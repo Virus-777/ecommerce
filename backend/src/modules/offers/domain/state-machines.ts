@@ -1,0 +1,12 @@
+/** Status flows from the spec (stateMachines). Illegal moves throw ILLEGAL_TRANSITION (409). */
+import { createStateMachine } from '../../../kernel/lib/state-machine.js';
+import { spec } from '../../../spec/offers.js';
+
+/** Offer status: Offer.status. publish requires an approved, Active product (catalog.isPurchasable), an approved seller whose launch review has passed (before that, publish keeps the offer in draft with publish_on_approval and statusReason awaiting_launch_review; sellers.launch_review.decided with outcome passed publishes them), no restriction covering new listings, verified compare-at and return terms at or above the baseline. publish, resume and restoreEligibility land on out_of_stock straight away when inventory available = 0 (stockDepleted follows in the same transaction). restoreEligibility returns to the status held before (status_before_ineligible): a paused offer stays paused. makeIneligible is system-driven (seller restricted or suspended, product hidden or suspended) or a staff hold; it stops new sales of this offer only, never other sellers' offers. remove is staff (reason required) or the seller ending the offer (ended_by_seller). Removed offers stay readable for past orders, carts and audit. stockDepleted / stockRestored come from inventory.stock.changed. */
+export const offerStatusMachine = createStateMachine("Offer status", spec.stateMachines["Offer status"]);
+
+/** Price change: PriceChange.state. requestApproval when the change exceeds the caller's price-change limit from access (example: Official Store Manager ±30%); approve comes from access.approval.decided and goes to scheduled, which starts immediately when startsAt is past. revert runs at endsAt and restores revertTo. Seller price changes over the large-change threshold need confirmLargeChange, not an approval. A new change on an offer cancels its older scheduled change only if the caller says so; otherwise PRICE_CHANGE_PENDING. */
+export const priceChangeMachine = createStateMachine("Price change", spec.stateMachines["Price change"]);
+
+/** Bulk update job: BulkUpdateJob.state. Nothing changes until apply. Only rows marked ready are applied; error rows are skipped and listed in the correction report. Official Store rows above the price-change limit become pending_approval price changes. */
+export const bulkUpdateJobMachine = createStateMachine("Bulk update job", spec.stateMachines["Bulk update job"]);

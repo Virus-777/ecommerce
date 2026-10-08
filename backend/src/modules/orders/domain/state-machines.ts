@@ -1,0 +1,12 @@
+/** Status flows from the spec (stateMachines). Illegal moves throw ILLEGAL_TRANSITION (409). */
+import { createStateMachine } from '../../../kernel/lib/state-machine.js';
+import { spec } from '../../../spec/orders.js';
+
+/** Order lifecycle: OrderDetail.lifecycle. An order exists only after a payment was authorized or its result is uncertain; a declined first attempt creates no order. With an accepted payment the order is created and accepted in one transaction. complete: every item is in a final state (delivered past its return window, cancelled, returned or refunded) and no return, case or refund is open (job orders.complete-orders). The overall display status is derived separately (see notes). */
+export const orderLifecycleMachine = createStateMachine("Order lifecycle", spec.stateMachines["Order lifecycle"]);
+
+/** Order item: OrderItem.state. Plan ch. 7 and 12 item states. decline_cancellation (or withdraw) restores the state held before the request (stored in state_before_request); ship from cancellation_requested happens when the seller declines because it already shipped. return_to_sender: a failed delivery the customer chose not to retry. refund_in_full only when the line's whole refundable amount is Sent (payments.refund.sent); partial amounts keep the state and raise refundedAmount, so a partial refund never marks every item refunded. Partial quantities split the line first: e.g. cancelling 1 of 2 creates a cancelled line of 1 and keeps a line of 1, with discount, shipping and tax shares re-allocated by largest remainder in cents. A replacement from returns adds a new confirmed line with replacementOfItemId. */
+export const orderItemMachine = createStateMachine("Order item", spec.stateMachines["Order item"]);
+
+/** Cancellation request: CancellationRequest.status. Customer requests start as requested; the seller confirms by respondBy (end of the next business day by default) or the request is auto-accepted if nothing has shipped. Official Store requests are accepted at once while warehouse picking has not started. Seller ('cannot fulfill') and staff cancellations are created directly as accepted. accepted publishes orders.item.cancelled per item with the refund breakdown; payments sends the refund under the cancellation policy (no Finance approval). */
+export const cancellationRequestMachine = createStateMachine("Cancellation request", spec.stateMachines["Cancellation request"]);

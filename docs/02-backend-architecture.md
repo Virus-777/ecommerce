@@ -1,6 +1,6 @@
 # Phase 2: Backend architecture and module plan
 
-Status: **design**. This document defines the backend's structure; the API design for every module (endpoints, request and response types, tables, status flows, events, permissions, jobs) lives in [`docs/api/`](api/README.md) and is published as OpenAPI 3.1 ([`docs/api/openapi.json`](api/openapi.json)). Nothing here is implemented yet; the build phase follows this design.
+Status: **design**. This document defines the backend's structure; the API design for every module (endpoints, request and response types, tables, status flows, events, permissions, jobs) lives in [`docs/api/`](api/README.md) and is published as OpenAPI 3.1 ([`docs/api/openapi.json`](api/openapi.json)). The structure is built in [`backend/`](../backend/README.md): kernel and all 33 modules, generated from and checked against the API design. Module business logic is not built yet (endpoints answer 501 NOT_IMPLEMENTED).
 
 ## 1. Stack
 

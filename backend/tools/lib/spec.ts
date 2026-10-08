@@ -1,0 +1,111 @@
+/**
+ * Loads the API design (docs/api/spec) for the generator and the check tools.
+ * The spec is the source of truth; the backend never defines routes, types, tables,
+ * events or permissions that are not in it.
+ */
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+export const backendDir = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+export const repoDir = resolve(backendDir, '..');
+export const apiDir = join(repoDir, 'docs', 'api');
+export const specDir = join(apiDir, 'spec');
+export const gqlDir = join(apiDir, 'graphql');
+
+export type TypeExpr = string | { type: string; desc?: string } | { [field: string]: TypeExpr };
+export type ObjectExpr = Record<string, TypeExpr>;
+
+export interface EndpointSpec {
+  id: string;
+  area: 'store' | 'seller' | 'admin' | 'public' | 'webhooks';
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  path: string;
+  summary: string;
+  desc?: string;
+  auth: 'anyone' | 'shopper' | 'customer' | 'seller' | 'staff' | 'provider';
+  permission?: string;
+  params?: ObjectExpr;
+  query?: ObjectExpr;
+  paging?: boolean;
+  body?: TypeExpr;
+  response?: TypeExpr | null;
+  status?: number;
+  errors?: string[];
+  idempotent?: boolean;
+  audited?: boolean;
+  approval?: string;
+  events?: string[];
+  screens?: string[];
+  phase?: number;
+}
+
+export interface TableSpec {
+  name: string;
+  desc?: string;
+  columns: Record<string, string>;
+  indexes?: string[];
+}
+
+export interface ModuleSpec {
+  name: string;
+  title: string;
+  group: string;
+  phase: number;
+  chapters?: number[];
+  summary: string;
+  owns: string[];
+  notOwns?: string[];
+  dependsOn?: string[];
+  optionalDeps?: string[];
+  publicApi?: { name: string; signature: string; desc: string; usedBy?: string[] }[];
+  types?: Record<string, ObjectExpr>;
+  tables?: TableSpec[];
+  stateMachines?: { name: string; field: string; initial?: string; transitions: [string, string, string][]; notes?: string }[];
+  endpoints: EndpointSpec[];
+  events?: {
+    publishes?: { name: string; when: string; payload?: ObjectExpr }[];
+    consumes?: { name: string; does: string }[];
+  };
+  permissions?: { key: string; audience: 'staff' | 'seller'; desc: string }[];
+  approvalActions?: { key: string; desc: string; limit: string; secondReviewer: string; approvers?: string }[];
+  jobs?: { name: string; schedule: string; does: string }[];
+  settings?: { key: string; default: unknown; desc: string }[];
+  integrations?: { name: string; purpose: string }[];
+  errorCodes?: Record<string, { status: number; meaning: string }>;
+  notes?: string[];
+}
+
+export interface CommonSpec {
+  info: { title: string; version: string; description: string };
+  areas: Record<string, { prefix: string; title: string; audience: string; auth: string }>;
+  auth: Record<string, string>;
+  types: Record<string, ObjectExpr>;
+  pagination: { query: ObjectExpr };
+  errors: Record<string, { status: number; meaning: string }>;
+  headers: Record<string, string>;
+}
+
+export function loadCommon(): CommonSpec {
+  return JSON.parse(readFileSync(join(specDir, 'common.json'), 'utf8'));
+}
+
+export function loadModules(): ModuleSpec[] {
+  return readdirSync(join(specDir, 'modules'))
+    .filter((f) => f.endsWith('.json'))
+    .sort()
+    .map((f) => JSON.parse(readFileSync(join(specDir, 'modules', f), 'utf8')) as ModuleSpec);
+}
+
+export function loadFragment(module: string): string | null {
+  const p = join(gqlDir, 'modules', `${module}.graphql`);
+  return existsSync(p) ? readFileSync(p, 'utf8') : null;
+}
+
+/** kebab-case module name → identifiers */
+export const camel = (s: string) => s.replace(/-([a-z0-9])/g, (_, c: string) => c.toUpperCase());
+export const pascal = (s: string) => {
+  const c = camel(s);
+  return c.charAt(0).toUpperCase() + c.slice(1);
+};
+export const snake = (s: string) => s.replace(/-/g, '_');

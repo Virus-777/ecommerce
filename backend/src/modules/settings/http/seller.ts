@@ -1,0 +1,15 @@
+import { notImplemented, routes } from '../../../kernel/http/index.js';
+import { endpoints } from '../../../spec/settings.js';
+import type { SettingsService } from '../service.js';
+
+/**
+ * Seller API: /api/seller/settings/…  (docs/api/modules/settings.md)
+ * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
+ */
+export const sellerRoutes = (service: SettingsService) => {
+  void service;
+  return routes(endpoints, 'seller', {
+    /** GET /upcoming-changes: Scheduled platform changes that affect sellers */
+    listUpcomingChanges: notImplemented,
+  });
+};
