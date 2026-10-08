@@ -85,7 +85,7 @@ describe('feature flags', () => {
 
   it('a flag of a disabled module stays off; rollouts narrow who sees it', async () => {
     await h.app.inject({ method: 'PUT', url: '/api/admin/settings/feature-flags/wishlist', headers: staff(), payload: { enabled: true, reason: 'try' } });
-    expect(await h.api.isEnabled('wishlist')).toBe(false); // wishlist is off in modules.config.ts
+    expect(await h.api.isEnabled('wishlist')).toBe(false); // wishlist is not running in this app
 
     const staffOnly = await h.app.inject({ method: 'PUT', url: '/api/admin/settings/feature-flags/bundleDeals', headers: staff(), payload: { enabled: true, rollout: 'staff_only', reason: 'internal test' } });
     expect(staffOnly.statusCode).toBe(200);

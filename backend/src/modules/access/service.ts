@@ -5,7 +5,6 @@ import { newId } from '../../kernel/lib/ids.js';
 import { pageOf, toPageRequest, type PageRequest } from '../../kernel/lib/pagination.js';
 import { allSpecs } from '../../kernel/module-system/loader.js';
 import type { ModuleContext } from '../../kernel/module-system/index.js';
-import { enabledModules } from '../../modules.config.js';
 import type * as audit from '../../spec/audit.js';
 import type * as common from '../../spec/common.js';
 import type * as identity from '../../spec/identity.js';
@@ -1408,7 +1407,7 @@ export class AccessService implements AccessPublicApi {
 
   private async doSync() {
     const now = this.now();
-    const enabled = new Set(this.ctx.config.modules ?? enabledModules);
+    const enabled = new Set<string>(this.ctx.modules);
     const prefixes = await this.sensitivePrefixes();
     const specs = Object.values(allSpecs);
     const permissions = specs.flatMap((s) =>

@@ -16,7 +16,7 @@ import type { Clock } from '../lib/clock.js';
 import type { RefGenerator } from '../lib/refs.js';
 import { schemaOf } from '../migrations/index.js';
 import type { ModuleSpecDef } from '../spec/define.js';
-import type { ModuleContext, ModuleDefinition } from './index.js';
+import type { ModuleContext, ModuleDefinition, ModuleName } from './index.js';
 import { specOf } from './loader.js';
 
 export interface KernelServices {
@@ -87,6 +87,8 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
   const result: BootResult = { endpoints: [], resolvers: new Map(), webhookVerifiers: new Map(), apis: new Map(), warnings: [] };
   const { apis, resolvers, webhookVerifiers, warnings } = result;
   const proxies = new Map<string, object>();
+  const afterBoot: { module: string; fn: () => unknown }[] = [];
+  const modules = defs.map((d) => d.spec.name) as ModuleName[];
   const proxyFor = (target: string, caller: string) => {
     const key = `${caller}>${target}`;
     if (!proxies.has(key)) proxies.set(key, apiProxy(target, caller, apis));
@@ -105,6 +107,7 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
     const ctx: ModuleContext<any> = {
       name,
       spec,
+      modules,
       config: k.config,
       log: k.log.child({ module: name }),
       db: k.database.kysely.withSchema(schemaOf(name)),
@@ -143,6 +146,7 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
         if (!spec.optionalDeps.includes(dep)) throw new Error(`${name} uses ${dep}, which is not in its spec optionalDeps`);
         return enabled.has(dep) ? (proxyFor(dep, name) as never) : undefined;
       },
+      afterBoot: (fn: () => unknown) => afterBoot.push({ module: name, fn }),
       http: {
         routes: (...s: RouteSet[]) => sets.push(...s),
         webhookVerifier: (v: WebhookVerifier) => webhookVerifiers.set(name, v),
@@ -162,6 +166,14 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
     }
   }
 
+  for (const { module, fn } of afterBoot) {
+    try {
+      await fn();
+    } catch (err) {
+      if (!isNotImplemented(err)) throw new Error(`${module}: afterBoot failed: ${(err as Error).message}`, { cause: err });
+      warnings.push(`${module}: afterBoot skipped, a dependency is not built yet (${(err as Error).message})`);
+    }
+  }
   for (const job of k.jobs.list()) if (!job.handled) warnings.push(`job ${job.name} (${job.module}) has no handler`);
   return result;
 }

@@ -40,6 +40,8 @@ type DbOf<N> = N extends keyof ModuleDbMap ? ModuleDbMap[N] : never;
 export interface ModuleContext<N extends ModuleName> {
   readonly name: N;
   readonly spec: SpecOf<N>;
+  /** Every module running in this process (settings catalogue, permission registry) */
+  readonly modules: readonly ModuleName[];
   readonly config: Config;
   readonly log: FastifyBaseLogger;
   /** Query builder scoped to this module's own schema. Other modules' tables are off limits. */
@@ -65,6 +67,11 @@ export interface ModuleContext<N extends ModuleName> {
   use<D extends DepsOf<N>>(module: D): ApiOf<D>;
   /** Public API of a module listed in optionalDeps; undefined when that module is disabled */
   tryUse<D extends OptionalDepsOf<N>>(module: D): ApiOf<D> | undefined;
+  /**
+   * Runs once every module has registered and provided its API, before the server takes requests:
+   * the place to call other modules at startup (register a report dataset, warm a cache).
+   */
+  afterBoot(fn: () => Promise<unknown> | unknown): void;
   readonly http: {
     /** Handlers for this module's spec endpoints; every endpoint needs exactly one */
     routes(...sets: RouteSet[]): void;

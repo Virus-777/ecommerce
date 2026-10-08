@@ -28,7 +28,8 @@ export async function harness(): Promise<Harness> {
     events: [] as { name: string; payload: any }[],
   };
   const app = await buildTestApp({
-    only: ['settings', 'audit'],
+    // modules whose settings these tests change must be running (settings of other modules are unavailable)
+    only: ['settings', 'audit', 'identity', 'catalog', 'returns', 'orders', 'shipping', 'notifications', 'checkout', 'support', 'promotions'],
     clock,
     config: { rateLimits: false },
     apiStubs: {

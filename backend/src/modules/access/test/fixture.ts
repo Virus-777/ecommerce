@@ -7,6 +7,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Kysely } from 'kysely';
 import type { Clock } from '../../../kernel/lib/clock.js';
 import { newId } from '../../../kernel/lib/ids.js';
+import { withDependencies } from '../../../kernel/module-system/loader.js';
 import { auth, buildTestApp, callers } from '../../../testing/app.js';
 import type { AccessDb } from '../../../spec/access.js';
 import type * as audit from '../../../spec/audit.js';
@@ -64,7 +65,8 @@ export async function accessFixture(): Promise<Fixture> {
   const invitations: { email: string; name: string }[] = [];
   const audits: audit.RecordInput[] = [];
   const app = await buildTestApp({
-    modules: ['access', 'identity', 'audit'],
+    // the modules whose approval actions and permissions these tests use must be running (the registry lists running modules)
+    modules: withDependencies(['access', 'identity', 'audit', 'finance', 'returns', 'support', 'warehouse', 'workqueues', 'purchasing']),
     clock,
     config: { rateLimits: false },
     apiStubs: {

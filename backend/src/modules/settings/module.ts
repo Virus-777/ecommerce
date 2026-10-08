@@ -7,7 +7,6 @@ import { adminRoutes } from './http/admin.js';
 import { publicRoutes } from './http/public.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresSettingsRepository } from './infra/postgres/repository.js';
-import { enabledModules } from '../../modules.config.js';
 import { SettingsService } from './service.js';
 
 /**
@@ -26,7 +25,7 @@ export default defineModule({
       repo: createPostgresSettingsRepository(ctx.db),
       ctx,
       // the kernel does not tell a module which modules run; this mirrors app.ts (spec gap, see report)
-      enabledModules: ctx.config.modules ?? enabledModules,
+      enabledModules: ctx.modules,
     });
     ctx.provide(service);
     await service.warmUp();
