@@ -5,7 +5,10 @@
 import type { z } from 'zod';
 
 export type Area = 'store' | 'seller' | 'admin' | 'public' | 'webhooks';
-export type AuthKind = 'anyone' | 'shopper' | 'customer' | 'seller' | 'staff' | 'provider';
+/** Every endpoint requires a token (docs/03-auth-middleware.md §0); the kind says which */
+export type AuthKind = 'visitor' | 'shopper' | 'customer' | 'account' | 'seller' | 'staff' | 'refresh' | 'provider' | 'bootstrap';
+/** Which records a caller reaches (§7) */
+export type EndpointScope = 'public' | 'own-customer' | 'own-seller' | 'own-member' | 'guest-order' | 'staff';
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 /** One endpoint of docs/api/spec/modules/<module>.json (format: docs/api/spec/FORMAT.md). */
@@ -16,6 +19,17 @@ export interface EndpointDef {
   readonly path: string;
   readonly auth: AuthKind;
   readonly permission?: string;
+  /** Extra permission when the request is about someone else, e.g. { if: { 'query.view': 'all' } } or { 'body.accountId': '!self' } */
+  readonly permissionWhen?: readonly { readonly if: Readonly<Record<string, string>>; readonly permission: string }[];
+  /** Fresh proof: reauth = reauthToken in the body; code = X-Step-Up-Code header */
+  readonly stepUp?: { readonly kind: 'reauth' | 'code'; readonly purpose: string };
+  /** Seller area: allowed before a seller is chosen */
+  readonly sellerContext?: 'optional';
+  readonly scope: EndpointScope;
+  /** Named rate-limit class (sign-in, registration, password-reset, code, bootstrap) */
+  readonly rateLimit?: string;
+  /** Response fields masked for staff and sellers without the permission */
+  readonly sensitive?: readonly { readonly path: readonly string[]; readonly permission: string; readonly mask: string }[];
   readonly summary: string;
   readonly desc?: string;
   readonly params?: () => z.ZodType;
@@ -58,7 +72,7 @@ export interface ModuleSpecDef {
   readonly dependsOn: readonly string[];
   readonly optionalDeps: readonly string[];
   readonly publicApi: readonly string[];
-  readonly permissions: readonly { readonly key: string; readonly audience: string; readonly desc: string }[];
+  readonly permissions: readonly { readonly key: string; readonly audience: string; readonly desc: string; readonly ownerOnly?: boolean; readonly delegable?: boolean }[];
   readonly approvalActions: readonly { readonly key: string; readonly desc: string; readonly limit: string; readonly secondReviewer: string; readonly approvers?: string }[];
   readonly stateMachines: Readonly<Record<string, StateMachineDef>>;
   readonly events: {
@@ -70,6 +84,8 @@ export interface ModuleSpecDef {
   readonly errorCodes: Readonly<Record<string, { readonly status: number; readonly meaning: string }>>;
   /** table → column → { type, nullable } as declared in the spec (used to detect migration drift) */
   readonly tables: Readonly<Record<string, Readonly<Record<string, { readonly type: string; readonly nullable: boolean }>>>>;
+  /** table → owner column per caller kind (seller_id, customer_id, guest_session_id) */
+  readonly tenantTables: Readonly<Record<string, Readonly<{ seller?: string; customer?: string; visitor?: string }>>>;
   readonly endpoints: EndpointTable;
 }
 

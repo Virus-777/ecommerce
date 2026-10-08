@@ -34,13 +34,13 @@ What staff may do and how much they may approve: staff roles, the permission reg
 | POST | `/api/admin/access/roles` | Create a task or custom role _(audited)_ | staff<br>`access.roles.manage` | `RoleInput` → `Role` |
 | PATCH | `/api/admin/access/roles/{id}` | Rename a role, change its work area or escalation role _(audited)_ | staff<br>`access.roles.manage` | `RoleUpdate` → `Role` |
 | POST | `/api/admin/access/roles/{id}/archive` | Archive an unused custom role _(audited)_ | staff<br>`access.roles.manage` | `{ reason: text }` → `Role` |
-| PUT | `/api/admin/access/roles/{id}/permissions` | Replace the permissions of a role _(audited)_ | staff<br>`access.roles.manage` | `{ permissionKeys: string[], reason: text }` → `RoleDetail` |
+| PUT | `/api/admin/access/roles/{id}/permissions` | Replace the permissions of a role _(audited, step-up: code)_ | staff<br>`access.roles.manage` | `{ permissionKeys: string[], reason: text }` → `RoleDetail` |
 | PUT | `/api/admin/access/roles/{id}/coverage` | Set the lead, backups and escalation role _(audited)_ | staff<br>`access.roles.manage` | `CoverageInput` → `RoleCoverage` |
 | GET | `/api/admin/access/permissions` | Permission registry grouped by work area | staff<br>`access.roles.view` | `PermissionGroup[]` |
 | GET | `/api/admin/access/members` | Staff members with roles, lead/backup duties, away status and 2-step state | staff<br>`access.roles.view` | Page<StaffMember> |
 | GET | `/api/admin/access/members/{accountId}` | One staff member: assignments, effective permissions and limits, away periods | staff<br>`access.roles.view` | `StaffMemberDetail` |
-| POST | `/api/admin/access/staff-invitations` | Invite a staff member with roles _(audited)_ | staff<br>`access.roles.manage` | `StaffInvitationInput` → `StaffMember` |
-| POST | `/api/admin/access/role-assignments` | Give a staff member a role _(audited)_ | staff<br>`access.roles.manage` | `{ accountId: uuid, roleId: uuid, reason: text, expiresAt: datetime? }` → `RoleAssignment` |
+| POST | `/api/admin/access/staff-invitations` | Invite a staff member with roles _(audited, step-up: code)_ | staff<br>`access.roles.manage` | `StaffInvitationInput` → `StaffMember` |
+| POST | `/api/admin/access/role-assignments` | Give a staff member a role _(audited, step-up: code)_ | staff<br>`access.roles.manage` | `{ accountId: uuid, roleId: uuid, reason: text, expiresAt: datetime? }` → `RoleAssignment` |
 | POST | `/api/admin/access/role-assignments/{id}/revoke` | Remove a role from a staff member _(audited)_ | staff<br>`access.roles.manage` | `{ reason: text }` → `RoleAssignment` |
 | GET | `/api/admin/access/approval-actions` | Actions that can have approval limits | staff<br>`access.roles.view` | `ApprovalAction[]` |
 | GET | `/api/admin/access/limits` | Approval limits in force | staff<br>`access.roles.view` | `ApprovalLimit[]` |
@@ -48,7 +48,7 @@ What staff may do and how much they may approve: staff roles, the permission reg
 | GET | `/api/admin/access/limit-changes` | Proposed, scheduled and past limit changes | staff<br>`access.roles.view` | Page<LimitChange> |
 | POST | `/api/admin/access/limit-changes/{id}/cancel` | Withdraw a pending or scheduled limit change _(audited)_ | staff<br>`access.limits.propose` | `{ reason: text }` → `LimitChange` |
 | POST | `/api/admin/access/authority-checks` | Can I do this, or who must approve it? | staff | `{ action: string, amount: AmountInput? }` → `AuthorityCheck` |
-| GET | `/api/admin/access/approval-requests` | Approval requests (waiting for me, mine, or all) | staff | Page<ApprovalRequest> |
+| GET | `/api/admin/access/approval-requests` | Approval requests (waiting for me, mine, or all) _(also access.approvals.view-all when not own)_ | staff | Page<ApprovalRequest> |
 | GET | `/api/admin/access/approval-requests/{id}` | One approval request with decisions and whether I can decide | staff | `ApprovalRequest` |
 | POST | `/api/admin/access/approval-requests/{id}/approve` | Approve (first or second approval) _(audited)_ | staff | `{ note: text?, stepUpCode: string? }` → `ApprovalRequest` |
 | POST | `/api/admin/access/approval-requests/{id}/reject` | Reject with a reason _(audited)_ | staff | `{ reason: text }` → `ApprovalRequest` |
@@ -57,7 +57,7 @@ What staff may do and how much they may approve: staff roles, the permission reg
 | POST | `/api/admin/access/approval-requests/{id}/cancel` | Requester withdraws a request _(audited)_ | staff | `{ reason: text }` → `ApprovalRequest` |
 | POST | `/api/admin/access/approval-requests/{id}/remind` | Remind eligible reviewers | staff | `{ message: text? }` → `{ notified: StaffRef[] }` |
 | GET | `/api/admin/access/away-periods` | Away periods (current and upcoming by default) | staff<br>`access.roles.view` | Page<AwayPeriod> |
-| POST | `/api/admin/access/away-periods` | Plan time away and who covers each role _(audited)_ | staff | `AwayInput` → `AwayPeriod` |
+| POST | `/api/admin/access/away-periods` | Plan time away and who covers each role _(audited, also access.away.manage when not own)_ | staff | `AwayInput` → `AwayPeriod` |
 | POST | `/api/admin/access/away-periods/{id}/end` | End an away period early (back at work) _(audited)_ | staff | `AwayPeriod` |
 | POST | `/api/admin/access/away-periods/{id}/cancel` | Cancel a planned away period _(audited)_ | staff | `{ reason: text? }` → `AwayPeriod` |
 | GET | `/api/admin/access/coverage` | Who receives each role's work today, and coverage gaps | staff | `Coverage` |
@@ -835,7 +835,6 @@ Checked through the access module (limits per role, second reviewer).
 | `SELF_APPROVAL_NOT_ALLOWED` | 403 | You cannot approve or reject your own request. |
 | `NOT_ELIGIBLE_APPROVER` | 403 | Your roles' limits do not cover this action or amount. details.eligibleRoles lists who can. |
 | `ALREADY_APPROVED_BY_YOU` | 409 | The second approval must come from a different person. |
-| `STEP_UP_REQUIRED` | 401 | Enter a current 2-step code (stepUpCode) to approve this amount. |
 | `SYSTEM_ROLE` | 409 | Seeded roles cannot be archived or have their key changed. |
 | `ROLE_IN_USE` | 409 | Remove the role from all staff before archiving it. |
 | `LAST_BUSINESS_OWNER` | 409 | At least one active Business Owner must remain. |

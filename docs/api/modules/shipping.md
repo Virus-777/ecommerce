@@ -33,8 +33,8 @@ How things get delivered: carriers and services, destinations and excluded areas
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| GET | `/api/store/shipping/estimates` | Delivery estimate per offer for a location (product page, offers list) | anyone | `OfferEstimate[]` |
-| GET | `/api/store/shipping/notices` | Live holiday and service notices for a location | anyone | `CustomerNotice[]` |
+| GET | `/api/store/shipping/estimates` | Delivery estimate per offer for a location (product page, offers list) | visitor | `OfferEstimate[]` |
+| GET | `/api/store/shipping/notices` | Live holiday and service notices for a location | visitor | `CustomerNotice[]` |
 | GET | `/api/store/shipping/orders/{orderId}/shipments` | Packages of an order with carrier, tracking and status | shopper | `ShipmentSummary[]` |
 | GET | `/api/store/shipping/shipments/{id}/tracking` | Track one package: carrier, tracking number, contents, estimate and events | shopper | `TrackingView` |
 | POST | `/api/store/shipping/shipments/{id}/delivery-choice` | Choose redelivery, pickup or return to seller after a failed delivery | shopper | `{ choice: enum(redeliver|pickup|return_to_seller), redeliveryDate: date? }` → `TrackingView` |

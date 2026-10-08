@@ -48,7 +48,7 @@ Who is told what, on which channel: notification topics for customers, sellers a
 | POST | `/api/seller/notifications/inbox/{id}/read` | Mark one notice as read (for me) | seller | `Notice` |
 | POST | `/api/seller/notifications/inbox/read-all` | Mark all as read (for me) | seller | `{ group: string? }` → `{ updated: int }` |
 | GET | `/api/seller/notifications/preferences` | Who hears about what (all members) | seller | `SellerPreferences` |
-| PUT | `/api/seller/notifications/preferences/members/{memberId}` | Set one member's topics and channel _(audited)_ | seller | `MemberPreferenceInput` → `MemberPreference` |
+| PUT | `/api/seller/notifications/preferences/members/{memberId}` | Set one member's topics and channel _(audited, also notifications.preferences.manage when not own)_ | seller | `MemberPreferenceInput` → `MemberPreference` |
 | POST | `/api/seller/notifications/push-devices` | Register the Android app for seller push notices _(phase 3)_ | seller | `PushDeviceInput` → `PushDevice` |
 | DELETE | `/api/seller/notifications/push-devices/{id}` | Stop seller push notices on a device _(phase 3)_ | seller | 204 No content |
 

@@ -84,7 +84,7 @@ Trust and Risk's case file: reports of counterfeit goods, suspicious orders, fak
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| POST | `/api/public/trust/reports` | Brand or rights owner reports counterfeit listings _(phase 2)_ | anyone | `{ brandName: string, contactName: string, contactEmail: email, offerOrProductIds: uuid[], details: text, proofMediaIds: uuid[] }` → `{ ref: string, confirmationSent: bool }` |
+| POST | `/api/public/trust/reports` | Brand or rights owner reports counterfeit listings _(phase 2)_ | visitor | `{ brandName: string, contactName: string, contactEmail: email, offerOrProductIds: uuid[], details: text, proofMediaIds: uuid[] }` → `{ ref: string, confirmationSent: bool }` |
 
 ## Types
 

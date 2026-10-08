@@ -19,7 +19,7 @@
       "prefix": "/api/store/{module}",
       "title": "Store API",
       "audience": "Customers and guests on the website and the Android app",
-      "auth": "Optional customer session (Bearer access token). Guests get a guest session for cart, checkout and guest order lookup."
+      "auth": "Every request carries a token: a visitor token (guests, issued when the app opens) or a customer access token."
     },
     "seller": {
       "prefix": "/api/seller/{module}",
@@ -37,7 +37,7 @@
       "prefix": "/api/public/{module}",
       "title": "Public API",
       "audience": "Anyone (sign-in, registration, public settings)",
-      "auth": "None"
+      "auth": "Visitor token of any app. Refresh and sign-out take the refresh token; the bootstrap endpoint takes an app proof."
     },
     "webhooks": {
       "prefix": "/webhooks/{module}",
@@ -47,12 +47,15 @@
     }
   },
   "auth": {
+    "visitor": "Any valid token of the app: a visitor token (before sign-in) or a signed-in access token",
+    "shopper": "A store token that can hold a cart: visitor (guest) or customer",
     "customer": "Signed-in customer",
-    "shopper": "Signed-in customer or guest session",
-    "anyone": "No session needed",
-    "seller": "Seller member; optional `permission` narrows it",
-    "staff": "Staff member; optional `permission` narrows it",
-    "provider": "Webhook signature"
+    "account": "Any signed-in account, any realm (self-service security endpoints)",
+    "seller": "Seller member acting for the seller in the token; optional `permission` narrows it",
+    "staff": "Staff member with 2-step; optional `permission` narrows it",
+    "refresh": "Refresh token only (cookie on the website, body on Android)",
+    "provider": "Webhook signature, verified per provider",
+    "bootstrap": "No token: an app proof (Play Integrity or bot challenge). Only POST /api/public/identity/app-sessions"
   },
   "types": {
     "Money": {
@@ -93,7 +96,7 @@
       "phone": "string?"
     },
     "Actor": {
-      "kind": "enum(customer|guest|seller|staff|system)",
+      "kind": "enum(customer|visitor|seller|staff|provider|anonymous|system)",
       "id": "string?",
       "name": "string?"
     },
@@ -150,7 +153,7 @@
     },
     "UNAUTHORIZED": {
       "status": 401,
-      "meaning": "No session, or the wrong kind of session for this API area."
+      "meaning": "No token, or the token is invalid, expired or revoked. Only this error should trigger a token refresh (WWW-Authenticate: Bearer error=\"invalid_token\")."
     },
     "FORBIDDEN": {
       "status": 403,
@@ -183,14 +186,40 @@
     "NOT_IMPLEMENTED": {
       "status": 501,
       "meaning": "Planned for a later launch phase."
+    },
+    "WRONG_AUDIENCE": {
+      "status": 403,
+      "meaning": "The token is for another app (store, Seller Center or Admin Center)."
+    },
+    "STEP_UP_REQUIRED": {
+      "status": 403,
+      "meaning": "A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose."
+    },
+    "OWNER_ONLY": {
+      "status": 403,
+      "meaning": "Only the seller owner can do this."
+    },
+    "NO_SELLER_ACCESS": {
+      "status": 403,
+      "meaning": "This account cannot act for that seller (or for any seller)."
+    },
+    "UPGRADE_REQUIRED": {
+      "status": 426,
+      "meaning": "This app version is no longer supported; update the app."
+    },
+    "SERVICE_UNAVAILABLE": {
+      "status": 503,
+      "meaning": "A service needed to authorize the request is unavailable; retry later."
     }
   },
   "headers": {
-    "Authorization": "Bearer <access token> (customer, seller member or staff session)",
-    "X-Guest-Session": "Guest session id for carts and guest checkout",
+    "Authorization": "Bearer <token> on every request: visitor token before sign-in, access token after (customer, seller member or staff)",
     "Idempotency-Key": "Required on endpoints marked idempotent (orders, payments, refunds, payouts). Same key + same body returns the first result.",
     "Accept-Language": "en-US (only locale at launch)",
-    "X-Request-Id": "Echoed back; include it when reporting problems"
+    "X-Request-Id": "Echoed back; include it when reporting problems",
+    "X-App-Proof": "Bootstrap only: Play Integrity token (Android) or bot-challenge token (website)",
+    "X-Step-Up-Code": "Current 2-step code for endpoints with stepUp kind \"code\"",
+    "X-Client": "web|android/<version>: analytics and minimum-version checks only, never trusted for authorization"
   },
   "stack": [
     {

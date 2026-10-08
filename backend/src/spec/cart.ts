@@ -879,6 +879,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/cart",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Cart grouped by package, with change detection",
     desc: "Every call re-reads offers, stock and coverage for all lines (batched) and returns per-item notices. Unavailable lines stay in their package with includedInCheckout=false. Creates nothing; an owner without a cart gets an empty view.",
     query: () =>
@@ -895,6 +896,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/cart/badge",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Item count and attention count for the header and app tab bar",
     response: () => CartBadge,
     status: 200,
@@ -906,6 +908,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/cart/items",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Add an offer to the cart (Add to cart)",
     desc: "Adding an offer already in the cart increases its quantity. Adding a different offer for the same variant creates a second line; the existing line is never switched. Quantity above the maximum is capped with outcome capped_at_limit.",
     body: () => AddItemInput,
@@ -921,6 +924,7 @@ export const endpoints = defineEndpoints({
     method: "PATCH",
     path: "/cart/items/{id}",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Change a line's quantity",
     params: () =>
       z.object({
@@ -940,6 +944,7 @@ export const endpoints = defineEndpoints({
     method: "DELETE",
     path: "/cart/items/{id}",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Remove a line",
     params: () =>
       z.object({
@@ -956,6 +961,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/cart/items/{id}/accept",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Accept a changed price or reduced quantity for a line",
     desc: "Moves the accepted price baseline to the current price (or the quantity to what is available) and closes the warning notices. Blocking notices cannot be accepted.",
     params: () =>
@@ -976,6 +982,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/cart/items/{id}/switch-offer",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Replace a line's offer with one the customer explicitly chose",
     desc: "Only on an explicit customer action (e.g. 'See other offers' then Choose). Must be the same variant. The response shows the new seller, price and package.",
     params: () =>
@@ -998,6 +1005,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/cart/remove-unavailable",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Remove every unavailable line in one action",
     response: () => CartView,
     status: 200,
@@ -1010,6 +1018,7 @@ export const endpoints = defineEndpoints({
     method: "PUT",
     path: "/cart/destination",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Set the deliver-to location used for estimates",
     desc: "Either a saved address (customers) or a postal code. Checkout starts from this location but asks for a full address.",
     body: () => z.object({
@@ -1028,6 +1037,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/cart/coupons",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Apply a coupon code for preview",
     desc: "Returns 200 with the coupon's status: applied (amount, covered items, items not covered and why) or rejected (reason). Account coupons for guests return needs_sign_in. Codes are carried into checkout and evaluated again there.",
     body: () => z.object({
@@ -1051,6 +1061,7 @@ export const endpoints = defineEndpoints({
     method: "DELETE",
     path: "/cart/coupons/{code}",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Remove a coupon code",
     params: () =>
       z.object({
@@ -1066,6 +1077,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/cart/merge",
     auth: "customer",
+    scope: "own-customer",
     summary: "Merge the guest cart into the customer cart after sign-in",
     desc: "Send with the customer session and the X-Guest-Session header of the guest cart. Same offer: quantities combine up to the limit. Different offer for the same variant: both lines kept. Unavailable guest lines are dropped with a note. Idempotent by guest cart: a second call returns the same report.",
     body: () => z.object({
@@ -1083,6 +1095,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/cart/items/{id}/save-for-later",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Move a line to Saved for later",
     params: () =>
       z.object({
@@ -1099,6 +1112,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/cart/saved",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Saved for later",
     paging: true,
     response: () => SavedItem,
@@ -1111,6 +1125,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/cart/saved/{id}/move-to-cart",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Move a saved item back into the cart",
     params: () =>
       z.object({
@@ -1131,6 +1146,7 @@ export const endpoints = defineEndpoints({
     method: "DELETE",
     path: "/cart/saved/{id}",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Delete a saved item",
     params: () =>
       z.object({
@@ -1147,6 +1163,7 @@ export const endpoints = defineEndpoints({
     path: "/carts",
     auth: "staff",
     permission: "cart.carts.view",
+    scope: "staff",
     summary: "Find a customer's or guest's cart (support)",
     desc: "Read-only, for answering 'my cart changed' questions. Guest carts are found by guest session id from a support case.",
     query: () =>
@@ -1167,6 +1184,7 @@ export const endpoints = defineEndpoints({
     path: "/carts/{id}",
     auth: "staff",
     permission: "cart.carts.view",
+    scope: "staff",
     summary: "One cart with lines, notices and merge history",
     params: () =>
       z.object({
@@ -1581,6 +1599,19 @@ export const spec = defineModuleSpec({
         "type": "timestamptz",
         "nullable": false
       }
+    }
+  },
+  tenantTables: {
+    "carts": {
+      "customer": "customer_id",
+      "visitor": "guest_session_id"
+    },
+    "cart_items": {
+      "seller": "seller_id"
+    },
+    "saved_items": {
+      "customer": "customer_id",
+      "visitor": "guest_session_id"
     }
   },
   endpoints,

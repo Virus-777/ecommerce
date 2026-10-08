@@ -104,14 +104,29 @@ export class IdentityService implements IdentityPublicApi {
     throw notImplemented("identity.startPhoneVerification");
   }
 
-  /** Check and consume a re-auth token from POST /api/store/identity/reauth or POST /api/seller/identity/reauth (valid 5 minutes, single use) */
-  async verifyReauthToken(accountId: string, token: string): Promise<boolean> {
+  /** True when the re-auth token was issued to this account, session, audience and seller for this purpose, is unused and unexpired. Does not consume it. */
+  async verifyReauthToken(principal: Principal, token: string, purpose: string): Promise<boolean> {
     throw notImplemented("identity.verifyReauthToken");
   }
 
   /** Batched staff view of sign-in security for customer 360 views: AccountAdmin (lock, forced reset, 2-step, devices, recent security activity) plus email status, warnings and a one-line sign-in summary. Callers pass identity account ids (Customer.userId). */
   async accountSecurityOf(accountIds: string[], opts?: { activityLimit?: number }): Promise<Map<string, unknown>> {
     throw notImplemented("identity.accountSecurityOf");
+  }
+
+  /** Marks a verified re-auth token used; called by the kernel after the request succeeded. */
+  async consumeReauthToken(token: string): Promise<void> {
+    throw notImplemented("identity.consumeReauthToken");
+  }
+
+  /** Revoked sessions and account-wide revocations (tokens issued before validAfter) since a cursor; every server polls this every few seconds and loads the last access-token lifetime on startup. */
+  async revocationsSince(cursor?: string): Promise<{ sessions: { sessionId: string, at: string }[], accounts: { accountId: string, validAfter: string }[], cursor: string }> {
+    throw notImplemented("identity.revocationsSince");
+  }
+
+  /** Middleware check for refresh and sign-out: the session the refresh token belongs to (also during the reuse grace window), or null when it is unknown, expired, revoked or reused. */
+  async verifyRefreshToken(refreshToken: string): Promise<{ sessionId: string, accountId?: string, audience: string, kind: string } | null> {
+    throw notImplemented("identity.verifyRefreshToken");
   }
 
   /* ---------------- events consumed */

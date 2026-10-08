@@ -968,6 +968,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/reports",
     auth: "customer",
+    scope: "own-customer",
     summary: "Report a listing, seller, order or message",
     desc: "From the Report link on a product, offer, storefront, order or conversation. Reports on reviews, answers and questions go to reviews. The reported party never sees the reporter's name. Same subject + same reporter within 24 h updates the existing report.",
     body: () => StoreReportInput,
@@ -983,6 +984,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/reports",
     auth: "customer",
+    scope: "own-customer",
     summary: "Reports I made, with status and outcome",
     desc: "The account/reviews 'Reports you made' tab merges this list with reviews' own content reports (GET /api/store/reviews/my-reports).",
     paging: true,
@@ -996,6 +998,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/reports/{id}",
     auth: "customer",
+    scope: "own-customer",
     summary: "One report I made",
     params: () =>
       z.object({
@@ -1011,6 +1014,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/reports/{id}/evidence",
     auth: "customer",
+    scope: "own-customer",
     summary: "Add photos or details to a report I made",
     params: () =>
       z.object({
@@ -1031,6 +1035,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/enforcements",
     auth: "customer",
+    scope: "own-customer",
     summary: "Trust actions that affect my account, with appeal route",
     response: () => z.array(MyEnforcement),
     status: 200,
@@ -1042,6 +1047,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/appeals",
     auth: "customer",
+    scope: "own-customer",
     summary: "Appeal a trust action on my account before the deadline",
     body: () => z.object({
       enforcementId: z.uuid(),
@@ -1060,6 +1066,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/appeals",
     auth: "customer",
+    scope: "own-customer",
     summary: "My appeals",
     response: () => z.array(TrustAppeal),
     status: 200,
@@ -1072,6 +1079,7 @@ export const endpoints = defineEndpoints({
     path: "/reports",
     auth: "seller",
     permission: "trust.reports.submit",
+    scope: "own-seller",
     summary: "Report abuse by a customer, a counterfeit competitor offer or a listing problem",
     body: () => StoreReportInput,
     response: () => MyReport,
@@ -1086,6 +1094,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/reports",
     auth: "seller",
+    scope: "own-seller",
     summary: "Reports this seller made",
     paging: true,
     response: () => MyReport,
@@ -1098,6 +1107,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/evidence-requests",
     auth: "seller",
+    scope: "own-seller",
     summary: "Proof Trust and Risk asked this seller for (e.g. proof of supply)",
     query: () =>
       z.object({
@@ -1114,6 +1124,7 @@ export const endpoints = defineEndpoints({
     path: "/evidence-requests/{id}/answer",
     auth: "seller",
     permission: "trust.evidence.submit",
+    scope: "own-seller",
     summary: "Send the requested proof",
     params: () =>
       z.object({
@@ -1135,6 +1146,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/enforcements",
     auth: "seller",
+    scope: "own-seller",
     summary: "Trust actions on this seller's offers, products or claims, with appeal route",
     response: () => z.array(MyEnforcement),
     status: 200,
@@ -1147,6 +1159,7 @@ export const endpoints = defineEndpoints({
     path: "/appeals",
     auth: "seller",
     permission: "trust.appeals.submit",
+    scope: "own-seller",
     summary: "Appeal a trust action on an offer, product or claim",
     desc: "Restrictions and suspensions of the seller account are appealed in sellers (Account health); this endpoint refuses them with APPEAL_IN_SELLERS.",
     body: () => z.object({
@@ -1166,6 +1179,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/appeals",
     auth: "seller",
+    scope: "own-seller",
     summary: "This seller's trust appeals",
     response: () => z.array(TrustAppeal),
     status: 200,
@@ -1176,7 +1190,8 @@ export const endpoints = defineEndpoints({
     area: "public",
     method: "POST",
     path: "/reports",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Brand or rights owner reports counterfeit listings",
     desc: "Contact details and proof of rights are required; confirmed by email before review.",
     body: () => z.object({
@@ -1202,6 +1217,7 @@ export const endpoints = defineEndpoints({
     path: "/overview",
     auth: "staff",
     permission: "trust.reports.view",
+    scope: "staff",
     summary: "Open reports by type, high risk, appeals waiting",
     response: () => TrustOverview,
     status: 200,
@@ -1214,6 +1230,7 @@ export const endpoints = defineEndpoints({
     path: "/reports",
     auth: "staff",
     permission: "trust.reports.view",
+    scope: "staff",
     summary: "Trust queue, highest risk first",
     query: () =>
       z.object({
@@ -1239,6 +1256,7 @@ export const endpoints = defineEndpoints({
     path: "/reports/{id}",
     auth: "staff",
     permission: "trust.reports.view",
+    scope: "staff",
     summary: "Report with evidence, linked records, recommendations, enforcement and timeline",
     desc: "Subject status labels are read from the owning modules (catalog, offers, sellers, customers, orders, reviews) in-process.",
     params: () =>
@@ -1256,8 +1274,20 @@ export const endpoints = defineEndpoints({
     path: "/reports",
     auth: "staff",
     permission: "trust.reports.investigate",
+    scope: "staff",
     summary: "Open a report as staff",
-    body: () => z.string(),
+    body: () => z.object({
+      type: z.string(),
+      title: z.string(),
+      description: z.string(),
+      get subjects() {
+        return z.array(TrustSubject);
+      },
+      get evidence() {
+        return z.array(EvidenceInput).nullish();
+      },
+      caseRef: z.string().nullish(),
+    }),
     response: () => TrustReport,
     status: 201,
     events: ["trust.report.created"],
@@ -1270,6 +1300,7 @@ export const endpoints = defineEndpoints({
     path: "/reports/{id}/assign",
     auth: "staff",
     permission: "trust.reports.investigate",
+    scope: "staff",
     summary: "Assign an investigator (moves to under review)",
     params: () =>
       z.object({
@@ -1292,6 +1323,7 @@ export const endpoints = defineEndpoints({
     path: "/reports/{id}/escalate",
     auth: "staff",
     permission: "trust.reports.investigate",
+    scope: "staff",
     summary: "Escalate to the Trust and Risk Manager or Business Owner",
     params: () =>
       z.object({
@@ -1314,6 +1346,7 @@ export const endpoints = defineEndpoints({
     path: "/reports/{id}/evidence",
     auth: "staff",
     permission: "trust.reports.investigate",
+    scope: "staff",
     summary: "Add evidence (check result, document, photo, note, linked record)",
     params: () =>
       z.object({
@@ -1332,6 +1365,7 @@ export const endpoints = defineEndpoints({
     path: "/reports/{id}/evidence-requests",
     auth: "staff",
     permission: "trust.reports.investigate",
+    scope: "staff",
     summary: "Ask the seller or customer for proof with a deadline",
     params: () =>
       z.object({
@@ -1357,6 +1391,7 @@ export const endpoints = defineEndpoints({
     path: "/reports/{id}/links",
     auth: "staff",
     permission: "trust.reports.investigate",
+    scope: "staff",
     summary: "Link more subjects or a support case",
     params: () =>
       z.object({
@@ -1379,6 +1414,7 @@ export const endpoints = defineEndpoints({
     path: "/reports/{id}/risk-score",
     auth: "staff",
     permission: "trust.reports.investigate",
+    scope: "staff",
     summary: "Override the risk score with a reason",
     params: () =>
       z.object({
@@ -1400,6 +1436,7 @@ export const endpoints = defineEndpoints({
     path: "/reports/{id}/notes",
     auth: "staff",
     permission: "trust.reports.investigate",
+    scope: "staff",
     summary: "Internal note",
     params: () =>
       z.object({
@@ -1419,6 +1456,7 @@ export const endpoints = defineEndpoints({
     path: "/reports/{id}/assessment",
     auth: "staff",
     permission: "trust.reports.decide",
+    scope: "staff",
     summary: "Record the risk assessment for a seller application or account",
     desc: "Publishes trust.assessment.completed; sellers shows the flags and recommendation to the Seller Manager.",
     params: () =>
@@ -1445,6 +1483,7 @@ export const endpoints = defineEndpoints({
     path: "/reports/{id}/recommendations",
     auth: "staff",
     permission: "trust.reports.investigate",
+    scope: "staff",
     summary: "Draft an enforcement recommendation for an owner team",
     params: () =>
       z.object({
@@ -1464,6 +1503,7 @@ export const endpoints = defineEndpoints({
     path: "/recommendations/{id}/route",
     auth: "staff",
     permission: "trust.reports.decide",
+    scope: "staff",
     summary: "Send a recommendation to its owner team",
     desc: "Creates a work item in the owner team's queue (workqueues consumes trust.recommendation.routed) and notifies the owner.",
     params: () =>
@@ -1484,6 +1524,7 @@ export const endpoints = defineEndpoints({
     path: "/recommendations",
     auth: "staff",
     permission: "trust.recommendations.decide",
+    scope: "staff",
     summary: "Recommendations waiting for my team",
     query: () =>
       z.object({
@@ -1502,6 +1543,7 @@ export const endpoints = defineEndpoints({
     path: "/recommendations/{id}/decide",
     auth: "staff",
     permission: "trust.recommendations.decide",
+    scope: "staff",
     summary: "Owner team accepts (records enforcement) or declines with a reason",
     desc: "Accept checks the owner's own permission for the action through access (e.g. catalog.products.publish, sellers.accounts.restrict, customers.accounts.act, finance.holds.place) and its approval limit; above the limit it returns APPROVAL_REQUIRED. Accept records an Enforcement and publishes trust.enforcement.recorded, which the owning module executes. For actions done directly in the owning module (e.g. Finance placing a hold in admin/finance), pass externalRef and the enforcement is recorded as already applied.",
     params: () =>
@@ -1535,6 +1577,7 @@ export const endpoints = defineEndpoints({
     path: "/recommendations/{id}/withdraw",
     auth: "staff",
     permission: "trust.reports.decide",
+    scope: "staff",
     summary: "Withdraw a recommendation",
     params: () =>
       z.object({
@@ -1557,6 +1600,7 @@ export const endpoints = defineEndpoints({
     path: "/reports/{id}/resolve",
     auth: "staff",
     permission: "trust.reports.decide",
+    scope: "staff",
     summary: "Resolve with an outcome and what the reporter is told",
     params: () =>
       z.object({
@@ -1581,6 +1625,7 @@ export const endpoints = defineEndpoints({
     path: "/reports/{id}/dismiss",
     auth: "staff",
     permission: "trust.reports.decide",
+    scope: "staff",
     summary: "Dismiss with a reason",
     params: () =>
       z.object({
@@ -1604,6 +1649,7 @@ export const endpoints = defineEndpoints({
     path: "/reports/{id}/reopen",
     auth: "staff",
     permission: "trust.reports.decide",
+    scope: "staff",
     summary: "Reopen with a reason (new evidence)",
     params: () =>
       z.object({
@@ -1625,6 +1671,7 @@ export const endpoints = defineEndpoints({
     path: "/reports/{id}/merge",
     auth: "staff",
     permission: "trust.reports.investigate",
+    scope: "staff",
     summary: "Merge a duplicate report into another",
     params: () =>
       z.object({
@@ -1647,6 +1694,7 @@ export const endpoints = defineEndpoints({
     path: "/enforcements",
     auth: "staff",
     permission: "trust.reports.view",
+    scope: "staff",
     summary: "Recorded enforcement with execution state",
     query: () =>
       z.object({
@@ -1668,6 +1716,7 @@ export const endpoints = defineEndpoints({
     path: "/enforcements/{id}/reverse",
     auth: "staff",
     permission: "trust.enforcements.reverse",
+    scope: "staff",
     summary: "Reverse an enforcement (overturned appeal or error)",
     params: () =>
       z.object({
@@ -1691,6 +1740,7 @@ export const endpoints = defineEndpoints({
     path: "/appeals",
     auth: "staff",
     permission: "trust.reports.view",
+    scope: "staff",
     summary: "Appeals on trust enforcement plus linked seller restriction appeals",
     query: () =>
       z.object({
@@ -1710,6 +1760,7 @@ export const endpoints = defineEndpoints({
     path: "/appeals/{id}/assign",
     auth: "staff",
     permission: "trust.appeals.decide",
+    scope: "staff",
     summary: "Assign a reviewer who did not make the decision",
     params: () =>
       z.object({
@@ -1731,6 +1782,7 @@ export const endpoints = defineEndpoints({
     path: "/appeals/{id}/decide",
     auth: "staff",
     permission: "trust.appeals.decide",
+    scope: "staff",
     summary: "Uphold, overturn or partly overturn",
     desc: "Overturn reverses the enforcement (trust.enforcement.reversed). Restrictions and history stay recorded; valid order history and access to help are preserved for everyone involved.",
     params: () =>
@@ -1756,6 +1808,7 @@ export const endpoints = defineEndpoints({
     path: "/reports/exports",
     auth: "staff",
     permission: "trust.reports.export",
+    scope: "staff",
     summary: "Export the filtered trust queue",
     desc: "Creates an authorized export job through reports.requestExport (dataset trust.admin.reports). Reporter identities are excluded unless the caller has trust.reports.export-identities.",
     body: () => z.object({
@@ -1774,6 +1827,7 @@ export const endpoints = defineEndpoints({
     path: "/detection-rules",
     auth: "staff",
     permission: "trust.rules.manage",
+    scope: "staff",
     summary: "Automated detection rules with recent hits",
     response: () => z.array(DetectionRule),
     status: 200,
@@ -1786,6 +1840,7 @@ export const endpoints = defineEndpoints({
     path: "/detection-rules/{key}",
     auth: "staff",
     permission: "trust.rules.manage",
+    scope: "staff",
     summary: "Turn a rule on or off or change its thresholds",
     params: () =>
       z.object({
@@ -2776,6 +2831,7 @@ export const spec = defineModuleSpec({
       }
     }
   },
+  tenantTables: {},
   endpoints,
 });
 

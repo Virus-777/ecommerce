@@ -373,6 +373,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/wishlist",
     auth: "customer",
+    scope: "own-customer",
     summary: "Wishlist page: lists, first batch of items with price hints and stock, and alerts",
     query: () =>
       z.object({
@@ -389,6 +390,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/lists/{id}/items",
     auth: "customer",
+    scope: "own-customer",
     summary: "More items of a list",
     params: () =>
       z.object({
@@ -410,6 +412,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/saved",
     auth: "customer",
+    scope: "own-customer",
     summary: "Which products are saved (for heart icons on cards)",
     query: () =>
       z.object({
@@ -425,6 +428,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/items",
     auth: "customer",
+    scope: "own-customer",
     summary: "Save a product (optionally with alerts)",
     desc: "Saving the same product and variant twice to a list returns the existing item.",
     body: () => SaveItemInput,
@@ -440,6 +444,7 @@ export const endpoints = defineEndpoints({
     method: "DELETE",
     path: "/items/{id}",
     auth: "customer",
+    scope: "own-customer",
     summary: "Remove a saved item (its alerts are removed too)",
     params: () =>
       z.object({
@@ -456,6 +461,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/items/{id}/move",
     auth: "customer",
+    scope: "own-customer",
     summary: "Move an item to another list",
     params: () =>
       z.object({
@@ -474,6 +480,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/items/{id}/move-to-cart",
     auth: "customer",
+    scope: "own-customer",
     summary: "Add the item to the cart with an explicit offer",
     desc: "Uses the saved offer, or the current main offer shown on the card; the seller is never swapped silently. The item stays saved unless removeFromList is true.",
     params: () =>
@@ -502,6 +509,7 @@ export const endpoints = defineEndpoints({
     method: "PUT",
     path: "/items/{id}/alerts",
     auth: "customer",
+    scope: "own-customer",
     summary: "Turn price-drop and back-in-stock alerts on or off for an item",
     params: () =>
       z.object({
@@ -518,6 +526,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/lists",
     auth: "customer",
+    scope: "own-customer",
     summary: "My lists",
     response: () => z.array(WishlistList),
     status: 200,
@@ -529,6 +538,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/lists",
     auth: "customer",
+    scope: "own-customer",
     summary: "Create a named list",
     body: () => z.object({
       name: z.string(),
@@ -544,6 +554,7 @@ export const endpoints = defineEndpoints({
     method: "PATCH",
     path: "/lists/{id}",
     auth: "customer",
+    scope: "own-customer",
     summary: "Rename a list",
     params: () =>
       z.object({
@@ -562,6 +573,7 @@ export const endpoints = defineEndpoints({
     method: "DELETE",
     path: "/lists/{id}",
     auth: "customer",
+    scope: "own-customer",
     summary: "Delete a list (not the default list)",
     params: () =>
       z.object({
@@ -578,6 +590,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/lists/{id}/share",
     auth: "customer",
+    scope: "own-customer",
     summary: "Create or revoke a share link",
     params: () =>
       z.object({
@@ -595,7 +608,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/shared/{token}",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "View a shared list (read-only, no prices history or alerts)",
     params: () =>
       z.object({
@@ -612,6 +626,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/alerts",
     auth: "customer",
+    scope: "own-customer",
     summary: "My alerts",
     query: () =>
       z.object({
@@ -628,6 +643,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/alerts",
     auth: "customer",
+    scope: "own-customer",
     summary: "Create an alert (also for a product not saved, e.g. from an out-of-stock product page)",
     body: () => AlertInput,
     response: () => Alert,
@@ -641,6 +657,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/alerts/{id}/transition",
     auth: "customer",
+    scope: "own-customer",
     summary: "Pause, resume or rearm an alert",
     params: () =>
       z.object({
@@ -660,6 +677,7 @@ export const endpoints = defineEndpoints({
     method: "DELETE",
     path: "/alerts/{id}",
     auth: "customer",
+    scope: "own-customer",
     summary: "Remove an alert",
     params: () =>
       z.object({
@@ -676,6 +694,7 @@ export const endpoints = defineEndpoints({
     path: "/insights",
     auth: "staff",
     permission: "wishlist.insights.view",
+    scope: "staff",
     summary: "Most saved products and alert counts (aggregates only, no customer data)",
     query: () =>
       z.object({
@@ -959,6 +978,18 @@ export const spec = defineModuleSpec({
         "type": "timestamptz",
         "nullable": false
       }
+    }
+  },
+  tenantTables: {
+    "lists": {
+      "customer": "customer_id"
+    },
+    "items": {
+      "customer": "customer_id"
+    },
+    "alerts": {
+      "seller": "seller_id",
+      "customer": "customer_id"
     }
   },
   endpoints,

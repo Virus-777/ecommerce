@@ -1411,6 +1411,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/stock-items",
     auth: "seller",
+    scope: "own-seller",
     summary: "Quantities for the seller's offers: available, reserved, low-stock threshold, status",
     query: () =>
       z.object({
@@ -1429,6 +1430,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/summary",
     auth: "seller",
+    scope: "own-seller",
     summary: "In stock, low, out of stock and reserved totals",
     response: () => SellerStockSummary,
     status: 200,
@@ -1441,6 +1443,7 @@ export const endpoints = defineEndpoints({
     path: "/stock-items/exports",
     auth: "seller",
     permission: "inventory.stock.export",
+    scope: "own-seller",
     summary: "Export the seller's stock rows (current filters or selected rows) as CSV",
     desc: "Creates an authorized export job through reports.requestExport (dataset inventory.seller.stock, sellerId from the session, never another seller's rows). filters takes the same keys as GET /stock-items (q, state, categoryId); stockItemIds limits it to selected rows. Poll GET /stock-items/exports/{id} for the download link.",
     body: () => z.object({
@@ -1461,6 +1464,7 @@ export const endpoints = defineEndpoints({
     path: "/stock-items/exports/{id}",
     auth: "seller",
     permission: "inventory.stock.export",
+    scope: "own-seller",
     summary: "Stock export status and download link (requesting member only)",
     params: () =>
       z.object({
@@ -1477,6 +1481,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/stock-items/{id}",
     auth: "seller",
+    scope: "own-seller",
     summary: "One stock item with reservations and movement history",
     params: () =>
       z.object({
@@ -1494,6 +1499,7 @@ export const endpoints = defineEndpoints({
     path: "/stock-items/{id}/adjustments",
     auth: "seller",
     permission: "inventory.stock.adjust",
+    scope: "own-seller",
     summary: "Set a new available quantity with a reason",
     desc: "Recorded with the reason, note, member name and time. Reserved units are not affected. Available 0 marks the offer Out of stock.",
     params: () =>
@@ -1514,6 +1520,7 @@ export const endpoints = defineEndpoints({
     path: "/adjustments/batch",
     auth: "seller",
     permission: "inventory.stock.adjust",
+    scope: "own-seller",
     summary: "Save several inline quantity edits at once (each with a reason)",
     body: () => z.object({
       get items() {
@@ -1538,6 +1545,7 @@ export const endpoints = defineEndpoints({
     path: "/stock-items/{id}",
     auth: "seller",
     permission: "inventory.stock.adjust",
+    scope: "own-seller",
     summary: "Change the low-stock alert threshold",
     params: () =>
       z.object({
@@ -1556,6 +1564,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/movements",
     auth: "seller",
+    scope: "own-seller",
     summary: "Adjustment and movement history (reason, person, time)",
     query: () =>
       z.object({
@@ -1576,6 +1585,7 @@ export const endpoints = defineEndpoints({
     path: "/stock-items",
     auth: "staff",
     permission: "inventory.stock.view",
+    scope: "staff",
     summary: "Stock by SKU with all five groups, bin, reorder point, cost and status",
     desc: "Defaults to Official Store stock. Seller stock is visible read-only with sellerId and is never totalled with company stock.",
     query: () =>
@@ -1599,6 +1609,7 @@ export const endpoints = defineEndpoints({
     path: "/summary",
     auth: "staff",
     permission: "inventory.stock.view",
+    scope: "staff",
     summary: "Units and value at cost per stock group, low and out-of-stock counts",
     query: () =>
       z.object({
@@ -1615,6 +1626,7 @@ export const endpoints = defineEndpoints({
     path: "/stock-items/{id}",
     auth: "staff",
     permission: "inventory.stock.view",
+    scope: "staff",
     summary: "Stock item with levels per location, reservations, incoming, pending adjustments and history",
     params: () =>
       z.object({
@@ -1631,6 +1643,7 @@ export const endpoints = defineEndpoints({
     path: "/stock-items",
     auth: "staff",
     permission: "inventory.items.manage",
+    scope: "staff",
     summary: "Create a company stock item (SKU) at a location",
     body: () => StockItemInput,
     response: () => StockItem,
@@ -1646,6 +1659,7 @@ export const endpoints = defineEndpoints({
     path: "/stock-items/{id}",
     auth: "staff",
     permission: "inventory.items.manage",
+    scope: "staff",
     summary: "Change reorder point, reorder quantity or archive a company SKU",
     params: () =>
       z.object({
@@ -1668,6 +1682,7 @@ export const endpoints = defineEndpoints({
     path: "/adjustments",
     auth: "staff",
     permission: "inventory.stock.adjust-official",
+    scope: "staff",
     summary: "Move company stock between groups, or into or out of stock, with a reason",
     desc: "Reserved units cannot be adjusted here (they stay with their orders; use discrepancies). Moving into Damaged or held needs a review date. The response shows before/after; above the limit it is pending_review with approval details.",
     body: () => AdjustmentRequest,
@@ -1686,6 +1701,7 @@ export const endpoints = defineEndpoints({
     path: "/adjustments",
     auth: "staff",
     permission: "inventory.stock.view",
+    scope: "staff",
     summary: "Adjustments, including those waiting for second review",
     query: () =>
       z.object({
@@ -1704,6 +1720,7 @@ export const endpoints = defineEndpoints({
     path: "/adjustments/{id}/cancel",
     auth: "staff",
     permission: "inventory.stock.adjust-official",
+    scope: "staff",
     summary: "Withdraw an adjustment waiting for review",
     params: () =>
       z.object({
@@ -1725,6 +1742,7 @@ export const endpoints = defineEndpoints({
     path: "/movements",
     auth: "staff",
     permission: "inventory.stock.view",
+    scope: "staff",
     summary: "Movement ledger (adjustment history with reason, staff and date)",
     query: () =>
       z.object({
@@ -1747,6 +1765,7 @@ export const endpoints = defineEndpoints({
     path: "/reservations",
     auth: "staff",
     permission: "inventory.stock.view",
+    scope: "staff",
     summary: "Holds and allocations by order or stock item",
     query: () =>
       z.object({
@@ -1766,6 +1785,7 @@ export const endpoints = defineEndpoints({
     path: "/reservations/{id}/release",
     auth: "staff",
     permission: "inventory.reservations.manage",
+    scope: "staff",
     summary: "Release a stuck hold or allocation (e.g. order closed without a cancel event)",
     params: () =>
       z.object({
@@ -1789,6 +1809,7 @@ export const endpoints = defineEndpoints({
     path: "/inbound",
     auth: "staff",
     permission: "inventory.stock.view",
+    scope: "staff",
     summary: "Received deliveries waiting for the Inventory Manager to make them sellable",
     query: () =>
       z.object({
@@ -1806,6 +1827,7 @@ export const endpoints = defineEndpoints({
     path: "/inbound/{id}",
     auth: "staff",
     permission: "inventory.stock.view",
+    scope: "staff",
     summary: "One counted receipt: received, damaged, shortage and proposed sellable per line",
     params: () =>
       z.object({
@@ -1822,6 +1844,7 @@ export const endpoints = defineEndpoints({
     path: "/inbound/{id}/confirm",
     auth: "staff",
     permission: "inventory.inbound.confirm",
+    scope: "staff",
     summary: "Make received units available for sale",
     desc: "Incoming → Available (sellable) and → Damaged or held (damaged). Updates weighted average unit cost with the receipt's unit cost. Orders waiting for out-of-stock SKUs are allocated first.",
     params: () =>
@@ -1843,6 +1866,7 @@ export const endpoints = defineEndpoints({
     path: "/return-outcomes",
     auth: "staff",
     permission: "inventory.stock.view",
+    scope: "staff",
     summary: "Inspected Official Store returns waiting for their stock outcome",
     query: () =>
       z.object({
@@ -1860,6 +1884,7 @@ export const endpoints = defineEndpoints({
     path: "/return-outcomes/{id}/record",
     auth: "staff",
     permission: "inventory.returns.record",
+    scope: "staff",
     summary: "Record the stock outcome of a returned item",
     params: () =>
       z.object({
@@ -1880,6 +1905,7 @@ export const endpoints = defineEndpoints({
     path: "/discrepancies",
     auth: "staff",
     permission: "inventory.stock.view",
+    scope: "staff",
     summary: "Shortages and damage reported by the warehouse",
     query: () =>
       z.object({
@@ -1898,6 +1924,7 @@ export const endpoints = defineEndpoints({
     path: "/discrepancies/{id}/resolve",
     auth: "staff",
     permission: "inventory.discrepancies.resolve",
+    scope: "staff",
     summary: "Resolve a shortage or damage report (reallocate, adjust or no change)",
     params: () =>
       z.object({
@@ -1918,6 +1945,7 @@ export const endpoints = defineEndpoints({
     path: "/low-stock",
     auth: "staff",
     permission: "inventory.stock.view",
+    scope: "staff",
     summary: "SKUs at or below reorder point with incoming stock and suggested reorder quantity",
     query: () =>
       z.object({
@@ -1936,6 +1964,7 @@ export const endpoints = defineEndpoints({
     path: "/locations",
     auth: "staff",
     permission: "inventory.stock.view",
+    scope: "staff",
     summary: "Company stock locations",
     response: () => z.array(Location),
     status: 200,
@@ -1948,6 +1977,7 @@ export const endpoints = defineEndpoints({
     path: "/locations",
     auth: "staff",
     permission: "inventory.locations.manage",
+    scope: "staff",
     summary: "Add a company stock location",
     desc: "One warehouse at launch. A second active sellable warehouse is phase 4 (operational expansion) and turns on transfers.",
     body: () => LocationInput,
@@ -1962,6 +1992,7 @@ export const endpoints = defineEndpoints({
     path: "/locations/{id}",
     auth: "staff",
     permission: "inventory.locations.manage",
+    scope: "staff",
     summary: "Rename, deactivate or change whether a location is sellable",
     params: () =>
       z.object({
@@ -1986,6 +2017,7 @@ export const endpoints = defineEndpoints({
     path: "/transfers",
     auth: "staff",
     permission: "inventory.transfers.manage",
+    scope: "staff",
     summary: "Plan a transfer between warehouses",
     body: () => z.object({
       fromLocationId: z.uuid(),
@@ -2007,6 +2039,7 @@ export const endpoints = defineEndpoints({
     path: "/transfers",
     auth: "staff",
     permission: "inventory.stock.view",
+    scope: "staff",
     summary: "Transfers",
     query: () =>
       z.object({
@@ -2024,6 +2057,7 @@ export const endpoints = defineEndpoints({
     path: "/transfers/{id}/ship",
     auth: "staff",
     permission: "inventory.transfers.manage",
+    scope: "staff",
     summary: "Send a transfer (source Available → destination Incoming)",
     params: () =>
       z.object({
@@ -2042,6 +2076,7 @@ export const endpoints = defineEndpoints({
     path: "/transfers/{id}/receive",
     auth: "staff",
     permission: "inventory.transfers.manage",
+    scope: "staff",
     summary: "Receive a transfer (received quantities per line)",
     params: () =>
       z.object({
@@ -2066,6 +2101,7 @@ export const endpoints = defineEndpoints({
     path: "/transfers/{id}/cancel",
     auth: "staff",
     permission: "inventory.transfers.manage",
+    scope: "staff",
     summary: "Cancel a draft transfer",
     params: () =>
       z.object({
@@ -2086,6 +2122,7 @@ export const endpoints = defineEndpoints({
     path: "/counts",
     auth: "staff",
     permission: "inventory.counts.manage",
+    scope: "staff",
     summary: "Start a stock count for a zone, bin range or SKU list",
     body: () => z.object({
       locationId: z.uuid(),
@@ -2102,6 +2139,7 @@ export const endpoints = defineEndpoints({
     path: "/counts/{id}/lines",
     auth: "staff",
     permission: "inventory.counts.manage",
+    scope: "staff",
     summary: "Record counted quantities",
     params: () =>
       z.object({
@@ -2123,6 +2161,7 @@ export const endpoints = defineEndpoints({
     path: "/counts/{id}/submit",
     auth: "staff",
     permission: "inventory.counts.manage",
+    scope: "staff",
     summary: "Submit a count; differences become count-correction adjustments",
     params: () =>
       z.object({
@@ -3239,6 +3278,14 @@ export const spec = defineModuleSpec({
         "type": "int",
         "nullable": true
       }
+    }
+  },
+  tenantTables: {
+    "locations": {
+      "seller": "seller_id"
+    },
+    "stock_items": {
+      "seller": "seller_id"
     }
   },
   endpoints,

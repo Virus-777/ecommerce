@@ -33,8 +33,8 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| GET | `/api/store/returns/policy` | Current returns baseline, category exceptions and who pays return shipping | anyone | `PublicPolicy` |
-| GET | `/api/store/returns/terms` | Effective return terms for a seller and category | anyone | `EffectiveTerms` |
+| GET | `/api/store/returns/policy` | Current returns baseline, category exceptions and who pays return shipping | visitor | `PublicPolicy` |
+| GET | `/api/store/returns/terms` | Effective return terms for a seller and category | visitor | `EffectiveTerms` |
 | GET | `/api/store/returns/orders/{orderId}/returnable-items` | Items of an order with per-item return eligibility | shopper | `{ orderId: uuid, orderRef: string, placedAt: datetime, items: ReturnableItem[] }` |
 | POST | `/api/store/returns/eligibility` | Eligibility, deadline, destination, shipping responsibility, remedies and refund estimate before submission | shopper | `EligibilityRequest` → `EligibilityResult` |
 | POST | `/api/store/returns/requests` | Request a return for selected items and quantities _(idempotent)_ | shopper | `ReturnCreateInput` → `{ returns: ReturnDetail[] }` |
@@ -93,7 +93,7 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | POST | `/api/admin/returns/refunds` | Issue a refund from the order page (exception refund request) _(idempotent, audited)_ | staff<br>`returns.exceptions.propose` | `ExceptionRefundInput` → `RefundRequest` |
 | GET | `/api/admin/returns/refunds` | Refund approval queue for Finance | staff<br>`returns.requests.view` | Page<RefundRequest> |
 | GET | `/api/admin/returns/refunds/{id}` | One refund request with breakdown, funding and earnings impact | staff<br>`returns.requests.view` | `RefundRequest` |
-| POST | `/api/admin/returns/refunds/{id}/approve` | Finance approves the refund and hands it to payments _(idempotent, audited)_ | staff<br>`returns.refunds.approve` | `{ note: text? }` → `RefundRequest` |
+| POST | `/api/admin/returns/refunds/{id}/approve` | Finance approves the refund and hands it to payments _(idempotent, audited)_ | staff<br>`returns.refunds.approve` | `{ note: text?, stepUpCode: string? }` → `RefundRequest` |
 | POST | `/api/admin/returns/refunds/{id}/decline` | Send a refund request back with a reason _(audited)_ | staff<br>`returns.refunds.approve` | `{ reason: text }` → `RefundRequest` |
 | POST | `/api/admin/returns/refunds/{id}/revise` | Change a declined refund and resubmit _(audited)_ | staff<br>`returns.requests.manage` | `RemedyInput` → `RefundRequest` |
 | GET | `/api/admin/returns/policies` | Active baseline, scheduled changes and history | staff<br>`returns.requests.view` | `ReturnPolicyAdmin` |

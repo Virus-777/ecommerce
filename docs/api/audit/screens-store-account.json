@@ -43,7 +43,7 @@
     "kind": "action",
     "status": "covered",
     "api": [
-      "POST /api/public/identity/guest-sessions"
+      "POST /api/public/identity/app-sessions"
     ],
     "note": "Starts the guest session. The checkout session itself belongs to store/checkout."
   },
@@ -160,7 +160,7 @@
     "kind": "data",
     "status": "covered",
     "api": [
-      "GET /api/public/identity/password-resets/{token}"
+      "POST /api/public/identity/password-resets/lookups"
     ],
     "note": "Returns emailMasked, while the prototype shows the full address."
   },
@@ -171,7 +171,7 @@
     "kind": "data",
     "status": "covered",
     "api": [
-      "GET /api/public/identity/password-resets/{token}"
+      "POST /api/public/identity/password-resets/lookups"
     ],
     "note": "PasswordResetStatus.policy."
   },
@@ -182,7 +182,7 @@
     "kind": "action",
     "status": "covered",
     "api": [
-      "POST /api/public/identity/password-resets/{token}/complete"
+      "POST /api/public/identity/password-resets/complete"
     ]
   },
   {

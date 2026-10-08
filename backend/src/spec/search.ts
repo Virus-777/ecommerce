@@ -1035,7 +1035,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/products",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Search results or category listing (product cards with sponsored slots marked)",
     desc: "Without q this is a category, brand, seller or collection listing. Out-of-stock products are excluded unless availability=include_out_of_stock. Seller and condition filters show the matching seller's offer price. Sponsored hits come from advertising.sponsoredForResults on the first page only and always carry a visible label; when advertising is off there are none.",
     query: () =>
@@ -1069,7 +1070,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/facets",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Everything around the results for the same query: total, correction, applied filters, facets with counts, sorts, store match, category context, empty guidance",
     desc: "Takes the same query parameters as GET /products. The app renders a results screen with this call plus the first page of /products.",
     query: () =>
@@ -1101,7 +1103,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/suggestions",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Suggestions while typing: queries, categories, brands, stores, products and recent searches",
     desc: "Tolerates misspellings. Store suggestions link to the seller's store page. Recent searches are included only when a customer or guest session is sent and recent searches are turned on in the profile.",
     query: () =>
@@ -1119,6 +1122,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/recent-searches",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Recent searches for this customer or guest session (max 10)",
     desc: "Signed-in customers: searches are saved to the account only while customers.MarketingPreferences.recentSearches is on (read with customers.getMarketingConsent); with it off nothing is saved and the list is empty. Guest sessions keep their own list until sign-in.",
     response: () => z.array(RecentSearch),
@@ -1131,6 +1135,7 @@ export const endpoints = defineEndpoints({
     method: "DELETE",
     path: "/recent-searches/{id}",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Remove one recent search",
     params: () =>
       z.object({
@@ -1146,6 +1151,7 @@ export const endpoints = defineEndpoints({
     method: "DELETE",
     path: "/recent-searches",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Clear all recent searches",
     response: null,
     status: 204,
@@ -1156,7 +1162,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/products/{productId}/similar",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Similar in-stock products (unavailable product alternatives and related products)",
     params: () =>
       z.object({
@@ -1176,7 +1183,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/cards",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Product cards for a list of product ids (home sections, recently viewed)",
     query: () =>
       z.object({
@@ -1192,7 +1200,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "POST",
     path: "/searches/{searchId}/clicks",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Record which result was opened (relevance and reports)",
     params: () =>
       z.object({
@@ -1212,7 +1221,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/barcodes/{code}",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Resolve a scanned GTIN/UPC/EAN to a listed product and variant",
     desc: "The app's 'Scan a barcode' reads the code on the device and sends it here. Matches search_documents.gtins (only purchasable, listed products). No match returns match=false with fallbackQuery so the app can show search results with empty guidance; it is logged as an unavailable search.",
     params: () =>
@@ -1233,7 +1243,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/ranking-policy",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Published 'How results are ranked'",
     response: () => RankingPolicy,
     status: 200,
@@ -1245,6 +1256,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/quick",
     auth: "seller",
+    scope: "own-seller",
     summary: "Seller Center top-bar search across own orders, offers/SKUs and returns",
     desc: "Fan-out over enabled modules' public APIs with the seller from the session: orders.listOrdersForSeller (order ref, buyer name, product), offers.searchOwnOffers (title, seller SKU, GTIN) and returns.listForSeller with q (return ref, order ref). Groups the member's role cannot see are left out (e.g. orders without orders.fulfillment.view). Nothing is indexed here; each group comes from its owning module.",
     query: () =>
@@ -1263,6 +1275,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/lookup",
     auth: "staff",
+    scope: "staff",
     summary: "Back-office top-bar quick search across orders, sellers, products and customers",
     desc: "Matches by reference, name, email, SKU or GTIN. Fan-out over enabled modules' public APIs, each group only when the caller holds that module's view permission: orders.listOrdersAdmin (orders.orders.view), sellers.searchSellers (sellers.accounts.view), customers.searchCustomers (customers.accounts.view; email masked without contact permission), products from this module's index plus offers.listOffersAdmin for seller SKUs (offers.offers.view). The lookup itself is not audited; opening a record is.",
     query: () =>
@@ -1282,6 +1295,7 @@ export const endpoints = defineEndpoints({
     path: "/synonyms",
     auth: "staff",
     permission: "search.synonyms.manage",
+    scope: "staff",
     summary: "Search synonyms",
     query: () =>
       z.object({
@@ -1299,6 +1313,7 @@ export const endpoints = defineEndpoints({
     path: "/synonyms",
     auth: "staff",
     permission: "search.synonyms.manage",
+    scope: "staff",
     summary: "Add a synonym set (takes effect on the next query; no reindex needed)",
     body: () => SynonymInput,
     response: () => Synonym,
@@ -1314,6 +1329,7 @@ export const endpoints = defineEndpoints({
     path: "/synonyms/{id}",
     auth: "staff",
     permission: "search.synonyms.manage",
+    scope: "staff",
     summary: "Edit or deactivate a synonym set",
     params: () =>
       z.object({
@@ -1333,6 +1349,7 @@ export const endpoints = defineEndpoints({
     path: "/synonyms/{id}",
     auth: "staff",
     permission: "search.synonyms.manage",
+    scope: "staff",
     summary: "Delete a synonym set",
     params: () =>
       z.object({
@@ -1350,6 +1367,7 @@ export const endpoints = defineEndpoints({
     path: "/index",
     auth: "staff",
     permission: "search.index.manage",
+    scope: "staff",
     summary: "Index size, staleness and lag behind events",
     response: () => IndexStatus,
     status: 200,
@@ -1361,6 +1379,7 @@ export const endpoints = defineEndpoints({
     path: "/reindex-jobs",
     auth: "staff",
     permission: "search.index.manage",
+    scope: "staff",
     summary: "Reindex everything or a scope (products, category, brand, seller)",
     body: () => z.object({
       scope: z.enum(["all", "products", "category", "brand", "seller"]),
@@ -1379,6 +1398,7 @@ export const endpoints = defineEndpoints({
     path: "/reindex-jobs/{id}",
     auth: "staff",
     permission: "search.index.manage",
+    scope: "staff",
     summary: "Reindex progress",
     params: () =>
       z.object({
@@ -1394,6 +1414,7 @@ export const endpoints = defineEndpoints({
     path: "/zero-result-queries",
     auth: "staff",
     permission: "search.analytics.view",
+    scope: "staff",
     summary: "Searches that found nothing (unavailable searches), most frequent first",
     query: () =>
       z.object({
@@ -1412,6 +1433,7 @@ export const endpoints = defineEndpoints({
     path: "/explain",
     auth: "staff",
     permission: "search.analytics.view",
+    scope: "staff",
     summary: "Why results rank as they do for a query (scores, factors, synonyms, correction)",
     query: () =>
       z.object({
@@ -1429,6 +1451,7 @@ export const endpoints = defineEndpoints({
     path: "/ranking-policies",
     auth: "staff",
     permission: "search.ranking.manage",
+    scope: "staff",
     summary: "Publish a new ranking policy version (wording and recommended-sort weights)",
     body: () => RankingPolicyInput,
     response: () => RankingPolicy,
@@ -2074,6 +2097,11 @@ export const spec = defineModuleSpec({
         "type": "timestamptz",
         "nullable": false
       }
+    }
+  },
+  tenantTables: {
+    "search_offers": {
+      "seller": "seller_id"
     }
   },
   endpoints,

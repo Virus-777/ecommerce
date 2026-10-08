@@ -1358,6 +1358,7 @@ export const endpoints = defineEndpoints({
     path: "/roles",
     auth: "staff",
     permission: "access.roles.view",
+    scope: "staff",
     summary: "Roles with people, lead, backups and approval-limit summary",
     desc: "Small and bounded (about 25 roles), not paged.",
     query: () =>
@@ -1376,6 +1377,7 @@ export const endpoints = defineEndpoints({
     path: "/roles/{id}",
     auth: "staff",
     permission: "access.roles.view",
+    scope: "staff",
     summary: "Role editor: permissions by area, approval limits, pending changes",
     params: () =>
       z.object({
@@ -1392,6 +1394,7 @@ export const endpoints = defineEndpoints({
     path: "/roles",
     auth: "staff",
     permission: "access.roles.manage",
+    scope: "staff",
     summary: "Create a task or custom role",
     body: () => RoleInput,
     response: () => Role,
@@ -1408,6 +1411,7 @@ export const endpoints = defineEndpoints({
     path: "/roles/{id}",
     auth: "staff",
     permission: "access.roles.manage",
+    scope: "staff",
     summary: "Rename a role, change its work area or escalation role",
     params: () =>
       z.object({
@@ -1428,6 +1432,7 @@ export const endpoints = defineEndpoints({
     path: "/roles/{id}/archive",
     auth: "staff",
     permission: "access.roles.manage",
+    scope: "staff",
     summary: "Archive an unused custom role",
     params: () =>
       z.object({
@@ -1450,6 +1455,8 @@ export const endpoints = defineEndpoints({
     path: "/roles/{id}/permissions",
     auth: "staff",
     permission: "access.roles.manage",
+    stepUp: {"kind":"code","purpose":"role-grant"},
+    scope: "staff",
     summary: "Replace the permissions of a role",
     desc: "Removing permissions applies at once. Adding sensitive permissions, or changing a role the caller holds, returns 202 with APPROVAL_REQUIRED semantics: the change waits for a second reviewer (access.roles.sensitive-grant) and RoleDetail.pendingPermissionApproval tracks it. Permissions never include approval limits; those are set with POST /limit-changes.",
     params: () =>
@@ -1462,7 +1469,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => RoleDetail,
     status: 200,
-    errors: ["UNKNOWN_PERMISSION","APPROVAL_REQUIRED"],
+    errors: ["UNKNOWN_PERMISSION","APPROVAL_REQUIRED","STEP_UP_REQUIRED"],
     audited: true,
     approval: "Approval action access.roles.sensitive-grant. Sensitive permissions or the caller's own role need a second reviewer",
     events: ["access.role.changed","access.approval.requested"],
@@ -1475,6 +1482,7 @@ export const endpoints = defineEndpoints({
     path: "/roles/{id}/coverage",
     auth: "staff",
     permission: "access.roles.manage",
+    scope: "staff",
     summary: "Set the lead, backups and escalation role",
     desc: "Lead and backups must hold the role (or be Business Owner); a backup cannot be the lead.",
     params: () =>
@@ -1496,6 +1504,7 @@ export const endpoints = defineEndpoints({
     path: "/permissions",
     auth: "staff",
     permission: "access.roles.view",
+    scope: "staff",
     summary: "Permission registry grouped by work area",
     query: () =>
       z.object({
@@ -1512,6 +1521,7 @@ export const endpoints = defineEndpoints({
     path: "/members",
     auth: "staff",
     permission: "access.roles.view",
+    scope: "staff",
     summary: "Staff members with roles, lead/backup duties, away status and 2-step state",
     query: () =>
       z.object({
@@ -1532,6 +1542,7 @@ export const endpoints = defineEndpoints({
     path: "/members/{accountId}",
     auth: "staff",
     permission: "access.roles.view",
+    scope: "staff",
     summary: "One staff member: assignments, effective permissions and limits, away periods",
     params: () =>
       z.object({
@@ -1548,12 +1559,14 @@ export const endpoints = defineEndpoints({
     path: "/staff-invitations",
     auth: "staff",
     permission: "access.roles.manage",
+    stepUp: {"kind":"code","purpose":"role-grant"},
+    scope: "staff",
     summary: "Invite a staff member with roles",
     desc: "Calls identity.inviteStaff (7-day link, 2-step set-up on accept) and creates pending_acceptance assignments. Approval limits come with the roles; they are never set per invitation. With requestLimitReview the invitation also opens an access.limits.change approval request to the Business Owner; any change the Business Owner makes goes through the normal limit change (role-level, effective-dated), and the member cannot approve anything until the review is decided.",
     body: () => StaffInvitationInput,
     response: () => StaffMember,
     status: 201,
-    errors: ["VALIDATION_FAILED","APPROVAL_REQUIRED"],
+    errors: ["VALIDATION_FAILED","APPROVAL_REQUIRED","STEP_UP_REQUIRED"],
     audited: true,
     events: ["access.role.changed"],
     screens: ["admin/staff"],
@@ -1565,6 +1578,8 @@ export const endpoints = defineEndpoints({
     path: "/role-assignments",
     auth: "staff",
     permission: "access.roles.manage",
+    stepUp: {"kind":"code","purpose":"role-grant"},
+    scope: "staff",
     summary: "Give a staff member a role",
     body: () => z.object({
       accountId: z.uuid(),
@@ -1574,7 +1589,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => RoleAssignment,
     status: 201,
-    errors: ["APPROVAL_REQUIRED","CONFLICT"],
+    errors: ["APPROVAL_REQUIRED","CONFLICT","STEP_UP_REQUIRED"],
     audited: true,
     approval: "Approval action access.roles.sensitive-grant. Roles with sensitive permissions, the Business Owner role, or any role for yourself need a second reviewer",
     events: ["access.role.changed","access.approval.requested"],
@@ -1587,6 +1602,7 @@ export const endpoints = defineEndpoints({
     path: "/role-assignments/{id}/revoke",
     auth: "staff",
     permission: "access.roles.manage",
+    scope: "staff",
     summary: "Remove a role from a staff member",
     desc: "If the person leads or backs up the role, the response lists the new coverage gap (also on GET /coverage).",
     params: () =>
@@ -1610,6 +1626,7 @@ export const endpoints = defineEndpoints({
     path: "/approval-actions",
     auth: "staff",
     permission: "access.roles.view",
+    scope: "staff",
     summary: "Actions that can have approval limits",
     response: () => z.array(ApprovalAction),
     status: 200,
@@ -1622,6 +1639,7 @@ export const endpoints = defineEndpoints({
     path: "/limits",
     auth: "staff",
     permission: "access.roles.view",
+    scope: "staff",
     summary: "Approval limits in force",
     query: () =>
       z.object({
@@ -1639,6 +1657,7 @@ export const endpoints = defineEndpoints({
     path: "/limit-changes",
     auth: "staff",
     permission: "access.limits.propose",
+    scope: "staff",
     summary: "Propose new approval limits for a role",
     desc: "Always goes to the Business Owner (approval action access.limits.change). Applies at effectiveFrom once approved; requests already waiting keep the old limit.",
     body: () => z.object({
@@ -1664,6 +1683,7 @@ export const endpoints = defineEndpoints({
     path: "/limit-changes",
     auth: "staff",
     permission: "access.roles.view",
+    scope: "staff",
     summary: "Proposed, scheduled and past limit changes",
     query: () =>
       z.object({
@@ -1682,6 +1702,7 @@ export const endpoints = defineEndpoints({
     path: "/limit-changes/{id}/cancel",
     auth: "staff",
     permission: "access.limits.propose",
+    scope: "staff",
     summary: "Withdraw a pending or scheduled limit change",
     params: () =>
       z.object({
@@ -1702,6 +1723,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/authority-checks",
     auth: "staff",
+    scope: "staff",
     summary: "Can I do this, or who must approve it?",
     desc: "Used by dialogs before submitting (refund over limit, payout run, hold) to show 'Within your limit' or 'Needs Business Owner approval'. Read-only.",
     body: () => z.object({
@@ -1721,6 +1743,8 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/approval-requests",
     auth: "staff",
+    permissionWhen: [{"if":{"query.view":"all"},"permission":"access.approvals.view-all"}],
+    scope: "staff",
     summary: "Approval requests (waiting for me, mine, or all)",
     desc: "view=to_decide lists requests the caller may decide now, oldest due first. view=all needs access.approvals.view-all.",
     query: () =>
@@ -1744,6 +1768,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/approval-requests/{id}",
     auth: "staff",
+    scope: "staff",
     summary: "One approval request with decisions and whether I can decide",
     params: () =>
       z.object({
@@ -1759,6 +1784,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/approval-requests/{id}/approve",
     auth: "staff",
+    scope: "staff",
     summary: "Approve (first or second approval)",
     desc: "Refused for the requester, for someone who already approved it, and for people whose limit does not cover the amount. Money approvals above stepUpAbove need a fresh 2-step code.",
     params: () =>
@@ -1782,6 +1808,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/approval-requests/{id}/reject",
     auth: "staff",
+    scope: "staff",
     summary: "Reject with a reason",
     params: () =>
       z.object({
@@ -1803,6 +1830,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/approval-requests/{id}/return",
     auth: "staff",
+    scope: "staff",
     summary: "Send back to the requester with a comment",
     params: () =>
       z.object({
@@ -1824,6 +1852,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/approval-requests/{id}/resubmit",
     auth: "staff",
+    scope: "staff",
     summary: "Requester resubmits after a return",
     desc: "Earlier approvals are cleared. If the underlying record changed, the requesting module cancels and creates a new request instead.",
     params: () =>
@@ -1846,6 +1875,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/approval-requests/{id}/cancel",
     auth: "staff",
+    scope: "staff",
     summary: "Requester withdraws a request",
     params: () =>
       z.object({
@@ -1867,6 +1897,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/approval-requests/{id}/remind",
     auth: "staff",
+    scope: "staff",
     summary: "Remind eligible reviewers",
     desc: "At most once per reminderMinIntervalMinutes per request.",
     params: () =>
@@ -1893,6 +1924,7 @@ export const endpoints = defineEndpoints({
     path: "/away-periods",
     auth: "staff",
     permission: "access.roles.view",
+    scope: "staff",
     summary: "Away periods (current and upcoming by default)",
     query: () =>
       z.object({
@@ -1912,6 +1944,8 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/away-periods",
     auth: "staff",
+    permissionWhen: [{"if":{"body.accountId":"!self"},"permission":"access.away.manage"}],
+    scope: "staff",
     summary: "Plan time away and who covers each role",
     desc: "Anyone may plan their own; others need access.away.manage. Every role the person leads must be covered by someone holding that role (or Business Owner). delegateApprovals sends the delegation to the Business Owner.",
     body: () => AwayInput,
@@ -1929,6 +1963,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/away-periods/{id}/end",
     auth: "staff",
+    scope: "staff",
     summary: "End an away period early (back at work)",
     params: () =>
       z.object({
@@ -1947,6 +1982,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/away-periods/{id}/cancel",
     auth: "staff",
+    scope: "staff",
     summary: "Cancel a planned away period",
     params: () =>
       z.object({
@@ -1967,6 +2003,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/coverage",
     auth: "staff",
+    scope: "staff",
     summary: "Who receives each role's work today, and coverage gaps",
     response: () => Coverage,
     status: 200,
@@ -1978,6 +2015,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/me",
     auth: "staff",
+    scope: "staff",
     summary: "My roles, permissions, limits and approvals waiting",
     desc: "Drives Admin Center navigation and the approvals badge.",
     response: () => MyAccess,
@@ -2328,10 +2366,6 @@ export const spec = defineModuleSpec({
     "ALREADY_APPROVED_BY_YOU": {
       "status": 409,
       "meaning": "The second approval must come from a different person."
-    },
-    "STEP_UP_REQUIRED": {
-      "status": 401,
-      "meaning": "Enter a current 2-step code (stepUpCode) to approve this amount."
     },
     "SYSTEM_ROLE": {
       "status": 409,
@@ -2914,6 +2948,11 @@ export const spec = defineModuleSpec({
         "type": "uuid",
         "nullable": false
       }
+    }
+  },
+  tenantTables: {
+    "approval_requests": {
+      "seller": "seller_id"
     }
   },
   endpoints,

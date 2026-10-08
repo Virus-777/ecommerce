@@ -80,14 +80,14 @@ Seller money and company money kept apart: the seller ledger (proceeds, pending,
 | GET | `/api/admin/finance/payout-runs/{id}/payouts` | Sellers in a run (held and changed-destination rows first) | staff<br>`finance.ledger.view` | Page<RunPayoutRow> |
 | POST | `/api/admin/finance/payout-runs/{id}/recalculate` | Refresh a draft run after holds, retries or destination changes _(audited)_ | staff<br>`finance.payouts.prepare` | `PayoutRun` |
 | POST | `/api/admin/finance/payout-runs/{id}/submit` | Submit the run for approval _(audited)_ | staff<br>`finance.payouts.prepare` | `PayoutRun` |
-| POST | `/api/admin/finance/payout-runs/{id}/approve` | Approve a payout run (first or second Finance reviewer) _(idempotent, audited)_ | staff<br>`finance.payouts.approve` | `{ confirmedReview: bool, note: text? }` → `PayoutRun` |
+| POST | `/api/admin/finance/payout-runs/{id}/approve` | Approve a payout run (first or second Finance reviewer) _(idempotent, audited)_ | staff<br>`finance.payouts.approve` | `{ confirmedReview: bool, note: text?, stepUpCode: string? }` → `PayoutRun` |
 | POST | `/api/admin/finance/payout-runs/{id}/send-back` | Return the run to draft with a comment _(audited)_ | staff<br>`finance.payouts.approve` | `{ reason: text }` → `PayoutRun` |
 | POST | `/api/admin/finance/payout-runs/{id}/release` | Release an approved run now (otherwise released at the scheduled time) _(idempotent, audited)_ | staff<br>`finance.payouts.approve` | `PayoutRun` |
 | GET | `/api/admin/finance/payouts` | All payouts, e.g. failed payouts to follow up | staff<br>`finance.ledger.view` | Page<Payout> |
 | POST | `/api/admin/finance/payouts/{id}/retry` | Recover a failed payout to a verified destination _(idempotent, audited)_ | staff<br>`finance.payouts.approve` | `{ now: bool, reason: text }` → `Payout` |
 | GET | `/api/admin/finance/destination-reviews` | Payout destination changes waiting for verification and review | staff<br>`finance.destinations.review` | Page<DestinationReview> |
-| POST | `/api/admin/finance/destination-reviews/{id}/approve` | Verify a new payout destination _(audited)_ | staff<br>`finance.destinations.review` | `{ reason: text }` → `DestinationReview` |
-| POST | `/api/admin/finance/destination-reviews/{id}/reject` | Reject a payout destination change _(audited)_ | staff<br>`finance.destinations.review` | `{ reason: text }` → `DestinationReview` |
+| POST | `/api/admin/finance/destination-reviews/{id}/approve` | Verify a new payout destination _(audited, step-up: code)_ | staff<br>`finance.destinations.review` | `{ reason: text }` → `DestinationReview` |
+| POST | `/api/admin/finance/destination-reviews/{id}/reject` | Reject a payout destination change _(audited, step-up: code)_ | staff<br>`finance.destinations.review` | `{ reason: text }` → `DestinationReview` |
 | GET | `/api/admin/finance/reconciliation/days/{date}` | Daily finance check: checklist, totals and failed payouts | staff<br>`finance.reconciliation.work` | `ReconDay` |
 | GET | `/api/admin/finance/reconciliation/items` | Mismatched payments, seller amounts, deposits and unexplained amounts | staff<br>`finance.reconciliation.work` | Page<ReconItem> |
 | POST | `/api/admin/finance/reconciliation/items/{id}/assign` | Set the owner of a mismatch _(audited)_ | staff<br>`finance.reconciliation.work` | `{ ownerId: uuid }` → `ReconItem` |
@@ -99,7 +99,7 @@ Seller money and company money kept apart: the seller ledger (proceeds, pending,
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| GET | `/api/public/finance/fee-schedule` | Published fee rules and an example calculation | anyone | `FeeSchedule` |
+| GET | `/api/public/finance/fee-schedule` | Published fee rules and an example calculation | visitor | `FeeSchedule` |
 
 ## Webhooks
 

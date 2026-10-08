@@ -1412,7 +1412,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/products/{productId}/reviews",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Published product reviews with filters and sorting",
     params: () =>
       z.object({
@@ -1437,7 +1438,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/products/{productId}/rating-summary",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Average, count, distribution and answered questions (honest no-reviews state)",
     params: () =>
       z.object({
@@ -1452,7 +1454,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/rating-summaries",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Ratings for several products (cards)",
     query: () =>
       z.object({
@@ -1467,7 +1470,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/products/{productId}/questions",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Questions with answers labelled Seller, Marketly staff or Customer",
     params: () =>
       z.object({
@@ -1489,6 +1493,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/products/{productId}/questions",
     auth: "customer",
+    scope: "own-customer",
     summary: "Ask a question about the product",
     desc: "Order-specific questions are redirected to order messages.",
     params: () =>
@@ -1509,6 +1514,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/questions/{id}/answers",
     auth: "customer",
+    scope: "own-customer",
     summary: "Answer another shopper's question (labelled Customer)",
     params: () =>
       z.object({
@@ -1528,6 +1534,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/votes",
     auth: "customer",
+    scope: "own-customer",
     summary: "Mark a review or answer helpful (or undo)",
     body: () => z.object({
       targetType: z.enum(["product_review", "answer"]),
@@ -1546,6 +1553,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/reports",
     auth: "customer",
+    scope: "own-customer",
     summary: "Report a review, feedback, question, answer or seller response",
     desc: "The reporter's name is never shown to the author. The outcome appears under Reports you made.",
     body: () => ReportInput,
@@ -1560,7 +1568,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/sellers/{sellerId}/feedback",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Seller feedback with public seller responses",
     params: () =>
       z.object({
@@ -1580,7 +1589,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/sellers/{sellerId}/feedback-summary",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Positive percentage and count over 12 months",
     params: () =>
       z.object({
@@ -1596,6 +1606,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/me/pending",
     auth: "customer",
+    scope: "own-customer",
     summary: "Delivered purchases waiting for a review and packages waiting for seller feedback",
     response: () => PendingReviews,
     status: 200,
@@ -1607,6 +1618,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/me/review-context/{orderItemId}",
     auth: "customer",
+    scope: "own-customer",
     summary: "Everything the write-a-review page needs: product, Verified Purchase, seller, existing review and feedback, guidelines",
     params: () =>
       z.object({
@@ -1623,6 +1635,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/me/reviews",
     auth: "customer",
+    scope: "own-customer",
     summary: "My product reviews with status and moderation outcomes",
     paging: true,
     response: () => MyReview,
@@ -1635,6 +1648,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/me/feedback",
     auth: "customer",
+    scope: "own-customer",
     summary: "Seller feedback I gave, with seller responses",
     paging: true,
     response: () => MyFeedback,
@@ -1647,6 +1661,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/me/reports",
     auth: "customer",
+    scope: "own-customer",
     summary: "Reports I made and their outcomes",
     desc: "Listing reports handled by trust are merged in by trust's own endpoint; this lists review, feedback and Q&A reports.",
     paging: true,
@@ -1660,6 +1675,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/me/reviews",
     auth: "customer",
+    scope: "own-customer",
     summary: "Write a product review (or save a draft)",
     body: () => ReviewInput,
     response: () => MyReview,
@@ -1674,6 +1690,7 @@ export const endpoints = defineEndpoints({
     method: "PATCH",
     path: "/me/reviews/{id}",
     auth: "customer",
+    scope: "own-customer",
     summary: "Edit a review, or fix and resubmit after removal or an edit request",
     params: () =>
       z.object({
@@ -1692,6 +1709,7 @@ export const endpoints = defineEndpoints({
     method: "DELETE",
     path: "/me/reviews/{id}",
     auth: "customer",
+    scope: "own-customer",
     summary: "Delete my review",
     params: () =>
       z.object({
@@ -1708,6 +1726,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/me/feedback",
     auth: "customer",
+    scope: "own-customer",
     summary: "Leave seller feedback for a delivered package (or save a draft)",
     desc: "draft: true stores it unpublished (status draft) so the review page can save both parts together; submit later with PATCH /me/feedback/{id} and draft: false.",
     body: () => FeedbackInput,
@@ -1723,6 +1742,7 @@ export const endpoints = defineEndpoints({
     method: "PATCH",
     path: "/me/feedback/{id}",
     auth: "customer",
+    scope: "own-customer",
     summary: "Edit seller feedback",
     params: () =>
       z.object({
@@ -1740,6 +1760,7 @@ export const endpoints = defineEndpoints({
     method: "DELETE",
     path: "/me/feedback/{id}",
     auth: "customer",
+    scope: "own-customer",
     summary: "Delete seller feedback",
     params: () =>
       z.object({
@@ -1756,6 +1777,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/me/appeals",
     auth: "customer",
+    scope: "own-customer",
     summary: "Appeal a moderation decision on my content",
     body: () => AppealInput,
     response: () => AppealView,
@@ -1770,6 +1792,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/questions",
     auth: "seller",
+    scope: "own-seller",
     summary: "Questions on products the seller offers",
     query: () =>
       z.object({
@@ -1788,6 +1811,7 @@ export const endpoints = defineEndpoints({
     path: "/questions/{id}/answers",
     auth: "seller",
     permission: "reviews.responses.post",
+    scope: "own-seller",
     summary: "Publish an answer labelled as from the seller",
     params: () =>
       z.object({
@@ -1808,6 +1832,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/feedback",
     auth: "seller",
+    scope: "own-seller",
     summary: "Seller feedback received",
     query: () =>
       z.object({
@@ -1825,6 +1850,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/feedback-summary",
     auth: "seller",
+    scope: "own-seller",
     summary: "Own feedback summary",
     response: () => SellerFeedbackSummary,
     status: 200,
@@ -1836,6 +1862,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/product-reviews",
     auth: "seller",
+    scope: "own-seller",
     summary: "Product reviews of items the seller sold (to respond)",
     query: () =>
       z.object({
@@ -1854,6 +1881,7 @@ export const endpoints = defineEndpoints({
     path: "/responses",
     auth: "seller",
     permission: "reviews.responses.post",
+    scope: "own-seller",
     summary: "Respond publicly to a review or feedback",
     desc: "Runs the rule check; failing responses are held for moderation with the failures listed.",
     body: () => ResponseInput,
@@ -1870,6 +1898,7 @@ export const endpoints = defineEndpoints({
     path: "/responses/{id}",
     auth: "seller",
     permission: "reviews.responses.post",
+    scope: "own-seller",
     summary: "Edit a response within the edit window",
     params: () =>
       z.object({
@@ -1891,6 +1920,7 @@ export const endpoints = defineEndpoints({
     path: "/reports",
     auth: "seller",
     permission: "reviews.responses.post",
+    scope: "own-seller",
     summary: "Report feedback, a review or an answer that breaks the rules",
     body: () => ReportInput,
     response: () => MyReport,
@@ -1905,6 +1935,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/reports",
     auth: "seller",
+    scope: "own-seller",
     summary: "Reports the seller made and their outcomes",
     paging: true,
     response: () => MyReport,
@@ -1918,6 +1949,7 @@ export const endpoints = defineEndpoints({
     path: "/appeals",
     auth: "seller",
     permission: "reviews.responses.post",
+    scope: "own-seller",
     summary: "Appeal a moderation decision on the seller's answer or response",
     body: () => AppealInput,
     response: () => AppealView,
@@ -1933,6 +1965,7 @@ export const endpoints = defineEndpoints({
     path: "/moderation-items",
     auth: "staff",
     permission: "reviews.moderation.view",
+    scope: "staff",
     summary: "Reported and held content: reviews, feedback, questions, answers, seller responses",
     query: () =>
       z.object({
@@ -1953,6 +1986,7 @@ export const endpoints = defineEndpoints({
     path: "/moderation-items/summary",
     auth: "staff",
     permission: "reviews.moderation.view",
+    scope: "staff",
     summary: "Open moderation counts for the nav badge and tabs",
     desc: "Counts of open items per queue and content type, plus overdue items (older than moderationTargetHours).",
     response: () => ModerationSummary,
@@ -1966,6 +2000,7 @@ export const endpoints = defineEndpoints({
     path: "/moderation-items/{id}",
     auth: "staff",
     permission: "reviews.moderation.view",
+    scope: "staff",
     summary: "Content with reports, purchase, author history and previous decisions",
     params: () =>
       z.object({
@@ -1982,6 +2017,7 @@ export const endpoints = defineEndpoints({
     path: "/moderation-items/{id}/decide",
     auth: "staff",
     permission: "reviews.moderation.decide",
+    scope: "staff",
     summary: "Keep, remove for a policy reason, request an edit, publish, or reject a seller response",
     desc: "The reporter and the author both see the outcome. Removing with reason legitimate_experience is refused.",
     params: () =>
@@ -2003,6 +2039,7 @@ export const endpoints = defineEndpoints({
     path: "/moderation-items/{id}/refer",
     auth: "staff",
     permission: "reviews.moderation.decide",
+    scope: "staff",
     summary: "Send to Trust and Risk (suspected fake or paid reviews, payment offers)",
     params: () =>
       z.object({
@@ -2024,6 +2061,7 @@ export const endpoints = defineEndpoints({
     path: "/questions",
     auth: "staff",
     permission: "reviews.answers.staff",
+    scope: "staff",
     summary: "Customer questions on products, e.g. unanswered questions on Official Store products (plan ch. 9)",
     desc: "owner=official limits to products with an Official Store offer (offers, optional). Default sort: oldest unanswered first. Staff answer with POST /questions/{id}/answers.",
     query: () =>
@@ -2047,6 +2085,7 @@ export const endpoints = defineEndpoints({
     path: "/questions/{id}/answers",
     auth: "staff",
     permission: "reviews.answers.staff",
+    scope: "staff",
     summary: "Add a Marketly staff answer",
     params: () =>
       z.object({
@@ -2069,6 +2108,7 @@ export const endpoints = defineEndpoints({
     path: "/appeals",
     auth: "staff",
     permission: "reviews.moderation.view",
+    scope: "staff",
     summary: "Appeals of moderation decisions",
     query: () =>
       z.object({
@@ -2086,6 +2126,7 @@ export const endpoints = defineEndpoints({
     path: "/appeals/{id}/decide",
     auth: "staff",
     permission: "reviews.appeals.decide",
+    scope: "staff",
     summary: "Decide an appeal (not by the original moderator)",
     params: () =>
       z.object({
@@ -2109,6 +2150,7 @@ export const endpoints = defineEndpoints({
     path: "/reviews",
     auth: "staff",
     permission: "reviews.moderation.view",
+    scope: "staff",
     summary: "Search all product reviews",
     query: () =>
       z.object({
@@ -2130,6 +2172,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/moderation-reasons",
     auth: "staff",
+    scope: "staff",
     summary: "Policy reasons for decisions",
     response: () => z.array(ModerationReason),
     status: 200,
@@ -3131,6 +3174,31 @@ export const spec = defineModuleSpec({
         "type": "timestamptz",
         "nullable": false
       }
+    }
+  },
+  tenantTables: {
+    "product_reviews": {
+      "seller": "seller_id",
+      "customer": "customer_id"
+    },
+    "seller_feedback": {
+      "seller": "seller_id",
+      "customer": "customer_id"
+    },
+    "seller_responses": {
+      "seller": "seller_id"
+    },
+    "questions": {
+      "customer": "customer_id"
+    },
+    "answers": {
+      "seller": "seller_id"
+    },
+    "helpful_votes": {
+      "customer": "customer_id"
+    },
+    "seller_feedback_summaries": {
+      "seller": "seller_id"
     }
   },
   endpoints,

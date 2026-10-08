@@ -916,6 +916,7 @@ export const endpoints = defineEndpoints({
     path: "/catalogue",
     auth: "staff",
     permission: "reports.library.view",
+    scope: "staff",
     summary: "Report library by group with owners",
     desc: "Only reports the caller may view.",
     response: () => z.array(ReportGroup),
@@ -929,6 +930,7 @@ export const endpoints = defineEndpoints({
     path: "/reports/{key}",
     auth: "staff",
     permission: "reports.library.view",
+    scope: "staff",
     summary: "One report: metrics, filters, layout and definitions",
     params: () =>
       z.object({
@@ -952,6 +954,7 @@ export const endpoints = defineEndpoints({
     path: "/reports/{key}/query",
     auth: "staff",
     permission: "reports.library.view",
+    scope: "staff",
     summary: "Run a report with filters",
     desc: "Checks the report's group permission (reports.<group>.view). Defaults: last 14 days, placement date basis, all sellers, USD, market time zone. The response always states range, basis, currency, time zone, tax treatment and freshness. Commerce sales returns the callout that marketplace sales are not marketplace fee income.",
     params: () =>
@@ -971,6 +974,7 @@ export const endpoints = defineEndpoints({
     path: "/dashboard",
     auth: "staff",
     permission: "reports.dashboard.view",
+    scope: "staff",
     summary: "Admin dashboard figures: gross sales, orders, fee income, refunds and the sales split",
     desc: "Queue tiles come from workqueues (GET /api/admin/workqueues/summary), ads from advertising and the payout run from finance.",
     query: () =>
@@ -988,6 +992,7 @@ export const endpoints = defineEndpoints({
     path: "/metrics",
     auth: "staff",
     permission: "reports.library.view",
+    scope: "staff",
     summary: "Metric definitions",
     query: () =>
       z.object({
@@ -1006,6 +1011,7 @@ export const endpoints = defineEndpoints({
     path: "/metrics/{key}",
     auth: "staff",
     permission: "reports.library.view",
+    scope: "staff",
     summary: "A metric with its version history",
     params: () =>
       z.object({
@@ -1032,6 +1038,7 @@ export const endpoints = defineEndpoints({
     path: "/metrics",
     auth: "staff",
     permission: "reports.definitions.manage",
+    scope: "staff",
     summary: "Create a metric definition (draft)",
     body: () => z.object({
       key: z.string(),
@@ -1052,6 +1059,7 @@ export const endpoints = defineEndpoints({
     path: "/metrics/{key}",
     auth: "staff",
     permission: "reports.definitions.manage",
+    scope: "staff",
     summary: "Revise a definition (new draft version)",
     params: () =>
       z.object({
@@ -1071,6 +1079,7 @@ export const endpoints = defineEndpoints({
     path: "/metrics/{key}/publish",
     auth: "staff",
     permission: "reports.definitions.manage",
+    scope: "staff",
     summary: "Publish the draft version with an effective date",
     desc: "A metric needs a named owner before it can be published (plan ch. 19).",
     params: () =>
@@ -1095,6 +1104,7 @@ export const endpoints = defineEndpoints({
     path: "/metrics/{key}/retire",
     auth: "staff",
     permission: "reports.definitions.manage",
+    scope: "staff",
     summary: "Retire a metric",
     params: () =>
       z.object({
@@ -1116,6 +1126,7 @@ export const endpoints = defineEndpoints({
     path: "/metrics/{key}/suggestions",
     auth: "staff",
     permission: "reports.library.view",
+    scope: "staff",
     summary: "Suggest a change to a definition",
     params: () =>
       z.object({
@@ -1136,6 +1147,7 @@ export const endpoints = defineEndpoints({
     path: "/metric-suggestions/{id}/decide",
     auth: "staff",
     permission: "reports.definitions.manage",
+    scope: "staff",
     summary: "Accept or decline a suggestion",
     params: () =>
       z.object({
@@ -1158,6 +1170,7 @@ export const endpoints = defineEndpoints({
     path: "/saved-views",
     auth: "staff",
     permission: "reports.library.view",
+    scope: "staff",
     summary: "My saved report views plus shared ones",
     query: () =>
       z.object({
@@ -1174,6 +1187,7 @@ export const endpoints = defineEndpoints({
     path: "/saved-views",
     auth: "staff",
     permission: "reports.library.view",
+    scope: "staff",
     summary: "Save the current filters as a view",
     body: () => z.object({
       reportKey: z.string(),
@@ -1194,6 +1208,7 @@ export const endpoints = defineEndpoints({
     path: "/saved-views/{id}",
     auth: "staff",
     permission: "reports.library.view",
+    scope: "staff",
     summary: "Delete a saved view (owner only)",
     params: () =>
       z.object({
@@ -1211,6 +1226,7 @@ export const endpoints = defineEndpoints({
     path: "/exports",
     auth: "staff",
     permission: "reports.exports.create",
+    scope: "staff",
     summary: "Export a report or a registered dataset",
     desc: "Runs asynchronously. Needs reports.exports.create plus the dataset's own permission; columns guarded by permissions the caller lacks are removed and listed in columnsExcluded. Audited.",
     body: () => ExportInput,
@@ -1228,6 +1244,7 @@ export const endpoints = defineEndpoints({
     path: "/export-datasets",
     auth: "staff",
     permission: "reports.exports.create",
+    scope: "staff",
     summary: "Export dataset registry: what each screen can export, its owner and permission",
     desc: "Only datasets the caller may export and whose owner module is enabled, unless all=true (reports.exports.create shows every row with available and permission).",
     query: () =>
@@ -1246,6 +1263,7 @@ export const endpoints = defineEndpoints({
     path: "/exports",
     auth: "staff",
     permission: "reports.exports.create",
+    scope: "staff",
     summary: "My exports",
     paging: true,
     response: () => ExportJob,
@@ -1259,6 +1277,7 @@ export const endpoints = defineEndpoints({
     path: "/exports/{id}",
     auth: "staff",
     permission: "reports.exports.create",
+    scope: "staff",
     summary: "Export status and download link (requester only)",
     params: () =>
       z.object({
@@ -1276,6 +1295,7 @@ export const endpoints = defineEndpoints({
     path: "/schedules",
     auth: "staff",
     permission: "reports.schedules.manage",
+    scope: "staff",
     summary: "Email a report on a schedule",
     desc: "Recipients must be staff with the report's permission.",
     body: () => z.object({
@@ -1300,6 +1320,7 @@ export const endpoints = defineEndpoints({
     path: "/schedules",
     auth: "staff",
     permission: "reports.schedules.manage",
+    scope: "staff",
     summary: "Report email schedules",
     response: () => z.array(ReportSchedule),
     status: 200,
@@ -1312,6 +1333,7 @@ export const endpoints = defineEndpoints({
     path: "/schedules/{id}",
     auth: "staff",
     permission: "reports.schedules.manage",
+    scope: "staff",
     summary: "Stop a schedule",
     params: () =>
       z.object({
@@ -1329,6 +1351,7 @@ export const endpoints = defineEndpoints({
     path: "/read-models",
     auth: "staff",
     permission: "reports.readmodels.manage",
+    scope: "staff",
     summary: "Read model health: lag, last event, rebuild state",
     response: () => z.array(ReadModelStatus),
     status: 200,
@@ -1341,6 +1364,7 @@ export const endpoints = defineEndpoints({
     path: "/read-models/{key}/rebuild",
     auth: "staff",
     permission: "reports.readmodels.manage",
+    scope: "staff",
     summary: "Rebuild a read model from the event log or source snapshots",
     params: () =>
       z.object({
@@ -1360,6 +1384,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/dashboard",
     auth: "seller",
+    scope: "own-seller",
     summary: "Today at this seller: work tiles, dispatch deadlines, sales, payouts, performance, announcements",
     desc: "Work tiles combine read-model counts with workqueues.sellerTaskCounts; dispatch deadlines from orders (open groups); payouts from finance.getSellerBalances (if the member may view finance); performance from sellers.getPerformance; announcements from content. Missing sources go to `unavailable`.",
     response: () => SellerDashboard,
@@ -1372,6 +1397,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/catalogue",
     auth: "seller",
+    scope: "own-seller",
     summary: "Reports available to sellers",
     response: () => z.array(ReportDefinition),
     status: 200,
@@ -1384,6 +1410,7 @@ export const endpoints = defineEndpoints({
     path: "/reports/{key}/query",
     auth: "seller",
     permission: "reports.seller.view",
+    scope: "own-seller",
     summary: "Run a seller report (product sales, order trend, returns by reason, service performance)",
     desc: "Always scoped to the caller's seller; sellerId, soldBy and other sellers' data are never accepted. Figures by order date, market time zone, stating how each metric is calculated.",
     params: () =>
@@ -1403,6 +1430,7 @@ export const endpoints = defineEndpoints({
     path: "/exports",
     auth: "seller",
     permission: "reports.seller.export",
+    scope: "own-seller",
     summary: "Export a seller report as CSV",
     body: () => ExportInput,
     response: () => ExportJob,
@@ -1419,6 +1447,7 @@ export const endpoints = defineEndpoints({
     path: "/exports",
     auth: "seller",
     permission: "reports.seller.export",
+    scope: "own-seller",
     summary: "My seller exports",
     paging: true,
     response: () => ExportJob,
@@ -1432,6 +1461,7 @@ export const endpoints = defineEndpoints({
     path: "/exports/{id}",
     auth: "seller",
     permission: "reports.seller.export",
+    scope: "own-seller",
     summary: "Seller export status and link (requester only)",
     params: () =>
       z.object({
@@ -1447,6 +1477,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/signals",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Batched anonymous discovery signals from the website and app (product views)",
     desc: "Counts only; no customer id is stored. Rate-limited per session. Ignored when the shopper opted out of personalisation.",
     body: () => z.object({
@@ -2833,6 +2864,26 @@ export const spec = defineModuleSpec({
         "type": "int",
         "nullable": true
       }
+    }
+  },
+  tenantTables: {
+    "export_jobs": {
+      "seller": "seller_id"
+    },
+    "fact_order_items": {
+      "seller": "seller_id"
+    },
+    "fact_refunds": {
+      "seller": "seller_id"
+    },
+    "fact_returns": {
+      "seller": "seller_id"
+    },
+    "fact_marketplace_finance_daily": {
+      "seller": "seller_id"
+    },
+    "fact_service_daily": {
+      "seller": "seller_id"
     }
   },
   endpoints,

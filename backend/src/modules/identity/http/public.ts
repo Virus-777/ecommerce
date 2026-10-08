@@ -26,21 +26,21 @@ export const publicRoutes = (service: IdentityService) =>
     signOut: notImplemented,
     /** POST /password-resets: Email a password reset link */
     requestPasswordReset: notImplemented,
-    /** GET /password-resets/{token}: Check a reset link before showing the new-password form */
+    /** POST /password-resets/lookups: Check a reset link before showing the new-password form */
     getPasswordReset: notImplemented,
-    /** POST /password-resets/{token}/complete: Set a new password from a reset link */
+    /** POST /password-resets/complete: Set a new password from a reset link */
     completePasswordReset: notImplemented,
     /** GET /password-policy: Password rules for the live checklist */
     getPasswordPolicy: notImplemented,
-    /** POST /guest-sessions: Start a guest session (cart, guest checkout) */
-    createGuestSession: notImplemented,
-    /** POST /order-links/{token}/redeem: Open an order from an emailed link */
+    /** POST /app-sessions: Start an app session: the visitor token every request needs */
+    startAppSession: notImplemented,
+    /** POST /order-links/redeem: Open an order from an emailed link */
     redeemOrderLink: notImplemented,
-    /** GET /invitations/{token}: Show an invitation (staff or seller member) */
+    /** POST /invitations/lookups: Show an invitation (staff or seller member) */
     getInvitation: notImplemented,
-    /** POST /invitations/{token}/accept: Accept an invitation and set a password */
+    /** POST /invitations/accept: Accept an invitation and set a password */
     acceptInvitation: notImplemented,
-    /** POST /invitations/{token}/two-step: Staff: confirm the authenticator code and start the first session */
+    /** POST /invitations/two-step: Staff: confirm the authenticator code and start the first session */
     confirmInvitationTwoStep: notImplemented,
     /** POST /external-sign-ins: Continue with Google or Apple */
     externalSignIn: notImplemented,

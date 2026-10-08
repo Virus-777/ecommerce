@@ -23,7 +23,7 @@ export interface EndpointSpec {
   path: string;
   summary: string;
   desc?: string;
-  auth: 'anyone' | 'shopper' | 'customer' | 'seller' | 'staff' | 'provider';
+  auth: 'visitor' | 'shopper' | 'customer' | 'account' | 'seller' | 'staff' | 'refresh' | 'provider' | 'bootstrap';
   permission?: string;
   params?: ObjectExpr;
   query?: ObjectExpr;
@@ -38,13 +38,23 @@ export interface EndpointSpec {
   events?: string[];
   screens?: string[];
   phase?: number;
+  stepUp?: { kind: 'reauth' | 'code'; purpose: string };
+  sellerContext?: 'optional';
+  permissionWhen?: { if: Record<string, string>; permission: string }[];
+  scope?: EndpointScope;
+  rateLimit?: string;
 }
+
+/** Which records a caller reaches (docs/03-auth-middleware.md §7) */
+export type EndpointScope = 'public' | 'own-customer' | 'own-seller' | 'own-member' | 'guest-order' | 'staff';
 
 export interface TableSpec {
   name: string;
   desc?: string;
   columns: Record<string, string>;
   indexes?: string[];
+  /** Tenant column override; false = not a tenant table */
+  tenant?: string | false;
 }
 
 export interface ModuleSpec {
@@ -67,7 +77,7 @@ export interface ModuleSpec {
     publishes?: { name: string; when: string; payload?: ObjectExpr }[];
     consumes?: { name: string; does: string }[];
   };
-  permissions?: { key: string; audience: 'staff' | 'seller'; desc: string }[];
+  permissions?: { key: string; audience: 'staff' | 'seller'; desc: string; ownerOnly?: boolean; delegable?: boolean }[];
   approvalActions?: { key: string; desc: string; limit: string; secondReviewer: string; approvers?: string }[];
   jobs?: { name: string; schedule: string; does: string }[];
   settings?: { key: string; default: unknown; desc: string }[];

@@ -55,6 +55,19 @@ create table kernel.ref_counters (
 comment on table kernel.ref_counters is 'Sequences behind human references such as MK-YYMMDD-NNNNN';
 `,
     },
+    {
+      id: '0002_webhook_events',
+      sql: /* sql */ `
+create table kernel.webhook_events (
+  provider text not null,
+  event_id text not null,
+  received_at timestamptz not null default now(),
+  primary key (provider, event_id)
+);
+comment on table kernel.webhook_events is 'Provider events already processed: a replayed webhook does nothing (docs/03-auth-middleware.md)';
+create index on kernel.webhook_events (received_at);
+`,
+    },
   ],
 };
 

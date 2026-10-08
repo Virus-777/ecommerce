@@ -1321,7 +1321,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/categories",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Visible category tree with in-stock counts and images",
     desc: "Each category carries productCount (items in stock now, including subcategories) and image. Coming-soon categories are included with comingSoon true and count 0.",
     response: () => z.array(Category),
@@ -1333,7 +1334,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/categories/{slug}",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Category with breadcrumb, subcategories and filterable attributes",
     params: () =>
       z.object({
@@ -1358,7 +1360,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/brands",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Active brands, optionally the popular brands of one category",
     desc: "sort=popular orders by in-stock products (brand_stats); with categorySlug the counts are for that category and its subcategories (store/categories phone rail \"Popular brands\").",
     query: () =>
@@ -1377,7 +1380,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/brands/{slug}",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Brand page header (logo, banner, description, product count)",
     params: () =>
       z.object({
@@ -1392,7 +1396,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/products/{id}",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Product detail (shared content only)",
     desc: "Offers, prices and delivery come from offers (`GET /api/store/offers/products/{id}/offers`). Products that are not approved and active return 404.",
     params: () =>
@@ -1410,6 +1415,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/match",
     auth: "seller",
+    scope: "own-seller",
     summary: "Search the catalog before adding a product",
     desc: "Matches on GTIN, model number and title so sellers attach offers to the exact existing product. Each match states matchQuality (exact, same model with a different bundle, different model, title only), the model number, category path, in-the-box list, offer count and lowest price, and the caller's own offers on it (offers.listOwnOffersForProduct). When nothing matches exactly, close different_model matches are still returned so the screen can warn against them. Only approved, active products are matched.",
     query: () =>
@@ -1429,6 +1435,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/brands",
     auth: "seller",
+    scope: "own-seller",
     summary: "Brands for the submission form",
     desc: "Active brands plus brands this seller requested that are still under review. A brand that is not listed is requested through ProductInput.requestedBrand.",
     query: () =>
@@ -1446,6 +1453,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/products",
     auth: "seller",
+    scope: "own-seller",
     summary: "This seller's submitted products",
     query: () =>
       z.object({
@@ -1463,6 +1471,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/products/{id}",
     auth: "seller",
+    scope: "own-seller",
     summary: "One own product with review feedback",
     params: () =>
       z.object({
@@ -1479,6 +1488,7 @@ export const endpoints = defineEndpoints({
     path: "/products",
     auth: "seller",
     permission: "catalog.products.submit",
+    scope: "own-seller",
     summary: "Create a product draft",
     desc: "Use requestedBrand instead of brandId when the brand is not listed; it becomes an under_review brand when the product is submitted.",
     body: () => ProductInput,
@@ -1493,6 +1503,7 @@ export const endpoints = defineEndpoints({
     path: "/products/{id}",
     auth: "seller",
     permission: "catalog.products.submit",
+    scope: "own-seller",
     summary: "Edit a draft or a product with changes requested",
     desc: "Same rules as createDraft. noGtin: true lets variants have no GTIN (the reviewer may ask for proof).",
     params: () =>
@@ -1512,6 +1523,7 @@ export const endpoints = defineEndpoints({
     path: "/products/{id}/submit",
     auth: "seller",
     permission: "catalog.products.submit",
+    scope: "own-seller",
     summary: "Submit for review",
     desc: "Fails with VALIDATION_FAILED and details.missing when required information is absent (including a GTIN on every variant unless noGtin is confirmed). The optional note is stored on the submission and in the review log for the reviewer. A requestedBrand is created as an under_review brand linked to this submission (event catalog.brand.requested).",
     params: () =>
@@ -1533,6 +1545,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/products/{id}/corrections",
     auth: "seller",
+    scope: "own-seller",
     summary: "Suggest a correction to shared product content",
     params: () =>
       z.object({
@@ -1554,6 +1567,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/categories/{id}/attributes",
     auth: "seller",
+    scope: "own-seller",
     summary: "Attributes (own and inherited) and image standards for a category (drives the submission form)",
     params: () =>
       z.object({
@@ -1577,6 +1591,7 @@ export const endpoints = defineEndpoints({
     path: "/review-queue",
     auth: "staff",
     permission: "catalog.products.review",
+    scope: "staff",
     summary: "Submissions waiting for review, oldest first",
     query: () =>
       z.object({
@@ -1594,6 +1609,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/products",
     auth: "staff",
+    scope: "staff",
     summary: "All products with filters",
     desc: "Rows carry ref, contentScore, missing, duplicateSuspected and the listing columns offerCount, liveOfferCount, bestPrice and offerNote. Tab counts come from GET /products/stats.",
     query: () =>
@@ -1618,6 +1634,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/products/stats",
     auth: "staff",
+    scope: "staff",
     summary: "Counts for the catalog product tabs and page header",
     desc: "All, Active, Hidden, Suspended, Missing content, Duplicates suspected, open submissions (Review queue · 23) and total offers.",
     response: () => ProductStats,
@@ -1631,6 +1648,7 @@ export const endpoints = defineEndpoints({
     path: "/products/exports",
     auth: "staff",
     permission: "catalog.products.export",
+    scope: "staff",
     summary: "Export the filtered product list",
     desc: "Creates an authorized, logged export job through reports.requestExport (dataset catalog.admin.products, registered at boot with reports.registerDataset; rows from exportRows). Filters use the same keys as GET /products.",
     body: () => z.object({
@@ -1648,6 +1666,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/products/{id}",
     auth: "staff",
+    scope: "staff",
     summary: "Product with review history and duplicate candidates",
     params: () =>
       z.object({
@@ -1664,6 +1683,7 @@ export const endpoints = defineEndpoints({
     path: "/products/{id}/checks/{kind}/dismiss",
     auth: "staff",
     permission: "catalog.products.review",
+    scope: "staff",
     summary: "Mark an automated check finding as not applicable (e.g. Not a duplicate)",
     desc: "Applies to the latest submission's check of that kind. For duplicate checks, matchedProductId dismisses one candidate; omit it to dismiss all. Recorded in the review log; the product leaves Duplicates suspected when no duplicate finding is open.",
     params: () =>
@@ -1688,6 +1708,7 @@ export const endpoints = defineEndpoints({
     path: "/products/{id}/review-draft",
     auth: "staff",
     permission: "catalog.products.review",
+    scope: "staff",
     summary: "Save the reviewer's unsent decision",
     desc: "Keeps decision, reason and field comments for the open submission per reviewer (ProductAdmin.reviewDraft). Cleared when approve, request-changes or reject is sent.",
     params: () =>
@@ -1711,6 +1732,7 @@ export const endpoints = defineEndpoints({
     path: "/products",
     auth: "staff",
     permission: "catalog.products.manage-official",
+    scope: "staff",
     summary: "Create an Official Store product draft",
     body: () => ProductInput,
     response: () => ProductAdmin,
@@ -1724,6 +1746,7 @@ export const endpoints = defineEndpoints({
     path: "/products/{id}",
     auth: "staff",
     permission: "catalog.products.manage-official",
+    scope: "staff",
     summary: "Edit an Official Store draft",
     params: () =>
       z.object({
@@ -1741,6 +1764,7 @@ export const endpoints = defineEndpoints({
     path: "/products/{id}/submit",
     auth: "staff",
     permission: "catalog.products.manage-official",
+    scope: "staff",
     summary: "Submit an Official Store product (same standard as sellers)",
     params: () =>
       z.object({
@@ -1757,6 +1781,7 @@ export const endpoints = defineEndpoints({
     path: "/products/{id}/approve",
     auth: "staff",
     permission: "catalog.products.review",
+    scope: "staff",
     summary: "Approve a submission",
     desc: "A product whose brand is under review (seller brand request) cannot be approved until the brand is activated (POST /brands/{id}/status).",
     params: () =>
@@ -1780,6 +1805,7 @@ export const endpoints = defineEndpoints({
     path: "/products/{id}/request-changes",
     auth: "staff",
     permission: "catalog.products.review",
+    scope: "staff",
     summary: "Ask the submitter to fix specific fields",
     params: () =>
       z.object({
@@ -1802,6 +1828,7 @@ export const endpoints = defineEndpoints({
     path: "/products/{id}/reject",
     auth: "staff",
     permission: "catalog.products.review",
+    scope: "staff",
     summary: "Reject with a reason",
     params: () =>
       z.object({
@@ -1823,6 +1850,7 @@ export const endpoints = defineEndpoints({
     path: "/products/{id}/publication",
     auth: "staff",
     permission: "catalog.products.publish",
+    scope: "staff",
     summary: "Set Active, Hidden or Suspended",
     desc: "Call GET /products/{id}/publication-impact first; the confirmation shows its effects.",
     params: () =>
@@ -1848,6 +1876,7 @@ export const endpoints = defineEndpoints({
     path: "/products/{id}/publication-impact",
     auth: "staff",
     permission: "catalog.products.publish",
+    scope: "staff",
     summary: "What hiding or suspending the product would do",
     desc: "Preview shown before setPublication and bulk hide or suspend (plan ch. 18: catalog removal explains its effects on open orders and customer cases): offers that stop showing and their sellers (offers.listActiveOffersForProduct), carts holding them (cart.countOfferInCarts), and open orders (orders.countOrderItemsForProducts), returns (returns.countOpenReturnsForProducts) and cases (support.countOpenCasesForProducts) that continue unchanged with their purchase snapshots. Counts from modules that are disabled are null.",
     params: () =>
@@ -1869,6 +1898,7 @@ export const endpoints = defineEndpoints({
     path: "/products/merge",
     auth: "staff",
     permission: "catalog.products.review",
+    scope: "staff",
     summary: "Merge duplicates and submissions into the product to keep",
     desc: "Each merges[] record either becomes a new variation (asNewVariant), joins an existing variation (intoVariantId) or is mapped by matching options. Offers, reviews and questions move to the kept product; past orders keep their snapshots; merged products redirect; a merged open submission is decided as merged. Publishes catalog.product.merged once per record. Preview with POST /products/merge/preview.",
     body: () => MergeRequest,
@@ -1886,6 +1916,7 @@ export const endpoints = defineEndpoints({
     path: "/products/merge/preview",
     auth: "staff",
     permission: "catalog.products.review",
+    scope: "staff",
     summary: "Preview what a merge moves before confirming",
     desc: "Read-only. Offers from offers.listOffersAdmin, reviews and rating from reviews.getRatingSummaries, questions from reviews.listProductQuestions, order items from orders.countOrderItemsForProducts.",
     body: () => MergeRequest,
@@ -1901,6 +1932,7 @@ export const endpoints = defineEndpoints({
     path: "/products/bulk",
     auth: "staff",
     permission: "catalog.products.bulk-edit",
+    scope: "staff",
     summary: "Bulk edit products (category, brand, publication) with preview",
     body: () => z.object({
       productIds: z.array(z.uuid()),
@@ -1926,6 +1958,7 @@ export const endpoints = defineEndpoints({
     path: "/corrections",
     auth: "staff",
     permission: "catalog.products.review",
+    scope: "staff",
     summary: "Open correction suggestions",
     query: () =>
       z.object({
@@ -1943,6 +1976,7 @@ export const endpoints = defineEndpoints({
     path: "/corrections/{id}/decide",
     auth: "staff",
     permission: "catalog.products.review",
+    scope: "staff",
     summary: "Accept or decline a correction",
     desc: "Changes affecting other sellers' offers are reviewed here; accepted changes are kept in the review log.",
     params: () =>
@@ -1964,6 +1998,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/categories",
     auth: "staff",
+    scope: "staff",
     summary: "Full category tree including hidden, with product and offer counts",
     desc: "productCount (active products with at least one eligible offer) and offerCount include subcategories; refreshed every 10 minutes.",
     response: () => z.array(Category),
@@ -1977,6 +2012,7 @@ export const endpoints = defineEndpoints({
     path: "/categories",
     auth: "staff",
     permission: "catalog.taxonomy.manage",
+    scope: "staff",
     summary: "Create a category",
     body: () => z.object({
       name: z.string(),
@@ -1999,6 +2035,7 @@ export const endpoints = defineEndpoints({
     path: "/categories/{id}",
     auth: "staff",
     permission: "catalog.taxonomy.manage",
+    scope: "staff",
     summary: "Rename, move, hide or mark coming soon",
     params: () =>
       z.object({
@@ -2024,6 +2061,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/categories/{id}/attributes",
     auth: "staff",
+    scope: "staff",
     summary: "Category attributes with fill rates, inheritance and image standards",
     desc: "Attributes defined on an ancestor are listed with inheritedFrom and are edited there. filledCount / productCount shows how many products have a value; for required attributes the difference is the \"N products are missing Warranty\" alert (those products appear under Missing content).",
     params: () =>
@@ -2049,6 +2087,7 @@ export const endpoints = defineEndpoints({
     path: "/categories/{id}/attributes",
     auth: "staff",
     permission: "catalog.taxonomy.manage",
+    scope: "staff",
     summary: "Replace a category's attributes and image standards",
     params: () =>
       z.object({
@@ -2074,6 +2113,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/brands",
     auth: "staff",
+    scope: "staff",
     summary: "All brands with counts, seller authorization and status",
     desc: "Brands tab (page total = tab count), the Brand filter on the products list, and seller brand requests waiting (status=under_review, requested=true).",
     query: () =>
@@ -2095,6 +2135,7 @@ export const endpoints = defineEndpoints({
     path: "/brands",
     auth: "staff",
     permission: "catalog.taxonomy.manage",
+    scope: "staff",
     summary: "Create a brand",
     body: () => z.object({
       name: z.string(),
@@ -2117,6 +2158,7 @@ export const endpoints = defineEndpoints({
     path: "/brands/{id}",
     auth: "staff",
     permission: "catalog.taxonomy.manage",
+    scope: "staff",
     summary: "Edit a brand, including who can sell",
     params: () =>
       z.object({
@@ -2144,6 +2186,7 @@ export const endpoints = defineEndpoints({
     path: "/brands/{id}/status",
     auth: "staff",
     permission: "catalog.taxonomy.manage",
+    scope: "staff",
     summary: "Activate, flag for review or block a brand (decides seller brand requests)",
     desc: "Reviewing a brand under review means activating or blocking it with a reason. Blocking a requested brand returns its submission to the seller with changes requested.",
     params: () =>
@@ -3036,6 +3079,17 @@ export const spec = defineModuleSpec({
         "type": "timestamptz",
         "nullable": false
       }
+    }
+  },
+  tenantTables: {
+    "correction_suggestions": {
+      "seller": "seller_id"
+    },
+    "brand_authorized_sellers": {
+      "seller": "seller_id"
+    },
+    "offer_index": {
+      "seller": "seller_id"
     }
   },
   endpoints,

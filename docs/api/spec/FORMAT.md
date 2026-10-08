@@ -39,6 +39,7 @@ One JSON file per backend module: `docs/api/spec/modules/<module>.json`.
     "consumes":  [ { "name": "sellers.seller.suspended", "does": "Stop showing the seller's draft submissions in the review queue" } ]
   },
   "permissions": [ { "key": "catalog.products.review", "audience": "staff", "desc": "Approve, request changes, reject" } ],
+                                           // seller permissions may add "ownerOnly": true and "delegable": false
   "approvalActions": [                     // actions that can need an approval request (access module checks limits)
     { "key": "finance.payouts.release", "desc": "Release a payout run", "limit": "money",   // money | units | percent | none
       "secondReviewer": "above-limit",     // always | above-limit | never
@@ -67,7 +68,8 @@ Used in `types`, `body`, `query`, event `payload` and inline objects.
 | `enum(a\|b\|c)` | one of the values |
 | `map<T>` | object with string keys and `T` values |
 | `{ "type": "int", "desc": "…" }` | any of the above with a description |
-| `{ "field": "type", … }` (nested object) | inline object |
+| `{ "type": "string", "permission": "orders.customers.view-contact", "mask": "email" }` | a sensitive field: masked (email, phone, name) or hidden (hide) for staff and sellers without the permission |
+| `{ "field": "type", … }` (nested object) | inline object. An object is a descriptor (rows above) only when all its keys are among `type`, `desc`, `permission`, `mask`; `{ "type": "enum(a\|b)", "note": "text" }` is an object with a field named `type` |
 
 ## Endpoints
 
@@ -79,8 +81,18 @@ Used in `types`, `body`, `query`, event `payload` and inline objects.
   "path": "/products/{id}/approve",        // relative to the area prefix: /api/admin/catalog/products/{id}/approve
   "summary": "Approve a submitted product",
   "desc": "Optional longer explanation: rules, side effects.",
-  "auth": "staff",                         // anyone | shopper | customer | seller | staff | provider
+  "auth": "staff",                         // every endpoint needs a token (docs/03-auth-middleware.md):
+                                           //   visitor | shopper | customer | account (store, public)
+                                           //   seller (seller) | staff (admin) | refresh | bootstrap (public) | provider (webhooks)
   "permission": "catalog.products.review", // optional; must be declared by some module
+  "permissionWhen": [                      // optional: an extra permission when the request is about someone else
+    { "if": { "query.view": "all" }, "permission": "access.approvals.view-all" }   // value, or "!self" / "!self-member"
+  ],
+  "stepUp": { "kind": "reauth", "purpose": "payout-account" },  // optional: reauth = reauthToken in the body; code = X-Step-Up-Code header
+  "sellerContext": "optional",             // seller area only: works before a seller is chosen
+  "scope": "own-member",                   // optional override of the derived record scope:
+                                           //   public | own-customer | own-seller | own-member | guest-order | staff
+  "rateLimit": "sign-in",                  // optional named rate-limit class
   "params": { "id": "uuid" },              // must match {placeholders} in path
   "query": { "q": "string?" },
   "paging": true,                          // adds cursor/page/limit and wraps response in Page<…>
@@ -107,3 +119,5 @@ Module-specific error codes go in `"errorCodes": { "OFFER_CHANGED": { "status": 
 5. Status changes go through a declared state machine; illegal moves return `ILLEGAL_TRANSITION`.
 6. Material admin actions are `audited: true` and take a `reason` where the plan asks for one.
 7. Tables live in the module's own schema; reference other modules by id only (no cross-module foreign keys).
+8. Every endpoint requires a token. Only `identity.startAppSession` uses `bootstrap` (an app proof instead of a token). Secrets never go in URL paths or queries.
+9. Tables with a `seller_id` or `customer_id` column are tenant tables: seller and customer callers only reach their own rows. Add `"tenant": false` to a table to opt out, or `"tenant": "<column>"` to name another column.

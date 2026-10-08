@@ -31,7 +31,7 @@ Help cases and disputes: customer help and order-problem cases opened from the o
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| GET | `/api/store/support/contact-options` | Topics, channels, hours and expected reply times | anyone | `ContactOptions` |
+| GET | `/api/store/support/contact-options` | Topics, channels, hours and expected reply times | visitor | `ContactOptions` |
 | GET | `/api/store/support/orders/{orderId}/problem-context` | Order problem form context: packages and items, who handles first, when Marketly steps in, open cases | shopper | `ProblemContext` |
 | POST | `/api/store/support/cases` | Contact support or report an order problem (missing, damaged, wrong item, not arrived) _(idempotent)_ | shopper | `CaseCreateInput` → `CaseView` |
 | GET | `/api/store/support/cases` | My cases with who handles them, the next action and the expected reply | shopper | Page<CaseSummary> |

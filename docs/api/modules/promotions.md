@@ -34,12 +34,12 @@ Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
 | GET | `/api/store/promotions/deals` | Deals page: flash sales, coupons, clearance and upcoming events | shopper | `DealsPage` |
-| GET | `/api/store/promotions/deals/clearance` | More clearance products | anyone | Page<DealProduct> |
+| GET | `/api/store/promotions/deals/clearance` | More clearance products | visitor | Page<DealProduct> |
 | GET | `/api/store/promotions/deals/coupons` | More clippable coupons | shopper | Page<CouponCard> |
-| GET | `/api/store/promotions/flash-sales/{campaignId}` | One flash sale with live claimed meters _(phase 2)_ | anyone | `FlashSaleBlock` |
+| GET | `/api/store/promotions/flash-sales/{campaignId}` | One flash sale with live claimed meters _(phase 2)_ | visitor | `FlashSaleBlock` |
 | GET | `/api/store/promotions/products/{productId}` | Promotions for a product page: deal prices per offer, purchase limits, countdowns, seller promos and coupons | shopper | `ProductPromotions` |
 | GET | `/api/store/promotions/offer-prices` | Promotion prices for a set of offers (product cards, collections, wishlist) | shopper | `OfferPromotion[]` |
-| GET | `/api/store/promotions/campaigns/{id}/eligible-products` | Items a coupon or campaign applies to ('Eligible items') | anyone | Page<DealProduct> |
+| GET | `/api/store/promotions/campaigns/{id}/eligible-products` | Items a coupon or campaign applies to ('Eligible items') | visitor | Page<DealProduct> |
 | POST | `/api/store/promotions/codes/check` | Look up a coupon code's terms without applying it | shopper | `{ code: string }` → `CodeCheck` |
 | GET | `/api/store/promotions/coupons` | My coupons: available and clipped, used and expired | customer | `AccountCoupons` |
 | POST | `/api/store/promotions/coupons/{campaignId}/clip` | Clip a coupon so it applies automatically at checkout | customer | `CouponCard` |

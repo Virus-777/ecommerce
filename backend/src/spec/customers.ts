@@ -1117,6 +1117,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/overview",
     auth: "customer",
+    scope: "own-customer",
     summary: "Account tab home: tiles, alerts, recent orders, open cases and returns",
     desc: "One call renders account/overview on web and Android. Aggregated in-process with a 300 ms budget per source: orders.countInProgress + orders.listRecentForCustomer + orders.listDelayedItemsForCustomer (orders in progress, recent orders, delay alerts), returns.listOpenForCustomer (open returns tile and list), messaging.unreadCount (unread messages), support.listOpenCasesForCustomer (open cases), wallet.getBalance (store credit, phase 3; otherwise available=false). A source that is disabled or times out is listed in `unavailable` instead of failing the page.",
     response: () => AccountOverview,
@@ -1129,6 +1130,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/profile",
     auth: "customer",
+    scope: "own-customer",
     summary: "Profile, verification state and active restrictions",
     response: () => CustomerProfile,
     status: 200,
@@ -1140,6 +1142,7 @@ export const endpoints = defineEndpoints({
     method: "PATCH",
     path: "/profile",
     auth: "customer",
+    scope: "own-customer",
     summary: "Change name or mobile phone",
     desc: "Email changes go through identity (new verification link). A new phone number is unverified until identity confirms the code.",
     body: () => ProfileInput,
@@ -1155,6 +1158,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/addresses",
     auth: "customer",
+    scope: "own-customer",
     summary: "Saved addresses (bounded by maxAddresses, not paged)",
     response: () => z.array(SavedAddress),
     status: 200,
@@ -1166,6 +1170,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/addresses",
     auth: "customer",
+    scope: "own-customer",
     summary: "Add an address",
     desc: "Validated first; a hard validation problem returns VALIDATION_FAILED with details.issues (AddressIssue[]). Saving never changes orders already placed.",
     body: () => AddressInput,
@@ -1181,6 +1186,7 @@ export const endpoints = defineEndpoints({
     method: "PATCH",
     path: "/addresses/{id}",
     auth: "customer",
+    scope: "own-customer",
     summary: "Edit an address",
     desc: "Accepted orders keep the address copied at checkout. To redirect an unshipped package the customer messages the seller from the order page.",
     params: () =>
@@ -1200,6 +1206,7 @@ export const endpoints = defineEndpoints({
     method: "DELETE",
     path: "/addresses/{id}",
     auth: "customer",
+    scope: "own-customer",
     summary: "Remove an address",
     desc: "Soft delete. If it was the default, the most recently used remaining address becomes default.",
     params: () =>
@@ -1216,6 +1223,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/addresses/{id}/make-default",
     auth: "customer",
+    scope: "own-customer",
     summary: "Set the default delivery address",
     params: () =>
       z.object({
@@ -1231,6 +1239,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/addresses/validate",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Check an address before saving or at guest checkout",
     desc: "Format rules (5-digit ZIP, state code), service region and PO box detection, plus a normalised suggestion from the address provider when configured.",
     body: () => common.Address,
@@ -1244,6 +1253,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/marketing-preferences",
     auth: "customer",
+    scope: "own-customer",
     summary: "Promotional consent per channel",
     response: () => MarketingPreferences,
     status: 200,
@@ -1255,6 +1265,7 @@ export const endpoints = defineEndpoints({
     method: "PUT",
     path: "/marketing-preferences",
     auth: "customer",
+    scope: "own-customer",
     summary: "Turn promotional channels on or off",
     desc: "Only the fields sent change. Each change appends to the consent log. Turning promotions off never affects order updates.",
     body: () => MarketingPreferencesInput,
@@ -1269,6 +1280,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/recently-viewed",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Recently viewed products for the home page",
     desc: "Guests are keyed by X-Guest-Session; signed-in customers by account. When identity claims the guest session at sign-in (identity.guest_session.claimed) the guest list is merged into the account. Price and availability come from offers and catalog when enabled.",
     query: () =>
@@ -1285,6 +1297,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/recently-viewed",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Record a product view",
     desc: "Called by the product page. Upserts and trims to recentlyViewedRetained per owner. Not recorded when personalizedRecommendations is off.",
     body: () => z.object({
@@ -1301,6 +1314,7 @@ export const endpoints = defineEndpoints({
     method: "DELETE",
     path: "/recently-viewed",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Clear the whole list",
     response: null,
     status: 204,
@@ -1312,6 +1326,7 @@ export const endpoints = defineEndpoints({
     method: "DELETE",
     path: "/recently-viewed/{productId}",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Remove one product from the list",
     params: () =>
       z.object({
@@ -1327,6 +1342,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/data-requests/exports",
     auth: "customer",
+    scope: "own-customer",
     summary: "Request a copy of my data",
     desc: "Profile, addresses, consent log, orders, returns, messages and reviews (collected from those modules' export hooks) as a ZIP. Link emailed within dataExportSlaHours.",
     response: () => DataRequest,
@@ -1341,6 +1357,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/data-requests",
     auth: "customer",
+    scope: "own-customer",
     summary: "My export and closure requests",
     response: () => z.array(DataRequest),
     status: 200,
@@ -1352,6 +1369,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/closure-eligibility",
     auth: "customer",
+    scope: "own-customer",
     summary: "Can I close my account now, and what blocks it",
     desc: "Counts open orders (orders), open returns and pending refunds (returns, payments), open cases (support) and store credit (wallet).",
     response: () => ClosureEligibility,
@@ -1364,6 +1382,8 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/data-requests/closure",
     auth: "customer",
+    stepUp: {"kind":"reauth","purpose":"account-closure"},
+    scope: "own-customer",
     summary: "Request account closure",
     desc: "Refused with CLOSURE_BLOCKED (details.blockers) while obligations are open. Otherwise scheduled after closureCoolingOffDays; the customer can cancel until then. Requires a recent sign-in (identity re-auth token).",
     body: () => z.object({
@@ -1372,7 +1392,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => DataRequest,
     status: 202,
-    errors: ["CLOSURE_BLOCKED","DATA_REQUEST_IN_PROGRESS"],
+    errors: ["CLOSURE_BLOCKED","DATA_REQUEST_IN_PROGRESS","STEP_UP_REQUIRED"],
     events: ["customers.closure.requested"],
     screens: ["account/profile"],
     phase: 1,
@@ -1382,6 +1402,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/data-requests/{id}/cancel",
     auth: "customer",
+    scope: "own-customer",
     summary: "Cancel a pending closure or export request",
     params: () =>
       z.object({
@@ -1398,6 +1419,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/guest-orders/lookup",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Find a guest order by reference and checkout email",
     desc: "Verifies the pair with orders (orders.findGuestOrder), then calls identity.grantGuestOrderAccess(guestSessionId, orderId, email, 'lookup') so the caller's guest session can open the order in orders, shipping, returns and support. Wrong combinations return the same GUEST_ORDER_NOT_FOUND without saying which part was wrong. Limited per IP and per email.",
     body: () => z.object({
@@ -1414,7 +1436,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "POST",
     path: "/guest-orders/links",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Email fresh links to every guest order placed with this email",
     desc: "Looks up guest orders for the email in orders and calls identity.issueOrderLink for each; notifications sends one email. Always answers 202 so it cannot be used to probe which emails have orders.",
     body: () => z.object({
@@ -1430,7 +1453,8 @@ export const endpoints = defineEndpoints({
     area: "public",
     method: "POST",
     path: "/unsubscribe",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "One-click stop of promotional messages from an email or SMS link",
     desc: "Token is signed by notifications and names customer and channel. Recorded in the consent log with source unsubscribe_link. Never affects essential messages.",
     body: () => z.object({
@@ -1449,6 +1473,7 @@ export const endpoints = defineEndpoints({
     path: "/guest-buyers",
     auth: "staff",
     permission: "customers.accounts.view",
+    scope: "staff",
     summary: "Guest buyers (orders without an account) with order count and spend",
     desc: "The page total gives the header count (e.g. 1,212 guest buyers). Orders open through orders' guest order lookup; a guest who registers moves to the customer list.",
     query: () =>
@@ -1469,6 +1494,7 @@ export const endpoints = defineEndpoints({
     path: "/customers",
     auth: "staff",
     permission: "customers.accounts.view",
+    scope: "staff",
     summary: "Customer accounts with orders, spend, open cases, status and verification",
     query: () =>
       z.object({
@@ -1493,6 +1519,7 @@ export const endpoints = defineEndpoints({
     path: "/customers/{id}",
     auth: "staff",
     permission: "customers.accounts.view",
+    scope: "staff",
     summary: "Customer detail: profile, orders, cases, messages, notes, abuse reports, restrictions",
     desc: "Aggregates in-process: identity (sign-in summary), orders (count, spend, recent), support (open cases), messaging (conversation summary), trust (reports filed by and against). Missing sources are listed in `unavailable`. Viewing is logged in the action history.",
     params: () =>
@@ -1511,6 +1538,7 @@ export const endpoints = defineEndpoints({
     path: "/customers/{id}/notes",
     auth: "staff",
     permission: "customers.notes.write",
+    scope: "staff",
     summary: "Add an internal note",
     params: () =>
       z.object({
@@ -1531,6 +1559,7 @@ export const endpoints = defineEndpoints({
     path: "/customers/{id}/actions",
     auth: "staff",
     permission: "customers.accounts.act",
+    scope: "staff",
     summary: "Apply an account action with a recorded reason",
     desc: "send_password_reset and sign_out_everywhere call identity and need customers.accounts.security. Restrict, suspend, reinstate and close need customers.accounts.act and go through the account status machine. Restricting or closing stops new orders; existing orders, returns, refunds and cases stay open and reachable. Closing an account with open obligations needs a second reviewer (access approval request).",
     params: () =>
@@ -1553,6 +1582,7 @@ export const endpoints = defineEndpoints({
     path: "/customers/{id}/restrictions/{restrictionId}/lift",
     auth: "staff",
     permission: "customers.accounts.act",
+    scope: "staff",
     summary: "Lift a restriction early",
     params: () =>
       z.object({
@@ -1576,6 +1606,7 @@ export const endpoints = defineEndpoints({
     path: "/customers/{id}/actions",
     auth: "staff",
     permission: "customers.accounts.view",
+    scope: "staff",
     summary: "Account action history for one customer",
     params: () =>
       z.object({
@@ -1593,6 +1624,7 @@ export const endpoints = defineEndpoints({
     path: "/customers/exports",
     auth: "staff",
     permission: "customers.accounts.export",
+    scope: "staff",
     summary: "Export the filtered customer list",
     desc: "Creates an authorized export job through reports.requestExport (dataset customers.admin.accounts). Columns respect the caller's permissions; contact details need customers.accounts.export.",
     body: () => z.object({
@@ -1611,6 +1643,7 @@ export const endpoints = defineEndpoints({
     path: "/data-requests",
     auth: "staff",
     permission: "customers.data-requests.manage",
+    scope: "staff",
     summary: "Export and closure requests across customers (privacy queue)",
     query: () =>
       z.object({
@@ -1636,6 +1669,7 @@ export const endpoints = defineEndpoints({
     path: "/data-requests/{id}/retry",
     auth: "staff",
     permission: "customers.data-requests.manage",
+    scope: "staff",
     summary: "Retry a failed export",
     params: () =>
       z.object({
@@ -2460,6 +2494,32 @@ export const spec = defineModuleSpec({
         "type": "timestamptz",
         "nullable": false
       }
+    }
+  },
+  tenantTables: {
+    "addresses": {
+      "customer": "customer_id"
+    },
+    "marketing_preferences": {
+      "customer": "customer_id"
+    },
+    "consent_log": {
+      "customer": "customer_id"
+    },
+    "account_restrictions": {
+      "customer": "customer_id"
+    },
+    "account_actions": {
+      "customer": "customer_id"
+    },
+    "customer_notes": {
+      "customer": "customer_id"
+    },
+    "data_requests": {
+      "customer": "customer_id"
+    },
+    "guest_lookup_attempts": {
+      "visitor": "guest_session_id"
     }
   },
   endpoints,

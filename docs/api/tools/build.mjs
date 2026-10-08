@@ -69,10 +69,14 @@ const PRIMS = {
 };
 const COMMON_TYPES = new Set(Object.keys(common.types));
 
+/** A field descriptor { type, desc?, permission?, mask? }, as opposed to an object with a field named "type" */
+const DESCRIPTOR_KEYS = new Set(['type', 'desc', 'permission', 'mask']);
+const isDescriptor = (e) => !!e && typeof e === 'object' && !Array.isArray(e) && typeof e.type === 'string' && Object.keys(e).every((k) => DESCRIPTOR_KEYS.has(k));
+
 /** Parse a type expression into { schema, optional }. `mod` = owning module (for local types). */
 function typeToSchema(expr, mod, where) {
   if (expr && typeof expr === 'object' && !Array.isArray(expr)) {
-    if (typeof expr.type === 'string') {
+    if (isDescriptor(expr)) {
       const r = typeToSchema(expr.type, mod, where);
       if (expr.desc) r.schema = { ...r.schema, description: expr.desc };
       return r;
@@ -191,9 +195,22 @@ for (const m of modules) {
     const params = Object.keys(ep.params ?? {});
     if (placeholders.sort().join() !== params.sort().join()) err(E, `path placeholders {${placeholders}} must match params {${params}}`);
     if (ep.permission && !allPermissions.has(ep.permission)) soft(E, `permission "${ep.permission}" is not declared by any module`);
-    if (ep.area === 'seller' && !['seller'].includes(ep.auth)) err(E, 'seller-area endpoints need auth "seller"');
-    if (ep.area === 'admin' && ep.auth !== 'staff') err(E, 'admin-area endpoints need auth "staff"');
-    if (ep.area === 'webhooks' && ep.auth !== 'provider') err(E, 'webhook endpoints need auth "provider"');
+    // Every endpoint requires a token (auth design v3); which kinds fit which area:
+    const AREA_AUTHS = { store: ['visitor', 'shopper', 'customer', 'account'], seller: ['seller'], admin: ['staff'], public: ['visitor', 'refresh', 'bootstrap'], webhooks: ['provider'] };
+    if (AREA_AUTHS[ep.area] && !AREA_AUTHS[ep.area].includes(ep.auth)) err(E, `${ep.area}-area endpoints need auth ${AREA_AUTHS[ep.area].map((a) => `"${a}"`).join(' or ')}`);
+    if (ep.auth === 'bootstrap' && !(m.name === 'identity' && ep.id === 'startAppSession')) err(E, 'only identity.startAppSession may use auth "bootstrap" (the one endpoint that issues the first token)');
+    if (ep.stepUp !== undefined) {
+      if (!['reauth', 'code'].includes(ep.stepUp?.kind) || typeof ep.stepUp?.purpose !== 'string') err(E, 'stepUp must be { kind: "reauth" | "code", purpose: string }');
+      if (ep.stepUp?.kind === 'reauth' && !(typeof ep.body === 'object' && ep.body && 'reauthToken' in ep.body)) err(E, 'stepUp kind "reauth" needs a reauthToken field in the body');
+      if (!(ep.errors ?? []).includes('STEP_UP_REQUIRED')) err(E, 'endpoints with stepUp must list STEP_UP_REQUIRED in errors');
+    }
+    if (ep.sellerContext !== undefined && (ep.sellerContext !== 'optional' || ep.area !== 'seller')) err(E, 'sellerContext can only be "optional", on seller-area endpoints');
+    if (ep.scope !== undefined && !['public', 'own-customer', 'own-seller', 'own-member', 'guest-order', 'staff'].includes(ep.scope)) err(E, 'scope must be public | own-customer | own-seller | own-member | guest-order | staff');
+    if (ep.rateLimit !== undefined && typeof ep.rateLimit !== 'string') err(E, 'rateLimit must be a class name');
+    for (const rule of ep.permissionWhen ?? []) {
+      if (!rule?.if || typeof rule.if !== 'object' || !Object.keys(rule.if).every((k) => /^(params|query|body)\.\w+$/.test(k))) err(E, 'permissionWhen[].if keys must be params.<field>, query.<field> or body.<field>');
+      if (!allPermissions.has(rule?.permission)) soft(E, `permissionWhen permission "${rule?.permission}" is not declared by any module`);
+    }
     for (const code of ep.errors ?? []) if (!common.errors[code] && !m.errorCodes?.[code]) err(E, `error code "${code}" is not in common.json or this module's errorCodes`);
     for (const ev of ep.events ?? []) if (!published.has(ev)) err(E, `event "${ev}" is not in this module's events.publishes`);
     for (const s of ep.screens ?? []) if (SCREENS.size && !SCREENS.has(s)) err(E, `screen "${s}" is not a prototype screen id`);
@@ -217,9 +234,18 @@ if (CHECK) process.exit(0);
 
 /* ------------------------------------------------------------------ OpenAPI */
 const securityFor = (auth) => ({
-  anyone: [], shopper: [{ bearer: [] }, { guestSession: [] }], customer: [{ bearer: [] }],
-  seller: [{ bearer: [] }], staff: [{ bearer: [] }], provider: [{ webhookSignature: [] }],
+  visitor: [{ bearer: [] }], shopper: [{ bearer: [] }], customer: [{ bearer: [] }], account: [{ bearer: [] }],
+  seller: [{ bearer: [] }], staff: [{ bearer: [] }], refresh: [{ refreshCookie: [] }, {}], provider: [{ webhookSignature: [] }],
+  bootstrap: [{ appProof: [] }],
 }[auth] ?? []);
+const BEARER = new Set(['visitor', 'shopper', 'customer', 'account', 'seller', 'staff']);
+/** The errors every endpoint can return from the auth middleware (docs/03-auth-middleware.md §3) */
+const authErrors = (ep) => [
+  'UNAUTHORIZED',
+  ...(BEARER.has(ep.auth) ? ['WRONG_AUDIENCE'] : []),
+  ...(ep.permission || ep.permissionWhen?.length || ep.auth === 'seller' ? ['FORBIDDEN'] : []),
+  ...(ep.stepUp ? ['STEP_UP_REQUIRED'] : []),
+];
 
 const schemas = {};
 for (const [name, t] of Object.entries(common.types)) schemas[name] = objectSchema(t, null, `common.${name}`);
@@ -235,12 +261,13 @@ for (const m of modules) {
       ...Object.entries(ep.query ?? {}).map(([name, t]) => { const r = typeToSchema(t, m, ''); return { name, in: 'query', required: !r.optional, schema: r.schema }; }),
       ...(ep.paging ? Object.entries(common.pagination.query).map(([name, t]) => ({ name, in: 'query', required: false, description: t.desc, schema: typeToSchema(t, null, '').schema })) : []),
       ...(ep.idempotent ? [{ name: 'Idempotency-Key', in: 'header', required: true, description: common.headers['Idempotency-Key'], schema: { type: 'string' } }] : []),
+      ...(ep.stepUp?.kind === 'code' ? [{ name: 'X-Step-Up-Code', in: 'header', required: true, description: common.headers['X-Step-Up-Code'], schema: { type: 'string' } }] : []),
     ];
     const status = String(ep.status ?? (ep.response === null ? 204 : 200));
     let respSchema = ep.response === null || ep.response === undefined ? null : typeToSchema(ep.response, m, '').schema;
     if (respSchema && ep.paging) respSchema = pageSchema(respSchema);
     const responses = { [status]: respSchema ? { description: 'Success', content: { 'application/json': { schema: respSchema } } } : { description: 'Success, no content' } };
-    const codes = new Set(['VALIDATION_FAILED', ...(ep.auth === 'anyone' ? [] : ['UNAUTHORIZED']), ...(ep.permission ? ['FORBIDDEN'] : []), ...(ep.params ? ['NOT_FOUND'] : []), ...(ep.errors ?? [])]);
+    const codes = new Set(['VALIDATION_FAILED', ...authErrors(ep), ...(ep.params ? ['NOT_FOUND'] : []), ...(ep.errors ?? [])]);
     for (const code of codes) {
       const def = allErrorCodes(m)[code];
       if (!def) continue;
@@ -253,13 +280,14 @@ for (const m of modules) {
       operationId: `${m.name}.${ep.id}`,
       tags: [`${common.areas[ep.area].title} · ${m.title}`],
       summary: ep.summary,
-      description: [ep.desc, ep.permission && `**Permission:** \`${ep.permission}\``, ep.approval && `**Approval:** ${ep.approval}`, ep.idempotent && '**Idempotent:** send an Idempotency-Key.', ep.audited && '**Audited:** recorded in the action history.', ep.events?.length && `**Publishes:** ${ep.events.map((e) => `\`${e}\``).join(', ')}`, ep.screens?.length && `**Screens:** ${ep.screens.join(', ')}`, (ep.phase ?? m.phase) > 1 && `**Launch phase:** ${ep.phase ?? m.phase}`].filter(Boolean).join('\n\n') || undefined,
+      description: [ep.desc, ep.permission && `**Permission:** \`${ep.permission}\``, ep.permissionWhen?.length && `**Also needs:** ${ep.permissionWhen.map((r) => `\`${r.permission}\` when ${Object.entries(r.if).map(([k, v]) => `${k} ${String(v).startsWith('!') ? `is not the caller's own (${v.slice(1)})` : `= ${v}`}`).join(' and ')}`).join('; ')}`, ep.stepUp && `**Step-up:** ${ep.stepUp.kind === 'reauth' ? 'single-use re-auth token in the body' : '2-step code in X-Step-Up-Code'} (purpose \`${ep.stepUp.purpose}\`)`, ep.sellerContext === 'optional' && '**Seller context:** optional (works before a seller is chosen).', ep.approval && `**Approval:** ${ep.approval}`, ep.idempotent && '**Idempotent:** send an Idempotency-Key.', ep.audited && '**Audited:** recorded in the action history.', ep.events?.length && `**Publishes:** ${ep.events.map((e) => `\`${e}\``).join(', ')}`, ep.screens?.length && `**Screens:** ${ep.screens.join(', ')}`, (ep.phase ?? m.phase) > 1 && `**Launch phase:** ${ep.phase ?? m.phase}`].filter(Boolean).join('\n\n') || undefined,
       security: securityFor(ep.auth),
       parameters: parameters.length ? parameters : undefined,
       requestBody: ep.body !== undefined ? { required: true, content: { 'application/json': { schema: typeToSchema(ep.body, m, '').schema } } } : undefined,
       responses,
       'x-module': m.name, 'x-area': ep.area, 'x-auth': ep.auth, 'x-permission': ep.permission, 'x-screens': ep.screens, 'x-events': ep.events,
       'x-idempotent': ep.idempotent || undefined, 'x-audited': ep.audited || undefined, 'x-phase': ep.phase ?? m.phase,
+      'x-step-up': ep.stepUp, 'x-permission-when': ep.permissionWhen, 'x-seller-context': ep.sellerContext, 'x-scope': ep.scope, 'x-rate-limit': ep.rateLimit,
     };
   }
 }
@@ -277,7 +305,8 @@ const openapi = {
     schemas,
     securitySchemes: {
       bearer: { type: 'http', scheme: 'bearer', description: common.headers.Authorization },
-      guestSession: { type: 'apiKey', in: 'header', name: 'X-Guest-Session' },
+      refreshCookie: { type: 'apiKey', in: 'cookie', name: '__Host-mk_refresh', description: 'Website refresh token (HttpOnly). Android sends refreshToken in the body instead.' },
+      appProof: { type: 'apiKey', in: 'header', name: 'X-App-Proof', description: common.headers['X-App-Proof'] },
       webhookSignature: { type: 'apiKey', in: 'header', name: 'X-Signature', description: 'Provider signature, verified per provider' },
     },
   },
@@ -286,7 +315,7 @@ const clean = (o) => JSON.parse(JSON.stringify(o));
 writeFileSync(join(apiDir, 'openapi.json'), JSON.stringify(clean(openapi), null, 2));
 
 /* ------------------------------------------------------------------ Markdown */
-const fmtType = (t) => (typeof t === 'string' ? `\`${t}\`` : t && typeof t.type === 'string' ? `\`${t.type}\`${t.desc ? ` ${t.desc}` : ''}` : `\`${JSON.stringify(t)}\``);
+const fmtType = (t) => (typeof t === 'string' ? `\`${t}\`` : isDescriptor(t) ?`\`${t.type}\`${t.desc ? ` ${t.desc}` : ''}` : `\`${JSON.stringify(t)}\``);
 const fmtShape = (t) => (t === undefined ? '' : t === null ? '204 No content' : typeof t === 'string' ? `\`${t}\`` : `\`{ ${Object.entries(t).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : v.type ?? 'object'}`).join(', ')} }\``);
 mkdirSync(join(apiDir, 'modules'), { recursive: true });
 const consumersOf = (event) => modules.filter((x) => x.events?.consumes?.some((c) => c.name === event)).map((x) => x.name);
@@ -305,7 +334,7 @@ for (const m of modules) {
     if (!eps.length) continue;
     lines.push('', `## ${common.areas[area].title}`, '', '| Method | Path | Purpose | Auth | Body → Response |', '|---|---|---|---|---|');
     for (const e of eps) {
-      const flags = [e.idempotent && 'idempotent', e.audited && 'audited', (e.phase ?? m.phase) > m.phase && `phase ${e.phase}`].filter(Boolean).join(', ');
+      const flags = [e.idempotent && 'idempotent', e.audited && 'audited', e.stepUp && `step-up: ${e.stepUp.kind}`, e.permissionWhen?.length && `also ${e.permissionWhen.map((r) => r.permission).join(', ')} when not own`, e.sellerContext === 'optional' && 'before seller is chosen', (e.phase ?? m.phase) > m.phase && `phase ${e.phase}`].filter(Boolean).join(', ');
       lines.push(`| ${e.method} | \`${fullPath(m, e)}\` | ${e.summary}${flags ? ` _(${flags})_` : ''} | ${e.auth}${e.permission ? `<br>\`${e.permission}\`` : ''} | ${[e.body !== undefined && fmtShape(e.body), (e.paging ? `Page<${typeof e.response === 'string' ? e.response : 'item'}>` : fmtShape(e.response))].filter(Boolean).join(' → ')} |`);
     }
   }

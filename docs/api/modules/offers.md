@@ -31,10 +31,10 @@ How one seller (or the Official Store) sells one variant in one condition: price
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| GET | `/api/store/offers/products/{productId}/offers` | All offers for a product variant with comparable totals to a delivery location | anyone | `OfferComparison` |
-| GET | `/api/store/offers/products/{productId}/purchase-box` | Purchase box for the selected variant: featured or chosen offer, delivery, quantity options, variant availability | anyone | `PurchaseBox` |
-| GET | `/api/store/offers/offers/{id}` | One offer as the customer sees it (used by cart and review-changes) | anyone | `OfferView` |
-| GET | `/api/store/offers/featured-offer-rule` | Published featured-offer rule ('How we choose the featured offer') | anyone | `FeaturedRule` |
+| GET | `/api/store/offers/products/{productId}/offers` | All offers for a product variant with comparable totals to a delivery location | visitor | `OfferComparison` |
+| GET | `/api/store/offers/products/{productId}/purchase-box` | Purchase box for the selected variant: featured or chosen offer, delivery, quantity options, variant availability | visitor | `PurchaseBox` |
+| GET | `/api/store/offers/offers/{id}` | One offer as the customer sees it (used by cart and review-changes) | visitor | `OfferView` |
+| GET | `/api/store/offers/featured-offer-rule` | Published featured-offer rule ('How we choose the featured offer') | visitor | `FeaturedRule` |
 
 ## Seller API
 

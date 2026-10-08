@@ -1889,7 +1889,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/products/{productId}/offers",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "All offers for a product variant with comparable totals to a delivery location",
     desc: "Each offer shows total cost (item + shipping − automatic discount), condition with notes and missing items, arrival range, seller quality and after-sales terms. The featured offer is marked; ineligible offers are listed with the reason. Postal code comes from the query, then the customer's default address, then the market default. Bounded list (max 100 offers per variant).",
     params: () =>
@@ -1913,7 +1914,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/products/{productId}/purchase-box",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Purchase box for the selected variant: featured or chosen offer, delivery, quantity options, variant availability",
     desc: "With offerId the customer's explicit choice is returned as selected and the featured offer alongside it. Unavailable variants return unavailable with the reason, an expected restock estimate and other sellers' offers.",
     params: () =>
@@ -1936,7 +1938,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/offers/{id}",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "One offer as the customer sees it (used by cart and review-changes)",
     desc: "Removed or ineligible offers still return with their status and alternatives are available through listProductOffers.",
     params: () =>
@@ -1958,7 +1961,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/featured-offer-rule",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Published featured-offer rule ('How we choose the featured offer')",
     response: () => FeaturedRule,
     status: 200,
@@ -1970,6 +1974,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/offers",
     auth: "seller",
+    scope: "own-seller",
     summary: "This seller's offers with review state, publication and stock as separate columns",
     query: () =>
       z.object({
@@ -1994,6 +1999,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/offers/counts",
     auth: "seller",
+    scope: "own-seller",
     summary: "Counts for the list tabs and the page heading",
     desc: "Offer status counts plus tab totals that combine the product review state (from catalog) with publication. Tabs: All, Active, Draft, Submitted, Changes requested, Rejected, Hidden or suspended; the heading reads '{all} offers across {productCount} products'.",
     response: () => z.object({
@@ -2019,6 +2025,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/offers/{id}",
     auth: "seller",
+    scope: "own-seller",
     summary: "One own offer with product, stock, price history, status log and featured eligibility",
     params: () =>
       z.object({
@@ -2035,6 +2042,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/offers/preview",
     auth: "seller",
+    scope: "own-seller",
     summary: "Check an offer before saving: delivery a customer would see, price context, was-price check, return baseline",
     body: () => OfferInput,
     response: () => OfferPreview,
@@ -2049,6 +2057,7 @@ export const endpoints = defineEndpoints({
     path: "/offers",
     auth: "seller",
     permission: "offers.offers.manage",
+    scope: "own-seller",
     summary: "Create an offer on a catalog product (draft or published)",
     desc: "Creates the inventory stock item with the initial quantity. Used and refurbished need condition notes; anything missing from the product's included items must be listed. A draft on a product still in review can publish on approval.",
     body: () => OfferInput,
@@ -2065,6 +2074,7 @@ export const endpoints = defineEndpoints({
     path: "/offers/{id}",
     auth: "seller",
     permission: "offers.offers.manage",
+    scope: "own-seller",
     summary: "Edit offer terms or price",
     desc: "Customer-visible changes bump termsVersion so carts show the change before checkout. Price changes go into price history.",
     params: () =>
@@ -2085,6 +2095,7 @@ export const endpoints = defineEndpoints({
     path: "/offers/{id}/publish",
     auth: "seller",
     permission: "offers.offers.manage",
+    scope: "own-seller",
     summary: "Publish a draft offer",
     desc: "Before the seller's launch review passes, the offer stays in draft marked to publish automatically (statusReason awaiting_launch_review) and is published on sellers.launch_review.decided (passed).",
     params: () =>
@@ -2104,6 +2115,7 @@ export const endpoints = defineEndpoints({
     path: "/offers/{id}/pause",
     auth: "seller",
     permission: "offers.offers.manage",
+    scope: "own-seller",
     summary: "Hide an offer from customers (stock is kept)",
     params: () =>
       z.object({
@@ -2125,6 +2137,7 @@ export const endpoints = defineEndpoints({
     path: "/offers/bulk-pause",
     auth: "seller",
     permission: "offers.offers.manage",
+    scope: "own-seller",
     summary: "Hide several own offers at once (up to 100)",
     desc: "Same rules as POST /offers/{id}/pause for each offer; each item succeeds or fails on its own (e.g. ILLEGAL_TRANSITION for a draft or removed offer). Stock is kept.",
     body: () => z.object({
@@ -2146,6 +2159,7 @@ export const endpoints = defineEndpoints({
     path: "/offers/{id}/resume",
     auth: "seller",
     permission: "offers.offers.manage",
+    scope: "own-seller",
     summary: "Show a paused offer again",
     params: () =>
       z.object({
@@ -2164,6 +2178,7 @@ export const endpoints = defineEndpoints({
     path: "/offers/{id}/end",
     auth: "seller",
     permission: "offers.offers.manage",
+    scope: "own-seller",
     summary: "End an offer permanently (Removed, reason ended_by_seller)",
     desc: "Open orders keep their snapshot; reserved units stay with their orders.",
     params: () =>
@@ -2186,6 +2201,7 @@ export const endpoints = defineEndpoints({
     path: "/offers/{id}",
     auth: "seller",
     permission: "offers.offers.manage",
+    scope: "own-seller",
     summary: "Delete a draft offer that was never published",
     params: () =>
       z.object({
@@ -2203,6 +2219,7 @@ export const endpoints = defineEndpoints({
     path: "/price-changes",
     auth: "seller",
     permission: "offers.prices.manage",
+    scope: "own-seller",
     summary: "Change prices of selected offers (up to 100)",
     desc: "Each item succeeds or fails on its own. Changes over the large-change threshold (default 50%) need confirmLargeChange.",
     body: () => z.object({
@@ -2228,6 +2245,7 @@ export const endpoints = defineEndpoints({
     path: "/offers/exports",
     auth: "seller",
     permission: "offers.offers.export",
+    scope: "own-seller",
     summary: "Export own offers (selected rows or the current filters) as CSV",
     desc: "Creates an authorized export job through reports.requestExport (dataset offers.seller.offers, sellerId from the session). filters takes the same keys as GET /offers; offerIds limits it to selected rows. Poll GET /offers/exports/{id} for the download link.",
     body: () => z.object({
@@ -2248,6 +2266,7 @@ export const endpoints = defineEndpoints({
     path: "/offers/exports/{id}",
     auth: "seller",
     permission: "offers.offers.export",
+    scope: "own-seller",
     summary: "Offer export status and download link (requesting member only)",
     params: () =>
       z.object({
@@ -2265,6 +2284,7 @@ export const endpoints = defineEndpoints({
     path: "/bulk-updates/template",
     auth: "seller",
     permission: "offers.bulk.update",
+    scope: "own-seller",
     summary: "Download a CSV template prefilled with this seller's SKUs, prices and quantities",
     desc: "Columns: seller_sku, price, quantity. Leaving a column out keeps the current value.",
     response: () => FileLink,
@@ -2278,6 +2298,7 @@ export const endpoints = defineEndpoints({
     path: "/bulk-updates",
     auth: "seller",
     permission: "offers.bulk.update",
+    scope: "own-seller",
     summary: "Upload a price and quantity file for preview",
     desc: "The file is uploaded to media first. Parsing runs in the background; poll getBulkUpdate until preview_ready.",
     body: () => z.object({
@@ -2295,6 +2316,7 @@ export const endpoints = defineEndpoints({
     path: "/bulk-updates",
     auth: "seller",
     permission: "offers.bulk.update",
+    scope: "own-seller",
     summary: "Upload history",
     paging: true,
     response: () => BulkUpdateJob,
@@ -2308,6 +2330,7 @@ export const endpoints = defineEndpoints({
     path: "/bulk-updates/{id}",
     auth: "seller",
     permission: "offers.bulk.update",
+    scope: "own-seller",
     summary: "Job state and totals (rows, ready, errors, unchanged)",
     params: () =>
       z.object({
@@ -2324,6 +2347,7 @@ export const endpoints = defineEndpoints({
     path: "/bulk-updates/{id}/rows",
     auth: "seller",
     permission: "offers.bulk.update",
+    scope: "own-seller",
     summary: "Row-by-row preview with before → after and the error for each failed row",
     params: () =>
       z.object({
@@ -2345,6 +2369,7 @@ export const endpoints = defineEndpoints({
     path: "/bulk-updates/{id}/apply",
     auth: "seller",
     permission: "offers.bulk.update",
+    scope: "own-seller",
     summary: "Apply the valid rows",
     desc: "Prices are changed here; quantities go to inventory as adjustments with reason 'Bulk update', the job id and the caller's name. Error rows are skipped.",
     params: () =>
@@ -2367,6 +2392,7 @@ export const endpoints = defineEndpoints({
     path: "/bulk-updates/{id}/correction-report",
     auth: "seller",
     permission: "offers.bulk.update",
+    scope: "own-seller",
     summary: "CSV of skipped rows with what to fix",
     params: () =>
       z.object({
@@ -2383,6 +2409,7 @@ export const endpoints = defineEndpoints({
     path: "/offers",
     auth: "staff",
     permission: "offers.offers.view",
+    scope: "staff",
     summary: "All offers with filters (seller, product, status, eligibility)",
     query: () =>
       z.object({
@@ -2407,6 +2434,7 @@ export const endpoints = defineEndpoints({
     path: "/offers/{id}",
     auth: "staff",
     permission: "offers.offers.view",
+    scope: "staff",
     summary: "Offer with status log, price history and price changes",
     params: () =>
       z.object({
@@ -2423,6 +2451,7 @@ export const endpoints = defineEndpoints({
     path: "/offers/{id}/remove",
     auth: "staff",
     permission: "offers.offers.remove",
+    scope: "staff",
     summary: "Remove an offer with a reason (seller is told the reason and appeal route)",
     desc: "Only this offer stops selling; other sellers' offers and the product stay. Open orders and returns are unaffected.",
     params: () =>
@@ -2444,6 +2473,7 @@ export const endpoints = defineEndpoints({
     path: "/offers/{id}/hold",
     auth: "staff",
     permission: "offers.offers.remove",
+    scope: "staff",
     summary: "Hold an offer during an investigation (Ineligible, staff_hold) with a reason and review date",
     params: () =>
       z.object({
@@ -2464,6 +2494,7 @@ export const endpoints = defineEndpoints({
     path: "/offers/{id}/release-hold",
     auth: "staff",
     permission: "offers.offers.remove",
+    scope: "staff",
     summary: "Release a staff hold",
     params: () =>
       z.object({
@@ -2486,6 +2517,7 @@ export const endpoints = defineEndpoints({
     path: "/offers/{id}/reinstate",
     auth: "staff",
     permission: "offers.offers.remove",
+    scope: "staff",
     summary: "Reinstate a removed offer as Paused (e.g. after a successful appeal)",
     params: () =>
       z.object({
@@ -2508,6 +2540,7 @@ export const endpoints = defineEndpoints({
     path: "/official/offers",
     auth: "staff",
     permission: "offers.official.manage",
+    scope: "staff",
     summary: "Official Store offers with price, cost, margin and sellable stock",
     query: () =>
       z.object({
@@ -2528,6 +2561,7 @@ export const endpoints = defineEndpoints({
     path: "/official/offers",
     auth: "staff",
     permission: "offers.official.manage",
+    scope: "staff",
     summary: "Create an Official Store offer linked to a company stock item",
     body: () => OfficialOfferInput,
     response: () => OfferAdminDetail,
@@ -2544,6 +2578,7 @@ export const endpoints = defineEndpoints({
     path: "/official/offers/{id}",
     auth: "staff",
     permission: "offers.official.manage",
+    scope: "staff",
     summary: "Edit Official Store offer terms (not price; use price changes)",
     params: () =>
       z.object({
@@ -2564,6 +2599,7 @@ export const endpoints = defineEndpoints({
     path: "/official/offers/{id}/publish",
     auth: "staff",
     permission: "offers.official.manage",
+    scope: "staff",
     summary: "Publish an Official Store offer",
     params: () =>
       z.object({
@@ -2583,6 +2619,7 @@ export const endpoints = defineEndpoints({
     path: "/official/offers/{id}/pause",
     auth: "staff",
     permission: "offers.official.manage",
+    scope: "staff",
     summary: "Hide an Official Store offer",
     params: () =>
       z.object({
@@ -2605,6 +2642,7 @@ export const endpoints = defineEndpoints({
     path: "/official/offers/{id}/resume",
     auth: "staff",
     permission: "offers.official.manage",
+    scope: "staff",
     summary: "Show a hidden Official Store offer again",
     params: () =>
       z.object({
@@ -2624,6 +2662,7 @@ export const endpoints = defineEndpoints({
     path: "/official/offers/{id}/price-changes",
     auth: "staff",
     permission: "offers.official.price",
+    scope: "staff",
     summary: "Change an Official Store price (now or scheduled) with a reason",
     desc: "Response shows margin before and after (from inventory unit cost) and other offers on the product. Within the caller's price-change limit the change is applied or scheduled; above it, it becomes an approval request in access and is applied only after approval. New price applies to new orders only; open carts see the change before checkout.",
     params: () =>
@@ -2646,6 +2685,7 @@ export const endpoints = defineEndpoints({
     path: "/price-changes",
     auth: "staff",
     permission: "offers.official.price",
+    scope: "staff",
     summary: "Pending, scheduled and recent price changes",
     query: () =>
       z.object({
@@ -2665,6 +2705,7 @@ export const endpoints = defineEndpoints({
     path: "/price-changes/{id}/cancel",
     auth: "staff",
     permission: "offers.official.price",
+    scope: "staff",
     summary: "Cancel a scheduled or pending price change",
     params: () =>
       z.object({
@@ -2686,6 +2727,7 @@ export const endpoints = defineEndpoints({
     path: "/official/bulk-updates",
     auth: "staff",
     permission: "offers.official.price",
+    scope: "staff",
     summary: "Upload an Official Store price file for preview",
     desc: "Quantities are not accepted here; company stock changes go through inventory adjustments.",
     body: () => z.object({
@@ -2705,6 +2747,7 @@ export const endpoints = defineEndpoints({
     path: "/official/bulk-updates/{id}",
     auth: "staff",
     permission: "offers.official.price",
+    scope: "staff",
     summary: "Official Store bulk job state and totals",
     params: () =>
       z.object({
@@ -2721,6 +2764,7 @@ export const endpoints = defineEndpoints({
     path: "/official/bulk-updates/{id}/rows",
     auth: "staff",
     permission: "offers.official.price",
+    scope: "staff",
     summary: "Official Store bulk preview rows",
     params: () =>
       z.object({
@@ -2742,6 +2786,7 @@ export const endpoints = defineEndpoints({
     path: "/official/bulk-updates/{id}/apply",
     auth: "staff",
     permission: "offers.official.price",
+    scope: "staff",
     summary: "Apply valid rows; rows above the price-change limit become approval requests",
     params: () =>
       z.object({
@@ -2762,6 +2807,7 @@ export const endpoints = defineEndpoints({
     path: "/featured-rule",
     auth: "staff",
     permission: "offers.offers.view",
+    scope: "staff",
     summary: "Current, scheduled and past versions of the featured-offer rule",
     response: () => z.object({
       get current() {
@@ -2784,6 +2830,7 @@ export const endpoints = defineEndpoints({
     path: "/featured-rule/versions",
     auth: "staff",
     permission: "offers.featured-rule.manage",
+    scope: "staff",
     summary: "Publish a new version of the featured-offer rule with an effective date",
     desc: "The previous version stays in force until effectiveFrom. All featured decisions are recomputed when it takes effect.",
     body: () => FeaturedRuleInput,
@@ -2800,6 +2847,7 @@ export const endpoints = defineEndpoints({
     path: "/products/{productId}/featured-decision",
     auth: "staff",
     permission: "offers.offers.view",
+    scope: "staff",
     summary: "Why an offer is (or is not) featured for a variant and location",
     params: () =>
       z.object({
@@ -2822,6 +2870,7 @@ export const endpoints = defineEndpoints({
     path: "/featured-decisions/recompute",
     auth: "staff",
     permission: "offers.featured-rule.manage",
+    scope: "staff",
     summary: "Recompute featured decisions for a product (or everything)",
     body: () => z.object({
       productId: z.uuid().nullish(),
@@ -3764,6 +3813,14 @@ export const spec = defineModuleSpec({
         "type": "text",
         "nullable": true
       }
+    }
+  },
+  tenantTables: {
+    "offers": {
+      "seller": "seller_id"
+    },
+    "bulk_update_jobs": {
+      "seller": "seller_id"
     }
   },
   endpoints,

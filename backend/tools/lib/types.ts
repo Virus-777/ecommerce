@@ -20,6 +20,8 @@ export interface Parsed {
   node: Node;
   optional: boolean;
   desc?: string;
+  /** Sensitive field: masked for staff and sellers without the permission */
+  sensitive?: { permission: string; mask: string };
 }
 
 /** Spec primitive → TypeScript type, Zod schema, and Zod schema in a query string (where values arrive as text) */
@@ -37,6 +39,10 @@ const PRIM: Record<string, { ts: string; zod: string; query?: string }> = {
   datetime: { ts: 'string', zod: 'z.iso.datetime({ offset: true })' },
 };
 
+/** A field descriptor { type, desc?, permission?, mask? }, as opposed to an object with a field named "type" */
+const DESCRIPTOR_KEYS = new Set(['type', 'desc', 'permission', 'mask']);
+const isDescriptor = (e: object): boolean => typeof (e as { type?: unknown }).type === 'string' && Object.keys(e).every((k) => DESCRIPTOR_KEYS.has(k));
+
 export class TypeContext {
   /** Other spec files this module's generated file must import (module names), plus 'common'. */
   readonly imports = new Set<string>();
@@ -51,10 +57,10 @@ export class TypeContext {
 
   parse(expr: TypeExpr, where: string): Parsed {
     if (expr && typeof expr === 'object' && !Array.isArray(expr)) {
-      if (typeof (expr as { type?: unknown }).type === 'string') {
-        const e = expr as { type: string; desc?: string };
+      if (isDescriptor(expr)) {
+        const e = expr as { type: string; desc?: string; permission?: string; mask?: string };
         const p = this.parse(e.type, where);
-        return { ...p, desc: e.desc ?? p.desc };
+        return { ...p, desc: e.desc ?? p.desc, ...(e.permission ? { sensitive: { permission: e.permission, mask: e.mask ?? 'hide' } } : {}) };
       }
       return { node: this.object(expr as ObjectExpr, where), optional: false };
     }

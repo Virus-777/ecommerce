@@ -21,7 +21,7 @@ Marketly uses **REST for everything** and adds **GraphQL for reading screens who
 | `POST /graphql/seller` | `schema.seller.graphql` | Seller members (Seller Center); every field is limited to the caller's own seller account |
 | `POST /graphql/admin` | `schema.admin.graphql` | Staff (Admin Center + Operations); permissioned fields check role permissions |
 
-Same sessions and headers as REST (`Authorization`, `X-Guest-Session`). A type or field appears in a schema only if its `@areas` includes that area, so the seller schema cannot even describe admin data.
+Same tokens and headers as REST: every request carries `Authorization: Bearer` (a visitor token before sign-in). A type or field appears in a schema only if its `@areas` includes that area, so the seller schema cannot even describe admin data.
 
 ## Modular schema (fits add / remove modules)
 

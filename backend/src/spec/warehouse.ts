@@ -989,6 +989,7 @@ export const endpoints = defineEndpoints({
     path: "/summary",
     auth: "staff",
     permission: "warehouse.view",
+    scope: "staff",
     summary: "Today's work: to pick, to pack, on hold, at risk, put-away and return parcels",
     query: () =>
       z.object({
@@ -1005,6 +1006,7 @@ export const endpoints = defineEndpoints({
     path: "/scan",
     auth: "staff",
     permission: "warehouse.view",
+    scope: "staff",
     summary: "Resolve a scanned barcode (bin, item, order, package or return label)",
     query: () =>
       z.object({
@@ -1023,6 +1025,7 @@ export const endpoints = defineEndpoints({
     path: "/bins",
     auth: "staff",
     permission: "warehouse.view",
+    scope: "staff",
     summary: "Bins with their kind and assigned items",
     query: () =>
       z.object({
@@ -1043,6 +1046,7 @@ export const endpoints = defineEndpoints({
     path: "/bins",
     auth: "staff",
     permission: "warehouse.bins.manage",
+    scope: "staff",
     summary: "Create bins (one or a list of codes)",
     body: () => z.object({
       locationId: z.uuid(),
@@ -1062,6 +1066,7 @@ export const endpoints = defineEndpoints({
     path: "/bins/{id}",
     auth: "staff",
     permission: "warehouse.bins.manage",
+    scope: "staff",
     summary: "Change kind or deactivate a bin",
     params: () =>
       z.object({
@@ -1083,6 +1088,7 @@ export const endpoints = defineEndpoints({
     path: "/stock-items/{stockItemId}/bins",
     auth: "staff",
     permission: "warehouse.bins.manage",
+    scope: "staff",
     summary: "Set the bins a company stock item is stored in (one primary)",
     params: () =>
       z.object({
@@ -1106,6 +1112,7 @@ export const endpoints = defineEndpoints({
     path: "/fulfillments",
     auth: "staff",
     permission: "warehouse.view",
+    scope: "staff",
     summary: "Official Store orders to pick and pack, most urgent first",
     query: () =>
       z.object({
@@ -1126,6 +1133,7 @@ export const endpoints = defineEndpoints({
     path: "/fulfillments/{id}",
     auth: "staff",
     permission: "warehouse.view",
+    scope: "staff",
     summary: "One fulfillment with lines, bins, packages, hold reason and mixed-order note",
     params: () =>
       z.object({
@@ -1142,6 +1150,7 @@ export const endpoints = defineEndpoints({
     path: "/waves",
     auth: "staff",
     permission: "warehouse.waves.manage",
+    scope: "staff",
     summary: "Create a pick wave (given orders, or all awaiting pick due before the carrier pickup)",
     body: () => z.object({
       locationId: z.uuid(),
@@ -1160,6 +1169,7 @@ export const endpoints = defineEndpoints({
     path: "/waves",
     auth: "staff",
     permission: "warehouse.view",
+    scope: "staff",
     summary: "Pick waves",
     query: () =>
       z.object({
@@ -1178,6 +1188,7 @@ export const endpoints = defineEndpoints({
     path: "/waves/{id}",
     auth: "staff",
     permission: "warehouse.view",
+    scope: "staff",
     summary: "Pick list grouped by order with bins in walking order, progress and next bin",
     params: () =>
       z.object({
@@ -1194,6 +1205,7 @@ export const endpoints = defineEndpoints({
     path: "/waves/{id}/start",
     auth: "staff",
     permission: "warehouse.picking.perform",
+    scope: "staff",
     summary: "Start picking a wave",
     params: () =>
       z.object({
@@ -1212,6 +1224,7 @@ export const endpoints = defineEndpoints({
     path: "/pick-lines/{id}/pick",
     auth: "staff",
     permission: "warehouse.picking.perform",
+    scope: "staff",
     summary: "Confirm a pick by scanning the bin and the item",
     params: () =>
       z.object({
@@ -1231,6 +1244,7 @@ export const endpoints = defineEndpoints({
     path: "/pick-lines/{id}/report-shortage",
     auth: "staff",
     permission: "warehouse.picking.perform",
+    scope: "staff",
     summary: "Report a bin shortage; the order is held (not packed partly) and Inventory is asked to resolve it",
     params: () =>
       z.object({
@@ -1250,6 +1264,7 @@ export const endpoints = defineEndpoints({
     path: "/fulfillments/{id}/report-damage",
     auth: "staff",
     permission: "warehouse.picking.perform",
+    scope: "staff",
     summary: "Report a damaged item at pick or pack (photos required)",
     params: () =>
       z.object({
@@ -1269,6 +1284,7 @@ export const endpoints = defineEndpoints({
     path: "/fulfillments/{id}/resume",
     auth: "staff",
     permission: "warehouse.waves.manage",
+    scope: "staff",
     summary: "Resume a held fulfillment after the shortage or damage is resolved",
     params: () =>
       z.object({
@@ -1290,6 +1306,7 @@ export const endpoints = defineEndpoints({
     path: "/box-types",
     auth: "staff",
     permission: "warehouse.view",
+    scope: "staff",
     summary: "Box and mailer sizes for packing",
     response: () => z.array(BoxType),
     status: 200,
@@ -1302,6 +1319,7 @@ export const endpoints = defineEndpoints({
     path: "/box-types",
     auth: "staff",
     permission: "warehouse.settings.manage",
+    scope: "staff",
     summary: "Replace the list of box and mailer sizes",
     body: () => z.object({
       get boxTypes() {
@@ -1319,6 +1337,7 @@ export const endpoints = defineEndpoints({
     path: "/fulfillments/{id}/packages",
     auth: "staff",
     permission: "warehouse.packing.perform",
+    scope: "staff",
     summary: "Open a package at a packing station (defaults to all picked items)",
     params: () =>
       z.object({
@@ -1341,6 +1360,7 @@ export const endpoints = defineEndpoints({
     path: "/packages/{id}/scan",
     auth: "staff",
     permission: "warehouse.packing.perform",
+    scope: "staff",
     summary: "Scan an item into the package checklist",
     params: () =>
       z.object({
@@ -1362,6 +1382,7 @@ export const endpoints = defineEndpoints({
     path: "/packages/{id}",
     auth: "staff",
     permission: "warehouse.packing.perform",
+    scope: "staff",
     summary: "Set box, dimensions, weight (from scale), fragile note and service",
     params: () =>
       z.object({
@@ -1380,6 +1401,7 @@ export const endpoints = defineEndpoints({
     path: "/packages/{id}/label",
     auth: "staff",
     permission: "warehouse.packing.perform",
+    scope: "staff",
     summary: "Buy the carrier label through shipping (service matching the customer's delivery choice)",
     desc: "Buys postage, so an Idempotency-Key is required; a retry returns the same label.",
     params: () =>
@@ -1403,6 +1425,7 @@ export const endpoints = defineEndpoints({
     path: "/packages/{id}/void-label",
     auth: "staff",
     permission: "warehouse.packing.perform",
+    scope: "staff",
     summary: "Void the label (e.g. wrong service) before the package is packed",
     params: () =>
       z.object({
@@ -1424,6 +1447,7 @@ export const endpoints = defineEndpoints({
     path: "/packages/{id}/label",
     auth: "staff",
     permission: "warehouse.packing.perform",
+    scope: "staff",
     summary: "Reprint the current label",
     params: () =>
       z.object({
@@ -1441,6 +1465,7 @@ export const endpoints = defineEndpoints({
     path: "/packages/{id}/service-options",
     auth: "staff",
     permission: "warehouse.packing.perform",
+    scope: "staff",
     summary: "Carrier services for this package with arrival dates and whether each keeps the customer's promise",
     desc: "From shipping.quoteLabelOptions with the package's parcel (box, weight), the fulfillment's destination and the customer's promised arrival range. The customer's chosen service is listed first; faster services that also keep the promise can be chosen, slower ones are shown disabled.",
     params: () =>
@@ -1459,6 +1484,7 @@ export const endpoints = defineEndpoints({
     path: "/packages/{id}/packing-slip",
     auth: "staff",
     permission: "warehouse.packing.perform",
+    scope: "staff",
     summary: "Packing slip listing only this seller group's items, package n of N, returns note",
     params: () =>
       z.object({
@@ -1475,6 +1501,7 @@ export const endpoints = defineEndpoints({
     path: "/packages/{id}/pack",
     auth: "staff",
     permission: "warehouse.packing.perform",
+    scope: "staff",
     summary: "Mark the package packed and hand it to shipping for carrier pickup",
     params: () =>
       z.object({
@@ -1493,6 +1520,7 @@ export const endpoints = defineEndpoints({
     path: "/putaway-tasks",
     auth: "staff",
     permission: "warehouse.view",
+    scope: "staff",
     summary: "Received units to put away, with suggested bins",
     query: () =>
       z.object({
@@ -1511,6 +1539,7 @@ export const endpoints = defineEndpoints({
     path: "/putaway-tasks/labels",
     auth: "staff",
     permission: "warehouse.view",
+    scope: "staff",
     summary: "Printable item and put-away labels for a receipt's units (SKU barcode, label, suggested bin, quantity)",
     desc: "One label per put-away task (or per unit with perUnit=true) for the receipt being received; format zpl for thermal printers, pdf otherwise. Reprinting is allowed; nothing changes state.",
     query: () =>
@@ -1532,6 +1561,7 @@ export const endpoints = defineEndpoints({
     path: "/putaway-tasks/{id}/complete",
     auth: "staff",
     permission: "warehouse.putaway.perform",
+    scope: "staff",
     summary: "Confirm put-away by scanning the bin",
     params: () =>
       z.object({
@@ -1554,6 +1584,7 @@ export const endpoints = defineEndpoints({
     path: "/return-parcels",
     auth: "staff",
     permission: "warehouse.view",
+    scope: "staff",
     summary: "Return parcels expected, received and handed over",
     query: () =>
       z.object({
@@ -1572,6 +1603,7 @@ export const endpoints = defineEndpoints({
     path: "/return-parcels",
     auth: "staff",
     permission: "warehouse.returns.receive",
+    scope: "staff",
     summary: "Receive a return parcel at the warehouse (scan the return label or reference)",
     desc: "Matches an expected parcel and calls returns.recordWarehouseReceipt (returns then publishes returns.return.received); otherwise records an unexpected parcel and alerts support.",
     body: () => ReceiveParcelInput,
@@ -1588,6 +1620,7 @@ export const endpoints = defineEndpoints({
     path: "/return-parcels/{id}/hand-over",
     auth: "staff",
     permission: "warehouse.returns.receive",
+    scope: "staff",
     summary: "Hand a received parcel to returns inspection",
     params: () =>
       z.object({
@@ -2403,6 +2436,7 @@ export const spec = defineModuleSpec({
       }
     }
   },
+  tenantTables: {},
   endpoints,
 });
 

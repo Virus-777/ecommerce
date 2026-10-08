@@ -47,10 +47,10 @@ The customer side of an account: profile, saved addresses, marketing consent, re
 | POST | `/api/store/customers/data-requests/exports` | Request a copy of my data | customer | `DataRequest` |
 | GET | `/api/store/customers/data-requests` | My export and closure requests | customer | `DataRequest[]` |
 | GET | `/api/store/customers/closure-eligibility` | Can I close my account now, and what blocks it | customer | `ClosureEligibility` |
-| POST | `/api/store/customers/data-requests/closure` | Request account closure | customer | `{ reauthToken: string, reason: text? }` → `DataRequest` |
+| POST | `/api/store/customers/data-requests/closure` | Request account closure _(step-up: reauth)_ | customer | `{ reauthToken: string, reason: text? }` → `DataRequest` |
 | POST | `/api/store/customers/data-requests/{id}/cancel` | Cancel a pending closure or export request | customer | `DataRequest` |
 | POST | `/api/store/customers/guest-orders/lookup` | Find a guest order by reference and checkout email | shopper | `{ orderRef: string, email: email }` → `GuestOrderAccess` |
-| POST | `/api/store/customers/guest-orders/links` | Email fresh links to every guest order placed with this email | anyone | `{ email: email }` → 204 No content |
+| POST | `/api/store/customers/guest-orders/links` | Email fresh links to every guest order placed with this email | visitor | `{ email: email }` → 204 No content |
 
 ## Admin API
 
@@ -71,7 +71,7 @@ The customer side of an account: profile, saved addresses, marketing consent, re
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| POST | `/api/public/customers/unsubscribe` | One-click stop of promotional messages from an email or SMS link | anyone | `{ token: string, channel: enum(email|sms|push|all)? }` → `MarketingPreferences` |
+| POST | `/api/public/customers/unsubscribe` | One-click stop of promotional messages from an email or SMS link | visitor | `{ token: string, channel: enum(email|sms|push|all)? }` → `MarketingPreferences` |
 
 ## Types
 

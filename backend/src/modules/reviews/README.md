@@ -28,16 +28,16 @@ Product reviews (Verified Purchase), seller feedback kept separate from product 
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| GET | `/api/store/reviews/products/{productId}/reviews` | Published product reviews with filters and sorting | anyone | Page<ProductReview> |
-| GET | `/api/store/reviews/products/{productId}/rating-summary` | Average, count, distribution and answered questions (honest no-reviews state) | anyone | `RatingSummary` |
-| GET | `/api/store/reviews/rating-summaries` | Ratings for several products (cards) | anyone | `RatingSummary[]` |
-| GET | `/api/store/reviews/products/{productId}/questions` | Questions with answers labelled Seller, Marketly staff or Customer | anyone | Page<Question> |
+| GET | `/api/store/reviews/products/{productId}/reviews` | Published product reviews with filters and sorting | visitor | Page<ProductReview> |
+| GET | `/api/store/reviews/products/{productId}/rating-summary` | Average, count, distribution and answered questions (honest no-reviews state) | visitor | `RatingSummary` |
+| GET | `/api/store/reviews/rating-summaries` | Ratings for several products (cards) | visitor | `RatingSummary[]` |
+| GET | `/api/store/reviews/products/{productId}/questions` | Questions with answers labelled Seller, Marketly staff or Customer | visitor | Page<Question> |
 | POST | `/api/store/reviews/products/{productId}/questions` | Ask a question about the product | customer | `{ text: text }` → `Question` |
 | POST | `/api/store/reviews/questions/{id}/answers` | Answer another shopper's question (labelled Customer) | customer | `{ text: text }` → `Answer` |
 | POST | `/api/store/reviews/votes` | Mark a review or answer helpful (or undo) | customer | `{ targetType: enum(product_review|answer), targetId: uuid, helpful: bool }` → `{ helpfulCount: int }` |
 | POST | `/api/store/reviews/reports` | Report a review, feedback, question, answer or seller response | customer | `ReportInput` → `MyReport` |
-| GET | `/api/store/reviews/sellers/{sellerId}/feedback` | Seller feedback with public seller responses | anyone | Page<SellerFeedback> |
-| GET | `/api/store/reviews/sellers/{sellerId}/feedback-summary` | Positive percentage and count over 12 months | anyone | `SellerFeedbackSummary` |
+| GET | `/api/store/reviews/sellers/{sellerId}/feedback` | Seller feedback with public seller responses | visitor | Page<SellerFeedback> |
+| GET | `/api/store/reviews/sellers/{sellerId}/feedback-summary` | Positive percentage and count over 12 months | visitor | `SellerFeedbackSummary` |
 | GET | `/api/store/reviews/me/pending` | Delivered purchases waiting for a review and packages waiting for seller feedback | customer | `PendingReviews` |
 | GET | `/api/store/reviews/me/review-context/{orderItemId}` | Everything the write-a-review page needs: product, Verified Purchase, seller, existing review and feedback, guidelines | customer | `ReviewContext` |
 | GET | `/api/store/reviews/me/reviews` | My product reviews with status and moderation outcomes | customer | Page<MyReview> |

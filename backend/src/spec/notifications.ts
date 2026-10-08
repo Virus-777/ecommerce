@@ -1317,6 +1317,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/inbox",
     auth: "customer",
+    scope: "own-customer",
     summary: "Customer notifications",
     desc: "Newest first; essential and promotional notices come in separate groups. Each notice links to its order, return or case.",
     query: () =>
@@ -1335,6 +1336,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/inbox/summary",
     auth: "customer",
+    scope: "own-customer",
     summary: "Unread badge and counts per group",
     response: () => InboxSummary,
     status: 200,
@@ -1346,6 +1348,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/inbox/{id}/read",
     auth: "customer",
+    scope: "own-customer",
     summary: "Mark one notice as read",
     params: () =>
       z.object({
@@ -1361,6 +1364,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/inbox/read-all",
     auth: "customer",
+    scope: "own-customer",
     summary: "Mark all (or one group) as read",
     body: () => z.object({
       group: z.string().nullish(),
@@ -1377,6 +1381,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/preferences",
     auth: "customer",
+    scope: "own-customer",
     summary: "What we send and where to change it",
     desc: "Essential notices are always on; promotional consent is changed through customers (PromotionalPointer); push settings per Android device from phase 3.",
     response: () => CustomerNotificationPreferences,
@@ -1389,6 +1394,7 @@ export const endpoints = defineEndpoints({
     method: "PUT",
     path: "/preferences/push",
     auth: "customer",
+    scope: "own-customer",
     summary: "Turn order-update push notices on or off",
     body: () => z.object({
       orderUpdates: z.boolean(),
@@ -1403,6 +1409,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/push-devices",
     auth: "customer",
+    scope: "own-customer",
     summary: "Register the Android app for push notices",
     desc: "Upsert by installationId; a token moving to another account is reassigned.",
     body: () => PushDeviceInput,
@@ -1415,6 +1422,7 @@ export const endpoints = defineEndpoints({
     method: "DELETE",
     path: "/push-devices/{id}",
     auth: "customer",
+    scope: "own-customer",
     summary: "Stop push notices on a device (sign-out)",
     params: () =>
       z.object({
@@ -1429,6 +1437,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/inbox",
     auth: "seller",
+    scope: "own-seller",
     summary: "Seller workspace notifications",
     desc: "Only topics the member may see (permission) and has not turned off; owner-only topics (payouts and holds) only for the owner.",
     query: () =>
@@ -1448,6 +1457,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/inbox/summary",
     auth: "seller",
+    scope: "own-seller",
     summary: "Unread, needs action (sorted by deadline)",
     response: () => InboxSummary,
     status: 200,
@@ -1459,6 +1469,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/inbox/{id}/read",
     auth: "seller",
+    scope: "own-seller",
     summary: "Mark one notice as read (for me)",
     params: () =>
       z.object({
@@ -1474,6 +1485,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/inbox/read-all",
     auth: "seller",
+    scope: "own-seller",
     summary: "Mark all as read (for me)",
     body: () => z.object({
       group: z.string().nullish(),
@@ -1490,6 +1502,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/preferences",
     auth: "seller",
+    scope: "own-seller",
     summary: "Who hears about what (all members)",
     response: () => SellerPreferences,
     status: 200,
@@ -1501,6 +1514,8 @@ export const endpoints = defineEndpoints({
     method: "PUT",
     path: "/preferences/members/{memberId}",
     auth: "seller",
+    permissionWhen: [{"if":{"params.memberId":"!self-member"},"permission":"notifications.preferences.manage"}],
+    scope: "own-member",
     summary: "Set one member's topics and channel",
     desc: "The owner (notifications.preferences.manage) sets anyone's; members may change their own channel and non-essential groups. Essential groups stay on for the owner; owner-only groups cannot be given to staff.",
     params: () =>
@@ -1520,6 +1535,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/push-devices",
     auth: "seller",
+    scope: "own-seller",
     summary: "Register the Android app for seller push notices",
     body: () => PushDeviceInput,
     response: () => PushDevice,
@@ -1531,6 +1547,7 @@ export const endpoints = defineEndpoints({
     method: "DELETE",
     path: "/push-devices/{id}",
     auth: "seller",
+    scope: "own-seller",
     summary: "Stop seller push notices on a device",
     params: () =>
       z.object({
@@ -1545,6 +1562,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/inbox",
     auth: "staff",
+    scope: "staff",
     summary: "My staff notices (routed by role, including roles I cover as backup)",
     query: () =>
       z.object({
@@ -1563,6 +1581,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/inbox/summary",
     auth: "staff",
+    scope: "staff",
     summary: "Counts and today's routing for my roles",
     response: () => StaffInboxSummary,
     status: 200,
@@ -1574,6 +1593,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/inbox/{id}/read",
     auth: "staff",
+    scope: "staff",
     summary: "Mark one notice as read (for me)",
     params: () =>
       z.object({
@@ -1589,6 +1609,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/inbox/read-all",
     auth: "staff",
+    scope: "staff",
     summary: "Mark all as read (for me)",
     body: () => z.object({
       area: z.string().nullish(),
@@ -1605,6 +1626,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/my-preferences",
     auth: "staff",
+    scope: "staff",
     summary: "My email preferences for staff notices",
     response: () => StaffPreferences,
     status: 200,
@@ -1616,6 +1638,7 @@ export const endpoints = defineEndpoints({
     method: "PUT",
     path: "/my-preferences",
     auth: "staff",
+    scope: "staff",
     summary: "Change my email preferences",
     desc: "In-app is always on. Urgent topics (overdue, failed payouts, integrity alerts) are emailed regardless of the digest.",
     body: () => z.object({
@@ -1634,6 +1657,7 @@ export const endpoints = defineEndpoints({
     path: "/topics",
     auth: "staff",
     permission: "notifications.templates.view",
+    scope: "staff",
     summary: "Audience × event × channel matrix with delivery stats",
     response: () => TopicMatrix,
     status: 200,
@@ -1646,6 +1670,7 @@ export const endpoints = defineEndpoints({
     path: "/topics/{key}/channels",
     auth: "staff",
     permission: "notifications.routing.manage",
+    scope: "staff",
     summary: "Turn channels on or off for a topic",
     desc: "In-app cannot be turned off for essential topics; channels before their phase are unavailable.",
     params: () =>
@@ -1672,6 +1697,7 @@ export const endpoints = defineEndpoints({
     path: "/templates",
     auth: "staff",
     permission: "notifications.templates.view",
+    scope: "staff",
     summary: "Templates",
     query: () =>
       z.object({
@@ -1693,6 +1719,7 @@ export const endpoints = defineEndpoints({
     path: "/templates/{id}",
     auth: "staff",
     permission: "notifications.templates.view",
+    scope: "staff",
     summary: "Template editor: topic, variables, live and draft versions, history",
     params: () =>
       z.object({
@@ -1709,6 +1736,7 @@ export const endpoints = defineEndpoints({
     path: "/templates/{id}/versions",
     auth: "staff",
     permission: "notifications.templates.edit",
+    scope: "staff",
     summary: "Start a draft (from the live version, or restore an older one)",
     params: () =>
       z.object({
@@ -1729,6 +1757,7 @@ export const endpoints = defineEndpoints({
     path: "/templates/{id}/versions/{versionId}",
     auth: "staff",
     permission: "notifications.templates.edit",
+    scope: "staff",
     summary: "Edit a draft (returns validation)",
     params: () =>
       z.object({
@@ -1753,6 +1782,7 @@ export const endpoints = defineEndpoints({
     path: "/templates/{id}/versions/{versionId}/preview",
     auth: "staff",
     permission: "notifications.templates.view",
+    scope: "staff",
     summary: "Render with sample or real data on desktop or phone",
     params: () =>
       z.object({
@@ -1775,6 +1805,7 @@ export const endpoints = defineEndpoints({
     path: "/templates/{id}/versions/{versionId}/test-send",
     auth: "staff",
     permission: "notifications.templates.edit",
+    scope: "staff",
     summary: "Send a test to my own email (or an allowed staff address)",
     params: () =>
       z.object({
@@ -1797,6 +1828,7 @@ export const endpoints = defineEndpoints({
     path: "/templates/{id}/versions/{versionId}/publish",
     auth: "staff",
     permission: "notifications.templates.publish",
+    scope: "staff",
     summary: "Publish a draft as the live version",
     params: () =>
       z.object({
@@ -1820,6 +1852,7 @@ export const endpoints = defineEndpoints({
     path: "/templates/{id}/versions/{versionId}/discard",
     auth: "staff",
     permission: "notifications.templates.edit",
+    scope: "staff",
     summary: "Discard a draft",
     params: () =>
       z.object({
@@ -1838,6 +1871,7 @@ export const endpoints = defineEndpoints({
     path: "/deliveries",
     auth: "staff",
     permission: "notifications.deliveries.view",
+    scope: "staff",
     summary: "Delivery log",
     query: () =>
       z.object({
@@ -1862,6 +1896,7 @@ export const endpoints = defineEndpoints({
     path: "/deliveries/{id}",
     auth: "staff",
     permission: "notifications.deliveries.view",
+    scope: "staff",
     summary: "One delivery with provider events",
     params: () =>
       z.object({
@@ -1878,6 +1913,7 @@ export const endpoints = defineEndpoints({
     path: "/deliveries/{id}/retry",
     auth: "staff",
     permission: "notifications.deliveries.retry",
+    scope: "staff",
     summary: "Retry a failed delivery",
     desc: "Not allowed for sensitive topics whose content expired (codes, reset links): the person must request a new one.",
     params: () =>
@@ -1900,6 +1936,7 @@ export const endpoints = defineEndpoints({
     path: "/stats",
     auth: "staff",
     permission: "notifications.templates.view",
+    scope: "staff",
     summary: "Delivery rate, bounces, failures, queue size",
     query: () =>
       z.object({
@@ -1916,6 +1953,7 @@ export const endpoints = defineEndpoints({
     path: "/suppressions",
     auth: "staff",
     permission: "notifications.suppressions.manage",
+    scope: "staff",
     summary: "Bounced, complained or blocked addresses",
     query: () =>
       z.object({
@@ -1937,6 +1975,7 @@ export const endpoints = defineEndpoints({
     path: "/suppressions/{id}/remove",
     auth: "staff",
     permission: "notifications.suppressions.manage",
+    scope: "staff",
     summary: "Allow sending again (address fixed or confirmed by the person)",
     params: () =>
       z.object({
@@ -1959,6 +1998,7 @@ export const endpoints = defineEndpoints({
     path: "/broadcasts",
     auth: "staff",
     permission: "notifications.broadcasts.manage",
+    scope: "staff",
     summary: "Promotional broadcasts",
     query: () =>
       z.object({
@@ -1977,6 +2017,7 @@ export const endpoints = defineEndpoints({
     path: "/broadcasts",
     auth: "staff",
     permission: "notifications.broadcasts.manage",
+    scope: "staff",
     summary: "Draft a broadcast to opted-in customers or sellers",
     desc: "Only promotional topics; the response estimates recipients after consent and suppressions.",
     body: () => BroadcastInput,
@@ -1992,6 +2033,7 @@ export const endpoints = defineEndpoints({
     path: "/broadcasts/{id}/schedule",
     auth: "staff",
     permission: "notifications.broadcasts.manage",
+    scope: "staff",
     summary: "Schedule a broadcast",
     params: () =>
       z.object({
@@ -2014,6 +2056,7 @@ export const endpoints = defineEndpoints({
     path: "/broadcasts/{id}/cancel",
     auth: "staff",
     permission: "notifications.broadcasts.manage",
+    scope: "staff",
     summary: "Cancel a draft or scheduled broadcast",
     params: () =>
       z.object({
@@ -2034,6 +2077,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/email-events",
     auth: "provider",
+    scope: "public",
     summary: "Delivery, bounce, complaint and open events from the email provider",
     desc: "Signature-verified; idempotent per providerEventId. Hard bounces and complaints add suppressions.",
     body: () => z.object({
@@ -2051,9 +2095,16 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/sms-events",
     auth: "provider",
+    scope: "public",
     summary: "SMS delivery receipts and STOP replies",
     desc: "STOP adds an SMS suppression and is forwarded to customers as an SMS promotions opt-out.",
-    body: () => z.enum(["delivered", "failed", "stop", "start"]),
+    body: () => z.object({
+      providerEventId: z.string(),
+      providerMessageId: z.string().nullish(),
+      type: z.enum(["delivered", "failed", "stop", "start"]),
+      phone: z.string(),
+      at: z.iso.datetime({ offset: true }),
+    }),
     response: null,
     status: 204,
     events: ["notifications.address.suppressed"],
@@ -2064,6 +2115,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/inbound-email",
     auth: "provider",
+    scope: "public",
     summary: "Replies to case and message emails",
     desc: "The reply-to address carries a signed token naming the module and record (case, conversation) and the recipient. Valid replies are published for support or messaging; attachments are stored through media. Unknown or expired tokens get an automatic 'please reply in your account' email.",
     body: () => InboundEmail,
@@ -3104,6 +3156,17 @@ export const spec = defineModuleSpec({
         "type": "timestamptz",
         "nullable": false
       }
+    }
+  },
+  tenantTables: {
+    "notices": {
+      "seller": "seller_id"
+    },
+    "member_preferences": {
+      "seller": "seller_id"
+    },
+    "push_devices": {
+      "seller": "seller_id"
     }
   },
   endpoints,

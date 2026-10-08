@@ -617,6 +617,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/conversations",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Inbox: conversations with sellers and Marketly support",
     query: () =>
       z.object({
@@ -635,6 +636,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/conversations/{id}",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Conversation header: counterparty, response time, linked order or item and its status",
     params: () =>
       z.object({
@@ -651,6 +653,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/conversations/{id}/messages",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Messages, newest first (cursor for older)",
     params: () =>
       z.object({
@@ -667,6 +670,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/conversations",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Message a seller or Marketly support about an order, item or return",
     desc: "Reuses the existing conversation for the same subject and appends the message.",
     body: () => StartConversationInput,
@@ -689,6 +693,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/conversations/{id}/messages",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Send a message with optional photos or files",
     params: () =>
       z.object({
@@ -707,6 +712,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/conversations/{id}/read",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Mark messages read up to a message",
     params: () =>
       z.object({
@@ -725,6 +731,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/unread-count",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Unread conversations for the header and account menu",
     response: () => z.object({
       conversations: z.number().int(),
@@ -739,6 +746,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/messages/{id}/report",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Report an abusive, promotional or off-platform message",
     params: () =>
       z.object({
@@ -763,6 +771,7 @@ export const endpoints = defineEndpoints({
     path: "/conversations",
     auth: "seller",
     permission: "messaging.conversations.reply",
+    scope: "own-seller",
     summary: "Order messages with reply deadlines; overdue first",
     query: () =>
       z.object({
@@ -782,6 +791,7 @@ export const endpoints = defineEndpoints({
     path: "/conversations/{id}",
     auth: "seller",
     permission: "messaging.conversations.reply",
+    scope: "own-seller",
     summary: "Conversation with order status and dispatch warning",
     params: () =>
       z.object({
@@ -798,6 +808,7 @@ export const endpoints = defineEndpoints({
     path: "/conversations/{id}/messages",
     auth: "seller",
     permission: "messaging.conversations.reply",
+    scope: "own-seller",
     summary: "Messages, newest first",
     params: () =>
       z.object({
@@ -815,6 +826,7 @@ export const endpoints = defineEndpoints({
     path: "/conversations",
     auth: "seller",
     permission: "messaging.conversations.reply",
+    scope: "own-seller",
     summary: "Message the buyer of one of the seller's orders",
     body: () => SellerStartInput,
     response: () => z.object({
@@ -837,6 +849,7 @@ export const endpoints = defineEndpoints({
     path: "/conversations/{id}/messages",
     auth: "seller",
     permission: "messaging.conversations.reply",
+    scope: "own-seller",
     summary: "Reply to the buyer",
     desc: "Service messages only; promotional content is not allowed and can be reported.",
     params: () =>
@@ -857,6 +870,7 @@ export const endpoints = defineEndpoints({
     path: "/conversations/{id}/read",
     auth: "seller",
     permission: "messaging.conversations.reply",
+    scope: "own-seller",
     summary: "Mark read",
     params: () =>
       z.object({
@@ -875,6 +889,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/response-stats",
     auth: "seller",
+    scope: "own-seller",
     summary: "Reply target, average reply time this month, awaiting and overdue counts",
     response: () => ResponseStats,
     status: 200,
@@ -887,6 +902,7 @@ export const endpoints = defineEndpoints({
     path: "/messages/{id}/report",
     auth: "seller",
     permission: "messaging.conversations.reply",
+    scope: "own-seller",
     summary: "Report an abusive buyer message",
     params: () =>
       z.object({
@@ -911,6 +927,7 @@ export const endpoints = defineEndpoints({
     path: "/templates",
     auth: "seller",
     permission: "messaging.conversations.reply",
+    scope: "own-seller",
     summary: "Reply templates",
     response: () => z.array(ReplyTemplate),
     status: 200,
@@ -923,6 +940,7 @@ export const endpoints = defineEndpoints({
     path: "/templates",
     auth: "seller",
     permission: "messaging.conversations.reply",
+    scope: "own-seller",
     summary: "Create a reply template",
     body: () => ReplyTemplateInput,
     response: () => ReplyTemplate,
@@ -936,6 +954,7 @@ export const endpoints = defineEndpoints({
     path: "/templates/{id}",
     auth: "seller",
     permission: "messaging.conversations.reply",
+    scope: "own-seller",
     summary: "Edit a reply template",
     params: () =>
       z.object({
@@ -953,6 +972,7 @@ export const endpoints = defineEndpoints({
     path: "/templates/{id}",
     auth: "seller",
     permission: "messaging.conversations.reply",
+    scope: "own-seller",
     summary: "Delete a reply template",
     params: () =>
       z.object({
@@ -969,6 +989,7 @@ export const endpoints = defineEndpoints({
     path: "/conversations",
     auth: "staff",
     permission: "messaging.conversations.read",
+    scope: "staff",
     summary: "Find conversations by order, customer or seller",
     desc: "Returns headers only; reading messages is a separate, logged call.",
     query: () =>
@@ -991,6 +1012,7 @@ export const endpoints = defineEndpoints({
     path: "/conversations/{id}/messages",
     auth: "staff",
     permission: "messaging.conversations.read",
+    scope: "staff",
     summary: "Read a private conversation (reason required, logged)",
     params: () =>
       z.object({
@@ -1014,6 +1036,7 @@ export const endpoints = defineEndpoints({
     path: "/conversations",
     auth: "staff",
     permission: "messaging.conversations.participate",
+    scope: "staff",
     summary: "Start a Marketly staff conversation with a seller or seller applicant, optionally about an order, items or a return",
     desc: "Used by Message seller (admin/seller), Message applicant (admin/seller-application) and Contact seller (admin/order). Creates a staff_seller conversation shown to the seller in Seller Center messages with counterparty Marketly Support, or to the applicant on their account (sell/status) before approval. One open conversation per seller + subject: starting again appends to it. The customer is never a participant.",
     body: () => StaffStartInput,
@@ -1031,6 +1054,7 @@ export const endpoints = defineEndpoints({
     path: "/conversations/{id}/messages",
     auth: "staff",
     permission: "messaging.conversations.participate",
+    scope: "staff",
     summary: "Post as Marketly Support (joins the conversation)",
     params: () =>
       z.object({
@@ -1055,6 +1079,7 @@ export const endpoints = defineEndpoints({
     path: "/messages/{id}/hide",
     auth: "staff",
     permission: "messaging.conversations.moderate",
+    scope: "staff",
     summary: "Hide a message that breaks the rules",
     params: () =>
       z.object({
@@ -1075,6 +1100,7 @@ export const endpoints = defineEndpoints({
     path: "/conversations/{id}/lock",
     auth: "staff",
     permission: "messaging.conversations.moderate",
+    scope: "staff",
     summary: "Lock or unlock a conversation",
     params: () =>
       z.object({
@@ -1098,6 +1124,7 @@ export const endpoints = defineEndpoints({
     path: "/reports",
     auth: "staff",
     permission: "messaging.conversations.moderate",
+    scope: "staff",
     summary: "Reported messages",
     query: () =>
       z.object({
@@ -1115,6 +1142,7 @@ export const endpoints = defineEndpoints({
     path: "/reports/{id}/decide",
     auth: "staff",
     permission: "messaging.conversations.moderate",
+    scope: "staff",
     summary: "Action or dismiss a report",
     params: () =>
       z.object({
@@ -1137,6 +1165,7 @@ export const endpoints = defineEndpoints({
     path: "/sellers/{sellerId}/response-stats",
     auth: "staff",
     permission: "messaging.conversations.read",
+    scope: "staff",
     summary: "A seller's reply performance",
     params: () =>
       z.object({
@@ -1604,6 +1633,16 @@ export const spec = defineModuleSpec({
         "type": "timestamptz",
         "nullable": false
       }
+    }
+  },
+  tenantTables: {
+    "conversations": {
+      "seller": "seller_id",
+      "customer": "customer_id",
+      "visitor": "guest_session_id"
+    },
+    "reply_templates": {
+      "seller": "seller_id"
     }
   },
   endpoints,

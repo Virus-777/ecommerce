@@ -11,10 +11,10 @@ Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 33 modules, 
 
 | Area | Prefix | Who | Auth |
 |---|---|---|---|
-| Store API | `/api/store/{module}` | Customers and guests on the website and the Android app | Optional customer session (Bearer access token). Guests get a guest session for cart, checkout and guest order lookup. |
+| Store API | `/api/store/{module}` | Customers and guests on the website and the Android app | Every request carries a token: a visitor token (guests, issued when the app opens) or a customer access token. |
 | Seller API | `/api/seller/{module}` | Seller owners and seller staff in Seller Center (website + Android app) | Seller member session. Every request acts for one seller account; seller member permissions apply. |
 | Admin API | `/api/admin/{module}` | Internal staff in the Admin Center and Operations Center | Staff session. Role permissions and approval limits apply. |
-| Public API | `/api/public/{module}` | Anyone (sign-in, registration, public settings) | None |
+| Public API | `/api/public/{module}` | Anyone (sign-in, registration, public settings) | Visitor token of any app. Refresh and sign-out take the refresh token; the bootstrap endpoint takes an app proof. |
 | Webhooks | `/webhooks/{module}` | Payment, carrier and email providers | Provider signature header, verified per provider |
 
 ## Platform
@@ -105,7 +105,7 @@ Each module needs only modules in earlier layers (required dependencies; optiona
 | Code | Status | Meaning |
 |---|---|---|
 | `VALIDATION_FAILED` | 400 | Fields are missing or invalid. details.issues lists each field. |
-| `UNAUTHORIZED` | 401 | No session, or the wrong kind of session for this API area. |
+| `UNAUTHORIZED` | 401 | No token, or the token is invalid, expired or revoked. Only this error should trigger a token refresh (WWW-Authenticate: Bearer error="invalid_token"). |
 | `FORBIDDEN` | 403 | Signed in, but the role or seller permission does not allow this. details.permission names it. |
 | `NOT_FOUND` | 404 | The record does not exist or is not visible to this caller. |
 | `ILLEGAL_TRANSITION` | 409 | The status does not allow this action (e.g. approving a rejected product). details.from, details.event. |
@@ -114,13 +114,21 @@ Each module needs only modules in earlier layers (required dependencies; optiona
 | `IDEMPOTENCY_KEY_REUSED` | 422 | The Idempotency-Key was used with a different request body. |
 | `RATE_LIMITED` | 429 | Too many requests; retry after the Retry-After header. |
 | `NOT_IMPLEMENTED` | 501 | Planned for a later launch phase. |
+| `WRONG_AUDIENCE` | 403 | The token is for another app (store, Seller Center or Admin Center). |
+| `STEP_UP_REQUIRED` | 403 | A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose. |
+| `OWNER_ONLY` | 403 | Only the seller owner can do this. |
+| `NO_SELLER_ACCESS` | 403 | This account cannot act for that seller (or for any seller). |
+| `UPGRADE_REQUIRED` | 426 | This app version is no longer supported; update the app. |
+| `SERVICE_UNAVAILABLE` | 503 | A service needed to authorize the request is unavailable; retry later. |
 
 ## Headers
 
 | Header | Use |
 |---|---|
-| `Authorization` | Bearer <access token> (customer, seller member or staff session) |
-| `X-Guest-Session` | Guest session id for carts and guest checkout |
+| `Authorization` | Bearer <token> on every request: visitor token before sign-in, access token after (customer, seller member or staff) |
 | `Idempotency-Key` | Required on endpoints marked idempotent (orders, payments, refunds, payouts). Same key + same body returns the first result. |
 | `Accept-Language` | en-US (only locale at launch) |
 | `X-Request-Id` | Echoed back; include it when reporting problems |
+| `X-App-Proof` | Bootstrap only: Play Integrity token (Android) or bot-challenge token (website) |
+| `X-Step-Up-Code` | Current 2-step code for endpoints with stepUp kind "code" |
+| `X-Client` | web|android/<version>: analytics and minimum-version checks only, never trusted for authorization |

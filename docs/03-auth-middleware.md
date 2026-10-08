@@ -1,6 +1,6 @@
 # Authentication and authorization middleware per role
 
-Status: **design v3, for review.** Nothing in this document is built yet.
+Status: **v3, implemented in the kernel** (2026-10-09). The open decisions in §18 were taken with the recommended option; see "Decisions taken".
 
 v3 adds your rule: **every API endpoint requires a token, and tokens are verified in middleware** (§0). v2 still let 78 endpoints run without a token.
 
@@ -9,18 +9,7 @@ v1 was reviewed twice: a fact-check against every spec, and a security review. v
 - 2 critical gaps: record scope had no enforcement; development tokens were on everywhere;
 - 9 high-risk gaps: revocation across servers, token format, web token storage, guest sessions, step-up binding, field-level data, anonymous callers recorded as "system", secrets in URLs, role grants that carry authority.
 
-§16 lists every change.
-
-**Built today** in `backend/src/kernel/auth` and `kernel/http/register.ts`:
-- audience check;
-- optional tokens on `anyone` endpoints;
-- guest-session check;
-- seller context with member access and the owner rule;
-- staff permission check;
-- launch-phase gate;
-- Idempotency-Key.
-
-v2 changes several of these; see the "today" column in §3.
+§16 lists every change. §17 lists what is built and what still waits for the identity, access, sellers and customers modules.
 
 ## 0. Rule: every endpoint requires a token, verified in middleware
 
@@ -405,7 +394,26 @@ Every staff role also gets `workqueues.items.view` and `workqueues.items.work` f
 | Errors | 401 for everything | 401 only for token problems; 403 for audience, step-up, owner-only |
 | Facts | 6 errors | refund approval → Finance; `advertising.rules.change` → Business Owner; publication override is declared; Finance staff limits; seller closure needs re-auth; store `/reauth` is not exempt |
 
-## 17. What will be built (after approval)
+## 17. What is built
+
+**Built** (`backend/src/kernel/auth`, `kernel/http`), checked by `npm run check`:
+- `chain.ts`: app-level onRequest authenticates **every** URL (unknown URLs and GraphQL included: 401 before 404); per-endpoint hooks for phase gate, caller rate limit, audience, caller kind, seller context + member access, permission / OWNER_ONLY, staff 2-step, refresh token, webhook signature + replay record, rate-limit classes, `permissionWhen`, step-up;
+- `tokens.ts`: EdDSA JWT verify/sign, `AUTH_JWKS`, per-machine dev key (`kid dev-…`, `dev` claims honoured only on dev keys);
+- `revocation.ts`, `rate-limit.ts`, `app-proof.ts` (dev, Turnstile; Play Integrity pluggable), `scope.ts` (`input.scope`, `scoped()`), `masking.ts`, `authorities.ts` (answers from identity/access/sellers/customers public APIs, fail closed), `setup.ts`;
+- `http/security.ts`: CORS per area, preflight before auth, no-store, WWW-Authenticate only for token problems; health check moved to an internal port (`HEALTH_PORT`);
+- spec: the `auth`, `scope`, `stepUp`, `permissionWhen`, `sellerContext`, `rateLimit`, sensitive-field and tenant metadata, generated into `src/spec`.
+
+**Over real HTTP** (`npm run test:http`, part of `npm run check`): every endpoint is called on a listening server with spec-generated input, about 6,300 requests: no token → 401, invalid token / refresh token / signature / app proof → 401, another app's token → 403, wrong caller → 401, missing permission → 403, missing step-up proof → 403, right token → reaches the handler; plus unknown URLs, CORS preflight, GraphQL per area, /docs and the internal health port.
+
+**Tests built:** for every one of the 1,269 endpoints: no token → 401 (bootstrap → APP_PROOF_INVALID), another app's token → 403 WRONG_AUDIENCE, missing permission → 403 FORBIDDEN or OWNER_ONLY, right token → reaches the handler. Kernel tests: expired / foreign-key / tampered / malformed tokens, visitor vs customer, 2-step, `permissionWhen`, seller context, owner-only + re-auth, guest scope, app proof, refresh from cookie and body, webhooks without a verifier.
+
+**Waits for the modules** (the middleware already calls these public APIs; until they exist it fails closed):
+- identity: issue tokens and visitor tokens, `verifyRefreshToken`, `verifyReauthToken`/`consumeReauthToken`, `verifyStepUp`, `revocationsSince`;
+- access: `hasPermission` with the seed role sets (§14); sellers: `getMemberAccess`; customers: `getCustomerByUserId`;
+- each module: webhook verifiers, `scoped()` in repositories, and cross-tenant 404 tests once handlers exist;
+- deployment: Play Integrity verifier, a shared rate-limit store for more than one server.
+
+### Planned layout (v3 design, for reference)
 
 ```
 backend/src/kernel/auth/
@@ -439,7 +447,12 @@ backend/src/kernel/http/
 - webhook replay;
 - GraphQL admin fields without `@auth` fail the build.
 
-## 18. Decisions for you
+## 18. Decisions
+
+**Decisions taken** (recommended options): 1 all spec changes accepted; 2 seed sets kept as proposals until access is built; 3 "any active member" for seller reads; 4 rate limits as proposed; 5 fresh 2-step for sensitive staff actions; 6 deputy owner not built yet; 7 HttpOnly refresh cookie on the website; 8 provider signature as the webhook token; 9 no service token (pure browser app); 10 Play Integrity + Turnstile; 11 unsubscribe through the link in the message.
+
+The questions as asked:
+
 
 1. **Spec changes (§15).** Accept them all, or name the ones to drop. Items 1–5 and 9 are small. Items 6, 10 and 11 (scope, field masking, viewer) touch every module spec.
 2. **Seed role permissions (§14).** Confirm, or mark rows to change. Refund approval now sits with Finance, not Returns.

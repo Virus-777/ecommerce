@@ -2281,6 +2281,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/deals",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Deals page: flash sales, coupons, clearance and upcoming events",
     desc: "First batch of every section in one call, with serverTime so countdowns reflect the real campaign period. Every deal names the seller whose offer it applies to. Clip state and reminders are filled for signed-in customers.",
     query: () =>
@@ -2296,7 +2297,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/deals/clearance",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "More clearance products",
     query: () =>
       z.object({
@@ -2313,6 +2315,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/deals/coupons",
     auth: "shopper",
+    scope: "own-customer",
     summary: "More clippable coupons",
     query: () =>
       z.object({
@@ -2328,7 +2331,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/flash-sales/{campaignId}",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "One flash sale with live claimed meters",
     desc: "Polled by the Deals page and app every 30–60 s for claimed percentages and sold-out state.",
     params: () =>
@@ -2346,6 +2350,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/products/{productId}",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Promotions for a product page: deal prices per offer, purchase limits, countdowns, seller promos and coupons",
     params: () =>
       z.object({
@@ -2365,6 +2370,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/offer-prices",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Promotion prices for a set of offers (product cards, collections, wishlist)",
     query: () =>
       z.object({
@@ -2379,7 +2385,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/campaigns/{id}/eligible-products",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Items a coupon or campaign applies to ('Eligible items')",
     params: () =>
       z.object({
@@ -2397,6 +2404,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/codes/check",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Look up a coupon code's terms without applying it",
     desc: "Applying a code happens in cart and checkout, which call evaluateCart and explain item coverage and rejections. Rate limited per session.",
     body: () => z.object({
@@ -2413,6 +2421,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/coupons",
     auth: "customer",
+    scope: "own-customer",
     summary: "My coupons: available and clipped, used and expired",
     response: () => AccountCoupons,
     status: 200,
@@ -2424,6 +2433,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/coupons/{campaignId}/clip",
     auth: "customer",
+    scope: "own-customer",
     summary: "Clip a coupon so it applies automatically at checkout",
     params: () =>
       z.object({
@@ -2440,6 +2450,7 @@ export const endpoints = defineEndpoints({
     method: "DELETE",
     path: "/coupons/{campaignId}/clip",
     auth: "customer",
+    scope: "own-customer",
     summary: "Remove a clipped coupon",
     params: () =>
       z.object({
@@ -2455,6 +2466,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/events/{campaignId}/reminder",
     auth: "customer",
+    scope: "own-customer",
     summary: "Remind me when an upcoming event starts",
     desc: "Sent as a promotional notification, only if the customer's marketing preferences allow it.",
     params: () =>
@@ -2471,6 +2483,7 @@ export const endpoints = defineEndpoints({
     method: "DELETE",
     path: "/events/{campaignId}/reminder",
     auth: "customer",
+    scope: "own-customer",
     summary: "Cancel an event reminder",
     params: () =>
       z.object({
@@ -2486,6 +2499,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/discounts",
     auth: "seller",
+    scope: "own-seller",
     summary: "Discounts this seller funds",
     query: () =>
       z.object({
@@ -2502,6 +2516,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/discounts/preview",
     auth: "seller",
+    scope: "own-seller",
     summary: "What the customer sees and the seller earns per unit",
     desc: "Uses the seller's fee rate from finance (example rate until confirmed). Seller-funded discounts lower the fee basis.",
     body: () => DiscountPreviewRequest,
@@ -2526,6 +2541,7 @@ export const endpoints = defineEndpoints({
     path: "/discounts",
     auth: "seller",
     permission: "promotions.discounts.manage",
+    scope: "own-seller",
     summary: "Create a seller-funded discount draft",
     body: () => SellerDiscountInput,
     response: () => SellerDiscount,
@@ -2539,6 +2555,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/discounts/{id}",
     auth: "seller",
+    scope: "own-seller",
     summary: "One own discount with usage",
     params: () =>
       z.object({
@@ -2555,6 +2572,7 @@ export const endpoints = defineEndpoints({
     path: "/discounts/{id}",
     auth: "seller",
     permission: "promotions.discounts.manage",
+    scope: "own-seller",
     summary: "Edit a draft or scheduled discount",
     desc: "Editing a scheduled discount returns it to draft. Live discounts can only be ended.",
     params: () =>
@@ -2574,6 +2592,7 @@ export const endpoints = defineEndpoints({
     path: "/discounts/{id}/schedule",
     auth: "seller",
     permission: "promotions.discounts.manage",
+    scope: "own-seller",
     summary: "Schedule a discount (goes live at its start time)",
     params: () =>
       z.object({
@@ -2591,6 +2610,7 @@ export const endpoints = defineEndpoints({
     path: "/discounts/{id}/pause",
     auth: "seller",
     permission: "promotions.discounts.manage",
+    scope: "own-seller",
     summary: "Pause an own discount",
     params: () =>
       z.object({
@@ -2609,6 +2629,7 @@ export const endpoints = defineEndpoints({
     path: "/discounts/{id}/resume",
     auth: "seller",
     permission: "promotions.discounts.manage",
+    scope: "own-seller",
     summary: "Resume an own discount",
     params: () =>
       z.object({
@@ -2626,6 +2647,7 @@ export const endpoints = defineEndpoints({
     path: "/discounts/{id}/end",
     auth: "seller",
     permission: "promotions.discounts.manage",
+    scope: "own-seller",
     summary: "End an own discount now (or cancel before start)",
     params: () =>
       z.object({
@@ -2646,6 +2668,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/invitations",
     auth: "seller",
+    scope: "own-seller",
     summary: "Platform campaign invitations and past participation",
     query: () =>
       z.object({
@@ -2662,6 +2685,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/invitations/{id}",
     auth: "seller",
+    scope: "own-seller",
     summary: "Invitation with eligibility per offer, funding split and expected earnings per unit",
     params: () =>
       z.object({
@@ -2678,6 +2702,7 @@ export const endpoints = defineEndpoints({
     path: "/invitations/{id}/accept",
     auth: "seller",
     permission: "promotions.campaigns.join",
+    scope: "own-seller",
     summary: "Consent to join with selected eligible offers",
     desc: "Records the consent text, the seller member, the offers and the seller funding share. Only eligible offers can be included. The seller agrees not to raise those offers' prices during the campaign.",
     params: () =>
@@ -2703,6 +2728,7 @@ export const endpoints = defineEndpoints({
     path: "/invitations/{id}/decline",
     auth: "seller",
     permission: "promotions.campaigns.join",
+    scope: "own-seller",
     summary: "Decline an invitation",
     params: () =>
       z.object({
@@ -2724,6 +2750,7 @@ export const endpoints = defineEndpoints({
     path: "/invitations/{id}/withdraw",
     auth: "seller",
     permission: "promotions.campaigns.join",
+    scope: "own-seller",
     summary: "Leave a campaign",
     desc: "Before the start: immediate. After the start: becomes a withdrawal request decided by Marketing.",
     params: () =>
@@ -2747,6 +2774,7 @@ export const endpoints = defineEndpoints({
     path: "/dashboard",
     auth: "staff",
     permission: "promotions.results.view",
+    scope: "staff",
     summary: "KPIs, tab counts, daily discount cost and campaign results",
     query: () =>
       z.object({
@@ -2764,6 +2792,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns",
     auth: "staff",
     permission: "promotions.campaigns.view",
+    scope: "staff",
     summary: "All campaigns and seller discounts",
     query: () =>
       z.object({
@@ -2786,6 +2815,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns",
     auth: "staff",
     permission: "promotions.campaigns.manage",
+    scope: "staff",
     summary: "Create a campaign draft",
     body: () => CampaignInput,
     response: () => Campaign,
@@ -2801,6 +2831,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}",
     auth: "staff",
     permission: "promotions.campaigns.view",
+    scope: "staff",
     summary: "Campaign with eligible count, funding review, readiness and participation summary",
     params: () =>
       z.object({
@@ -2817,6 +2848,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}",
     auth: "staff",
     permission: "promotions.campaigns.manage",
+    scope: "staff",
     summary: "Edit a campaign",
     desc: "Locked while in review (CAMPAIGN_LOCKED). Material edits to approved or scheduled campaigns reopen them to draft.",
     params: () =>
@@ -2837,6 +2869,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/eligible-offers",
     auth: "staff",
     permission: "promotions.campaigns.view",
+    scope: "staff",
     summary: "Offers the scope resolves to, with exclusion and ineligibility reasons",
     params: () =>
       z.object({
@@ -2859,6 +2892,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/price-preview",
     auth: "staff",
     permission: "promotions.campaigns.view",
+    scope: "staff",
     summary: "Product card, cart and checkout preview for a sample offer",
     params: () =>
       z.object({
@@ -2878,6 +2912,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/invitations",
     auth: "staff",
     permission: "promotions.campaigns.manage",
+    scope: "staff",
     summary: "Invite sellers to join (consent required before their offers are included)",
     params: () =>
       z.object({
@@ -2900,6 +2935,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/participations",
     auth: "staff",
     permission: "promotions.campaigns.view",
+    scope: "staff",
     summary: "Sellers invited, with consent state and earnings per $100 sale",
     params: () =>
       z.object({
@@ -2921,6 +2957,7 @@ export const endpoints = defineEndpoints({
     path: "/participations/{id}/decide-withdrawal",
     auth: "staff",
     permission: "promotions.campaigns.manage",
+    scope: "staff",
     summary: "Approve or reject a seller's request to leave a live campaign",
     params: () =>
       z.object({
@@ -2944,6 +2981,7 @@ export const endpoints = defineEndpoints({
     path: "/participations/{id}/remove",
     auth: "staff",
     permission: "promotions.campaigns.manage",
+    scope: "staff",
     summary: "Remove a seller or some of its offers from a campaign",
     params: () =>
       z.object({
@@ -2967,6 +3005,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/flash-items",
     auth: "staff",
     permission: "promotions.campaigns.manage",
+    scope: "staff",
     summary: "Set flash sale offers, deal prices, deal stock and purchase limits",
     desc: "Deal stock cannot exceed the offer's available stock at the time of saving (inventory check). Raising deal stock on a live sale restocks sold-out items.",
     params: () =>
@@ -2992,6 +3031,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/flash-items",
     auth: "staff",
     permission: "promotions.campaigns.view",
+    scope: "staff",
     summary: "Flash items with claimed and sold-out state",
     params: () =>
       z.object({
@@ -3008,6 +3048,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/submit",
     auth: "staff",
     permission: "promotions.campaigns.manage",
+    scope: "staff",
     summary: "Send to Finance for funding confirmation",
     desc: "Runs validation (period, scope not empty, funding consistent with seller consent) and builds the funding review checks. Edits lock until Finance decides.",
     params: () =>
@@ -3031,6 +3072,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/withdraw",
     auth: "staff",
     permission: "promotions.campaigns.manage",
+    scope: "staff",
     summary: "Take a campaign back from Finance review to draft",
     params: () =>
       z.object({
@@ -3049,6 +3091,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/confirm-funding",
     auth: "staff",
     permission: "promotions.funding.confirm",
+    scope: "staff",
     summary: "Finance confirms funding",
     desc: "A budget above the Marketing limit or above the confirming Finance member's limit raises an approval request (access); the campaign stays in review until it is decided.",
     params: () =>
@@ -3074,6 +3117,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/request-changes",
     auth: "staff",
     permission: "promotions.funding.confirm",
+    scope: "staff",
     summary: "Finance sends the campaign back with a reason",
     params: () =>
       z.object({
@@ -3096,6 +3140,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/schedule",
     auth: "staff",
     permission: "promotions.campaigns.publish",
+    scope: "staff",
     summary: "Schedule an approved campaign",
     params: () =>
       z.object({
@@ -3115,6 +3160,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/pause",
     auth: "staff",
     permission: "promotions.campaigns.publish",
+    scope: "staff",
     summary: "Pause a scheduled or live campaign",
     desc: "Takes effect for new evaluations immediately; open reservations may still commit.",
     params: () =>
@@ -3138,6 +3184,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/resume",
     auth: "staff",
     permission: "promotions.campaigns.publish",
+    scope: "staff",
     summary: "Resume a paused campaign",
     params: () =>
       z.object({
@@ -3160,6 +3207,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/end",
     auth: "staff",
     permission: "promotions.campaigns.publish",
+    scope: "staff",
     summary: "End a live or paused campaign early",
     params: () =>
       z.object({
@@ -3182,6 +3230,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/cancel",
     auth: "staff",
     permission: "promotions.campaigns.manage",
+    scope: "staff",
     summary: "Cancel a campaign that has not started",
     params: () =>
       z.object({
@@ -3204,6 +3253,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/codes",
     auth: "staff",
     permission: "promotions.campaigns.manage",
+    scope: "staff",
     summary: "Generate unique single-use codes (e.g. for support or partners)",
     params: () =>
       z.object({
@@ -3232,6 +3282,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/codes",
     auth: "staff",
     permission: "promotions.campaigns.view",
+    scope: "staff",
     summary: "Codes with redemptions",
     params: () =>
       z.object({
@@ -3254,6 +3305,7 @@ export const endpoints = defineEndpoints({
     path: "/codes/{id}/deactivate",
     auth: "staff",
     permission: "promotions.campaigns.manage",
+    scope: "staff",
     summary: "Deactivate a leaked or misused code",
     params: () =>
       z.object({
@@ -3274,6 +3326,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/redemptions",
     auth: "staff",
     permission: "promotions.results.view",
+    scope: "staff",
     summary: "Redemptions with funding split and reversals",
     params: () =>
       z.object({
@@ -3295,6 +3348,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/results",
     auth: "staff",
     permission: "promotions.results.view",
+    scope: "staff",
     summary: "Sales, discount cost by funder, margin impact, redemptions, returns and seller participation",
     params: () =>
       z.object({
@@ -3319,6 +3373,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/history",
     auth: "staff",
     permission: "promotions.campaigns.view",
+    scope: "staff",
     summary: "Submission, decisions, status changes and edits with reasons",
     params: () =>
       z.object({
@@ -4443,6 +4498,29 @@ export const spec = defineModuleSpec({
         "type": "bigint",
         "nullable": false
       }
+    }
+  },
+  tenantTables: {
+    "campaigns": {
+      "seller": "seller_id"
+    },
+    "eligible_offers": {
+      "seller": "seller_id"
+    },
+    "participations": {
+      "seller": "seller_id"
+    },
+    "coupon_clips": {
+      "customer": "customer_id"
+    },
+    "redemptions": {
+      "customer": "customer_id"
+    },
+    "redemption_lines": {
+      "seller": "seller_id"
+    },
+    "event_reminders": {
+      "customer": "customer_id"
     }
   },
   endpoints,

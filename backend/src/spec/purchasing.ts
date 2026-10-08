@@ -1117,6 +1117,7 @@ export const endpoints = defineEndpoints({
     path: "/summary",
     auth: "staff",
     permission: "purchasing.orders.view",
+    scope: "staff",
     summary: "Open purchase orders, committed cost, incoming units, late or short, low-stock items",
     response: () => PurchasingSummary,
     status: 200,
@@ -1129,6 +1130,7 @@ export const endpoints = defineEndpoints({
     path: "/suppliers",
     auth: "staff",
     permission: "purchasing.orders.view",
+    scope: "staff",
     summary: "Suppliers with lead time, on-time rate and open POs",
     query: () =>
       z.object({
@@ -1147,6 +1149,7 @@ export const endpoints = defineEndpoints({
     path: "/suppliers",
     auth: "staff",
     permission: "purchasing.suppliers.manage",
+    scope: "staff",
     summary: "Add a supplier",
     body: () => SupplierInput,
     response: () => Supplier,
@@ -1161,6 +1164,7 @@ export const endpoints = defineEndpoints({
     path: "/suppliers/{id}",
     auth: "staff",
     permission: "purchasing.orders.view",
+    scope: "staff",
     summary: "Supplier with price list, performance, recent POs and open claims",
     params: () =>
       z.object({
@@ -1177,6 +1181,7 @@ export const endpoints = defineEndpoints({
     path: "/suppliers/{id}",
     auth: "staff",
     permission: "purchasing.suppliers.manage",
+    scope: "staff",
     summary: "Edit or deactivate a supplier",
     params: () =>
       z.object({
@@ -1195,6 +1200,7 @@ export const endpoints = defineEndpoints({
     path: "/suppliers/{id}/items",
     auth: "staff",
     permission: "purchasing.suppliers.manage",
+    scope: "staff",
     summary: "Replace a supplier's price list (buying costs per SKU)",
     params: () =>
       z.object({
@@ -1218,6 +1224,7 @@ export const endpoints = defineEndpoints({
     path: "/purchase-orders",
     auth: "staff",
     permission: "purchasing.orders.view",
+    scope: "staff",
     summary: "Purchase orders with status, cost and expected arrival",
     query: () =>
       z.object({
@@ -1239,6 +1246,7 @@ export const endpoints = defineEndpoints({
     path: "/purchase-orders",
     auth: "staff",
     permission: "purchasing.orders.manage",
+    scope: "staff",
     summary: "Create a draft purchase order",
     body: () => PurchaseOrderInput,
     response: () => PurchaseOrder,
@@ -1254,6 +1262,7 @@ export const endpoints = defineEndpoints({
     path: "/purchase-orders/{id}",
     auth: "staff",
     permission: "purchasing.orders.view",
+    scope: "staff",
     summary: "Purchase order: lines expected vs received, costs, deliveries, receipts, claims, approval and timeline",
     params: () =>
       z.object({
@@ -1270,6 +1279,7 @@ export const endpoints = defineEndpoints({
     path: "/purchase-orders/{id}",
     auth: "staff",
     permission: "purchasing.orders.manage",
+    scope: "staff",
     summary: "Edit a draft, or update expected dates and notes after sending",
     params: () =>
       z.object({
@@ -1290,6 +1300,7 @@ export const endpoints = defineEndpoints({
     path: "/purchase-orders/{id}/send",
     auth: "staff",
     permission: "purchasing.orders.manage",
+    scope: "staff",
     summary: "Send to the supplier (or request approval when above the buyer's limit)",
     desc: "Within the limit: status Sent, Incoming added in inventory, supplier emailed if asked. Above it: stays Draft with approval details and is sent automatically once approved.",
     params: () =>
@@ -1315,6 +1326,7 @@ export const endpoints = defineEndpoints({
     path: "/purchase-orders/{id}/cancel",
     auth: "staff",
     permission: "purchasing.orders.manage",
+    scope: "staff",
     summary: "Cancel a draft or a sent PO with nothing received",
     params: () =>
       z.object({
@@ -1337,6 +1349,7 @@ export const endpoints = defineEndpoints({
     path: "/purchase-orders/{id}/close",
     auth: "staff",
     permission: "purchasing.orders.manage",
+    scope: "staff",
     summary: "Close a partly received PO short (remaining units will not arrive)",
     params: () =>
       z.object({
@@ -1360,6 +1373,7 @@ export const endpoints = defineEndpoints({
     path: "/reorder-suggestions",
     auth: "staff",
     permission: "purchasing.orders.view",
+    scope: "staff",
     summary: "SKUs at or below reorder point after incoming stock, with suggested quantity and preferred supplier",
     query: () =>
       z.object({
@@ -1377,6 +1391,7 @@ export const endpoints = defineEndpoints({
     path: "/purchase-orders/from-suggestions",
     auth: "staff",
     permission: "purchasing.orders.manage",
+    scope: "staff",
     summary: "Create draft POs (one per preferred supplier) from selected suggestions",
     body: () => z.object({
       stockItemIds: z.array(z.uuid()),
@@ -1394,6 +1409,7 @@ export const endpoints = defineEndpoints({
     path: "/deliveries",
     auth: "staff",
     permission: "purchasing.orders.view",
+    scope: "staff",
     summary: "Expected and arrived purchase deliveries for receiving",
     query: () =>
       z.object({
@@ -1413,6 +1429,7 @@ export const endpoints = defineEndpoints({
     path: "/purchase-orders/{id}/deliveries",
     auth: "staff",
     permission: "purchasing.orders.manage",
+    scope: "staff",
     summary: "Add an expected delivery (carrier, reference, arrival window)",
     params: () =>
       z.object({
@@ -1431,6 +1448,7 @@ export const endpoints = defineEndpoints({
     path: "/deliveries/{id}",
     auth: "staff",
     permission: "purchasing.orders.manage",
+    scope: "staff",
     summary: "Reschedule or mark a delivery delayed, with a reason",
     params: () =>
       z.object({
@@ -1450,6 +1468,7 @@ export const endpoints = defineEndpoints({
     path: "/deliveries/{id}/arrive",
     auth: "staff",
     permission: "purchasing.receipts.record",
+    scope: "staff",
     summary: "Check in a delivery at the dock",
     params: () =>
       z.object({
@@ -1473,6 +1492,7 @@ export const endpoints = defineEndpoints({
     path: "/deliveries/{id}/receipts",
     auth: "staff",
     permission: "purchasing.receipts.record",
+    scope: "staff",
     summary: "Start receiving: creates the receiving record with expected quantities",
     params: () =>
       z.object({
@@ -1490,6 +1510,7 @@ export const endpoints = defineEndpoints({
     path: "/deliveries/stats",
     auth: "staff",
     permission: "purchasing.orders.view",
+    scope: "staff",
     summary: "Receiving KPIs and tab counts",
     desc: "Expected today (deliveries and units), arrived not received (dock), received this week (deliveries and units), open shortages with their owner, and counts for the Expected / Receiving / Received with issues / Completed tabs.",
     query: () =>
@@ -1508,6 +1529,7 @@ export const endpoints = defineEndpoints({
     path: "/receipts",
     auth: "staff",
     permission: "purchasing.orders.view",
+    scope: "staff",
     summary: "Receiving records (in progress, waiting for confirmation, with issues, completed)",
     query: () =>
       z.object({
@@ -1527,6 +1549,7 @@ export const endpoints = defineEndpoints({
     path: "/receipts/{id}",
     auth: "staff",
     permission: "purchasing.orders.view",
+    scope: "staff",
     summary: "One receiving record: expected vs received, damage photos, bins, buying cost",
     params: () =>
       z.object({
@@ -1543,6 +1566,7 @@ export const endpoints = defineEndpoints({
     path: "/receipts/{id}",
     auth: "staff",
     permission: "purchasing.receipts.record",
+    scope: "staff",
     summary: "Record counted, damaged, bin and photos per line (save and finish later)",
     params: () =>
       z.object({
@@ -1566,6 +1590,7 @@ export const endpoints = defineEndpoints({
     path: "/receipts/{id}/submit",
     auth: "staff",
     permission: "purchasing.receipts.record",
+    scope: "staff",
     summary: "Finish counting: shortages go to Purchasing, units wait in Incoming for Inventory to confirm",
     desc: "Sends the counted lines to inventory (submitInbound); damaged lines need photos; shortages update the PO and can raise a claim.",
     params: () =>
@@ -1589,6 +1614,7 @@ export const endpoints = defineEndpoints({
     path: "/receipts/{id}/cancel",
     auth: "staff",
     permission: "purchasing.receipts.record",
+    scope: "staff",
     summary: "Discard a receiving record started by mistake",
     params: () =>
       z.object({
@@ -1610,6 +1636,7 @@ export const endpoints = defineEndpoints({
     path: "/claims",
     auth: "staff",
     permission: "purchasing.orders.view",
+    scope: "staff",
     summary: "Supplier claims for shortages and damage",
     query: () =>
       z.object({
@@ -1628,6 +1655,7 @@ export const endpoints = defineEndpoints({
     path: "/claims",
     auth: "staff",
     permission: "purchasing.claims.manage",
+    scope: "staff",
     summary: "Open a supplier claim",
     body: () => ClaimInput,
     response: () => SupplierClaim,
@@ -1642,6 +1670,7 @@ export const endpoints = defineEndpoints({
     path: "/claims/{id}/submit",
     auth: "staff",
     permission: "purchasing.claims.manage",
+    scope: "staff",
     summary: "Mark a claim as sent to the supplier",
     params: () =>
       z.object({
@@ -1663,6 +1692,7 @@ export const endpoints = defineEndpoints({
     path: "/claims/{id}/settle",
     auth: "staff",
     permission: "purchasing.claims.manage",
+    scope: "staff",
     summary: "Record the supplier's settlement (credit note, refund or replacement)",
     params: () =>
       z.object({
@@ -1689,6 +1719,7 @@ export const endpoints = defineEndpoints({
     path: "/claims/{id}/close",
     auth: "staff",
     permission: "purchasing.claims.manage",
+    scope: "staff",
     summary: "Close a claim as rejected by the supplier or withdrawn",
     params: () =>
       z.object({
@@ -2470,6 +2501,7 @@ export const spec = defineModuleSpec({
       }
     }
   },
+  tenantTables: {},
   endpoints,
 });
 

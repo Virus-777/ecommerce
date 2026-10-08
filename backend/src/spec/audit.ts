@@ -490,6 +490,7 @@ export const endpoints = defineEndpoints({
     path: "/entries",
     auth: "staff",
     permission: "audit.entries.view",
+    scope: "staff",
     summary: "Action history with filters",
     desc: "Newest first. Each item is complete (actor and role, action, target, reason, before → after, approval state), so the table and phone list render from one call.",
     query: () =>
@@ -519,6 +520,7 @@ export const endpoints = defineEndpoints({
     path: "/entries/{id}",
     auth: "staff",
     permission: "audit.entries.view",
+    scope: "staff",
     summary: "One entry with evidence and approval history",
     params: () =>
       z.object({
@@ -535,6 +537,7 @@ export const endpoints = defineEndpoints({
     path: "/summary",
     auth: "staff",
     permission: "audit.entries.view",
+    scope: "staff",
     summary: "Counts for the filter chips (pending second review, financial, enforcement, settings)",
     query: () =>
       z.object({
@@ -552,6 +555,7 @@ export const endpoints = defineEndpoints({
     path: "/targets/{type}/{id}",
     auth: "staff",
     permission: "audit.entries.view",
+    scope: "staff",
     summary: "History of one record (order, seller, payout, product, setting…)",
     desc: "Includes entries where the record is a related target. Used for 'staff history with reasons' panels.",
     params: () =>
@@ -571,6 +575,7 @@ export const endpoints = defineEndpoints({
     path: "/exports",
     auth: "staff",
     permission: "audit.entries.export",
+    scope: "staff",
     summary: "Export filtered history (authorized, recorded)",
     desc: "Records the reason in the action history, then creates an authorized export job through reports.requestExport (dataset audit.admin.entries, csv or jsonl). Poll GET /exports/{id} for the download link. Limited to reports.maxExportRows.",
     body: () => z.object({
@@ -593,6 +598,7 @@ export const endpoints = defineEndpoints({
     path: "/exports",
     auth: "staff",
     permission: "audit.entries.export",
+    scope: "staff",
     summary: "My exports (all exports with audit.retention.manage)",
     desc: "Proxies reports.listExports for dataset audit.admin.entries: the caller's own jobs, or every requester's with audit.retention.manage.",
     query: () =>
@@ -611,6 +617,7 @@ export const endpoints = defineEndpoints({
     path: "/exports/{id}",
     auth: "staff",
     permission: "audit.entries.export",
+    scope: "staff",
     summary: "Export status and a fresh download link",
     desc: "Proxies reports.getExport: only the requester may download, and each signed link is recorded.",
     params: () =>
@@ -630,6 +637,7 @@ export const endpoints = defineEndpoints({
     path: "/retention",
     auth: "staff",
     permission: "audit.entries.view",
+    scope: "staff",
     summary: "Retention setting and last purge",
     response: () => RetentionPolicy,
     status: 200,
@@ -642,6 +650,7 @@ export const endpoints = defineEndpoints({
     path: "/retention",
     auth: "staff",
     permission: "audit.retention.manage",
+    scope: "staff",
     summary: "Change how long history is kept",
     desc: "Lengthening applies now (200). Shortening returns 202 with pendingChange until the Business Owner approves.",
     body: () => z.object({
@@ -663,6 +672,7 @@ export const endpoints = defineEndpoints({
     path: "/integrity",
     auth: "staff",
     permission: "audit.entries.view",
+    scope: "staff",
     summary: "Hash-chain check result",
     response: () => IntegrityStatus,
     status: 200,
@@ -675,6 +685,7 @@ export const endpoints = defineEndpoints({
     path: "/entries",
     auth: "seller",
     permission: "audit.own-history.view",
+    scope: "own-seller",
     summary: "Changes made on this seller account",
     desc: "Seller member changes (staff, permissions, store details, payout destination) and staff actions marked visible to the seller. Staff names are not shown.",
     query: () =>
@@ -1069,6 +1080,11 @@ export const spec = defineModuleSpec({
         "type": "bigint",
         "nullable": true
       }
+    }
+  },
+  tenantTables: {
+    "entries": {
+      "seller": "seller_id"
     }
   },
   endpoints,

@@ -10,12 +10,13 @@ import * as common from './common.js';
 /* ------------------------------------------------------------------ types */
 
 export interface Principal {
-  kind: "customer" | "seller" | "staff" | "guest";
+  kind: "customer" | "seller" | "staff" | "visitor";
   accountId?: string | null;
   sessionId?: string | null;
   /** Seller the session acts for (seller audience only) */
   sellerId?: string | null;
   sellerMemberId?: string | null;
+  /** Visitor session id (also the guest session in the store) */
   guestSessionId?: string | null;
   authenticatedAt?: string | null;
   /** Set when this session passed 2-step verification; used for step-up checks */
@@ -23,12 +24,12 @@ export interface Principal {
 }
 
 export const Principal: z.ZodType<Principal> = z.object({
-  kind: z.enum(["customer", "seller", "staff", "guest"]),
+  kind: z.enum(["customer", "seller", "staff", "visitor"]),
   accountId: z.uuid().nullish(),
   sessionId: z.uuid().nullish(),
   sellerId: z.uuid().describe("Seller the session acts for (seller audience only)").nullish(),
   sellerMemberId: z.uuid().nullish(),
-  guestSessionId: z.uuid().nullish(),
+  guestSessionId: z.uuid().describe("Visitor session id (also the guest session in the store)").nullish(),
   authenticatedAt: z.iso.datetime({ offset: true }).nullish(),
   twoStepVerifiedAt: z.iso.datetime({ offset: true }).describe("Set when this session passed 2-step verification; used for step-up checks").nullish(),
 }).register(common.apiTypes, { id: "identity.Principal" });
@@ -314,11 +315,14 @@ export interface CompleteResetRequest {
   newPassword: string;
   /** Default true on the screen */
   signOutOtherDevices: boolean;
+  /** From the reset link (sent in the body, never in the URL path) */
+  token: string;
 }
 
 export const CompleteResetRequest: z.ZodType<CompleteResetRequest> = z.object({
   newPassword: z.string(),
   signOutOtherDevices: z.boolean().describe("Default true on the screen"),
+  token: z.string().describe("From the reset link (sent in the body, never in the URL path)"),
 }).register(common.apiTypes, { id: "identity.CompleteResetRequest" });
 
 export interface ChangePasswordRequest {
@@ -610,6 +614,8 @@ export interface AcceptInvitationRequest {
   currentPassword?: string | null;
   name?: string | null;
   device: DeviceInfo;
+  /** From the invitation link (sent in the body, never in the URL path) */
+  token: string;
 }
 
 export const AcceptInvitationRequest: z.ZodType<AcceptInvitationRequest> = z.object({
@@ -619,6 +625,7 @@ export const AcceptInvitationRequest: z.ZodType<AcceptInvitationRequest> = z.obj
   get device() {
     return DeviceInfo;
   },
+  token: z.string().describe("From the invitation link (sent in the body, never in the URL path)"),
 }).register(common.apiTypes, { id: "identity.AcceptInvitationRequest" });
 
 export interface AcceptInvitationResult {
@@ -1087,10 +1094,16 @@ export interface IdentityPublicApi {
   sendPasswordReset(accountId: string, input: { reason: string, by: common.Actor, revokeSessions: boolean }): Promise<void>;
   /** Text a 6-digit code to a new mobile number (needs SMS, phase 2; until then the number stays unverified). Confirmed at POST /api/public/identity/verifications/{id}/confirm; publishes identity.user.verified with channel phone. Used by: customers. */
   startPhoneVerification(accountId: string, phone: string): Promise<VerificationChallenge>;
-  /** Check and consume a re-auth token from POST /api/store/identity/reauth or POST /api/seller/identity/reauth (valid 5 minutes, single use) Used by: customers, sellers, finance. */
-  verifyReauthToken(accountId: string, token: string): Promise<boolean>;
+  /** True when the re-auth token was issued to this account, session, audience and seller for this purpose, is unused and unexpired. Does not consume it. Used by: customers, sellers, finance. */
+  verifyReauthToken(principal: Principal, token: string, purpose: string): Promise<boolean>;
   /** Batched staff view of sign-in security for customer 360 views: AccountAdmin (lock, forced reset, 2-step, devices, recent security activity) plus email status, warnings and a one-line sign-in summary. Callers pass identity account ids (Customer.userId). Used by: graphql. */
   accountSecurityOf(accountIds: string[], opts?: { activityLimit?: number }): Promise<Map<string, unknown>>;
+  /** Marks a verified re-auth token used; called by the kernel after the request succeeded. Used by: kernel. */
+  consumeReauthToken(token: string): Promise<void>;
+  /** Revoked sessions and account-wide revocations (tokens issued before validAfter) since a cursor; every server polls this every few seconds and loads the last access-token lifetime on startup. Used by: kernel. */
+  revocationsSince(cursor?: string): Promise<{ sessions: { sessionId: string, at: string }[], accounts: { accountId: string, validAfter: string }[], cursor: string }>;
+  /** Middleware check for refresh and sign-out: the session the refresh token belongs to (also during the reuse grace window), or null when it is unknown, expired, revoked or reused. Used by: kernel. */
+  verifyRefreshToken(refreshToken: string): Promise<{ sessionId: string, accountId?: string, audience: string, kind: string } | null>;
 }
 
 /* ------------------------------------------------------------------ tables (Kysely row types) */
@@ -1121,6 +1134,7 @@ export interface IdentityDb {
     last_sign_in_at: Date | null;
     last_active_at: Date | null;
     version: number;
+    tokens_valid_after: Date | null;
   };
   /** Last N hashes to block reuse */
   password_history: {
@@ -1243,6 +1257,7 @@ export interface IdentityDb {
     revoked_at: Date | null;
     revoke_reason: string | null;
   };
+  /** Visitor sessions (auth v3): one per app install before sign-in; in the store also the guest session */
   guest_sessions: {
     id: string;
     device_kind: string;
@@ -1251,6 +1266,10 @@ export interface IdentityDb {
     expires_at: Date;
     claimed_by_account_id: string | null;
     claimed_at: Date | null;
+    audience: 'store' | 'seller' | 'admin';
+    refresh_token_hash: string;
+    previous_token_hash: string | null;
+    rotated_at: Date | null;
   };
   /** Orders a guest session may open */
   guest_order_grants: {
@@ -1313,7 +1332,9 @@ export const endpoints = defineEndpoints({
     area: "public",
     method: "POST",
     path: "/registrations",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
+    rateLimit: "registration",
     summary: "Create a customer account and send an email code",
     desc: "Always answers 202 with a challenge so the form cannot be used to discover accounts: if the email already has an account, the email says so and offers sign-in and password reset, and the code will not verify. Password rules are checked live with GET /password-policy and again here.",
     body: () => RegistrationRequest,
@@ -1328,7 +1349,9 @@ export const endpoints = defineEndpoints({
     area: "public",
     method: "POST",
     path: "/verifications/{id}/confirm",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
+    rateLimit: "code",
     summary: "Confirm an email or phone code (registration, email change, phone change)",
     desc: "Registration: activates the account and signs the customer in; guest orders placed with this email can then be attached (identity.user.verified, consumed by customers). Email change: switches the sign-in email and alerts the old address. Phone: marks the number verified (identity.user.verified with channel phone).",
     params: () =>
@@ -1347,7 +1370,9 @@ export const endpoints = defineEndpoints({
     area: "public",
     method: "POST",
     path: "/verifications/{id}/resend",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
+    rateLimit: "code",
     summary: "Send a new code",
     params: () =>
       z.object({
@@ -1364,7 +1389,9 @@ export const endpoints = defineEndpoints({
     area: "public",
     method: "POST",
     path: "/sessions",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
+    rateLimit: "sign-in",
     summary: "Sign in with email and password",
     desc: "Returns tokens, or a 2-step challenge, or (seller audience with several sellers) the list of sellers to choose from. Wrong passwords return INVALID_CREDENTIALS with details.attemptsLeft; at the limit the account locks for lockoutMinutes and ACCOUNT_LOCKED carries details.lockedUntil. Unknown emails get the same answer and timing. A guest session passed in is claimed (cart and recently viewed merge). A sign-in from a device not seen before publishes identity.session.new_device for the security alert.",
     body: () => SignInRequest,
@@ -1379,7 +1406,9 @@ export const endpoints = defineEndpoints({
     area: "public",
     method: "POST",
     path: "/sign-in-challenges/{id}/verify",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
+    rateLimit: "sign-in",
     summary: "Complete sign-in with a 2-step code or recovery code",
     params: () =>
       z.object({
@@ -1397,7 +1426,9 @@ export const endpoints = defineEndpoints({
     area: "public",
     method: "POST",
     path: "/sign-in-challenges/{id}/send-sms",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
+    rateLimit: "code",
     summary: "Text the 2-step code to the saved phone",
     params: () =>
       z.object({
@@ -1414,11 +1445,12 @@ export const endpoints = defineEndpoints({
     area: "public",
     method: "POST",
     path: "/sessions/refresh",
-    auth: "anyone",
+    auth: "refresh",
+    scope: "public",
     summary: "Exchange a refresh token for new tokens",
     desc: "Rotates the refresh token. Presenting an already-rotated token revokes the session (theft signal) and returns REFRESH_TOKEN_INVALID. The Android app calls this when an access token expires.",
     body: () => z.object({
-      refreshToken: z.string(),
+      refreshToken: z.string().describe("Android; the website sends the __Host-mk_refresh cookie instead").nullish(),
     }),
     response: () => SessionTokens,
     status: 200,
@@ -1429,11 +1461,12 @@ export const endpoints = defineEndpoints({
     area: "public",
     method: "POST",
     path: "/sessions/sign-out",
-    auth: "anyone",
+    auth: "refresh",
+    scope: "public",
     summary: "Sign out this device",
     desc: "Works for every audience; the refresh token identifies the session. Idempotent.",
     body: () => z.object({
-      refreshToken: z.string(),
+      refreshToken: z.string().describe("Android; the website sends the __Host-mk_refresh cookie instead").nullish(),
     }),
     response: null,
     status: 204,
@@ -1443,7 +1476,9 @@ export const endpoints = defineEndpoints({
     area: "public",
     method: "POST",
     path: "/password-resets",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
+    rateLimit: "password-reset",
     summary: "Email a password reset link",
     desc: "Always 202 with the masked email, whether or not an account exists. The link works once and expires in 30 minutes; a new request invalidates the previous link.",
     body: () => z.object({
@@ -1462,14 +1497,14 @@ export const endpoints = defineEndpoints({
   },
   getPasswordReset: {
     area: "public",
-    method: "GET",
-    path: "/password-resets/{token}",
-    auth: "anyone",
+    method: "POST",
+    path: "/password-resets/lookups",
+    auth: "visitor",
+    scope: "public",
     summary: "Check a reset link before showing the new-password form",
-    params: () =>
-      z.object({
-        token: z.string(),
-      }),
+    body: () => z.object({
+      token: z.string(),
+    }),
     response: () => PasswordResetStatus,
     status: 200,
     screens: ["auth/recover"],
@@ -1478,14 +1513,11 @@ export const endpoints = defineEndpoints({
   completePasswordReset: {
     area: "public",
     method: "POST",
-    path: "/password-resets/{token}/complete",
-    auth: "anyone",
+    path: "/password-resets/complete",
+    auth: "visitor",
+    scope: "public",
     summary: "Set a new password from a reset link",
     desc: "Clears lockouts. Signs out other devices when chosen (always for forced resets). The account owner gets a confirmation email.",
-    params: () =>
-      z.object({
-        token: z.string(),
-      }),
     body: () => CompleteResetRequest,
     response: null,
     status: 204,
@@ -1498,7 +1530,8 @@ export const endpoints = defineEndpoints({
     area: "public",
     method: "GET",
     path: "/password-policy",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Password rules for the live checklist",
     query: () =>
       z.object({
@@ -1509,37 +1542,37 @@ export const endpoints = defineEndpoints({
     screens: ["auth/register","auth/recover","account/security"],
     phase: 1,
   },
-  createGuestSession: {
+  startAppSession: {
     area: "public",
     method: "POST",
-    path: "/guest-sessions",
-    auth: "anyone",
-    summary: "Start a guest session (cart, guest checkout)",
-    desc: "Created lazily on the first add to cart or product view. The id is sent as X-Guest-Session. Expires after guestSessionTtlDays without activity; order grants on it last guestOrderAccessDays.",
+    path: "/app-sessions",
+    auth: "bootstrap",
+    scope: "public",
+    rateLimit: "bootstrap",
+    summary: "Start an app session: the visitor token every request needs",
+    desc: "The only endpoint without a token. Requires an app proof in X-App-Proof (Play Integrity on Android, bot challenge on the website). Returns a visitor access token and refresh token for the app named in audience. In the store the visitor session is also the guest session (cart, recently viewed, guest checkout, guest order grants). Signing in or registering with the visitor token claims the session into the account.",
     body: () => z.object({
+      audience: z.enum(["store", "seller", "admin"]),
       get device() {
         return DeviceInfo;
       },
     }),
-    response: () => GuestSession,
+    response: () => SessionTokens,
     status: 201,
-    errors: ["RATE_LIMITED"],
-    screens: ["store/cart","store/checkout"],
+    errors: ["APP_PROOF_INVALID","RATE_LIMITED"],
+    screens: ["store/home"],
     phase: 1,
   },
   redeemOrderLink: {
     area: "public",
     method: "POST",
-    path: "/order-links/{token}/redeem",
-    auth: "anyone",
+    path: "/order-links/redeem",
+    auth: "visitor",
+    scope: "public",
     summary: "Open an order from an emailed link",
     desc: "Grants the (new or given) guest session access to that order. Signed-in customers whose verified email matches see it in their account instead.",
-    params: () =>
-      z.object({
-        token: z.string(),
-      }),
     body: () => z.object({
-      guestSessionId: z.uuid().nullish(),
+      token: z.string(),
     }),
     response: () => OrderLinkRedemption,
     status: 200,
@@ -1549,14 +1582,14 @@ export const endpoints = defineEndpoints({
   },
   getInvitation: {
     area: "public",
-    method: "GET",
-    path: "/invitations/{token}",
-    auth: "anyone",
+    method: "POST",
+    path: "/invitations/lookups",
+    auth: "visitor",
+    scope: "public",
     summary: "Show an invitation (staff or seller member)",
-    params: () =>
-      z.object({
-        token: z.string(),
-      }),
+    body: () => z.object({
+      token: z.string(),
+    }),
     response: () => InvitationView,
     status: 200,
     errors: ["INVITATION_INVALID"],
@@ -1565,14 +1598,11 @@ export const endpoints = defineEndpoints({
   acceptInvitation: {
     area: "public",
     method: "POST",
-    path: "/invitations/{token}/accept",
-    auth: "anyone",
+    path: "/invitations/accept",
+    auth: "visitor",
+    scope: "public",
     summary: "Accept an invitation and set a password",
     desc: "Seller members: signs in to Seller Center for the inviting seller. Staff: returns a 2-step set-up that must be confirmed before the first session.",
-    params: () =>
-      z.object({
-        token: z.string(),
-      }),
     body: () => AcceptInvitationRequest,
     response: () => AcceptInvitationResult,
     status: 200,
@@ -1583,14 +1613,12 @@ export const endpoints = defineEndpoints({
   confirmInvitationTwoStep: {
     area: "public",
     method: "POST",
-    path: "/invitations/{token}/two-step",
-    auth: "anyone",
+    path: "/invitations/two-step",
+    auth: "visitor",
+    scope: "public",
     summary: "Staff: confirm the authenticator code and start the first session",
-    params: () =>
-      z.object({
-        token: z.string(),
-      }),
     body: () => z.object({
+      token: z.string(),
       setupId: z.uuid(),
       code: z.string(),
       get device() {
@@ -1614,7 +1642,9 @@ export const endpoints = defineEndpoints({
     area: "public",
     method: "POST",
     path: "/external-sign-ins",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
+    rateLimit: "sign-in",
     summary: "Continue with Google or Apple",
     desc: "Members only. Links to an existing account only when the provider confirms the same verified email.",
     body: () => z.object({
@@ -1638,7 +1668,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/security",
-    auth: "customer",
+    auth: "account",
+    scope: "own-customer",
     summary: "Sign-in and security page in one call",
     desc: "Also used by seller members from Seller Center (same member account; the store-area security endpoints accept a member session of either audience).",
     response: () => SecurityOverview,
@@ -1650,7 +1681,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "PUT",
     path: "/password",
-    auth: "customer",
+    auth: "account",
+    scope: "own-customer",
     summary: "Change password",
     body: () => ChangePasswordRequest,
     response: null,
@@ -1664,16 +1696,18 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "POST",
     path: "/email-changes",
-    auth: "customer",
+    auth: "account",
+    stepUp: {"kind":"reauth","purpose":"email-change"},
+    scope: "own-customer",
     summary: "Change sign-in email (sends a code to the new address)",
     desc: "Confirmed with POST /api/public/identity/verifications/{id}/confirm. The old address stays active until then.",
     body: () => z.object({
       newEmail: z.email(),
-      currentPassword: z.string(),
+      reauthToken: z.string(),
     }),
     response: () => VerificationChallenge,
     status: 202,
-    errors: ["EMAIL_IN_USE","CURRENT_PASSWORD_WRONG"],
+    errors: ["EMAIL_IN_USE","CURRENT_PASSWORD_WRONG","STEP_UP_REQUIRED"],
     events: ["identity.verification.code_issued"],
     screens: ["account/profile"],
     phase: 1,
@@ -1683,6 +1717,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/reauth",
     auth: "customer",
+    scope: "own-customer",
     summary: "Confirm it's you before a sensitive action",
     desc: "Returns a single-use re-auth token valid 5 minutes, required by account closure (customers). Seller Center uses POST /api/seller/identity/reauth for payout account and business changes.",
     body: () => ReauthRequest,
@@ -1697,6 +1732,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/reauth",
     auth: "seller",
+    scope: "own-seller",
     summary: "Confirm it is you before a sensitive Seller Center action",
     desc: "Same check as the store re-auth (password or 2-step code) on the seller session. Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account and the current seller context; required by payout account changes, business change requests and account close (sellers).",
     body: () => ReauthRequest,
@@ -1711,7 +1747,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "POST",
     path: "/two-step/setups",
-    auth: "customer",
+    auth: "account",
+    scope: "own-customer",
     summary: "Start turning on 2-step verification",
     body: () => TwoStepSetupRequest,
     response: () => TwoStepSetup,
@@ -1724,7 +1761,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "POST",
     path: "/two-step/setups/{id}/confirm",
-    auth: "customer",
+    auth: "account",
+    scope: "own-customer",
     summary: "Confirm the first code; returns recovery codes once",
     params: () =>
       z.object({
@@ -1744,7 +1782,9 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "POST",
     path: "/two-step/methods/{id}/remove",
-    auth: "customer",
+    auth: "account",
+    stepUp: {"kind":"reauth","purpose":"two-step-removal"},
+    scope: "own-customer",
     summary: "Turn off a 2-step method",
     desc: "Staff accounts cannot remove their last method (TWO_STEP_REQUIRED).",
     params: () =>
@@ -1752,12 +1792,12 @@ export const endpoints = defineEndpoints({
         id: z.uuid(),
       }),
     body: () => z.object({
-      currentPassword: z.string(),
+      reauthToken: z.string(),
       code: z.string(),
     }),
     response: () => TwoStepStatus,
     status: 200,
-    errors: ["CURRENT_PASSWORD_WRONG","CODE_INVALID","TWO_STEP_REQUIRED"],
+    errors: ["CURRENT_PASSWORD_WRONG","CODE_INVALID","TWO_STEP_REQUIRED","STEP_UP_REQUIRED"],
     events: ["identity.two_step.changed"],
     screens: ["account/security"],
     phase: 1,
@@ -1766,14 +1806,16 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "POST",
     path: "/two-step/recovery-codes",
-    auth: "customer",
+    auth: "account",
+    stepUp: {"kind":"reauth","purpose":"recovery-codes"},
+    scope: "own-customer",
     summary: "Replace recovery codes",
     body: () => z.object({
-      currentPassword: z.string(),
+      reauthToken: z.string(),
     }),
     response: () => RecoveryCodes,
     status: 200,
-    errors: ["CURRENT_PASSWORD_WRONG"],
+    errors: ["CURRENT_PASSWORD_WRONG","STEP_UP_REQUIRED"],
     screens: ["account/security"],
     phase: 1,
   },
@@ -1781,7 +1823,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/devices",
-    auth: "customer",
+    auth: "account",
+    scope: "own-customer",
     summary: "Where you're signed in",
     desc: "Small and bounded (maxDevicesPerAccount), so not paged.",
     response: () => z.array(Device),
@@ -1793,7 +1836,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "POST",
     path: "/devices/{id}/sign-out",
-    auth: "customer",
+    auth: "account",
+    scope: "own-customer",
     summary: "Sign out one device",
     params: () =>
       z.object({
@@ -1809,7 +1853,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "POST",
     path: "/devices/sign-out-all",
-    auth: "customer",
+    auth: "account",
+    scope: "own-customer",
     summary: "Sign out everywhere",
     body: () => z.object({
       keepThisDevice: z.boolean(),
@@ -1825,7 +1870,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/security-activity",
-    auth: "customer",
+    auth: "account",
+    scope: "own-customer",
     summary: "Recent security activity",
     query: () =>
       z.object({
@@ -1843,6 +1889,8 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/session/sellers",
     auth: "seller",
+    sellerContext: "optional",
+    scope: "own-seller",
     summary: "Sellers this member can act for (seller switcher)",
     desc: "Allowed with a seller-audience session even before a seller is chosen.",
     response: () => z.array(SellerContext),
@@ -1855,6 +1903,8 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/session/seller-context",
     auth: "seller",
+    sellerContext: "optional",
+    scope: "own-seller",
     summary: "Choose or switch the seller this session acts for",
     desc: "Re-issues tokens bound to the chosen seller. Every later seller-area request acts only for that seller.",
     body: () => z.object({
@@ -1872,6 +1922,7 @@ export const endpoints = defineEndpoints({
     path: "/accounts",
     auth: "staff",
     permission: "identity.accounts.view",
+    scope: "staff",
     summary: "Find accounts (staff or members)",
     desc: "Staff realm results need identity.staff-accounts.manage as well. Roles of staff come from GET /api/admin/access/members.",
     query: () =>
@@ -1893,6 +1944,7 @@ export const endpoints = defineEndpoints({
     path: "/accounts/{id}",
     auth: "staff",
     permission: "identity.accounts.view",
+    scope: "staff",
     summary: "Account security detail (devices, lockout, recent activity)",
     params: () =>
       z.object({
@@ -1909,6 +1961,7 @@ export const endpoints = defineEndpoints({
     path: "/accounts/{id}/lock",
     auth: "staff",
     permission: "identity.accounts.manage",
+    scope: "staff",
     summary: "Lock an account (suspected compromise, offboarding)",
     desc: "Revokes all sessions. Staff-realm targets need identity.staff-accounts.manage; nobody can lock their own account.",
     params: () =>
@@ -1930,6 +1983,7 @@ export const endpoints = defineEndpoints({
     path: "/accounts/{id}/unlock",
     auth: "staff",
     permission: "identity.accounts.manage",
+    scope: "staff",
     summary: "Unlock an account",
     params: () =>
       z.object({
@@ -1952,6 +2006,7 @@ export const endpoints = defineEndpoints({
     path: "/accounts/{id}/force-password-reset",
     auth: "staff",
     permission: "identity.accounts.manage",
+    scope: "staff",
     summary: "Require a new password at next sign-in",
     desc: "Revokes all sessions and emails a reset link. Sign-in returns password_reset_required until done.",
     params: () =>
@@ -1976,6 +2031,7 @@ export const endpoints = defineEndpoints({
     path: "/accounts/{id}/reset-two-step",
     auth: "staff",
     permission: "identity.accounts.manage",
+    scope: "staff",
     summary: "Remove 2-step methods after an identity check (lost phone)",
     desc: "Staff accounts must set up 2-step again at next sign-in. The identity check performed is recorded.",
     params: () =>
@@ -2000,6 +2056,7 @@ export const endpoints = defineEndpoints({
     path: "/accounts/{id}/sign-out-all",
     auth: "staff",
     permission: "identity.accounts.manage",
+    scope: "staff",
     summary: "Sign an account out everywhere",
     params: () =>
       z.object({
@@ -2022,6 +2079,8 @@ export const endpoints = defineEndpoints({
     path: "/accounts/{id}/disable",
     auth: "staff",
     permission: "identity.staff-accounts.manage",
+    stepUp: {"kind":"code","purpose":"staff-account"},
+    scope: "staff",
     summary: "Disable a staff account (offboarding)",
     desc: "Revokes sessions. access consumes identity.account.disabled to end role assignments and flag lead/backup gaps.",
     params: () =>
@@ -2033,7 +2092,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => AccountAdmin,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","SELF_ACTION_NOT_ALLOWED"],
+    errors: ["ILLEGAL_TRANSITION","SELF_ACTION_NOT_ALLOWED","STEP_UP_REQUIRED"],
     audited: true,
     events: ["identity.account.disabled"],
     screens: ["admin/staff"],
@@ -2045,6 +2104,8 @@ export const endpoints = defineEndpoints({
     path: "/accounts/{id}/enable",
     auth: "staff",
     permission: "identity.staff-accounts.manage",
+    stepUp: {"kind":"code","purpose":"staff-account"},
+    scope: "staff",
     summary: "Re-enable a disabled staff account",
     desc: "Roles are not restored automatically; assign them again in access.",
     params: () =>
@@ -2056,7 +2117,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => AccountAdmin,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION"],
+    errors: ["ILLEGAL_TRANSITION","STEP_UP_REQUIRED"],
     audited: true,
     events: ["identity.account.enabled"],
     screens: ["admin/staff"],
@@ -2068,6 +2129,7 @@ export const endpoints = defineEndpoints({
     path: "/accounts/{id}/security-activity",
     auth: "staff",
     permission: "identity.accounts.view",
+    scope: "staff",
     summary: "Security activity of one account",
     params: () =>
       z.object({
@@ -2092,6 +2154,7 @@ export const endpoints = defineEndpoints({
     path: "/invitations",
     auth: "staff",
     permission: "identity.staff-accounts.manage",
+    scope: "staff",
     summary: "Staff invitations",
     query: () =>
       z.object({
@@ -2109,6 +2172,8 @@ export const endpoints = defineEndpoints({
     path: "/invitations/{id}/resend",
     auth: "staff",
     permission: "identity.staff-accounts.manage",
+    stepUp: {"kind":"code","purpose":"staff-account"},
+    scope: "staff",
     summary: "Resend a staff invitation (new 7-day link)",
     params: () =>
       z.object({
@@ -2116,7 +2181,7 @@ export const endpoints = defineEndpoints({
       }),
     response: () => Invitation,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION"],
+    errors: ["ILLEGAL_TRANSITION","STEP_UP_REQUIRED"],
     audited: true,
     events: ["identity.invitation.created"],
     screens: ["admin/staff"],
@@ -2128,6 +2193,8 @@ export const endpoints = defineEndpoints({
     path: "/invitations/{id}/revoke",
     auth: "staff",
     permission: "identity.staff-accounts.manage",
+    stepUp: {"kind":"code","purpose":"staff-account"},
+    scope: "staff",
     summary: "Cancel a staff invitation",
     params: () =>
       z.object({
@@ -2138,7 +2205,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => Invitation,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION"],
+    errors: ["ILLEGAL_TRANSITION","STEP_UP_REQUIRED"],
     audited: true,
     events: ["identity.invitation.revoked"],
     screens: ["admin/staff"],
@@ -2157,7 +2224,7 @@ export const spec = defineModuleSpec({
   summary: "Who someone is and how they prove it: accounts for customers, seller members and staff, credentials, email verification, sessions and refresh tokens for the website and the Android app, password recovery, 2-step verification, signed-in devices, guest sessions and the security activity log.",
   dependsOn: [],
   optionalDeps: ["audit","sellers","customers"],
-  publicApi: ["authenticate","verifyGuestSession","getAccount","getAccounts","findAccountByEmail","inviteStaff","inviteSellerMember","grantSellerContext","revokeSellerContext","revokeSessions","verifyStepUp","grantGuestOrderAccess","hasGuestOrderAccess","issueOrderLink","closeAccount","sendPasswordReset","startPhoneVerification","verifyReauthToken","accountSecurityOf"],
+  publicApi: ["authenticate","verifyGuestSession","getAccount","getAccounts","findAccountByEmail","inviteStaff","inviteSellerMember","grantSellerContext","revokeSellerContext","revokeSessions","verifyStepUp","grantGuestOrderAccess","hasGuestOrderAccess","issueOrderLink","closeAccount","sendPasswordReset","startPhoneVerification","verifyReauthToken","accountSecurityOf","consumeReauthToken","revocationsSince","verifyRefreshToken"],
   permissions: [
     {
       "key": "identity.accounts.view",
@@ -2482,6 +2549,22 @@ export const spec = defineModuleSpec({
     "orderLinkTtlDays": {
       "default": 180,
       "desc": "Emailed order link lifetime"
+    },
+    "staffIdleMinutes": {
+      "default": 30,
+      "desc": "Staff sessions end after this long without activity"
+    },
+    "maxStaffSessions": {
+      "default": 3,
+      "desc": "Concurrent staff sessions per account; the oldest is signed out"
+    },
+    "refreshReuseGraceSeconds": {
+      "default": 20,
+      "desc": "A just-rotated refresh token presented again within this window returns the same new tokens (parallel refresh)"
+    },
+    "visitorRefreshDays": {
+      "default": 30,
+      "desc": "Visitor refresh token lifetime after last activity"
     }
   },
   errorCodes: {
@@ -2500,10 +2583,6 @@ export const spec = defineModuleSpec({
     "EMAIL_NOT_VERIFIED": {
       "status": 403,
       "meaning": "Confirm the email first. details.challenge is a fresh VerificationChallenge."
-    },
-    "NO_SELLER_ACCESS": {
-      "status": 403,
-      "meaning": "This account cannot act for that seller (or for any seller)."
     },
     "CODE_INVALID": {
       "status": 400,
@@ -2564,6 +2643,10 @@ export const spec = defineModuleSpec({
     "ORDER_LINK_INVALID": {
       "status": 410,
       "meaning": "The order link has expired; use Guest order lookup."
+    },
+    "APP_PROOF_INVALID": {
+      "status": 401,
+      "meaning": "The app proof (Play Integrity or bot challenge) is missing or failed."
     }
   },
   tables: {
@@ -2651,6 +2734,10 @@ export const spec = defineModuleSpec({
       "version": {
         "type": "int",
         "nullable": false
+      },
+      "tokens_valid_after": {
+        "type": "timestamptz",
+        "nullable": true
       }
     },
     "password_history": {
@@ -3083,6 +3170,22 @@ export const spec = defineModuleSpec({
       "claimed_at": {
         "type": "timestamptz",
         "nullable": true
+      },
+      "audience": {
+        "type": "text",
+        "nullable": false
+      },
+      "refresh_token_hash": {
+        "type": "text",
+        "nullable": false
+      },
+      "previous_token_hash": {
+        "type": "text",
+        "nullable": true
+      },
+      "rotated_at": {
+        "type": "timestamptz",
+        "nullable": true
       }
     },
     "guest_order_grants": {
@@ -3242,6 +3345,17 @@ export const spec = defineModuleSpec({
         "type": "timestamptz",
         "nullable": true
       }
+    }
+  },
+  tenantTables: {
+    "sessions": {
+      "seller": "seller_id"
+    },
+    "seller_access": {
+      "seller": "seller_id"
+    },
+    "guest_order_grants": {
+      "visitor": "guest_session_id"
     }
   },
   endpoints,

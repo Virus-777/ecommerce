@@ -354,7 +354,7 @@
     "AdminItemAfterSales": { "itemId": "uuid", "title": "string", "sellerName": "string", "request": "string", "amount": "Money?", "status": "string", "owner": "string?" },
     "AdminPaymentPanel": { "state": "string", "methodLabel": "string", "authorizedAt": "datetime?", "capturedAt": "datetime?", "processorRef": "string?", "captured": "Money", "refunded": "Money" },
     "InternalNote": { "id": "uuid", "text": "text", "author": "Actor", "at": "datetime" },
-    "AdminCustomerPanel": { "customerId": "uuid?", "guest": "bool", "name": "string", "email": { "type": "string", "desc": "Masked unless orders.customers.view-contact" }, "phone": "string?", "customerSince": "date?", "orderCount": "int?" },
+    "AdminCustomerPanel": { "customerId": "uuid?", "guest": "bool", "name": "string", "email": { "type": "string", "desc": "Masked unless orders.customers.view-contact", "permission": "orders.customers.view-contact", "mask": "email" }, "phone": "string?", "customerSince": "date?", "orderCount": "int?" },
     "AdminOrderDetail": {
       "order": "OrderDetail",
       "customer": "AdminCustomerPanel",

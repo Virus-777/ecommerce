@@ -21,7 +21,8 @@
     "module:new": "tsx tools/new-module.ts",
     "check:api": "tsx tools/check-api.ts",
     "check:boundaries": "tsx tools/check-boundaries.ts",
-    "check": "npm run gen:check && npm run typecheck && npm run check:boundaries && npm run check:api && npm test",
+    "test:http": "tsx --env-file-if-exists=.env tools/test-http.ts",
+    "check": "npm run gen:check && npm run typecheck && npm run check:boundaries && npm run check:api && npm test && npm run test:http",
     "token": "tsx --env-file-if-exists=.env tools/token.ts"
   },
   "dependencies": {

@@ -3,19 +3,20 @@
  *   - it boots with exactly its spec dependencies;
  *   - its migrations create the spec's tables and columns;
  *   - every spec endpoint is routed at the spec URL;
- *   - the auth guard answers 401 without the session the spec requires, 403 without the permission;
- *   - with the right session, requests pass auth and validation and reach the handler.
+ *   - every endpoint answers 401 without a token, 403 WRONG_AUDIENCE for another app's token,
+ *     403 FORBIDDEN (or OWNER_ONLY) without its permission;
+ *   - with the right token, requests pass the middleware and validation and reach the handler.
  */
 import type { FastifyInstance } from 'fastify';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { z } from 'zod';
-import { newId } from '../kernel/lib/ids.js';
 import { routeUrlOf, urlOf } from '../kernel/http/register.js';
 import { schemaOf } from '../kernel/migrations/index.js';
-import { specOf } from '../kernel/module-system/loader.js';
-import type { EndpointDef } from '../kernel/spec/define.js';
+import { allSpecs, specOf } from '../kernel/module-system/loader.js';
+import type { Area, AuthKind, EndpointDef } from '../kernel/spec/define.js';
+import type { Audience } from '../kernel/auth/tokens.js';
 import { auth, buildTestApp, callers } from './app.js';
+import { sampleParams } from './samples.js';
 
 const PG_TYPE: Record<string, string> = {
   int: 'int4',
@@ -33,25 +34,24 @@ const udtOf = (t: string): string => {
   return PG_TYPE[base] ?? base;
 };
 
-/** A path value that satisfies the param schema (uuid, int or string). */
-function sampleParams(def: EndpointDef): Record<string, string> {
-  const shape = (def.params?.() as z.ZodObject | undefined)?.shape ?? {};
-  const out: Record<string, string> = {};
-  for (const [k, s] of Object.entries(shape)) {
-    out[k] = [newId(), '1', 'sample', '2026-01-01'].find((v) => (s as z.ZodType).safeParse(v).success) ?? 'sample';
-  }
-  return out;
-}
-
 const fill = (url: string, params: Record<string, string>) => url.replace(/\{(\w+)\}/g, (_, k: string) => encodeURIComponent(params[k] ?? 'x'));
 
-function sessionFor(def: EndpointDef, permissions: 'all' | 'none' = 'all'): Record<string, string> {
+const BEARER = new Set<AuthKind>(['visitor', 'shopper', 'customer', 'account', 'seller', 'staff']);
+const AUDIENCE: Partial<Record<Area, Audience>> = { store: 'store', seller: 'seller', admin: 'admin' };
+
+/** The token an endpoint asks for: the right kind of caller, for the app that owns the area. */
+function tokenFor(def: EndpointDef, permissions: 'all' | 'none' = 'all'): Record<string, string> {
+  const audience = AUDIENCE[def.area] ?? 'store';
   switch (def.auth) {
+    case 'visitor':
+      return auth(callers.visitor({ audience }));
+    case 'account':
+      return auth(audience === 'seller' ? callers.seller() : audience === 'admin' ? callers.staff() : callers.customer());
     case 'customer':
     case 'shopper':
       return auth(callers.customer());
     case 'seller':
-      return auth(permissions === 'none' ? callers.seller({ isOwner: false, permissions: [] }) : callers.seller());
+      return auth(permissions === 'none' ? callers.seller({ permissions: [] }) : callers.seller());
     case 'staff':
       return auth(callers.staff(permissions === 'none' ? [] : undefined));
     default:
@@ -59,16 +59,20 @@ function sessionFor(def: EndpointDef, permissions: 'all' | 'none' = 'all'): Reco
   }
 }
 
+/** A signed-in token from another app (staff for the store, a customer for seller and admin areas). */
+const otherAppToken = (def: EndpointDef) => auth(def.area === 'store' ? callers.staff() : callers.customer());
+
 export function describeModule(name: string) {
   const spec = specOf(name)!;
   const endpoints = Object.entries(spec.endpoints);
 
   describe(`${name} module`, () => {
     let app: FastifyInstance;
+    const ownerOnly = new Set(Object.values(allSpecs).flatMap((s) => s.permissions.filter((p) => p.ownerOnly).map((p) => p.key)));
 
     beforeAll(async () => {
       // every launch phase on, so auth and validation are exercised for later-phase endpoints too
-      app = await buildTestApp({ only: [name], config: { launchPhase: 4 } });
+      app = await buildTestApp({ only: [name], config: { launchPhase: 4, rateLimits: false } });
     });
     afterAll(async () => {
       await app?.close();
@@ -99,29 +103,42 @@ export function describeModule(name: string) {
       expect(app.hasRoute({ method: def.method, url })).toBe(true);
     });
 
-    const guarded = endpoints.filter(([, d]) => d.auth !== 'anyone');
-    if (guarded.length) {
-      it.each(guarded)('%s refuses callers without the required session', async (_id, def) => {
-        const res = await app.inject({ method: def.method, url: fill(urlOf(name, def), sampleParams(def)) });
+    const call = (def: EndpointDef, headers: Record<string, string> = {}) =>
+      app.inject({ method: def.method, url: fill(urlOf(name, def), sampleParams(def.params?.())), headers, ...(def.body ? { payload: {} } : {}) });
+
+    // every endpoint needs a token: a bearer token, an app proof, a refresh token or a provider signature
+    if (endpoints.length) {
+      it.each(endpoints)('%s refuses a request without a token', async (_id, def) => {
+        const res = await call(def);
         expect(res.statusCode, res.body).toBe(401);
-        expect(res.json().error.code).toBe('UNAUTHORIZED');
+        expect(res.json().error.code).toBe(def.auth === 'bootstrap' ? 'APP_PROOF_INVALID' : 'UNAUTHORIZED');
+      });
+    }
+
+    const audienced = endpoints.filter(([, d]) => BEARER.has(d.auth) && d.auth !== 'account' && AUDIENCE[d.area]);
+    if (audienced.length) {
+      it.each(audienced)('%s refuses a token issued for another app', async (_id, def) => {
+        const res = await call(def, otherAppToken(def));
+        expect(res.statusCode, res.body).toBe(403);
+        expect(res.json().error.code).toBe('WRONG_AUDIENCE');
       });
     }
 
     const permissioned = endpoints.filter(([, d]) => d.permission && (d.auth === 'staff' || d.auth === 'seller'));
     if (permissioned.length) {
       it.each(permissioned)('%s refuses callers without its permission', async (_id, def) => {
-        const res = await app.inject({ method: def.method, url: fill(urlOf(name, def), sampleParams(def)), headers: sessionFor(def, 'none') });
+        const res = await call(def, tokenFor(def, 'none'));
         expect(res.statusCode, res.body).toBe(403);
-        expect(res.json().error).toMatchObject({ code: 'FORBIDDEN', details: { permission: def.permission } });
+        if (def.auth === 'seller' && ownerOnly.has(def.permission!)) expect(res.json().error.code).toBe('OWNER_ONLY');
+        else expect(res.json().error).toMatchObject({ code: 'FORBIDDEN', details: { permission: def.permission } });
       });
     }
 
     // GET endpoints whose query has no required fields can be called as they are
-    const callable = endpoints.filter(([, d]) => d.method === 'GET' && d.auth !== 'provider' && (!d.query || d.query().safeParse({}).success));
+    const callable = endpoints.filter(([, d]) => d.method === 'GET' && BEARER.has(d.auth) && !d.stepUp && (!d.query || d.query().safeParse({}).success));
     if (callable.length) {
-      it.each(callable)('%s reaches its handler with the right session', async (_id, def) => {
-        const res = await app.inject({ method: 'GET', url: fill(urlOf(name, def), sampleParams(def)), headers: sessionFor(def) });
+      it.each(callable)('%s reaches its handler with the right token', async (_id, def) => {
+        const res = await call(def, tokenFor(def));
         expect([400, 401, 403, 500], res.body).not.toContain(res.statusCode);
       });
     }

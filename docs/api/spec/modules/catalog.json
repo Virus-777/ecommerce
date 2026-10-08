@@ -1114,7 +1114,7 @@
       "method": "GET",
       "path": "/categories",
       "summary": "Visible category tree with in-stock counts and images",
-      "auth": "anyone",
+      "auth": "visitor",
       "response": "Category[]",
       "screens": [
         "store/categories",
@@ -1129,7 +1129,7 @@
       "method": "GET",
       "path": "/categories/{slug}",
       "summary": "Category with breadcrumb, subcategories and filterable attributes",
-      "auth": "anyone",
+      "auth": "visitor",
       "params": {
         "slug": "string"
       },
@@ -1148,7 +1148,7 @@
       "method": "GET",
       "path": "/brands",
       "summary": "Active brands, optionally the popular brands of one category",
-      "auth": "anyone",
+      "auth": "visitor",
       "paging": true,
       "query": {
         "q": "string?",
@@ -1168,7 +1168,7 @@
       "method": "GET",
       "path": "/brands/{slug}",
       "summary": "Brand page header (logo, banner, description, product count)",
-      "auth": "anyone",
+      "auth": "visitor",
       "params": {
         "slug": "string"
       },
@@ -1184,7 +1184,7 @@
       "path": "/products/{id}",
       "summary": "Product detail (shared content only)",
       "desc": "Offers, prices and delivery come from offers (`GET /api/store/offers/products/{id}/offers`). Products that are not approved and active return 404.",
-      "auth": "anyone",
+      "auth": "visitor",
       "params": {
         "id": "uuid"
       },

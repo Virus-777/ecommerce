@@ -1607,6 +1607,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/home",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Homepage sections in order, resolved for display",
     desc: "Only published sections within their schedule. Products are resolved with current price, seller and availability; unavailable products are removed or replaced. Ad positions return only their placement key; the client requests the ad from advertising. One call renders the page (plus the ad decision).",
     query: () =>
@@ -1622,7 +1623,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/pages/{slug}",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Campaign page, collection, About or landing page",
     desc: "Returns 404 outside the publication window. Collections list each product with live availability (checked hourly) and the seller.",
     params: () =>
@@ -1639,7 +1641,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/collections",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Published collections of a brand (or of one collection kind) as cards",
     desc: "Used by the brand page (Collections row). Only collections inside their publication window; productCount counts available products.",
     query: () =>
@@ -1657,7 +1660,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/pages/{slug}/products",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "More products for rule-based collections (New arrivals, Best sellers)",
     params: () =>
       z.object({
@@ -1679,7 +1683,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/navigation",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Header and footer links, service strip, contact details and company line",
     desc: "serviceStrip is returned only inside its activeFrom / activeUntil window.",
     response: () => SiteNavigation,
@@ -1691,7 +1696,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/help",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Help Center: topics, popular articles, popular searches, featured guide and contact channels",
     desc: "audience=seller returns the seller help home used by Seller Center (seller topics with their top articles, seller popular searches, the seller featured guide); default customer. Order-specific help (recent orders, open cases) comes from orders and support.",
     query: () =>
@@ -1707,7 +1713,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/help/articles",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Search or browse help articles",
     query: () =>
       z.object({
@@ -1725,7 +1732,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/help/articles/{slug}",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "A help article with effective and updated dates and related articles",
     params: () =>
       z.object({
@@ -1742,6 +1750,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/help/articles/{id}/feedback",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Was this helpful?",
     params: () =>
       z.object({
@@ -1761,7 +1770,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/policies",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Policies with effective date and version",
     response: () => z.array(PolicySummary),
     status: 200,
@@ -1772,7 +1782,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/policies/{key}",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Current policy (or the version in effect at a date)",
     desc: "?at= returns the version in effect at that moment, e.g. the order date, so customers can read the terms their order keeps.",
     params: () =>
@@ -1793,7 +1804,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/policies/{key}/versions",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Previous versions of a policy",
     params: () =>
       z.object({
@@ -1808,7 +1820,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/policy-versions/{id}",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "One past or current policy version (linked from order details)",
     params: () =>
       z.object({
@@ -1826,6 +1839,7 @@ export const endpoints = defineEndpoints({
     path: "/homepage",
     auth: "staff",
     permission: "content.homepage.manage",
+    scope: "staff",
     summary: "Homepage sections with owner, schedule, status and locked ad positions",
     response: () => HomepageAdmin,
     status: 200,
@@ -1838,6 +1852,7 @@ export const endpoints = defineEndpoints({
     path: "/homepage/sections",
     auth: "staff",
     permission: "content.homepage.manage",
+    scope: "staff",
     summary: "Add a section to the draft layout",
     body: () => SectionInput,
     response: () => HomeSectionAdmin,
@@ -1852,6 +1867,7 @@ export const endpoints = defineEndpoints({
     path: "/homepage/sections/{id}",
     auth: "staff",
     permission: "content.homepage.manage",
+    scope: "staff",
     summary: "Edit a section (heading, product source, schedule, position, owner)",
     desc: "Ad position sections are locked (SECTION_LOCKED); they are managed in advertising.",
     params: () =>
@@ -1872,6 +1888,7 @@ export const endpoints = defineEndpoints({
     path: "/homepage/sections/{id}/products",
     auth: "staff",
     permission: "content.homepage.manage",
+    scope: "staff",
     summary: "Products in a section, resolved with title, seller and stock",
     desc: "Resolves the section product source (manual list, collection or rule) through catalog, offers and inventory. Unavailable products are listed only with includeHidden=true and carry hiddenReason.",
     params: () =>
@@ -1895,6 +1912,7 @@ export const endpoints = defineEndpoints({
     path: "/homepage/sections/{id}/schedule",
     auth: "staff",
     permission: "content.homepage.manage",
+    scope: "staff",
     summary: "Schedule a section (show from / remove at)",
     params: () =>
       z.object({
@@ -1918,6 +1936,7 @@ export const endpoints = defineEndpoints({
     path: "/homepage/sections/{id}/remove",
     auth: "staff",
     permission: "content.homepage.manage",
+    scope: "staff",
     summary: "Remove a section (correction or removal, reason required)",
     params: () =>
       z.object({
@@ -1941,6 +1960,7 @@ export const endpoints = defineEndpoints({
     path: "/homepage/order",
     auth: "staff",
     permission: "content.homepage.manage",
+    scope: "staff",
     summary: "Reorder sections in the draft (ad positions move with the layout but stay locked)",
     body: () => z.object({
       sectionIds: z.array(z.uuid()),
@@ -1957,6 +1977,7 @@ export const endpoints = defineEndpoints({
     path: "/homepage/preview",
     auth: "staff",
     permission: "content.homepage.manage",
+    scope: "staff",
     summary: "Preview the homepage (draft or live) on desktop or phone at a given time",
     body: () => PreviewRequest,
     response: () => Homepage,
@@ -1970,6 +1991,7 @@ export const endpoints = defineEndpoints({
     path: "/homepage/publish",
     auth: "staff",
     permission: "content.homepage.publish",
+    scope: "staff",
     summary: "Publish the draft layout as a new version",
     body: () => z.object({
       summary: z.string(),
@@ -1988,6 +2010,7 @@ export const endpoints = defineEndpoints({
     path: "/homepage/discard-draft",
     auth: "staff",
     permission: "content.homepage.manage",
+    scope: "staff",
     summary: "Discard the unpublished layout draft",
     response: () => HomepageAdmin,
     status: 200,
@@ -2000,6 +2023,7 @@ export const endpoints = defineEndpoints({
     path: "/homepage/versions",
     auth: "staff",
     permission: "content.homepage.manage",
+    scope: "staff",
     summary: "Homepage version history",
     paging: true,
     response: () => Version,
@@ -2013,6 +2037,7 @@ export const endpoints = defineEndpoints({
     path: "/homepage/versions/{number}/restore",
     auth: "staff",
     permission: "content.homepage.publish",
+    scope: "staff",
     summary: "Restore an earlier layout (creates a new version; nothing is overwritten)",
     params: () =>
       z.object({
@@ -2036,6 +2061,7 @@ export const endpoints = defineEndpoints({
     path: "/pages",
     auth: "staff",
     permission: "content.pages.manage",
+    scope: "staff",
     summary: "Campaign pages and collections with publish and removal times",
     query: () =>
       z.object({
@@ -2055,6 +2081,7 @@ export const endpoints = defineEndpoints({
     path: "/pages",
     auth: "staff",
     permission: "content.pages.manage",
+    scope: "staff",
     summary: "Create a page or collection draft",
     body: () => PageInput,
     response: () => PageAdmin,
@@ -2070,6 +2097,7 @@ export const endpoints = defineEndpoints({
     path: "/pages/{id}",
     auth: "staff",
     permission: "content.pages.manage",
+    scope: "staff",
     summary: "Page with draft and live versions, checks and linked promotion",
     params: () =>
       z.object({
@@ -2086,6 +2114,7 @@ export const endpoints = defineEndpoints({
     path: "/pages/{id}",
     auth: "staff",
     permission: "content.pages.manage",
+    scope: "staff",
     summary: "Edit the page draft (creates or updates the draft version)",
     params: () =>
       z.object({
@@ -2105,6 +2134,7 @@ export const endpoints = defineEndpoints({
     path: "/pages/{id}/preview",
     auth: "staff",
     permission: "content.pages.manage",
+    scope: "staff",
     summary: "Preview the draft as customers will see it",
     params: () =>
       z.object({
@@ -2122,6 +2152,7 @@ export const endpoints = defineEndpoints({
     path: "/pages/{id}/submit",
     auth: "staff",
     permission: "content.pages.manage",
+    scope: "staff",
     summary: "Send for review",
     params: () =>
       z.object({
@@ -2140,6 +2171,7 @@ export const endpoints = defineEndpoints({
     path: "/pages/{id}/approve",
     auth: "staff",
     permission: "content.pages.publish",
+    scope: "staff",
     summary: "Approve or request changes",
     params: () =>
       z.object({
@@ -2162,6 +2194,7 @@ export const endpoints = defineEndpoints({
     path: "/pages/{id}/schedule",
     auth: "staff",
     permission: "content.pages.publish",
+    scope: "staff",
     summary: "Set publish and removal times",
     params: () =>
       z.object({
@@ -2185,6 +2218,7 @@ export const endpoints = defineEndpoints({
     path: "/pages/{id}/publish",
     auth: "staff",
     permission: "content.pages.publish",
+    scope: "staff",
     summary: "Publish the draft now",
     params: () =>
       z.object({
@@ -2204,6 +2238,7 @@ export const endpoints = defineEndpoints({
     path: "/pages/{id}/unpublish",
     auth: "staff",
     permission: "content.pages.publish",
+    scope: "staff",
     summary: "Take a page down (it can be republished)",
     params: () =>
       z.object({
@@ -2226,6 +2261,7 @@ export const endpoints = defineEndpoints({
     path: "/pages/{id}/remove",
     auth: "staff",
     permission: "content.pages.remove",
+    scope: "staff",
     summary: "Correction or removal action (reason required, takes effect now)",
     params: () =>
       z.object({
@@ -2250,6 +2286,7 @@ export const endpoints = defineEndpoints({
     path: "/pages/{id}/versions",
     auth: "staff",
     permission: "content.pages.manage",
+    scope: "staff",
     summary: "Version history of a page",
     params: () =>
       z.object({
@@ -2267,6 +2304,7 @@ export const endpoints = defineEndpoints({
     path: "/pages/{id}/versions/{number}/restore",
     auth: "staff",
     permission: "content.pages.manage",
+    scope: "staff",
     summary: "Restore an earlier version as a new draft version",
     params: () =>
       z.object({
@@ -2289,6 +2327,7 @@ export const endpoints = defineEndpoints({
     path: "/help/summary",
     auth: "staff",
     permission: "content.help.manage",
+    scope: "staff",
     summary: "Published articles, policies, articles needing review and helpful rating",
     response: () => HelpSummary,
     status: 200,
@@ -2301,6 +2340,7 @@ export const endpoints = defineEndpoints({
     path: "/help/items",
     auth: "staff",
     permission: "content.help.manage",
+    scope: "staff",
     summary: "Policies and help articles in one list",
     query: () =>
       z.object({
@@ -2322,6 +2362,7 @@ export const endpoints = defineEndpoints({
     path: "/help/categories",
     auth: "staff",
     permission: "content.help.manage",
+    scope: "staff",
     summary: "Help categories including hidden",
     response: () => z.array(HelpCategory),
     status: 200,
@@ -2334,6 +2375,7 @@ export const endpoints = defineEndpoints({
     path: "/help/categories",
     auth: "staff",
     permission: "content.help.manage",
+    scope: "staff",
     summary: "Create a help category",
     body: () => z.object({
       name: z.string(),
@@ -2355,6 +2397,7 @@ export const endpoints = defineEndpoints({
     path: "/help/categories/{id}",
     auth: "staff",
     permission: "content.help.manage",
+    scope: "staff",
     summary: "Rename, hide or reorder a category",
     params: () =>
       z.object({
@@ -2379,6 +2422,7 @@ export const endpoints = defineEndpoints({
     path: "/help/articles",
     auth: "staff",
     permission: "content.help.manage",
+    scope: "staff",
     summary: "Create a help article draft",
     body: () => HelpArticleInput,
     response: () => HelpArticleAdmin,
@@ -2394,6 +2438,7 @@ export const endpoints = defineEndpoints({
     path: "/help/articles/{id}",
     auth: "staff",
     permission: "content.help.manage",
+    scope: "staff",
     summary: "Article with status, versions and feedback",
     params: () =>
       z.object({
@@ -2410,6 +2455,7 @@ export const endpoints = defineEndpoints({
     path: "/help/articles/{id}",
     auth: "staff",
     permission: "content.help.manage",
+    scope: "staff",
     summary: "Edit the article draft",
     params: () =>
       z.object({
@@ -2429,6 +2475,7 @@ export const endpoints = defineEndpoints({
     path: "/help/articles/{id}/transition",
     auth: "staff",
     permission: "content.help.manage",
+    scope: "staff",
     summary: "Submit, approve, request changes, schedule, publish, unpublish or remove an article",
     desc: "One action endpoint for the Content publication state machine on articles. remove needs kind and reason; schedule needs publishAt.",
     params: () =>
@@ -2456,6 +2503,7 @@ export const endpoints = defineEndpoints({
     path: "/help/articles/{id}/versions",
     auth: "staff",
     permission: "content.help.manage",
+    scope: "staff",
     summary: "Article version history",
     params: () =>
       z.object({
@@ -2473,6 +2521,7 @@ export const endpoints = defineEndpoints({
     path: "/help/articles/{id}/versions/{number}/restore",
     auth: "staff",
     permission: "content.help.manage",
+    scope: "staff",
     summary: "Restore an earlier article version as a new draft",
     params: () =>
       z.object({
@@ -2495,6 +2544,7 @@ export const endpoints = defineEndpoints({
     path: "/policies",
     auth: "staff",
     permission: "content.policies.edit",
+    scope: "staff",
     summary: "Policies with current, scheduled and draft versions",
     response: () => z.array(PolicySummary),
     status: 200,
@@ -2507,6 +2557,7 @@ export const endpoints = defineEndpoints({
     path: "/policies",
     auth: "staff",
     permission: "content.policies.manage",
+    scope: "staff",
     summary: "Create a new policy with its business owner",
     body: () => z.object({
       key: z.string(),
@@ -2527,6 +2578,7 @@ export const endpoints = defineEndpoints({
     path: "/policies/{id}/versions",
     auth: "staff",
     permission: "content.policies.edit",
+    scope: "staff",
     summary: "All versions of a policy with effective date, summary and approver",
     params: () =>
       z.object({
@@ -2543,6 +2595,7 @@ export const endpoints = defineEndpoints({
     path: "/policies/{id}/versions",
     auth: "staff",
     permission: "content.policies.edit",
+    scope: "staff",
     summary: "Start a new version draft (copies the current text)",
     params: () =>
       z.object({
@@ -2564,6 +2617,7 @@ export const endpoints = defineEndpoints({
     path: "/policy-versions/{id}",
     auth: "staff",
     permission: "content.policies.edit",
+    scope: "staff",
     summary: "A policy version with approvals",
     params: () =>
       z.object({
@@ -2580,6 +2634,7 @@ export const endpoints = defineEndpoints({
     path: "/policy-versions/{id}",
     auth: "staff",
     permission: "content.policies.edit",
+    scope: "staff",
     summary: "Edit a draft version (text, effective date, change summary, impact, notices)",
     desc: "extend_open_orders is accepted only when the change favors the customer, confirmed by the policy owner during approval.",
     params: () =>
@@ -2600,6 +2655,7 @@ export const endpoints = defineEndpoints({
     path: "/policy-versions/{id}/diff",
     auth: "staff",
     permission: "content.policies.edit",
+    scope: "staff",
     summary: "Changes from the previous version",
     params: () =>
       z.object({
@@ -2616,6 +2672,7 @@ export const endpoints = defineEndpoints({
     path: "/policy-versions/{id}/submit",
     auth: "staff",
     permission: "content.policies.edit",
+    scope: "staff",
     summary: "Send for approval (policy owner, then Business Owner)",
     params: () =>
       z.object({
@@ -2635,6 +2692,7 @@ export const endpoints = defineEndpoints({
     path: "/policy-versions/{id}/approve",
     auth: "staff",
     permission: "content.policies.approve",
+    scope: "staff",
     summary: "Policy owner approval or changes requested",
     desc: "After the owner approves, the Business Owner's final approval is raised as an access approval request.",
     params: () =>
@@ -2659,6 +2717,7 @@ export const endpoints = defineEndpoints({
     path: "/policy-versions/{id}/schedule",
     auth: "staff",
     permission: "content.policies.edit",
+    scope: "staff",
     summary: "Publish an approved version with its effective date",
     desc: "Customer-facing changes need at least policyNoticeDays notice; shorter notice needs Business Owner approval. Notices go to customers and sellers when flagged.",
     params: () =>
@@ -2683,6 +2742,7 @@ export const endpoints = defineEndpoints({
     path: "/policy-versions/{id}/withdraw",
     auth: "staff",
     permission: "content.policies.edit",
+    scope: "staff",
     summary: "Withdraw a version before it takes effect",
     params: () =>
       z.object({
@@ -2704,6 +2764,7 @@ export const endpoints = defineEndpoints({
     path: "/navigation",
     auth: "staff",
     permission: "content.pages.publish",
+    scope: "staff",
     summary: "Replace header and footer links",
     body: () => z.object({
       get header() {
@@ -3576,6 +3637,11 @@ export const spec = defineModuleSpec({
         "type": "timestamptz",
         "nullable": false
       }
+    }
+  },
+  tenantTables: {
+    "article_feedback": {
+      "customer": "customer_id"
     }
   },
   endpoints,

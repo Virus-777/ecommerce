@@ -29,17 +29,17 @@ Finding products: a product index built from catalog, offers, inventory and revi
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| GET | `/api/store/search/products` | Search results or category listing (product cards with sponsored slots marked) | anyone | Page<SearchHit> |
-| GET | `/api/store/search/facets` | Everything around the results for the same query: total, correction, applied filters, facets with counts, sorts, store match, category context, empty guidance | anyone | `SearchContext` |
-| GET | `/api/store/search/suggestions` | Suggestions while typing: queries, categories, brands, stores, products and recent searches | anyone | `Suggestions` |
+| GET | `/api/store/search/products` | Search results or category listing (product cards with sponsored slots marked) | visitor | Page<SearchHit> |
+| GET | `/api/store/search/facets` | Everything around the results for the same query: total, correction, applied filters, facets with counts, sorts, store match, category context, empty guidance | visitor | `SearchContext` |
+| GET | `/api/store/search/suggestions` | Suggestions while typing: queries, categories, brands, stores, products and recent searches | visitor | `Suggestions` |
 | GET | `/api/store/search/recent-searches` | Recent searches for this customer or guest session (max 10) | shopper | `RecentSearch[]` |
 | DELETE | `/api/store/search/recent-searches/{id}` | Remove one recent search | shopper | 204 No content |
 | DELETE | `/api/store/search/recent-searches` | Clear all recent searches | shopper | 204 No content |
-| GET | `/api/store/search/products/{productId}/similar` | Similar in-stock products (unavailable product alternatives and related products) | anyone | `ProductCard[]` |
-| GET | `/api/store/search/cards` | Product cards for a list of product ids (home sections, recently viewed) | anyone | `ProductCard[]` |
-| POST | `/api/store/search/searches/{searchId}/clicks` | Record which result was opened (relevance and reports) | anyone | `{ productId: uuid, position: int, sponsored: bool }` → 204 No content |
-| GET | `/api/store/search/barcodes/{code}` | Resolve a scanned GTIN/UPC/EAN to a listed product and variant | anyone | `BarcodeMatch` |
-| GET | `/api/store/search/ranking-policy` | Published 'How results are ranked' | anyone | `RankingPolicy` |
+| GET | `/api/store/search/products/{productId}/similar` | Similar in-stock products (unavailable product alternatives and related products) | visitor | `ProductCard[]` |
+| GET | `/api/store/search/cards` | Product cards for a list of product ids (home sections, recently viewed) | visitor | `ProductCard[]` |
+| POST | `/api/store/search/searches/{searchId}/clicks` | Record which result was opened (relevance and reports) | visitor | `{ productId: uuid, position: int, sponsored: bool }` → 204 No content |
+| GET | `/api/store/search/barcodes/{code}` | Resolve a scanned GTIN/UPC/EAN to a listed product and variant | visitor | `BarcodeMatch` |
+| GET | `/api/store/search/ranking-policy` | Published 'How results are ranked' | visitor | `RankingPolicy` |
 
 ## Seller API
 
