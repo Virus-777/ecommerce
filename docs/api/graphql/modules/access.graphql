@@ -1,0 +1,255 @@
+# access: staff roles, approval limits and approval requests. Admin Center only.
+# Writes (approve, reject, return, remind, limit changes) stay on REST /api/admin/access/*.
+# Adds the full approval request to the records that wait for one (payout run, hold, refund request, seller),
+# so approval panels (AdminPayoutRun, AdminOrder refunds, AdminSeller) need no second request.
+
+"""
+A request for someone else's approval: a money or authority decision another module is waiting on
+(payout run, refund, hold, price change, seller restriction, setting change…). The requesting module keeps its record
+pending until the request is decided.
+"""
+type ApprovalRequest @areas(in: [ADMIN]) {
+  id: UUID!
+  "AP-YYMMDD-NNNN"
+  ref: String!
+  action: ApprovalActionRef!
+  "The record waiting for the decision, with the screen that opens it"
+  target: ApprovalTarget!
+  amount: Money
+  "Percent or units for percent/units actions"
+  quantity: Float
+  "One line for lists: 'Payout run of $78,420.55 for 142 sellers'"
+  summary: String!
+  "Before/after or line items supplied by the requesting module"
+  details: JSON
+  reason: String!
+  requestedBy: Actor!
+  requestedByRoles: [AccessRoleRef!]!
+  "The requester had authority up to the second-review threshold, so their request counts as the first approval"
+  requesterCountsAsFirst: Boolean!
+  status: ApprovalStatus!
+  "Approvals by people other than the requester"
+  requiredApprovals: Int!
+  "Approvals still missing before the request is approved (0 once decided)"
+  approvalsRemaining: Int!
+  approvals: [ApprovalDecision!]!
+  """
+  The approval panel, one row per required approval: done rows name who decided,
+  waiting rows name the nominated reviewer or the eligible role, with the deadline.
+  """
+  steps: [ApprovalStep!]!
+  "People who could decide now, backups included"
+  eligibleApprovers: [AccessStaffRef!]!
+  "Requester's choice of second reviewer; others who are eligible may still decide"
+  nominatedReviewer: AccessStaffRef
+  deadline: Deadline
+  "Limits in force when the request was created"
+  limitSnapshot: JSON @auth(requires: STAFF, permission: "access.roles.view")
+  timeline: [TimelineEvent!]!
+  createdAt: DateTime!
+  decidedAt: DateTime
+  "Whether the caller may approve, reject or return it now"
+  canDecide: Boolean!
+  "Your own request · Above your limit · Already approved by you · Your role has no payout authority"
+  cannotDecideReason: String
+}
+
+"The approval action from the module manifests, e.g. finance.payouts.release"
+type ApprovalActionRef @areas(in: [ADMIN]) {
+  key: String!
+  module: String!
+  label: String!
+}
+
+"The record an approval request is about"
+type ApprovalTarget @areas(in: [ADMIN]) {
+  "payout_run, refund_request, hold, seller, offer, price_change, setting_change, limit_change, role_permissions, away_period…"
+  type: String!
+  id: String!
+  "Human reference: PO-RUN-261009, RF-261006-0193, MK-…"
+  ref: String
+  label: String
+  sellerId: UUID
+  "Admin screen that shows the target, e.g. admin/payouts"
+  screen: String
+}
+
+type ApprovalDecision @areas(in: [ADMIN]) {
+  step: Int!
+  decision: ApprovalDecisionKind!
+  by: Actor!
+  roles: [AccessRoleRef!]!
+  note: String
+  "Set when the approver used authority delegated during an away period"
+  viaDelegationFrom: AccessStaffRef
+  at: DateTime!
+}
+
+"One row of the approval panel (e.g. 1 · Priya Nair · Finance Manager · Approved; 2 · Second Finance reviewer · Owen Price · due Oct 9, 9:30 AM)"
+type ApprovalStep @areas(in: [ADMIN]) {
+  step: Int!
+  state: ApprovalStepState!
+  "Priya Nair · Finance Manager, or Second Finance reviewer while waiting"
+  label: String!
+  "Who decided (done, rejected or returned steps)"
+  decidedBy: Actor
+  decidedAt: DateTime
+  "Nominated reviewer for a waiting step"
+  assignedTo: AccessStaffRef
+  deadline: Deadline
+  note: String
+}
+
+"Counts for the approval tiles on the admin dashboard and the inbox"
+type ApprovalSummary @areas(in: [ADMIN]) {
+  "Requests the caller may decide now"
+  toDecide: Int!
+  "Of those, past their deadline"
+  overdue: Int!
+  "Of those, due within the next business day"
+  dueSoon: Int!
+  "Open requests the caller made"
+  myOpenRequests: Int!
+  "The caller's requests returned for changes"
+  returnedToMe: Int!
+}
+
+"Who receives a role's work today: lead, or the covering backup while the lead is away"
+type AccessRoleCoverage @areas(in: [ADMIN]) {
+  role: AccessRoleRef!
+  "Finance, Orders and shipping, Customer support…"
+  workArea: String!
+  lead: AccessStaffRef
+  backups: [AccessStaffRef!]!
+  "People who act on the role's work now"
+  receivingNow: [AccessStaffRef!]!
+  "Work goes to a backup because the lead is away"
+  viaBackup: Boolean!
+  leadAwayUntil: DateTime
+}
+
+type AccessRoleRef @areas(in: [ADMIN]) {
+  id: UUID!
+  "Stable key, e.g. finance_manager, business_owner"
+  key: String!
+  name: String!
+}
+
+type AccessStaffRef @areas(in: [ADMIN]) {
+  accountId: UUID!
+  name: String!
+  "Away now (an away period is active)"
+  away: Boolean!
+}
+
+enum ApprovalStatus @areas(in: [ADMIN]) {
+  PENDING
+  PARTIALLY_APPROVED
+  APPROVED
+  REJECTED
+  RETURNED
+  CANCELLED
+  EXPIRED
+}
+
+enum ApprovalDecisionKind @areas(in: [ADMIN]) {
+  APPROVED
+  REJECTED
+  RETURNED
+}
+
+enum ApprovalStepState @areas(in: [ADMIN]) {
+  DONE
+  WAITING
+  REJECTED
+  RETURNED
+  "Not reached: the request was cancelled or expired first"
+  SKIPPED
+}
+
+type ApprovalRequestPage implements Paged @areas(in: [ADMIN]) {
+  items: [ApprovalRequest!]!
+  nextCursor: String
+  page: Int
+  totalPages: Int
+  total: Int
+}
+
+"""
+The caller's own authority for one approval action, for decision panels: how much they may approve alone, whether a
+second reviewer is needed and who the request goes to above the limit.
+"""
+type ApprovalLimitView @areas(in: [ADMIN]) {
+  "e.g. returns.refunds.approve"
+  actionKey: String!
+  "e.g. Approve refunds"
+  actionLabel: String!
+  authority: ApprovalAuthority!
+  "Highest amount the caller may approve alone (MONEY actions)"
+  limit: Money
+  "Percent or units the caller may approve alone (PERCENT and UNITS actions)"
+  limitValue: Float
+  unit: ApprovalLimitUnit!
+  "A second, different person must also approve (always, or above secondReviewerAbove)"
+  needsSecondReviewer: Boolean!
+  secondReviewerAbove: Money
+  "Approval route above the caller's limit, in order, e.g. [Finance Manager, Business Owner]"
+  route: [String!]!
+  "e.g. Up to $2,000.00 per refund · second reviewer above $1,000.00"
+  summary: String!
+}
+
+enum ApprovalAuthority @areas(in: [ADMIN]) {
+  NOT_PERMITTED
+  "May create the request but never approve it"
+  RECOMMEND_ONLY
+  PERMITTED
+  PERMITTED_WITH_SECOND_REVIEW
+}
+
+enum ApprovalLimitUnit @areas(in: [ADMIN]) {
+  MONEY
+  PERCENT
+  UNITS
+  "Yes/no authority, no amount"
+  NONE
+}
+
+extend type Query {
+  "The caller's approval limit and route for one action (e.g. returns.refunds.approve) on decision panels"
+  myApprovalLimit(actionKey: String!): ApprovalLimitView @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "myLimitFor")
+
+  "Requests the caller may decide now, oldest due first (dashboard tile, inbox, approvals list)"
+  approvalsWaitingForMe(module: String, actionKey: String, overdue: Boolean, paging: PageInput): ApprovalRequestPage! @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "listApprovalsToDecide")
+
+  "Counts for the dashboard and inbox: waiting for me, overdue, my open requests"
+  myApprovalSummary: ApprovalSummary! @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "approvalSummaryFor")
+
+  "One request with decisions and steps. Visible to the requester, eligible approvers and holders of access.approvals.view-all."
+  approvalRequest(id: UUID!): ApprovalRequest @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "getApprovalForViewer")
+
+  "Leads, backups and who receives each role's work today (dashboard 'Team on shift')"
+  teamOnShift(workArea: String): [AccessRoleCoverage!]! @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "coverageNow")
+}
+
+# ---- Approval requests on the records that wait for them (visible to whoever can read the parent record)
+
+extend type PayoutRun {
+  "The run's release approval with steps, for the approval panel on AdminPayoutRun"
+  approvalRequest: ApprovalRequest @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "approvalForTargets")
+}
+
+extend type Hold {
+  "Approval for placing or releasing this hold, when one is needed"
+  approvalRequest: ApprovalRequest @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "approvalForTargets")
+}
+
+extend type RefundRequest {
+  "Finance approval of this refund (returns.refunds.approve), shown in the AdminOrder refunds panel"
+  approvalRequest: ApprovalRequest @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "approvalForTargets")
+}
+
+extend type Seller {
+  "Open requests about this seller (restriction, suspension, payout destination change, holds) for AdminSeller"
+  pendingApprovals: [ApprovalRequest!]! @areas(in: [ADMIN]) @auth(requires: STAFF) @cost(weight: 5) @source(module: "access", fn: "approvalsForSellers")
+}

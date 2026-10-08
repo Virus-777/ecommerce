@@ -1,0 +1,377 @@
+# content: homepage sections, campaign pages and curated collections, Help Center articles.
+# Read-only views of what the Content Manager published. Editing, scheduling, publishing and
+# version restore stay on REST (/api/admin/content/...).
+#
+# Products inside sections and pages are nested as catalog Product and offers Offer, so the
+# screen query asks for price, deal badge (promotions Offer.deal) and stock (inventory) on the
+# same objects as everywhere else. Content only decides WHICH products appear and in what order.
+#
+# Other modules extending HomeSection or ContentPage must limit the field to
+# @areas(in: [STORE, ADMIN]) (or narrower): these types are not in the seller schema.
+
+# ------------------------------------------------------------------ links, banners, tiles
+
+"A link shown on a section, block, breadcrumb or help article"
+type ContentLink @areas(in: [STORE, ADMIN]) {
+  label: String!
+  "Store path or absolute URL"
+  url: String!
+  kind: ContentLinkKind
+}
+
+enum ContentLinkKind @areas(in: [STORE, ADMIN]) {
+  PAGE
+  COLLECTION
+  CATEGORY
+  PRODUCT
+  DEALS
+  SELLER
+  BRAND
+  POLICY
+  HELP
+  EXTERNAL
+}
+
+"Campaign or promotional banner (hero) used by sections and page blocks"
+type ContentBanner @areas(in: [STORE, ADMIN]) {
+  eyebrow: String
+  headline: String!
+  body: String
+  images: [MediaRef!]!
+  primaryCta: ContentLink!
+  secondaryCta: ContentLink
+  theme: ContentBannerTheme
+}
+
+enum ContentBannerTheme @areas(in: [STORE, ADMIN]) {
+  BRAND
+  LIGHT
+  DARK
+}
+
+"""
+One product placed by content (section, page block or collection). Price, was price, deal badge,
+seller and stock are read from `offer` (or `product.featuredOffer` when no offer is pinned).
+"""
+type ContentProductTile @areas(in: [STORE, ADMIN]) {
+  product: Product!
+  "The offer this placement shows (e.g. the deal offer). Null = use product.featuredOffer."
+  offer: Offer
+  "Editorial badge, e.g. Home Week. Price badges come from Offer.deal."
+  badge: String
+  "Position in a ranked collection (Best sellers)"
+  rank: Int
+  "Grouping label, e.g. Added Oct 6 (New arrivals)"
+  group: String
+  "When content last confirmed the product is available (curated collections show it)"
+  checkedAt: DateTime
+}
+
+type ContentProductTilePage implements Paged @areas(in: [STORE, ADMIN]) {
+  items: [ContentProductTile!]!
+  nextCursor: String
+  page: Int
+  totalPages: Int
+  total: Int
+}
+
+"A category shortcut with the image chosen by content (catalog categories have no artwork)"
+type ContentCategoryShortcut @areas(in: [STORE, ADMIN]) {
+  category: Category!
+  image: MediaRef
+  "Shorter label for the shortcut; defaults to the category name"
+  label: String
+}
+
+"Campaign or page period, shown with its time zone"
+type ContentPeriod @areas(in: [STORE, ADMIN]) {
+  from: DateTime!
+  to: DateTime!
+  "IANA zone, e.g. America/Los_Angeles"
+  timeZone: String!
+}
+
+# ------------------------------------------------------------------ homepage
+
+"The published homepage: ordered sections with their schedules already applied"
+type HomePage @areas(in: [STORE, ADMIN]) {
+  "Published layout version"
+  version: Int!
+  generatedAt: DateTime!
+  sections: [HomeSection!]!
+}
+
+enum HomeSectionKind @areas(in: [STORE, ADMIN]) {
+  CAMPAIGN_BANNER
+  CATEGORY_SHORTCUTS
+  "Flash deals strip: read HomeSection.flashSales (promotions)"
+  DEALS
+  OFFICIAL_HIGHLIGHTS
+  FEATURED_PRODUCTS
+  FEATURED_SELLERS
+  NEW_ARRIVALS
+  POPULAR_PRODUCTS
+  BRAND_COLLECTIONS
+  "Read Query.recentlyViewed (customers); content only places the section"
+  RECENTLY_VIEWED
+  COLLECTION_TEASER
+  PROMISE_STRIP
+  "Locked ad slot: request the ad from REST POST /api/store/advertising/decisions with adPlacementKey"
+  AD_POSITION
+}
+
+"""
+One homepage section. Only the fields that fit its kind are filled; the others are empty lists or null.
+Sections appear at their showFrom time and disappear at removeAt (or when their linked promotion ends).
+"""
+type HomeSection @areas(in: [STORE, ADMIN]) {
+  id: UUID!
+  "1-based position in the published layout"
+  position: Int!
+  kind: HomeSectionKind!
+  heading: String
+  subheading: String
+  "Section link, e.g. See all deals"
+  link: ContentLink
+  banner: ContentBanner
+  "Products in order, unavailable ones already removed"
+  products(limit: Int): [ContentProductTile!]! @cost(weight: 10)
+  categories: [ContentCategoryShortcut!]!
+  "Featured seller cards in published order (FEATURED_SELLERS), resolved by reference to sellers: name, slug, logo, Verified label, location, dispatch label. Rating comes from reviews (Seller.rating). Suspended or closed sellers are left out."
+  sellers: [Seller!]!
+  brands: [Brand!]!
+  "Collection teased by a COLLECTION_TEASER section (or the See all target of a product section)"
+  collection: Collection
+  "Published selection rule for rule-based sections, e.g. Ranked by units sold in the last 30 days. Sponsored placements don't affect rank."
+  selectionRule: String
+  "AD_POSITION only: the slot to request from advertising (REST, records impressions)"
+  adPlacementKey: String
+  "When the section is scheduled to disappear (campaign banners count down to it)"
+  endsAt: DateTime
+  "PROMISE_STRIP only: the promises in order (icon, title, text); empty for other kinds"
+  promiseItems: [ContentPromiseItem!]!
+}
+
+"One item of the Our promise strip, e.g. Delivery date first"
+type ContentPromiseItem @areas(in: [STORE, ADMIN]) {
+  "Icon name from the design system, e.g. calendar-check"
+  icon: String!
+  title: String!
+  body: String!
+}
+
+# ------------------------------------------------------------------ pages and collections
+
+enum ContentPageKind @areas(in: [STORE, ADMIN]) {
+  CAMPAIGN
+  COLLECTION
+  ABOUT
+  LANDING
+}
+
+enum ContentBlockType @areas(in: [STORE, ADMIN]) {
+  HERO
+  TEXT
+  PRODUCT_GRID
+  PRODUCT_SECTION
+  BANNER
+  TERMS
+  FAQ
+  SELLER_FEATURE
+  IMAGE
+  AVAILABILITY_NOTE
+  CHIPS
+}
+
+"One block of a campaign page or collection, in page order"
+type ContentBlock @areas(in: [STORE, ADMIN]) {
+  "Stable block id, used for in-page anchors (chips link to sections)"
+  id: String!
+  type: ContentBlockType!
+  title: String
+  "Icon name from the design system, e.g. lamp-desk"
+  icon: String
+  "Sanitized rich text"
+  body: String
+  "Editor's note shown above a curated section"
+  editorNote: String
+  banner: ContentBanner
+  "Resolved on read; unavailable products are removed or replaced"
+  products: [ContentProductTile!]! @cost(weight: 10)
+  "Terms lines or chip labels"
+  items: [String!]!
+  link: ContentLink
+}
+
+"""
+A store page: campaign page (e.g. Home Week), curated collection, About or landing page.
+Collections also carry `collection` for the curator, selection rule and paged products.
+"""
+type ContentPage @areas(in: [STORE, ADMIN]) {
+  id: UUID!
+  kind: ContentPageKind!
+  title: String!
+  slug: String!
+  eyebrow: String
+  intro: String
+  breadcrumb: [ContentLink!]!
+  "Campaign period shown on the page, e.g. Oct 6 – Oct 19, 2026"
+  period: ContentPeriod
+  "Seconds until the period ends, computed at serve time for countdowns"
+  endsInSeconds: Int
+  blocks: [ContentBlock!]!
+  "Trust notes, e.g. Only in-stock offers are included; no seller paid to be included"
+  notes: [String!]!
+  "Set when kind is COLLECTION"
+  collection: Collection
+  seoTitle: String
+  seoDescription: String
+  updatedAt: DateTime!
+  version: Int!
+}
+
+enum CollectionKind @areas(in: [STORE, ADMIN]) {
+  CURATED
+  NEW_ARRIVALS
+  BEST_SELLERS
+  SEASONAL
+  BRAND
+  OFFICIAL
+}
+
+"Editor who curated a collection"
+type ContentCurator @areas(in: [STORE, ADMIN]) {
+  name: String!
+  avatar: MediaRef
+  updatedAt: DateTime!
+  sectionCount: Int!
+  productCount: Int!
+}
+
+"A curated or rule-based product collection (New arrivals, Best sellers, Seasonal, editor collections)"
+type Collection @areas(in: [STORE, ADMIN]) {
+  "Same id as its ContentPage"
+  id: UUID!
+  kind: CollectionKind!
+  title: String!
+  slug: String!
+  "Store path of the collection page"
+  url: String!
+  curator: ContentCurator
+  "Published selection rule, e.g. Products first listed in the last 30 days, newest first. Updated daily."
+  selectionRule: String
+  "Category tabs or chips offered on the collection (e.g. Best sellers by category)"
+  categoryFilters: [Category!]!
+  "When the ranking or selection was last refreshed"
+  refreshedAt: DateTime
+  "All products of the collection, page by page, optionally limited to one category tab"
+  products(categoryId: UUID, paging: PageInput): ContentProductTilePage! @cost(weight: 10) @source(module: "content", fn: "collectionProducts")
+}
+
+# ------------------------------------------------------------------ Help Center (store)
+
+enum HelpAudience @areas(in: [STORE]) {
+  CUSTOMER
+  SELLER
+  BOTH
+}
+
+"A Help Center topic, e.g. Returns"
+type HelpCategory @areas(in: [STORE]) {
+  id: UUID!
+  slug: String!
+  name: String!
+  "Icon name from the design system"
+  icon: String
+  description: String
+  position: Int!
+  audience: HelpAudience!
+  articleCount: Int!
+}
+
+"Article card for lists, related articles and suggestions"
+type HelpArticleSummary @areas(in: [STORE]) {
+  id: UUID!
+  slug: String!
+  title: String!
+  category: HelpCategory!
+  summary: String
+  readMinutes: Int
+  updatedAt: DateTime!
+}
+
+"A published help article"
+type HelpArticle @areas(in: [STORE]) {
+  id: UUID!
+  slug: String!
+  title: String!
+  category: HelpCategory!
+  breadcrumb: [ContentLink!]!
+  "When the rules the article describes take effect"
+  effectiveAt: DateTime
+  updatedAt: DateTime!
+  readMinutes: Int!
+  "Structured rich text (headings, lists, links), sanitized"
+  body: String!
+  "Tables such as who pays return shipping"
+  tables: [JSON!]!
+  related: [HelpArticleSummary!]!
+  "e.g. Go to my orders, Contact us"
+  actions: [ContentLink!]!
+  policyLinks: [ContentLink!]!
+  version: Int!
+}
+
+enum HelpContactKind @areas(in: [STORE]) {
+  CHAT
+  PHONE
+  MESSAGE
+}
+
+type HelpContactChannel @areas(in: [STORE]) {
+  kind: HelpContactKind!
+  label: String!
+  "e.g. Mon–Sat, 8 AM–8 PM PT"
+  hours: String!
+  detail: String!
+  action: ContentLink!
+}
+
+"Help Center home. The screen adds recent orders (orders) and open cases (support) in the same query."
+type HelpCenter @areas(in: [STORE]) {
+  topics: [HelpCategory!]!
+  popular: [HelpArticleSummary!]!
+  popularSearches: [ContentLink!]!
+  contact: [HelpContactChannel!]!
+  "e.g. For items from marketplace sellers, the seller answers first…"
+  sellerFirstNote: String!
+}
+
+# ------------------------------------------------------------------ fields on other modules' types
+
+extend type Case {
+  "Help articles for this case's topic, suggested on the case page"
+  helpArticles(limit: Int = 3): [HelpArticleSummary!]! @areas(in: [STORE]) @source(module: "content", fn: "helpArticlesFor")
+}
+
+# ------------------------------------------------------------------ queries
+
+extend type Query {
+  "Homepage sections in published order, resolved for display (public, CDN-cacheable without a session)"
+  homePage: HomePage! @areas(in: [STORE]) @cost(weight: 20) @source(module: "content", fn: "getHomePage")
+
+  "Campaign page, collection, About or landing page. Null when not published."
+  contentPage(slug: String!): ContentPage @areas(in: [STORE]) @cost(weight: 10) @source(module: "content", fn: "getStorePage")
+
+  "Help Center home: topics, popular articles, popular searches and contact channels"
+  helpCenter: HelpCenter! @areas(in: [STORE]) @source(module: "content", fn: "getHelpCenter")
+
+  "A help article by slug"
+  helpArticle(slug: String!): HelpArticle @areas(in: [STORE]) @source(module: "content", fn: "getHelpArticle")
+
+  "Preview the draft or live homepage at a moment, exactly as customers will see it"
+  homePagePreview(at: DateTime, device: String, useDraft: Boolean = true): HomePage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "content.homepage.manage") @cost(weight: 20) @source(module: "content", fn: "previewHomePage")
+
+  "Preview a page draft as customers will see it"
+  contentPagePreview(id: UUID!): ContentPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "content.pages.manage") @cost(weight: 10) @source(module: "content", fn: "previewPage")
+}

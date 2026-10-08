@@ -1,0 +1,164 @@
+# screens: account/return
+# replaces: GET returns/requests/{id}, GET returns/requests/{id}/label, GET payments/refunds/{id}, GET orders/orders/{id}, GET messaging/conversations, GET shipping/shipments/{id}/tracking, GET support/cases/{id}
+# why: The return page keeps the return track, drop-off label, return shipment, refund progress, replacement with its tracking, the help case and the untouched original order side by side; they come from returns, shipping, support, orders and messaging in one round trip.
+query ReturnDetail($ref: String!) {
+  return(ref: $ref) {
+    id
+    ref
+    orderRef
+    ownerType
+    sellerName
+    status
+    statusLabel
+    reason
+    details
+    remedy
+    handledBy
+    nextStep
+    open
+    requestedAt
+    actions
+    media { ...ImageFields }
+    track { key label state }
+    items {
+      orderItemId
+      title
+      imageUrl
+      quantity
+      options { name value }
+      unitPrice { ...MoneyFields }
+    }
+    responseDue { dueAt state }
+    nextDeadline { dueAt state }
+    infoRequest {
+      question
+      askedAt
+      replyDueAt
+      reply
+      repliedAt
+      askedBy { kind name }
+    }
+    decision {
+      kind
+      explanation
+      decidedAt
+      platformDecision
+      decidedBy { kind name }
+    }
+    shipment {
+      id
+      status
+      method
+      carrier
+      service
+      trackingNumber
+      trackingUrl
+      labelUrl
+      qrCodeUrl
+      dropOffBy
+      instructions
+      paidBy
+      cost { ...MoneyFields }
+      dropOffPoints { name address distanceMiles hours }
+      from { city region postalCode }
+      to { name line1 line2 city region postalCode country }
+      events { at label detail }
+    }
+    refund {
+      id
+      ref
+      status
+      statusLabel
+      approvedAt
+      sentAt
+      failedReason
+      expectedBy
+      bankReference
+      explanation
+      track { key label state }
+      breakdown {
+        destination
+        isEstimate
+        itemAmount { ...MoneyFields }
+        discountShare { ...MoneyFields }
+        shippingRefund { ...MoneyFields }
+        returnShippingDeduction { ...MoneyFields }
+        deductions {
+          label
+          reason
+          amount { ...MoneyFields }
+        }
+        total { ...MoneyFields }
+      }
+    }
+    replacement {
+      id
+      kind
+      status
+      title
+      quantity
+      chargeNote
+      newReturnWindowEnds
+      options { name value }
+      shipment {
+        id
+        status
+        statusLabel
+        carrierName
+        serviceName
+        trackingNumber
+        trackingUrl
+        steps
+        currentStep
+        estimateLabel
+        deliveredAt
+        events { at label detail location }
+      }
+    }
+    terms { summary windowDays }
+    escalation { at reason caseRef }
+    case {
+      id
+      ref
+      status
+      statusLabel
+      expectedReply
+      nextAction {
+        label
+        whoMustAct
+        youNeedToAct
+        due { dueAt state }
+      }
+    }
+    timeline { at label detail }
+    order {
+      id
+      ref
+      placedAt
+      status
+      statusLabel
+      totals {
+        total { ...MoneyFields }
+      }
+    }
+    conversation {
+      id
+      unreadCount
+      counterparty { kind name }
+    }
+  }
+}
+
+fragment MoneyFields on Money {
+  amount
+  currency
+  formatted
+}
+
+fragment ImageFields on MediaRef {
+  id
+  url
+  alt
+  width
+  height
+}

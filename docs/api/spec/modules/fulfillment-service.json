@@ -1,0 +1,235 @@
+{
+  "name": "fulfillment-service",
+  "title": "Fulfillment service",
+  "group": "Later phases",
+  "phase": 4,
+  "chapters": [1, 12, 9, 14],
+  "summary": "Platform storage and shipping for sellers: seller enrollment under service terms, SKU enrollment, inbound shipments to our warehouse, receiving into seller-owned stock, picking and shipping by us while the seller stays the seller of record, returns handling, removal of stock, and storage and handling fees with full seller visibility.",
+  "owns": [
+    "Service enrollment: application, accepted service terms and fee schedule version, status, capacity allowance",
+    "SKU enrollment: which offers are fulfilled by Marketly, with dimensions, weight, labelling and restricted-item checks",
+    "Inbound shipments (seller → our warehouse): plan, boxes, carrier and tracking, arrival, receiving results, discrepancies and seller acknowledgement or claim",
+    "Ownership tracking: every unit in our warehouse that belongs to a seller is recorded against that seller (stock owner), never mixed with company stock",
+    "Fulfillment requests: orders for service offers routed to our warehouse; the seller remains the seller of record",
+    "Returns handling for service offers: receipt, inspection outcome on seller-owned stock (sellable, unsellable, removal)",
+    "Removal and disposal orders (sending stock back to the seller or disposing of it at the seller's request)",
+    "Fee schedule and fee charges: receiving, storage (per volume per month, long-term surcharge), pick and pack per unit and order, returns processing, removal; posted to finance as separate lines",
+    "Seller visibility: stock held by the company by group and fees charged"
+  ],
+  "notOwns": [
+    "Stock quantities and reservations: inventory (with owner = seller and location = our warehouse)",
+    "Physical receiving, picking, packing and labels: warehouse (works the tasks this module creates)",
+    "Shipments and tracking to customers: shipping",
+    "Return eligibility and refunds: returns and payments",
+    "Seller ledger and statements: finance",
+    "Seller accounts and restrictions: sellers"
+  ],
+  "dependsOn": ["inventory", "warehouse", "finance"],
+  "optionalDeps": ["sellers", "offers", "orders", "shipping", "returns", "media", "access", "notifications", "reports"],
+  "publicApi": [
+    { "name": "isServiceOffer", "signature": "(offerId: uuid) => bool", "desc": "True when the offer is fulfilled by Marketly. Offers shows 'Ships from Marketly' while the seller stays named; orders route the seller group's fulfillment to our warehouse.", "usedBy": ["offers", "orders", "shipping", "checkout"] },
+    { "name": "stockOwner", "signature": "(stockItemId: uuid) => { kind: 'company' | 'seller', sellerId?: uuid }", "desc": "Owner of stock in our warehouse; reports and inventory use it to keep seller stock separate from company stock (plan ch. 9).", "usedBy": ["inventory", "warehouse", "reports"] },
+    { "name": "createFulfillmentRequest", "signature": "(orderId: uuid, sellerGroupId: uuid, items: { orderItemId: uuid, offerId: uuid, quantity: int }[]) => FulfillmentRequest", "desc": "Called when a seller group contains service offers; creates the warehouse pick task. Also triggered by orders.order.placed.", "usedBy": ["orders"] }
+  ],
+  "types": {
+    "Enrollment": {
+      "id": "uuid", "sellerId": "uuid", "sellerName": "string",
+      "state": "enum(applied|information_required|approved|active|suspended|offboarding|closed|rejected)",
+      "termsVersion": "string", "feeScheduleVersion": "string", "acceptedAt": "datetime?", "acceptedBy": "Actor?",
+      "capacity": { "type": "Capacity" },
+      "reason": "text?", "reviewer": "Actor?", "createdAt": "datetime", "decidedAt": "datetime?"
+    },
+    "Capacity": { "maxCubicFeet": "number", "usedCubicFeet": "number", "maxSkus": "int", "usedSkus": "int" },
+    "EnrollmentInput": { "expectedSkus": "int", "expectedMonthlyUnits": "int", "categories": "uuid[]", "termsVersion": "string", "feeScheduleVersion": "string", "acceptTerms": "bool", "contactNote": "text?" },
+    "SkuEnrollment": {
+      "id": "uuid", "offerId": "uuid", "productId": "uuid", "title": "string", "sku": "string", "image": "MediaRef?",
+      "dimensionsCm": "Dimensions", "weightGrams": "int", "sizeTier": "enum(small|standard|large|oversize)",
+      "barcode": "string?", "labelRequired": "bool", "restricted": "bool", "restrictionReason": "string?",
+      "state": "enum(pending|approved|rejected|active|inactive)",
+      "stock": "OwnedStock?"
+    },
+    "Dimensions": { "length": "number", "width": "number", "height": "number" },
+    "SkuEnrollmentInput": { "offerId": "uuid", "dimensionsCm": "Dimensions", "weightGrams": "int", "barcode": "string?", "hazmat": "bool", "notes": "text?" },
+    "OwnedStock": {
+      "available": "int", "reserved": "int", "inbound": "int", "receiving": "int", "unsellable": "int", "returned": "int", "removalPending": "int",
+      "volumeCubicFeet": "number", "agedDays": { "type": "map<int>", "desc": "Units by age bucket, e.g. 0-90, 91-180, 181-365, 365+" }
+    },
+    "InboundLineInput": { "skuEnrollmentId": "uuid", "quantity": "int" },
+    "InboundInput": { "shipFrom": "Address", "lines": "InboundLineInput[]", "boxes": "int", "carrier": "string?", "tracking": "string?", "expectedArrival": "date?" },
+    "InboundLine": { "skuEnrollmentId": "uuid", "sku": "string", "title": "string", "expected": "int", "received": "int", "damaged": "int", "missing": "int", "extra": "int" },
+    "InboundShipment": {
+      "id": "uuid", "ref": { "type": "string", "desc": "IB-YYMMDD-NNNN" }, "sellerId": "uuid",
+      "state": "enum(draft|submitted|in_transit|arrived|receiving|received|closed|cancelled)",
+      "destination": "Address", "shipFrom": "Address", "boxes": "int", "carrier": "string?", "tracking": "string?",
+      "expectedArrival": "date?", "arrivedAt": "datetime?", "receivedAt": "datetime?",
+      "lines": "InboundLine[]",
+      "discrepancy": { "type": "Discrepancy?" },
+      "labels": { "type": "MediaRef[]", "desc": "Box and unit labels to print" },
+      "fees": "FeeCharge[]",
+      "timeline": "TimelineEvent[]"
+    },
+    "Discrepancy": { "summary": "string", "evidence": "MediaRef[]", "sellerResponse": "enum(pending|accepted|claimed)", "claimNote": "text?", "decision": "text?", "decidedBy": "Actor?" },
+    "ReceivingInput": { "lines": { "type": "ReceivedLine[]" }, "evidenceIds": "uuid[]?", "note": "text?", "complete": "bool" },
+    "ReceivedLine": { "skuEnrollmentId": "uuid", "received": "int", "damaged": "int" },
+    "FulfillmentRequest": {
+      "id": "uuid", "orderId": "uuid", "orderRef": "string", "sellerGroupId": "uuid", "sellerId": "uuid",
+      "state": "enum(open|picking|packed|shipped|cancelled|short)",
+      "items": { "type": "json[]", "desc": "orderItemId, offerId, sku, quantity, picked" },
+      "warehouseTaskId": "uuid?", "shipmentId": "uuid?", "dispatchBy": "Deadline",
+      "createdAt": "datetime"
+    },
+    "ServiceReturn": {
+      "id": "uuid", "returnId": "uuid", "returnRef": "string", "sellerId": "uuid", "skuEnrollmentId": "uuid", "quantity": "int",
+      "outcome": "enum(pending|restocked|unsellable|removal|disposed)", "inspectionNote": "text?", "evidence": "MediaRef[]", "inspectedAt": "datetime?"
+    },
+    "RemovalInput": { "kind": "enum(return_to_seller|dispose)", "lines": "InboundLineInput[]", "fromGroup": "enum(available|unsellable)", "shipTo": "Address?", "reason": "text?" },
+    "RemovalOrder": {
+      "id": "uuid", "ref": "string", "sellerId": "uuid", "kind": "enum(return_to_seller|dispose)",
+      "state": "enum(requested|approved|processing|shipped|completed|cancelled)",
+      "lines": "InboundLine[]", "shipTo": "Address?", "tracking": "string?", "fee": "Money?", "createdAt": "datetime"
+    },
+    "FeeRate": { "type": "enum(receiving_per_unit|storage_per_cubic_foot_month|long_term_storage_per_cubic_foot_month|pick_pack_per_unit|order_handling|returns_processing_per_unit|removal_per_unit|disposal_per_unit|label_per_unit)", "sizeTier": "enum(small|standard|large|oversize|any)", "rate": "Money", "note": "string?" },
+    "FeeSchedule": { "id": "uuid", "version": "string", "effectiveAt": "datetime", "rates": "FeeRate[]", "state": "enum(draft|scheduled|current|superseded)", "isExample": "bool" },
+    "FeeCharge": {
+      "id": "uuid", "sellerId": "uuid", "type": "string", "period": "string?", "reference": { "type": "string?", "desc": "Inbound, order, return or removal ref" },
+      "units": "number", "rate": "Money", "amount": "Money",
+      "state": "enum(accrued|posted|reversed)", "postedAt": "datetime?", "reason": "text?"
+    },
+    "SellerServiceOverview": {
+      "enrollment": "Enrollment",
+      "stockTotals": "OwnedStock",
+      "openInbound": "InboundShipment[]",
+      "feesThisMonth": "Money", "feesLastMonth": "Money",
+      "alerts": { "type": "string[]", "desc": "e.g. 12 units aged over 365 days will incur long-term storage on Nov 15" }
+    }
+  },
+  "tables": [
+    { "name": "enrollments", "columns": { "id": "uuid pk", "seller_id": "uuid unique", "state": "text", "terms_version": "text", "fee_schedule_version": "text", "accepted_at": "timestamptz?", "accepted_by": "text?", "max_cubic_feet": "numeric", "max_skus": "int", "reason": "text?", "reviewer_id": "text?", "created_at": "timestamptz", "decided_at": "timestamptz?" } },
+    { "name": "sku_enrollments", "columns": { "id": "uuid pk", "seller_id": "uuid", "offer_id": "uuid unique", "product_id": "uuid", "sku": "text", "dimensions": "jsonb", "weight_grams": "int", "size_tier": "text", "barcode": "text?", "label_required": "bool", "restricted": "bool", "restriction_reason": "text?", "state": "text", "inventory_item_id": "uuid?" }, "indexes": ["(seller_id, state)"] },
+    { "name": "inbound_shipments", "columns": { "id": "uuid pk", "ref": "text unique", "seller_id": "uuid", "state": "text", "ship_from": "jsonb", "destination": "jsonb", "boxes": "int", "carrier": "text?", "tracking": "text?", "expected_arrival": "date?", "arrived_at": "timestamptz?", "received_at": "timestamptz?", "warehouse_receipt_id": "uuid?", "created_at": "timestamptz" }, "indexes": ["(seller_id, state)", "(state, expected_arrival)"] },
+    { "name": "inbound_lines", "columns": { "inbound_id": "uuid → inbound_shipments", "sku_enrollment_id": "uuid → sku_enrollments", "expected": "int", "received": "int", "damaged": "int" } },
+    { "name": "discrepancies", "columns": { "id": "uuid pk", "inbound_id": "uuid → inbound_shipments", "summary": "text", "evidence_media_ids": "jsonb", "seller_response": "text", "claim_note": "text?", "decision": "text?", "decided_by": "text?", "decided_at": "timestamptz?" } },
+    { "name": "ownership_ledger", "desc": "Every movement of seller-owned units in our warehouse (received, reserved, shipped, returned, unsellable, removed, disposed, adjusted) with reason; reconciles with inventory", "columns": { "id": "uuid pk", "seller_id": "uuid", "sku_enrollment_id": "uuid → sku_enrollments", "movement": "text", "quantity": "int", "from_group": "text?", "to_group": "text?", "reference": "text?", "actor_kind": "text", "actor_id": "text?", "reason": "text?", "at": "timestamptz" }, "indexes": ["(seller_id, at)", "(sku_enrollment_id, at)"] },
+    { "name": "fulfillment_requests", "columns": { "id": "uuid pk", "order_id": "uuid", "seller_group_id": "uuid unique", "seller_id": "uuid", "state": "text", "items": "jsonb", "warehouse_task_id": "uuid?", "shipment_id": "uuid?", "dispatch_by": "timestamptz", "created_at": "timestamptz" } },
+    { "name": "service_returns", "columns": { "id": "uuid pk", "return_id": "uuid", "seller_id": "uuid", "sku_enrollment_id": "uuid", "quantity": "int", "outcome": "text", "inspection_note": "text?", "evidence_media_ids": "jsonb", "inspected_at": "timestamptz?" } },
+    { "name": "removal_orders", "columns": { "id": "uuid pk", "ref": "text unique", "seller_id": "uuid", "kind": "text", "state": "text", "lines": "jsonb", "ship_to": "jsonb?", "tracking": "text?", "created_at": "timestamptz" } },
+    { "name": "fee_schedules", "columns": { "id": "uuid pk", "version": "text unique", "effective_at": "timestamptz", "rates": "jsonb", "state": "text", "approval_request_id": "uuid?" } },
+    { "name": "fee_charges", "columns": { "id": "uuid pk", "seller_id": "uuid", "type": "text", "period": "text?", "reference": "text?", "units": "numeric", "rate": "bigint", "amount": "bigint", "currency": "text", "state": "text", "posted_at": "timestamptz?", "reason": "text?", "idempotency_key": "text unique" }, "indexes": ["(seller_id, state)", "(type, period)"] },
+    { "name": "storage_snapshots", "desc": "Daily volume per seller and SKU for storage billing", "columns": { "day": "date", "seller_id": "uuid", "sku_enrollment_id": "uuid", "units": "int", "cubic_feet": "numeric", "aged_units": "jsonb" }, "indexes": ["unique (day, sku_enrollment_id)"] }
+  ],
+  "stateMachines": [
+    { "name": "Service enrollment", "field": "Enrollment.state", "initial": "applied", "transitions": [["applied", "requestInfo", "information_required"], ["information_required", "resubmit", "applied"], ["applied", "approve", "approved"], ["applied", "reject", "rejected"], ["approved", "activate", "active"], ["active", "suspend", "suspended"], ["suspended", "reinstate", "active"], ["active", "offboard", "offboarding"], ["suspended", "offboard", "offboarding"], ["offboarding", "close", "closed"]], "notes": "activate happens when the first inbound shipment is received. suspend stops new inbound shipments and new service-offer sales but keeps fulfilling accepted orders and returns (plan ch. 10). offboarding requires all stock to be removed or disposed before close; storage keeps accruing until then." },
+    { "name": "SKU enrollment", "field": "SkuEnrollment.state", "initial": "pending", "transitions": [["pending", "approve", "approved"], ["pending", "reject", "rejected"], ["approved", "activate", "active"], ["active", "deactivate", "inactive"], ["inactive", "activate", "active"]], "notes": "activate when stock is received; the offer then shows 'Ships from Marketly'. deactivate when the seller stops using the service for the SKU (requires zero available stock or a removal order)." },
+    { "name": "Inbound shipment", "field": "InboundShipment.state", "initial": "draft", "transitions": [["draft", "submit", "submitted"], ["submitted", "ship", "in_transit"], ["in_transit", "arrive", "arrived"], ["submitted", "arrive", "arrived"], ["arrived", "startReceiving", "receiving"], ["receiving", "finishReceiving", "received"], ["received", "close", "closed"], ["draft", "cancel", "cancelled"], ["submitted", "cancel", "cancelled"]], "notes": "Received units become available seller-owned stock only after inspection (Inventory Manager confirms). Discrepancies (short, damaged, extra) open a discrepancy the seller accepts or claims; close happens when it is resolved or after discrepancyResponseDays." },
+    { "name": "Removal order", "field": "RemovalOrder.state", "initial": "requested", "transitions": [["requested", "approve", "approved"], ["requested", "cancel", "cancelled"], ["approved", "startProcessing", "processing"], ["processing", "ship", "shipped"], ["processing", "complete", "completed"], ["shipped", "complete", "completed"]], "notes": "Disposal completes without shipping. Units are reserved out of available when approved." },
+    { "name": "Service fee charge", "field": "FeeCharge.state", "initial": "accrued", "transitions": [["accrued", "post", "posted"], ["accrued", "reverse", "reversed"], ["posted", "reverse", "reversed"]], "notes": "Posted charges reach the seller statement as fulfillment-service lines separate from commission and ad charges. Reversal needs a reason; above the caller's limit it needs Finance approval." }
+  ],
+  "endpoints": [
+    { "id": "getServiceOverview", "area": "seller", "method": "GET", "path": "/overview", "summary": "Enrollment, stock held by Marketly, open inbound shipments and fees", "auth": "seller", "response": "SellerServiceOverview", "screens": ["seller/inventory", "seller/dashboard"], "phase": 4 },
+    { "id": "applyForService", "area": "seller", "method": "POST", "path": "/enrollment", "summary": "Apply for storage and shipping by Marketly and accept the service terms", "auth": "seller", "permission": "fulfillment-service.enrollment.manage", "body": "EnrollmentInput", "response": "Enrollment", "status": 201, "errors": ["TERMS_NOT_ACCEPTED", "ILLEGAL_TRANSITION"], "audited": true, "events": ["fulfillment-service.enrollment.submitted"], "screens": ["seller/setup"], "phase": 4 },
+    { "id": "getOwnEnrollment", "area": "seller", "method": "GET", "path": "/enrollment", "summary": "Own enrollment status, terms, capacity", "auth": "seller", "response": "Enrollment", "errors": ["NOT_FOUND"], "screens": ["seller/setup", "seller/store"], "phase": 4 },
+    { "id": "requestOffboarding", "area": "seller", "method": "POST", "path": "/enrollment/offboard", "summary": "Stop using the service (stock must be removed)", "auth": "seller", "permission": "fulfillment-service.enrollment.manage", "body": { "reason": "text", "removal": "enum(return_to_seller|dispose)" }, "response": "Enrollment", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "screens": ["seller/store"], "phase": 4 },
+    { "id": "getFeeScheduleSeller", "area": "seller", "method": "GET", "path": "/fee-schedule", "summary": "Current and upcoming fee schedule", "auth": "seller", "response": { "current": "FeeSchedule", "upcoming": "FeeSchedule?" }, "screens": ["seller/finance"], "phase": 4 },
+    { "id": "listSkuEnrollments", "area": "seller", "method": "GET", "path": "/skus", "summary": "Enrolled SKUs with stock held by Marketly by group", "auth": "seller", "paging": true, "query": { "state": "string?", "q": "string?" }, "response": "SkuEnrollment", "screens": ["seller/inventory"], "phase": 4 },
+    { "id": "enrollSku", "area": "seller", "method": "POST", "path": "/skus", "summary": "Enroll an offer for fulfillment by Marketly", "auth": "seller", "permission": "fulfillment-service.inbound.manage", "body": "SkuEnrollmentInput", "response": "SkuEnrollment", "status": 201, "errors": ["SKU_RESTRICTED", "CAPACITY_EXCEEDED", "ILLEGAL_TRANSITION"], "screens": ["seller/inventory", "seller/offer"], "phase": 4 },
+    { "id": "deactivateSku", "area": "seller", "method": "POST", "path": "/skus/{id}/deactivate", "summary": "Stop using the service for a SKU", "auth": "seller", "permission": "fulfillment-service.inbound.manage", "params": { "id": "uuid" }, "response": "SkuEnrollment", "errors": ["ILLEGAL_TRANSITION", "STOCK_REMAINING"], "screens": ["seller/inventory"], "phase": 4 },
+    { "id": "listInbound", "area": "seller", "method": "GET", "path": "/inbound", "summary": "Own inbound shipments", "auth": "seller", "paging": true, "query": { "state": "string?" }, "response": "InboundShipment", "screens": ["seller/inventory"], "phase": 4 },
+    { "id": "createInbound", "area": "seller", "method": "POST", "path": "/inbound", "summary": "Plan an inbound shipment to our warehouse", "auth": "seller", "permission": "fulfillment-service.inbound.manage", "body": "InboundInput", "response": "InboundShipment", "status": 201, "errors": ["CAPACITY_EXCEEDED", "ILLEGAL_TRANSITION"], "screens": ["seller/inventory"], "phase": 4 },
+    { "id": "getInbound", "area": "seller", "method": "GET", "path": "/inbound/{id}", "summary": "Inbound shipment with labels, receiving results and discrepancies", "auth": "seller", "params": { "id": "uuid" }, "response": "InboundShipment", "screens": ["seller/inventory"], "phase": 4 },
+    { "id": "updateInbound", "area": "seller", "method": "PATCH", "path": "/inbound/{id}", "summary": "Edit a draft or add carrier and tracking", "auth": "seller", "permission": "fulfillment-service.inbound.manage", "params": { "id": "uuid" }, "body": "InboundInput", "response": "InboundShipment", "errors": ["ILLEGAL_TRANSITION"], "screens": ["seller/inventory"], "phase": 4 },
+    { "id": "submitInbound", "area": "seller", "method": "POST", "path": "/inbound/{id}/submit", "summary": "Submit and get box and unit labels", "auth": "seller", "permission": "fulfillment-service.inbound.manage", "params": { "id": "uuid" }, "response": "InboundShipment", "errors": ["ILLEGAL_TRANSITION", "VALIDATION_FAILED"], "events": ["fulfillment-service.inbound.submitted"], "screens": ["seller/inventory"], "phase": 4 },
+    { "id": "markInboundShipped", "area": "seller", "method": "POST", "path": "/inbound/{id}/ship", "summary": "Mark as shipped with carrier and tracking", "auth": "seller", "permission": "fulfillment-service.inbound.manage", "params": { "id": "uuid" }, "body": { "carrier": "string", "tracking": "string", "expectedArrival": "date?" }, "response": "InboundShipment", "errors": ["ILLEGAL_TRANSITION"], "screens": ["seller/inventory"], "phase": 4 },
+    { "id": "cancelInbound", "area": "seller", "method": "POST", "path": "/inbound/{id}/cancel", "summary": "Cancel before it ships", "auth": "seller", "permission": "fulfillment-service.inbound.manage", "params": { "id": "uuid" }, "body": { "reason": "text?" }, "response": "InboundShipment", "errors": ["ILLEGAL_TRANSITION"], "screens": ["seller/inventory"], "phase": 4 },
+    { "id": "respondDiscrepancy", "area": "seller", "method": "POST", "path": "/inbound/{id}/discrepancy-response", "summary": "Accept a receiving discrepancy or claim it with evidence", "auth": "seller", "permission": "fulfillment-service.inbound.manage", "params": { "id": "uuid" }, "body": { "response": "enum(accepted|claimed)", "note": "text?", "evidenceIds": "uuid[]?" }, "response": "InboundShipment", "errors": ["ILLEGAL_TRANSITION"], "screens": ["seller/inventory"], "phase": 4 },
+    { "id": "listOwnServiceReturns", "area": "seller", "method": "GET", "path": "/returns", "summary": "Returns of service offers received at our warehouse with inspection outcome", "auth": "seller", "paging": true, "query": { "outcome": "string?" }, "response": "ServiceReturn", "screens": ["seller/returns"], "phase": 4 },
+    { "id": "listRemovals", "area": "seller", "method": "GET", "path": "/removals", "summary": "Removal and disposal orders", "auth": "seller", "paging": true, "response": "RemovalOrder", "screens": ["seller/inventory"], "phase": 4 },
+    { "id": "requestRemoval", "area": "seller", "method": "POST", "path": "/removals", "summary": "Ask for stock back or to dispose of it", "auth": "seller", "permission": "fulfillment-service.inbound.manage", "body": "RemovalInput", "response": "RemovalOrder", "status": 201, "errors": ["INSUFFICIENT_STOCK"], "idempotent": true, "audited": true, "screens": ["seller/inventory"], "phase": 4 },
+    { "id": "cancelRemoval", "area": "seller", "method": "POST", "path": "/removals/{id}/cancel", "summary": "Cancel a removal that has not been approved", "auth": "seller", "permission": "fulfillment-service.inbound.manage", "params": { "id": "uuid" }, "response": "RemovalOrder", "errors": ["ILLEGAL_TRANSITION"], "screens": ["seller/inventory"], "phase": 4 },
+    { "id": "listOwnFees", "area": "seller", "method": "GET", "path": "/fees", "summary": "Fees charged (storage, handling, receiving, returns, removal)", "auth": "seller", "permission": "fulfillment-service.fees.view", "paging": true, "query": { "type": "string?", "from": "date?", "to": "date?" }, "response": "FeeCharge", "screens": ["seller/finance", "seller/statement"], "phase": 4 },
+    { "id": "listStockMovements", "area": "seller", "method": "GET", "path": "/skus/{id}/movements", "summary": "Ownership ledger for one SKU (every unit movement with reason)", "auth": "seller", "params": { "id": "uuid" }, "paging": true, "response": { "movement": "string", "quantity": "int", "fromGroup": "string?", "toGroup": "string?", "reference": "string?", "reason": "text?", "at": "datetime" }, "screens": ["seller/inventory"], "phase": 4 },
+
+    { "id": "listEnrollmentsAdmin", "area": "admin", "method": "GET", "path": "/enrollments", "summary": "Seller enrollments", "auth": "staff", "permission": "fulfillment-service.enrollment.review", "paging": true, "query": { "state": "string?", "q": "string?" }, "response": "Enrollment", "screens": ["admin/sellers", "admin/seller"], "phase": 4 },
+    { "id": "decideEnrollment", "area": "admin", "method": "POST", "path": "/enrollments/{id}/decide", "summary": "Approve with capacity, reject or request information", "auth": "staff", "permission": "fulfillment-service.enrollment.review", "params": { "id": "uuid" }, "body": { "decision": "enum(approve|reject|request_info)", "reason": "text", "capacity": "Capacity?" }, "response": "Enrollment", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["fulfillment-service.enrollment.decided"], "screens": ["admin/seller"], "phase": 4 },
+    { "id": "changeEnrollmentStatus", "area": "admin", "method": "POST", "path": "/enrollments/{id}/status", "summary": "Suspend, reinstate, offboard or close an enrollment", "auth": "staff", "permission": "fulfillment-service.enrollment.review", "params": { "id": "uuid" }, "body": { "action": "enum(suspend|reinstate|offboard|close)", "reason": "text", "affectedActivity": { "type": "string?", "desc": "e.g. new inbound shipments" }, "appealRoute": "string?" }, "response": "Enrollment", "errors": ["ILLEGAL_TRANSITION", "STOCK_REMAINING"], "audited": true, "events": ["fulfillment-service.enrollment.decided"], "screens": ["admin/seller"], "phase": 4 },
+    { "id": "reviewSku", "area": "admin", "method": "POST", "path": "/skus/{id}/review", "summary": "Approve or reject a SKU for the service", "auth": "staff", "permission": "fulfillment-service.enrollment.review", "params": { "id": "uuid" }, "body": { "approve": "bool", "reason": "text?", "sizeTier": "enum(small|standard|large|oversize)?" }, "response": "SkuEnrollment", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "screens": ["admin/seller"], "phase": 4 },
+    { "id": "listInboundAdmin", "area": "admin", "method": "GET", "path": "/inbound", "summary": "Inbound shipments expected and arriving (receiving queue)", "auth": "staff", "permission": "fulfillment-service.inbound.receive", "paging": true, "query": { "state": "string?", "sellerId": "uuid?", "expectedFrom": "date?", "expectedTo": "date?" }, "response": "InboundShipment", "screens": ["ops/receiving"], "phase": 4 },
+    { "id": "markInboundArrived", "area": "admin", "method": "POST", "path": "/inbound/{id}/arrive", "summary": "Record arrival at the dock", "auth": "staff", "permission": "fulfillment-service.inbound.receive", "params": { "id": "uuid" }, "body": { "boxesArrived": "int", "note": "text?" }, "response": "InboundShipment", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "screens": ["ops/receiving"], "phase": 4 },
+    { "id": "recordReceiving", "area": "admin", "method": "POST", "path": "/inbound/{id}/receive", "summary": "Record received and damaged units (partial or complete)", "desc": "Counts go to inventory as seller-owned stock (incoming → available after inspection, damaged → held). Completing with differences opens a discrepancy for the seller.", "auth": "staff", "permission": "fulfillment-service.inbound.receive", "params": { "id": "uuid" }, "body": "ReceivingInput", "response": "InboundShipment", "errors": ["ILLEGAL_TRANSITION"], "idempotent": true, "audited": true, "events": ["fulfillment-service.inbound.received"], "screens": ["ops/receiving"], "phase": 4 },
+    { "id": "decideDiscrepancy", "area": "admin", "method": "POST", "path": "/inbound/{id}/discrepancy-decision", "summary": "Decide a claimed discrepancy (reimburse, adjust or reject)", "auth": "staff", "permission": "fulfillment-service.inbound.receive", "params": { "id": "uuid" }, "body": { "decision": "enum(adjust_stock|reimburse|reject)", "units": "int?", "amount": "Money?", "reason": "text" }, "response": "InboundShipment", "errors": ["ILLEGAL_TRANSITION", "APPROVAL_REQUIRED"], "idempotent": true, "audited": true, "approval": "Approval action fulfillment-service.reimbursements.approve. Reimbursements above the caller's limit need Finance approval", "screens": ["ops/receiving"], "phase": 4 },
+    { "id": "listFulfillmentRequests", "area": "admin", "method": "GET", "path": "/fulfillment-requests", "summary": "Orders for service offers and their warehouse progress", "auth": "staff", "permission": "fulfillment-service.operations.view", "paging": true, "query": { "state": "string?", "sellerId": "uuid?", "overdue": "bool?" }, "response": "FulfillmentRequest", "screens": ["ops/pick-pack", "ops/dispatch"], "phase": 4 },
+    { "id": "recordReturnOutcome", "area": "admin", "method": "POST", "path": "/returns/{id}/outcome", "summary": "Record the inspection outcome of a returned service unit", "auth": "staff", "permission": "fulfillment-service.inbound.receive", "params": { "id": "uuid" }, "body": { "outcome": "enum(restocked|unsellable|removal|disposed)", "note": "text", "evidenceIds": "uuid[]?" }, "response": "ServiceReturn", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["fulfillment-service.return.inspected"], "screens": ["ops/return-inspection"], "phase": 4 },
+    { "id": "listRemovalsAdmin", "area": "admin", "method": "GET", "path": "/removals", "summary": "Removal and disposal orders", "auth": "staff", "permission": "fulfillment-service.operations.view", "paging": true, "query": { "state": "string?", "sellerId": "uuid?" }, "response": "RemovalOrder", "screens": ["ops/pick-pack"], "phase": 4 },
+    { "id": "advanceRemoval", "area": "admin", "method": "POST", "path": "/removals/{id}/transition", "summary": "Approve, process, ship or complete a removal order", "auth": "staff", "permission": "fulfillment-service.inbound.receive", "params": { "id": "uuid" }, "body": { "action": "enum(approve|startProcessing|ship|complete|cancel)", "tracking": "string?", "reason": "text?" }, "response": "RemovalOrder", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["fulfillment-service.removal.completed"], "screens": ["ops/pick-pack"], "phase": 4 },
+    { "id": "getSellerStockAdmin", "area": "admin", "method": "GET", "path": "/sellers/{sellerId}/stock", "summary": "Seller-owned stock held by the company, by SKU and group", "auth": "staff", "permission": "fulfillment-service.operations.view", "params": { "sellerId": "uuid" }, "paging": true, "response": "SkuEnrollment", "screens": ["admin/seller", "ops/inventory"], "phase": 4 },
+    { "id": "listFeeSchedules", "area": "admin", "method": "GET", "path": "/fee-schedules", "summary": "Fee schedule versions", "auth": "staff", "permission": "fulfillment-service.fees.manage", "response": "FeeSchedule[]", "screens": ["admin/settings"], "phase": 4 },
+    { "id": "createFeeSchedule", "area": "admin", "method": "POST", "path": "/fee-schedules", "summary": "Propose a new fee schedule with an effective date", "desc": "Needs Business Owner approval and sellerNoticeDays notice; enrolled sellers are notified.", "auth": "staff", "permission": "fulfillment-service.fees.manage", "body": { "version": "string", "effectiveAt": "datetime", "rates": "FeeRate[]", "reason": "text" }, "response": "FeeSchedule", "status": 202, "errors": ["APPROVAL_REQUIRED", "VALIDATION_FAILED"], "audited": true, "approval": "Approval action fulfillment-service.fees.change. Always Business Owner approval", "screens": ["admin/settings"], "phase": 4 },
+    { "id": "listFeeChargesAdmin", "area": "admin", "method": "GET", "path": "/fees", "summary": "Fee charges across sellers", "auth": "staff", "permission": "fulfillment-service.fees.manage", "paging": true, "query": { "sellerId": "uuid?", "type": "string?", "state": "string?", "period": "string?" }, "response": "FeeCharge", "screens": ["admin/finance"], "phase": 4 },
+    { "id": "reverseFeeCharge", "area": "admin", "method": "POST", "path": "/fees/{id}/reverse", "summary": "Reverse a fee charge with a reason", "auth": "staff", "permission": "fulfillment-service.fees.manage", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "FeeCharge", "errors": ["ILLEGAL_TRANSITION", "APPROVAL_REQUIRED"], "idempotent": true, "audited": true, "approval": "Approval action fulfillment-service.charges.reverse. Above the caller's adjustment limit needs Finance approval", "events": ["fulfillment-service.fee.reversed"], "screens": ["admin/finance"], "phase": 4 }
+  ],
+  "events": {
+    "publishes": [
+      { "name": "fulfillment-service.enrollment.submitted", "when": "A seller applies", "payload": { "enrollmentId": "uuid", "sellerId": "uuid" } },
+      { "name": "fulfillment-service.enrollment.decided", "when": "Approve, reject, request info, suspend, reinstate, offboard or close", "payload": { "enrollmentId": "uuid", "sellerId": "uuid", "state": "string", "reason": "text?" } },
+      { "name": "fulfillment-service.inbound.submitted", "when": "An inbound shipment is submitted (warehouse expects it)", "payload": { "inboundId": "uuid", "sellerId": "uuid", "units": "int", "expectedArrival": "date?" } },
+      { "name": "fulfillment-service.inbound.received", "when": "Receiving is recorded", "payload": { "inboundId": "uuid", "sellerId": "uuid", "received": "int", "damaged": "int", "complete": "bool" } },
+      { "name": "fulfillment-service.return.inspected", "when": "A returned service unit gets an outcome", "payload": { "serviceReturnId": "uuid", "returnId": "uuid", "sellerId": "uuid", "outcome": "string" } },
+      { "name": "fulfillment-service.removal.completed", "when": "A removal or disposal is completed", "payload": { "removalId": "uuid", "sellerId": "uuid", "units": "int" } },
+      { "name": "fulfillment-service.fee.charged", "when": "Fee charges are posted for seller statements", "payload": { "chargeId": "uuid", "sellerId": "uuid", "type": "string", "amount": "Money", "reference": "string?" } },
+      { "name": "fulfillment-service.fee.reversed", "when": "A fee charge is reversed", "payload": { "chargeId": "uuid", "sellerId": "uuid", "amount": "Money", "reason": "text" } }
+    ],
+    "consumes": [
+      { "name": "orders.order.placed", "does": "Create fulfillment requests for seller groups with service offers" },
+      { "name": "orders.item.cancelled", "does": "Cancel or shorten open fulfillment requests and release seller-owned reservations" },
+      { "name": "shipping.shipment.dispatched", "does": "Mark requests shipped; accrue pick-and-pack and order handling fees" },
+      { "name": "returns.return.received", "does": "Create a service return for units returned to our warehouse; accrue the returns processing fee" },
+      { "name": "inventory.stock.low", "does": "Notify the seller to send more stock for service SKUs" },
+      { "name": "sellers.seller.suspended", "does": "Suspend the enrollment for new inbound; keep fulfilling accepted orders" },
+      { "name": "sellers.seller.closed", "does": "Start offboarding; ask the seller to remove stock" },
+      { "name": "access.approval.decided", "does": "Apply approved fee schedules, reimbursements and fee reversals" }
+    ]
+  },
+  "permissions": [
+    { "key": "fulfillment-service.enrollment.review", "audience": "staff", "desc": "Decide enrollments, SKU approvals and enrollment status" },
+    { "key": "fulfillment-service.inbound.receive", "audience": "staff", "desc": "Record arrivals, receiving, discrepancy decisions, return outcomes and removals" },
+    { "key": "fulfillment-service.operations.view", "audience": "staff", "desc": "View fulfillment requests, removals and seller-owned stock" },
+    { "key": "fulfillment-service.fees.manage", "audience": "staff", "desc": "Fee schedules and fee charges (reversals within limits)" },
+    { "key": "fulfillment-service.enrollment.manage", "audience": "seller", "desc": "Apply, accept service terms and offboard" },
+    { "key": "fulfillment-service.inbound.manage", "audience": "seller", "desc": "Enroll SKUs, plan inbound shipments, request removals" },
+    { "key": "fulfillment-service.fees.view", "audience": "seller", "desc": "View service fees" }
+  ],
+  "approvalActions": [
+    { "key": "fulfillment-service.reimbursements.approve", "desc": "Reimburse a seller for an inbound discrepancy or lost unit", "limit": "money", "secondReviewer": "above-limit", "approvers": "Warehouse Manager within the limit; Finance Manager above it (example values)" },
+    { "key": "fulfillment-service.fees.change", "desc": "Publish a new fulfillment fee schedule (with sellerNoticeDays notice)", "limit": "none", "secondReviewer": "always", "approvers": "Business Owner" },
+    { "key": "fulfillment-service.charges.reverse", "desc": "Reverse a fulfillment fee charged to a seller", "limit": "money", "secondReviewer": "above-limit", "approvers": "Within the caller's adjustment limit; Finance Manager above it" }
+  ],
+  "jobs": [
+    { "name": "fulfillment-service.storage-snapshot", "schedule": "daily 23:55 market time", "does": "Record units and volume per seller SKU with age buckets" },
+    { "name": "fulfillment-service.monthly-storage-fees", "schedule": "monthly, 1st 03:00 market time", "does": "Accrue storage and long-term storage fees from the month's snapshots" },
+    { "name": "fulfillment-service.post-fees", "schedule": "daily 02:30 market time", "does": "Post accrued fees to finance (fee.charged)" },
+    { "name": "fulfillment-service.inbound-overdue", "schedule": "daily", "does": "Flag inbound shipments past expected arrival; close discrepancies without a seller response after discrepancyResponseDays" },
+    { "name": "fulfillment-service.aged-stock-notice", "schedule": "weekly", "does": "Warn sellers about units approaching long-term storage" },
+    { "name": "fulfillment-service.reconcile", "schedule": "daily", "does": "Compare the ownership ledger with inventory quantities per seller SKU; open a work item for differences" }
+  ],
+  "settings": [
+    { "key": "longTermStorageDays", "default": 365, "desc": "Age after which the long-term storage rate applies" },
+    { "key": "discrepancyResponseDays", "default": 14, "desc": "Time for the seller to accept or claim a receiving discrepancy" },
+    { "key": "sellerNoticeDays", "default": 30, "desc": "Notice before a new fee schedule takes effect" },
+    { "key": "warehouseAddress", "default": "Reno, NV warehouse (placeholder)", "desc": "Inbound destination" },
+    { "key": "unsellableDisposalDays", "default": 60, "desc": "Unsellable units not removed by the seller are disposed after this (with notice)" }
+  ],
+  "integrations": [],
+  "errorCodes": {
+    "TERMS_NOT_ACCEPTED": { "status": 422, "meaning": "The service terms and fee schedule must be accepted." },
+    "CAPACITY_EXCEEDED": { "status": 409, "meaning": "The seller's storage or SKU allowance would be exceeded." },
+    "SKU_RESTRICTED": { "status": 422, "meaning": "The item can't be stored (hazardous, oversize beyond limits, restricted category)." },
+    "STOCK_REMAINING": { "status": 409, "meaning": "Seller-owned stock is still in our warehouse; remove or dispose of it first." },
+    "INSUFFICIENT_STOCK": { "status": 409, "meaning": "Not enough units in the requested stock group." }
+  },
+  "notes": [
+    "Phase 4 (plan ch. 1, 12, 20): introduced only when warehouse responsibilities and service terms are ready; the module is off at launch and the prototype has no dedicated screens, so screen ids point at the existing inventory, receiving, pick-pack and finance screens that will host these views.",
+    "Selling and shipping are separate: the seller stays the named seller of record on the offer, order and invoice; offers only add 'Ships from Marketly'.",
+    "Ownership: inventory holds the quantities with owner = seller at our warehouse location; this module keeps the ownership ledger and reconciles daily. Seller stock is never pooled with company stock and reports identify the stock owner and the charges (plan ch. 9).",
+    "Fees are seller charges separate from commission and ad charges; finance shows them as their own statement lines. Fee schedules are versioned with effective dates and seller notice.",
+    "Physical work (receiving, pick, pack, returns inspection) is done by warehouse tasks; this module creates and tracks them and records outcomes that concern ownership and fees."
+  ]
+}

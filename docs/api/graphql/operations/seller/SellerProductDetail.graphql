@@ -1,0 +1,217 @@
+# screens: seller/product-new, seller/offer
+# replaces: GET catalog/products/{id}, GET catalog/categories/{id}/attributes, GET offers/offers, GET offers/offers/{id}, GET inventory/stock-items, GET finance/fee-schedule
+# note: myProduct also resolves any approved, active product, so seller/offer can show the read-only product card before the seller has an offer on it.
+# why: The submission and offer forms show shared product content, the category attributes, the submission record and review feedback, and the seller's own offers with price context, earnings, delivery estimate and stock together.
+query SellerProductDetail($id: UUID!, $previewPrice: Int) {
+  myProduct(id: $id) {
+    id
+    ref
+    title
+    brand {
+      id
+      name
+    }
+    category {
+      id
+      name
+      attributes {
+        id
+        name
+        kind
+        unit
+        options
+        required
+        variantDefining
+      }
+    }
+    categoryPath
+    modelNumber
+    manufacturerPartNumber
+    noGtin
+    requestedBrandName
+    description
+    keyFeatures
+    specs {
+      name
+      value
+    }
+    includedItems
+    images {
+      ...Image
+    }
+    variants {
+      id
+      gtin
+      options {
+        name
+        value
+      }
+    }
+    updatedAt
+    submittedByMe
+    submission {
+      id
+      ref
+      kind
+      state
+      submittedAt
+      submittedBy {
+        kind
+        name
+      }
+      lastSavedAt
+      lastSavedBy {
+        kind
+        name
+      }
+      expectedReviewBy
+      note
+      reviewDeadline {
+        dueAt
+        state
+      }
+    }
+    reviewState
+    publication
+    missing
+    reviewLog {
+      action
+      reason
+      at
+      fields {
+        name
+        value
+      }
+      actor {
+        kind
+        name
+      }
+    }
+    offerCount
+    myOffers {
+      id
+      status
+      variant {
+        id
+        options {
+          name
+          value
+        }
+      }
+      condition
+      conditionLabel
+      conditionNotes
+      includedItems
+      missingItems
+      sellerSku
+      price {
+        ...Amount
+      }
+      compareAt {
+        verified
+        amount {
+          ...Amount
+        }
+      }
+      purchaseLimit
+      dispatch {
+        businessDays
+        sameDayCutoff
+        label
+      }
+      shippingProfileId
+      returnTerms {
+        kind
+        windowDays
+        freeReturnShipping
+        summary
+      }
+      warranty {
+        kind
+        months
+        summary
+      }
+      publishOnApproval
+      publishedAt
+      statusReason {
+        code
+        text
+        affectedActivity
+        appealRoute
+      }
+      featuredEligibility {
+        eligible
+        reasons {
+          code
+          message
+          howToFix
+        }
+      }
+      earningsPreview(price: $previewPrice) {
+        rateBps
+        feeBasisNote
+        exampleLabel
+        ruleVersion
+        price {
+          ...Amount
+        }
+        feeBasis {
+          ...Amount
+        }
+        fee {
+          ...Amount
+        }
+        earnings {
+          ...Amount
+        }
+      }
+      deliveryEstimate {
+        shipsToLocation
+        locationLabel
+        methodName
+        carrierService
+        free
+        arrivalLabel
+        dispatchLabel
+        price {
+          ...Amount
+        }
+      }
+      priceContext {
+        otherOfferCount
+        lowestNewPrice {
+          ...Amount
+        }
+        officialStorePrice {
+          ...Amount
+        }
+      }
+      stock {
+        id
+        sku
+        state
+        lowStockThreshold
+        quantities {
+          available
+          reserved
+          incoming
+        }
+      }
+      updatedAt
+    }
+  }
+}
+
+fragment Amount on Money {
+  amount
+  currency
+  formatted
+}
+
+fragment Image on MediaRef {
+  id
+  url
+  alt
+  width
+  height
+}

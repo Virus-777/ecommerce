@@ -1,0 +1,9 @@
+{
+  "name": "marketly-api-design-tools",
+  "private": true,
+  "description": "Tools that validate and generate the Marketly API design (REST spec → OpenAPI, GraphQL fragments → per-area schemas).",
+  "type": "module",
+  "devDependencies": {
+    "graphql": "^16.11.0"
+  }
+}

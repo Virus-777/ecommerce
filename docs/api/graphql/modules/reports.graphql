@@ -1,0 +1,211 @@
+# reports: dashboard figures with stated meanings. Every figure carries its range, date basis, currency and time zone,
+# and links to its published metric definition. Figures come from reports' read models, never other modules' tables.
+#
+# AdminDashboard = adminDashboard (KPIs, sales split) + workqueues.workSummary + finance / advertising cards.
+# SellerDashboard = sellerDashboard (work tiles, sales) + mySeller { performance, balance (finance) } + orders' dispatch
+# deadlines + content announcements. Sellers only ever see their own results.
+
+enum DashboardPeriod {
+  TODAY
+  LAST_7_DAYS
+  LAST_14_DAYS
+  LAST_30_DAYS
+}
+
+enum DashboardScope {
+  "Whole marketplace (Admin Center)"
+  PLATFORM
+  "The caller's own seller account (Seller Center)"
+  SELLER
+}
+
+enum MetricDateBasis {
+  PLACEMENT
+  PAYMENT
+  SHIPMENT
+  COMPLETION
+  EVENT
+}
+
+enum MetricUnit {
+  MONEY
+  COUNT
+  PERCENT
+  RATIO
+  DURATION_HOURS
+  DAYS
+}
+
+enum MetricGroup {
+  COMMERCE
+  COMPANY_TRADING
+  MARKETPLACE_FINANCE
+  PRODUCTS_DISCOVERY
+  SERVICE_SELLERS
+  CUSTOMERS_MARKETING_ADS
+}
+
+"The published meaning of a metric, shown under every figure that uses it"
+type MetricDefinition {
+  "e.g. commerce.gross_sales"
+  key: String!
+  name: String!
+  group: MetricGroup!
+  "Plain-language meaning"
+  definition: String!
+  unit: MetricUnit!
+  includes: [String!]!
+  "e.g. tax"
+  excludes: [String!]!
+  defaultDateBasis: MetricDateBasis!
+  "e.g. reporting currency USD"
+  currencyRule: String!
+  "e.g. America/Los_Angeles; days run 00:00–23:59 market time"
+  timeZone: String!
+  "e.g. gross sales ↔ sales after cancellations and refunds"
+  relatedKeys: [String!]!
+  version: Int!
+  effectiveFrom: Date!
+  ownerName: String @areas(in: [ADMIN])
+}
+
+enum MetricDeltaUnit {
+  "Percent change"
+  PCT
+  "Percentage points"
+  PTS
+}
+
+enum MetricDirection {
+  UP
+  DOWN
+  FLAT
+}
+
+"Change against the comparison period"
+type MetricDelta {
+  value: Float!
+  unit: MetricDeltaUnit!
+  direction: MetricDirection!
+  "Whether the change is good news (refunds going down is good)"
+  good: Boolean!
+}
+
+"One headline figure (KPI tile)"
+type MetricValue {
+  metricKey: String!
+  label: String!
+  value: Float!
+  "Set when the unit is MONEY"
+  money: Money
+  "Formatted for display, e.g. $241.3k, 3,418, 2.1%"
+  display: String!
+  unit: MetricUnit!
+  delta: MetricDelta
+  "e.g. avg $71.20, 2.1% of gross, on $109.4k seller sales"
+  note: String
+  definition: MetricDefinition
+}
+
+"One point of a chart series"
+type MetricPoint {
+  date: Date!
+  "Axis label, e.g. Oct 8"
+  label: String!
+  value: Float!
+  "Set when the series unit is MONEY"
+  money: Money
+}
+
+"A chart line, e.g. daily sales for the Official Store"
+type MetricSeries {
+  "e.g. official, marketplace, sales"
+  key: String!
+  label: String!
+  metricKey: String!
+  unit: MetricUnit!
+  "day, week or month"
+  granularity: String!
+  points: [MetricPoint!]!
+  "Sum or average over the series range, formatted like the points"
+  total: MetricValue
+}
+
+"One share of a split, e.g. Official Store 58% · $140.2k"
+type DashboardSplit {
+  key: String!
+  label: String!
+  amount: Money!
+  sharePct: Float!
+}
+
+enum DashboardTone {
+  DANGER
+  WARNING
+  NEUTRAL
+}
+
+enum DashboardWorkTileKey @areas(in: [SELLER]) {
+  OVERDUE_DISPATCH
+  DISPATCH_DUE_TODAY
+  NEW_ORDERS
+  LOW_STOCK
+  OPEN_RETURNS
+  UNANSWERED_MESSAGES
+}
+
+"A 'Work for today' tile on the seller dashboard (counts from orders, inventory, returns, messaging, workqueues)"
+type DashboardWorkTile @areas(in: [SELLER]) {
+  key: DashboardWorkTileKey!
+  count: Int!
+  "e.g. MK-261007-10433 · 3 h past deadline"
+  sub: String!
+  tone: DashboardTone!
+  "Seller Center screen to open, e.g. seller/orders"
+  screen: String!
+  screenState: String
+}
+
+"""
+Dashboard figures for one scope and period: KPI tiles, chart series and splits, each with its definition.
+Admin: gross sales, orders (with AOV), marketplace fee income, refunds; series and split Official Store vs marketplace sellers.
+Seller: sales (item sales before fees, by order date), orders, average order, today so far; daily sales series.
+"""
+type DashboardMetrics {
+  scope: DashboardScope!
+  period: DashboardPeriod!
+  from: Date!
+  to: Date!
+  "Comparison range for deltas (the previous period of the same length)"
+  compareFrom: Date
+  compareTo: Date
+  "Figures include events up to this time"
+  asOf: DateTime!
+  dateBasis: MetricDateBasis!
+  "e.g. Gross sales by order placement date"
+  basisLabel: String!
+  currency: String!
+  timeZone: String!
+  taxIncluded: Boolean!
+  "Recent days can still change (late cancellations and refunds)"
+  mayStillChange: Boolean!
+  kpis: [MetricValue!]!
+  "Chart series. The sales chart always covers the last 14 days, whatever the period."
+  series: [MetricSeries!]!
+  "Admin: Official Store vs marketplace sellers. Empty for sellers."
+  split: [DashboardSplit!]!
+  "Seller only: today's work tiles"
+  workToday: [DashboardWorkTile!] @areas(in: [SELLER])
+  "Definitions of every metric shown"
+  definitions: [MetricDefinition!]!
+  "Figures not shown because their source is off or behind, e.g. marketplace_fee_income when finance is off"
+  unavailable: [String!]!
+}
+
+extend type Query {
+  "Admin dashboard figures (AdminDashboard screen query)"
+  adminDashboard(period: DashboardPeriod = LAST_7_DAYS): DashboardMetrics @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "reports.dashboard.view") @source(module: "reports", fn: "getAdminDashboard") @cost(weight: 5)
+
+  "The caller's seller dashboard figures and work tiles (SellerDashboard screen query)"
+  sellerDashboard(period: DashboardPeriod = LAST_14_DAYS): DashboardMetrics @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "reports", fn: "getSellerDashboard") @cost(weight: 5)
+}

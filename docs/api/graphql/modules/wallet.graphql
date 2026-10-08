@@ -1,0 +1,121 @@
+# wallet (phase 3): store credit balance, lots and ledger, and the staff view of a customer's credit.
+# Holds, captures, refunds to credit, goodwill grants, corrections and gift cards stay on REST and the
+# in-process API (idempotency, approval limits, audit).
+
+"Soonest-expiring credit"
+type WalletLotExpiry @areas(in: [STORE, ADMIN]) @phase(n: 3) {
+  amount: Money!
+  expiresAt: DateTime!
+}
+
+enum WalletLotSource @areas(in: [STORE, ADMIN]) {
+  REFUND
+  GOODWILL
+  PRICE_ADJUSTMENT
+  GIFT_CARD
+  CORRECTION
+}
+
+"A credit lot; lots are used earliest-expiring first"
+type WalletCreditLot @areas(in: [STORE, ADMIN]) @phase(n: 3) {
+  id: UUID!
+  source: WalletLotSource!
+  original: Money!
+  remaining: Money!
+  expiresAt: DateTime
+  createdAt: DateTime!
+  "e.g. case CS-260903-1876"
+  reference: String
+}
+
+enum WalletEntryKind @areas(in: [STORE, ADMIN]) {
+  REFUND_TO_CREDIT
+  GOODWILL
+  PRICE_ADJUSTMENT
+  GIFT_CARD_REDEEMED
+  HOLD
+  CAPTURE
+  RELEASE
+  ORDER_REFUND_RETURNED
+  EXPIRY
+  CORRECTION
+  REVERSAL
+}
+
+"One line of the credit history"
+type WalletLedgerEntry @areas(in: [STORE, ADMIN]) @phase(n: 3) {
+  id: UUID!
+  at: DateTime!
+  kind: WalletEntryKind!
+  "Signed: credits positive, uses negative"
+  amount: Money!
+  balanceAfter: Money!
+  "e.g. Goodwill credit · case CS-260903-1876, late delivery; Used on order MK-260830-11764"
+  label: String!
+  orderRef: String
+  caseRef: String
+  "Staff who made the entry (admin only)"
+  actor: Actor @areas(in: [ADMIN])
+  "Internal reason (admin only)"
+  reason: String @areas(in: [ADMIN])
+}
+
+"Store credit balance (Account overview tile, Coupons and credit, checkout)"
+type WalletBalance @areas(in: [STORE, ADMIN]) @phase(n: 3) {
+  available: Money!
+  "Reserved for a checkout in progress"
+  held: Money!
+  nextExpiry: WalletLotExpiry
+  "e.g. Any item from any seller; not on gift cards"
+  usableOn: String!
+  lots: [WalletCreditLot!]!
+  "Latest credit history entries"
+  recentEntries(limit: Int = 5): [WalletLedgerEntry!]!
+}
+
+enum WalletGoodwillState @areas(in: [ADMIN]) {
+  PENDING_APPROVAL
+  GRANTED
+  REJECTED
+  REVERSED
+}
+
+enum WalletChargedTo @areas(in: [ADMIN]) {
+  PLATFORM
+  SELLER
+}
+
+"A goodwill credit grant with its approval"
+type WalletGoodwillGrant @areas(in: [ADMIN]) @phase(n: 3) {
+  id: UUID!
+  amount: Money!
+  reason: String!
+  reasonCode: String!
+  caseRef: String
+  orderRef: String
+  chargedTo: WalletChargedTo!
+  sellerId: UUID
+  state: WalletGoodwillState!
+  approval: ApprovalInfo
+  requestedBy: Actor!
+  decidedBy: Actor
+  createdAt: DateTime!
+  grantedAt: DateTime
+}
+
+"Customer 360 credit panel: balance, goodwill in the last 30 days against the limit, pending grants"
+type WalletCustomerAdmin @areas(in: [ADMIN]) @phase(n: 3) {
+  balance: WalletBalance!
+  goodwillLast30Days: Money!
+  goodwillLimitPerCustomer: Money!
+  pendingGrants: [WalletGoodwillGrant!]!
+}
+
+# ------------------------------------------------------------------ fields on other modules' types
+
+extend type Customer {
+  "My store credit (Account overview tile)"
+  wallet: WalletBalance @areas(in: [STORE]) @phase(n: 3) @source(module: "wallet", fn: "getBalance")
+  "Staff view of this customer's credit (Admin customer 360)"
+  walletAdmin: WalletCustomerAdmin @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "wallet.credit.view") @phase(n: 3) @source(module: "wallet", fn: "getCustomerWallet")
+}

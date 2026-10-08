@@ -1,0 +1,179 @@
+{
+  "name": "wallet",
+  "title": "Wallet",
+  "group": "Later phases",
+  "phase": 3,
+  "chapters": [15, 7, 13, 6],
+  "summary": "Customer store credit with an auditable ledger (refunds to credit, goodwill credit within approval limits, price adjustments, use at checkout, expiry), gift cards, and a placeholder for loyalty rewards. Checkout and payments use the balance through the in-process public API.",
+  "owns": [
+    "Store credit accounts and balance, made of credit lots with their source and expiry",
+    "Credit ledger: refund to credit, goodwill credit, price adjustment, gift card redemption, checkout hold, capture and release, reversal on refund of an order paid with credit, expiry, staff correction",
+    "Goodwill credit grants with reason, linked case or order, and approval above the staff member's limit",
+    "Holds at checkout (reserve while payment runs, capture on order acceptance, release on failure)",
+    "Gift cards: issuance in batches, codes, balance check, redemption into store credit, void and expiry",
+    "Loyalty points ledger (phase 4 experiment; designed, off)"
+  ],
+  "notOwns": [
+    "Card refunds and the choice of refund destination: payments and returns (they call creditRefund when the customer chose store credit)",
+    "Case decisions and remedies: support (calls grantGoodwill)",
+    "Coupons and discounts: promotions",
+    "Accounting of the credit liability: finance (consumes wallet events)",
+    "Approval limits and second reviewers: access"
+  ],
+  "dependsOn": ["customers", "payments"],
+  "optionalDeps": ["access", "support", "orders", "notifications", "finance", "audit"],
+  "publicApi": [
+    { "name": "getBalance", "signature": "(customerId: uuid) => CreditBalance", "desc": "Available balance and soonest expiry, for checkout step 4 'Use my Marketly credit'.", "usedBy": ["checkout", "customers", "graphql"] },
+    { "name": "holdCredit", "signature": "(customerId: uuid, quoteId: uuid, amount: Money, idempotencyKey: string) => CreditHold", "desc": "Reserve credit for a quote; earliest-expiring lots first. Fails with INSUFFICIENT_CREDIT.", "usedBy": ["checkout", "payments"] },
+    { "name": "captureHold", "signature": "(holdId: uuid, orderId: uuid) => CreditHold", "desc": "Turn a hold into a use when the order is accepted.", "usedBy": ["payments", "checkout"] },
+    { "name": "releaseHold", "signature": "(holdId: uuid) => CreditHold", "desc": "Release a hold on payment failure or quote expiry.", "usedBy": ["payments", "checkout"] },
+    { "name": "creditRefund", "signature": "(input: { customerId: uuid, refundId: uuid, orderId: uuid, amount: Money, reason: string }, idempotencyKey: string) => LedgerEntry", "desc": "Refund to store credit (customer's choice) or return the credit part of a refunded order. Called by returns for return refunds to store credit and by payments for the refunds it executes (other origins with destination store_credit, and the credit part of a mixed tender). Idempotent per refundId; the payment tender split decides how much goes back to credit.", "usedBy": ["payments", "returns"] },
+    { "name": "grantGoodwill", "signature": "(input: GoodwillInput, actor: Actor, idempotencyKey: string) => GoodwillGrant", "desc": "Goodwill credit from a support case or order; above the actor's limit it becomes pending approval.", "usedBy": ["support"] },
+    { "name": "getCustomerWallet", "signature": "(customerId: uuid) => CustomerWalletAdmin", "desc": "Staff view of a customer's credit: balance, lots, goodwill in the last 30 days against the per-customer limit, and pending grants (GET /admin/wallet/customers/{customerId}).", "usedBy": ["graphql"] }
+  ],
+  "types": {
+    "CreditBalance": {
+      "customerId": "uuid", "available": "Money", "held": "Money",
+      "nextExpiry": { "type": "LotExpiry?" },
+      "usableOn": { "type": "string", "desc": "e.g. Any item from any seller; not on gift cards" }
+    },
+    "LotExpiry": { "amount": "Money", "expiresAt": "datetime" },
+    "CreditLot": { "id": "uuid", "source": "enum(refund|goodwill|price_adjustment|gift_card|correction)", "original": "Money", "remaining": "Money", "expiresAt": "datetime?", "createdAt": "datetime", "reference": "string?" },
+    "LedgerEntry": {
+      "id": "uuid", "at": "datetime",
+      "kind": "enum(refund_to_credit|goodwill|price_adjustment|gift_card_redeemed|hold|capture|release|order_refund_returned|expiry|correction|reversal)",
+      "amount": { "type": "Money", "desc": "Signed: credits positive, uses negative" },
+      "balanceAfter": "Money",
+      "label": { "type": "string", "desc": "e.g. Goodwill credit · case CS-260903-1876, late delivery; Used on order MK-260830-11764" },
+      "orderId": "uuid?", "orderRef": "string?", "caseRef": "string?", "refundId": "uuid?",
+      "actor": "Actor?", "reason": "text?"
+    },
+    "CreditHold": { "id": "uuid", "customerId": "uuid", "quoteId": "uuid", "orderId": "uuid?", "amount": "Money", "state": "enum(held|captured|released)", "expiresAt": "datetime" },
+    "WalletOverview": {
+      "balance": "CreditBalance",
+      "lots": "CreditLot[]",
+      "recent": "LedgerEntry[]",
+      "giftCardsEnabled": "bool",
+      "howToUse": { "type": "string", "desc": "e.g. Choose to use it at the payment step of checkout." }
+    },
+    "GoodwillInput": {
+      "customerId": "uuid", "amount": "Money",
+      "reason": "text",
+      "reasonCode": "enum(late_delivery|service_failure|price_adjustment|damaged_item|other)",
+      "caseId": "uuid?", "orderId": "uuid?",
+      "chargedTo": { "type": "enum(platform|seller)", "desc": "Seller-charged goodwill is posted to seller earnings by finance" },
+      "sellerId": "uuid?",
+      "expiresInDays": "int?"
+    },
+    "GoodwillGrant": {
+      "id": "uuid", "customerId": "uuid", "customerName": "string?", "amount": "Money",
+      "reason": "text", "reasonCode": "string", "caseRef": "string?", "orderRef": "string?",
+      "chargedTo": "enum(platform|seller)", "sellerId": "uuid?",
+      "state": "enum(pending_approval|granted|rejected|reversed)",
+      "approval": "ApprovalInfo?",
+      "requestedBy": "Actor", "decidedBy": "Actor?", "createdAt": "datetime", "grantedAt": "datetime?",
+      "ledgerEntryId": "uuid?"
+    },
+    "GiftCard": {
+      "id": "uuid", "codeLast4": "string", "batchId": "uuid?",
+      "initial": "Money", "remaining": "Money",
+      "state": "enum(issued|active|redeemed|voided|expired)",
+      "purpose": "enum(promotional|customer_service|sold)",
+      "expiresAt": "datetime?", "redeemedBy": "uuid?", "redeemedAt": "datetime?",
+      "createdBy": "Actor", "createdAt": "datetime"
+    },
+    "GiftCardBatchInput": { "count": "int", "amount": "Money", "purpose": "enum(promotional|customer_service|sold)", "expiresAt": "datetime?", "reason": "text", "costCenter": "string?" },
+    "CustomerWalletAdmin": {
+      "balance": "CreditBalance", "lots": "CreditLot[]",
+      "goodwillLast30Days": "Money", "goodwillLimitPerCustomer": "Money",
+      "pendingGrants": "GoodwillGrant[]"
+    },
+    "LoyaltyAccount": { "customerId": "uuid", "points": "int", "tier": "string?", "pendingPoints": "int", "programTerms": "string?" }
+  },
+  "tables": [
+    { "name": "accounts", "columns": { "customer_id": "uuid pk", "currency": "text", "available": "bigint", "held": "bigint", "updated_at": "timestamptz", "version": "int" } },
+    { "name": "lots", "desc": "Credit in buckets with source and expiry; uses consume earliest-expiring first", "columns": { "id": "uuid pk", "customer_id": "uuid → accounts", "source": "text", "original": "bigint", "remaining": "bigint", "expires_at": "timestamptz?", "reference": "text?", "state": "text (active|depleted|expired)", "created_at": "timestamptz" }, "indexes": ["(customer_id, state, expires_at)"] },
+    { "name": "ledger", "desc": "Append-only; balance is the sum of entries", "columns": { "id": "uuid pk", "customer_id": "uuid → accounts", "kind": "text", "amount": "bigint", "balance_after": "bigint", "lot_allocations": "jsonb", "order_id": "uuid?", "refund_id": "uuid?", "case_id": "uuid?", "hold_id": "uuid?", "idempotency_key": "text?", "actor_kind": "text", "actor_id": "text?", "reason": "text?", "at": "timestamptz" }, "indexes": ["(customer_id, at)", "unique (idempotency_key)", "unique (refund_id, kind) where refund_id is not null"] },
+    { "name": "holds", "columns": { "id": "uuid pk", "customer_id": "uuid → accounts", "quote_id": "uuid", "order_id": "uuid?", "amount": "bigint", "state": "text", "expires_at": "timestamptz", "idempotency_key": "text unique" } },
+    { "name": "goodwill_grants", "columns": { "id": "uuid pk", "customer_id": "uuid", "amount": "bigint", "currency": "text", "reason": "text", "reason_code": "text", "case_id": "uuid?", "order_id": "uuid?", "charged_to": "text", "seller_id": "uuid?", "state": "text", "approval_request_id": "uuid?", "requested_by": "text", "decided_by": "text?", "ledger_entry_id": "uuid?", "idempotency_key": "text unique", "created_at": "timestamptz" }, "indexes": ["(state, created_at)", "(customer_id, created_at)"] },
+    { "name": "gift_cards", "columns": { "id": "uuid pk", "code_hash": "text unique", "code_last4": "text", "batch_id": "uuid?", "initial": "bigint", "remaining": "bigint", "currency": "text", "state": "text", "purpose": "text", "expires_at": "timestamptz?", "redeemed_by": "uuid?", "redeemed_at": "timestamptz?", "created_by": "text", "created_at": "timestamptz" } },
+    { "name": "loyalty_entries", "desc": "Phase 4 experiment: points earned and spent", "columns": { "id": "uuid pk", "customer_id": "uuid", "points": "int", "kind": "text", "order_id": "uuid?", "at": "timestamptz" } }
+  ],
+  "stateMachines": [
+    { "name": "Credit hold", "field": "CreditHold.state", "initial": "held", "transitions": [["held", "capture", "captured"], ["held", "release", "released"], ["held", "expire", "released"]], "notes": "A hold never outlives holdTtlMinutes; captured credit returns only through creditRefund." },
+    { "name": "Goodwill grant", "field": "GoodwillGrant.state", "initial": "pending_approval", "transitions": [["pending_approval", "approve", "granted"], ["pending_approval", "reject", "rejected"], ["granted", "reverse", "reversed"]], "notes": "Within the requester's goodwill limit the grant is approved immediately (pending_approval → granted in the same call). Above it, an access approval request is raised (e.g. Support limit $50, Finance $2,000). reverse removes unused credit only, with a reason." },
+    { "name": "Gift card", "field": "GiftCard.state", "initial": "issued", "transitions": [["issued", "activate", "active"], ["active", "redeem", "redeemed"], ["issued", "void", "voided"], ["active", "void", "voided"], ["active", "expire", "expired"]], "notes": "Redeeming moves the full remaining value into a store credit lot (source gift_card). Expiry follows the law of the service region; default no expiry for sold cards." }
+  ],
+  "endpoints": [
+    { "id": "getMyCredit", "area": "store", "method": "GET", "path": "/credit", "summary": "Store credit balance, lots with expiry and recent history", "auth": "customer", "response": "WalletOverview", "screens": ["account/coupons", "account/overview", "store/checkout"], "phase": 3 },
+    { "id": "listMyCreditEntries", "area": "store", "method": "GET", "path": "/credit/entries", "summary": "Credit history", "auth": "customer", "paging": true, "response": "LedgerEntry", "screens": ["account/coupons"], "phase": 3 },
+    { "id": "redeemGiftCard", "area": "store", "method": "POST", "path": "/gift-cards/redeem", "summary": "Add a gift card to store credit", "auth": "customer", "body": { "code": "string" }, "response": "WalletOverview", "errors": ["GIFT_CARD_INVALID", "RATE_LIMITED"], "idempotent": true, "events": ["wallet.gift_card.redeemed"], "screens": ["account/coupons"], "phase": 3 },
+    { "id": "checkGiftCard", "area": "store", "method": "POST", "path": "/gift-cards/check", "summary": "Check a gift card balance", "auth": "shopper", "body": { "code": "string" }, "response": { "remaining": "Money", "expiresAt": "datetime?", "state": "string" }, "errors": ["GIFT_CARD_INVALID", "RATE_LIMITED"], "screens": ["account/coupons"], "phase": 3 },
+    { "id": "getMyLoyalty", "area": "store", "method": "GET", "path": "/loyalty", "summary": "Loyalty points (experiment; NOT_IMPLEMENTED until a program is defined)", "auth": "customer", "response": "LoyaltyAccount", "errors": ["NOT_IMPLEMENTED"], "screens": ["account/overview"], "phase": 4 },
+
+    { "id": "getCustomerWallet", "area": "admin", "method": "GET", "path": "/customers/{customerId}", "summary": "A customer's credit balance, lots, goodwill in the last 30 days and pending grants", "auth": "staff", "permission": "wallet.credit.view", "params": { "customerId": "uuid" }, "response": "CustomerWalletAdmin", "screens": ["admin/customers", "admin/case"], "phase": 3 },
+    { "id": "listCustomerEntries", "area": "admin", "method": "GET", "path": "/customers/{customerId}/entries", "summary": "A customer's credit ledger", "auth": "staff", "permission": "wallet.credit.view", "params": { "customerId": "uuid" }, "paging": true, "query": { "kind": "string?" }, "response": "LedgerEntry", "screens": ["admin/customers"], "phase": 3 },
+    { "id": "grantGoodwillCredit", "area": "admin", "method": "POST", "path": "/goodwill", "summary": "Grant goodwill credit with a reason", "desc": "Within the staff member's goodwill limit (from access) it is granted now; above it, the grant waits for approval and the response is 202 with the approval request. Per-customer 30-day limit applies.", "auth": "staff", "permission": "wallet.goodwill.grant", "body": "GoodwillInput", "response": "GoodwillGrant", "status": 201, "errors": ["APPROVAL_REQUIRED", "GOODWILL_LIMIT_EXCEEDED"], "idempotent": true, "audited": true, "approval": "Approval action wallet.goodwill.grant. Above the staff member's goodwill limit (e.g. Support $50) it goes to a Finance member whose limit covers it", "events": ["wallet.credit.granted"], "screens": ["admin/case", "admin/customers", "admin/order"], "phase": 3 },
+    { "id": "listGoodwill", "area": "admin", "method": "GET", "path": "/goodwill", "summary": "Goodwill grants for review", "auth": "staff", "permission": "wallet.credit.view", "paging": true, "query": { "state": "enum(pending_approval|granted|rejected|reversed)?", "from": "date?", "to": "date?", "requestedBy": "uuid?" }, "response": "GoodwillGrant", "screens": ["admin/finance", "admin/audit"], "phase": 3 },
+    { "id": "reverseGoodwill", "area": "admin", "method": "POST", "path": "/goodwill/{id}/reverse", "summary": "Reverse an unused goodwill grant", "auth": "staff", "permission": "wallet.credit.correct", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "GoodwillGrant", "errors": ["ILLEGAL_TRANSITION", "CREDIT_ALREADY_USED"], "idempotent": true, "audited": true, "events": ["wallet.credit.reversed"], "screens": ["admin/customers"], "phase": 3 },
+    { "id": "correctCredit", "area": "admin", "method": "POST", "path": "/customers/{customerId}/corrections", "summary": "Correct a balance (positive or negative) with a reason", "auth": "staff", "permission": "wallet.credit.correct", "params": { "customerId": "uuid" }, "body": { "amount": { "type": "Money", "desc": "Signed" }, "reason": "text", "reference": "string?" }, "response": "LedgerEntry", "status": 201, "errors": ["APPROVAL_REQUIRED", "INSUFFICIENT_CREDIT"], "idempotent": true, "audited": true, "approval": "Approval action wallet.credit.correct. Corrections above the caller's adjustment limit need a second Finance reviewer", "events": ["wallet.credit.corrected"], "screens": ["admin/customers", "ops/finance-checks"], "phase": 3 },
+    { "id": "issueGiftCards", "area": "admin", "method": "POST", "path": "/gift-cards", "summary": "Issue a batch of gift cards", "desc": "Codes are returned once in the response file reference and stored only as hashes.", "auth": "staff", "permission": "wallet.gift_cards.manage", "body": "GiftCardBatchInput", "response": { "batchId": "uuid", "count": "int", "total": "Money", "codesFileId": { "type": "uuid", "desc": "Media document with the codes, downloadable once" } }, "status": 201, "errors": ["APPROVAL_REQUIRED"], "idempotent": true, "audited": true, "approval": "Approval action wallet.gift-cards.issue. Batch total above the caller's limit needs Finance approval", "events": ["wallet.gift_card.issued"], "screens": ["admin/finance"], "phase": 3 },
+    { "id": "listGiftCards", "area": "admin", "method": "GET", "path": "/gift-cards", "summary": "Gift cards", "auth": "staff", "permission": "wallet.gift_cards.manage", "paging": true, "query": { "last4": "string?", "batchId": "uuid?", "state": "string?" }, "response": "GiftCard", "screens": ["admin/finance"], "phase": 3 },
+    { "id": "voidGiftCard", "area": "admin", "method": "POST", "path": "/gift-cards/{id}/void", "summary": "Void a gift card (lost, fraud)", "auth": "staff", "permission": "wallet.gift_cards.manage", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "GiftCard", "errors": ["ILLEGAL_TRANSITION"], "idempotent": true, "audited": true, "screens": ["admin/finance"], "phase": 3 }
+  ],
+  "events": {
+    "publishes": [
+      { "name": "wallet.credit.granted", "when": "Credit is added (refund to credit, goodwill, price adjustment, gift card)", "payload": { "customerId": "uuid", "entryId": "uuid", "kind": "string", "amount": "Money", "chargedTo": "enum(platform|seller)?", "sellerId": "uuid?", "caseId": "uuid?", "orderId": "uuid?" } },
+      { "name": "wallet.credit.used", "when": "A hold is captured on an accepted order", "payload": { "customerId": "uuid", "orderId": "uuid", "amount": "Money" } },
+      { "name": "wallet.credit.expired", "when": "A lot expires unused", "payload": { "customerId": "uuid", "lotId": "uuid", "amount": "Money" } },
+      { "name": "wallet.credit.reversed", "when": "A goodwill grant is reversed", "payload": { "customerId": "uuid", "grantId": "uuid", "amount": "Money", "reason": "text" } },
+      { "name": "wallet.credit.corrected", "when": "Staff correct a balance", "payload": { "customerId": "uuid", "entryId": "uuid", "amount": "Money", "reason": "text" } },
+      { "name": "wallet.gift_card.issued", "when": "A gift card batch is issued", "payload": { "batchId": "uuid", "count": "int", "total": "Money", "purpose": "string" } },
+      { "name": "wallet.gift_card.redeemed", "when": "A gift card is added to store credit", "payload": { "giftCardId": "uuid", "customerId": "uuid", "amount": "Money" } }
+    ],
+    "consumes": [
+      { "name": "orders.order.placed", "does": "Capture the quote's credit hold if payments has not already" },
+      { "name": "payments.payment.failed", "does": "Release the quote's credit hold" },
+      { "name": "access.approval.decided", "does": "Grant or reject pending goodwill, corrections and gift card batches" },
+      { "name": "identity.user.registered", "does": "Create an empty wallet account lazily on first credit (no-op otherwise)" }
+    ]
+  },
+  "permissions": [
+    { "key": "wallet.credit.view", "audience": "staff", "desc": "View customer credit balances, ledgers and goodwill grants" },
+    { "key": "wallet.goodwill.grant", "audience": "staff", "desc": "Grant goodwill credit within the approval limit" },
+    { "key": "wallet.credit.correct", "audience": "staff", "desc": "Reverse goodwill and correct balances (Finance)" },
+    { "key": "wallet.gift_cards.manage", "audience": "staff", "desc": "Issue, list and void gift cards" }
+  ],
+  "approvalActions": [
+    { "key": "wallet.goodwill.grant", "desc": "Grant goodwill store credit to a customer", "limit": "money", "secondReviewer": "above-limit", "approvers": "Support up to $50 (example); a Finance member whose limit covers it (e.g. Finance $2,000) above that" },
+    { "key": "wallet.credit.correct", "desc": "Correct a customer's store credit balance", "limit": "money", "secondReviewer": "above-limit", "approvers": "Within the caller's adjustment limit; a second Finance reviewer above it" },
+    { "key": "wallet.gift-cards.issue", "desc": "Issue a batch of gift cards (batch total)", "limit": "money", "secondReviewer": "above-limit", "approvers": "Within the caller's limit; Finance Manager above it" }
+  ],
+  "jobs": [
+    { "name": "wallet.expire-lots", "schedule": "daily 00:30 market time", "does": "Expire lots past expiresAt; notify customers 30 and 7 days before expiry" },
+    { "name": "wallet.release-stale-holds", "schedule": "every 1 min", "does": "Release holds past expiresAt" },
+    { "name": "wallet.balance-check", "schedule": "daily", "does": "Verify every account balance equals the ledger sum; flag differences to Finance checks" }
+  ],
+  "settings": [
+    { "key": "creditExpiryMonths", "default": 12, "desc": "Default expiry of goodwill and price-adjustment credit (refund credit follows local rules; default none)" },
+    { "key": "goodwillMaxPerCustomer30Days", "default": { "amount": 10000, "currency": "USD" }, "desc": "Goodwill a customer can receive in 30 days before Finance approval is always needed" },
+    { "key": "holdTtlMinutes", "default": 30, "desc": "Checkout hold lifetime" },
+    { "key": "giftCardsEnabled", "default": false, "desc": "Gift cards are a later service" },
+    { "key": "loyaltyEnabled", "default": false, "desc": "Loyalty experiment (phase 4)" }
+  ],
+  "integrations": [],
+  "errorCodes": {
+    "INSUFFICIENT_CREDIT": { "status": 409, "meaning": "Available credit is lower than requested." },
+    "GOODWILL_LIMIT_EXCEEDED": { "status": 409, "meaning": "The customer's 30-day goodwill limit would be exceeded." },
+    "CREDIT_ALREADY_USED": { "status": 409, "meaning": "The credit was already used and cannot be reversed." },
+    "GIFT_CARD_INVALID": { "status": 422, "meaning": "Unknown, voided, expired or already redeemed gift card." }
+  },
+  "notes": [
+    "Phase 3 (plan ch. 15 'later services'; ch. 7 'Coupons, Credits when supported'). The store-credit part of account/coupons and the 'Use my Marketly credit' checkbox in checkout use this module when enabled.",
+    "Money moves only through the ledger; every write is idempotent (refundId, Idempotency-Key) so a retry never credits twice.",
+    "Store credit used at checkout is a payment tender: payments records the tender split, and a later refund returns the credit part through creditRefund before any card refund.",
+    "Goodwill funded by a seller (e.g. late dispatch) is posted to seller earnings by finance from wallet.credit.granted with chargedTo=seller; platform goodwill is a company cost.",
+    "Granting access is not financial authority: goodwill and corrections use approval limits from access, never the permission alone.",
+    "dependsOn follows the architecture doc (customers, payments); access is optional only so the module can boot alone in tests — production requires it for limits."
+  ]
+}

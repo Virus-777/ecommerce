@@ -1,0 +1,382 @@
+{
+  "name": "trust",
+  "title": "Trust and risk",
+  "group": "After-sales and money",
+  "phase": 1,
+  "chapters": [2, 10, 17, 18],
+  "summary": "Trust and Risk's case file: reports of counterfeit goods, suspicious orders, fake reviews and abuse from customers, sellers, staff, brand owners and automated signals, with evidence, a risk score, an investigation workflow, enforcement recommendations routed to the team that owns the action, recorded enforcement with reasons, and appeals decided by someone other than the original decider. Trust recommends; Catalog, Seller Manager, Support, Finance and the other owners act.",
+  "owns": [
+    "Trust reports (TR- references) with type, source, reporter, subjects (seller, product, offer, order, customer, review, message, application, claim), description and status",
+    "Evidence: automated checks with pass/warn/fail results, documents, photos, notes, linked records, evidence requests to the reported party with deadlines",
+    "Risk score (0–100) with contributing factors and a recorded override",
+    "Investigation workflow: assign, escalate, resolve with an outcome, dismiss with a reason, reopen, merge duplicates",
+    "Enforcement recommendations routed to owner teams (suspend product or offer, restrict or suspend seller, hold payout, inform customers, remove reviews, restrict customer messaging) and the owner's accept or decline with reason",
+    "Recorded enforcement with reason, parameters, effect on open orders and cases, execution confirmation and reversal",
+    "Appeals against trust enforcement (customers and sellers), reviewed by someone other than the decider; read-only mirror of seller restriction appeals that came from a trust report",
+    "Automated detection rules (review bursts, linked new accounts with mismatched payments, brand registry mismatches) that raise reports",
+    "Application risk assessments for Seller Manager (risk level, flags, recommendation)",
+    "What reporters see: status and outcome of reports they made, without revealing their identity to the reported party"
+  ],
+  "notOwns": [
+    "Executing actions: catalog (products), offers (offers), sellers (restrictions, suspensions and their appeals), customers (customer restrictions), reviews (content removal), finance (holds), orders (dispatch holds), support (customer outreach and cases), messaging (conversation locks)",
+    "Reports on individual reviews, answers and questions for ordinary moderation: reviews (it refers patterns to trust through reviews.content.referred)",
+    "Payment fraud scoring by the provider: payments (trust consumes its signals)"
+  ],
+  "dependsOn": ["access"],
+  "optionalDeps": ["media", "catalog", "offers", "sellers", "customers", "orders", "payments", "reviews", "messaging", "support", "finance", "workqueues", "reports", "notifications", "audit", "identity"],
+  "publicApi": [
+    { "name": "raiseSignal", "signature": "(input: { type: string, detector: string, title: string, subjects: TrustSubject[], evidence: EvidenceInput[], score?: int, dedupeKey: string }) => TrustReport", "desc": "Automated signals from other modules' detectors; de-duplicated by dedupeKey (adds evidence to the open report instead of creating a new one)", "usedBy": ["payments", "reviews", "orders", "messaging"] },
+    { "name": "requestAssessment", "signature": "(input: { subjectType: 'seller_application' | 'seller' | 'customer', subjectId: uuid, sellerId?: uuid, question: string, requestedBy: Actor }) => { reportId: uuid, ref: string }", "desc": "Seller Manager asks Trust and Risk to assess an application or account; the answer comes back as trust.assessment.completed", "usedBy": ["sellers"] },
+    { "name": "reportsAbout", "signature": "(subjectType: string, subjectId: uuid) => { filedBy: int, against: int, open: int, reportIds: uuid[] }", "desc": "Counts for customer and seller detail pages", "usedBy": ["customers", "sellers", "support", "graphql"] },
+    { "name": "enforcementsFor", "signature": "(subjectType: string, subjectId: uuid) => Enforcement[]", "desc": "Active enforcement on an offer, product, seller or customer, with appeal route", "usedBy": ["offers", "catalog", "sellers", "customers"] },
+    { "name": "listReportsAbout", "signature": "(subjectType: 'customer' | 'seller', subjectId: uuid, filter: { role?: 'filed_by' | 'against', statuses?: string[] }, page: PageInput) => Page<TrustReport>", "desc": "Reports filed by or about a customer or seller (including its offers, products and claims) for the admin 360 views; reporter identity, evidence and internal notes are left out", "usedBy": ["graphql"] },
+    { "name": "getReportSummaries", "signature": "(reportIds: uuid[]) => TrustReport[]", "desc": "Batch lookup of reports by id (e.g. the report behind a restriction) without reporter identity, evidence or internal notes", "usedBy": ["graphql"] },
+    { "name": "exportRows", "signature": "(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }", "desc": "Export rows for reports dataset trust.admin.reports (reporter identities only with trust.reports.export-identities)", "usedBy": ["reports"] }
+  ],
+  "types": {
+    "StaffRef": { "staffId": "uuid", "name": "string", "role": { "type": "string?", "desc": "Role label from access.getStaffRef, e.g. Business Owner, Seller Manager (shown with appeal reviewers and deciders)" } },
+    "TrustSubject": {
+      "type": "enum(seller|product|offer|order|customer|review|question|answer|message|conversation|application|storefront_claim|payment)",
+      "id": "uuid", "ref": "string?", "label": "string",
+      "statusLabel": { "type": "string?", "desc": "Current status in the owning module, e.g. Restricted" },
+      "screen": { "type": "string?", "desc": "Admin screen to open, e.g. admin/seller" }
+    },
+    "RiskFactor": { "factor": "string", "weight": "int", "detail": "string" },
+    "EvidenceItem": {
+      "id": "uuid",
+      "kind": "enum(check|document|photo|note|record_link|signal|statement)",
+      "result": { "type": "enum(fail|warn|info|ok)?", "desc": "For checks, shown as the evidence list icons" },
+      "text": "text", "media": "MediaRef[]",
+      "source": "enum(reporter|reported_party|staff|automated|brand_owner|other_module)",
+      "addedBy": "Actor", "addedAt": "datetime",
+      "visibility": { "type": "enum(internal|shared_with_subject)", "desc": "Reporter identity and internal notes are never shared" }
+    },
+    "EvidenceInput": { "kind": "enum(check|document|photo|note|record_link|signal|statement)", "result": "enum(fail|warn|info|ok)?", "text": "text", "mediaIds": "uuid[]?", "visibility": "enum(internal|shared_with_subject)?" },
+    "EvidenceRequest": {
+      "id": "uuid", "reportId": "uuid", "to": "TrustSubject", "question": "text", "dueAt": "datetime", "deadline": "Deadline",
+      "state": "enum(open|answered|expired|cancelled)", "answer": "text?", "answerMedia": "MediaRef[]", "answeredAt": "datetime?"
+    },
+    "Recommendation": {
+      "id": "uuid", "reportId": "uuid",
+      "action": "enum(suspend_offer|suspend_product|remove_reviews|keep_reviews|restrict_seller|suspend_seller|warn_seller|revoke_claim|hold_payout|hold_dispatch|review_payments|refund_buyers|inform_customers|request_identity_confirmation|restrict_customer_messaging|restrict_customer_account|lock_conversation|other)",
+      "label": { "type": "string", "desc": "e.g. Suspend the Gadget Grove offer for BRL-S2" },
+      "ownerTeam": "enum(catalog|sellers|support|finance|orders|reviews|customers|messaging)",
+      "ownerRole": { "type": "string", "desc": "access role key, e.g. catalog_manager" },
+      "owner": "StaffRef?",
+      "targets": "TrustSubject[]",
+      "params": { "type": "json", "desc": "Action parameters the owner reviews, e.g. sellers.RestrictionInput for restrict_seller, { amount, reviewDate } for hold_payout, { endsAt } for messaging restrictions" },
+      "rationale": "text",
+      "state": "enum(pending|sent_to_owner|completed|declined|withdrawn)",
+      "routedAt": "datetime?", "decidedAt": "datetime?", "decidedBy": "StaffRef?",
+      "decisionReason": { "type": "text?", "desc": "Reason recorded by the owner, e.g. 'Brand registry mismatch on 4 units'" },
+      "enforcementId": "uuid?"
+    },
+    "RecommendationInput": {
+      "action": "string", "label": "string", "ownerTeam": "string", "ownerRole": "string?", "ownerStaffId": "uuid?",
+      "targets": "TrustSubject[]", "params": "json?", "rationale": "text"
+    },
+    "Enforcement": {
+      "id": "uuid", "ref": { "type": "string", "desc": "e.g. EN-261006-0012" },
+      "reportId": "uuid", "reportRef": "string", "recommendationId": "uuid?",
+      "action": "string", "ownerTeam": "string", "targets": "TrustSubject[]",
+      "reason": { "type": "text", "desc": "Recorded reason (also shown to the affected party where the owning module shows reasons)" },
+      "params": "json",
+      "effects": { "type": "string[]", "desc": "What changes and what stays, e.g. 'open orders and returns stay active'" },
+      "recordedBy": "Actor", "recordedAt": "datetime",
+      "executionState": "enum(pending|applied|failed|reversed)",
+      "appliedRef": { "type": "string?", "desc": "Record in the owning module, e.g. RS-261002-0019 or a hold id" },
+      "appliedAt": "datetime?", "failure": "text?",
+      "appealable": "bool", "appealDeadline": "datetime?",
+      "reversedAt": "datetime?", "reversalReason": "text?"
+    },
+    "TrustAppeal": {
+      "id": "uuid", "ref": "string",
+      "source": { "type": "enum(trust|sellers)", "desc": "sellers = read-only mirror of a seller restriction appeal linked to a trust report; decide it in sellers" },
+      "externalAppealId": "uuid?",
+      "reportId": "uuid?", "reportRef": "string?", "enforcementId": "uuid?",
+      "appellant": "Actor", "appellantName": "string",
+      "decisionAppealed": "string",
+      "argument": "text", "evidence": "MediaRef[]",
+      "reviewer": "StaffRef?", "originalDecider": "StaffRef",
+      "decideBy": "Deadline",
+      "state": "enum(open|under_review|upheld|overturned|partly_overturned|withdrawn)",
+      "decision": { "type": "json?", "desc": "{ outcome, explanation, decidedBy, decidedAt, changes }" },
+      "filedAt": "datetime"
+    },
+    "TrustReport": {
+      "id": "uuid", "ref": { "type": "string", "desc": "e.g. TR-3391" },
+      "type": "enum(counterfeit|suspicious_orders|fake_reviews|abuse|prohibited_item|misleading_listing|seller_application|account_risk|other)",
+      "title": "string", "description": "text",
+      "source": "enum(customer|seller|staff|automated|brand_owner|referral)",
+      "reporter": { "type": "json", "desc": "{ actor: Actor, name?, contactEmail? } — staff only; never shown to subjects" },
+      "reporterCount": { "type": "int", "desc": "Merged duplicate reports, e.g. brand owner and 3 customers" },
+      "detector": "string?",
+      "subjects": "TrustSubject[]",
+      "status": "enum(open|under_review|escalated|resolved|dismissed|merged)",
+      "riskScore": "int", "riskLevel": "enum(low|medium|high)",
+      "riskFactors": "RiskFactor[]",
+      "riskOverride": { "type": "json?", "desc": "{ score, reason, by, at }" },
+      "assignee": "StaffRef?",
+      "deadline": "Deadline?",
+      "evidence": "EvidenceItem[]",
+      "evidenceRequests": "EvidenceRequest[]",
+      "recommendations": "Recommendation[]",
+      "enforcements": "Enforcement[]",
+      "linkedCaseRefs": "string[]",
+      "mergedReportIds": "uuid[]",
+      "notes": { "type": "json[]", "desc": "{ id, body, author, at } internal" },
+      "timeline": "TimelineEvent[]",
+      "resolution": { "type": "json?", "desc": "{ outcome: action_taken|no_violation|insufficient_evidence|duplicate|referred, summary, decidedBy, decidedAt }" },
+      "reporterOutcome": { "type": "text?", "desc": "Text the reporter sees" },
+      "assessment": { "type": "json?", "desc": "For seller_application and account_risk: { level, flags: [{ severity, text }], recommendation, recommendedHoldDays? }" },
+      "createdAt": "datetime", "updatedAt": "datetime"
+    },
+    "ReportRow": {
+      "id": "uuid", "ref": "string", "type": "string", "title": "string", "status": "string",
+      "riskScore": "int", "riskLevel": "string", "source": "string", "reporterLabel": "string",
+      "subjects": "TrustSubject[]", "assignee": "StaffRef?",
+      "recommendations": { "type": "json", "desc": "{ total, pending, sentToOwner, completed, declined }" },
+      "deadline": "Deadline?", "createdAt": "datetime"
+    },
+    "TrustOverview": {
+      "open": "int", "highRisk": "int",
+      "byType": { "type": "map<int>", "desc": "Open reports per type" },
+      "typeNotes": { "type": "map<string>", "desc": "e.g. suspicious_orders: '6 orders on hold'" },
+      "appealsWaiting": "int", "nextAppealDecideBy": "datetime?",
+      "recommendationsWaitingOnOwners": "int",
+      "queueOwner": "StaffRef?"
+    },
+    "StoreReportInput": {
+      "type": "enum(counterfeit|prohibited_item|misleading_listing|abuse|suspicious_order|other)",
+      "subject": { "type": "json", "desc": "{ type: offer|product|seller|order|message|conversation, id }" },
+      "reason": { "type": "string", "desc": "Reason code from the report form, e.g. may_be_counterfeit" },
+      "details": "text?", "evidenceIds": "uuid[]?", "orderId": "uuid?"
+    },
+    "MyReport": {
+      "id": "uuid", "ref": "string",
+      "what": { "type": "string", "desc": "e.g. Report on a listing" },
+      "about": { "type": "string", "desc": "e.g. Brightline S2 Robot Vacuum from Gadget Grove" },
+      "youSaid": "string",
+      "reportedAt": "datetime",
+      "statusLabel": "enum(received|under_review|decision_made|action_taken|no_violation)",
+      "outcome": "text?", "expectedBy": "date?", "caseRef": "string?"
+    },
+    "MyEnforcement": {
+      "id": "uuid", "ref": "string", "title": "string", "reason": "text", "effects": "string[]",
+      "targets": "TrustSubject[]", "recordedAt": "datetime",
+      "appealable": "bool", "appealDeadline": "datetime?", "appealId": "uuid?",
+      "appealRoute": { "type": "string", "desc": "Where to appeal; restrictions on seller accounts are appealed in Account health (sellers)" }
+    },
+    "DetectionRule": {
+      "key": { "type": "string", "desc": "e.g. reviews.burst, orders.linked_new_accounts, offers.price_far_below_authorized" },
+      "description": "text", "type": "string", "active": "bool",
+      "thresholds": "json", "baseScore": "int",
+      "lastRunAt": "datetime?", "hitsLast30Days": "int"
+    }
+  },
+  "tables": [
+    { "name": "reports", "columns": { "id": "uuid pk", "ref": "text unique", "type": "text", "title": "text", "description": "text", "source": "text", "reporter_kind": "text", "reporter_id": "text?", "reporter_name": "text?", "reporter_contact": "text?", "reporter_count": "int", "detector": "text?", "dedupe_key": "text?", "status": "text", "risk_score": "int", "risk_factors": "jsonb", "risk_override": "jsonb?", "assignee_staff_id": "uuid?", "due_at": "timestamptz?", "resolution": "jsonb?", "reporter_outcome": "text?", "assessment": "jsonb?", "merged_into_id": "uuid? → reports", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(status, risk_score desc)", "(type, status)", "(assignee_staff_id, status)", "unique(dedupe_key) where status in ('open','under_review','escalated')", "(reporter_kind, reporter_id, created_at desc)"] },
+    { "name": "report_subjects", "columns": { "report_id": "uuid → reports", "subject_type": "text", "subject_id": "uuid", "ref": "text?", "label": "text" }, "indexes": ["(subject_type, subject_id)", "unique(report_id, subject_type, subject_id)"] },
+    { "name": "evidence", "columns": { "id": "uuid pk", "report_id": "uuid → reports", "kind": "text", "result": "text?", "text": "text", "media_ids": "jsonb", "source": "text", "visibility": "text", "added_by_kind": "text", "added_by_id": "text?", "added_at": "timestamptz" }, "indexes": ["(report_id, added_at)"] },
+    { "name": "evidence_requests", "columns": { "id": "uuid pk", "report_id": "uuid → reports", "to_type": "text", "to_id": "uuid", "question": "text", "due_at": "timestamptz", "state": "text", "answer": "text?", "answer_media_ids": "jsonb", "answered_at": "timestamptz?" }, "indexes": ["(to_type, to_id, state)", "(state, due_at)"] },
+    { "name": "recommendations", "columns": { "id": "uuid pk", "report_id": "uuid → reports", "action": "text", "label": "text", "owner_team": "text", "owner_role": "text", "owner_staff_id": "uuid?", "targets": "jsonb", "params": "jsonb", "rationale": "text", "state": "text", "routed_at": "timestamptz?", "decided_at": "timestamptz?", "decided_by": "text?", "decision_reason": "text?", "enforcement_id": "uuid?" }, "indexes": ["(owner_team, state)", "(report_id)"] },
+    { "name": "enforcements", "columns": { "id": "uuid pk", "ref": "text unique", "report_id": "uuid → reports", "recommendation_id": "uuid? → recommendations", "action": "text", "owner_team": "text", "targets": "jsonb", "reason": "text", "params": "jsonb", "effects": "jsonb", "recorded_by": "text", "recorded_at": "timestamptz", "execution_state": "text", "applied_ref": "text?", "applied_at": "timestamptz?", "failure": "text?", "appealable": "bool", "appeal_deadline": "timestamptz?", "reversed_at": "timestamptz?", "reversal_reason": "text?" }, "indexes": ["(execution_state)", "(owner_team, recorded_at desc)"] },
+    { "name": "enforcement_targets", "desc": "Lookup of active enforcement by target", "columns": { "enforcement_id": "uuid → enforcements", "target_type": "text", "target_id": "uuid" }, "indexes": ["(target_type, target_id)"] },
+    { "name": "appeals", "columns": { "id": "uuid pk", "ref": "text unique", "source": "text (trust|sellers)", "external_appeal_id": "uuid?", "report_id": "uuid? → reports", "enforcement_id": "uuid? → enforcements", "appellant_kind": "text", "appellant_id": "text", "appellant_name": "text", "decision_appealed": "text", "argument": "text", "evidence_media_ids": "jsonb", "reviewer_staff_id": "uuid?", "original_decider_id": "text", "decide_by": "timestamptz", "state": "text", "decision": "jsonb?", "filed_at": "timestamptz" }, "indexes": ["(state, decide_by)", "unique(source, external_appeal_id) where external_appeal_id is not null", "(appellant_kind, appellant_id)"] },
+    { "name": "report_notes", "columns": { "id": "uuid pk", "report_id": "uuid → reports", "body": "text", "author_id": "text", "author_name": "text", "at": "timestamptz" } },
+    { "name": "report_events", "desc": "Timeline: created, merged, assigned, escalated, evidence added, recommendation routed and decided, enforcement applied, resolved", "columns": { "id": "uuid pk", "report_id": "uuid → reports", "kind": "text", "detail": "jsonb", "actor_kind": "text", "actor_id": "text?", "at": "timestamptz" }, "indexes": ["(report_id, at)"] },
+    { "name": "detection_rules", "columns": { "key": "text pk", "description": "text", "type": "text", "active": "bool", "thresholds": "jsonb", "base_score": "int", "updated_by": "text", "updated_at": "timestamptz", "last_run_at": "timestamptz?" } },
+    { "name": "risk_signals", "desc": "Raw signals from events used by detection rules (sliding windows)", "columns": { "id": "uuid pk", "kind": "text", "subject_type": "text", "subject_id": "uuid", "features": "jsonb", "at": "timestamptz" }, "indexes": ["(kind, at)", "(subject_type, subject_id, at)"] }
+  ],
+  "stateMachines": [
+    {
+      "name": "Trust report", "field": "TrustReport.status", "initial": "open",
+      "transitions": [
+        ["open", "assign", "under_review"],
+        ["open", "escalate", "escalated"],
+        ["under_review", "escalate", "escalated"],
+        ["escalated", "deescalate", "under_review"],
+        ["under_review", "resolve", "resolved"],
+        ["escalated", "resolve", "resolved"],
+        ["open", "dismiss", "dismissed"],
+        ["under_review", "dismiss", "dismissed"],
+        ["escalated", "dismiss", "dismissed"],
+        ["open", "merge", "merged"],
+        ["under_review", "merge", "merged"],
+        ["resolved", "reopen", "under_review"],
+        ["dismissed", "reopen", "under_review"]
+      ],
+      "notes": "Resolve needs an outcome and a summary; it is blocked while a recommendation is still sent_to_owner (RECOMMENDATIONS_OPEN) unless the outcome is referred. Dismiss needs a reason and a reporter-facing message. Escalated = high risk or needs the Trust and Risk Manager / Business Owner. Merge moves subjects, evidence and reporters into the kept report."
+    },
+    {
+      "name": "Recommendation", "field": "Recommendation.state", "initial": "pending",
+      "transitions": [
+        ["pending", "route", "sent_to_owner"],
+        ["sent_to_owner", "accept", "completed"],
+        ["sent_to_owner", "decline", "declined"],
+        ["pending", "withdraw", "withdrawn"],
+        ["sent_to_owner", "withdraw", "withdrawn"]
+      ],
+      "notes": "Route sends it to the owner team's queue (workqueues). Accept is done by someone holding the owner team's permission for that action (e.g. catalog.products.publish for suspend_product, sellers.accounts.restrict for restrict_seller, customers.accounts.act for customer restrictions) and records an Enforcement with the owner's reason. Decline needs a reason. Trust staff cannot accept their own recommendations (separate duties, plan ch. 18)."
+    },
+    {
+      "name": "Enforcement execution", "field": "Enforcement.executionState", "initial": "pending",
+      "transitions": [["pending", "confirm", "applied"], ["pending", "fail", "failed"], ["failed", "retry", "pending"], ["applied", "reverse", "reversed"]],
+      "notes": "Confirmed when the owning module's event arrives carrying the enforcement id (catalog.product.publication_changed, offers.offer.status_changed, sellers.seller.restricted, customers.account.restricted, finance.hold.placed...) or when the owner records the external reference. Reverse (e.g. appeal overturned) publishes trust.enforcement.reversed so the owner undoes it."
+    },
+    {
+      "name": "Evidence request", "field": "EvidenceRequest.state", "initial": "open",
+      "transitions": [["open", "answer", "answered"], ["open", "expire", "expired"], ["open", "cancel", "cancelled"]],
+      "notes": "Expiry is noted on the report as missing proof; it is not a decision by itself."
+    },
+    {
+      "name": "Trust appeal", "field": "TrustAppeal.state", "initial": "open",
+      "transitions": [["open", "assign", "under_review"], ["under_review", "uphold", "upheld"], ["under_review", "overturn", "overturned"], ["under_review", "partlyOverturn", "partly_overturned"], ["open", "withdraw", "withdrawn"], ["under_review", "withdraw", "withdrawn"]],
+      "notes": "The reviewer must differ from the person who recommended and the person who accepted the enforcement (SAME_REVIEWER_NOT_ALLOWED). Mirrored seller appeals (source sellers) follow the sellers state machine and are read-only here."
+    }
+  ],
+  "endpoints": [
+    { "id": "createStoreReport", "area": "store", "method": "POST", "path": "/reports", "summary": "Report a listing, seller, order or message", "desc": "From the Report link on a product, offer, storefront, order or conversation. Reports on reviews, answers and questions go to reviews. The reported party never sees the reporter's name. Same subject + same reporter within 24 h updates the existing report.", "auth": "customer", "body": "StoreReportInput", "response": "MyReport", "status": 201, "errors": ["VALIDATION_FAILED", "RATE_LIMITED"], "events": ["trust.report.created"], "screens": ["store/product", "store/offers", "store/seller", "account/order", "account/messages"] },
+    { "id": "listMyReports", "area": "store", "method": "GET", "path": "/reports", "summary": "Reports I made, with status and outcome", "desc": "The account/reviews 'Reports you made' tab merges this list with reviews' own content reports (GET /api/store/reviews/my-reports).", "auth": "customer", "paging": true, "response": "MyReport", "screens": ["account/reviews"] },
+    { "id": "getMyReport", "area": "store", "method": "GET", "path": "/reports/{id}", "summary": "One report I made", "auth": "customer", "params": { "id": "uuid" }, "response": "MyReport", "screens": ["account/reviews"] },
+    { "id": "addMyReportDetails", "area": "store", "method": "POST", "path": "/reports/{id}/evidence", "summary": "Add photos or details to a report I made", "auth": "customer", "params": { "id": "uuid" }, "body": { "text": "text", "mediaIds": "uuid[]?" }, "response": "MyReport", "errors": ["ILLEGAL_TRANSITION"], "screens": ["account/reviews"] },
+    { "id": "listMyEnforcements", "area": "store", "method": "GET", "path": "/enforcements", "summary": "Trust actions that affect my account, with appeal route", "auth": "customer", "response": "MyEnforcement[]", "screens": ["account/messages", "account/reviews", "help/case"] },
+    { "id": "submitCustomerAppeal", "area": "store", "method": "POST", "path": "/appeals", "summary": "Appeal a trust action on my account before the deadline", "auth": "customer", "body": { "enforcementId": "uuid", "argument": "text", "evidenceIds": "uuid[]?" }, "response": "TrustAppeal", "status": 201, "errors": ["APPEAL_WINDOW_CLOSED", "APPEAL_ALREADY_OPEN", "NOT_APPEALABLE"], "events": ["trust.appeal.submitted"], "screens": ["help/case", "account/messages"] },
+    { "id": "listCustomerAppeals", "area": "store", "method": "GET", "path": "/appeals", "summary": "My appeals", "auth": "customer", "response": "TrustAppeal[]", "screens": ["help/case"] },
+
+    { "id": "createSellerReport", "area": "seller", "method": "POST", "path": "/reports", "summary": "Report abuse by a customer, a counterfeit competitor offer or a listing problem", "auth": "seller", "permission": "trust.reports.submit", "body": "StoreReportInput", "response": "MyReport", "status": 201, "errors": ["VALIDATION_FAILED", "RATE_LIMITED"], "events": ["trust.report.created"], "screens": ["seller/customers", "seller/order", "seller/offer"] },
+    { "id": "listSellerReports", "area": "seller", "method": "GET", "path": "/reports", "summary": "Reports this seller made", "auth": "seller", "paging": true, "response": "MyReport", "screens": ["seller/customers"] },
+    { "id": "listSellerEvidenceRequests", "area": "seller", "method": "GET", "path": "/evidence-requests", "summary": "Proof Trust and Risk asked this seller for (e.g. proof of supply)", "auth": "seller", "query": { "state": "enum(open|answered|expired)?" }, "response": "EvidenceRequest[]", "screens": ["seller/products", "seller/notifications"] },
+    { "id": "answerEvidenceRequest", "area": "seller", "method": "POST", "path": "/evidence-requests/{id}/answer", "summary": "Send the requested proof", "auth": "seller", "permission": "trust.evidence.submit", "params": { "id": "uuid" }, "body": { "answer": "text", "mediaIds": "uuid[]" }, "response": "EvidenceRequest", "errors": ["ILLEGAL_TRANSITION"], "events": ["trust.evidence.received"], "screens": ["seller/products"] },
+    { "id": "listSellerEnforcements", "area": "seller", "method": "GET", "path": "/enforcements", "summary": "Trust actions on this seller's offers, products or claims, with appeal route", "auth": "seller", "response": "MyEnforcement[]", "screens": ["seller/products", "seller/performance"] },
+    { "id": "submitSellerAppeal", "area": "seller", "method": "POST", "path": "/appeals", "summary": "Appeal a trust action on an offer, product or claim", "desc": "Restrictions and suspensions of the seller account are appealed in sellers (Account health); this endpoint refuses them with APPEAL_IN_SELLERS.", "auth": "seller", "permission": "trust.appeals.submit", "body": { "enforcementId": "uuid", "argument": "text", "evidenceIds": "uuid[]?" }, "response": "TrustAppeal", "status": 201, "errors": ["APPEAL_WINDOW_CLOSED", "APPEAL_ALREADY_OPEN", "NOT_APPEALABLE", "APPEAL_IN_SELLERS"], "events": ["trust.appeal.submitted"], "screens": ["seller/products"] },
+    { "id": "listSellerAppeals", "area": "seller", "method": "GET", "path": "/appeals", "summary": "This seller's trust appeals", "auth": "seller", "response": "TrustAppeal[]", "screens": ["seller/products", "seller/performance"] },
+
+    { "id": "submitRightsOwnerReport", "area": "public", "method": "POST", "path": "/reports", "summary": "Brand or rights owner reports counterfeit listings", "desc": "Contact details and proof of rights are required; confirmed by email before review.", "auth": "anyone", "body": { "brandName": "string", "contactName": "string", "contactEmail": "email", "offerOrProductIds": "uuid[]", "details": "text", "proofMediaIds": "uuid[]" }, "response": { "ref": "string", "confirmationSent": "bool" }, "status": 202, "errors": ["VALIDATION_FAILED", "RATE_LIMITED"], "events": ["trust.report.created"], "phase": 2 },
+
+    { "id": "getTrustOverview", "area": "admin", "method": "GET", "path": "/overview", "summary": "Open reports by type, high risk, appeals waiting", "auth": "staff", "permission": "trust.reports.view", "response": "TrustOverview", "screens": ["admin/trust", "admin/dashboard"] },
+    { "id": "listReports", "area": "admin", "method": "GET", "path": "/reports", "summary": "Trust queue, highest risk first", "auth": "staff", "permission": "trust.reports.view", "paging": true, "query": { "status": "enum(open|under_review|escalated|resolved|dismissed|merged|active)?", "type": "string?", "riskLevel": "enum(low|medium|high)?", "source": "string?", "assigneeId": "uuid?", "subjectType": "string?", "subjectId": "uuid?", "q": "string?", "sort": "enum(risk|newest|oldest|deadline)?" }, "response": "ReportRow", "screens": ["admin/trust", "admin/customers", "admin/seller"] },
+    { "id": "getReport", "area": "admin", "method": "GET", "path": "/reports/{id}", "summary": "Report with evidence, linked records, recommendations, enforcement and timeline", "desc": "Subject status labels are read from the owning modules (catalog, offers, sellers, customers, orders, reviews) in-process.", "auth": "staff", "permission": "trust.reports.view", "params": { "id": "uuid" }, "response": "TrustReport", "screens": ["admin/trust"] },
+    { "id": "createReportStaff", "area": "admin", "method": "POST", "path": "/reports", "summary": "Open a report as staff", "auth": "staff", "permission": "trust.reports.investigate", "body": { "type": "string", "title": "string", "description": "text", "subjects": "TrustSubject[]", "evidence": "EvidenceInput[]?", "caseRef": "string?" }, "response": "TrustReport", "status": 201, "events": ["trust.report.created"], "screens": ["admin/trust", "admin/case"] },
+    { "id": "assignReport", "area": "admin", "method": "POST", "path": "/reports/{id}/assign", "summary": "Assign an investigator (moves to under review)", "auth": "staff", "permission": "trust.reports.investigate", "params": { "id": "uuid" }, "body": { "staffId": "uuid", "dueAt": "datetime?" }, "response": "TrustReport", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "screens": ["admin/trust"] },
+    { "id": "escalateReport", "area": "admin", "method": "POST", "path": "/reports/{id}/escalate", "summary": "Escalate to the Trust and Risk Manager or Business Owner", "auth": "staff", "permission": "trust.reports.investigate", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "TrustReport", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["trust.report.escalated"], "screens": ["admin/trust"] },
+    { "id": "addEvidence", "area": "admin", "method": "POST", "path": "/reports/{id}/evidence", "summary": "Add evidence (check result, document, photo, note, linked record)", "auth": "staff", "permission": "trust.reports.investigate", "params": { "id": "uuid" }, "body": "EvidenceInput", "response": "EvidenceItem", "status": 201, "audited": true, "screens": ["admin/trust"] },
+    { "id": "requestEvidence", "area": "admin", "method": "POST", "path": "/reports/{id}/evidence-requests", "summary": "Ask the seller or customer for proof with a deadline", "auth": "staff", "permission": "trust.reports.investigate", "params": { "id": "uuid" }, "body": { "to": "TrustSubject", "question": "text", "dueAt": "datetime" }, "response": "EvidenceRequest", "status": 201, "audited": true, "events": ["trust.evidence.requested"], "screens": ["admin/trust"] },
+    { "id": "linkRecords", "area": "admin", "method": "POST", "path": "/reports/{id}/links", "summary": "Link more subjects or a support case", "auth": "staff", "permission": "trust.reports.investigate", "params": { "id": "uuid" }, "body": { "subjects": "TrustSubject[]?", "caseRefs": "string[]?" }, "response": "TrustReport", "screens": ["admin/trust"] },
+    { "id": "overrideRiskScore", "area": "admin", "method": "POST", "path": "/reports/{id}/risk-score", "summary": "Override the risk score with a reason", "auth": "staff", "permission": "trust.reports.investigate", "params": { "id": "uuid" }, "body": { "score": "int", "reason": "text" }, "response": "TrustReport", "audited": true, "screens": ["admin/trust"] },
+    { "id": "addReportNote", "area": "admin", "method": "POST", "path": "/reports/{id}/notes", "summary": "Internal note", "auth": "staff", "permission": "trust.reports.investigate", "params": { "id": "uuid" }, "body": { "body": "text" }, "response": "TrustReport", "screens": ["admin/trust"] },
+    { "id": "recordAssessment", "area": "admin", "method": "POST", "path": "/reports/{id}/assessment", "summary": "Record the risk assessment for a seller application or account", "desc": "Publishes trust.assessment.completed; sellers shows the flags and recommendation to the Seller Manager.", "auth": "staff", "permission": "trust.reports.decide", "params": { "id": "uuid" }, "body": { "level": "enum(low|medium|high)", "flags": { "type": "json[]", "desc": "{ severity, text }" }, "recommendation": "text", "recommendedHoldDays": "int?" }, "response": "TrustReport", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["trust.assessment.completed", "trust.report.resolved"], "screens": ["admin/trust", "admin/seller-application"] },
+    { "id": "addRecommendation", "area": "admin", "method": "POST", "path": "/reports/{id}/recommendations", "summary": "Draft an enforcement recommendation for an owner team", "auth": "staff", "permission": "trust.reports.investigate", "params": { "id": "uuid" }, "body": "RecommendationInput", "response": "Recommendation", "status": 201, "errors": ["VALIDATION_FAILED"], "audited": true, "screens": ["admin/trust"] },
+    { "id": "routeRecommendation", "area": "admin", "method": "POST", "path": "/recommendations/{id}/route", "summary": "Send a recommendation to its owner team", "desc": "Creates a work item in the owner team's queue (workqueues consumes trust.recommendation.routed) and notifies the owner.", "auth": "staff", "permission": "trust.reports.decide", "params": { "id": "uuid" }, "response": "Recommendation", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["trust.recommendation.routed"], "screens": ["admin/trust"] },
+    { "id": "listOwnerRecommendations", "area": "admin", "method": "GET", "path": "/recommendations", "summary": "Recommendations waiting for my team", "auth": "staff", "permission": "trust.recommendations.decide", "paging": true, "query": { "ownerTeam": "string?", "state": "enum(pending|sent_to_owner|completed|declined|withdrawn)?" }, "response": "Recommendation", "screens": ["admin/trust", "admin/catalog", "admin/seller", "admin/cases", "admin/finance"] },
+    { "id": "decideRecommendation", "area": "admin", "method": "POST", "path": "/recommendations/{id}/decide", "summary": "Owner team accepts (records enforcement) or declines with a reason", "desc": "Accept checks the owner's own permission for the action through access (e.g. catalog.products.publish, sellers.accounts.restrict, customers.accounts.act, finance.holds.place) and its approval limit; above the limit it returns APPROVAL_REQUIRED. Accept records an Enforcement and publishes trust.enforcement.recorded, which the owning module executes. For actions done directly in the owning module (e.g. Finance placing a hold in admin/finance), pass externalRef and the enforcement is recorded as already applied.", "auth": "staff", "permission": "trust.recommendations.decide", "params": { "id": "uuid" }, "body": { "accept": "bool", "reason": "text", "params": "json?", "externalRef": "string?" }, "response": { "recommendation": "Recommendation", "enforcement": "Enforcement?" }, "errors": ["ILLEGAL_TRANSITION", "FORBIDDEN", "APPROVAL_REQUIRED", "SEPARATE_DUTIES"], "audited": true, "events": ["trust.recommendation.decided", "trust.enforcement.recorded"], "screens": ["admin/trust", "admin/catalog", "admin/seller", "admin/cases", "admin/finance"] },
+    { "id": "withdrawRecommendation", "area": "admin", "method": "POST", "path": "/recommendations/{id}/withdraw", "summary": "Withdraw a recommendation", "auth": "staff", "permission": "trust.reports.decide", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "Recommendation", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["trust.recommendation.decided"], "screens": ["admin/trust"] },
+    { "id": "resolveReport", "area": "admin", "method": "POST", "path": "/reports/{id}/resolve", "summary": "Resolve with an outcome and what the reporter is told", "auth": "staff", "permission": "trust.reports.decide", "params": { "id": "uuid" }, "body": { "outcome": "enum(action_taken|no_violation|insufficient_evidence|referred)", "summary": "text", "reporterOutcome": "text" }, "response": "TrustReport", "errors": ["ILLEGAL_TRANSITION", "RECOMMENDATIONS_OPEN"], "audited": true, "events": ["trust.report.resolved"], "screens": ["admin/trust"] },
+    { "id": "dismissReport", "area": "admin", "method": "POST", "path": "/reports/{id}/dismiss", "summary": "Dismiss with a reason", "auth": "staff", "permission": "trust.reports.decide", "params": { "id": "uuid" }, "body": { "reason": "text", "reporterOutcome": "text" }, "response": "TrustReport", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["trust.report.resolved"], "screens": ["admin/trust"] },
+    { "id": "reopenReport", "area": "admin", "method": "POST", "path": "/reports/{id}/reopen", "summary": "Reopen with a reason (new evidence)", "auth": "staff", "permission": "trust.reports.decide", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "TrustReport", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "screens": ["admin/trust"] },
+    { "id": "mergeReport", "area": "admin", "method": "POST", "path": "/reports/{id}/merge", "summary": "Merge a duplicate report into another", "auth": "staff", "permission": "trust.reports.investigate", "params": { "id": "uuid" }, "body": { "intoReportId": "uuid", "reason": "text" }, "response": "TrustReport", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "screens": ["admin/trust"] },
+    { "id": "listEnforcements", "area": "admin", "method": "GET", "path": "/enforcements", "summary": "Recorded enforcement with execution state", "auth": "staff", "permission": "trust.reports.view", "paging": true, "query": { "action": "string?", "ownerTeam": "string?", "executionState": "enum(pending|applied|failed|reversed)?", "targetType": "string?", "targetId": "uuid?" }, "response": "Enforcement", "screens": ["admin/trust"] },
+    { "id": "reverseEnforcement", "area": "admin", "method": "POST", "path": "/enforcements/{id}/reverse", "summary": "Reverse an enforcement (overturned appeal or error)", "auth": "staff", "permission": "trust.enforcements.reverse", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "Enforcement", "approval": "Approval action trust.enforcements.reverse. Per role authority (Trust and Risk Manager; second reviewer when Permitted with second review)", "errors": ["ILLEGAL_TRANSITION", "APPROVAL_REQUIRED"], "audited": true, "events": ["trust.enforcement.reversed"], "screens": ["admin/trust"] },
+    { "id": "listAppeals", "area": "admin", "method": "GET", "path": "/appeals", "summary": "Appeals on trust enforcement plus linked seller restriction appeals", "auth": "staff", "permission": "trust.reports.view", "paging": true, "query": { "state": "enum(open|under_review|upheld|overturned|partly_overturned|withdrawn|active)?", "source": "enum(trust|sellers)?", "reviewerId": "uuid?" }, "response": "TrustAppeal", "screens": ["admin/trust"] },
+    { "id": "assignAppealReviewer", "area": "admin", "method": "POST", "path": "/appeals/{id}/assign", "summary": "Assign a reviewer who did not make the decision", "auth": "staff", "permission": "trust.appeals.decide", "params": { "id": "uuid" }, "body": { "reviewerId": "uuid" }, "response": "TrustAppeal", "errors": ["SAME_REVIEWER_NOT_ALLOWED", "ILLEGAL_TRANSITION", "APPEAL_IN_SELLERS"], "audited": true, "screens": ["admin/trust"] },
+    { "id": "decideTrustAppeal", "area": "admin", "method": "POST", "path": "/appeals/{id}/decide", "summary": "Uphold, overturn or partly overturn", "desc": "Overturn reverses the enforcement (trust.enforcement.reversed). Restrictions and history stay recorded; valid order history and access to help are preserved for everyone involved.", "auth": "staff", "permission": "trust.appeals.decide", "params": { "id": "uuid" }, "body": { "outcome": "enum(uphold|overturn|partly_overturn)", "explanation": "text", "changes": "json?" }, "response": "TrustAppeal", "errors": ["SAME_REVIEWER_NOT_ALLOWED", "ILLEGAL_TRANSITION", "APPEAL_IN_SELLERS"], "audited": true, "events": ["trust.appeal.decided", "trust.enforcement.reversed"], "screens": ["admin/trust"] },
+    { "id": "exportReports", "area": "admin", "method": "POST", "path": "/reports/exports", "summary": "Export the filtered trust queue", "desc": "Creates an authorized export job through reports.requestExport (dataset trust.admin.reports). Reporter identities are excluded unless the caller has trust.reports.export-identities.", "auth": "staff", "permission": "trust.reports.export", "body": { "filters": "json", "format": "enum(csv|xlsx)?" }, "response": "reports.ExportJob", "status": 202, "audited": true, "screens": ["admin/trust"] },
+    { "id": "listDetectionRules", "area": "admin", "method": "GET", "path": "/detection-rules", "summary": "Automated detection rules with recent hits", "auth": "staff", "permission": "trust.rules.manage", "response": "DetectionRule[]", "screens": ["admin/trust"] },
+    { "id": "updateDetectionRule", "area": "admin", "method": "PATCH", "path": "/detection-rules/{key}", "summary": "Turn a rule on or off or change its thresholds", "auth": "staff", "permission": "trust.rules.manage", "params": { "key": "string" }, "body": { "active": "bool?", "thresholds": "json?", "baseScore": "int?", "reason": "text" }, "response": "DetectionRule", "audited": true, "screens": ["admin/trust"] }
+  ],
+  "events": {
+    "publishes": [
+      { "name": "trust.report.created", "when": "A report is opened by a person, a detector or a referral", "payload": { "reportId": "uuid", "ref": "string", "type": "string", "source": "string", "riskScore": "int", "subjects": "json[]" } },
+      { "name": "trust.report.escalated", "when": "A report is escalated", "payload": { "reportId": "uuid", "reason": "text" } },
+      { "name": "trust.report.resolved", "when": "A report is resolved or dismissed (reporters are told the outcome)", "payload": { "reportId": "uuid", "outcome": "string", "reporterOutcome": "text?" } },
+      { "name": "trust.evidence.requested", "when": "Proof is requested from a seller or customer", "payload": { "requestId": "uuid", "reportId": "uuid", "toType": "string", "toId": "uuid", "dueAt": "datetime" } },
+      { "name": "trust.evidence.received", "when": "The reported party sends proof", "payload": { "requestId": "uuid", "reportId": "uuid" } },
+      { "name": "trust.recommendation.routed", "when": "A recommendation is sent to its owner team", "payload": { "recommendationId": "uuid", "reportId": "uuid", "action": "string", "ownerTeam": "string", "ownerRole": "string", "targets": "json[]" } },
+      { "name": "trust.recommendation.decided", "when": "The owner team accepts or declines, or Trust withdraws it", "payload": { "recommendationId": "uuid", "reportId": "uuid", "state": "string", "reason": "text" } },
+      { "name": "trust.enforcement.recorded", "when": "An owner accepts a recommendation; the owning module executes it", "payload": { "enforcementId": "uuid", "reportId": "uuid", "action": "string", "ownerTeam": "string", "targets": "json[]", "reason": "text", "params": "json", "appealDeadline": "datetime?", "alreadyApplied": "bool" } },
+      { "name": "trust.enforcement.reversed", "when": "An enforcement is reversed (appeal overturned or error); owners undo it", "payload": { "enforcementId": "uuid", "action": "string", "targets": "json[]", "reason": "text" } },
+      { "name": "trust.appeal.submitted", "when": "A customer or seller appeals a trust enforcement", "payload": { "appealId": "uuid", "enforcementId": "uuid", "decideBy": "datetime" } },
+      { "name": "trust.appeal.decided", "when": "A trust appeal is decided", "payload": { "appealId": "uuid", "enforcementId": "uuid", "outcome": "string" } },
+      { "name": "trust.assessment.completed", "when": "A seller application or account assessment is recorded", "payload": { "reportId": "uuid", "subjectType": "string", "subjectId": "uuid", "level": "string", "flags": "json[]", "recommendation": "text", "recommendedHoldDays": "int?" } }
+    ],
+    "consumes": [
+      { "name": "reviews.content.referred", "does": "Open or extend a fake_reviews report with the referred reviews as subjects" },
+      { "name": "messaging.message.reported", "does": "Open an abuse report for the conversation" },
+      { "name": "orders.order.placed", "does": "Feed the linked-new-accounts detection rule (accounts, cards, shipping address)" },
+      { "name": "payments.chargeback.opened", "does": "Add a signal to suspicious-order detection and open reports for repeated chargebacks" },
+      { "name": "payments.payment.failed", "does": "Signal for card-testing detection" },
+      { "name": "reviews.review.published", "does": "Feed the review-burst detection rule" },
+      { "name": "offers.offer.created", "does": "Feed the price-far-below-authorized and restricted-brand rules" },
+      { "name": "catalog.product.publication_changed", "does": "Confirm execution of suspend_product enforcements. setPublication accepts trustReportId; until catalog's publication_changed payload carries it (request to the catalog owner), match by the enforcement reference in the reason" },
+      { "name": "offers.offer.status_changed", "does": "Confirm execution of suspend_offer enforcements" },
+      { "name": "sellers.seller.restricted", "does": "Confirm restrict_seller enforcements (trustEnforcementId)" },
+      { "name": "sellers.seller.suspended", "does": "Confirm suspend_seller enforcements" },
+      { "name": "sellers.appeal.submitted", "does": "Mirror appeals of restrictions that came from a trust report into the Appeals tab" },
+      { "name": "sellers.appeal.decided", "does": "Update the mirrored appeal" },
+      { "name": "customers.account.restricted", "does": "Confirm customer restriction enforcements" },
+      { "name": "customers.account.restriction_lifted", "does": "Record that a customer restriction ended" },
+      { "name": "finance.hold.placed", "does": "Confirm hold_payout enforcements when the hold carries trustReportId" },
+      { "name": "orders.item.cancelled", "does": "When trustReportId is set: record the staff cancellation on the report (confirms hold_dispatch, review_payments or other recommendations that ended in cancellation)" },
+      { "name": "returns.refund.approved", "does": "When trustReportId is set: confirm refund_buyers enforcements" },
+      { "name": "support.case.opened", "does": "Confirm inform_customers outreach cases that reference the report" },
+      { "name": "sellers.application.submitted", "does": "Run application detection rules (duplicate tax id, bank token or address of a closed account) and add signals to any assessment" }
+    ]
+  },
+  "permissions": [
+    { "key": "trust.reports.view", "audience": "staff", "desc": "View the trust queue, reports, enforcement and appeals" },
+    { "key": "trust.reports.investigate", "audience": "staff", "desc": "Assign, add evidence, request proof, override risk, add notes and draft recommendations" },
+    { "key": "trust.reports.decide", "audience": "staff", "desc": "Route recommendations, resolve, dismiss and reopen reports, record assessments" },
+    { "key": "trust.recommendations.decide", "audience": "staff", "desc": "Owner teams (Catalog, Seller Manager, Support, Finance...) accept or decline recommendations; the action's own permission is also checked" },
+    { "key": "trust.enforcements.reverse", "audience": "staff", "desc": "Reverse recorded enforcement" },
+    { "key": "trust.appeals.decide", "audience": "staff", "desc": "Decide appeals on trust enforcement (never your own decision)" },
+    { "key": "trust.rules.manage", "audience": "staff", "desc": "Change automated detection rules" },
+    { "key": "trust.reports.export", "audience": "staff", "desc": "Export the trust queue" },
+    { "key": "trust.reports.export-identities", "audience": "staff", "desc": "Include reporter identities in exports" },
+    { "key": "trust.reports.submit", "audience": "seller", "desc": "Report abuse, counterfeits and listing problems" },
+    { "key": "trust.evidence.submit", "audience": "seller", "desc": "Answer Trust and Risk evidence requests" },
+    { "key": "trust.appeals.submit", "audience": "seller", "desc": "Appeal trust actions on offers, products and claims" }
+  ],
+  "approvalActions": [
+    { "key": "trust.enforcements.reverse", "desc": "Reverse a recorded trust enforcement", "limit": "none", "secondReviewer": "above-limit", "approvers": "Per role authority in access (Trust and Risk Manager; Business Owner when Permitted with second review)" }
+  ],
+  "jobs": [
+    { "name": "trust.run-detection", "schedule": "every 5 min", "does": "Evaluate detection rules over risk_signals windows; raise or extend reports (de-duplicated)" },
+    { "name": "trust.rescore", "schedule": "every 15 min", "does": "Recompute risk scores for open reports when evidence or signals change (overrides are kept)" },
+    { "name": "trust.evidence-deadlines", "schedule": "hourly", "does": "Expire evidence requests past due and note it on the report" },
+    { "name": "trust.execution-check", "schedule": "every 15 min", "does": "Flag enforcement still pending after executionGraceMinutes as failed and raise a workqueue item for the owner team" },
+    { "name": "trust.appeal-deadlines", "schedule": "hourly", "does": "Raise workqueue items for appeals near decideBy" }
+  ],
+  "settings": [
+    { "key": "riskThresholds", "default": { "medium": 40, "high": 70 }, "desc": "Score bands for low, medium, high" },
+    { "key": "highRiskDeadlineHours", "default": 24, "desc": "Investigation deadline for high-risk reports" },
+    { "key": "defaultDeadlineHours", "default": 72, "desc": "Investigation deadline for other reports" },
+    { "key": "appealWindowDays", "default": 14, "desc": "Days to appeal a trust enforcement" },
+    { "key": "appealDecisionDays", "default": 7, "desc": "Target to decide an appeal" },
+    { "key": "evidenceRequestDays", "default": 5, "desc": "Default deadline for proof requests" },
+    { "key": "executionGraceMinutes", "default": 60, "desc": "Time for an owner module to confirm execution" },
+    { "key": "reporterRateLimitPerDay", "default": 20, "desc": "Reports per customer or seller per day" },
+    { "key": "evidenceRetentionDays", "default": 730, "desc": "How long evidence is kept after resolution" }
+  ],
+  "integrations": [
+    { "name": "Brand registry lookups (optional)", "purpose": "Check serial numbers against brand owner registries for counterfeit reports" }
+  ],
+  "errorCodes": {
+    "APPEAL_WINDOW_CLOSED": { "status": 409, "meaning": "The appeal deadline has passed" },
+    "APPEAL_ALREADY_OPEN": { "status": 409, "meaning": "An appeal for this enforcement is already open" },
+    "NOT_APPEALABLE": { "status": 409, "meaning": "This action cannot be appealed (e.g. informing customers)" },
+    "APPEAL_IN_SELLERS": { "status": 409, "meaning": "Seller account restrictions and suspensions are appealed and decided in sellers" },
+    "SAME_REVIEWER_NOT_ALLOWED": { "status": 409, "meaning": "The reviewer recommended or accepted the original action" },
+    "SEPARATE_DUTIES": { "status": 403, "meaning": "Trust staff cannot accept their own recommendations; the owner team decides" },
+    "RECOMMENDATIONS_OPEN": { "status": 409, "meaning": "Recommendations are still waiting for their owner teams" }
+  },
+  "notes": [
+    "Trust recommends, owners act (plan ch. 17): Catalog suspends products, offers handle offer removal, Seller Manager restricts sellers, Support informs customers, Finance holds payouts. The owner's acceptance in trust records the enforcement and publishes trust.enforcement.recorded; catalog, offers, sellers, customers, reviews, messaging and advertising execute it and their own events confirm execution.",
+    "Owner modules that do not consume trust.enforcement.recorded (finance holds, orders dispatch holds, support outreach) act in their own screens; the owner then accepts the recommendation with externalRef so the enforcement is recorded as already applied (alreadyApplied=true in the event, so nobody executes it twice). Executing actions take an optional trustReportId so trust can confirm them: catalog setPublication, sellers createRestriction / suspendSeller (sellers.seller.restricted / suspended), finance placeHold (finance.hold.placed), orders cancel-items (orders.item.cancelled), customers account actions (customers.account.restricted) and returns exception refunds (returns.refund.approved).",
+    "Valid order history and access to help are preserved for everyone involved in every enforcement (plan ch. 17); each recorded effect list states what keeps working.",
+    "Reporters are never revealed to reported parties. Reports on reviews, answers and questions stay in reviews; the account/reviews 'Reports you made' tab merges both lists.",
+    "Appeals: trust decides appeals on its enforcement (offers, products, claims, customer restrictions from trust). Seller account restrictions and suspensions are appealed and decided in sellers; trust mirrors linked ones read-only so the Trust and Risk Manager sees them in one Appeals tab.",
+    "Approval actions registered with access: trust.enforcements.reverse (authority). Approval limits for the executed actions (holds, restrictions) belong to the owning module's action and are checked at accept time.",
+    "Phase 2: rights-owner reports through the public form and stronger moderation tooling; automated detection, evidence, recommendations, enforcement and appeals are phase 1 because the admin/trust screen and the launch checklist depend on them.",
+    "Exports: trust registers dataset trust.admin.reports with reports.registerDataset and serves the rows through exportRows; reporter identity columns need trust.reports.export-identities."
+  ]
+}

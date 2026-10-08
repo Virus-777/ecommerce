@@ -1,0 +1,111 @@
+# wishlist (phase 3): saved items, lists and price-drop / back-in-stock alerts for the signed-in customer.
+# Store only. Saving, moving, alert toggles and share links stay on REST (/api/store/wishlist/...).
+# Current price, deal and stock of a saved item are read from its Offer (offers, promotions, inventory);
+# wishlist owns what was saved, when, the price when saved, the price hint and the alert settings.
+
+"A named list of saved items"
+type WishlistList @areas(in: [STORE]) @phase(n: 3) {
+  id: UUID!
+  name: String!
+  isDefault: Boolean!
+  itemCount: Int!
+  shared: Boolean!
+  shareUrl: URL
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+enum WishlistPriceHintKind @areas(in: [STORE]) {
+  LOWEST_IN_WINDOW
+  TYPICAL_RANGE
+  UNCHANGED
+  NONE
+}
+
+"Price history hint, e.g. Lowest in 30 days; Typical price $139–$165"
+type WishlistPriceHint @areas(in: [STORE]) @phase(n: 3) {
+  kind: WishlistPriceHintKind!
+  label: String!
+  low: Money
+  high: Money
+  windowDays: Int!
+}
+
+"Alert toggles shown on a saved item card"
+type WishlistAlertToggle @areas(in: [STORE]) @phase(n: 3) {
+  priceDrop: Boolean!
+  backInStock: Boolean!
+}
+
+"A saved product in a wishlist"
+type WishlistItem @areas(in: [STORE]) @phase(n: 3) {
+  id: UUID!
+  list: WishlistList!
+  product: Product!
+  variant: Variant
+  "The saved offer, if the customer saved a specific seller's offer; else use product.featuredOffer. Null when that offer is gone."
+  offer: Offer
+  priceWhenSaved: Money
+  priceHint: WishlistPriceHint!
+  alerts: WishlistAlertToggle!
+  canMoveToCart: Boolean!
+  note: String
+  addedAt: DateTime!
+}
+
+type WishlistItemPage implements Paged @areas(in: [STORE]) @phase(n: 3) {
+  items: [WishlistItem!]!
+  nextCursor: String
+  page: Int
+  totalPages: Int
+  total: Int
+}
+
+enum WishlistAlertKind @areas(in: [STORE]) {
+  PRICE_DROP
+  BACK_IN_STOCK
+}
+
+enum WishlistAlertState @areas(in: [STORE]) {
+  ACTIVE
+  TRIGGERED
+  PAUSED
+  REMOVED
+}
+
+"A price-drop or back-in-stock alert, delivered through notifications under promotional preferences"
+type WishlistAlert @areas(in: [STORE]) @phase(n: 3) {
+  id: UUID!
+  "The saved item it belongs to (alerts can also exist for products that are not saved)"
+  itemId: UUID
+  product: Product!
+  variant: Variant
+  "Seller the alert is limited to, if any"
+  seller: SellerPublicProfile
+  kind: WishlistAlertKind!
+  "e.g. Any drop below $329.00; Olive, from Trailhead Outfitters"
+  condition: String!
+  targetPrice: Money
+  referencePrice: Money
+  state: WishlistAlertState!
+  triggeredAt: DateTime
+  triggeredPrice: Money
+  pausedReason: String
+  createdAt: DateTime!
+}
+
+# ------------------------------------------------------------------ fields on other modules' types
+
+extend type Customer {
+  "Saved items of a list (default list when listId is omitted). total = saved item count for Account overview."
+  wishlist(listId: UUID, paging: PageInput): WishlistItemPage @areas(in: [STORE]) @phase(n: 3) @cost(weight: 10) @source(module: "wishlist", fn: "listItems")
+  "The customer's wishlist lists"
+  wishlistLists: [WishlistList!] @areas(in: [STORE]) @phase(n: 3) @source(module: "wishlist", fn: "listLists")
+  "Price-drop and back-in-stock alerts"
+  wishlistAlerts: [WishlistAlert!] @areas(in: [STORE]) @phase(n: 3) @source(module: "wishlist", fn: "listAlerts")
+}
+
+extend type Product {
+  "Saved by the signed-in customer (heart icon). Null for guests and before phase 3."
+  saved: Boolean @areas(in: [STORE]) @phase(n: 3) @source(module: "wishlist", fn: "isSaved")
+}

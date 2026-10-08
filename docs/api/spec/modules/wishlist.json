@@ -1,0 +1,159 @@
+{
+  "name": "wishlist",
+  "title": "Wishlist",
+  "group": "Later phases",
+  "phase": 3,
+  "chapters": [3, 7, 19],
+  "summary": "Saved shopping for customers: saved items in one or more lists, price-drop and back-in-stock alerts, and shareable lists. Alerts are delivered through notifications under the customer's promotional preferences.",
+  "owns": [
+    "Wishlists: a default list plus named lists, saved products with the variant and preferred offer",
+    "Saved status for product cards (heart icons)",
+    "Price-drop alerts (any drop, or below a target price) and back-in-stock alerts (optionally for one seller or variant)",
+    "Alert state: active, triggered, paused, removed, with the price or stock that triggered it",
+    "Price hints for saved items (lowest in 30 days, typical range), computed from offers.priceRange / offers.lowestPrice (no own price history)",
+    "Move to cart and share a list by link"
+  ],
+  "notOwns": [
+    "Recently viewed products: customers",
+    "Sending the alert: notifications; the customer's marketing consent (wishlist alerts): customers",
+    "Prices, price history and stock: offers and inventory (read through public APIs and events)",
+    "Cart lines: cart (move to cart calls its public API)"
+  ],
+  "dependsOn": ["catalog", "offers", "customers"],
+  "optionalDeps": ["inventory", "cart", "promotions", "notifications", "reports", "media", "search"],
+  "publicApi": [
+    { "name": "savedCount", "signature": "(productId: uuid) => int", "desc": "How many customers saved a product (aggregate only, for reports and Official Store planning).", "usedBy": ["reports"] },
+    { "name": "isSaved", "signature": "(customerId: uuid, productIds: uuid[]) => map<bool>", "desc": "Saved state for product cards rendered by other modules.", "usedBy": ["search", "content", "graphql"] },
+    { "name": "listItems", "signature": "(customerId: uuid, opts: { listId?: uuid, paging: PageInput }) => Paged<SavedItem>", "desc": "Saved items of a list (default list when omitted) with price hints and alert toggles (GET /wishlist, GET /lists/{id}/items).", "usedBy": ["graphql"] },
+    { "name": "listLists", "signature": "(customerId: uuid) => WishlistList[]", "desc": "The customer's lists with item counts and share state (GET /lists).", "usedBy": ["graphql"] },
+    { "name": "listAlerts", "signature": "(customerId: uuid) => Alert[]", "desc": "The customer's price-drop and back-in-stock alerts (GET /alerts).", "usedBy": ["graphql"] }
+  ],
+  "types": {
+    "WishlistList": { "id": "uuid", "name": "string", "isDefault": "bool", "itemCount": "int", "shared": "bool", "shareUrl": "string?", "createdAt": "datetime", "updatedAt": "datetime" },
+    "PriceHint": {
+      "kind": "enum(lowest_in_window|typical_range|unchanged|none)",
+      "label": { "type": "string", "desc": "e.g. Lowest in 30 days; Typical price $139–$165; Same price for 30 days" },
+      "low": "Money?", "high": "Money?", "windowDays": "int"
+    },
+    "SavedItem": {
+      "id": "uuid", "listId": "uuid",
+      "productId": "uuid", "variantId": "uuid?", "offerId": "uuid?",
+      "title": "string", "image": "MediaRef?", "options": "map<string>",
+      "sellerName": "string?", "officialStore": "bool",
+      "price": "Money?", "wasPrice": "Money?", "priceWhenSaved": "Money?",
+      "priceHint": "PriceHint",
+      "availability": "enum(in_stock|low_stock|out_of_stock|unavailable)",
+      "availableQty": "int?", "stockLabel": { "type": "string?", "desc": "e.g. 9 left" },
+      "alerts": { "type": "AlertToggle", "desc": "Toggle state shown on the item card" },
+      "canMoveToCart": "bool",
+      "note": "string?",
+      "addedAt": "datetime"
+    },
+    "AlertToggle": { "priceDrop": "bool", "backInStock": "bool" },
+    "SaveItemInput": { "productId": "uuid", "variantId": "uuid?", "offerId": "uuid?", "listId": { "type": "uuid?", "desc": "Default list when omitted" }, "note": "string?", "priceDropAlert": "bool?", "backInStockAlert": "bool?" },
+    "Alert": {
+      "id": "uuid", "itemId": "uuid?", "productId": "uuid", "variantId": "uuid?", "sellerId": "uuid?",
+      "title": "string", "image": "MediaRef?",
+      "kind": "enum(price_drop|back_in_stock)",
+      "condition": { "type": "string", "desc": "e.g. Any drop below $329.00; Olive, from Trailhead Outfitters" },
+      "targetPrice": "Money?", "referencePrice": "Money?",
+      "state": "enum(active|triggered|paused|removed)",
+      "triggeredAt": "datetime?", "triggeredPrice": "Money?",
+      "pausedReason": "string?",
+      "createdAt": "datetime"
+    },
+    "AlertInput": { "productId": "uuid", "variantId": "uuid?", "sellerId": "uuid?", "kind": "enum(price_drop|back_in_stock)", "targetPrice": "Money?" },
+    "WishlistPage": {
+      "list": "WishlistList",
+      "lists": "WishlistList[]",
+      "items": "SavedItem[]",
+      "nextCursor": "string?",
+      "alerts": "Alert[]",
+      "deliveryNote": { "type": "string", "desc": "e.g. Alerts arrive as notifications and email. Turn alerts off any time. These are separate from order updates." },
+      "alertsEnabledByPreference": "bool"
+    },
+    "SharedList": { "name": "string", "ownerFirstName": "string?", "items": "SavedItem[]", "updatedAt": "datetime" }
+  },
+  "tables": [
+    { "name": "lists", "columns": { "id": "uuid pk", "customer_id": "uuid", "name": "text", "is_default": "bool", "share_token": "text? unique", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(customer_id)", "unique (customer_id) where is_default"] },
+    { "name": "items", "columns": { "id": "uuid pk", "list_id": "uuid → lists", "customer_id": "uuid", "product_id": "uuid", "variant_id": "uuid?", "offer_id": "uuid?", "price_when_saved": "bigint?", "currency": "text", "note": "text?", "added_at": "timestamptz" }, "indexes": ["unique (list_id, product_id, variant_id)", "(customer_id, product_id)", "(product_id)"] },
+    { "name": "alerts", "columns": { "id": "uuid pk", "customer_id": "uuid", "item_id": "uuid? → items", "product_id": "uuid", "variant_id": "uuid?", "seller_id": "uuid?", "kind": "text", "target_price": "bigint?", "reference_price": "bigint?", "state": "text", "triggered_at": "timestamptz?", "triggered_price": "bigint?", "paused_reason": "text?", "last_notified_at": "timestamptz?", "created_at": "timestamptz" }, "indexes": ["(product_id, kind, state)", "(customer_id, state)"] }
+  ],
+  "stateMachines": [
+    {
+      "name": "Wishlist alert", "field": "Alert.state", "initial": "active",
+      "transitions": [
+        ["active", "trigger", "triggered"],
+        ["triggered", "rearm", "active"],
+        ["active", "pause", "paused"],
+        ["paused", "resume", "active"],
+        ["active", "remove", "removed"],
+        ["triggered", "remove", "removed"],
+        ["paused", "remove", "removed"]
+      ],
+      "notes": "trigger fires when a price drop meets the condition or stock returns (debounced; one notice per alert per alertCooldownHours). Price-drop alerts rearm automatically with the new price as reference; back-in-stock alerts stay triggered until the customer rearms or removes them. pause is automatic when the product becomes unavailable for good (merged, suspended) or the customer turns off wishlist alerts in preferences."
+    }
+  ],
+  "endpoints": [
+    { "id": "getWishlist", "area": "store", "method": "GET", "path": "/wishlist", "summary": "Wishlist page: lists, first batch of items with price hints and stock, and alerts", "auth": "customer", "query": { "listId": "uuid?", "limit": "int?" }, "response": "WishlistPage", "screens": ["account/wishlist"], "phase": 3 },
+    { "id": "listItems", "area": "store", "method": "GET", "path": "/lists/{id}/items", "summary": "More items of a list", "auth": "customer", "params": { "id": "uuid" }, "paging": true, "query": { "availability": "enum(in_stock|out_of_stock)?", "sort": "enum(added|price_drop|price)?" }, "response": "SavedItem", "screens": ["account/wishlist"], "phase": 3 },
+    { "id": "savedStatus", "area": "store", "method": "GET", "path": "/saved", "summary": "Which products are saved (for heart icons on cards)", "auth": "customer", "query": { "productIds": { "type": "string", "desc": "Comma-separated, up to 100" } }, "response": "map<bool>", "screens": ["store/product", "store/category", "store/search"], "phase": 3 },
+    { "id": "saveItem", "area": "store", "method": "POST", "path": "/items", "summary": "Save a product (optionally with alerts)", "desc": "Saving the same product and variant twice to a list returns the existing item.", "auth": "customer", "body": "SaveItemInput", "response": "SavedItem", "status": 201, "errors": ["LIST_LIMIT_REACHED"], "events": ["wishlist.item.saved"], "screens": ["store/product", "account/wishlist"], "phase": 3 },
+    { "id": "removeItem", "area": "store", "method": "DELETE", "path": "/items/{id}", "summary": "Remove a saved item (its alerts are removed too)", "auth": "customer", "params": { "id": "uuid" }, "response": null, "status": 204, "events": ["wishlist.item.removed"], "screens": ["account/wishlist"], "phase": 3 },
+    { "id": "moveItem", "area": "store", "method": "POST", "path": "/items/{id}/move", "summary": "Move an item to another list", "auth": "customer", "params": { "id": "uuid" }, "body": { "listId": "uuid" }, "response": "SavedItem", "screens": ["account/wishlist"], "phase": 3 },
+    { "id": "moveToCart", "area": "store", "method": "POST", "path": "/items/{id}/move-to-cart", "summary": "Add the item to the cart with an explicit offer", "desc": "Uses the saved offer, or the current main offer shown on the card; the seller is never swapped silently. The item stays saved unless removeFromList is true.", "auth": "customer", "params": { "id": "uuid" }, "body": { "offerId": "uuid?", "quantity": "int", "removeFromList": "bool?" }, "response": { "cartLineId": "string", "cartItemCount": "int", "item": "SavedItem?" }, "errors": ["OUT_OF_STOCK", "OFFER_CHANGED"], "screens": ["account/wishlist"], "phase": 3 },
+    { "id": "updateItemAlerts", "area": "store", "method": "PUT", "path": "/items/{id}/alerts", "summary": "Turn price-drop and back-in-stock alerts on or off for an item", "auth": "customer", "params": { "id": "uuid" }, "body": "AlertToggle", "response": "SavedItem", "screens": ["account/wishlist"], "phase": 3 },
+    { "id": "listLists", "area": "store", "method": "GET", "path": "/lists", "summary": "My lists", "auth": "customer", "response": "WishlistList[]", "screens": ["account/wishlist"], "phase": 3 },
+    { "id": "createList", "area": "store", "method": "POST", "path": "/lists", "summary": "Create a named list", "auth": "customer", "body": { "name": "string" }, "response": "WishlistList", "status": 201, "errors": ["LIST_LIMIT_REACHED"], "screens": ["account/wishlist"], "phase": 3 },
+    { "id": "updateList", "area": "store", "method": "PATCH", "path": "/lists/{id}", "summary": "Rename a list", "auth": "customer", "params": { "id": "uuid" }, "body": { "name": "string" }, "response": "WishlistList", "screens": ["account/wishlist"], "phase": 3 },
+    { "id": "deleteList", "area": "store", "method": "DELETE", "path": "/lists/{id}", "summary": "Delete a list (not the default list)", "auth": "customer", "params": { "id": "uuid" }, "response": null, "status": 204, "errors": ["ILLEGAL_TRANSITION"], "screens": ["account/wishlist"], "phase": 3 },
+    { "id": "shareList", "area": "store", "method": "POST", "path": "/lists/{id}/share", "summary": "Create or revoke a share link", "auth": "customer", "params": { "id": "uuid" }, "body": { "enabled": "bool" }, "response": "WishlistList", "screens": ["account/wishlist"], "phase": 3 },
+    { "id": "getSharedList", "area": "store", "method": "GET", "path": "/shared/{token}", "summary": "View a shared list (read-only, no prices history or alerts)", "auth": "anyone", "params": { "token": "string" }, "response": "SharedList", "errors": ["NOT_FOUND"], "screens": ["account/wishlist"], "phase": 3 },
+    { "id": "listAlerts", "area": "store", "method": "GET", "path": "/alerts", "summary": "My alerts", "auth": "customer", "paging": true, "query": { "state": "enum(active|triggered|paused)?" }, "response": "Alert", "screens": ["account/wishlist", "account/notifications"], "phase": 3 },
+    { "id": "createAlert", "area": "store", "method": "POST", "path": "/alerts", "summary": "Create an alert (also for a product not saved, e.g. from an out-of-stock product page)", "auth": "customer", "body": "AlertInput", "response": "Alert", "status": 201, "errors": ["ALERT_LIMIT_REACHED"], "screens": ["store/product", "account/wishlist"], "phase": 3 },
+    { "id": "changeAlert", "area": "store", "method": "POST", "path": "/alerts/{id}/transition", "summary": "Pause, resume or rearm an alert", "auth": "customer", "params": { "id": "uuid" }, "body": { "action": "enum(pause|resume|rearm)" }, "response": "Alert", "errors": ["ILLEGAL_TRANSITION"], "screens": ["account/wishlist"], "phase": 3 },
+    { "id": "removeAlert", "area": "store", "method": "DELETE", "path": "/alerts/{id}", "summary": "Remove an alert", "auth": "customer", "params": { "id": "uuid" }, "response": null, "status": 204, "screens": ["account/wishlist"], "phase": 3 },
+    { "id": "wishlistInsights", "area": "admin", "method": "GET", "path": "/insights", "summary": "Most saved products and alert counts (aggregates only, no customer data)", "auth": "staff", "permission": "wishlist.insights.view", "paging": true, "query": { "categoryId": "uuid?", "from": "date?", "to": "date?" }, "response": { "productId": "uuid", "title": "string", "saves": "int", "activePriceAlerts": "int", "activeStockAlerts": "int", "outOfStock": "bool" }, "screens": ["admin/reports"], "phase": 3 }
+  ],
+  "events": {
+    "publishes": [
+      { "name": "wishlist.item.saved", "when": "A customer saves a product", "payload": { "customerId": "uuid", "productId": "uuid", "variantId": "uuid?" } },
+      { "name": "wishlist.item.removed", "when": "A customer removes a saved product", "payload": { "customerId": "uuid", "productId": "uuid" } },
+      { "name": "wishlist.alert.triggered", "when": "A price drop or back-in-stock condition is met (notifications sends it under promotional preferences)", "payload": { "alertId": "uuid", "customerId": "uuid", "kind": "string", "productId": "uuid", "offerId": "uuid?", "price": "Money?", "previousPrice": "Money?" } }
+    ],
+    "consumes": [
+      { "name": "offers.offer.price_changed", "does": "Evaluate price-drop alerts for saved offers" },
+      { "name": "inventory.stock.changed", "does": "Evaluate back-in-stock alerts when available goes from 0 to positive" },
+      { "name": "offers.offer.status_changed", "does": "Evaluate back-in-stock alerts for reactivated offers; clear saved offer ids of closed offers" },
+      { "name": "catalog.product.merged", "does": "Move saved items and alerts to the kept product" },
+      { "name": "catalog.product.publication_changed", "does": "Pause alerts for suspended products; mark items unavailable" }
+    ]
+  },
+  "permissions": [
+    { "key": "wishlist.insights.view", "audience": "staff", "desc": "Aggregate wishlist insights" }
+  ],
+  "jobs": [
+    { "name": "wishlist.evaluate-alerts", "schedule": "every 10 min", "does": "Batch-evaluate alert conditions changed by recent events, apply cooldown, publish wishlist.alert.triggered" }
+  ],
+  "settings": [
+    { "key": "maxLists", "default": 10, "desc": "Lists per customer" },
+    { "key": "maxItemsPerList", "default": 500, "desc": "Items per list" },
+    { "key": "maxActiveAlerts", "default": 100, "desc": "Active alerts per customer" },
+    { "key": "alertCooldownHours", "default": 24, "desc": "Minimum time between notices for the same alert" },
+    { "key": "priceHintDays", "default": 30, "desc": "Window for Lowest in N days" },
+    { "key": "minDropPct", "default": 1, "desc": "Smallest drop that counts for 'any drop'" }
+  ],
+  "integrations": [],
+  "errorCodes": {
+    "LIST_LIMIT_REACHED": { "status": 409, "meaning": "Too many lists or items in the list." },
+    "ALERT_LIMIT_REACHED": { "status": 409, "meaning": "Too many active alerts." },
+    "OUT_OF_STOCK": { "status": 409, "meaning": "The item can't be added to the cart because it is out of stock." },
+    "OFFER_CHANGED": { "status": 409, "meaning": "The saved offer's price or availability changed; details carry the current offer to confirm." }
+  },
+  "notes": [
+    "Phase 3 (plan ch. 20 Customer growth): the module ships as a scaffold and stays off at launch; account/wishlist is marked 'coming later'.",
+    "Recently viewed belongs to customers (brief); the wishlist page shows it by calling customers.",
+    "Alerts are promotional: notifications delivers them only if the customer allows wishlist alerts (account/notifications) and never mixes them into essential order updates.",
+    "Price hints are honest: 'Lowest in 30 days' only when the current price is the lowest in the window, from offers.priceRange(offerId, priceHintDays) (offers keeps the only price history); campaign was-prices come from promotions.referencePrice when enabled."
+  ]
+}

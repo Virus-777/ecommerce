@@ -1,0 +1,329 @@
+{
+  "info": {
+    "title": "Marketly API",
+    "version": "0.1.0-design",
+    "description": "Design of the Marketly marketplace API: Customer Store (website + Android app), Seller Center, Admin Center and Operations. One backend, organised in removable modules. Generated from docs/api/spec/*.json."
+  },
+  "servers": [
+    {
+      "url": "https://api.marketly.example",
+      "description": "Production (placeholder)"
+    },
+    {
+      "url": "http://localhost:4000",
+      "description": "Local development"
+    }
+  ],
+  "areas": {
+    "store": {
+      "prefix": "/api/store/{module}",
+      "title": "Store API",
+      "audience": "Customers and guests on the website and the Android app",
+      "auth": "Optional customer session (Bearer access token). Guests get a guest session for cart, checkout and guest order lookup."
+    },
+    "seller": {
+      "prefix": "/api/seller/{module}",
+      "title": "Seller API",
+      "audience": "Seller owners and seller staff in Seller Center (website + Android app)",
+      "auth": "Seller member session. Every request acts for one seller account; seller member permissions apply."
+    },
+    "admin": {
+      "prefix": "/api/admin/{module}",
+      "title": "Admin API",
+      "audience": "Internal staff in the Admin Center and Operations Center",
+      "auth": "Staff session. Role permissions and approval limits apply."
+    },
+    "public": {
+      "prefix": "/api/public/{module}",
+      "title": "Public API",
+      "audience": "Anyone (sign-in, registration, public settings)",
+      "auth": "None"
+    },
+    "webhooks": {
+      "prefix": "/webhooks/{module}",
+      "title": "Webhooks",
+      "audience": "Payment, carrier and email providers",
+      "auth": "Provider signature header, verified per provider"
+    }
+  },
+  "auth": {
+    "customer": "Signed-in customer",
+    "shopper": "Signed-in customer or guest session",
+    "anyone": "No session needed",
+    "seller": "Seller member; optional `permission` narrows it",
+    "staff": "Staff member; optional `permission` narrows it",
+    "provider": "Webhook signature"
+  },
+  "types": {
+    "Money": {
+      "amount": {
+        "type": "int",
+        "desc": "Minor units (cents). 18900 = $189.00"
+      },
+      "currency": {
+        "type": "string",
+        "desc": "ISO 4217, e.g. USD"
+      }
+    },
+    "Error": {
+      "error": "ErrorBody"
+    },
+    "ErrorBody": {
+      "code": {
+        "type": "string",
+        "desc": "Stable code, e.g. OFFER_CHANGED"
+      },
+      "message": "string",
+      "details": "json?"
+    },
+    "Address": {
+      "name": "string",
+      "line1": "string",
+      "line2": "string?",
+      "city": "string",
+      "region": {
+        "type": "string",
+        "desc": "State code, e.g. OR"
+      },
+      "postalCode": "string",
+      "country": {
+        "type": "string",
+        "desc": "ISO 3166-1 alpha-2"
+      },
+      "phone": "string?"
+    },
+    "Actor": {
+      "kind": "enum(customer|guest|seller|staff|system)",
+      "id": "string?",
+      "name": "string?"
+    },
+    "MediaRef": {
+      "id": "uuid",
+      "url": "url",
+      "alt": "string?",
+      "width": "int?",
+      "height": "int?",
+      "bytes": { "type": "int?", "desc": "File size in bytes (media sizeBytes), shown next to attachments and evidence files" }
+    },
+    "DateRange": {
+      "from": "date",
+      "to": "date"
+    },
+    "TimelineEvent": {
+      "at": "datetime",
+      "label": "string",
+      "detail": "string?",
+      "actor": "Actor?"
+    },
+    "ApprovalInfo": {
+      "required": "bool",
+      "reason": "string?",
+      "approvalRequestId": "uuid?",
+      "approvers": "string[]"
+    },
+    "Deadline": {
+      "dueAt": "datetime",
+      "state": "enum(on_time|due_soon|overdue)"
+    }
+  },
+  "pagination": {
+    "query": {
+      "cursor": {
+        "type": "string?",
+        "desc": "Opaque cursor from the previous response. Used by the Android app's infinite scroll."
+      },
+      "page": {
+        "type": "int?",
+        "desc": "1-based page number. Used by the website's numbered pages."
+      },
+      "limit": {
+        "type": "int?",
+        "desc": "Items per batch, 1–100, default 24"
+      }
+    },
+    "response": "{ items: T[], nextCursor: string|null, page?: int, totalPages?: int, total?: int }"
+  },
+  "errors": {
+    "VALIDATION_FAILED": {
+      "status": 400,
+      "meaning": "Fields are missing or invalid. details.issues lists each field."
+    },
+    "UNAUTHORIZED": {
+      "status": 401,
+      "meaning": "No session, or the wrong kind of session for this API area."
+    },
+    "FORBIDDEN": {
+      "status": 403,
+      "meaning": "Signed in, but the role or seller permission does not allow this. details.permission names it."
+    },
+    "NOT_FOUND": {
+      "status": 404,
+      "meaning": "The record does not exist or is not visible to this caller."
+    },
+    "ILLEGAL_TRANSITION": {
+      "status": 409,
+      "meaning": "The status does not allow this action (e.g. approving a rejected product). details.from, details.event."
+    },
+    "APPROVAL_REQUIRED": {
+      "status": 409,
+      "meaning": "Above the caller's limit or needs a second reviewer. details.approvalRequestId tracks it."
+    },
+    "CONFLICT": {
+      "status": 409,
+      "meaning": "Concurrent change; reload and retry."
+    },
+    "IDEMPOTENCY_KEY_REUSED": {
+      "status": 422,
+      "meaning": "The Idempotency-Key was used with a different request body."
+    },
+    "RATE_LIMITED": {
+      "status": 429,
+      "meaning": "Too many requests; retry after the Retry-After header."
+    },
+    "NOT_IMPLEMENTED": {
+      "status": 501,
+      "meaning": "Planned for a later launch phase."
+    }
+  },
+  "headers": {
+    "Authorization": "Bearer <access token> (customer, seller member or staff session)",
+    "X-Guest-Session": "Guest session id for carts and guest checkout",
+    "Idempotency-Key": "Required on endpoints marked idempotent (orders, payments, refunds, payouts). Same key + same body returns the first result.",
+    "Accept-Language": "en-US (only locale at launch)",
+    "X-Request-Id": "Echoed back; include it when reporting problems"
+  },
+  "stack": [
+    {
+      "concern": "Runtime",
+      "choice": "Node.js 22+ with TypeScript (strict), ES modules",
+      "why": "Types keep 30+ modules safe to change"
+    },
+    {
+      "concern": "HTTP framework",
+      "choice": "Fastify 5",
+      "why": "Lightweight and fast; one plugin per module fits add/remove"
+    },
+    {
+      "concern": "Validation and docs",
+      "choice": "Zod schemas → OpenAPI",
+      "why": "One schema drives validation, types and this documentation"
+    },
+    {
+      "concern": "Complex screen reads",
+      "choice": "GraphQL (Mercurius), read-only, store / seller / admin schemas",
+      "why": "One round trip for screens that combine many modules; every write stays on REST"
+    },
+    {
+      "concern": "Database",
+      "choice": "PostgreSQL via Kysely (typed SQL builder)",
+      "why": "No ORM magic; each module owns a schema; MongoDB swap is per module behind repository interfaces"
+    },
+    {
+      "concern": "Background work",
+      "choice": "Job scheduler interface (in-process first, Postgres queue later)",
+      "why": "Payout runs, deadlines, ad schedules, payment checks"
+    },
+    {
+      "concern": "Module communication",
+      "choice": "Typed in-process events + public contracts",
+      "why": "Modules never read each other's tables"
+    },
+    {
+      "concern": "Tests",
+      "choice": "Vitest + in-memory PostgreSQL (PGlite)",
+      "why": "Each module boots alone in a test"
+    }
+  ],
+  "moduleRules": [
+    "Each module owns its PostgreSQL schema; no foreign keys across modules, only ids.",
+    "Other modules may use only its contract: public API functions, types and events.",
+    "Dependencies are declared; the server refuses to start if one is missing and names it.",
+    "Disable a module in one config line; delete its folder to remove it; its tables stay until you drop them.",
+    "Every list pages two ways: cursors for the Android app, page numbers for the website.",
+    "Money is integer cents with a currency; anything that moves money or creates orders is idempotent.",
+    "Statuses change only through declared state machines; material staff actions are audited with a reason."
+  ],
+  "scenarios": [
+    {
+      "n": 1,
+      "name": "Mixed purchase",
+      "flow": [
+        "cart",
+        "checkout",
+        "orders",
+        "payments",
+        "shipping",
+        "warehouse",
+        "finance"
+      ]
+    },
+    {
+      "n": 2,
+      "name": "Changed offer before purchase",
+      "flow": [
+        "cart",
+        "checkout",
+        "offers",
+        "inventory"
+      ]
+    },
+    {
+      "n": 3,
+      "name": "Payment uncertainty",
+      "flow": [
+        "checkout",
+        "payments",
+        "orders"
+      ]
+    },
+    {
+      "n": 4,
+      "name": "Partial cancellation and return",
+      "flow": [
+        "orders",
+        "returns",
+        "payments",
+        "finance"
+      ]
+    },
+    {
+      "n": 5,
+      "name": "Late shipment",
+      "flow": [
+        "shipping",
+        "workqueues",
+        "notifications",
+        "support"
+      ]
+    },
+    {
+      "n": 6,
+      "name": "Refund after payout",
+      "flow": [
+        "returns",
+        "payments",
+        "finance"
+      ]
+    },
+    {
+      "n": 7,
+      "name": "Seller restriction",
+      "flow": [
+        "sellers",
+        "offers",
+        "orders",
+        "returns",
+        "support"
+      ]
+    },
+    {
+      "n": 8,
+      "name": "Opening advertisement",
+      "flow": [
+        "advertising",
+        "content",
+        "reports"
+      ]
+    }
+  ]
+}

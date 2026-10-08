@@ -1,0 +1,2257 @@
+{
+  "name": "catalog",
+  "title": "Catalog",
+  "group": "Catalog and stock",
+  "phase": 1,
+  "chapters": [
+    5,
+    8
+  ],
+  "summary": "What a product is: categories, attributes, brands, products, variants, and the review workflow that decides whether a product may be sold. How a seller sells it (price, stock, condition) belongs to offers.",
+  "owns": [
+    "Category tree, category attributes and image standards",
+    "Brands",
+    "Shared product content: title, description, key features, specs, included items, images, identifiers",
+    "Variants (colour, size, capacity) and their identifiers",
+    "Product review workflow: Draft, Submitted, Changes requested, Approved, Rejected",
+    "Publication: Active, Hidden, Suspended (always with a reason)",
+    "Correction suggestions to shared content and duplicate merges",
+    "Frozen product snapshots for order items",
+    "Brand status, seller authorization (who can sell) and seller brand requests",
+    "Listing counts read model (offers, in-stock products) for admin lists, category and brand counts"
+  ],
+  "notOwns": [
+    "Price, condition, stock, dispatch and return terms: offers and inventory",
+    "Search ranking and suggestions: search (reads catalog events)",
+    "Product reviews and Q&A: reviews"
+  ],
+  "dependsOn": [
+    "media"
+  ],
+  "optionalDeps": [
+    "search",
+    "sellers",
+    "access",
+    "audit",
+    "offers",
+    "cart",
+    "reviews",
+    "inventory",
+    "reports",
+    "orders",
+    "returns",
+    "support"
+  ],
+  "publicApi": [
+    {
+      "name": "getProduct",
+      "signature": "(productId: uuid) => Product | null",
+      "desc": "Read shared product content",
+      "usedBy": [
+        "offers",
+        "search",
+        "reviews",
+        "promotions",
+        "graphql"
+      ]
+    },
+    {
+      "name": "isPurchasable",
+      "signature": "(productId: uuid) => bool",
+      "desc": "Approved and Active. Offers only go live on purchasable products.",
+      "usedBy": [
+        "offers",
+        "cart"
+      ]
+    },
+    {
+      "name": "snapshotForOrder",
+      "signature": "(variantId: uuid) => ProductSnapshot",
+      "desc": "Frozen copy of title, brand, options and version stored on an order item (plan ch. 8: purchases keep what was accepted)",
+      "usedBy": [
+        "orders"
+      ]
+    },
+    {
+      "name": "listCategories",
+      "signature": "(opts: { includeHidden?: bool }) => Category[]",
+      "desc": "Category tree for menus and the Categories tab, with in-stock product counts and category images",
+      "usedBy": [
+        "graphql",
+        "search"
+      ]
+    },
+    {
+      "name": "getCategoryBySlug",
+      "signature": "(slug: string) => { category: Category, breadcrumb: Category[], filters: Attribute[] } | null",
+      "desc": "Category page header, breadcrumb and filterable attributes",
+      "usedBy": [
+        "graphql"
+      ]
+    },
+    {
+      "name": "getBrandBySlug",
+      "signature": "(slug: string) => Brand | null",
+      "desc": "Brand page header",
+      "usedBy": [
+        "graphql"
+      ]
+    },
+    {
+      "name": "getProductForSeller",
+      "signature": "(sellerId: uuid, productId: uuid) => { product: ProductAdmin, ownsSubmission: bool } | null",
+      "desc": "A product the seller submitted, an approved product the seller has offers on, or any approved and active product (so the seller can create a first offer on it, seller/offer). Review log, missing fields and the submission are returned only when ownsSubmission is true (null otherwise); reviewState is returned for every resolved product (always approved when the seller did not submit it). Null (NOT_FOUND) only for another seller's unapproved product, or a hidden or suspended product the seller has no offer on.",
+      "usedBy": [
+        "graphql"
+      ]
+    },
+    {
+      "name": "getProductAdmin",
+      "signature": "(productId: uuid) => ProductAdmin | null",
+      "desc": "Any product with review history and duplicate candidates (staff)",
+      "usedBy": [
+        "graphql"
+      ]
+    },
+    {
+      "name": "listReviewQueue",
+      "signature": "(filter: { kind?, categoryId? }, page: PageInput) => Page<ProductAdmin>",
+      "desc": "Submissions waiting for review",
+      "usedBy": [
+        "graphql"
+      ]
+    },
+    {
+      "name": "countProductsForSellers",
+      "signature": "(sellerIds: uuid[]) => map<{ approved: int, inReview: int, changesRequested: int, rejected: int, drafts: int, submissionsBlocked: bool, blockedNote: string | null, pausedSubmissions: int }>",
+      "desc": "Seller 360 catalog tiles (staff): the seller's submitted products by review state, and whether a restriction blocks new drafts and submissions (with its scope) and how many open submissions are paused",
+      "usedBy": [
+        "graphql"
+      ]
+    },
+    {
+      "name": "exportRows",
+      "signature": "(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }",
+      "desc": "Export rows for reports dataset catalog.admin.products (the filtered admin product list)",
+      "usedBy": [
+        "reports"
+      ]
+    }
+  ],
+  "types": {
+    "Category": {
+      "id": "uuid",
+      "parentId": "uuid?",
+      "name": "string",
+      "slug": "string",
+      "position": "int",
+      "visible": {
+        "type": "bool",
+        "desc": "False hides it, e.g. no eligible inventory yet"
+      },
+      "comingSoon": "bool",
+      "productCount": {
+        "type": "int",
+        "desc": "Active products with at least one eligible, in-stock offer in this category and its subcategories (store: \"items in stock now\"; admin tree counts). From listing_stats, refreshed every 10 min"
+      },
+      "offerCount": {
+        "type": "int?",
+        "desc": "Eligible offers in this category and its subcategories. Admin responses only (null in the store)"
+      },
+      "image": {
+        "type": "MediaRef?",
+        "desc": "Category tile image (store Categories page, Official Store shortcuts)"
+      },
+      "children": "Category[]"
+    },
+    "Attribute": {
+      "id": "uuid",
+      "categoryId": "uuid",
+      "name": {
+        "type": "string",
+        "desc": "e.g. Screen size"
+      },
+      "kind": "enum(text|number|enum|bool)",
+      "unit": "string?",
+      "options": "string[]",
+      "required": "bool",
+      "filterable": {
+        "type": "bool",
+        "desc": "Shown as a category filter in the store"
+      },
+      "variantDefining": {
+        "type": "bool",
+        "desc": "Creates variants (colour, size)"
+      }
+    },
+    "Brand": {
+      "id": "uuid",
+      "name": "string",
+      "slug": "string",
+      "logo": "MediaRef?",
+      "description": "text?",
+      "productCount": "int",
+      "banner": {
+        "type": "MediaRef?",
+        "desc": "Brand page banner image"
+      }
+    },
+    "Variant": {
+      "id": "uuid",
+      "options": {
+        "type": "map<string>",
+        "desc": "e.g. { \"color\": \"Sage\" }"
+      },
+      "gtin": "string?",
+      "images": "MediaRef[]"
+    },
+    "ProductSummary": {
+      "id": "uuid",
+      "ref": "string",
+      "title": "string",
+      "slug": "string",
+      "brand": "Brand?",
+      "categoryId": "uuid?",
+      "image": "MediaRef?",
+      "variantCount": "int"
+    },
+    "Product": {
+      "id": "uuid",
+      "ref": {
+        "type": "string",
+        "desc": "Human product reference PRD-NNNNN, shown on duplicates, merges and admin lists"
+      },
+      "title": "string",
+      "slug": "string",
+      "brand": "Brand?",
+      "categoryId": "uuid?",
+      "categoryPath": "string[]",
+      "description": "text",
+      "keyFeatures": "string[]",
+      "specs": {
+        "type": "map<string>",
+        "desc": "Category attributes, e.g. { \"Battery life\": \"40 h\" }"
+      },
+      "includedItems": "string[]",
+      "images": "MediaRef[]",
+      "video": "MediaRef?",
+      "modelNumber": "string?",
+      "manufacturerPartNumber": {
+        "type": "string?",
+        "desc": "Manufacturer part number (MPN)"
+      },
+      "noGtin": {
+        "type": "bool",
+        "desc": "Submitter confirmed the product has no GTIN (custom-made or private label); variants may then have no gtin and the reviewer may ask for proof"
+      },
+      "variants": "Variant[]",
+      "updatedAt": "datetime",
+      "listedAt": {
+        "type": "datetime?",
+        "desc": "When the product was first approved and listed (New listing / Listed on …)"
+      }
+    },
+    "ProductAdmin": {
+      "product": "Product",
+      "owner": {
+        "type": "enum(official|seller)"
+      },
+      "ownerSellerId": "uuid?",
+      "reviewState": "enum(draft|submitted|changes_requested|approved|rejected)",
+      "publication": "enum(active|hidden|suspended)",
+      "version": "int",
+      "missing": {
+        "type": "string[]",
+        "desc": "Missing information that blocks submission"
+      },
+      "reviewLog": "ReviewLogEntry[]",
+      "duplicateCandidates": "ProductSummary[]",
+      "submission": {
+        "type": "Submission?",
+        "desc": "Open or latest review submission"
+      },
+      "checks": {
+        "type": "ProductCheck[]",
+        "desc": "Automated checks on the latest submission (staff only)"
+      },
+      "requestedBrand": {
+        "type": "RequestedBrand?",
+        "desc": "Brand the submitter asked to add (no brandId yet); becomes an under_review brand on submit"
+      },
+      "contentScore": {
+        "type": "int",
+        "desc": "0–100 completeness and quality score (required attributes, images against the category standard, description length, identifiers, key features); recomputed on every save"
+      },
+      "duplicateSuspected": {
+        "type": "bool",
+        "desc": "Latest submission has a duplicate check with warn or fail that was not dismissed"
+      },
+      "offerCount": {
+        "type": "int",
+        "desc": "All offers on the product (listing_stats)"
+      },
+      "liveOfferCount": {
+        "type": "int",
+        "desc": "Eligible, in-stock offers"
+      },
+      "bestPrice": {
+        "type": "Money?",
+        "desc": "Lowest eligible offer price"
+      },
+      "offerNote": {
+        "type": "string?",
+        "desc": "Offer-state note when some offers are not live, e.g. Gadget Grove offer paused · 3 other offers live"
+      },
+      "reviewDraft": {
+        "type": "ReviewDraft?",
+        "desc": "The calling reviewer's unsent decision on the open submission (staff only)"
+      }
+    },
+    "ReviewLogEntry": {
+      "id": "uuid",
+      "action": "enum(submitted|approved|changes_requested|rejected|publication_changed|merged|check_dismissed)",
+      "reason": {
+        "type": "text?",
+        "desc": "Decision reason, or the submitter's note to the reviewer on submitted entries"
+      },
+      "fields": {
+        "type": "map<string>",
+        "desc": "Field-level comments on changes requested"
+      },
+      "actor": "Actor",
+      "at": "datetime"
+    },
+    "ProductInput": {
+      "title": "string",
+      "brandId": "uuid?",
+      "categoryId": "uuid?",
+      "description": "text?",
+      "keyFeatures": "string[]?",
+      "specs": "map<string>?",
+      "includedItems": "string[]?",
+      "imageIds": "uuid[]?",
+      "videoId": "uuid?",
+      "modelNumber": "string?",
+      "variants": "VariantInput[]?",
+      "manufacturerPartNumber": "string?",
+      "noGtin": {
+        "type": "bool?",
+        "desc": "Confirm the product has no GTIN; otherwise every variant needs a gtin before submission"
+      },
+      "requestedBrand": {
+        "type": "RequestedBrand?",
+        "desc": "Brand not listed: request it instead of brandId. It is reviewed with the product"
+      }
+    },
+    "VariantInput": {
+      "options": "map<string>",
+      "gtin": "string?",
+      "imageIds": "uuid[]?"
+    },
+    "CorrectionSuggestion": {
+      "id": "uuid",
+      "productId": "uuid",
+      "sellerId": "uuid",
+      "field": "string",
+      "current": "text?",
+      "proposed": "text",
+      "evidence": "MediaRef[]",
+      "state": "enum(open|accepted|declined)",
+      "decisionReason": "text?",
+      "createdAt": "datetime"
+    },
+    "MergeRequest": {
+      "keepProductId": "uuid",
+      "merges": {
+        "type": "MergeItem[]",
+        "desc": "Records merged into the kept product: duplicate products and open submissions"
+      },
+      "reason": {
+        "type": "text",
+        "desc": "Shown to the affected sellers"
+      }
+    },
+    "MergeResult": {
+      "keptProductId": "uuid",
+      "movedOffers": "int",
+      "movedReviews": "int",
+      "merged": "MergedRecord[]"
+    },
+    "CatalogMatch": {
+      "product": "ProductSummary",
+      "matchedOn": "enum(gtin|model|title)",
+      "variants": "Variant[]",
+      "offerCount": "int",
+      "matchQuality": {
+        "type": "enum(exact|same_model_different_bundle|different_model|title_only)",
+        "desc": "Exact model match; same model with different box contents (e.g. HA-ANC700-TB); a close but different model; or a title-only hit"
+      },
+      "modelNumber": "string?",
+      "categoryPath": "string[]",
+      "includedItems": "string[]",
+      "lowestPrice": {
+        "type": "Money?",
+        "desc": "\"from\" price: lowest eligible offer"
+      },
+      "myOffers": {
+        "type": "MyOfferRef[]",
+        "desc": "The caller's own offers on this product (\"You sell Midnight black (New, Used – Good)\")"
+      },
+      "listedAt": "datetime?"
+    },
+    "ProductSnapshot": {
+      "productId": "uuid",
+      "variantId": "uuid",
+      "productVersion": "int",
+      "title": "string",
+      "brandName": "string?",
+      "options": "map<string>",
+      "modelNumber": "string?",
+      "imageUrl": "url?",
+      "takenAt": "datetime"
+    },
+    "Submission": {
+      "id": "uuid",
+      "ref": {
+        "type": "string",
+        "desc": "SUB-YYMMDD-NNNN"
+      },
+      "productId": "uuid",
+      "kind": {
+        "type": "enum(new|content_change|resubmitted)",
+        "desc": "new product, change to an approved product's content, or submitted again after changes were requested"
+      },
+      "state": "enum(open|decided|withdrawn)",
+      "version": {
+        "type": "int",
+        "desc": "Product version that was submitted"
+      },
+      "submittedAt": "datetime",
+      "submittedBy": "Actor",
+      "lastSavedAt": "datetime?",
+      "lastSavedBy": "Actor?",
+      "expectedReviewBy": {
+        "type": "datetime?",
+        "desc": "Shown to the submitter"
+      },
+      "reviewDeadline": {
+        "type": "Deadline?",
+        "desc": "Internal review target that orders the queue (setting reviewTargetBusinessHours)"
+      },
+      "assignee": {
+        "type": "Actor?",
+        "desc": "Reviewer who picked it up (staff only)"
+      },
+      "decidedAt": "datetime?",
+      "note": {
+        "type": "text?",
+        "desc": "Submitter's note to the reviewer, e.g. what changed on resubmission"
+      }
+    },
+    "ProductCheck": {
+      "kind": "enum(duplicate|image_standard|category_fit|prohibited_claim|brand_authorization|restricted_item|identifier)",
+      "result": "enum(pass|warn|fail)",
+      "message": {
+        "type": "string",
+        "desc": "e.g. 2 possible duplicates with the same model number"
+      },
+      "details": "string[]",
+      "evidence": "ProductCheckEvidence[]",
+      "ranAt": "datetime",
+      "dismissal": {
+        "type": "ProductCheckDismissal?",
+        "desc": "Set when a reviewer marked the finding not applicable (e.g. Not a duplicate)"
+      }
+    },
+    "ProductCheckEvidence": {
+      "label": {
+        "type": "string",
+        "desc": "e.g. Matched product, Claim in description, Image 3"
+      },
+      "field": "string?",
+      "text": {
+        "type": "string?",
+        "desc": "Matched text, e.g. FDA approved"
+      },
+      "score": {
+        "type": "number?",
+        "desc": "Similarity or confidence 0–1"
+      },
+      "matchedProductId": "uuid?",
+      "mediaId": "uuid?",
+      "suggestedCategoryId": "uuid?"
+    },
+    "ImageRule": {
+      "text": {
+        "type": "string",
+        "desc": "e.g. Minimum 1000 × 1000 px, JPG or PNG, up to 10 MB"
+      },
+      "severity": {
+        "type": "enum(blocking|warning)",
+        "desc": "Blocking fails the image_standard check; warning is advisory"
+      },
+      "check": {
+        "type": "json?",
+        "desc": "Machine-checkable parameters passed to media.checkImage, e.g. { \"minWidth\": 1000 }"
+      }
+    },
+    "AttributeAdmin": {
+      "attribute": "Attribute",
+      "inheritedFrom": "AttributeOrigin?",
+      "filledCount": {
+        "type": "int",
+        "desc": "Products in the category (approved or in review) with a value for this attribute"
+      },
+      "productCount": {
+        "type": "int",
+        "desc": "Products in the category the count is out of"
+      }
+    },
+    "AttributeOrigin": {
+      "categoryId": "uuid",
+      "name": {
+        "type": "string",
+        "desc": "e.g. All products"
+      }
+    },
+    "BrandAdmin": {
+      "brand": "Brand",
+      "status": {
+        "type": "enum(active|under_review|blocked)",
+        "desc": "Only active brands show in the store and can be chosen for new submissions; under_review covers seller brand requests and brands flagged by Trust and Risk"
+      },
+      "statusReason": "text?",
+      "flagNote": {
+        "type": "string?",
+        "desc": "e.g. Counterfeit report CS-261004-0377 with Trust and Risk"
+      },
+      "trustReportId": "uuid?",
+      "sellingPolicy": {
+        "type": "enum(open|authorized_list|official_only)",
+        "desc": "Who can sell: open to all sellers, sellers on the authorized list, or the Official Store only. Shown as \"Brand not verified\" while status is under_review"
+      },
+      "authorizedSellerIds": {
+        "type": "uuid[]",
+        "desc": "Sellers on the authorized list (staff-added or from an approved brand-affiliation claim)"
+      },
+      "productCount": "int",
+      "offerCount": "int",
+      "sellerCount": {
+        "type": "int",
+        "desc": "Distinct sellers (Official Store counts as one) with an eligible offer on the brand"
+      },
+      "pageLive": {
+        "type": "bool",
+        "desc": "Active with at least one in-stock product, so the store brand page is reachable"
+      },
+      "requestedBy": {
+        "type": "BrandRequestOrigin?",
+        "desc": "Set when a seller requested the brand with a product submission"
+      },
+      "updatedAt": "datetime"
+    },
+    "BrandRequestOrigin": {
+      "sellerId": "uuid",
+      "productId": {
+        "type": "uuid?",
+        "desc": "Set when requested with a product submission"
+      },
+      "submissionId": "uuid?",
+      "changeRequestId": {
+        "type": "uuid?",
+        "desc": "Set when added from an approved sellers brand_request change request"
+      },
+      "at": "datetime"
+    },
+    "RequestedBrand": {
+      "name": "string",
+      "website": "url?",
+      "note": {
+        "type": "text?",
+        "desc": "e.g. how the seller sources the brand"
+      }
+    },
+    "ProductCheckDismissal": {
+      "reason": "text",
+      "matchedProductId": {
+        "type": "uuid?",
+        "desc": "The duplicate candidate that was dismissed (others stay open)"
+      },
+      "by": "Actor",
+      "at": "datetime"
+    },
+    "ReviewDraft": {
+      "submissionId": "uuid",
+      "decision": "enum(approve|request_changes|reject)?",
+      "reason": "text?",
+      "fields": {
+        "type": "map<string>",
+        "desc": "Field → comment to the submitter"
+      },
+      "savedBy": "Actor",
+      "savedAt": "datetime"
+    },
+    "MergeItem": {
+      "productId": "uuid",
+      "asNewVariant": {
+        "type": "map<string>?",
+        "desc": "Add the record as a new variation of the kept product with these options, e.g. { \"Color\": \"Lavender\", \"Switch\": \"Kestrel Brown\" }"
+      },
+      "intoVariantId": {
+        "type": "uuid?",
+        "desc": "Merge into this existing variation of the kept product. Omit both to map variants by matching options"
+      }
+    },
+    "MergedRecord": {
+      "productId": "uuid",
+      "ref": "string",
+      "newVariantId": "uuid?",
+      "intoVariantId": "uuid?",
+      "movedOffers": "int",
+      "movedReviews": "int",
+      "redirectFrom": {
+        "type": "string",
+        "desc": "Old product slug that now redirects"
+      }
+    },
+    "MergePreview": {
+      "keepProductId": "uuid",
+      "records": "MergePreviewRecord[]",
+      "offersMoved": "int",
+      "offersAfter": "int",
+      "offersOnSaleAfter": {
+        "type": "int",
+        "desc": "Eligible offers after the merge (paused offers stay paused)"
+      },
+      "reviewsMoved": "int",
+      "reviewsAfter": "int",
+      "ratingAfter": "number?",
+      "questionsMoved": "int?",
+      "questionsAfter": "int?",
+      "pastOrders": {
+        "type": "int?",
+        "desc": "Order items (open and past) on the merged records, from orders.countOrderItemsForProducts; they keep their purchase snapshots. Null only when orders is disabled"
+      },
+      "redirects": "int",
+      "sellersNotified": "AffectedSeller[]",
+      "notes": {
+        "type": "string[]",
+        "desc": "What carries over, e.g. Gadget Grove offer moves to Gray and stays paused while the seller is restricted; old URLs, ads and coupons now point to the kept product"
+      }
+    },
+    "AffectedSeller": {
+      "sellerId": {
+        "type": "uuid?",
+        "desc": "Null for the Official Store"
+      },
+      "name": "string",
+      "offers": "int"
+    },
+    "MergePreviewRecord": {
+      "productId": "uuid",
+      "ref": "string",
+      "title": "string",
+      "kind": "enum(product|submission)",
+      "action": "enum(new_variant|into_variant|by_options)",
+      "variantLabel": "string?",
+      "offers": "int",
+      "reviews": "int"
+    },
+    "MyOfferRef": {
+      "offerId": "uuid",
+      "variantId": "uuid",
+      "variantLabel": "string",
+      "condition": "string"
+    },
+    "ProductStats": {
+      "all": "int",
+      "active": "int",
+      "hidden": "int",
+      "suspended": "int",
+      "missingContent": "int",
+      "duplicatesSuspected": "int",
+      "inReview": {
+        "type": "int",
+        "desc": "Open submissions in the review queue"
+      },
+      "offers": {
+        "type": "int",
+        "desc": "All offers on catalog products"
+      }
+    },
+    "PublicationImpact": {
+      "productId": "uuid",
+      "from": "enum(active|hidden|suspended)",
+      "to": "enum(active|hidden|suspended)",
+      "activeOffers": {
+        "type": "int",
+        "desc": "Eligible offers that stop showing (become ineligible) until the product is active again"
+      },
+      "sellersAffected": "AffectedSeller[]",
+      "cartsAffected": {
+        "type": "int?",
+        "desc": "Carts holding these offers; shoppers see the item as unavailable. Null when cart is disabled"
+      },
+      "openOrders": {
+        "type": "int?",
+        "desc": "Open order items for the product; they continue and keep their purchase snapshots. From orders.countOrderItemsForProducts; null only when orders is disabled"
+      },
+      "openReturns": {
+        "type": "int?",
+        "desc": "Open returns; they continue. From returns.countOpenReturnsForProducts; null only when returns is disabled"
+      },
+      "openCases": {
+        "type": "int?",
+        "desc": "Open customer cases; they continue. From support.countOpenCasesForProducts; null only when support is disabled"
+      },
+      "effects": {
+        "type": "string[]",
+        "desc": "Plain-language lines shown in the confirmation, e.g. 4 offers stop showing; 17 open orders continue"
+      },
+      "approvalNeeded": {
+        "type": "bool",
+        "desc": "Reactivating a product suspended after a trust report needs a second reviewer"
+      }
+    }
+  },
+  "tables": [
+    {
+      "name": "categories",
+      "desc": "Category tree",
+      "columns": {
+        "id": "uuid pk",
+        "parent_id": "uuid? → categories",
+        "name": "text",
+        "slug": "text unique",
+        "position": "int",
+        "visible": "bool",
+        "coming_soon": "bool",
+        "image_media_id": "uuid?"
+      }
+    },
+    {
+      "name": "attributes",
+      "desc": "Attributes per category; drive specs, filters and variant options",
+      "columns": {
+        "id": "uuid pk",
+        "category_id": "uuid → categories",
+        "name": "text",
+        "kind": "text",
+        "unit": "text?",
+        "options": "jsonb",
+        "required": "bool",
+        "filterable": "bool",
+        "variant_defining": "bool",
+        "position": "int"
+      }
+    },
+    {
+      "name": "image_standards",
+      "desc": "Minimum size, background, count per category",
+      "columns": {
+        "category_id": "uuid pk → categories",
+        "min_width": "int",
+        "min_count": "int",
+        "rules": "jsonb (ImageRule[])"
+      }
+    },
+    {
+      "name": "brands",
+      "columns": {
+        "id": "uuid pk",
+        "name": "text",
+        "slug": "text unique",
+        "logo_media_id": "uuid?",
+        "description": "text?",
+        "banner_media_id": "uuid?",
+        "status": "text (active|under_review|blocked)",
+        "status_reason": "text?",
+        "flag_note": "text?",
+        "trust_report_id": "uuid?",
+        "selling_policy": "text (open|authorized_list|official_only)",
+        "requested_by_seller_id": "uuid?",
+        "requested_for_product_id": "uuid?",
+        "requested_change_request_id": "uuid?",
+        "created_at": "timestamptz",
+        "updated_at": "timestamptz"
+      },
+      "indexes": [
+        "(status, name)"
+      ]
+    },
+    {
+      "name": "products",
+      "desc": "Shared content; owner is the Official Store or the submitting seller",
+      "columns": {
+        "id": "uuid pk",
+        "ref": "text unique (PRD-NNNNN)",
+        "title": "text",
+        "slug": "text",
+        "brand_id": "uuid? → brands",
+        "category_id": "uuid? → categories",
+        "description": "text",
+        "key_features": "jsonb",
+        "specs": "jsonb",
+        "included_items": "jsonb",
+        "media_ids": "jsonb",
+        "video_media_id": "uuid?",
+        "model_number": "text?",
+        "mpn": "text?",
+        "no_gtin": "bool",
+        "requested_brand": "jsonb?",
+        "content_score": "int",
+        "owner_type": "text (official|seller)",
+        "owner_seller_id": "uuid?",
+        "review_state": "text",
+        "publication": "text",
+        "version": "int",
+        "merged_into_id": "uuid?",
+        "search": "tsvector (generated)",
+        "created_at": "timestamptz",
+        "updated_at": "timestamptz",
+        "listed_at": "timestamptz?"
+      },
+      "indexes": [
+        "(review_state, id)",
+        "(category_id, id)",
+        "(owner_seller_id, id)",
+        "gin(search)",
+        "(publication, id)",
+        "(brand_id, id)"
+      ]
+    },
+    {
+      "name": "variants",
+      "columns": {
+        "id": "uuid pk",
+        "product_id": "uuid → products",
+        "options": "jsonb",
+        "gtin": "text? unique",
+        "media_ids": "jsonb",
+        "position": "int"
+      }
+    },
+    {
+      "name": "review_log",
+      "desc": "Every submission, decision, publication change and merge",
+      "columns": {
+        "id": "uuid pk",
+        "product_id": "uuid → products",
+        "action": "text",
+        "reason": "text?",
+        "fields": "jsonb",
+        "actor_kind": "text",
+        "actor_id": "text?",
+        "at": "timestamptz"
+      }
+    },
+    {
+      "name": "correction_suggestions",
+      "columns": {
+        "id": "uuid pk",
+        "product_id": "uuid → products",
+        "seller_id": "uuid",
+        "field": "text",
+        "current": "text?",
+        "proposed": "text",
+        "evidence_media_ids": "jsonb",
+        "state": "text",
+        "decision_reason": "text?",
+        "decided_by": "text?",
+        "created_at": "timestamptz"
+      }
+    },
+    {
+      "name": "submissions",
+      "desc": "One row per submission for review; the review queue reads open rows by review_due_at",
+      "columns": {
+        "id": "uuid pk",
+        "ref": "text unique",
+        "product_id": "uuid → products",
+        "kind": "text (new|content_change|resubmitted)",
+        "state": "text (open|decided|withdrawn)",
+        "product_version": "int",
+        "submitted_at": "timestamptz",
+        "submitted_by": "jsonb",
+        "last_saved_at": "timestamptz?",
+        "last_saved_by": "jsonb?",
+        "expected_review_by": "timestamptz?",
+        "review_due_at": "timestamptz?",
+        "assignee_staff_id": "uuid?",
+        "assignee_name": "text?",
+        "decided_at": "timestamptz?",
+        "note": "text?"
+      },
+      "indexes": [
+        "(state, review_due_at)",
+        "(product_id, submitted_at desc)"
+      ]
+    },
+    {
+      "name": "submission_checks",
+      "desc": "Automated check results per submission (advisory; the reviewer decides)",
+      "columns": {
+        "id": "uuid pk",
+        "submission_id": "uuid → submissions",
+        "kind": "text",
+        "result": "text (pass|warn|fail)",
+        "message": "text",
+        "details": "jsonb",
+        "evidence": "jsonb",
+        "ran_at": "timestamptz",
+        "dismissed_at": "timestamptz?",
+        "dismissed_by": "jsonb?",
+        "dismiss_reason": "text?",
+        "dismissed_matched_product_id": "uuid?"
+      },
+      "indexes": [
+        "(submission_id)",
+        "(kind, result)"
+      ]
+    },
+    {
+      "name": "review_drafts",
+      "desc": "A reviewer's unsent decision per open submission; deleted when the decision is sent",
+      "columns": {
+        "submission_id": "uuid → submissions",
+        "staff_id": "uuid",
+        "decision": "text?",
+        "reason": "text?",
+        "fields": "jsonb",
+        "saved_at": "timestamptz"
+      },
+      "indexes": [
+        "pk (submission_id, staff_id)"
+      ]
+    },
+    {
+      "name": "brand_authorized_sellers",
+      "desc": "Authorized seller list per brand",
+      "columns": {
+        "brand_id": "uuid → brands",
+        "seller_id": "uuid",
+        "source": "text (staff|claim)",
+        "added_by": "jsonb",
+        "added_at": "timestamptz"
+      },
+      "indexes": [
+        "pk (brand_id, seller_id)",
+        "(seller_id)"
+      ]
+    },
+    {
+      "name": "offer_index",
+      "desc": "Read model of offers on catalog products, kept from offers and inventory events (no cross-module keys)",
+      "columns": {
+        "offer_id": "uuid pk",
+        "product_id": "uuid → products",
+        "variant_id": "uuid",
+        "owner_type": "text (official|seller)",
+        "seller_id": "uuid?",
+        "seller_name": "text?",
+        "condition": "text",
+        "status": "text",
+        "eligible": "bool",
+        "in_stock": "bool",
+        "price": "jsonb (Money)?",
+        "updated_at": "timestamptz"
+      },
+      "indexes": [
+        "(product_id)",
+        "(seller_id)"
+      ]
+    },
+    {
+      "name": "listing_stats",
+      "desc": "Per-product counts from offer_index: admin list columns, CatalogMatch counts",
+      "columns": {
+        "product_id": "uuid pk → products",
+        "offer_count": "int",
+        "live_offer_count": "int",
+        "in_stock": "bool",
+        "best_price": "jsonb (Money)?",
+        "offer_note": "text?",
+        "refreshed_at": "timestamptz"
+      }
+    },
+    {
+      "name": "category_stats",
+      "desc": "Per-category counts including subcategories (job catalog.refresh-counts)",
+      "columns": {
+        "category_id": "uuid pk → categories",
+        "product_count": "int",
+        "offer_count": "int",
+        "refreshed_at": "timestamptz"
+      }
+    },
+    {
+      "name": "brand_stats",
+      "desc": "Per-brand counts, overall and per top-level category (popular brands)",
+      "columns": {
+        "brand_id": "uuid → brands",
+        "category_id": "uuid? (null = all categories)",
+        "product_count": "int",
+        "offer_count": "int",
+        "seller_count": "int",
+        "refreshed_at": "timestamptz"
+      },
+      "indexes": [
+        "pk (brand_id, category_id)",
+        "(category_id, product_count desc)"
+      ]
+    }
+  ],
+  "stateMachines": [
+    {
+      "name": "Product review",
+      "field": "ProductAdmin.reviewState",
+      "initial": "draft",
+      "transitions": [
+        [
+          "draft",
+          "submit",
+          "submitted"
+        ],
+        [
+          "submitted",
+          "approve",
+          "approved"
+        ],
+        [
+          "submitted",
+          "requestChanges",
+          "changes_requested"
+        ],
+        [
+          "submitted",
+          "reject",
+          "rejected"
+        ],
+        [
+          "changes_requested",
+          "submit",
+          "submitted"
+        ],
+        [
+          "approved",
+          "reopen",
+          "submitted"
+        ]
+      ],
+      "notes": "Submit is blocked until required information is present (title, brand, category, description of 40+ characters, one image, one variant, required category attributes). Reopen is used after an accepted correction that changes what the product is."
+    },
+    {
+      "name": "Publication",
+      "field": "ProductAdmin.publication",
+      "initial": "active",
+      "transitions": [
+        [
+          "active",
+          "hide",
+          "hidden"
+        ],
+        [
+          "active",
+          "suspend",
+          "suspended"
+        ],
+        [
+          "hidden",
+          "activate",
+          "active"
+        ],
+        [
+          "suspended",
+          "activate",
+          "active"
+        ],
+        [
+          "hidden",
+          "suspend",
+          "suspended"
+        ]
+      ],
+      "notes": "Independent of review. Every change records a reason. Suspending a product does not remove other sellers' valid offers from past orders."
+    },
+    {
+      "name": "Brand status",
+      "field": "BrandAdmin.status",
+      "initial": "active",
+      "transitions": [
+        [
+          "under_review",
+          "activate",
+          "active"
+        ],
+        [
+          "under_review",
+          "block",
+          "blocked"
+        ],
+        [
+          "active",
+          "flag",
+          "under_review"
+        ],
+        [
+          "active",
+          "block",
+          "blocked"
+        ],
+        [
+          "blocked",
+          "activate",
+          "active"
+        ]
+      ],
+      "notes": "Staff-created brands start active; seller-requested brands start under_review. Every change records a reason. Blocking stops new submissions and new offers on the brand; existing products are hidden or suspended separately through publication."
+    }
+  ],
+  "endpoints": [
+    {
+      "id": "listCategories",
+      "area": "store",
+      "method": "GET",
+      "path": "/categories",
+      "summary": "Visible category tree with in-stock counts and images",
+      "auth": "anyone",
+      "response": "Category[]",
+      "screens": [
+        "store/categories",
+        "store/home",
+        "store/official"
+      ],
+      "desc": "Each category carries productCount (items in stock now, including subcategories) and image. Coming-soon categories are included with comingSoon true and count 0."
+    },
+    {
+      "id": "getCategory",
+      "area": "store",
+      "method": "GET",
+      "path": "/categories/{slug}",
+      "summary": "Category with breadcrumb, subcategories and filterable attributes",
+      "auth": "anyone",
+      "params": {
+        "slug": "string"
+      },
+      "response": {
+        "category": "Category",
+        "breadcrumb": "Category[]",
+        "filters": "Attribute[]"
+      },
+      "screens": [
+        "store/category"
+      ]
+    },
+    {
+      "id": "listBrands",
+      "area": "store",
+      "method": "GET",
+      "path": "/brands",
+      "summary": "Active brands, optionally the popular brands of one category",
+      "auth": "anyone",
+      "paging": true,
+      "query": {
+        "q": "string?",
+        "categorySlug": "string?",
+        "sort": "enum(name|popular)?"
+      },
+      "response": "Brand",
+      "screens": [
+        "store/brand",
+        "store/categories"
+      ],
+      "desc": "sort=popular orders by in-stock products (brand_stats); with categorySlug the counts are for that category and its subcategories (store/categories phone rail \"Popular brands\")."
+    },
+    {
+      "id": "getBrand",
+      "area": "store",
+      "method": "GET",
+      "path": "/brands/{slug}",
+      "summary": "Brand page header (logo, banner, description, product count)",
+      "auth": "anyone",
+      "params": {
+        "slug": "string"
+      },
+      "response": "Brand",
+      "screens": [
+        "store/brand"
+      ]
+    },
+    {
+      "id": "getProduct",
+      "area": "store",
+      "method": "GET",
+      "path": "/products/{id}",
+      "summary": "Product detail (shared content only)",
+      "desc": "Offers, prices and delivery come from offers (`GET /api/store/offers/products/{id}/offers`). Products that are not approved and active return 404.",
+      "auth": "anyone",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "Product",
+      "errors": [
+        "NOT_FOUND"
+      ],
+      "screens": [
+        "store/product",
+        "store/search-empty"
+      ]
+    },
+    {
+      "id": "matchCatalog",
+      "area": "seller",
+      "method": "GET",
+      "path": "/match",
+      "summary": "Search the catalog before adding a product",
+      "desc": "Matches on GTIN, model number and title so sellers attach offers to the exact existing product. Each match states matchQuality (exact, same model with a different bundle, different model, title only), the model number, category path, in-the-box list, offer count and lowest price, and the caller's own offers on it (offers.listOwnOffersForProduct). When nothing matches exactly, close different_model matches are still returned so the screen can warn against them. Only approved, active products are matched.",
+      "auth": "seller",
+      "query": {
+        "q": "string",
+        "gtin": "string?",
+        "sort": "enum(best_match|most_offers|newest)?"
+      },
+      "paging": true,
+      "response": "CatalogMatch",
+      "screens": [
+        "seller/catalog-match"
+      ]
+    },
+    {
+      "id": "listBrandsSeller",
+      "area": "seller",
+      "method": "GET",
+      "path": "/brands",
+      "summary": "Brands for the submission form",
+      "desc": "Active brands plus brands this seller requested that are still under review. A brand that is not listed is requested through ProductInput.requestedBrand.",
+      "auth": "seller",
+      "paging": true,
+      "query": {
+        "q": "string?"
+      },
+      "response": "Brand",
+      "screens": [
+        "seller/product-new"
+      ]
+    },
+    {
+      "id": "listOwnProducts",
+      "area": "seller",
+      "method": "GET",
+      "path": "/products",
+      "summary": "This seller's submitted products",
+      "auth": "seller",
+      "paging": true,
+      "query": {
+        "reviewState": "enum(draft|submitted|changes_requested|approved|rejected)?",
+        "q": "string?"
+      },
+      "response": "ProductAdmin",
+      "screens": [
+        "seller/products"
+      ]
+    },
+    {
+      "id": "getOwnProduct",
+      "area": "seller",
+      "method": "GET",
+      "path": "/products/{id}",
+      "summary": "One own product with review feedback",
+      "auth": "seller",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "ProductAdmin",
+      "screens": [
+        "seller/product-new"
+      ]
+    },
+    {
+      "id": "createDraft",
+      "area": "seller",
+      "method": "POST",
+      "path": "/products",
+      "summary": "Create a product draft",
+      "auth": "seller",
+      "permission": "catalog.products.submit",
+      "body": "ProductInput",
+      "response": "ProductAdmin",
+      "status": 201,
+      "screens": [
+        "seller/product-new"
+      ],
+      "desc": "Use requestedBrand instead of brandId when the brand is not listed; it becomes an under_review brand when the product is submitted."
+    },
+    {
+      "id": "updateDraft",
+      "area": "seller",
+      "method": "PATCH",
+      "path": "/products/{id}",
+      "summary": "Edit a draft or a product with changes requested",
+      "auth": "seller",
+      "permission": "catalog.products.submit",
+      "params": {
+        "id": "uuid"
+      },
+      "body": "ProductInput",
+      "response": "ProductAdmin",
+      "errors": [
+        "ILLEGAL_TRANSITION"
+      ],
+      "screens": [
+        "seller/product-new"
+      ],
+      "desc": "Same rules as createDraft. noGtin: true lets variants have no GTIN (the reviewer may ask for proof)."
+    },
+    {
+      "id": "submitProduct",
+      "area": "seller",
+      "method": "POST",
+      "path": "/products/{id}/submit",
+      "summary": "Submit for review",
+      "desc": "Fails with VALIDATION_FAILED and details.missing when required information is absent (including a GTIN on every variant unless noGtin is confirmed). The optional note is stored on the submission and in the review log for the reviewer. A requestedBrand is created as an under_review brand linked to this submission (event catalog.brand.requested).",
+      "auth": "seller",
+      "permission": "catalog.products.submit",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "ProductAdmin",
+      "errors": [
+        "VALIDATION_FAILED",
+        "ILLEGAL_TRANSITION"
+      ],
+      "events": [
+        "catalog.product.submitted",
+        "catalog.brand.requested"
+      ],
+      "screens": [
+        "seller/product-new"
+      ],
+      "body": {
+        "note": {
+          "type": "text?",
+          "desc": "Note to the reviewer, e.g. what changed on resubmission"
+        }
+      }
+    },
+    {
+      "id": "suggestCorrection",
+      "area": "seller",
+      "method": "POST",
+      "path": "/products/{id}/corrections",
+      "summary": "Suggest a correction to shared product content",
+      "auth": "seller",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "field": "string",
+        "proposed": "text",
+        "evidenceIds": "uuid[]?"
+      },
+      "response": "CorrectionSuggestion",
+      "status": 201,
+      "events": [
+        "catalog.correction.suggested"
+      ],
+      "screens": [
+        "seller/offer"
+      ]
+    },
+    {
+      "id": "listCategoryAttributes",
+      "area": "seller",
+      "method": "GET",
+      "path": "/categories/{id}/attributes",
+      "summary": "Attributes (own and inherited) and image standards for a category (drives the submission form)",
+      "auth": "seller",
+      "params": {
+        "id": "uuid"
+      },
+      "response": {
+        "attributes": "Attribute[]",
+        "imageRules": "ImageRule[]"
+      },
+      "screens": [
+        "seller/product-new"
+      ]
+    },
+    {
+      "id": "reviewQueue",
+      "area": "admin",
+      "method": "GET",
+      "path": "/review-queue",
+      "summary": "Submissions waiting for review, oldest first",
+      "auth": "staff",
+      "permission": "catalog.products.review",
+      "paging": true,
+      "query": {
+        "kind": "enum(new|correction|resubmitted)?",
+        "categoryId": "uuid?"
+      },
+      "response": "ProductAdmin",
+      "screens": [
+        "admin/product-review",
+        "admin/dashboard"
+      ]
+    },
+    {
+      "id": "listProductsAdmin",
+      "area": "admin",
+      "method": "GET",
+      "path": "/products",
+      "summary": "All products with filters",
+      "auth": "staff",
+      "paging": true,
+      "query": {
+        "q": "string?",
+        "categoryId": "uuid?",
+        "brandId": "uuid?",
+        "sellerId": "uuid?",
+        "reviewState": "string?",
+        "publication": "string?",
+        "missingContent": "bool?",
+        "duplicateSuspected": "bool?"
+      },
+      "response": "ProductAdmin",
+      "screens": [
+        "admin/catalog"
+      ],
+      "desc": "Rows carry ref, contentScore, missing, duplicateSuspected and the listing columns offerCount, liveOfferCount, bestPrice and offerNote. Tab counts come from GET /products/stats."
+    },
+    {
+      "id": "productStats",
+      "area": "admin",
+      "method": "GET",
+      "path": "/products/stats",
+      "summary": "Counts for the catalog product tabs and page header",
+      "desc": "All, Active, Hidden, Suspended, Missing content, Duplicates suspected, open submissions (Review queue · 23) and total offers.",
+      "auth": "staff",
+      "response": "ProductStats",
+      "screens": [
+        "admin/catalog"
+      ]
+    },
+    {
+      "id": "exportProducts",
+      "area": "admin",
+      "method": "POST",
+      "path": "/products/exports",
+      "summary": "Export the filtered product list",
+      "desc": "Creates an authorized, logged export job through reports.requestExport (dataset catalog.admin.products, registered at boot with reports.registerDataset; rows from exportRows). Filters use the same keys as GET /products.",
+      "auth": "staff",
+      "permission": "catalog.products.export",
+      "body": {
+        "filters": "json",
+        "format": "enum(csv|xlsx)?"
+      },
+      "response": "reports.ExportJob",
+      "status": 202,
+      "audited": true,
+      "screens": [
+        "admin/catalog"
+      ]
+    },
+    {
+      "id": "getProductAdmin",
+      "area": "admin",
+      "method": "GET",
+      "path": "/products/{id}",
+      "summary": "Product with review history and duplicate candidates",
+      "auth": "staff",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "ProductAdmin",
+      "screens": [
+        "admin/product-review"
+      ]
+    },
+    {
+      "id": "dismissCheck",
+      "area": "admin",
+      "method": "POST",
+      "path": "/products/{id}/checks/{kind}/dismiss",
+      "summary": "Mark an automated check finding as not applicable (e.g. Not a duplicate)",
+      "desc": "Applies to the latest submission's check of that kind. For duplicate checks, matchedProductId dismisses one candidate; omit it to dismiss all. Recorded in the review log; the product leaves Duplicates suspected when no duplicate finding is open.",
+      "auth": "staff",
+      "permission": "catalog.products.review",
+      "params": {
+        "id": "uuid",
+        "kind": "enum(duplicate|image_standard|category_fit|prohibited_claim|brand_authorization|restricted_item|identifier)"
+      },
+      "body": {
+        "reason": "text",
+        "matchedProductId": "uuid?"
+      },
+      "response": "ProductAdmin",
+      "errors": [
+        "NOT_FOUND"
+      ],
+      "audited": true,
+      "screens": [
+        "admin/product-review"
+      ]
+    },
+    {
+      "id": "saveReviewDraft",
+      "area": "admin",
+      "method": "PUT",
+      "path": "/products/{id}/review-draft",
+      "summary": "Save the reviewer's unsent decision",
+      "desc": "Keeps decision, reason and field comments for the open submission per reviewer (ProductAdmin.reviewDraft). Cleared when approve, request-changes or reject is sent.",
+      "auth": "staff",
+      "permission": "catalog.products.review",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "decision": "enum(approve|request_changes|reject)?",
+        "reason": "text?",
+        "fields": "map<string>?"
+      },
+      "response": "ReviewDraft",
+      "errors": [
+        "ILLEGAL_TRANSITION"
+      ],
+      "screens": [
+        "admin/product-review"
+      ]
+    },
+    {
+      "id": "createOfficialDraft",
+      "area": "admin",
+      "method": "POST",
+      "path": "/products",
+      "summary": "Create an Official Store product draft",
+      "auth": "staff",
+      "permission": "catalog.products.manage-official",
+      "body": "ProductInput",
+      "response": "ProductAdmin",
+      "status": 201,
+      "screens": [
+        "admin/official"
+      ]
+    },
+    {
+      "id": "updateOfficialDraft",
+      "area": "admin",
+      "method": "PATCH",
+      "path": "/products/{id}",
+      "summary": "Edit an Official Store draft",
+      "auth": "staff",
+      "permission": "catalog.products.manage-official",
+      "params": {
+        "id": "uuid"
+      },
+      "body": "ProductInput",
+      "response": "ProductAdmin",
+      "screens": [
+        "admin/official"
+      ]
+    },
+    {
+      "id": "submitOfficial",
+      "area": "admin",
+      "method": "POST",
+      "path": "/products/{id}/submit",
+      "summary": "Submit an Official Store product (same standard as sellers)",
+      "auth": "staff",
+      "permission": "catalog.products.manage-official",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "ProductAdmin",
+      "events": [
+        "catalog.product.submitted"
+      ]
+    },
+    {
+      "id": "approveProduct",
+      "area": "admin",
+      "method": "POST",
+      "path": "/products/{id}/approve",
+      "summary": "Approve a submission",
+      "auth": "staff",
+      "permission": "catalog.products.review",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "note": "text?"
+      },
+      "response": "ProductAdmin",
+      "errors": [
+        "ILLEGAL_TRANSITION",
+        "BRAND_NOT_ACTIVE"
+      ],
+      "audited": true,
+      "events": [
+        "catalog.product.approved"
+      ],
+      "screens": [
+        "admin/product-review"
+      ],
+      "desc": "A product whose brand is under review (seller brand request) cannot be approved until the brand is activated (POST /brands/{id}/status)."
+    },
+    {
+      "id": "requestChanges",
+      "area": "admin",
+      "method": "POST",
+      "path": "/products/{id}/request-changes",
+      "summary": "Ask the submitter to fix specific fields",
+      "auth": "staff",
+      "permission": "catalog.products.review",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "reason": "text",
+        "fields": {
+          "type": "map<string>",
+          "desc": "Field → comment shown next to the field"
+        }
+      },
+      "response": "ProductAdmin",
+      "audited": true,
+      "events": [
+        "catalog.product.changes_requested"
+      ],
+      "screens": [
+        "admin/product-review",
+        "seller/product-new"
+      ]
+    },
+    {
+      "id": "rejectProduct",
+      "area": "admin",
+      "method": "POST",
+      "path": "/products/{id}/reject",
+      "summary": "Reject with a reason",
+      "auth": "staff",
+      "permission": "catalog.products.review",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "reason": "text"
+      },
+      "response": "ProductAdmin",
+      "audited": true,
+      "events": [
+        "catalog.product.rejected"
+      ],
+      "screens": [
+        "admin/product-review"
+      ]
+    },
+    {
+      "id": "setPublication",
+      "area": "admin",
+      "method": "POST",
+      "path": "/products/{id}/publication",
+      "summary": "Set Active, Hidden or Suspended",
+      "auth": "staff",
+      "permission": "catalog.products.publish",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "publication": "enum(active|hidden|suspended)",
+        "reason": "text",
+        "trustReportId": "uuid?"
+      },
+      "response": "ProductAdmin",
+      "audited": true,
+      "events": [
+        "catalog.product.publication_changed"
+      ],
+      "screens": [
+        "admin/catalog",
+        "admin/trust"
+      ],
+      "approval": "Approval action catalog.products.publication-override. Reactivating a product that was suspended after a trust report needs a second reviewer.",
+      "desc": "Call GET /products/{id}/publication-impact first; the confirmation shows its effects."
+    },
+    {
+      "id": "publicationImpact",
+      "area": "admin",
+      "method": "GET",
+      "path": "/products/{id}/publication-impact",
+      "summary": "What hiding or suspending the product would do",
+      "desc": "Preview shown before setPublication and bulk hide or suspend (plan ch. 18: catalog removal explains its effects on open orders and customer cases): offers that stop showing and their sellers (offers.listActiveOffersForProduct), carts holding them (cart.countOfferInCarts), and open orders (orders.countOrderItemsForProducts), returns (returns.countOpenReturnsForProducts) and cases (support.countOpenCasesForProducts) that continue unchanged with their purchase snapshots. Counts from modules that are disabled are null.",
+      "auth": "staff",
+      "permission": "catalog.products.publish",
+      "params": {
+        "id": "uuid"
+      },
+      "query": {
+        "publication": "enum(active|hidden|suspended)"
+      },
+      "response": "PublicationImpact",
+      "screens": [
+        "admin/catalog",
+        "admin/trust"
+      ]
+    },
+    {
+      "id": "mergeDuplicate",
+      "area": "admin",
+      "method": "POST",
+      "path": "/products/merge",
+      "summary": "Merge duplicates and submissions into the product to keep",
+      "desc": "Each merges[] record either becomes a new variation (asNewVariant), joins an existing variation (intoVariantId) or is mapped by matching options. Offers, reviews and questions move to the kept product; past orders keep their snapshots; merged products redirect; a merged open submission is decided as merged. Publishes catalog.product.merged once per record. Preview with POST /products/merge/preview.",
+      "auth": "staff",
+      "permission": "catalog.products.review",
+      "body": "MergeRequest",
+      "response": "MergeResult",
+      "audited": true,
+      "events": [
+        "catalog.product.merged"
+      ],
+      "screens": [
+        "admin/product-review"
+      ],
+      "errors": [
+        "VALIDATION_FAILED",
+        "CONFLICT"
+      ]
+    },
+    {
+      "id": "previewMerge",
+      "area": "admin",
+      "method": "POST",
+      "path": "/products/merge/preview",
+      "summary": "Preview what a merge moves before confirming",
+      "desc": "Read-only. Offers from offers.listOffersAdmin, reviews and rating from reviews.getRatingSummaries, questions from reviews.listProductQuestions, order items from orders.countOrderItemsForProducts.",
+      "auth": "staff",
+      "permission": "catalog.products.review",
+      "body": "MergeRequest",
+      "response": "MergePreview",
+      "errors": [
+        "VALIDATION_FAILED"
+      ],
+      "screens": [
+        "admin/product-review"
+      ]
+    },
+    {
+      "id": "bulkUpdate",
+      "area": "admin",
+      "method": "POST",
+      "path": "/products/bulk",
+      "summary": "Bulk edit products (category, brand, publication) with preview",
+      "auth": "staff",
+      "permission": "catalog.products.bulk-edit",
+      "body": {
+        "productIds": "uuid[]",
+        "change": "json",
+        "reason": "text",
+        "dryRun": "bool"
+      },
+      "response": {
+        "affected": "int",
+        "preview": "ProductSummary[]",
+        "errors": "json[]"
+      },
+      "audited": true,
+      "screens": [
+        "admin/catalog"
+      ],
+      "phase": 2
+    },
+    {
+      "id": "listCorrections",
+      "area": "admin",
+      "method": "GET",
+      "path": "/corrections",
+      "summary": "Open correction suggestions",
+      "auth": "staff",
+      "permission": "catalog.products.review",
+      "paging": true,
+      "query": {
+        "state": "enum(open|accepted|declined)?"
+      },
+      "response": "CorrectionSuggestion",
+      "screens": [
+        "admin/product-review"
+      ]
+    },
+    {
+      "id": "decideCorrection",
+      "area": "admin",
+      "method": "POST",
+      "path": "/corrections/{id}/decide",
+      "summary": "Accept or decline a correction",
+      "desc": "Changes affecting other sellers' offers are reviewed here; accepted changes are kept in the review log.",
+      "auth": "staff",
+      "permission": "catalog.products.review",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "accept": "bool",
+        "reason": "text"
+      },
+      "response": "CorrectionSuggestion",
+      "audited": true,
+      "events": [
+        "catalog.correction.decided"
+      ]
+    },
+    {
+      "id": "categoriesAdmin",
+      "area": "admin",
+      "method": "GET",
+      "path": "/categories",
+      "summary": "Full category tree including hidden, with product and offer counts",
+      "auth": "staff",
+      "response": "Category[]",
+      "screens": [
+        "admin/categories"
+      ],
+      "desc": "productCount (active products with at least one eligible offer) and offerCount include subcategories; refreshed every 10 minutes."
+    },
+    {
+      "id": "createCategory",
+      "area": "admin",
+      "method": "POST",
+      "path": "/categories",
+      "summary": "Create a category",
+      "auth": "staff",
+      "permission": "catalog.taxonomy.manage",
+      "body": {
+        "name": "string",
+        "parentId": "uuid?",
+        "position": "int?",
+        "visible": "bool?",
+        "comingSoon": "bool?",
+        "imageId": "uuid?"
+      },
+      "response": "Category",
+      "status": 201,
+      "audited": true,
+      "screens": [
+        "admin/categories"
+      ],
+      "events": [
+        "catalog.category.changed"
+      ]
+    },
+    {
+      "id": "updateCategory",
+      "area": "admin",
+      "method": "PATCH",
+      "path": "/categories/{id}",
+      "summary": "Rename, move, hide or mark coming soon",
+      "auth": "staff",
+      "permission": "catalog.taxonomy.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "name": "string?",
+        "parentId": "uuid?",
+        "position": "int?",
+        "visible": "bool?",
+        "comingSoon": "bool?",
+        "imageId": "uuid?"
+      },
+      "response": "Category",
+      "audited": true,
+      "screens": [
+        "admin/categories"
+      ],
+      "events": [
+        "catalog.category.changed"
+      ]
+    },
+    {
+      "id": "getCategoryAttributesAdmin",
+      "area": "admin",
+      "method": "GET",
+      "path": "/categories/{id}/attributes",
+      "summary": "Category attributes with fill rates, inheritance and image standards",
+      "desc": "Attributes defined on an ancestor are listed with inheritedFrom and are edited there. filledCount / productCount shows how many products have a value; for required attributes the difference is the \"N products are missing Warranty\" alert (those products appear under Missing content).",
+      "auth": "staff",
+      "params": {
+        "id": "uuid"
+      },
+      "response": {
+        "attributes": "AttributeAdmin[]",
+        "imageRules": "ImageRule[]"
+      },
+      "errors": [
+        "NOT_FOUND"
+      ],
+      "screens": [
+        "admin/categories"
+      ]
+    },
+    {
+      "id": "putAttributes",
+      "area": "admin",
+      "method": "PUT",
+      "path": "/categories/{id}/attributes",
+      "summary": "Replace a category's attributes and image standards",
+      "auth": "staff",
+      "permission": "catalog.taxonomy.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "attributes": "Attribute[]",
+        "imageRules": "ImageRule[]"
+      },
+      "response": "Attribute[]",
+      "audited": true,
+      "screens": [
+        "admin/categories"
+      ],
+      "events": [
+        "catalog.category.changed"
+      ]
+    },
+    {
+      "id": "listBrandsAdmin",
+      "area": "admin",
+      "method": "GET",
+      "path": "/brands",
+      "summary": "All brands with counts, seller authorization and status",
+      "desc": "Brands tab (page total = tab count), the Brand filter on the products list, and seller brand requests waiting (status=under_review, requested=true).",
+      "auth": "staff",
+      "paging": true,
+      "query": {
+        "q": "string?",
+        "status": "enum(active|under_review|blocked)?",
+        "sellingPolicy": "enum(open|authorized_list|official_only)?",
+        "requested": "bool?"
+      },
+      "response": "BrandAdmin",
+      "screens": [
+        "admin/categories",
+        "admin/catalog"
+      ]
+    },
+    {
+      "id": "createBrand",
+      "area": "admin",
+      "method": "POST",
+      "path": "/brands",
+      "summary": "Create a brand",
+      "auth": "staff",
+      "permission": "catalog.taxonomy.manage",
+      "body": {
+        "name": "string",
+        "logoId": "uuid?",
+        "description": "text?",
+        "bannerId": "uuid?",
+        "sellingPolicy": "enum(open|authorized_list|official_only)?",
+        "authorizedSellerIds": "uuid[]?"
+      },
+      "response": "BrandAdmin",
+      "status": 201,
+      "audited": true,
+      "screens": [
+        "admin/categories"
+      ],
+      "events": [
+        "catalog.brand.changed"
+      ]
+    },
+    {
+      "id": "updateBrand",
+      "area": "admin",
+      "method": "PATCH",
+      "path": "/brands/{id}",
+      "summary": "Edit a brand, including who can sell",
+      "auth": "staff",
+      "permission": "catalog.taxonomy.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "name": "string?",
+        "logoId": "uuid?",
+        "description": "text?",
+        "bannerId": "uuid?",
+        "sellingPolicy": "enum(open|authorized_list|official_only)?",
+        "authorizedSellerIds": {
+          "type": "uuid[]?",
+          "desc": "Replaces the staff-added authorized sellers (claim-based entries stay)"
+        },
+        "reason": "text?"
+      },
+      "response": "BrandAdmin",
+      "audited": true,
+      "events": [
+        "catalog.brand.changed"
+      ],
+      "screens": [
+        "admin/categories"
+      ]
+    },
+    {
+      "id": "setBrandStatus",
+      "area": "admin",
+      "method": "POST",
+      "path": "/brands/{id}/status",
+      "summary": "Activate, flag for review or block a brand (decides seller brand requests)",
+      "desc": "Reviewing a brand under review means activating or blocking it with a reason. Blocking a requested brand returns its submission to the seller with changes requested.",
+      "auth": "staff",
+      "permission": "catalog.taxonomy.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "status": "enum(active|under_review|blocked)",
+        "reason": "text",
+        "trustReportId": "uuid?"
+      },
+      "response": "BrandAdmin",
+      "errors": [
+        "ILLEGAL_TRANSITION"
+      ],
+      "audited": true,
+      "events": [
+        "catalog.brand.changed"
+      ],
+      "screens": [
+        "admin/categories"
+      ]
+    }
+  ],
+  "events": {
+    "publishes": [
+      {
+        "name": "catalog.product.submitted",
+        "when": "A seller or the Official Store submits a product",
+        "payload": {
+          "productId": "uuid",
+          "ownerSellerId": "uuid?"
+        }
+      },
+      {
+        "name": "catalog.product.approved",
+        "when": "A reviewer approves",
+        "payload": {
+          "productId": "uuid",
+          "ownerSellerId": "uuid?"
+        }
+      },
+      {
+        "name": "catalog.product.changes_requested",
+        "when": "A reviewer asks for changes",
+        "payload": {
+          "productId": "uuid",
+          "ownerSellerId": "uuid?",
+          "reason": "text",
+          "fields": "map<string>"
+        }
+      },
+      {
+        "name": "catalog.product.rejected",
+        "when": "A reviewer rejects",
+        "payload": {
+          "productId": "uuid",
+          "ownerSellerId": "uuid?",
+          "reason": "text"
+        }
+      },
+      {
+        "name": "catalog.product.publication_changed",
+        "when": "Active / Hidden / Suspended changes",
+        "payload": {
+          "productId": "uuid",
+          "from": "string",
+          "to": "string",
+          "reason": "text",
+          "trustReportId": "uuid?"
+        }
+      },
+      {
+        "name": "catalog.product.updated",
+        "when": "Shared content changes",
+        "payload": {
+          "productId": "uuid",
+          "version": "int"
+        }
+      },
+      {
+        "name": "catalog.product.merged",
+        "when": "A duplicate or submission is merged (one event per merged record)",
+        "payload": {
+          "keptProductId": "uuid",
+          "duplicateProductId": "uuid",
+          "newVariantId": "uuid?",
+          "intoVariantId": "uuid?",
+          "reason": "text"
+        }
+      },
+      {
+        "name": "catalog.correction.suggested",
+        "when": "A seller suggests a correction",
+        "payload": {
+          "suggestionId": "uuid",
+          "productId": "uuid"
+        }
+      },
+      {
+        "name": "catalog.correction.decided",
+        "when": "Staff accept or decline a correction",
+        "payload": {
+          "suggestionId": "uuid",
+          "accepted": "bool"
+        }
+      },
+      {
+        "name": "catalog.category.changed",
+        "when": "A category is created, renamed, moved, hidden or its attributes change",
+        "payload": {
+          "categoryId": "uuid",
+          "change": "enum(created|updated|attributes)"
+        }
+      },
+      {
+        "name": "catalog.brand.requested",
+        "when": "A seller submits a product with a brand that is not listed",
+        "payload": {
+          "brandId": "uuid",
+          "name": "string",
+          "sellerId": "uuid",
+          "productId": "uuid"
+        }
+      },
+      {
+        "name": "catalog.brand.changed",
+        "when": "A brand is created, edited, or its status or selling policy changes",
+        "payload": {
+          "brandId": "uuid",
+          "change": "enum(created|updated|status)",
+          "status": "string",
+          "sellingPolicy": "string"
+        }
+      }
+    ],
+    "consumes": [
+      {
+        "name": "sellers.seller.restricted",
+        "does": "When the restriction covers product submissions (optionally scoped to categories), block new drafts and submissions from that seller in scope and pause its open submissions in the review queue"
+      },
+      {
+        "name": "sellers.seller.suspended",
+        "does": "Pause the seller's open submissions in the review queue"
+      },
+      {
+        "name": "sellers.seller.reinstated",
+        "does": "Return paused submissions to the review queue"
+      },
+      {
+        "name": "trust.enforcement.recorded",
+        "does": "Suspend products named in a counterfeit enforcement"
+      },
+      {
+        "name": "offers.offer.created",
+        "does": "Add the offer to offer_index and refresh listing_stats for the product"
+      },
+      {
+        "name": "offers.offer.status_changed",
+        "does": "Update offer eligibility in offer_index and refresh listing_stats (offerNote names paused offers)"
+      },
+      {
+        "name": "offers.offer.price_changed",
+        "does": "Update the offer price in offer_index and the product best price"
+      },
+      {
+        "name": "inventory.stock.changed",
+        "does": "Update in_stock for the offer in offer_index and refresh listing_stats"
+      },
+      {
+        "name": "sellers.change_request.decided",
+        "does": "kind brand_request and approved: create the brand as active from brandRequest (selling policy open: every approved seller may list it and the requesting seller gets no exclusive authorization; requestedBy records the seller and the change request), or activate a brand with the same name that is still under_review; publishes catalog.brand.changed. Rejected requests and other kinds are ignored"
+      }
+    ]
+  },
+  "permissions": [
+    {
+      "key": "catalog.products.review",
+      "audience": "staff",
+      "desc": "Approve, request changes, reject, merge duplicates, decide corrections"
+    },
+    {
+      "key": "catalog.products.publish",
+      "audience": "staff",
+      "desc": "Hide, suspend or reactivate products (reason required)"
+    },
+    {
+      "key": "catalog.products.manage-official",
+      "audience": "staff",
+      "desc": "Create and edit Official Store products"
+    },
+    {
+      "key": "catalog.products.bulk-edit",
+      "audience": "staff",
+      "desc": "Bulk edits across many products"
+    },
+    {
+      "key": "catalog.taxonomy.manage",
+      "audience": "staff",
+      "desc": "Categories, attributes, image standards and brands"
+    },
+    {
+      "key": "catalog.products.submit",
+      "audience": "seller",
+      "desc": "Create drafts and submit products for review"
+    },
+    {
+      "key": "catalog.products.export",
+      "audience": "staff",
+      "desc": "Export the filtered product list (authorized, logged)"
+    }
+  ],
+  "jobs": [
+    {
+      "name": "catalog.refresh-counts",
+      "schedule": "every 10 min",
+      "does": "Roll listing_stats up into category_stats (with subcategories) and brand_stats (overall and per top-level category)"
+    }
+  ],
+  "settings": [
+    {
+      "key": "maxImagesPerProduct",
+      "default": 12,
+      "desc": "Images per product"
+    },
+    {
+      "key": "minDescriptionLength",
+      "default": 40,
+      "desc": "Characters required before submission"
+    }
+  ],
+  "notes": [
+    "Official Store products follow the same review standard as seller products (plan ch. 2).",
+    "Variants are replaced as a set while a product is a draft; after approval, variant changes go through corrections so existing offers keep their variant ids.",
+    "Automated submission checks (plan ch. 8: review for duplicates, misleading claims, poor imagery and incorrect categories) run when a product is submitted and are stored per submission in submission_checks: duplicate (title, brand, model number, GTIN and image similarity against existing products), image_standard (media.checkImage against the category image_standards), category_fit (attributes and title against the chosen category), prohibited_claim (medical, safety and superlative claims in title, features and description), brand_authorization (protected brands need an approved brand claim), restricted_item (restricted categories and keywords) and identifier (GTIN format and reuse). Results are pass, warn or fail with evidence; they are shown to the reviewer in the review queue and never approve or reject on their own. Fail results are listed to the submitter only through the reviewer's request-changes reasons.",
+    "Each submit creates a submissions row (SUB-YYMMDD-NNNN): kind new for a first submission, resubmitted after changes were requested, content_change when an approved product is reopened. Draft saves update last_saved_at and last_saved_by; the review queue is ordered by review_due_at.",
+    "Product references: every product gets ref PRD-NNNNN at creation; it is shown on duplicates, merges and admin lists and accepted by admin search.",
+    "Content score (0–100) is recomputed on every save from required attributes filled, images meeting the category standard, description length, key features and identifiers; missing[] lists what lowers it.",
+    "Listing counts: catalog keeps offer_index from offers and inventory events (offers.getOfferStats on rebuild) so admin lists, CatalogMatch, category and brand counts need no per-row calls to offers. Counts may lag by the job interval.",
+    "Brand requests: a seller who cannot find a brand sends requestedBrand with the product. On submit the brand is created with status under_review and requestedBy; the reviewer activates or blocks it (POST /brands/{id}/status) before deciding the product. Brand affiliation claims shown on storefronts stay in sellers (public claims). A seller can also request a brand without a product (sellers POST /brand-requests, a brand_request change request reviewed in sellers with its evidence). Both paths end in the same catalog state, an active brand with requestedBy set: on sellers.change_request.decided (approved) catalog creates the brand as active, or activates a same-name brand that is still under_review from a product submission, so the product waiting on it can then be decided. catalog does not review that request a second time.",
+    "Seller offer creation: myProduct / getProductForSeller resolves any approved, active product so seller/offer can show the read-only product card before the seller has an offer on it.",
+    "Impact and merge previews count open and past order items, open returns and open cases in-process (orders.countOrderItemsForProducts, returns.countOpenReturnsForProducts, support.countOpenCasesForProducts). Those modules depend on catalog, so catalog lists them only as optional dependencies resolved at call time; a disabled module leaves its count null."
+  ],
+  "approvalActions": [
+    {
+      "key": "catalog.products.publication-override",
+      "desc": "Reactivate a product suspended after a trust report, or override another team's publication decision",
+      "limit": "none",
+      "secondReviewer": "always",
+      "approvers": "Catalog Manager with Trust and Risk Manager (example)"
+    }
+  ],
+  "errorCodes": {
+    "BRAND_NOT_ACTIVE": {
+      "status": 409,
+      "meaning": "The product's brand is under review or blocked; decide the brand first"
+    }
+  }
+}

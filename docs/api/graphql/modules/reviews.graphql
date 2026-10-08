@@ -1,0 +1,286 @@
+# reviews: product reviews (Verified Purchase), product questions and answers, seller feedback (kept separate from product
+# reviews) and rating summaries.
+# Adds Product.reviewSummary, Product.reviews, Product.questions, Seller.rating, Seller.feedback, Offer.sellerRating
+# (also for Official Store offers) and OrderItem.reviewStatus.
+# Moderation queues, reports and appeals stay on REST.
+
+"A published product review"
+type Review {
+  id: UUID!
+  productId: UUID!
+  "e.g. Color: Midnight black"
+  variantLabel: String
+  author: ReviewAuthor!
+  "1–5"
+  rating: Int!
+  headline: String!
+  text: String!
+  media: [MediaRef!]!
+  "Who sold the reviewed item"
+  soldBy: ReviewSoldBy!
+  reviewedAt: DateTime!
+  editedAt: DateTime
+  helpfulCount: Int!
+  "Null without a customer session"
+  viewerVotedHelpful: Boolean
+  "Public response from the seller or the Official Store"
+  response: ReviewResponse
+
+  # ---- Seller Center and Admin Center only
+  "Order the review is linked to"
+  orderRef: String @areas(in: [SELLER, ADMIN])
+  "The caller may respond publicly (one response per review)"
+  canRespond: Boolean @areas(in: [SELLER])
+  reportCount: Int @areas(in: [ADMIN])
+}
+
+type ReviewAuthor {
+  kind: ReviewAuthorKind!
+  "e.g. Mara D."
+  displayName: String!
+  "Bought this product on Marketly"
+  verifiedPurchase: Boolean!
+}
+
+enum ReviewAuthorKind {
+  CUSTOMER
+  SELLER
+  STAFF
+}
+
+type ReviewSoldBy {
+  "Null for the Official Store"
+  sellerId: UUID
+  name: String!
+}
+
+"A public seller response to a review or feedback, checked against the response rules"
+type ReviewResponse {
+  id: UUID!
+  "e.g. Marketly Official Store / Northwind Audio"
+  fromName: String!
+  fromKind: ReviewResponseFrom!
+  text: String!
+  publishedAt: DateTime
+  status: ReviewResponseStatus @areas(in: [SELLER, ADMIN])
+  editableUntil: DateTime @areas(in: [SELLER, ADMIN])
+}
+
+enum ReviewResponseFrom {
+  SELLER
+  OFFICIAL_STORE
+}
+
+enum ReviewResponseStatus @areas(in: [SELLER, ADMIN]) {
+  PENDING
+  PUBLISHED
+  HELD
+  REJECTED
+}
+
+"Product rating summary. hasReviews false shows the honest no-reviews state without stars."
+type ReviewSummary {
+  productId: UUID!
+  hasReviews: Boolean!
+  "Null until there are reviews"
+  average: Float
+  ratingCount: Int!
+  writtenCount: Int!
+  "5 to 1 stars"
+  distribution: [ReviewRatingBucket!]!
+  answeredQuestions: Int!
+  withPhotos: Int!
+}
+
+type ReviewRatingBucket {
+  stars: Int!
+  count: Int!
+  pct: Int!
+}
+
+type ReviewPage implements Paged {
+  items: [Review!]!
+  nextCursor: String
+  page: Int
+  totalPages: Int
+  total: Int
+}
+
+enum ReviewSort {
+  MOST_HELPFUL
+  NEWEST
+  HIGHEST_RATED
+  LOWEST_RATED
+}
+
+"A product question with answers labelled by who answered"
+type Question {
+  id: UUID!
+  productId: UUID!
+  text: String!
+  "e.g. a shopper / Marcus J."
+  askedBy: String!
+  askedAt: DateTime!
+  answers: [Answer!]!
+  answerCount: Int!
+  "Only while unanswered, e.g. The Official Store usually answers within 1 business day"
+  answerExpectation: String
+  status: QuestionStatus @areas(in: [SELLER, ADMIN])
+}
+
+enum QuestionStatus @areas(in: [SELLER, ADMIN]) {
+  PENDING_REVIEW
+  PUBLISHED
+  REMOVED
+}
+
+type Answer {
+  id: UUID!
+  text: String!
+  by: ReviewAuthor!
+  "Shown as Answer from the seller / Marketly staff / Customer"
+  label: AnswerLabel!
+  answeredAt: DateTime!
+  helpfulCount: Int!
+  status: AnswerStatus @areas(in: [SELLER, ADMIN])
+}
+
+enum AnswerLabel {
+  SELLER
+  MARKETLY_STAFF
+  CUSTOMER
+}
+
+enum AnswerStatus @areas(in: [SELLER, ADMIN]) {
+  PENDING_REVIEW
+  PUBLISHED
+  EDIT_REQUESTED
+  REMOVED
+}
+
+type QuestionPage implements Paged {
+  items: [Question!]!
+  nextCursor: String
+  page: Int
+  totalPages: Int
+  total: Int
+}
+
+"Feedback about a seller's shipping, packaging and communication for one package (not about the product)"
+type SellerFeedback {
+  id: UUID!
+  sellerId: UUID!
+  author: ReviewAuthor!
+  "Item as described"
+  asDescribed: Boolean!
+  "1–5"
+  dispatchRating: Int!
+  "1–5; null when the customer did not contact the seller"
+  communicationRating: Int
+  "1–5, drives positive / neutral / negative"
+  overall: Int!
+  sentiment: SellerFeedbackSentiment!
+  comment: String
+  "What was bought, for context on the storefront"
+  itemTitle: String
+  postedAt: DateTime!
+  editedAt: DateTime
+  response: ReviewResponse
+  orderRef: String @areas(in: [SELLER, ADMIN])
+}
+
+enum SellerFeedbackSentiment {
+  POSITIVE
+  NEUTRAL
+  NEGATIVE
+}
+
+type SellerFeedbackPage implements Paged {
+  items: [SellerFeedback!]!
+  nextCursor: String
+  page: Int
+  totalPages: Int
+  total: Int
+}
+
+"""
+Seller feedback summary over the last 12 months, e.g. 98% positive · 4,812 ratings. Also given for the Official Store
+(official true, sellerId null), which collects the same package feedback.
+"""
+type SellerRating {
+  "Null for the Official Store"
+  sellerId: UUID
+  "True for the Official Store"
+  official: Boolean!
+  periodMonths: Int!
+  count: Int!
+  "Average overall feedback score, 1–5. Null until there is feedback."
+  average: Float
+  "Null until the seller has feedback"
+  positivePct: Int
+  neutralPct: Int
+  negativePct: Int
+  asDescribedPct: Int
+  avgDispatch: Float
+  avgCommunication: Float
+  "Packages dispatched by their deadline, last 90 days (from shipping's dispatch metrics). Null with too few orders or without shipping."
+  onTimeDispatchPct: Float
+  "e.g. 98% positive · 4,812 ratings"
+  label: String!
+}
+
+"Review and feedback state of a purchased item for the customer's order page"
+type ReviewItemStatus @areas(in: [STORE]) {
+  "Delivered and not yet reviewed"
+  canReview: Boolean!
+  reviewBy: DateTime
+  reviewId: UUID
+  status: ReviewStatus
+  "e.g. Published / Hidden: under review"
+  statusLabel: String
+  rating: Int
+  "Seller feedback can be left for this item's package"
+  feedbackEligible: Boolean!
+  feedbackGiven: Boolean!
+}
+
+enum ReviewStatus @areas(in: [STORE]) {
+  DRAFT
+  PENDING
+  PUBLISHED
+  HELD
+  EDIT_REQUESTED
+  REMOVED
+  DELETED
+}
+
+# ---------------------------------------------------------------- fields on other modules' types
+
+extend type Product {
+  "Average, count, distribution and answered questions (batched for product cards)"
+  reviewSummary: ReviewSummary! @source(module: "reviews", fn: "getRatingSummaries")
+
+  "Published reviews with filters and sorting"
+  reviews(stars: Int, verifiedOnly: Boolean, withPhotos: Boolean, variantLabel: String, sort: ReviewSort = MOST_HELPFUL, paging: PageInput): ReviewPage! @source(module: "reviews", fn: "listProductReviews") @cost(weight: 10)
+
+  "Published questions with labelled answers, most helpful first"
+  questions(search: String, paging: PageInput): QuestionPage! @source(module: "reviews", fn: "listProductQuestions") @cost(weight: 10)
+}
+
+extend type Seller {
+  "Seller feedback summary for the storefront, offers and seller 360"
+  rating: SellerRating! @source(module: "reviews", fn: "getSellerFeedbackSummary")
+
+  "Seller feedback with public seller responses, newest first"
+  feedback(sentiment: SellerFeedbackSentiment, paging: PageInput): SellerFeedbackPage! @source(module: "reviews", fn: "listSellerFeedback") @cost(weight: 10)
+}
+
+extend type Offer {
+  "Feedback summary of whoever sells this offer: the marketplace seller or the Official Store (Offer.seller is null for Official Store offers)"
+  sellerRating: SellerRating! @areas(in: [STORE, ADMIN]) @source(module: "reviews", fn: "getOfferSellerRatings")
+}
+
+extend type OrderItem {
+  "Write a review / see your review, and whether seller feedback is open"
+  reviewStatus: ReviewItemStatus @areas(in: [STORE]) @source(module: "reviews", fn: "reviewStatusForItems")
+}

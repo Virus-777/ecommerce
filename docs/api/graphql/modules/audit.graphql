@@ -1,0 +1,157 @@
+# audit: the tamper-evident action history (who did what, in which role, to which record, why, before/after, approvals).
+# Admin Center only. Exports, retention and integrity stay on REST /api/admin/audit/*.
+# Adds `auditTrail` to the admin 360 views (order, seller, customer, payout run): the "Action history" card with a
+# "Full log" link to admin/audit.
+
+"""
+One recorded action. Entries are append-only; staff see them with audit.entries.view.
+"""
+type AuditEntry @areas(in: [ADMIN]) {
+  id: UUID!
+  "Monotonic sequence used by the hash chain"
+  seq: Int!
+  at: DateTime!
+  actor: Actor!
+  "Roles the actor held when acting, e.g. Seller Manager"
+  actorRoles: [AuditRoleName!]!
+  "Key, e.g. finance.hold.released"
+  action: String!
+  "Released payout hold"
+  actionLabel: String!
+  module: String!
+  category: AuditCategory!
+  target: AuditTarget!
+  "Other records the action touched (e.g. the return and case of an order refund)"
+  relatedTargets: [AuditTarget!]!
+  reason: String
+  "Human before/after, e.g. Ships by Sep 22 → Ships by Oct 12"
+  change: AuditChange!
+  "Structured values before the change"
+  before: JSON @cost(weight: 2)
+  "Structured values after the change"
+  after: JSON @cost(weight: 2)
+  "References: UPS proof of delivery, case CS-260930-1172, media ids"
+  evidence: [String!]!
+  approval: AuditApproval!
+  "X-Request-Id of the HTTP call"
+  requestId: String
+  ip: String
+  "Also shown in the seller's own history"
+  visibleToSeller: Boolean!
+}
+
+type AuditRoleName @areas(in: [ADMIN]) {
+  key: String!
+  name: String!
+}
+
+"The record an entry is about"
+type AuditTarget @areas(in: [ADMIN]) {
+  "order, order_item, seller, product, offer, payout, payout_run, hold, refund, return, case, setting, role, staff, customer, campaign…"
+  type: String!
+  id: String!
+  "Human reference shown in lists: MK-261002-55410, PO-261009-0418"
+  ref: String
+  "Casa Verde Home · Pellar Cast Iron Skillet"
+  label: String
+  sellerId: UUID
+  "Admin screen that opens the target, e.g. admin/payouts"
+  screen: String
+}
+
+type AuditChange @areas(in: [ADMIN]) {
+  before: String
+  after: String
+}
+
+"Which approval applied to the action"
+type AuditApproval @areas(in: [ADMIN]) {
+  state: AuditApprovalState!
+  "Why none was needed or who is awaited: 'Within $50 limit', 'Waiting for Morgan Hale'"
+  note: String
+  approvalRequestId: UUID
+  approvers: [String!]!
+  decidedAt: DateTime
+  steps: [TimelineEvent!]!
+}
+
+enum AuditCategory @areas(in: [ADMIN]) {
+  FINANCIAL
+  SELLER_ENFORCEMENT
+  CATALOG
+  ORDERS
+  RETURNS
+  CUSTOMERS
+  SETTINGS
+  ACCESS
+  SECURITY
+  CONTENT
+  ADVERTISING
+  OTHER
+}
+
+enum AuditApprovalState @areas(in: [ADMIN]) {
+  NOT_REQUIRED
+  PENDING
+  PARTIALLY_APPROVED
+  APPROVED
+  REJECTED
+  RETURNED
+  CANCELLED
+  EXPIRED
+}
+
+"Filters of the admin/audit list (same as REST GET /api/admin/audit/entries)"
+input AuditFilterInput @areas(in: [ADMIN]) {
+  "Order, seller, SKU, payout reference, staff name or reason text"
+  q: String
+  actorId: String
+  roleKey: String
+  module: String
+  category: AuditCategory
+  targetType: String
+  targetId: String
+  sellerId: UUID
+  action: String
+  approvalState: AuditApprovalState
+  from: DateTime
+  to: DateTime
+}
+
+type AuditEntryPage implements Paged @areas(in: [ADMIN]) {
+  items: [AuditEntry!]!
+  nextCursor: String
+  page: Int
+  totalPages: Int
+  total: Int
+}
+
+extend type Query {
+  "The action history with filters, newest first"
+  auditEntries(filter: AuditFilterInput, paging: PageInput): AuditEntryPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @cost(weight: 10) @source(module: "audit", fn: "searchEntries")
+
+  auditEntry(id: UUID!): AuditEntry @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @source(module: "audit", fn: "getEntry")
+}
+
+# ---- "Action history" on admin 360 views. includeRelated also returns entries where the record is a related target
+# (an order's returns, cases and packages; a seller's restrictions and holds). Newest first.
+
+extend type Order {
+  "Staff and system actions on this order, its items, packages, returns, refunds and cases"
+  auditTrail(category: AuditCategory, includeRelated: Boolean = true, paging: PageInput): AuditEntryPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @cost(weight: 5) @source(module: "audit", fn: "trailOf")
+}
+
+extend type Seller {
+  "Approval, restrictions, holds, payout destination and member changes for this seller"
+  auditTrail(category: AuditCategory, includeRelated: Boolean = true, paging: PageInput): AuditEntryPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @cost(weight: 5) @source(module: "audit", fn: "trailOf")
+}
+
+extend type Customer {
+  "Account actions by staff (restrictions, password resets, closures) and their reasons"
+  auditTrail(category: AuditCategory, includeRelated: Boolean = true, paging: PageInput): AuditEntryPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @cost(weight: 5) @source(module: "audit", fn: "trailOf")
+}
+
+extend type PayoutRun {
+  "Run creation, holds applied, approvals and release"
+  auditTrail(category: AuditCategory, includeRelated: Boolean = true, paging: PageInput): AuditEntryPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @cost(weight: 5) @source(module: "audit", fn: "trailOf")
+}

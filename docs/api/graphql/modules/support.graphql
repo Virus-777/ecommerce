@@ -1,0 +1,474 @@
+# support: help cases and disputes (customer help, order problems, seller requests, disputes with evidence and decisions).
+# Adds Order.cases, Return.case, Customer.openCases (store) / cases (admin) and Seller.cases (admin).
+# The order behind a case is linked by orderId/orderRef; orders adds Case.order where a screen needs the full order.
+
+"""
+A help case or dispute: who handles it, the next action and who must take it, linked items, the labelled conversation,
+offers, decision, remedies, appeal and reopen rules.
+Store and seller see their side (no internal notes). Admin adds parties, purchase terms at order time, shipment evidence,
+evidence files, deadlines and history (dispute review).
+"""
+type Case {
+  id: UUID!
+  "CS-NNNNNN"
+  ref: String!
+  kind: CaseKind!
+  subject: String!
+  category: CaseCategory!
+  priority: CasePriority!
+  status: CaseStatus!
+  "e.g. Waiting on seller"
+  statusLabel: String!
+  openedAt: DateTime!
+  updatedAt: DateTime!
+  "Not resolved or closed"
+  open: Boolean!
+  handledBy: CaseHandler!
+  nextAction: CaseNextAction!
+  expectedResponse: Deadline
+  "e.g. By Fri, Oct 9, 5:00 PM PT / Closed Aug 28"
+  expectedReply: String!
+  orderId: UUID
+  orderRef: String
+  "Order items the case is about, with their current state"
+  items: [CaseItem!]!
+  returnId: UUID
+  returnRef: String
+  "Messages visible to the caller, oldest first. Internal notes (role INTERNAL_NOTE, audience INTERNAL) only in Admin Center."
+  messages: [CaseMessage!]!
+  attachments: [MediaRef!]!
+  offers: [CaseOffer!]!
+  decision: CaseDecision
+  "Refund, replacement or other remedies with their progress"
+  remedies: [CaseRemedy!]!
+  appeal: CaseAppeal
+  reopenUntil: DateTime
+  "e.g. Stays open until the refund is sent; reopen within 30 days if it doesn't arrive"
+  reopenRules: String!
+  timeline: [TimelineEvent!]!
+  "What the caller may do now"
+  can: CaseActions! @areas(in: [STORE, SELLER])
+
+  # ---- Seller Center and Admin Center only
+  "Marketly support is following or deciding the case"
+  marketplaceInvolved: Boolean! @areas(in: [SELLER, ADMIN])
+  "Dispute evidence from both parties and staff"
+  evidence: [CaseEvidence!]! @areas(in: [SELLER, ADMIN])
+
+  # ---- Admin Center only
+  customer: CaseCustomer @areas(in: [ADMIN])
+  seller: CaseSeller @areas(in: [ADMIN])
+  owner: Actor @areas(in: [ADMIN])
+  team: String @areas(in: [ADMIN])
+  financeReviewer: Actor @areas(in: [ADMIN])
+  "Purchase terms snapshot taken when the order was accepted"
+  purchaseTerms: CasePurchaseTerms @areas(in: [ADMIN])
+  "Dispatch, label and carrier events that bear on the dispute"
+  shipmentEvidence: [TimelineEvent!]! @areas(in: [ADMIN])
+  "Deadlines per party, e.g. Seller evidence due 12:00 PM"
+  deadlines: [CaseNamedDeadline!]! @areas(in: [ADMIN])
+  "Assignment, escalation, holds and decisions with who and when"
+  history: [TimelineEvent!]! @areas(in: [ADMIN])
+  reopened: Boolean! @areas(in: [ADMIN])
+  "Saved, unpublished decision (Save decision draft); never shown to the parties"
+  decisionDraft: CaseDecisionDraft @areas(in: [ADMIN])
+}
+
+"An unpublished decision draft saved by staff"
+type CaseDecisionDraft @areas(in: [ADMIN]) {
+  outcome: CaseOutcome
+  reason: String
+  remedies: [CaseDraftRemedy!]!
+  appealDeadline: DateTime
+  notifyParties: Boolean!
+  savedAt: DateTime!
+  savedBy: Actor!
+}
+
+type CaseDraftRemedy @areas(in: [ADMIN]) {
+  kind: CaseRemedyKind!
+  amount: Money
+  chargedTo: CaseRemedyChargedTo
+  orderItemIds: [UUID!]!
+  dueAt: DateTime
+  note: String
+}
+
+enum CaseKind {
+  CUSTOMER_HELP
+  ORDER_PROBLEM
+  DISPUTE
+  SELLER_REQUEST
+}
+
+enum CasePriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum CaseStatus {
+  OPEN
+  WAITING_ON_SELLER
+  WAITING_ON_CUSTOMER
+  ESCALATED
+  DECISION_MADE
+  APPEALED
+  RESOLVED
+  CLOSED
+  REOPENED
+}
+
+"Case topic with its response targets"
+type CaseCategory {
+  "e.g. delivery_late, return_dispute, fees_payouts"
+  key: String!
+  "e.g. Delivery, late item"
+  label: String!
+  firstResponseBusinessHours: Int!
+  resolutionBusinessDays: Int!
+  "Team that owns the category, e.g. customer_support, returns, finance"
+  team: String @areas(in: [ADMIN])
+}
+
+type CaseHandler {
+  kind: CaseHandlerKind!
+  "e.g. Casa Verde Home (seller) / Isabel Cruz, Marketly support"
+  name: String!
+  staff: Actor
+  team: String
+  "Marketly support is following a seller-handled case"
+  supportFollowing: Boolean!
+}
+
+enum CaseHandlerKind {
+  SELLER
+  OFFICIAL_STORE
+  MARKETPLACE_SUPPORT
+}
+
+type CaseNextAction {
+  "e.g. Casa Verde Home confirms tracking or offers a refund"
+  label: String!
+  whoMustAct: CaseParty!
+  due: Deadline
+  youNeedToAct: Boolean!
+  "e.g. If they miss it, Marketly steps in"
+  note: String
+}
+
+enum CaseParty {
+  CUSTOMER
+  SELLER
+  MARKETPLACE
+  NONE
+}
+
+"An order item linked to the case"
+type CaseItem {
+  orderItemId: UUID!
+  title: String!
+  options: [VariantOption!]!
+  quantity: Int!
+  price: Money!
+  imageUrl: URL
+  ownerType: CaseOwnerType!
+  "Null for the Official Store"
+  sellerId: UUID
+  sellerName: String!
+  "e.g. Package 3 of 3"
+  packageLabel: String
+  "e.g. Delayed"
+  itemStatus: String!
+  "e.g. Was Sep 22 · now Oct 12"
+  estimate: String
+}
+
+enum CaseOwnerType {
+  OFFICIAL
+  SELLER
+}
+
+"A message on a case, labelled by who wrote it and who can see it"
+type CaseMessage {
+  id: UUID!
+  author: Actor!
+  "e.g. Isabel Cruz, Marketly support"
+  authorLabel: String!
+  role: CaseMessageRole!
+  audience: CaseMessageAudience!
+  body: String!
+  attachments: [MediaRef!]!
+  at: DateTime!
+}
+
+"INTERNAL_NOTE is only ever returned in Admin Center"
+enum CaseMessageRole {
+  CUSTOMER
+  SELLER
+  MARKETLY_STAFF
+  INTERNAL_NOTE
+  SYSTEM
+}
+
+"INTERNAL is only ever returned in Admin Center"
+enum CaseMessageAudience {
+  ALL
+  CUSTOMER
+  SELLER
+  INTERNAL
+}
+
+"An offer from the seller or Marketly (ship by a date, refund, replacement)"
+type CaseOffer {
+  id: UUID!
+  from: CaseOfferFrom!
+  kind: CaseOfferKind!
+  amount: Money
+  shipBy: Date
+  note: String
+  status: CaseOfferStatus!
+  respondBy: DateTime
+  createdAt: DateTime!
+}
+
+enum CaseOfferFrom {
+  SELLER
+  MARKETPLACE
+}
+
+enum CaseOfferKind {
+  SHIP_BY_DATE
+  REFUND
+  PARTIAL_REFUND
+  REPLACEMENT
+}
+
+enum CaseOfferStatus {
+  OPEN
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  WITHDRAWN
+}
+
+type CaseDecision {
+  outcome: CaseOutcome!
+  "Shared with both parties, citing the purchase terms"
+  reason: String!
+  decidedBy: Actor!
+  decidedAt: DateTime!
+  publishedAt: DateTime
+  appealDeadline: DateTime
+  "e.g. A different Marketly team member reviews, replies within 3 business days"
+  appealRoute: String!
+  "True after an appeal decision"
+  final: Boolean!
+}
+
+enum CaseOutcome {
+  CUSTOMER_FAVORED
+  SELLER_FAVORED
+  SHARED
+  NO_FAULT
+  INFORMATION_ONLY
+}
+
+"A remedy promised on the case. Refund remedies follow the refund request: approved is not money sent."
+type CaseRemedy {
+  id: UUID!
+  kind: CaseRemedyKind!
+  amount: Money
+  chargedTo: CaseRemedyChargedTo
+  orderItemIds: [UUID!]!
+  status: CaseRemedyStatus!
+  statusLabel: String!
+  "Refund: Requested, Approved, Processing, Sent"
+  track: [String!]!
+  currentStep: Int
+  dueAt: DateTime
+  "e.g. Visa •••• 4417"
+  destination: String
+  "e.g. Approved means we agreed to refund you; it isn't money in your account yet"
+  note: String
+  refundRequestId: UUID @areas(in: [SELLER, ADMIN])
+  replacementId: UUID @areas(in: [SELLER, ADMIN])
+}
+
+"GOODWILL_CREDIT needs the wallet module (phase 3); until then it is a platform-funded partial refund"
+enum CaseRemedyKind {
+  REFUND
+  PARTIAL_REFUND
+  REPLACEMENT
+  RETURN_LABEL
+  GOODWILL_CREDIT
+  SHIP_BY_DEADLINE
+  NONE
+}
+
+enum CaseRemedyChargedTo {
+  SELLER
+  PLATFORM
+  SHARED
+}
+
+enum CaseRemedyStatus {
+  PENDING_APPROVAL
+  APPROVED
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+type CaseAppeal {
+  id: UUID!
+  by: Actor!
+  reason: String!
+  attachments: [MediaRef!]!
+  submittedAt: DateTime!
+  status: CaseAppealStatus!
+  "Always a different person from the original decider"
+  reviewer: Actor
+  decidedAt: DateTime
+  outcome: String
+}
+
+enum CaseAppealStatus {
+  SUBMITTED
+  IN_REVIEW
+  DECISION_STANDS
+  OVERTURNED
+}
+
+type CaseActions @areas(in: [STORE, SELLER]) {
+  reply: Boolean!
+  escalate: Boolean!
+  appeal: Boolean!
+  reopen: Boolean!
+  respondToOffer: Boolean!
+  addEvidence: Boolean!
+}
+
+"Dispute evidence: photos, videos, documents, carrier records"
+type CaseEvidence @areas(in: [SELLER, ADMIN]) {
+  id: UUID!
+  party: CaseEvidenceParty!
+  kind: CaseEvidenceKind!
+  media: [MediaRef!]!
+  note: String
+  addedBy: Actor!
+  at: DateTime!
+}
+
+enum CaseEvidenceParty @areas(in: [SELLER, ADMIN]) {
+  CUSTOMER
+  SELLER
+  STAFF
+}
+
+enum CaseEvidenceKind @areas(in: [SELLER, ADMIN]) {
+  PHOTO
+  VIDEO
+  DOCUMENT
+  TRACKING
+  INVOICE
+  OTHER
+}
+
+"The customer as the dispute reviewer sees them"
+type CaseCustomer @areas(in: [ADMIN]) {
+  id: UUID
+  name: String!
+  location: String
+  orders: Int!
+  openCases: Int!
+  email: Email
+  "e.g. Full refund"
+  asksFor: String
+}
+
+"The seller as the dispute reviewer sees them"
+type CaseSeller @areas(in: [ADMIN]) {
+  ownerType: CaseOwnerType!
+  "Null for the Official Store"
+  id: UUID
+  name: String!
+  verified: Boolean!
+  location: String
+  onTimeDispatchPct: Float
+  "What the seller offers, e.g. Ship the order"
+  offers: String
+}
+
+"What the customer accepted at order time"
+type CasePurchaseTerms @areas(in: [ADMIN]) {
+  snapshotAt: DateTime!
+  termsVersion: String!
+  item: String!
+  pricePaid: Money!
+  listPrice: Money
+  discountNote: String
+  promisedDelivery: String
+  dispatchBy: DateTime
+  shipping: String!
+  returns: String!
+  payment: String!
+}
+
+type CaseNamedDeadline @areas(in: [ADMIN]) {
+  label: String!
+  deadline: Deadline!
+  party: CaseParty!
+}
+
+type CasePage implements Paged {
+  items: [Case!]!
+  nextCursor: String
+  page: Int
+  totalPages: Int
+  total: Int
+}
+
+# ---------------------------------------------------------------- fields on other modules' types
+
+extend type Order {
+  "Open and recent cases about this order, each with its linked items. Seller area: cases about the caller's items."
+  cases: [Case!]! @source(module: "support", fn: "listCasesForOrder") @cost(weight: 5)
+}
+
+extend type Return {
+  """
+  The help case or dispute opened about this return (escalation or report), as the caller may see it: the customer's
+  side in the store, the seller's own side in Seller Center (no internal notes), the full case in Admin Center.
+  Null when no case was opened.
+  """
+  case: Case @source(module: "support", fn: "getCasesForReturns")
+}
+
+extend type Customer {
+  "Open cases, most recently updated first, for the account overview"
+  openCases(limit: Int = 3): CasePage! @areas(in: [STORE]) @source(module: "support", fn: "listOpenCasesForCustomer")
+  "Customer 360: the customer's cases and disputes"
+  cases(open: Boolean, paging: PageInput): CasePage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "support.cases.view") @source(module: "support", fn: "listCasesForCustomer")
+}
+
+extend type Seller {
+  "Seller 360: cases and disputes about the seller's orders"
+  cases(open: Boolean, paging: PageInput): CasePage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "support.cases.view") @source(module: "support", fn: "listCasesForSeller")
+}
+
+extend type Query {
+  "Case detail for the signed-in customer (or a guest order session)"
+  case(ref: String!): Case @areas(in: [STORE]) @auth(requires: SHOPPER) @source(module: "support", fn: "getCaseForCustomer")
+
+  "My cases with who handles them, the next action and the expected reply"
+  cases(open: Boolean, paging: PageInput): CasePage! @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "support", fn: "listCasesForCustomer")
+
+  "A case about the caller's orders, or the caller's own support request (no internal notes)"
+  sellerCase(ref: String!): Case @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "support", fn: "getCaseForSeller")
+
+  "Dispute review: parties, purchase terms, shipment evidence, files, conversation with internal notes, deadlines"
+  caseAdmin(ref: String!): Case @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "support.cases.view") @source(module: "support", fn: "getCaseAdmin")
+}

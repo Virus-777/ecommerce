@@ -1,0 +1,342 @@
+# catalog: products, variants, categories and brands.
+# Other modules add fields to these types (e.g. offers → Product.offers, reviews → Product.reviewSummary).
+# Catalog adds Seller.catalogCounts (admin seller 360).
+#
+# Seller Center: myProduct(id) resolves a product the caller submitted, an approved product the caller has offers on, or
+# any approved and active product (create-offer card on seller/offer before the seller has an offer). Review fields
+# (reviewLog, missing, submission) belong to the submitter and resolve to null when the caller does not own the
+# submission; reviewState resolves for every product the caller can see.
+# Admin: Product.submission (with assignee) and Product.checks (automated submission checks, plan ch. 8) feed the
+# review queue and AdminProductReview.
+
+"What a product is (shared content). Prices, stock and delivery come from fields added by offers and inventory."
+type Product {
+  id: UUID!
+  "Human product reference, PRD-NNNNN (duplicates, merges, admin lists)"
+  ref: String!
+  title: String!
+  slug: String!
+  brand: Brand
+  category: Category
+  "Category names from the root, for breadcrumbs"
+  categoryPath: [String!]!
+  description: String!
+  keyFeatures: [String!]!
+  "Category attributes, e.g. Battery life → 40 h"
+  specs: [Spec!]!
+  includedItems: [String!]!
+  images: [MediaRef!]!
+  video: MediaRef
+  modelNumber: String
+  "Manufacturer part number (MPN)"
+  manufacturerPartNumber: String
+  variants: [Variant!]!
+  "When the product was first approved and listed in the store (New listing / Listed on …). Null until approved."
+  listedAt: DateTime
+  updatedAt: DateTime!
+
+  # ---- Seller Center and Admin Center only
+  "Draft, submitted, changes requested, approved, rejected. Seller area: always APPROVED for a product the caller did not submit."
+  reviewState: ProductReviewState @areas(in: [SELLER, ADMIN])
+  publication: ProductPublication @areas(in: [SELLER, ADMIN])
+  "Missing information that blocks submission. Seller area: null unless the caller submitted the product."
+  missing: [String!] @areas(in: [SELLER, ADMIN])
+  "Submissions, decisions with reasons and field comments. Seller area: null unless the caller submitted the product."
+  reviewLog: [ReviewLogEntry!] @areas(in: [SELLER, ADMIN])
+  "The open (or latest) review submission: reference, kind, who submitted and last saved it, review targets. Seller area: null unless the caller submitted the product."
+  submission: ProductSubmission @areas(in: [SELLER, ADMIN])
+  "True when the caller submitted this product, false when it only has offers on it or is creating a first offer"
+  submittedByMe: Boolean @areas(in: [SELLER])
+  "Submitter confirmed the product has no GTIN (custom-made or private label). Seller area: null unless the caller submitted the product."
+  noGtin: Boolean @areas(in: [SELLER, ADMIN])
+  "Brand the submitter asked to add because it was not listed; reviewed with the product. Seller area: null unless the caller submitted the product."
+  requestedBrandName: String @areas(in: [SELLER, ADMIN])
+  "The calling reviewer's unsent decision on the open submission (Save draft)"
+  reviewDraft: ProductReviewDraft @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "catalog.products.review")
+  owner: ProductOwner @areas(in: [ADMIN])
+  "Possible duplicates found on submission"
+  duplicateCandidates: [Product!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "catalog.products.review") @cost(weight: 5)
+  "Automated checks run on the latest submission (duplicates, imagery, category fit, claims, brand, restricted items, identifiers). Advisory: the reviewer decides."
+  checks: [ProductCheck!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "catalog.products.review") @cost(weight: 3)
+}
+
+type Spec {
+  name: String!
+  value: String!
+}
+
+type Variant {
+  id: UUID!
+  "e.g. color → Sage"
+  options: [VariantOption!]!
+  gtin: String
+  images: [MediaRef!]!
+}
+
+type VariantOption {
+  name: String!
+  value: String!
+}
+
+type Category {
+  id: UUID!
+  name: String!
+  slug: String!
+  visible: Boolean!
+  comingSoon: Boolean!
+  "Active products with at least one eligible, in-stock offer here and in subcategories (store: items in stock now)"
+  productCount: Int!
+  "Eligible offers here and in subcategories"
+  offerCount: Int @areas(in: [ADMIN])
+  "Category tile image (Categories page, Official Store shortcuts)"
+  image: MediaRef
+  children: [Category!]!
+  "Attributes shown as filters on the category page"
+  filters: [CategoryFilter!]!
+  "All attributes of the category for the product submission form (required ones block submission; variant-defining ones create variants)"
+  attributes: [CategoryAttribute!]! @areas(in: [SELLER, ADMIN])
+}
+
+"A category attribute as the submission form needs it"
+type CategoryAttribute @areas(in: [SELLER, ADMIN]) {
+  id: UUID!
+  "e.g. Screen size"
+  name: String!
+  kind: CategoryAttributeKind!
+  "e.g. in, h, W"
+  unit: String
+  "Allowed values for ENUM attributes"
+  options: [String!]!
+  "Must be filled before the product can be submitted"
+  required: Boolean!
+  "Creates variants, e.g. Color, Size"
+  variantDefining: Boolean!
+  "Shown as a category filter in the store"
+  filterable: Boolean!
+}
+
+enum CategoryAttributeKind @areas(in: [SELLER, ADMIN]) {
+  TEXT
+  NUMBER
+  ENUM
+  BOOL
+}
+
+type CategoryFilter {
+  name: String!
+  kind: String!
+  unit: String
+  options: [String!]!
+}
+
+type Brand {
+  id: UUID!
+  name: String!
+  slug: String!
+  logo: MediaRef
+  "Brand page banner"
+  banner: MediaRef
+  description: String
+  productCount: Int!
+}
+
+enum ProductReviewState @areas(in: [SELLER, ADMIN]) {
+  DRAFT
+  SUBMITTED
+  CHANGES_REQUESTED
+  APPROVED
+  REJECTED
+}
+
+enum ProductPublication @areas(in: [SELLER, ADMIN]) {
+  ACTIVE
+  HIDDEN
+  SUSPENDED
+}
+
+type ProductOwner @areas(in: [ADMIN]) {
+  "OFFICIAL or SELLER"
+  type: String!
+  sellerId: UUID
+}
+
+"""
+One submission of a product for review (new product, content change or resubmission after changes were requested).
+The review queue is ordered by reviewDeadline.
+"""
+type ProductSubmission @areas(in: [SELLER, ADMIN]) {
+  id: UUID!
+  "SUB-YYMMDD-NNNN"
+  ref: String!
+  kind: ProductSubmissionKind!
+  state: ProductSubmissionState!
+  "Product version that was submitted"
+  version: Int!
+  submittedAt: DateTime!
+  submittedBy: Actor!
+  "Last draft save, by the seller or Official Store staff"
+  lastSavedAt: DateTime
+  lastSavedBy: Actor
+  "Shown to the submitter, e.g. reviews usually finish within 2 business days"
+  expectedReviewBy: DateTime
+  "Internal review target that orders the queue"
+  reviewDeadline: Deadline
+  "Reviewer who picked up the submission"
+  assignee: Actor @areas(in: [ADMIN])
+  decidedAt: DateTime
+  "Submitter's note to the reviewer, e.g. what changed on resubmission"
+  note: String
+}
+
+enum ProductSubmissionKind @areas(in: [SELLER, ADMIN]) {
+  "First submission of a new product"
+  NEW
+  "Change to an approved product's content (reopened by an accepted correction or an Official Store edit)"
+  CONTENT_CHANGE
+  "Submitted again after changes were requested"
+  RESUBMITTED
+}
+
+enum ProductSubmissionState @areas(in: [SELLER, ADMIN]) {
+  OPEN
+  DECIDED
+  WITHDRAWN
+}
+
+"""
+Result of one automated check run when a product is submitted (plan ch. 8: duplicates, misleading claims, poor imagery,
+incorrect categories). WARN and FAIL results are shown to the reviewer with evidence; they never decide on their own.
+"""
+type ProductCheck @areas(in: [ADMIN]) {
+  kind: ProductCheckKind!
+  result: ProductCheckResult!
+  "e.g. 2 possible duplicates with the same model number"
+  message: String!
+  "Supporting lines, e.g. Image 3 is 640 × 640 px (minimum 1000 × 1000)"
+  details: [String!]!
+  evidence: [ProductCheckEvidence!]!
+  ranAt: DateTime!
+  "Set when a reviewer marked the finding not applicable (e.g. Not a duplicate)"
+  dismissal: ProductCheckDismissal
+}
+
+type ProductCheckDismissal @areas(in: [ADMIN]) {
+  reason: String!
+  "The duplicate candidate that was dismissed; null when the whole finding was dismissed"
+  matchedProduct: Product
+  by: Actor!
+  at: DateTime!
+}
+
+"A reviewer's unsent decision, kept until the decision is sent"
+type ProductReviewDraft @areas(in: [ADMIN]) {
+  decision: ProductReviewDecision
+  reason: String
+  "Field → comment to the submitter"
+  fields: [Spec!]!
+  savedBy: Actor!
+  savedAt: DateTime!
+}
+
+enum ProductReviewDecision @areas(in: [ADMIN]) {
+  APPROVE
+  REQUEST_CHANGES
+  REJECT
+}
+
+enum ProductCheckKind @areas(in: [ADMIN]) {
+  DUPLICATE
+  IMAGE_STANDARD
+  CATEGORY_FIT
+  PROHIBITED_CLAIM
+  BRAND_AUTHORIZATION
+  RESTRICTED_ITEM
+  IDENTIFIER
+}
+
+enum ProductCheckResult @areas(in: [ADMIN]) {
+  PASS
+  WARN
+  FAIL
+}
+
+"What a check matched: another product, a field and its text, an image, or a suggested category"
+type ProductCheckEvidence @areas(in: [ADMIN]) {
+  "e.g. Matched product, Claim in description, Image 3"
+  label: String!
+  "Product field the evidence is in, e.g. description, images, gtin"
+  field: String
+  "Matched text, e.g. FDA approved"
+  text: String
+  "Similarity or confidence, 0–1"
+  score: Float
+  "The existing product a DUPLICATE or IDENTIFIER check matched"
+  matchedProduct: Product
+  media: MediaRef
+  "Category the CATEGORY_FIT check suggests instead"
+  suggestedCategory: Category
+}
+
+type ReviewLogEntry @areas(in: [SELLER, ADMIN]) {
+  action: String!
+  reason: String
+  "Field → comment, shown next to the field in the submission form"
+  fields: [Spec!]!
+  actor: Actor!
+  at: DateTime!
+}
+
+type ProductPage implements Paged @areas(in: [ADMIN]) {
+  items: [Product!]!
+  nextCursor: String
+  page: Int
+  totalPages: Int
+  total: Int
+}
+
+extend type Query {
+  "Product detail. In the store, only approved and active products resolve."
+  product(id: UUID!): Product @source(module: "catalog", fn: "getProduct")
+
+  "Category tree for menus and the Categories tab"
+  categories: [Category!]! @areas(in: [STORE, SELLER]) @source(module: "catalog", fn: "listCategories")
+
+  "Category page header, breadcrumb and filters"
+  category(slug: String!): Category @areas(in: [STORE]) @source(module: "catalog", fn: "getCategoryBySlug")
+
+  brand(slug: String!): Brand @areas(in: [STORE]) @source(module: "catalog", fn: "getBrandBySlug")
+
+  """
+  A product this seller submitted (with review feedback), an approved product it has offers on, or any approved and
+  active product it wants to create a first offer on (SellerProductDetail: product, Product.myOffers, stock).
+  Review fields other than reviewState are null when the caller does not own the submission.
+  Null (NOT_FOUND) for another seller's unapproved product or a hidden or suspended product the caller has no offer on.
+  """
+  myProduct(id: UUID!): Product @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "catalog", fn: "getProductForSeller")
+
+  "Submissions waiting for review, by review deadline (Product.submission carries kind, submittedAt and reviewDeadline)"
+  productReviewQueue(kind: String, categoryId: UUID, paging: PageInput): ProductPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "catalog.products.review") @source(module: "catalog", fn: "listReviewQueue")
+
+  "Any product with review history (staff)"
+  productAdmin(id: UUID!): Product @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "catalog", fn: "getProductAdmin")
+}
+
+"Seller 360 catalog tiles: the seller's submitted products by review state and whether submissions are blocked"
+type CatalogSellerCounts @areas(in: [ADMIN]) {
+  approved: Int!
+  inReview: Int!
+  changesRequested: Int!
+  rejected: Int!
+  drafts: Int!
+  "A restriction covering product submissions blocks new drafts and submissions"
+  submissionsBlocked: Boolean!
+  "Scope of the block, e.g. Product submissions blocked in Cameras until Oct 30"
+  blockedNote: String
+  "Open submissions paused in the review queue by a restriction or suspension"
+  pausedSubmissions: Int!
+}
+
+extend type Seller {
+  "Products the seller submitted, by review state, and whether submissions are blocked (seller 360)"
+  catalogCounts: CatalogSellerCounts @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "catalog", fn: "countProductsForSellers") @cost(weight: 3)
+}

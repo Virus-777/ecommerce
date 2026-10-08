@@ -1,0 +1,474 @@
+# workqueues: the Operations Center's shared to-do system. Queues with a named lead, backup and escalation route,
+# work items raised from other modules' events, the daily routine, the day-end review and saved filters.
+# Admin Center only. Work items never do the work: each links to the owning module's screen.
+# Seller-visible tasks stay on REST (GET /api/seller/workqueues/tasks); the seller dashboard counts come from reports.
+
+"A staff member as shown on queues and items"
+type WorkQueueStaff @areas(in: [ADMIN]) {
+  staffId: UUID!
+  name: String!
+  "Role label, e.g. Order Manager"
+  role: String
+}
+
+enum WorkQueueArea @areas(in: [ADMIN]) {
+  ORDERS_SHIPPING
+  INVENTORY_WAREHOUSE
+  PURCHASING
+  RETURNS
+  SUPPORT
+  FINANCE
+  CATALOG
+  SELLERS
+  TRUST
+  MARKETING_ADS
+  CONTENT
+  PLATFORM
+}
+
+"One step of a queue's escalation route"
+type WorkQueueEscalationStep @areas(in: [ADMIN]) {
+  "Minutes after the deadline (0 = at the deadline)"
+  afterMinutes: Int!
+  "Role or person, e.g. Business Owner"
+  toName: String!
+  "Optional rule, e.g. seller items only, amount over $1,000"
+  condition: String
+  notify: Boolean!
+}
+
+"The oldest open item in a queue, e.g. MK-260914-48213 · 16 d"
+type WorkQueueOldestItem @areas(in: [ADMIN]) {
+  itemId: UUID!
+  subjectRef: String
+  openedAt: DateTime!
+  ageLabel: String!
+}
+
+"A work queue with its owner, lead, backup, escalation route and live counts"
+type WorkQueue @areas(in: [ADMIN]) {
+  "Stable key, e.g. shipping.overdue_dispatch"
+  key: String!
+  name: String!
+  area: WorkQueueArea!
+  "access role key, e.g. order_manager"
+  ownerRole: String!
+  lead: WorkQueueStaff!
+  backup: WorkQueueStaff!
+  "Readable route, e.g. Seller Manager (sellers), Business Owner after 48 h"
+  escalationLabel: String!
+  escalationRoute: [WorkQueueEscalationStep!]!
+  defaultDeadlineMinutes: Int!
+  businessHoursOnly: Boolean!
+  open: Int!
+  overdue: Int!
+  dueSoon: Int!
+  oldest: WorkQueueOldestItem
+  "I lead it, back it up or have items assigned in it"
+  mine: Boolean!
+  "Screen where the work is done, e.g. ops/dispatch"
+  screen: String!
+  screenFilter: String
+  visibleToSeller: Boolean!
+  active: Boolean!
+  "Items in this queue, most urgent first"
+  items(filter: WorkItemFilterInput, paging: PageInput): WorkItemPage! @cost(weight: 10)
+}
+
+enum WorkItemKind @areas(in: [ADMIN]) {
+  OVERDUE_DISPATCH
+  MISSING_TRACKING
+  DELIVERY_EXCEPTION
+  SELLER_CANNOT_FULFILL
+  LOW_STOCK
+  RECEIVING
+  PICK_PACK
+  RETURN_INSPECTION
+  RETURN_DECISION
+  APPROVAL_WAITING
+  CASE_PAST_TARGET
+  CASE_ESCALATED
+  PAYOUT_FAILED
+  PAYMENT_CHECK
+  PAYMENT_MISMATCH
+  CHARGEBACK
+  HOLD_REVIEW
+  PRODUCT_REVIEW
+  APPLICATION_WAITING
+  LAUNCH_REVIEW
+  APPEAL_DUE
+  RESTRICTION_REVIEW
+  RESTRICTION_EVIDENCE
+  SELLER_PERFORMANCE
+  STOREFRONT_REVIEW
+  TRUST_REPORT
+  TRUST_RECOMMENDATION
+  DATA_REQUEST
+  SELLER_REPLY_OVERDUE
+  MANUAL_TASK
+}
+
+enum WorkItemPriority @areas(in: [ADMIN]) {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum WorkItemState @areas(in: [ADMIN]) {
+  OPEN
+  ASSIGNED
+  IN_PROGRESS
+  WAITING
+  RESOLVED
+  DISMISSED
+}
+
+enum WorkItemWaitingOn @areas(in: [ADMIN]) {
+  SELLER
+  CUSTOMER
+  CARRIER
+  SUPPLIER
+  FINANCE
+  OTHER
+}
+
+enum WorkItemSubjectType @areas(in: [ADMIN]) {
+  ORDER
+  ORDER_ITEM
+  SHIPMENT
+  "Shipping delivery exception (late dispatch, missing tracking, failed delivery)"
+  DELIVERY_EXCEPTION
+  OFFER
+  STOCK_ITEM
+  PURCHASE_ORDER
+  APPROVAL_REQUEST
+  CASE
+  RETURN
+  REFUND
+  PAYOUT
+  PAYMENT
+  RECONCILIATION_CHECK
+  SELLER
+  APPLICATION
+  APPEAL
+  RESTRICTION
+  CHANGE_REQUEST
+  TRUST_REPORT
+  RECOMMENDATION
+  CAMPAIGN
+  CUSTOMER
+  DATA_REQUEST
+  OTHER
+}
+
+"What the item is about, with its human reference"
+type WorkItemSubject @areas(in: [ADMIN]) {
+  type: WorkItemSubjectType!
+  id: String!
+  "e.g. MK-261007-10433, PO-261002-0311"
+  ref: String
+  label: String
+}
+
+"A link to the owning module's screen, e.g. Open order → admin/order"
+type WorkItemLink @areas(in: [ADMIN]) {
+  label: String!
+  screen: String!
+  state: String
+}
+
+"Where the item came from"
+type WorkItemSource @areas(in: [ADMIN]) {
+  module: String!
+  event: String
+  raisedBy: Actor!
+  dedupeKey: String!
+}
+
+type WorkItemResolution @areas(in: [ADMIN]) {
+  "fixed_at_source, resolved or dismissed"
+  outcome: String!
+  note: String
+  by: Actor!
+}
+
+type WorkItemNote @areas(in: [ADMIN]) {
+  id: UUID!
+  body: String!
+  author: Actor!
+  at: DateTime!
+}
+
+"A piece of work with a deadline, an owner and automatic escalation. Most items close themselves when the source event arrives."
+type WorkItem @areas(in: [ADMIN]) {
+  id: UUID!
+  "e.g. WQ-261008-0042"
+  ref: String!
+  queueKey: String!
+  queueName: String!
+  area: WorkQueueArea!
+  kind: WorkItemKind!
+  title: String!
+  summary: String
+  subject: WorkItemSubject!
+  "Other records the item's actions use, e.g. the delivery exception of an overdue dispatch item (Remind seller → REST POST /api/admin/shipping/exceptions/{id}/notify-seller)"
+  relatedSubjects: [WorkItemSubject!]!
+  sellerId: UUID
+  sellerName: String
+  customerId: UUID
+  amount: Money
+  ownerRole: String!
+  lead: WorkQueueStaff!
+  backup: WorkQueueStaff!
+  assignee: WorkQueueStaff
+  deadline: Deadline!
+  priority: WorkItemPriority!
+  state: WorkItemState!
+  waitingOn: WorkItemWaitingOn
+  "0 = not escalated; n = step n of the route reached"
+  escalationLevel: Int!
+  escalatedTo: WorkQueueStaff
+  source: WorkItemSource!
+  links: [WorkItemLink!]!
+  "Also shown to the seller as a Seller Center task (staff notes never are)"
+  visibleToSeller: Boolean!
+  notes: [WorkItemNote!]!
+  history: [TimelineEvent!]!
+  openedAt: DateTime!
+  updatedAt: DateTime!
+  resolvedAt: DateTime
+  resolution: WorkItemResolution
+}
+
+type WorkItemPage implements Paged @areas(in: [ADMIN]) {
+  items: [WorkItem!]!
+  nextCursor: String
+  page: Int
+  totalPages: Int
+  total: Int
+}
+
+"Filters for work item lists (same as GET /api/admin/workqueues/items)"
+input WorkItemFilterInput @areas(in: [ADMIN]) {
+  queueKeys: [String!]
+  areas: [WorkQueueArea!]
+  kinds: [WorkItemKind!]
+  states: [WorkItemState!]
+  "Only items assigned to the caller"
+  assignedToMe: Boolean
+  overdueOnly: Boolean
+  "e.g. 24h: overdue by more than this"
+  overdueOver: String
+  sellerId: UUID
+  "official or marketplace"
+  sellerKind: String
+  search: String
+}
+
+# ------------------------------------------------------------------ My work queues
+
+enum WorkQueueScope @areas(in: [ADMIN]) {
+  "Queues I lead, back up or have items in"
+  MINE
+  "Every queue I may see (workqueues.items.view-all)"
+  ALL
+}
+
+"Headline numbers on My work queues"
+type WorkQueueStats @areas(in: [ADMIN]) {
+  assignedToMe: Int!
+  queuesILead: Int!
+  overdue: Int!
+  "Positive = more overdue than yesterday"
+  overdueChangeVsYesterday: Int!
+  oldestOpen: WorkQueueOldestItem
+}
+
+enum WorkQueueRoutineState @areas(in: [ADMIN]) {
+  NOT_DONE
+  IN_PROGRESS
+  DONE
+  LATE
+}
+
+"Shared check progress, e.g. 3 of 4 managers checked in"
+type WorkQueueCheckIn @areas(in: [ADMIN]) {
+  done: Int!
+  total: Int!
+}
+
+"One check in the daily operating routine"
+type WorkQueueRoutineCheck @areas(in: [ADMIN]) {
+  id: UUID!
+  "e.g. Review dispatch and delivery"
+  title: String!
+  areaLabel: String!
+  owner: WorkQueueStaff!
+  dueAt: DateTime!
+  state: WorkQueueRoutineState!
+  doneAt: DateTime
+  doneBy: WorkQueueStaff
+  note: String
+  checkedIn: WorkQueueCheckIn
+}
+
+type WorkQueueRoutineDay @areas(in: [ADMIN]) {
+  date: Date!
+  checks: [WorkQueueRoutineCheck!]!
+  done: Int!
+  total: Int!
+}
+
+enum WorkQueueDayEndKey @areas(in: [ADMIN]) {
+  UNRESOLVED_COMMITMENTS
+  FAILED_PAYOUTS
+  UPCOMING_CAMPAIGNS
+  NEXT_DAY_SHIPPING
+  CUSTOM
+}
+
+type WorkQueueDayEndItem @areas(in: [ADMIN]) {
+  key: WorkQueueDayEndKey!
+  title: String!
+  summary: String!
+  owner: WorkQueueStaff
+  link: WorkItemLink!
+  "Module that answered it; 'unavailable' when that module is off"
+  source: String!
+  checked: Boolean!
+  checkedBy: WorkQueueStaff
+  checkedAt: DateTime
+  note: String
+}
+
+enum WorkQueueDayEndState @areas(in: [ADMIN]) {
+  OPEN
+  COMPLETED
+  MISSED
+}
+
+"The day-end review shared with queue leads"
+type WorkQueueDayEndReview @areas(in: [ADMIN]) {
+  id: UUID!
+  date: Date!
+  dueAt: DateTime!
+  state: WorkQueueDayEndState!
+  sharedWithRoles: [String!]!
+  items: [WorkQueueDayEndItem!]!
+  completedBy: WorkQueueStaff
+  completedAt: DateTime
+  summarySentTo: [String!]!
+}
+
+enum WorkQueueFilterTarget @areas(in: [ADMIN]) {
+  "Filters this module's item list"
+  WORK_ITEMS
+  "Stores a filter for another module's list screen, e.g. ops/dispatch"
+  SCREEN
+}
+
+"A saved filter, own or shared"
+type WorkQueueSavedFilter @areas(in: [ADMIN]) {
+  id: UUID!
+  name: String!
+  owner: WorkQueueStaff!
+  shared: Boolean!
+  target: WorkQueueFilterTarget!
+  screen: String
+  screenState: String
+  "Query parameters as saved, e.g. { queueKey, overdueOver: '24h', sellerKind: 'marketplace' }"
+  filters: JSON!
+  "Current matching open items (WORK_ITEMS filters only)"
+  count: Int
+  createdAt: DateTime!
+}
+
+"Everything on the My work queues screen (OpsQueues)"
+type MyWorkQueues @areas(in: [ADMIN]) {
+  me: WorkQueueStaff!
+  roles: [String!]!
+  date: Date!
+  stats: WorkQueueStats!
+  queues(scope: WorkQueueScope = MINE): [WorkQueue!]! @cost(weight: 5)
+  routine: WorkQueueRoutineDay!
+  "Today's review; null before it is created"
+  dayEnd: WorkQueueDayEndReview
+  savedFilters: [WorkQueueSavedFilter!]!
+  "e.g. escalation reminder"
+  reminders: [String!]!
+  "Areas the caller may export"
+  exportScope: [String!]!
+}
+
+# ------------------------------------------------------------------ Admin dashboard
+
+enum WorkQueueTone @areas(in: [ADMIN]) {
+  DANGER
+  WARNING
+  NEUTRAL
+}
+
+"A needs-attention tile on the admin dashboard; links to its queue"
+type WorkQueueAttentionTile @areas(in: [ADMIN]) {
+  queueKey: String!
+  name: String!
+  "e.g. Order & Shipping"
+  areaLabel: String!
+  count: Int!
+  overdue: Int!
+  tone: WorkQueueTone!
+  "e.g. oldest 2 days"
+  oldestLabel: String
+  screen: String!
+  screenFilter: String
+}
+
+enum WorkQueueShiftRole @areas(in: [ADMIN]) {
+  LEAD
+  BACKUP
+}
+
+enum WorkQueueShiftStatus @areas(in: [ADMIN]) {
+  ON_SHIFT
+  AWAY
+  OFF
+}
+
+"Leads and backups on shift, for the admin dashboard"
+type WorkQueueTeamMember @areas(in: [ADMIN]) {
+  staff: WorkQueueStaff!
+  area: String!
+  role: WorkQueueShiftRole!
+  coveringFor: WorkQueueStaff
+  status: WorkQueueShiftStatus!
+}
+
+"The work side of the admin dashboard: needs-attention tiles, overdue dispatch and team on shift"
+type WorkQueueSummary @areas(in: [ADMIN]) {
+  needsAttention: [WorkQueueAttentionTile!]!
+  "Top overdue and at-risk dispatch items for the dashboard table"
+  overdueDispatch(limit: Int = 5): [WorkItem!]!
+  team: [WorkQueueTeamMember!]!
+  generatedAt: DateTime!
+}
+
+# ------------------------------------------------------------------ extensions and queries
+
+extend type Seller {
+  "Open work items about this seller (applications, appeals, restriction reviews, overdue dispatch…) for the seller 360"
+  openWorkItems: [WorkItem!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "workqueues.items.view") @source(module: "workqueues", fn: "listForSubject")
+}
+
+extend type Query {
+  "My work queues (OpsQueues screen query)"
+  myQueues: MyWorkQueues @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "workqueues.items.view") @source(module: "workqueues", fn: "getMyQueues")
+
+  "Needs-attention tiles, overdue dispatch and team on shift (AdminDashboard)"
+  workSummary: WorkQueueSummary @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "workqueues.items.view") @source(module: "workqueues", fn: "getWorkSummary") @cost(weight: 5)
+
+  "Work items across the queues the caller may see"
+  workItems(filter: WorkItemFilterInput, paging: PageInput): WorkItemPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "workqueues.items.view") @source(module: "workqueues", fn: "listItems")
+
+  workItem(id: UUID!): WorkItem @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "workqueues.items.view") @source(module: "workqueues", fn: "getItem")
+}

@@ -1,0 +1,143 @@
+# screens: seller/performance
+# replaces: GET sellers/account, GET sellers/performance, GET sellers/restrictions, GET sellers/appeals, GET sellers/payout-account, GET reviews/feedback-summary
+# why: Account health shows status, verification, payouts, feedback, metrics against targets, restrictions, appeals and warnings in one view.
+query SellerPerformance($restrictionStates: [SellerRestrictionState!], $appealStates: [SellerAppealState!]) {
+  mySeller {
+    id
+    storeName
+    status
+    statusSince
+    sellingSince
+    canSellNew
+    verification {
+      state
+      checked
+      lastCheckedAt
+      expiresAt
+      reason
+    }
+    payoutReadiness {
+      state
+      note
+      blockedReasons
+    }
+    rating {
+      count
+      positivePct
+      label
+    }
+    performance {
+      from
+      to
+      orderCount
+      overall
+      updatedAt
+      metrics {
+        key
+        label
+        value
+        display
+        status
+        numerator
+        denominator
+        detail
+        definition
+        target {
+          comparator
+          threshold
+          unit
+          windowDays
+          display
+          isExample
+          category {
+            id
+            name
+          }
+        }
+      }
+      warnings {
+        id
+        kind
+        title
+        detail
+        issuedAt
+        state
+        resolvedAt
+        resolutionNote
+        issuedBy {
+          ...Who
+        }
+      }
+      history {
+        at
+        label
+        detail
+        actor {
+          ...Who
+        }
+      }
+    }
+    restrictions(states: $restrictionStates) {
+      id
+      ref
+      state
+      title
+      reasonCode
+      reason
+      ruleRef
+      affectedActivities
+      affectedSummary
+      stillWorks
+      toResolve
+      reviewDate
+      startedAt
+      endsAt
+      scope {
+        wholeAccount
+        conditions
+        categories {
+          id
+          name
+        }
+      }
+      appealRoute {
+        deadline
+        howTo
+        reviewer
+        secondAppealTo
+      }
+      setBy {
+        ...Who
+      }
+      resolutionEvidence {
+        id
+        url
+        alt
+      }
+    }
+    appeals(states: $appealStates) {
+      id
+      ref
+      subject
+      subjectRef
+      level
+      state
+      submittedAt
+      decideBy {
+        dueAt
+        state
+      }
+      decision {
+        outcome
+        explanation
+        changes
+        decidedAt
+      }
+    }
+  }
+}
+
+fragment Who on Actor {
+  kind
+  name
+}

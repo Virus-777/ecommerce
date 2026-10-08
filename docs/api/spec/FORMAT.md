@@ -1,0 +1,109 @@
+# Module spec format
+
+One JSON file per backend module: `docs/api/spec/modules/<module>.json`.
+`node docs/api/tools/build.mjs` validates every file and generates:
+
+- `docs/api/openapi.json`: OpenAPI 3.1 for Swagger UI, Redoc, Postman and client generators
+- `docs/api/modules/<module>.md`: readable reference per module
+- `docs/api/viewer/data.js`: data for the visual API reference
+
+## File shape
+
+```jsonc
+{
+  "name": "catalog",                       // kebab-case, = URL segment, = DB schema (snake_case)
+  "title": "Catalog",
+  "group": "Catalog and stock",            // Platform | Participants | Catalog and stock | Buying | After-sales and money | Growth | Later phases
+  "phase": 1,                              // plan ch. 20 launch phase (1–4); 3–4 are off at launch
+  "chapters": [5, 8],                      // plan chapters this module implements
+  "summary": "One or two sentences: what it owns.",
+  "owns": ["Categories and attributes", "…"],          // capabilities, plain words
+  "notOwns": ["Prices and stock belong to offers and inventory"],  // optional: boundary notes
+  "dependsOn": ["media"],                  // must be enabled (hard dependency)
+  "optionalDeps": ["search"],              // used when enabled
+  "publicApi": [                           // functions other modules call in-process (not HTTP)
+    { "name": "snapshotForOrder", "signature": "(variantId: uuid) => ProductSnapshot", "desc": "…", "usedBy": ["orders"] }
+  ],
+  "types": { "Product": { "id": "uuid", "title": "string", "brandId": "uuid?" } },
+  "tables": [
+    { "name": "products", "desc": "…", "columns": { "id": "uuid pk", "brand_id": "uuid → brands", "review_state": "text" }, "indexes": ["(review_state, id)"] }
+  ],
+  "stateMachines": [
+    { "name": "Product review", "field": "Product.reviewState", "initial": "draft",
+      "transitions": [["draft", "submit", "submitted"], ["submitted", "approve", "approved"]],
+      "notes": "…" }
+  ],
+  "endpoints": [ /* see below */ ],
+  "events": {
+    "publishes": [ { "name": "catalog.product.approved", "when": "A reviewer approves a submission", "payload": { "productId": "uuid" } } ],
+    "consumes":  [ { "name": "sellers.seller.suspended", "does": "Stop showing the seller's draft submissions in the review queue" } ]
+  },
+  "permissions": [ { "key": "catalog.products.review", "audience": "staff", "desc": "Approve, request changes, reject" } ],
+  "approvalActions": [                     // actions that can need an approval request (access module checks limits)
+    { "key": "finance.payouts.release", "desc": "Release a payout run", "limit": "money",   // money | units | percent | none
+      "secondReviewer": "above-limit",     // always | above-limit | never
+      "approvers": "Finance Manager; Business Owner above $50,000 (example)" }
+  ],
+  "jobs": [ { "name": "catalog.reindex-stale", "schedule": "every 10 min", "does": "…" } ],
+  "settings": [ { "key": "maxImagesPerProduct", "default": 12, "desc": "…" } ],
+  "integrations": [ { "name": "S3-compatible storage", "purpose": "…" } ],
+  "notes": ["Anything a builder must know"]
+}
+```
+
+## Type notation
+
+Used in `types`, `body`, `query`, event `payload` and inline objects.
+
+| Write | Means |
+|---|---|
+| `string` `text` `int` `number` `bool` `json` | primitives (`text` = long string) |
+| `uuid` `email` `url` `date` `datetime` | formatted strings (`date` = YYYY-MM-DD, `datetime` = ISO 8601 UTC) |
+| `Money` `Address` `Actor` `MediaRef` `DateRange` `TimelineEvent` `ApprovalInfo` `Deadline` | shared types in `common.json` |
+| `Product` | a type in this module's `types` |
+| `catalog.ProductSnapshot` | a type from another module (`module.Type`) |
+| `T?` | optional and nullable |
+| `T[]` | array |
+| `enum(a\|b\|c)` | one of the values |
+| `map<T>` | object with string keys and `T` values |
+| `{ "type": "int", "desc": "…" }` | any of the above with a description |
+| `{ "field": "type", … }` (nested object) | inline object |
+
+## Endpoints
+
+```jsonc
+{
+  "id": "approveProduct",                  // unique in the module, camelCase; becomes the OpenAPI operationId (catalog.approveProduct)
+  "area": "admin",                         // store | seller | admin | public | webhooks
+  "method": "POST",
+  "path": "/products/{id}/approve",        // relative to the area prefix: /api/admin/catalog/products/{id}/approve
+  "summary": "Approve a submitted product",
+  "desc": "Optional longer explanation: rules, side effects.",
+  "auth": "staff",                         // anyone | shopper | customer | seller | staff | provider
+  "permission": "catalog.products.review", // optional; must be declared by some module
+  "params": { "id": "uuid" },              // must match {placeholders} in path
+  "query": { "q": "string?" },
+  "paging": true,                          // adds cursor/page/limit and wraps response in Page<…>
+  "body": { "note": "string?" },           // type name, inline object, or omitted
+  "response": "Product",                   // type, "Product[]", inline object, or null for 204
+  "status": 200,                           // success status (default 200; 201 create; 202 accepted; 204 no content)
+  "errors": ["ILLEGAL_TRANSITION"],        // codes from common.json or module-specific UPPER_SNAKE
+  "idempotent": false,                     // true → Idempotency-Key header required
+  "audited": true,                         // writes to the action history
+  "approval": "Above $2,000 needs a second Finance reviewer",   // optional approval rule
+  "events": ["catalog.product.approved"],  // events this call publishes
+  "screens": ["admin/product-review"],     // prototype screen ids that use this endpoint
+  "phase": 1                               // optional: later phase than the module
+}
+```
+
+Module-specific error codes go in `"errorCodes": { "OFFER_CHANGED": { "status": 409, "meaning": "…" } }` at the top level of the module file.
+
+## Rules
+1. Paths are nouns, plural, kebab-case; actions on a record are `POST /{things}/{id}/{verb}` (e.g. `/payouts/{id}/approve`).
+2. Every list endpoint is `paging: true` unless it is small and bounded (e.g. categories).
+3. Money is `Money`; never floats. Times are `datetime` (UTC).
+4. Anything that moves money or creates orders is `idempotent: true`.
+5. Status changes go through a declared state machine; illegal moves return `ILLEGAL_TRANSITION`.
+6. Material admin actions are `audited: true` and take a `reason` where the plan asks for one.
+7. Tables live in the module's own schema; reference other modules by id only (no cross-module foreign keys).

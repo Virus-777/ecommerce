@@ -1,0 +1,978 @@
+# Trust and risk (`trust`)
+
+Trust and Risk's case file: reports of counterfeit goods, suspicious orders, fake reviews and abuse from customers, sellers, staff, brand owners and automated signals, with evidence, a risk score, an investigation workflow, enforcement recommendations routed to the team that owns the action, recorded enforcement with reasons, and appeals decided by someone other than the original decider. Trust recommends; Catalog, Seller Manager, Support, Finance and the other owners act.
+
+- **Group:** After-sales and money · **Launch phase:** 1 · **Plan chapters:** 2, 10, 17, 18
+- **Depends on:** [access](access.md) · **Optional:** [media](media.md), [catalog](catalog.md), [offers](offers.md), [sellers](sellers.md), [customers](customers.md), [orders](orders.md), [payments](payments.md), [reviews](reviews.md), [messaging](messaging.md), [support](support.md), [finance](finance.md), [workqueues](workqueues.md), [reports](reports.md), [notifications](notifications.md), [audit](audit.md), [identity](identity.md)
+
+## Owns
+- Trust reports (TR- references) with type, source, reporter, subjects (seller, product, offer, order, customer, review, message, application, claim), description and status
+- Evidence: automated checks with pass/warn/fail results, documents, photos, notes, linked records, evidence requests to the reported party with deadlines
+- Risk score (0–100) with contributing factors and a recorded override
+- Investigation workflow: assign, escalate, resolve with an outcome, dismiss with a reason, reopen, merge duplicates
+- Enforcement recommendations routed to owner teams (suspend product or offer, restrict or suspend seller, hold payout, inform customers, remove reviews, restrict customer messaging) and the owner's accept or decline with reason
+- Recorded enforcement with reason, parameters, effect on open orders and cases, execution confirmation and reversal
+- Appeals against trust enforcement (customers and sellers), reviewed by someone other than the decider; read-only mirror of seller restriction appeals that came from a trust report
+- Automated detection rules (review bursts, linked new accounts with mismatched payments, brand registry mismatches) that raise reports
+- Application risk assessments for Seller Manager (risk level, flags, recommendation)
+- What reporters see: status and outcome of reports they made, without revealing their identity to the reported party
+
+**Not here:**
+- Executing actions: catalog (products), offers (offers), sellers (restrictions, suspensions and their appeals), customers (customer restrictions), reviews (content removal), finance (holds), orders (dispatch holds), support (customer outreach and cases), messaging (conversation locks)
+- Reports on individual reviews, answers and questions for ordinary moderation: reviews (it refers patterns to trust through reviews.content.referred)
+- Payment fraud scoring by the provider: payments (trust consumes its signals)
+
+## Store API
+
+| Method | Path | Purpose | Auth | Body → Response |
+|---|---|---|---|---|
+| POST | `/api/store/trust/reports` | Report a listing, seller, order or message | customer | `StoreReportInput` → `MyReport` |
+| GET | `/api/store/trust/reports` | Reports I made, with status and outcome | customer | Page<MyReport> |
+| GET | `/api/store/trust/reports/{id}` | One report I made | customer | `MyReport` |
+| POST | `/api/store/trust/reports/{id}/evidence` | Add photos or details to a report I made | customer | `{ text: text, mediaIds: uuid[]? }` → `MyReport` |
+| GET | `/api/store/trust/enforcements` | Trust actions that affect my account, with appeal route | customer | `MyEnforcement[]` |
+| POST | `/api/store/trust/appeals` | Appeal a trust action on my account before the deadline | customer | `{ enforcementId: uuid, argument: text, evidenceIds: uuid[]? }` → `TrustAppeal` |
+| GET | `/api/store/trust/appeals` | My appeals | customer | `TrustAppeal[]` |
+
+## Seller API
+
+| Method | Path | Purpose | Auth | Body → Response |
+|---|---|---|---|---|
+| POST | `/api/seller/trust/reports` | Report abuse by a customer, a counterfeit competitor offer or a listing problem | seller<br>`trust.reports.submit` | `StoreReportInput` → `MyReport` |
+| GET | `/api/seller/trust/reports` | Reports this seller made | seller | Page<MyReport> |
+| GET | `/api/seller/trust/evidence-requests` | Proof Trust and Risk asked this seller for (e.g. proof of supply) | seller | `EvidenceRequest[]` |
+| POST | `/api/seller/trust/evidence-requests/{id}/answer` | Send the requested proof | seller<br>`trust.evidence.submit` | `{ answer: text, mediaIds: uuid[] }` → `EvidenceRequest` |
+| GET | `/api/seller/trust/enforcements` | Trust actions on this seller's offers, products or claims, with appeal route | seller | `MyEnforcement[]` |
+| POST | `/api/seller/trust/appeals` | Appeal a trust action on an offer, product or claim | seller<br>`trust.appeals.submit` | `{ enforcementId: uuid, argument: text, evidenceIds: uuid[]? }` → `TrustAppeal` |
+| GET | `/api/seller/trust/appeals` | This seller's trust appeals | seller | `TrustAppeal[]` |
+
+## Admin API
+
+| Method | Path | Purpose | Auth | Body → Response |
+|---|---|---|---|---|
+| GET | `/api/admin/trust/overview` | Open reports by type, high risk, appeals waiting | staff<br>`trust.reports.view` | `TrustOverview` |
+| GET | `/api/admin/trust/reports` | Trust queue, highest risk first | staff<br>`trust.reports.view` | Page<ReportRow> |
+| GET | `/api/admin/trust/reports/{id}` | Report with evidence, linked records, recommendations, enforcement and timeline | staff<br>`trust.reports.view` | `TrustReport` |
+| POST | `/api/admin/trust/reports` | Open a report as staff | staff<br>`trust.reports.investigate` | `{ type: string, title: string, description: text, subjects: TrustSubject[], evidence: EvidenceInput[]?, caseRef: string? }` → `TrustReport` |
+| POST | `/api/admin/trust/reports/{id}/assign` | Assign an investigator (moves to under review) _(audited)_ | staff<br>`trust.reports.investigate` | `{ staffId: uuid, dueAt: datetime? }` → `TrustReport` |
+| POST | `/api/admin/trust/reports/{id}/escalate` | Escalate to the Trust and Risk Manager or Business Owner _(audited)_ | staff<br>`trust.reports.investigate` | `{ reason: text }` → `TrustReport` |
+| POST | `/api/admin/trust/reports/{id}/evidence` | Add evidence (check result, document, photo, note, linked record) _(audited)_ | staff<br>`trust.reports.investigate` | `EvidenceInput` → `EvidenceItem` |
+| POST | `/api/admin/trust/reports/{id}/evidence-requests` | Ask the seller or customer for proof with a deadline _(audited)_ | staff<br>`trust.reports.investigate` | `{ to: TrustSubject, question: text, dueAt: datetime }` → `EvidenceRequest` |
+| POST | `/api/admin/trust/reports/{id}/links` | Link more subjects or a support case | staff<br>`trust.reports.investigate` | `{ subjects: TrustSubject[]?, caseRefs: string[]? }` → `TrustReport` |
+| POST | `/api/admin/trust/reports/{id}/risk-score` | Override the risk score with a reason _(audited)_ | staff<br>`trust.reports.investigate` | `{ score: int, reason: text }` → `TrustReport` |
+| POST | `/api/admin/trust/reports/{id}/notes` | Internal note | staff<br>`trust.reports.investigate` | `{ body: text }` → `TrustReport` |
+| POST | `/api/admin/trust/reports/{id}/assessment` | Record the risk assessment for a seller application or account _(audited)_ | staff<br>`trust.reports.decide` | `{ level: enum(low|medium|high), flags: json[], recommendation: text, recommendedHoldDays: int? }` → `TrustReport` |
+| POST | `/api/admin/trust/reports/{id}/recommendations` | Draft an enforcement recommendation for an owner team _(audited)_ | staff<br>`trust.reports.investigate` | `RecommendationInput` → `Recommendation` |
+| POST | `/api/admin/trust/recommendations/{id}/route` | Send a recommendation to its owner team _(audited)_ | staff<br>`trust.reports.decide` | `Recommendation` |
+| GET | `/api/admin/trust/recommendations` | Recommendations waiting for my team | staff<br>`trust.recommendations.decide` | Page<Recommendation> |
+| POST | `/api/admin/trust/recommendations/{id}/decide` | Owner team accepts (records enforcement) or declines with a reason _(audited)_ | staff<br>`trust.recommendations.decide` | `{ accept: bool, reason: text, params: json?, externalRef: string? }` → `{ recommendation: Recommendation, enforcement: Enforcement? }` |
+| POST | `/api/admin/trust/recommendations/{id}/withdraw` | Withdraw a recommendation _(audited)_ | staff<br>`trust.reports.decide` | `{ reason: text }` → `Recommendation` |
+| POST | `/api/admin/trust/reports/{id}/resolve` | Resolve with an outcome and what the reporter is told _(audited)_ | staff<br>`trust.reports.decide` | `{ outcome: enum(action_taken|no_violation|insufficient_evidence|referred), summary: text, reporterOutcome: text }` → `TrustReport` |
+| POST | `/api/admin/trust/reports/{id}/dismiss` | Dismiss with a reason _(audited)_ | staff<br>`trust.reports.decide` | `{ reason: text, reporterOutcome: text }` → `TrustReport` |
+| POST | `/api/admin/trust/reports/{id}/reopen` | Reopen with a reason (new evidence) _(audited)_ | staff<br>`trust.reports.decide` | `{ reason: text }` → `TrustReport` |
+| POST | `/api/admin/trust/reports/{id}/merge` | Merge a duplicate report into another _(audited)_ | staff<br>`trust.reports.investigate` | `{ intoReportId: uuid, reason: text }` → `TrustReport` |
+| GET | `/api/admin/trust/enforcements` | Recorded enforcement with execution state | staff<br>`trust.reports.view` | Page<Enforcement> |
+| POST | `/api/admin/trust/enforcements/{id}/reverse` | Reverse an enforcement (overturned appeal or error) _(audited)_ | staff<br>`trust.enforcements.reverse` | `{ reason: text }` → `Enforcement` |
+| GET | `/api/admin/trust/appeals` | Appeals on trust enforcement plus linked seller restriction appeals | staff<br>`trust.reports.view` | Page<TrustAppeal> |
+| POST | `/api/admin/trust/appeals/{id}/assign` | Assign a reviewer who did not make the decision _(audited)_ | staff<br>`trust.appeals.decide` | `{ reviewerId: uuid }` → `TrustAppeal` |
+| POST | `/api/admin/trust/appeals/{id}/decide` | Uphold, overturn or partly overturn _(audited)_ | staff<br>`trust.appeals.decide` | `{ outcome: enum(uphold|overturn|partly_overturn), explanation: text, changes: json? }` → `TrustAppeal` |
+| POST | `/api/admin/trust/reports/exports` | Export the filtered trust queue _(audited)_ | staff<br>`trust.reports.export` | `{ filters: json, format: enum(csv|xlsx)? }` → `reports.ExportJob` |
+| GET | `/api/admin/trust/detection-rules` | Automated detection rules with recent hits | staff<br>`trust.rules.manage` | `DetectionRule[]` |
+| PATCH | `/api/admin/trust/detection-rules/{key}` | Turn a rule on or off or change its thresholds _(audited)_ | staff<br>`trust.rules.manage` | `{ active: bool?, thresholds: json?, baseScore: int?, reason: text }` → `DetectionRule` |
+
+## Public API
+
+| Method | Path | Purpose | Auth | Body → Response |
+|---|---|---|---|---|
+| POST | `/api/public/trust/reports` | Brand or rights owner reports counterfeit listings _(phase 2)_ | anyone | `{ brandName: string, contactName: string, contactEmail: email, offerOrProductIds: uuid[], details: text, proofMediaIds: uuid[] }` → `{ ref: string, confirmationSent: bool }` |
+
+## Types
+
+### StaffRef
+
+| Field | Type |
+|---|---|
+| staffId | `uuid` |
+| name | `string` |
+| role | `string?` Role label from access.getStaffRef, e.g. Business Owner, Seller Manager (shown with appeal reviewers and deciders) |
+
+### TrustSubject
+
+| Field | Type |
+|---|---|
+| type | `enum(seller|product|offer|order|customer|review|question|answer|message|conversation|application|storefront_claim|payment)` |
+| id | `uuid` |
+| ref | `string?` |
+| label | `string` |
+| statusLabel | `string?` Current status in the owning module, e.g. Restricted |
+| screen | `string?` Admin screen to open, e.g. admin/seller |
+
+### RiskFactor
+
+| Field | Type |
+|---|---|
+| factor | `string` |
+| weight | `int` |
+| detail | `string` |
+
+### EvidenceItem
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| kind | `enum(check|document|photo|note|record_link|signal|statement)` |
+| result | `enum(fail|warn|info|ok)?` For checks, shown as the evidence list icons |
+| text | `text` |
+| media | `MediaRef[]` |
+| source | `enum(reporter|reported_party|staff|automated|brand_owner|other_module)` |
+| addedBy | `Actor` |
+| addedAt | `datetime` |
+| visibility | `enum(internal|shared_with_subject)` Reporter identity and internal notes are never shared |
+
+### EvidenceInput
+
+| Field | Type |
+|---|---|
+| kind | `enum(check|document|photo|note|record_link|signal|statement)` |
+| result | `enum(fail|warn|info|ok)?` |
+| text | `text` |
+| mediaIds | `uuid[]?` |
+| visibility | `enum(internal|shared_with_subject)?` |
+
+### EvidenceRequest
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| reportId | `uuid` |
+| to | `TrustSubject` |
+| question | `text` |
+| dueAt | `datetime` |
+| deadline | `Deadline` |
+| state | `enum(open|answered|expired|cancelled)` |
+| answer | `text?` |
+| answerMedia | `MediaRef[]` |
+| answeredAt | `datetime?` |
+
+### Recommendation
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| reportId | `uuid` |
+| action | `enum(suspend_offer|suspend_product|remove_reviews|keep_reviews|restrict_seller|suspend_seller|warn_seller|revoke_claim|hold_payout|hold_dispatch|review_payments|refund_buyers|inform_customers|request_identity_confirmation|restrict_customer_messaging|restrict_customer_account|lock_conversation|other)` |
+| label | `string` e.g. Suspend the Gadget Grove offer for BRL-S2 |
+| ownerTeam | `enum(catalog|sellers|support|finance|orders|reviews|customers|messaging)` |
+| ownerRole | `string` access role key, e.g. catalog_manager |
+| owner | `StaffRef?` |
+| targets | `TrustSubject[]` |
+| params | `json` Action parameters the owner reviews, e.g. sellers.RestrictionInput for restrict_seller, { amount, reviewDate } for hold_payout, { endsAt } for messaging restrictions |
+| rationale | `text` |
+| state | `enum(pending|sent_to_owner|completed|declined|withdrawn)` |
+| routedAt | `datetime?` |
+| decidedAt | `datetime?` |
+| decidedBy | `StaffRef?` |
+| decisionReason | `text?` Reason recorded by the owner, e.g. 'Brand registry mismatch on 4 units' |
+| enforcementId | `uuid?` |
+
+### RecommendationInput
+
+| Field | Type |
+|---|---|
+| action | `string` |
+| label | `string` |
+| ownerTeam | `string` |
+| ownerRole | `string?` |
+| ownerStaffId | `uuid?` |
+| targets | `TrustSubject[]` |
+| params | `json?` |
+| rationale | `text` |
+
+### Enforcement
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| ref | `string` e.g. EN-261006-0012 |
+| reportId | `uuid` |
+| reportRef | `string` |
+| recommendationId | `uuid?` |
+| action | `string` |
+| ownerTeam | `string` |
+| targets | `TrustSubject[]` |
+| reason | `text` Recorded reason (also shown to the affected party where the owning module shows reasons) |
+| params | `json` |
+| effects | `string[]` What changes and what stays, e.g. 'open orders and returns stay active' |
+| recordedBy | `Actor` |
+| recordedAt | `datetime` |
+| executionState | `enum(pending|applied|failed|reversed)` |
+| appliedRef | `string?` Record in the owning module, e.g. RS-261002-0019 or a hold id |
+| appliedAt | `datetime?` |
+| failure | `text?` |
+| appealable | `bool` |
+| appealDeadline | `datetime?` |
+| reversedAt | `datetime?` |
+| reversalReason | `text?` |
+
+### TrustAppeal
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| ref | `string` |
+| source | `enum(trust|sellers)` sellers = read-only mirror of a seller restriction appeal linked to a trust report; decide it in sellers |
+| externalAppealId | `uuid?` |
+| reportId | `uuid?` |
+| reportRef | `string?` |
+| enforcementId | `uuid?` |
+| appellant | `Actor` |
+| appellantName | `string` |
+| decisionAppealed | `string` |
+| argument | `text` |
+| evidence | `MediaRef[]` |
+| reviewer | `StaffRef?` |
+| originalDecider | `StaffRef` |
+| decideBy | `Deadline` |
+| state | `enum(open|under_review|upheld|overturned|partly_overturned|withdrawn)` |
+| decision | `json?` { outcome, explanation, decidedBy, decidedAt, changes } |
+| filedAt | `datetime` |
+
+### TrustReport
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| ref | `string` e.g. TR-3391 |
+| type | `enum(counterfeit|suspicious_orders|fake_reviews|abuse|prohibited_item|misleading_listing|seller_application|account_risk|other)` |
+| title | `string` |
+| description | `text` |
+| source | `enum(customer|seller|staff|automated|brand_owner|referral)` |
+| reporter | `json` { actor: Actor, name?, contactEmail? } — staff only; never shown to subjects |
+| reporterCount | `int` Merged duplicate reports, e.g. brand owner and 3 customers |
+| detector | `string?` |
+| subjects | `TrustSubject[]` |
+| status | `enum(open|under_review|escalated|resolved|dismissed|merged)` |
+| riskScore | `int` |
+| riskLevel | `enum(low|medium|high)` |
+| riskFactors | `RiskFactor[]` |
+| riskOverride | `json?` { score, reason, by, at } |
+| assignee | `StaffRef?` |
+| deadline | `Deadline?` |
+| evidence | `EvidenceItem[]` |
+| evidenceRequests | `EvidenceRequest[]` |
+| recommendations | `Recommendation[]` |
+| enforcements | `Enforcement[]` |
+| linkedCaseRefs | `string[]` |
+| mergedReportIds | `uuid[]` |
+| notes | `json[]` { id, body, author, at } internal |
+| timeline | `TimelineEvent[]` |
+| resolution | `json?` { outcome: action_taken|no_violation|insufficient_evidence|duplicate|referred, summary, decidedBy, decidedAt } |
+| reporterOutcome | `text?` Text the reporter sees |
+| assessment | `json?` For seller_application and account_risk: { level, flags: [{ severity, text }], recommendation, recommendedHoldDays? } |
+| createdAt | `datetime` |
+| updatedAt | `datetime` |
+
+### ReportRow
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| ref | `string` |
+| type | `string` |
+| title | `string` |
+| status | `string` |
+| riskScore | `int` |
+| riskLevel | `string` |
+| source | `string` |
+| reporterLabel | `string` |
+| subjects | `TrustSubject[]` |
+| assignee | `StaffRef?` |
+| recommendations | `json` { total, pending, sentToOwner, completed, declined } |
+| deadline | `Deadline?` |
+| createdAt | `datetime` |
+
+### TrustOverview
+
+| Field | Type |
+|---|---|
+| open | `int` |
+| highRisk | `int` |
+| byType | `map<int>` Open reports per type |
+| typeNotes | `map<string>` e.g. suspicious_orders: '6 orders on hold' |
+| appealsWaiting | `int` |
+| nextAppealDecideBy | `datetime?` |
+| recommendationsWaitingOnOwners | `int` |
+| queueOwner | `StaffRef?` |
+
+### StoreReportInput
+
+| Field | Type |
+|---|---|
+| type | `enum(counterfeit|prohibited_item|misleading_listing|abuse|suspicious_order|other)` |
+| subject | `json` { type: offer|product|seller|order|message|conversation, id } |
+| reason | `string` Reason code from the report form, e.g. may_be_counterfeit |
+| details | `text?` |
+| evidenceIds | `uuid[]?` |
+| orderId | `uuid?` |
+
+### MyReport
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| ref | `string` |
+| what | `string` e.g. Report on a listing |
+| about | `string` e.g. Brightline S2 Robot Vacuum from Gadget Grove |
+| youSaid | `string` |
+| reportedAt | `datetime` |
+| statusLabel | `enum(received|under_review|decision_made|action_taken|no_violation)` |
+| outcome | `text?` |
+| expectedBy | `date?` |
+| caseRef | `string?` |
+
+### MyEnforcement
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| ref | `string` |
+| title | `string` |
+| reason | `text` |
+| effects | `string[]` |
+| targets | `TrustSubject[]` |
+| recordedAt | `datetime` |
+| appealable | `bool` |
+| appealDeadline | `datetime?` |
+| appealId | `uuid?` |
+| appealRoute | `string` Where to appeal; restrictions on seller accounts are appealed in Account health (sellers) |
+
+### DetectionRule
+
+| Field | Type |
+|---|---|
+| key | `string` e.g. reviews.burst, orders.linked_new_accounts, offers.price_far_below_authorized |
+| description | `text` |
+| type | `string` |
+| active | `bool` |
+| thresholds | `json` |
+| baseScore | `int` |
+| lastRunAt | `datetime?` |
+| hitsLast30Days | `int` |
+
+## Status flows
+
+### Trust report (`TrustReport.status`)
+
+```mermaid
+stateDiagram-v2
+  [*] --> open
+  open --> under_review: assign
+  open --> escalated: escalate
+  under_review --> escalated: escalate
+  escalated --> under_review: deescalate
+  under_review --> resolved: resolve
+  escalated --> resolved: resolve
+  open --> dismissed: dismiss
+  under_review --> dismissed: dismiss
+  escalated --> dismissed: dismiss
+  open --> merged: merge
+  under_review --> merged: merge
+  resolved --> under_review: reopen
+  dismissed --> under_review: reopen
+```
+
+Resolve needs an outcome and a summary; it is blocked while a recommendation is still sent_to_owner (RECOMMENDATIONS_OPEN) unless the outcome is referred. Dismiss needs a reason and a reporter-facing message. Escalated = high risk or needs the Trust and Risk Manager / Business Owner. Merge moves subjects, evidence and reporters into the kept report.
+
+### Recommendation (`Recommendation.state`)
+
+```mermaid
+stateDiagram-v2
+  [*] --> pending
+  pending --> sent_to_owner: route
+  sent_to_owner --> completed: accept
+  sent_to_owner --> declined: decline
+  pending --> withdrawn: withdraw
+  sent_to_owner --> withdrawn: withdraw
+```
+
+Route sends it to the owner team's queue (workqueues). Accept is done by someone holding the owner team's permission for that action (e.g. catalog.products.publish for suspend_product, sellers.accounts.restrict for restrict_seller, customers.accounts.act for customer restrictions) and records an Enforcement with the owner's reason. Decline needs a reason. Trust staff cannot accept their own recommendations (separate duties, plan ch. 18).
+
+### Enforcement execution (`Enforcement.executionState`)
+
+```mermaid
+stateDiagram-v2
+  [*] --> pending
+  pending --> applied: confirm
+  pending --> failed: fail
+  failed --> pending: retry
+  applied --> reversed: reverse
+```
+
+Confirmed when the owning module's event arrives carrying the enforcement id (catalog.product.publication_changed, offers.offer.status_changed, sellers.seller.restricted, customers.account.restricted, finance.hold.placed...) or when the owner records the external reference. Reverse (e.g. appeal overturned) publishes trust.enforcement.reversed so the owner undoes it.
+
+### Evidence request (`EvidenceRequest.state`)
+
+```mermaid
+stateDiagram-v2
+  [*] --> open
+  open --> answered: answer
+  open --> expired: expire
+  open --> cancelled: cancel
+```
+
+Expiry is noted on the report as missing proof; it is not a decision by itself.
+
+### Trust appeal (`TrustAppeal.state`)
+
+```mermaid
+stateDiagram-v2
+  [*] --> open
+  open --> under_review: assign
+  under_review --> upheld: uphold
+  under_review --> overturned: overturn
+  under_review --> partly_overturned: partlyOverturn
+  open --> withdrawn: withdraw
+  under_review --> withdrawn: withdraw
+```
+
+The reviewer must differ from the person who recommended and the person who accepted the enforcement (SAME_REVIEWER_NOT_ALLOWED). Mirrored seller appeals (source sellers) follow the sellers state machine and are read-only here.
+
+## Data (schema `trust`)
+
+**reports**
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| ref | text unique |
+| type | text |
+| title | text |
+| description | text |
+| source | text |
+| reporter_kind | text |
+| reporter_id | text? |
+| reporter_name | text? |
+| reporter_contact | text? |
+| reporter_count | int |
+| detector | text? |
+| dedupe_key | text? |
+| status | text |
+| risk_score | int |
+| risk_factors | jsonb |
+| risk_override | jsonb? |
+| assignee_staff_id | uuid? |
+| due_at | timestamptz? |
+| resolution | jsonb? |
+| reporter_outcome | text? |
+| assessment | jsonb? |
+| merged_into_id | uuid? → reports |
+| created_at | timestamptz |
+| updated_at | timestamptz |
+
+Indexes: `(status, risk_score desc)`, `(type, status)`, `(assignee_staff_id, status)`, `unique(dedupe_key) where status in ('open','under_review','escalated')`, `(reporter_kind, reporter_id, created_at desc)`
+
+**report_subjects**
+
+| Column | Type |
+|---|---|
+| report_id | uuid → reports |
+| subject_type | text |
+| subject_id | uuid |
+| ref | text? |
+| label | text |
+
+Indexes: `(subject_type, subject_id)`, `unique(report_id, subject_type, subject_id)`
+
+**evidence**
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| report_id | uuid → reports |
+| kind | text |
+| result | text? |
+| text | text |
+| media_ids | jsonb |
+| source | text |
+| visibility | text |
+| added_by_kind | text |
+| added_by_id | text? |
+| added_at | timestamptz |
+
+Indexes: `(report_id, added_at)`
+
+**evidence_requests**
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| report_id | uuid → reports |
+| to_type | text |
+| to_id | uuid |
+| question | text |
+| due_at | timestamptz |
+| state | text |
+| answer | text? |
+| answer_media_ids | jsonb |
+| answered_at | timestamptz? |
+
+Indexes: `(to_type, to_id, state)`, `(state, due_at)`
+
+**recommendations**
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| report_id | uuid → reports |
+| action | text |
+| label | text |
+| owner_team | text |
+| owner_role | text |
+| owner_staff_id | uuid? |
+| targets | jsonb |
+| params | jsonb |
+| rationale | text |
+| state | text |
+| routed_at | timestamptz? |
+| decided_at | timestamptz? |
+| decided_by | text? |
+| decision_reason | text? |
+| enforcement_id | uuid? |
+
+Indexes: `(owner_team, state)`, `(report_id)`
+
+**enforcements**
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| ref | text unique |
+| report_id | uuid → reports |
+| recommendation_id | uuid? → recommendations |
+| action | text |
+| owner_team | text |
+| targets | jsonb |
+| reason | text |
+| params | jsonb |
+| effects | jsonb |
+| recorded_by | text |
+| recorded_at | timestamptz |
+| execution_state | text |
+| applied_ref | text? |
+| applied_at | timestamptz? |
+| failure | text? |
+| appealable | bool |
+| appeal_deadline | timestamptz? |
+| reversed_at | timestamptz? |
+| reversal_reason | text? |
+
+Indexes: `(execution_state)`, `(owner_team, recorded_at desc)`
+
+**enforcement_targets**: Lookup of active enforcement by target
+
+| Column | Type |
+|---|---|
+| enforcement_id | uuid → enforcements |
+| target_type | text |
+| target_id | uuid |
+
+Indexes: `(target_type, target_id)`
+
+**appeals**
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| ref | text unique |
+| source | text (trust|sellers) |
+| external_appeal_id | uuid? |
+| report_id | uuid? → reports |
+| enforcement_id | uuid? → enforcements |
+| appellant_kind | text |
+| appellant_id | text |
+| appellant_name | text |
+| decision_appealed | text |
+| argument | text |
+| evidence_media_ids | jsonb |
+| reviewer_staff_id | uuid? |
+| original_decider_id | text |
+| decide_by | timestamptz |
+| state | text |
+| decision | jsonb? |
+| filed_at | timestamptz |
+
+Indexes: `(state, decide_by)`, `unique(source, external_appeal_id) where external_appeal_id is not null`, `(appellant_kind, appellant_id)`
+
+**report_notes**
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| report_id | uuid → reports |
+| body | text |
+| author_id | text |
+| author_name | text |
+| at | timestamptz |
+
+**report_events**: Timeline: created, merged, assigned, escalated, evidence added, recommendation routed and decided, enforcement applied, resolved
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| report_id | uuid → reports |
+| kind | text |
+| detail | jsonb |
+| actor_kind | text |
+| actor_id | text? |
+| at | timestamptz |
+
+Indexes: `(report_id, at)`
+
+**detection_rules**
+
+| Column | Type |
+|---|---|
+| key | text pk |
+| description | text |
+| type | text |
+| active | bool |
+| thresholds | jsonb |
+| base_score | int |
+| updated_by | text |
+| updated_at | timestamptz |
+| last_run_at | timestamptz? |
+
+**risk_signals**: Raw signals from events used by detection rules (sliding windows)
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| kind | text |
+| subject_type | text |
+| subject_id | uuid |
+| features | jsonb |
+| at | timestamptz |
+
+Indexes: `(kind, at)`, `(subject_type, subject_id, at)`
+
+## Events
+
+| Publishes | When | Payload | Consumed by |
+|---|---|---|---|
+| `trust.report.created` | A report is opened by a person, a detector or a referral | `{ reportId: uuid, ref: string, type: string, source: string, riskScore: int, subjects: json[] }` | notifications, workqueues |
+| `trust.report.escalated` | A report is escalated | `{ reportId: uuid, reason: text }` | - |
+| `trust.report.resolved` | A report is resolved or dismissed (reporters are told the outcome) | `{ reportId: uuid, outcome: string, reporterOutcome: text? }` | workqueues |
+| `trust.evidence.requested` | Proof is requested from a seller or customer | `{ requestId: uuid, reportId: uuid, toType: string, toId: uuid, dueAt: datetime }` | - |
+| `trust.evidence.received` | The reported party sends proof | `{ requestId: uuid, reportId: uuid }` | - |
+| `trust.recommendation.routed` | A recommendation is sent to its owner team | `{ recommendationId: uuid, reportId: uuid, action: string, ownerTeam: string, ownerRole: string, targets: json[] }` | workqueues |
+| `trust.recommendation.decided` | The owner team accepts or declines, or Trust withdraws it | `{ recommendationId: uuid, reportId: uuid, state: string, reason: text }` | workqueues |
+| `trust.enforcement.recorded` | An owner accepts a recommendation; the owning module executes it | `{ enforcementId: uuid, reportId: uuid, action: string, ownerTeam: string, targets: json[], reason: text, params: json, appealDeadline: datetime?, alreadyApplied: bool }` | advertising, catalog, customers, messaging, offers, reviews, sellers |
+| `trust.enforcement.reversed` | An enforcement is reversed (appeal overturned or error); owners undo it | `{ enforcementId: uuid, action: string, targets: json[], reason: text }` | - |
+| `trust.appeal.submitted` | A customer or seller appeals a trust enforcement | `{ appealId: uuid, enforcementId: uuid, decideBy: datetime }` | - |
+| `trust.appeal.decided` | A trust appeal is decided | `{ appealId: uuid, enforcementId: uuid, outcome: string }` | - |
+| `trust.assessment.completed` | A seller application or account assessment is recorded | `{ reportId: uuid, subjectType: string, subjectId: uuid, level: string, flags: json[], recommendation: text, recommendedHoldDays: int? }` | sellers |
+
+| Consumes | From | Does |
+|---|---|---|
+| `reviews.content.referred` | reviews | Open or extend a fake_reviews report with the referred reviews as subjects |
+| `messaging.message.reported` | messaging | Open an abuse report for the conversation |
+| `orders.order.placed` | orders | Feed the linked-new-accounts detection rule (accounts, cards, shipping address) |
+| `payments.chargeback.opened` | payments | Add a signal to suspicious-order detection and open reports for repeated chargebacks |
+| `payments.payment.failed` | payments | Signal for card-testing detection |
+| `reviews.review.published` | reviews | Feed the review-burst detection rule |
+| `offers.offer.created` | offers | Feed the price-far-below-authorized and restricted-brand rules |
+| `catalog.product.publication_changed` | catalog | Confirm execution of suspend_product enforcements. setPublication accepts trustReportId; until catalog's publication_changed payload carries it (request to the catalog owner), match by the enforcement reference in the reason |
+| `offers.offer.status_changed` | offers | Confirm execution of suspend_offer enforcements |
+| `sellers.seller.restricted` | sellers | Confirm restrict_seller enforcements (trustEnforcementId) |
+| `sellers.seller.suspended` | sellers | Confirm suspend_seller enforcements |
+| `sellers.appeal.submitted` | sellers | Mirror appeals of restrictions that came from a trust report into the Appeals tab |
+| `sellers.appeal.decided` | sellers | Update the mirrored appeal |
+| `customers.account.restricted` | customers | Confirm customer restriction enforcements |
+| `customers.account.restriction_lifted` | customers | Record that a customer restriction ended |
+| `finance.hold.placed` | finance | Confirm hold_payout enforcements when the hold carries trustReportId |
+| `orders.item.cancelled` | orders | When trustReportId is set: record the staff cancellation on the report (confirms hold_dispatch, review_payments or other recommendations that ended in cancellation) |
+| `returns.refund.approved` | returns | When trustReportId is set: confirm refund_buyers enforcements |
+| `support.case.opened` | support | Confirm inform_customers outreach cases that reference the report |
+| `sellers.application.submitted` | sellers | Run application detection rules (duplicate tax id, bank token or address of a closed account) and add signals to any assessment |
+
+## In-process API (for other modules)
+
+| Function | Signature | Used by |
+|---|---|---|
+| raiseSignal | `(input: { type: string, detector: string, title: string, subjects: TrustSubject[], evidence: EvidenceInput[], score?: int, dedupeKey: string }) => TrustReport`<br>Automated signals from other modules' detectors; de-duplicated by dedupeKey (adds evidence to the open report instead of creating a new one) | payments, reviews, orders, messaging |
+| requestAssessment | `(input: { subjectType: 'seller_application' | 'seller' | 'customer', subjectId: uuid, sellerId?: uuid, question: string, requestedBy: Actor }) => { reportId: uuid, ref: string }`<br>Seller Manager asks Trust and Risk to assess an application or account; the answer comes back as trust.assessment.completed | sellers |
+| reportsAbout | `(subjectType: string, subjectId: uuid) => { filedBy: int, against: int, open: int, reportIds: uuid[] }`<br>Counts for customer and seller detail pages | customers, sellers, support, graphql |
+| enforcementsFor | `(subjectType: string, subjectId: uuid) => Enforcement[]`<br>Active enforcement on an offer, product, seller or customer, with appeal route | offers, catalog, sellers, customers |
+| listReportsAbout | `(subjectType: 'customer' | 'seller', subjectId: uuid, filter: { role?: 'filed_by' | 'against', statuses?: string[] }, page: PageInput) => Page<TrustReport>`<br>Reports filed by or about a customer or seller (including its offers, products and claims) for the admin 360 views; reporter identity, evidence and internal notes are left out | graphql |
+| getReportSummaries | `(reportIds: uuid[]) => TrustReport[]`<br>Batch lookup of reports by id (e.g. the report behind a restriction) without reporter identity, evidence or internal notes | graphql |
+| exportRows | `(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }`<br>Export rows for reports dataset trust.admin.reports (reporter identities only with trust.reports.export-identities) | reports |
+
+## Permissions
+
+| Key | Who | Allows |
+|---|---|---|
+| `trust.reports.view` | staff | View the trust queue, reports, enforcement and appeals |
+| `trust.reports.investigate` | staff | Assign, add evidence, request proof, override risk, add notes and draft recommendations |
+| `trust.reports.decide` | staff | Route recommendations, resolve, dismiss and reopen reports, record assessments |
+| `trust.recommendations.decide` | staff | Owner teams (Catalog, Seller Manager, Support, Finance...) accept or decline recommendations; the action's own permission is also checked |
+| `trust.enforcements.reverse` | staff | Reverse recorded enforcement |
+| `trust.appeals.decide` | staff | Decide appeals on trust enforcement (never your own decision) |
+| `trust.rules.manage` | staff | Change automated detection rules |
+| `trust.reports.export` | staff | Export the trust queue |
+| `trust.reports.export-identities` | staff | Include reporter identities in exports |
+| `trust.reports.submit` | seller | Report abuse, counterfeits and listing problems |
+| `trust.evidence.submit` | seller | Answer Trust and Risk evidence requests |
+| `trust.appeals.submit` | seller | Appeal trust actions on offers, products and claims |
+
+## Approval actions
+
+Checked through the access module (limits per role, second reviewer).
+
+| Action | Limit | Second reviewer | Approvers | Meaning |
+|---|---|---|---|---|
+| `trust.enforcements.reverse` | none | above-limit | Per role authority in access (Trust and Risk Manager; Business Owner when Permitted with second review) | Reverse a recorded trust enforcement |
+
+## Error codes
+
+| Code | Status | Meaning |
+|---|---|---|
+| `APPEAL_WINDOW_CLOSED` | 409 | The appeal deadline has passed |
+| `APPEAL_ALREADY_OPEN` | 409 | An appeal for this enforcement is already open |
+| `NOT_APPEALABLE` | 409 | This action cannot be appealed (e.g. informing customers) |
+| `APPEAL_IN_SELLERS` | 409 | Seller account restrictions and suspensions are appealed and decided in sellers |
+| `SAME_REVIEWER_NOT_ALLOWED` | 409 | The reviewer recommended or accepted the original action |
+| `SEPARATE_DUTIES` | 403 | Trust staff cannot accept their own recommendations; the owner team decides |
+| `RECOMMENDATIONS_OPEN` | 409 | Recommendations are still waiting for their owner teams |
+
+## Background jobs
+
+| Job | Schedule | Does |
+|---|---|---|
+| `trust.run-detection` | every 5 min | Evaluate detection rules over risk_signals windows; raise or extend reports (de-duplicated) |
+| `trust.rescore` | every 15 min | Recompute risk scores for open reports when evidence or signals change (overrides are kept) |
+| `trust.evidence-deadlines` | hourly | Expire evidence requests past due and note it on the report |
+| `trust.execution-check` | every 15 min | Flag enforcement still pending after executionGraceMinutes as failed and raise a workqueue item for the owner team |
+| `trust.appeal-deadlines` | hourly | Raise workqueue items for appeals near decideBy |
+
+## Settings
+
+| Key | Default | Meaning |
+|---|---|---|
+| riskThresholds | `{"medium":40,"high":70}` | Score bands for low, medium, high |
+| highRiskDeadlineHours | `24` | Investigation deadline for high-risk reports |
+| defaultDeadlineHours | `72` | Investigation deadline for other reports |
+| appealWindowDays | `14` | Days to appeal a trust enforcement |
+| appealDecisionDays | `7` | Target to decide an appeal |
+| evidenceRequestDays | `5` | Default deadline for proof requests |
+| executionGraceMinutes | `60` | Time for an owner module to confirm execution |
+| reporterRateLimitPerDay | `20` | Reports per customer or seller per day |
+| evidenceRetentionDays | `730` | How long evidence is kept after resolution |
+
+## Integrations
+- **Brand registry lookups (optional)**: Check serial numbers against brand owner registries for counterfeit reports
+
+## Notes
+- Trust recommends, owners act (plan ch. 17): Catalog suspends products, offers handle offer removal, Seller Manager restricts sellers, Support informs customers, Finance holds payouts. The owner's acceptance in trust records the enforcement and publishes trust.enforcement.recorded; catalog, offers, sellers, customers, reviews, messaging and advertising execute it and their own events confirm execution.
+- Owner modules that do not consume trust.enforcement.recorded (finance holds, orders dispatch holds, support outreach) act in their own screens; the owner then accepts the recommendation with externalRef so the enforcement is recorded as already applied (alreadyApplied=true in the event, so nobody executes it twice). Executing actions take an optional trustReportId so trust can confirm them: catalog setPublication, sellers createRestriction / suspendSeller (sellers.seller.restricted / suspended), finance placeHold (finance.hold.placed), orders cancel-items (orders.item.cancelled), customers account actions (customers.account.restricted) and returns exception refunds (returns.refund.approved).
+- Valid order history and access to help are preserved for everyone involved in every enforcement (plan ch. 17); each recorded effect list states what keeps working.
+- Reporters are never revealed to reported parties. Reports on reviews, answers and questions stay in reviews; the account/reviews 'Reports you made' tab merges both lists.
+- Appeals: trust decides appeals on its enforcement (offers, products, claims, customer restrictions from trust). Seller account restrictions and suspensions are appealed and decided in sellers; trust mirrors linked ones read-only so the Trust and Risk Manager sees them in one Appeals tab.
+- Approval actions registered with access: trust.enforcements.reverse (authority). Approval limits for the executed actions (holds, restrictions) belong to the owning module's action and are checked at accept time.
+- Phase 2: rights-owner reports through the public form and stronger moderation tooling; automated detection, evidence, recommendations, enforcement and appeals are phase 1 because the admin/trust screen and the launch checklist depend on them.
+- Exports: trust registers dataset trust.admin.reports with reports.registerDataset and serves the rows through exportRows; reporter identity columns need trust.reports.export-identities.
+
+## GraphQL (read layer)
+
+This module's fragment of the GraphQL schemas (see [../graphql/README.md](../graphql/README.md)). Writes stay on the REST endpoints above.
+
+```graphql
+# trust: Trust and Risk reports (counterfeit, suspicious orders, fake reviews, abuse), their risk score, recorded
+# enforcement and outcome. In GraphQL, trust only adds the reports linked to the admin 360 views (customer, seller)
+# and the report behind a restriction. Investigating and deciding stay on REST (admin/trust screen).
+# Admin Center only. Reporter identities are never exposed here.
+
+enum TrustReportType @areas(in: [ADMIN]) {
+  COUNTERFEIT
+  SUSPICIOUS_ORDERS
+  FAKE_REVIEWS
+  ABUSE
+  PROHIBITED_ITEM
+  MISLEADING_LISTING
+  SELLER_APPLICATION
+  ACCOUNT_RISK
+  OTHER
+}
+
+enum TrustReportStatus @areas(in: [ADMIN]) {
+  OPEN
+  UNDER_REVIEW
+  ESCALATED
+  RESOLVED
+  DISMISSED
+  MERGED
+}
+
+enum TrustReportSource @areas(in: [ADMIN]) {
+  CUSTOMER
+  SELLER
+  STAFF
+  AUTOMATED
+  BRAND_OWNER
+  REFERRAL
+}
+
+enum TrustRiskLevel @areas(in: [ADMIN]) {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum TrustSubjectType @areas(in: [ADMIN]) {
+  SELLER
+  PRODUCT
+  OFFER
+  ORDER
+  CUSTOMER
+  REVIEW
+  QUESTION
+  ANSWER
+  MESSAGE
+  CONVERSATION
+  APPLICATION
+  STOREFRONT_CLAIM
+  PAYMENT
+}
+
+"How the 360 subject relates to a report"
+enum TrustSubjectRole @areas(in: [ADMIN]) {
+  "Reports this customer or seller filed"
+  FILED_BY
+  "Reports about this customer or seller (or their offers, products, messages)"
+  AGAINST
+}
+
+"Something a report is about, with its status in the owning module"
+type TrustSubject @areas(in: [ADMIN]) {
+  type: TrustSubjectType!
+  id: UUID!
+  ref: String
+  label: String!
+  "Current status in the owning module, e.g. Restricted"
+  statusLabel: String
+  "Admin screen to open, e.g. admin/seller"
+  screen: String
+}
+
+"Counts of recommendations by state on a report"
+type TrustRecommendationCounts @areas(in: [ADMIN]) {
+  total: Int!
+  pending: Int!
+  sentToOwner: Int!
+  completed: Int!
+  declined: Int!
+}
+
+enum TrustEnforcementState @areas(in: [ADMIN]) {
+  PENDING
+  APPLIED
+  FAILED
+  REVERSED
+}
+
+"Enforcement recorded from a report: who decided, why, and what changed (executed by the owning module)"
+type TrustEnforcement @areas(in: [ADMIN]) {
+  id: UUID!
+  "e.g. EN-261006-0012"
+  ref: String!
+  "e.g. restrict_seller, suspend_offer, restrict_customer_messaging"
+  action: String!
+  "catalog, sellers, support, finance, orders, reviews, customers or messaging"
+  ownerTeam: String!
+  reason: String!
+  "What changes and what stays, e.g. open orders and returns stay active"
+  effects: [String!]!
+  recordedBy: Actor!
+  recordedAt: DateTime!
+  executionState: TrustEnforcementState!
+  "Record in the owning module, e.g. RS-261002-0019"
+  appliedRef: String
+  appealable: Boolean!
+  appealDeadline: DateTime
+  reversedAt: DateTime
+}
+
+type TrustReportResolution @areas(in: [ADMIN]) {
+  "action_taken, no_violation, insufficient_evidence, duplicate or referred"
+  outcome: String!
+  summary: String!
+  decidedBy: Actor!
+  decidedAt: DateTime!
+}
+
+"A Trust and Risk report as listed on admin 360 views. The full case file (evidence, notes, reporter) stays on REST."
+type TrustReport @areas(in: [ADMIN]) {
+  id: UUID!
+  "e.g. TR-3391"
+  ref: String!
+  type: TrustReportType!
+  title: String!
+  description: String!
+  source: TrustReportSource!
+  "Merged duplicate reports, e.g. brand owner and 3 customers"
+  reporterCount: Int!
+  subjects: [TrustSubject!]!
+  status: TrustReportStatus!
+  riskScore: Int!
+  riskLevel: TrustRiskLevel!
+  assignee: Actor
+  deadline: Deadline
+  recommendations: TrustRecommendationCounts!
+  enforcements: [TrustEnforcement!]!
+  "Support cases linked to the report, e.g. CS-104933"
+  linkedCaseRefs: [String!]!
+  resolution: TrustReportResolution
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type TrustReportPage implements Paged @areas(in: [ADMIN]) {
+  items: [TrustReport!]!
+  nextCursor: String
+  page: Int
+  totalPages: Int
+  total: Int
+}
+
+"Abuse report counts for customer and seller detail pages and lists"
+type TrustReportCounts @areas(in: [ADMIN]) {
+  filedBy: Int!
+  against: Int!
+  open: Int!
+}
+
+# ------------------------------------------------------------------ extensions
+
+extend type Customer {
+  "Abuse reports filed by and against this customer (customer list and 360)"
+  trustReportCounts: TrustReportCounts @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "customers.accounts.view") @source(module: "trust", fn: "reportsAbout")
+  "Linked Trust and Risk reports, newest first. No role = both."
+  trustReports(role: TrustSubjectRole, statuses: [TrustReportStatus!], paging: PageInput): TrustReportPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "trust.reports.view") @source(module: "trust", fn: "listReportsAbout") @cost(weight: 5)
+}
+
+extend type Seller {
+  "Abuse reports filed by and against this seller (seller 360)"
+  trustReportCounts: TrustReportCounts @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "sellers.accounts.view") @source(module: "trust", fn: "reportsAbout")
+  "Linked Trust and Risk reports (about the seller, its offers, products and claims), newest first. No role = both."
+  trustReports(role: TrustSubjectRole, statuses: [TrustReportStatus!], paging: PageInput): TrustReportPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "trust.reports.view") @source(module: "trust", fn: "listReportsAbout") @cost(weight: 5)
+}
+
+extend type SellerRestriction {
+  "The Trust and Risk report the restriction came from"
+  trustReport: TrustReport @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "trust.reports.view") @source(module: "trust", fn: "getReportSummaries")
+}
+
+extend type CustomerRestriction {
+  "The Trust and Risk report the restriction came from"
+  trustReport: TrustReport @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "trust.reports.view") @source(module: "trust", fn: "getReportSummaries")
+}
+```

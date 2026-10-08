@@ -1,0 +1,543 @@
+# sellers: marketplace seller accounts, the public storefront profile, performance against targets,
+# warnings, restrictions and appeals.
+#
+# Seller is one type in all three schemas:
+#   store   public card fields + publicProfile (storefront content). Reached through Offer.seller and sellerStorefront(slug).
+#   seller  the caller's own account only, reached through mySeller (Offer.seller is not in the seller schema, so no
+#           other seller's account fields can be reached).
+#   admin   any seller: sellerAdmin(id) (seller 360), sellers (list), Product.ownerSeller.
+# Other modules extend Seller where they own the data: reviews → rating, feedback; messaging → replyStats, inbox;
+# finance → balance, finance; returns / support → returns, cases; access → pendingApprovals; audit → auditTrail;
+# trust → trustReports; workqueues → openWorkItems.
+# SellerStorefront (store): search → products, categories; shipping → shippingSummary; returns → returnTerms;
+# promotions → activePromotions. Seller 360 (admin): catalog → catalogCounts; orders → orderCounts (recent orders via
+# ordersAdmin(filter: { sellerId })).
+# Rating figures belong to reviews (Seller.rating); Seller has no copy of them. dispatchLabel is a card shortcut of
+# shipping's dispatch schedule (Seller.shippingSummary owns the full terms).
+# The Official Store has no seller record (offers show it as ownerType official, seller null).
+
+"""
+Storefront content of a marketplace seller: banner, introduction, what was verified, service figures, approved
+claims, contact options and featured collections. Only staff-approved claims and live data appear here.
+Shipping, returns, promotion and product sections come from those modules' fields on Seller.
+"""
+type SellerPublicProfile {
+  sellerId: UUID!
+  banner: MediaRef
+  "One-line store tagline under the store name, e.g. Headphones and speakers, tested before they ship (staff-reviewed like claims)"
+  tagline: String
+  introduction: String
+  "What was checked and what was not (always: product authenticity is not certified)"
+  verification: SellerVerification!
+  "On-time dispatch, last 90 days (reply figures come from messaging: Seller.replyStats)"
+  onTimeDispatchPct: Float
+  "Staff-approved public claims, e.g. Authorized Halden retailer"
+  approvedClaims: [SellerPublicClaim!]!
+  contact: SellerStorefrontContact!
+  warranty: String
+  "Visible featured collections in the seller's order (offers can add SellerCollection.offers)"
+  collections: [SellerCollection!]!
+}
+
+type SellerPublicClaim {
+  kind: SellerClaimKind!
+  text: String!
+}
+
+enum SellerClaimKind {
+  BRAND_AFFILIATION
+  AUTHORIZED_RETAILER
+  CERTIFICATION
+  AWARD
+  OTHER
+}
+
+type SellerStorefrontContact {
+  "Shopper can message the seller (order messages are always on for buyers with an order)"
+  canMessage: Boolean!
+  productQuestions: Boolean!
+  "e.g. within_24h"
+  replyTarget: String!
+  "Only when the seller chose to show it"
+  phone: String
+}
+
+"A seller-curated featured collection on the storefront"
+type SellerCollection {
+  id: UUID!
+  title: String!
+  image: MediaRef
+  offerIds: [UUID!]!
+  itemCount: Int!
+}
+
+enum SellerVerificationState {
+  NOT_VERIFIED
+  VERIFIED
+  LAPSED
+  REVOKED
+}
+
+"The Verified seller label, in plain language"
+type SellerVerification {
+  state: SellerVerificationState!
+  "e.g. Business identity: Northwind Audio LLC, registered in Oregon"
+  checked: [String!]!
+  "Always includes that product authenticity is not certified"
+  notChecked: [String!]!
+  lastCheckedAt: DateTime
+  expiresAt: DateTime
+  "Why not granted, lapsed or revoked"
+  reason: String @areas(in: [SELLER, ADMIN])
+}
+
+"""
+A marketplace seller. Public card fields are in every schema (offer lists, storefront header); account fields only in
+Seller Center (own account, `mySeller`) and Admin Center (`sellerAdmin`, `sellers`). Account status, verification,
+product approval and payout readiness are separate fields, as the plan requires.
+"""
+type Seller {
+  id: UUID!
+  "e.g. SL-20714"
+  ref: String!
+  slug: String!
+  storeName: String!
+  logo: MediaRef
+  "e.g. Portland, OR"
+  location: String
+  "Holds the Verified seller label now"
+  verified: Boolean!
+  "e.g. Ships in 1 business day. Card shortcut copied from shipping's dispatch schedule; full terms: Seller.shippingSummary"
+  dispatchLabel: String
+  sellingSince: Date
+  "False while suspended or closed; the storefront explains that existing orders are still looked after"
+  sellingNow: Boolean!
+  "Storefront content (SellerStorefront)"
+  publicProfile: SellerPublicProfile!
+
+  # ---- Seller Center and Admin Center
+  legalName: String @areas(in: [SELLER, ADMIN])
+  status: SellerStatus! @areas(in: [SELLER, ADMIN])
+  statusSince: DateTime! @areas(in: [SELLER, ADMIN])
+  "False when suspended, closed or not yet launch-ready"
+  canSellNew: Boolean! @areas(in: [SELLER, ADMIN])
+  launchReady: Boolean! @areas(in: [SELLER, ADMIN])
+  verification: SellerVerification! @areas(in: [SELLER, ADMIN])
+  payoutReadiness: SellerPayoutReadiness! @areas(in: [SELLER, ADMIN])
+  "New agreement versions waiting for the owner's acceptance"
+  pendingAgreements: Int! @areas(in: [SELLER, ADMIN])
+  accountManager: SellerAccountManager @areas(in: [SELLER, ADMIN])
+  "Latest metrics vs targets, warnings and the 12-month action history (recomputed daily at 06:00 market time)"
+  performance: SellerPerformance @areas(in: [SELLER, ADMIN]) @cost(weight: 3)
+  "Restrictions, newest first. Default: pending approval and active."
+  restrictions(states: [SellerRestrictionState!]): [SellerRestriction!]! @areas(in: [SELLER, ADMIN])
+  "Appeals on restrictions, suspensions, warnings and application decisions, newest first"
+  appeals(states: [SellerAppealState!]): [SellerAppeal!]! @areas(in: [SELLER, ADMIN])
+  "Store name, public claim and business change requests"
+  changeRequests(states: [SellerChangeRequestState!]): [SellerChangeRequest!]! @areas(in: [SELLER, ADMIN])
+  "Legal and tax details (seller: needs sellers.account.manage)"
+  business: SellerBusiness @areas(in: [SELLER, ADMIN])
+
+  # ---- Seller Center only
+  "The calling member: role and permissions, for showing or hiding actions"
+  membership: SellerMembership @areas(in: [SELLER])
+
+  # ---- Admin Center only (seller 360)
+  "Owner contact"
+  owner: SellerContact @areas(in: [ADMIN])
+  "Main category by active offers, for lists"
+  mainCategory: String @areas(in: [ADMIN])
+  "One line for lists, e.g. Refurbished offers removed · appeal under review"
+  restrictionSummary: String @areas(in: [ADMIN])
+  "Open warning shown in lists, e.g. Dispatch below target"
+  warningNote: String @areas(in: [ADMIN])
+  notes: [SellerNote!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "sellers.accounts.view")
+  "Account actions: approval, warnings, restrictions, suspensions, appeals, label changes (newest first)"
+  history: [TimelineEvent!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "sellers.accounts.view")
+}
+
+enum SellerStatus @areas(in: [SELLER, ADMIN]) {
+  APPLIED
+  INFORMATION_REQUIRED
+  UNDER_REVIEW
+  APPROVED
+  RESTRICTED
+  SUSPENDED
+  CLOSED
+}
+
+enum SellerPayoutReadinessState @areas(in: [SELLER, ADMIN]) {
+  NOT_ADDED
+  VERIFICATION_PENDING
+  VERIFIED
+  CHANGE_UNDER_REVIEW
+  BLOCKED
+}
+
+"Whether payouts can be sent to the seller's destination (balances come from finance: Seller.balance)"
+type SellerPayoutReadiness @areas(in: [SELLER, ADMIN]) {
+  state: SellerPayoutReadinessState!
+  "e.g. Checking •••• 7731"
+  destinationLabel: String
+  "What the seller must do, e.g. confirm the 2 small deposits"
+  note: String!
+  blockedReasons: [String!]!
+}
+
+type SellerAccountManager @areas(in: [SELLER, ADMIN]) {
+  name: String!
+  "e.g. Replies within 1 business day"
+  replyTarget: String
+}
+
+type SellerMembership @areas(in: [SELLER]) {
+  memberId: UUID!
+  "owner, products_inventory, shipping, customer_service or custom"
+  role: String!
+  permissions: [String!]!
+  isOwner: Boolean!
+}
+
+type SellerContact @areas(in: [SELLER, ADMIN]) {
+  name: String!
+  email: Email
+  phone: String
+  supportHours: String
+}
+
+type SellerBusinessOwner @areas(in: [SELLER, ADMIN]) {
+  name: String!
+  ownershipPct: Float!
+  isPrimary: Boolean!
+  "not_started, pending, verified or failed"
+  verificationState: String!
+}
+
+"Business details collected in the application. Tax ids only ever show the last 4 digits."
+type SellerBusiness @areas(in: [SELLER, ADMIN]) {
+  legalName: String!
+  "llc, corporation, partnership or sole_proprietor"
+  businessType: String!
+  stateOfRegistration: String
+  registryNumber: String
+  address: Address!
+  phone: String!
+  website: String
+  "ein or ssn"
+  taxIdType: String!
+  taxIdLast4: String!
+  owners: [SellerBusinessOwner!]!
+  "Editable without review"
+  contact: SellerContact!
+}
+
+# ------------------------------------------------------------------ performance
+
+enum SellerMetricKey @areas(in: [SELLER, ADMIN]) {
+  DISPATCH_RELIABILITY
+  CANCELLATION_RATE
+  VALID_TRACKING
+  RETURN_RATE
+  RESPONSE_TIME
+  UNRESOLVED_CASES
+  POLICY_VIOLATIONS
+}
+
+enum SellerMetricStatus @areas(in: [SELLER, ADMIN]) {
+  MEETS
+  WATCH
+  BELOW
+  ACTION_NEEDED
+}
+
+enum SellerPerformanceOverall @areas(in: [SELLER, ADMIN]) {
+  GOOD
+  AT_RISK
+  ACTION_NEEDED
+}
+
+"A service target, e.g. dispatch reliability at least 95% over 30 days"
+type SellerPerformanceTarget @areas(in: [SELLER, ADMIN]) {
+  metric: SellerMetricKey!
+  "GTE or LTE"
+  comparator: String!
+  threshold: Float!
+  "percent, hours or count"
+  unit: String!
+  windowDays: Int!
+  "Category-specific target, e.g. return rate for Electronics"
+  category: Category
+  "e.g. At least 95%"
+  display: String!
+  "Preview targets are marked as examples"
+  isExample: Boolean!
+  effectiveFrom: Date!
+}
+
+"One metric against its target"
+type SellerPerformanceMetric @areas(in: [SELLER, ADMIN]) {
+  key: SellerMetricKey!
+  label: String!
+  value: Float!
+  "e.g. 96.4%, 31 h, 1"
+  display: String!
+  target: SellerPerformanceTarget!
+  status: SellerMetricStatus!
+  numerator: Int
+  denominator: Int
+  "e.g. 362 of 376 orders on time"
+  detail: String!
+  "How it is calculated, e.g. orders dispatched by their deadline ÷ all dispatched orders"
+  definition: String!
+}
+
+"Seller performance summary: Account health in Seller Center, the performance card on the seller 360"
+type SellerPerformance @areas(in: [SELLER, ADMIN]) {
+  from: Date!
+  to: Date!
+  orderCount: Int!
+  overall: SellerPerformanceOverall!
+  metrics: [SellerPerformanceMetric!]!
+  "Shortcut for lists and the dispatch filter (same value as the DISPATCH_RELIABILITY metric)"
+  onTimeDispatchPct: Float
+  "Default: open warnings and those resolved in the last 12 months"
+  warnings: [SellerWarning!]!
+  "Warnings and actions, last 12 months"
+  history: [TimelineEvent!]!
+  updatedAt: DateTime!
+}
+
+enum SellerWarningKind @areas(in: [SELLER, ADMIN]) {
+  PERFORMANCE
+  LISTING
+  POLICY
+  CONDUCT
+}
+
+type SellerWarning @areas(in: [SELLER, ADMIN]) {
+  id: UUID!
+  kind: SellerWarningKind!
+  title: String!
+  detail: String!
+  issuedAt: DateTime!
+  issuedBy: Actor!
+  "open or resolved"
+  state: String!
+  resolvedAt: DateTime
+  resolutionNote: String
+}
+
+# ------------------------------------------------------------------ restrictions and appeals
+
+enum SellerRestrictionState @areas(in: [SELLER, ADMIN]) {
+  PENDING_APPROVAL
+  ACTIVE
+  LIFTED
+  EXPIRED
+  CANCELLED
+}
+
+enum SellerRestrictionReason @areas(in: [SELLER, ADMIN]) {
+  PERFORMANCE
+  POLICY_VIOLATION
+  BRAND_CLAIM
+  COUNTERFEIT_RISK
+  FRAUD_RISK
+  UNRESOLVED_CASES
+  VERIFICATION_LAPSED
+  APPROVAL_CONDITION
+  OTHER
+}
+
+"What a restriction stops (one enum everywhere: restriction, events, canSell)"
+enum SellerActivity @areas(in: [SELLER, ADMIN]) {
+  NEW_LISTINGS
+  PRODUCT_SUBMISSIONS
+  NEW_OFFERS
+  OFFER_REACTIVATION
+  SALES
+  ADVERTISING
+  PROMOTIONS
+  PAYOUT_SCHEDULE
+}
+
+"Where a restriction applies. All lists empty = the whole account."
+type SellerRestrictionScope @areas(in: [SELLER, ADMIN]) {
+  wholeAccount: Boolean!
+  categories: [Category!]!
+  "e.g. refurbished"
+  conditions: [String!]!
+  offerIds: [UUID!]!
+  productIds: [UUID!]!
+}
+
+type SellerAppealRoute @areas(in: [SELLER, ADMIN]) {
+  deadline: DateTime!
+  howTo: String!
+  "Role or person, never the original decider"
+  reviewer: String!
+  secondAppealTo: String
+}
+
+"""
+A restriction on a seller account with its reason, affected activity, what still works, how to resolve it and the
+appeal route. Other sellers' offers and existing orders are never touched.
+"""
+type SellerRestriction @areas(in: [SELLER, ADMIN]) {
+  id: UUID!
+  "e.g. RS-261002-0019"
+  ref: String!
+  state: SellerRestrictionState!
+  "e.g. New listings in Cameras paused"
+  title: String!
+  reasonCode: SellerRestrictionReason!
+  "Facts and the rule, shown to the seller"
+  reason: String!
+  ruleRef: String
+  affectedActivities: [SellerActivity!]!
+  scope: SellerRestrictionScope!
+  affectedSummary: String!
+  "e.g. existing orders, dispatch and shipping; returns, refunds and cases; messages; payouts"
+  stillWorks: [String!]!
+  toResolve: String!
+  appealRoute: SellerAppealRoute!
+  reviewDate: Date!
+  startedAt: DateTime
+  endsAt: DateTime
+  setBy: Actor!
+  "e.g. Trust and Risk, when created from a trust recommendation"
+  recommendedBy: Actor
+  "Second-review state while PENDING_APPROVAL"
+  approval: ApprovalInfo @areas(in: [ADMIN])
+  "Trust report behind it (trust adds SellerRestriction.trustReport)"
+  trustReportId: UUID @areas(in: [ADMIN])
+  appeals: [SellerAppeal!]!
+  "Documents the seller sent to resolve it"
+  resolutionEvidence: [MediaRef!]!
+  liftedAt: DateTime
+  liftReason: String
+}
+
+enum SellerAppealSubject @areas(in: [SELLER, ADMIN]) {
+  RESTRICTION
+  SUSPENSION
+  APPLICATION_REJECTION
+  WARNING
+}
+
+enum SellerAppealState @areas(in: [SELLER, ADMIN]) {
+  SUBMITTED
+  UNDER_REVIEW
+  UPHELD
+  OVERTURNED
+  PARTLY_OVERTURNED
+  WITHDRAWN
+}
+
+type SellerAppealDecision @areas(in: [SELLER, ADMIN]) {
+  "upheld, overturned or partly_overturned"
+  outcome: String!
+  explanation: String!
+  "What changed, e.g. restriction lifted for Cameras"
+  changes: [String!]!
+  decidedBy: Actor!
+  decidedAt: DateTime!
+}
+
+"A seller's appeal. Decided by someone other than the original decider; level 2 goes to the next reviewer."
+type SellerAppeal @areas(in: [SELLER, ADMIN]) {
+  id: UUID!
+  "e.g. AP-261004-021"
+  ref: String!
+  subject: SellerAppealSubject!
+  subjectId: UUID!
+  "e.g. RS-261002-0019"
+  subjectRef: String!
+  "1 = first appeal, 2 = second appeal"
+  level: Int!
+  argument: String!
+  evidence: [MediaRef!]!
+  state: SellerAppealState!
+  reviewer: Actor
+  originalDecider: Actor!
+  decideBy: Deadline!
+  decision: SellerAppealDecision
+  submittedAt: DateTime!
+}
+
+enum SellerChangeRequestState @areas(in: [SELLER, ADMIN]) {
+  PENDING
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+"A store name, public claim, legal name, ownership or address change waiting for or past staff review"
+type SellerChangeRequest @areas(in: [SELLER, ADMIN]) {
+  id: UUID!
+  "store_name, public_claim, legal_name, ownership or business_address"
+  kind: String!
+  current: JSON
+  proposed: JSON!
+  evidence: [MediaRef!]!
+  state: SellerChangeRequestState!
+  decisionReason: String
+  "Effect on selling or payouts the seller is told about"
+  impact: String
+  submittedBy: Actor!
+  submittedAt: DateTime!
+  decidedAt: DateTime
+}
+
+"Staff note on a seller"
+type SellerNote @areas(in: [ADMIN]) {
+  id: UUID!
+  body: String!
+  author: Actor!
+  createdAt: DateTime!
+}
+
+type SellerPage implements Paged @areas(in: [ADMIN]) {
+  items: [Seller!]!
+  nextCursor: String
+  page: Int
+  totalPages: Int
+  total: Int
+}
+
+"Filters for the admin seller list"
+input SellerFilterInput @areas(in: [ADMIN]) {
+  "Store name, legal name or contact email"
+  search: String
+  statuses: [SellerStatus!]
+  verified: Boolean
+  "Sellers whose on-time dispatch is below this percentage, e.g. 95"
+  dispatchBelowPct: Float
+  mainCategoryId: UUID
+}
+
+# ------------------------------------------------------------------ extensions and queries
+
+extend type Offer {
+  "The marketplace seller (public card fields; rating from reviews). Null for Official Store offers. Not in the seller schema."
+  seller: Seller @areas(in: [STORE, ADMIN]) @source(module: "sellers", fn: "getStorefrontCard")
+}
+
+extend type Product {
+  "The seller that owns a seller-created product (null for official products)"
+  ownerSeller: Seller @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "sellers", fn: "getSellers")
+}
+
+extend type Query {
+  "A seller by storefront slug: header, publicProfile, rating and feedback (the SellerStorefront screen query). Null for unknown or closed stores."
+  sellerStorefront(slug: String!): Seller @areas(in: [STORE]) @source(module: "sellers", fn: "getStorefrontBySlug")
+
+  "The caller's own seller account: dashboard, Account health (SellerPerformance), store profile"
+  mySeller: Seller @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "sellers", fn: "getSeller")
+
+  "Seller 360 (Admin Center seller detail)"
+  sellerAdmin(id: UUID!): Seller @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "sellers.accounts.view") @source(module: "sellers", fn: "getSeller")
+
+  "Admin seller list"
+  sellers(filter: SellerFilterInput, paging: PageInput): SellerPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "sellers.accounts.view") @source(module: "sellers", fn: "searchSellers")
+}

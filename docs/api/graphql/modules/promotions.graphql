@@ -1,0 +1,332 @@
+# promotions: deal prices and badges on offers, flash sales, coupons and the Deals page.
+# Reads only. Clipping coupons, event reminders, campaign setup, seller consent and every
+# redemption stay on REST (/api/{store,seller,admin}/promotions/...).
+# Adds Offer.deal, Product.coupons, Customer.coupons, OrderItem.discountFunding, HomeSection.flashSales / campaign,
+# ContentPage.campaign and Seller.activePromotions (storefront).
+#
+# Price rule: Offer.deal comes from the same priceOffers() call that cart, checkout and
+# confirmation use, so a deal price matches everywhere. Was prices are the offer's lowest
+# price in the look-back window (offers.lowestPrice), never an invented reference.
+
+# ------------------------------------------------------------------ campaigns
+
+enum PromotionCampaignStatus {
+  DRAFT
+  IN_REVIEW
+  CHANGES_REQUESTED
+  APPROVED
+  SCHEDULED
+  LIVE
+  PAUSED
+  ENDED
+  CANCELLED
+}
+
+"Campaign period with its time zone. Countdowns use startsAt/endsAt exactly."
+type PromotionPeriod {
+  startsAt: DateTime!
+  endsAt: DateTime!
+  "IANA zone the campaign was set up in, e.g. America/Los_Angeles"
+  timeZone: String!
+  "e.g. Oct 16 – Oct 25, 2026 PT"
+  display: String!
+}
+
+"Public face of a promotion campaign: name, period, terms and status (campaign pages, banners, deal badges)"
+type PromotionCampaign {
+  id: UUID!
+  name: String!
+  "Customer-facing one-liner, e.g. 20% off bedding and lighting"
+  description: String
+  period: PromotionPeriod!
+  "Public terms shown on the Deals page, campaign page and coupon"
+  terms: String
+  status: PromotionCampaignStatus!
+  "Shared coupon code, when the campaign has one"
+  code: String
+}
+
+# ------------------------------------------------------------------ deal on an offer (Offer.deal)
+
+enum DealBadgeKind {
+  DEAL
+  COUPON
+  FLASH
+  CLEARANCE
+  FREE_SHIPPING
+  CAMPAIGN
+}
+
+"Badge on product cards and the purchase box, e.g. −20%, Home Week, Flash deal"
+type DealBadge {
+  label: String!
+  kind: DealBadgeKind!
+}
+
+enum FlashDealState {
+  UPCOMING
+  ACTIVE
+  SOLD_OUT
+  ENDED
+}
+
+"Live countdown and claimed meter of a flash deal on one offer"
+type FlashDealCountdown {
+  campaignId: UUID!
+  startsAt: DateTime!
+  endsAt: DateTime!
+  claimedPct: Int!
+  dealStockLeft: Int!
+  state: FlashDealState!
+}
+
+"Seller promotion applied automatically or by code, e.g. 10% off orders over $100 from Northwind Audio"
+type PromotionBanner {
+  campaign: PromotionCampaign!
+  title: String!
+  detail: String!
+  period: PromotionPeriod!
+  autoApply: Boolean!
+  code: String
+}
+
+"""
+The promotion currently applied to one offer: deal price, honest was price, badges, purchase limit,
+countdown and terms. Null on Offer.deal when no promotion applies (the offer's own price stands).
+"""
+type Deal {
+  "Offer price before promotions"
+  regularPrice: Money!
+  "Price after markdown or flash price; what the cart will charge"
+  price: Money!
+  "Reference price: the offer's lowest price in the look-back window. Null when there is no history."
+  wasPrice: Money
+  "e.g. Lowest price from this seller in the 30 days before Oct 6"
+  wasPriceRule: String
+  "Discount from regularPrice in basis points: 2000 = 20%"
+  percentOffBps: Int
+  badges: [DealBadge!]!
+  "Campaign that sets the price (null for a plain seller markdown without a campaign page)"
+  campaign: PromotionCampaign
+  "Units per customer at the deal price"
+  purchaseLimit: Int
+  "Set for flash deals"
+  flash: FlashDealCountdown
+  "When the deal price ends (campaign end or flash end)"
+  endsAt: DateTime
+  "Seller promotions that also apply to this offer"
+  sellerPromos: [PromotionBanner!]!
+}
+
+# ------------------------------------------------------------------ flash sales
+
+enum FlashSaleState {
+  UPCOMING
+  LIVE
+  ENDED
+}
+
+"One flash-sale item: a single seller's offer at a deal price with limited deal stock"
+type FlashSaleItem {
+  id: UUID!
+  offer: Offer!
+  product: Product!
+  dealPrice: Money!
+  regularPrice: Money!
+  "Basis points: 2000 = 20%"
+  percentOffBps: Int!
+  dealStock: Int!
+  claimed: Int!
+  claimedPct: Int!
+  purchaseLimit: Int!
+  "When SOLD_OUT, show the regular offer separately (offer price without the deal)"
+  state: FlashDealState!
+  soldOutAt: DateTime
+}
+
+"A flash sale with real start and end times, claimed meters and purchase limits"
+type FlashSale {
+  "Campaign id"
+  id: UUID!
+  campaign: PromotionCampaign!
+  name: String!
+  period: PromotionPeriod!
+  state: FlashSaleState!
+  "Computed from endsAt and server time; clients count down from it"
+  secondsLeft: Int!
+  items: [FlashSaleItem!]!
+}
+
+# ------------------------------------------------------------------ coupons
+
+enum CouponState @areas(in: [STORE]) {
+  AVAILABLE
+  CLIPPED
+  USED
+  EXPIRED
+}
+
+"Where a coupon was used"
+type CouponUse @areas(in: [STORE]) {
+  orderId: UUID!
+  orderRef: String!
+  saved: Money!
+  at: DateTime!
+}
+
+"A clippable coupon card (Deals page, product page, My coupons). Clip and unclip use REST."
+type Coupon @areas(in: [STORE]) {
+  "Campaign id (one card per campaign for a customer)"
+  id: UUID!
+  campaign: PromotionCampaign!
+  "Unique code assigned to this customer, if any"
+  codeId: UUID
+  code: String
+  title: String!
+  "e.g. $10, 15%, Free"
+  amountLabel: String!
+  "e.g. off, shipping"
+  unitLabel: String!
+  "e.g. Casa Verde Home · minimum spend $100 · one use per customer"
+  conditions: String!
+  "Seller or Marketly name of who funds the discount"
+  fundedBy: String!
+  expiresAt: DateTime!
+  state: CouponState!
+  autoApply: Boolean!
+  terms: String
+  usedOn: CouponUse
+}
+
+"The signed-in customer's coupons (account Coupons and credit screen)"
+type CustomerCoupons @areas(in: [STORE]) {
+  available: [Coupon!]!
+  usedOrExpired: [Coupon!]!
+  "e.g. One coupon per seller package."
+  rules: [String!]!
+}
+
+# ------------------------------------------------------------------ Deals page
+
+"Product on a deal list (clearance), priced for the named seller's offer"
+type DealItem @areas(in: [STORE]) {
+  product: Product!
+  offer: Offer!
+  price: Money!
+  wasPrice: Money
+  endsAt: DateTime
+  "Clearance lasts while the seller's current stock lasts"
+  stockLeft: Int
+}
+
+type DealItemPage implements Paged @areas(in: [STORE]) {
+  items: [DealItem!]!
+  nextCursor: String
+  page: Int
+  totalPages: Int
+  total: Int
+}
+
+"An upcoming sale event with the customer's reminder state (set or cancel the reminder through REST)"
+type DealEvent @areas(in: [STORE]) {
+  campaign: PromotionCampaign!
+  "e.g. Cookware and coffee from the Official Store and Casa Verde"
+  summary: String!
+  "Always false for guests"
+  reminderSet: Boolean!
+}
+
+type DealTab @areas(in: [STORE]) {
+  key: String!
+  label: String!
+  count: Int!
+}
+
+"Deals page: flash sales, coupons, clearance and upcoming events in one read"
+type DealsOverview @areas(in: [STORE]) {
+  "Server time, so countdowns reflect the real campaign period"
+  serverTime: DateTime!
+  tabs: [DealTab!]!
+  flashSales: [FlashSale!]!
+  "First batch of clippable coupons with the customer's clipped state"
+  coupons: [Coupon!]!
+  "Clearance products, page by page"
+  clearance(paging: PageInput): DealItemPage! @cost(weight: 10) @source(module: "promotions", fn: "listClearance")
+  upcomingEvents: [DealEvent!]!
+  "e.g. Coupons can't be combined with flash sale prices unless the coupon says so."
+  rules: [String!]!
+}
+
+# ------------------------------------------------------------------ discount funding (seller and admin)
+
+"One discount on an order item, split between the platform and the seller"
+type PromotionAllocation @areas(in: [SELLER, ADMIN]) {
+  campaign: PromotionCampaign!
+  code: String
+  "e.g. Coupon WELCOME20"
+  label: String!
+  amount: Money!
+  "Platform-funded part: never reduces seller proceeds"
+  platformPart: Money!
+  "Seller-funded part: commission is charged on the price after this part"
+  sellerPart: Money!
+}
+
+"Discounts on one order item and who funds them"
+type PromotionFundingSplit @areas(in: [SELLER, ADMIN]) {
+  allocations: [PromotionAllocation!]!
+  sellerFunded: Money!
+  platformFunded: Money!
+}
+
+# ------------------------------------------------------------------ fields on other modules' types
+
+extend type Offer {
+  "Promotion price, was price, badges, purchase limit and countdown for this offer. Null = no promotion."
+  deal: Deal @source(module: "promotions", fn: "priceOffers")
+}
+
+extend type Product {
+  "Clippable coupons that cover this product (product page)"
+  coupons: [Coupon!]! @areas(in: [STORE]) @source(module: "promotions", fn: "couponsForProduct")
+}
+
+extend type Customer {
+  "My coupons: available and clipped, used and expired"
+  coupons: CustomerCoupons @areas(in: [STORE]) @source(module: "promotions", fn: "couponsForCustomer")
+}
+
+extend type Seller {
+  "Live seller-funded promotions for the storefront banner (automatic or by code), soonest ending first. Platform campaigns are not included."
+  activePromotions: [PromotionBanner!]! @areas(in: [STORE]) @source(module: "promotions", fn: "activeSellerPromotions")
+}
+
+extend type OrderItem {
+  "Discount allocations with platform and seller parts (Seller Center: own items only)"
+  discountFunding: PromotionFundingSplit @areas(in: [SELLER, ADMIN]) @source(module: "promotions", fn: "fundingSplitFor")
+}
+
+extend type HomeSection {
+  "DEALS sections: live flash sales for the home flash strip. Empty for other kinds."
+  flashSales(limit: Int = 1): [FlashSale!]! @areas(in: [STORE, ADMIN]) @source(module: "promotions", fn: "liveDeals")
+  "Campaign linked to a CAMPAIGN_BANNER section (period and terms); the section hides when it ends"
+  campaign: PromotionCampaign @areas(in: [STORE, ADMIN]) @source(module: "promotions", fn: "getPublicCampaign")
+}
+
+extend type ContentPage {
+  "Campaign behind a campaign page: period, terms and status"
+  campaign: PromotionCampaign @areas(in: [STORE, ADMIN]) @source(module: "promotions", fn: "getPublicCampaign")
+}
+
+# ------------------------------------------------------------------ queries
+
+extend type Query {
+  "Deals page: flash sales, coupons, clearance and upcoming events"
+  deals: DealsOverview! @areas(in: [STORE]) @cost(weight: 20) @source(module: "promotions", fn: "getDealsPage")
+
+  "Live flash sales (home flash strip, app Deals tab header)"
+  flashSales(limit: Int = 4): [FlashSale!]! @areas(in: [STORE]) @cost(weight: 10) @source(module: "promotions", fn: "liveDeals")
+
+  "One flash sale with live claimed meters"
+  flashSale(id: UUID!): FlashSale @areas(in: [STORE]) @source(module: "promotions", fn: "getFlashSale")
+}

@@ -1,0 +1,151 @@
+# screens: seller/finance
+# replaces: GET finance/balances, GET finance/ledger, GET finance/payouts, GET finance/payout-destination, GET sellers/account
+# why: Balances, holds, the next payout, the ledger and payout results are shown side by side and must come from the same moment.
+query SellerFinanceOverview($ledgerTypes: [LedgerEntryType!], $ledgerFrom: Date, $ledgerTo: Date, $ledgerPaging: PageInput, $payoutPaging: PageInput) {
+  mySeller {
+    id
+    membership {
+      isOwner
+      permissions
+    }
+  }
+  sellerFinance {
+    sellerId
+    feeRuleVersion
+    balance {
+      asOf
+      salesPeriod {
+        from
+        to
+      }
+      salesProceeds {
+        ...Amount
+      }
+      pending {
+        ...Amount
+      }
+      available {
+        ...Amount
+      }
+      held {
+        ...Amount
+      }
+      holds {
+        id
+        status
+        reason
+        reviewDate
+        amount {
+          ...Amount
+        }
+        reference {
+          ...FinanceRef
+        }
+      }
+      negative
+      amountOwed {
+        ...Amount
+      }
+      owedDueBy
+      nextPayout {
+        scheduledFor
+        cutoffAt
+        arrivesNote
+        note
+        estimatedAmount {
+          ...Amount
+        }
+      }
+      settlementRules {
+        schedule
+        availableAfterDeliveryDays
+        refundAfterPayout
+        text
+      }
+      destination {
+        label
+        status
+        verifiedAt
+        pendingChange {
+          label
+          requestedAt
+          paysCurrentUntilApproved
+        }
+      }
+    }
+    ledger(types: $ledgerTypes, from: $ledgerFrom, to: $ledgerTo, paging: $ledgerPaging) {
+      total
+      page
+      totalPages
+      nextCursor
+      items {
+        id
+        at
+        type
+        typeLabel
+        description
+        bucket
+        statementId
+        statementRef
+        reference {
+          ...FinanceRef
+        }
+        amount {
+          ...Amount
+        }
+        balanceAfter {
+          ...Amount
+        }
+      }
+    }
+    payouts(paging: $payoutPaging) {
+      total
+      nextCursor
+      items {
+        id
+        ref
+        status
+        requestedOn
+        releasedAt
+        paidAt
+        arrivedOn
+        failureCode
+        failureReason
+        nextStep
+        resultNote
+        retryOfRef
+        statementId
+        statementRef
+        statementPeriod {
+          from
+          to
+        }
+        amount {
+          ...Amount
+        }
+      }
+    }
+    amountsOwed {
+      id
+      status
+      since
+      dueBy
+      note
+      remaining {
+        ...Amount
+      }
+    }
+  }
+}
+
+fragment Amount on Money {
+  amount
+  currency
+  formatted
+}
+
+fragment FinanceRef on FinanceReference {
+  kind
+  id
+  ref
+}

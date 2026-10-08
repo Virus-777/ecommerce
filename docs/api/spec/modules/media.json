@@ -1,0 +1,282 @@
+{
+  "name": "media",
+  "title": "Media",
+  "group": "Platform",
+  "phase": 1,
+  "chapters": [5, 8, 13, 16, 17],
+  "summary": "Every uploaded or generated file: images, video and documents. Signed direct uploads, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted).",
+  "owns": [
+    "Upload sessions with signed, expiring upload URLs straight to storage (website and Android app)",
+    "Processing: malware scan, type sniffing, EXIF/GPS stripping, orientation, image renditions (thumb to zoom), video poster and transcode, document page count",
+    "Assets: kind, purpose, owner, visibility (public CDN or private), alt text and title, status",
+    "Image standard checks against rules supplied by the caller (catalog category rules, ad formats) plus platform baseline checks",
+    "Usage tracking: which product, offer, return, case, review, ad or page uses a file",
+    "Deletion rules: files in use cannot be deleted; evidence files are retained for the evidence period even after they stop being used",
+    "Staff takedown (remove with reason, placeholder shown) and restore",
+    "Signed download links for private files (verification documents, evidence, exports) with access checks",
+    "Generated files from other modules (exports, statements, correction reports, data exports) with expiry",
+    "Storage adapter: local disk in development, S3-compatible storage in production"
+  ],
+  "notOwns": [
+    "Which images a product, offer or ad shows and in what order: catalog, offers, advertising, content (they attach assets by id)",
+    "Image standards per category (minimum size, background, count): catalog; ad creative formats and sizes: advertising. media evaluates the rules they pass",
+    "Whether a customer may attach evidence to a given return or case: returns and support (they call attach after their own checks)",
+    "Content moderation decisions about reviews or listings: reviews, catalog, trust (they ask media to remove a file)"
+  ],
+  "dependsOn": [],
+  "optionalDeps": ["audit", "identity"],
+  "publicApi": [
+    { "name": "getAsset", "signature": "(assetId: uuid) => MediaAsset | null", "desc": "Asset with renditions and status", "usedBy": ["catalog", "offers", "sellers", "content", "advertising", "reviews", "returns", "support", "messaging", "customers"] },
+    { "name": "refs", "signature": "(assetIds: uuid[], size?: 'thumb' | 'small' | 'medium' | 'large' | 'zoom') => MediaRef[]", "desc": "common.MediaRef (id, url, alt, width, height) for embedding in responses; removed files return the placeholder", "usedBy": ["catalog", "offers", "sellers", "content", "advertising", "reviews", "returns", "support", "messaging", "search", "cart", "orders", "wishlist"] },
+    { "name": "attach", "signature": "(assetId: uuid, usage: UsageInput, expectedOwner: MediaOwner) => void", "desc": "Record that a record uses a file. Fails if the asset is not ready, belongs to another owner (ASSET_NOT_OWNED) or the purpose does not fit the usage. Evidence usages extend retainUntil.", "usedBy": ["catalog", "offers", "sellers", "content", "advertising", "reviews", "returns", "support", "messaging", "warehouse", "trust"] },
+    { "name": "detach", "signature": "(assetId: uuid, usage: { module: string, kind: string, refId: string }) => void", "desc": "Record that a record no longer uses a file (image replaced, draft deleted)", "usedBy": ["catalog", "offers", "sellers", "content", "advertising", "reviews", "returns", "support", "messaging"] },
+    { "name": "checkImage", "signature": "(assetId: uuid, rules: ImageRules) => ImageCheckResult", "desc": "Evaluate an image against category or placement rules; the result is stored on the asset", "usedBy": ["catalog", "advertising", "content", "sellers"] },
+    { "name": "storeGeneratedFile", "signature": "(input: { owner: MediaOwner, fileName: string, contentType: string, body: ReadableStream, ttlHours?: int, purpose: 'export' | 'statement' | 'report' | 'correction_report' | 'data_export' | 'label' }) => MediaAsset", "desc": "Store a file produced by the platform (private)", "usedBy": ["audit", "offers", "customers", "finance", "reports", "warehouse", "shipping", "inventory"] },
+    { "name": "signedDownload", "signature": "(assetId: uuid, principal: identity.Principal, reason?: string) => DownloadLink", "desc": "Signed link for a private file after the caller's module checked access; recorded for sensitive purposes", "usedBy": ["customers", "finance", "reports", "audit", "sellers", "returns", "support"] },
+    { "name": "remove", "signature": "(assetId: uuid, input: { reason: string, by: Actor }) => void", "desc": "Takedown on behalf of a moderation decision (trust, reviews, catalog)", "usedBy": ["trust", "reviews", "catalog", "advertising"] }
+  ],
+  "types": {
+    "MediaOwner": {
+      "kind": "enum(seller|staff|customer|guest|platform)",
+      "id": { "type": "string?", "desc": "sellerId, staff accountId, customer accountId or guest session id" },
+      "label": "string?"
+    },
+    "UploadRequest": {
+      "purpose": { "type": "enum(product_image|product_video|brand_logo|store_logo|store_banner|offer_photo|ad_creative|ad_video|content_image|verification_document|return_evidence|case_evidence|review_photo|message_attachment|inspection_photo|bulk_file|other_document)", "desc": "Decides allowed types, size limit, visibility and retention" },
+      "fileName": "string",
+      "contentType": { "type": "string", "desc": "image/jpeg, image/png, image/webp, image/heic, video/mp4, application/pdf, text/csv…" },
+      "sizeBytes": "int",
+      "sha256": { "type": "string?", "desc": "Hex; verified after upload, also used to spot exact duplicates" },
+      "alt": "string?"
+    },
+    "UploadTicket": {
+      "uploadId": "uuid",
+      "assetId": "uuid",
+      "method": "enum(PUT|POST)",
+      "url": { "type": "url", "desc": "Signed storage URL; upload the bytes directly to it" },
+      "headers": "map<string>",
+      "fields": { "type": "map<string>", "desc": "Form fields for POST policy uploads" },
+      "maxBytes": "int",
+      "expiresAt": "datetime"
+    },
+    "Rendition": {
+      "size": "enum(thumb|small|medium|large|zoom|poster|video_720|video_1080)",
+      "url": "url",
+      "width": "int",
+      "height": "int",
+      "format": { "type": "string", "desc": "webp, avif, jpeg, mp4" },
+      "bytes": "int"
+    },
+    "MediaAsset": {
+      "id": "uuid",
+      "kind": "enum(image|video|document|spreadsheet)",
+      "purpose": "string",
+      "status": "enum(pending_upload|processing|ready|rejected|removed|deleted|expired)",
+      "fileName": "string",
+      "contentType": "string",
+      "sizeBytes": "int",
+      "width": "int?",
+      "height": "int?",
+      "durationSeconds": "number?",
+      "pageCount": "int?",
+      "alt": { "type": "string?", "desc": "Required before a product or content image can be published (catalog/content check)" },
+      "title": "string?",
+      "owner": "MediaOwner",
+      "visibility": "enum(public|private)",
+      "url": { "type": "url?", "desc": "Public: medium rendition (images) or poster (video). Private files have no URL; use the download endpoint." },
+      "renditions": "Rendition[]",
+      "check": "ImageCheckResult?",
+      "rejectionReason": { "type": "string?", "desc": "Unsupported or corrupt file, malware found, size or dimensions outside limits" },
+      "inUse": "bool",
+      "usageCount": "int",
+      "retainUntil": { "type": "datetime?", "desc": "Evidence files cannot be deleted before this" },
+      "createdAt": "datetime",
+      "readyAt": "datetime?"
+    },
+    "UsageInput": {
+      "module": "string",
+      "kind": { "type": "enum(product_image|product_video|variant_image|offer_photo|brand_logo|store_logo|store_banner|ad_creative|content_block|help_article|verification_document|return_evidence|case_evidence|order_evidence|inspection_photo|review_photo|message_attachment|bulk_file|generated)", "desc": "Evidence kinds: verification_document, return_evidence, case_evidence, order_evidence, inspection_photo" },
+      "refId": "string",
+      "refLabel": "string?"
+    },
+    "Usage": {
+      "module": "string",
+      "kind": "string",
+      "refId": "string",
+      "refLabel": "string?",
+      "evidence": "bool",
+      "attachedAt": "datetime",
+      "detachedAt": "datetime?"
+    },
+    "MediaAssetDetail": {
+      "asset": "MediaAsset",
+      "usages": "Usage[]",
+      "deletable": "bool",
+      "deleteBlockedReason": { "type": "string?", "desc": "Used by 2 products · Kept as return evidence until Oct 2028" },
+      "history": "TimelineEvent[]"
+    },
+    "AssetUpdate": { "alt": "string?", "title": "string?" },
+    "ImageRules": {
+      "minWidth": "int?",
+      "minHeight": "int?",
+      "minShortSide": "int?",
+      "aspectRatios": { "type": "string[]", "desc": "Allowed ratios, e.g. ['1:1', '4:5']" },
+      "aspectTolerance": { "type": "number?", "desc": "Allowed deviation, e.g. 0.02" },
+      "background": "enum(any|white|light)?",
+      "allowWatermark": "bool?",
+      "allowTextOverlay": "bool?",
+      "formats": "string[]",
+      "maxBytes": "int?"
+    },
+    "ImageMeasurements": {
+      "width": "int",
+      "height": "int",
+      "aspect": "number",
+      "hasAlpha": "bool",
+      "backgroundWhiteness": { "type": "number?", "desc": "0–1 share of near-white border pixels" },
+      "sharpness": { "type": "number?", "desc": "Variance-of-Laplacian score" },
+      "watermarkLikely": "bool?",
+      "textCoverage": { "type": "number?", "desc": "0–1 estimated area covered by text" },
+      "duplicateOf": { "type": "uuid?", "desc": "Same perceptual hash as another asset of this owner" }
+    },
+    "ImageIssue": {
+      "code": "enum(too_small|wrong_aspect|background_not_white|watermark|blurry|text_overlay|format_not_allowed|too_large|duplicate)",
+      "severity": "enum(blocking|warning)",
+      "message": { "type": "string", "desc": "Plain language for the seller: 'Image is 800 px wide; this category needs at least 1,000 px.'" }
+    },
+    "ImageCheckResult": {
+      "assetId": "uuid",
+      "passed": { "type": "bool", "desc": "No blocking issues" },
+      "rulesSource": { "type": "string?", "desc": "e.g. catalog category Monitors, advertising opening_fullscreen mobile" },
+      "measured": "ImageMeasurements",
+      "issues": "ImageIssue[]",
+      "checkedAt": "datetime"
+    },
+    "DownloadLink": { "url": "url", "expiresAt": "datetime", "fileName": "string", "contentType": "string", "sizeBytes": "int" },
+    "StorageEvent": { "bucket": "string", "key": "string", "versionId": "string?", "sizeBytes": "int", "etag": "string", "at": "datetime" },
+    "RemoveRequest": { "reason": "text", "showPlaceholder": { "type": "bool", "desc": "Public URLs return a neutral placeholder instead of 404" } }
+  },
+  "tables": [
+    { "name": "assets", "columns": { "id": "uuid pk", "kind": "text", "purpose": "text", "status": "text", "file_name": "text", "content_type": "text", "size_bytes": "bigint", "sha256": "text?", "phash": "bigint? (images)", "width": "int?", "height": "int?", "duration_seconds": "numeric?", "page_count": "int?", "alt": "text?", "title": "text?", "owner_kind": "text", "owner_id": "text?", "owner_label": "text?", "visibility": "text", "storage_bucket": "text", "storage_key": "text", "check_result": "jsonb?", "rejection_reason": "text?", "removed_reason": "text?", "removed_by": "text?", "retain_until": "timestamptz?", "expires_at": "timestamptz? (generated files)", "created_at": "timestamptz", "ready_at": "timestamptz?", "deleted_at": "timestamptz?" }, "indexes": ["(owner_kind, owner_id, created_at desc)", "(status, created_at)", "(purpose, created_at)", "(owner_kind, owner_id, phash)", "(retain_until)", "(expires_at)"] },
+    { "name": "renditions", "columns": { "asset_id": "uuid → assets", "size": "text", "storage_key": "text", "url": "text", "width": "int", "height": "int", "format": "text", "bytes": "bigint" }, "indexes": ["pk (asset_id, size, format)"] },
+    { "name": "uploads", "desc": "Upload sessions (signed URL issued, waiting for bytes)", "columns": { "id": "uuid pk", "asset_id": "uuid → assets", "expected_bytes": "bigint", "expected_sha256": "text?", "url_expires_at": "timestamptz", "completed_at": "timestamptz?", "client_ip": "inet?", "created_by_kind": "text", "created_by_id": "text?" }, "indexes": ["(url_expires_at) where completed_at is null"] },
+    { "name": "usages", "columns": { "id": "uuid pk", "asset_id": "uuid → assets", "module": "text", "kind": "text", "ref_id": "text", "ref_label": "text?", "evidence": "bool", "attached_at": "timestamptz", "detached_at": "timestamptz?" }, "indexes": ["(asset_id) where detached_at is null", "unique (asset_id, module, kind, ref_id) where detached_at is null", "(module, kind, ref_id)"] },
+    { "name": "processing_jobs", "columns": { "id": "uuid pk", "asset_id": "uuid → assets", "step": "text (scan|probe|strip|renditions|transcode|check)", "status": "text", "attempts": "int", "provider_ref": "text?", "error": "text?", "next_attempt_at": "timestamptz?", "created_at": "timestamptz", "finished_at": "timestamptz?" }, "indexes": ["(status, next_attempt_at)", "(provider_ref)"] },
+    { "name": "upload_counters", "desc": "Daily per-owner counts and bytes for rate limits and quotas", "columns": { "owner_kind": "text", "owner_id": "text", "day": "date", "count": "int", "bytes": "bigint" }, "indexes": ["pk (owner_kind, owner_id, day)"] }
+  ],
+  "stateMachines": [
+    {
+      "name": "Asset", "field": "MediaAsset.status", "initial": "pending_upload",
+      "transitions": [
+        ["pending_upload", "complete", "processing"],
+        ["pending_upload", "expire", "expired"],
+        ["processing", "succeed", "ready"],
+        ["processing", "fail", "rejected"],
+        ["ready", "remove", "removed"],
+        ["removed", "restore", "ready"],
+        ["ready", "delete", "deleted"],
+        ["rejected", "delete", "deleted"],
+        ["removed", "purge", "deleted"]
+      ],
+      "notes": "complete is called by the client (POST /uploads/{id}/complete) or by the storage notification webhook, whichever comes first; size and sha256 are verified. fail covers malware, unreadable or mismatched files and hard limits (status rejected with rejectionReason). delete is refused while the asset has active usages (ASSET_IN_USE) or before retainUntil (ASSET_RETAINED). remove (staff takedown) works even when in use: public URLs serve a placeholder, the original stays private for evidence, and media.asset.removed tells the using modules. Storage objects of deleted assets are erased after deletedGraceDays."
+    }
+  ],
+  "endpoints": [
+    { "id": "createStoreUpload", "area": "store", "method": "POST", "path": "/uploads", "summary": "Start an upload (return photos, case evidence, review photos, message attachments, seller application documents)", "desc": "Allowed purposes here: return_evidence, case_evidence, review_photo, message_attachment, verification_document (seller applicants). Guests (shopper with X-Guest-Session) may upload return and case evidence for their guest order. Upload the bytes to the returned URL, then call complete.", "auth": "shopper", "body": "UploadRequest", "response": "UploadTicket", "status": 201, "errors": ["PURPOSE_NOT_ALLOWED", "FILE_TYPE_NOT_ALLOWED", "FILE_TOO_LARGE", "QUOTA_EXCEEDED", "RATE_LIMITED"], "screens": ["account/return-new", "help/order-problem", "help/case", "account/review", "account/messages", "sell/apply"] },
+    { "id": "completeStoreUpload", "area": "store", "method": "POST", "path": "/uploads/{id}/complete", "summary": "Confirm the bytes are uploaded; processing starts", "auth": "shopper", "params": { "id": "uuid" }, "response": "MediaAsset", "status": 202, "errors": ["UPLOAD_INCOMPLETE", "UPLOAD_EXPIRED", "CHECKSUM_MISMATCH"], "screens": ["account/return-new", "help/order-problem", "account/review", "sell/apply"] },
+    { "id": "getStoreAsset", "area": "store", "method": "GET", "path": "/assets/{id}", "summary": "My upload (poll until ready)", "auth": "shopper", "params": { "id": "uuid" }, "response": "MediaAsset", "screens": ["account/return-new", "account/review"] },
+    { "id": "updateStoreAsset", "area": "store", "method": "PATCH", "path": "/assets/{id}", "summary": "Describe my photo (alt text)", "auth": "shopper", "params": { "id": "uuid" }, "body": "AssetUpdate", "response": "MediaAsset", "screens": ["account/review"] },
+    { "id": "deleteStoreAsset", "area": "store", "method": "DELETE", "path": "/assets/{id}", "summary": "Remove my upload before submitting", "desc": "Refused once attached to a submitted return, case or published review (evidence is retained).", "auth": "shopper", "params": { "id": "uuid" }, "response": null, "errors": ["ASSET_IN_USE", "ASSET_RETAINED"], "screens": ["account/return-new", "help/order-problem", "account/review"] },
+    { "id": "getStoreDownload", "area": "store", "method": "GET", "path": "/assets/{id}/download", "summary": "Signed link to one of my private files", "auth": "shopper", "params": { "id": "uuid" }, "response": "DownloadLink", "screens": ["help/case", "account/return"] },
+
+    { "id": "createSellerUpload", "area": "seller", "method": "POST", "path": "/uploads", "summary": "Start an upload (product images and video, store logo and banner, ad creatives, documents, inspection photos, case evidence, bulk files)", "auth": "seller", "permission": "media.assets.upload", "body": "UploadRequest", "response": "UploadTicket", "status": 201, "errors": ["PURPOSE_NOT_ALLOWED", "FILE_TYPE_NOT_ALLOWED", "FILE_TOO_LARGE", "QUOTA_EXCEEDED", "RATE_LIMITED"], "screens": ["seller/product-new", "seller/offer", "seller/store", "seller/ad-request", "seller/bulk-update", "seller/return", "seller/returns", "seller/setup"] },
+    { "id": "completeSellerUpload", "area": "seller", "method": "POST", "path": "/uploads/{id}/complete", "summary": "Confirm the upload; processing starts", "auth": "seller", "permission": "media.assets.upload", "params": { "id": "uuid" }, "response": "MediaAsset", "status": 202, "errors": ["UPLOAD_INCOMPLETE", "UPLOAD_EXPIRED", "CHECKSUM_MISMATCH"], "screens": ["seller/product-new", "seller/store", "seller/ad-request", "seller/bulk-update"] },
+    { "id": "listSellerAssets", "area": "seller", "method": "GET", "path": "/assets", "summary": "Seller media library", "auth": "seller", "paging": true, "query": { "purpose": "string?", "kind": "enum(image|video|document|spreadsheet)?", "status": "enum(processing|ready|rejected|removed)?", "inUse": "bool?", "q": { "type": "string?", "desc": "File name, title or alt text" } }, "response": "MediaAsset", "screens": ["seller/product-new", "seller/store", "seller/ad-request"] },
+    { "id": "getSellerAsset", "area": "seller", "method": "GET", "path": "/assets/{id}", "summary": "One file with where it is used and whether it can be deleted", "auth": "seller", "params": { "id": "uuid" }, "response": "MediaAssetDetail", "screens": ["seller/product-new", "seller/store"] },
+    { "id": "updateSellerAsset", "area": "seller", "method": "PATCH", "path": "/assets/{id}", "summary": "Edit alt text or title", "auth": "seller", "permission": "media.assets.upload", "params": { "id": "uuid" }, "body": "AssetUpdate", "response": "MediaAsset", "screens": ["seller/product-new", "seller/store"] },
+    { "id": "deleteSellerAsset", "area": "seller", "method": "DELETE", "path": "/assets/{id}", "summary": "Delete an unused file", "auth": "seller", "permission": "media.assets.upload", "params": { "id": "uuid" }, "response": null, "errors": ["ASSET_IN_USE", "ASSET_RETAINED"], "screens": ["seller/product-new", "seller/store"] },
+    { "id": "checkSellerImage", "area": "seller", "method": "POST", "path": "/assets/{id}/checks", "summary": "Check an image against category or placement rules before submitting", "desc": "Pass the rules from GET /api/seller/catalog/categories/{id}/attributes (imageRules) or the ad placement format. Platform baseline checks always run.", "auth": "seller", "params": { "id": "uuid" }, "body": { "rules": "ImageRules", "rulesSource": "string?" }, "response": "ImageCheckResult", "errors": ["ILLEGAL_TRANSITION"], "screens": ["seller/product-new", "seller/ad-request"] },
+    { "id": "getSellerDownload", "area": "seller", "method": "GET", "path": "/assets/{id}/download", "summary": "Signed link to one of the seller's private files", "auth": "seller", "params": { "id": "uuid" }, "response": "DownloadLink", "screens": ["seller/finance", "seller/bulk-update", "seller/return"] },
+
+    { "id": "createAdminUpload", "area": "admin", "method": "POST", "path": "/uploads", "summary": "Start a staff upload (Official Store products, content, ad creatives, inspection photos, evidence)", "desc": "Staff uploads for content, ads and Official Store are owned by the platform; evidence uploads are owned by the staff member.", "auth": "staff", "permission": "media.assets.manage", "body": { "upload": "UploadRequest", "ownerKind": "enum(platform|staff)?" }, "response": "UploadTicket", "status": 201, "errors": ["PURPOSE_NOT_ALLOWED", "FILE_TYPE_NOT_ALLOWED", "FILE_TOO_LARGE"], "screens": ["admin/official", "admin/content", "admin/help-content", "admin/ad-assets", "admin/case", "ops/return-inspection", "ops/receiving"] },
+    { "id": "completeAdminUpload", "area": "admin", "method": "POST", "path": "/uploads/{id}/complete", "summary": "Confirm a staff upload", "auth": "staff", "permission": "media.assets.manage", "params": { "id": "uuid" }, "response": "MediaAsset", "status": 202, "errors": ["UPLOAD_INCOMPLETE", "UPLOAD_EXPIRED", "CHECKSUM_MISMATCH"], "screens": ["admin/official", "admin/content", "admin/ad-assets"] },
+    { "id": "listAssetsAdmin", "area": "admin", "method": "GET", "path": "/assets", "summary": "All files with filters", "auth": "staff", "permission": "media.assets.view", "paging": true, "query": { "ownerKind": "enum(seller|staff|customer|guest|platform)?", "ownerId": "string?", "purpose": "string?", "kind": "enum(image|video|document|spreadsheet)?", "status": "enum(pending_upload|processing|ready|rejected|removed|deleted|expired)?", "inUse": "bool?", "failedChecks": "bool?", "q": "string?" }, "response": "MediaAsset", "screens": ["admin/ad-assets", "admin/content", "admin/official", "admin/product-review"] },
+    { "id": "getAssetAdmin", "area": "admin", "method": "GET", "path": "/assets/{id}", "summary": "File detail with usages, checks and history", "auth": "staff", "permission": "media.assets.view", "params": { "id": "uuid" }, "response": "MediaAssetDetail", "screens": ["admin/ad-assets", "admin/product-review", "admin/trust"] },
+    { "id": "updateAssetAdmin", "area": "admin", "method": "PATCH", "path": "/assets/{id}", "summary": "Edit alt text or title of a platform file", "auth": "staff", "permission": "media.assets.manage", "params": { "id": "uuid" }, "body": "AssetUpdate", "response": "MediaAsset", "screens": ["admin/content", "admin/ad-assets", "admin/official"] },
+    { "id": "checkImageAdmin", "area": "admin", "method": "POST", "path": "/assets/{id}/checks", "summary": "Check an image against rules", "auth": "staff", "permission": "media.assets.view", "params": { "id": "uuid" }, "body": { "rules": "ImageRules", "rulesSource": "string?" }, "response": "ImageCheckResult", "screens": ["admin/product-review", "admin/ad-assets"] },
+    { "id": "removeAsset", "area": "admin", "method": "POST", "path": "/assets/{id}/remove", "summary": "Take a file down (policy, rights, privacy) with a reason", "desc": "Works even when in use. Using modules receive media.asset.removed and flag the record (e.g. product needs a new image).", "auth": "staff", "permission": "media.assets.moderate", "params": { "id": "uuid" }, "body": "RemoveRequest", "response": "MediaAssetDetail", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["media.asset.removed"], "screens": ["admin/trust", "admin/product-review", "admin/reviews", "admin/ad-assets"] },
+    { "id": "restoreAsset", "area": "admin", "method": "POST", "path": "/assets/{id}/restore", "summary": "Restore a removed file", "auth": "staff", "permission": "media.assets.moderate", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "MediaAssetDetail", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["media.asset.restored"], "screens": ["admin/trust"] },
+    { "id": "deleteAssetAdmin", "area": "admin", "method": "DELETE", "path": "/assets/{id}", "summary": "Delete an unused platform file", "auth": "staff", "permission": "media.assets.manage", "params": { "id": "uuid" }, "response": null, "errors": ["ASSET_IN_USE", "ASSET_RETAINED"], "audited": true, "events": ["media.asset.deleted"], "screens": ["admin/content", "admin/ad-assets"] },
+    { "id": "getAdminDownload", "area": "admin", "method": "GET", "path": "/assets/{id}/download", "summary": "Signed link to a private file (verification documents, evidence)", "desc": "Files owned by sellers or customers need media.assets.view-private; every link is recorded with the reason.", "auth": "staff", "permission": "media.assets.view-private", "params": { "id": "uuid" }, "query": { "reason": "string" }, "response": "DownloadLink", "audited": true, "screens": ["admin/seller-application", "admin/case", "admin/trust", "admin/returns"] },
+
+    { "id": "storageEvent", "area": "webhooks", "method": "POST", "path": "/storage-events", "summary": "Object-created notifications from storage", "desc": "Completes uploads whose client never called complete (app killed mid-flow). Idempotent per object key and version.", "auth": "provider", "body": { "events": "StorageEvent[]" }, "response": null },
+    { "id": "processingResult", "area": "webhooks", "method": "POST", "path": "/processing-results", "summary": "Video transcoding results", "desc": "Signature-verified; matched by provider job reference. Idempotent.", "auth": "provider", "body": { "providerJobId": "string", "status": "enum(succeeded|failed)", "outputs": "Rendition[]", "durationSeconds": "number?", "error": "string?" }, "response": null }
+  ],
+  "events": {
+    "publishes": [
+      { "name": "media.asset.ready", "when": "Processing finished and the file can be used", "payload": { "assetId": "uuid", "kind": "string", "purpose": "string", "owner": "MediaOwner" } },
+      { "name": "media.asset.rejected", "when": "Processing refused the file", "payload": { "assetId": "uuid", "purpose": "string", "owner": "MediaOwner", "reason": "string" } },
+      { "name": "media.asset.removed", "when": "Staff take a file down", "payload": { "assetId": "uuid", "reason": "text", "usages": "Usage[]", "by": "Actor" } },
+      { "name": "media.asset.restored", "when": "A removed file is restored", "payload": { "assetId": "uuid", "usages": "Usage[]", "by": "Actor" } },
+      { "name": "media.asset.deleted", "when": "A file is deleted", "payload": { "assetId": "uuid", "owner": "MediaOwner" } }
+    ],
+    "consumes": [
+      { "name": "sellers.seller.closed", "does": "Mark the seller's never-used files for deletion after orphanGraceDays; evidence and files used by past orders' snapshots are kept until retainUntil" },
+      { "name": "customers.account.closed", "does": "Delete the customer's unused uploads; evidence attached to returns and cases is kept until retainUntil, then purged" }
+    ]
+  },
+  "permissions": [
+    { "key": "media.assets.view", "audience": "staff", "desc": "Browse all files and their usages" },
+    { "key": "media.assets.manage", "audience": "staff", "desc": "Upload, edit and delete platform files (Official Store, content, ads, evidence)" },
+    { "key": "media.assets.moderate", "audience": "staff", "desc": "Take files down and restore them (reason required)" },
+    { "key": "media.assets.view-private", "audience": "staff", "desc": "Download private files of sellers and customers (verification documents, evidence); every download is recorded" },
+    { "key": "media.assets.upload", "audience": "seller", "desc": "Upload and manage the seller's files" }
+  ],
+  "jobs": [
+    { "name": "media.process", "schedule": "queue worker", "does": "Scan, probe, strip metadata, build renditions, run baseline image checks, start video transcodes; retry with backoff; publish media.asset.ready or media.asset.rejected" },
+    { "name": "media.expire-uploads", "schedule": "hourly", "does": "Expire pending uploads past pendingUploadExpiryHours and delete partial objects" },
+    { "name": "media.sweep-orphans", "schedule": "daily", "does": "Delete ready files never attached to anything after orphanGraceDays (except generated files, which follow their own expiry)" },
+    { "name": "media.expire-generated", "schedule": "hourly", "does": "Delete generated files (exports, reports) past expires_at" },
+    { "name": "media.purge-deleted", "schedule": "daily", "does": "Erase storage objects of deleted assets after deletedGraceDays and of removed evidence after retainUntil" },
+    { "name": "media.reconcile-storage", "schedule": "weekly", "does": "Compare storage listing with assets; report orphaned objects and missing files" }
+  ],
+  "settings": [
+    { "key": "limitsByPurpose", "default": { "product_image": { "maxMB": 20, "types": ["jpeg", "png", "webp", "heic"] }, "product_video": { "maxMB": 500, "types": ["mp4", "mov"] }, "ad_creative": { "maxMB": 5, "types": ["jpeg", "png", "webp"] }, "verification_document": { "maxMB": 10, "types": ["pdf", "jpeg", "png"] }, "return_evidence": { "maxMB": 15, "types": ["jpeg", "png", "webp", "heic", "mp4"] }, "bulk_file": { "maxMB": 25, "types": ["csv", "xlsx"] } }, "desc": "Size and type limits per purpose (others default to 20 MB images, 25 MB documents)" },
+    { "key": "renditionWidths", "default": { "thumb": 160, "small": 320, "medium": 640, "large": 1280, "zoom": 2048 }, "desc": "Image rendition widths (WebP plus JPEG fallback)" },
+    { "key": "baselineImageRules", "default": { "minShortSide": 500, "formats": ["jpeg", "png", "webp", "heic"] }, "desc": "Checks applied to every image regardless of caller rules" },
+    { "key": "uploadUrlTtlMinutes", "default": 15, "desc": "Signed upload URL lifetime" },
+    { "key": "downloadUrlTtlMinutes", "default": 10, "desc": "Signed download URL lifetime" },
+    { "key": "pendingUploadExpiryHours", "default": 24, "desc": "Pending uploads expire after this" },
+    { "key": "orphanGraceDays", "default": 30, "desc": "Never-attached files are deleted after this" },
+    { "key": "evidenceRetentionDays", "default": 730, "desc": "Evidence files are kept at least this long after their last use (business decision to confirm)" },
+    { "key": "deletedGraceDays", "default": 7, "desc": "Storage objects of deleted files are erased after this" },
+    { "key": "customerUploadsPerDay", "default": 50, "desc": "Uploads per customer or guest per day" },
+    { "key": "sellerStorageQuotaGB", "default": 20, "desc": "Storage per seller (QUOTA_EXCEEDED above it)" }
+  ],
+  "integrations": [
+    { "name": "S3-compatible storage", "purpose": "Two buckets: public (renditions behind the CDN, immutable URLs) and private (originals, documents, evidence, generated files). Presigned PUT/POST for uploads, presigned GET for downloads, object-created notifications. Local disk adapter for development and tests." },
+    { "name": "Image processing (libvips / sharp)", "purpose": "Decode (including HEIC from phones), auto-orient, strip EXIF and GPS, renditions in WebP and JPEG, perceptual hash, background and sharpness measurements" },
+    { "name": "Video transcoding service", "purpose": "MP4 720p/1080p and poster frame for optional product and ad videos; results by webhook" },
+    { "name": "Malware scanning (ClamAV or provider)", "purpose": "Scan every upload before it becomes ready; documents and spreadsheets are never served inline" },
+    { "name": "CDN", "purpose": "Serves public renditions with long cache lifetimes; removed files are purged from the CDN" }
+  ],
+  "errorCodes": {
+    "PURPOSE_NOT_ALLOWED": { "status": 403, "meaning": "This caller cannot upload files for that purpose." },
+    "FILE_TYPE_NOT_ALLOWED": { "status": 415, "meaning": "Type not accepted for this purpose. details.allowed." },
+    "FILE_TOO_LARGE": { "status": 413, "meaning": "Above the size limit for this purpose. details.maxBytes." },
+    "QUOTA_EXCEEDED": { "status": 429, "meaning": "Daily upload count or storage quota reached." },
+    "UPLOAD_INCOMPLETE": { "status": 409, "meaning": "The storage object is missing or smaller than declared." },
+    "UPLOAD_EXPIRED": { "status": 410, "meaning": "The upload URL expired; start a new upload." },
+    "CHECKSUM_MISMATCH": { "status": 422, "meaning": "The uploaded bytes do not match the declared sha256." },
+    "ASSET_IN_USE": { "status": 409, "meaning": "The file is used by details.usages (product, offer, ad, page…); remove it there first." },
+    "ASSET_RETAINED": { "status": 409, "meaning": "The file is kept as evidence until details.retainUntil." },
+    "ASSET_NOT_OWNED": { "status": 403, "meaning": "The file belongs to another owner and cannot be attached here." }
+  },
+  "notes": [
+    "Upload flow (website and Android): 1) POST /uploads with purpose, type, size → signed URL; 2) PUT the bytes straight to storage (no API bandwidth); 3) POST /uploads/{id}/complete → 202 processing; 4) poll GET /assets/{id} or just attach: attach waits for ready and returns ILLEGAL_TRANSITION if processing failed. The app can upload several files in parallel and resume after a network change by starting a new upload.",
+    "Ownership: seller uploads belong to the seller account (any member with media.assets.upload), never to the person; staff uploads for Official Store, content and ads belong to the platform; customer uploads belong to the customer account, guest uploads to the guest session until attached to their return or case. A file can only be attached by its owner's module calls (attach checks expectedOwner), so a seller cannot reuse another seller's images.",
+    "Deletion rules: a file in use cannot be deleted (ASSET_IN_USE); files attached as evidence (return, case, order, inspection, verification) get retainUntil = last use + evidenceRetentionDays and cannot be deleted before that (ASSET_RETAINED) even if the record is closed. Past orders keep their product snapshot image URL; removing a product image does not break past orders because snapshot renditions are kept while referenced (usage kind order_evidence is attached by orders when a snapshot is taken).",
+    "Image standards: catalog owns per-category rules and passes them to checkImage when a seller submits; the result (measurements and plain-language issues) is stored on the asset and returned by catalog with the submission. media itself only enforces the platform baseline (minimum short side, formats).",
+    "Privacy: EXIF and GPS are stripped from every image before any rendition is public, which matters for customer return photos taken on phones."
+  ]
+}

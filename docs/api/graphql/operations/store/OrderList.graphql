@@ -1,0 +1,53 @@
+# screens: account/orders
+# replaces: GET orders/orders, GET orders/orders/counts
+# why: Order history cards show each package's seller and status next to the order, and the status tabs need counts for the same date range; both come in one round trip per search, tab or page change.
+query OrderList($filter: OrderListFilter, $paging: PageInput, $countsRange: OrderDateRange) {
+  orders(filter: $filter, paging: $paging) {
+    total
+    page
+    totalPages
+    nextCursor
+    items {
+      id
+      ref
+      placedAt
+      status
+      statusLabel
+      itemCount
+      sellerCount
+      packageCount
+      note
+      actions
+      thumbnails { ...ImageFields }
+      totals {
+        total { ...MoneyFields }
+      }
+      groups {
+        id
+        packageLabel
+        status
+        statusLabel
+        estimateLabel
+        seller { id name slug official }
+      }
+    }
+  }
+  me {
+    id
+    orderCounts(range: $countsRange) { all inProgress delivered returns cancelled }
+  }
+}
+
+fragment MoneyFields on Money {
+  amount
+  currency
+  formatted
+}
+
+fragment ImageFields on MediaRef {
+  id
+  url
+  alt
+  width
+  height
+}

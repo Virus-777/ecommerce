@@ -1,0 +1,5621 @@
+[
+  {
+    "chapter": 1,
+    "requirement": "Four main areas: customer store, Seller Center, Admin Center and Operations Center (operations inside the Admin Center at launch)",
+    "status": "covered",
+    "api": [
+      "gql store/HomePage",
+      "gql seller/SellerDashboard",
+      "gql admin/AdminDashboard",
+      "gql admin/OpsQueues"
+    ],
+    "note": "common.json areas store / seller / admin; Operations Center screens (ops/*) use the admin area and workqueues"
+  },
+  {
+    "chapter": 1,
+    "requirement": "Launch scope: physical products, our own inventory and a selected group of sellers who ship their own orders",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/inventory/stock-items",
+      "POST /api/admin/sellers/seller-invitations",
+      "POST /api/seller/shipping/shipments"
+    ],
+    "note": "sellers setting applicationsOpen=false (invite-only launch)"
+  },
+  {
+    "chapter": 1,
+    "requirement": "Storage and shipping services for sellers are added after the basic marketplace works",
+    "status": "later",
+    "api": [
+      "POST /api/seller/fulfillment-service/enrollment"
+    ],
+    "note": "fulfillment-service module phase 4; all endpoints ph4"
+  },
+  {
+    "chapter": 1,
+    "requirement": "Customers discover products, compare offers, check out and manage purchases on one website",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/products",
+      "GET /api/store/offers/products/{productId}/offers",
+      "POST /api/store/checkout/sessions",
+      "GET /api/store/orders/orders"
+    ]
+  },
+  {
+    "chapter": 1,
+    "requirement": "Seller and shipping provider remain visible at every stage (product, cart, checkout, order, tracking)",
+    "status": "covered",
+    "api": [
+      "GET /api/store/offers/products/{productId}/purchase-box",
+      "GET /api/store/cart/cart",
+      "GET /api/store/checkout/sessions/{id}",
+      "GET /api/store/orders/orders/{id}",
+      "GET /api/store/shipping/shipments/{id}/tracking"
+    ],
+    "note": "OfferView.seller (SellerCue) + DeliveryEstimate.carrier; CartPackage.seller; SellerGroup.seller/shipsFrom; TrackingView.carrier/seller"
+  },
+  {
+    "chapter": 1,
+    "requirement": "Own products: the company controls offer, price, stock, shipping and after-sales service",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/offers/official/offers",
+      "POST /api/admin/offers/official/offers/{id}/price-changes",
+      "POST /api/admin/inventory/adjustments",
+      "GET /api/admin/warehouse/fulfillments",
+      "POST /api/admin/returns/requests/{id}/approve"
+    ]
+  },
+  {
+    "chapter": 1,
+    "requirement": "Marketplace products: approved sellers control offers and stock, subject to platform rules",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/offers/offers",
+      "POST /api/seller/inventory/stock-items/{id}/adjustments",
+      "POST /api/admin/offers/offers/{id}/hold",
+      "POST /api/admin/offers/offers/{id}/remove"
+    ]
+  },
+  {
+    "chapter": 1,
+    "requirement": "Shared catalog: several sellers offer the same product; customers compare price, condition, delivery and seller reputation on one product page",
+    "status": "covered",
+    "api": [
+      "GET /api/store/offers/products/{productId}/offers",
+      "gql store/OffersPage"
+    ],
+    "note": "OfferComparison.offers[] with total, condition, delivery, seller (positivePct, onTimeDispatchPct)"
+  },
+  {
+    "chapter": 1,
+    "requirement": "Unique seller products: a seller can submit a new product when no match exists; approval required before publication",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/catalog/match",
+      "POST /api/seller/catalog/products",
+      "POST /api/seller/catalog/products/{id}/submit",
+      "POST /api/admin/catalog/products/{id}/approve"
+    ],
+    "note": "Product review state machine draft → submitted → approved"
+  },
+  {
+    "chapter": 1,
+    "requirement": "Fulfillment model Official store: company owns, stores and ships stock (launch)",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/warehouse/fulfillments",
+      "POST /api/admin/warehouse/packages/{id}/label",
+      "POST /api/admin/warehouse/packages/{id}/pack"
+    ],
+    "note": "SellerGroup.fulfilledBy official_warehouse"
+  },
+  {
+    "chapter": 1,
+    "requirement": "Fulfillment model Seller shipping: outside seller owns and ships stock (launch)",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/orders/orders",
+      "POST /api/seller/shipping/shipments",
+      "POST /api/seller/shipping/labels"
+    ],
+    "note": "SellerGroup.fulfilledBy seller"
+  },
+  {
+    "chapter": 1,
+    "requirement": "Fulfillment model Platform shipping service: seller owns stock, company stores and ships (later)",
+    "status": "later",
+    "api": [
+      "GET /api/seller/fulfillment-service/overview",
+      "GET /api/admin/fulfillment-service/enrollments"
+    ],
+    "note": "Phase 4; SellerGroup.fulfilledBy includes marketly_service"
+  },
+  {
+    "chapter": 1,
+    "requirement": "A seller using our fulfillment service still owns its stock and remains identified as the seller",
+    "status": "later",
+    "api": [
+      "GET /api/seller/fulfillment-service/skus/{id}/movements",
+      "GET /api/admin/fulfillment-service/sellers/{sellerId}/stock"
+    ],
+    "note": "Phase 4 ownership ledger"
+  },
+  {
+    "chapter": 1,
+    "requirement": "Customers see the full payable total before placing an order",
+    "status": "covered",
+    "api": [
+      "GET /api/store/checkout/sessions/{id}",
+      "POST /api/store/checkout/sessions/{id}/place"
+    ],
+    "note": "place checks quoteVersion and expectedTotal (QUOTE_OUTDATED)"
+  },
+  {
+    "chapter": 1,
+    "requirement": "Each purchased item has a named seller, a delivery estimate and a return policy",
+    "status": "covered",
+    "api": [
+      "GET /api/store/checkout/sessions/{id}",
+      "GET /api/store/orders/orders/{id}"
+    ],
+    "note": "OrderItem.returnTerms (snapshot), SellerGroup.seller and delivery"
+  },
+  {
+    "chapter": 1,
+    "requirement": "One checkout may produce several packages; customers manage each item without losing the overall order view",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}",
+      "GET /api/store/shipping/orders/{orderId}/shipments",
+      "POST /api/store/orders/orders/{id}/cancellations"
+    ],
+    "note": "Item-level actions on OrderItem.actions; overall OrderDisplayStatus"
+  },
+  {
+    "chapter": 1,
+    "requirement": "Initial scope: physical goods in a defined service region and one main currency",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/settings/overview",
+      "GET /api/admin/shipping/zones",
+      "GET /api/public/settings/app-config"
+    ],
+    "note": "market.serviceRegion; market.currency read-only in phase 1"
+  },
+  {
+    "chapter": 1,
+    "requirement": "Digital downloads, paid subscriptions, auctions, overseas selling and memberships are separate expansion projects",
+    "status": "non-api",
+    "api": [],
+    "note": "Scope boundary; correctly absent from the API"
+  },
+  {
+    "chapter": 1,
+    "requirement": "Revenue comes from our product sales and marketplace fees",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/finance/trading",
+      "GET /api/admin/finance/marketplace-income"
+    ]
+  },
+  {
+    "chapter": 1,
+    "requirement": "Advertising, seller subscriptions, storage and fulfillment charges are optional later services",
+    "status": "later",
+    "api": [
+      "GET /api/admin/advertising/charges",
+      "GET /api/admin/fulfillment-service/fees"
+    ],
+    "note": "Ad charges ph3, fulfillment fees ph4; seller subscriptions not modelled (plan defers)"
+  },
+  {
+    "chapter": 1,
+    "requirement": "Seller sales are reported separately from the company's own sales and fee income",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/finance/overview",
+      "GET /api/admin/reports/dashboard",
+      "GET /api/admin/finance/marketplace-income"
+    ],
+    "note": "reports dashboard sales split; finance overview separates company sales, fee income, owed to sellers"
+  },
+  {
+    "chapter": 2,
+    "requirement": "Customer can shop, pay, track orders, request returns and help, and review purchases; access limited to own account, orders and cases",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders",
+      "GET /api/store/returns/requests",
+      "GET /api/store/support/cases",
+      "POST /api/store/reviews/me/reviews"
+    ],
+    "note": "Store area auth customer/shopper scopes every read to the session"
+  },
+  {
+    "chapter": 2,
+    "requirement": "Seller owner maintains the business and store, accepts marketplace rules and manages sales",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/sellers/business",
+      "PATCH /api/seller/sellers/store-profile",
+      "POST /api/seller/sellers/agreements/{key}/accept",
+      "GET /api/seller/orders/orders"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Seller owner assigns seller staff; staff perform only the duties assigned by the owner",
+    "status": "later",
+    "api": [
+      "GET /api/seller/sellers/roles",
+      "GET /api/seller/sellers/members",
+      "POST /api/seller/sellers/invitations",
+      "PATCH /api/seller/sellers/members/{id}"
+    ],
+    "note": "Role catalogue at launch; invitations and member permission changes are ph2 (plan ch. 20 phase 2 \"staff access\")"
+  },
+  {
+    "chapter": 2,
+    "requirement": "Company owns shopping experience, catalog standards, seller admission, fee rules and the dispute process",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/catalog/review-queue",
+      "GET /api/admin/sellers/applications",
+      "GET /api/admin/finance/fee-rules",
+      "POST /api/admin/support/cases/{id}/decide"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Official Store Manager is responsible for the company's own trading activity",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/offers/official/offers",
+      "GET /api/admin/finance/trading"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Sellers provide accurate descriptions",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/catalog/products/{id}/submit",
+      "POST /api/admin/catalog/products/{id}/request-changes",
+      "POST /api/seller/catalog/products/{id}/corrections"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Sellers provide real stock availability",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/inventory/stock-items/{id}/adjustments",
+      "POST /api/seller/inventory/adjustments/batch"
+    ],
+    "note": "inventory setting allowSellerNegativeAvailable=false"
+  },
+  {
+    "chapter": 2,
+    "requirement": "Sellers provide valid shipping information and a return address",
+    "status": "covered",
+    "api": [
+      "PUT /api/seller/shipping/settings",
+      "PUT /api/seller/returns/terms"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Sellers follow published dispatch and response targets",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/sellers/performance",
+      "GET /api/admin/sellers/performance-targets",
+      "GET /api/seller/messaging/response-stats"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Sellers cooperate with customer cases",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/support/cases",
+      "POST /api/seller/support/cases/{id}/messages",
+      "POST /api/seller/support/cases/{id}/evidence"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Sellers keep required business details current",
+    "status": "covered",
+    "api": [
+      "PATCH /api/seller/sellers/business/contact",
+      "POST /api/seller/sellers/business/change-requests"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Official store products follow the same accuracy, review and customer service standards as seller products",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/catalog/products/{id}/submit",
+      "GET /api/admin/catalog/review-queue"
+    ],
+    "note": "submit: \"same standard as sellers\""
+  },
+  {
+    "chapter": 2,
+    "requirement": "Official Store labels identify who sells the item",
+    "status": "covered",
+    "api": [
+      "GET /api/store/offers/products/{productId}/purchase-box",
+      "GET /api/store/search/products"
+    ],
+    "note": "SellerCue.official; ProductCard.official and badges"
+  },
+  {
+    "chapter": 2,
+    "requirement": "Any promoted placement is labeled and offers remain comparable by total cost and delivery",
+    "status": "covered",
+    "api": [
+      "POST /api/store/advertising/decisions",
+      "GET /api/store/offers/products/{productId}/offers"
+    ],
+    "note": "Placement.label Ad|Sponsored; OfferView.total comparable total"
+  },
+  {
+    "chapter": 2,
+    "requirement": "Managers can assign daily tasks to agents, warehouse workers and finance staff",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/workqueues/items",
+      "POST /api/admin/workqueues/items/{id}/assign"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "A role represents responsibility and permitted actions; one person can hold several roles",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/access/roles",
+      "POST /api/admin/access/role-assignments",
+      "GET /api/admin/access/members/{accountId}"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "The business owner sets commercial policy and approval limits",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/access/limit-changes",
+      "GET /api/admin/access/limits",
+      "POST /api/admin/settings/changes/{id}/submit"
+    ],
+    "note": "Approval action access.limits.change (Business Owner approves every limit change)"
+  },
+  {
+    "chapter": 2,
+    "requirement": "Every work queue needs a named lead, a backup and an escalation route",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/workqueues/queues",
+      "PATCH /api/admin/workqueues/queues/{key}",
+      "GET /api/admin/workqueues/coverage-gaps",
+      "PUT /api/admin/access/roles/{id}/coverage"
+    ],
+    "note": "createQueue requires lead, backup and escalation; LEAD_EQUALS_BACKUP"
+  },
+  {
+    "chapter": 2,
+    "requirement": "An administrator granting access does not automatically gain authority to release payouts or approve financial exceptions",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/access/role-assignments",
+      "POST /api/admin/finance/payout-runs/{id}/approve"
+    ],
+    "note": "access.roles.sensitive-grant needs second reviewer; payout approve: platform administrators without payout authority cannot approve"
+  },
+  {
+    "chapter": 2,
+    "requirement": "Official Store Manager owns sales targets and trading performance against them",
+    "status": "covered",
+    "api": [
+      "PUT /api/admin/finance/trading-targets/{period}",
+      "GET /api/admin/finance/trading-targets",
+      "GET /api/admin/finance/trading"
+    ],
+    "note": "TradingSummary has sales, cost and margin but no target values; no endpoint stores sales targets Fixed: Added TradingTarget (monthly, optional per category) with list and set endpoints (permission finance.trading.targets, audited, table trading_targets); TradingSummary.target gives sales attainment and margin vs target.",
+    "proposal": {
+      "module": "finance",
+      "method": "PUT",
+      "area": "admin",
+      "path": "/trading-targets",
+      "summary": "Set Official Store sales and margin targets per period (and add target/attainment fields to TradingSummary)",
+      "fields": [
+        "period",
+        "salesTarget",
+        "marginTargetPct",
+        "categoryId?"
+      ]
+    },
+    "resolvedBy": "people"
+  },
+  {
+    "chapter": 2,
+    "requirement": "Official Store Manager owns company assortment, prices and service standards",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/offers/official/offers",
+      "POST /api/admin/offers/official/offers/{id}/price-changes",
+      "POST /api/admin/catalog/products",
+      "POST /api/admin/shipping/profiles"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Purchasing Manager manages suppliers, purchasing, buying costs, expected deliveries and replenishment plans",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/purchasing/suppliers",
+      "PUT /api/admin/purchasing/suppliers/{id}/items",
+      "POST /api/admin/purchasing/purchase-orders",
+      "GET /api/admin/purchasing/deliveries",
+      "GET /api/admin/purchasing/reorder-suggestions"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Inventory Manager controls sellable quantities, reservations, adjustments and low-stock alerts",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/inventory/stock-items",
+      "GET /api/admin/inventory/reservations",
+      "POST /api/admin/inventory/adjustments",
+      "GET /api/admin/inventory/low-stock",
+      "POST /api/admin/inventory/inbound/{id}/confirm"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Inventory Manager handles stock counts and transfers",
+    "status": "later",
+    "api": [
+      "POST /api/admin/inventory/counts",
+      "POST /api/admin/inventory/transfers"
+    ],
+    "note": "Counts and transfers are ph4 (plan ch. 9 \"add counts, multiple warehouses and transfers as operations grow\"; ch. 20 phase 4)"
+  },
+  {
+    "chapter": 2,
+    "requirement": "Warehouse Manager manages receiving, storage locations, picking, packing, physical inspections and warehouse workers",
+    "status": "covered",
+    "api": [
+      "PATCH /api/admin/purchasing/receipts/{id}",
+      "GET /api/admin/warehouse/bins",
+      "POST /api/admin/warehouse/waves",
+      "POST /api/admin/warehouse/packages/{id}/pack",
+      "POST /api/admin/returns/requests/{id}/inspection",
+      "POST /api/admin/workqueues/items/{id}/assign"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Order Manager monitors order acceptance, seller groups, processing, cancellations, partial fulfillment and overdue actions",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/orders/orders",
+      "GET /api/admin/orders/orders/{id}",
+      "POST /api/admin/orders/orders/{id}/cancel-items",
+      "POST /api/admin/orders/orders/{id}/cancellation-requests/{requestId}/decide",
+      "POST /api/admin/orders/orders/{id}/groups/{groupId}/dispatch-deadline"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Shipping Manager manages carriers, shipping methods and rates, dispatch targets, tracking and delivery exceptions",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/shipping/carriers",
+      "PUT /api/admin/shipping/methods/{id}",
+      "PUT /api/admin/shipping/profiles/{id}",
+      "PUT /api/admin/shipping/dispatch-targets",
+      "GET /api/admin/shipping/shipments",
+      "GET /api/admin/shipping/exceptions"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Returns Manager reviews return eligibility, coordinates receipt and inspection, and proposes refunds or replacements",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/returns/requests",
+      "POST /api/admin/returns/requests/{id}/approve",
+      "POST /api/admin/returns/requests/{id}/inspection",
+      "POST /api/admin/returns/requests/{id}/remedy"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Shipping Manager maintains shipping coverage, service options and delivery promises",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/shipping/zones",
+      "PATCH /api/admin/shipping/carriers/{id}/services/{serviceId}",
+      "PUT /api/admin/shipping/dispatch-targets"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Shipping Manager maintains carrier contacts",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/shipping/carriers",
+      "PATCH /api/admin/shipping/carriers/{id}",
+      "GET /api/admin/shipping/carriers"
+    ],
+    "note": "Carrier type has code, name, accountLabel, services; no contact person, phone, email or claims contact Fixed: Added CarrierContact (role account_manager|operations|claims|billing|escalation, name, email, phone, hours) as Carrier.contacts, on CarrierInput and the PATCH body; staff only, never returned to sellers.",
+    "proposal": {
+      "module": "shipping",
+      "change": "add contacts { name, role, email, phone, claimsEmail, accountManager } to Carrier and the POST/PATCH carrier inputs"
+    },
+    "resolvedBy": "fulfilment"
+  },
+  {
+    "chapter": 2,
+    "requirement": "Shipping Manager tracks orders awaiting dispatch, late packages, failed delivery and lost or damaged shipments",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/shipping/summary",
+      "GET /api/admin/shipping/exceptions",
+      "GET /api/admin/shipping/exceptions/counts"
+    ],
+    "note": "Exception kinds late_dispatch, missing_tracking, delivery_failed, lost_or_damaged; jobs shipping.detect-*"
+  },
+  {
+    "chapter": 2,
+    "requirement": "Shipping Manager coordinates carrier claims and replacements with support, returns and finance",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/shipping/claims",
+      "POST /api/admin/shipping/claims/{id}/status",
+      "POST /api/admin/shipping/exceptions/{id}/escalate"
+    ],
+    "note": "Approval action shipping.claims.open (Finance above $1,000)"
+  },
+  {
+    "chapter": 2,
+    "requirement": "Seller shipping issues reach the Seller Manager when performance action is needed",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/shipping/exceptions/{id}/escalate",
+      "POST /api/admin/sellers/sellers/{id}/warnings"
+    ],
+    "note": "escalate targets Seller Manager; sellers.performance.below_target raises work items"
+  },
+  {
+    "chapter": 2,
+    "requirement": "Purchasing orders stock, Warehouse receives it, Inventory confirms the sellable quantity",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/purchasing/purchase-orders/{id}/send",
+      "POST /api/admin/purchasing/deliveries/{id}/arrive",
+      "POST /api/admin/purchasing/receipts/{id}/submit",
+      "POST /api/admin/inventory/inbound/{id}/confirm"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Order Manager tracks fulfillment readiness, Warehouse organizes packing, Shipping oversees dispatch and delivery",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/orders/orders",
+      "GET /api/admin/warehouse/fulfillments",
+      "GET /api/admin/shipping/shipments"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Return hand-offs: Returns Manager owns case and condition decision, Warehouse inspects, Inventory records stock outcome, Finance approves the remedy within limits",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/returns/requests/{id}/assign",
+      "POST /api/admin/returns/requests/{id}/inspection",
+      "POST /api/admin/inventory/return-outcomes/{id}/record",
+      "POST /api/admin/returns/refunds/{id}/approve"
+    ],
+    "note": "Approval action returns.refunds.approve"
+  },
+  {
+    "chapter": 2,
+    "requirement": "Launch staffing: the same person may cover inventory and warehouse, or orders and shipping",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/access/role-assignments",
+      "GET /api/admin/access/coverage"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Sellers that ship their own goods stay responsible; our managers supervise service performance and customer escalations",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/sellers/sellers/{id}",
+      "GET /api/admin/sellers/sellers",
+      "POST /api/admin/support/cases/{id}/escalate"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Platform Administrator manages staff accounts, role access, platform settings, policy publication and action history",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/access/staff-invitations",
+      "GET /api/admin/identity/accounts",
+      "PUT /api/admin/access/roles/{id}/permissions",
+      "POST /api/admin/settings/changes",
+      "POST /api/admin/content/policy-versions/{id}/schedule",
+      "GET /api/admin/audit/entries"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Catalog Manager owns categories, brands, product quality, shared content, listing review and duplicate corrections",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/catalog/categories",
+      "POST /api/admin/catalog/brands",
+      "GET /api/admin/catalog/review-queue",
+      "POST /api/admin/catalog/products/merge",
+      "GET /api/admin/catalog/corrections"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Seller Manager reviews applications, onboards sellers, monitors performance, restrictions and appeals",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/sellers/applications",
+      "POST /api/admin/sellers/sellers/{id}/launch-review/decide",
+      "GET /api/admin/sellers/sellers",
+      "POST /api/admin/sellers/sellers/{id}/restrictions",
+      "POST /api/admin/sellers/appeals/{id}/decide"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Customer Support Manager owns inquiries, complaints, case assignments, response targets and escalations",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/support/cases",
+      "POST /api/admin/support/cases/assign",
+      "PUT /api/admin/support/categories/{key}",
+      "POST /api/admin/support/cases/{id}/escalate"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Finance Manager reviews payments, fees, refunds, holds, seller balances, payouts and financial corrections",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/payments/payments",
+      "GET /api/admin/finance/fee-rules",
+      "GET /api/admin/returns/refunds",
+      "GET /api/admin/finance/holds",
+      "GET /api/admin/finance/sellers",
+      "GET /api/admin/finance/payout-runs",
+      "POST /api/admin/finance/reconciliation/items/{id}/correct"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Marketing Manager owns campaigns, coupons, featured placements, promotion budgets and campaign results",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/promotions/campaigns",
+      "POST /api/admin/promotions/campaigns/{id}/codes",
+      "GET /api/admin/promotions/campaigns/{id}/results",
+      "PATCH /api/admin/content/homepage/sections/{id}"
+    ],
+    "note": "Limits.budget per campaign"
+  },
+  {
+    "chapter": 2,
+    "requirement": "Advertising Manager manages ad formats, placements, audiences, schedules, display limits, creative approval and ad reports",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/advertising/placements",
+      "PATCH /api/admin/advertising/placements/{id}",
+      "POST /api/admin/advertising/campaigns",
+      "POST /api/admin/advertising/creatives/{id}/review",
+      "GET /api/admin/advertising/reports/performance"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Content Manager maintains homepage sections, campaign pages, Help Center articles and approved policy content",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/content/homepage",
+      "POST /api/admin/content/pages",
+      "POST /api/admin/content/help/articles",
+      "POST /api/admin/content/policies/{id}/versions"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Trust and Risk Manager reviews suspicious activity, counterfeit reports, review abuse, evidence and enforcement recommendations",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/trust/reports",
+      "GET /api/admin/trust/detection-rules",
+      "POST /api/admin/trust/reports/{id}/evidence",
+      "POST /api/admin/trust/reports/{id}/recommendations",
+      "POST /api/admin/reviews/moderation-items/{id}/refer"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Reports Analyst maintains metric definitions and performance reports",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/reports/metrics",
+      "POST /api/admin/reports/metrics",
+      "POST /api/admin/reports/metrics/{key}/publish",
+      "GET /api/admin/reports/catalogue"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Business owner assigns approval limits for payouts, refunds, holds, seller restrictions and publication overrides",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/access/approval-actions",
+      "POST /api/admin/access/limit-changes",
+      "POST /api/admin/access/authority-checks"
+    ],
+    "note": "Approval actions finance.payouts.release, returns.refunds.approve, finance.holds.place, sellers.sellers.restrict, catalog.products.publication-override"
+  },
+  {
+    "chapter": 2,
+    "requirement": "Finance controls financial remedies",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/returns/refunds/{id}/approve",
+      "POST /api/admin/support/cases/{id}/decide"
+    ],
+    "note": "support.remedies.approve routes platform-funded remedies above limit to Finance"
+  },
+  {
+    "chapter": 2,
+    "requirement": "Trust and Risk supports enforcement evidence while owner teams decide",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/trust/recommendations/{id}/route",
+      "POST /api/admin/trust/recommendations/{id}/decide"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "Advertising coordinates creative approval with Content and Marketing",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/advertising/campaigns/{id}/approve",
+      "POST /api/admin/advertising/creatives/{id}/review"
+    ],
+    "note": "ApprovalStep.role enum(advertising|content|marketing)"
+  },
+  {
+    "chapter": 2,
+    "requirement": "Record material changes",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/audit/entries",
+      "GET /api/admin/audit/targets/{type}/{id}"
+    ],
+    "note": "Endpoints flagged audited:true write audit entries"
+  },
+  {
+    "chapter": 2,
+    "requirement": "Assign backups for each role",
+    "status": "covered",
+    "api": [
+      "PUT /api/admin/access/roles/{id}/coverage",
+      "POST /api/admin/access/away-periods",
+      "GET /api/admin/access/coverage"
+    ]
+  },
+  {
+    "chapter": 2,
+    "requirement": "High-value adjustments may require a second reviewer",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/finance/adjustments",
+      "POST /api/admin/inventory/adjustments"
+    ],
+    "note": "finance.adjustments.record above adjustmentSecondReviewerThreshold; inventory.adjustments.apply above limit"
+  },
+  {
+    "chapter": 3,
+    "requirement": "Shopping pages: home, categories, search results, product details, other seller offers, brand and seller pages",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/home",
+      "GET /api/store/catalog/categories/{slug}",
+      "GET /api/store/search/products",
+      "GET /api/store/catalog/products/{id}",
+      "GET /api/store/offers/products/{productId}/offers",
+      "GET /api/store/catalog/brands/{slug}",
+      "GET /api/store/sellers/stores/{slug}"
+    ]
+  },
+  {
+    "chapter": 3,
+    "requirement": "Purchase pages: cart, checkout, payment result and order confirmation",
+    "status": "covered",
+    "api": [
+      "GET /api/store/cart/cart",
+      "GET /api/store/checkout/sessions/{id}",
+      "GET /api/store/payments/intents/{id}",
+      "GET /api/store/checkout/sessions/{id}/confirmation"
+    ]
+  },
+  {
+    "chapter": 3,
+    "requirement": "My account: profile, addresses, order history, order details, returns, refunds, messages and security",
+    "status": "covered",
+    "api": [
+      "GET /api/store/customers/profile",
+      "GET /api/store/customers/addresses",
+      "GET /api/store/orders/orders",
+      "GET /api/store/orders/orders/{id}",
+      "GET /api/store/returns/requests",
+      "GET /api/store/payments/refunds",
+      "GET /api/store/messaging/conversations",
+      "GET /api/store/identity/security"
+    ]
+  },
+  {
+    "chapter": 3,
+    "requirement": "Help: help articles, contact support, order problem form and case details",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/help",
+      "GET /api/store/support/contact-options",
+      "GET /api/store/support/orders/{orderId}/problem-context",
+      "POST /api/store/support/cases",
+      "GET /api/store/support/cases/{id}"
+    ]
+  },
+  {
+    "chapter": 3,
+    "requirement": "Trust and policies pages: about us, seller rules, shipping, returns, privacy and purchase terms",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/pages/{slug}",
+      "GET /api/store/content/policies",
+      "GET /api/store/content/policies/{key}"
+    ],
+    "note": "Page kind about; policy keys returns, shipping, purchase_terms, privacy, seller rules"
+  },
+  {
+    "chapter": 3,
+    "requirement": "Saved shopping: wishlist and price and availability alerts (Growth)",
+    "status": "later",
+    "api": [
+      "GET /api/store/wishlist/wishlist",
+      "POST /api/store/wishlist/alerts"
+    ],
+    "note": "wishlist module phase 3"
+  },
+  {
+    "chapter": 3,
+    "requirement": "Saved shopping: recently viewed products",
+    "status": "covered",
+    "api": [
+      "GET /api/store/customers/recently-viewed",
+      "POST /api/store/customers/recently-viewed"
+    ],
+    "note": "Available at launch (ahead of the plan's Growth priority)"
+  },
+  {
+    "chapter": 3,
+    "requirement": "Campaign pages: deals, new arrivals, best sellers, seasonal pages and curated collections (basic at launch)",
+    "status": "covered",
+    "api": [
+      "GET /api/store/promotions/deals",
+      "GET /api/store/content/pages/{slug}",
+      "GET /api/store/content/pages/{slug}/products"
+    ]
+  },
+  {
+    "chapter": 3,
+    "requirement": "Advertisements: opening full-screen ads, banners, promotional pop-ups and designated sponsored product positions (basic at launch)",
+    "status": "covered",
+    "api": [
+      "POST /api/store/advertising/decisions",
+      "GET /api/store/search/products"
+    ],
+    "note": "Placement keys opening_fullscreen, *_banner, popup, sponsored_product"
+  },
+  {
+    "chapter": 3,
+    "requirement": "Seller entry: Sell with us, seller requirements, fee explanation and application",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/program",
+      "GET /api/public/finance/fee-schedule",
+      "POST /api/store/sellers/applications"
+    ]
+  },
+  {
+    "chapter": 3,
+    "requirement": "Main navigation: visible search box and access to Categories, Deals, Official Store, Account, Orders and Cart",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/navigation",
+      "GET /api/store/catalog/categories",
+      "GET /api/store/search/suggestions",
+      "GET /api/store/cart/cart/badge"
+    ]
+  },
+  {
+    "chapter": 3,
+    "requirement": "Brand stores and featured sellers can sit inside discovery pages",
+    "status": "covered",
+    "api": [
+      "GET /api/store/catalog/brands/{slug}",
+      "GET /api/store/content/home"
+    ],
+    "note": "SectionKind featured_sellers, brand_collections"
+  },
+  {
+    "chapter": 3,
+    "requirement": "Add New Arrivals and Best Sellers once inventory and sales history support them",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/pages/{slug}/products",
+      "GET /api/store/search/products"
+    ],
+    "note": "sort best_selling enabled after bestSellingMinOrders (SORT_NOT_AVAILABLE before); listedWithinDays"
+  },
+  {
+    "chapter": 3,
+    "requirement": "Footer: contact details, help, shipping and return policies, seller entry and company terms",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/navigation"
+    ]
+  },
+  {
+    "chapter": 3,
+    "requirement": "Policies state an effective date; orders retain the purchase terms accepted",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/policies",
+      "GET /api/store/content/policy-versions/{id}",
+      "GET /api/store/orders/orders/{id}"
+    ],
+    "note": "OrderDetail.policyVersions captured at place"
+  },
+  {
+    "chapter": 3,
+    "requirement": "Advertising Manager controls ad positions",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/advertising/placements",
+      "PATCH /api/admin/advertising/placements/{id}",
+      "GET /api/admin/content/homepage"
+    ],
+    "note": "Homepage ad positions are locked in content"
+  },
+  {
+    "chapter": 3,
+    "requirement": "Shopping, checkout, orders and returns work on phones with readable text, labeled controls, keyboard access, assistive reading and status messages not relying on color",
+    "status": "non-api",
+    "api": [],
+    "note": "UI requirement; API supplies text status labels (statusLabel, stateLabel) so status never depends on colour"
+  },
+  {
+    "chapter": 4,
+    "requirement": "Homepage helps customers start quickly: prominent search, categories, current promotions and available products",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/home",
+      "gql store/HomePage"
+    ]
+  },
+  {
+    "chapter": 4,
+    "requirement": "Homepage core sections: campaign banner, category shortcuts, official store highlights, featured products, current deals and advertising positions",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/home",
+      "GET /api/admin/content/homepage"
+    ],
+    "note": "SectionKind campaign_banner, category_shortcuts, official_highlights, featured_products, deals, ad_position"
+  },
+  {
+    "chapter": 4,
+    "requirement": "Homepage additional sections: new arrivals, popular products, featured sellers, brand collections and recently viewed",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/home",
+      "GET /api/store/customers/recently-viewed"
+    ]
+  },
+  {
+    "chapter": 4,
+    "requirement": "Content Manager maintains homepage sections and schedules",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/content/homepage/sections",
+      "PATCH /api/admin/content/homepage/sections/{id}",
+      "POST /api/admin/content/homepage/sections/{id}/schedule",
+      "POST /api/admin/content/homepage/publish"
+    ]
+  },
+  {
+    "chapter": 4,
+    "requirement": "Advertising Manager controls opening full-screen ads, ad banners and pop-ups",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/advertising/campaigns",
+      "PATCH /api/admin/advertising/placements/{id}"
+    ]
+  },
+  {
+    "chapter": 4,
+    "requirement": "Expired or unavailable offers are removed or replaced on the homepage",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/home"
+    ],
+    "note": "Job content.refresh-collections replaces sold-out curated items; advertising.availability-sweep pauses ads for unavailable offers"
+  },
+  {
+    "chapter": 4,
+    "requirement": "Search accepts product names, brands, keywords and seller names",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/products",
+      "GET /api/store/search/suggestions"
+    ]
+  },
+  {
+    "chapter": 4,
+    "requirement": "Search shows useful suggestions",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/suggestions",
+      "GET /api/store/search/recent-searches"
+    ]
+  },
+  {
+    "chapter": 4,
+    "requirement": "Search recognizes common misspellings",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/facets",
+      "GET /api/admin/search/synonyms"
+    ],
+    "note": "facets returns correction; exact=true for \"Search instead for\""
+  },
+  {
+    "chapter": 4,
+    "requirement": "Entered query stays visible on results pages",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/facets"
+    ],
+    "note": "Facets echo query and correction"
+  },
+  {
+    "chapter": 4,
+    "requirement": "Seller suggestions lead to a store page rather than mixing seller records into product results",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/suggestions",
+      "GET /api/store/search/facets"
+    ],
+    "note": "Suggestions include stores; facets returns a store match block"
+  },
+  {
+    "chapter": 4,
+    "requirement": "Universal filters: category, price, brand, rating, seller, condition, availability and delivery options",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/products",
+      "GET /api/store/search/facets"
+    ]
+  },
+  {
+    "chapter": 4,
+    "requirement": "Category filters for relevant attributes (screen size, capacity, size)",
+    "status": "covered",
+    "api": [
+      "GET /api/store/catalog/categories/{slug}",
+      "GET /api/store/search/products"
+    ],
+    "note": "attrs query; category filterable attributes"
+  },
+  {
+    "chapter": 4,
+    "requirement": "Sorting: recommended, price ascending/descending, newest, highest rated; best selling once sales history exists",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/products"
+    ],
+    "note": "sort enum(recommended|price_asc|price_desc|newest|rating|best_selling); job search.sales-counts"
+  },
+  {
+    "chapter": 4,
+    "requirement": "Product cards show image, name, variant or range, rating, current price and a delivery or seller cue",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/products",
+      "GET /api/store/search/cards"
+    ],
+    "note": "ProductCard fields; rating null when no reviews"
+  },
+  {
+    "chapter": 4,
+    "requirement": "A \"from\" price belongs to one named eligible offer",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/products"
+    ],
+    "note": "ProductCard.priceIsFrom with offerId and sellerName"
+  },
+  {
+    "chapter": 4,
+    "requirement": "An official store filter leads to company offers at the prices shown",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/products"
+    ],
+    "note": "seller=official shows the Official Store offer price"
+  },
+  {
+    "chapter": 4,
+    "requirement": "No results: suggest nearby categories or fewer filters",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/facets",
+      "GET /api/store/search/products/{productId}/similar"
+    ],
+    "note": "Facets empty guidance"
+  },
+  {
+    "chapter": 4,
+    "requirement": "Unavailable product: explain the status and offer alternatives",
+    "status": "covered",
+    "api": [
+      "GET /api/store/offers/products/{productId}/purchase-box",
+      "GET /api/store/search/products/{productId}/similar"
+    ],
+    "note": "PurchaseBox.unavailable (UnavailableInfo reason, expectedRestockDate, alternatives)"
+  },
+  {
+    "chapter": 4,
+    "requirement": "Customers can remove filters individually and clear all filters",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/facets"
+    ],
+    "note": "Applied filters list"
+  },
+  {
+    "chapter": 4,
+    "requirement": "Customers can return to their previous results after viewing a product",
+    "status": "non-api",
+    "api": [],
+    "note": "Client navigation state; no server behaviour needed"
+  },
+  {
+    "chapter": 4,
+    "requirement": "Document how featured and recommended products are chosen",
+    "status": "covered",
+    "api": [
+      "GET /api/store/offers/featured-offer-rule",
+      "GET /api/store/search/ranking-policy"
+    ]
+  },
+  {
+    "chapter": 4,
+    "requirement": "Sponsored positions carry a visible label",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/products",
+      "POST /api/store/advertising/decisions"
+    ],
+    "note": "Sponsored hits always labelled; GlobalRules.labelRequired"
+  },
+  {
+    "chapter": 4,
+    "requirement": "Only eligible offers compete for the main purchase position; poor delivery performance or unresolved restrictions make an offer ineligible",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/offers/products/{productId}/featured-decision",
+      "GET /api/store/offers/featured-offer-rule"
+    ],
+    "note": "Job offers.reevaluate-eligibility; FeaturedRuleParameters.minOnTimeDispatchPct"
+  },
+  {
+    "chapter": 4,
+    "requirement": "Later additions: personalized suggestions, visual search and comparison tools",
+    "status": "later",
+    "api": [],
+    "note": "Plan defers; not in the API"
+  },
+  {
+    "chapter": 4,
+    "requirement": "Location-based delivery filters",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/products"
+    ],
+    "note": "delivery/arrivesBy/postalCode filters already designed"
+  },
+  {
+    "chapter": 5,
+    "requirement": "Customers can identify both the product and the offer before adding to cart",
+    "status": "covered",
+    "api": [
+      "GET /api/store/catalog/products/{id}",
+      "GET /api/store/offers/products/{productId}/purchase-box",
+      "gql store/ProductPage"
+    ]
+  },
+  {
+    "chapter": 5,
+    "requirement": "Product information: name, brand, category, photos, optional video, description, specifications, key features and included accessories",
+    "status": "covered",
+    "api": [
+      "GET /api/store/catalog/products/{id}"
+    ],
+    "note": "Product.video, specs, keyFeatures, includedItems"
+  },
+  {
+    "chapter": 5,
+    "requirement": "Selectable variations; a variation change updates photos, available offers and price",
+    "status": "covered",
+    "api": [
+      "GET /api/store/offers/products/{productId}/purchase-box",
+      "GET /api/store/catalog/products/{id}"
+    ],
+    "note": "PurchaseBox.variants (VariantAvailability)"
+  },
+  {
+    "chapter": 5,
+    "requirement": "Product reviews, rating summary, customer questions and related products; honest no-review state",
+    "status": "covered",
+    "api": [
+      "GET /api/store/reviews/products/{productId}/reviews",
+      "GET /api/store/reviews/products/{productId}/rating-summary",
+      "GET /api/store/reviews/products/{productId}/questions",
+      "GET /api/store/search/products/{productId}/similar"
+    ]
+  },
+  {
+    "chapter": 5,
+    "requirement": "Purchase area: selected seller, condition, price, discount terms, available quantity and purchase limit",
+    "status": "covered",
+    "api": [
+      "GET /api/store/offers/products/{productId}/purchase-box",
+      "GET /api/store/promotions/products/{productId}"
+    ],
+    "note": "Availability.maxPerOrder/purchaseLimit"
+  },
+  {
+    "chapter": 5,
+    "requirement": "Purchase area: who ships, shipping cost, delivery estimate for the customer's location, return and warranty information",
+    "status": "covered",
+    "api": [
+      "GET /api/store/offers/products/{productId}/purchase-box",
+      "GET /api/store/shipping/estimates"
+    ],
+    "note": "OfferView.delivery, returns, warranty"
+  },
+  {
+    "chapter": 5,
+    "requirement": "Quantity selector, Add to Cart, Buy Now and access to the seller's store",
+    "status": "covered",
+    "api": [
+      "POST /api/store/cart/cart/items",
+      "POST /api/store/checkout/sessions",
+      "GET /api/store/sellers/stores/{slug}"
+    ]
+  },
+  {
+    "chapter": 5,
+    "requirement": "Buy Now still shows checkout totals and requires an explicit order action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/checkout/sessions",
+      "POST /api/store/checkout/sessions/{id}/place"
+    ]
+  },
+  {
+    "chapter": 5,
+    "requirement": "Other offers compare cost: item price, shipping, discounts and comparable totals",
+    "status": "covered",
+    "api": [
+      "GET /api/store/offers/products/{productId}/offers"
+    ],
+    "note": "OfferView.total, automaticDiscount"
+  },
+  {
+    "chapter": 5,
+    "requirement": "Other offers compare condition with seller-specific condition notes",
+    "status": "covered",
+    "api": [
+      "GET /api/store/offers/products/{productId}/offers"
+    ],
+    "note": "OfferView.condition, conditionNotes"
+  },
+  {
+    "chapter": 5,
+    "requirement": "Other offers compare delivery: dispatch estimate, arrival range and shipping provider",
+    "status": "covered",
+    "api": [
+      "GET /api/store/offers/products/{productId}/offers"
+    ],
+    "note": "DeliveryEstimate.dispatchLabel, arrivesFrom/To, carrier"
+  },
+  {
+    "chapter": 5,
+    "requirement": "Other offers compare seller quality: identity, feedback and service performance",
+    "status": "covered",
+    "api": [
+      "GET /api/store/offers/products/{productId}/offers",
+      "GET /api/store/reviews/sellers/{sellerId}/feedback-summary"
+    ],
+    "note": "SellerCue.verified, positivePct, onTimeDispatchPct"
+  },
+  {
+    "chapter": 5,
+    "requirement": "Other offers compare after-sales terms: return eligibility, return costs and warranty",
+    "status": "covered",
+    "api": [
+      "GET /api/store/offers/products/{productId}/offers",
+      "GET /api/store/returns/terms"
+    ]
+  },
+  {
+    "chapter": 5,
+    "requirement": "Main offer chosen by a published rule considering eligibility, availability, delivery and total price",
+    "status": "covered",
+    "api": [
+      "GET /api/store/offers/featured-offer-rule",
+      "POST /api/admin/offers/featured-rule/versions"
+    ]
+  },
+  {
+    "chapter": 5,
+    "requirement": "Customers can select another offer explicitly",
+    "status": "covered",
+    "api": [
+      "POST /api/store/cart/cart/items",
+      "POST /api/store/cart/cart/items/{id}/switch-offer"
+    ]
+  },
+  {
+    "chapter": 5,
+    "requirement": "Do not silently switch sellers after a cart item has been added",
+    "status": "covered",
+    "api": [
+      "GET /api/store/cart/cart",
+      "POST /api/store/cart/cart/items/{id}/switch-offer"
+    ],
+    "note": "Cart line keeps offerId; PurchaseBox.selectedBy customer_choice never switched"
+  },
+  {
+    "chapter": 5,
+    "requirement": "Official Store, Verified Seller and Sponsored labels have clear meanings",
+    "status": "covered",
+    "api": [
+      "GET /api/store/offers/featured-offer-rule",
+      "GET /api/store/sellers/program",
+      "GET /api/store/sellers/stores/{slug}"
+    ],
+    "note": "SellerProgram.verificationLabels; Storefront.verification"
+  },
+  {
+    "chapter": 5,
+    "requirement": "Realistic delivery dates and authentic discount conditions",
+    "status": "covered",
+    "api": [
+      "GET /api/store/shipping/estimates",
+      "GET /api/store/offers/products/{productId}/purchase-box"
+    ],
+    "note": "Job offers.verify-compare-at drops unsupported was-prices"
+  },
+  {
+    "chapter": 5,
+    "requirement": "If an offer changes or disappears before checkout, explain the change and let the customer choose an alternative",
+    "status": "covered",
+    "api": [
+      "GET /api/store/cart/cart",
+      "POST /api/store/cart/cart/items/{id}/accept",
+      "GET /api/store/checkout/sessions/{id}/changes/{changeSetId}",
+      "GET /api/store/offers/offers/{id}"
+    ]
+  },
+  {
+    "chapter": 5,
+    "requirement": "Different conditions or bundles remain distinguishable; a used item with missing accessories never appears equivalent to a new complete item",
+    "status": "covered",
+    "api": [
+      "GET /api/store/offers/products/{productId}/offers"
+    ],
+    "note": "OfferView.missingItems, complete; FeaturedRuleParameters.competingConditions"
+  },
+  {
+    "chapter": 6,
+    "requirement": "One cart across company and seller products",
+    "status": "covered",
+    "api": [
+      "GET /api/store/cart/cart",
+      "POST /api/store/cart/cart/items",
+      "gql store/CartPage"
+    ]
+  },
+  {
+    "chapter": 6,
+    "requirement": "Group cart items by seller or delivery package so shipping costs and estimates are understandable",
+    "status": "covered",
+    "api": [
+      "GET /api/store/cart/cart"
+    ],
+    "note": "CartPackage with seller, shipsFrom, delivery, subtotal"
+  },
+  {
+    "chapter": 6,
+    "requirement": "Selected seller, condition and variation stay visible in the cart",
+    "status": "covered",
+    "api": [
+      "GET /api/store/cart/cart"
+    ],
+    "note": "CartItem.seller, condition, variantLabel"
+  },
+  {
+    "chapter": 6,
+    "requirement": "Allow quantity changes and item removal",
+    "status": "covered",
+    "api": [
+      "PATCH /api/store/cart/cart/items/{id}",
+      "DELETE /api/store/cart/cart/items/{id}"
+    ]
+  },
+  {
+    "chapter": 6,
+    "requirement": "Save for later (later)",
+    "status": "later",
+    "api": [
+      "POST /api/store/cart/cart/items/{id}/save-for-later",
+      "GET /api/store/cart/cart/saved"
+    ],
+    "note": "ph3 in API; plan says \"later\""
+  },
+  {
+    "chapter": 6,
+    "requirement": "Explain unavailable items, quantity limits and changed prices",
+    "status": "covered",
+    "api": [
+      "GET /api/store/cart/cart",
+      "POST /api/store/cart/cart/items/{id}/accept"
+    ],
+    "note": "CartItem.notices, maxQuantity, purchaseLimit, acceptedUnitPrice"
+  },
+  {
+    "chapter": 6,
+    "requirement": "Show item subtotal, discounts, shipping and final total; explain charges still dependent on the delivery address",
+    "status": "covered",
+    "api": [
+      "GET /api/store/cart/cart",
+      "PUT /api/store/cart/cart/destination"
+    ],
+    "note": "CartTotals.taxNote \"Calculated after you enter an address\""
+  },
+  {
+    "chapter": 6,
+    "requirement": "Preserve eligible items while the customer resolves one unavailable item; never discard the cart",
+    "status": "covered",
+    "api": [
+      "GET /api/store/cart/cart",
+      "POST /api/store/cart/cart/remove-unavailable"
+    ],
+    "note": "CartItem.includedInCheckout; CartTotals.excludedItemCount"
+  },
+  {
+    "chapter": 6,
+    "requirement": "Checkout step 1: account sign-in",
+    "status": "covered",
+    "api": [
+      "POST /api/public/identity/sessions",
+      "POST /api/store/cart/cart/merge"
+    ]
+  },
+  {
+    "chapter": 6,
+    "requirement": "Checkout step 1: simple guest purchase option if the business enables it",
+    "status": "covered",
+    "api": [
+      "POST /api/public/identity/guest-sessions",
+      "PUT /api/store/checkout/sessions/{id}/contact"
+    ],
+    "note": "Setting checkout.guestCheckoutEnabled (settings, Business Owner approval)"
+  },
+  {
+    "chapter": 6,
+    "requirement": "Guests have a reliable way to revisit orders and request help",
+    "status": "covered",
+    "api": [
+      "POST /api/store/customers/guest-orders/lookup",
+      "POST /api/store/customers/guest-orders/links",
+      "POST /api/public/identity/order-links/{token}/redeem",
+      "POST /api/store/support/cases"
+    ],
+    "note": "Support endpoints accept shopper (guest order grant)"
+  },
+  {
+    "chapter": 6,
+    "requirement": "Checkout step 2: select or enter a delivery address and confirm every item can ship there",
+    "status": "covered",
+    "api": [
+      "PUT /api/store/checkout/sessions/{id}/address",
+      "POST /api/store/customers/addresses/validate"
+    ]
+  },
+  {
+    "chapter": 6,
+    "requirement": "Checkout step 3: delivery option per package with separate arrival estimates",
+    "status": "covered",
+    "api": [
+      "PUT /api/store/checkout/sessions/{id}/delivery",
+      "GET /api/store/checkout/sessions/{id}"
+    ]
+  },
+  {
+    "chapter": 6,
+    "requirement": "Checkout step 4: apply eligible coupons, explain rejected coupons and show which items receive each discount",
+    "status": "covered",
+    "api": [
+      "POST /api/store/checkout/sessions/{id}/coupons",
+      "DELETE /api/store/checkout/sessions/{id}/coupons/{code}",
+      "POST /api/store/promotions/codes/check"
+    ],
+    "note": "promotions RejectedCode reasons; DiscountAllocation per line"
+  },
+  {
+    "chapter": 6,
+    "requirement": "Checkout step 4: apply store credit",
+    "status": "later",
+    "api": [
+      "PUT /api/store/checkout/sessions/{id}/credit"
+    ],
+    "note": "ph3 (wallet); plan ch. 15 lists store credit as later"
+  },
+  {
+    "chapter": 6,
+    "requirement": "Checkout step 5: choose a payment method and review the complete order, seller information and return terms",
+    "status": "covered",
+    "api": [
+      "PUT /api/store/checkout/sessions/{id}/payment-method",
+      "GET /api/store/payments/options",
+      "GET /api/store/checkout/sessions/{id}",
+      "gql store/CheckoutReview"
+    ]
+  },
+  {
+    "chapter": 6,
+    "requirement": "Checkout step 6: place the order and show a clear payment result",
+    "status": "covered",
+    "api": [
+      "POST /api/store/checkout/sessions/{id}/place",
+      "GET /api/store/payments/intents/{id}"
+    ]
+  },
+  {
+    "chapter": 6,
+    "requirement": "Send confirmation only when the order has been accepted",
+    "status": "covered",
+    "api": [
+      "GET /api/store/checkout/sessions/{id}/confirmation"
+    ],
+    "note": "Confirmation only after payment accepted; notifications consume orders.order.accepted"
+  },
+  {
+    "chapter": 6,
+    "requirement": "If stock, price, delivery or coupon eligibility changes, show revised details before the customer commits",
+    "status": "covered",
+    "api": [
+      "POST /api/store/checkout/sessions/{id}/revalidate",
+      "GET /api/store/checkout/sessions/{id}/changes/{changeSetId}",
+      "POST /api/store/checkout/sessions/{id}/changes/{changeSetId}/accept"
+    ],
+    "note": "Session status changes_pending; place returns changes_required, nothing charged"
+  },
+  {
+    "chapter": 6,
+    "requirement": "A failed payment allows a retry or another payment method without losing the cart",
+    "status": "covered",
+    "api": [
+      "POST /api/store/checkout/sessions/{id}/retry-payment"
+    ],
+    "note": "place: failed → no order, cart and choices kept, holds kept until retryUntil"
+  },
+  {
+    "chapter": 6,
+    "requirement": "If payment status is uncertain, show that the result is being checked and direct the customer to order status",
+    "status": "covered",
+    "api": [
+      "GET /api/store/payments/intents/{id}",
+      "POST /api/store/payments/intents/{id}/check"
+    ],
+    "note": "Session payment_pending; job payments.check-uncertain"
+  },
+  {
+    "chapter": 6,
+    "requirement": "Repeated clicks or a page refresh do not create duplicate purchases",
+    "status": "covered",
+    "api": [
+      "POST /api/store/checkout/sessions/{id}/place",
+      "POST /api/store/checkout/sessions/{id}/complete-action"
+    ],
+    "note": "idempotent: true; Idempotency-Key returns the first result"
+  },
+  {
+    "chapter": 6,
+    "requirement": "If only part of a purchase can proceed, obtain a clear choice about the revised order and charge before accepting it",
+    "status": "covered",
+    "api": [
+      "GET /api/store/checkout/sessions/{id}/changes/{changeSetId}",
+      "POST /api/store/checkout/sessions/{id}/changes/{changeSetId}/accept"
+    ]
+  },
+  {
+    "chapter": 6,
+    "requirement": "Confirmation page: order reference, items, charged total, delivery address, seller groups, next steps; packages may arrive separately",
+    "status": "covered",
+    "api": [
+      "GET /api/store/checkout/sessions/{id}/confirmation",
+      "gql store/OrderConfirmation"
+    ]
+  },
+  {
+    "chapter": 6,
+    "requirement": "Confirmation provides View Order and Contact Support actions",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}",
+      "POST /api/store/support/cases"
+    ]
+  },
+  {
+    "chapter": 6,
+    "requirement": "Printable receipts or invoices as applicable",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}/documents",
+      "GET /api/store/orders/orders/{id}/documents/{documentId}"
+    ]
+  },
+  {
+    "chapter": 7,
+    "requirement": "Account menu: Orders, Returns and Refunds, Addresses, Messages, Notifications, Profile and Security",
+    "status": "covered",
+    "api": [
+      "GET /api/store/customers/overview",
+      "gql store/AccountOverview",
+      "GET /api/store/returns/requests/overview",
+      "GET /api/store/notifications/inbox",
+      "GET /api/store/identity/security"
+    ]
+  },
+  {
+    "chapter": 7,
+    "requirement": "Account menu: Wishlist when supported",
+    "status": "later",
+    "api": [
+      "GET /api/store/wishlist/wishlist"
+    ],
+    "note": "ph3"
+  },
+  {
+    "chapter": 7,
+    "requirement": "Account menu: Coupons",
+    "status": "covered",
+    "api": [
+      "GET /api/store/promotions/coupons"
+    ]
+  },
+  {
+    "chapter": 7,
+    "requirement": "Account menu: Credits when supported",
+    "status": "later",
+    "api": [
+      "GET /api/store/wallet/credit"
+    ],
+    "note": "ph3"
+  },
+  {
+    "chapter": 7,
+    "requirement": "Account menu: saved payment methods",
+    "status": "covered",
+    "api": [
+      "GET /api/store/payments/methods",
+      "POST /api/store/payments/methods/setup",
+      "POST /api/store/payments/methods"
+    ]
+  },
+  {
+    "chapter": 7,
+    "requirement": "Customers update their profile",
+    "status": "covered",
+    "api": [
+      "GET /api/store/customers/profile",
+      "PATCH /api/store/customers/profile"
+    ]
+  },
+  {
+    "chapter": 7,
+    "requirement": "Customers manage addresses",
+    "status": "covered",
+    "api": [
+      "POST /api/store/customers/addresses",
+      "PATCH /api/store/customers/addresses/{id}",
+      "DELETE /api/store/customers/addresses/{id}",
+      "POST /api/store/customers/addresses/{id}/make-default"
+    ]
+  },
+  {
+    "chapter": 7,
+    "requirement": "Customers control marketing preferences",
+    "status": "covered",
+    "api": [
+      "GET /api/store/customers/marketing-preferences",
+      "PUT /api/store/customers/marketing-preferences"
+    ]
+  },
+  {
+    "chapter": 7,
+    "requirement": "Address changes do not automatically alter accepted orders",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}"
+    ],
+    "note": "OrderDetail.deliveryAddress is a snapshot; addressNote explains"
+  },
+  {
+    "chapter": 7,
+    "requirement": "Security: password recovery",
+    "status": "covered",
+    "api": [
+      "POST /api/public/identity/password-resets",
+      "POST /api/public/identity/password-resets/{token}/complete"
+    ]
+  },
+  {
+    "chapter": 7,
+    "requirement": "Security: account verification",
+    "status": "covered",
+    "api": [
+      "POST /api/public/identity/registrations",
+      "POST /api/public/identity/verifications/{id}/confirm"
+    ]
+  },
+  {
+    "chapter": 7,
+    "requirement": "Security: sign-out",
+    "status": "covered",
+    "api": [
+      "POST /api/public/identity/sessions/sign-out",
+      "POST /api/store/identity/devices/sign-out-all"
+    ]
+  },
+  {
+    "chapter": 7,
+    "requirement": "Security: review of account access",
+    "status": "covered",
+    "api": [
+      "GET /api/store/identity/devices",
+      "GET /api/store/identity/security-activity"
+    ]
+  },
+  {
+    "chapter": 7,
+    "requirement": "Saved payment options show a recognizable label and limited details; removal does not affect historical receipts",
+    "status": "covered",
+    "api": [
+      "GET /api/store/payments/methods",
+      "DELETE /api/store/payments/methods/{id}",
+      "GET /api/store/orders/orders/{id}/documents"
+    ]
+  },
+  {
+    "chapter": 7,
+    "requirement": "Order history supports search by order reference or product, date filtering and status filters",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders",
+      "GET /api/store/orders/orders/counts",
+      "gql store/OrderList"
+    ],
+    "note": "q, range/from/to, tab"
+  },
+  {
+    "chapter": 7,
+    "requirement": "Order detail shows the overall purchase and the individual seller groups, items and shipments",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}",
+      "gql store/OrderDetail"
+    ]
+  },
+  {
+    "chapter": 7,
+    "requirement": "Payment view: accepted, pending, failed or refunded result (status model)",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}"
+    ],
+    "note": "PaymentProgress.state enum(pending|accepted|failed|partly_refunded|refunded)"
+  },
+  {
+    "chapter": 7,
+    "requirement": "Preparation view: which items are confirmed, preparing or delayed (status model)",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}"
+    ],
+    "note": "OrderItem.state includes confirmed, preparing, delayed"
+  },
+  {
+    "chapter": 7,
+    "requirement": "Shipment view: package contents, carrier, tracking and delivery estimate",
+    "status": "covered",
+    "api": [
+      "GET /api/store/shipping/orders/{orderId}/shipments",
+      "GET /api/store/shipping/shipments/{id}/tracking"
+    ]
+  },
+  {
+    "chapter": 7,
+    "requirement": "Completion view: delivered items and items still outstanding",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}"
+    ],
+    "note": "DeliveryProgress packagesTotal/packagesDelivered"
+  },
+  {
+    "chapter": 7,
+    "requirement": "After-sales view: cancellation, return, refund or support case for each item",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}"
+    ],
+    "note": "OrderItem.afterSales (ItemAfterSales)"
+  },
+  {
+    "chapter": 7,
+    "requirement": "Partly delivered, partly cancelled or partly refunded orders shown at item level with an accurate overall summary",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}",
+      "GET /api/store/orders/orders"
+    ],
+    "note": "OrderDisplayStatus partly_* values derived from items"
+  },
+  {
+    "chapter": 7,
+    "requirement": "Keep payment, delivery and return progress distinct",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}"
+    ],
+    "note": "OrderProgress.payment / delivery / returns"
+  },
+  {
+    "chapter": 7,
+    "requirement": "Cancel eligible items before the applicable cutoff",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}/cancellation-options",
+      "POST /api/store/orders/orders/{id}/cancellation-preview",
+      "POST /api/store/orders/orders/{id}/cancellations"
+    ]
+  },
+  {
+    "chapter": 7,
+    "requirement": "After shipment, explain return or refusal options according to policy",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}/cancellation-options"
+    ],
+    "note": "CancellableItem.alternative enum(return|refuse_delivery|view_return|track)"
+  },
+  {
+    "chapter": 7,
+    "requirement": "Track a package",
+    "status": "covered",
+    "api": [
+      "GET /api/store/shipping/shipments/{id}/tracking"
+    ]
+  },
+  {
+    "chapter": 7,
+    "requirement": "Report missing or damaged items",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/orders/{orderId}/problem-context",
+      "POST /api/store/support/cases"
+    ]
+  },
+  {
+    "chapter": 7,
+    "requirement": "Contact the seller",
+    "status": "covered",
+    "api": [
+      "POST /api/store/messaging/conversations"
+    ]
+  },
+  {
+    "chapter": 7,
+    "requirement": "Ask platform support for help and view case history",
+    "status": "covered",
+    "api": [
+      "POST /api/store/support/cases",
+      "GET /api/store/support/cases",
+      "GET /api/store/support/cases/{id}"
+    ]
+  },
+  {
+    "chapter": 7,
+    "requirement": "Request an eligible return",
+    "status": "covered",
+    "api": [
+      "GET /api/store/returns/orders/{orderId}/returnable-items",
+      "POST /api/store/returns/eligibility",
+      "POST /api/store/returns/requests"
+    ]
+  },
+  {
+    "chapter": 7,
+    "requirement": "Follow refund progress",
+    "status": "covered",
+    "api": [
+      "GET /api/store/payments/refunds",
+      "GET /api/store/payments/refunds/{id}",
+      "GET /api/store/returns/requests/{id}"
+    ]
+  },
+  {
+    "chapter": 7,
+    "requirement": "Download purchase documents",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}/documents/{documentId}"
+    ]
+  },
+  {
+    "chapter": 7,
+    "requirement": "Review a delivered purchase",
+    "status": "covered",
+    "api": [
+      "GET /api/store/reviews/me/pending",
+      "GET /api/store/reviews/me/review-context/{orderItemId}",
+      "POST /api/store/reviews/me/reviews"
+    ]
+  },
+  {
+    "chapter": 7,
+    "requirement": "Messages and case updates stay linked to the affected order or item",
+    "status": "covered",
+    "api": [
+      "GET /api/store/messaging/conversations/{id}",
+      "GET /api/store/support/cases/{id}"
+    ],
+    "note": "StartConversationInput.orderId/orderItemId; case linked items"
+  },
+  {
+    "chapter": 7,
+    "requirement": "Customers see who is handling a case, the next action required and when a response is expected",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/cases",
+      "GET /api/store/support/cases/{id}",
+      "gql store/CaseDetail"
+    ]
+  },
+  {
+    "chapter": 7,
+    "requirement": "A closed case can be reopened or appealed within the published rules",
+    "status": "covered",
+    "api": [
+      "POST /api/store/support/cases/{id}/reopen",
+      "POST /api/store/support/cases/{id}/appeal"
+    ],
+    "note": "Job support.auto-close ends reopen and appeal windows"
+  },
+  {
+    "chapter": 8,
+    "requirement": "Category hierarchy with brands, product attributes and variations",
+    "status": "covered",
+    "api": [
+      "GET /api/store/catalog/categories",
+      "GET /api/admin/catalog/categories",
+      "POST /api/admin/catalog/brands",
+      "PUT /api/admin/catalog/categories/{id}/attributes"
+    ]
+  },
+  {
+    "chapter": 8,
+    "requirement": "Sellers maintain their own SKU references while customers see product names",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/offers/offers",
+      "GET /api/seller/inventory/stock-items"
+    ],
+    "note": "Offer.sellerSku"
+  },
+  {
+    "chapter": 8,
+    "requirement": "Shared catalog information describes the product; offers hold price, condition, stock, dispatch and service terms",
+    "status": "covered",
+    "api": [
+      "GET /api/store/catalog/products/{id}",
+      "GET /api/store/offers/offers/{id}"
+    ],
+    "note": "catalog: shared content only; Offer DispatchTerms, ReturnTerms, WarrantyTerms"
+  },
+  {
+    "chapter": 8,
+    "requirement": "Matching considers the precise model, variation and bundle contents",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/catalog/match"
+    ],
+    "note": "CatalogMatch; Product.modelNumber, includedItems"
+  },
+  {
+    "chapter": 8,
+    "requirement": "Staff and sellers search the catalog before adding an item",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/catalog/match",
+      "GET /api/admin/catalog/products"
+    ]
+  },
+  {
+    "chapter": 8,
+    "requirement": "Sellers attach an offer to an existing matching product",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/offers/offers",
+      "POST /api/seller/offers/offers/preview"
+    ]
+  },
+  {
+    "chapter": 8,
+    "requirement": "New products collect category, brand, name, description, specifications, variations, images and identification details for the category",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/catalog/products",
+      "GET /api/seller/catalog/categories/{id}/attributes",
+      "POST /api/admin/catalog/products"
+    ]
+  },
+  {
+    "chapter": 8,
+    "requirement": "Draft saving, missing-information prompts and submission status",
+    "status": "covered",
+    "api": [
+      "PATCH /api/seller/catalog/products/{id}",
+      "GET /api/seller/catalog/products",
+      "GET /api/seller/catalog/products/{id}"
+    ],
+    "note": "ProductAdmin.missing blocks submission"
+  },
+  {
+    "chapter": 8,
+    "requirement": "Staff can request corrections with a clear reason",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/catalog/products/{id}/request-changes"
+    ]
+  },
+  {
+    "chapter": 8,
+    "requirement": "Review for duplicates, misleading claims, poor imagery, incorrect categories and products outside the allowed assortment",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/catalog/review-queue",
+      "GET /api/admin/catalog/products/{id}",
+      "POST /api/admin/catalog/products/{id}/reject",
+      "POST /api/admin/media/assets/{id}/checks"
+    ],
+    "note": "duplicateCandidates; automated ProductCheck"
+  },
+  {
+    "chapter": 8,
+    "requirement": "Product review states Draft, Submitted, Changes Requested, Approved, Rejected (status model)",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/catalog/products/{id}/approve"
+    ],
+    "note": "SM Product review: draft, submitted, changes_requested, approved, rejected"
+  },
+  {
+    "chapter": 8,
+    "requirement": "Publication states Active, Hidden, Suspended (status model)",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/catalog/products/{id}/publication"
+    ],
+    "note": "SM Publication: active, hidden, suspended"
+  },
+  {
+    "chapter": 8,
+    "requirement": "Offer availability is separate: an approved product may have no stock; one seller's restriction does not remove other valid offers",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/offers/offers",
+      "POST /api/admin/offers/offers/{id}/remove"
+    ],
+    "note": "Offer SM includes out_of_stock, ineligible; remove: other sellers' offers and the product stay"
+  },
+  {
+    "chapter": 8,
+    "requirement": "Sellers can suggest corrections to shared information",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/catalog/products/{id}/corrections"
+    ]
+  },
+  {
+    "chapter": 8,
+    "requirement": "Staff review changes that affect other sellers",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/catalog/corrections",
+      "POST /api/admin/catalog/corrections/{id}/decide"
+    ]
+  },
+  {
+    "chapter": 8,
+    "requirement": "Keep a history of accepted changes",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/catalog/products/{id}",
+      "GET /api/admin/audit/targets/{type}/{id}"
+    ],
+    "note": "ProductAdmin.reviewLog keeps accepted corrections"
+  },
+  {
+    "chapter": 8,
+    "requirement": "Merge duplicates so offers, reviews and past orders remain understandable",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/catalog/products/merge"
+    ],
+    "note": "Offers and reviews move; past orders keep snapshots; duplicate redirects"
+  },
+  {
+    "chapter": 8,
+    "requirement": "Filter by category, brand, seller, approval state, missing content and publication status",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/catalog/products"
+    ]
+  },
+  {
+    "chapter": 8,
+    "requirement": "Bulk price and stock updates with clear preview and correction report",
+    "status": "later",
+    "api": [
+      "POST /api/seller/offers/bulk-updates",
+      "GET /api/seller/offers/bulk-updates/{id}/rows",
+      "GET /api/seller/offers/bulk-updates/{id}/correction-report",
+      "POST /api/admin/offers/official/bulk-updates"
+    ],
+    "note": "ph2 (plan ch. 20 phase 2 \"bulk updates\"); launch has POST seller/offers/price-changes (≤100) and inventory adjustments/batch"
+  },
+  {
+    "chapter": 8,
+    "requirement": "Broad catalog edits need controlled permissions",
+    "status": "later",
+    "api": [
+      "POST /api/admin/catalog/products/bulk"
+    ],
+    "note": "ph2 bulk edit with preview; permissioned"
+  },
+  {
+    "chapter": 8,
+    "requirement": "Manage category attributes and image standards",
+    "status": "covered",
+    "api": [
+      "PUT /api/admin/catalog/categories/{id}/attributes",
+      "GET /api/seller/catalog/categories/{id}/attributes"
+    ]
+  },
+  {
+    "chapter": 8,
+    "requirement": "Hide categories with no eligible inventory or explain that products are coming soon",
+    "status": "covered",
+    "api": [
+      "PATCH /api/admin/catalog/categories/{id}"
+    ]
+  },
+  {
+    "chapter": 8,
+    "requirement": "Past purchases stay tied to the description, variation, condition and price accepted at purchase",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}"
+    ],
+    "note": "OrderItem.product (ProductSnapshot) and offer (OfferTermsSnapshot); catalog.snapshotForOrder"
+  },
+  {
+    "chapter": 8,
+    "requirement": "Catalog Manager owns shared product quality and publication decisions",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/catalog/products/{id}/approve",
+      "POST /api/admin/catalog/products/{id}/publication"
+    ],
+    "note": "Permissions catalog.products.review / publish"
+  },
+  {
+    "chapter": 8,
+    "requirement": "Official Store Manager and each seller own offer accuracy",
+    "status": "covered",
+    "api": [
+      "PATCH /api/admin/offers/official/offers/{id}",
+      "PATCH /api/seller/offers/offers/{id}"
+    ]
+  },
+  {
+    "chapter": 8,
+    "requirement": "Authorized staff can remove offers, request corrections or suspend products, recording the reason",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/offers/offers/{id}/remove",
+      "POST /api/admin/catalog/products/{id}/request-changes",
+      "POST /api/admin/catalog/products/{id}/publication"
+    ],
+    "note": "reason required; audited"
+  },
+  {
+    "chapter": 9,
+    "requirement": "Official store: create company offers",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/offers/official/offers",
+      "POST /api/admin/offers/official/offers/{id}/publish"
+    ]
+  },
+  {
+    "chapter": 9,
+    "requirement": "Official store: set prices and discounts",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/offers/official/offers/{id}/price-changes",
+      "GET /api/admin/offers/price-changes",
+      "POST /api/admin/promotions/campaigns"
+    ],
+    "note": "Approval action offers.prices.change above price-change limit"
+  },
+  {
+    "chapter": 9,
+    "requirement": "Official store: choose available quantities",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/inventory/stock-items/{id}",
+      "POST /api/admin/inventory/adjustments"
+    ]
+  },
+  {
+    "chapter": 9,
+    "requirement": "Official store: maintain product content",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/catalog/products",
+      "PATCH /api/admin/catalog/products/{id}",
+      "POST /api/admin/catalog/products/{id}/submit"
+    ]
+  },
+  {
+    "chapter": 9,
+    "requirement": "Official store: view company orders",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/orders/orders"
+    ],
+    "note": "sellerType=official"
+  },
+  {
+    "chapter": 9,
+    "requirement": "Official store: view shipping tasks",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/warehouse/fulfillments",
+      "GET /api/admin/warehouse/summary"
+    ]
+  },
+  {
+    "chapter": 9,
+    "requirement": "Official store: view customer questions on company products",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/reviews/questions"
+    ],
+    "note": "Staff can answer a question by id, but no admin endpoint lists questions (e.g. unanswered questions on Official Store products); moderation-items only holds reported/held content Fixed: Added admin questions list (AdminQuestionRow) filtered by owner=official|seller, sellerId, productId, answered; oldest unanswered first; staff answer via existing answer endpoint.",
+    "proposal": {
+      "module": "reviews",
+      "method": "GET",
+      "area": "admin",
+      "path": "/questions",
+      "summary": "Product questions with filters (owner=official|seller, sellerId, productId, answered=false), oldest unanswered first",
+      "fields": [
+        "id",
+        "product",
+        "question",
+        "askedAt",
+        "answers",
+        "answeredBy",
+        "hasSellerAnswer"
+      ]
+    },
+    "resolvedBy": "people"
+  },
+  {
+    "chapter": 9,
+    "requirement": "Official store: view returns and refund requests",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/returns/requests",
+      "GET /api/admin/returns/refunds"
+    ],
+    "note": "sellerType=official"
+  },
+  {
+    "chapter": 9,
+    "requirement": "Manage the official storefront, featured collections and service policies",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/content/pages",
+      "PATCH /api/admin/content/pages/{id}",
+      "PUT /api/admin/shipping/profiles/{id}",
+      "GET /api/admin/returns/policies",
+      "GET /api/store/search/products"
+    ],
+    "note": "Storefront built as a content landing page (promise_strip, collection_teaser sections; collectionKind official); store/official lists offers via search seller=official. No dedicated storefront type, but served"
+  },
+  {
+    "chapter": 9,
+    "requirement": "Keep seller identity visible in mixed purchases",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}",
+      "GET /api/admin/warehouse/fulfillments/{id}"
+    ],
+    "note": "SellerGroup.seller; Fulfillment mixed-order note"
+  },
+  {
+    "chapter": 9,
+    "requirement": "Purchasing Manager maintains suppliers, purchase records, costs and expected arrivals",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/purchasing/suppliers/{id}",
+      "GET /api/admin/purchasing/purchase-orders",
+      "POST /api/admin/purchasing/purchase-orders/{id}/deliveries",
+      "GET /api/admin/purchasing/summary"
+    ]
+  },
+  {
+    "chapter": 9,
+    "requirement": "Warehouse staff record received quantities, shortages and damage",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/purchasing/deliveries/{id}/receipts",
+      "PATCH /api/admin/purchasing/receipts/{id}",
+      "POST /api/admin/purchasing/receipts/{id}/submit",
+      "POST /api/admin/purchasing/claims"
+    ]
+  },
+  {
+    "chapter": 9,
+    "requirement": "Inventory Manager makes checked stock available for sale",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/inventory/inbound",
+      "POST /api/admin/inventory/inbound/{id}/confirm"
+    ]
+  },
+  {
+    "chapter": 9,
+    "requirement": "Stock groups Available, Reserved, Incoming, Damaged or held, Returned (status model)",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/inventory/stock-items",
+      "GET /api/admin/inventory/summary"
+    ],
+    "note": "StockQuantities available, reserved, incoming, damagedHeld, returned"
+  },
+  {
+    "chapter": 9,
+    "requirement": "Show low-stock warnings",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/inventory/low-stock",
+      "GET /api/seller/inventory/summary"
+    ],
+    "note": "Event inventory.stock.low; job inventory.low-stock-digest"
+  },
+  {
+    "chapter": 9,
+    "requirement": "Prevent selling beyond eligible available quantities",
+    "status": "covered",
+    "api": [
+      "POST /api/store/checkout/sessions/{id}/place"
+    ],
+    "note": "inventory.hold at place; setting allowSellerNegativeAvailable=false"
+  },
+  {
+    "chapter": 9,
+    "requirement": "Every stock adjustment shows its reason, responsible staff member and date",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/inventory/movements",
+      "GET /api/seller/inventory/movements"
+    ],
+    "note": "Movement.reasonCode, actor, approvedBy, at"
+  },
+  {
+    "chapter": 9,
+    "requirement": "Released reservations return to available only when the purchase has ended or been cancelled",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/inventory/reservations",
+      "POST /api/admin/inventory/reservations/{id}/release"
+    ],
+    "note": "SM Reservation held/allocated/released/expired/fulfilled; job inventory.reconcile-reservations never auto-releases allocations"
+  },
+  {
+    "chapter": 9,
+    "requirement": "At launch support the locations needed for stock, picking, packing and returns",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/inventory/locations",
+      "POST /api/admin/inventory/locations",
+      "GET /api/admin/warehouse/bins"
+    ]
+  },
+  {
+    "chapter": 9,
+    "requirement": "Shelf locations",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/warehouse/bins",
+      "PUT /api/admin/warehouse/stock-items/{stockItemId}/bins",
+      "GET /api/admin/warehouse/putaway-tasks"
+    ]
+  },
+  {
+    "chapter": 9,
+    "requirement": "Counts, multiple warehouses and transfers as operations grow",
+    "status": "later",
+    "api": [
+      "POST /api/admin/inventory/counts",
+      "POST /api/admin/inventory/transfers"
+    ],
+    "note": "ph4"
+  },
+  {
+    "chapter": 9,
+    "requirement": "Packing staff need item lists, package details, labels and an easy way to report shortages or damaged items",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/warehouse/waves/{id}",
+      "POST /api/admin/warehouse/fulfillments/{id}/packages",
+      "PATCH /api/admin/warehouse/packages/{id}",
+      "POST /api/admin/warehouse/packages/{id}/label",
+      "GET /api/admin/warehouse/packages/{id}/packing-slip",
+      "POST /api/admin/warehouse/pick-lines/{id}/report-shortage",
+      "POST /api/admin/warehouse/fulfillments/{id}/report-damage"
+    ]
+  },
+  {
+    "chapter": 9,
+    "requirement": "Returned goods can be restocked, repaired, sold in a different condition, returned to supplier or written off; record the outcome",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/inventory/return-outcomes",
+      "POST /api/admin/inventory/return-outcomes/{id}/record"
+    ],
+    "note": "RecordReturnOutcomeRequest.outcome enum(restock|different_condition|repair|return_to_supplier|write_off)"
+  },
+  {
+    "chapter": 9,
+    "requirement": "Track buying cost, sales, discounts, shipping expenses and returns so company margins are reviewed separately from marketplace fee income",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/finance/trading",
+      "GET /api/admin/finance/marketplace-income"
+    ],
+    "note": "TradingSummary costBasis, buyingCost, discounts, shippingExpense, returnsCost"
+  },
+  {
+    "chapter": 9,
+    "requirement": "Seller stock remains separate from company-owned stock",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/inventory/stock-items",
+      "GET /api/admin/inventory/stock-items"
+    ],
+    "note": "Admin stock items are company SKUs; seller stock items scoped to the seller"
+  },
+  {
+    "chapter": 9,
+    "requirement": "If the company stores seller goods, reports identify the stock owner and storage or shipping charges",
+    "status": "later",
+    "api": [
+      "GET /api/admin/fulfillment-service/sellers/{sellerId}/stock",
+      "GET /api/seller/fulfillment-service/fees"
+    ],
+    "note": "ph4"
+  },
+  {
+    "chapter": 10,
+    "requirement": "Sell with us explains eligible products, requirements, fees, payout timing, shipping responsibilities and service expectations",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/program",
+      "GET /api/public/finance/fee-schedule"
+    ],
+    "note": "SellerProgram launchCategories, notAllowed, requirements, feeExamples, payoutTiming, serviceTargets"
+  },
+  {
+    "chapter": 10,
+    "requirement": "Show the application process and provide help for applicants",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/program",
+      "GET /api/store/support/contact-options"
+    ],
+    "note": "SellerProgram.steps, faq, contact"
+  },
+  {
+    "chapter": 10,
+    "requirement": "Application step 1: create a seller account with contact, business and store details",
+    "status": "covered",
+    "api": [
+      "POST /api/store/sellers/applications",
+      "PATCH /api/store/sellers/applications/{id}"
+    ]
+  },
+  {
+    "chapter": 10,
+    "requirement": "Application step 2: verification information, payout details and return address; requirements depend on market and seller type",
+    "status": "covered",
+    "api": [
+      "PATCH /api/store/sellers/applications/{id}",
+      "POST /api/store/sellers/applications/{id}/documents",
+      "POST /api/store/media/uploads"
+    ],
+    "note": "ApplicationBusinessInput.kind registered_business|individual; job sellers.run-verification-checks"
+  },
+  {
+    "chapter": 10,
+    "requirement": "Application step 3: accept the seller agreement, product rules, fee schedule and service standards",
+    "status": "covered",
+    "api": [
+      "POST /api/store/sellers/applications/{id}/submit",
+      "GET /api/seller/sellers/agreements"
+    ]
+  },
+  {
+    "chapter": 10,
+    "requirement": "Application step 4: Seller Manager reviews, requests information, approves or explains rejection",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/sellers/applications/{id}/start-review",
+      "POST /api/admin/sellers/applications/{id}/request-information",
+      "POST /api/admin/sellers/applications/{id}/approve",
+      "POST /api/admin/sellers/applications/{id}/reject",
+      "POST /api/store/sellers/applications/{id}/respond"
+    ]
+  },
+  {
+    "chapter": 10,
+    "requirement": "Trust and Risk supports applications requiring additional review",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/sellers/applications/{id}/trust-review",
+      "POST /api/admin/trust/reports/{id}/assessment"
+    ]
+  },
+  {
+    "chapter": 10,
+    "requirement": "Application step 5: store setup, shipping coverage and first product or offer submissions",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/sellers/setup",
+      "PATCH /api/seller/sellers/store-profile",
+      "PUT /api/seller/shipping/settings",
+      "POST /api/seller/offers/offers"
+    ]
+  },
+  {
+    "chapter": 10,
+    "requirement": "Application step 6: launch readiness review; account approval alone does not publish incomplete or unapproved products",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/sellers/setup/launch-review",
+      "POST /api/admin/sellers/sellers/{id}/launch-review/decide"
+    ],
+    "note": "SM Launch readiness review"
+  },
+  {
+    "chapter": 10,
+    "requirement": "Seller statuses Applied, Information Required, Under Review, Approved, Restricted, Suspended, Closed (status model)",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/sellers/account",
+      "GET /api/admin/sellers/sellers"
+    ],
+    "note": "SM Seller account status: applied, under_review, information_required, approved, restricted, suspended, closed"
+  },
+  {
+    "chapter": 10,
+    "requirement": "Explain restrictions and what the seller can do to resolve them",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/sellers/restrictions/{id}",
+      "POST /api/seller/sellers/restrictions/{id}/evidence"
+    ],
+    "note": "Restriction.toResolve, stillWorks"
+  },
+  {
+    "chapter": 10,
+    "requirement": "Seller account status, product approval and payout readiness are visible separately",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/sellers/account"
+    ],
+    "note": "SellerAccount.status, productApproval, payoutReadiness"
+  },
+  {
+    "chapter": 10,
+    "requirement": "Storefront: store name, logo, introduction, location, product categories and current offers",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/stores/{slug}",
+      "GET /api/store/search/products",
+      "gql store/SellerStorefront"
+    ]
+  },
+  {
+    "chapter": 10,
+    "requirement": "Storefront: rating and feedback, shipping coverage, service expectations, return information and a contact action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/stores/{slug}",
+      "GET /api/store/reviews/sellers/{sellerId}/feedback"
+    ],
+    "note": "Storefront.shipping, returns, contact (ContactOptions)"
+  },
+  {
+    "chapter": 10,
+    "requirement": "Storefront: featured collections and promotions",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/sellers/store-profile/collections",
+      "GET /api/store/sellers/stores/{slug}/collections/{collectionId}"
+    ],
+    "note": "Storefront.promotion"
+  },
+  {
+    "chapter": 10,
+    "requirement": "Staff review changes to public claims or brand affiliation",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/sellers/store-profile/claims",
+      "GET /api/admin/sellers/change-requests",
+      "POST /api/admin/sellers/change-requests/{id}/decide",
+      "POST /api/admin/sellers/claims/{id}/revoke"
+    ]
+  },
+  {
+    "chapter": 10,
+    "requirement": "Clear verification labels explaining what was checked, without promising authenticity beyond that check",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/stores/{slug}",
+      "POST /api/admin/sellers/sellers/{id}/verification"
+    ],
+    "note": "Storefront.verification; SM Verified seller label; job sellers.verification-lapse"
+  },
+  {
+    "chapter": 10,
+    "requirement": "Sellers can update contact details",
+    "status": "covered",
+    "api": [
+      "PATCH /api/seller/sellers/business/contact"
+    ]
+  },
+  {
+    "chapter": 10,
+    "requirement": "Sellers can update staff access",
+    "status": "later",
+    "api": [
+      "POST /api/seller/sellers/invitations",
+      "PATCH /api/seller/sellers/members/{id}",
+      "POST /api/seller/sellers/members/{id}/remove"
+    ],
+    "note": "ph2"
+  },
+  {
+    "chapter": 10,
+    "requirement": "Material changes to ownership, verification or payout destination require review",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/sellers/business/change-requests",
+      "POST /api/seller/sellers/payout-account/change",
+      "GET /api/admin/finance/destination-reviews",
+      "POST /api/admin/finance/destination-reviews/{id}/approve"
+    ]
+  },
+  {
+    "chapter": 10,
+    "requirement": "Notify the seller about material changes and any impact on selling or payouts",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/notifications/inbox"
+    ],
+    "note": "notifications consumes sellers.payout_account.changed only; sellers.change_request.decided, sellers.verification.changed, finance.destination.verified/rejected and sellers.launch_review.decided are published but never turned into seller notices Fixed: notifications now consumes sellers.change_request.decided, sellers.verification.changed, sellers.launch_review.decided, finance.destination.verified and finance.destination.rejected as essential seller-owner topics stating the impact on selling or payouts (destination results owner-only, always email); coverage note updated.",
+    "proposal": {
+      "module": "notifications",
+      "change": "consume sellers.change_request.decided, sellers.verification.changed, sellers.launch_review.decided, finance.destination.verified and finance.destination.rejected as essential seller-owner topics (with impact on selling/payouts)"
+    },
+    "resolvedBy": "platform"
+  },
+  {
+    "chapter": 10,
+    "requirement": "Performance summary covering dispatch reliability, cancellations, returns, unresolved cases and policy violations",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/sellers/performance",
+      "gql seller/SellerPerformance"
+    ],
+    "note": "PerformanceMetric.key enum includes dispatch_reliability, cancellation_rate, return_rate, unresolved_cases, policy_violations"
+  },
+  {
+    "chapter": 10,
+    "requirement": "Restrictions state the reason, affected activity and appeal route",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/sellers/restrictions/{id}",
+      "POST /api/seller/sellers/restrictions/{id}/appeals",
+      "GET /api/seller/sellers/appeals"
+    ]
+  },
+  {
+    "chapter": 10,
+    "requirement": "Suspending new sales preserves access to existing fulfillment and customer obligations",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/sellers/sellers/{id}/suspension-impact",
+      "POST /api/admin/sellers/sellers/{id}/suspend"
+    ],
+    "note": "Approval action sellers.sellers.suspend (always second reviewer)"
+  },
+  {
+    "chapter": 10,
+    "requirement": "Begin with invited or carefully reviewed sellers",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/sellers/seller-invitations",
+      "GET /api/admin/sellers/seller-invitations"
+    ],
+    "note": "setting applicationsOpen=false"
+  },
+  {
+    "chapter": 10,
+    "requirement": "Confirm sellers can maintain stock, ship, answer customers and receive payouts before increasing enrollment",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/sellers/setup",
+      "POST /api/admin/sellers/sellers/{id}/launch-review/decide",
+      "GET /api/seller/sellers/payout-account"
+    ]
+  },
+  {
+    "chapter": 11,
+    "requirement": "Seller Manager oversees seller service",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/sellers/sellers",
+      "GET /api/admin/sellers/sellers/stats",
+      "gql admin/AdminSeller"
+    ]
+  },
+  {
+    "chapter": 11,
+    "requirement": "Official store uses equivalent areas with additional purchasing tools",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/offers/official/offers",
+      "GET /api/admin/purchasing/summary"
+    ]
+  },
+  {
+    "chapter": 11,
+    "requirement": "Seller dashboard: new orders, dispatch deadlines, low stock, open returns, unanswered messages and payout summary",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/reports/dashboard",
+      "gql seller/SellerDashboard"
+    ]
+  },
+  {
+    "chapter": 11,
+    "requirement": "Products and offers: catalog search, new product submission, offer creation, drafts, review feedback, prices, variations and publication",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/catalog/match",
+      "POST /api/seller/catalog/products",
+      "GET /api/seller/catalog/products/{id}",
+      "POST /api/seller/offers/offers",
+      "POST /api/seller/offers/price-changes",
+      "POST /api/seller/offers/offers/{id}/publish",
+      "gql seller/SellerProductDetail"
+    ]
+  },
+  {
+    "chapter": 11,
+    "requirement": "Inventory: available quantities, low stock, out-of-stock items, adjustments and bulk updates",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/inventory/stock-items",
+      "GET /api/seller/inventory/summary",
+      "POST /api/seller/inventory/stock-items/{id}/adjustments",
+      "POST /api/seller/inventory/adjustments/batch"
+    ],
+    "note": "Inline batch at launch; file upload bulk ph2"
+  },
+  {
+    "chapter": 11,
+    "requirement": "Orders: new, preparing, shipped and completed; item details, cancellation requests and packing information",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/orders/orders",
+      "GET /api/seller/orders/orders/{id}",
+      "POST /api/seller/orders/orders/{id}/cancellation-requests/{requestId}/accept",
+      "GET /api/seller/orders/orders/{id}/packing-slip"
+    ],
+    "note": "tab enum(new|preparing|shipped|completed|cancellation_requests)"
+  },
+  {
+    "chapter": 11,
+    "requirement": "Shipping: coverage, rates, dispatch times, package records, labels where supported and tracking updates",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/shipping/settings",
+      "PUT /api/seller/shipping/profiles/{id}",
+      "GET /api/seller/shipping/shipments",
+      "POST /api/seller/shipping/labels",
+      "POST /api/seller/shipping/shipments/{id}/correct-tracking"
+    ]
+  },
+  {
+    "chapter": 11,
+    "requirement": "Returns and cases: return requests, return address, inspection outcomes, refund requests and dispute evidence",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/returns/requests",
+      "PUT /api/seller/returns/terms",
+      "POST /api/seller/returns/requests/{id}/inspection",
+      "POST /api/seller/returns/requests/{id}/remedy",
+      "POST /api/seller/support/cases/{id}/evidence"
+    ]
+  },
+  {
+    "chapter": 11,
+    "requirement": "Finance: sales, platform fees, refunds, adjustments, pending and available earnings, payouts and statements",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/finance/balances",
+      "GET /api/seller/finance/ledger",
+      "GET /api/seller/finance/payouts",
+      "GET /api/seller/finance/statements",
+      "gql seller/SellerFinanceOverview"
+    ]
+  },
+  {
+    "chapter": 11,
+    "requirement": "Marketing: seller discounts and promotion participation",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/promotions/discounts",
+      "POST /api/seller/promotions/discounts",
+      "GET /api/seller/promotions/invitations"
+    ]
+  },
+  {
+    "chapter": 11,
+    "requirement": "Marketing: sponsored ad applications, campaign status and spending",
+    "status": "later",
+    "api": [
+      "POST /api/seller/advertising/campaigns",
+      "GET /api/seller/advertising/campaigns",
+      "GET /api/seller/advertising/summary"
+    ],
+    "note": "ph3 (plan ch. 20 phase 3 paid seller ads)"
+  },
+  {
+    "chapter": 11,
+    "requirement": "Customers: order messages, product questions and seller feedback responses",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/messaging/conversations",
+      "GET /api/seller/reviews/questions",
+      "POST /api/seller/reviews/questions/{id}/answers",
+      "POST /api/seller/reviews/responses"
+    ]
+  },
+  {
+    "chapter": 11,
+    "requirement": "Store and settings: store profile, policies, contact details, staff roles, notification preferences and account status",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/sellers/store-profile",
+      "GET /api/seller/returns/terms",
+      "PATCH /api/seller/sellers/business/contact",
+      "GET /api/seller/sellers/roles",
+      "GET /api/seller/notifications/preferences",
+      "GET /api/seller/sellers/account"
+    ]
+  },
+  {
+    "chapter": 11,
+    "requirement": "Reports: product sales, order trends, returns and seller service performance",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/reports/catalogue",
+      "POST /api/seller/reports/reports/{key}/query"
+    ]
+  },
+  {
+    "chapter": 11,
+    "requirement": "Search, filters and bulk updates with clear error reports",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/offers/offers",
+      "GET /api/seller/orders/orders",
+      "POST /api/seller/offers/price-changes"
+    ],
+    "note": "Price changes return per-item results; file-based bulk with correction report is ph2"
+  },
+  {
+    "chapter": 11,
+    "requirement": "Each order shows the dispatch deadline, next action and message history",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/orders/orders/{id}",
+      "GET /api/seller/messaging/conversations",
+      "gql seller/SellerOrderDetail"
+    ],
+    "note": "SellerOrderDetail.dispatchDeadline, allowedActions, timeline; conversations?orderId"
+  },
+  {
+    "chapter": 11,
+    "requirement": "Help explains fees, restrictions and correction steps for rejected submissions",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/finance/fee-schedule",
+      "GET /api/seller/sellers/restrictions/{id}",
+      "GET /api/seller/catalog/products/{id}",
+      "GET /api/store/content/help/articles"
+    ]
+  },
+  {
+    "chapter": 11,
+    "requirement": "Owners invite staff for products, shipping or finance",
+    "status": "later",
+    "api": [
+      "POST /api/seller/sellers/invitations"
+    ],
+    "note": "ph2"
+  },
+  {
+    "chapter": 11,
+    "requirement": "Owners contact seller support",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/support/requests",
+      "GET /api/seller/support/categories"
+    ]
+  },
+  {
+    "chapter": 11,
+    "requirement": "Limit payout changes to authorized people",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/sellers/payout-account/change"
+    ],
+    "note": "Owner only; destination review in finance"
+  },
+  {
+    "chapter": 11,
+    "requirement": "Sellers cannot view another seller's orders, costs, customer messages or balances",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/orders/orders",
+      "GET /api/seller/finance/balances"
+    ],
+    "note": "Seller area acts for one seller account from the session"
+  },
+  {
+    "chapter": 12,
+    "requirement": "Order Manager monitors purchases across seller groups",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/orders/orders",
+      "GET /api/admin/orders/orders/{id}",
+      "gql admin/AdminOrder"
+    ]
+  },
+  {
+    "chapter": 12,
+    "requirement": "Each seller sees only its fulfillment tasks",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/orders/orders"
+    ],
+    "note": "Fulfillment task = the seller's group"
+  },
+  {
+    "chapter": 12,
+    "requirement": "Warehouse handles company packing",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/warehouse/fulfillments"
+    ]
+  },
+  {
+    "chapter": 12,
+    "requirement": "Shipping owns dispatch and delivery exceptions",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/shipping/exceptions"
+    ]
+  },
+  {
+    "chapter": 12,
+    "requirement": "Customers see all packages under the original order",
+    "status": "covered",
+    "api": [
+      "GET /api/store/shipping/orders/{orderId}/shipments",
+      "GET /api/store/orders/orders/{id}"
+    ]
+  },
+  {
+    "chapter": 12,
+    "requirement": "Journey 1: payment accepted and items allocated for the order",
+    "status": "covered",
+    "api": [
+      "POST /api/store/checkout/sessions/{id}/place",
+      "GET /api/admin/inventory/reservations"
+    ],
+    "note": "inventory consumes orders.order.accepted (held → allocated)"
+  },
+  {
+    "chapter": 12,
+    "requirement": "Journey 2: official store or seller receives a fulfillment task and dispatch deadline",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/orders/orders/{id}",
+      "GET /api/admin/warehouse/fulfillments/{id}"
+    ]
+  },
+  {
+    "chapter": 12,
+    "requirement": "Journey 3: pick items, prepare the package and record shipment information",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/orders/orders/{id}/start-preparing",
+      "POST /api/seller/shipping/shipments",
+      "POST /api/admin/warehouse/pick-lines/{id}/pick",
+      "POST /api/admin/warehouse/packages/{id}/pack"
+    ]
+  },
+  {
+    "chapter": 12,
+    "requirement": "Journey 4: customer receives shipment updates with package contents and tracking",
+    "status": "covered",
+    "api": [
+      "GET /api/store/shipping/shipments/{id}/tracking",
+      "GET /api/store/notifications/inbox"
+    ],
+    "note": "Notice on shipping.shipment.dispatched"
+  },
+  {
+    "chapter": 12,
+    "requirement": "Journey 5: delivery recorded or a delivery issue opened; returns and service requests remain available",
+    "status": "covered",
+    "api": [
+      "POST /webhooks/shipping/carriers/{carrier}/events",
+      "POST /api/admin/shipping/exceptions",
+      "POST /api/store/support/cases"
+    ]
+  },
+  {
+    "chapter": 12,
+    "requirement": "Define eligible destinations, dispatch schedules, shipping methods, rates and free-shipping conditions",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/shipping/zones",
+      "PUT /api/admin/shipping/dispatch-targets",
+      "GET /api/admin/shipping/methods",
+      "POST /api/admin/shipping/free-shipping-rules",
+      "PUT /api/seller/shipping/settings",
+      "POST /api/seller/shipping/profiles"
+    ]
+  },
+  {
+    "chapter": 12,
+    "requirement": "Maintain package contents, carrier, tracking reference and shipment date",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/shipping/shipments",
+      "GET /api/seller/shipping/shipments/{id}",
+      "GET /api/admin/shipping/shipments/{id}"
+    ]
+  },
+  {
+    "chapter": 12,
+    "requirement": "Allow tracking corrections with a history",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/shipping/shipments/{id}/correct-tracking",
+      "POST /api/admin/shipping/shipments/{id}/correct-tracking"
+    ],
+    "note": "TrackingCorrection history"
+  },
+  {
+    "chapter": 12,
+    "requirement": "Calculate realistic arrival ranges from preparation time and shipping service",
+    "status": "covered",
+    "api": [
+      "GET /api/store/shipping/estimates"
+    ]
+  },
+  {
+    "chapter": 12,
+    "requirement": "Show holiday or other known service interruptions",
+    "status": "covered",
+    "api": [
+      "GET /api/store/shipping/notices",
+      "POST /api/admin/shipping/notices",
+      "POST /api/seller/shipping/closures"
+    ],
+    "note": "DeliveryEstimate.serviceNotice"
+  },
+  {
+    "chapter": 12,
+    "requirement": "Support partial shipments and partial cancellations without marking the whole purchase complete",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/shipping/shipments",
+      "POST /api/seller/orders/orders/{id}/cancel-items"
+    ],
+    "note": "SellerGroup.status partly_shipped / partly_cancelled; job orders.complete-orders only when every item is final"
+  },
+  {
+    "chapter": 12,
+    "requirement": "Seller cannot fulfill: flag affected items, notify customer, apply cancellation and refund policy",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/orders/orders/{id}/cancel-items",
+      "POST /api/seller/shipping/exceptions/{id}/respond"
+    ],
+    "note": "orders.item.cancelled → notifications and refund"
+  },
+  {
+    "chapter": 12,
+    "requirement": "Late dispatch: create an overdue task, notify the seller and offer customer support escalation",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/shipping/exceptions",
+      "POST /api/admin/shipping/exceptions/{id}/notify-seller",
+      "POST /api/admin/shipping/exceptions/{id}/notify-customer",
+      "GET /api/seller/workqueues/tasks"
+    ],
+    "note": "Job shipping.detect-late-dispatch; workqueues consumes shipping.dispatch.overdue"
+  },
+  {
+    "chapter": 12,
+    "requirement": "Missing tracking: request valid details and avoid implying delivery",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/shipping/exceptions/{id}/request-tracking"
+    ],
+    "note": "Job shipping.detect-missing-tracking; notices never claim in transit before a scan"
+  },
+  {
+    "chapter": 12,
+    "requirement": "Lost or damaged package: open a case with the item, carrier information and agreed customer remedy",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/shipping/exceptions",
+      "POST /api/admin/shipping/claims",
+      "POST /api/admin/support/cases"
+    ]
+  },
+  {
+    "chapter": 12,
+    "requirement": "Failed delivery: show next delivery, pickup or return steps and any applicable costs",
+    "status": "covered",
+    "api": [
+      "GET /api/store/shipping/shipments/{id}/tracking",
+      "POST /api/store/shipping/shipments/{id}/delivery-choice"
+    ],
+    "note": "FailedDeliveryInfo.options with cost and costIfNoChoice"
+  },
+  {
+    "chapter": 12,
+    "requirement": "Future platform fulfillment: inbound deliveries, receiving, ownership tracking, storage, picking, shipping charges and returns handling",
+    "status": "later",
+    "api": [
+      "POST /api/seller/fulfillment-service/inbound",
+      "POST /api/admin/fulfillment-service/inbound/{id}/receive"
+    ],
+    "note": "ph4"
+  },
+  {
+    "chapter": 12,
+    "requirement": "Sellers see stock held by the company and the fees charged",
+    "status": "later",
+    "api": [
+      "GET /api/seller/fulfillment-service/skus",
+      "GET /api/seller/fulfillment-service/fees"
+    ],
+    "note": "ph4"
+  },
+  {
+    "chapter": 13,
+    "requirement": "Return: select an order item and quantity, choose a reason, add details or photos",
+    "status": "covered",
+    "api": [
+      "GET /api/store/returns/orders/{orderId}/returnable-items",
+      "POST /api/store/media/uploads",
+      "POST /api/store/returns/requests"
+    ]
+  },
+  {
+    "chapter": 13,
+    "requirement": "Show eligibility, return deadline, destination, shipping responsibility and remedy before submission",
+    "status": "covered",
+    "api": [
+      "POST /api/store/returns/eligibility"
+    ]
+  },
+  {
+    "chapter": 13,
+    "requirement": "Approve, request information or reject with an explanation",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/returns/requests/{id}/approve",
+      "POST /api/seller/returns/requests/{id}/request-info",
+      "POST /api/seller/returns/requests/{id}/reject",
+      "POST /api/admin/returns/requests/{id}/approve"
+    ]
+  },
+  {
+    "chapter": 13,
+    "requirement": "Publish the expected response timing",
+    "status": "covered",
+    "api": [
+      "GET /api/store/returns/policy",
+      "GET /api/store/returns/terms"
+    ],
+    "note": "PolicyVersion.sellerResponseBusinessDays; seller responseTargetBusinessDays"
+  },
+  {
+    "chapter": 13,
+    "requirement": "Provide shipping or drop-off instructions and track the return separately from the original delivery",
+    "status": "covered",
+    "api": [
+      "GET /api/store/returns/requests/{id}/label",
+      "POST /api/store/returns/requests/{id}/shipment",
+      "GET /api/store/returns/requests/{id}"
+    ],
+    "note": "SM Return shipment"
+  },
+  {
+    "chapter": 13,
+    "requirement": "Record receipt and inspection; approve refund, exchange or other outcome and show progress",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/returns/requests/{id}/receive",
+      "POST /api/seller/returns/requests/{id}/inspection",
+      "POST /api/seller/returns/requests/{id}/remedy",
+      "GET /api/store/returns/requests/{id}",
+      "gql store/ReturnDetail"
+    ]
+  },
+  {
+    "chapter": 13,
+    "requirement": "Publish a platform return baseline",
+    "status": "covered",
+    "api": [
+      "GET /api/store/returns/policy",
+      "POST /api/admin/returns/policies"
+    ],
+    "note": "Approval action returns.baseline.change"
+  },
+  {
+    "chapter": 13,
+    "requirement": "Sellers can offer more generous terms within platform rules",
+    "status": "covered",
+    "api": [
+      "PUT /api/seller/returns/terms"
+    ]
+  },
+  {
+    "chapter": 13,
+    "requirement": "Category exceptions visible before purchase",
+    "status": "covered",
+    "api": [
+      "GET /api/store/returns/terms",
+      "POST /api/admin/returns/category-exceptions"
+    ]
+  },
+  {
+    "chapter": 13,
+    "requirement": "Define who pays return shipping for damaged, incorrect, defective and change-of-mind returns",
+    "status": "covered",
+    "api": [
+      "GET /api/store/returns/policy"
+    ],
+    "note": "ShippingResponsibility.reasonGroup/paidBy"
+  },
+  {
+    "chapter": 13,
+    "requirement": "Company handles its own returns; sellers handle theirs",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/returns/inspections",
+      "GET /api/seller/returns/requests"
+    ]
+  },
+  {
+    "chapter": 13,
+    "requirement": "Platform support can intervene when a seller misses deadlines or a customer challenges the outcome",
+    "status": "covered",
+    "api": [
+      "POST /api/store/returns/requests/{id}/escalate",
+      "POST /api/admin/returns/requests/{id}/take-over",
+      "POST /api/admin/returns/requests/{id}/overturn"
+    ],
+    "note": "Job returns.response-deadlines moves overdue returns to platform handling"
+  },
+  {
+    "chapter": 13,
+    "requirement": "Refund-without-return is a controlled exception with a recorded reason",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/returns/requests/{id}/approve-without-return",
+      "POST /api/admin/returns/requests/{id}/approve-without-return"
+    ]
+  },
+  {
+    "chapter": 13,
+    "requirement": "Refunds for full orders, selected items, partial quantities and partial amounts",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/returns/refunds",
+      "POST /api/seller/returns/requests/{id}/remedy",
+      "POST /api/store/orders/orders/{id}/cancellations"
+    ]
+  },
+  {
+    "chapter": 13,
+    "requirement": "Show item value, shipping, discounts and other charges separately in refunds",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/returns/refunds/{id}",
+      "POST /api/store/returns/eligibility"
+    ],
+    "note": "RefundBreakdown"
+  },
+  {
+    "chapter": 13,
+    "requirement": "Refund outcomes Requested, Under Review, Approved, Processing, Sent, Failed (status model)",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/returns/refunds",
+      "GET /api/store/payments/refunds"
+    ],
+    "note": "SM Refund request: requested, under_review, approved, processing, sent, failed"
+  },
+  {
+    "chapter": 13,
+    "requirement": "Do not imply money has arrived because a request was approved",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}",
+      "GET /api/store/returns/policy"
+    ],
+    "note": "ItemAfterSales.refundStatus: approved never shown as money arrived"
+  },
+  {
+    "chapter": 13,
+    "requirement": "Prevent duplicate refunds and amounts above the remaining refundable amount",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/payments/orders/{orderId}/refundable",
+      "POST /api/admin/returns/refunds"
+    ],
+    "note": "idempotent; refundable cap"
+  },
+  {
+    "chapter": 13,
+    "requirement": "Explain the refund payment destination and expected timing",
+    "status": "covered",
+    "api": [
+      "GET /api/store/payments/refunds/{id}",
+      "POST /api/store/payments/refunds/{id}/destination"
+    ]
+  },
+  {
+    "chapter": 13,
+    "requirement": "Record how each refund affects seller earnings and marketplace fees",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/returns/refunds/{id}",
+      "GET /api/seller/finance/ledger"
+    ],
+    "note": "EarningsImpact from finance.previewRefundImpact"
+  },
+  {
+    "chapter": 13,
+    "requirement": "Exchange or replacement has its own shipment record and does not erase the original purchase",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/returns/requests/{id}/remedy",
+      "POST /api/admin/returns/requests/{id}/remedy"
+    ],
+    "note": "SM Replacement; OrderItem.replacementOfItemId"
+  },
+  {
+    "chapter": 13,
+    "requirement": "Dispute: customers report the problem against an item or seller group",
+    "status": "covered",
+    "api": [
+      "POST /api/store/support/cases"
+    ],
+    "note": "orderItemIds / group"
+  },
+  {
+    "chapter": 13,
+    "requirement": "Keep dispute messages and evidence together",
+    "status": "covered",
+    "api": [
+      "POST /api/store/support/cases/{id}/messages",
+      "POST /api/seller/support/cases/{id}/evidence",
+      "POST /api/admin/support/cases/{id}/evidence"
+    ]
+  },
+  {
+    "chapter": 13,
+    "requirement": "Staff review purchase terms, shipment evidence, photos and communications, then record a decision and remedy",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/support/cases/{id}",
+      "POST /api/admin/support/cases/{id}/decide",
+      "gql admin/AdminCase"
+    ]
+  },
+  {
+    "chapter": 13,
+    "requirement": "Offer an appeal route with a stated deadline",
+    "status": "covered",
+    "api": [
+      "POST /api/store/support/cases/{id}/appeal",
+      "POST /api/seller/support/cases/{id}/appeal",
+      "POST /api/admin/support/cases/{id}/appeal/decide"
+    ],
+    "note": "decide publishes appeal deadline; appeal reviewer must differ"
+  },
+  {
+    "chapter": 13,
+    "requirement": "Returns Manager owns return cases; Customer Support owns communication and dispute intake",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/returns/requests/{id}/assign",
+      "GET /api/admin/support/cases"
+    ]
+  },
+  {
+    "chapter": 13,
+    "requirement": "Case lists show reason, owner, deadline, parties and amount",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/returns/requests",
+      "GET /api/admin/support/cases"
+    ]
+  },
+  {
+    "chapter": 13,
+    "requirement": "Finance reviews financial remedies and post-payout adjustments",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/returns/refunds/{id}/approve",
+      "POST /api/admin/finance/adjustments",
+      "GET /api/admin/finance/amounts-owed"
+    ]
+  },
+  {
+    "chapter": 13,
+    "requirement": "Warehouse inspects returns and Inventory records their stock outcome",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/warehouse/return-parcels",
+      "POST /api/admin/warehouse/return-parcels/{id}/hand-over",
+      "POST /api/admin/returns/requests/{id}/inspection",
+      "POST /api/admin/inventory/return-outcomes/{id}/record"
+    ]
+  },
+  {
+    "chapter": 14,
+    "requirement": "Finance Manager owns payment review, fees, financial remedies and payouts",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/payments/payments",
+      "GET /api/admin/finance/fee-rules",
+      "GET /api/admin/returns/refunds",
+      "GET /api/admin/finance/payout-runs"
+    ]
+  },
+  {
+    "chapter": 14,
+    "requirement": "Sellers receive earnings under published settlement rules",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/finance/balances",
+      "GET /api/public/finance/fee-schedule"
+    ],
+    "note": "SellerBalances.settlementRules"
+  },
+  {
+    "chapter": 14,
+    "requirement": "Reports distinguish collected money, company sales, marketplace income and amounts owed to sellers",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/finance/overview"
+    ]
+  },
+  {
+    "chapter": 14,
+    "requirement": "Show accepted payment methods",
+    "status": "covered",
+    "api": [
+      "GET /api/store/payments/options"
+    ]
+  },
+  {
+    "chapter": 14,
+    "requirement": "Show payment result, receipts and refund progress",
+    "status": "covered",
+    "api": [
+      "GET /api/store/payments/intents/{id}",
+      "GET /api/store/orders/orders/{id}/documents",
+      "GET /api/store/payments/refunds"
+    ]
+  },
+  {
+    "chapter": 14,
+    "requirement": "Support a failed payment retry and cases where the result needs confirmation",
+    "status": "covered",
+    "api": [
+      "POST /api/store/checkout/sessions/{id}/retry-payment",
+      "POST /api/store/payments/intents/{id}/check",
+      "POST /api/admin/payments/payments/{id}/check"
+    ],
+    "note": "SM Payment intent includes pending_check"
+  },
+  {
+    "chapter": 14,
+    "requirement": "Customer payments linked to the overall purchase and its seller groups; a partial refund does not mark every item refunded",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/payments/payments/{id}",
+      "GET /api/admin/payments/orders/{orderId}/summary",
+      "GET /api/store/orders/orders/{id}"
+    ],
+    "note": "Payment allocations per group; item-level refunded state; PaymentProgress partly_refunded"
+  },
+  {
+    "chapter": 14,
+    "requirement": "Finance queue for unexplained amounts, payment disputes and chargebacks",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/finance/reconciliation/items",
+      "GET /api/admin/payments/disputes",
+      "POST /api/admin/payments/disputes/{id}/evidence",
+      "POST /api/admin/payments/disputes/{id}/accept"
+    ],
+    "note": "Approval action payments.disputes.accept"
+  },
+  {
+    "chapter": 14,
+    "requirement": "Seller balances: sales proceeds, pending earnings, available earnings, held amounts with reason and review date, payout record",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/finance/balances",
+      "GET /api/seller/finance/payouts",
+      "GET /api/seller/finance/payouts/{id}"
+    ],
+    "note": "SellerBalances.salesProceeds, pending, available, held, holds[]"
+  },
+  {
+    "chapter": 14,
+    "requirement": "Fee rules define whether commission applies before or after discounts and whether shipping is included",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/finance/fee-rules",
+      "POST /api/admin/finance/fee-rules"
+    ],
+    "note": "FeeRuleSet.basis, includeShipping; approval finance.fees.change"
+  },
+  {
+    "chapter": 14,
+    "requirement": "Distinguish platform-funded from seller-funded discounts",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/finance/fee-rules",
+      "GET /api/admin/promotions/campaigns/{id}"
+    ],
+    "note": "FeeRuleSet.platformDiscountsReduceFee; Campaign.funding"
+  },
+  {
+    "chapter": 14,
+    "requirement": "Explain fee treatment for cancellations, returns and payment disputes in the seller agreement",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/finance/fee-schedule",
+      "GET /api/seller/sellers/agreements"
+    ],
+    "note": "FeeRuleSet.treatment, agreementVersion"
+  },
+  {
+    "chapter": 14,
+    "requirement": "Illustration: $100 sale with 10% fee gives $10 fee income and $90 seller earnings",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/finance/fee-rules/calculate",
+      "GET /api/public/finance/fee-schedule"
+    ]
+  },
+  {
+    "chapter": 14,
+    "requirement": "Payout status pending, processing, paid and failed (status model)",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/finance/payouts",
+      "GET /api/admin/finance/payouts"
+    ],
+    "note": "SM Payout: pending, on_hold, processing, paid, failed, cancelled"
+  },
+  {
+    "chapter": 14,
+    "requirement": "Itemized seller statements connecting sales, fees, refunds, holds and payouts",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/finance/statements/{id}",
+      "GET /api/seller/finance/statements/{id}/download",
+      "gql seller/SellerStatement"
+    ]
+  },
+  {
+    "chapter": 14,
+    "requirement": "Daily finance checks for mismatched payments and seller amounts, with reasons recorded for corrections",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/finance/reconciliation/days/{date}",
+      "POST /api/admin/finance/reconciliation/items/{id}/explain",
+      "POST /api/admin/finance/reconciliation/items/{id}/correct",
+      "POST /api/admin/finance/reconciliation/days/{date}/complete"
+    ],
+    "note": "Job finance.reconcile.daily"
+  },
+  {
+    "chapter": 14,
+    "requirement": "Refund after payout is deducted from later earnings or becomes an amount owed",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/finance/amounts-owed",
+      "POST /api/admin/finance/amounts-owed/{id}/settle"
+    ],
+    "note": "Job finance.negative-balance.age"
+  },
+  {
+    "chapter": 14,
+    "requirement": "Show negative balances clearly",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/finance/balances",
+      "GET /api/admin/finance/sellers/{sellerId}"
+    ],
+    "note": "SellerBalances.negative, amountOwed, owedDueBy"
+  },
+  {
+    "chapter": 14,
+    "requirement": "Payout destination changes need verification and a recorded review",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/sellers/payout-account/change",
+      "GET /api/seller/finance/payout-destination",
+      "POST /api/admin/finance/destination-reviews/{id}/approve",
+      "POST /api/admin/finance/destination-reviews/{id}/reject"
+    ],
+    "note": "Approval action finance.destinations.approve; reviewer ≠ requester"
+  },
+  {
+    "chapter": 14,
+    "requirement": "Company-owned product proceeds appear in company trading reports, not seller payouts",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/finance/trading"
+    ]
+  },
+  {
+    "chapter": 14,
+    "requirement": "Payout runs approved within limits and failed payouts recovered",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/finance/payout-runs/{id}/approve",
+      "POST /api/admin/finance/payout-runs/{id}/release",
+      "POST /api/admin/finance/payouts/{id}/retry",
+      "gql admin/AdminPayoutRun"
+    ],
+    "note": "Approval action finance.payouts.release"
+  },
+  {
+    "chapter": 14,
+    "requirement": "Holds on seller earnings with reason and review date",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/finance/holds",
+      "POST /api/admin/finance/holds/{id}/release",
+      "POST /api/admin/finance/holds/{id}/extend"
+    ],
+    "note": "Approval actions finance.holds.place / release"
+  },
+  {
+    "chapter": 15,
+    "requirement": "Marketing owns discounts and campaigns, Advertising owns ad delivery, Content prepares material, Finance confirms funding",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/promotions/campaigns",
+      "POST /api/admin/promotions/campaigns/{id}/confirm-funding",
+      "POST /api/admin/advertising/campaigns",
+      "POST /api/admin/content/pages"
+    ],
+    "note": "Approval action promotions.budgets.approve"
+  },
+  {
+    "chapter": 15,
+    "requirement": "Sellers can discount their offers",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/promotions/discounts/preview",
+      "POST /api/seller/promotions/discounts",
+      "POST /api/seller/promotions/discounts/{id}/schedule"
+    ]
+  },
+  {
+    "chapter": 15,
+    "requirement": "Sellers can join approved campaigns",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/promotions/invitations/{id}",
+      "POST /api/seller/promotions/invitations/{id}/accept"
+    ]
+  },
+  {
+    "chapter": 15,
+    "requirement": "Customers see clear eligibility and final prices",
+    "status": "covered",
+    "api": [
+      "GET /api/store/promotions/products/{productId}",
+      "GET /api/store/promotions/campaigns/{id}/eligible-products",
+      "GET /api/store/promotions/offer-prices"
+    ]
+  },
+  {
+    "chapter": 15,
+    "requirement": "Launch promotions: item markdowns, percentage or fixed-amount coupons, minimum-spend discounts and free shipping",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/promotions/campaigns"
+    ],
+    "note": "DiscountRule.kind markdown|percent_coupon|fixed_coupon|min_spend|free_shipping"
+  },
+  {
+    "chapter": 15,
+    "requirement": "Growth promotions: flash sales",
+    "status": "later",
+    "api": [
+      "PUT /api/admin/promotions/campaigns/{id}/flash-items",
+      "GET /api/store/promotions/flash-sales/{campaignId}"
+    ],
+    "note": "ph2"
+  },
+  {
+    "chapter": 15,
+    "requirement": "Growth promotions: bundles and quantity deals",
+    "status": "later",
+    "api": [
+      "POST /api/admin/promotions/campaigns"
+    ],
+    "note": "DiscountRule.bundle / quantityTiers marked Phase 3"
+  },
+  {
+    "chapter": 15,
+    "requirement": "Growth promotions: new customer offers",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/promotions/campaigns"
+    ],
+    "note": "Eligibility.audience new_customers"
+  },
+  {
+    "chapter": 15,
+    "requirement": "Growth promotions: targeted campaigns",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/promotions/campaigns"
+    ],
+    "note": "Eligibility.audience signed_in|regions; advanced targeting is plan phase 3"
+  },
+  {
+    "chapter": 15,
+    "requirement": "Later services: gift cards and store credit",
+    "status": "later",
+    "api": [
+      "POST /api/store/wallet/gift-cards/redeem",
+      "GET /api/store/wallet/credit"
+    ],
+    "note": "wallet ph3"
+  },
+  {
+    "chapter": 15,
+    "requirement": "Later services: loyalty rewards",
+    "status": "later",
+    "api": [
+      "GET /api/store/wallet/loyalty"
+    ],
+    "note": "ph4, NOT_IMPLEMENTED until a program is defined"
+  },
+  {
+    "chapter": 15,
+    "requirement": "Later services: paid membership",
+    "status": "later",
+    "api": [],
+    "note": "Plan defers; not in the API"
+  },
+  {
+    "chapter": 15,
+    "requirement": "Later services: sponsored placements paid by sellers",
+    "status": "later",
+    "api": [
+      "POST /api/seller/advertising/campaigns"
+    ],
+    "note": "ph3"
+  },
+  {
+    "chapter": 15,
+    "requirement": "Campaign setup: name, start and end time, participating products or offers, eligible customers, discount type, budget or usage cap and funding owner",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/promotions/campaigns",
+      "PATCH /api/admin/promotions/campaigns/{id}",
+      "GET /api/admin/promotions/campaigns/{id}/eligible-offers"
+    ],
+    "note": "CampaignInput: discount, startsAt/endsAt, scope, eligibility, limits, funding"
+  },
+  {
+    "chapter": 15,
+    "requirement": "Specify exclusions, whether discounts combine and whether limits apply per customer or per order",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/promotions/campaigns"
+    ],
+    "note": "Scope.exclude, StackingRules, Limits.perCustomer/perOrder"
+  },
+  {
+    "chapter": 15,
+    "requirement": "Seller campaigns define approval, seller consent and funding before publication",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/promotions/campaigns/{id}/invitations",
+      "GET /api/admin/promotions/campaigns/{id}/participations",
+      "POST /api/admin/promotions/campaigns/{id}/submit"
+    ],
+    "note": "SM Seller participation invited → accepted"
+  },
+  {
+    "chapter": 15,
+    "requirement": "Sellers see the expected impact on their earnings",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/promotions/invitations/{id}",
+      "POST /api/seller/promotions/discounts/preview"
+    ],
+    "note": "EarningsImpact"
+  },
+  {
+    "chapter": 15,
+    "requirement": "A platform-funded coupon does not unexpectedly reduce seller proceeds",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/finance/fee-rules",
+      "GET /api/admin/promotions/campaigns/{id}/redemptions"
+    ],
+    "note": "platformDiscountsReduceFee=false; funding split per redemption"
+  },
+  {
+    "chapter": 15,
+    "requirement": "Deals page with current offers, clearance and scheduled events",
+    "status": "covered",
+    "api": [
+      "GET /api/store/promotions/deals",
+      "GET /api/store/promotions/deals/clearance",
+      "GET /api/store/promotions/deals/coupons",
+      "POST /api/store/promotions/events/{campaignId}/reminder"
+    ]
+  },
+  {
+    "chapter": 15,
+    "requirement": "Countdown timers reflect the actual campaign period",
+    "status": "covered",
+    "api": [
+      "GET /api/store/promotions/products/{productId}",
+      "GET /api/store/offers/products/{productId}/purchase-box"
+    ],
+    "note": "OfferView.saleEndsAt from campaign endsAt"
+  },
+  {
+    "chapter": 15,
+    "requirement": "Flash sales need real start and end times, eligible stock, purchase limits and clear sold-out behavior",
+    "status": "later",
+    "api": [
+      "GET /api/admin/promotions/campaigns/{id}/flash-items"
+    ],
+    "note": "ph2; SM Flash item active/sold_out/ended"
+  },
+  {
+    "chapter": 15,
+    "requirement": "If promotional stock ends, show the regular offer separately",
+    "status": "covered",
+    "api": [
+      "GET /api/store/offers/products/{productId}/purchase-box"
+    ],
+    "note": "OfferView.regularPrice"
+  },
+  {
+    "chapter": 15,
+    "requirement": "Manage banners, collections, category highlights and product selection from the Admin Center",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/content/homepage/sections",
+      "POST /api/admin/content/pages",
+      "PATCH /api/admin/content/pages/{id}"
+    ]
+  },
+  {
+    "chapter": 15,
+    "requirement": "Preview campaign pages and schedule publication and removal",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/content/pages/{id}/preview",
+      "POST /api/admin/content/pages/{id}/schedule",
+      "POST /api/admin/promotions/campaigns/{id}/price-preview"
+    ]
+  },
+  {
+    "chapter": 15,
+    "requirement": "Promotions consistent across product pages, cart, checkout and order confirmation",
+    "status": "covered",
+    "api": [
+      "GET /api/store/promotions/products/{productId}",
+      "GET /api/store/cart/cart",
+      "GET /api/store/checkout/sessions/{id}",
+      "GET /api/store/checkout/sessions/{id}/confirmation"
+    ],
+    "note": "Single promotions evaluation; DiscountAllocation carried into orders"
+  },
+  {
+    "chapter": 15,
+    "requirement": "Label paid placements and identify the seller behind promoted offers",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/advertising/rules",
+      "POST /api/store/advertising/decisions"
+    ],
+    "note": "GlobalRules.sellerNamedOnPromotedOffers"
+  },
+  {
+    "chapter": 15,
+    "requirement": "Moderation applies to seller advertising content",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/advertising/creatives/{id}/review",
+      "POST /api/admin/advertising/campaigns/{id}/reject"
+    ]
+  },
+  {
+    "chapter": 15,
+    "requirement": "Review campaign sales, discount cost, company margin impact, seller participation, coupon use and returns",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/promotions/campaigns/{id}/results",
+      "GET /api/admin/promotions/dashboard"
+    ]
+  },
+  {
+    "chapter": 15,
+    "requirement": "Record campaign costs separately from sales",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/promotions/campaigns/{id}/results",
+      "GET /api/admin/finance/overview"
+    ],
+    "note": "CampaignResult.sales vs discountCost"
+  },
+  {
+    "chapter": 15,
+    "requirement": "Marketing messages follow customer preferences with a clear way to stop",
+    "status": "covered",
+    "api": [
+      "PUT /api/store/customers/marketing-preferences",
+      "POST /api/public/customers/unsubscribe",
+      "POST /api/admin/notifications/broadcasts"
+    ]
+  },
+  {
+    "chapter": 15,
+    "requirement": "Personal recommendations and automated campaign targeting",
+    "status": "later",
+    "api": [],
+    "note": "Plan: once the store has enough activity; not in the API"
+  },
+  {
+    "chapter": 15,
+    "requirement": "At launch, curated collections and accurate product availability",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/pages/{slug}"
+    ],
+    "note": "Job content.refresh-collections"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Advertising promotes company products, seller offers, brands or platform campaigns",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/advertising/campaigns"
+    ],
+    "note": "AdCampaignInput.advertiser.kind, goal"
+  },
+  {
+    "chapter": 16,
+    "requirement": "A campaign can use both a promotion and advertising",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/advertising/campaigns"
+    ],
+    "note": "linkedPromotionId, stopWithPromotion"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Opening full-screen ad with clear close/skip action and campaign link",
+    "status": "covered",
+    "api": [
+      "POST /api/store/advertising/decisions",
+      "POST /api/store/advertising/events"
+    ]
+  },
+  {
+    "chapter": 16,
+    "requirement": "Banner advertisement linking to a product, seller, brand or campaign on home, category and campaign pages",
+    "status": "covered",
+    "api": [
+      "POST /api/store/advertising/decisions"
+    ],
+    "note": "Placement keys home_banner, category_banner, campaign_banner; Destination"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Promotional pop-up: dismissible window after a defined trigger",
+    "status": "covered",
+    "api": [
+      "POST /api/store/advertising/decisions",
+      "GET /api/admin/advertising/placements"
+    ],
+    "note": "Placement.trigger (PopupTrigger)"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Sponsored product: labeled card alongside search, category and related product results",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/products",
+      "POST /api/store/advertising/decisions"
+    ]
+  },
+  {
+    "chapter": 16,
+    "requirement": "Sponsored store or brand: labeled feature on home and discovery pages",
+    "status": "covered",
+    "api": [
+      "POST /api/store/advertising/decisions"
+    ],
+    "note": "Placement key sponsored_store; advertiser kind brand"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Floating or sticky ad: compact dismissible strip",
+    "status": "covered",
+    "api": [
+      "POST /api/store/advertising/decisions"
+    ],
+    "note": "Placement key floating"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Interstitial advertisement between browsing steps outside checkout",
+    "status": "covered",
+    "api": [
+      "POST /api/store/advertising/decisions",
+      "GET /api/admin/advertising/rules"
+    ],
+    "note": "Placement key interstitial; blockedPages"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Video advertisement with playback and mute controls",
+    "status": "later",
+    "api": [
+      "GET /api/admin/advertising/placements"
+    ],
+    "note": "Placement key video, availability later"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Opening ad: manage desktop and mobile versions",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/advertising/creatives",
+      "GET /api/admin/advertising/campaigns/{id}/preview"
+    ],
+    "note": "Creative.device desktop|phone"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Opening ad: choose trigger pages, period, destination, audience and maximum display frequency (default one per session, configurable)",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/advertising/campaigns",
+      "PATCH /api/admin/advertising/placements/{id}"
+    ],
+    "note": "pages, startsAt/endsAt, destination, audience, frequencyCap.perSession"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Closing the ad returns the customer to the intended page",
+    "status": "covered",
+    "api": [
+      "POST /api/store/advertising/events"
+    ],
+    "note": "Dismissal recorded; navigation is client-side"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Avoid showing several overlays at once",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/advertising/rules"
+    ],
+    "note": "GlobalRules.overlaysPerPageView"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Close controls visible and usable on phones and with a keyboard",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/advertising/rules",
+      "GET /api/admin/advertising/campaigns/{id}/preview"
+    ],
+    "note": "GlobalRules.closeControlMinPx"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Paid ads carry an Advertisement or Sponsored label",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/advertising/placements"
+    ],
+    "note": "Placement.label; GlobalRules.labelRequired"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Ads never cover checkout, payment results, tracking or return actions",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/advertising/rules"
+    ],
+    "note": "GlobalRules.blockedPages always includes checkout, payment_result, order_tracking, returns"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Remove expired ads and ads promoting unavailable offers",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/advertising/campaigns/{id}/check"
+    ],
+    "note": "Jobs advertising.finish-due, advertising.availability-sweep"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Advertisement Management is a dedicated Admin Center area owned by Advertising Manager",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/advertising/dashboard"
+    ]
+  },
+  {
+    "chapter": 16,
+    "requirement": "Controls own promotional ads and, when enabled, paid seller advertising",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/advertising/rules",
+      "PUT /api/admin/advertising/rules"
+    ],
+    "note": "GlobalRules.paidSellerAdsEnabled; approval advertising.rules.change"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Dashboard: live campaigns, upcoming starts, ending soon, waiting approvals, spending and performance",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/advertising/dashboard"
+    ]
+  },
+  {
+    "chapter": 16,
+    "requirement": "Campaign lifecycle: create, preview, submit, approve, schedule, activate, pause, resume, finish and archive (status model)",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/advertising/campaigns",
+      "GET /api/admin/advertising/campaigns/{id}/preview",
+      "POST /api/admin/advertising/campaigns/{id}/submit",
+      "POST /api/admin/advertising/campaigns/{id}/approve",
+      "POST /api/admin/advertising/campaigns/{id}/schedule",
+      "POST /api/admin/advertising/campaigns/{id}/activate",
+      "POST /api/admin/advertising/campaigns/{id}/pause",
+      "POST /api/admin/advertising/campaigns/{id}/resume",
+      "POST /api/admin/advertising/campaigns/{id}/finish",
+      "POST /api/admin/advertising/campaigns/{id}/archive"
+    ],
+    "note": "SM Ad campaign: draft, in_review, approved, rejected, scheduled, live, paused, finished, archived"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Placements: opening full-screen, banners, pop-ups, sponsored cards, store features, floating panels and interstitials",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/advertising/placements",
+      "PATCH /api/admin/advertising/placements/{id}"
+    ]
+  },
+  {
+    "chapter": 16,
+    "requirement": "Creative assets: desktop and mobile images, ad text, optional video, destination links and review notes",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/advertising/creatives",
+      "POST /api/admin/advertising/creatives",
+      "GET /api/admin/advertising/creatives/{id}",
+      "POST /api/admin/media/uploads"
+    ]
+  },
+  {
+    "chapter": 16,
+    "requirement": "Rules and reports: audiences, page eligibility, display limits, budgets, billing and results",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/advertising/rules",
+      "GET /api/admin/advertising/placements",
+      "GET /api/admin/advertising/reports/performance"
+    ],
+    "note": "AdBudget billing, dailyLimit, totalLimit"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Setup step 1: identify the advertiser and campaign goal",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/advertising/campaigns"
+    ],
+    "note": "advertiser.kind platform|official_store|seller|brand; goal"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Setup step 2: ad type, placement, audience, pages and destination; targeting limited to available information and permissions",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/advertising/campaigns"
+    ],
+    "note": "Audience.categoryIds \"when privacy choices allow\""
+  },
+  {
+    "chapter": 16,
+    "requirement": "Setup step 3: dates, publication time zone, display frequency, priority and budget or delivery cap",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/advertising/campaigns"
+    ],
+    "note": "timeZone, frequencyCap, priority, budget.deliveryCap"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Setup step 4: upload creative, preview on desktop and mobile, check availability, claims, links and labels",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/advertising/creatives",
+      "GET /api/admin/advertising/campaigns/{id}/preview",
+      "POST /api/admin/advertising/campaigns/{id}/check",
+      "POST /api/admin/advertising/creatives/{id}/check"
+    ]
+  },
+  {
+    "chapter": 16,
+    "requirement": "Setup step 5: complete approval, then schedule or activate; staff can pause immediately",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/advertising/campaigns/{id}/approve",
+      "POST /api/admin/advertising/campaigns/{id}/schedule",
+      "POST /api/admin/advertising/campaigns/{id}/activate",
+      "POST /api/admin/advertising/campaigns/{id}/pause"
+    ],
+    "note": "Pause takes effect within 1 minute"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Setup step 6: review results, charges and outcome; finish or renew deliberately",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/advertising/campaigns/{id}/report",
+      "POST /api/admin/advertising/campaigns/{id}/finish",
+      "POST /api/admin/advertising/campaigns/{id}/renew"
+    ],
+    "note": "Job advertising.ending-soon-notice"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Audience rules: all shoppers, selected service regions, new or returning visitors, signed-in customers and product categories",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/advertising/campaigns"
+    ],
+    "note": "Audience.mode, regions, visitors, signIn, categoryIds"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Limits per visit or time period; define whether dismissal suppresses further displays",
+    "status": "covered",
+    "api": [
+      "PATCH /api/admin/advertising/placements/{id}",
+      "POST /api/admin/advertising/campaigns"
+    ],
+    "note": "FrequencyCap, DismissalRule"
+  },
+  {
+    "chapter": 16,
+    "requirement": "When several ads qualify for one position, use a defined rotation or priority rule",
+    "status": "covered",
+    "api": [
+      "PATCH /api/admin/advertising/placements/{id}"
+    ],
+    "note": "RotationRule; campaign priority"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Sellers request sponsored campaigns, submit creative, set a spending limit and view approval status and results",
+    "status": "later",
+    "api": [
+      "POST /api/seller/advertising/campaigns",
+      "POST /api/seller/advertising/creatives",
+      "POST /api/seller/advertising/campaigns/{id}/submit",
+      "GET /api/seller/advertising/campaigns/{id}"
+    ],
+    "note": "ph3"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Choose a commercial model (fixed placement fee or measured delivery charge) before enabling paid ads",
+    "status": "later",
+    "api": [
+      "GET /api/seller/advertising/pricing"
+    ],
+    "note": "ph3; billing cpc|cpm|fixed_daily"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Finance shows ad charges separately from commission and confirms cancellation and unused-budget treatment",
+    "status": "later",
+    "api": [
+      "GET /api/admin/advertising/charges",
+      "POST /api/admin/advertising/charges/{id}/void",
+      "GET /api/seller/advertising/charges"
+    ],
+    "note": "ph3"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Paid campaigns never imply guaranteed purchases",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/advertising/reports/performance"
+    ],
+    "note": "PerformanceReport.attributionNote"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Report displays, clicks, dismissals, campaign cost and attributed purchases with a stated attribution period",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/advertising/reports/performance",
+      "GET /api/admin/advertising/campaigns/{id}/report"
+    ],
+    "note": "GlobalRules.attributionDays"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Marketing reviews promotion results; Advertising reviews placement performance",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/promotions/campaigns/{id}/results",
+      "GET /api/admin/advertising/reports/performance"
+    ],
+    "note": "PerformanceReport.byPlacement"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Launch with managed full-screen ads, banners and optional pop-ups",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/advertising/placements"
+    ],
+    "note": "Placement.availability launch"
+  },
+  {
+    "chapter": 16,
+    "requirement": "Paid seller ads, advanced targeting and video follow once approval and billing are ready",
+    "status": "later",
+    "api": [
+      "GET /api/seller/advertising/campaigns"
+    ],
+    "note": "ph3 / placement availability later"
+  },
+  {
+    "chapter": 17,
+    "requirement": "Product reviews and seller feedback displayed separately",
+    "status": "covered",
+    "api": [
+      "GET /api/store/reviews/products/{productId}/reviews",
+      "GET /api/store/reviews/sellers/{sellerId}/feedback",
+      "GET /api/store/reviews/sellers/{sellerId}/feedback-summary"
+    ]
+  },
+  {
+    "chapter": 17,
+    "requirement": "Customers submit a rating and written review after an eligible purchase",
+    "status": "covered",
+    "api": [
+      "GET /api/store/reviews/me/review-context/{orderItemId}",
+      "POST /api/store/reviews/me/reviews",
+      "POST /api/store/reviews/me/feedback"
+    ]
+  },
+  {
+    "chapter": 17,
+    "requirement": "Photos can be included in reviews",
+    "status": "covered",
+    "api": [
+      "POST /api/store/media/uploads",
+      "POST /api/store/reviews/me/reviews"
+    ],
+    "note": "ReviewInput.mediaIds"
+  },
+  {
+    "chapter": 17,
+    "requirement": "Verified Purchase links the review to a recorded purchase; other eligibility labels explained",
+    "status": "covered",
+    "api": [
+      "GET /api/store/reviews/me/review-context/{orderItemId}",
+      "GET /api/store/reviews/products/{productId}/reviews"
+    ]
+  },
+  {
+    "chapter": 17,
+    "requirement": "Customers can edit their feedback",
+    "status": "covered",
+    "api": [
+      "PATCH /api/store/reviews/me/reviews/{id}",
+      "PATCH /api/store/reviews/me/feedback/{id}"
+    ]
+  },
+  {
+    "chapter": 17,
+    "requirement": "Customers can report inappropriate content and view moderation outcomes",
+    "status": "covered",
+    "api": [
+      "POST /api/store/reviews/reports",
+      "GET /api/store/reviews/me/reports",
+      "GET /api/store/reviews/me/reviews",
+      "POST /api/store/reviews/me/appeals"
+    ]
+  },
+  {
+    "chapter": 17,
+    "requirement": "Sellers can respond publicly under clear rules",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/reviews/product-reviews",
+      "POST /api/seller/reviews/responses",
+      "PATCH /api/seller/reviews/responses/{id}"
+    ],
+    "note": "SM Seller response pending → published | rejected"
+  },
+  {
+    "chapter": 17,
+    "requirement": "Staff do not remove legitimate negative reviews simply because they are unfavorable",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/reviews/moderation-items/{id}/decide",
+      "GET /api/admin/reviews/moderation-reasons"
+    ],
+    "note": "Reason codes are policy reasons only (legitimate_experience keeps); harms_sales is a report reason, not a removal reason"
+  },
+  {
+    "chapter": 17,
+    "requirement": "Product questions with answers identified as from sellers, company staff or customers",
+    "status": "covered",
+    "api": [
+      "GET /api/store/reviews/products/{productId}/questions",
+      "POST /api/store/reviews/questions/{id}/answers",
+      "POST /api/seller/reviews/questions/{id}/answers",
+      "POST /api/admin/reviews/questions/{id}/answers"
+    ]
+  },
+  {
+    "chapter": 17,
+    "requirement": "Order messages remain private and connected to the transaction",
+    "status": "covered",
+    "api": [
+      "POST /api/store/messaging/conversations",
+      "GET /api/admin/messaging/conversations/{id}/messages"
+    ],
+    "note": "orderId required; staff read needs a reason and is logged"
+  },
+  {
+    "chapter": 17,
+    "requirement": "Promotional messages kept separate from service conversations",
+    "status": "covered",
+    "api": [
+      "POST /api/store/messaging/messages/{id}/report",
+      "GET /api/store/notifications/preferences"
+    ],
+    "note": "Essential notices never carry promotional content (template validation)"
+  },
+  {
+    "chapter": 17,
+    "requirement": "Help Center articles for shopping, delivery, payment, cancellations, returns, refunds, accounts and marketplace sellers",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/help",
+      "GET /api/store/content/help/articles",
+      "GET /api/admin/content/help/categories"
+    ]
+  },
+  {
+    "chapter": 17,
+    "requirement": "Order-specific help from the order page with the affected items already identified",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/orders/{orderId}/problem-context"
+    ]
+  },
+  {
+    "chapter": 17,
+    "requirement": "Support cases show category, priority, owner, customer and seller, conversation history, status and next response deadline",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/support/cases",
+      "GET /api/admin/support/cases/{id}"
+    ]
+  },
+  {
+    "chapter": 17,
+    "requirement": "Staff can assign, escalate, request information, resolve and reopen cases",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/support/cases/{id}/assign",
+      "POST /api/admin/support/cases/{id}/escalate",
+      "POST /api/admin/support/cases/{id}/request-info",
+      "POST /api/admin/support/cases/{id}/resolve",
+      "POST /api/admin/support/cases/{id}/reopen"
+    ]
+  },
+  {
+    "chapter": 17,
+    "requirement": "Customers receive acknowledgment, progress updates and a clear resolution",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/cases/{id}",
+      "GET /api/store/notifications/inbox"
+    ],
+    "note": "Notices on support.case.opened, message_added, decided, resolved"
+  },
+  {
+    "chapter": 17,
+    "requirement": "Avoid closing a case while a promised refund or replacement is unresolved",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/support/cases/{id}/resolve"
+    ],
+    "note": "REMEDY_PENDING error while any remedy is pending"
+  },
+  {
+    "chapter": 17,
+    "requirement": "Trust and Risk reviews counterfeit reports, suspicious orders, fake reviews and abuse",
+    "status": "covered",
+    "api": [
+      "POST /api/store/trust/reports",
+      "POST /api/seller/trust/reports",
+      "GET /api/admin/trust/reports",
+      "GET /api/admin/trust/detection-rules",
+      "POST /api/admin/reviews/moderation-items/{id}/refer"
+    ]
+  },
+  {
+    "chapter": 17,
+    "requirement": "Catalog handles product corrections, Seller Manager handles restrictions, Support keeps customers informed",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/trust/recommendations/{id}/route",
+      "GET /api/admin/trust/recommendations",
+      "POST /api/admin/trust/recommendations/{id}/decide"
+    ]
+  },
+  {
+    "chapter": 17,
+    "requirement": "Record evidence, reasons and appeals while preserving valid order history and access to help",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/trust/reports/{id}/evidence",
+      "GET /api/admin/trust/enforcements",
+      "POST /api/admin/trust/appeals/{id}/decide",
+      "POST /api/store/trust/appeals",
+      "POST /api/seller/trust/appeals"
+    ]
+  },
+  {
+    "chapter": 17,
+    "requirement": "Published response and resolution targets for sellers and support",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/support/categories",
+      "PUT /api/admin/support/categories/{key}",
+      "GET /api/store/support/contact-options",
+      "PUT /api/admin/sellers/performance-targets"
+    ]
+  },
+  {
+    "chapter": 17,
+    "requirement": "Escalation rules for overdue replies, lost packages and contested refunds",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/workqueues/items/{id}/escalate",
+      "POST /api/admin/shipping/exceptions/{id}/escalate",
+      "POST /api/store/returns/requests/{id}/escalate"
+    ],
+    "note": "Jobs support.seller-deadline, messaging.reply-deadlines, shipping.detect-stalled, workqueues.deadline-sweep"
+  },
+  {
+    "chapter": 17,
+    "requirement": "Targets match staffing and operating hours",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/settings/business-calendar"
+    ],
+    "note": "support.sla-timers compute in business hours"
+  },
+  {
+    "chapter": 17,
+    "requirement": "Dashboard shows overdue cases and orders requiring action",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/workqueues/summary",
+      "GET /api/admin/support/cases/stats",
+      "gql admin/AdminDashboard"
+    ]
+  },
+  {
+    "chapter": 18,
+    "requirement": "Admin Center controls the marketplace; Operations Center is a set of work queues sharing one management area at launch",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/workqueues/me",
+      "gql admin/OpsQueues"
+    ]
+  },
+  {
+    "chapter": 18,
+    "requirement": "Dashboard: sales split, overdue orders, review queues, cases and payout issues",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/reports/dashboard",
+      "GET /api/admin/workqueues/summary",
+      "gql admin/AdminDashboard"
+    ]
+  },
+  {
+    "chapter": 18,
+    "requirement": "Commerce menu: company and seller orders, cancellations, shipments, returns and refunds",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/orders/orders",
+      "POST /api/admin/orders/orders/{id}/cancel-items",
+      "GET /api/admin/shipping/shipments",
+      "GET /api/admin/returns/requests",
+      "GET /api/admin/returns/refunds"
+    ]
+  },
+  {
+    "chapter": 18,
+    "requirement": "Catalog menu: products, offers, categories, brands, reviews and corrections",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/catalog/products",
+      "GET /api/admin/offers/offers",
+      "GET /api/admin/catalog/categories",
+      "GET /api/admin/reviews/reviews",
+      "GET /api/admin/catalog/corrections",
+      "gql admin/AdminProductReview"
+    ]
+  },
+  {
+    "chapter": 18,
+    "requirement": "Official store menu: company offers, suppliers, purchasing, inventory and trading reports",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/offers/official/offers",
+      "GET /api/admin/purchasing/suppliers",
+      "GET /api/admin/purchasing/purchase-orders",
+      "GET /api/admin/inventory/stock-items",
+      "GET /api/admin/finance/trading"
+    ]
+  },
+  {
+    "chapter": 18,
+    "requirement": "Sellers menu: applications, checks, stores, performance, restrictions and appeals",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/sellers/applications/{id}",
+      "POST /api/admin/sellers/applications/{id}/checks/{checkId}/result",
+      "GET /api/admin/sellers/sellers/{id}",
+      "GET /api/admin/sellers/appeals"
+    ]
+  },
+  {
+    "chapter": 18,
+    "requirement": "Inventory and warehouse menu: stock, availability, locations, receiving, picking and packing",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/inventory/stock-items",
+      "GET /api/admin/inventory/locations",
+      "GET /api/admin/purchasing/receipts",
+      "GET /api/admin/warehouse/waves",
+      "GET /api/admin/warehouse/summary"
+    ],
+    "note": "Counts are ph4"
+  },
+  {
+    "chapter": 18,
+    "requirement": "Shipping menu: carrier services, rates, dispatch tasks, tracking and delivery exceptions",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/shipping/carriers",
+      "GET /api/admin/shipping/profiles",
+      "GET /api/admin/shipping/shipments",
+      "GET /api/admin/shipping/exceptions"
+    ]
+  },
+  {
+    "chapter": 18,
+    "requirement": "Finance menu: payments, fees, refunds, balances, holds, payouts and statements",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/payments/payments",
+      "GET /api/admin/finance/fee-rules",
+      "GET /api/admin/finance/sellers",
+      "GET /api/admin/finance/holds",
+      "GET /api/admin/finance/payouts",
+      "GET /api/admin/finance/statements/{id}"
+    ]
+  },
+  {
+    "chapter": 18,
+    "requirement": "Customers and service menu: accounts, messages, cases, disputes, reviews and abuse reports",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/customers/customers",
+      "GET /api/admin/messaging/conversations",
+      "GET /api/admin/support/cases",
+      "GET /api/admin/payments/disputes",
+      "GET /api/admin/reviews/moderation-items",
+      "GET /api/admin/trust/reports",
+      "gql admin/AdminCustomer"
+    ]
+  },
+  {
+    "chapter": 18,
+    "requirement": "Marketing and content menu: promotions, coupons, homepage, campaign pages and help articles",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/promotions/campaigns",
+      "GET /api/admin/promotions/campaigns/{id}/codes",
+      "GET /api/admin/content/homepage",
+      "GET /api/admin/content/pages",
+      "GET /api/admin/content/help/items"
+    ]
+  },
+  {
+    "chapter": 18,
+    "requirement": "Advertisements menu: formats, campaigns, assets, placements, schedules, approvals and results",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/advertising/campaigns",
+      "GET /api/admin/advertising/creatives",
+      "GET /api/admin/advertising/placements",
+      "GET /api/admin/advertising/reports/performance"
+    ]
+  },
+  {
+    "chapter": 18,
+    "requirement": "Reports and settings menu: business reports, staff roles, market rules, policies and action history",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/reports/catalogue",
+      "GET /api/admin/access/roles",
+      "GET /api/admin/settings/overview",
+      "GET /api/admin/content/policies",
+      "GET /api/admin/audit/entries"
+    ]
+  },
+  {
+    "chapter": 18,
+    "requirement": "Daily routine: each manager reviews dispatch, delivery, shortages, physical work, waiting cases, payments, payouts and live campaigns",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/workqueues/routines/today",
+      "POST /api/admin/workqueues/routine-checks/{id}/complete",
+      "PUT /api/admin/workqueues/routine-templates"
+    ]
+  },
+  {
+    "chapter": 18,
+    "requirement": "Each manager assigns owners and next actions",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/workqueues/items/{id}/assign",
+      "POST /api/admin/workqueues/items/{id}/claim"
+    ]
+  },
+  {
+    "chapter": 18,
+    "requirement": "Day end: review unresolved commitments, failed payouts, upcoming campaigns and next-day shipping",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/workqueues/day-end-reviews/current",
+      "POST /api/admin/workqueues/day-end-reviews/{id}/items/{itemKey}/check",
+      "POST /api/admin/workqueues/day-end-reviews/{id}/complete"
+    ]
+  },
+  {
+    "chapter": 18,
+    "requirement": "Provide saved filters",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/workqueues/saved-filters",
+      "POST /api/admin/workqueues/saved-filters",
+      "POST /api/admin/orders/saved-filters",
+      "POST /api/admin/reports/saved-views"
+    ]
+  },
+  {
+    "chapter": 18,
+    "requirement": "Provide authorized exports",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/orders/exports",
+      "POST /api/admin/reports/exports",
+      "POST /api/admin/workqueues/items/exports",
+      "POST /api/admin/audit/exports",
+      "POST /api/admin/customers/customers/exports"
+    ],
+    "note": "Exports run through reports with permission filtering and audit"
+  },
+  {
+    "chapter": 18,
+    "requirement": "Separate duties for catalog, shipping, support and finance",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/access/permissions",
+      "PUT /api/admin/access/roles/{id}/permissions"
+    ]
+  },
+  {
+    "chapter": 18,
+    "requirement": "Restrict payout changes and financial adjustments to authorized staff",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/finance/destination-reviews/{id}/approve",
+      "POST /api/admin/finance/adjustments",
+      "POST /api/admin/access/authority-checks"
+    ]
+  },
+  {
+    "chapter": 18,
+    "requirement": "Record edits, reasons and approval history",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/audit/entries/{id}",
+      "GET /api/admin/access/approval-requests/{id}"
+    ]
+  },
+  {
+    "chapter": 18,
+    "requirement": "Seller suspension explains its effects on open orders and customer cases",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/sellers/sellers/{id}/suspension-impact"
+    ]
+  },
+  {
+    "chapter": 18,
+    "requirement": "Catalog removal explains its effects on open orders and customer cases",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/catalog/products/{id}/publication-impact",
+      "POST /api/admin/catalog/products/{id}/publication"
+    ],
+    "note": "setPublication has no impact preview (offers stopped, carts affected, open orders, returns, cases); only offer removal states \"open orders and returns are unaffected\" in its description Fixed: Added publication-impact preview (offers that stop showing, sellers, carts, open orders/returns/cases that continue, approvalNeeded); setPublication points to it. Open orders/returns/cases are nullable until orders/returns/support expose per-product counts.",
+    "proposal": {
+      "module": "catalog",
+      "method": "GET",
+      "area": "admin",
+      "path": "/products/{id}/publication-impact",
+      "summary": "What hiding or suspending a product would do: offers stopped, carts and checkouts affected, open orders, returns and cases that continue",
+      "fields": [
+        "activeOffers",
+        "sellersAffected",
+        "cartsAffected",
+        "openOrders",
+        "openReturns",
+        "openCases",
+        "message"
+      ]
+    },
+    "resolvedBy": "catalog"
+  },
+  {
+    "chapter": 18,
+    "requirement": "Refund overrides explain their effects",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/returns/refunds/{id}",
+      "GET /api/admin/payments/orders/{orderId}/refundable",
+      "POST /api/admin/returns/requests/{id}/overturn"
+    ],
+    "note": "Refund request shows breakdown, funding and seller earnings impact"
+  },
+  {
+    "chapter": 18,
+    "requirement": "Settings cover regions, currency, business hours, shipping, returns, fees, advertising rules and staff roles",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/settings/overview",
+      "GET /api/admin/settings/definitions",
+      "GET /api/admin/access/roles"
+    ],
+    "note": "Section providers link to returns, finance, shipping, advertising owners"
+  },
+  {
+    "chapter": 18,
+    "requirement": "Setting changes state their effective date and impact on existing commitments",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/settings/changes",
+      "POST /api/admin/settings/changes/{id}/preview",
+      "POST /api/admin/settings/changes/{id}/submit",
+      "GET /api/seller/settings/upcoming-changes"
+    ],
+    "note": "Approval action settings.changes.apply"
+  },
+  {
+    "chapter": 19,
+    "requirement": "Content Manager maintains homepage sections, collections, campaign pages, help and approved policies",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/content/homepage",
+      "GET /api/admin/content/pages",
+      "GET /api/admin/content/help/items",
+      "GET /api/admin/content/policies"
+    ]
+  },
+  {
+    "chapter": 19,
+    "requirement": "Advertising Manager controls ad placement and timing within content",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/content/homepage",
+      "PATCH /api/admin/advertising/placements/{id}"
+    ],
+    "note": "Locked ad positions"
+  },
+  {
+    "chapter": 19,
+    "requirement": "Each content item has an owner, preview and publication status",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/content/pages/{id}",
+      "POST /api/admin/content/pages/{id}/preview",
+      "POST /api/admin/content/homepage/preview"
+    ],
+    "note": "OwnerRef; SM Content publication"
+  },
+  {
+    "chapter": 19,
+    "requirement": "Keep previous versions and provide a correction or removal action",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/content/pages/{id}/versions",
+      "POST /api/admin/content/pages/{id}/versions/{number}/restore",
+      "POST /api/admin/content/pages/{id}/remove",
+      "GET /api/admin/content/homepage/versions",
+      "POST /api/admin/content/homepage/sections/{id}/remove",
+      "GET /api/admin/content/help/articles/{id}/versions"
+    ]
+  },
+  {
+    "chapter": 19,
+    "requirement": "Customer notices: order accepted, payment result, dispatch, delays, delivery, cancellation, return and refund updates, case replies",
+    "status": "covered",
+    "api": [
+      "GET /api/store/notifications/inbox",
+      "GET /api/admin/notifications/topics"
+    ],
+    "note": "notifications consumes orders.order.accepted, payments.*, shipping.shipment.dispatched/delivered, orders.item.delayed/cancelled, returns.*, payments.refund.*, support.case.message_added"
+  },
+  {
+    "chapter": 19,
+    "requirement": "Seller notices: application result, requested corrections, new orders, dispatch deadlines, returns, cases, restrictions and payout results",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/notifications/inbox",
+      "GET /api/seller/notifications/inbox/summary",
+      "PUT /api/seller/notifications/preferences/members/{memberId}"
+    ],
+    "note": "Dispatch reminders via notifications.send-scheduled"
+  },
+  {
+    "chapter": 19,
+    "requirement": "Staff notices: overdue shipping, stock shortages, waiting approvals, escalated cases, failed payouts and unusual financial activity",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/notifications/inbox",
+      "GET /api/admin/notifications/inbox/summary"
+    ],
+    "note": "Routed by role (lead or backup). Note: warehouse.shortage.reported / inventory.discrepancy.reported are not consumed by notifications; shortages surface via inventory.stock.low and GET /api/admin/inventory/discrepancies"
+  },
+  {
+    "chapter": 19,
+    "requirement": "Show important updates inside the account or workspace and send email where appropriate",
+    "status": "covered",
+    "api": [
+      "GET /api/store/notifications/inbox",
+      "PUT /api/admin/notifications/topics/{key}/channels",
+      "GET /api/admin/notifications/deliveries"
+    ]
+  },
+  {
+    "chapter": 19,
+    "requirement": "SMS and push notices later",
+    "status": "later",
+    "api": [
+      "POST /api/store/notifications/push-devices",
+      "POST /webhooks/notifications/sms-events"
+    ],
+    "note": "push ph3, SMS ph2"
+  },
+  {
+    "chapter": 19,
+    "requirement": "Link each notice to the relevant order, case or action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/notifications/inbox"
+    ],
+    "note": "NoticeLink.screen + id required by template validation"
+  },
+  {
+    "chapter": 19,
+    "requirement": "Promotional messages follow separate preferences from essential order updates",
+    "status": "covered",
+    "api": [
+      "GET /api/store/notifications/preferences",
+      "PUT /api/store/customers/marketing-preferences"
+    ],
+    "note": "Essential notices cannot be turned off"
+  },
+  {
+    "chapter": 19,
+    "requirement": "Commerce report: completed sales, order count, average order value, cancellations and refunds, split company vs sellers",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/reports/reports/{key}/query",
+      "GET /api/admin/reports/dashboard"
+    ],
+    "note": "Report group commerce"
+  },
+  {
+    "chapter": 19,
+    "requirement": "Company trading report: product sales, purchasing cost, discounts, shipping, returns and margin with a defined cost basis",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/finance/trading",
+      "POST /api/admin/reports/reports/{key}/query"
+    ],
+    "note": "TradingSummary.costBasis; group company_trading"
+  },
+  {
+    "chapter": 19,
+    "requirement": "Marketplace finance report: seller sales, earned fees, discount funding, owed to sellers, holds and completed payouts",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/finance/marketplace-income",
+      "GET /api/admin/finance/overview"
+    ],
+    "note": "Group marketplace_finance"
+  },
+  {
+    "chapter": 19,
+    "requirement": "Products and discovery report: views, cart additions, purchases, unavailable searches, stockouts and return reasons",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/reports/reports/{key}/query",
+      "POST /api/store/reports/signals",
+      "GET /api/admin/search/zero-result-queries"
+    ],
+    "note": "Group products_discovery"
+  },
+  {
+    "chapter": 19,
+    "requirement": "Service and sellers report: on-time dispatch, delivery issues, seller cancellations, response time, case backlog and complaint patterns",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/reports/reports/{key}/query"
+    ],
+    "note": "Group service_sellers"
+  },
+  {
+    "chapter": 19,
+    "requirement": "Customers, marketing and ads report: returning buyers, repeat purchases, campaign results, ad displays, clicks, dismissals and spending",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/reports/reports/{key}/query",
+      "GET /api/admin/advertising/reports/performance"
+    ],
+    "note": "Group customers_marketing_ads"
+  },
+  {
+    "chapter": 19,
+    "requirement": "Reports Analyst maintains metric definitions",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/reports/metrics/{key}",
+      "PATCH /api/admin/reports/metrics/{key}",
+      "POST /api/admin/reports/metrics/{key}/suggestions",
+      "POST /api/admin/reports/metric-suggestions/{id}/decide"
+    ]
+  },
+  {
+    "chapter": 19,
+    "requirement": "Distinguish gross sales from sales after cancellations and refunds; marketplace sales are not fee income",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/reports/metrics",
+      "GET /api/admin/reports/reports/{key}"
+    ],
+    "note": "reports notes"
+  },
+  {
+    "chapter": 19,
+    "requirement": "Reports state date range, reporting currency, time zone and date basis (placement, payment, shipment or completion)",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/reports/reports/{key}",
+      "POST /api/admin/reports/reports/{key}/query"
+    ]
+  },
+  {
+    "chapter": 19,
+    "requirement": "Staff filters and exports consistent with their permissions",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/reports/catalogue",
+      "POST /api/admin/reports/exports",
+      "GET /api/admin/reports/saved-views"
+    ]
+  },
+  {
+    "chapter": 19,
+    "requirement": "Sellers see their own results",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/reports/reports/{key}/query"
+    ]
+  },
+  {
+    "chapter": 19,
+    "requirement": "Small group of launch measures, expanded when each has a business owner and reliable meaning",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/reports/metrics/{key}/publish"
+    ],
+    "note": "settings.launchMetrics; metric owner"
+  },
+  {
+    "chapter": 20,
+    "requirement": "Phase 1: own products and selected sellers; shopping, stock, shipping, returns, support, seller finance and payouts; managed full-screen ads, banners and optional pop-ups",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/settings/feature-flags",
+      "GET /api/public/settings/app-config"
+    ],
+    "note": "Module phase 1 set; placement availability launch"
+  },
+  {
+    "chapter": 20,
+    "requirement": "Phase 1 exit: mixed purchase, partial return, payout and ad scheduling work end to end",
+    "status": "covered",
+    "api": [
+      "POST /api/store/checkout/sessions/{id}/place",
+      "POST /api/store/returns/requests",
+      "POST /api/admin/finance/payout-runs/{id}/release",
+      "POST /api/admin/advertising/campaigns/{id}/schedule"
+    ]
+  },
+  {
+    "chapter": 20,
+    "requirement": "Phase 2: broader onboarding, bulk updates, better seller reports, staff access, performance controls and stronger moderation",
+    "status": "later",
+    "api": [
+      "POST /api/seller/offers/bulk-updates",
+      "POST /api/seller/sellers/invitations",
+      "POST /api/seller/reports/exports"
+    ],
+    "note": "ph2 endpoints; job sellers.auto-warnings phase 2"
+  },
+  {
+    "chapter": 20,
+    "requirement": "Phase 3: wishlist, advanced campaigns, recommendations, paid seller ads, more ad formats and loyalty experiments",
+    "status": "later",
+    "api": [
+      "GET /api/store/wishlist/wishlist",
+      "POST /api/seller/advertising/campaigns"
+    ],
+    "note": "ph3/ph4"
+  },
+  {
+    "chapter": 20,
+    "requirement": "Phase 4: multiple warehouses, seller storage and shipping service, advanced returns and additional delivery programs",
+    "status": "later",
+    "api": [
+      "POST /api/admin/inventory/transfers",
+      "POST /api/seller/fulfillment-service/enrollment"
+    ],
+    "note": "ph4"
+  },
+  {
+    "chapter": 20,
+    "requirement": "Readiness: catalog contains complete, approved products and accurate offers from our store and sellers",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/catalog/products",
+      "GET /api/admin/offers/offers"
+    ],
+    "note": "reviewState, missingContent filters"
+  },
+  {
+    "chapter": 20,
+    "requirement": "Readiness: checkout shows correct totals, delivery details and policies per seller group; payment failures and price or stock changes have clear outcomes",
+    "status": "covered",
+    "api": [
+      "GET /api/store/checkout/sessions/{id}",
+      "GET /api/store/checkout/sessions/{id}/changes/{changeSetId}",
+      "POST /api/store/checkout/sessions/{id}/retry-payment"
+    ]
+  },
+  {
+    "chapter": 20,
+    "requirement": "Readiness: every order reaches the correct fulfillment team; customers follow separate packages and partial cancellations",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/orders/orders",
+      "GET /api/admin/warehouse/fulfillments",
+      "GET /api/store/shipping/orders/{orderId}/shipments",
+      "POST /api/store/orders/orders/{id}/cancellations"
+    ]
+  },
+  {
+    "chapter": 20,
+    "requirement": "Readiness: eligible return, refund and unresolved seller dispute handled through the account and staff work queues",
+    "status": "covered",
+    "api": [
+      "POST /api/store/returns/requests",
+      "POST /api/store/support/cases/{id}/escalate",
+      "GET /api/admin/workqueues/items"
+    ]
+  },
+  {
+    "chapter": 20,
+    "requirement": "Readiness: seller statements explain fees and adjustments; one payout and a failed payout recovery reviewed",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/finance/statements/{id}",
+      "POST /api/admin/finance/payouts/{id}/retry"
+    ]
+  },
+  {
+    "chapter": 20,
+    "requirement": "Readiness: staff roles and backups, service targets, policies and notifications are ready",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/access/coverage",
+      "GET /api/admin/workqueues/coverage-gaps",
+      "GET /api/admin/support/categories",
+      "GET /api/admin/content/policies",
+      "GET /api/admin/notifications/topics"
+    ]
+  },
+  {
+    "chapter": 20,
+    "requirement": "Readiness: ads can be previewed, scheduled, dismissed, paused and ended without blocking purchases",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/advertising/campaigns/{id}/preview",
+      "POST /api/admin/advertising/campaigns/{id}/schedule",
+      "POST /api/store/advertising/events",
+      "POST /api/admin/advertising/campaigns/{id}/pause",
+      "POST /api/admin/advertising/campaigns/{id}/finish"
+    ],
+    "note": "blockedPages keep checkout free of ads"
+  },
+  {
+    "chapter": 20,
+    "requirement": "Pilot review: daily review of order errors, dispatch delays, refunds, seller statements and customer confusion",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/workqueues/routines/today",
+      "GET /api/admin/workqueues/day-end-reviews",
+      "GET /api/admin/reports/dashboard"
+    ]
+  },
+  {
+    "chapter": 20,
+    "requirement": "Expand only when recurring issues have named owners",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/workqueues/queues",
+      "GET /api/admin/workqueues/coverage-gaps"
+    ]
+  },
+  {
+    "chapter": 21,
+    "requirement": "Decision: launch country, service region, main currency, categories and restricted products",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/settings/overview",
+      "GET /api/admin/catalog/categories",
+      "GET /api/store/sellers/program"
+    ],
+    "note": "market.* settings; SellerProgram.notAllowed"
+  },
+  {
+    "chapter": 21,
+    "requirement": "Decision: invited or open seller applications, required checks, approval owner and admission standards",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/settings/changes",
+      "POST /api/admin/sellers/seller-invitations",
+      "GET /api/admin/sellers/applications/{id}"
+    ],
+    "note": "sellers setting applicationsOpen"
+  },
+  {
+    "chapter": 21,
+    "requirement": "Decision: company shipping process, seller dispatch targets, coverage and fee rules",
+    "status": "covered",
+    "api": [
+      "PUT /api/admin/shipping/dispatch-targets",
+      "GET /api/admin/shipping/zones",
+      "PUT /api/admin/shipping/profiles/{id}"
+    ]
+  },
+  {
+    "chapter": 21,
+    "requirement": "Decision: return windows, category exceptions, shipping responsibility and escalation timing",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/returns/policies",
+      "POST /api/admin/returns/category-exceptions"
+    ]
+  },
+  {
+    "chapter": 21,
+    "requirement": "Decision: fee basis, discount funding, payout schedule, holds and post-payout refund handling",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/finance/fee-rules",
+      "GET /api/admin/finance/fee-rules",
+      "POST /api/admin/settings/changes"
+    ],
+    "note": "Finance settings section (payout/hold settings)"
+  },
+  {
+    "chapter": 21,
+    "requirement": "Decision: main offer criteria, official store presentation and sponsored placement labels",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/offers/featured-rule/versions",
+      "PUT /api/admin/advertising/rules"
+    ]
+  },
+  {
+    "chapter": 21,
+    "requirement": "Decision: guest purchases, support channels, operating hours and response targets",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/settings/changes",
+      "PUT /api/admin/support/categories/{key}",
+      "GET /api/store/support/contact-options"
+    ],
+    "note": "checkout.guestCheckoutEnabled, support.businessHours"
+  },
+  {
+    "chapter": 21,
+    "requirement": "Decision: advertising launch formats, allowed positions, display limits, creative approval, seller pricing and attribution",
+    "status": "covered",
+    "api": [
+      "PATCH /api/admin/advertising/placements/{id}",
+      "PUT /api/admin/advertising/rules",
+      "GET /api/seller/advertising/pricing"
+    ],
+    "note": "Seller pricing ph3"
+  },
+  {
+    "chapter": 21,
+    "requirement": "Scenario 1 Mixed purchase: company items and two sellers in one checkout; order details show each seller group, package and payment amount",
+    "status": "covered",
+    "api": [
+      "POST /api/store/checkout/sessions/{id}/place",
+      "GET /api/store/orders/orders/{id}",
+      "gql store/OrderDetail"
+    ],
+    "note": "SellerGroup.totals per group"
+  },
+  {
+    "chapter": 21,
+    "requirement": "Scenario 2 Changed offer: customers review price or stock changes and choose; seller never silently replaced",
+    "status": "covered",
+    "api": [
+      "GET /api/store/cart/cart",
+      "GET /api/store/checkout/sessions/{id}/changes/{changeSetId}",
+      "POST /api/store/checkout/sessions/{id}/changes/{changeSetId}/accept"
+    ]
+  },
+  {
+    "chapter": 21,
+    "requirement": "Scenario 3 Payment uncertainty: a retry allows outcome checking without duplicate orders or charges",
+    "status": "covered",
+    "api": [
+      "POST /api/store/checkout/sessions/{id}/place",
+      "POST /api/store/payments/intents/{id}/check",
+      "POST /api/store/checkout/sessions/{id}/retry-payment"
+    ],
+    "note": "idempotent place and retry; job payments.detect-orphans"
+  },
+  {
+    "chapter": 21,
+    "requirement": "Scenario 4 Partial service case: cancellation and return affect only the selected items, refund amounts and seller earnings",
+    "status": "covered",
+    "api": [
+      "POST /api/store/orders/orders/{id}/cancellations",
+      "POST /api/store/returns/requests",
+      "GET /api/admin/returns/refunds/{id}",
+      "GET /api/seller/finance/ledger"
+    ]
+  },
+  {
+    "chapter": 21,
+    "requirement": "Scenario 5 Late shipment: Shipping Manager and seller see the overdue task; customer gets an update and escalation route",
+    "status": "covered",
+    "api": [
+      "GET /api/admin/shipping/exceptions",
+      "GET /api/seller/workqueues/tasks",
+      "POST /api/admin/shipping/exceptions/{id}/notify-customer"
+    ]
+  },
+  {
+    "chapter": 21,
+    "requirement": "Scenario 6 Refund after payout: customer receives refund; seller statement records the deduction or amount owed",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/returns/refunds/{id}/approve",
+      "GET /api/admin/finance/amounts-owed",
+      "GET /api/seller/finance/statements/{id}"
+    ]
+  },
+  {
+    "chapter": 21,
+    "requirement": "Scenario 7 Seller restriction: new sales stop while existing orders, returns and cases stay accessible",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/sellers/sellers/{id}/restrictions",
+      "GET /api/admin/sellers/sellers/{id}/suspension-impact",
+      "GET /api/seller/sellers/restrictions/{id}"
+    ],
+    "note": "Restriction.stillWorks"
+  },
+  {
+    "chapter": 21,
+    "requirement": "Scenario 8 Opening advertisement: eligible visitor sees a full-screen campaign, closes it and continues; display limits, pausing and expiry behave correctly",
+    "status": "covered",
+    "api": [
+      "POST /api/store/advertising/decisions",
+      "POST /api/store/advertising/events",
+      "POST /api/admin/advertising/campaigns/{id}/pause"
+    ],
+    "note": "Frequency caps; job advertising.finish-due"
+  },
+  {
+    "chapter": 21,
+    "requirement": "Next planning: assign each role, backup and approval limit",
+    "status": "covered",
+    "api": [
+      "POST /api/admin/access/role-assignments",
+      "PUT /api/admin/access/roles/{id}/coverage",
+      "POST /api/admin/access/limit-changes"
+    ]
+  }
+]

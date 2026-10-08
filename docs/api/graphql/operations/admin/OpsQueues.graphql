@@ -1,0 +1,132 @@
+# screens: ops/queues
+# replaces: GET workqueues/me, GET workqueues/queues, GET workqueues/routines/today, GET workqueues/day-end-reviews/current, GET workqueues/saved-filters, GET warehouse/summary, GET shipping/exceptions/counts
+# why: The operations workspace shows queue counts, the daily routine, the day-end review, saved filters, warehouse work and exception counts at once.
+query OpsQueues($scope: WorkQueueScope = ALL, $locationId: UUID) {
+  myQueues {
+    me {
+      ...Staff
+    }
+    roles
+    date
+    stats {
+      assignedToMe
+      queuesILead
+      overdue
+      overdueChangeVsYesterday
+      oldestOpen {
+        ...Oldest
+      }
+    }
+    queues(scope: $scope) {
+      key
+      name
+      area
+      lead {
+        ...Staff
+      }
+      backup {
+        ...Staff
+      }
+      escalationLabel
+      open
+      overdue
+      dueSoon
+      oldest {
+        ...Oldest
+      }
+      mine
+      screen
+      screenFilter
+    }
+    routine {
+      date
+      done
+      total
+      checks {
+        id
+        title
+        areaLabel
+        owner {
+          ...Staff
+        }
+        dueAt
+        state
+        doneAt
+        note
+        checkedIn {
+          done
+          total
+        }
+      }
+    }
+    dayEnd {
+      id
+      dueAt
+      state
+      sharedWithRoles
+      items {
+        key
+        title
+        summary
+        owner {
+          ...Staff
+        }
+        link {
+          label
+          screen
+          state
+        }
+        source
+        checked
+      }
+    }
+    savedFilters {
+      id
+      name
+      shared
+      owner {
+        ...Staff
+      }
+      target
+      screen
+      screenState
+      count
+    }
+    reminders
+    exportScope
+  }
+
+  warehouseToday(locationId: $locationId) {
+    date
+    toPick
+    picking
+    toPack
+    toShip
+    shipToday
+    dispatchedToday
+    atRisk
+    late
+    shipByCutoff
+    pickupsToday
+  }
+
+  deliveryExceptionCounts {
+    sellerCannotFulfill
+    lateDispatch
+    missingTracking
+    lostOrDamaged
+    failedDelivery
+    customerNotNotified
+  }
+}
+
+fragment Staff on WorkQueueStaff {
+  staffId
+  name
+  role
+}
+
+fragment Oldest on WorkQueueOldestItem {
+  subjectRef
+  ageLabel
+}

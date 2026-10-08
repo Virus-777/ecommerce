@@ -1,0 +1,253 @@
+# customers: the customer side of an account (profile, addresses, marketing consent, recently viewed,
+# account status and restrictions) and the staff view of customer accounts.
+#
+# Customer is the hub other modules extend for the AccountOverview screen and the admin customer 360, e.g.
+#   orders → orderCounts, delayedItems; returns → returnsOverview, openReturns, returns (admin); support → openCases,
+#   cases (admin); messaging → unreadMessages; payments → paymentMethods; promotions → coupons; identity → security
+#   (admin); audit → auditTrail (admin); trust → trustReportCounts, trustReports (admin); wallet / wishlist (phase 3).
+# Customer is never reachable from the seller schema: no seller-area field may return it (sellers see the order's
+# buyer label, owned by orders). Personal fields are limited to STORE and ADMIN.
+
+"""
+A shopper's account. In the store it is always the signed-in customer (`me`); in Admin Center any customer
+(`customer(id)`, `customers`). Credentials, sessions and 2-step verification belong to identity.
+"""
+type Customer {
+  id: UUID!
+  "Human reference, e.g. CU-208114"
+  ref: String!
+  displayName: String!
+  firstName: String! @areas(in: [STORE, ADMIN])
+  lastName: String! @areas(in: [STORE, ADMIN])
+  email: Email! @areas(in: [STORE, ADMIN])
+  emailVerified: Boolean! @areas(in: [STORE, ADMIN])
+  phone: String @areas(in: [STORE, ADMIN])
+  phoneVerified: Boolean! @areas(in: [STORE, ADMIN])
+  memberSince: Date! @areas(in: [STORE, ADMIN])
+  accountStatus: CustomerAccountStatus! @areas(in: [STORE, ADMIN])
+  "False while suspended, closed or under an ordering restriction"
+  canOrder: Boolean! @areas(in: [STORE, ADMIN])
+  "False during a messaging restriction (replies inside open cases stay allowed)"
+  canMessage: Boolean! @areas(in: [STORE, ADMIN])
+  "Active restrictions with reason, what still works and the appeal route. `includeEnded` shows lifted and expired ones (admin history)."
+  restrictions(includeEnded: Boolean = false): [CustomerRestriction!]! @areas(in: [STORE, ADMIN])
+  defaultAddress: CustomerAddress @areas(in: [STORE, ADMIN])
+  "Saved addresses, default first (at most maxAddresses, 20)"
+  addresses: [CustomerAddress!]! @areas(in: [STORE, ADMIN])
+  marketingPreferences: CustomerMarketingPreferences! @areas(in: [STORE, ADMIN])
+  "Data export and closure requests, newest first"
+  dataRequests: [CustomerDataRequest!]! @areas(in: [STORE, ADMIN])
+
+  # ---- Admin Center only (customer 360)
+  "City and state from the default address, for lists"
+  location: String @areas(in: [ADMIN])
+  "Read model from orders events, for the customer list column. Orders owns the figures: the 360 uses Customer.orderCounts (orders) and recent orders via ordersAdmin(filter: { customerId })."
+  orderCount: Int! @areas(in: [ADMIN])
+  "Read model from orders events"
+  totalSpend: Money! @areas(in: [ADMIN])
+  verification: CustomerVerification! @areas(in: [ADMIN])
+  "Internal notes, newest first. Never shown to the customer."
+  notes: [CustomerNote!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "customers.accounts.view")
+  "Recorded account actions (reset link, sign-out, restrict, suspend, close) with reason, newest first"
+  accountActions(limit: Int = 20): [CustomerAccountAction!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "customers.accounts.view")
+}
+
+enum CustomerAccountStatus {
+  ACTIVE
+  UNDER_REVIEW
+  RESTRICTED
+  SUSPENDED
+  CLOSED
+}
+
+enum CustomerVerification @areas(in: [ADMIN]) {
+  EMAIL_AND_PHONE
+  EMAIL_ONLY
+  NOT_VERIFIED
+}
+
+"A delivery address saved by the customer. Orders keep their own copy, so later edits never change accepted orders."
+type CustomerAddress {
+  id: UUID!
+  "e.g. Home, Work"
+  label: String
+  address: Address!
+  deliveryInstructions: String
+  isDefault: Boolean!
+  lastUsedAt: DateTime
+  updatedAt: DateTime!
+}
+
+"Promotional consent per channel. Essential order, payment, delivery, return, refund, case and security messages are always on."
+type CustomerMarketingPreferences {
+  emailPromotions: Boolean!
+  smsPromotions: Boolean!
+  "Android app promotions; separate from order push notices"
+  pushPromotions: Boolean!
+  "Price-drop and back-in-stock notices (used once wishlist is on)"
+  wishlistAlerts: Boolean!
+  personalizedRecommendations: Boolean!
+  "Keep my recent searches (search stores them; this is the switch)"
+  recentSearches: Boolean!
+  "Always true"
+  essentialAlwaysOn: Boolean!
+  smsNumber: String
+  updatedAt: DateTime!
+}
+
+enum CustomerRestrictionScope {
+  MESSAGING
+  ORDERING
+  REVIEWS
+  ACCOUNT
+}
+
+enum CustomerRestrictionReason {
+  CUSTOMER_REQUEST
+  SUSPECTED_TAKEOVER
+  ABUSIVE_MESSAGES
+  PAYMENT_FRAUD_REVIEW
+  POLICY_VIOLATION
+  OTHER
+}
+
+enum CustomerRestrictionState {
+  ACTIVE
+  LIFTED
+  EXPIRED
+}
+
+"A scoped restriction on a customer account. Existing orders, returns, refunds and cases always stay reachable."
+type CustomerRestriction {
+  id: UUID!
+  scope: CustomerRestrictionScope!
+  reasonCode: CustomerRestrictionReason!
+  "Shown to the customer"
+  reason: String!
+  "e.g. existing orders, returns, refunds and cases"
+  stillWorks: [String!]!
+  "How and by when to appeal: a support case for staff restrictions, trust appeals for trust enforcement"
+  appealRoute: String!
+  appealDeadline: DateTime
+  startsAt: DateTime!
+  "Null = until lifted"
+  endsAt: DateTime
+  state: CustomerRestrictionState!
+  setBy: Actor! @areas(in: [ADMIN])
+  "Trust report that led to it (trust adds CustomerRestriction.trustReport)"
+  trustReportId: UUID @areas(in: [ADMIN])
+}
+
+enum CustomerDataRequestKind {
+  EXPORT
+  CLOSURE
+}
+
+enum CustomerDataRequestState {
+  REQUESTED
+  PROCESSING
+  READY
+  EXPIRED
+  FAILED
+  COMPLETED
+  CANCELLED
+}
+
+"A personal data export or account closure request"
+type CustomerDataRequest {
+  id: UUID!
+  kind: CustomerDataRequestKind!
+  state: CustomerDataRequestState!
+  requestedAt: DateTime!
+  dueBy: DateTime!
+  readyAt: DateTime
+  "Signed link, only while READY and only to the customer"
+  downloadUrl: URL @areas(in: [STORE])
+  expiresAt: DateTime
+  "Closure date after the cooling-off period"
+  scheduledFor: DateTime
+  completedAt: DateTime
+  cancelledAt: DateTime
+}
+
+"A product the customer (or guest session) viewed recently, newest first"
+type RecentlyViewedItem {
+  productId: UUID!
+  variantId: UUID
+  "Snapshot kept so the row can be greyed out when the product is no longer shown"
+  title: String!
+  image: MediaRef
+  """
+  The product with its current offers (offers adds Product.featuredOffer for the price).
+  Null when the product is hidden or suspended.
+  """
+  product: Product
+  "False when the product is hidden, suspended or has no eligible offer; the app greys it out"
+  available: Boolean!
+  viewedAt: DateTime!
+}
+
+"Internal staff note on a customer"
+type CustomerNote @areas(in: [ADMIN]) {
+  id: UUID!
+  body: String!
+  author: Actor!
+  createdAt: DateTime!
+}
+
+enum CustomerAccountActionKind @areas(in: [ADMIN]) {
+  SEND_PASSWORD_RESET
+  SIGN_OUT_EVERYWHERE
+  MARK_UNDER_REVIEW
+  CLEAR_REVIEW
+  RESTRICT
+  LIFT_RESTRICTION
+  SUSPEND
+  REINSTATE
+  CLOSE
+}
+
+"A recorded staff action on the account. Every action has a reason."
+type CustomerAccountAction @areas(in: [ADMIN]) {
+  id: UUID!
+  action: CustomerAccountActionKind!
+  reasonCode: String!
+  details: String!
+  fromStatus: CustomerAccountStatus
+  toStatus: CustomerAccountStatus
+  restrictionId: UUID
+  actor: Actor!
+  at: DateTime!
+}
+
+type CustomerPage implements Paged @areas(in: [ADMIN]) {
+  items: [Customer!]!
+  nextCursor: String
+  page: Int
+  totalPages: Int
+  total: Int
+}
+
+"Filters for the admin customer list"
+input CustomerFilterInput @areas(in: [ADMIN]) {
+  "Name, email or CU- reference"
+  search: String
+  statuses: [CustomerAccountStatus!]
+  verification: CustomerVerification
+  joinedFrom: Date
+  joinedTo: Date
+}
+
+extend type Query {
+  "The signed-in customer: Account tab, profile and the AccountOverview screen query"
+  me: Customer @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "customers", fn: "getCustomerByUserId")
+
+  "Recently viewed products for the customer or guest session (home page row, account). Default recentlyViewedShown (12), max 50."
+  recentlyViewed(limit: Int = 12): [RecentlyViewedItem!]! @areas(in: [STORE]) @auth(requires: SHOPPER) @source(module: "customers", fn: "listRecentlyViewedItems")
+
+  "Customer 360 (Admin Center customer detail)"
+  customer(id: UUID!): Customer @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "customers.accounts.view") @source(module: "customers", fn: "getCustomer")
+
+  "Admin customer list"
+  customers(filter: CustomerFilterInput, paging: PageInput): CustomerPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "customers.accounts.view") @source(module: "customers", fn: "searchCustomers")
+}

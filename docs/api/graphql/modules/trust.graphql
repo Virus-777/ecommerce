@@ -1,0 +1,189 @@
+# trust: Trust and Risk reports (counterfeit, suspicious orders, fake reviews, abuse), their risk score, recorded
+# enforcement and outcome. In GraphQL, trust only adds the reports linked to the admin 360 views (customer, seller)
+# and the report behind a restriction. Investigating and deciding stay on REST (admin/trust screen).
+# Admin Center only. Reporter identities are never exposed here.
+
+enum TrustReportType @areas(in: [ADMIN]) {
+  COUNTERFEIT
+  SUSPICIOUS_ORDERS
+  FAKE_REVIEWS
+  ABUSE
+  PROHIBITED_ITEM
+  MISLEADING_LISTING
+  SELLER_APPLICATION
+  ACCOUNT_RISK
+  OTHER
+}
+
+enum TrustReportStatus @areas(in: [ADMIN]) {
+  OPEN
+  UNDER_REVIEW
+  ESCALATED
+  RESOLVED
+  DISMISSED
+  MERGED
+}
+
+enum TrustReportSource @areas(in: [ADMIN]) {
+  CUSTOMER
+  SELLER
+  STAFF
+  AUTOMATED
+  BRAND_OWNER
+  REFERRAL
+}
+
+enum TrustRiskLevel @areas(in: [ADMIN]) {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum TrustSubjectType @areas(in: [ADMIN]) {
+  SELLER
+  PRODUCT
+  OFFER
+  ORDER
+  CUSTOMER
+  REVIEW
+  QUESTION
+  ANSWER
+  MESSAGE
+  CONVERSATION
+  APPLICATION
+  STOREFRONT_CLAIM
+  PAYMENT
+}
+
+"How the 360 subject relates to a report"
+enum TrustSubjectRole @areas(in: [ADMIN]) {
+  "Reports this customer or seller filed"
+  FILED_BY
+  "Reports about this customer or seller (or their offers, products, messages)"
+  AGAINST
+}
+
+"Something a report is about, with its status in the owning module"
+type TrustSubject @areas(in: [ADMIN]) {
+  type: TrustSubjectType!
+  id: UUID!
+  ref: String
+  label: String!
+  "Current status in the owning module, e.g. Restricted"
+  statusLabel: String
+  "Admin screen to open, e.g. admin/seller"
+  screen: String
+}
+
+"Counts of recommendations by state on a report"
+type TrustRecommendationCounts @areas(in: [ADMIN]) {
+  total: Int!
+  pending: Int!
+  sentToOwner: Int!
+  completed: Int!
+  declined: Int!
+}
+
+enum TrustEnforcementState @areas(in: [ADMIN]) {
+  PENDING
+  APPLIED
+  FAILED
+  REVERSED
+}
+
+"Enforcement recorded from a report: who decided, why, and what changed (executed by the owning module)"
+type TrustEnforcement @areas(in: [ADMIN]) {
+  id: UUID!
+  "e.g. EN-261006-0012"
+  ref: String!
+  "e.g. restrict_seller, suspend_offer, restrict_customer_messaging"
+  action: String!
+  "catalog, sellers, support, finance, orders, reviews, customers or messaging"
+  ownerTeam: String!
+  reason: String!
+  "What changes and what stays, e.g. open orders and returns stay active"
+  effects: [String!]!
+  recordedBy: Actor!
+  recordedAt: DateTime!
+  executionState: TrustEnforcementState!
+  "Record in the owning module, e.g. RS-261002-0019"
+  appliedRef: String
+  appealable: Boolean!
+  appealDeadline: DateTime
+  reversedAt: DateTime
+}
+
+type TrustReportResolution @areas(in: [ADMIN]) {
+  "action_taken, no_violation, insufficient_evidence, duplicate or referred"
+  outcome: String!
+  summary: String!
+  decidedBy: Actor!
+  decidedAt: DateTime!
+}
+
+"A Trust and Risk report as listed on admin 360 views. The full case file (evidence, notes, reporter) stays on REST."
+type TrustReport @areas(in: [ADMIN]) {
+  id: UUID!
+  "e.g. TR-3391"
+  ref: String!
+  type: TrustReportType!
+  title: String!
+  description: String!
+  source: TrustReportSource!
+  "Merged duplicate reports, e.g. brand owner and 3 customers"
+  reporterCount: Int!
+  subjects: [TrustSubject!]!
+  status: TrustReportStatus!
+  riskScore: Int!
+  riskLevel: TrustRiskLevel!
+  assignee: Actor
+  deadline: Deadline
+  recommendations: TrustRecommendationCounts!
+  enforcements: [TrustEnforcement!]!
+  "Support cases linked to the report, e.g. CS-104933"
+  linkedCaseRefs: [String!]!
+  resolution: TrustReportResolution
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type TrustReportPage implements Paged @areas(in: [ADMIN]) {
+  items: [TrustReport!]!
+  nextCursor: String
+  page: Int
+  totalPages: Int
+  total: Int
+}
+
+"Abuse report counts for customer and seller detail pages and lists"
+type TrustReportCounts @areas(in: [ADMIN]) {
+  filedBy: Int!
+  against: Int!
+  open: Int!
+}
+
+# ------------------------------------------------------------------ extensions
+
+extend type Customer {
+  "Abuse reports filed by and against this customer (customer list and 360)"
+  trustReportCounts: TrustReportCounts @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "customers.accounts.view") @source(module: "trust", fn: "reportsAbout")
+  "Linked Trust and Risk reports, newest first. No role = both."
+  trustReports(role: TrustSubjectRole, statuses: [TrustReportStatus!], paging: PageInput): TrustReportPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "trust.reports.view") @source(module: "trust", fn: "listReportsAbout") @cost(weight: 5)
+}
+
+extend type Seller {
+  "Abuse reports filed by and against this seller (seller 360)"
+  trustReportCounts: TrustReportCounts @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "sellers.accounts.view") @source(module: "trust", fn: "reportsAbout")
+  "Linked Trust and Risk reports (about the seller, its offers, products and claims), newest first. No role = both."
+  trustReports(role: TrustSubjectRole, statuses: [TrustReportStatus!], paging: PageInput): TrustReportPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "trust.reports.view") @source(module: "trust", fn: "listReportsAbout") @cost(weight: 5)
+}
+
+extend type SellerRestriction {
+  "The Trust and Risk report the restriction came from"
+  trustReport: TrustReport @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "trust.reports.view") @source(module: "trust", fn: "getReportSummaries")
+}
+
+extend type CustomerRestriction {
+  "The Trust and Risk report the restriction came from"
+  trustReport: TrustReport @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "trust.reports.view") @source(module: "trust", fn: "getReportSummaries")
+}

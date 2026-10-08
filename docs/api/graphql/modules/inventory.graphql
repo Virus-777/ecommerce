@@ -1,0 +1,161 @@
+# inventory: how many units exist and in which stock group.
+# Adds Offer.availability (customer view), Offer.stock and Variant.stock (Seller Center: own stock only; Admin Center),
+# and stock summaries for the seller and admin dashboards.
+
+"Customer view of an offer's stock: drives the stock label and the quantity selector"
+type Availability {
+  state: StockState!
+  "Shown when low (e.g. '9 left'); null otherwise in the store"
+  quantity: Int
+  "min(available, purchase limit); drives the quantity selector"
+  maxPerOrder: Int!
+  purchaseLimit: Int
+  "e.g. 'In stock', '2 left', 'Limit 3 per customer'"
+  label: String!
+  "Estimate from incoming stock when out of stock, e.g. 'around Oct 26'"
+  expectedRestockDate: Date
+}
+
+enum StockState {
+  IN_STOCK
+  LOW_STOCK
+  OUT_OF_STOCK
+}
+
+"""
+One stock item: one per seller offer, or one per Official Store SKU. Seller stock and company stock are never added together.
+In the Seller Center only the caller's own items resolve; in the Admin Center reading needs inventory.stock.view.
+"""
+type StockItem @areas(in: [SELLER, ADMIN]) {
+  id: UUID!
+  ownerType: StockOwnerType!
+  "Company SKU or seller SKU"
+  sku: String!
+  "Product title and variant, e.g. 'Halden Aurora ANC Headphones, Black'"
+  label: String!
+  image: MediaRef
+  condition: String!
+  quantities: StockQuantities!
+  state: StockState!
+  "Low-stock alert at / reorder point"
+  lowStockThreshold: Int
+  "e.g. 'Oct 6, 4:30 PM · Avery Stone'"
+  lastChange: String
+  updatedAt: DateTime!
+  "Latest quantity changes with reason, person and reference"
+  recentMovements(limit: Int = 10): [StockMovement!]! @cost(weight: 3)
+
+  # ---- Admin Center only (company stock)
+  reorderQuantity: Int @areas(in: [ADMIN])
+  "Weighted average buying cost (company stock only)"
+  unitCost: Money @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "inventory.stock.view")
+  valueAtCost: Money @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "inventory.stock.view")
+  "Primary bin from warehouse, e.g. A-03-2"
+  binCode: String @areas(in: [ADMIN])
+  nextIncoming: StockIncoming @areas(in: [ADMIN])
+}
+
+enum StockOwnerType @areas(in: [SELLER, ADMIN]) {
+  OFFICIAL
+  SELLER
+}
+
+"The five stock groups. Quantities, not statuses: every item carries all five."
+type StockQuantities @areas(in: [SELLER, ADMIN]) {
+  "Sellable to new customers"
+  available: Int!
+  "Held during checkout or allocated to accepted orders"
+  reserved: Int!
+  "Expected from suppliers or transfers, or received and waiting for confirmation"
+  incoming: Int!
+  "Awaiting inspection or unsuitable for sale"
+  damagedHeld: Int!
+  "Received back, needs a condition decision"
+  returned: Int!
+}
+
+type StockIncoming @areas(in: [ADMIN]) {
+  quantity: Int!
+  expectedDate: Date
+  "e.g. PUR-2610-0042"
+  purchaseOrderRef: String
+}
+
+"One quantity change in the movement ledger"
+type StockMovement @areas(in: [SELLER, ADMIN]) {
+  id: UUID!
+  fromGroup: StockGroup!
+  toGroup: StockGroup!
+  "Always positive; direction is from → to"
+  quantity: Int!
+  reasonCode: String!
+  reasonLabel: String!
+  note: String
+  "e.g. 'Received PUR-2610-0031', 'Return RT-261001-0161'"
+  referenceLabel: String
+  actor: Actor!
+  approvedBy: Actor
+  at: DateTime!
+}
+
+enum StockGroup @areas(in: [SELLER, ADMIN]) {
+  AVAILABLE
+  RESERVED
+  INCOMING
+  DAMAGED_HELD
+  RETURNED
+  "Entering or leaving stock"
+  OUTSIDE
+}
+
+"Seller dashboard tile: in stock, low, out of stock and reserved"
+type StockSellerSummary @areas(in: [SELLER]) {
+  inStockSkus: Int!
+  inStockUnits: Int!
+  lowStockSkus: Int!
+  outOfStockSkus: Int!
+  reservedUnits: Int!
+  "e.g. 'Aurora, Silver'"
+  outOfStockLabels: [String!]!
+}
+
+"Official Store stock by group, with low and out-of-stock counts"
+type StockSummary @areas(in: [ADMIN]) {
+  skuCount: Int!
+  groups: [StockGroupTotal!]!
+  lowStockCount: Int!
+  outOfStockCount: Int!
+  "e.g. '3 SKUs at or below reorder point'"
+  lowStockHeadline: String
+}
+
+type StockGroupTotal @areas(in: [ADMIN]) {
+  group: StockGroup!
+  label: String!
+  meaning: String!
+  units: Int!
+  valueAtCost: Money
+}
+
+# ------------------------------------------------------------------ extensions
+
+extend type Offer {
+  "Stock state, low-stock count and quantity limit as the customer sees them"
+  availability: Availability! @source(module: "inventory", fn: "getOfferAvailability")
+
+  "The stock item holding this offer's quantities (seller: own offers only)"
+  stock: StockItem @areas(in: [SELLER, ADMIN]) @source(module: "inventory", fn: "getStockForOffers")
+}
+
+extend type Variant {
+  "Stock items for this variant. Seller Center: the caller's own items; Admin Center: company and seller items, never summed"
+  stock: [StockItem!]! @areas(in: [SELLER, ADMIN]) @source(module: "inventory", fn: "listStockForVariants")
+}
+
+extend type Query {
+  "Seller dashboard stock tile"
+  myStockSummary: StockSellerSummary! @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "inventory", fn: "getSellerStockSummary")
+
+  "Official Store stock by group (admin dashboard and stock overview)"
+  stockSummary(locationId: UUID): StockSummary! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "inventory.stock.view") @source(module: "inventory", fn: "getStockSummary") @cost(weight: 5)
+}

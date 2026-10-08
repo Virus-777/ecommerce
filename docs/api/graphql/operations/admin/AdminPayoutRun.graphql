@@ -1,0 +1,162 @@
+# screens: admin/payouts
+# replaces: GET finance/payout-runs/{id}, GET finance/payout-runs/{id}/payouts, GET finance/payouts, GET finance/holds, GET finance/destination-reviews, GET access/approval-requests/{id}
+# why: Approving a payout run needs totals, per-seller holds and destinations, last run's failures, destination reviews and the approval steps in one view.
+query AdminPayoutRun(
+  $ref: String!
+  $sellerFilter: PayoutRunSellerFilter = ALL
+  $search: String
+  $paging: PageInput
+) {
+  payoutRun(ref: $ref) {
+    id
+    ref
+    status
+    scheduledRelease
+    cutoffAt
+    rule
+    total {
+      ...Amount
+    }
+    payingNow {
+      ...Amount
+    }
+    held {
+      ...Amount
+    }
+    negativeOffset {
+      ...Amount
+    }
+    sellerCount
+    readyCount
+    heldCount
+    retriesIncluded
+    retriesAmount {
+      ...Amount
+    }
+    failedLastRun
+    failedLastRunAmount {
+      ...Amount
+    }
+    approval {
+      required
+      reason
+    }
+    approvals {
+      order
+      role
+      status
+      at
+      dueAt
+      note
+      approver {
+        kind
+        name
+      }
+    }
+    approvalRequest {
+      id
+      ref
+      status
+      canDecide
+      cannotDecideReason
+    }
+    viewerCanApprove
+    checks {
+      level
+      title
+      detail
+    }
+
+    sellers(filter: $sellerFilter, search: $search, paging: $paging) {
+      total
+      page
+      totalPages
+      nextCursor
+      items {
+        payoutId
+        sellerId
+        sellerName
+        available {
+          ...Amount
+        }
+        holds {
+          id
+          amount {
+            ...Amount
+          }
+          reason
+          reviewDate
+          reference {
+            ref
+          }
+        }
+        negativeBalance {
+          ...Amount
+        }
+        destination {
+          ...Destination
+        }
+        payout {
+          ...Amount
+        }
+        status
+        isRetry
+      }
+    }
+
+    failedPayouts {
+      id
+      ref
+      sellerId
+      sellerName
+      amount {
+        ...Amount
+      }
+      status
+      failedAt
+      failureCode
+      failureReason
+      nextStep
+      retriedBy
+    }
+
+    destinationReviews {
+      id
+      sellerId
+      sellerName
+      fromLabel
+      toLabel
+      requestedAt
+      requestedBy {
+        kind
+        name
+      }
+      status
+      checks {
+        label
+        result
+      }
+      pauseUntil
+      decidedAt
+      decidedBy {
+        kind
+        name
+      }
+      reason
+    }
+  }
+}
+
+fragment Amount on Money {
+  amount
+  currency
+  formatted
+}
+
+fragment Destination on PayoutDestination {
+  label
+  status
+  pendingChange {
+    label
+  }
+}

@@ -1,0 +1,239 @@
+# screens: store/checkout, store/checkout-review-changes
+# replaces: GET checkout/sessions/{id}, GET checkout/sessions/{id}/changes/{changeSetId}, GET offers/offers/{id}, GET customers/addresses, GET payments/options, GET payments/methods, GET wallet/credit, GET returns/terms, GET shipping/notices, GET settings/app-config
+# why: Checkout shows address, packages with delivery options, coupons, credit, payment choices, totals, legal text and any revalidation changes with alternative offers from seven modules; re-read after every REST step so the quote version on screen is the one Place order sends.
+query CheckoutReview($id: UUID!, $guest: Boolean = false) {
+  checkoutSession(id: $id) {
+    id
+    status
+    source
+    quoteVersion
+    currency
+    steps { key status message }
+    account { kind name email phone createAccountAfter marketingOptIn note }
+    address {
+      addressId
+      allShippable
+      message
+      locationNote
+      addressBookNote
+      address { ...AddressFields }
+      lines { lineId title sellerName shippable reason message }
+    }
+    packages {
+      key
+      label
+      soldAndShippedBy
+      shipsFrom
+      returnTerms
+      sellerSupport
+      selectedOptionId
+      seller { ...SellerLabelFields }
+      lines { ...CheckoutLineFields }
+      options {
+        id
+        methodCode
+        methodName
+        carrierService
+        free
+        freeReason
+        arrivalLabel
+        dispatchLabel
+        cutoffAt
+        notices
+        isDefault
+        price { ...MoneyFields }
+      }
+      totals {
+        items { ...MoneyFields }
+        discounts { ...MoneyFields }
+        shipping { ...MoneyFields }
+        tax { ...MoneyFields }
+        total { ...MoneyFields }
+      }
+    }
+    packagesNote
+    excludedLines { ...CheckoutLineFields }
+    coupons {
+      code
+      status
+      label
+      fundedBy
+      fundingNote
+      rejectionCode
+      reason
+      otherDiscountsNote
+      amount { ...MoneyFields }
+      coverage {
+        lineId
+        title
+        amount { ...MoneyFields }
+      }
+      notCovered { lineId title reason }
+    }
+    credit {
+      sourceNote
+      use
+      available { ...MoneyFields }
+      applied { ...MoneyFields }
+    }
+    payment {
+      chargeNote
+      selected { kind label savedMethodId billingSummary }
+    }
+    paymentOptions {
+      acceptedBrands
+      walletAvailable
+      walletKinds
+      chargeNote
+      savedMethods { id kind brand label last4 expMonth expYear expired isDefault billingSummary }
+    }
+    totals { ...CheckoutTotalsFields }
+    legal { text purchaseTermsUrl }
+    readyToPlace
+    blockers
+    doubleSubmitNote
+    expiresAt
+    openChangeSet {
+      id
+      status
+      detectedAt
+      intro
+      partialOrder
+      partialNote
+      previousTotal { ...MoneyFields }
+      newTotal { ...MoneyFields }
+      deltas {
+        label
+        amount { ...MoneyFields }
+      }
+      changes {
+        id
+        kind
+        lineId
+        packageKey
+        headline
+        title
+        sellerName
+        previous
+        current
+        availableQuantity
+        detail
+        choices
+        defaultChoice
+        image { ...ImageFields }
+        previousAmount { ...MoneyFields }
+        currentAmount { ...MoneyFields }
+        effectOnTotal { ...MoneyFields }
+        alternatives {
+          offerId
+          conditionLabel
+          arrivalLabel
+          available
+          returnTerms
+          differentSeller
+          note
+          seller { ...SellerLabelFields }
+          price { ...MoneyFields }
+          shipping { ...MoneyFields }
+        }
+      }
+    }
+  }
+  me @skip(if: $guest) {
+    id
+    addresses {
+      id
+      label
+      isDefault
+      address { ...AddressFields }
+    }
+  }
+  storeInfo {
+    support { phone hoursLabel }
+  }
+}
+
+fragment MoneyFields on Money {
+  amount
+  currency
+  formatted
+}
+
+fragment ImageFields on MediaRef {
+  id
+  url
+  alt
+  width
+  height
+}
+
+fragment AddressFields on Address {
+  name
+  line1
+  line2
+  city
+  region
+  postalCode
+  country
+  phone
+}
+
+fragment SellerLabelFields on CartSellerLabel {
+  id
+  name
+  slug
+  official
+  verified
+  logo { ...ImageFields }
+}
+
+fragment CheckoutLineFields on CheckoutLine {
+  id
+  offerId
+  productId
+  variantId
+  title
+  variantLabel
+  condition
+  quantity
+  status
+  note
+  image { ...ImageFields }
+  unitPrice { ...MoneyFields }
+  lineTotal { ...MoneyFields }
+  discounts {
+    code
+    label
+    fundedBy
+    amount { ...MoneyFields }
+  }
+}
+
+fragment CheckoutTotalsFields on CheckoutTotals {
+  itemCount
+  taxNote
+  items { ...MoneyFields }
+  discounts {
+    code
+    label
+    fundedBy
+    amount { ...MoneyFields }
+  }
+  discountTotal { ...MoneyFields }
+  shippingByPackage {
+    packageKey
+    sellerName
+    free
+    amount { ...MoneyFields }
+  }
+  shippingTotal { ...MoneyFields }
+  tax {
+    jurisdiction
+    label
+    rate
+    amount { ...MoneyFields }
+  }
+  taxTotal { ...MoneyFields }
+  creditApplied { ...MoneyFields }
+  total { ...MoneyFields }
+}

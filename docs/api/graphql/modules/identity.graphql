@@ -1,0 +1,110 @@
+# identity: sign-in security of an account, for the admin customer 360 (Sign-in row, lock state, 2-step, devices,
+# recent security activity). Sign-in, sessions, password and 2-step flows stay on REST /api/<area>/identity/*;
+# account actions (lock, unlock, force password reset, sign out everywhere) stay on REST /api/admin/identity/*.
+
+"""
+How an account signs in and how safe it is right now. Staff view (identity.accounts.view); never in the store or Seller Center.
+"""
+type AccountSecurity @areas(in: [ADMIN]) {
+  accountId: UUID!
+  status: AccountSecurityStatus!
+  "Sign-in email (may differ from a pending change)"
+  email: Email!
+  emailVerified: Boolean!
+  emailVerifiedAt: DateTime
+  "Email change waiting for verification"
+  pendingEmailChange: Email
+  "One line for the 360 view, e.g. Password + two-step code"
+  signInSummary: String!
+  createdAt: DateTime!
+  lastSignInAt: DateTime
+  lastActiveAt: DateTime
+  passwordChangedAt: DateTime
+  "Staff required a password reset at next sign-in"
+  mustResetPassword: Boolean!
+  "Set while locked (manual or after repeated failed sign-ins)"
+  lockedUntil: DateTime
+  lockReason: String
+  "Failed sign-ins in the current lockout window"
+  failedSignInsInWindow: Int!
+  twoStep: AccountSecurityTwoStep!
+  "Signed-in devices, most recently active first"
+  devices: [AccountSecurityDevice!]!
+  "two_step_off, recovery_codes_low, password_old, unrecognised_sign_in"
+  warnings: [AccountSecurityWarning!]!
+  "Security activity, newest first (max 50)"
+  recentActivity(limit: Int = 10): [AccountSecurityEvent!]! @cost(weight: 2)
+}
+
+type AccountSecurityTwoStep @areas(in: [ADMIN]) {
+  enabled: Boolean!
+  "Always true for staff"
+  required: Boolean!
+  methods: [AccountSecurityTwoStepMethod!]!
+  recoveryCodesRemaining: Int!
+}
+
+type AccountSecurityTwoStepMethod @areas(in: [ADMIN]) {
+  id: UUID!
+  "TOTP or SMS"
+  method: String!
+  "Authenticator app, Text message to (503) •••-0148"
+  label: String!
+  addedAt: DateTime!
+  lastUsedAt: DateTime
+}
+
+type AccountSecurityDevice @areas(in: [ADMIN]) {
+  id: UUID!
+  "web or android"
+  kind: String!
+  "Chrome on Windows 11 · Marketly app on Pixel 8"
+  label: String!
+  "Approximate, from IP: Portland, OR"
+  location: String
+  "store, seller, admin"
+  audiences: [String!]!
+  firstSeenAt: DateTime!
+  lastActiveAt: DateTime!
+  twoStepTrustedUntil: DateTime
+}
+
+type AccountSecurityWarning @areas(in: [ADMIN]) {
+  code: String!
+  message: String!
+}
+
+type AccountSecurityEvent @areas(in: [ADMIN]) {
+  id: UUID!
+  at: DateTime!
+  "signed_in, sign_in_failed, password_reset_completed, account_locked…"
+  kind: String!
+  "Human text: '3 wrong passwords, sign-in blocked for 15 min'"
+  label: String!
+  device: String
+  location: String
+  result: AccountSecurityEventResult!
+  "Staff member when the change was made by staff"
+  actor: Actor
+  reason: String
+}
+
+enum AccountSecurityStatus @areas(in: [ADMIN]) {
+  INVITED
+  PENDING_VERIFICATION
+  ACTIVE
+  LOCKED
+  DISABLED
+  CLOSED
+}
+
+enum AccountSecurityEventResult @areas(in: [ADMIN]) {
+  COMPLETED
+  FAILED
+  BLOCKED
+}
+
+extend type Customer {
+  "Sign-in security for the admin customer 360 (resolved from the customer's identity account)"
+  security: AccountSecurity @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "identity.accounts.view") @source(module: "identity", fn: "accountSecurityOf")
+}

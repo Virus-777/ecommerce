@@ -1,0 +1,510 @@
+{
+  "name": "access",
+  "title": "Access and approvals",
+  "group": "Platform",
+  "phase": 1,
+  "chapters": [2, 18],
+  "summary": "What staff may do and how much they may approve: staff roles, the permission registry, role assignments, leads and backups per work area, approval limits per role, approval requests with a second reviewer, and cover while someone is away. Granting access never grants financial authority.",
+  "owns": [
+    "Staff roles: Business Owner, the 17 management roles of plan ch. 2 (Official Store, Purchasing, Inventory, Warehouse, Order, Shipping, Returns, Platform Administrator, Catalog, Seller, Customer Support, Finance, Marketing, Advertising, Content, Trust and Risk, Reports Analyst), task roles (warehouse worker, finance staff, support agent) and custom roles",
+    "Permission registry: every staff permission declared by every enabled module, grouped by work area",
+    "Role permissions and role assignments (one person can hold several roles; a role is a responsibility, not a person)",
+    "Lead, ordered backups and escalation role for every role's work area, with coverage gaps",
+    "Approval action registry (payouts, refunds, holds, seller restrictions, price changes, publication overrides, adjustments…) declared by owning modules",
+    "Approval limits per role and action, set by the Business Owner, with effective dates; changes to limits always need Business Owner approval",
+    "Authority checks: allowed, approval required or not permitted, for a principal, action and amount",
+    "Approval requests: one or two approvals, nominated reviewer, return with comment, reject, cancel, expiry, reminders; nobody approves their own request",
+    "Away periods: who covers each role while a lead is away, and (with Business Owner approval) temporary delegation of approval authority"
+  ],
+  "notOwns": [
+    "Staff accounts, sign-in, 2-step verification, invitations links and account lock/disable: identity (access calls identity.inviteStaff and reacts to identity.account.disabled)",
+    "Seller member roles and seller permissions (owner-only payout changes, etc.): sellers",
+    "Executing the approved action (releasing the payout, sending the refund, suspending the seller): the module that requested the approval, on access.approval.decided",
+    "The action history itself: audit (access records every role, permission, limit and approval change there)",
+    "Work items, queues, deadlines and escalation timers: workqueues (it uses lead/backup resolution from here)",
+    "Delivering notices to approvers and backups: notifications"
+  ],
+  "dependsOn": ["identity"],
+  "optionalDeps": ["audit", "notifications", "sellers", "finance", "returns"],
+  "publicApi": [
+    { "name": "hasPermission", "signature": "(principal: identity.Principal, permissionKey: string) => bool", "desc": "Kernel guard for every admin endpoint with a `permission`. Includes roles covered as a backup only where the away period grants them.", "usedBy": ["kernel"] },
+    { "name": "permissionsOf", "signature": "(accountId: uuid) => string[]", "desc": "Effective staff permissions (cached, invalidated on access.role.changed)", "usedBy": ["kernel", "reports"] },
+    { "name": "check", "signature": "(principal: identity.Principal, action: string, amount?: AmountInput) => AuthorityCheck", "desc": "allowed | approval_required | denied for this person, action and amount, with who could approve. Uses the limits in force now. Permissions alone never make a money action allowed.", "usedBy": ["finance", "returns", "payments", "sellers", "offers", "catalog", "inventory", "purchasing", "shipping", "support", "promotions", "customers", "settings", "content", "advertising", "audit", "wallet"] },
+    { "name": "requestApproval", "signature": "(input: RequestApprovalInput) => ApprovalRequest", "desc": "Create an approval request (or return the open one for the same action and target). The requesting module keeps its record pending and finishes on access.approval.decided.", "usedBy": ["finance", "returns", "sellers", "offers", "catalog", "inventory", "purchasing", "shipping", "support", "promotions", "customers", "settings", "content", "advertising", "audit", "wallet"] },
+    { "name": "decide", "signature": "(requestId: uuid, principal: identity.Principal, decision: { kind: 'approve' | 'reject' | 'return', note?: string, stepUpCode?: string }) => ApprovalRequest", "desc": "Same rules as the admin approve/reject/return endpoints, for modules that show the decision inside their own screen (payout run approval)", "usedBy": ["finance", "returns", "sellers"] },
+    { "name": "cancelApproval", "signature": "(requestId: uuid, by: Actor, reason: string) => void", "desc": "The requesting module withdraws a request (record changed or deleted)", "usedBy": ["finance", "returns", "sellers", "offers", "settings"] },
+    { "name": "getApproval", "signature": "(requestId: uuid) => ApprovalRequest | null", "desc": "Full request with decisions", "usedBy": ["audit", "finance", "returns", "sellers"] },
+    { "name": "approvalInfo", "signature": "(requestId: uuid) => ApprovalInfo", "desc": "Compact common.ApprovalInfo for embedding in other modules' responses", "usedBy": ["finance", "returns", "sellers", "offers", "inventory", "purchasing", "settings", "content", "promotions"] },
+    { "name": "resolveRecipients", "signature": "(roleKey: string) => RecipientResolution", "desc": "Who receives a role's work and notices right now: lead, or the covering backup while the lead is away (the lead keeps a copy)", "usedBy": ["notifications", "workqueues", "support"] },
+    { "name": "rolesOf", "signature": "(accountId: uuid) => RoleRef[]", "desc": "Active roles of a staff member (audit stores them with each entry)", "usedBy": ["audit", "notifications", "workqueues"] },
+    { "name": "membersOfRole", "signature": "(roleKey: string) => StaffRef[]", "desc": "Everyone holding a role (assignment pickers in workqueues and support)", "usedBy": ["workqueues", "support", "notifications"] },
+    { "name": "listApprovalsToDecide", "signature": "(principal: identity.Principal, filter: { module?: string, actionKey?: string, overdue?: bool }, page: PageInput) => Page<ApprovalRequest>", "desc": "Requests the caller may decide now, oldest due first (same rules as GET /approval-requests?view=to_decide). canDecide and steps are computed for the caller.", "usedBy": ["graphql"] },
+    { "name": "approvalSummaryFor", "signature": "(principal: identity.Principal) => { toDecide: int, overdue: int, dueSoon: int, myOpenRequests: int, returnedToMe: int }", "desc": "Approval counts for the admin dashboard and inbox", "usedBy": ["graphql"] },
+    { "name": "getApprovalForViewer", "signature": "(principal: identity.Principal, requestId: uuid) => ApprovalRequest | null", "desc": "One request with decisions and steps, null unless the caller is the requester, an eligible approver or holds access.approvals.view-all. canDecide and cannotDecideReason are for the caller.", "usedBy": ["graphql"] },
+    { "name": "approvalForTargets", "signature": "(principal: identity.Principal, targetType: string, targetIds: string[]) => Map<string, ApprovalRequest | null>", "desc": "Batched: the current approval request per target record (open request first, else the latest decided one), for approval panels embedded in other modules' admin views (payout run, hold, refund request). Visibility follows the parent record; canDecide is for the caller.", "usedBy": ["graphql"] },
+    { "name": "approvalsForSellers", "signature": "(principal: identity.Principal, sellerIds: uuid[]) => Map<uuid, ApprovalRequest[]>", "desc": "Batched: open requests whose target belongs to each seller (ApprovalTarget.sellerId), for the admin seller 360", "usedBy": ["graphql"] },
+    { "name": "coverageNow", "signature": "(filter: { workArea?: string }) => RoleCoverage[]", "desc": "Leads, backups and who receives each role's work today (GET /coverage without gaps), for the admin dashboard", "usedBy": ["graphql"] },
+    { "name": "myLimitFor", "signature": "(principal: identity.Principal, actionKey: string) => MyActionLimit", "desc": "The caller's own authority, limit, second-review rule and approval route for one action (decision panels)", "usedBy": ["graphql"] },
+    { "name": "getStaffRef", "signature": "(staffId: uuid) => StaffRef | null", "desc": "A staff member's display name and role label (roleLabel) for assignee, owner, reviewer and decider columns", "usedBy": ["support", "finance", "trust", "workqueues", "reports"] }
+  ],
+  "types": {
+    "RoleRef": { "id": "uuid", "key": { "type": "string", "desc": "Stable key, e.g. finance_manager, business_owner" }, "name": "string" },
+    "StaffRef": { "accountId": "uuid", "name": "string", "email": "email?", "away": "bool", "roleLabel": { "type": "string?", "desc": "Display name of the member's primary role, e.g. Support Specialist, Finance Manager" } },
+    "Role": {
+      "id": "uuid",
+      "key": "string",
+      "name": "string",
+      "kind": { "type": "enum(owner|management|task|custom)", "desc": "owner = Business Owner; management = the 17 plan roles; task = agents, warehouse workers, finance staff" },
+      "workArea": { "type": "string", "desc": "Finance, Orders, Settings…" },
+      "description": "text?",
+      "system": { "type": "bool", "desc": "Seeded roles cannot be archived or have their key changed" },
+      "archived": "bool",
+      "people": "StaffRef[]",
+      "lead": "StaffRef?",
+      "backups": "StaffRef[]",
+      "escalationRole": "RoleRef?",
+      "permissionCount": "int",
+      "limitSummary": { "type": "string", "desc": "Human summary, e.g. 'Refunds up to $2,000; payouts with 2nd review' or 'No financial authority'" }
+    },
+    "Permission": {
+      "key": { "type": "string", "desc": "<module>.<resource>.<action>" },
+      "module": "string",
+      "area": { "type": "string", "desc": "Grouping on the role editor: Finance, Orders and shipping, Returns and cases…" },
+      "label": "string",
+      "desc": "text",
+      "sensitive": { "type": "bool", "desc": "Granting it needs a second reviewer (access.*, identity.staff-accounts.*, finance.*, audit.entries.export, settings.changes.*)" },
+      "available": { "type": "bool", "desc": "False when the declaring module is disabled" }
+    },
+    "PermissionGroup": { "area": "string", "permissions": "PermissionGrant[]", "grantedCount": "int" },
+    "PermissionGrant": { "permission": "Permission", "granted": "bool" },
+    "RoleDetail": {
+      "role": "Role",
+      "permissions": "PermissionGroup[]",
+      "limits": "ApprovalLimit[]",
+      "pendingLimitChange": "LimitChange?",
+      "pendingPermissionApproval": "ApprovalInfo?"
+    },
+    "RoleInput": {
+      "name": "string",
+      "workArea": "string",
+      "kind": "enum(task|custom)?",
+      "description": "text?",
+      "escalationRoleId": "uuid?",
+      "reason": "text"
+    },
+    "RoleUpdate": {
+      "name": "string?",
+      "workArea": "string?",
+      "description": "text?",
+      "escalationRoleId": "uuid?",
+      "reason": "text"
+    },
+    "ApprovalAction": {
+      "key": { "type": "string", "desc": "e.g. finance.payouts.release, returns.refunds.approve, finance.holds.place, sellers.sellers.restrict, offers.prices.change" },
+      "module": "string",
+      "label": { "type": "string", "desc": "The manifest's desc" },
+      "limit": { "type": "enum(money|units|percent|none)", "desc": "From the manifest. none = authority only (yes/no actions such as seller restrictions)" },
+      "secondReviewer": { "type": "enum(always|above-limit|never)", "desc": "From the manifest. always: one approver other than the requester is always needed (e.g. seller suspension, payout destination change)" },
+      "approvers": { "type": "string?", "desc": "The manifest's default approvers text, shown when seeding limits" },
+      "defaultEligibleRoleKeys": "string[]",
+      "available": "bool"
+    },
+    "LimitValue": {
+      "authority": { "type": "enum(not_permitted|recommend_only|permitted|permitted_with_second_review)", "desc": "recommend_only: may create the request but never approve it" },
+      "limitMoney": { "type": "Money?", "desc": "Highest amount this role may approve alone (money actions)" },
+      "limitNumber": { "type": "number?", "desc": "Percent or units for percent/units actions" },
+      "secondReviewerAboveMoney": { "type": "Money?", "desc": "Above this a second, different eligible person must also approve" },
+      "secondReviewerAboveNumber": "number?",
+      "secondReviewerRoleKeys": { "type": "string[]", "desc": "Roles that may act as second reviewer (e.g. finance_manager, finance_staff, business_owner)" }
+    },
+    "ApprovalLimit": {
+      "id": "uuid",
+      "role": "RoleRef",
+      "action": "ApprovalAction",
+      "value": "LimitValue",
+      "summary": { "type": "string", "desc": "Up to $2,000.00 per refund · second reviewer above $1,000.00" },
+      "effectiveFrom": "datetime",
+      "approvedBy": "Actor?"
+    },
+    "LimitInput": { "actionKey": "string", "value": "LimitValue" },
+    "LimitDiff": { "actionKey": "string", "actionLabel": "string", "before": "LimitValue?", "after": "LimitValue" },
+    "LimitChange": {
+      "id": "uuid",
+      "role": "RoleRef",
+      "changes": "LimitDiff[]",
+      "reason": "text",
+      "effectiveFrom": { "type": "datetime", "desc": "Requests already waiting keep the limit they were created under" },
+      "status": "enum(pending_approval|scheduled|applied|rejected|cancelled)",
+      "proposedBy": "Actor",
+      "approval": "ApprovalInfo",
+      "createdAt": "datetime",
+      "appliedAt": "datetime?"
+    },
+    "AmountInput": { "money": "Money?", "number": { "type": "number?", "desc": "Percent or units" } },
+    "AuthorityCheck": {
+      "decision": "enum(allowed|approval_required|denied)",
+      "action": "string",
+      "reason": { "type": "string", "desc": "Within your $2,000.00 refund limit · Above your limit: Business Owner approval · Your role can recommend only" },
+      "callerLimit": "LimitValue?",
+      "requiresSecondReviewer": "bool",
+      "approvalsNeeded": { "type": "int", "desc": "Approvals by other people still needed if the caller submits now (0 when allowed)" },
+      "eligibleApproverRoles": "RoleRef[]",
+      "eligibleApprovers": { "type": "StaffRef[]", "desc": "People who could approve now, backups included" }
+    },
+    "ApprovalTarget": {
+      "type": { "type": "string", "desc": "payout_run, refund, hold, seller, offer, price_change, setting_change, limit_change, role_permissions, away_period…" },
+      "id": "string",
+      "ref": { "type": "string?", "desc": "Human reference: PO-RUN-261009, MK-260930-21877, RT-…" },
+      "label": "string?",
+      "sellerId": "uuid?",
+      "screen": { "type": "string?", "desc": "Prototype/admin screen that shows the target, e.g. admin/payouts" }
+    },
+    "ApprovalDecision": {
+      "step": "int",
+      "decision": "enum(approved|rejected|returned)",
+      "by": "Actor",
+      "roles": "RoleRef[]",
+      "note": "text?",
+      "viaDelegationFrom": { "type": "StaffRef?", "desc": "Set when the approver used authority delegated during an away period" },
+      "at": "datetime"
+    },
+    "ApprovalRequest": {
+      "id": "uuid",
+      "ref": { "type": "string", "desc": "AP-YYMMDD-NNNN" },
+      "action": "ApprovalAction",
+      "target": "ApprovalTarget",
+      "amount": "Money?",
+      "quantity": "number?",
+      "summary": { "type": "string", "desc": "One line for lists: 'Payout run of $78,420.55 for 142 sellers'" },
+      "details": { "type": "json", "desc": "Before/after or line items supplied by the requesting module" },
+      "reason": "text",
+      "requestedBy": "Actor",
+      "requestedByRoles": "RoleRef[]",
+      "requesterCountsAsFirst": { "type": "bool", "desc": "The requester had authority up to the second-review threshold, so their request is the first approval" },
+      "status": "enum(pending|partially_approved|approved|rejected|returned|cancelled|expired)",
+      "requiredApprovals": { "type": "int", "desc": "Approvals by people other than the requester" },
+      "approvals": "ApprovalDecision[]",
+      "eligibleApprovers": "StaffRef[]",
+      "nominatedReviewer": { "type": "StaffRef?", "desc": "Requester's choice of second reviewer; others who are eligible may still decide" },
+      "deadline": "Deadline?",
+      "limitSnapshot": { "type": "json", "desc": "Limits in force when the request was created" },
+      "timeline": "TimelineEvent[]",
+      "createdAt": "datetime",
+      "decidedAt": "datetime?",
+      "canDecide": { "type": "bool", "desc": "For the caller" },
+      "cannotDecideReason": { "type": "string?", "desc": "Your own request · Above your limit · Already approved by you" }
+    },
+    "RequestApprovalInput": {
+      "action": "string",
+      "target": "ApprovalTarget",
+      "amount": "Money?",
+      "quantity": "number?",
+      "summary": "string",
+      "details": "json?",
+      "reason": "text",
+      "requestedBy": "identity.Principal",
+      "nominatedReviewerId": "uuid?",
+      "dueAt": "datetime?"
+    },
+    "StaffMember": {
+      "account": "identity.AccountSummary",
+      "roles": "RoleRef[]",
+      "leads": { "type": "RoleRef[]", "desc": "Roles this person leads" },
+      "backupFor": "RoleRef[]",
+      "coveringNow": { "type": "RoleRef[]", "desc": "Roles received as backup during someone's away period" },
+      "away": "AwayPeriod?",
+      "reportsTo": "StaffRef?",
+      "status": "enum(invited|active|locked|disabled)",
+      "limitReview": { "type": "ApprovalInfo?", "desc": "Open or decided Business Owner review of this member's approval limits (requestLimitReview on the invitation)" }
+    },
+    "StaffMemberDetail": {
+      "member": "StaffMember",
+      "assignments": "RoleAssignment[]",
+      "effectivePermissions": "string[]",
+      "effectiveLimits": "ApprovalLimit[]",
+      "awayPeriods": "AwayPeriod[]",
+      "approvalsWaiting": { "type": "int", "desc": "Requests this person could decide now" }
+    },
+    "RoleAssignment": {
+      "id": "uuid",
+      "accountId": "uuid",
+      "role": "RoleRef",
+      "status": "enum(pending_acceptance|pending_approval|active|revoked|expired)",
+      "grantedBy": "Actor",
+      "reason": "text",
+      "grantedAt": "datetime",
+      "expiresAt": "datetime?",
+      "revokedAt": "datetime?",
+      "revokedBy": "Actor?",
+      "revokeReason": "text?",
+      "approval": "ApprovalInfo?"
+    },
+    "StaffInvitationInput": {
+      "email": "email",
+      "name": "string",
+      "roleIds": "uuid[]",
+      "reportsToAccountId": "uuid?",
+      "reason": "text",
+      "requestLimitReview": { "type": "bool?", "desc": "Request approval limits from the Business Owner: opens an access.limits.change approval request asking the Business Owner to confirm or adjust the limits the chosen roles carry before the new member uses them. Until it is decided the member's approval actions stay at no limit (they can prepare but not approve)." }
+    },
+    "RoleCoverage": {
+      "role": "RoleRef",
+      "workArea": "string",
+      "lead": "StaffRef?",
+      "backups": "StaffRef[]",
+      "receivingNow": "StaffRef[]",
+      "viaBackup": "bool",
+      "leadAwayUntil": "datetime?",
+      "escalationRole": "RoleRef?"
+    },
+    "CoverageGap": {
+      "kind": "enum(no_lead|no_backup|backup_not_in_role|shared_backup|lead_and_backups_away|one_person_leads_several)",
+      "roles": "RoleRef[]",
+      "people": "StaffRef[]",
+      "message": "string",
+      "severity": "enum(critical|review|ok)"
+    },
+    "Coverage": { "roles": "RoleCoverage[]", "gaps": "CoverageGap[]" },
+    "CoverageInput": {
+      "leadAccountId": "uuid?",
+      "backupAccountIds": { "type": "uuid[]", "desc": "Ordered; the first available backup receives the work" },
+      "escalationRoleId": "uuid?",
+      "reason": "text"
+    },
+    "AwayCoverage": { "role": "RoleRef", "coveredBy": "StaffRef" },
+    "AwayPeriod": {
+      "id": "uuid",
+      "account": "StaffRef",
+      "from": "datetime",
+      "to": "datetime",
+      "status": "enum(pending_approval|scheduled|active|ended|cancelled|rejected)",
+      "coverage": "AwayCoverage[]",
+      "delegateApprovals": { "type": "bool", "desc": "Covering people may use the away person's approval limits (never above them) while away" },
+      "approval": "ApprovalInfo?",
+      "reason": "text?",
+      "createdBy": "Actor",
+      "createdAt": "datetime"
+    },
+    "AwayInput": {
+      "accountId": { "type": "uuid?", "desc": "Default: the caller. Others need access.away.manage." },
+      "from": "datetime",
+      "to": "datetime",
+      "coverage": "AwayCoverageInput[]",
+      "delegateApprovals": "bool",
+      "reason": "text?"
+    },
+    "AwayCoverageInput": { "roleId": "uuid", "coveredByAccountId": "uuid" },
+    "RecipientResolution": {
+      "roleKey": "string",
+      "leadAccountId": "uuid?",
+      "accountIds": { "type": "uuid[]", "desc": "Who should act now (lead, or covering backups)" },
+      "ccAccountIds": { "type": "uuid[]", "desc": "Who should also see it (the away lead, on return)" },
+      "viaBackup": "bool",
+      "escalationRoleKey": "string?"
+    },
+    "MyAccess": {
+      "account": "identity.AccountSummary",
+      "roles": "RoleRef[]",
+      "coveringNow": "RoleRef[]",
+      "permissions": "string[]",
+      "limits": "ApprovalLimit[]",
+      "approvalsToDecide": "int",
+      "myOpenRequests": "int",
+      "away": "AwayPeriod?"
+    },
+    "MyActionLimit": {
+      "action": "ApprovalAction",
+      "value": "LimitValue",
+      "needsSecondReviewer": "bool",
+      "route": {
+        "type": "string[]",
+        "desc": "Approver roles above the caller's limit, in order, e.g. Finance Manager, Business Owner"
+      },
+      "summary": {
+        "type": "string",
+        "desc": "e.g. Up to $2,000.00 per refund · second reviewer above $1,000.00"
+      }
+    }
+  },
+  "tables": [
+    { "name": "roles", "columns": { "id": "uuid pk", "key": "text unique", "name": "text", "kind": "text (owner|management|task|custom)", "work_area": "text", "description": "text?", "system": "bool", "escalation_role_id": "uuid? → roles", "archived_at": "timestamptz?", "created_at": "timestamptz", "updated_at": "timestamptz", "version": "int" } },
+    { "name": "permissions", "desc": "Registry synced at boot from every enabled module's manifest", "columns": { "key": "text pk", "module": "text", "area": "text", "label": "text", "description": "text", "sensitive": "bool", "registered_at": "timestamptz", "unavailable_since": "timestamptz?" }, "indexes": ["(module)"] },
+    { "name": "role_permissions", "columns": { "role_id": "uuid → roles", "permission_key": "text → permissions", "granted_by": "text", "granted_at": "timestamptz" }, "indexes": ["pk (role_id, permission_key)", "(permission_key)"] },
+    { "name": "role_assignments", "columns": { "id": "uuid pk", "account_id": "uuid", "role_id": "uuid → roles", "status": "text", "granted_by_kind": "text", "granted_by_id": "text", "reason": "text", "granted_at": "timestamptz", "expires_at": "timestamptz?", "revoked_at": "timestamptz?", "revoked_by": "text?", "revoke_reason": "text?", "approval_request_id": "uuid? → approval_requests" }, "indexes": ["(account_id) where status = 'active'", "(role_id) where status = 'active'", "unique (account_id, role_id) where status in ('active','pending_acceptance','pending_approval')"] },
+    { "name": "role_coverage", "desc": "Lead, ordered backups and escalation per role", "columns": { "role_id": "uuid pk → roles", "lead_account_id": "uuid?", "backup_account_ids": "jsonb (ordered uuid[])", "updated_by": "text", "updated_at": "timestamptz" } },
+    { "name": "approval_actions", "desc": "Registry synced at boot from module manifests (`approvalActions`)", "columns": { "key": "text pk", "module": "text", "label": "text", "limit_kind": "text (money|units|percent|none)", "second_reviewer": "text (always|above-limit|never)", "approvers": "text?", "default_eligible_role_keys": "jsonb", "unavailable_since": "timestamptz?" } },
+    { "name": "approval_limits", "desc": "Effective-dated; the row in force has effective_from <= now < effective_to", "columns": { "id": "uuid pk", "role_id": "uuid → roles", "action_key": "text → approval_actions", "authority": "text", "limit_amount_minor": "bigint?", "limit_currency": "text?", "limit_number": "numeric?", "second_above_amount_minor": "bigint?", "second_above_number": "numeric?", "second_reviewer_role_keys": "jsonb", "effective_from": "timestamptz", "effective_to": "timestamptz?", "limit_change_id": "uuid? → limit_changes" }, "indexes": ["(role_id, action_key, effective_from desc)"] },
+    { "name": "limit_changes", "columns": { "id": "uuid pk", "role_id": "uuid → roles", "changes": "jsonb", "reason": "text", "effective_from": "timestamptz", "status": "text", "proposed_by_kind": "text", "proposed_by_id": "text", "approval_request_id": "uuid? → approval_requests", "created_at": "timestamptz", "applied_at": "timestamptz?", "cancel_reason": "text?" }, "indexes": ["(status, effective_from)"] },
+    { "name": "approval_requests", "columns": { "id": "uuid pk", "ref": "text unique", "action_key": "text", "module": "text", "target_type": "text", "target_id": "text", "target_ref": "text?", "target_label": "text?", "target_screen": "text?", "seller_id": "uuid?", "amount_minor": "bigint?", "currency": "text?", "quantity": "numeric?", "summary": "text", "details": "jsonb", "reason": "text", "requested_by_kind": "text", "requested_by_id": "text", "requester_roles": "jsonb", "requester_counts_as_first": "bool", "required_approvals": "int", "status": "text", "eligible_role_keys": "jsonb", "nominated_reviewer_id": "uuid?", "limit_snapshot": "jsonb", "due_at": "timestamptz?", "expires_at": "timestamptz", "created_at": "timestamptz", "decided_at": "timestamptz?", "outcome_reason": "text?", "last_reminded_at": "timestamptz?", "version": "int" }, "indexes": ["(status, created_at)", "(module, target_type, target_id)", "(requested_by_id, status)", "unique (action_key, target_type, target_id) where status in ('pending','partially_approved','returned')"] },
+    { "name": "approval_decisions", "columns": { "id": "uuid pk", "request_id": "uuid → approval_requests", "step": "int", "decision": "text", "by_account_id": "uuid", "roles": "jsonb", "note": "text?", "via_delegation_from": "uuid?", "at": "timestamptz" }, "indexes": ["(request_id, step)", "unique (request_id, by_account_id) where decision = 'approved'"] },
+    { "name": "away_periods", "columns": { "id": "uuid pk", "account_id": "uuid", "starts_at": "timestamptz", "ends_at": "timestamptz", "status": "text", "delegate_approvals": "bool", "reason": "text?", "approval_request_id": "uuid? → approval_requests", "created_by_kind": "text", "created_by_id": "text", "created_at": "timestamptz", "ended_at": "timestamptz?" }, "indexes": ["(account_id, starts_at)", "(status, starts_at)", "(status, ends_at)"] },
+    { "name": "away_coverage", "columns": { "away_period_id": "uuid → away_periods", "role_id": "uuid → roles", "covered_by_account_id": "uuid" }, "indexes": ["pk (away_period_id, role_id)", "(covered_by_account_id)"] }
+  ],
+  "stateMachines": [
+    {
+      "name": "Approval request", "field": "ApprovalRequest.status", "initial": "pending",
+      "transitions": [
+        ["pending", "approve", "partially_approved"],
+        ["pending", "approveFinal", "approved"],
+        ["partially_approved", "approveFinal", "approved"],
+        ["pending", "reject", "rejected"],
+        ["partially_approved", "reject", "rejected"],
+        ["pending", "return", "returned"],
+        ["partially_approved", "return", "returned"],
+        ["returned", "resubmit", "pending"],
+        ["pending", "cancel", "cancelled"],
+        ["partially_approved", "cancel", "cancelled"],
+        ["returned", "cancel", "cancelled"],
+        ["pending", "expire", "expired"],
+        ["partially_approved", "expire", "expired"],
+        ["returned", "expire", "expired"]
+      ],
+      "notes": "approve moves to partially_approved while approvals < requiredApprovals; approveFinal is the approval that completes it. Each approver must be eligible (a role whose limit covers the amount, or a second-reviewer role above the threshold, or authority delegated during an away period), must not be the requester, and must not have approved the same request already. resubmit clears earlier approvals. approved, rejected, cancelled and expired publish access.approval.decided; the requesting module then acts. Approved is not executed: e.g. a payout shows Paid only after the bank confirms."
+    },
+    {
+      "name": "Limit change", "field": "LimitChange.status", "initial": "pending_approval",
+      "transitions": [
+        ["pending_approval", "approve", "scheduled"],
+        ["pending_approval", "reject", "rejected"],
+        ["pending_approval", "cancel", "cancelled"],
+        ["scheduled", "cancel", "cancelled"],
+        ["scheduled", "apply", "applied"]
+      ],
+      "notes": "Every limit change needs Business Owner approval (action access.limits.change). A change proposed by a Business Owner is approved on creation for other roles' limits; a Business Owner cannot approve a change to a role they hold themselves when another Business Owner exists. Platform Administrators can propose but never approve. apply runs at effectiveFrom (job access.apply-limit-changes) and closes the previous rows (effective_to)."
+    },
+    {
+      "name": "Role assignment", "field": "RoleAssignment.status", "initial": "pending_acceptance",
+      "transitions": [
+        ["pending_acceptance", "accept", "active"],
+        ["pending_acceptance", "revoke", "revoked"],
+        ["pending_approval", "approve", "active"],
+        ["pending_approval", "reject", "revoked"],
+        ["active", "revoke", "revoked"],
+        ["active", "expire", "expired"]
+      ],
+      "notes": "Assignments to invited staff wait for identity.invitation.accepted. Assigning a role that carries sensitive permissions, or assigning any role to yourself, creates pending_approval with a second reviewer (action access.roles.sensitive-grant). Disabling the account (identity.account.disabled) revokes all assignments."
+    },
+    {
+      "name": "Away period", "field": "AwayPeriod.status", "initial": "scheduled",
+      "transitions": [
+        ["pending_approval", "approve", "scheduled"],
+        ["pending_approval", "reject", "rejected"],
+        ["pending_approval", "cancel", "cancelled"],
+        ["scheduled", "start", "active"],
+        ["scheduled", "cancel", "cancelled"],
+        ["active", "end", "ended"]
+      ],
+      "notes": "Periods with delegateApprovals start in pending_approval (Business Owner approves the delegation: granting access is not financial authority). start and end run from the job at from/to; end can also be called early. Coverage only re-routes work and notices; covering people use their own limits unless delegation was approved, and then never more than the away person's limits."
+    }
+  ],
+  "endpoints": [
+    { "id": "listRoles", "area": "admin", "method": "GET", "path": "/roles", "summary": "Roles with people, lead, backups and approval-limit summary", "desc": "Small and bounded (about 25 roles), not paged.", "auth": "staff", "permission": "access.roles.view", "query": { "q": "string?", "includeArchived": "bool?" }, "response": "Role[]", "screens": ["admin/staff"] },
+    { "id": "getRole", "area": "admin", "method": "GET", "path": "/roles/{id}", "summary": "Role editor: permissions by area, approval limits, pending changes", "auth": "staff", "permission": "access.roles.view", "params": { "id": "uuid" }, "response": "RoleDetail", "screens": ["admin/staff"] },
+    { "id": "createRole", "area": "admin", "method": "POST", "path": "/roles", "summary": "Create a task or custom role", "auth": "staff", "permission": "access.roles.manage", "body": "RoleInput", "response": "Role", "status": 201, "errors": ["VALIDATION_FAILED"], "audited": true, "events": ["access.role.changed"], "screens": ["admin/staff"] },
+    { "id": "updateRole", "area": "admin", "method": "PATCH", "path": "/roles/{id}", "summary": "Rename a role, change its work area or escalation role", "auth": "staff", "permission": "access.roles.manage", "params": { "id": "uuid" }, "body": "RoleUpdate", "response": "Role", "errors": ["SYSTEM_ROLE"], "audited": true, "events": ["access.role.changed"], "screens": ["admin/staff"] },
+    { "id": "archiveRole", "area": "admin", "method": "POST", "path": "/roles/{id}/archive", "summary": "Archive an unused custom role", "auth": "staff", "permission": "access.roles.manage", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "Role", "errors": ["SYSTEM_ROLE", "ROLE_IN_USE"], "audited": true, "events": ["access.role.changed"], "screens": ["admin/staff"] },
+    { "id": "setRolePermissions", "area": "admin", "method": "PUT", "path": "/roles/{id}/permissions", "summary": "Replace the permissions of a role", "desc": "Removing permissions applies at once. Adding sensitive permissions, or changing a role the caller holds, returns 202 with APPROVAL_REQUIRED semantics: the change waits for a second reviewer (access.roles.sensitive-grant) and RoleDetail.pendingPermissionApproval tracks it. Permissions never include approval limits; those are set with POST /limit-changes.", "auth": "staff", "permission": "access.roles.manage", "params": { "id": "uuid" }, "body": { "permissionKeys": "string[]", "reason": "text" }, "response": "RoleDetail", "errors": ["UNKNOWN_PERMISSION", "APPROVAL_REQUIRED"], "audited": true, "approval": "Approval action access.roles.sensitive-grant. Sensitive permissions or the caller's own role need a second reviewer", "events": ["access.role.changed", "access.approval.requested"], "screens": ["admin/staff"] },
+    { "id": "setRoleCoverage", "area": "admin", "method": "PUT", "path": "/roles/{id}/coverage", "summary": "Set the lead, backups and escalation role", "desc": "Lead and backups must hold the role (or be Business Owner); a backup cannot be the lead.", "auth": "staff", "permission": "access.roles.manage", "params": { "id": "uuid" }, "body": "CoverageInput", "response": "RoleCoverage", "errors": ["COVERAGE_INVALID"], "audited": true, "events": ["access.coverage.changed"], "screens": ["admin/staff", "admin/inbox"] },
+    { "id": "listPermissions", "area": "admin", "method": "GET", "path": "/permissions", "summary": "Permission registry grouped by work area", "auth": "staff", "permission": "access.roles.view", "query": { "module": "string?" }, "response": "PermissionGroup[]", "screens": ["admin/staff"] },
+    { "id": "listMembers", "area": "admin", "method": "GET", "path": "/members", "summary": "Staff members with roles, lead/backup duties, away status and 2-step state", "auth": "staff", "permission": "access.roles.view", "paging": true, "query": { "q": "string?", "roleId": "uuid?", "status": "enum(invited|active|locked|disabled)?", "away": "bool?" }, "response": "StaffMember", "screens": ["admin/staff"] },
+    { "id": "getMember", "area": "admin", "method": "GET", "path": "/members/{accountId}", "summary": "One staff member: assignments, effective permissions and limits, away periods", "auth": "staff", "permission": "access.roles.view", "params": { "accountId": "uuid" }, "response": "StaffMemberDetail", "screens": ["admin/staff"] },
+    { "id": "inviteStaff", "area": "admin", "method": "POST", "path": "/staff-invitations", "summary": "Invite a staff member with roles", "desc": "Calls identity.inviteStaff (7-day link, 2-step set-up on accept) and creates pending_acceptance assignments. Approval limits come with the roles; they are never set per invitation. With requestLimitReview the invitation also opens an access.limits.change approval request to the Business Owner; any change the Business Owner makes goes through the normal limit change (role-level, effective-dated), and the member cannot approve anything until the review is decided.", "auth": "staff", "permission": "access.roles.manage", "body": "StaffInvitationInput", "response": "StaffMember", "status": 201, "errors": ["VALIDATION_FAILED", "APPROVAL_REQUIRED"], "audited": true, "events": ["access.role.changed"], "screens": ["admin/staff"] },
+    { "id": "assignRole", "area": "admin", "method": "POST", "path": "/role-assignments", "summary": "Give a staff member a role", "auth": "staff", "permission": "access.roles.manage", "body": { "accountId": "uuid", "roleId": "uuid", "reason": "text", "expiresAt": "datetime?" }, "response": "RoleAssignment", "status": 201, "errors": ["APPROVAL_REQUIRED", "CONFLICT"], "audited": true, "approval": "Approval action access.roles.sensitive-grant. Roles with sensitive permissions, the Business Owner role, or any role for yourself need a second reviewer", "events": ["access.role.changed", "access.approval.requested"], "screens": ["admin/staff"] },
+    { "id": "revokeRoleAssignment", "area": "admin", "method": "POST", "path": "/role-assignments/{id}/revoke", "summary": "Remove a role from a staff member", "desc": "If the person leads or backs up the role, the response lists the new coverage gap (also on GET /coverage).", "auth": "staff", "permission": "access.roles.manage", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "RoleAssignment", "errors": ["ILLEGAL_TRANSITION", "LAST_BUSINESS_OWNER"], "audited": true, "events": ["access.role.changed", "access.coverage.changed"], "screens": ["admin/staff"] },
+
+    { "id": "listApprovalActions", "area": "admin", "method": "GET", "path": "/approval-actions", "summary": "Actions that can have approval limits", "auth": "staff", "permission": "access.roles.view", "response": "ApprovalAction[]", "screens": ["admin/staff"] },
+    { "id": "listLimits", "area": "admin", "method": "GET", "path": "/limits", "summary": "Approval limits in force", "auth": "staff", "permission": "access.roles.view", "query": { "roleId": "uuid?", "actionKey": "string?" }, "response": "ApprovalLimit[]", "screens": ["admin/staff"] },
+    { "id": "proposeLimitChange", "area": "admin", "method": "POST", "path": "/limit-changes", "summary": "Propose new approval limits for a role", "desc": "Always goes to the Business Owner (approval action access.limits.change). Applies at effectiveFrom once approved; requests already waiting keep the old limit.", "auth": "staff", "permission": "access.limits.propose", "body": { "roleId": "uuid", "changes": "LimitInput[]", "reason": "text", "effectiveFrom": "datetime" }, "response": "LimitChange", "status": 202, "errors": ["UNKNOWN_APPROVAL_ACTION", "VALIDATION_FAILED"], "audited": true, "approval": "Approval action access.limits.change. Business Owner approves every limit change", "events": ["access.approval.requested"], "screens": ["admin/staff"] },
+    { "id": "listLimitChanges", "area": "admin", "method": "GET", "path": "/limit-changes", "summary": "Proposed, scheduled and past limit changes", "auth": "staff", "permission": "access.roles.view", "paging": true, "query": { "status": "enum(pending_approval|scheduled|applied|rejected|cancelled)?", "roleId": "uuid?" }, "response": "LimitChange", "screens": ["admin/staff"] },
+    { "id": "cancelLimitChange", "area": "admin", "method": "POST", "path": "/limit-changes/{id}/cancel", "summary": "Withdraw a pending or scheduled limit change", "auth": "staff", "permission": "access.limits.propose", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "LimitChange", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "screens": ["admin/staff"] },
+    { "id": "checkAuthority", "area": "admin", "method": "POST", "path": "/authority-checks", "summary": "Can I do this, or who must approve it?", "desc": "Used by dialogs before submitting (refund over limit, payout run, hold) to show 'Within your limit' or 'Needs Business Owner approval'. Read-only.", "auth": "staff", "body": { "action": "string", "amount": "AmountInput?" }, "response": "AuthorityCheck", "errors": ["UNKNOWN_APPROVAL_ACTION"], "screens": ["admin/order", "admin/payouts", "admin/returns", "admin/finance"] },
+
+    { "id": "listApprovalRequests", "area": "admin", "method": "GET", "path": "/approval-requests", "summary": "Approval requests (waiting for me, mine, or all)", "desc": "view=to_decide lists requests the caller may decide now, oldest due first. view=all needs access.approvals.view-all.", "auth": "staff", "paging": true, "query": { "view": "enum(to_decide|requested_by_me|all)?", "status": "enum(pending|partially_approved|approved|rejected|returned|cancelled|expired)?", "actionKey": "string?", "module": "string?", "targetType": "string?", "targetId": "string?", "overdue": "bool?" }, "response": "ApprovalRequest", "screens": ["admin/dashboard", "admin/inbox", "admin/payouts", "admin/order", "admin/audit", "admin/staff"] },
+    { "id": "getApprovalRequest", "area": "admin", "method": "GET", "path": "/approval-requests/{id}", "summary": "One approval request with decisions and whether I can decide", "auth": "staff", "params": { "id": "uuid" }, "response": "ApprovalRequest", "screens": ["admin/payouts", "admin/order", "admin/audit"] },
+    { "id": "approveRequest", "area": "admin", "method": "POST", "path": "/approval-requests/{id}/approve", "summary": "Approve (first or second approval)", "desc": "Refused for the requester, for someone who already approved it, and for people whose limit does not cover the amount. Money approvals above stepUpAbove need a fresh 2-step code.", "auth": "staff", "params": { "id": "uuid" }, "body": { "note": "text?", "stepUpCode": "string?" }, "response": "ApprovalRequest", "errors": ["ILLEGAL_TRANSITION", "SELF_APPROVAL_NOT_ALLOWED", "NOT_ELIGIBLE_APPROVER", "ALREADY_APPROVED_BY_YOU", "STEP_UP_REQUIRED", "CONFLICT"], "audited": true, "events": ["access.approval.partially_approved", "access.approval.decided"], "screens": ["admin/payouts", "admin/order", "admin/staff", "admin/settings", "admin/inbox"] },
+    { "id": "rejectRequest", "area": "admin", "method": "POST", "path": "/approval-requests/{id}/reject", "summary": "Reject with a reason", "auth": "staff", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "ApprovalRequest", "errors": ["ILLEGAL_TRANSITION", "SELF_APPROVAL_NOT_ALLOWED", "NOT_ELIGIBLE_APPROVER"], "audited": true, "events": ["access.approval.decided"], "screens": ["admin/payouts", "admin/order", "admin/staff", "admin/settings"] },
+    { "id": "returnRequest", "area": "admin", "method": "POST", "path": "/approval-requests/{id}/return", "summary": "Send back to the requester with a comment", "auth": "staff", "params": { "id": "uuid" }, "body": { "comment": "text" }, "response": "ApprovalRequest", "errors": ["ILLEGAL_TRANSITION", "NOT_ELIGIBLE_APPROVER"], "audited": true, "events": ["access.approval.returned"], "screens": ["admin/payouts"] },
+    { "id": "resubmitRequest", "area": "admin", "method": "POST", "path": "/approval-requests/{id}/resubmit", "summary": "Requester resubmits after a return", "desc": "Earlier approvals are cleared. If the underlying record changed, the requesting module cancels and creates a new request instead.", "auth": "staff", "params": { "id": "uuid" }, "body": { "note": "text" }, "response": "ApprovalRequest", "errors": ["ILLEGAL_TRANSITION", "FORBIDDEN"], "audited": true, "events": ["access.approval.requested"], "screens": ["admin/payouts", "admin/order"] },
+    { "id": "cancelRequest", "area": "admin", "method": "POST", "path": "/approval-requests/{id}/cancel", "summary": "Requester withdraws a request", "auth": "staff", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "ApprovalRequest", "errors": ["ILLEGAL_TRANSITION", "FORBIDDEN"], "audited": true, "events": ["access.approval.decided"], "screens": ["admin/payouts", "admin/order"] },
+    { "id": "remindReviewers", "area": "admin", "method": "POST", "path": "/approval-requests/{id}/remind", "summary": "Remind eligible reviewers", "desc": "At most once per reminderMinIntervalMinutes per request.", "auth": "staff", "params": { "id": "uuid" }, "body": { "message": "text?" }, "response": { "notified": "StaffRef[]" }, "errors": ["ILLEGAL_TRANSITION", "REMINDER_TOO_SOON"], "events": ["access.approval.reminder_sent"], "screens": ["admin/payouts"] },
+
+    { "id": "listAwayPeriods", "area": "admin", "method": "GET", "path": "/away-periods", "summary": "Away periods (current and upcoming by default)", "auth": "staff", "permission": "access.roles.view", "paging": true, "query": { "accountId": "uuid?", "status": "enum(pending_approval|scheduled|active|ended|cancelled|rejected)?", "from": "date?", "to": "date?" }, "response": "AwayPeriod", "screens": ["admin/staff", "admin/inbox"] },
+    { "id": "createAwayPeriod", "area": "admin", "method": "POST", "path": "/away-periods", "summary": "Plan time away and who covers each role", "desc": "Anyone may plan their own; others need access.away.manage. Every role the person leads must be covered by someone holding that role (or Business Owner). delegateApprovals sends the delegation to the Business Owner.", "auth": "staff", "body": "AwayInput", "response": "AwayPeriod", "status": 201, "errors": ["COVERAGE_INVALID", "AWAY_OVERLAP", "FORBIDDEN"], "audited": true, "approval": "Approval action access.delegations.approve. Delegating approval authority needs Business Owner approval", "events": ["access.approval.requested"], "screens": ["admin/staff", "admin/inbox"] },
+    { "id": "endAwayPeriod", "area": "admin", "method": "POST", "path": "/away-periods/{id}/end", "summary": "End an away period early (back at work)", "auth": "staff", "params": { "id": "uuid" }, "response": "AwayPeriod", "errors": ["ILLEGAL_TRANSITION", "FORBIDDEN"], "audited": true, "events": ["access.away.ended", "access.coverage.changed"], "screens": ["admin/inbox"] },
+    { "id": "cancelAwayPeriod", "area": "admin", "method": "POST", "path": "/away-periods/{id}/cancel", "summary": "Cancel a planned away period", "auth": "staff", "params": { "id": "uuid" }, "body": { "reason": "text?" }, "response": "AwayPeriod", "errors": ["ILLEGAL_TRANSITION", "FORBIDDEN"], "audited": true, "screens": ["admin/staff"] },
+    { "id": "getCoverage", "area": "admin", "method": "GET", "path": "/coverage", "summary": "Who receives each role's work today, and coverage gaps", "auth": "staff", "response": "Coverage", "screens": ["admin/staff", "admin/inbox", "ops/queues"] },
+    { "id": "getMyAccess", "area": "admin", "method": "GET", "path": "/me", "summary": "My roles, permissions, limits and approvals waiting", "desc": "Drives Admin Center navigation and the approvals badge.", "auth": "staff", "response": "MyAccess", "screens": ["admin/dashboard", "admin/inbox"] }
+  ],
+  "events": {
+    "publishes": [
+      { "name": "access.approval.requested", "when": "An approval request is created or resubmitted", "payload": { "requestId": "uuid", "ref": "string", "actionKey": "string", "module": "string", "target": "ApprovalTarget", "amount": "Money?", "summary": "string", "requestedBy": "Actor", "eligibleRoleKeys": "string[]", "eligibleAccountIds": "uuid[]", "nominatedReviewerId": "uuid?", "dueAt": "datetime?" } },
+      { "name": "access.approval.partially_approved", "when": "A first approval is recorded and another is still needed", "payload": { "requestId": "uuid", "actionKey": "string", "module": "string", "target": "ApprovalTarget", "approvedBy": "Actor", "remainingApprovals": "int", "eligibleAccountIds": "uuid[]" } },
+      { "name": "access.approval.returned", "when": "A reviewer sends a request back with a comment", "payload": { "requestId": "uuid", "actionKey": "string", "module": "string", "target": "ApprovalTarget", "by": "Actor", "comment": "text", "requestedById": "string" } },
+      { "name": "access.approval.decided", "when": "A request reaches a final outcome", "payload": { "requestId": "uuid", "ref": "string", "actionKey": "string", "module": "string", "target": "ApprovalTarget", "outcome": "enum(approved|rejected|cancelled|expired)", "decidedBy": "Actor?", "reason": "text?", "amount": "Money?", "approverIds": "uuid[]", "requestedById": "string" } },
+      { "name": "access.approval.reminder_sent", "when": "Someone reminds the eligible reviewers, or the reminder job runs", "payload": { "requestId": "uuid", "toAccountIds": "uuid[]", "by": "Actor", "message": "text?" } },
+      { "name": "access.role.changed", "when": "A role is created, edited, archived, its permissions change, or it is assigned or removed", "payload": { "roleId": "uuid", "roleKey": "string", "change": "enum(created|updated|archived|permissions_changed|assigned|unassigned)", "accountId": "uuid?", "by": "Actor" } },
+      { "name": "access.limits.changed", "when": "An approved limit change takes effect", "payload": { "roleId": "uuid", "roleKey": "string", "actionKeys": "string[]", "limitChangeId": "uuid", "effectiveFrom": "datetime" } },
+      { "name": "access.coverage.changed", "when": "Who receives a role's work changes (lead/backups edited, away period starts or ends, assignment removed)", "payload": { "roleId": "uuid", "roleKey": "string", "leadAccountId": "uuid?", "receivingAccountIds": "uuid[]", "viaBackup": "bool" } },
+      { "name": "access.away.started", "when": "An away period begins", "payload": { "awayPeriodId": "uuid", "accountId": "uuid", "until": "datetime", "coverage": "AwayCoverageInput[]", "delegateApprovals": "bool" } },
+      { "name": "access.away.ended", "when": "An away period ends (on time or early)", "payload": { "awayPeriodId": "uuid", "accountId": "uuid" } }
+    ],
+    "consumes": [
+      { "name": "identity.invitation.accepted", "does": "Activate pending_acceptance role assignments of a newly accepted staff member" },
+      { "name": "identity.account.disabled", "does": "Revoke all role assignments, remove the person as lead/backup, drop them from eligible approvers of open requests, and publish access.coverage.changed with the gap" },
+      { "name": "identity.account.locked", "does": "Treat a locked staff member as unavailable for routing (backup receives) until unlocked" },
+      { "name": "identity.account.unlocked", "does": "Restore routing to the unlocked staff member" }
+    ]
+  },
+  "permissions": [
+    { "key": "access.roles.view", "audience": "staff", "desc": "View roles, staff members, limits, coverage and away periods" },
+    { "key": "access.roles.manage", "audience": "staff", "desc": "Create and edit roles and their permissions, assign and remove roles, set leads and backups, invite staff (Platform Administrator). Does not include approval limits." },
+    { "key": "access.limits.propose", "audience": "staff", "desc": "Propose approval-limit changes (Platform Administrator, Business Owner)" },
+    { "key": "access.limits.approve", "audience": "staff", "desc": "Decide approval-limit changes and delegations of approval authority (Business Owner only)" },
+    { "key": "access.approvals.view-all", "audience": "staff", "desc": "See every approval request, not only those I requested or may decide" },
+    { "key": "access.away.manage", "audience": "staff", "desc": "Plan away periods for other staff members" }
+  ],
+  "approvalActions": [
+    { "key": "access.limits.change", "desc": "Change an approval limit or second-review threshold of a role (applies at effectiveFrom)", "limit": "none", "secondReviewer": "always", "approvers": "Business Owner (never the proposer; Platform Administrators can propose but never approve)" },
+    { "key": "access.roles.sensitive-grant", "desc": "Grant sensitive permissions to a role, assign a role carrying them, assign the Business Owner role, or assign any role to yourself", "limit": "none", "secondReviewer": "always", "approvers": "A second staff member with access.roles.manage; Business Owner when the Business Owner role or the requester's own roles are involved" },
+    { "key": "access.delegations.approve", "desc": "Temporary delegation of approval authority during an away period (granting access is not financial authority)", "limit": "none", "secondReviewer": "always", "approvers": "Business Owner" }
+  ],
+  "jobs": [
+    { "name": "access.sync-registry", "schedule": "on boot", "does": "Upsert permissions and approval actions from enabled module manifests; mark those of disabled modules unavailable (kept for history); seed the system roles on first boot" },
+    { "name": "access.apply-limit-changes", "schedule": "every minute", "does": "Apply scheduled limit changes whose effectiveFrom has passed; publish access.limits.changed" },
+    { "name": "access.run-away-periods", "schedule": "every 5 min", "does": "Start scheduled away periods and end active ones at their time; publish access.away.started/ended and access.coverage.changed" },
+    { "name": "access.expire-approval-requests", "schedule": "every 15 min", "does": "Expire open requests past expires_at (dueAt + grace, or approvalRequestTtlHours) and publish access.approval.decided with outcome expired" },
+    { "name": "access.remind-approvals", "schedule": "every 30 min", "does": "Remind eligible reviewers of requests due within reminderHoursBeforeDue or waiting longer than reminderAfterHours; escalate to the role's escalation role when overdue" },
+    { "name": "access.expire-assignments", "schedule": "hourly", "does": "Expire role assignments past expiresAt (temporary access)" }
+  ],
+  "settings": [
+    { "key": "approvalRequestTtlHours", "default": 72, "desc": "Open requests without a due date expire after this" },
+    { "key": "reminderHoursBeforeDue", "default": 4, "desc": "Remind reviewers this long before dueAt" },
+    { "key": "reminderAfterHours", "default": 24, "desc": "Remind reviewers of undated requests waiting this long" },
+    { "key": "reminderMinIntervalMinutes", "default": 60, "desc": "Manual reminders per request" },
+    { "key": "stepUpAbove", "default": { "amount": 1000000, "currency": "USD" }, "desc": "Money approvals above this need a fresh 2-step code" },
+    { "key": "sensitivePermissionPrefixes", "default": ["access.", "identity.staff-accounts.", "finance.", "audit.entries.export", "settings.changes."], "desc": "Granting these needs a second reviewer" }
+  ],
+  "errorCodes": {
+    "SELF_APPROVAL_NOT_ALLOWED": { "status": 403, "meaning": "You cannot approve or reject your own request." },
+    "NOT_ELIGIBLE_APPROVER": { "status": 403, "meaning": "Your roles' limits do not cover this action or amount. details.eligibleRoles lists who can." },
+    "ALREADY_APPROVED_BY_YOU": { "status": 409, "meaning": "The second approval must come from a different person." },
+    "STEP_UP_REQUIRED": { "status": 401, "meaning": "Enter a current 2-step code (stepUpCode) to approve this amount." },
+    "SYSTEM_ROLE": { "status": 409, "meaning": "Seeded roles cannot be archived or have their key changed." },
+    "ROLE_IN_USE": { "status": 409, "meaning": "Remove the role from all staff before archiving it." },
+    "LAST_BUSINESS_OWNER": { "status": 409, "meaning": "At least one active Business Owner must remain." },
+    "COVERAGE_INVALID": { "status": 400, "meaning": "Lead and backups must hold the role, a backup cannot be the lead, and every led role needs cover. details.issues." },
+    "AWAY_OVERLAP": { "status": 409, "meaning": "This person already has an away period in that time." },
+    "UNKNOWN_PERMISSION": { "status": 400, "meaning": "details.keys are not in the permission registry (or their module is disabled)." },
+    "UNKNOWN_APPROVAL_ACTION": { "status": 400, "meaning": "The action key is not registered by any enabled module." },
+    "REMINDER_TOO_SOON": { "status": 429, "meaning": "Reviewers were reminded recently; try again after details.nextAllowedAt." }
+  },
+  "notes": [
+    "Granting access is not financial authority. Permissions decide which screens and actions a person can open; approval limits decide how much they may approve. A permission such as finance.payouts.approve is necessary but never sufficient: check() also needs a limit covering the amount. Platform Administrators (access.roles.manage) can grant permissions but cannot set or approve limits, and cannot approve their own requests.",
+    "Approval actions are declared by the owning module in its spec and manifest (`approvalActions`: key, desc, limit money|units|percent|none, secondReviewer always|above-limit|never, approvers; see FORMAT.md), next to its permissions, and registered at boot. Every endpoint `approval` rule names its action key. Declared actions include finance.payouts.release, finance.holds.place / finance.holds.release, finance.adjustments.record, returns.refunds.approve, sellers.sellers.restrict / sellers.sellers.suspend (always second reviewer) / sellers.sellers.close, offers.prices.change (percent), inventory.adjustments.apply (units), purchasing.orders.send, shipping.claims.open, support.remedies.approve, wallet.goodwill.grant, promotions.budgets.approve, advertising.rules.change, customers.accounts.close-with-obligations, trust.enforcements.reverse and settings.changes.apply. access declares access.limits.change, access.roles.sensitive-grant and access.delegations.approve. A catalog publication override action (catalog.products.publication-override) is not declared yet; catalog is owned by the lead.",
+    "Second reviewer logic: if the requester's own limit covers the amount but it is above the second-review threshold, the request starts with requesterCountsAsFirst = true and needs one more approver from secondReviewerRoleKeys. If the amount is above the requester's limit, it needs approvers whose limits cover it (and a second one above their threshold). Actions declared with secondReviewer = always need one approver other than the requester whatever the amount.",
+    "Modules follow one pattern: call check(); if allowed, act; if approval_required, call requestApproval(), keep their record pending, return 202 or APPROVAL_REQUIRED with details.approvalRequestId, and finish on access.approval.decided (approved: execute; rejected/cancelled/expired: revert the pending record). They embed approvalInfo() in their responses so screens can show who must approve.",
+    "Lead and backups: notices and work for a role go to its lead; while the lead is away (or locked) they go to the first available backup and the lead sees them on return. notifications and workqueues use resolveRecipients(); routing changes are announced with access.coverage.changed.",
+    "Seeded system roles (keys): business_owner, platform_administrator, official_store_manager, purchasing_manager, inventory_manager, warehouse_manager, order_manager, shipping_manager, returns_manager, catalog_manager, seller_manager, customer_support_manager, finance_manager, marketing_manager, advertising_manager, content_manager, trust_and_risk_manager, reports_analyst, plus task roles warehouse_worker, finance_staff, support_agent. Seeded limits are example values from the prototype and must be confirmed by the Business Owner.",
+    "Every write here is recorded through audit.record with before/after (permission sets, limit values, coverage) and the approval request id."
+  ]
+}

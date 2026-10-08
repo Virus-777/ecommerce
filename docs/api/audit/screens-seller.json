@@ -1,0 +1,3011 @@
+[
+  {
+    "screen": "seller/setup",
+    "element": "Account status card (Approved, since date)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/sellers/setup",
+      "GET /api/seller/sellers/account"
+    ]
+  },
+  {
+    "screen": "seller/setup",
+    "element": "Product approval card (n of m approved, %, in review, changes requested)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/sellers/setup"
+    ],
+    "note": "SetupChecklist.productApproval"
+  },
+  {
+    "screen": "seller/setup",
+    "element": "Payout readiness card (Verification pending + explanation)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/sellers/setup",
+      "GET /api/seller/sellers/payout-account"
+    ]
+  },
+  {
+    "screen": "seller/setup",
+    "element": "Setup checklist: 6 steps with state, detail, CTA; \"x of y complete\" meter",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/sellers/setup"
+    ],
+    "note": "steps[], completed, total"
+  },
+  {
+    "screen": "seller/setup",
+    "element": "Payout verification step: \"Confirm deposits\" (enter the two test-deposit amounts)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/finance/payout-destination/confirm-deposits"
+    ],
+    "note": "sellers.json says deposit confirmation belongs to finance (seller/finance), but finance has only GET /payout-destination in the seller area; no endpoint accepts the micro-deposit amounts. Fixed: Added confirmDeposits (two Money amounts; owner-only permission finance.destinations.confirm; attempts limit), DestinationStatus.depositsSentAt and depositAttemptsLeft.",
+    "proposal": {
+      "module": "finance",
+      "method": "POST",
+      "area": "seller",
+      "path": "/payout-destination/confirm-deposits",
+      "summary": "Confirm the two micro-deposit amounts to verify the payout destination (owner only)",
+      "fields": {
+        "amounts": "Money[2]",
+        "response": "{ destination: DestinationStatus, review: DestinationReview? }"
+      }
+    },
+    "resolvedBy": "people"
+  },
+  {
+    "screen": "seller/setup",
+    "element": "Launch readiness review: \"Request review\"",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/sellers/setup/launch-review"
+    ]
+  },
+  {
+    "screen": "seller/setup",
+    "element": "\"What goes live after review\" list (product, review state, outcome)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/sellers/setup"
+    ],
+    "note": "goLivePreview"
+  },
+  {
+    "screen": "seller/setup",
+    "element": "Seller Manager card (name, reply target)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/sellers/setup"
+    ],
+    "note": "accountManager"
+  },
+  {
+    "screen": "seller/setup",
+    "element": "Help links while you set up (fees, image standards, dispatch, fixing submissions)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/help/articles"
+    ],
+    "note": "Public help content with audience=seller; the endpoint lists seller/help among its screens."
+  },
+  {
+    "screen": "seller/dashboard",
+    "element": "Page header: store name and \"updated\" time",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller/SellerDashboard",
+      "gql seller:Query.mySeller",
+      "gql seller:DashboardMetrics.asOf"
+    ]
+  },
+  {
+    "screen": "seller/dashboard",
+    "element": "Work for today tiles (overdue dispatch, due today, new orders, low/out of stock, open returns, unanswered messages) with counts and subtitles",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller/SellerDashboard",
+      "gql seller:DashboardMetrics.workToday",
+      "GET /api/seller/reports/dashboard"
+    ]
+  },
+  {
+    "screen": "seller/dashboard",
+    "element": "Dispatch deadlines table (order, placed, buyer, items, deadline, next action), most urgent first",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Query.sellerOrders",
+      "GET /api/seller/orders/orders"
+    ],
+    "note": "tabs=new,preparing sort=dispatch_deadline"
+  },
+  {
+    "screen": "seller/dashboard",
+    "element": "Sales card: 14-day sales with delta, orders and average, today so far, daily line chart",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:DashboardMetrics.kpis",
+      "gql seller:DashboardMetrics.series",
+      "GET /api/seller/reports/dashboard"
+    ]
+  },
+  {
+    "screen": "seller/dashboard",
+    "element": "Payouts card: pending, available, next payout date and amount, destination, held, schedule text",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Seller.balance",
+      "GET /api/seller/finance/balances"
+    ]
+  },
+  {
+    "screen": "seller/dashboard",
+    "element": "Performance card: on-time dispatch, cancellation rate, message response time against targets",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Seller.performance",
+      "GET /api/seller/sellers/performance"
+    ]
+  },
+  {
+    "screen": "seller/dashboard",
+    "element": "Announcements (title, Policy badge, text, effective date, \"Read the change\" link, posted date)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Query.upcomingChanges",
+      "GET /api/seller/settings/upcoming-changes"
+    ]
+  },
+  {
+    "screen": "seller/products",
+    "element": "Offers table / phone cards: product, variant, SKU, price, stock with low/out highlight, condition, review state and publication as separate columns",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/offers/offers"
+    ]
+  },
+  {
+    "screen": "seller/products",
+    "element": "Inline row notes: changes-requested reason, rejection reason, suspension reason, \"Submitted Oct 7 · review usually 2 business days\", \"Missing images and identifiers\", \"Hidden by you on Oct 2\"",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/offers/offers",
+      "GET /api/seller/catalog/products"
+    ],
+    "note": "SellerOfferRow.reviewNote/statusReason plus ProductAdmin.missing, submission.submittedAt/expectedReviewBy, reviewLog. Needs two list calls joined by productId."
+  },
+  {
+    "screen": "seller/products",
+    "element": "Status tabs with counts (All, Active, Draft, Submitted, Changes requested, Rejected, Hidden or suspended) and \"24 offers across 11 products\"",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/offers/offers/counts",
+      "GET /api/seller/offers/offers"
+    ],
+    "note": "Counts return all/active/draft/paused/outOfStock/ineligible/removed/productChangesRequested only. Nothing for Submitted (product in review), Rejected, or the number of distinct products. Fixed: Counts gain productSubmitted, productRejected, hiddenOrSuspended and productCount (for \"24 offers across 11 products\"); list gains the hiddenOrSuspended filter.",
+    "proposal": {
+      "module": "offers",
+      "change": "add fields productSubmitted, productRejected, hiddenOrSuspended and productCount to the GET /offers/counts response"
+    },
+    "resolvedBy": "fulfilment"
+  },
+  {
+    "screen": "seller/products",
+    "element": "Search name, seller SKU, GTIN or model",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/offers/offers"
+    ],
+    "note": "q"
+  },
+  {
+    "screen": "seller/products",
+    "element": "Category filter",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/offers/offers",
+      "gql seller:Query.categories"
+    ],
+    "note": "categoryId"
+  },
+  {
+    "screen": "seller/products",
+    "element": "Publication filter (Active, Hidden, Suspended, Not published)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/offers/offers"
+    ],
+    "note": "status (active|paused|ineligible|draft) plus productReviewState"
+  },
+  {
+    "screen": "seller/products",
+    "element": "Content filter (Missing images, Missing identifiers, Low stock)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/offers/offers"
+    ],
+    "note": "stockState covers Low stock only; there is no filter for missing images or identifiers. Fixed: Added query missingContent enum(images|identifiers) and SellerOfferRow.contentGaps. content_gaps is copied onto offers from catalog ProductAdmin.missing when catalog product events arrive. Low stock stays stockState=low_stock.",
+    "proposal": {
+      "module": "offers",
+      "change": "add query param missingContent enum(images|identifiers) to GET /offers (resolved from catalog missing[])"
+    },
+    "resolvedBy": "fulfilment"
+  },
+  {
+    "screen": "seller/products",
+    "element": "Pagination / phone lazy load",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/offers/offers"
+    ]
+  },
+  {
+    "screen": "seller/products",
+    "state": "Rows selected",
+    "element": "Bulk \"Change price\" for selected rows",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/offers/price-changes"
+    ]
+  },
+  {
+    "screen": "seller/products",
+    "state": "Rows selected",
+    "element": "Bulk \"Update stock\" for selected rows",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/inventory/adjustments/batch"
+    ]
+  },
+  {
+    "screen": "seller/products",
+    "state": "Rows selected",
+    "element": "Bulk \"Hide offers\" for selected rows",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/offers/offers/bulk-pause"
+    ],
+    "note": "Only single-offer pause exists. Price and stock have bulk endpoints, and orders has bulk-start-preparing. Fixed: New bulk pause (up to 100) with a result for each item; phase 1, like selected-row price changes.",
+    "proposal": {
+      "module": "offers",
+      "method": "POST",
+      "area": "seller",
+      "path": "/offers/bulk-pause",
+      "summary": "Hide several own offers at once (per-item result)",
+      "fields": {
+        "offerIds": "uuid[]",
+        "reason": "string?",
+        "response": "{ results: { offerId, ok, error? }[] }"
+      }
+    },
+    "resolvedBy": "fulfilment"
+  },
+  {
+    "screen": "seller/products",
+    "state": "Rows selected",
+    "element": "Bulk \"Export\" of selected offers",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/offers/offers/exports",
+      "GET /api/seller/offers/offers/exports/{id}"
+    ],
+    "proposal": {
+      "module": "offers",
+      "method": "POST",
+      "area": "seller",
+      "path": "/offers/exports",
+      "summary": "Export own offers (selected ids or current filters) as CSV",
+      "fields": {
+        "offerIds": "uuid[]?",
+        "filters": "json?",
+        "format": "enum(csv)",
+        "response": "ExportJob"
+      }
+    },
+    "note": "Fixed: Module-owned export via reports.requestExport, dataset offers.seller.offers (offerIds or filters), with a status/link endpoint and the new seller permission offers.offers.export.",
+    "resolvedBy": "fulfilment"
+  },
+  {
+    "screen": "seller/products",
+    "state": "Rows selected",
+    "element": "Clear selection / row checkboxes",
+    "kind": "action",
+    "status": "client-only",
+    "api": []
+  },
+  {
+    "screen": "seller/products",
+    "element": "Row action \"Show offer\" (hidden offer)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/offers/offers/{id}/resume"
+    ]
+  },
+  {
+    "screen": "seller/products",
+    "element": "Row action \"Send documents\" (suspended offer: proof of purchase requested by Oct 12)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/trust/evidence-requests",
+      "POST /api/seller/trust/evidence-requests/{id}/answer",
+      "POST /api/seller/media/uploads"
+    ]
+  },
+  {
+    "screen": "seller/products",
+    "element": "Row \"More actions\" menu (hide, end, delete draft, publish draft)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/offers/offers/{id}/pause",
+      "POST /api/seller/offers/offers/{id}/end",
+      "DELETE /api/seller/offers/offers/{id}",
+      "POST /api/seller/offers/offers/{id}/publish"
+    ]
+  },
+  {
+    "screen": "seller/products",
+    "state": "Add product",
+    "element": "\"Add a product\" modal: match existing vs create new",
+    "kind": "action",
+    "status": "client-only",
+    "api": []
+  },
+  {
+    "screen": "seller/catalog-match",
+    "element": "Catalog search with \"Search by\" Name / Model number / GTIN / Brand",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/catalog/match"
+    ],
+    "note": "q, gtin"
+  },
+  {
+    "screen": "seller/catalog-match",
+    "state": "Results",
+    "element": "Result cards: match badge, category path, brand, model number, GTIN, variations, in-the-box contents, offer count and \"from\" price, \"You sell …\" note",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/catalog/match"
+    ],
+    "note": "CatalogMatch has ProductSummary (no modelNumber, categoryPath or includedItems), variants (gtin, options), offerCount and matchedOn gtin|model|title. Missing: model number, category path, in-the-box list, lowest offer price, the seller's own offers on the product, and a match quality that can say \"same model, different bundle\" or \"different model\". Fixed: CatalogMatch gains matchQuality (exact|same_model_different_bundle|different_model|title_only), modelNumber, categoryPath, includedItems, lowestPrice and myOffers (offers.listOwnOffersForProduct).",
+    "proposal": {
+      "module": "catalog",
+      "change": "add modelNumber, categoryPath, includedItems, lowestPrice (Money), myOffers ({variantId, condition}[]) and matchQuality enum(exact|same_model_different_bundle|different_model|title) to CatalogMatch"
+    },
+    "resolvedBy": "catalog"
+  },
+  {
+    "screen": "seller/catalog-match",
+    "state": "Results",
+    "element": "Sort results (Best match, Most offers, Newest)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/catalog/match"
+    ],
+    "proposal": {
+      "module": "catalog",
+      "change": "add query param sort enum(best_match|most_offers|newest) to GET /catalog/match"
+    },
+    "note": "Fixed: Added sort enum(best_match|most_offers|newest) to matchCatalog.",
+    "resolvedBy": "catalog"
+  },
+  {
+    "screen": "seller/catalog-match",
+    "state": "Results",
+    "element": "Result count line (\"3 results for … in Electronics\")",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/catalog/match"
+    ],
+    "note": "paging total"
+  },
+  {
+    "screen": "seller/catalog-match",
+    "state": "No match",
+    "element": "\"Close matches that are not the same model\" list (title, model, offer count, Different model badge)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/catalog/match"
+    ],
+    "note": "Same gap as the result cards: no model number and no match quality in CatalogMatch. Fixed: Different-model matches are still returned with matchQuality different_model and modelNumber when there is no exact match.",
+    "proposal": {
+      "module": "catalog",
+      "change": "same as Results: add modelNumber and matchQuality to CatalogMatch"
+    },
+    "resolvedBy": "catalog"
+  },
+  {
+    "screen": "seller/catalog-match",
+    "state": "No match",
+    "element": "\"Search by GTIN\" from the empty state",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/catalog/match"
+    ],
+    "note": "gtin"
+  },
+  {
+    "screen": "seller/product-new",
+    "element": "Submission form data: category path, basic details, key features, specifications, variations, images, identifiers, included items",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller/SellerProductDetail",
+      "gql seller:Query.myProduct",
+      "GET /api/seller/catalog/products/{id}"
+    ]
+  },
+  {
+    "screen": "seller/product-new",
+    "element": "\"Change category\" (category picker)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "gql seller:Query.categories",
+      "GET /api/seller/catalog/categories/{id}/attributes"
+    ]
+  },
+  {
+    "screen": "seller/product-new",
+    "element": "Category-driven specification fields (required attributes, options, units) and image standards",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/catalog/categories/{id}/attributes",
+      "gql seller:Category.attributes"
+    ]
+  },
+  {
+    "screen": "seller/product-new",
+    "element": "Brand select, with \"Brand not listed? Request it\" hint",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/catalog/brands",
+      "POST /api/seller/catalog/products/{id}/submit"
+    ],
+    "note": "The seller area has no brand list (only GET /api/store/catalog/brands, a store endpoint for store/brand), and ProductInput accepts brandId only, so a seller cannot request a new brand. Fixed: Added seller listBrandsSeller and ProductInput.requestedBrand {name, website, note}; on submit it becomes an under_review brand (catalog.brand.requested) that staff decide with setBrandStatus; approve fails with BRAND_NOT_ACTIVE until then.",
+    "proposal": {
+      "module": "catalog",
+      "method": "GET",
+      "area": "seller",
+      "path": "/brands",
+      "summary": "Brands for the submission form (search) — plus add requestedBrandName: string? to ProductInput so a missing brand is reviewed with the product",
+      "fields": {
+        "q": "string?",
+        "response": "Brand[]"
+      }
+    },
+    "resolvedBy": "catalog"
+  },
+  {
+    "screen": "seller/product-new",
+    "element": "Save draft",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/catalog/products",
+      "PATCH /api/seller/catalog/products/{id}"
+    ]
+  },
+  {
+    "screen": "seller/product-new",
+    "element": "Submit for review / Resubmit for review",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/catalog/products/{id}/submit"
+    ]
+  },
+  {
+    "screen": "seller/product-new",
+    "state": "Changes requested",
+    "element": "\"Note to the reviewer\" on resubmission",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/catalog/products/{id}/submit",
+      "gql admin:ProductSubmission.note"
+    ],
+    "note": "The submit endpoint has no body. Fixed: submitProduct body {note}; stored as Submission.note and in the review log; selected in AdminProductReview and SellerProductDetail.",
+    "proposal": {
+      "module": "catalog",
+      "change": "add body { note: text? } to POST /products/{id}/submit and record it in reviewLog"
+    },
+    "resolvedBy": "catalog"
+  },
+  {
+    "screen": "seller/product-new",
+    "element": "Variation matrix: color, seller SKU, price, quantity, GTIN per variation",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PATCH /api/seller/catalog/products/{id}",
+      "POST /api/seller/offers/offers",
+      "gql seller:Product.myOffers"
+    ],
+    "note": "ProductInput.variants carries options and gtin. SKU, price and quantity are draft offers per variant (publishOnApproval)."
+  },
+  {
+    "screen": "seller/product-new",
+    "element": "Upload images (drag and drop / browse) with checks",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/media/uploads",
+      "POST /api/seller/media/uploads/{id}/complete",
+      "POST /api/seller/media/assets/{id}/checks"
+    ]
+  },
+  {
+    "screen": "seller/product-new",
+    "element": "Image errors and standards (minimum count, main image overlay)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/catalog/categories/{id}/attributes",
+      "gql seller:Product.missing",
+      "POST /api/seller/media/assets/{id}/checks"
+    ]
+  },
+  {
+    "screen": "seller/product-new",
+    "element": "Identifiers: GTIN / UPC, manufacturer part number, \"This product has no GTIN\" confirmation",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PATCH /api/seller/catalog/products/{id}",
+      "gql seller:Product.manufacturerPartNumber",
+      "gql seller:Product.noGtin"
+    ],
+    "note": "ProductInput has variants[].gtin only. There is no manufacturer part number field and no flag to confirm the product has no GTIN. Fixed: Added manufacturerPartNumber and noGtin to ProductInput and Product (REST and GraphQL); submit requires a GTIN on every variant unless noGtin is set.",
+    "proposal": {
+      "module": "catalog",
+      "change": "add manufacturerPartNumber: string? and hasNoGtin: bool? to ProductInput and Product"
+    },
+    "resolvedBy": "catalog"
+  },
+  {
+    "screen": "seller/product-new",
+    "element": "Included accessories: tick items, add another item",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PATCH /api/seller/catalog/products/{id}"
+    ],
+    "note": "includedItems"
+  },
+  {
+    "screen": "seller/product-new",
+    "element": "\"Ready to submit?\" panel: % complete, checklist, status, last saved by/at, review time",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Product.missing",
+      "gql seller:Product.submission",
+      "gql seller:Product.reviewState"
+    ]
+  },
+  {
+    "screen": "seller/product-new",
+    "state": "Changes requested",
+    "element": "Changes-requested banner: reviewer, date, reason, numbered field comments, submission ref, highlighted fields",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Product.reviewLog",
+      "gql seller:Product.submission"
+    ]
+  },
+  {
+    "screen": "seller/product-new",
+    "state": "Changes requested",
+    "element": "Review history timeline",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Product.reviewLog"
+    ]
+  },
+  {
+    "screen": "seller/product-new",
+    "state": "Draft",
+    "element": "\"Before you submit\" duplicate note and \"Search the catalog again\"",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/catalog/match"
+    ]
+  },
+  {
+    "screen": "seller/offer",
+    "element": "Product card (shared content, read-only): Approved/Active status, title, brand, model, GTIN, category path, other offer count, variation select, in-the-box list",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Query.myProduct",
+      "gql seller/SellerProductDetail"
+    ],
+    "note": "SellerProductDetail names seller/offer, but myProduct returns NOT_FOUND when the seller neither submitted the product nor has an offer on it, which is exactly the create-offer case. GET /api/seller/catalog/products/{id} is own products only. Query.product exists in the seller schema but no persisted seller query uses it. Fixed: getProductForSeller/myProduct now resolve any approved, active product (the create-offer case), with reviewState visible; only another seller's unapproved product or a hidden/suspended product without the caller's offer returns NOT_FOUND.",
+    "proposal": {
+      "module": "catalog",
+      "change": "let Query.myProduct (getProductForSeller) resolve any approved, active catalog product (shared content, variants, includedItems, offerCount) for the offer form, or add a persisted seller query for the create-offer screen built on Query.product"
+    },
+    "resolvedBy": "catalog"
+  },
+  {
+    "screen": "seller/offer",
+    "element": "\"Suggest a correction\" to shared content",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/catalog/products/{id}/corrections"
+    ]
+  },
+  {
+    "screen": "seller/offer",
+    "element": "Condition and condition notes (used: list what is missing from the box)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/offers/offers"
+    ],
+    "note": "condition, conditionNotes, missingItems"
+  },
+  {
+    "screen": "seller/offer",
+    "element": "Price hint: lowest New offer today and Official Store price",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/offers/offers/preview",
+      "gql seller:Offer.priceContext"
+    ]
+  },
+  {
+    "screen": "seller/offer",
+    "element": "Price, quantity, seller SKU, low-stock alert",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/offers/offers"
+    ]
+  },
+  {
+    "screen": "seller/offer",
+    "element": "Shipping profile options (\"Free Standard over $49\", Edit profiles)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/shipping/profiles"
+    ]
+  },
+  {
+    "screen": "seller/offer",
+    "element": "Dispatch time and shipping profile selection",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/offers/offers"
+    ],
+    "note": "dispatchBusinessDays, shippingProfileId"
+  },
+  {
+    "screen": "seller/offer",
+    "element": "Customer delivery preview (\"Customers in Portland, OR see: Arrives …\")",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/offers/offers/preview"
+    ]
+  },
+  {
+    "screen": "seller/offer",
+    "element": "Return policy choice (30-day baseline, 60-day, 60-day with free return shipping) and baseline rule",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/offers/offers/preview",
+      "POST /api/seller/offers/offers"
+    ],
+    "note": "returnBaseline; ReturnTermsInput"
+  },
+  {
+    "screen": "seller/offer",
+    "element": "Warranty select",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/offers/offers"
+    ],
+    "note": "WarrantyInput"
+  },
+  {
+    "screen": "seller/offer",
+    "element": "Fee and earnings preview per unit (Example badge)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/finance/fee-schedule",
+      "gql seller:Offer.earningsPreview"
+    ],
+    "note": "Before the offer exists the client applies the fee-schedule rate; after save, Offer.earningsPreview(price)."
+  },
+  {
+    "screen": "seller/offer",
+    "element": "Save draft",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/offers/offers",
+      "PATCH /api/seller/offers/offers/{id}"
+    ]
+  },
+  {
+    "screen": "seller/offer",
+    "element": "Publish offer",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/offers/offers",
+      "POST /api/seller/offers/offers/{id}/publish"
+    ]
+  },
+  {
+    "screen": "seller/inventory",
+    "element": "Summary cards: in stock (SKUs, units), low stock, out of stock, reserved units",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/inventory/summary",
+      "gql seller:Query.myStockSummary"
+    ]
+  },
+  {
+    "screen": "seller/inventory",
+    "element": "Search product or SKU, stock status filter, category filter",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/inventory/stock-items"
+    ]
+  },
+  {
+    "screen": "seller/inventory",
+    "element": "Stock table: product/SKU/variant, available, reserved, low-stock threshold, status, last updated",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/inventory/stock-items"
+    ]
+  },
+  {
+    "screen": "seller/inventory",
+    "element": "Inline quantity edits with \"Save N changes\" (asks for a reason)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/inventory/adjustments/batch"
+    ]
+  },
+  {
+    "screen": "seller/inventory",
+    "element": "Export",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/inventory/stock-items/exports",
+      "GET /api/seller/inventory/stock-items/exports/{id}"
+    ],
+    "proposal": {
+      "module": "inventory",
+      "method": "POST",
+      "area": "seller",
+      "path": "/exports",
+      "summary": "Export own stock rows (current filters) as CSV",
+      "fields": {
+        "filters": "json?",
+        "format": "enum(csv)",
+        "response": "ExportJob"
+      }
+    },
+    "note": "Fixed: Module-owned export via reports.requestExport, dataset inventory.seller.stock, with a status/link endpoint and the new seller permission inventory.stock.export.",
+    "resolvedBy": "fulfilment"
+  },
+  {
+    "screen": "seller/inventory",
+    "element": "Recent adjustments table (when, SKU, change and before→after, reason and note, by)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/inventory/movements"
+    ]
+  },
+  {
+    "screen": "seller/inventory",
+    "state": "Adjust stock",
+    "element": "Adjust modal: available now and reserved for the item",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/inventory/stock-items/{id}"
+    ]
+  },
+  {
+    "screen": "seller/inventory",
+    "state": "Adjust stock",
+    "element": "Save adjustment (new quantity, reason, note)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/inventory/stock-items/{id}/adjustments"
+    ]
+  },
+  {
+    "screen": "seller/bulk-update",
+    "element": "Download the template",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "GET /api/seller/offers/bulk-updates/template"
+    ],
+    "note": "Plan ch. 20 Phase 2 (Seller expansion: bulk updates, better seller reports, staff access); spec endpoint phase 2."
+  },
+  {
+    "screen": "seller/bulk-update",
+    "element": "Upload file / Replace file / Upload a corrected file",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/seller/media/uploads",
+      "POST /api/seller/offers/bulk-updates"
+    ],
+    "note": "Plan ch. 20 Phase 2 (Seller expansion: bulk updates, better seller reports, staff access); spec endpoint phase 2."
+  },
+  {
+    "screen": "seller/bulk-update",
+    "state": "Preview",
+    "element": "Totals: rows in file, ready (price/stock changes), errors, unchanged",
+    "kind": "data",
+    "status": "later",
+    "api": [
+      "GET /api/seller/offers/bulk-updates/{id}"
+    ],
+    "note": "Plan ch. 20 Phase 2 (Seller expansion: bulk updates, better seller reports, staff access); spec endpoint phase 2."
+  },
+  {
+    "screen": "seller/bulk-update",
+    "state": "Preview",
+    "element": "Row-by-row preview with before → after and error text; All / Errors / Ready filter",
+    "kind": "data",
+    "status": "later",
+    "api": [
+      "GET /api/seller/offers/bulk-updates/{id}/rows"
+    ],
+    "note": "Plan ch. 20 Phase 2 (Seller expansion: bulk updates, better seller reports, staff access); spec endpoint phase 2."
+  },
+  {
+    "screen": "seller/bulk-update",
+    "state": "Preview",
+    "element": "Download correction report",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "GET /api/seller/offers/bulk-updates/{id}/correction-report"
+    ],
+    "note": "Plan ch. 20 Phase 2 (Seller expansion: bulk updates, better seller reports, staff access); spec endpoint phase 2."
+  },
+  {
+    "screen": "seller/bulk-update",
+    "state": "Preview",
+    "element": "Apply valid rows",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/seller/offers/bulk-updates/{id}/apply"
+    ],
+    "note": "Plan ch. 20 Phase 2 (Seller expansion: bulk updates, better seller reports, staff access); spec endpoint phase 2."
+  },
+  {
+    "screen": "seller/bulk-update",
+    "state": "Applied",
+    "element": "Applied summary: updated, skipped, price changes, stock changes, applied by/at",
+    "kind": "data",
+    "status": "later",
+    "api": [
+      "GET /api/seller/offers/bulk-updates/{id}"
+    ],
+    "note": "Plan ch. 20 Phase 2 (Seller expansion: bulk updates, better seller reports, staff access); spec endpoint phase 2."
+  },
+  {
+    "screen": "seller/bulk-update",
+    "state": "Applied",
+    "element": "Correction report table and \"Download report (CSV)\"",
+    "kind": "data",
+    "status": "later",
+    "api": [
+      "GET /api/seller/offers/bulk-updates/{id}/rows",
+      "GET /api/seller/offers/bulk-updates/{id}/correction-report"
+    ],
+    "note": "Plan ch. 20 Phase 2 (Seller expansion: bulk updates, better seller reports, staff access); spec endpoint phase 2."
+  },
+  {
+    "screen": "seller/bulk-update",
+    "state": "Applied",
+    "element": "Upload history with per-file report links",
+    "kind": "data",
+    "status": "later",
+    "api": [
+      "GET /api/seller/offers/bulk-updates",
+      "GET /api/seller/offers/bulk-updates/{id}/correction-report"
+    ],
+    "note": "Plan ch. 20 Phase 2 (Seller expansion: bulk updates, better seller reports, staff access); spec endpoint phase 2."
+  },
+  {
+    "screen": "seller/orders",
+    "element": "Tab counts (New, Preparing, Shipped, Completed, Cancellation requests)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/orders/orders/counts",
+      "gql seller:Query.sellerOrderCounts"
+    ]
+  },
+  {
+    "screen": "seller/orders",
+    "element": "Search order number, buyer or SKU; date placed range; sort",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/orders/orders"
+    ],
+    "note": "q, placedFrom/placedTo, sort"
+  },
+  {
+    "screen": "seller/orders",
+    "element": "Orders table / phone cards: order, placed, buyer, items (+ \"1 of 2 items shipped\"), total, status, dispatch deadline, next action, overdue flags",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/orders/orders"
+    ]
+  },
+  {
+    "screen": "seller/orders",
+    "state": "Preparing",
+    "element": "Overdue dispatch alert",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/orders/orders",
+      "GET /api/seller/orders/orders/counts"
+    ]
+  },
+  {
+    "screen": "seller/orders",
+    "element": "Packing slips (header) / \"Print 3 packing slips\"",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/orders/packing-slips"
+    ]
+  },
+  {
+    "screen": "seller/orders",
+    "element": "Export",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/orders/exports",
+      "GET /api/seller/orders/exports/{id}"
+    ]
+  },
+  {
+    "screen": "seller/orders",
+    "state": "New",
+    "element": "Mark all as preparing",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/orders/orders/bulk-start-preparing"
+    ]
+  },
+  {
+    "screen": "seller/orders",
+    "state": "Completed",
+    "element": "Pagination (Completed: 3 of 126)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/orders/orders"
+    ]
+  },
+  {
+    "screen": "seller/orders",
+    "state": "Cancellation requests",
+    "element": "Cancellation request card: order, placed, buyer, item, price, not shipped, buyer reason, respond-by deadline",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Query.sellerOrders",
+      "gql seller:OrderGroup.cancellations",
+      "GET /api/seller/orders/orders/{id}"
+    ],
+    "note": "SellerOrderRow has no reason, respondBy or request id; use the GraphQL list or the detail call."
+  },
+  {
+    "screen": "seller/orders",
+    "state": "Cancellation requests",
+    "element": "\"Cancel item and refund\" (accept buyer cancellation)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/orders/orders/{id}/cancellation-requests/{requestId}/accept"
+    ]
+  },
+  {
+    "screen": "seller/orders",
+    "state": "Cancellation requests",
+    "element": "\"Decline, already shipped\"",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/orders/orders/{id}/cancellation-requests/{requestId}/decline"
+    ]
+  },
+  {
+    "screen": "seller/order",
+    "element": "Header: order ref, placed time, buyer, payment accepted, status",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller/SellerOrderDetail",
+      "gql seller:Query.sellerOrder"
+    ]
+  },
+  {
+    "screen": "seller/order",
+    "element": "Print packing slip",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/orders/orders/{id}/packing-slip"
+    ]
+  },
+  {
+    "screen": "seller/order",
+    "element": "Dispatch countdown / \"Shipped on time\" banner",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:OrderGroup.dispatchDeadline",
+      "gql seller:OrderGroup.dispatchResult"
+    ]
+  },
+  {
+    "screen": "seller/order",
+    "element": "Your items: item, variant, condition, SKU, qty × price, item status; mixed-order note; subtotal, shipping charged, fee, estimated earnings",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:OrderGroup.items",
+      "gql seller:OrderGroup.money",
+      "gql seller:Order.mixedOrderNote"
+    ]
+  },
+  {
+    "screen": "seller/order",
+    "state": "To ship",
+    "element": "Record-shipment options: carriers, services, tracking format, label availability",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Query.myShippingSetup",
+      "GET /api/seller/shipping/shipping-setup"
+    ]
+  },
+  {
+    "screen": "seller/order",
+    "state": "To ship",
+    "element": "Mark as shipped (carrier, tracking, ship date, service, items and quantities in this package)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/shipping/shipments"
+    ]
+  },
+  {
+    "screen": "seller/order",
+    "state": "To ship",
+    "element": "Buy label",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/shipping/labels/quotes",
+      "POST /api/seller/shipping/labels"
+    ]
+  },
+  {
+    "screen": "seller/order",
+    "state": "To ship",
+    "element": "Cancel selected items (item, quantity, reason)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/orders/orders/{id}/cancel-items"
+    ]
+  },
+  {
+    "screen": "seller/order",
+    "state": "Shipped",
+    "element": "Package card: carrier, tracking + Track link, shipped at, contents, arrival estimate, progress",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:OrderGroup.shipments",
+      "GET /api/seller/shipping/shipments/{id}"
+    ]
+  },
+  {
+    "screen": "seller/order",
+    "state": "Shipped",
+    "element": "Edit tracking",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/shipping/shipments/{id}/correct-tracking"
+    ]
+  },
+  {
+    "screen": "seller/order",
+    "state": "Shipped",
+    "element": "Tracking changes history",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Shipment.corrections"
+    ]
+  },
+  {
+    "screen": "seller/order",
+    "element": "Messages with the buyer (thread, reply target)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Order.conversations",
+      "GET /api/seller/messaging/conversations/{id}/messages"
+    ]
+  },
+  {
+    "screen": "seller/order",
+    "element": "Send message",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/messaging/conversations/{id}/messages",
+      "POST /api/seller/messaging/conversations"
+    ]
+  },
+  {
+    "screen": "seller/order",
+    "element": "Ship to: name, address, carrier phone, method, promised arrival, gift note",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:OrderGroup.shipTo",
+      "gql seller:OrderGroup.delivery",
+      "gql seller:OrderGroup.giftNote",
+      "gql seller:OrderGroup.hidePricesOnSlip"
+    ]
+  },
+  {
+    "screen": "seller/order",
+    "element": "Timeline",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:OrderGroup.timeline"
+    ]
+  },
+  {
+    "screen": "seller/shipping",
+    "element": "Coverage: ship-to area and excluded areas",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/shipping/settings",
+      "PUT /api/seller/shipping/settings"
+    ]
+  },
+  {
+    "screen": "seller/shipping",
+    "element": "Methods and rates table: method, carriers, transit, rate type, tiers, free shipping, on/off",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/shipping/settings",
+      "GET /api/seller/shipping/carrier-services"
+    ],
+    "note": "Transit days come from carrier-services (transitMin/Max)."
+  },
+  {
+    "screen": "seller/shipping",
+    "element": "Method on/off toggles and rate edits",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PUT /api/seller/shipping/profiles/{id}"
+    ]
+  },
+  {
+    "screen": "seller/shipping",
+    "element": "Add method",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/shipping/methods"
+    ],
+    "note": "ProfileMethodInput needs a platform methodId, but only the admin area can list methods (GET /api/admin/shipping/methods). Fixed: New seller endpoint listing the active platform shipping methods (id = ProfileMethodInput.methodId) with carrier services and transit.",
+    "proposal": {
+      "module": "shipping",
+      "method": "GET",
+      "area": "seller",
+      "path": "/methods",
+      "summary": "Platform shipping methods a seller can add to a profile, with carrier services and transit",
+      "fields": {
+        "response": "{ id, code, name, customerLabel, transitMinDays, transitMaxDays, carrierServiceIds }[]"
+      }
+    },
+    "resolvedBy": "fulfilment"
+  },
+  {
+    "screen": "seller/shipping",
+    "element": "Free Standard shipping threshold",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PUT /api/seller/shipping/profiles/{id}"
+    ],
+    "note": "freeShippingThreshold"
+  },
+  {
+    "screen": "seller/shipping",
+    "element": "Dispatch schedule: handling time, same-day cutoff, business days",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PUT /api/seller/shipping/settings"
+    ]
+  },
+  {
+    "screen": "seller/shipping",
+    "element": "Holiday closures list",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/shipping/settings"
+    ]
+  },
+  {
+    "screen": "seller/shipping",
+    "element": "Add closure",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/shipping/closures"
+    ]
+  },
+  {
+    "screen": "seller/shipping",
+    "element": "Remove closure",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "DELETE /api/seller/shipping/closures/{id}"
+    ]
+  },
+  {
+    "screen": "seller/shipping",
+    "element": "Return address card (address, phone, email)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/returns/terms"
+    ],
+    "note": "returnAddress (Address has phone). The email shown in the prototype has no field."
+  },
+  {
+    "screen": "seller/shipping",
+    "element": "Edit return address",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PUT /api/seller/returns/terms"
+    ]
+  },
+  {
+    "screen": "seller/shipping",
+    "element": "\"Buy labels in Seller Center\" toggle and label support per carrier",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/shipping/settings",
+      "PUT /api/seller/shipping/settings"
+    ]
+  },
+  {
+    "screen": "seller/shipping",
+    "element": "Save changes with effective time (now or from a date)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PUT /api/seller/shipping/settings",
+      "PUT /api/seller/shipping/profiles/{id}"
+    ],
+    "note": "effectiveFrom"
+  },
+  {
+    "screen": "seller/shipping",
+    "element": "Unsaved changes summary / Discard",
+    "kind": "action",
+    "status": "client-only",
+    "api": []
+  },
+  {
+    "screen": "seller/shipping",
+    "element": "\"What customers see\" preview",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/shipping/settings",
+      "GET /api/seller/shipping/preview"
+    ]
+  },
+  {
+    "screen": "seller/shipping",
+    "element": "\"When changes apply\" with last-saved history",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/shipping/settings"
+    ],
+    "note": "history, applyNote, pendingChange"
+  },
+  {
+    "screen": "seller/returns",
+    "element": "Queue tiles: response overdue, waiting for response, received to inspect, dispute needs evidence",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/returns/requests/counts",
+      "gql seller:Seller.returnCounts"
+    ]
+  },
+  {
+    "screen": "seller/returns",
+    "element": "Tab counts (Return requests 5, Received to inspect 2, Disputes 2, Closed 4)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/returns/requests/counts"
+    ],
+    "note": "The counts are queue-tile figures (awaitingResponse, toInspect, disputesNeedingEvidence), not per-tab totals. Fixed: Added SellerReturnCounts.tabs {requests, toInspect, disputes, closed}.",
+    "proposal": {
+      "module": "returns",
+      "change": "add tabs { requests, toInspect, disputes, closed } (totals per list tab) to GET /requests/counts"
+    },
+    "resolvedBy": "fulfilment"
+  },
+  {
+    "screen": "seller/returns",
+    "element": "Search return, order or SKU; reason; period",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/returns/requests"
+    ]
+  },
+  {
+    "screen": "seller/returns",
+    "element": "Cases table / phone cards: return ref, \"Marketly support involved\" badge, order, item + SKU, reason + detail, amount or refunded, requested, deadline, status",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/returns/requests"
+    ]
+  },
+  {
+    "screen": "seller/returns",
+    "element": "Export",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/returns/requests/exports",
+      "GET /api/seller/returns/requests/exports/{id}"
+    ],
+    "proposal": {
+      "module": "returns",
+      "method": "POST",
+      "area": "seller",
+      "path": "/exports",
+      "summary": "Export own returns and cases (current tab and filters) as CSV",
+      "fields": {
+        "filters": "json?",
+        "format": "enum(csv)",
+        "response": "ExportJob"
+      }
+    },
+    "note": "Fixed: Module-owned export via reports.requestExport, dataset returns.seller.requests, with a status/link endpoint and the new seller permission returns.requests.export.",
+    "resolvedBy": "fulfilment"
+  },
+  {
+    "screen": "seller/returns",
+    "element": "Return address card with receiving hours",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/returns/terms"
+    ]
+  },
+  {
+    "screen": "seller/returns",
+    "element": "\"Your return terms\" card",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/returns/terms"
+    ]
+  },
+  {
+    "screen": "seller/return",
+    "element": "Header and progress: ref, order, requested by/at, reason, status, steps",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller/SellerReturnDetail",
+      "gql seller:Query.sellerReturn",
+      "gql seller:Return.track"
+    ]
+  },
+  {
+    "screen": "seller/return",
+    "element": "Customer's request: reason, wanted remedy, text, photos with captions",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Return.details",
+      "gql seller:Return.media",
+      "gql seller:Return.remedy"
+    ]
+  },
+  {
+    "screen": "seller/return",
+    "state": "Respond",
+    "element": "Order item and payment: item, variant, SKU, qty, delivered, return window end, paid, max refundable, payment method",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Return.items",
+      "gql seller:Return.payment",
+      "gql seller:Return.order"
+    ]
+  },
+  {
+    "screen": "seller/return",
+    "state": "Respond",
+    "element": "Policy that applies and respond-by time",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Return.terms",
+      "gql seller:Return.deadlines"
+    ]
+  },
+  {
+    "screen": "seller/return",
+    "state": "Respond",
+    "element": "\"Approve and send label\" (seller-paid prepaid label with cost)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/returns/requests/{id}/approve",
+      "gql seller:Return.earningsImpact"
+    ]
+  },
+  {
+    "screen": "seller/return",
+    "state": "Respond",
+    "element": "\"Refund without asking for the item back\"",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/returns/requests/{id}/approve-without-return"
+    ]
+  },
+  {
+    "screen": "seller/return",
+    "state": "Respond",
+    "element": "Request more information (question)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/returns/requests/{id}/request-info"
+    ]
+  },
+  {
+    "screen": "seller/return",
+    "state": "Respond",
+    "element": "Reject return (reason, explanation)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/returns/requests/{id}/reject"
+    ]
+  },
+  {
+    "screen": "seller/return",
+    "state": "Inspect and refund",
+    "element": "Return shipment: carrier, tracking, label cost, delivered to, events",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Return.shipment"
+    ]
+  },
+  {
+    "screen": "seller/return",
+    "state": "Inspect and refund",
+    "element": "Record inspection: condition on arrival, notes, photos",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/returns/requests/{id}/inspection",
+      "POST /api/seller/media/uploads"
+    ]
+  },
+  {
+    "screen": "seller/return",
+    "state": "Inspect and refund",
+    "element": "Stock outcome option \"Damaged stock\"",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/returns/requests/{id}/inspection"
+    ],
+    "note": "InspectionInput.proposedStockOutcome is restock|different_condition|repair|return_to_supplier|write_off. Nothing matches \"Damaged stock\". Fixed: Added damaged_stock to proposedStockOutcome (returns InspectionInput and Inspection, GraphQL ReturnStockOutcome) and to inventory return outcomes: Returned → Damaged or held.",
+    "proposal": {
+      "module": "returns",
+      "change": "add damaged_stock (unit kept in damaged/held stock) to InspectionInput.proposedStockOutcome"
+    },
+    "resolvedBy": "fulfilment"
+  },
+  {
+    "screen": "seller/return",
+    "state": "Inspect and refund",
+    "element": "Confirm inspection and refund (full, or partial with amount and explanation)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/returns/requests/{id}/inspection",
+      "POST /api/seller/returns/requests/{id}/remedy"
+    ]
+  },
+  {
+    "screen": "seller/return",
+    "state": "Inspect and refund",
+    "element": "\"Save draft\" of the inspection and refund decision",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PUT /api/seller/returns/requests/{id}/inspection-draft",
+      "gql seller:Return.inspectionDraft"
+    ],
+    "proposal": {
+      "module": "returns",
+      "method": "PUT",
+      "area": "seller",
+      "path": "/requests/{id}/inspection-draft",
+      "summary": "Save an unsent inspection and refund decision",
+      "fields": {
+        "inspection": "InspectionInput (partial)",
+        "remedy": "RemedyInput (partial)"
+      }
+    },
+    "note": "Fixed: New draft endpoint (partial inspection + remedy) and ReturnCase.inspectionDraft. The draft is cleared when the inspection or remedy is recorded. Selected in SellerReturnDetail.",
+    "resolvedBy": "fulfilment"
+  },
+  {
+    "screen": "seller/return",
+    "element": "Messages and evidence thread (customer, seller, Marketly support, system notes)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Return.conversation",
+      "gql seller:Return.case"
+    ]
+  },
+  {
+    "screen": "seller/return",
+    "element": "Send message / Attach file",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/messaging/conversations/{id}/messages",
+      "POST /api/seller/support/cases/{id}/messages",
+      "POST /api/seller/media/uploads"
+    ]
+  },
+  {
+    "screen": "seller/return",
+    "state": "Respond",
+    "element": "Upload dispute evidence before any case exists",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/returns/requests/{id}/evidence",
+      "gql seller:Return.evidence"
+    ],
+    "note": "Evidence can only be added to a support case, and there is no case before escalation (\"Add files now so they are on record\"). Fixed: New return evidence endpoint and ReturnCase.evidence; new publicApi returns.listEvidence lets support copy it into the case on escalation. Selected in SellerReturnDetail.",
+    "proposal": {
+      "module": "returns",
+      "method": "POST",
+      "area": "seller",
+      "path": "/requests/{id}/evidence",
+      "summary": "Attach evidence to a return before it is escalated (carried into the case on escalation)",
+      "fields": {
+        "kind": "enum(photo|video|document|tracking|invoice|other)",
+        "mediaIds": "uuid[]",
+        "note": "text?"
+      }
+    },
+    "resolvedBy": "fulfilment"
+  },
+  {
+    "screen": "seller/return",
+    "state": "Inspect and refund",
+    "element": "Upload dispute evidence",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/support/cases/{id}/evidence",
+      "POST /api/seller/media/uploads"
+    ]
+  },
+  {
+    "screen": "seller/return",
+    "element": "Deadline alert (respond by / inspect and refund by)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Return.deadlines"
+    ]
+  },
+  {
+    "screen": "seller/return",
+    "element": "\"Effect on your earnings\" panel",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Return.earningsImpact"
+    ]
+  },
+  {
+    "screen": "seller/return",
+    "element": "Customer card: name, city, orders with you",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Return.customer"
+    ]
+  },
+  {
+    "screen": "seller/return",
+    "element": "Activity timeline",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Return.activity"
+    ]
+  },
+  {
+    "screen": "seller/finance",
+    "element": "Balance cards: sales proceeds (period), pending, available, held with hold detail (order, reason, review date)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller/SellerFinanceOverview",
+      "gql seller:SellerBalance.holds",
+      "GET /api/seller/finance/balances"
+    ]
+  },
+  {
+    "screen": "seller/finance",
+    "element": "Transactions ledger with running balance, reference links, \"11 of 64\" and pager",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:FinanceSellerAccount.ledger",
+      "GET /api/seller/finance/ledger"
+    ]
+  },
+  {
+    "screen": "seller/finance",
+    "element": "Ledger type filter (All, Sales, Fees, Refunds, Payouts)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/finance/ledger"
+    ],
+    "note": "types"
+  },
+  {
+    "screen": "seller/finance",
+    "element": "Export ledger",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/finance/ledger/exports"
+    ]
+  },
+  {
+    "screen": "seller/finance",
+    "element": "Payouts table with status and result (failed reason, retry)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:FinanceSellerAccount.payouts",
+      "GET /api/seller/finance/payouts"
+    ]
+  },
+  {
+    "screen": "seller/finance",
+    "element": "Next payout card: amount, status, date, cutoff, verified destination, arrival note",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:SellerBalance.nextPayout",
+      "gql seller:SellerBalance.destination",
+      "GET /api/seller/finance/payout-destination"
+    ]
+  },
+  {
+    "screen": "seller/finance",
+    "element": "Change payout account (owner only, step-up)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/identity/reauth"
+    ],
+    "note": "The change needs a reauthToken, which is only issued by POST /api/store/identity/reauth (customer area). The seller area has no re-authentication endpoint. Business change requests and account close have the same gap. Fixed: Added seller-area re-authentication (ReauthRequest -> single-use ReauthToken) used by payout account and business changes.",
+    "proposal": {
+      "module": "identity",
+      "method": "POST",
+      "area": "seller",
+      "path": "/reauth",
+      "summary": "Confirm the member's password or 2-step code before a sensitive seller action; returns a single-use reauthToken",
+      "fields": {
+        "password": "string?",
+        "code": "string?",
+        "response": "{ reauthToken, expiresAt }"
+      }
+    },
+    "resolvedBy": "people"
+  },
+  {
+    "screen": "seller/finance",
+    "element": "Negative balance example (refund after payout)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:SellerBalance.negative",
+      "gql seller:FinanceSellerAccount.amountsOwed",
+      "GET /api/seller/finance/ledger"
+    ]
+  },
+  {
+    "screen": "seller/statement",
+    "element": "Header: period, seller name, seller ID, payout ref, issued date",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller/SellerStatement",
+      "gql seller:Query.statement"
+    ]
+  },
+  {
+    "screen": "seller/statement",
+    "element": "Download PDF / Download CSV",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/finance/statements/{id}/download"
+    ]
+  },
+  {
+    "screen": "seller/statement",
+    "element": "Sections: sales (units, SKU, seller discount, shipping), fees with basis, refunds incl. after payout and fee returned, holds and releases, adjustments with reason and owner, ad charges; section totals",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Statement.sections",
+      "GET /api/seller/finance/statements/{id}"
+    ]
+  },
+  {
+    "screen": "seller/statement",
+    "element": "Reconciliation to the payout",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Statement.reconciliation"
+    ]
+  },
+  {
+    "screen": "seller/statement",
+    "element": "Payout card: amount, status, sent, arrived, destination, bank reference",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Statement.payout",
+      "GET /api/seller/finance/payouts/{id}"
+    ]
+  },
+  {
+    "screen": "seller/statement",
+    "element": "\"Includes a refund after payout\" notice",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Statement.afterPayoutNotices"
+    ]
+  },
+  {
+    "screen": "seller/marketing",
+    "element": "Tab counts (Discounts, Platform campaigns, Sponsored ads)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/promotions/discounts",
+      "GET /api/seller/promotions/invitations"
+    ],
+    "note": "List totals. The Sponsored ads count is phase 3 (GET /advertising/campaigns)."
+  },
+  {
+    "screen": "seller/marketing",
+    "state": "Discounts",
+    "element": "\"Your discounts\" table: name, offers, discount amount (\"10% off\", \"$5 off\", \"Free shipping over $75\"), period, funding, status, used orders",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/promotions/discounts"
+    ],
+    "note": "SellerDiscount has campaign (kind, period, fundingLabel, status), offers, usedOrders and preview, but no discount rule or amount. Fixed: Added discount: DiscountRule and discountLabel (e.g. 10% off, $5 off, Free shipping over $75) to SellerDiscount.",
+    "proposal": {
+      "module": "promotions",
+      "change": "add discount: DiscountRule and discountLabel: string (e.g. \"10% off\") to SellerDiscount"
+    },
+    "resolvedBy": "platform"
+  },
+  {
+    "screen": "seller/marketing",
+    "state": "Discounts",
+    "element": "Offer picker for a discount",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/offers/offers"
+    ]
+  },
+  {
+    "screen": "seller/marketing",
+    "state": "Discounts",
+    "element": "Create discount form (name, type, amount, per-customer limit, offers, start/end, combine with coupons) and \"Save draft\"",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/promotions/discounts",
+      "PATCH /api/seller/promotions/discounts/{id}"
+    ]
+  },
+  {
+    "screen": "seller/marketing",
+    "state": "Discounts",
+    "element": "\"Customer sees\" price and earnings per unit",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/promotions/discounts/preview"
+    ]
+  },
+  {
+    "screen": "seller/marketing",
+    "state": "Discounts",
+    "element": "Schedule discount",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/promotions/discounts",
+      "POST /api/seller/promotions/discounts/{id}/schedule"
+    ]
+  },
+  {
+    "screen": "seller/marketing",
+    "state": "Platform campaigns",
+    "element": "Invitation card: name, join-by deadline, period, banner, description, placements, eligibility rules, funding split, fee basis",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/promotions/invitations",
+      "GET /api/seller/promotions/invitations/{id}"
+    ]
+  },
+  {
+    "screen": "seller/marketing",
+    "state": "Platform campaigns",
+    "element": "Choose offers: stock and per-offer eligibility with reason",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/promotions/invitations/{id}"
+    ]
+  },
+  {
+    "screen": "seller/marketing",
+    "state": "Platform campaigns",
+    "element": "Expected impact per unit",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/promotions/invitations/{id}"
+    ],
+    "note": "offers[].earnings, earningsExample, salesNote"
+  },
+  {
+    "screen": "seller/marketing",
+    "state": "Platform campaigns",
+    "element": "Join campaign (consent + selected offers)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/promotions/invitations/{id}/accept"
+    ]
+  },
+  {
+    "screen": "seller/marketing",
+    "state": "Platform campaigns",
+    "element": "Decline invitation",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/promotions/invitations/{id}/decline"
+    ]
+  },
+  {
+    "screen": "seller/marketing",
+    "state": "Platform campaigns",
+    "element": "Leave-policy note (\"You can leave before Oct 12 …\")",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/promotions/invitations/{id}"
+    ]
+  },
+  {
+    "screen": "seller/marketing",
+    "state": "Platform campaigns",
+    "element": "Past campaigns list",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/promotions/invitations"
+    ]
+  },
+  {
+    "screen": "seller/marketing",
+    "state": "Sponsored ads",
+    "element": "Sponsored ads table: campaign, type, promotes, schedule, billing, status, spend vs limit",
+    "kind": "data",
+    "status": "later",
+    "api": [
+      "GET /api/seller/advertising/campaigns"
+    ],
+    "note": "Plan ch. 20 Phase 3 (Customer growth: paid seller advertisements); spec endpoint phase 3."
+  },
+  {
+    "screen": "seller/marketing",
+    "state": "Sponsored ads",
+    "element": "Pause / Resume campaign",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/seller/advertising/campaigns/{id}/pause",
+      "POST /api/seller/advertising/campaigns/{id}/resume"
+    ],
+    "note": "Plan ch. 20 Phase 3 (Customer growth: paid seller advertisements); spec endpoint phase 3."
+  },
+  {
+    "screen": "seller/marketing",
+    "state": "Sponsored ads",
+    "element": "Ad spend, clicks, attributed orders",
+    "kind": "data",
+    "status": "later",
+    "api": [
+      "GET /api/seller/advertising/summary"
+    ],
+    "note": "Plan ch. 20 Phase 3 (Customer growth: paid seller advertisements); spec endpoint phase 3."
+  },
+  {
+    "screen": "seller/ad-request",
+    "state": "Set up",
+    "element": "Ad type and billing model options with example rates",
+    "kind": "data",
+    "status": "later",
+    "api": [
+      "GET /api/seller/advertising/pricing"
+    ],
+    "note": "Plan ch. 20 Phase 3 (Customer growth: paid seller advertisements); spec endpoint phase 3."
+  },
+  {
+    "screen": "seller/ad-request",
+    "state": "Set up",
+    "element": "Products that can be promoted (active, with stock)",
+    "kind": "data",
+    "status": "later",
+    "api": [
+      "GET /api/seller/advertising/promotable-offers"
+    ],
+    "note": "Plan ch. 20 Phase 3 (Customer growth: paid seller advertisements); spec endpoint phase 3."
+  },
+  {
+    "screen": "seller/ad-request",
+    "state": "Set up",
+    "element": "Placement, schedule, daily and total spending limits, headline",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/seller/advertising/campaigns",
+      "PATCH /api/seller/advertising/campaigns/{id}"
+    ],
+    "note": "Plan ch. 20 Phase 3 (Customer growth: paid seller advertisements); spec endpoint phase 3."
+  },
+  {
+    "screen": "seller/ad-request",
+    "state": "Set up",
+    "element": "Upload desktop and mobile creatives (with checks)",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/seller/media/uploads",
+      "POST /api/seller/advertising/creatives",
+      "POST /api/seller/media/assets/{id}/checks"
+    ],
+    "note": "Plan ch. 20 Phase 3 (Customer growth: paid seller advertisements); spec endpoint phase 3."
+  },
+  {
+    "screen": "seller/ad-request",
+    "state": "Set up",
+    "element": "Sponsored-labelled previews (desktop, mobile)",
+    "kind": "data",
+    "status": "client-only",
+    "api": [],
+    "note": "Rendered from form values"
+  },
+  {
+    "screen": "seller/ad-request",
+    "state": "Set up",
+    "element": "Save draft",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/seller/advertising/campaigns"
+    ],
+    "note": "Plan ch. 20 Phase 3 (Customer growth: paid seller advertisements); spec endpoint phase 3."
+  },
+  {
+    "screen": "seller/ad-request",
+    "state": "Set up",
+    "element": "Submit for approval",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/seller/advertising/campaigns/{id}/submit"
+    ],
+    "note": "Plan ch. 20 Phase 3 (Customer growth: paid seller advertisements); spec endpoint phase 3."
+  },
+  {
+    "screen": "seller/ad-request",
+    "state": "In review",
+    "element": "Request summary, review checks, submitted previews, activity",
+    "kind": "data",
+    "status": "later",
+    "api": [
+      "GET /api/seller/advertising/campaigns/{id}"
+    ],
+    "note": "Plan ch. 20 Phase 3 (Customer growth: paid seller advertisements); spec endpoint phase 3."
+  },
+  {
+    "screen": "seller/ad-request",
+    "state": "In review",
+    "element": "Withdraw request",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/seller/advertising/campaigns/{id}/withdraw"
+    ],
+    "note": "Plan ch. 20 Phase 3 (Customer growth: paid seller advertisements); spec endpoint phase 3."
+  },
+  {
+    "screen": "seller/ad-request",
+    "state": "In review",
+    "element": "Edit and resubmit",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "PATCH /api/seller/advertising/campaigns/{id}",
+      "POST /api/seller/advertising/campaigns/{id}/submit"
+    ],
+    "note": "Plan ch. 20 Phase 3 (Customer growth: paid seller advertisements); spec endpoint phase 3."
+  },
+  {
+    "screen": "seller/customers",
+    "element": "Tab counts (Order messages, Product questions, Feedback)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/messaging/response-stats",
+      "GET /api/seller/reviews/questions",
+      "GET /api/seller/reviews/feedback"
+    ]
+  },
+  {
+    "screen": "seller/customers",
+    "state": "Order messages",
+    "element": "Reply target badge, average reply time this month, overdue count",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/messaging/response-stats",
+      "gql seller:Seller.replyStats"
+    ]
+  },
+  {
+    "screen": "seller/customers",
+    "state": "Order messages",
+    "element": "Search buyer or order",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/messaging/conversations"
+    ]
+  },
+  {
+    "screen": "seller/customers",
+    "state": "Order messages",
+    "element": "Conversation list: buyer, order, last message, time, reply deadline, unread, overdue flag",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/messaging/conversations",
+      "gql seller:Query.sellerConversations"
+    ]
+  },
+  {
+    "screen": "seller/customers",
+    "state": "Order messages",
+    "element": "Conversation pane: buyer, order, item, order status, overdue, privacy note, messages, dispatch warning",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/messaging/conversations/{id}",
+      "GET /api/seller/messaging/conversations/{id}/messages",
+      "gql seller:Query.sellerConversation"
+    ]
+  },
+  {
+    "screen": "seller/customers",
+    "state": "Order messages",
+    "element": "Opening a conversation marks it read",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/messaging/conversations/{id}/read"
+    ]
+  },
+  {
+    "screen": "seller/customers",
+    "state": "Order messages",
+    "element": "Send reply",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/messaging/conversations/{id}/messages"
+    ]
+  },
+  {
+    "screen": "seller/customers",
+    "state": "Order messages",
+    "element": "Attach file",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/media/uploads",
+      "POST /api/seller/messaging/conversations/{id}/messages"
+    ],
+    "note": "MessageInput.mediaIds"
+  },
+  {
+    "screen": "seller/customers",
+    "state": "Order messages",
+    "element": "Reply templates",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "GET /api/seller/messaging/templates"
+    ],
+    "note": "Spec marks reply templates phase 2 (plan ch. 20 Phase 2, Seller expansion)."
+  },
+  {
+    "screen": "seller/customers",
+    "state": "Product questions",
+    "element": "Question cards: product thumbnail and name, question, asker, date, status; published answer with seller label, date, helpful count",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/reviews/questions"
+    ],
+    "note": "SellerQuestionRow has Question.productTitle but no product image. Fixed: Added SellerQuestionRow.productImage.",
+    "proposal": {
+      "module": "reviews",
+      "change": "add productImage: MediaRef? to SellerQuestionRow"
+    },
+    "resolvedBy": "people"
+  },
+  {
+    "screen": "seller/customers",
+    "state": "Product questions",
+    "element": "Publish answer",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/reviews/questions/{id}/answers"
+    ]
+  },
+  {
+    "screen": "seller/customers",
+    "state": "Product questions",
+    "element": "Skip question",
+    "kind": "action",
+    "status": "client-only",
+    "api": []
+  },
+  {
+    "screen": "seller/customers",
+    "state": "Feedback",
+    "element": "Feedback summary: % positive, rating count, 12 months, positive/neutral/negative bars",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/reviews/feedback-summary",
+      "gql seller:Seller.rating"
+    ]
+  },
+  {
+    "screen": "seller/customers",
+    "state": "Feedback",
+    "element": "Feedback cards: stars, buyer, date, order, comment, seller response",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/reviews/feedback"
+    ]
+  },
+  {
+    "screen": "seller/customers",
+    "state": "Feedback",
+    "element": "Post public response",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/reviews/responses"
+    ]
+  },
+  {
+    "screen": "seller/customers",
+    "state": "Feedback",
+    "element": "Report feedback",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/reviews/reports"
+    ]
+  },
+  {
+    "screen": "seller/reports",
+    "element": "Date range: 7 / 30 / 90 days and custom range",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/reports/reports/{key}/query",
+      "GET /api/seller/reports/catalogue"
+    ]
+  },
+  {
+    "screen": "seller/reports",
+    "element": "KPIs: gross sales, orders, units sold, return rate with deltas; refreshed time",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/reports/reports/{key}/query"
+    ],
+    "note": "ReportResult.kpis, meta.freshAsOf"
+  },
+  {
+    "screen": "seller/reports",
+    "element": "Orders per day chart",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/reports/reports/{key}/query"
+    ],
+    "note": "series"
+  },
+  {
+    "screen": "seller/reports",
+    "element": "Returns by reason chart with insight note",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/reports/reports/{key}/query"
+    ],
+    "note": "breakdowns, callouts"
+  },
+  {
+    "screen": "seller/reports",
+    "element": "Product sales table (units, gross sales, average price, returns, return rate, discount badge)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/reports/reports/{key}/query"
+    ],
+    "note": "table"
+  },
+  {
+    "screen": "seller/reports",
+    "element": "Service performance against targets with definitions",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/reports/reports/{key}/query",
+      "GET /api/seller/sellers/performance"
+    ]
+  },
+  {
+    "screen": "seller/reports",
+    "element": "Export CSV",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/seller/reports/exports",
+      "GET /api/seller/reports/exports/{id}"
+    ],
+    "note": "Plan ch. 20 Phase 2 (Seller expansion: bulk updates, better seller reports, staff access); spec endpoint phase 2."
+  },
+  {
+    "screen": "seller/performance",
+    "element": "Status cards: account status, selling since, restriction count; verification; payouts; seller feedback",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller/SellerPerformance",
+      "gql seller:Query.mySeller",
+      "gql seller:Seller.verification",
+      "gql seller:Seller.payoutReadiness",
+      "gql seller:Seller.rating",
+      "GET /api/seller/sellers/account"
+    ]
+  },
+  {
+    "screen": "seller/performance",
+    "element": "Restriction panel: title, status, since, applied by, ref, reason and rule, how to resolve, affected activity, still works, appeal deadline and reviewer note",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Seller.restrictions",
+      "GET /api/seller/sellers/restrictions/{id}"
+    ]
+  },
+  {
+    "screen": "seller/performance",
+    "element": "Upload documents",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/sellers/restrictions/{id}/evidence",
+      "POST /api/seller/media/uploads"
+    ]
+  },
+  {
+    "screen": "seller/performance",
+    "element": "Appeal restriction",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/sellers/restrictions/{id}/appeals"
+    ]
+  },
+  {
+    "screen": "seller/performance",
+    "element": "Performance against targets table",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:Seller.performance",
+      "GET /api/seller/sellers/performance"
+    ]
+  },
+  {
+    "screen": "seller/performance",
+    "element": "Warnings and actions timeline",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql seller:SellerPerformance.warnings",
+      "gql seller:SellerPerformance.history"
+    ]
+  },
+  {
+    "screen": "seller/store",
+    "element": "Store profile editor data (name, location, logo, banner, introduction, warranty, contact options)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/sellers/store-profile"
+    ]
+  },
+  {
+    "screen": "seller/store",
+    "element": "Save changes",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PATCH /api/seller/sellers/store-profile"
+    ],
+    "note": "Store name creates a change request"
+  },
+  {
+    "screen": "seller/store",
+    "element": "Replace logo / Replace banner",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/media/uploads",
+      "POST /api/seller/media/uploads/{id}/complete",
+      "PATCH /api/seller/sellers/store-profile"
+    ]
+  },
+  {
+    "screen": "seller/store",
+    "element": "\"1 change waiting for staff review\" alert and pending markers",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/sellers/store-profile",
+      "GET /api/seller/sellers/change-requests"
+    ]
+  },
+  {
+    "screen": "seller/store",
+    "element": "Categories you sell in (with paused category)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/sellers/store-profile"
+    ],
+    "note": "categories[]"
+  },
+  {
+    "screen": "seller/store",
+    "element": "Featured collections list (title, image, offer count)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/sellers/store-profile"
+    ]
+  },
+  {
+    "screen": "seller/store",
+    "element": "Edit collection",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PATCH /api/seller/sellers/store-profile/collections/{id}"
+    ]
+  },
+  {
+    "screen": "seller/store",
+    "element": "Reorder collections (drag)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PUT /api/seller/sellers/store-profile/collections/order"
+    ]
+  },
+  {
+    "screen": "seller/store",
+    "element": "Add collection",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/sellers/store-profile/collections"
+    ]
+  },
+  {
+    "screen": "seller/store",
+    "element": "Store policies: return window, change-of-mind return shipping",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/returns/terms",
+      "PUT /api/seller/returns/terms"
+    ]
+  },
+  {
+    "screen": "seller/store",
+    "element": "Brand affiliation claim (pending review)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/sellers/store-profile/claims",
+      "GET /api/seller/sellers/store-profile"
+    ]
+  },
+  {
+    "screen": "seller/store",
+    "element": "Verified seller label explanation",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/sellers/store-profile"
+    ],
+    "note": "verification.checked / notChecked"
+  },
+  {
+    "screen": "seller/store",
+    "element": "Live preview: banner, logo, name, verified, location, rating, % positive, dispatch time, intro, pending claim, featured, policies",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/sellers/store-profile",
+      "GET /api/seller/reviews/feedback-summary",
+      "GET /api/seller/shipping/settings"
+    ]
+  },
+  {
+    "screen": "seller/store",
+    "element": "Desktop / Phone preview toggle",
+    "kind": "action",
+    "status": "client-only",
+    "api": []
+  },
+  {
+    "screen": "seller/staff",
+    "element": "Staff table: name, email, role, status, last active / invite expiry",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/sellers/members"
+    ]
+  },
+  {
+    "screen": "seller/staff",
+    "element": "Edit member (role, single permissions)",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "PATCH /api/seller/sellers/members/{id}"
+    ],
+    "note": "Plan ch. 20 Phase 2 (Seller expansion: bulk updates, better seller reports, staff access); spec endpoint phase 2."
+  },
+  {
+    "screen": "seller/staff",
+    "element": "Resend invitation",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/seller/sellers/invitations/{id}/resend"
+    ],
+    "note": "Plan ch. 20 Phase 2 (Seller expansion: bulk updates, better seller reports, staff access); spec endpoint phase 2."
+  },
+  {
+    "screen": "seller/staff",
+    "element": "Permission matrix",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/sellers/roles",
+      "GET /api/seller/sellers/members"
+    ]
+  },
+  {
+    "screen": "seller/staff",
+    "element": "Notification preferences table (topics per person, channel, owner-only locks)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/notifications/preferences"
+    ]
+  },
+  {
+    "screen": "seller/staff",
+    "element": "Save preferences",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PUT /api/seller/notifications/preferences/members/{memberId}"
+    ],
+    "note": "One call per changed member"
+  },
+  {
+    "screen": "seller/staff",
+    "element": "Account status card (seller ID, status, since, verification, product approval, payouts, restrictions)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/sellers/account"
+    ]
+  },
+  {
+    "screen": "seller/staff",
+    "state": "Staff",
+    "element": "Invite staff side card: Send invite",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/seller/sellers/invitations"
+    ],
+    "note": "Plan ch. 20 Phase 2 (Seller expansion: bulk updates, better seller reports, staff access); spec endpoint phase 2."
+  },
+  {
+    "screen": "seller/staff",
+    "state": "Invite staff",
+    "element": "Invite modal: email, name, role, single permissions, notification opt-in, Send invite",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/seller/sellers/invitations",
+      "PUT /api/seller/notifications/preferences/members/{memberId}"
+    ],
+    "note": "Plan ch. 20 Phase 2 (Seller expansion: bulk updates, better seller reports, staff access); spec endpoint phase 2."
+  },
+  {
+    "screen": "seller/notifications",
+    "element": "Header counts: unread, need action",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/notifications/inbox/summary",
+      "gql seller:Query.notificationInbox"
+    ]
+  },
+  {
+    "screen": "seller/notifications",
+    "element": "Mark all as read",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/notifications/inbox/read-all"
+    ]
+  },
+  {
+    "screen": "seller/notifications",
+    "element": "Category chips with counts (All 11, Orders 2, Returns & cases 4, Products 2, Account & finance 4)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/notifications/inbox/summary",
+      "gql seller:NotificationGroupCount.total"
+    ],
+    "note": "InboxSummary.byGroup is unread per group; the chips show totals per group. Fixed: Added total and totalByGroup (read + unread) to InboxSummary; GraphQL NotificationGroupCount.total.",
+    "proposal": {
+      "module": "notifications",
+      "change": "add totalByGroup: map<int> (and total) to InboxSummary"
+    },
+    "resolvedBy": "platform"
+  },
+  {
+    "screen": "seller/notifications",
+    "element": "Category filter",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/notifications/inbox"
+    ],
+    "note": "group"
+  },
+  {
+    "screen": "seller/notifications",
+    "element": "Unread only toggle",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/notifications/inbox"
+    ],
+    "note": "unreadOnly"
+  },
+  {
+    "screen": "seller/notifications",
+    "element": "Notice list by day: icon, title, body, category, action required + deadline, time, link",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/notifications/inbox"
+    ]
+  },
+  {
+    "screen": "seller/notifications",
+    "element": "Open a notice (marks it read)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/notifications/inbox/{id}/read"
+    ]
+  },
+  {
+    "screen": "seller/notifications",
+    "element": "Load older notices",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/notifications/inbox"
+    ],
+    "note": "paging"
+  },
+  {
+    "screen": "seller/notifications",
+    "element": "Needs action sidebar, sorted by deadline",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/notifications/inbox/summary"
+    ],
+    "note": "needsAction"
+  },
+  {
+    "screen": "seller/help",
+    "state": "Help",
+    "element": "Search seller help",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/help/articles"
+    ],
+    "note": "audience=seller, q. Public content endpoint that lists seller/help."
+  },
+  {
+    "screen": "seller/help",
+    "state": "Help",
+    "element": "Help home: popular searches, six topic cards with descriptions and article links, featured guide",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/help"
+    ],
+    "note": "GET /api/store/content/help (HelpHome) has no audience parameter and serves the customer help home. The articles endpoint returns articles only, not topics or popular searches. Fixed: GET /help takes audience=customer|seller; HelpHome adds featured (HelpArticle guide) and per-audience popular searches; HelpCategory.topArticles fills the topic card links; HelpArticleInput.featured / popularSearch let Content set them.",
+    "proposal": {
+      "module": "content",
+      "change": "add query param audience enum(customer|seller) to GET /api/store/content/help (topics, popular searches, featured articles for sellers), or add GET /api/seller/content/help"
+    },
+    "resolvedBy": "platform"
+  },
+  {
+    "screen": "seller/help",
+    "state": "Help",
+    "element": "\"How fees work\" example calculation",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/finance/fee-schedule"
+    ]
+  },
+  {
+    "screen": "seller/help",
+    "element": "Expected reply time (standard, urgent, support hours)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/support/categories"
+    ],
+    "note": "CaseCategory gives firstResponseBusinessHours per topic, but seller support hours (\"Mon–Sat, 8 AM–8 PM PT\") have no source. Fixed: Response is now SellerSupportOptions: categories plus hoursLabel, openNow, nextOpenAt from settings business hours.",
+    "proposal": {
+      "module": "support",
+      "change": "return seller support hours (hoursLabel, openNow) alongside GET /api/seller/support/categories"
+    },
+    "resolvedBy": "people"
+  },
+  {
+    "screen": "seller/help",
+    "element": "Your support requests: ref, status, subject, topic, next step / reply expected",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/support/cases"
+    ],
+    "note": "scope=support_requests"
+  },
+  {
+    "screen": "seller/help",
+    "element": "Open a support request",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/support/cases/{id}"
+    ]
+  },
+  {
+    "screen": "seller/help",
+    "state": "Contact seller support",
+    "element": "Topic select",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/support/categories"
+    ]
+  },
+  {
+    "screen": "seller/help",
+    "state": "Contact seller support",
+    "element": "Attachments",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/media/uploads",
+      "POST /api/seller/media/uploads/{id}/complete"
+    ]
+  },
+  {
+    "screen": "seller/help",
+    "state": "Contact seller support",
+    "element": "Send request (topic, reference, subject, message, attachments, reply channel)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/support/requests"
+    ]
+  },
+  {
+    "screen": "seller/help",
+    "state": "Contact seller support",
+    "element": "\"These may answer it now\" suggested articles",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/help/articles"
+    ]
+  },
+  {
+    "screen": "seller/_chrome",
+    "element": "Store switcher: current store name, logo, status \"Approved · selling\"",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/identity/session/sellers",
+      "GET /api/seller/sellers/account",
+      "gql seller:Seller.sellingNow",
+      "gql seller:Seller.logo"
+    ]
+  },
+  {
+    "screen": "seller/_chrome",
+    "element": "Switch store",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/seller/identity/session/seller-context"
+    ]
+  },
+  {
+    "screen": "seller/_chrome",
+    "element": "Top-bar search \"Search orders, products, SKUs\"",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/search/quick"
+    ],
+    "note": "There is no seller-area search. Each list takes q, but one box would need several calls and has no mixed result shape. Fixed: New federated seller quick search over orders.listOrdersForSeller, the new offers.searchOwnOffers, and returns.listForSeller (which gains q), filtered by the member's role.",
+    "proposal": {
+      "module": "search",
+      "method": "GET",
+      "area": "seller",
+      "path": "/quick",
+      "summary": "Seller Center quick search across own orders, offers/SKUs and returns",
+      "fields": {
+        "q": "string",
+        "response": "{ orders: {id, ref, buyerName, statusLabel}[], offers: {id, title, sku}[], returns: {id, ref, statusLabel}[] }"
+      }
+    },
+    "resolvedBy": "fulfilment"
+  },
+  {
+    "screen": "seller/_chrome",
+    "element": "Help icon",
+    "kind": "action",
+    "status": "client-only",
+    "api": [],
+    "note": "Navigation to seller/help"
+  },
+  {
+    "screen": "seller/_chrome",
+    "element": "Bell unread count",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/notifications/inbox/summary",
+      "gql seller:Query.unreadNotificationCount"
+    ]
+  },
+  {
+    "screen": "seller/_chrome",
+    "element": "Sidebar counts: Inventory 3, Orders 4, Returns 2, Customers 5, Notifications 4",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/inventory/summary",
+      "GET /api/seller/orders/orders/counts",
+      "GET /api/seller/returns/requests/counts",
+      "GET /api/seller/messaging/response-stats",
+      "GET /api/seller/notifications/inbox/summary"
+    ],
+    "note": "Five REST calls per page. There is no single nav-badge call and no persisted chrome GraphQL query, although Seller.inbox/returnCounts, myStockSummary and sellerOrderCounts exist."
+  },
+  {
+    "screen": "seller/_chrome",
+    "element": "Signed-in member name and role (sidebar footer)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/seller/identity/session/sellers",
+      "GET /api/seller/sellers/account",
+      "GET /api/seller/sellers/members"
+    ],
+    "note": "roleLabel and sellerName from SellerContext; the member name is found by matching SellerAccount.me.memberId in members."
+  }
+]

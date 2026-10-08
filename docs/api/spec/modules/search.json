@@ -1,0 +1,456 @@
+{
+  "name": "search",
+  "title": "Search",
+  "group": "Catalog and stock",
+  "phase": 1,
+  "chapters": [4, 3, 19],
+  "summary": "Finding products: a product index built from catalog, offers, inventory and reviews events; search with misspelling tolerance and corrections, suggestions (queries, categories, brands, stores, products, recent searches), universal and category filters with counts, sorting, sponsored slots from advertising, and guidance for empty or unavailable results.",
+  "owns": [
+    "Product search index (Postgres full-text + trigram first; external engine adapter later)",
+    "Search and category listings with universal filters (category, price, brand, rating, seller, condition, availability, delivery) and category attribute filters",
+    "Facets with counts, applied-filter chips with individual removal and clear all",
+    "Sorting: recommended (published ranking policy), price ascending/descending, newest, highest rated; best selling once sales history exists",
+    "Suggestions: queries, categories, brands, seller stores (leading to the store page), products",
+    "Misspelling tolerance and 'Showing results for … / Search instead for …'",
+    "Store match card (sellers are not mixed into product results)",
+    "Empty-result guidance: remove one filter (with counts), nearby categories, tips, popular products",
+    "Recently searched (per customer or guest session) with removal and clear all",
+    "Search synonyms, reindexing, zero-result query reporting, ranking policy"
+  ],
+  "notOwns": [
+    "Which ads appear and where: advertising (search asks for sponsored slots and marks them)",
+    "Product content and category tree: catalog",
+    "Prices, featured offer and delivery estimates: offers (search indexes them)",
+    "Homepage sections and curated collections: content (uses search for product cards and listings)",
+    "Recently viewed products: customers; back-in-stock alerts: wishlist",
+    "Personalized recommendations and visual search: later projects (plan ch. 4)"
+  ],
+  "dependsOn": ["catalog", "offers"],
+  "optionalDeps": ["inventory", "reviews", "sellers", "advertising", "promotions", "customers", "media", "reports", "wishlist", "orders", "returns"],
+  "publicApi": [
+    { "name": "searchProducts", "signature": "(query: SearchQuery) => { items: ProductCard[], total: int, nextCursor: string|null }", "desc": "Same engine as the store endpoint, without sponsored slots. Used for collections (new arrivals, best sellers, category picks).", "usedBy": ["content", "promotions"] },
+    { "name": "getProductCards", "signature": "(productIds: uuid[], opts?: { postalCode?: string, sellerId?: uuid }) => ProductCard[]", "desc": "Cards for any product list (home sections, recently viewed, related products), same shape everywhere", "usedBy": ["content", "wishlist", "reviews", "advertising"] },
+    { "name": "zeroResultStats", "signature": "(from: date, to: date) => ZeroResultQuery[]", "desc": "Unavailable searches for the products and discovery report", "usedBy": ["reports"] },
+    { "name": "runSearch", "signature": "(query: SearchQuery & { exact?: bool, postalCode?: string, searchId?: string }, page: PageInput) => { context: SearchContext, items: { productId: uuid, match: SearchMatch }[], sponsoredSlots: SponsoredSlot[], page: PageInfo }", "desc": "Store search with spelling correction, facets, store match, empty guidance and sponsored placeholders (ads are filled by advertising)", "usedBy": ["graphql"] },
+    { "name": "listCategoryProducts", "signature": "(slug: string, query: SearchQuery & { postalCode?: string, searchId?: string }, page: PageInput) => { context: SearchContext, items: { productId: uuid, match: SearchMatch }[], sponsoredSlots: SponsoredSlot[], page: PageInfo } | null", "desc": "Category page listing with category attribute facets and category context", "usedBy": ["graphql"] },
+    { "name": "getSuggestions", "signature": "(prefix: string, session?: { customerId?: uuid, guestSessionId?: string }) => Suggestions", "desc": "Suggestions while typing: queries, categories, brands, stores, products and recent searches", "usedBy": ["graphql"] },
+    { "name": "similarProducts", "signature": "(productIds: uuid[], limit: int) => map<uuid[]>", "desc": "Similar in-stock products per product (related products, alternatives for unavailable products)", "usedBy": ["graphql"] },
+    { "name": "listSellerProducts", "signature": "(sellerId: uuid, query: SearchQuery & { postalCode?: string, searchId?: string }, page: PageInput) => { context: SearchContext, items: { productId: uuid, match: SearchMatch }[], sponsoredSlots: SponsoredSlot[], page: PageInfo }", "desc": "Storefront product grid: products with a live offer from this seller, with the same filters, facets and sorts as search (query.filters.sellerIds is replaced by the seller). Each result's match.offer is this seller's offer. No store match and no sponsored slots.", "usedBy": ["graphql"] },
+    { "name": "sellerCategoryCounts", "signature": "(sellerIds: uuid[]) => map<{ categoryId: uuid, name: string, slug: string, count: int, comingSoon: bool }[]>", "desc": "Storefront category chips: categories in which the seller has live offers, with product counts from the search index (the REST storefront's categories)", "usedBy": ["sellers", "graphql"] },
+    { "name": "bestSellerRanks", "signature": "(productIds: uuid[]) => map<{ rank: int, categoryId: uuid, categoryName: string, label: string, updatedAt: datetime } | null>", "desc": "Best-seller rank of products in their category by 30-day units sold; null when not ranked (outside the top 100 or below bestSellingMinOrders)", "usedBy": ["graphql", "content"] }
+  ],
+  "types": {
+    "ProductCard": {
+      "productId": "uuid",
+      "slug": "string",
+      "title": "string",
+      "brandName": "string?",
+      "image": "MediaRef?",
+      "variantId": { "type": "uuid?", "desc": "Variant matched by the filters (e.g. color), else the featured variant" },
+      "variantCue": { "type": "string?", "desc": "e.g. '3 colors' or 'Midnight black'" },
+      "rating": { "type": "number?", "desc": "Null when there are no reviews (never shown as 0 stars)" },
+      "ratingCount": "int",
+      "price": { "type": "Money", "desc": "Featured offer's price, or the lowest eligible offer when priceIsFrom" },
+      "priceIsFrom": { "type": "bool", "desc": "'from' price belongs to one named eligible offer (offerId, sellerName)" },
+      "offerId": "uuid?",
+      "sellerName": "string",
+      "sellerId": "uuid?",
+      "official": "bool",
+      "condition": "string",
+      "wasPrice": "Money?",
+      "discountPct": "int?",
+      "dealEndsAt": "datetime?",
+      "deliveryCue": { "type": "string?", "desc": "e.g. 'Free delivery Fri, Oct 16' for the default or given postal code" },
+      "freeDelivery": "bool",
+      "availability": "enum(in_stock|low_stock|out_of_stock)",
+      "offerCount": "int",
+      "badges": { "type": "string[]", "desc": "e.g. 'Official Store', 'Deal', 'New listing'" }
+    },
+    "SponsoredMark": {
+      "label": { "type": "string", "desc": "Always visible: 'Sponsored'" },
+      "advertiserName": "string",
+      "impressionToken": { "type": "string", "desc": "From advertising; send with impressions and clicks" },
+      "whyUrl": { "type": "string?", "desc": "'Why these ads?' help article" }
+    },
+    "SearchHit": {
+      "position": "int",
+      "kind": "enum(organic|sponsored)",
+      "slot": { "type": "enum(top_row|inline)?", "desc": "Sponsored only: a separate labelled row above results (search) or inline grid positions (category). Positions come from advertising." },
+      "product": "ProductCard",
+      "sponsored": "SponsoredMark?"
+    },
+    "QueryInfo": {
+      "raw": "string?",
+      "normalized": "string?",
+      "correctedTo": { "type": "string?", "desc": "'Showing results for wireless headphones'" },
+      "correctionApplied": "bool",
+      "searchInsteadFor": { "type": "string?", "desc": "Original query, to run exactly with exact=true" }
+    },
+    "AppliedFilter": {
+      "key": "string",
+      "value": "string",
+      "label": { "type": "string", "desc": "e.g. 'Price: $50 to $250', '4 stars and up'" },
+      "removeQuery": { "type": "string", "desc": "Query string for the same search without this filter" }
+    },
+    "FacetValue": {
+      "value": "string",
+      "label": "string",
+      "count": { "type": "int", "desc": "Results if this value is added to the current filters" },
+      "selected": "bool",
+      "note": { "type": "string?", "desc": "e.g. 'Shows company offers at the prices listed' for Official Store" }
+    },
+    "PriceRange": { "min": "Money?", "max": "Money?", "selectedMin": "Money?", "selectedMax": "Money?" },
+    "Facet": {
+      "key": { "type": "string", "desc": "Query parameter name, or the attribute key for category facets" },
+      "label": "string",
+      "group": { "type": "enum(universal|category)", "desc": "category = attribute filters of the current category, e.g. 'Headphone features'" },
+      "groupLabel": "string?",
+      "kind": "enum(category|price|brand|rating|seller|condition|availability|delivery|attribute)",
+      "multiSelect": "bool",
+      "values": "FacetValue[]",
+      "range": "PriceRange?",
+      "unit": "string?",
+      "moreCount": { "type": "int?", "desc": "'Show 7 more brands'" },
+      "collapsed": "bool"
+    },
+    "SortOption": { "key": "enum(recommended|price_asc|price_desc|newest|rating|best_selling)", "label": "string", "available": { "type": "bool", "desc": "best_selling stays unavailable until enough sales history exists" }, "selected": "bool" },
+    "StoreMatch": {
+      "sellerId": "uuid",
+      "name": "string",
+      "slug": "string",
+      "logo": "MediaRef?",
+      "verified": "bool",
+      "official": "bool",
+      "positivePct": "int?",
+      "ratingCount": "int?",
+      "productCount": "int",
+      "location": "string?",
+      "note": { "type": "string", "desc": "'Stores are listed here, not mixed into product results.'" }
+    },
+    "CategoryCrumb": { "id": "uuid", "name": "string", "slug": "string" },
+    "CategoryCount": { "id": "uuid", "name": "string", "slug": "string", "count": "int", "comingSoon": "bool" },
+    "CategoryContext": { "category": "CategoryCrumb", "breadcrumb": "CategoryCrumb[]", "subcategories": "CategoryCount[]", "sellerCount": "int" },
+    "RemovableFilter": { "filter": "AppliedFilter", "resultCount": "int" },
+    "EmptyGuidance": {
+      "title": { "type": "string", "desc": "e.g. 'Nothing matches all your filters'" },
+      "message": "text",
+      "removableFilters": { "type": "RemovableFilter[]", "desc": "Each single filter to remove with the result count it gives" },
+      "clearAllCount": "int?",
+      "nearbyCategories": "CategoryCount[]",
+      "tips": "string[]",
+      "popular": { "type": "ProductCard[]", "desc": "Popular in-stock products in the closest category" }
+    },
+    "SearchContext": {
+      "searchId": { "type": "string", "desc": "Identifies this result set for click logging and returning to results" },
+      "query": "QueryInfo",
+      "total": "int",
+      "totalLabel": { "type": "string", "desc": "e.g. '128 results from 9 sellers, including the Official Store'" },
+      "appliedFilters": "AppliedFilter[]",
+      "clearAllQuery": "string",
+      "facets": "Facet[]",
+      "sorts": "SortOption[]",
+      "storeMatch": "StoreMatch?",
+      "category": "CategoryContext?",
+      "emptyGuidance": "EmptyGuidance?",
+      "fromPriceNote": { "type": "string", "desc": "Explains 'from' prices" },
+      "rankingNote": { "type": "string", "desc": "'Sponsored items are paid placements and are labeled.' with a link to the ranking policy" }
+    },
+    "QuerySuggestion": { "text": "string", "matchedPrefix": "string", "categoryScope": "CategoryCrumb?" },
+    "BrandSuggestion": { "brandId": "uuid", "name": "string", "slug": "string", "logo": "MediaRef?", "productCount": "int" },
+    "StoreSuggestion": { "sellerId": "uuid", "name": "string", "slug": "string", "logo": "MediaRef?", "verified": "bool", "productCount": "int", "summary": { "type": "string", "desc": "e.g. 'Seller store · 86 products in audio'" } },
+    "ProductSuggestion": { "productId": "uuid", "slug": "string", "title": "string", "image": "MediaRef?", "fromPrice": "Money?", "sellerName": "string?" },
+    "RecentSearch": { "id": "uuid", "query": "string", "filtersLabel": "string?", "searchedAt": "datetime" },
+    "Suggestions": {
+      "query": "string",
+      "queries": "QuerySuggestion[]",
+      "categories": "QuerySuggestion[]",
+      "brands": "BrandSuggestion[]",
+      "stores": "StoreSuggestion[]",
+      "products": "ProductSuggestion[]",
+      "recent": { "type": "RecentSearch[]", "desc": "Only when a customer or guest session is present and recent searches are on" }
+    },
+    "RankingFactor": { "key": "string", "label": "string", "weight": "number" },
+    "RankingPolicy": {
+      "version": "int",
+      "text": { "type": "text", "desc": "Published 'How results are ranked' wording" },
+      "factors": "RankingFactor[]",
+      "effectiveFrom": "datetime",
+      "publishedBy": "Actor"
+    },
+    "RankingPolicyInput": { "text": "text", "factors": "RankingFactor[]", "effectiveFrom": "datetime", "reason": "text" },
+    "Synonym": {
+      "id": "uuid",
+      "terms": { "type": "string[]", "desc": "e.g. ['earbuds', 'earphones', 'in-ear headphones']" },
+      "kind": "enum(equivalent|one_way)",
+      "from": { "type": "string?", "desc": "one_way: the term that expands to terms" },
+      "active": "bool",
+      "note": "text?",
+      "updatedBy": "Actor",
+      "updatedAt": "datetime"
+    },
+    "SynonymInput": { "terms": "string[]", "kind": "enum(equivalent|one_way)", "from": "string?", "active": "bool?", "note": "text?" },
+    "ReindexJob": {
+      "id": "uuid",
+      "scope": "enum(all|products|category|brand|seller)",
+      "ids": "uuid[]",
+      "state": "enum(queued|running|completed|failed)",
+      "total": "int",
+      "processed": "int",
+      "requestedBy": "Actor",
+      "reason": "text",
+      "startedAt": "datetime?",
+      "finishedAt": "datetime?",
+      "error": "string?"
+    },
+    "IndexStatus": {
+      "engine": { "type": "string", "desc": "e.g. 'postgres-fts'" },
+      "documents": "int",
+      "offerRows": "int",
+      "staleDocuments": "int",
+      "lagSeconds": "int",
+      "lastEventAt": "datetime?",
+      "lastFullReindexAt": "datetime?",
+      "runningJob": "ReindexJob?"
+    },
+    "ZeroResultQuery": { "query": "string", "normalized": "string", "count": "int", "lastAt": "datetime", "lastFilters": "string?", "correctionOffered": "bool" },
+    "SearchExplain": { "productId": "uuid", "title": "string", "position": "int", "score": "number", "factors": "map<number>", "matchedTerms": "string[]", "synonymsUsed": "string[]", "correctedFrom": "string?" },
+    "BestSellerRank": {
+      "rank": "int",
+      "categoryId": "uuid",
+      "categoryName": "string",
+      "label": {
+        "type": "string",
+        "desc": "e.g. #3 in Headphones"
+      },
+      "updatedAt": "datetime"
+    },
+    "BarcodeMatch": {
+      "code": { "type": "string", "desc": "Normalized GTIN (UPC-A, EAN-13, GTIN-14; check digit verified)" },
+      "match": "bool",
+      "productId": "uuid?",
+      "variantId": { "type": "uuid?", "desc": "The variant carrying this GTIN, so the product page opens on it" },
+      "slug": "string?",
+      "title": "string?",
+      "card": "ProductCard?",
+      "fallbackQuery": { "type": "string?", "desc": "When nothing is listed with this code: the code itself, so the app can open search results with the empty guidance" }
+    },
+    "LookupHit": {
+      "kind": "enum(order|seller|product|customer|offer|return)",
+      "id": "uuid",
+      "ref": { "type": "string?", "desc": "Order or return reference, seller SKU" },
+      "title": { "type": "string", "desc": "Order ref + customer, seller name, product title, customer name" },
+      "subtitle": { "type": "string?", "desc": "Status label, email (masked unless the caller may see contact details), SKU" },
+      "statusLabel": "string?",
+      "screen": { "type": "string", "desc": "Screen id to open, e.g. admin/order, admin/seller, admin/product-review, admin/customer, seller/order, seller/offer, seller/return" }
+    },
+    "LookupGroup": {
+      "kind": "enum(orders|sellers|products|customers|offers|returns)",
+      "label": "string",
+      "items": "LookupHit[]",
+      "more": { "type": "bool", "desc": "More matches exist; 'See all' opens the module's list with q" }
+    },
+    "LookupResult": {
+      "query": "string",
+      "groups": { "type": "LookupGroup[]", "desc": "Only groups the caller may see and whose module is enabled; empty groups are left out" }
+    }
+  },
+  "tables": [
+    {
+      "name": "search_documents",
+      "desc": "One row per purchasable product: denormalized from catalog, offers, inventory, reviews and promotions events",
+      "columns": {
+        "product_id": "uuid pk", "slug": "text", "title": "text", "brand_id": "uuid?", "brand_name": "text?", "category_id": "uuid?", "category_path_ids": "uuid[]",
+        "attributes": "jsonb (filterable attribute key → values)", "variant_count": "int", "variant_options": "jsonb", "image": "jsonb?",
+        "seller_ids": "uuid[]", "has_official": "bool", "conditions": "text[]", "offer_count": "int",
+        "featured_offer_id": "uuid?", "featured_price": "bigint?", "featured_seller_name": "text?", "featured_official": "bool", "min_price": "bigint?", "max_price": "bigint?", "currency": "char(3)",
+        "was_price": "bigint?", "deal_ends_at": "timestamptz?", "on_sale": "bool (an active campaign price from promotions or a verified compare-at on the featured offer)", "gtins": "text[] (variant GTINs from catalog, normalized)", "variant_gtins": "jsonb (GTIN → variantId)", "badges": "jsonb",
+        "in_stock": "bool", "low_stock": "bool", "free_delivery": "bool", "fastest_dispatch_days": "int?", "same_day_cutoff": "time?",
+        "rating": "numeric(2,1)?", "rating_count": "int", "sales_30d": "int", "first_listed_at": "timestamptz", "popularity": "numeric",
+        "tsv": "tsvector (title A, brand A, category B, attributes C, description D)", "title_norm": "text (for trigram)",
+        "version": "bigint", "indexed_at": "timestamptz",
+        "best_seller_rank": "int? (rank in best_seller_category_id by sales_30d; null outside the top 100)",
+        "best_seller_category_id": "uuid?"
+      },
+      "indexes": ["gin(tsv)", "gin(title_norm gin_trgm_ops)", "gin(seller_ids)", "gin(category_path_ids)", "gin(attributes jsonb_path_ops)", "(in_stock, featured_price)", "(first_listed_at)", "(rating, rating_count)"]
+    },
+    {
+      "name": "search_offers",
+      "desc": "Offer-level rows so seller, condition and price filters show the matching seller's price (e.g. Official Store filter shows company offers)",
+      "columns": { "offer_id": "uuid pk", "product_id": "uuid → search_documents", "variant_id": "uuid", "seller_id": "uuid?", "official": "bool", "condition": "text", "price": "bigint", "in_stock": "bool", "free_delivery": "bool", "dispatch_days": "int", "featured_eligible": "bool" },
+      "indexes": ["(product_id)", "(seller_id, price)", "(condition, price)"]
+    },
+    { "name": "suggestion_terms", "desc": "Popular queries, category, brand, store and product names for suggestions and spelling correction", "columns": { "id": "uuid pk", "term": "text", "kind": "text (query|category|brand|store|product)", "target_id": "uuid?", "weight": "numeric", "updated_at": "timestamptz" }, "indexes": ["gin(term gin_trgm_ops)", "(kind, weight desc)"] },
+    { "name": "synonyms", "columns": { "id": "uuid pk", "terms": "text[]", "kind": "text", "from_term": "text?", "active": "bool", "note": "text?", "updated_by": "text", "updated_at": "timestamptz" } },
+    { "name": "recent_searches", "columns": { "id": "uuid pk", "owner_kind": "text (customer|guest)", "owner_id": "text", "query": "text", "filters": "jsonb", "searched_at": "timestamptz" }, "indexes": ["(owner_kind, owner_id, searched_at desc)"] },
+    { "name": "query_log", "desc": "Every search (partitioned by month); feeds zero-result reports, suggestions and ranking", "columns": { "id": "uuid pk", "search_id": "text", "raw": "text?", "normalized": "text?", "filters": "jsonb", "sort": "text", "results": "int", "corrected_to": "text?", "session_key": "text?", "at": "timestamptz" }, "indexes": ["(normalized, at)", "(results, at) where results = 0"] },
+    { "name": "click_log", "columns": { "search_id": "text", "product_id": "uuid", "position": "int", "sponsored": "bool", "at": "timestamptz" }, "indexes": ["(search_id)", "(product_id, at)"] },
+    { "name": "dirty_documents", "desc": "Products waiting to be reindexed", "columns": { "product_id": "uuid pk", "reason": "text", "queued_at": "timestamptz" } },
+    { "name": "reindex_jobs", "columns": { "id": "uuid pk", "scope": "text", "ids": "uuid[]", "state": "text", "total": "int", "processed": "int", "requested_by": "text", "reason": "text", "started_at": "timestamptz?", "finished_at": "timestamptz?", "error": "text?" } },
+    { "name": "ranking_policies", "columns": { "version": "int pk", "text": "text", "factors": "jsonb", "effective_from": "timestamptz", "reason": "text", "published_by": "text", "published_at": "timestamptz" } }
+  ],
+  "stateMachines": [
+    {
+      "name": "Reindex job", "field": "ReindexJob.state", "initial": "queued",
+      "transitions": [["queued", "start", "running"], ["running", "complete", "completed"], ["running", "fail", "failed"]],
+      "notes": "One full reindex at a time (REINDEX_ALREADY_RUNNING). Scoped jobs only mark documents dirty. The live index keeps serving during a full rebuild (new rows swap in per product)."
+    }
+  ],
+  "endpoints": [
+    {
+      "id": "searchProducts", "area": "store", "method": "GET", "path": "/products",
+      "summary": "Search results or category listing (product cards with sponsored slots marked)",
+      "desc": "Without q this is a category, brand, seller or collection listing. Out-of-stock products are excluded unless availability=include_out_of_stock. Seller and condition filters show the matching seller's offer price. Sponsored hits come from advertising.sponsoredForResults on the first page only and always carry a visible label; when advertising is off there are none.",
+      "auth": "anyone", "paging": true,
+      "query": {
+        "q": { "type": "string?", "desc": "Names, brands, keywords and seller names; a full GTIN/UPC also matches the product carrying it" },
+        "exact": { "type": "bool?", "desc": "Search exactly for q without correction ('Search instead for …')" },
+        "category": { "type": "string?", "desc": "Category slug" },
+        "brand": "string[]?",
+        "priceMin": { "type": "int?", "desc": "Minor units" },
+        "priceMax": "int?",
+        "rating": { "type": "int?", "desc": "Minimum stars, 1–4" },
+        "seller": { "type": "string[]?", "desc": "Seller slugs; 'official' for the Official Store" },
+        "condition": "enum(new|used|refurbished)[]?",
+        "availability": "enum(in_stock|include_out_of_stock)?",
+        "delivery": "enum(free|ships_today|arrives_by)[]?",
+        "arrivesBy": "date?",
+        "attrs": { "type": "string?", "desc": "Category attribute filters 'key:v1|v2;key2:v3', e.g. 'noise_cancelling:active;battery_life:30'" },
+        "listedWithinDays": { "type": "int?", "desc": "New arrivals" },
+        "onSale": { "type": "bool?", "desc": "Only products with a deal price now (active campaign price or verified was-price), e.g. a category's deals teaser with category + onSale" },
+        "sort": "enum(recommended|price_asc|price_desc|newest|rating|best_selling)?",
+        "postalCode": { "type": "string?", "desc": "For delivery cues and the arrives-by filter" }
+      },
+      "response": "SearchHit",
+      "errors": ["INVALID_FILTER", "SORT_NOT_AVAILABLE"],
+      "screens": ["store/search", "store/category", "store/home", "store/official", "store/seller", "store/brand", "store/collection", "store/deals"]
+    },
+    {
+      "id": "getSearchContext", "area": "store", "method": "GET", "path": "/facets",
+      "summary": "Everything around the results for the same query: total, correction, applied filters, facets with counts, sorts, store match, category context, empty guidance",
+      "desc": "Takes the same query parameters as GET /products. The app renders a results screen with this call plus the first page of /products.",
+      "auth": "anyone",
+      "query": {
+        "q": "string?",
+        "exact": "bool?",
+        "category": "string?",
+        "brand": "string[]?",
+        "priceMin": "int?",
+        "priceMax": "int?",
+        "rating": "int?",
+        "seller": "string[]?",
+        "condition": "enum(new|used|refurbished)[]?",
+        "availability": "enum(in_stock|include_out_of_stock)?",
+        "delivery": "enum(free|ships_today|arrives_by)[]?",
+        "arrivesBy": "date?",
+        "attrs": "string?",
+        "listedWithinDays": "int?",
+        "sort": "enum(recommended|price_asc|price_desc|newest|rating|best_selling)?",
+        "postalCode": "string?"
+      },
+      "response": "SearchContext",
+      "errors": ["INVALID_FILTER"],
+      "screens": ["store/search", "store/search-empty", "store/category", "store/official", "store/seller", "store/brand"]
+    },
+    { "id": "getSuggestions", "area": "store", "method": "GET", "path": "/suggestions", "summary": "Suggestions while typing: queries, categories, brands, stores, products and recent searches", "desc": "Tolerates misspellings. Store suggestions link to the seller's store page. Recent searches are included only when a customer or guest session is sent and recent searches are turned on in the profile.", "auth": "anyone", "query": { "q": "string", "limit": { "type": "int?", "desc": "Per group, default 5" } }, "response": "Suggestions", "screens": ["store/search", "store/home"] },
+    { "id": "listRecentSearches", "area": "store", "method": "GET", "path": "/recent-searches", "summary": "Recent searches for this customer or guest session (max 10)", "auth": "shopper", "response": "RecentSearch[]", "screens": ["store/search", "store/home"], "desc": "Signed-in customers: searches are saved to the account only while customers.MarketingPreferences.recentSearches is on (read with customers.getMarketingConsent); with it off nothing is saved and the list is empty. Guest sessions keep their own list until sign-in." },
+    { "id": "deleteRecentSearch", "area": "store", "method": "DELETE", "path": "/recent-searches/{id}", "summary": "Remove one recent search", "auth": "shopper", "params": { "id": "uuid" }, "response": null, "screens": ["store/search"] },
+    { "id": "clearRecentSearches", "area": "store", "method": "DELETE", "path": "/recent-searches", "summary": "Clear all recent searches", "auth": "shopper", "response": null, "screens": ["store/search"] },
+    { "id": "getSimilarProducts", "area": "store", "method": "GET", "path": "/products/{productId}/similar", "summary": "Similar in-stock products (unavailable product alternatives and related products)", "auth": "anyone", "params": { "productId": "uuid" }, "query": { "limit": "int?", "postalCode": "string?" }, "response": "ProductCard[]", "screens": ["store/search-empty", "store/product"] },
+    { "id": "getProductCards", "area": "store", "method": "GET", "path": "/cards", "summary": "Product cards for a list of product ids (home sections, recently viewed)", "auth": "anyone", "query": { "ids": "uuid[]", "postalCode": "string?" }, "response": "ProductCard[]", "screens": ["store/home", "store/collection"] },
+    { "id": "recordSearchClick", "area": "store", "method": "POST", "path": "/searches/{searchId}/clicks", "summary": "Record which result was opened (relevance and reports)", "auth": "anyone", "params": { "searchId": "string" }, "body": { "productId": "uuid", "position": "int", "sponsored": "bool" }, "response": null, "status": 204, "screens": ["store/search", "store/category"] },
+    { "id": "lookupBarcode", "area": "store", "method": "GET", "path": "/barcodes/{code}", "summary": "Resolve a scanned GTIN/UPC/EAN to a listed product and variant", "desc": "The app's 'Scan a barcode' reads the code on the device and sends it here. Matches search_documents.gtins (only purchasable, listed products). No match returns match=false with fallbackQuery so the app can show search results with empty guidance; it is logged as an unavailable search.", "auth": "anyone", "params": { "code": "string" }, "query": { "postalCode": "string?" }, "response": "BarcodeMatch", "errors": ["VALIDATION_FAILED"], "screens": ["store/search", "store/home"] },
+    { "id": "getRankingPolicy", "area": "store", "method": "GET", "path": "/ranking-policy", "summary": "Published 'How results are ranked'", "auth": "anyone", "response": "RankingPolicy", "screens": ["store/category", "store/search", "help/article"] },
+
+    { "id": "sellerQuickSearch", "area": "seller", "method": "GET", "path": "/quick", "summary": "Seller Center top-bar search across own orders, offers/SKUs and returns", "desc": "Fan-out over enabled modules' public APIs with the seller from the session: orders.listOrdersForSeller (order ref, buyer name, product), offers.searchOwnOffers (title, seller SKU, GTIN) and returns.listForSeller with q (return ref, order ref). Groups the member's role cannot see are left out (e.g. orders without orders.fulfillment.view). Nothing is indexed here; each group comes from its owning module.", "auth": "seller", "query": { "q": "string", "limit": { "type": "int?", "desc": "Per group, default 5, max 10" } }, "response": "LookupResult", "errors": ["VALIDATION_FAILED"], "screens": ["seller/dashboard"] },
+    { "id": "adminLookup", "area": "admin", "method": "GET", "path": "/lookup", "summary": "Back-office top-bar quick search across orders, sellers, products and customers", "desc": "Matches by reference, name, email, SKU or GTIN. Fan-out over enabled modules' public APIs, each group only when the caller holds that module's view permission: orders.listOrdersAdmin (orders.orders.view), sellers.searchSellers (sellers.accounts.view), customers.searchCustomers (customers.accounts.view; email masked without contact permission), products from this module's index plus offers.listOffersAdmin for seller SKUs (offers.offers.view). The lookup itself is not audited; opening a record is.", "auth": "staff", "query": { "q": "string", "limit": { "type": "int?", "desc": "Per group, default 5, max 10" } }, "response": "LookupResult", "errors": ["VALIDATION_FAILED"], "screens": ["admin/dashboard"] },
+    { "id": "listSynonyms", "area": "admin", "method": "GET", "path": "/synonyms", "summary": "Search synonyms", "auth": "staff", "permission": "search.synonyms.manage", "paging": true, "query": { "q": "string?", "active": "bool?" }, "response": "Synonym" },
+    { "id": "createSynonym", "area": "admin", "method": "POST", "path": "/synonyms", "summary": "Add a synonym set (takes effect on the next query; no reindex needed)", "auth": "staff", "permission": "search.synonyms.manage", "body": "SynonymInput", "response": "Synonym", "status": 201, "errors": ["SYNONYM_CONFLICT"], "audited": true, "events": ["search.synonym.changed"] },
+    { "id": "updateSynonym", "area": "admin", "method": "PATCH", "path": "/synonyms/{id}", "summary": "Edit or deactivate a synonym set", "auth": "staff", "permission": "search.synonyms.manage", "params": { "id": "uuid" }, "body": "SynonymInput", "response": "Synonym", "errors": ["SYNONYM_CONFLICT"], "audited": true, "events": ["search.synonym.changed"] },
+    { "id": "deleteSynonym", "area": "admin", "method": "DELETE", "path": "/synonyms/{id}", "summary": "Delete a synonym set", "auth": "staff", "permission": "search.synonyms.manage", "params": { "id": "uuid" }, "response": null, "audited": true, "events": ["search.synonym.changed"] },
+    { "id": "getIndexStatus", "area": "admin", "method": "GET", "path": "/index", "summary": "Index size, staleness and lag behind events", "auth": "staff", "permission": "search.index.manage", "response": "IndexStatus" },
+    { "id": "startReindex", "area": "admin", "method": "POST", "path": "/reindex-jobs", "summary": "Reindex everything or a scope (products, category, brand, seller)", "auth": "staff", "permission": "search.index.manage", "body": { "scope": "enum(all|products|category|brand|seller)", "ids": "uuid[]?", "reason": "text" }, "response": "ReindexJob", "status": 202, "errors": ["REINDEX_ALREADY_RUNNING"], "audited": true },
+    { "id": "getReindexJob", "area": "admin", "method": "GET", "path": "/reindex-jobs/{id}", "summary": "Reindex progress", "auth": "staff", "permission": "search.index.manage", "params": { "id": "uuid" }, "response": "ReindexJob" },
+    { "id": "listZeroResultQueries", "area": "admin", "method": "GET", "path": "/zero-result-queries", "summary": "Searches that found nothing (unavailable searches), most frequent first", "auth": "staff", "permission": "search.analytics.view", "paging": true, "query": { "from": "date", "to": "date" }, "response": "ZeroResultQuery", "screens": ["admin/reports"] },
+    { "id": "explainSearch", "area": "admin", "method": "GET", "path": "/explain", "summary": "Why results rank as they do for a query (scores, factors, synonyms, correction)", "auth": "staff", "permission": "search.analytics.view", "query": { "q": "string", "category": "string?", "limit": "int?" }, "response": "SearchExplain[]" },
+    { "id": "publishRankingPolicy", "area": "admin", "method": "POST", "path": "/ranking-policies", "summary": "Publish a new ranking policy version (wording and recommended-sort weights)", "auth": "staff", "permission": "search.ranking.manage", "body": "RankingPolicyInput", "response": "RankingPolicy", "status": 201, "audited": true, "events": ["search.ranking_policy.published"], "screens": ["admin/settings"] }
+  ],
+  "events": {
+    "publishes": [
+      { "name": "search.synonym.changed", "when": "A synonym set is created, edited or deleted", "payload": { "synonymId": "uuid", "action": "enum(created|updated|deleted)" } },
+      { "name": "search.index.rebuilt", "when": "A reindex job completes", "payload": { "jobId": "uuid", "scope": "string", "documents": "int" } },
+      { "name": "search.ranking_policy.published", "when": "A ranking policy version is published", "payload": { "version": "int", "effectiveFrom": "datetime" } }
+    ],
+    "consumes": [
+      { "name": "catalog.product.approved", "does": "Index the product (it appears once it has an eligible offer)" },
+      { "name": "catalog.product.publication_changed", "does": "Remove Hidden or Suspended products; re-add on Active" },
+      { "name": "catalog.product.updated", "does": "Reindex title, brand, category, attributes and images" },
+      { "name": "catalog.product.merged", "does": "Drop the duplicate; reindex the kept product" },
+      { "name": "offers.offer.created", "does": "Mark the product dirty" },
+      { "name": "offers.offer.price_changed", "does": "Update offer row and the product's from/featured price" },
+      { "name": "offers.offer.status_changed", "does": "Update offer row; drop the product from in-stock results when it has no active offer" },
+      { "name": "offers.featured.changed", "does": "Update featured offer, price and seller on the card" },
+      { "name": "inventory.stock.changed", "does": "Update in-stock and low-stock flags" },
+      { "name": "reviews.review.published", "does": "Update rating and rating count" },
+      { "name": "sellers.seller.approved", "does": "Add the store to store suggestions" },
+      { "name": "sellers.seller.restricted", "does": "Refresh the seller's offers and store suggestion" },
+      { "name": "sellers.seller.suspended", "does": "Remove the store from suggestions; offers update through offers events" },
+      { "name": "sellers.seller.reinstated", "does": "Restore the store suggestion" },
+      { "name": "sellers.seller.closed", "does": "Remove the store from suggestions" },
+      { "name": "promotions.campaign.started", "does": "Update deal badges, was prices and deal end times on cards" },
+      { "name": "promotions.campaign.ended", "does": "Remove deal badges" },
+      { "name": "orders.order.placed", "does": "Count units for best-selling sort and popularity (phase 2 sort)" },
+      { "name": "identity.guest_session.claimed", "does": "Merge the guest session's recent searches into the account (identity calls nothing in search)" },
+      { "name": "catalog.brand.changed", "does": "Reindex the brand name, slug and status on the brand's product documents and brand suggestions; only active brands are suggested or offered as a facet" },
+      { "name": "customers.marketing_preferences.changed", "does": "recentSearches false: delete the customer's saved recent searches and stop saving new ones; true: start saving again (nothing is restored)" }
+    ]
+  },
+  "permissions": [
+    { "key": "search.synonyms.manage", "audience": "staff", "desc": "Create, edit and delete search synonyms" },
+    { "key": "search.index.manage", "audience": "staff", "desc": "View index status and start reindex jobs" },
+    { "key": "search.analytics.view", "audience": "staff", "desc": "Zero-result queries and ranking explanations" },
+    { "key": "search.ranking.manage", "audience": "staff", "desc": "Publish the ranking policy and recommended-sort weights" }
+  ],
+  "jobs": [
+    { "name": "search.process-dirty", "schedule": "every 30 s", "does": "Rebuild documents in dirty_documents from catalog, offers, inventory, reviews and promotions public APIs" },
+    { "name": "search.refresh-delivery-flags", "schedule": "every 15 min", "does": "Recompute 'Ships today' and arrives-by flags as dispatch cutoffs pass" },
+    { "name": "search.refresh-suggestions", "schedule": "hourly", "does": "Rebuild suggestion_terms from popular queries (with results), categories, brands, stores and product names" },
+    { "name": "search.full-reindex", "schedule": "nightly 03:00 market time", "does": "Full rebuild (catches category tree changes, which catalog does not publish as events)" },
+    { "name": "search.sales-counts", "schedule": "nightly 03:30 market time", "does": "30-day units sold per product for best-selling sort and popularity; enables best_selling once bestSellingMinOrders is reached; ranks the top 100 products per leaf category (best_seller_rank, shown as #3 in Headphones)" },
+    { "name": "search.prune-logs", "schedule": "daily 04:00 market time", "does": "Delete recent searches older than the retention period and query/click logs older than 13 months" }
+  ],
+  "settings": [
+    { "key": "pageSize", "default": 24, "desc": "Default results per page" },
+    { "key": "typoSimilarityThreshold", "default": 0.35, "desc": "Trigram similarity for misspelling tolerance" },
+    { "key": "autoCorrectBelowResults", "default": 3, "desc": "Apply a confident correction when the original query has fewer results" },
+    { "key": "recentSearchesMax", "default": 10, "desc": "Recent searches kept per customer or guest" },
+    { "key": "recentSearchRetentionDays", "default": 90, "desc": "Recent searches older than this are deleted" },
+    { "key": "newArrivalsWindowDays", "default": 30, "desc": "'New arrivals' = first listed within this window" },
+    { "key": "bestSellingMinOrders", "default": 500, "desc": "Platform orders in 30 days before best-selling sort is offered" },
+    { "key": "excludeOutOfStockByDefault", "default": true, "desc": "Out-of-stock products appear only with 'Include out of stock'" },
+    { "key": "searchEngine", "default": "postgres", "desc": "postgres | external (adapter added later)" }
+  ],
+  "integrations": [
+    { "name": "PostgreSQL full-text search and pg_trgm", "purpose": "Ranking, misspelling tolerance and suggestions at launch" },
+    { "name": "External search engine (later)", "purpose": "OpenSearch or Meilisearch adapter behind the same API when volume needs it" }
+  ],
+  "errorCodes": {
+    "INVALID_FILTER": { "status": 400, "meaning": "Unknown filter key or value for this category. details.filter" },
+    "SORT_NOT_AVAILABLE": { "status": 409, "meaning": "best_selling is not offered until there is enough sales history" },
+    "REINDEX_ALREADY_RUNNING": { "status": 409, "meaning": "A full reindex is already running. details.jobId" },
+    "SYNONYM_CONFLICT": { "status": 409, "meaning": "A term is already in another active equivalent set. details.synonymId" }
+  },
+  "notes": [
+    "Quick lookups (seller and admin top bars, GET /quick and GET /lookup) are federated, not indexed: search calls each enabled module's list function with q and a small limit, filters groups by the caller's permissions and links each hit to its screen. A disabled module's group simply disappears. Product hits in the admin lookup also match GTINs and come from search_documents (listed products); unlisted drafts are found through offers SKUs.",
+    "Barcode scanning: GTINs are copied from catalog variants into search_documents.gtins (normalized, check digit verified) on catalog.product.approved / updated; GET /barcodes/{code} and a q that is a full GTIN resolve through them. Codes that match nothing are recorded as unavailable searches.",
+    "onSale: search_documents.on_sale is set from promotions.campaign.started / ended (active campaign price) and from a verified compare-at on the featured offer (offers.offer.price_changed); the category deals teaser is GET /products?category=…&onSale=true.",
+    "Recommended sort (published ranking policy v1): text relevance, then in-stock and featured-offer eligibility, delivery speed to the location, rating with enough reviews, and recent conversion. Sponsored placement never changes organic rank; sponsored hits are separate, labelled and come from advertising.",
+    "'From' prices always belong to one eligible offer named on the card (plan ch. 4). With a seller filter (e.g. Official Store) the card shows that seller's offer at the price listed.",
+    "Seller names in queries produce a store match card and store suggestions leading to the store page; seller records are never mixed into product results.",
+    "Universal filters always appear; category filters come from catalog attributes marked filterable for the current category (e.g. screen size, capacity, size). Facet counts are computed against the other active filters so each value shows what selecting it would give.",
+    "Empty results: EmptyGuidance lists each applied filter with the result count after removing it, nearby categories, tips and popular products. Product-level unavailability (out of stock, discontinued) is explained by the offers purchase box (store endpoint getPurchaseBox) and catalog; search supplies similar in-stock products.",
+    "Returning to previous results: the query string is the state; searchId plus page/cursor restores the same page after viewing a product.",
+    "Recent searches are stored per customer or guest session and merged on sign-in when search consumes identity.guest_session.claimed. For a customer they are saved to the account only while customers.MarketingPreferences.recentSearches is on (customers.getMarketingConsent at save time). Turning it off deletes the saved history: customers publishes customers.marketing_preferences.changed and search deletes the rows. With customers disabled, nothing is saved to accounts.",
+    "Reports read unavailable searches through zeroResultStats; query logs are not exported directly.",
+    "Optional dependencies: inventory (stock flags), reviews (ratings), sellers (store suggestions), advertising (sponsored slots), promotions (deal badges), customers (recent-search preference). With any of them off, the related fields are simply empty."
+  ]
+}

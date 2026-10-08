@@ -1,0 +1,240 @@
+# screens: seller/order
+# replaces: GET orders/orders/{id}, GET shipping/shipments, GET shipping/exceptions, GET shipping/shipping-setup, GET messaging/conversations, GET messaging/conversations/{id}/messages
+# why: The fulfillment task needs the seller's own group, its shipments and tracking changes, open delivery exceptions, the record-shipment options and the buyer conversation in one request.
+query SellerOrderDetail($ref: String!, $messagePaging: PageInput) {
+  sellerOrder(ref: $ref) {
+    id
+    ref
+    placedAt
+    acceptedAt
+    paymentAccepted
+    buyerName
+    mixedOrderNote
+    groups {
+      id
+      packageLabel
+      shipsFrom
+      status
+      statusLabel
+      nextAction
+      allowedActions
+      deadlineLabel
+      dispatchResult
+      dispatchDeadline {
+        dueAt
+        state
+      }
+      itemsSummary
+      units
+      delivery {
+        methodName
+        carrier
+        service
+        arrivalFrom
+        arrivalTo
+        dispatchBy
+      }
+      shipTo {
+        ...PostalAddress
+      }
+      giftNote
+      hidePricesOnSlip
+      items {
+        id
+        title
+        variantLabel
+        image {
+          url
+          alt
+        }
+        quantity
+        shippedQuantity
+        cancelledQuantity
+        unitPrice {
+          ...Amount
+        }
+        lineSubtotal {
+          ...Amount
+        }
+        state
+        stateLabel
+        offerTerms {
+          conditionLabel
+          sellerSku
+        }
+      }
+      money {
+        itemSubtotal {
+          ...Amount
+        }
+        sellerDiscounts {
+          ...Amount
+        }
+        shippingCharged {
+          ...Amount
+        }
+        shippingLabel
+        platformFeeEstimate {
+          ...Amount
+        }
+        earningsEstimate {
+          ...Amount
+        }
+        earningsNote
+      }
+      cancellations {
+        id
+        initiatedBy
+        reason
+        status
+        respondBy {
+          dueAt
+          state
+        }
+        items {
+          itemId
+          title
+          variantLabel
+          quantity
+        }
+      }
+      shipments {
+        id
+        packageLabel
+        carrierName
+        serviceName
+        trackingNumber
+        trackingUrl
+        trackingState
+        status
+        statusLabel
+        steps
+        currentStep
+        shippedAt
+        estimateLabel
+        dispatchedOnTime
+        contents {
+          orderItemId
+          title
+          variantLabel
+          quantity
+        }
+        corrections {
+          at
+          from
+          to
+          reason
+          customerNotified
+          by {
+            ...Who
+          }
+        }
+        recordedBy {
+          ...Who
+        }
+      }
+      deliveryExceptions {
+        id
+        kind
+        situation
+        requiredResponse
+        nextStep
+        deadlineLabel
+        status
+        deadline {
+          dueAt
+          state
+        }
+      }
+      timeline {
+        at
+        label
+        detail
+        actor {
+          ...Who
+        }
+      }
+    }
+    conversations {
+      id
+      counterparty {
+        name
+      }
+      privacyNote
+      rulesNote
+      replyState
+      replyLabel
+      dispatchWarning
+      canSend
+      replyDue {
+        dueAt
+        state
+      }
+      messages(paging: $messagePaging) {
+        nextCursor
+        items {
+          id
+          kind
+          authorLabel
+          fromMe
+          body
+          hidden
+          at
+          attachments {
+            id
+            url
+            alt
+          }
+        }
+      }
+    }
+  }
+  myShippingSetup {
+    labelPurchaseAvailable
+    labelUnavailableReason
+    dispatchLabel
+    defaultPackage {
+      weightGrams
+      lengthCm
+      widthCm
+      heightCm
+      label
+    }
+    carriers {
+      code
+      name
+      trackingConnected
+      services {
+        id
+        code
+        name
+        transitMinDays
+        transitMaxDays
+        labelSupported
+        trackingPattern
+      }
+    }
+  }
+}
+
+fragment Amount on Money {
+  amount
+  currency
+  formatted
+}
+
+fragment PostalAddress on Address {
+  name
+  line1
+  line2
+  city
+  region
+  postalCode
+  country
+  phone
+}
+
+fragment Who on Actor {
+  kind
+  name
+}

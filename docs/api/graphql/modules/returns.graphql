@@ -1,0 +1,750 @@
+# returns: return requests, return shipments, inspection, remedies and the refund requests Finance approves.
+# Adds Order.returns, Order.refundRequests (admin), OrderItem.returnEligibility, Customer.returnsOverview / openReturns /
+# returns (admin), Seller.returnCounts (seller), Seller.returns (admin), Seller.returnTerms (store) and
+# Case.refundRequests (admin). Orders adds Return.order and RefundRequest.order (admin) for the full order.
+# Return status (the item) and refund status (the money) are always separate fields: "Approved" never means money arrived.
+
+"""
+A return request for items of one seller package, from request to remedy.
+Store: the customer's view (ReturnDetail). Seller: the seller's own returns with policy, payment, deadlines, inspection and
+earnings impact (ReturnCase). Admin: the full case with owner, exception record and refund request.
+"""
+type Return {
+  id: UUID!
+  "RT-YYMMDD-NNNN"
+  ref: String!
+  orderId: UUID!
+  "MK-… reference of the original order"
+  orderRef: String!
+  ownerType: ReturnOwnerType!
+  "Null for the Official Store"
+  sellerId: UUID
+  sellerName: String!
+  status: ReturnStatus!
+  "Customer wording, e.g. Approved: send it back"
+  statusLabel: String!
+  "Item track: Requested, Approved, Sent back, Received, Inspected, Refunded (or Replaced)"
+  track: [ReturnTrackStep!]!
+  items: [ReturnItem!]!
+  itemCount: Int!
+  "Customer reason, e.g. Arrived damaged"
+  reason: String!
+  "What the customer wrote"
+  details: String
+  "Customer photos"
+  media: [MediaRef!]!
+  "Remedy the customer asked for"
+  remedy: ReturnRemedyKind!
+  handledBy: ReturnHandler!
+  "When the seller (or Marketly) must respond"
+  responseDue: Deadline
+  infoRequest: ReturnInfoRequest
+  decision: ReturnDecision
+  "Return label and tracking, separate from the original delivery"
+  shipment: ReturnShipment
+  "Refund progress (Requested, Under review, Approved, Processing, Sent), kept apart from the return status"
+  refund: ReturnRefund
+  "Replacement or exchange, with its own shipment"
+  replacement: ReturnReplacement
+  "Return terms accepted at purchase (frozen on the order item)"
+  terms: ReturnTerms!
+  escalation: ReturnEscalation
+  timeline: [TimelineEvent!]!
+  "Plain next step, e.g. Drop off by Thu, Oct 15"
+  nextStep: String!
+  nextDeadline: Deadline
+  "Not completed or cancelled"
+  open: Boolean!
+  requestedAt: DateTime!
+  "What the customer can do now"
+  actions: [ReturnCustomerAction!]! @areas(in: [STORE])
+
+  # ---- Seller Center and Admin Center only
+  customer: ReturnCustomer @areas(in: [SELLER, ADMIN])
+  "What the customer paid for these items and what is still refundable"
+  payment: ReturnPayment @areas(in: [SELLER, ADMIN])
+  "Who pays return shipping for this reason under the applied terms"
+  shippingPaidBy: ReturnShippingPayer @areas(in: [SELLER, ADMIN])
+  deadlines: ReturnDeadlines @areas(in: [SELLER, ADMIN])
+  inspection: ReturnInspection @areas(in: [SELLER, ADMIN])
+  "Refund request in the Finance approval queue, once a refund is decided"
+  refundRequest: RefundRequest @areas(in: [SELLER, ADMIN])
+  "Effect of the refund on seller earnings: refund, earnings change, fee returned, label charge"
+  earningsImpact: ReturnEarningsImpact @areas(in: [SELLER, ADMIN])
+  "Marketly support is involved (escalated, took over or following)"
+  platformInvolved: Boolean! @areas(in: [SELLER, ADMIN])
+  flags: [ReturnFlag!]! @areas(in: [SELLER, ADMIN])
+  "Seller and staff activity, newest first"
+  activity: [TimelineEvent!]! @areas(in: [SELLER, ADMIN])
+  "REST actions the caller may take now, e.g. approve, request-info, reject, inspection, remedy"
+  allowedActions: [String!]! @areas(in: [SELLER, ADMIN])
+  "Staff owner of the return"
+  owner: Actor @areas(in: [ADMIN])
+  "Refund-without-return record with reason and approvals"
+  exception: ReturnException @areas(in: [ADMIN])
+  "Expected contents, serial number shipped and category checks for the inspection, once received"
+  inspectionChecklist: ReturnInspectionChecklist @areas(in: [SELLER, ADMIN])
+  "Unsent inspection and refund decision (Save draft)"
+  inspectionDraft: ReturnInspectionDraft @areas(in: [SELLER, ADMIN])
+  "Who is inspecting (Inspecting)"
+  inspector: Actor @areas(in: [SELLER, ADMIN])
+  "Evidence attached before any case exists; copied into the case on escalation"
+  evidence: [ReturnEvidence!]! @areas(in: [SELLER, ADMIN])
+}
+
+type ReturnInspectionChecklist @areas(in: [SELLER, ADMIN]) {
+  "Box contents from the order item snapshot"
+  expectedContents: [String!]!
+  "Serial recorded at packing (Official Store); null when none was recorded"
+  serialShipped: String
+  items: [ReturnChecklistItem!]!
+}
+
+type ReturnChecklistItem @areas(in: [SELLER, ADMIN]) {
+  key: String!
+  kind: ReturnChecklistKind!
+  "e.g. Serial number matches order (HA24-0918-7731)"
+  label: String!
+  expected: String
+  required: Boolean!
+}
+
+enum ReturnChecklistKind @areas(in: [SELLER, ADMIN]) {
+  CONTENTS
+  SERIAL
+  FUNCTIONAL
+  HYGIENE
+  CONDITION
+}
+
+type ReturnInspectionDraft @areas(in: [SELLER, ADMIN]) {
+  "Partial inspection input as last saved"
+  inspection: JSON!
+  "Partial remedy input (seller form)"
+  remedy: JSON
+  savedBy: Actor!
+  savedAt: DateTime!
+}
+
+type ReturnEvidence @areas(in: [SELLER, ADMIN]) {
+  id: UUID!
+  kind: ReturnEvidenceKind!
+  media: [MediaRef!]!
+  note: String
+  party: String!
+  addedBy: Actor!
+  addedAt: DateTime!
+  "Set once copied into the support case"
+  caseId: UUID
+}
+
+enum ReturnEvidenceKind @areas(in: [SELLER, ADMIN]) {
+  PHOTO
+  VIDEO
+  DOCUMENT
+  TRACKING
+  INVOICE
+  OTHER
+}
+
+enum ReturnOwnerType {
+  OFFICIAL
+  SELLER
+}
+
+enum ReturnStatus {
+  REQUESTED
+  INFO_REQUESTED
+  APPROVED
+  REJECTED
+  IN_TRANSIT
+  RECEIVED
+  AWAITING_REMEDY
+  COMPLETED
+  CANCELLED
+}
+
+"STORE_CREDIT needs the wallet module (phase 3)"
+enum ReturnRemedyKind {
+  REFUND
+  REPLACEMENT
+  EXCHANGE
+  STORE_CREDIT
+}
+
+enum ReturnHandler {
+  SELLER
+  OFFICIAL_STORE
+  MARKETPLACE_SUPPORT
+}
+
+enum ReturnCustomerAction @areas(in: [STORE]) {
+  WITHDRAW
+  REPLY_INFO
+  GET_LABEL
+  ADD_TRACKING
+  ESCALATE
+  REPORT_PROBLEM
+}
+
+enum ReturnShippingPayer {
+  SELLER
+  CUSTOMER
+  PLATFORM
+}
+
+"One step of a status track (return or refund)"
+type ReturnTrackStep {
+  key: String!
+  label: String!
+  state: ReturnStepState!
+}
+
+enum ReturnStepState {
+  DONE
+  CURRENT
+  UPCOMING
+}
+
+"A returned order item (snapshot of what was bought)"
+type ReturnItem {
+  orderItemId: UUID!
+  productId: UUID!
+  variantId: UUID!
+  title: String!
+  "e.g. Color → Cream"
+  options: [VariantOption!]!
+  sku: String
+  imageUrl: URL
+  quantity: Int!
+  unitPrice: Money!
+}
+
+"A question from the seller or Marketly; the respond-by clock pauses until the customer replies"
+type ReturnInfoRequest {
+  question: String!
+  askedBy: Actor!
+  askedAt: DateTime!
+  replyDueAt: DateTime!
+  reply: String
+  replyMedia: [MediaRef!]!
+  repliedAt: DateTime
+}
+
+type ReturnDecision {
+  kind: ReturnDecisionKind!
+  reasonCode: String
+  "Shown to the customer"
+  explanation: String
+  decidedBy: Actor!
+  decidedAt: DateTime!
+  "True when Marketly decided instead of the seller"
+  platformDecision: Boolean!
+}
+
+enum ReturnDecisionKind {
+  APPROVED
+  APPROVED_WITHOUT_RETURN
+  REJECTED
+  OVERTURNED
+}
+
+"The return shipment: drop-off code or label, instructions and tracking"
+type ReturnShipment {
+  id: UUID!
+  status: ReturnShipmentStatus!
+  method: ReturnLabelMethod!
+  carrier: String
+  service: String
+  trackingNumber: String
+  trackingUrl: URL
+  labelUrl: URL
+  qrCodeUrl: URL
+  dropOffBy: DateTime
+  dropOffPoints: [ReturnDropOffPoint!]!
+  instructions: [String!]!
+  from: Address
+  to: Address!
+  cost: Money
+  paidBy: ReturnShippingPayer!
+  "Shipment record in the shipping module"
+  shippingShipmentId: UUID
+  events: [TimelineEvent!]!
+}
+
+enum ReturnShipmentStatus {
+  LABEL_ISSUED
+  IN_TRANSIT
+  DELIVERED
+  EXCEPTION
+  EXPIRED
+}
+
+enum ReturnLabelMethod {
+  PREPAID_QR
+  PREPAID_LABEL
+  CUSTOMER_ARRANGED
+}
+
+type ReturnDropOffPoint {
+  name: String!
+  address: String!
+  distanceMiles: Float
+  hours: String
+}
+
+"Customer-facing refund progress for a return"
+type ReturnRefund {
+  id: UUID!
+  "RF-YYMMDD-NNNN"
+  ref: String!
+  status: RefundRequestStatus!
+  statusLabel: String!
+  track: [ReturnTrackStep!]!
+  breakdown: ReturnRefundBreakdown!
+  approvedAt: DateTime
+  sentAt: DateTime
+  failedReason: String
+  expectedBy: DateTime
+  bankReference: String
+  "Plain words, e.g. Approved still means the money hasn't been sent"
+  explanation: String!
+}
+
+"Plan ch. 13 refund statuses. APPROVED is not money sent; SENT means it left Marketly."
+enum RefundRequestStatus {
+  REQUESTED
+  UNDER_REVIEW
+  APPROVED
+  DECLINED
+  PROCESSING
+  SENT
+  FAILED
+  CANCELLED
+}
+
+"How a refund amount is made up"
+type ReturnRefundBreakdown {
+  itemAmount: Money!
+  "Coupon share allocated to the returned items (subtracted)"
+  discountShare: Money!
+  shippingRefund: Money!
+  returnShippingDeduction: Money!
+  deductions: [ReturnRefundDeduction!]!
+  total: Money!
+  "Remaining refundable amount for these items"
+  maxRefundable: Money!
+  "e.g. Visa •••• 4417, or Marketly store credit"
+  destination: String!
+  isEstimate: Boolean!
+}
+
+type ReturnRefundDeduction {
+  label: String!
+  amount: Money!
+  reason: String!
+}
+
+type ReturnReplacement {
+  id: UUID!
+  kind: ReturnReplacementKind!
+  status: ReturnReplacementStatus!
+  variantId: UUID!
+  title: String!
+  options: [VariantOption!]!
+  quantity: Int!
+  "e.g. Same item, no charge"
+  chargeNote: String!
+  carrier: String
+  trackingNumber: String
+  estimatedDelivery: Date
+  "A replacement gets a new return window"
+  newReturnWindowEnds: Date
+  cancelReason: String
+  createdAt: DateTime!
+}
+
+enum ReturnReplacementKind {
+  REPLACEMENT
+  EXCHANGE
+}
+
+enum ReturnReplacementStatus {
+  PENDING
+  RESERVED
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+"Effective return terms: baseline, category exception and seller terms combined"
+type ReturnTerms {
+  windowDays: Int!
+  changeOfMindAllowed: Boolean!
+  "e.g. Unopened and sealed"
+  condition: String
+  responsibilities: [ReturnShippingRule!]!
+  remedies: [ReturnRemedyKind!]!
+  responseTargetBusinessDays: Int!
+  "One line, e.g. 30-day returns, free for defects"
+  summary: String!
+  policyVersion: String!
+  sellerTermsVersion: Int
+  source: ReturnTermsSource!
+}
+
+enum ReturnTermsSource {
+  BASELINE
+  SELLER_TERMS
+  CATEGORY_EXCEPTION
+}
+
+"Who pays return shipping for a group of reasons"
+type ReturnShippingRule {
+  reasonGroup: ReturnReasonGroup!
+  paidBy: ReturnShippingPayer!
+  "Deducted from the refund when the customer pays, e.g. $7.99 for change of mind"
+  customerFee: Money
+  originalShippingRefunded: Boolean!
+  "Official Store wording, e.g. Free for every reason"
+  officialStoreRule: String
+  note: String
+}
+
+enum ReturnReasonGroup {
+  DAMAGED
+  INCORRECT
+  DEFECTIVE
+  NOT_AS_DESCRIBED
+  MISSING_PARTS
+  CHANGE_OF_MIND
+  LOST_IN_TRANSIT
+}
+
+"The customer asked Marketly to step in"
+type ReturnEscalation {
+  at: DateTime!
+  by: Actor!
+  reason: ReturnEscalationReason!
+  note: String
+  caseId: UUID
+  caseRef: String
+}
+
+enum ReturnEscalationReason {
+  SELLER_NO_RESPONSE
+  SELLER_MISSED_INSPECTION
+  CUSTOMER_DISAGREES
+  REFUND_LATE
+  SELLER_REJECTED
+  OTHER
+}
+
+# ---------------------------------------------------------------- seller and admin views
+
+"The customer as the seller sees them (no contact details)"
+type ReturnCustomer @areas(in: [SELLER, ADMIN]) {
+  displayName: String!
+  city: String
+  ordersWithSeller: Int!
+}
+
+type ReturnPayment @areas(in: [SELLER, ADMIN]) {
+  itemPaid: Money!
+  shippingPaid: Money!
+  discountShare: Money!
+  maxRefundable: Money!
+  refundedSoFar: Money!
+  "e.g. Visa •••• 2290"
+  methodLabel: String!
+}
+
+type ReturnDeadlines @areas(in: [SELLER, ADMIN]) {
+  respondBy: Deadline
+  inspectBy: Deadline
+  refundBy: Deadline
+  dropOffBy: Deadline
+}
+
+"Condition on arrival and the proposed stock outcome"
+type ReturnInspection @areas(in: [SELLER, ADMIN]) {
+  id: UUID!
+  inspectedBy: Actor!
+  inspectedAt: DateTime!
+  conditionOutcome: ReturnConditionOutcome!
+  grade: ReturnGrade!
+  checks: [ReturnInspectionCheck!]!
+  missingParts: [String!]!
+  notes: String
+  media: [MediaRef!]!
+  proposedStockOutcome: ReturnStockOutcome!
+  "e.g. Used – Like new"
+  regradeCondition: String
+  stockOutcomeRecordedBy: Actor
+  stockOutcomeRecordedAt: DateTime
+}
+
+enum ReturnConditionOutcome @areas(in: [SELLER, ADMIN]) {
+  AS_DESCRIBED
+  DAMAGED_BY_CUSTOMER
+  MISSING_PARTS
+  NOT_MATCHING_REQUEST
+  WRONG_ITEM_RETURNED
+  EMPTY_PACKAGE
+}
+
+enum ReturnGrade @areas(in: [SELLER, ADMIN]) {
+  NEW_SEALED
+  LIKE_NEW
+  GOOD
+  DAMAGED
+}
+
+enum ReturnStockOutcome @areas(in: [SELLER, ADMIN]) {
+  RESTOCK
+  DIFFERENT_CONDITION
+  "Kept in damaged or held stock, not for sale"
+  DAMAGED_STOCK
+  REPAIR
+  RETURN_TO_SUPPLIER
+  WRITE_OFF
+}
+
+type ReturnInspectionCheck @areas(in: [SELLER, ADMIN]) {
+  label: String!
+  passed: Boolean!
+}
+
+"Effect of a refund on the seller balance, shown before deciding"
+type ReturnEarningsImpact @areas(in: [SELLER, ADMIN]) {
+  refundToCustomer: Money!
+  sellerEarningsChange: Money!
+  feeReturned: Money!
+  labelCharge: Money
+  totalBalanceChange: Money!
+  "The sale was already paid out; the amount comes off the next payout"
+  afterPayout: Boolean!
+  note: String!
+}
+
+type ReturnFlag @areas(in: [SELLER, ADMIN]) {
+  kind: ReturnFlagKind!
+  label: String!
+}
+
+enum ReturnFlagKind @areas(in: [SELLER, ADMIN]) {
+  REFUND_WITHOUT_RETURN_PROPOSED
+  REFUND_WITHOUT_RETURN_APPROVED
+  SELLER_MISSED_DEADLINE
+  PLATFORM_TOOK_OVER
+  REFUND_FAILED
+  CUSTOMER_ESCALATED
+  DISPUTE_OPEN
+  REFUND_AFTER_PAYOUT
+}
+
+"Refund without return: a controlled exception with a recorded reason"
+type ReturnException @areas(in: [ADMIN]) {
+  reasonCode: String!
+  details: String!
+  proposedBy: Actor!
+  proposedAt: DateTime!
+  approvedBy: Actor
+  approvedAt: DateTime
+  stockOutcome: String
+}
+
+"""
+A refund decided by returns, a case decision or an exception, waiting for or past Finance approval.
+Approved is not sent: payments sends the money after approval.
+"""
+type RefundRequest @areas(in: [SELLER, ADMIN]) {
+  id: UUID!
+  "RF-YYMMDD-NNNN"
+  ref: String!
+  source: RefundRequestSource!
+  returnId: UUID
+  returnRef: String
+  caseId: UUID
+  orderId: UUID!
+  orderRef: String!
+  orderItemIds: [UUID!]!
+  ownerType: ReturnOwnerType!
+  "Null for the Official Store"
+  sellerId: UUID
+  sellerName: String!
+  customerName: String!
+  status: RefundRequestStatus!
+  breakdown: ReturnRefundBreakdown!
+  fundedBy: RefundFundedBy!
+  sellerShare: Money
+  platformShare: Money
+  reasonCode: String
+  reason: String
+  earningsImpact: ReturnEarningsImpact
+  proposedBy: Actor!
+  approvedBy: Actor
+  declineReason: String
+  failedReason: String
+  "Refund record in payments once handed over"
+  paymentRefundId: UUID
+  history: [TimelineEvent!]!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+
+  # ---- Admin Center only
+  "Finance approval: approver limits and second reviewer"
+  approval: ApprovalInfo @areas(in: [ADMIN])
+  "Set when the refund executes a trust recommendation"
+  trustReportId: UUID @areas(in: [ADMIN])
+}
+
+enum RefundRequestSource @areas(in: [SELLER, ADMIN]) {
+  RETURN
+  CASE
+  EXCEPTION
+  SELLER
+}
+
+enum RefundFundedBy @areas(in: [SELLER, ADMIN]) {
+  SELLER
+  PLATFORM
+  SHARED
+  OFFICIAL_STORE
+}
+
+type RefundRequestPage implements Paged @areas(in: [ADMIN]) {
+  items: [RefundRequest!]!
+  nextCursor: String
+  page: Int
+  totalPages: Int
+  total: Int
+}
+
+type ReturnPage implements Paged {
+  items: [Return!]!
+  nextCursor: String
+  page: Int
+  totalPages: Int
+  total: Int
+}
+
+enum ReturnListState {
+  OPEN
+  COMPLETED
+  ALL
+}
+
+# ---------------------------------------------------------------- order item, account and dashboard views
+
+"Whether an order item can be returned now, and its latest return"
+type ReturnEligibility @areas(in: [STORE, ADMIN]) {
+  eligible: Boolean!
+  ineligibleReason: ReturnIneligibleReason
+  "e.g. Return by Sat, Oct 17 / Not shipped yet. You can cancel it instead."
+  message: String!
+  quantityPurchased: Int!
+  quantityReturnable: Int!
+  returnBy: DateTime
+  "Open or most recent return of this item, with return and refund status side by side"
+  latestReturn: ReturnItemState
+}
+
+enum ReturnIneligibleReason @areas(in: [STORE, ADMIN]) {
+  NOT_DELIVERED
+  NOT_SHIPPED
+  WINDOW_CLOSED
+  RETURN_OPEN
+  FINAL_SALE
+  CATEGORY_EXCLUDED
+  ALREADY_RETURNED
+  CANCELLED
+}
+
+type ReturnItemState @areas(in: [STORE, ADMIN]) {
+  returnId: UUID!
+  ref: String!
+  status: ReturnStatus!
+  statusLabel: String!
+  refundStatus: RefundRequestStatus
+}
+
+"Return and refund totals for the account"
+type ReturnsOverview @areas(in: [STORE]) {
+  openReturns: Int!
+  "e.g. 1 needs drop-off by Oct 15"
+  openNote: String
+  refundsOnTheWay: Money!
+  refundsOnTheWayNote: String
+  refundedThisYear: Money!
+  completedThisYear: Int!
+}
+
+"Seller returns queue tiles"
+type ReturnQueueCounts @areas(in: [SELLER]) {
+  responseOverdue: Int!
+  overdueRef: String
+  awaitingResponse: Int!
+  nextResponseDueAt: DateTime
+  toInspect: Int!
+  oldestReceivedAt: DateTime
+  disputesNeedingEvidence: Int!
+  nextEvidenceDueAt: DateTime
+}
+
+# ---------------------------------------------------------------- fields on other modules' types
+
+extend type Order {
+  "Returns on this order, newest first. Seller area: only the caller's own returns."
+  returns: [Return!]! @source(module: "returns", fn: "listForOrder") @cost(weight: 5)
+  "Refund requests for this order (returns, case decisions and exceptions) with Finance approval state"
+  refundRequests: [RefundRequest!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "listRefundRequestsForOrder")
+}
+
+extend type OrderItem {
+  "Return window and eligibility now, plus the item's latest return"
+  returnEligibility: ReturnEligibility @areas(in: [STORE, ADMIN]) @source(module: "returns", fn: "eligibilityForItems")
+}
+
+extend type Customer {
+  "Account overview and returns page totals"
+  returnsOverview: ReturnsOverview @areas(in: [STORE]) @source(module: "returns", fn: "customerOverview") @cost(weight: 3)
+  "Open returns, newest first, for the account overview"
+  openReturns(limit: Int = 3): ReturnPage! @areas(in: [STORE]) @source(module: "returns", fn: "listOpenForCustomer")
+  "Customer 360: the customer's returns"
+  returns(state: ReturnListState = ALL, paging: PageInput): ReturnPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "listForCustomer")
+}
+
+extend type Seller {
+  "Returns queue tiles for the seller dashboard"
+  returnCounts: ReturnQueueCounts @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "returns", fn: "sellerQueueCounts") @cost(weight: 3)
+  "Seller 360: the seller's returns"
+  returns(state: ReturnListState = OPEN, paging: PageInput): ReturnPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "listForSeller")
+  "Storefront returns section: the seller's standard terms for new items (category exceptions show per offer on the product page)"
+  returnTerms: ReturnTerms @areas(in: [STORE]) @source(module: "returns", fn: "sellerReturnTermsFor")
+}
+
+extend type Case {
+  "Refund requests created by this case's decision, with Finance approval state"
+  refundRequests: [RefundRequest!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "listRefundRequestsForCase")
+}
+
+extend type Query {
+  "Return detail for the signed-in customer (or a guest order session)"
+  return(ref: String!): Return @areas(in: [STORE]) @auth(requires: SHOPPER) @source(module: "returns", fn: "getReturnForCustomer")
+
+  "My returns, return status and refund status side by side"
+  returns(state: ReturnListState = OPEN, paging: PageInput): ReturnPage! @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "returns", fn: "listForCustomer")
+
+  "A return of the caller's seller account: request, policy, payment, deadlines, shipment, inspection and earnings impact"
+  sellerReturn(ref: String!): Return @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "returns", fn: "getReturnForSeller")
+
+  "Any return with owner, exception record, refund request and action history (staff)"
+  returnAdmin(ref: String!): Return @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "getReturnAdmin")
+
+  "Refund approval queue for Finance"
+  refundRequests(status: RefundRequestStatus, source: RefundRequestSource, paging: PageInput): RefundRequestPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "listRefundRequests")
+
+  "One refund request with breakdown, funding, earnings impact and approval"
+  refundRequest(ref: String!): RefundRequest @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "getRefundRequest")
+}

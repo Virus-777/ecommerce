@@ -1,0 +1,132 @@
+# warehouse: physical pick, pack and dispatch of Official Store stock.
+# Adds OrderGroup.warehouseTask (Admin Center order 360). Outside sellers pick and pack their own orders,
+# so the field is null for their groups. Query warehouseToday feeds OpsQueues (today's pick, pack and ship work).
+
+"Warehouse work for one order's Official Store package group: pick lines with bins, packages, holds"
+type WarehouseTask @areas(in: [ADMIN]) {
+  id: UUID!
+  orderRef: String!
+  status: WarehouseTaskStatus!
+  shipBy: DateTime!
+  deadline: Deadline!
+  "Service the customer chose, e.g. 'UPS Ground · arrives Tue, Oct 13'"
+  deliveryChoice: String!
+  "Pick wave, e.g. 'Wave 3'"
+  waveRef: String
+  lines: [WarehouseTaskLine!]!
+  packages: [WarehousePackage!]!
+  "e.g. 'Shortage reported: bin F-12-3 empty. Inventory is checking.'"
+  holdReason: String
+  "e.g. 'This order also has Package 2 of 2 from Pixel & Port. They ship it separately.'"
+  mixedOrderNote: String
+  totalPackagesInOrder: Int!
+  createdAt: DateTime!
+}
+
+enum WarehouseTaskStatus @areas(in: [ADMIN]) {
+  AWAITING_PICK
+  PICKING
+  PICKED
+  PACKING
+  PACKED
+  DISPATCHED
+  ON_HOLD
+  CANCELLED
+}
+
+"One order item to pick"
+type WarehouseTaskLine @areas(in: [ADMIN]) {
+  id: UUID!
+  orderItemId: UUID!
+  sku: String!
+  label: String!
+  image: MediaRef
+  quantity: Int!
+  binCode: String
+  picked: Int!
+  short: Int!
+  state: WarehouseTaskLineState!
+  pickedBy: Actor
+  pickedAt: DateTime
+}
+
+enum WarehouseTaskLineState @areas(in: [ADMIN]) {
+  PENDING
+  PICKED
+  SHORT
+  CANCELLED
+}
+
+"A package packed at a packing station"
+type WarehousePackage @areas(in: [ADMIN]) {
+  id: UUID!
+  "Package number within the whole order (all sellers)"
+  index: Int!
+  of: Int!
+  status: WarehousePackageStatus!
+  itemCount: Int!
+  allScanned: Boolean!
+  "e.g. 'M box'"
+  boxName: String
+  fragile: Boolean!
+  carrier: String
+  service: String
+  trackingNumber: String
+  packedBy: Actor
+  packedAt: DateTime
+  "shipping module shipment (see OrderGroup.shipments)"
+  shipmentId: UUID
+}
+
+enum WarehousePackageStatus @areas(in: [ADMIN]) {
+  OPEN
+  LABELLED
+  PACKED
+  DISPATCHED
+  VOIDED
+}
+
+# ------------------------------------------------------------------ extensions
+
+extend type OrderGroup {
+  "Warehouse progress for an Official Store package group; null for groups outside sellers ship themselves"
+  warehouseTask: WarehouseTask @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "warehouse.view") @source(module: "warehouse", fn: "getTasksForOrderGroups")
+}
+
+"""
+Today's Official Store warehouse work (OpsQueues, pick-pack header): what is left to pick, pack and ship before the
+next carrier pickup, and what is late. Same counts as REST GET /api/admin/warehouse/summary.
+"""
+type WarehouseToday @areas(in: [ADMIN]) {
+  locationId: UUID!
+  date: Date!
+  toPick: Int!
+  picking: Int!
+  toPack: Int!
+  "Packed, waiting for the carrier pickup"
+  toShip: Int!
+  "All Official Store packages due to ship today (ship-by today, any stage: to pick, picking, to pack, packed, dispatched)"
+  shipToday: Int!
+  packedToday: Int!
+  dispatchedToday: Int!
+  onHold: Int!
+  "Not packed and ship-by within the at-risk window (settings atRiskMinutes)"
+  atRisk: Int!
+  "Ship-by passed and not dispatched"
+  late: Int!
+  "Next carrier pickup: work due today must be packed by then. Null when no pickup is left today."
+  shipByCutoff: DateTime
+  "Remaining carrier pickups today (settings carrierPickupTimes)"
+  pickupsToday: [DateTime!]!
+  openShortages: Int!
+  putawayOpen: Int!
+  returnParcelsExpected: Int!
+  returnParcelsToHandOver: Int!
+  "Late first, then at risk, then by ship-by"
+  urgentTasks(limit: Int = 10): [WarehouseTask!]! @cost(weight: 5)
+}
+
+extend type Query {
+  "Today's warehouse work for one site (default: the main Official Store warehouse)"
+  warehouseToday(locationId: UUID): WarehouseToday @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "warehouse.view") @source(module: "warehouse", fn: "getTodaySummary") @cost(weight: 5)
+}

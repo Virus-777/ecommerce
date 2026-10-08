@@ -1,0 +1,172 @@
+# screens: store/cart
+# replaces: GET cart/cart, GET cart/cart/saved, GET offers/offers/{id}, GET shipping/notices, GET customers/recently-viewed
+# why: The cart view is already composed by the cart module (packages, change notices, coupons, totals); saved-for-later and the recently viewed row of the empty state come in the same round trip.
+query CartPage($postalCode: String, $savedLimit: Int = 20, $recentlyViewedLimit: Int = 4) {
+  cart {
+    id
+    currency
+    itemCount
+    sellerCount
+    packageCount
+    checkoutReady
+    checkoutBlockers
+    retentionNote
+    savedForLaterCount
+    checkedAt
+    destination { postalCode city region country source }
+    attention { count title message }
+    packages {
+      key
+      label
+      shipsFrom
+      returnTerms
+      notShippable
+      seller { ...SellerLabelFields }
+      subtotal { ...MoneyFields }
+      delivery {
+        methodName
+        arrivalLabel
+        free
+        freeShippingNote
+        estimateBasis
+        serviceNotices
+        shipping { ...MoneyFields }
+        amountToFreeShipping { ...MoneyFields }
+      }
+      items {
+        id
+        offerId
+        productId
+        variantId
+        title
+        variantLabel
+        condition
+        conditionNote
+        sku
+        quantity
+        maxQuantity
+        purchaseLimit
+        availableQuantity
+        state
+        includedInCheckout
+        image { ...ImageFields }
+        unitPrice { ...MoneyFields }
+        compareAtPrice { ...MoneyFields }
+        acceptedUnitPrice { ...MoneyFields }
+        lineTotal { ...MoneyFields }
+        notices {
+          id
+          kind
+          severity
+          message
+          availableQuantity
+          changedBy
+          changedAt
+          actions
+          previousPrice { ...MoneyFields }
+          currentPrice { ...MoneyFields }
+          alternatives {
+            count
+            productId
+            variantId
+            condition
+            lowestPrice { ...MoneyFields }
+          }
+        }
+      }
+    }
+    coupons {
+      code
+      status
+      label
+      fundedBy
+      reason
+      amount { ...MoneyFields }
+      coverage {
+        itemId
+        title
+        amount { ...MoneyFields }
+      }
+      notCovered { itemId title reason }
+    }
+    totals {
+      itemCount
+      excludedItemCount
+      taxNote
+      itemsSubtotal { ...MoneyFields }
+      discounts {
+        code
+        label
+        fundedBy
+        amount { ...MoneyFields }
+      }
+      shippingByPackage {
+        packageKey
+        sellerName
+        free
+        amount { ...MoneyFields }
+      }
+      shippingTotal { ...MoneyFields }
+      total { ...MoneyFields }
+    }
+    savedForLater(limit: $savedLimit) {
+      id
+      offerId
+      productId
+      variantId
+      title
+      variantLabel
+      available
+      unavailableReason
+      savedAt
+      image { ...ImageFields }
+      currentPrice { ...MoneyFields }
+      seller { ...SellerLabelFields }
+    }
+  }
+  recentlyViewed(limit: $recentlyViewedLimit) {
+    productId
+    variantId
+    title
+    available
+    image { ...ImageFields }
+    product {
+      id
+      slug
+      reviewSummary { hasReviews average ratingCount }
+      featuredOffer(postalCode: $postalCode) {
+        id
+        price { ...MoneyFields }
+        deal {
+          percentOffBps
+          price { ...MoneyFields }
+          wasPrice { ...MoneyFields }
+        }
+        deliveryEstimate(postalCode: $postalCode) { free arrivalLabel }
+      }
+    }
+  }
+}
+
+fragment MoneyFields on Money {
+  amount
+  currency
+  formatted
+}
+
+fragment ImageFields on MediaRef {
+  id
+  url
+  alt
+  width
+  height
+}
+
+fragment SellerLabelFields on CartSellerLabel {
+  id
+  name
+  slug
+  official
+  verified
+  logo { ...ImageFields }
+}

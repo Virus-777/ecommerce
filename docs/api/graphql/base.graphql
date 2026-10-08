@@ -1,0 +1,163 @@
+"""
+Marketly GraphQL base. Shared by the three schemas (store, seller, admin).
+
+Rules (see docs/api/graphql/README.md):
+- GraphQL is for READING complex screen data. All writes stay on REST (idempotency, approvals, audit).
+- Each module contributes a fragment in docs/api/graphql/modules/<module>.graphql:
+  its own types, `extend type Query` fields, and fields it adds to other modules' types.
+- The module that owns the data resolves the field (@source). Removing a module removes its fields.
+- @areas decides which schema(s) a type or field appears in. No @areas = all three.
+"""
+schema {
+  query: Query
+}
+
+type Query {
+  "Schema health check. Real queries are contributed by modules."
+  ping: String!
+}
+
+# ------------------------------------------------------------------ directives
+
+"Which API area schemas include this type or field. Omitted = STORE, SELLER and ADMIN."
+directive @areas(in: [Area!]!) on OBJECT | FIELD_DEFINITION | ENUM | INPUT_OBJECT | UNION
+
+"""
+Who may read this field. `permission` is a staff or seller permission key from the REST spec.
+Seller-area fields are always limited to the caller's own seller account.
+On fields visible in both SELLER and ADMIN areas, `permission` is checked for staff callers; seller callers are always
+limited to their own seller account. A field that needs different rules per area is declared once per area in
+separate `extend type` blocks (e.g. Seller.balance, Case.order).
+"""
+directive @auth(requires: Auth!, permission: String) on FIELD_DEFINITION | OBJECT
+
+"""
+Which module resolves this field and with which in-process function (publicApi in the module's REST spec).
+Documents ownership; the resolver batches calls per request (DataLoader).
+"""
+directive @source(module: String!, fn: String!) on FIELD_DEFINITION
+
+"Relative cost for query cost limits. Lists default to 10, other fields to 1."
+directive @cost(weight: Int!) on FIELD_DEFINITION
+
+"Planned for a later launch phase (plan ch. 20). The field resolves to null until then."
+directive @phase(n: Int!) on FIELD_DEFINITION | OBJECT
+
+enum Area {
+  STORE
+  SELLER
+  ADMIN
+}
+
+enum Auth {
+  "No session needed"
+  ANYONE
+  "Customer or guest session"
+  SHOPPER
+  CUSTOMER
+  SELLER
+  STAFF
+}
+
+# ------------------------------------------------------------------ scalars
+
+"UUIDv7 string"
+scalar UUID
+"ISO 8601 timestamp in UTC"
+scalar DateTime
+"YYYY-MM-DD"
+scalar Date
+scalar URL
+scalar Email
+"Free-form JSON (only where the REST spec uses json)"
+scalar JSON
+
+# ------------------------------------------------------------------ shared types (mirror common.json)
+
+"Integer minor units (cents) and ISO 4217 currency. 18900 USD = $189.00"
+type Money {
+  amount: Int!
+  currency: String!
+  "Formatted for display in the market locale, e.g. $189.00"
+  formatted: String!
+}
+
+type Address {
+  name: String!
+  line1: String!
+  line2: String
+  city: String!
+  region: String!
+  postalCode: String!
+  country: String!
+  phone: String
+}
+
+type MediaRef {
+  id: UUID!
+  url: URL!
+  alt: String
+  width: Int
+  height: Int
+  "File size in bytes (media's sizeBytes), shown next to attachments and evidence files, e.g. 212 KB"
+  bytes: Int
+}
+
+enum ActorKind {
+  CUSTOMER
+  GUEST
+  SELLER
+  STAFF
+  SYSTEM
+}
+
+type Actor {
+  kind: ActorKind!
+  id: String
+  name: String
+}
+
+type TimelineEvent {
+  at: DateTime!
+  label: String!
+  detail: String
+  actor: Actor
+}
+
+enum DeadlineState {
+  ON_TIME
+  DUE_SOON
+  OVERDUE
+}
+
+type Deadline {
+  dueAt: DateTime!
+  state: DeadlineState!
+}
+
+type ApprovalInfo {
+  required: Boolean!
+  reason: String
+  approvalRequestId: UUID
+  approvers: [String!]!
+}
+
+"""
+Paging input, same as REST: `cursor` for the Android app's infinite scroll, `page` for the website's numbered pages.
+"""
+input PageInput {
+  cursor: String
+  page: Int
+  "1–100, default 24"
+  limit: Int
+}
+
+"""
+Every list returns `<Type>Page { items, nextCursor, page, totalPages, total }`, the same shape as REST.
+"""
+interface Paged {
+  nextCursor: String
+  page: Int
+  totalPages: Int
+  total: Int
+}

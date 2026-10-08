@@ -1,0 +1,99 @@
+# settings: market-level facts every screen may show (support hours and whether support is open now, closures,
+# maintenance notice, public feature flags) and, for Seller Center, upcoming platform changes.
+# Admin settings pages, change requests and feature flags stay on REST /api/admin/settings/*.
+# The Android app keeps using REST GET /api/public/settings/app-config (cached by configVersion).
+
+"Public facts about the marketplace for headers, footers, help and contact screens"
+type StoreInfo {
+  market: StoreInfoMarket!
+  support: StoreInfoSupport!
+  "Upcoming closures and reduced-hours days (next 60 days)"
+  closures: [StoreInfoClosure!]!
+  "Present while a maintenance notice is active"
+  maintenance: StoreInfoMaintenance
+  guestCheckoutEnabled: Boolean!
+  "Public feature flags, e.g. wishlist, paidSellerAds, externalSignIn"
+  features: [StoreInfoFeature!]!
+  "Changes whenever any value changes; clients may cache by it"
+  configVersion: String!
+}
+
+type StoreInfoMarket {
+  "ISO 3166-1 alpha-2, e.g. US"
+  country: String!
+  "ISO 4217, USD at launch"
+  currency: String!
+  "IANA, e.g. America/Los_Angeles"
+  timeZone: String!
+  locale: String!
+  serviceRegionLabel: String!
+}
+
+type StoreInfoSupport {
+  "Mon–Sat, 8 AM–8 PM PT"
+  hoursLabel: String!
+  openNow: Boolean!
+  "When support opens next, while closed"
+  nextOpenAt: DateTime
+  phone: String!
+  email: Email
+  chatHoursLabel: String!
+  "Closed Sundays and US holidays"
+  closedLabel: String
+}
+
+type StoreInfoClosure {
+  date: Date!
+  label: String!
+  kind: StoreInfoClosureKind!
+  "Local time HH:MM on reduced-hours days"
+  opens: String
+  closes: String
+}
+
+enum StoreInfoClosureKind {
+  CLOSED
+  REDUCED_HOURS
+}
+
+type StoreInfoMaintenance {
+  "Planned maintenance or a live incident (error pages show incidents as a status note)"
+  kind: StoreInfoMaintenanceKind
+  message: String
+  until: DateTime
+  "When the notice was last changed (Updated 9:42 AM PT)"
+  updatedAt: DateTime
+}
+
+enum StoreInfoMaintenanceKind {
+  MAINTENANCE
+  INCIDENT
+}
+
+type StoreInfoFeature {
+  key: String!
+  enabled: Boolean!
+}
+
+"A platform change sellers should know about before it takes effect (Seller dashboard 'Announcements')"
+type SettingsUpcomingChange @areas(in: [SELLER]) {
+  ref: String!
+  "Owning module, e.g. returns, finance"
+  module: String!
+  title: String!
+  description: String
+  effectiveAt: DateTime!
+  "Who or what it applies to, e.g. Orders placed on or after Nov 1"
+  appliesTo: String!
+  helpLink: String
+  "When the change was announced to sellers"
+  postedAt: DateTime!
+}
+
+extend type Query {
+  "Support hours, open now, closures, maintenance notice and public flags"
+  storeInfo: StoreInfo! @auth(requires: ANYONE) @source(module: "settings", fn: "storeInfo")
+
+  "Scheduled platform changes that affect sellers, soonest first"
+  upcomingChanges: [SettingsUpcomingChange!]! @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "settings", fn: "upcomingChangesForSellers")
+}

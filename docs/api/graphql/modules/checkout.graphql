@@ -1,0 +1,473 @@
+# checkout: the checkout session (CheckoutReview), the change set found on revalidation and the confirmation.
+# All steps (contact, address, delivery, coupons, payment, revalidate, place) are REST writes on
+# /api/store/checkout/sessions; this fragment only reads the session as the screens show it.
+# Uses cart's CartSellerLabel / CartFundedBy / CartCouponStatus, payments' PaymentOptions / PaymentStatus
+# and orders' OrderPolicyVersion (checkout depends on cart, payments and orders).
+
+"One checkout: steps, contact, address, packages with delivery options, coupons, payment, totals and legal text"
+type CheckoutSession @areas(in: [STORE]) {
+  id: UUID!
+  status: CheckoutStatus!
+  source: CheckoutSource!
+  "Increments whenever anything that changes the total changes; Place order (REST) must send the version shown"
+  quoteVersion: Int!
+  currency: String!
+  steps: [CheckoutStep!]!
+  account: CheckoutAccount
+  address: CheckoutAddressStep
+  packages: [CheckoutPackage!]!
+  "'Your items ship in 3 packages from different places, so each has its own options and arrival date.'"
+  packagesNote: String!
+  "Cart lines not in this checkout (unavailable, not shippable); they stay in the cart"
+  excludedLines: [CheckoutLine!]!
+  coupons: [CheckoutCoupon!]!
+  credit: CheckoutCredit @phase(n: 3)
+  payment: CheckoutPaymentStep!
+  "Accepted brands, saved methods and wallets (from payments.listOptions for this session's total)"
+  paymentOptions: PaymentOptions!
+  "Result of the latest payment attempt (after a decline or while pending), from payments.getIntentStatus"
+  lastPayment: PaymentStatus
+  totals: CheckoutTotals!
+  legal: CheckoutLegal!
+  giftNote: String
+  hidePricesOnSlip: Boolean!
+  readyToPlace: Boolean!
+  blockers: [String!]!
+  "'Tapping twice or refreshing won't create two orders or charge you twice.'"
+  doubleSubmitNote: String!
+  "Changes found on revalidation that the customer must review (checkout-review-changes screen)"
+  openChangeSet: CheckoutChangeSet
+  "After a failed payment: prices and stock held until this time"
+  holdUntil: DateTime
+  expiresAt: DateTime!
+  orderId: UUID
+  orderRef: String
+  "Order confirmation; null until the payment is accepted (OrderConfirmation screen)"
+  confirmation: CheckoutConfirmation @source(module: "checkout", fn: "getConfirmation")
+}
+
+type CheckoutStep @areas(in: [STORE]) {
+  key: CheckoutStepKey!
+  status: CheckoutStepStatus!
+  message: String
+}
+
+type CheckoutAccount @areas(in: [STORE]) {
+  kind: CheckoutAccountKind!
+  customerId: UUID
+  name: String
+  email: String!
+  phone: String
+  createAccountAfter: Boolean!
+  marketingOptIn: Boolean!
+  "Guests: 'We'll email a link to view and manage this order.'"
+  note: String
+}
+
+type CheckoutAddressStep @areas(in: [STORE]) {
+  address: Address!
+  addressId: UUID
+  allShippable: Boolean!
+  "'All 4 items can ship to this address.'"
+  message: String!
+  lines: [CheckoutShippability!]!
+  "'Delivery dates below are for Portland, OR 97205.'"
+  locationNote: String!
+  addressBookNote: String!
+}
+
+type CheckoutShippability @areas(in: [STORE]) {
+  lineId: String!
+  title: String!
+  sellerName: String!
+  shippable: Boolean!
+  reason: CheckoutShippabilityReason
+  message: String
+}
+
+"One seller package with its delivery options and totals"
+type CheckoutPackage @areas(in: [STORE]) {
+  key: String!
+  "'Package 2 of 3'"
+  label: String!
+  seller: CartSellerLabel!
+  "'Sold and shipped by Northwind Audio'"
+  soldAndShippedBy: String!
+  shipsFrom: String!
+  lines: [CheckoutLine!]!
+  options: [DeliveryOption!]!
+  selectedOptionId: String
+  "The selected option (also in options)"
+  selectedOption: DeliveryOption
+  returnTerms: String!
+  "'Seller support replies within 1 business day'"
+  sellerSupport: String!
+  totals: CheckoutPackageTotals!
+}
+
+type CheckoutLine @areas(in: [STORE]) {
+  "Session line id"
+  id: String!
+  cartItemId: UUID
+  offerId: UUID!
+  productId: UUID!
+  variantId: UUID!
+  title: String!
+  variantLabel: String!
+  "e.g. 'New' or 'Used, like new'"
+  condition: String!
+  image: MediaRef
+  quantity: Int!
+  unitPrice: Money!
+  lineTotal: Money!
+  discounts: [CheckoutDiscount!]!
+  status: CheckoutLineStatus!
+  note: String
+}
+
+type CheckoutDiscount @areas(in: [STORE]) {
+  code: String
+  label: String!
+  amount: Money!
+  fundedBy: CartFundedBy!
+}
+
+"A delivery method for one package, priced and dated by shipping for the chosen address"
+type DeliveryOption @areas(in: [STORE]) {
+  "Opaque option id (profile version + method + service); sent back on REST PUT /sessions/{id}/delivery"
+  id: String!
+  methodCode: String!
+  "Standard"
+  methodName: String!
+  "'UPS Ground' or 'UPS Ground or USPS Ground Advantage'"
+  carrierService: String
+  price: Money!
+  free: Boolean!
+  "Who pays the shipping when it is free to the customer"
+  fundedBy: DeliveryOptionFundedBy!
+  "'Free over $35'"
+  freeReason: String
+  arrivalFrom: Date!
+  arrivalTo: Date!
+  "'Arrives Wed, Oct 14'"
+  arrivalLabel: String!
+  dispatchBy: DateTime!
+  "'Ships today from Reno, NV'"
+  dispatchLabel: String!
+  "Order before this time to keep the date"
+  cutoffAt: DateTime
+  notices: [String!]!
+  isDefault: Boolean!
+}
+
+type CheckoutPackageTotals @areas(in: [STORE]) {
+  items: Money!
+  discounts: Money!
+  shipping: Money!
+  tax: Money!
+  total: Money!
+}
+
+type CheckoutCoupon @areas(in: [STORE]) {
+  code: String!
+  status: CartCouponStatus!
+  amount: Money
+  "'$20 off your first order over $100'"
+  label: String
+  fundedBy: CartFundedBy
+  "'Funded by Marketly, so sellers receive their full price.'"
+  fundingNote: String
+  "promotions rejection code, e.g. no_eligible_items"
+  rejectionCode: String
+  "Plain-words reason for a rejection"
+  reason: String
+  coverage: [CheckoutCouponCoverage!]!
+  notCovered: [CheckoutCouponExclusion!]!
+  "'Your other discount is unchanged.'"
+  otherDiscountsNote: String
+}
+
+type CheckoutCouponCoverage @areas(in: [STORE]) {
+  lineId: String!
+  title: String!
+  amount: Money!
+}
+
+type CheckoutCouponExclusion @areas(in: [STORE]) {
+  lineId: String!
+  title: String!
+  reason: String!
+}
+
+"Store credit (wallet, phase 3)"
+type CheckoutCredit @areas(in: [STORE]) {
+  available: Money!
+  "'from a refund on Aug 18'"
+  sourceNote: String!
+  use: Boolean!
+  applied: Money!
+}
+
+type CheckoutPaymentStep @areas(in: [STORE]) {
+  selected: CheckoutPaymentSelection
+  chargeNote: String!
+}
+
+type CheckoutPaymentSelection @areas(in: [STORE]) {
+  kind: CheckoutPaymentKind!
+  "e.g. 'Visa •••• 4417'"
+  label: String!
+  savedMethodId: UUID
+  billingSummary: String
+}
+
+type CheckoutTotals @areas(in: [STORE]) {
+  itemCount: Int!
+  items: Money!
+  discounts: [CheckoutDiscount!]!
+  discountTotal: Money!
+  shippingByPackage: [CheckoutPackageShipping!]!
+  shippingTotal: Money!
+  tax: [CheckoutTaxLine!]!
+  taxTotal: Money!
+  taxNote: String
+  creditApplied: Money!
+  "Full payable total; what Place order charges"
+  total: Money!
+}
+
+type CheckoutPackageShipping @areas(in: [STORE]) {
+  packageKey: String!
+  sellerName: String!
+  amount: Money!
+  free: Boolean!
+}
+
+type CheckoutTaxLine @areas(in: [STORE]) {
+  jurisdiction: String!
+  "'Tax (Oregon has no sales tax)'"
+  label: String!
+  rate: Float!
+  amount: Money!
+}
+
+type CheckoutLegal @areas(in: [STORE]) {
+  purchaseTermsVersionId: UUID
+  "Returns, shipping and purchase-terms versions in force; stored on the order"
+  policyVersions: [OrderPolicyVersion!]!
+  purchaseTermsUrl: URL
+  "'By placing your order you agree to the Purchase terms and the return terms shown for each package.'"
+  text: String!
+}
+
+"Changes found when checkout re-checked the order before charging"
+type CheckoutChangeSet @areas(in: [STORE]) {
+  id: UUID!
+  detectedAt: DateTime!
+  status: CheckoutChangeSetStatus!
+  "'We checked your order again before charging you. Nothing has been charged yet.'"
+  intro: String!
+  changes: [CheckoutChange!]!
+  previousTotal: Money!
+  "With the default choices"
+  newTotal: Money!
+  deltas: [CheckoutTotalDelta!]!
+  "Some items cannot be bought; the rest can go through with explicit consent"
+  partialOrder: Boolean!
+  partialNote: String
+}
+
+type CheckoutChange @areas(in: [STORE]) {
+  id: UUID!
+  kind: CheckoutChangeKind!
+  lineId: String
+  packageKey: String
+  "'Price went up', 'Less stock available', 'Delivery date moved'"
+  headline: String!
+  title: String!
+  image: MediaRef
+  sellerName: String!
+  previous: String!
+  current: String!
+  previousAmount: Money
+  currentAmount: Money
+  availableQuantity: Int
+  "e.g. 'Casa Verde Home now ships in 4 business days because of a restock.'"
+  detail: String
+  "Other offers the customer may pick; never switched automatically"
+  alternatives: [CheckoutAlternativeOffer!]!
+  choices: [CheckoutChangeChoice!]!
+  defaultChoice: CheckoutChangeChoice!
+  "Signed amount with the default choice"
+  effectOnTotal: Money!
+}
+
+type CheckoutAlternativeOffer @areas(in: [STORE]) {
+  offerId: UUID!
+  seller: CartSellerLabel!
+  conditionLabel: String!
+  price: Money!
+  shipping: Money
+  arrivalLabel: String!
+  available: Int!
+  returnTerms: String!
+  differentSeller: Boolean!
+  "'Different seller. Only switched if you pick this.'"
+  note: String!
+}
+
+type CheckoutTotalDelta @areas(in: [STORE]) {
+  label: String!
+  "Signed"
+  amount: Money!
+}
+
+"Order confirmation, available once the payment is accepted"
+type CheckoutConfirmation @areas(in: [STORE]) {
+  orderId: UUID!
+  orderRef: String!
+  greetingName: String
+  email: String!
+  charged: Money!
+  paymentLabel: String!
+  deliveryAddress: Address!
+  packages: [CheckoutConfirmationPackage!]!
+  "'Your 4 items ship in 3 packages that may arrive on different days.'"
+  packagesNote: String!
+  totals: CheckoutTotals!
+  nextSteps: [CheckoutNextStep!]!
+  "'Your order keeps the purchase terms and each seller's return terms as they were when you ordered.'"
+  termsNote: String!
+  receiptDocumentId: UUID
+  "Guest who ticked 'create an account after checkout'"
+  offerAccountCreation: Boolean!
+}
+
+type CheckoutConfirmationPackage @areas(in: [STORE]) {
+  label: String!
+  seller: CartSellerLabel!
+  shipsFrom: String!
+  arrivalLabel: String!
+  shippingLabel: String!
+  items: [CheckoutConfirmationItem!]!
+}
+
+type CheckoutConfirmationItem @areas(in: [STORE]) {
+  title: String!
+  variantLabel: String!
+  condition: String!
+  quantity: Int!
+  price: Money!
+  image: MediaRef
+  status: String!
+}
+
+type CheckoutNextStep @areas(in: [STORE]) {
+  title: String!
+  when: String!
+  body: String!
+}
+
+# ------------------------------------------------------------------ enums
+
+enum CheckoutStatus @areas(in: [STORE]) {
+  OPEN
+  CHANGES_PENDING
+  PLACING
+  AWAITING_ACTION
+  PAYMENT_PENDING
+  PAYMENT_FAILED
+  COMPLETED
+  EXPIRED
+  CANCELLED
+}
+
+enum CheckoutSource @areas(in: [STORE]) {
+  CART
+  BUY_NOW
+}
+
+enum CheckoutStepKey @areas(in: [STORE]) {
+  ACCOUNT
+  ADDRESS
+  DELIVERY
+  COUPONS
+  PAYMENT
+  REVIEW
+}
+
+enum CheckoutStepStatus @areas(in: [STORE]) {
+  TODO
+  DONE
+  NEEDS_ATTENTION
+}
+
+enum CheckoutAccountKind @areas(in: [STORE]) {
+  CUSTOMER
+  GUEST
+}
+
+enum CheckoutShippabilityReason @areas(in: [STORE]) {
+  EXCLUDED_AREA
+  PO_BOX
+  MILITARY
+  OUTSIDE_SELLER_COVERAGE
+  ITEM_TOO_LARGE
+}
+
+enum CheckoutLineStatus @areas(in: [STORE]) {
+  INCLUDED
+  REMOVED
+  NOT_SHIPPABLE
+  UNAVAILABLE
+}
+
+enum DeliveryOptionFundedBy @areas(in: [STORE]) {
+  CUSTOMER
+  SELLER
+  COMPANY
+  PLATFORM
+}
+
+enum CheckoutPaymentKind @areas(in: [STORE]) {
+  SAVED_CARD
+  NEW_CARD
+  DIGITAL_WALLET
+}
+
+enum CheckoutChangeSetStatus @areas(in: [STORE]) {
+  OPEN
+  ACCEPTED
+  SUPERSEDED
+}
+
+enum CheckoutChangeKind @areas(in: [STORE]) {
+  PRICE_INCREASED
+  PRICE_DECREASED
+  QUANTITY_REDUCED
+  OUT_OF_STOCK
+  OFFER_ENDED
+  DELIVERY_DATE_CHANGED
+  DELIVERY_OPTION_UNAVAILABLE
+  SHIPPING_COST_CHANGED
+  COUPON_NO_LONGER_APPLIES
+  COUPON_AMOUNT_CHANGED
+  NOT_SHIPPABLE
+  PURCHASE_LIMIT
+}
+
+enum CheckoutChangeChoice @areas(in: [STORE]) {
+  ACCEPT
+  REMOVE
+  CHOOSE_OFFER
+  REDUCE_QUANTITY
+  KEEP_WITHOUT_DISCOUNT
+  CHOOSE_OTHER_OPTION
+}
+
+# ------------------------------------------------------------------ queries
+
+extend type Query {
+  "A checkout session of the current shopper (CheckoutReview, review changes, OrderConfirmation via confirmation)"
+  checkoutSession(id: UUID!): CheckoutSession @areas(in: [STORE]) @auth(requires: SHOPPER) @source(module: "checkout", fn: "getSessionView")
+}

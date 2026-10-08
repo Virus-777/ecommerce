@@ -1,0 +1,382 @@
+{
+  "name": "customers",
+  "title": "Customers",
+  "group": "Participants",
+  "phase": 1,
+  "chapters": [3, 4, 6, 7, 17, 18, 19],
+  "summary": "The customer side of an account: profile, saved addresses, marketing consent, recently viewed products, the Account tab overview, guest order access, data export and account closure, and the staff view of customer accounts with notes and recorded account actions. Credentials, sessions and verification belong to identity.",
+  "owns": [
+    "Customer profile (name, phone, member since) linked one-to-one to an identity user",
+    "Saved delivery addresses with a default; checkout copies the address into the order, so later changes never alter accepted orders",
+    "Marketing preferences per channel (email, SMS, push promotions, wishlist alerts, personalised recommendations) with a consent log; essential order messages are always on",
+    "Recently viewed products for customers and guest sessions (launch feature on the home page)",
+    "Account overview aggregate for the Account tab (orders in progress, open returns, unread messages, store credit, recent orders, open cases, delay alerts)",
+    "Guest order access: lookup by order reference and checkout email, and emailing order links",
+    "Customer account status (Active, Under review, Restricted, Suspended, Closed) and scoped restrictions (messaging, ordering, reviews) with reason, end date and appeal route",
+    "Admin customer list and detail, internal notes and account actions that always record a reason",
+    "Personal data export requests and account closure requests"
+  ],
+  "notOwns": [
+    "Email, password, 2-step verification, devices and sessions: identity (account actions call identity in-process)",
+    "Saved payment methods: payments",
+    "Orders, returns, cases, messages, store credit: orders, returns, support, messaging, wallet (the overview only reads them)",
+    "Wishlist and price or availability alerts: wishlist (phase 3); the wishlistAlerts consent flag lives here so one preference page covers all promotional messages",
+    "Notification delivery and channel routing: notifications (reads consent from here)",
+    "Abuse reports about customers: trust (shown read-only in the admin detail)"
+  ],
+  "dependsOn": ["identity"],
+  "optionalDeps": ["orders", "returns", "support", "messaging", "wallet", "catalog", "offers", "trust", "reports", "notifications", "access", "audit", "media", "workqueues"],
+  "publicApi": [
+    { "name": "getCustomer", "signature": "(customerId: uuid) => CustomerSnapshot | null", "desc": "Name, email, phone, account status and what the customer may do now", "usedBy": ["orders", "support", "messaging", "trust", "checkout", "reviews", "graphql"] },
+    { "name": "getCustomerByUserId", "signature": "(userId: uuid) => CustomerSnapshot | null", "desc": "Resolve the customer for an identity session", "usedBy": ["checkout", "cart", "wishlist", "graphql"] },
+    { "name": "getAddressForOrder", "signature": "(customerId: uuid, addressId: uuid) => Address", "desc": "Returns a copy of a saved address. Checkout stores that copy on the order. Later edits or deletions never change the order (plan ch. 7).", "usedBy": ["checkout"] },
+    { "name": "rememberCheckoutAddress", "signature": "(customerId: uuid, address: Address, label?: string) => SavedAddress", "desc": "Save an address entered at checkout when the customer ticks 'save to my addresses'", "usedBy": ["checkout"] },
+    { "name": "canPlaceOrders", "signature": "(customerId: uuid) => { allowed: bool, reason?: string }", "desc": "False while the account is suspended, closed or has an active ordering restriction", "usedBy": ["checkout"] },
+    { "name": "canSendMessages", "signature": "(customerId: uuid) => { allowed: bool, reason?: string, until?: datetime }", "desc": "False during an active messaging restriction. Replies inside open cases stay allowed (support decides).", "usedBy": ["messaging", "reviews"] },
+    { "name": "getMarketingConsent", "signature": "(customerId: uuid) => MarketingPreferences", "desc": "Promotional consent per channel plus the personalisation switches (recommendations, recent searches). Essential order messages ignore it. search reads recentSearches before saving a search to the account.", "usedBy": ["notifications", "promotions", "advertising", "search"] },
+    { "name": "validateAddress", "signature": "(address: Address) => AddressValidation", "desc": "Same checks as POST /addresses/validate (provider when configured): issues, deliverability and a suggested correction. Used for addresses typed at checkout that are not saved.", "usedBy": ["checkout"] },
+    { "name": "listRecentlyViewed", "signature": "(owner: { customerId?: uuid, guestSessionId?: string }, limit: int) => uuid[]", "desc": "Product ids, newest first, for recommendations and the phase-3 wishlist", "usedBy": ["wishlist", "search"] },
+    { "name": "listRecentlyViewedItems", "signature": "(owner: { customerId?: uuid, guestSessionId?: string }, limit: int) => RecentlyViewedItem[]", "desc": "Recently viewed rows, newest first, with the title and image snapshot and availability (same rows as GET /recently-viewed). In GraphQL the current price comes from offers through RecentlyViewedItem.product.", "usedBy": ["graphql"] },
+    { "name": "searchCustomers", "signature": "(filter: { search?: string, statuses?: string[], verification?: string, joinedFrom?: date, joinedTo?: date }, page: PageInput) => Page<CustomerSnapshot>", "desc": "Admin customer list with the same filters and permission rules as GET /api/admin/customers/customers", "usedBy": ["graphql", "search"] },
+    { "name": "exportRows", "signature": "(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }", "desc": "Export rows for reports dataset customers.admin.accounts (the filtered customer list)", "usedBy": ["reports"] }
+  ],
+  "types": {
+    "CustomerSnapshot": {
+      "id": "uuid", "userId": "uuid", "ref": { "type": "string", "desc": "Human reference, e.g. CU-208114" },
+      "displayName": "string", "email": "email", "phone": "string?",
+      "accountStatus": "enum(active|under_review|restricted|suspended|closed)",
+      "canOrder": "bool", "canMessage": "bool"
+    },
+    "CustomerProfile": {
+      "id": "uuid", "ref": "string", "firstName": "string", "lastName": "string", "displayName": "string",
+      "email": "email", "emailVerified": "bool", "emailVerifiedAt": "datetime?",
+      "phone": "string?", "phoneVerified": "bool",
+      "memberSince": "date", "defaultAddressId": "uuid?",
+      "accountStatus": "enum(active|under_review|restricted|suspended|closed)",
+      "restrictions": { "type": "AccountRestriction[]", "desc": "Active restrictions the customer can see, with appeal route" },
+      "updatedAt": "datetime"
+    },
+    "ProfileInput": {
+      "firstName": "string?", "lastName": "string?",
+      "phone": { "type": "string?", "desc": "Changing it clears phoneVerified; identity sends a code" }
+    },
+    "SavedAddress": {
+      "id": "uuid", "label": { "type": "string?", "desc": "e.g. Home, Work" }, "address": "Address",
+      "deliveryInstructions": "text?", "isDefault": "bool", "lastUsedAt": "datetime?", "createdAt": "datetime", "updatedAt": "datetime"
+    },
+    "AddressInput": {
+      "label": "string?", "address": "Address", "deliveryInstructions": "text?", "makeDefault": "bool?"
+    },
+    "AddressValidation": {
+      "valid": "bool",
+      "issues": { "type": "AddressIssue[]", "desc": "Field-level problems, e.g. 5-digit ZIP required" },
+      "suggestion": { "type": "Address?", "desc": "Normalised address from the validation provider" },
+      "deliverable": { "type": "bool", "desc": "Inside the service region (all 50 US states at launch)" },
+      "poBox": "bool"
+    },
+    "AddressIssue": { "field": "string", "code": "enum(missing|invalid_format|not_found|outside_service_region|po_box_not_allowed)", "message": "string" },
+    "MarketingPreferences": {
+      "emailPromotions": "bool",
+      "smsPromotions": "bool",
+      "pushPromotions": { "type": "bool", "desc": "Android app promotions; set separately from order push notices" },
+      "wishlistAlerts": { "type": "bool", "desc": "Price-drop and back-in-stock notices (used once wishlist is on)" },
+      "personalizedRecommendations": "bool",
+      "recentSearches": { "type": "bool", "desc": "Keep my recent searches (search stores them; this is the on/off switch)" },
+      "essentialAlwaysOn": { "type": "bool", "desc": "Always true. Order, payment, delivery, return, refund, case and security messages cannot be turned off." },
+      "smsNumber": "string?",
+      "updatedAt": "datetime"
+    },
+    "MarketingPreferencesInput": {
+      "emailPromotions": "bool?", "smsPromotions": "bool?", "pushPromotions": "bool?", "wishlistAlerts": "bool?", "personalizedRecommendations": "bool?", "recentSearches": "bool?",
+      "source": "enum(profile|app_settings|checkout|registration)?"
+    },
+    "ConsentRecord": { "channel": "enum(email|sms|push|wishlist|personalization)", "granted": "bool", "source": "enum(profile|app_settings|checkout|registration|unsubscribe_link|staff)", "at": "datetime" },
+    "RecentlyViewedItem": {
+      "productId": "uuid", "variantId": "uuid?", "slug": "string?", "title": "string", "image": "MediaRef?",
+      "price": { "type": "Money?", "desc": "Current main-offer price from offers when enabled; null if no eligible offer" },
+      "wasPrice": "Money?",
+      "available": { "type": "bool", "desc": "False when the product is hidden, suspended or has no eligible offer; the app greys it out" },
+      "viewedAt": "datetime"
+    },
+    "OverviewTile": {
+      "key": "enum(orders_in_progress|open_returns|unread_messages|store_credit)",
+      "count": "int?", "amount": "Money?",
+      "note": { "type": "string?", "desc": "e.g. '1 package delayed', '1 needs drop-off'" },
+      "available": { "type": "bool", "desc": "False when the source module is disabled; the app hides the tile" }
+    },
+    "OverviewAlert": {
+      "kind": "enum(item_delayed|payment_being_checked|return_action_needed|case_waiting_on_you|payment_failed)",
+      "title": "string", "body": "text",
+      "orderId": "uuid?", "orderRef": "string?", "caseRef": "string?", "returnRef": "string?",
+      "actions": { "type": "string[]", "desc": "e.g. wait, cancel_item, view_case" }
+    },
+    "OverviewOrder": {
+      "orderId": "uuid", "ref": "string", "placedAt": "datetime", "total": "Money",
+      "statusLabel": { "type": "string", "desc": "Overall summary, e.g. Partly delivered" },
+      "packageCount": "int", "thumbnails": "MediaRef[]",
+      "itemStates": { "type": "map<int>", "desc": "Item-level counts, e.g. { delivered: 1, in_transit: 2, delayed: 1 }" }
+    },
+    "OverviewCase": { "caseId": "uuid", "ref": "string", "subject": "string", "statusLabel": "string", "handledBy": "string?", "nextUpdateBy": "datetime?", "orderRef": "string?", "sellerName": "string?" },
+    "OverviewReturn": { "returnId": "uuid", "ref": "string", "productTitle": "string", "image": "MediaRef?", "returnStatus": "string", "refundStatus": { "type": "string", "desc": "Requested, Under review, Approved, Processing, Sent or Failed. Approved does not mean the money has arrived." } },
+    "AccountOverview": {
+      "customer": { "firstName": "string", "displayName": "string", "email": "email", "memberSince": "date" },
+      "tiles": "OverviewTile[]",
+      "alerts": "OverviewAlert[]",
+      "recentOrders": { "type": "OverviewOrder[]", "desc": "Up to 3" },
+      "openCases": { "type": "OverviewCase[]", "desc": "Up to 3" },
+      "openReturns": { "type": "OverviewReturn[]", "desc": "Up to 2" },
+      "menuCounts": { "type": "map<int>", "desc": "Badge counts for the account menu keyed by screen, e.g. { 'account/messages': 2 }" },
+      "unavailable": { "type": "string[]", "desc": "Sections not shown because their module is off or did not answer in time (e.g. 'store_credit')" },
+      "generatedAt": "datetime"
+    },
+    "AccountRestriction": {
+      "id": "uuid",
+      "scope": "enum(messaging|ordering|reviews|account)",
+      "reasonCode": "enum(customer_request|suspected_takeover|abusive_messages|payment_fraud_review|policy_violation|other)",
+      "reason": { "type": "text", "desc": "Shown to the customer" },
+      "stillWorks": { "type": "string[]", "desc": "e.g. existing orders, returns, refunds and cases" },
+      "appealRoute": { "type": "text", "desc": "How and by when to appeal" },
+      "appealDeadline": "datetime?",
+      "startsAt": "datetime", "endsAt": "datetime?",
+      "state": "enum(active|lifted|expired)",
+      "setBy": "Actor", "trustReportId": "uuid?", "trustEnforcementId": "uuid?"
+    },
+    "ClosureBlocker": { "kind": "enum(open_orders|open_returns|open_cases|pending_refunds|store_credit_balance)", "count": "int", "detail": "string" },
+    "ClosureEligibility": {
+      "eligible": "bool", "blockers": "ClosureBlocker[]",
+      "retainedRecords": { "type": "string[]", "desc": "What is kept after closure as the law requires, e.g. order and tax records" }
+    },
+    "DataRequest": {
+      "id": "uuid", "kind": "enum(export|closure)",
+      "state": "enum(requested|processing|ready|expired|failed|completed|cancelled)",
+      "requestedAt": "datetime", "dueBy": "datetime",
+      "readyAt": "datetime?", "downloadUrl": { "type": "url?", "desc": "Signed link, only while ready" }, "expiresAt": "datetime?",
+      "scheduledFor": { "type": "datetime?", "desc": "Closure date after the cooling-off period" },
+      "completedAt": "datetime?", "cancelledAt": "datetime?"
+    },
+    "GuestOrderAccess": {
+      "orderId": "uuid", "orderRef": "string",
+      "granted": { "type": "bool", "desc": "True: identity added this order to the caller's guest session (identity.grantGuestOrderAccess, via lookup). The app then reads the order from orders with the same X-Guest-Session." },
+      "accessUntil": { "type": "datetime", "desc": "When the guest session's access to this order ends" },
+      "canCreateAccount": { "type": "bool", "desc": "No member account exists for the email yet; show the create-account prompt" }
+    },
+    "GuestBuyerRow": {
+      "id": "uuid",
+      "email": "email",
+      "name": { "type": "string", "desc": "Name from the latest guest checkout" },
+      "orderCount": "int",
+      "totalSpend": "Money",
+      "firstOrderAt": "datetime",
+      "lastOrderAt": "datetime",
+      "openCases": { "type": "int?", "desc": "From support when enabled" },
+      "lastOrderRef": "string?"
+    },
+    "AdminCustomerRow": {
+      "id": "uuid", "ref": "string", "name": "string", "email": "email", "location": "string?",
+      "orderCount": "int", "totalSpend": "Money", "openCases": "int",
+      "accountStatus": "enum(active|under_review|restricted|suspended|closed)",
+      "verification": "enum(email_and_phone|email_only|not_verified)",
+      "abuseReports": "int", "joinedAt": "datetime"
+    },
+    "CustomerNote": { "id": "uuid", "body": "text", "author": "Actor", "createdAt": "datetime" },
+    "AccountActionRecord": {
+      "id": "uuid", "action": "enum(send_password_reset|sign_out_everywhere|mark_under_review|clear_review|restrict|lift_restriction|suspend|reinstate|close)",
+      "reasonCode": "string", "details": "text", "fromStatus": "string?", "toStatus": "string?", "restrictionId": "uuid?", "actor": "Actor", "at": "datetime"
+    },
+    "AdminCustomerDetail": {
+      "profile": "CustomerProfile",
+      "defaultAddress": "SavedAddress?",
+      "addresses": "SavedAddress[]",
+      "signIn": { "type": "json", "desc": "From identity: method, twoStepEnabled, lastSignInAt" },
+      "marketing": "MarketingPreferences",
+      "orders": { "count": "int", "totalSpend": "Money", "recent": "OverviewOrder[]" },
+      "openCases": "OverviewCase[]",
+      "messages": { "conversationCount": "int", "lastMessageAt": "datetime?", "lastCounterparty": "string?" },
+      "abuseReports": { "filedBy": "int", "against": "int", "reportIds": "uuid[]" },
+      "notes": "CustomerNote[]",
+      "restrictions": "AccountRestriction[]",
+      "recentActions": "AccountActionRecord[]",
+      "dataRequests": "DataRequest[]",
+      "unavailable": "string[]"
+    },
+    "AccountActionInput": {
+      "action": "enum(send_password_reset|sign_out_everywhere|mark_under_review|clear_review|restrict_messaging|restrict_ordering|restrict_reviews|restrict_account|suspend|reinstate|close)",
+      "reasonCode": "enum(customer_request|suspected_takeover|abusive_messages|payment_fraud_review|policy_violation|other)",
+      "details": { "type": "text", "desc": "Required: what happened and what evidence was checked" },
+      "endsAt": { "type": "datetime?", "desc": "For restrictions; null = until lifted" },
+      "customerMessage": { "type": "text?", "desc": "Shown to the customer with the restriction; defaults from the reason" },
+      "trustReportId": "uuid?"
+    },
+    "AccountActionResult": {
+      "accountStatus": "enum(active|under_review|restricted|suspended|closed)",
+      "record": "AccountActionRecord",
+      "restriction": "AccountRestriction?",
+      "effects": { "type": "string[]", "desc": "What changed and what stays available, e.g. 'Existing orders, returns, refunds and cases stay open'" }
+    }
+  },
+  "tables": [
+    { "name": "customers", "desc": "One row per identity user who shops", "columns": { "id": "uuid pk", "user_id": "uuid unique", "ref": "text unique (CU-NNNNNN)", "first_name": "text", "last_name": "text", "email": "text (mirror of identity, lower-case)", "email_verified_at": "timestamptz?", "phone": "text?", "phone_verified_at": "timestamptz?", "account_status": "text", "default_address_id": "uuid? → addresses", "order_count": "int (read model from orders events)", "total_spend_minor": "bigint", "currency": "text", "closed_at": "timestamptz?", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(account_status, id)", "(email)", "(created_at, id)", "gin(to_tsvector(first_name || ' ' || last_name || ' ' || email))"] },
+    { "name": "addresses", "desc": "Saved addresses. Soft-deleted so past checkout references stay explainable; orders hold their own copy.", "columns": { "id": "uuid pk", "customer_id": "uuid → customers", "label": "text?", "name": "text", "line1": "text", "line2": "text?", "city": "text", "region": "text", "postal_code": "text", "country": "text", "phone": "text?", "delivery_instructions": "text?", "is_default": "bool", "validated_at": "timestamptz?", "last_used_at": "timestamptz?", "deleted_at": "timestamptz?", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(customer_id) where deleted_at is null", "unique(customer_id) where is_default and deleted_at is null"] },
+    { "name": "marketing_preferences", "columns": { "customer_id": "uuid pk → customers", "email_promotions": "bool", "sms_promotions": "bool", "push_promotions": "bool", "wishlist_alerts": "bool", "personalized_recommendations": "bool", "recent_searches": "bool", "updated_at": "timestamptz" } },
+    { "name": "consent_log", "desc": "Append-only history of every consent change (proof of opt-in and opt-out)", "columns": { "id": "uuid pk", "customer_id": "uuid → customers", "channel": "text", "granted": "bool", "source": "text", "actor_kind": "text", "actor_id": "text?", "ip": "inet?", "at": "timestamptz" }, "indexes": ["(customer_id, at desc)"] },
+    { "name": "recently_viewed", "desc": "One row per owner and product; upserted on each view", "columns": { "id": "uuid pk", "owner_kind": "text (customer|guest)", "owner_id": "text", "product_id": "uuid", "variant_id": "uuid?", "title": "text (snapshot at view time)", "image_media_id": "uuid?", "viewed_at": "timestamptz" }, "indexes": ["unique(owner_kind, owner_id, product_id)", "(owner_kind, owner_id, viewed_at desc)"] },
+    { "name": "account_restrictions", "columns": { "id": "uuid pk", "customer_id": "uuid → customers", "scope": "text", "reason_code": "text", "reason": "text", "still_works": "jsonb", "appeal_route": "text", "appeal_deadline": "timestamptz?", "starts_at": "timestamptz", "ends_at": "timestamptz?", "state": "text", "set_by_kind": "text", "set_by_id": "text?", "trust_report_id": "uuid?", "trust_enforcement_id": "uuid?", "lifted_at": "timestamptz?", "lift_reason": "text?" }, "indexes": ["(customer_id, state)", "(state, ends_at)"] },
+    { "name": "account_actions", "desc": "Every staff account action with reason and before/after status (also sent to audit)", "columns": { "id": "uuid pk", "customer_id": "uuid → customers", "action": "text", "reason_code": "text", "details": "text", "from_status": "text?", "to_status": "text?", "restriction_id": "uuid?", "actor_kind": "text", "actor_id": "text", "at": "timestamptz" }, "indexes": ["(customer_id, at desc)"] },
+    { "name": "guest_buyers", "desc": "Read model of people who bought without an account, one row per checkout email (from orders.order.placed with guestEmail); removed when the email registers", "columns": { "id": "uuid pk", "email_normalized": "text unique", "email": "text", "name": "text", "order_count": "int", "total_spend": "bigint", "currency": "text", "first_order_at": "timestamptz", "last_order_at": "timestamptz", "last_order_id": "uuid", "last_order_ref": "text" }, "indexes": ["(last_order_at desc)"] },
+    { "name": "customer_notes", "desc": "Internal staff notes; never shown to the customer", "columns": { "id": "uuid pk", "customer_id": "uuid → customers", "body": "text", "author_id": "text", "author_name": "text", "created_at": "timestamptz" }, "indexes": ["(customer_id, created_at desc)"] },
+    { "name": "data_requests", "columns": { "id": "uuid pk", "customer_id": "uuid → customers", "kind": "text (export|closure)", "state": "text", "requested_at": "timestamptz", "due_by": "timestamptz", "file_media_id": "uuid?", "ready_at": "timestamptz?", "expires_at": "timestamptz?", "scheduled_for": "timestamptz?", "completed_at": "timestamptz?", "cancelled_at": "timestamptz?", "failure": "text?" }, "indexes": ["(state, due_by)", "(customer_id, requested_at desc)"] },
+    { "name": "guest_lookup_attempts", "desc": "Guest order lookup attempts for rate limiting and abuse signals (the access grants themselves live in identity)", "columns": { "id": "uuid pk", "email_hash": "text", "ip": "inet", "guest_session_id": "uuid?", "succeeded": "bool", "order_id": "uuid?", "at": "timestamptz" }, "indexes": ["(email_hash, at desc)", "(ip, at desc)"] }
+  ],
+  "stateMachines": [
+    {
+      "name": "Customer account status", "field": "CustomerProfile.accountStatus", "initial": "active",
+      "transitions": [
+        ["active", "markUnderReview", "under_review"],
+        ["under_review", "clearReview", "active"],
+        ["active", "restrict", "restricted"],
+        ["under_review", "restrict", "restricted"],
+        ["restricted", "liftLastRestriction", "active"],
+        ["active", "suspend", "suspended"],
+        ["under_review", "suspend", "suspended"],
+        ["restricted", "suspend", "suspended"],
+        ["suspended", "reinstate", "active"],
+        ["active", "close", "closed"],
+        ["restricted", "close", "closed"],
+        ["suspended", "close", "closed"]
+      ],
+      "notes": "Restricted means at least one active scoped restriction (messaging, ordering, reviews or account). Suspended stops new orders, messages and reviews. In every state except closed, existing orders, returns, refunds and cases stay reachable by the customer and staff (plan ch. 17, scenario 7). Close by staff requires reason code and runs the same obligation check as a customer request unless the reason is suspected fraud."
+    },
+    {
+      "name": "Account restriction", "field": "AccountRestriction.state", "initial": "active",
+      "transitions": [["active", "lift", "lifted"], ["active", "expire", "expired"]],
+      "notes": "Lift requires a reason. The expire job runs when endsAt passes. When the last active restriction ends the account returns to active."
+    },
+    {
+      "name": "Data request", "field": "DataRequest.state", "initial": "requested",
+      "transitions": [
+        ["requested", "startExport", "processing"],
+        ["processing", "finishExport", "ready"],
+        ["processing", "fail", "failed"],
+        ["failed", "retry", "processing"],
+        ["ready", "expireLink", "expired"],
+        ["requested", "cancel", "cancelled"],
+        ["requested", "completeClosure", "completed"]
+      ],
+      "notes": "Exports: requested → processing → ready (link emailed, valid exportLinkValidDays) → expired. Closures: requested stays open for closureCoolingOffDays (customer can cancel), then the job re-checks obligations and completes; if new obligations appeared it keeps waiting and tells the customer."
+    }
+  ],
+  "endpoints": [
+    { "id": "getAccountOverview", "area": "store", "method": "GET", "path": "/overview", "summary": "Account tab home: tiles, alerts, recent orders, open cases and returns", "desc": "One call renders account/overview on web and Android. Aggregated in-process with a 300 ms budget per source: orders.countInProgress + orders.listRecentForCustomer + orders.listDelayedItemsForCustomer (orders in progress, recent orders, delay alerts), returns.listOpenForCustomer (open returns tile and list), messaging.unreadCount (unread messages), support.listOpenCasesForCustomer (open cases), wallet.getBalance (store credit, phase 3; otherwise available=false). A source that is disabled or times out is listed in `unavailable` instead of failing the page.", "auth": "customer", "response": "AccountOverview", "screens": ["account/overview"] },
+    { "id": "getProfile", "area": "store", "method": "GET", "path": "/profile", "summary": "Profile, verification state and active restrictions", "auth": "customer", "response": "CustomerProfile", "screens": ["account/profile", "account/security"] },
+    { "id": "updateProfile", "area": "store", "method": "PATCH", "path": "/profile", "summary": "Change name or mobile phone", "desc": "Email changes go through identity (new verification link). A new phone number is unverified until identity confirms the code.", "auth": "customer", "body": "ProfileInput", "response": "CustomerProfile", "errors": ["VALIDATION_FAILED"], "events": ["customers.profile.updated"], "screens": ["account/profile"] },
+    { "id": "listAddresses", "area": "store", "method": "GET", "path": "/addresses", "summary": "Saved addresses (bounded by maxAddresses, not paged)", "auth": "customer", "response": "SavedAddress[]", "screens": ["account/addresses", "store/checkout"] },
+    { "id": "createAddress", "area": "store", "method": "POST", "path": "/addresses", "summary": "Add an address", "desc": "Validated first; a hard validation problem returns VALIDATION_FAILED with details.issues (AddressIssue[]). Saving never changes orders already placed.", "auth": "customer", "body": "AddressInput", "response": "SavedAddress", "status": 201, "errors": ["VALIDATION_FAILED", "ADDRESS_LIMIT_REACHED", "ADDRESS_UNDELIVERABLE"], "events": ["customers.address.saved"], "screens": ["account/addresses", "store/checkout"] },
+    { "id": "updateAddress", "area": "store", "method": "PATCH", "path": "/addresses/{id}", "summary": "Edit an address", "desc": "Accepted orders keep the address copied at checkout. To redirect an unshipped package the customer messages the seller from the order page.", "auth": "customer", "params": { "id": "uuid" }, "body": "AddressInput", "response": "SavedAddress", "errors": ["VALIDATION_FAILED", "ADDRESS_UNDELIVERABLE"], "events": ["customers.address.saved"], "screens": ["account/addresses"] },
+    { "id": "deleteAddress", "area": "store", "method": "DELETE", "path": "/addresses/{id}", "summary": "Remove an address", "desc": "Soft delete. If it was the default, the most recently used remaining address becomes default.", "auth": "customer", "params": { "id": "uuid" }, "response": null, "screens": ["account/addresses"] },
+    { "id": "makeDefaultAddress", "area": "store", "method": "POST", "path": "/addresses/{id}/make-default", "summary": "Set the default delivery address", "auth": "customer", "params": { "id": "uuid" }, "response": "SavedAddress[]", "screens": ["account/addresses"] },
+    { "id": "validateAddress", "area": "store", "method": "POST", "path": "/addresses/validate", "summary": "Check an address before saving or at guest checkout", "desc": "Format rules (5-digit ZIP, state code), service region and PO box detection, plus a normalised suggestion from the address provider when configured.", "auth": "shopper", "body": "Address", "response": "AddressValidation", "screens": ["account/addresses", "store/checkout"] },
+    { "id": "getMarketingPreferences", "area": "store", "method": "GET", "path": "/marketing-preferences", "summary": "Promotional consent per channel", "auth": "customer", "response": "MarketingPreferences", "screens": ["account/profile", "account/overview"] },
+    { "id": "updateMarketingPreferences", "area": "store", "method": "PUT", "path": "/marketing-preferences", "summary": "Turn promotional channels on or off", "desc": "Only the fields sent change. Each change appends to the consent log. Turning promotions off never affects order updates.", "auth": "customer", "body": "MarketingPreferencesInput", "response": "MarketingPreferences", "events": ["customers.marketing_preferences.changed"], "screens": ["account/profile", "account/overview"] },
+    { "id": "listRecentlyViewed", "area": "store", "method": "GET", "path": "/recently-viewed", "summary": "Recently viewed products for the home page", "desc": "Guests are keyed by X-Guest-Session; signed-in customers by account. When identity claims the guest session at sign-in (identity.guest_session.claimed) the guest list is merged into the account. Price and availability come from offers and catalog when enabled.", "auth": "shopper", "query": { "limit": "int?" }, "response": "RecentlyViewedItem[]", "screens": ["store/home", "store/product"] },
+    { "id": "recordRecentlyViewed", "area": "store", "method": "POST", "path": "/recently-viewed", "summary": "Record a product view", "desc": "Called by the product page. Upserts and trims to recentlyViewedRetained per owner. Not recorded when personalizedRecommendations is off.", "auth": "shopper", "body": { "productId": "uuid", "variantId": "uuid?" }, "response": null, "status": 204, "screens": ["store/product"] },
+    { "id": "clearRecentlyViewed", "area": "store", "method": "DELETE", "path": "/recently-viewed", "summary": "Clear the whole list", "auth": "shopper", "response": null, "screens": ["store/home"] },
+    { "id": "removeRecentlyViewed", "area": "store", "method": "DELETE", "path": "/recently-viewed/{productId}", "summary": "Remove one product from the list", "auth": "shopper", "params": { "productId": "uuid" }, "response": null, "screens": ["store/home"] },
+    { "id": "requestDataExport", "area": "store", "method": "POST", "path": "/data-requests/exports", "summary": "Request a copy of my data", "desc": "Profile, addresses, consent log, orders, returns, messages and reviews (collected from those modules' export hooks) as a ZIP. Link emailed within dataExportSlaHours.", "auth": "customer", "response": "DataRequest", "status": 202, "errors": ["DATA_REQUEST_IN_PROGRESS", "RATE_LIMITED"], "events": ["customers.data_export.requested"], "screens": ["account/profile"] },
+    { "id": "listDataRequests", "area": "store", "method": "GET", "path": "/data-requests", "summary": "My export and closure requests", "auth": "customer", "response": "DataRequest[]", "screens": ["account/profile"] },
+    { "id": "getClosureEligibility", "area": "store", "method": "GET", "path": "/closure-eligibility", "summary": "Can I close my account now, and what blocks it", "desc": "Counts open orders (orders), open returns and pending refunds (returns, payments), open cases (support) and store credit (wallet).", "auth": "customer", "response": "ClosureEligibility", "screens": ["account/profile"] },
+    { "id": "requestClosure", "area": "store", "method": "POST", "path": "/data-requests/closure", "summary": "Request account closure", "desc": "Refused with CLOSURE_BLOCKED (details.blockers) while obligations are open. Otherwise scheduled after closureCoolingOffDays; the customer can cancel until then. Requires a recent sign-in (identity re-auth token).", "auth": "customer", "body": { "reauthToken": "string", "reason": "text?" }, "response": "DataRequest", "status": 202, "errors": ["CLOSURE_BLOCKED", "DATA_REQUEST_IN_PROGRESS"], "events": ["customers.closure.requested"], "screens": ["account/profile"] },
+    { "id": "cancelDataRequest", "area": "store", "method": "POST", "path": "/data-requests/{id}/cancel", "summary": "Cancel a pending closure or export request", "auth": "customer", "params": { "id": "uuid" }, "response": "DataRequest", "errors": ["ILLEGAL_TRANSITION"], "screens": ["account/profile"] },
+    { "id": "lookupGuestOrder", "area": "store", "method": "POST", "path": "/guest-orders/lookup", "summary": "Find a guest order by reference and checkout email", "desc": "Verifies the pair with orders (orders.findGuestOrder), then calls identity.grantGuestOrderAccess(guestSessionId, orderId, email, 'lookup') so the caller's guest session can open the order in orders, shipping, returns and support. Wrong combinations return the same GUEST_ORDER_NOT_FOUND without saying which part was wrong. Limited per IP and per email.", "auth": "shopper", "body": { "orderRef": "string", "email": "email" }, "response": "GuestOrderAccess", "errors": ["GUEST_ORDER_NOT_FOUND", "RATE_LIMITED"], "screens": ["auth/guest-orders"] },
+    { "id": "sendGuestOrderLinks", "area": "store", "method": "POST", "path": "/guest-orders/links", "summary": "Email fresh links to every guest order placed with this email", "desc": "Looks up guest orders for the email in orders and calls identity.issueOrderLink for each; notifications sends one email. Always answers 202 so it cannot be used to probe which emails have orders.", "auth": "anyone", "body": { "email": "email" }, "response": null, "status": 202, "errors": ["RATE_LIMITED"], "screens": ["auth/guest-orders"] },
+
+    { "id": "unsubscribe", "area": "public", "method": "POST", "path": "/unsubscribe", "summary": "One-click stop of promotional messages from an email or SMS link", "desc": "Token is signed by notifications and names customer and channel. Recorded in the consent log with source unsubscribe_link. Never affects essential messages.", "auth": "anyone", "body": { "token": "string", "channel": "enum(email|sms|push|all)?" }, "response": "MarketingPreferences", "errors": ["UNSUBSCRIBE_TOKEN_INVALID"], "events": ["customers.marketing_preferences.changed"] },
+
+    { "id": "listGuestBuyers", "area": "admin", "method": "GET", "path": "/guest-buyers", "summary": "Guest buyers (orders without an account) with order count and spend", "desc": "The page total gives the header count (e.g. 1,212 guest buyers). Orders open through orders' guest order lookup; a guest who registers moves to the customer list.", "auth": "staff", "permission": "customers.accounts.view", "paging": true, "query": { "q": { "type": "string?", "desc": "Email, name or order reference" }, "orderedFrom": "date?", "orderedTo": "date?" }, "response": "GuestBuyerRow", "screens": ["admin/customers"] },
+    { "id": "listCustomers", "area": "admin", "method": "GET", "path": "/customers", "summary": "Customer accounts with orders, spend, open cases, status and verification", "auth": "staff", "permission": "customers.accounts.view", "paging": true, "query": { "q": { "type": "string?", "desc": "Name, email, phone, CU- reference or order reference (resolved through orders)" }, "status": "enum(active|under_review|restricted|suspended|closed)?", "verification": "enum(email_and_phone|email_only|not_verified)?", "hasOpenCases": "bool?", "hasAbuseReports": "bool?", "joinedFrom": "date?", "joinedTo": "date?", "sort": "enum(newest|spend|orders|name)?" }, "response": "AdminCustomerRow", "screens": ["admin/customers"] },
+    { "id": "getCustomerAdmin", "area": "admin", "method": "GET", "path": "/customers/{id}", "summary": "Customer detail: profile, orders, cases, messages, notes, abuse reports, restrictions", "desc": "Aggregates in-process: identity (sign-in summary), orders (count, spend, recent), support (open cases), messaging (conversation summary), trust (reports filed by and against). Missing sources are listed in `unavailable`. Viewing is logged in the action history.", "auth": "staff", "permission": "customers.accounts.view", "params": { "id": "uuid" }, "response": "AdminCustomerDetail", "audited": true, "screens": ["admin/customers"] },
+    { "id": "addCustomerNote", "area": "admin", "method": "POST", "path": "/customers/{id}/notes", "summary": "Add an internal note", "auth": "staff", "permission": "customers.notes.write", "params": { "id": "uuid" }, "body": { "body": "text" }, "response": "CustomerNote", "status": 201, "audited": true, "screens": ["admin/customers", "admin/case"] },
+    { "id": "applyAccountAction", "area": "admin", "method": "POST", "path": "/customers/{id}/actions", "summary": "Apply an account action with a recorded reason", "desc": "send_password_reset and sign_out_everywhere call identity and need customers.accounts.security. Restrict, suspend, reinstate and close need customers.accounts.act and go through the account status machine. Restricting or closing stops new orders; existing orders, returns, refunds and cases stay open and reachable. Closing an account with open obligations needs a second reviewer (access approval request).", "auth": "staff", "permission": "customers.accounts.act", "params": { "id": "uuid" }, "body": "AccountActionInput", "response": "AccountActionResult", "errors": ["VALIDATION_FAILED", "ILLEGAL_TRANSITION", "APPROVAL_REQUIRED", "FORBIDDEN"], "audited": true, "approval": "Approval action customers.accounts.close-with-obligations. Closing an account that still has open orders, returns or cases needs a second reviewer", "events": ["customers.account.status_changed", "customers.account.restricted"], "screens": ["admin/customers"] },
+    { "id": "liftRestriction", "area": "admin", "method": "POST", "path": "/customers/{id}/restrictions/{restrictionId}/lift", "summary": "Lift a restriction early", "auth": "staff", "permission": "customers.accounts.act", "params": { "id": "uuid", "restrictionId": "uuid" }, "body": { "reason": "text" }, "response": "AccountActionResult", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["customers.account.restriction_lifted", "customers.account.status_changed"], "screens": ["admin/customers", "admin/trust"] },
+    { "id": "listAccountActions", "area": "admin", "method": "GET", "path": "/customers/{id}/actions", "summary": "Account action history for one customer", "auth": "staff", "permission": "customers.accounts.view", "params": { "id": "uuid" }, "paging": true, "response": "AccountActionRecord", "screens": ["admin/customers"] },
+    { "id": "exportCustomers", "area": "admin", "method": "POST", "path": "/customers/exports", "summary": "Export the filtered customer list", "desc": "Creates an authorized export job through reports.requestExport (dataset customers.admin.accounts). Columns respect the caller's permissions; contact details need customers.accounts.export.", "auth": "staff", "permission": "customers.accounts.export", "body": { "filters": "json", "format": "enum(csv|xlsx)?" }, "response": "reports.ExportJob", "status": 202, "audited": true, "screens": ["admin/customers"] },
+    { "id": "listDataRequestsAdmin", "area": "admin", "method": "GET", "path": "/data-requests", "summary": "Export and closure requests across customers (privacy queue)", "auth": "staff", "permission": "customers.data-requests.manage", "paging": true, "query": { "kind": "enum(export|closure)?", "state": "string?", "overdue": "bool?" }, "response": { "request": "DataRequest", "customerId": "uuid", "customerName": "string" }, "screens": ["admin/customers"] },
+    { "id": "retryDataRequest", "area": "admin", "method": "POST", "path": "/data-requests/{id}/retry", "summary": "Retry a failed export", "auth": "staff", "permission": "customers.data-requests.manage", "params": { "id": "uuid" }, "response": "DataRequest", "errors": ["ILLEGAL_TRANSITION"], "audited": true }
+  ],
+  "events": {
+    "publishes": [
+      { "name": "customers.customer.created", "when": "A customer profile is created for a newly registered identity user", "payload": { "customerId": "uuid", "userId": "uuid" } },
+      { "name": "customers.profile.updated", "when": "Name or phone changes", "payload": { "customerId": "uuid", "fields": "string[]" } },
+      { "name": "customers.address.saved", "when": "An address is added or edited (orders ignore it; accepted orders keep their copy)", "payload": { "customerId": "uuid", "addressId": "uuid", "isDefault": "bool" } },
+      { "name": "customers.marketing_preferences.changed", "when": "Any promotional consent or personalization preference changes (including recentSearches and personalizedRecommendations)", "payload": { "customerId": "uuid", "emailPromotions": "bool", "smsPromotions": "bool", "pushPromotions": "bool", "wishlistAlerts": "bool", "source": "string", "personalizedRecommendations": "bool", "recentSearches": "bool" } },
+      { "name": "customers.account.status_changed", "when": "Account status moves through the status machine", "payload": { "customerId": "uuid", "from": "string", "to": "string", "reasonCode": "string" } },
+      { "name": "customers.account.restricted", "when": "A scoped restriction starts", "payload": { "customerId": "uuid", "restrictionId": "uuid", "scope": "string", "endsAt": "datetime?", "trustReportId": "uuid?", "trustEnforcementId": "uuid?" } },
+      { "name": "customers.account.restriction_lifted", "when": "A restriction is lifted or expires", "payload": { "customerId": "uuid", "restrictionId": "uuid", "scope": "string", "trustEnforcementId": "uuid?" } },
+      { "name": "customers.data_export.requested", "when": "A customer asks for their data", "payload": { "customerId": "uuid", "requestId": "uuid" } },
+      { "name": "customers.data_export.ready", "when": "The export file is ready (notifications emails the link)", "payload": { "customerId": "uuid", "requestId": "uuid", "expiresAt": "datetime" } },
+      { "name": "customers.closure.requested", "when": "A customer asks to close the account", "payload": { "customerId": "uuid", "requestId": "uuid", "scheduledFor": "datetime" } },
+      { "name": "customers.account.closed", "when": "Closure completes; identity disables sign-in, notifications stops promotional sends", "payload": { "customerId": "uuid", "userId": "uuid" } }
+    ],
+    "consumes": [
+      { "name": "orders.order.placed", "does": "When guestEmail is set, add or update the guest buyer row (order count, spend, last order)" },
+      { "name": "identity.user.registered", "does": "Create the customer profile, default marketing preferences (all promotional channels off unless opted in at registration) and the first consent log rows; remove the guest buyer row with the same email" },
+      { "name": "identity.user.verified", "does": "Mark email or phone verified (orders attaches guest orders with that email itself)" },
+      { "name": "identity.guest_session.claimed", "does": "Merge the guest session's recently viewed list into the customer's list (newest view wins) and delete the guest rows" },
+      { "name": "identity.email.changed", "does": "Update the mirrored email and its verification date" },
+      { "name": "identity.account.closed", "does": "If identity closed the account directly (staff tool), move the customer to closed and stop promotional consent" },
+      { "name": "orders.order.placed", "does": "Update order count, spend and the used address's lastUsedAt" },
+      { "name": "trust.enforcement.recorded", "does": "When the target is a customer (restrict messaging, ordering, reviews or account), create the restriction with the enforcement's reason, end date and appeal route" },
+      { "name": "catalog.product.merged", "does": "Repoint recently viewed rows from the duplicate to the kept product" }
+    ]
+  },
+  "permissions": [
+    { "key": "customers.accounts.view", "audience": "staff", "desc": "View customer accounts, orders summary, cases and notes" },
+    { "key": "customers.accounts.act", "audience": "staff", "desc": "Restrict, suspend, reinstate or close customer accounts (reason required)" },
+    { "key": "customers.accounts.security", "audience": "staff", "desc": "Send password reset links and sign a customer out everywhere" },
+    { "key": "customers.notes.write", "audience": "staff", "desc": "Add internal notes to a customer" },
+    { "key": "customers.accounts.export", "audience": "staff", "desc": "Export customer lists including contact details" },
+    { "key": "customers.data-requests.manage", "audience": "staff", "desc": "Work the data export and closure queue" }
+  ],
+  "approvalActions": [
+    { "key": "customers.accounts.close-with-obligations", "desc": "Staff closure of a customer account that still has open orders, returns or cases", "limit": "none", "secondReviewer": "always", "approvers": "Customer Support Manager or Business Owner (not the requester)" }
+  ],
+  "jobs": [
+    { "name": "customers.expire-restrictions", "schedule": "every 10 min", "does": "Expire restrictions past endsAt; return the account to active when none remain" },
+    { "name": "customers.build-data-exports", "schedule": "every 5 min", "does": "Process requested exports: collect each enabled module's export hook, write a ZIP to media, mark ready, publish customers.data_export.ready" },
+    { "name": "customers.expire-export-links", "schedule": "hourly", "does": "Expire ready exports after exportLinkValidDays and delete the file" },
+    { "name": "customers.complete-closures", "schedule": "daily 02:00 market time", "does": "For closures past the cooling-off date, re-check obligations; close the account, anonymise profile and addresses, keep order references" },
+    { "name": "customers.prune-recently-viewed", "schedule": "daily", "does": "Delete rows older than recentlyViewedRetentionDays and guest rows whose session expired" }
+  ],
+  "settings": [
+    { "key": "maxAddresses", "default": 20, "desc": "Saved addresses per customer" },
+    { "key": "recentlyViewedShown", "default": 12, "desc": "Items returned to the home page by default" },
+    { "key": "recentlyViewedRetained", "default": 50, "desc": "Items kept per owner" },
+    { "key": "recentlyViewedRetentionDays", "default": 90, "desc": "Days a view is kept" },
+    { "key": "dataExportSlaHours", "default": 48, "desc": "Promised time to deliver a data export" },
+    { "key": "exportLinkValidDays", "default": 7, "desc": "Download link lifetime" },
+    { "key": "closureCoolingOffDays", "default": 14, "desc": "Days before a requested closure completes; the customer can cancel until then" },
+    { "key": "guestLookupAttemptsPerHour", "default": 10, "desc": "Lookups per IP and per email" },
+    { "key": "overviewSourceTimeoutMs", "default": 300, "desc": "Per-module budget for the account overview aggregate" }
+  ],
+  "integrations": [
+    { "name": "Address validation provider (optional)", "purpose": "Normalise US addresses and detect PO boxes; format rules only when not configured" }
+  ],
+  "errorCodes": {
+    "ADDRESS_LIMIT_REACHED": { "status": 409, "meaning": "The customer already has maxAddresses saved addresses" },
+    "ADDRESS_UNDELIVERABLE": { "status": 422, "meaning": "Outside the service region or not deliverable; details.issues explains" },
+    "CLOSURE_BLOCKED": { "status": 409, "meaning": "Open orders, returns, cases, pending refunds or credit; details.blockers lists them" },
+    "DATA_REQUEST_IN_PROGRESS": { "status": 409, "meaning": "A request of the same kind is already open" },
+    "GUEST_ORDER_NOT_FOUND": { "status": 404, "meaning": "No guest order matches that reference and email" },
+    "UNSUBSCRIBE_TOKEN_INVALID": { "status": 400, "meaning": "The unsubscribe link is invalid or expired" }
+  },
+  "notes": [
+    "Customer id is separate from the identity user id (one-to-one). Other modules store customerId; the guest order flow stores email only.",
+    "Recently viewed is owned here at launch (brief: phase 1, used on the home page) instead of the phase-3 wishlist module listed in the architecture doc. Wishlist reads it through listRecentlyViewed. optionalDeps gain catalog and offers for current price and availability.",
+    "Overview aggregation uses ctx.tryUse for orders, returns, messaging, support and wallet. Each source answers within overviewSourceTimeoutMs or is reported in `unavailable`; the page never fails because one module is slow or off. Builders: those modules must expose countInProgress, listRecentForCustomer, listDelayedItemsForCustomer (orders), listOpenForCustomer (returns), unreadCount (messaging, exists), listOpenCasesForCustomer (support) and getBalance (wallet) in their contracts.",
+    "Marketing consent is the source of truth here; notifications reads getMarketingConsent and consumes customers.marketing_preferences.changed. Notification channel routing and essential notices stay in notifications. This resolves the overlap between 'marketing preferences' (customers) and 'preferences (essential vs promotional)' (notifications) in the architecture doc.",
+    "Guest order lookup is served here (architecture doc); the access grant itself is identity's (grantGuestOrderAccess on the caller's guest session), so orders, shipping, returns and support only check identity.hasGuestOrderAccess. Needs orders to expose findGuestOrder(orderRef, email) and listGuestOrdersByEmail(email).",
+    "Approval action registered with access: customers.accounts.close-with-obligations (limit none, secondReviewer always; see approvalActions) for staff closures while orders, returns or cases are still open.",
+    "Account actions call identity in-process: send_password_reset uses the forced-reset tool, sign_out_everywhere uses revokeSessions, completed closure uses closeAccount.",
+    "Customer restrictions applied directly by staff are appealed through a support case (route stated in appealRoute). Restrictions that come from a trust enforcement are appealed in trust (POST /api/store/trust/appeals).",
+    "Address changes never alter accepted orders: checkout copies the address via getAddressForOrder and orders store that copy."
+  ]
+}

@@ -1,0 +1,232 @@
+# screens: admin/product-review
+# replaces: GET catalog/review-queue, GET catalog/products/{id}, GET offers/offers, GET sellers/sellers/{id}, GET reviews/products/{productId}/rating-summary
+# why: The review queue by review deadline, the selected submission with its automated checks, offer and seller, and the duplicate candidates with their offers and reviews load together.
+query AdminProductReview(
+  $productId: UUID!
+  $kind: String
+  $categoryId: UUID
+  $paging: PageInput
+  $offerPaging: PageInput
+) {
+  productReviewQueue(kind: $kind, categoryId: $categoryId, paging: $paging) {
+    total
+    nextCursor
+    page
+    totalPages
+    items {
+      id
+      title
+      images {
+        url
+        alt
+      }
+      category {
+        name
+      }
+      ownerSeller {
+        id
+        storeName
+      }
+      reviewState
+      missing
+      submission {
+        ref
+        kind
+        submittedAt
+        reviewDeadline {
+          dueAt
+          state
+        }
+        assignee {
+          name
+        }
+      }
+    }
+  }
+
+  productAdmin(id: $productId) {
+    id
+    ref
+    title
+    brand {
+      name
+    }
+    category {
+      id
+      name
+    }
+    categoryPath
+    modelNumber
+    description
+    keyFeatures
+    specs {
+      name
+      value
+    }
+    images {
+      id
+      url
+      alt
+      width
+      height
+    }
+    variants {
+      id
+      gtin
+      options {
+        name
+        value
+      }
+    }
+    reviewState
+    publication
+    missing
+    submission {
+      id
+      ref
+      kind
+      state
+      version
+      note
+      submittedAt
+      submittedBy {
+        kind
+        name
+      }
+      lastSavedAt
+      lastSavedBy {
+        kind
+        name
+      }
+      reviewDeadline {
+        dueAt
+        state
+      }
+      assignee {
+        kind
+        id
+        name
+      }
+    }
+    checks {
+      kind
+      result
+      message
+      details
+      ranAt
+      evidence {
+        label
+        field
+        text
+        score
+        matchedProduct {
+          id
+          ref
+          title
+        }
+        media {
+          url
+          alt
+        }
+        suggestedCategory {
+          id
+          name
+        }
+      }
+      # Not a duplicate / dismissed findings
+      dismissal {
+        reason
+        at
+        by {
+          name
+        }
+        matchedProduct {
+          id
+          ref
+        }
+      }
+    }
+    # Decision card "Save draft"
+    reviewDraft {
+      decision
+      reason
+      fields {
+        name
+        value
+      }
+      savedAt
+      savedBy {
+        name
+      }
+    }
+    owner {
+      type
+      sellerId
+    }
+    ownerSeller {
+      id
+      storeName
+      verified
+    }
+    duplicateCandidates {
+      id
+      ref
+      title
+      brand {
+        name
+      }
+      categoryPath
+      modelNumber
+      images {
+        url
+        alt
+      }
+      variants {
+        options {
+          name
+          value
+        }
+      }
+      offerCount
+      reviewSummary {
+        ratingCount
+        average
+      }
+      updatedAt
+    }
+    reviewLog {
+      action
+      reason
+      fields {
+        name
+        value
+      }
+      actor {
+        kind
+        name
+      }
+      at
+    }
+  }
+
+  offersAdmin(filter: { productId: $productId }, paging: $offerPaging) {
+    items {
+      id
+      sellerName
+      conditionLabel
+      price {
+        formatted
+      }
+      dispatch {
+        label
+      }
+      stock {
+        quantities {
+          available
+        }
+      }
+      status
+      publishOnApproval
+    }
+  }
+}

@@ -1,0 +1,173 @@
+# notifications: in-app inboxes for the store (customer), Seller Center (seller member) and Admin Center (staff).
+# Every field reads the caller's own inbox: the signed-in customer, the seller member within the current seller,
+# or the staff member (including notices received as a backup). Guests have no inbox.
+# Writes (mark read, read all, preferences, templates, broadcasts) stay on REST /api/<area>/notifications/*.
+
+"""
+One in-app notice (REST type Notice). Every notice links to the record it is about.
+"""
+type Notification {
+  id: UUID!
+  "customer.shipment.dispatched, seller.dispatch.reminder, staff.approval.waiting…"
+  topicKey: String!
+  "Essential updates are always on; promotional notices show in their own section"
+  category: NotificationCategory!
+  """
+  Inbox filter group. Store: orders, returns_refunds, cases, account, promotions.
+  Seller: orders, returns_cases, products, account_finance. Admin: the work area (Shipping, Finance…).
+  """
+  group: String!
+  title: String!
+  body: String!
+  "Icon name from the design system, e.g. truck"
+  icon: String
+  tone: NotificationTone!
+  link: NotificationLink!
+  createdAt: DateTime!
+  readAt: DateTime
+  read: Boolean!
+  actionRequired: Boolean!
+  "Due date for action notices, e.g. Dispatch by 5:00 PM, Evidence due Oct 9"
+  deadline: Deadline
+  "The work was done (shows 'Resolved Oct 7')"
+  resolvedAt: DateTime
+  "Which role it was routed to and why (lead, backup for an away lead, mention…)"
+  routedTo: NotificationRouting @areas(in: [ADMIN])
+}
+
+"Where a notice leads"
+type NotificationLink {
+  "order, order_item, shipment, return, refund, case, conversation, product, seller_order, payout, statement, hold, restriction, approval, queue, setting_change, account, campaign"
+  kind: String!
+  id: String!
+  "MK-260914-48213, RT-261002-0520, CS-261005-3381"
+  ref: String
+  "Button text, e.g. Open dispatch queue"
+  label: String
+  "App route / prototype screen id, e.g. account/tracking, seller/order, ops/dispatch"
+  screen: String!
+  url: URL
+}
+
+type NotificationRouting @areas(in: [ADMIN]) {
+  roleKey: String!
+  roleName: String!
+  reason: NotificationRoutingReason!
+  "Name of the away lead when received as backup"
+  coveringFor: String
+  "Who receives the notice now for this role, e.g. Theo Grant (lead)"
+  recipients: [NotificationRecipient!]!
+}
+
+"A staff member receiving a routed notice"
+type NotificationRecipient @areas(in: [ADMIN]) {
+  staffId: UUID!
+  name: String!
+  as: NotificationRecipientRole!
+}
+
+enum NotificationRecipientRole @areas(in: [ADMIN]) {
+  LEAD
+  BACKUP
+  MEMBER
+}
+
+"Header badge and inbox tabs"
+type NotificationInboxSummary {
+  unread: Int!
+  "Unread per group (store and seller groups; work areas for staff)"
+  byGroup: [NotificationGroupCount!]!
+  "Open action notices"
+  actionRequired: Int!
+  "Open action notices sorted by deadline, max 10 (dashboard 'Needs action' lists)"
+  needsAction: [Notification!]!
+
+  # ---- Admin Center only
+  "Action notices for the caller personally (own roles and roles covered as backup)"
+  needsMyAction: Int @areas(in: [ADMIN])
+  mentions: Int @areas(in: [ADMIN])
+  "Roles the caller leads, backs up or covers, and who receives their notices today"
+  routingToday: [NotificationRoutingRow!] @areas(in: [ADMIN])
+  "e.g. Backup Seller Manager on Oct 8–9"
+  coveringNote: String @areas(in: [ADMIN])
+}
+
+type NotificationGroupCount {
+  group: String!
+  unread: Int!
+  "All notices in the group, read and unread (category chips)"
+  total: Int!
+}
+
+"One row of 'Routing today' in the staff inbox"
+type NotificationRoutingRow @areas(in: [ADMIN]) {
+  roleKey: String!
+  roleName: String!
+  "Names of the people receiving the role's notices now"
+  receivingNow: [String!]!
+  lead: String
+  leadAway: Boolean!
+  note: String
+}
+
+enum NotificationCategory {
+  ESSENTIAL
+  OPTIONAL
+  PROMOTIONAL
+}
+
+enum NotificationTone {
+  INFO
+  SUCCESS
+  WARNING
+  DANGER
+  BRAND
+  DEAL
+  NEUTRAL
+}
+
+enum NotificationRoutingReason @areas(in: [ADMIN]) {
+  LEAD
+  BACKUP
+  MEMBER
+  DIRECT
+  REQUESTER
+  APPROVER
+  MENTION
+}
+
+"Staff inbox tabs (Admin Center; ignored in the store and Seller Center)"
+enum NotificationView {
+  ALL
+  NEEDS_MY_ACTION
+  MENTIONS
+}
+
+"Inbox filters. `view` is used by the Admin Center only and ignored elsewhere."
+input NotificationFilterInput {
+  "A group key (see Notification.group); for staff, a work area"
+  group: String
+  unreadOnly: Boolean
+  actionRequired: Boolean
+  category: NotificationCategory
+  view: NotificationView
+}
+
+type NotificationPage implements Paged {
+  items: [Notification!]!
+  nextCursor: String
+  page: Int
+  totalPages: Int
+  total: Int
+}
+
+extend type Query {
+  "The caller's inbox, newest first. Signed-in customers, seller members and staff only."
+  notifications(filter: NotificationFilterInput, paging: PageInput): NotificationPage! @source(module: "notifications", fn: "listInbox")
+
+  "Unread count for the header bell (all three areas)"
+  unreadNotificationCount: Int! @source(module: "notifications", fn: "unreadCount")
+
+  "Unread per group, open action notices and, for staff, routing today"
+  notificationInbox: NotificationInboxSummary! @source(module: "notifications", fn: "inboxSummary")
+}

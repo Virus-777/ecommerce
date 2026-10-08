@@ -1,0 +1,208 @@
+/* ==========================================================================
+   Marketly design tokens (CSS)
+   Source of truth: design/tokens.json. Keep both in sync.
+   Layout concept: one calm sea-green brand, warm orange reserved for deals,
+   cool-green-biased neutrals, information-dense but airy.
+   Light palette on bare :root; dark redefined for OS-dark (unless explicitly
+   light) and for an explicit data-theme="dark".
+   ========================================================================== */
+
+:root {
+  /* ---- Color: surfaces ---- */
+  --bg: #F5F7F6;
+  --surface: #FFFFFF;
+  --surface-2: #EFF3F1;
+  --surface-3: #E3E9E6;
+  --border: #DAE2DE;
+  --border-strong: #BFCAC5;
+  --overlay: rgba(12, 22, 19, 0.52);
+
+  /* ---- Color: text ---- */
+  --text: #13201C;
+  --text-2: #44514C;
+  --text-3: #5F6C67;
+  --text-inverse: #FFFFFF;
+
+  /* ---- Color: brand (sea green) ---- */
+  --brand: #0B6E5F;
+  --brand-hover: #085A4E;
+  --brand-soft: #E2F1ED;
+  --brand-soft-2: #C9E6DE;
+  --brand-text: #08604F;
+  --on-brand: #FFFFFF;
+
+  /* ---- Color: deal (warm orange, prices & promotions only) ---- */
+  --deal: #C2410C;
+  --deal-soft: #FFF0E6;
+  --deal-text: #B03A09;
+  --on-deal: #FFFFFF;
+
+  /* ---- Color: semantic ---- */
+  --success: #157A3F;
+  --success-soft: #E5F5EB;
+  --warning: #9A5A06;
+  --warning-soft: #FCF1DC;
+  --danger: #B42318;
+  --danger-soft: #FCE9E7;
+  --info: #1F5BC4;
+  --info-soft: #E8F0FD;
+  --star: #D98E04;
+  --focus: #1F5BC4;
+
+  /* ---- Color: data visualisation (validated: CVD + contrast) ---- */
+  --chart-1: #0F8A73;   /* Official store / primary series */
+  --chart-2: #C77F14;   /* Marketplace sellers / second series */
+  --chart-grid: #E3E9E6;
+  --chart-axis: #5F6C67;
+
+  /* ---- Color: image placeholder tints (product imagery stand-ins) ---- */
+  --img-1: #E4EFEC;  --img-2: #E9ECF4;  --img-3: #F4ECE4;
+  --img-4: #ECE8F2;  --img-5: #F2EFE2;  --img-6: #E5EEF3;
+  --img-ink: #3E4C47;
+
+  /* ---- Typography ---- */
+  --font-display: "Bricolage Grotesque", "Figtree", ui-sans-serif, system-ui, sans-serif;
+  --font-ui: "Figtree", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  --fs-2xs: 11px;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 15px;   /* body / base */
+  --fs-lg: 17px;
+  --fs-xl: 20px;
+  --fs-2xl: 24px;
+  --fs-3xl: 30px;
+  --fs-4xl: 38px;
+
+  --lh-tight: 1.2;
+  --lh-snug: 1.35;
+  --lh-body: 1.5;
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  /* ---- Spacing (4px base) ---- */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-7: 32px; --sp-8: 40px;
+  --sp-9: 48px; --sp-10: 64px;
+
+  /* ---- Radius ---- */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+  --r-pill: 999px;
+
+  /* ---- Elevation ---- */
+  --sh-1: 0 1px 2px rgba(16, 32, 28, 0.06);
+  --sh-2: 0 2px 6px rgba(16, 32, 28, 0.06), 0 8px 24px rgba(16, 32, 28, 0.06);
+  --sh-3: 0 12px 40px rgba(16, 32, 28, 0.18);
+
+  /* ---- Layout ---- */
+  --container: 1240px;
+  --sidebar: 248px;
+  --header-h: 64px;
+  --tabbar-h: 64px;
+  --tap: 44px;          /* minimum touch target */
+
+  /* ---- Motion ---- */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur: 200ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0D1412;
+    --surface: #141D1A;
+    --surface-2: #1A2521;
+    --surface-3: #22302B;
+    --border: #2A3833;
+    --border-strong: #3B4C46;
+    --overlay: rgba(0, 0, 0, 0.62);
+    --text: #E7EEEB;
+    --text-2: #B6C3BE;
+    --text-3: #8F9D98;
+    --text-inverse: #0D1412;
+    --brand: #3CC2A6;
+    --brand-hover: #5BD3BA;
+    --brand-soft: #12332C;
+    --brand-soft-2: #18463C;
+    --brand-text: #63D6BD;
+    --on-brand: #04201A;
+    --deal: #F07A3E;
+    --deal-soft: #3A2015;
+    --deal-text: #FF9C66;
+    --on-deal: #1E0B02;
+    --success: #4FCB82;
+    --success-soft: #12301F;
+    --warning: #EDB04F;
+    --warning-soft: #33260F;
+    --danger: #FF7E72;
+    --danger-soft: #3A1815;
+    --info: #82AAFF;
+    --info-soft: #15233F;
+    --star: #F0B23A;
+    --focus: #82AAFF;
+    --chart-1: #25A587;
+    --chart-2: #BD7C1C;
+    --chart-grid: #26332E;
+    --chart-axis: #8F9D98;
+    --img-1: #1B2B27;  --img-2: #1D2230;  --img-3: #2C241D;
+    --img-4: #251F2E;  --img-5: #29271B;  --img-6: #1A2830;
+    --img-ink: #A9B8B3;
+    --sh-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --sh-2: 0 2px 6px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.3);
+    --sh-3: 0 12px 40px rgba(0, 0, 0, 0.55);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0D1412;
+  --surface: #141D1A;
+  --surface-2: #1A2521;
+  --surface-3: #22302B;
+  --border: #2A3833;
+  --border-strong: #3B4C46;
+  --overlay: rgba(0, 0, 0, 0.62);
+  --text: #E7EEEB;
+  --text-2: #B6C3BE;
+  --text-3: #8F9D98;
+  --text-inverse: #0D1412;
+  --brand: #3CC2A6;
+  --brand-hover: #5BD3BA;
+  --brand-soft: #12332C;
+  --brand-soft-2: #18463C;
+  --brand-text: #63D6BD;
+  --on-brand: #04201A;
+  --deal: #F07A3E;
+  --deal-soft: #3A2015;
+  --deal-text: #FF9C66;
+  --on-deal: #1E0B02;
+  --success: #4FCB82;
+  --success-soft: #12301F;
+  --warning: #EDB04F;
+  --warning-soft: #33260F;
+  --danger: #FF7E72;
+  --danger-soft: #3A1815;
+  --info: #82AAFF;
+  --info-soft: #15233F;
+  --star: #F0B23A;
+  --focus: #82AAFF;
+  --chart-1: #25A587;
+  --chart-2: #BD7C1C;
+  --chart-grid: #26332E;
+  --chart-axis: #8F9D98;
+  --img-1: #1B2B27;  --img-2: #1D2230;  --img-3: #2C241D;
+  --img-4: #251F2E;  --img-5: #29271B;  --img-6: #1A2830;
+  --img-ink: #A9B8B3;
+  --sh-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --sh-2: 0 2px 6px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.3);
+  --sh-3: 0 12px 40px rgba(0, 0, 0, 0.55);
+}

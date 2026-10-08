@@ -1,0 +1,225 @@
+{
+  "name": "audit",
+  "title": "Action history",
+  "group": "Platform",
+  "phase": 1,
+  "chapters": [2, 18],
+  "summary": "The tamper-evident action history: who did what, in which role, to which record, why, what changed (before and after), which approvals applied and the request id. Every module writes to it through record(); staff read it with filters and authorized exports; retention is a governed setting.",
+  "owns": [
+    "Append-only action history entries (cannot be edited or deleted by anyone; only purged after retention)",
+    "Actor, actor roles at the time, action, module, target and related targets, reason, before/after (structured and human text), approval state, request id, IP",
+    "Approval state of each entry (not required / pending / approved / rejected …), kept current from access events without changing the entry",
+    "Search and filters (staff, role, target, action, category, approval state, date range) and per-record history for detail pages",
+    "Authorized exports of the action history (CSV, JSON lines; reason required and recorded), run as reports export jobs (dataset audit.admin.entries)",
+    "Retention setting with a legal minimum, purge job, and hash-chain integrity checks",
+    "Seller-visible history of actions on the seller's own account (seller staff changes, payout destination changes)"
+  ],
+  "notOwns": [
+    "Account security activity shown to customers (sign-ins, password changes): identity.security_events",
+    "Approval requests, limits and decisions: access (audit stores the request id and a projection of its state)",
+    "Record timelines shown to customers and sellers (order timeline, return progress): owning modules",
+    "Business reports and their exports: reports"
+  ],
+  "dependsOn": [],
+  "optionalDeps": ["access", "media", "identity", "notifications", "orders", "sellers", "customers", "finance", "reports"],
+  "publicApi": [
+    { "name": "record", "signature": "(entry: RecordInput) => uuid", "desc": "Append one entry. Call it inside the same transaction as the change (outbox once introduced), so a change is never saved without its history. Roles are resolved through access.rolesOf when the actor is staff and actorRoles is omitted.", "usedBy": ["identity", "access", "settings", "media", "notifications", "customers", "sellers", "catalog", "offers", "inventory", "purchasing", "warehouse", "orders", "payments", "shipping", "returns", "finance", "promotions", "advertising", "reviews", "messaging", "support", "trust", "content", "workqueues", "reports", "wallet"] },
+    { "name": "recordMany", "signature": "(entries: RecordInput[]) => uuid[]", "desc": "Bulk actions (bulk catalog edit, payout run items) in one call", "usedBy": ["catalog", "offers", "inventory", "finance"] },
+    { "name": "historyOf", "signature": "(targetType: string, targetId: string, limit?: int) => AuditEntry[]", "desc": "Staff history for a record, embedded in other modules' admin detail responses (order, seller, payout)", "usedBy": ["orders", "sellers", "finance", "returns", "customers", "catalog", "settings"] },
+    { "name": "trailOf", "signature": "(targetType: string, targetIds: string[], opts: { includeRelated?: bool, category?: string, page?: PageInput }) => Map<string, Page<AuditEntry>>", "desc": "Batched, paged history per record for the Action history card on admin 360 views (order, seller, customer, payout run). includeRelated also matches entries where the record is one of relatedTargets. Newest first.", "usedBy": ["graphql"] },
+    { "name": "searchEntries", "signature": "(filters: AuditFilters, page: PageInput) => Page<AuditEntry>", "desc": "The action history with filters, newest first (same as GET /entries)", "usedBy": ["graphql"] },
+    { "name": "getEntry", "signature": "(entryId: uuid) => AuditEntry | null", "desc": "One entry with before/after and approval", "usedBy": ["graphql"] },
+    { "name": "exportRows", "signature": "(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }", "desc": "Export rows for reports dataset audit.admin.entries (filters are AuditFilters; values are already redacted at record time)", "usedBy": ["reports"] }
+  ],
+  "types": {
+    "RoleName": { "key": "string", "name": "string" },
+    "AuditTarget": {
+      "type": { "type": "string", "desc": "order, order_item, seller, product, offer, payout, payout_run, hold, refund, return, case, setting, role, staff, customer, campaign…" },
+      "id": "string",
+      "ref": { "type": "string?", "desc": "Human reference shown in the list: MK-261002-55410, PO-261009-0418, PLR-CI26" },
+      "label": { "type": "string?", "desc": "Casa Verde Home · Pellar Cast Iron Skillet" },
+      "sellerId": "uuid?",
+      "screen": { "type": "string?", "desc": "Admin screen that opens the target, e.g. admin/payouts" }
+    },
+    "ChangeText": { "before": "string?", "after": "string?" },
+    "AuditApproval": {
+      "state": "enum(not_required|pending|partially_approved|approved|rejected|returned|cancelled|expired)",
+      "note": { "type": "string?", "desc": "Why none was needed or who is awaited: 'Within $50 limit', 'Waiting for Morgan Hale'" },
+      "approvalRequestId": "uuid?",
+      "approvers": "string[]",
+      "decidedAt": "datetime?",
+      "steps": "TimelineEvent[]"
+    },
+    "AuditEntry": {
+      "id": "uuid",
+      "seq": { "type": "int", "desc": "Monotonic sequence used by the hash chain" },
+      "at": "datetime",
+      "actor": "Actor",
+      "actorRoles": "RoleName[]",
+      "action": { "type": "string", "desc": "Key, e.g. finance.hold.released" },
+      "actionLabel": { "type": "string", "desc": "Released payout hold" },
+      "module": "string",
+      "category": "enum(financial|seller_enforcement|catalog|orders|returns|customers|settings|access|security|content|advertising|other)",
+      "target": "AuditTarget",
+      "relatedTargets": "AuditTarget[]",
+      "reason": "text?",
+      "change": "ChangeText",
+      "before": "json?",
+      "after": "json?",
+      "evidence": { "type": "string[]", "desc": "References: UPS proof of delivery, case CS-260930-1172, media ids" },
+      "approval": "AuditApproval",
+      "requestId": { "type": "string?", "desc": "X-Request-Id of the HTTP call" },
+      "ip": "string?",
+      "visibleToSeller": "bool"
+    },
+    "RecordInput": {
+      "actor": "Actor",
+      "actorRoles": "RoleName[]?",
+      "action": "string",
+      "actionLabel": "string",
+      "module": "string",
+      "category": "enum(financial|seller_enforcement|catalog|orders|returns|customers|settings|access|security|content|advertising|other)",
+      "target": "AuditTarget",
+      "relatedTargets": "AuditTarget[]?",
+      "reason": "text?",
+      "before": "json?",
+      "after": "json?",
+      "beforeText": "string?",
+      "afterText": "string?",
+      "evidence": "string[]?",
+      "approvalRequestId": "uuid?",
+      "approvalNote": { "type": "string?", "desc": "Shown when no approval was needed, e.g. 'Within 30% limit'" },
+      "requestId": "string?",
+      "ip": "string?",
+      "visibleToSeller": { "type": "bool?", "desc": "Show in the seller's own history (seller member changes, payout destination, restrictions)" },
+      "at": "datetime?"
+    },
+    "AuditFilters": {
+      "q": { "type": "string?", "desc": "Order, seller, SKU, payout reference, staff name or reason text" },
+      "actorId": "string?",
+      "roleKey": "string?",
+      "module": "string?",
+      "category": "enum(financial|seller_enforcement|catalog|orders|returns|customers|settings|access|security|content|advertising|other)?",
+      "targetType": "string?",
+      "targetId": "string?",
+      "sellerId": "uuid?",
+      "action": "string?",
+      "approvalState": "enum(not_required|pending|partially_approved|approved|rejected|returned|cancelled|expired)?",
+      "from": "datetime?",
+      "to": "datetime?"
+    },
+    "AuditSummary": {
+      "range": "DateRange",
+      "total": "int",
+      "pendingSecondReview": "int",
+      "financial": "int",
+      "sellerEnforcement": "int",
+      "settings": "int",
+      "byActor": { "type": "map<int>", "desc": "Staff name → count, top 10" }
+    },
+    "RetentionPolicy": {
+      "retainYears": "int",
+      "minimumYears": { "type": "int", "desc": "Legal floor; cannot be lowered from the API" },
+      "oldestEntryAt": "datetime?",
+      "nextPurgeAt": "datetime?",
+      "lastPurge": "PurgeResult?",
+      "updatedBy": "Actor?",
+      "updatedAt": "datetime?",
+      "pendingChange": { "type": "RetentionChange?", "desc": "Shortening waits for Business Owner approval" }
+    },
+    "RetentionChange": { "retainYears": "int", "reason": "text", "approval": "ApprovalInfo", "requestedBy": "Actor", "requestedAt": "datetime" },
+    "PurgeResult": { "at": "datetime", "removedEntries": "int", "removedThrough": "datetime" },
+    "IntegrityStatus": {
+      "ok": "bool",
+      "lastVerifiedAt": "datetime?",
+      "lastVerifiedSeq": "int?",
+      "brokenAtSeq": "int?",
+      "message": "string?"
+    },
+    "SellerAuditEntry": {
+      "id": "uuid",
+      "at": "datetime",
+      "actor": { "type": "Actor", "desc": "Seller members by name; Marketly staff shown as 'Marketly' with no personal name" },
+      "actionLabel": "string",
+      "target": "AuditTarget",
+      "reason": "text?",
+      "change": "ChangeText"
+    }
+  },
+  "tables": [
+    { "name": "entries", "desc": "Append-only (no UPDATE/DELETE grants for the app role). Partitioned by month on at. hash = sha256(prev_hash || canonical row).", "columns": { "id": "uuid pk", "seq": "bigint unique (identity)", "at": "timestamptz", "actor_kind": "text", "actor_id": "text?", "actor_name": "text?", "actor_roles": "jsonb", "action": "text", "action_label": "text", "module": "text", "category": "text", "target_type": "text", "target_id": "text", "target_ref": "text?", "target_label": "text?", "target_screen": "text?", "seller_id": "uuid?", "reason": "text?", "before": "jsonb?", "after": "jsonb?", "before_text": "text?", "after_text": "text?", "evidence": "jsonb", "approval_request_id": "uuid?", "approval_note": "text?", "request_id": "text?", "ip": "inet?", "visible_to_seller": "bool", "search": "tsvector (generated: refs, labels, reason, names)", "prev_hash": "bytea", "hash": "bytea" }, "indexes": ["(at desc, id)", "(target_type, target_id, at desc)", "(actor_id, at desc)", "(category, at desc)", "(seller_id, at desc) where visible_to_seller", "(approval_request_id)", "gin(search)"] },
+    { "name": "entry_targets", "desc": "Related targets for history lookups (an order item entry also appears under its order and seller)", "columns": { "entry_id": "uuid → entries", "target_type": "text", "target_id": "text", "at": "timestamptz" }, "indexes": ["(target_type, target_id, at desc)"] },
+    { "name": "approval_states", "desc": "Projection of access approval requests referenced by entries; updated from access events, so entries stay immutable", "columns": { "approval_request_id": "uuid pk", "state": "text", "approvers": "jsonb", "steps": "jsonb", "awaiting": "text?", "decided_at": "timestamptz?", "updated_at": "timestamptz" }, "indexes": ["(state)"] },
+    { "name": "retention", "desc": "Single row", "columns": { "id": "int pk (1)", "retain_years": "int", "pending_years": "int?", "pending_reason": "text?", "pending_approval_request_id": "uuid?", "pending_requested_by": "text?", "updated_by": "text?", "updated_at": "timestamptz?", "last_purge_at": "timestamptz?", "last_purge_removed": "bigint?", "last_purge_through": "timestamptz?" } },
+    { "name": "integrity_checks", "columns": { "id": "uuid pk", "started_at": "timestamptz", "finished_at": "timestamptz?", "from_seq": "bigint", "to_seq": "bigint", "ok": "bool?", "broken_at_seq": "bigint?" }, "indexes": ["(started_at desc)"] }
+  ],
+  "stateMachines": [
+    {
+      "name": "Retention change", "field": "RetentionPolicy.pendingChange", "initial": "none",
+      "transitions": [
+        ["none", "lengthen", "none"],
+        ["none", "requestShorten", "pending_approval"],
+        ["pending_approval", "approve", "none"],
+        ["pending_approval", "reject", "none"],
+        ["pending_approval", "cancel", "none"]
+      ],
+      "notes": "Lengthening applies at once. Shortening needs Business Owner approval (action audit.retention.change) and never goes below minimumYears; the next purge uses the new value."
+    }
+  ],
+  "endpoints": [
+    { "id": "listEntries", "area": "admin", "method": "GET", "path": "/entries", "summary": "Action history with filters", "desc": "Newest first. Each item is complete (actor and role, action, target, reason, before → after, approval state), so the table and phone list render from one call.", "auth": "staff", "permission": "audit.entries.view", "paging": true, "query": { "q": "string?", "actorId": "string?", "roleKey": "string?", "module": "string?", "category": "enum(financial|seller_enforcement|catalog|orders|returns|customers|settings|access|security|content|advertising|other)?", "targetType": "string?", "targetId": "string?", "sellerId": "uuid?", "action": "string?", "approvalState": "enum(not_required|pending|partially_approved|approved|rejected|returned|cancelled|expired)?", "from": "datetime?", "to": "datetime?" }, "response": "AuditEntry", "screens": ["admin/audit"] },
+    { "id": "getEntry", "area": "admin", "method": "GET", "path": "/entries/{id}", "summary": "One entry with evidence and approval history", "auth": "staff", "permission": "audit.entries.view", "params": { "id": "uuid" }, "response": "AuditEntry", "screens": ["admin/audit"] },
+    { "id": "getSummary", "area": "admin", "method": "GET", "path": "/summary", "summary": "Counts for the filter chips (pending second review, financial, enforcement, settings)", "auth": "staff", "permission": "audit.entries.view", "query": { "from": "date?", "to": "date?" }, "response": "AuditSummary", "screens": ["admin/audit", "admin/dashboard"] },
+    { "id": "listTargetHistory", "area": "admin", "method": "GET", "path": "/targets/{type}/{id}", "summary": "History of one record (order, seller, payout, product, setting…)", "desc": "Includes entries where the record is a related target. Used for 'staff history with reasons' panels.", "auth": "staff", "permission": "audit.entries.view", "params": { "type": "string", "id": "string" }, "paging": true, "response": "AuditEntry", "screens": ["admin/order", "admin/seller", "admin/payouts", "admin/customers", "admin/settings", "admin/staff"] },
+    { "id": "createExport", "area": "admin", "method": "POST", "path": "/exports", "summary": "Export filtered history (authorized, recorded)", "desc": "Records the reason in the action history, then creates an authorized export job through reports.requestExport (dataset audit.admin.entries, csv or jsonl). Poll GET /exports/{id} for the download link. Limited to reports.maxExportRows.", "auth": "staff", "permission": "audit.entries.export", "body": { "filters": "AuditFilters", "format": "enum(csv|jsonl)", "reason": "text" }, "response": "reports.ExportJob", "status": 202, "errors": ["EXPORT_TOO_LARGE"], "audited": true, "screens": ["admin/audit"] },
+    { "id": "listExports", "area": "admin", "method": "GET", "path": "/exports", "summary": "My exports (all exports with audit.retention.manage)", "auth": "staff", "permission": "audit.entries.export", "paging": true, "query": { "status": "enum(queued|running|ready|failed|expired)?" }, "response": "reports.ExportJob", "screens": ["admin/audit"], "desc": "Proxies reports.listExports for dataset audit.admin.entries: the caller's own jobs, or every requester's with audit.retention.manage." },
+    { "id": "getExport", "area": "admin", "method": "GET", "path": "/exports/{id}", "summary": "Export status and a fresh download link", "desc": "Proxies reports.getExport: only the requester may download, and each signed link is recorded.", "auth": "staff", "permission": "audit.entries.export", "params": { "id": "uuid" }, "response": "reports.ExportJob", "audited": true, "screens": ["admin/audit"], "errors": ["NOT_FOUND"] },
+    { "id": "getRetention", "area": "admin", "method": "GET", "path": "/retention", "summary": "Retention setting and last purge", "auth": "staff", "permission": "audit.entries.view", "response": "RetentionPolicy", "screens": ["admin/audit", "admin/settings"] },
+    { "id": "updateRetention", "area": "admin", "method": "PUT", "path": "/retention", "summary": "Change how long history is kept", "desc": "Lengthening applies now (200). Shortening returns 202 with pendingChange until the Business Owner approves.", "auth": "staff", "permission": "audit.retention.manage", "body": { "retainYears": "int", "reason": "text" }, "response": "RetentionPolicy", "errors": ["BELOW_LEGAL_MINIMUM", "APPROVAL_REQUIRED"], "audited": true, "approval": "Approval action audit.retention.change. Shortening retention needs Business Owner approval", "events": ["audit.retention.changed"], "screens": ["admin/audit", "admin/settings"] },
+    { "id": "getIntegrity", "area": "admin", "method": "GET", "path": "/integrity", "summary": "Hash-chain check result", "auth": "staff", "permission": "audit.entries.view", "response": "IntegrityStatus", "screens": ["admin/audit"] },
+    { "id": "listOwnSellerEntries", "area": "seller", "method": "GET", "path": "/entries", "summary": "Changes made on this seller account", "desc": "Seller member changes (staff, permissions, store details, payout destination) and staff actions marked visible to the seller. Staff names are not shown.", "auth": "seller", "permission": "audit.own-history.view", "paging": true, "query": { "from": "date?", "to": "date?", "targetType": "string?" }, "response": "SellerAuditEntry", "screens": ["seller/staff", "seller/store"] }
+  ],
+  "events": {
+    "publishes": [
+      { "name": "audit.retention.changed", "when": "The retention period changes (after approval when shortened)", "payload": { "retainYears": "int", "previousYears": "int", "by": "Actor" } },
+      { "name": "audit.integrity.failed", "when": "The hash-chain check finds a broken link", "payload": { "brokenAtSeq": "int", "detectedAt": "datetime" } }
+    ],
+    "consumes": [
+      { "name": "access.approval.requested", "does": "Create or reset the approval_states row (pending, awaiting the eligible reviewers)" },
+      { "name": "access.approval.partially_approved", "does": "Add the first approval to approval_states (still pending a second reviewer)" },
+      { "name": "access.approval.returned", "does": "Mark the approval state returned with the comment" },
+      { "name": "access.approval.decided", "does": "Set the final approval state and decision time; for audit.retention.change apply or drop the pending retention change" }
+    ]
+  },
+  "permissions": [
+    { "key": "audit.entries.view", "audience": "staff", "desc": "Read the action history (Platform Administrator, Business Owner, Finance Manager, Reports Analyst)" },
+    { "key": "audit.entries.export", "audience": "staff", "desc": "Export action history (sensitive; every export is recorded)" },
+    { "key": "audit.retention.manage", "audience": "staff", "desc": "Change the retention period (shortening still needs Business Owner approval)" },
+    { "key": "audit.own-history.view", "audience": "seller", "desc": "See changes made on the seller's own account (owner by default)" }
+  ],
+  "approvalActions": [
+    { "key": "audit.retention.change", "desc": "Shorten the action-history retention period (never below the legal minimum; lengthening needs no approval)", "limit": "none", "secondReviewer": "always", "approvers": "Business Owner" }
+  ],
+  "jobs": [
+    { "name": "audit.verify-chain", "schedule": "daily 03:00 market time", "does": "Recompute hashes from the last verified seq; on mismatch publish audit.integrity.failed (Platform Administrator and Business Owner are notified)" },
+    { "name": "audit.purge-expired", "schedule": "monthly", "does": "Drop month partitions entirely older than retainYears (never below minimumRetentionYears), keep a signed checkpoint hash so the chain still verifies, record the purge as an entry" }
+  ],
+  "settings": [
+    { "key": "retainYears", "default": 7, "desc": "Years entries are kept (example value on the prototype)" },
+    { "key": "minimumRetentionYears", "default": 7, "desc": "Legal floor; changed only by configuration, not the API" },
+    { "key": "redactKeys", "default": ["password", "token", "secret", "accountNumber", "cardNumber"], "desc": "Keys masked in before/after JSON at record time" }
+  ],
+  "errorCodes": {
+    "EXPORT_TOO_LARGE": { "status": 400, "meaning": "The filters match more than reports.maxExportRows; narrow the date range. details.matched." },
+    "BELOW_LEGAL_MINIMUM": { "status": 400, "meaning": "Retention cannot be shorter than details.minimumYears." }
+  },
+  "notes": [
+    "Material actions: every endpoint marked audited in any module calls audit.record (the kernel provides a helper that fills actor, roles, requestId and IP from the request). Modules pass before/after as structured JSON plus short human text ('Held $1,240.00' → 'Available $1,240.00') for the list.",
+    "audit has no hard dependencies so every module can use it. It is optional for others (ctx.tryUse('audit')); if disabled, modules still work and the kernel logs a warning that material actions are not being recorded. It should stay enabled in every real deployment.",
+    "Entries are never updated. The approval column comes from approval_states, which follows access events (requested → partially approved → approved), so an entry created with 'Pending · waiting for Morgan Hale' later shows 'Approved'.",
+    "Tamper evidence: entries form a hash chain by seq; the app's database role has INSERT and SELECT only on entries. Purges keep a checkpoint so verification continues across purged ranges.",
+    "Secrets are never stored: redactKeys are masked at record time; payout account numbers appear only as last 4 digits.",
+    "Retention 7 years is the prototype's example; the legal requirement is a business decision to confirm.",
+    "Exports: audit registers dataset audit.admin.entries with reports.registerDataset and serves the rows through exportRows; the job, file, link expiry and link logging are reports' (requestExport, getExport, listExports). reports is an optional dependency checked at call time; while it is disabled the audit Export button is hidden (DATASET_UNAVAILABLE)."
+  ]
+}

@@ -1,0 +1,311 @@
+# cart: one cart across the Official Store and marketplace sellers, grouped into seller packages.
+# Every read re-checks price, stock and eligibility and explains changes per line (notices);
+# unavailable lines stay in the cart and are never swapped for another seller's offer.
+# All writes (add, quantity, accept change, coupons, destination) stay on REST /api/store/cart.
+
+"The shopper's cart (customer or guest session), as the CartPage shows it"
+type Cart @areas(in: [STORE]) {
+  id: UUID!
+  currency: String!
+  itemCount: Int!
+  sellerCount: Int!
+  packageCount: Int!
+  "Deliver-to location used for estimates; null when none is known"
+  destination: CartDestination
+  "One package per seller and ship-from location"
+  packages: [CartPackage!]!
+  "Banner: '2 items need your attention'"
+  attention: CartAttention
+  "Coupon codes previewed on the cart, with coverage and reasons"
+  coupons: [CartCoupon!]!
+  totals: CartTotals!
+  "At least one eligible line and no warning notice left unaccepted"
+  checkoutReady: Boolean!
+  checkoutBlockers: [String!]!
+  "'Items stay in your cart for 30 days. Prices and stock are checked again at checkout.'"
+  retentionNote: String!
+  savedForLaterCount: Int!
+  "Saved for later, newest first"
+  savedForLater(limit: Int = 20): [CartSavedItem!]! @cost(weight: 5)
+  "When prices and stock were last re-read"
+  checkedAt: DateTime!
+}
+
+"Seller as shown on the cart and at checkout"
+type CartSellerLabel @areas(in: [STORE]) {
+  "Seller id; null for the Official Store"
+  id: UUID
+  name: String!
+  slug: String!
+  "Marketly Official Store"
+  official: Boolean!
+  verified: Boolean!
+  logo: MediaRef
+}
+
+type CartDestination @areas(in: [STORE]) {
+  postalCode: String!
+  "ISO 3166-1 alpha-2"
+  country: String!
+  region: String
+  city: String
+  "Saved customer address the location came from"
+  addressId: UUID
+  "DEFAULT_REGION = no location known; estimates use the market default"
+  source: CartDestinationSource!
+}
+
+"Items from one seller and ship-from location, with their own delivery estimate and shipping"
+type CartPackage @areas(in: [STORE]) {
+  "Stable grouping key: owner type + seller id + ship-from"
+  key: String!
+  "'Package 2 of 3'"
+  label: String!
+  seller: CartSellerLabel!
+  "e.g. 'Reno, NV warehouse'"
+  shipsFrom: String!
+  items: [CartLine!]!
+  "Null when every item in the package is unavailable or shipping is disabled"
+  delivery: CartPackageDelivery
+  "Summary of the seller's return terms for these items"
+  returnTerms: String!
+  "Eligible items plus package shipping"
+  subtotal: Money!
+  "The seller does not ship to the deliver-to location"
+  notShippable: Boolean!
+}
+
+"One cart line, bound to the exact offer the customer chose"
+type CartLine @areas(in: [STORE]) {
+  id: UUID!
+  offerId: UUID!
+  productId: UUID!
+  variantId: UUID!
+  title: String!
+  "e.g. 'Queen · Sage'"
+  variantLabel: String!
+  options: [CartLineOption!]!
+  condition: CartLineCondition!
+  conditionNote: String
+  sku: String
+  image: MediaRef
+  quantity: Int!
+  "min(offer purchase limit, available stock, platform line maximum)"
+  maxQuantity: Int!
+  "'Limit 3 per customer'"
+  purchaseLimit: Int
+  "Only set when low or below the requested quantity"
+  availableQuantity: Int
+  "Current offer price"
+  unitPrice: Money!
+  "Was price, from offers or promotions"
+  compareAtPrice: Money
+  "Price the customer added or last accepted; the baseline for change detection"
+  acceptedUnitPrice: Money!
+  lineTotal: Money!
+  "Derived from the open notices"
+  state: CartLineState!
+  includedInCheckout: Boolean!
+  "What changed since the customer added or last accepted the line"
+  notices: [CartNotice!]!
+  addedAt: DateTime!
+}
+
+type CartLineOption @areas(in: [STORE]) {
+  name: String!
+  value: String!
+}
+
+"A change on a line, explained in one sentence, with the actions the UI offers"
+type CartNotice @areas(in: [STORE]) {
+  id: UUID!
+  kind: CartNoticeKind!
+  "BLOCKING = excluded from checkout until resolved; WARNING = included only after the customer accepts; INFO = shown once"
+  severity: CartNoticeSeverity!
+  "'Price changed since you added it: was $94.99, now $99.99. Northwind Audio updated this offer on Oct 8.'"
+  message: String!
+  previousPrice: Money
+  currentPrice: Money
+  previousQuantity: Int
+  availableQuantity: Int
+  "Seller name when the seller changed the offer"
+  changedBy: String
+  changedAt: DateTime
+  "Other offers for the same variant and condition; shown as a link, never applied automatically"
+  alternatives: CartAlternativesHint
+  actions: [CartNoticeAction!]!
+  detectedAt: DateTime!
+}
+
+type CartAlternativesHint @areas(in: [STORE]) {
+  count: Int!
+  lowestPrice: Money
+  productId: UUID!
+  variantId: UUID!
+  condition: CartLineCondition!
+}
+
+"Default (cheapest eligible) delivery for a package at the deliver-to location"
+type CartPackageDelivery @areas(in: [STORE]) {
+  "e.g. Standard"
+  methodName: String!
+  arrivalFrom: Date!
+  arrivalTo: Date!
+  "'Arrives Mon, Oct 19 – Tue, Oct 20'"
+  arrivalLabel: String!
+  shipping: Money!
+  free: Boolean!
+  "'Free over $35'"
+  freeShippingNote: String
+  amountToFreeShipping: Money
+  estimateBasis: CartDestinationSource!
+  "Holiday or service interruption notes"
+  serviceNotices: [String!]!
+}
+
+type CartCoupon @areas(in: [STORE]) {
+  code: String!
+  status: CartCouponStatus!
+  amount: Money
+  "'$20 off your first order over $100'"
+  label: String
+  fundedBy: CartFundedBy
+  "Why it was rejected, in plain words"
+  reason: String
+  "Items that receive the discount and their share"
+  coverage: [CartCouponCoverage!]!
+  notCovered: [CartCouponExclusion!]!
+}
+
+type CartCouponCoverage @areas(in: [STORE]) {
+  itemId: UUID!
+  title: String!
+  amount: Money!
+}
+
+type CartCouponExclusion @areas(in: [STORE]) {
+  itemId: UUID!
+  title: String!
+  "e.g. 'already on a seller markdown'"
+  reason: String!
+}
+
+type CartTotals @areas(in: [STORE]) {
+  itemCount: Int!
+  "Eligible items only"
+  itemsSubtotal: Money!
+  discounts: [CartDiscount!]!
+  shippingByPackage: [CartPackageShipping!]!
+  shippingTotal: Money!
+  "'Calculated after you enter an address' (tax is computed in checkout)"
+  taxNote: String!
+  "Total before tax"
+  total: Money!
+  excludedItemCount: Int!
+}
+
+type CartDiscount @areas(in: [STORE]) {
+  code: String
+  label: String!
+  amount: Money!
+  fundedBy: CartFundedBy!
+}
+
+type CartPackageShipping @areas(in: [STORE]) {
+  packageKey: String!
+  sellerName: String!
+  amount: Money!
+  free: Boolean!
+}
+
+type CartAttention @areas(in: [STORE]) {
+  count: Int!
+  title: String!
+  message: String!
+}
+
+type CartSavedItem @areas(in: [STORE]) {
+  id: UUID!
+  offerId: UUID!
+  productId: UUID!
+  variantId: UUID!
+  seller: CartSellerLabel!
+  title: String!
+  variantLabel: String!
+  image: MediaRef
+  currentPrice: Money
+  available: Boolean!
+  unavailableReason: String
+  savedAt: DateTime!
+}
+
+# ------------------------------------------------------------------ enums
+
+enum CartDestinationSource @areas(in: [STORE]) {
+  ADDRESS
+  POSTAL_CODE
+  DEFAULT_REGION
+}
+
+enum CartLineCondition @areas(in: [STORE]) {
+  NEW
+  USED_LIKE_NEW
+  USED_GOOD
+  USED_ACCEPTABLE
+  REFURBISHED
+}
+
+enum CartLineState @areas(in: [STORE]) {
+  OK
+  NEEDS_ATTENTION
+  UNAVAILABLE
+}
+
+enum CartNoticeKind @areas(in: [STORE]) {
+  PRICE_INCREASED
+  PRICE_DECREASED
+  OUT_OF_STOCK
+  QUANTITY_REDUCED
+  PURCHASE_LIMIT_REDUCED
+  OFFER_ENDED
+  SELLER_UNAVAILABLE
+  PRODUCT_UNAVAILABLE
+  NOT_SHIPPABLE
+  DELIVERY_ESTIMATE_CHANGED
+  COUPON_NO_LONGER_APPLIES
+}
+
+enum CartNoticeSeverity @areas(in: [STORE]) {
+  INFO
+  WARNING
+  BLOCKING
+}
+
+enum CartNoticeAction @areas(in: [STORE]) {
+  REMOVE
+  ACCEPT
+  REDUCE_QUANTITY
+  CHOOSE_OFFER
+  SAVE_FOR_LATER
+  "Needs the wishlist module (phase 3)"
+  NOTIFY_ME
+}
+
+enum CartCouponStatus @areas(in: [STORE]) {
+  APPLIED
+  REJECTED
+  NEEDS_SIGN_IN
+}
+
+enum CartFundedBy @areas(in: [STORE]) {
+  PLATFORM
+  SELLER
+  SHARED
+}
+
+# ------------------------------------------------------------------ queries
+
+extend type Query {
+  "The current shopper's cart, re-checked on read (CartPage). Null when the session has no cart yet."
+  cart: Cart @areas(in: [STORE]) @auth(requires: SHOPPER) @source(module: "cart", fn: "getCartView")
+}

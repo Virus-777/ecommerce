@@ -1,0 +1,2967 @@
+{
+  "name": "offers",
+  "title": "Offers",
+  "group": "Catalog and stock",
+  "phase": 1,
+  "chapters": [
+    5,
+    8,
+    9,
+    2
+  ],
+  "summary": "How one seller (or the Official Store) sells one variant in one condition: price and authentic was-price, purchase limit, seller SKU, dispatch, shipping profile, return and warranty terms, offer status, and the published featured-offer rule that picks the main offer for a delivery location.",
+  "owns": [
+    "Offers: seller (or Official Store) × variant × condition, with condition notes and stated missing accessories",
+    "Price, compare-at (was) price with a verified basis, sale end time, purchase limit, seller SKU",
+    "Offer terms: dispatch time, shipping profile reference, return terms (platform baseline or more generous), warranty",
+    "Offer status: Draft, Active, Paused, Out of stock, Ineligible, Removed (with reason)",
+    "Price history and price changes (scheduled, approval-gated for the Official Store)",
+    "Featured-offer rule (versioned, published), eligibility and ineligibility reasons, featured-offer selection per variant and delivery zone",
+    "Comparable totals per delivery location for the purchase box and the all-offers page",
+    "Seller and Official Store bulk price and quantity file updates with preview and correction report",
+    "Frozen offer snapshots for order items (seller, condition, price, terms accepted at purchase)"
+  ],
+  "notOwns": [
+    "Shared product content (title, specs, included items, variants): catalog",
+    "Stock quantities, reservations and adjustments: inventory (offers reads availability and passes bulk quantity rows to inventory)",
+    "Shipping rates, delivery estimates and seller shipping profiles: shipping (offers stores the profile id and asks shipping for quotes)",
+    "Return policy baseline and category exceptions: returns (offers validates against it)",
+    "Seller status, restrictions and performance figures: sellers",
+    "Discounts, coupons and campaign prices: promotions (offers only shows the automatic discount promotions reports for an offer)",
+    "Company trading summary (sales, margin, discounts, returns): finance and reports",
+    "Fee previews on the offer form: finance fee rules"
+  ],
+  "dependsOn": [
+    "catalog",
+    "sellers",
+    "inventory"
+  ],
+  "optionalDeps": [
+    "shipping",
+    "returns",
+    "promotions",
+    "access",
+    "audit",
+    "cart",
+    "finance",
+    "fulfillment-service",
+    "media",
+    "purchasing",
+    "reviews",
+    "trust",
+    "reports"
+  ],
+  "publicApi": [
+    {
+      "name": "getOffer",
+      "signature": "(offerId: uuid) => Offer | null",
+      "desc": "Current offer with terms and status",
+      "usedBy": [
+        "cart",
+        "checkout",
+        "orders",
+        "promotions",
+        "advertising",
+        "wishlist",
+        "search",
+        "graphql"
+      ]
+    },
+    {
+      "name": "quoteOffer",
+      "signature": "(offerId: uuid, quantity: int, postalCode?: string) => OfferView",
+      "desc": "Price, availability, delivery estimate and comparable total for one offer at a location",
+      "usedBy": [
+        "cart",
+        "checkout",
+        "graphql"
+      ]
+    },
+    {
+      "name": "revalidate",
+      "signature": "(lines: { offerId: uuid, quantity: int, termsVersion: int, price: Money }[], postalCode: string) => { ok: bool, changes: OfferChange[] }",
+      "desc": "Scenario 2: reports price, stock, delivery or terms changes since the cart line was added. Never substitutes another seller.",
+      "usedBy": [
+        "cart",
+        "checkout"
+      ]
+    },
+    {
+      "name": "snapshotForOrder",
+      "signature": "(offerId: uuid) => OfferSnapshot",
+      "desc": "Frozen seller, condition, notes, missing items, price, compare-at and terms stored on the order item (plan ch. 8)",
+      "usedBy": [
+        "orders"
+      ]
+    },
+    {
+      "name": "getFeaturedOffer",
+      "signature": "(variantId: uuid, postalCode?: string) => OfferView | null",
+      "desc": "Featured offer under the published rule; null when no eligible offer",
+      "usedBy": [
+        "search",
+        "wishlist",
+        "content",
+        "advertising"
+      ]
+    },
+    {
+      "name": "listActiveOffersForProduct",
+      "signature": "(productId: uuid) => OfferSummary[]",
+      "desc": "Active offers for indexing (from price, sellers, conditions, delivery flags)",
+      "usedBy": [
+        "search",
+        "promotions"
+      ]
+    },
+    {
+      "name": "isPromotable",
+      "signature": "(offerId: uuid) => bool",
+      "desc": "Active, in stock and featured-eligible. Sponsored products may only promote such offers (plan ch. 16).",
+      "usedBy": [
+        "advertising"
+      ]
+    },
+    {
+      "name": "lowestPrice",
+      "signature": "(offerId: uuid, sinceDays: int, before?: datetime) => Money | null",
+      "desc": "Lowest offer price in force in the window, from offer_price_history. The single source for honest was-prices.",
+      "usedBy": [
+        "promotions",
+        "wishlist"
+      ]
+    },
+    {
+      "name": "priceRange",
+      "signature": "(offerId: uuid, sinceDays: int) => { lowest: Money, highest: Money, current: Money, unchanged: bool } | null",
+      "desc": "Lowest, highest and current price in force in the window, from offer_price_history (wishlist price hints).",
+      "usedBy": [
+        "wishlist"
+      ]
+    },
+    {
+      "name": "compareOffers",
+      "signature": "(productId: uuid, opts: { variantId?: uuid, condition?: 'all'|'new'|'used'|'refurbished', postalCode?: string, sort?: 'total_cost'|'fastest_delivery' }) => OfferComparison",
+      "desc": "All offers for a product variant with comparable totals to a delivery location (all-offers page). Same as GET /products/{productId}/offers; primes the quoteOffer loader.",
+      "usedBy": [
+        "graphql"
+      ]
+    },
+    {
+      "name": "getFeaturedOfferForProduct",
+      "signature": "(items: { productId: uuid, variantId?: uuid }[], postalCode?: string) => map<Offer | null>",
+      "desc": "Featured offer per product (default variant when variantId is omitted) under the published rule, batched for product cards and the purchase box",
+      "usedBy": [
+        "graphql"
+      ]
+    },
+    {
+      "name": "getOfferStats",
+      "signature": "(productIds: uuid[], opts?: { condition?: 'all'|'new'|'used'|'refurbished' }) => map<{ count: int, lowest: Money, highest: Money, lowestOfferId: uuid, lowestSellerName: string } | null>",
+      "desc": "Active offer count and price range per product; the lowest price always names its eligible offer",
+      "usedBy": [
+        "graphql"
+      ]
+    },
+    {
+      "name": "getVariantOfferSummaries",
+      "signature": "(variantIds: uuid[], postalCode?: string) => map<VariantAvailability>",
+      "desc": "Variant chooser cues: offer count, lowest price, in stock, summary label",
+      "usedBy": [
+        "graphql"
+      ]
+    },
+    {
+      "name": "listOwnOffersForProduct",
+      "signature": "(sellerId: uuid, productIds: uuid[]) => map<Offer[]>",
+      "desc": "The seller's own offers on each product, any status (Seller Center product detail)",
+      "usedBy": [
+        "graphql",
+        "catalog"
+      ]
+    },
+    {
+      "name": "getOwnOffer",
+      "signature": "(sellerId: uuid, offerId: uuid) => Offer | null",
+      "desc": "One of the seller's own offers; null for another seller's offer",
+      "usedBy": [
+        "graphql"
+      ]
+    },
+    {
+      "name": "searchOwnOffers",
+      "signature": "(sellerId: uuid, q: string, limit: int) => { items: OfferSummary[], more: bool }",
+      "desc": "Own offers matching title, seller SKU or GTIN, for the Seller Center top-bar search",
+      "usedBy": [
+        "search"
+      ]
+    },
+    {
+      "name": "getOfferAdmin",
+      "signature": "(offerId: uuid) => Offer | null",
+      "desc": "Any offer with status reason, eligibility, price history, status log and price changes (staff)",
+      "usedBy": [
+        "graphql"
+      ]
+    },
+    {
+      "name": "listOffersAdmin",
+      "signature": "(filter: { sellerId?: uuid, official?: bool, productId?: uuid, status?: string[], featuredEligible?: bool, ineligibilityCode?: string, q?: string }, page: PageInput) => Page<Offer>",
+      "desc": "All offers with filters, including featured-ineligible offers by reason (staff)",
+      "usedBy": [
+        "graphql",
+        "search",
+        "catalog"
+      ]
+    },
+    {
+      "name": "getFeaturedDecision",
+      "signature": "(productId: uuid, variantId?: uuid, postalCode?: string) => FeaturedDecision",
+      "desc": "Why each offer is or is not featured for a variant and location (staff)",
+      "usedBy": [
+        "graphql"
+      ]
+    },
+    {
+      "name": "getPurchaseBoxOffer",
+      "signature": "(items: { productId: uuid, offerId?: uuid, variantId?: uuid }[], postalCode?: string) => map<Offer | null>",
+      "desc": "The offer for the purchase box: the requested offer when it is active on the product, otherwise the featured offer for the variant and location (ProductPage with a nullable offer id)",
+      "usedBy": [
+        "graphql"
+      ]
+    },
+    {
+      "name": "listActiveOffersByIds",
+      "signature": "(offerIds: uuid[], limit?: int) => Offer[]",
+      "desc": "Active offers for a list of ids in the given order, inactive ones left out (storefront featured collections)",
+      "usedBy": [
+        "sellers",
+        "graphql"
+      ]
+    },
+    {
+      "name": "exportRows",
+      "signature": "(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }",
+      "desc": "Export rows for reports datasets offers.admin.offers and offers.seller.offers (seller rows scoped to the principal's seller)",
+      "usedBy": [
+        "reports"
+      ]
+    }
+  ],
+  "types": {
+    "Offer": {
+      "id": "uuid",
+      "ownerType": "enum(official|seller)",
+      "sellerId": {
+        "type": "uuid?",
+        "desc": "Null for the Official Store"
+      },
+      "sellerName": "string",
+      "productId": "uuid",
+      "variantId": "uuid",
+      "condition": "enum(new|used_like_new|used_good|used_acceptable|refurbished)",
+      "conditionNotes": {
+        "type": "text?",
+        "desc": "Required for used and refurbished; shown beside the price"
+      },
+      "includedItems": {
+        "type": "string[]",
+        "desc": "What is in this seller's box (defaults to the product's included items)"
+      },
+      "missingItems": {
+        "type": "string[]",
+        "desc": "Product's standard included items that this offer does not include. Must be stated; shown as 'Missing: …'"
+      },
+      "complete": {
+        "type": "bool",
+        "desc": "True when nothing is missing"
+      },
+      "sellerSku": {
+        "type": "string",
+        "desc": "Seller's own code; customers do not see it"
+      },
+      "stockItemId": {
+        "type": "uuid",
+        "desc": "inventory stock item that holds this offer's quantities"
+      },
+      "price": "Money",
+      "compareAt": "CompareAtPrice?",
+      "saleEndsAt": "datetime?",
+      "purchaseLimit": {
+        "type": "int?",
+        "desc": "Maximum units per customer"
+      },
+      "dispatch": "DispatchTerms",
+      "shippingProfileId": {
+        "type": "uuid",
+        "desc": "shipping module profile (rates, services, coverage)"
+      },
+      "returnTerms": "ReturnTerms",
+      "warranty": "WarrantyTerms",
+      "status": "enum(draft|active|paused|out_of_stock|ineligible|removed)",
+      "statusReason": "StatusReason?",
+      "featuredEligibility": "FeaturedEligibility",
+      "publishOnApproval": {
+        "type": "bool",
+        "desc": "Draft on a product still in catalog review goes live when the product is approved"
+      },
+      "termsVersion": {
+        "type": "int",
+        "desc": "Increments on any customer-visible change; carts compare it to detect changes"
+      },
+      "publishedAt": "datetime?",
+      "createdAt": "datetime",
+      "updatedAt": "datetime"
+    },
+    "CompareAtPrice": {
+      "amount": "Money",
+      "basis": {
+        "type": "enum(lowest_30_days|list_price)",
+        "desc": "lowest_30_days: this offer's lowest price in the 30 days before the sale; list_price: manufacturer list price on file"
+      },
+      "verified": {
+        "type": "bool",
+        "desc": "Checked against price history or the list price on file. Unverified was-prices are never shown."
+      },
+      "explanation": {
+        "type": "string",
+        "desc": "e.g. 'Was price is the Official Store's lowest price in the 30 days before the sale.'"
+      }
+    },
+    "DispatchTerms": {
+      "businessDays": {
+        "type": "int",
+        "desc": "0 = same business day"
+      },
+      "sameDayCutoff": {
+        "type": "string?",
+        "desc": "Local cutoff HH:mm for same-day dispatch, market time zone"
+      },
+      "shipsFrom": {
+        "type": "string",
+        "desc": "City and region, e.g. 'Reno, NV'"
+      },
+      "label": {
+        "type": "string",
+        "desc": "e.g. 'Ships today', 'Ships in 1 business day'"
+      }
+    },
+    "ReturnTerms": {
+      "kind": {
+        "type": "enum(baseline|extended)",
+        "desc": "extended = more generous than the platform baseline for the category"
+      },
+      "windowDays": "int",
+      "freeReturnShipping": "bool",
+      "categoryException": {
+        "type": "string?",
+        "desc": "Category exception text shown before purchase (from returns)"
+      },
+      "summary": {
+        "type": "string",
+        "desc": "e.g. '30-day returns. You pay return shipping unless the item is faulty.'"
+      },
+      "policyId": {
+        "type": "uuid?",
+        "desc": "returns module policy version the terms were validated against"
+      }
+    },
+    "WarrantyTerms": {
+      "kind": "enum(manufacturer|seller|none)",
+      "months": "int?",
+      "handledBy": "enum(manufacturer|seller|official_store)?",
+      "summary": {
+        "type": "string",
+        "desc": "e.g. '2-year manufacturer warranty'"
+      }
+    },
+    "FeaturedEligibility": {
+      "eligible": "bool",
+      "reasons": "IneligibilityReason[]",
+      "evaluatedAt": "datetime"
+    },
+    "IneligibilityReason": {
+      "code": "enum(offer_not_active|out_of_stock|seller_restricted|seller_suspended|delivery_performance_under_review|on_time_dispatch_below_standard|product_not_purchasable|does_not_ship_to_location|condition_not_competing|staff_hold)",
+      "message": {
+        "type": "string",
+        "desc": "Customer-safe text, e.g. 'Not eligible for featured offer: delivery performance under review'"
+      },
+      "howToFix": {
+        "type": "string?",
+        "desc": "Seller-facing next step"
+      }
+    },
+    "StatusReason": {
+      "code": "enum(awaiting_launch_review|seller_restricted|seller_suspended|seller_closed|product_hidden|product_suspended|product_merged|staff_hold|removed_by_staff|ended_by_seller|enforcement)",
+      "text": "text",
+      "affectedActivity": {
+        "type": "string?",
+        "desc": "For restrictions: what is stopped, e.g. 'Refurbished offers and new listings'"
+      },
+      "appealRoute": {
+        "type": "string?",
+        "desc": "For restrictions and removals: how to appeal"
+      },
+      "reviewDate": {
+        "type": "date?",
+        "desc": "For holds"
+      },
+      "actor": "Actor?",
+      "at": "datetime"
+    },
+    "OfferInput": {
+      "productId": "uuid",
+      "variantId": "uuid",
+      "condition": "enum(new|used_like_new|used_good|used_acceptable|refurbished)",
+      "conditionNotes": "text?",
+      "missingItems": "string[]?",
+      "price": "Money",
+      "compareAt": "CompareAtInput?",
+      "saleEndsAt": "datetime?",
+      "purchaseLimit": "int?",
+      "sellerSku": "string",
+      "quantity": {
+        "type": "int",
+        "desc": "Initial available quantity; recorded in inventory as 'Initial stock'"
+      },
+      "lowStockThreshold": "int?",
+      "dispatchBusinessDays": "int",
+      "shippingProfileId": "uuid",
+      "returnTerms": "ReturnTermsInput",
+      "warranty": "WarrantyInput",
+      "publish": {
+        "type": "bool?",
+        "desc": "Publish immediately when the product is purchasable; otherwise saved as draft"
+      },
+      "publishOnApproval": "bool?"
+    },
+    "OfficialOfferInput": {
+      "productId": "uuid",
+      "variantId": "uuid",
+      "condition": "enum(new|used_like_new|used_good|used_acceptable|refurbished)",
+      "conditionNotes": "text?",
+      "missingItems": "string[]?",
+      "price": "Money",
+      "compareAt": "CompareAtInput?",
+      "purchaseLimit": "int?",
+      "sku": {
+        "type": "string",
+        "desc": "Company SKU, e.g. HAL-AUR-BLK-LN"
+      },
+      "stockItemId": {
+        "type": "uuid?",
+        "desc": "Existing company stock item; omitted = create one at the default warehouse"
+      },
+      "dispatchBusinessDays": "int",
+      "shippingProfileId": "uuid",
+      "returnTerms": "ReturnTermsInput",
+      "warranty": "WarrantyInput",
+      "publish": "bool?"
+    },
+    "OfferUpdate": {
+      "variantId": {
+        "type": "uuid?",
+        "desc": "Draft only"
+      },
+      "condition": {
+        "type": "enum(new|used_like_new|used_good|used_acceptable|refurbished)?",
+        "desc": "Draft only; afterwards end the offer and create a new one"
+      },
+      "conditionNotes": "text?",
+      "missingItems": "string[]?",
+      "price": {
+        "type": "Money?",
+        "desc": "Sellers only; Official Store prices change through price-changes"
+      },
+      "compareAt": "CompareAtInput?",
+      "saleEndsAt": "datetime?",
+      "purchaseLimit": "int?",
+      "sellerSku": "string?",
+      "dispatchBusinessDays": "int?",
+      "shippingProfileId": "uuid?",
+      "returnTerms": "ReturnTermsInput?",
+      "warranty": "WarrantyInput?",
+      "publishOnApproval": "bool?"
+    },
+    "CompareAtInput": {
+      "amount": "Money",
+      "basis": "enum(lowest_30_days|list_price)"
+    },
+    "ReturnTermsInput": {
+      "kind": "enum(baseline|extended)",
+      "windowDays": {
+        "type": "int?",
+        "desc": "Required for extended; at least the category baseline"
+      },
+      "freeReturnShipping": "bool?"
+    },
+    "WarrantyInput": {
+      "kind": "enum(manufacturer|seller|none)",
+      "months": "int?"
+    },
+    "SellerCue": {
+      "sellerId": "uuid?",
+      "name": "string",
+      "official": "bool",
+      "verified": "bool",
+      "storeSlug": "string?",
+      "positivePct": "int?",
+      "ratingCount": "int?",
+      "onTimeDispatchPct": {
+        "type": "int?",
+        "desc": "Last 90 days, from sellers performance"
+      },
+      "location": "string?"
+    },
+    "DeliveryEstimate": {
+      "shipsToLocation": "bool",
+      "arrivesFrom": "date?",
+      "arrivesTo": "date?",
+      "label": {
+        "type": "string",
+        "desc": "e.g. 'Free delivery Thu, Oct 15' or 'Arrives Fri, Oct 16 – Mon, Oct 19'"
+      },
+      "shippingCost": "Money?",
+      "free": "bool",
+      "freeOver": {
+        "type": "Money?",
+        "desc": "Free-shipping threshold for this seller, if any"
+      },
+      "carrier": "string?",
+      "service": "string?",
+      "shipsFrom": "string",
+      "dispatchLabel": "string",
+      "orderWithinMinutes": {
+        "type": "int?",
+        "desc": "Countdown to the cutoff that keeps this date"
+      },
+      "serviceNotice": {
+        "type": "string?",
+        "desc": "Holiday or known interruption (from shipping)"
+      }
+    },
+    "Availability": {
+      "state": "enum(in_stock|low_stock|out_of_stock)",
+      "quantity": {
+        "type": "int?",
+        "desc": "Shown when low (e.g. '9 left') or to the seller"
+      },
+      "maxPerOrder": {
+        "type": "int",
+        "desc": "min(available, purchase limit); drives the quantity selector"
+      },
+      "purchaseLimit": "int?",
+      "label": {
+        "type": "string",
+        "desc": "e.g. 'In stock', '2 left', 'Limit 3 per customer'"
+      }
+    },
+    "OfferView": {
+      "offerId": "uuid",
+      "seller": "SellerCue",
+      "condition": "enum(new|used_like_new|used_good|used_acceptable|refurbished)",
+      "conditionLabel": {
+        "type": "string",
+        "desc": "e.g. 'Used – Like new'"
+      },
+      "conditionNotes": "text?",
+      "missingItems": "string[]",
+      "complete": "bool",
+      "price": {
+        "type": "Money",
+        "desc": "Price the customer pays now: the campaign price from promotions.priceOffers when a markdown or flash sale applies, else the offer price"
+      },
+      "regularPrice": {
+        "type": "Money?",
+        "desc": "Offer price when a campaign price applies (shown separately when deal stock ends)"
+      },
+      "compareAt": "CompareAtPrice?",
+      "discountPct": "int?",
+      "saleEndsAt": "datetime?",
+      "promotion": "PromotionCue?",
+      "automaticDiscount": {
+        "type": "AutomaticDiscount?",
+        "desc": "Seller or platform discount the customer qualifies for without a code (from promotions)"
+      },
+      "delivery": "DeliveryEstimate",
+      "total": {
+        "type": "Money",
+        "desc": "Item price + shipping − automatic discount, before tax. The comparable total."
+      },
+      "availability": "Availability",
+      "returns": "ReturnTerms",
+      "warranty": "WarrantyTerms",
+      "featured": "bool",
+      "featuredEligible": "bool",
+      "ineligibleNote": {
+        "type": "string?",
+        "desc": "Shown under ineligible offers on the all-offers page"
+      },
+      "status": "enum(draft|active|paused|out_of_stock|ineligible|removed)",
+      "termsVersion": "int"
+    },
+    "AutomaticDiscount": {
+      "label": "string",
+      "amount": "Money",
+      "fundedBy": "string"
+    },
+    "PromotionCue": {
+      "campaignId": "uuid?",
+      "label": {
+        "type": "string",
+        "desc": "e.g. 'Home Week deal', 'Flash sale'"
+      },
+      "endsAt": "datetime?",
+      "badges": "string[]",
+      "purchaseLimit": "int?",
+      "wasPriceRule": {
+        "type": "string?",
+        "desc": "From promotions, e.g. 'Was price is the seller's lowest price in the 30 days before Oct 6'"
+      }
+    },
+    "DeliverTo": {
+      "postalCode": "string",
+      "label": {
+        "type": "string",
+        "desc": "e.g. 'Portland 97205'"
+      },
+      "source": "enum(customer_address|entered|market_default)"
+    },
+    "OfferComparison": {
+      "product": "catalog.ProductSummary",
+      "variant": "catalog.Variant",
+      "deliverTo": "DeliverTo",
+      "sort": "enum(total_cost|fastest_delivery)",
+      "featuredOfferId": "uuid?",
+      "offers": "OfferView[]",
+      "conditionCounts": {
+        "type": "map<int>",
+        "desc": "{ all, new, used, refurbished }"
+      },
+      "rule": "FeaturedRuleSummary",
+      "taxNote": {
+        "type": "string",
+        "desc": "'Totals include shipping; sales tax is added at checkout.'"
+      }
+    },
+    "FeaturedRuleSummary": {
+      "version": "int",
+      "steps": "string[]",
+      "notes": "string[]"
+    },
+    "PurchaseBox": {
+      "product": "catalog.ProductSummary",
+      "variantId": "uuid",
+      "deliverTo": "DeliverTo",
+      "selected": "OfferView?",
+      "selectedBy": {
+        "type": "enum(featured|customer_choice|only_offer)",
+        "desc": "customer_choice keeps the seller the customer picked; never switched silently"
+      },
+      "featured": {
+        "type": "OfferView?",
+        "desc": "Present when the customer chose a different offer, so both are visible"
+      },
+      "otherOffers": "OtherOffersCue",
+      "variants": "VariantAvailability[]",
+      "quantityOptions": "int[]",
+      "unavailable": "UnavailableInfo?"
+    },
+    "OtherOffersCue": {
+      "count": "int",
+      "lowestPrice": "Money?",
+      "lowestTotal": "Money?",
+      "label": {
+        "type": "string",
+        "desc": "e.g. '3 offers from $129.00'"
+      }
+    },
+    "VariantAvailability": {
+      "variantId": "uuid",
+      "options": "map<string>",
+      "label": "string",
+      "offerCount": "int",
+      "lowestPrice": "Money?",
+      "inStock": "bool",
+      "summary": {
+        "type": "string",
+        "desc": "e.g. '$189.00 · In stock' or '2 offers from $184.00'"
+      }
+    },
+    "UnavailableInfo": {
+      "reason": "enum(out_of_stock|no_offers|not_shippable|product_unavailable)",
+      "title": {
+        "type": "string",
+        "desc": "e.g. 'Out of stock at the Official Store'"
+      },
+      "message": "text",
+      "expectedRestockDate": {
+        "type": "date?",
+        "desc": "From inventory incoming stock; stated as an estimate"
+      },
+      "alternatives": {
+        "type": "OfferView[]",
+        "desc": "Other sellers' offers for the same variant"
+      }
+    },
+    "OfferPreview": {
+      "delivery": "DeliveryEstimate",
+      "lowestNewPrice": "Money?",
+      "officialStorePrice": "Money?",
+      "compareAtCheck": "CompareAtPrice?",
+      "returnBaseline": {
+        "type": "ReturnTerms",
+        "desc": "Category baseline the terms must meet"
+      },
+      "featuredEligibility": "FeaturedEligibility",
+      "warnings": "string[]"
+    },
+    "OfferSummary": {
+      "id": "uuid",
+      "productId": "uuid",
+      "variantId": "uuid",
+      "productTitle": "string",
+      "variantLabel": "string",
+      "image": "MediaRef?",
+      "ownerType": "enum(official|seller)",
+      "condition": "enum(new|used_like_new|used_good|used_acceptable|refurbished)",
+      "sellerSku": "string",
+      "price": "Money",
+      "compareAt": "Money?",
+      "status": "enum(draft|active|paused|out_of_stock|ineligible|removed)",
+      "statusReason": "StatusReason?",
+      "featured": "bool",
+      "featuredEligible": "bool"
+    },
+    "StockCue": {
+      "available": "int",
+      "reserved": "int",
+      "incoming": "int",
+      "lowStockThreshold": "int?",
+      "state": "enum(in_stock|low_stock|out_of_stock)"
+    },
+    "SellerOfferRow": {
+      "offer": "OfferSummary",
+      "productReviewState": {
+        "type": "string",
+        "desc": "From catalog; shown as a separate column"
+      },
+      "productPublication": "string",
+      "reviewNote": {
+        "type": "text?",
+        "desc": "Reviewer reason when changes were requested on the seller's own product"
+      },
+      "stock": "StockCue",
+      "contentGaps": {
+        "type": "enum(images|identifiers)[]",
+        "desc": "Missing product content shown under the name (e.g. 'Missing images and identifiers'); empty when complete"
+      }
+    },
+    "SellerOfferDetail": {
+      "offer": "Offer",
+      "product": "catalog.ProductSummary",
+      "variant": "catalog.Variant",
+      "productIncludedItems": "string[]",
+      "productReviewState": "string",
+      "productPublication": "string",
+      "stock": "StockCue",
+      "priceHistory": "PricePoint[]",
+      "statusLog": "OfferStatusEntry[]",
+      "otherOfferCount": "int",
+      "lowestNewPrice": "Money?",
+      "officialStorePrice": "Money?"
+    },
+    "PricePoint": {
+      "price": "Money",
+      "compareAt": "Money?",
+      "from": "datetime",
+      "to": "datetime?",
+      "changedBy": "Actor",
+      "changeId": "uuid?"
+    },
+    "OfferStatusEntry": {
+      "from": "string?",
+      "to": "string",
+      "event": "string",
+      "reasonCode": "string?",
+      "reason": "text?",
+      "actor": "Actor",
+      "at": "datetime"
+    },
+    "PriceChangeRequest": {
+      "price": "Money",
+      "compareAt": "CompareAtInput?",
+      "startsAt": {
+        "type": "datetime?",
+        "desc": "Null = now"
+      },
+      "endsAt": {
+        "type": "datetime?",
+        "desc": "Price reverts to the previous price at this time (e.g. end of an event)"
+      },
+      "reason": {
+        "type": "text",
+        "desc": "Required; recorded in action history"
+      }
+    },
+    "PriceChange": {
+      "id": "uuid",
+      "offerId": "uuid",
+      "offer": "OfferSummary",
+      "from": "Money",
+      "to": "Money",
+      "changePct": {
+        "type": "number",
+        "desc": "Signed, e.g. -31.7"
+      },
+      "compareAt": "Money?",
+      "startsAt": "datetime?",
+      "endsAt": "datetime?",
+      "revertTo": "Money?",
+      "marginBeforePct": {
+        "type": "number?",
+        "desc": "Official Store only, from inventory unit cost"
+      },
+      "marginAfterPct": "number?",
+      "reason": "text?",
+      "source": "enum(seller|seller_bulk|official|official_bulk)",
+      "state": "enum(requested|pending_approval|scheduled|applied|reverted|rejected|cancelled)",
+      "approval": "ApprovalInfo?",
+      "requestedBy": "Actor",
+      "createdAt": "datetime",
+      "appliedAt": "datetime?"
+    },
+    "SellerPriceItem": {
+      "offerId": "uuid",
+      "price": "Money",
+      "compareAt": "CompareAtInput?",
+      "saleEndsAt": "datetime?"
+    },
+    "PriceChangeResult": {
+      "offerId": "uuid",
+      "ok": "bool",
+      "change": "PriceChange?",
+      "error": "ErrorBody?"
+    },
+    "BulkUpdateJob": {
+      "id": "uuid",
+      "ownerType": "enum(official|seller)",
+      "fileName": "string",
+      "uploadedBy": "Actor",
+      "uploadedAt": "datetime",
+      "state": "enum(uploaded|preview_ready|applying|applied|failed|expired)",
+      "totals": "BulkUpdateTotals",
+      "appliedBy": "Actor?",
+      "appliedAt": "datetime?",
+      "expiresAt": {
+        "type": "datetime",
+        "desc": "Preview must be applied before this; prices may have moved after"
+      },
+      "failure": "string?"
+    },
+    "BulkUpdateTotals": {
+      "rows": "int",
+      "ready": "int",
+      "errors": "int",
+      "unchanged": "int",
+      "priceChanges": "int",
+      "stockChanges": "int",
+      "pendingApproval": "int",
+      "applied": "int",
+      "skipped": "int"
+    },
+    "BulkUpdateRow": {
+      "row": "int",
+      "sellerSku": "string",
+      "offerId": "uuid?",
+      "productLabel": "string?",
+      "priceFrom": "Money?",
+      "priceTo": "Money?",
+      "quantityFrom": "int?",
+      "quantityTo": "int?",
+      "result": "enum(ready|error|unchanged|applied|skipped|pending_approval)",
+      "error": "BulkRowError?"
+    },
+    "BulkRowError": {
+      "code": {
+        "type": "enum(unknown_sku|negative_quantity|price_below_minimum|price_missing|price_change_too_large|offer_removed|not_a_number|duplicate_row)",
+        "desc": "Stable code"
+      },
+      "message": {
+        "type": "string",
+        "desc": "What is wrong and how to fix it, e.g. 'Price $2.40 is below the $5.00 minimum for Cables and adapters. Did you mean $24.00?'"
+      }
+    },
+    "FileLink": {
+      "url": "url",
+      "fileName": "string",
+      "expiresAt": "datetime"
+    },
+    "OfficialOfferRow": {
+      "offer": "OfferSummary",
+      "unitCost": {
+        "type": "Money?",
+        "desc": "Weighted average buying cost from inventory"
+      },
+      "marginPct": "number?",
+      "stock": "StockCue",
+      "note": {
+        "type": "string?",
+        "desc": "e.g. 'Incoming 120 on PUR-2610-0042' or 'Product changes requested'"
+      },
+      "pendingPriceChange": "PriceChange?"
+    },
+    "OfferAdminRow": {
+      "offer": "OfferSummary",
+      "seller": "SellerCue",
+      "sellerStatus": "string?",
+      "ineligibleReasons": "string[]"
+    },
+    "OfferAdminDetail": {
+      "offer": "Offer",
+      "product": "catalog.ProductSummary",
+      "seller": "SellerCue",
+      "stock": "StockCue",
+      "statusLog": "OfferStatusEntry[]",
+      "priceHistory": "PricePoint[]",
+      "priceChanges": "PriceChange[]"
+    },
+    "RemoveOfferRequest": {
+      "reasonCode": "enum(wrong_product|misleading_condition|counterfeit_report|pricing_error|policy_violation|other)",
+      "reason": "text",
+      "appealRoute": {
+        "type": "string?",
+        "desc": "Defaults to the seller appeal route from sellers"
+      },
+      "notifySeller": "bool?"
+    },
+    "HoldOfferRequest": {
+      "reason": "text",
+      "reviewDate": "date",
+      "reference": {
+        "type": "string?",
+        "desc": "e.g. trust report TR-261007-004"
+      }
+    },
+    "FeaturedRule": {
+      "version": "int",
+      "effectiveFrom": "datetime",
+      "text": {
+        "type": "text",
+        "desc": "Published wording, linked from the store and Seller rules"
+      },
+      "steps": "string[]",
+      "parameters": "FeaturedRuleParameters",
+      "publishedBy": "Actor",
+      "publishedAt": "datetime"
+    },
+    "FeaturedRuleParameters": {
+      "minOnTimeDispatchPct": {
+        "type": "int",
+        "desc": "Seller on-time dispatch at or above this over the window"
+      },
+      "performanceWindowDays": "int",
+      "deliveryDayAdjustmentPct": {
+        "type": "number",
+        "desc": "Added to the total, as % of item price, per business day slower than the fastest eligible offer"
+      },
+      "competingConditions": {
+        "type": "string[]",
+        "desc": "Conditions that compete by default, e.g. ['new']; others compete only within their condition filter"
+      },
+      "tieBreakers": "string[]"
+    },
+    "FeaturedRuleInput": {
+      "text": "text",
+      "steps": "string[]",
+      "parameters": "FeaturedRuleParameters",
+      "effectiveFrom": "datetime",
+      "reason": "text"
+    },
+    "FeaturedDecision": {
+      "productId": "uuid",
+      "variantId": "uuid",
+      "deliverTo": "DeliverTo",
+      "ruleVersion": "int",
+      "winnerOfferId": "uuid?",
+      "candidates": "FeaturedCandidate[]",
+      "computedAt": "datetime"
+    },
+    "FeaturedCandidate": {
+      "offerId": "uuid",
+      "sellerName": "string",
+      "condition": "string",
+      "eligible": "bool",
+      "reasons": "IneligibilityReason[]",
+      "total": "Money",
+      "arrivesTo": "date?",
+      "adjustedTotal": {
+        "type": "Money",
+        "desc": "Total + delivery adjustment used for ranking"
+      },
+      "rank": "int?"
+    },
+    "OfferChange": {
+      "offerId": "uuid",
+      "kind": "enum(price|availability|delivery|terms|removed|seller_restricted)",
+      "before": "string?",
+      "after": "string?",
+      "message": {
+        "type": "string",
+        "desc": "Customer-facing explanation"
+      },
+      "alternatives": {
+        "type": "OfferView[]",
+        "desc": "Other offers for the same variant the customer may choose explicitly"
+      }
+    },
+    "OfferSnapshot": {
+      "offerId": "uuid",
+      "termsVersion": "int",
+      "ownerType": "enum(official|seller)",
+      "sellerId": "uuid?",
+      "sellerName": "string",
+      "condition": "string",
+      "conditionNotes": "text?",
+      "missingItems": "string[]",
+      "price": "Money",
+      "compareAt": "Money?",
+      "dispatch": "DispatchTerms",
+      "returnTerms": "ReturnTerms",
+      "warranty": "WarrantyTerms",
+      "stockItemId": "uuid",
+      "takenAt": "datetime"
+    }
+  },
+  "tables": [
+    {
+      "name": "offers",
+      "desc": "One row per offer; product and seller are referenced by id only",
+      "columns": {
+        "id": "uuid pk",
+        "owner_type": "text (official|seller)",
+        "seller_id": "uuid?",
+        "product_id": "uuid",
+        "variant_id": "uuid",
+        "condition": "text",
+        "condition_notes": "text?",
+        "included_items": "jsonb",
+        "missing_items": "jsonb",
+        "seller_sku": "text",
+        "stock_item_id": "uuid",
+        "price_amount": "bigint",
+        "currency": "char(3)",
+        "compare_at_amount": "bigint?",
+        "compare_at_basis": "text?",
+        "compare_at_verified": "bool",
+        "sale_ends_at": "timestamptz?",
+        "purchase_limit": "int?",
+        "dispatch_business_days": "int",
+        "same_day_cutoff": "time?",
+        "ships_from": "text",
+        "shipping_profile_id": "uuid",
+        "return_kind": "text",
+        "return_window_days": "int",
+        "free_return_shipping": "bool",
+        "return_policy_id": "uuid?",
+        "warranty_kind": "text",
+        "warranty_months": "int?",
+        "warranty_handled_by": "text?",
+        "status": "text",
+        "status_before_ineligible": "text?",
+        "ineligible_source": "jsonb? ({ kind: restriction|suspension|product|staff, id })",
+        "status_reason": "jsonb?",
+        "publish_on_approval": "bool",
+        "content_gaps": "text[]",
+        "terms_version": "int",
+        "published_at": "timestamptz?",
+        "removed_at": "timestamptz?",
+        "created_at": "timestamptz",
+        "updated_at": "timestamptz"
+      },
+      "indexes": [
+        "unique (owner_type, seller_id, seller_sku)",
+        "unique (seller_id, variant_id) where condition = 'new' and status <> 'removed'",
+        "(product_id, variant_id, status)",
+        "(seller_id, status, id)",
+        "(status, id)",
+        "(stock_item_id)"
+      ]
+    },
+    {
+      "name": "offer_price_history",
+      "desc": "Every price in force and when; basis for 'lowest price in the last 30 days' was-price checks",
+      "columns": {
+        "id": "uuid pk",
+        "offer_id": "uuid → offers",
+        "price_amount": "bigint",
+        "compare_at_amount": "bigint?",
+        "valid_from": "timestamptz",
+        "valid_to": "timestamptz?",
+        "price_change_id": "uuid? → price_changes",
+        "actor_kind": "text",
+        "actor_id": "text?"
+      },
+      "indexes": [
+        "(offer_id, valid_from)"
+      ]
+    },
+    {
+      "name": "price_changes",
+      "desc": "Requested, scheduled, approval-gated and applied price changes",
+      "columns": {
+        "id": "uuid pk",
+        "offer_id": "uuid → offers",
+        "from_amount": "bigint",
+        "to_amount": "bigint",
+        "change_pct": "numeric(6,2)",
+        "compare_at_amount": "bigint?",
+        "compare_at_basis": "text?",
+        "starts_at": "timestamptz?",
+        "ends_at": "timestamptz?",
+        "revert_to_amount": "bigint?",
+        "reason": "text?",
+        "source": "text",
+        "bulk_job_id": "uuid? → bulk_update_jobs",
+        "state": "text",
+        "approval_request_id": "uuid?",
+        "requested_by_kind": "text",
+        "requested_by_id": "text?",
+        "decided_at": "timestamptz?",
+        "applied_at": "timestamptz?",
+        "created_at": "timestamptz"
+      },
+      "indexes": [
+        "(state, starts_at)",
+        "(state, ends_at)",
+        "(offer_id, created_at)",
+        "(approval_request_id)"
+      ]
+    },
+    {
+      "name": "offer_status_log",
+      "desc": "Every status change with reason and actor",
+      "columns": {
+        "id": "uuid pk",
+        "offer_id": "uuid → offers",
+        "from_status": "text?",
+        "to_status": "text",
+        "event": "text",
+        "reason_code": "text?",
+        "reason": "text?",
+        "affected_activity": "text?",
+        "appeal_route": "text?",
+        "review_date": "date?",
+        "actor_kind": "text",
+        "actor_id": "text?",
+        "at": "timestamptz"
+      },
+      "indexes": [
+        "(offer_id, at)"
+      ]
+    },
+    {
+      "name": "offer_eligibility",
+      "desc": "Featured-offer eligibility per offer (location-independent part)",
+      "columns": {
+        "offer_id": "uuid pk → offers",
+        "eligible": "bool",
+        "reasons": "jsonb",
+        "seller_on_time_pct": "numeric(5,2)?",
+        "seller_restriction_ref": "text?",
+        "evaluated_at": "timestamptz"
+      }
+    },
+    {
+      "name": "featured_offers",
+      "desc": "Cached featured-offer decision per variant, condition group and delivery zone",
+      "columns": {
+        "variant_id": "uuid",
+        "condition_group": "text (new|used|refurbished)",
+        "zone_key": "text",
+        "product_id": "uuid",
+        "offer_id": "uuid?",
+        "rule_version": "int",
+        "candidates": "jsonb",
+        "dirty": "bool",
+        "computed_at": "timestamptz"
+      },
+      "indexes": [
+        "pk (variant_id, condition_group, zone_key)",
+        "(product_id)",
+        "(dirty) where dirty"
+      ]
+    },
+    {
+      "name": "featured_rules",
+      "desc": "Published versions of the featured-offer rule",
+      "columns": {
+        "version": "int pk",
+        "text": "text",
+        "steps": "jsonb",
+        "parameters": "jsonb",
+        "effective_from": "timestamptz",
+        "reason": "text",
+        "published_by": "text",
+        "published_at": "timestamptz"
+      }
+    },
+    {
+      "name": "bulk_update_jobs",
+      "desc": "Uploaded price/quantity files (seller or Official Store)",
+      "columns": {
+        "id": "uuid pk",
+        "owner_type": "text",
+        "seller_id": "uuid?",
+        "file_media_id": "uuid",
+        "file_name": "text",
+        "state": "text",
+        "totals": "jsonb",
+        "report_media_id": "uuid?",
+        "uploaded_by": "text",
+        "uploaded_at": "timestamptz",
+        "applied_by": "text?",
+        "applied_at": "timestamptz?",
+        "expires_at": "timestamptz",
+        "failure": "text?"
+      },
+      "indexes": [
+        "(seller_id, uploaded_at)",
+        "(state, expires_at)"
+      ]
+    },
+    {
+      "name": "bulk_update_rows",
+      "columns": {
+        "job_id": "uuid → bulk_update_jobs",
+        "row_no": "int",
+        "seller_sku": "text",
+        "offer_id": "uuid?",
+        "price_from": "bigint?",
+        "price_to": "bigint?",
+        "qty_from": "int?",
+        "qty_to": "int?",
+        "result": "text",
+        "error_code": "text?",
+        "error_message": "text?"
+      },
+      "indexes": [
+        "pk (job_id, row_no)",
+        "(job_id, result)"
+      ]
+    }
+  ],
+  "stateMachines": [
+    {
+      "name": "Offer status",
+      "field": "Offer.status",
+      "initial": "draft",
+      "transitions": [
+        [
+          "draft",
+          "publish",
+          "active"
+        ],
+        [
+          "active",
+          "pause",
+          "paused"
+        ],
+        [
+          "out_of_stock",
+          "pause",
+          "paused"
+        ],
+        [
+          "paused",
+          "resume",
+          "active"
+        ],
+        [
+          "active",
+          "stockDepleted",
+          "out_of_stock"
+        ],
+        [
+          "out_of_stock",
+          "stockRestored",
+          "active"
+        ],
+        [
+          "active",
+          "makeIneligible",
+          "ineligible"
+        ],
+        [
+          "paused",
+          "makeIneligible",
+          "ineligible"
+        ],
+        [
+          "out_of_stock",
+          "makeIneligible",
+          "ineligible"
+        ],
+        [
+          "ineligible",
+          "restoreEligibility",
+          "active"
+        ],
+        [
+          "draft",
+          "remove",
+          "removed"
+        ],
+        [
+          "active",
+          "remove",
+          "removed"
+        ],
+        [
+          "paused",
+          "remove",
+          "removed"
+        ],
+        [
+          "out_of_stock",
+          "remove",
+          "removed"
+        ],
+        [
+          "ineligible",
+          "remove",
+          "removed"
+        ],
+        [
+          "removed",
+          "reinstate",
+          "paused"
+        ]
+      ],
+      "notes": "publish requires an approved, Active product (catalog.isPurchasable), an approved seller whose launch review has passed (before that, publish keeps the offer in draft with publish_on_approval and statusReason awaiting_launch_review; sellers.launch_review.decided with outcome passed publishes them), no restriction covering new listings, verified compare-at and return terms at or above the baseline. publish, resume and restoreEligibility land on out_of_stock straight away when inventory available = 0 (stockDepleted follows in the same transaction). restoreEligibility returns to the status held before (status_before_ineligible): a paused offer stays paused. makeIneligible is system-driven (seller restricted or suspended, product hidden or suspended) or a staff hold; it stops new sales of this offer only, never other sellers' offers. remove is staff (reason required) or the seller ending the offer (ended_by_seller). Removed offers stay readable for past orders, carts and audit. stockDepleted / stockRestored come from inventory.stock.changed."
+    },
+    {
+      "name": "Price change",
+      "field": "PriceChange.state",
+      "initial": "requested",
+      "transitions": [
+        [
+          "requested",
+          "apply",
+          "applied"
+        ],
+        [
+          "requested",
+          "schedule",
+          "scheduled"
+        ],
+        [
+          "requested",
+          "requestApproval",
+          "pending_approval"
+        ],
+        [
+          "pending_approval",
+          "approve",
+          "scheduled"
+        ],
+        [
+          "pending_approval",
+          "reject",
+          "rejected"
+        ],
+        [
+          "pending_approval",
+          "cancel",
+          "cancelled"
+        ],
+        [
+          "scheduled",
+          "start",
+          "applied"
+        ],
+        [
+          "scheduled",
+          "cancel",
+          "cancelled"
+        ],
+        [
+          "applied",
+          "revert",
+          "reverted"
+        ]
+      ],
+      "notes": "requestApproval when the change exceeds the caller's price-change limit from access (example: Official Store Manager ±30%); approve comes from access.approval.decided and goes to scheduled, which starts immediately when startsAt is past. revert runs at endsAt and restores revertTo. Seller price changes over the large-change threshold need confirmLargeChange, not an approval. A new change on an offer cancels its older scheduled change only if the caller says so; otherwise PRICE_CHANGE_PENDING."
+    },
+    {
+      "name": "Bulk update job",
+      "field": "BulkUpdateJob.state",
+      "initial": "uploaded",
+      "transitions": [
+        [
+          "uploaded",
+          "parse",
+          "preview_ready"
+        ],
+        [
+          "uploaded",
+          "fail",
+          "failed"
+        ],
+        [
+          "preview_ready",
+          "apply",
+          "applying"
+        ],
+        [
+          "applying",
+          "complete",
+          "applied"
+        ],
+        [
+          "applying",
+          "fail",
+          "failed"
+        ],
+        [
+          "preview_ready",
+          "expire",
+          "expired"
+        ]
+      ],
+      "notes": "Nothing changes until apply. Only rows marked ready are applied; error rows are skipped and listed in the correction report. Official Store rows above the price-change limit become pending_approval price changes."
+    }
+  ],
+  "endpoints": [
+    {
+      "id": "listProductOffers",
+      "area": "store",
+      "method": "GET",
+      "path": "/products/{productId}/offers",
+      "summary": "All offers for a product variant with comparable totals to a delivery location",
+      "desc": "Each offer shows total cost (item + shipping − automatic discount), condition with notes and missing items, arrival range, seller quality and after-sales terms. The featured offer is marked; ineligible offers are listed with the reason. Postal code comes from the query, then the customer's default address, then the market default. Bounded list (max 100 offers per variant).",
+      "auth": "anyone",
+      "params": {
+        "productId": "uuid"
+      },
+      "query": {
+        "variantId": "uuid?",
+        "condition": "enum(all|new|used|refurbished)?",
+        "postalCode": "string?",
+        "sort": "enum(total_cost|fastest_delivery)?"
+      },
+      "response": "OfferComparison",
+      "errors": [
+        "NOT_FOUND"
+      ],
+      "screens": [
+        "store/offers",
+        "store/search-empty"
+      ]
+    },
+    {
+      "id": "getPurchaseBox",
+      "area": "store",
+      "method": "GET",
+      "path": "/products/{productId}/purchase-box",
+      "summary": "Purchase box for the selected variant: featured or chosen offer, delivery, quantity options, variant availability",
+      "desc": "With offerId the customer's explicit choice is returned as selected and the featured offer alongside it. Unavailable variants return unavailable with the reason, an expected restock estimate and other sellers' offers.",
+      "auth": "anyone",
+      "params": {
+        "productId": "uuid"
+      },
+      "query": {
+        "variantId": "uuid?",
+        "offerId": "uuid?",
+        "postalCode": "string?"
+      },
+      "response": "PurchaseBox",
+      "errors": [
+        "NOT_FOUND"
+      ],
+      "screens": [
+        "store/product",
+        "store/search-empty"
+      ]
+    },
+    {
+      "id": "getOfferView",
+      "area": "store",
+      "method": "GET",
+      "path": "/offers/{id}",
+      "summary": "One offer as the customer sees it (used by cart and review-changes)",
+      "desc": "Removed or ineligible offers still return with their status and alternatives are available through listProductOffers.",
+      "auth": "anyone",
+      "params": {
+        "id": "uuid"
+      },
+      "query": {
+        "postalCode": "string?",
+        "quantity": "int?"
+      },
+      "response": "OfferView",
+      "errors": [
+        "NOT_FOUND"
+      ],
+      "screens": [
+        "store/cart",
+        "store/checkout-review-changes"
+      ]
+    },
+    {
+      "id": "getFeaturedRule",
+      "area": "store",
+      "method": "GET",
+      "path": "/featured-offer-rule",
+      "summary": "Published featured-offer rule ('How we choose the featured offer')",
+      "auth": "anyone",
+      "response": "FeaturedRule",
+      "screens": [
+        "store/offers",
+        "info/policy"
+      ]
+    },
+    {
+      "id": "listOwnOffers",
+      "area": "seller",
+      "method": "GET",
+      "path": "/offers",
+      "summary": "This seller's offers with review state, publication and stock as separate columns",
+      "auth": "seller",
+      "paging": true,
+      "query": {
+        "q": {
+          "type": "string?",
+          "desc": "Name, seller SKU, GTIN or model"
+        },
+        "status": "enum(draft|active|paused|out_of_stock|ineligible|removed)?",
+        "condition": "string?",
+        "categoryId": "uuid?",
+        "stockState": "enum(in_stock|low_stock|out_of_stock)?",
+        "productReviewState": "enum(draft|submitted|changes_requested|approved|rejected)?",
+        "featured": "bool?",
+        "hiddenOrSuspended": {
+          "type": "bool?",
+          "desc": "Paused or ineligible offers, including those on hidden or suspended products"
+        },
+        "missingContent": {
+          "type": "enum(images|identifiers)?",
+          "desc": "Product content gaps: images = fewer than the category's required images; identifiers = no GTIN/UPC or brand + model number. Low stock is stockState=low_stock"
+        }
+      },
+      "response": "SellerOfferRow",
+      "screens": [
+        "seller/products",
+        "seller/inventory"
+      ]
+    },
+    {
+      "id": "countOwnOffers",
+      "area": "seller",
+      "method": "GET",
+      "path": "/offers/counts",
+      "summary": "Counts for the list tabs and the page heading",
+      "auth": "seller",
+      "response": {
+        "all": "int",
+        "active": "int",
+        "draft": "int",
+        "paused": "int",
+        "outOfStock": "int",
+        "ineligible": "int",
+        "removed": "int",
+        "productSubmitted": {
+          "type": "int",
+          "desc": "Offers whose product submission is waiting for catalog review (Submitted tab)"
+        },
+        "productChangesRequested": "int",
+        "productRejected": {
+          "type": "int",
+          "desc": "Offers on a product submission the catalog team rejected (Rejected tab)"
+        },
+        "hiddenOrSuspended": {
+          "type": "int",
+          "desc": "Paused by the seller, or ineligible because of a staff hold, restriction or a hidden/suspended product (Hidden or suspended tab = list with hiddenOrSuspended=true)"
+        },
+        "productCount": {
+          "type": "int",
+          "desc": "Distinct products the seller's non-removed offers are on"
+        }
+      },
+      "screens": [
+        "seller/products",
+        "seller/dashboard"
+      ],
+      "desc": "Offer status counts plus tab totals that combine the product review state (from catalog) with publication. Tabs: All, Active, Draft, Submitted, Changes requested, Rejected, Hidden or suspended; the heading reads '{all} offers across {productCount} products'."
+    },
+    {
+      "id": "getOwnOffer",
+      "area": "seller",
+      "method": "GET",
+      "path": "/offers/{id}",
+      "summary": "One own offer with product, stock, price history, status log and featured eligibility",
+      "auth": "seller",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "SellerOfferDetail",
+      "errors": [
+        "NOT_FOUND"
+      ],
+      "screens": [
+        "seller/offer"
+      ]
+    },
+    {
+      "id": "previewOffer",
+      "area": "seller",
+      "method": "POST",
+      "path": "/offers/preview",
+      "summary": "Check an offer before saving: delivery a customer would see, price context, was-price check, return baseline",
+      "auth": "seller",
+      "body": "OfferInput",
+      "response": "OfferPreview",
+      "errors": [
+        "VALIDATION_FAILED",
+        "PRODUCT_NOT_PURCHASABLE"
+      ],
+      "screens": [
+        "seller/offer"
+      ]
+    },
+    {
+      "id": "createOffer",
+      "area": "seller",
+      "method": "POST",
+      "path": "/offers",
+      "summary": "Create an offer on a catalog product (draft or published)",
+      "desc": "Creates the inventory stock item with the initial quantity. Used and refurbished need condition notes; anything missing from the product's included items must be listed. A draft on a product still in review can publish on approval.",
+      "auth": "seller",
+      "permission": "offers.offers.manage",
+      "body": "OfferInput",
+      "response": "SellerOfferDetail",
+      "status": 201,
+      "errors": [
+        "VALIDATION_FAILED",
+        "PRODUCT_NOT_PURCHASABLE",
+        "VARIANT_NOT_IN_PRODUCT",
+        "DUPLICATE_OFFER",
+        "SELLER_RESTRICTED",
+        "MISSING_ITEMS_REQUIRED",
+        "RETURN_TERMS_BELOW_BASELINE",
+        "PRICE_BELOW_MINIMUM",
+        "WAS_PRICE_NOT_VERIFIED",
+        "SHIPPING_PROFILE_INVALID"
+      ],
+      "events": [
+        "offers.offer.created",
+        "offers.offer.status_changed"
+      ],
+      "screens": [
+        "seller/offer",
+        "seller/catalog-match"
+      ]
+    },
+    {
+      "id": "updateOffer",
+      "area": "seller",
+      "method": "PATCH",
+      "path": "/offers/{id}",
+      "summary": "Edit offer terms or price",
+      "desc": "Customer-visible changes bump termsVersion so carts show the change before checkout. Price changes go into price history.",
+      "auth": "seller",
+      "permission": "offers.offers.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "body": "OfferUpdate",
+      "response": "SellerOfferDetail",
+      "errors": [
+        "ILLEGAL_TRANSITION",
+        "MISSING_ITEMS_REQUIRED",
+        "RETURN_TERMS_BELOW_BASELINE",
+        "PRICE_BELOW_MINIMUM",
+        "WAS_PRICE_NOT_VERIFIED",
+        "LARGE_PRICE_CHANGE_UNCONFIRMED",
+        "SHIPPING_PROFILE_INVALID"
+      ],
+      "events": [
+        "offers.offer.updated",
+        "offers.offer.price_changed"
+      ],
+      "screens": [
+        "seller/offer"
+      ]
+    },
+    {
+      "id": "publishOffer",
+      "area": "seller",
+      "method": "POST",
+      "path": "/offers/{id}/publish",
+      "summary": "Publish a draft offer",
+      "desc": "Before the seller's launch review passes, the offer stays in draft marked to publish automatically (statusReason awaiting_launch_review) and is published on sellers.launch_review.decided (passed).",
+      "auth": "seller",
+      "permission": "offers.offers.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "SellerOfferDetail",
+      "errors": [
+        "ILLEGAL_TRANSITION",
+        "PRODUCT_NOT_PURCHASABLE",
+        "SELLER_RESTRICTED"
+      ],
+      "events": [
+        "offers.offer.status_changed"
+      ],
+      "screens": [
+        "seller/offer",
+        "seller/products"
+      ]
+    },
+    {
+      "id": "pauseOffer",
+      "area": "seller",
+      "method": "POST",
+      "path": "/offers/{id}/pause",
+      "summary": "Hide an offer from customers (stock is kept)",
+      "auth": "seller",
+      "permission": "offers.offers.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "reason": "text?"
+      },
+      "response": "SellerOfferDetail",
+      "errors": [
+        "ILLEGAL_TRANSITION"
+      ],
+      "events": [
+        "offers.offer.status_changed"
+      ],
+      "screens": [
+        "seller/products"
+      ]
+    },
+    {
+      "id": "bulkPauseOffers",
+      "area": "seller",
+      "method": "POST",
+      "path": "/offers/bulk-pause",
+      "summary": "Hide several own offers at once (up to 100)",
+      "desc": "Same rules as POST /offers/{id}/pause for each offer; each item succeeds or fails on its own (e.g. ILLEGAL_TRANSITION for a draft or removed offer). Stock is kept.",
+      "auth": "seller",
+      "permission": "offers.offers.manage",
+      "body": {
+        "offerIds": "uuid[]",
+        "reason": "text?"
+      },
+      "response": {
+        "results": {
+          "type": "json[]",
+          "desc": "{ offerId, ok, status?, error?: { code, message } } per requested offer"
+        }
+      },
+      "errors": [
+        "VALIDATION_FAILED"
+      ],
+      "events": [
+        "offers.offer.status_changed"
+      ],
+      "screens": [
+        "seller/products"
+      ]
+    },
+    {
+      "id": "resumeOffer",
+      "area": "seller",
+      "method": "POST",
+      "path": "/offers/{id}/resume",
+      "summary": "Show a paused offer again",
+      "auth": "seller",
+      "permission": "offers.offers.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "SellerOfferDetail",
+      "errors": [
+        "ILLEGAL_TRANSITION",
+        "SELLER_RESTRICTED"
+      ],
+      "events": [
+        "offers.offer.status_changed"
+      ],
+      "screens": [
+        "seller/products"
+      ]
+    },
+    {
+      "id": "endOffer",
+      "area": "seller",
+      "method": "POST",
+      "path": "/offers/{id}/end",
+      "summary": "End an offer permanently (Removed, reason ended_by_seller)",
+      "desc": "Open orders keep their snapshot; reserved units stay with their orders.",
+      "auth": "seller",
+      "permission": "offers.offers.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "reason": "text?"
+      },
+      "response": "SellerOfferDetail",
+      "errors": [
+        "ILLEGAL_TRANSITION"
+      ],
+      "events": [
+        "offers.offer.status_changed"
+      ],
+      "screens": [
+        "seller/products"
+      ]
+    },
+    {
+      "id": "deleteDraftOffer",
+      "area": "seller",
+      "method": "DELETE",
+      "path": "/offers/{id}",
+      "summary": "Delete a draft offer that was never published",
+      "auth": "seller",
+      "permission": "offers.offers.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "response": null,
+      "errors": [
+        "ILLEGAL_TRANSITION"
+      ],
+      "screens": [
+        "seller/products"
+      ]
+    },
+    {
+      "id": "changeOwnPrices",
+      "area": "seller",
+      "method": "POST",
+      "path": "/price-changes",
+      "summary": "Change prices of selected offers (up to 100)",
+      "desc": "Each item succeeds or fails on its own. Changes over the large-change threshold (default 50%) need confirmLargeChange.",
+      "auth": "seller",
+      "permission": "offers.prices.manage",
+      "body": {
+        "items": "SellerPriceItem[]",
+        "confirmLargeChange": "bool?"
+      },
+      "response": {
+        "results": "PriceChangeResult[]"
+      },
+      "errors": [
+        "VALIDATION_FAILED",
+        "LARGE_PRICE_CHANGE_UNCONFIRMED"
+      ],
+      "events": [
+        "offers.offer.price_changed"
+      ],
+      "screens": [
+        "seller/products"
+      ]
+    },
+    {
+      "id": "exportOwnOffers",
+      "area": "seller",
+      "method": "POST",
+      "path": "/offers/exports",
+      "summary": "Export own offers (selected rows or the current filters) as CSV",
+      "desc": "Creates an authorized export job through reports.requestExport (dataset offers.seller.offers, sellerId from the session). filters takes the same keys as GET /offers; offerIds limits it to selected rows. Poll GET /offers/exports/{id} for the download link.",
+      "auth": "seller",
+      "permission": "offers.offers.export",
+      "body": {
+        "offerIds": "uuid[]?",
+        "filters": "json?",
+        "format": "enum(csv|xlsx)?"
+      },
+      "response": "reports.ExportJob",
+      "status": 202,
+      "errors": [
+        "VALIDATION_FAILED",
+        "RATE_LIMITED"
+      ],
+      "audited": true,
+      "screens": [
+        "seller/products"
+      ]
+    },
+    {
+      "id": "getOwnOffersExport",
+      "area": "seller",
+      "method": "GET",
+      "path": "/offers/exports/{id}",
+      "summary": "Offer export status and download link (requesting member only)",
+      "auth": "seller",
+      "permission": "offers.offers.export",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "reports.ExportJob",
+      "errors": [
+        "NOT_FOUND",
+        "FORBIDDEN"
+      ],
+      "screens": [
+        "seller/products"
+      ]
+    },
+    {
+      "id": "getBulkTemplate",
+      "area": "seller",
+      "method": "GET",
+      "path": "/bulk-updates/template",
+      "summary": "Download a CSV template prefilled with this seller's SKUs, prices and quantities",
+      "desc": "Columns: seller_sku, price, quantity. Leaving a column out keeps the current value.",
+      "auth": "seller",
+      "permission": "offers.bulk.update",
+      "response": "FileLink",
+      "screens": [
+        "seller/bulk-update"
+      ],
+      "phase": 2
+    },
+    {
+      "id": "createBulkUpdate",
+      "area": "seller",
+      "method": "POST",
+      "path": "/bulk-updates",
+      "summary": "Upload a price and quantity file for preview",
+      "desc": "The file is uploaded to media first. Parsing runs in the background; poll getBulkUpdate until preview_ready.",
+      "auth": "seller",
+      "permission": "offers.bulk.update",
+      "body": {
+        "fileId": "uuid"
+      },
+      "response": "BulkUpdateJob",
+      "status": 202,
+      "errors": [
+        "BULK_FILE_INVALID"
+      ],
+      "screens": [
+        "seller/bulk-update"
+      ],
+      "phase": 2
+    },
+    {
+      "id": "listBulkUpdates",
+      "area": "seller",
+      "method": "GET",
+      "path": "/bulk-updates",
+      "summary": "Upload history",
+      "auth": "seller",
+      "permission": "offers.bulk.update",
+      "paging": true,
+      "response": "BulkUpdateJob",
+      "screens": [
+        "seller/bulk-update"
+      ],
+      "phase": 2
+    },
+    {
+      "id": "getBulkUpdate",
+      "area": "seller",
+      "method": "GET",
+      "path": "/bulk-updates/{id}",
+      "summary": "Job state and totals (rows, ready, errors, unchanged)",
+      "auth": "seller",
+      "permission": "offers.bulk.update",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "BulkUpdateJob",
+      "screens": [
+        "seller/bulk-update"
+      ],
+      "phase": 2
+    },
+    {
+      "id": "listBulkUpdateRows",
+      "area": "seller",
+      "method": "GET",
+      "path": "/bulk-updates/{id}/rows",
+      "summary": "Row-by-row preview with before → after and the error for each failed row",
+      "auth": "seller",
+      "permission": "offers.bulk.update",
+      "params": {
+        "id": "uuid"
+      },
+      "query": {
+        "result": "enum(ready|error|unchanged|applied|skipped|pending_approval)?"
+      },
+      "paging": true,
+      "response": "BulkUpdateRow",
+      "screens": [
+        "seller/bulk-update"
+      ],
+      "phase": 2
+    },
+    {
+      "id": "applyBulkUpdate",
+      "area": "seller",
+      "method": "POST",
+      "path": "/bulk-updates/{id}/apply",
+      "summary": "Apply the valid rows",
+      "desc": "Prices are changed here; quantities go to inventory as adjustments with reason 'Bulk update', the job id and the caller's name. Error rows are skipped.",
+      "auth": "seller",
+      "permission": "offers.bulk.update",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "confirmLargeChanges": "bool?"
+      },
+      "response": "BulkUpdateJob",
+      "status": 202,
+      "errors": [
+        "ILLEGAL_TRANSITION",
+        "BULK_JOB_EXPIRED",
+        "LARGE_PRICE_CHANGE_UNCONFIRMED"
+      ],
+      "events": [
+        "offers.bulk_update.applied",
+        "offers.offer.price_changed"
+      ],
+      "screens": [
+        "seller/bulk-update"
+      ],
+      "phase": 2
+    },
+    {
+      "id": "getCorrectionReport",
+      "area": "seller",
+      "method": "GET",
+      "path": "/bulk-updates/{id}/correction-report",
+      "summary": "CSV of skipped rows with what to fix",
+      "auth": "seller",
+      "permission": "offers.bulk.update",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "FileLink",
+      "screens": [
+        "seller/bulk-update"
+      ],
+      "phase": 2
+    },
+    {
+      "id": "listOffersAdmin",
+      "area": "admin",
+      "method": "GET",
+      "path": "/offers",
+      "summary": "All offers with filters (seller, product, status, eligibility)",
+      "auth": "staff",
+      "permission": "offers.offers.view",
+      "paging": true,
+      "query": {
+        "q": "string?",
+        "ownerType": "enum(official|seller)?",
+        "sellerId": "uuid?",
+        "productId": "uuid?",
+        "status": "enum(draft|active|paused|out_of_stock|ineligible|removed)?",
+        "condition": "string?",
+        "featuredEligible": "bool?",
+        "ineligibleReason": "string?"
+      },
+      "response": "OfferAdminRow",
+      "screens": [
+        "admin/catalog",
+        "admin/seller",
+        "admin/trust"
+      ]
+    },
+    {
+      "id": "getOfferAdmin",
+      "area": "admin",
+      "method": "GET",
+      "path": "/offers/{id}",
+      "summary": "Offer with status log, price history and price changes",
+      "auth": "staff",
+      "permission": "offers.offers.view",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "OfferAdminDetail",
+      "screens": [
+        "admin/catalog",
+        "admin/trust"
+      ]
+    },
+    {
+      "id": "removeOffer",
+      "area": "admin",
+      "method": "POST",
+      "path": "/offers/{id}/remove",
+      "summary": "Remove an offer with a reason (seller is told the reason and appeal route)",
+      "desc": "Only this offer stops selling; other sellers' offers and the product stay. Open orders and returns are unaffected.",
+      "auth": "staff",
+      "permission": "offers.offers.remove",
+      "params": {
+        "id": "uuid"
+      },
+      "body": "RemoveOfferRequest",
+      "response": "OfferAdminDetail",
+      "errors": [
+        "ILLEGAL_TRANSITION"
+      ],
+      "audited": true,
+      "events": [
+        "offers.offer.status_changed"
+      ],
+      "screens": [
+        "admin/catalog",
+        "admin/trust",
+        "admin/seller"
+      ]
+    },
+    {
+      "id": "holdOffer",
+      "area": "admin",
+      "method": "POST",
+      "path": "/offers/{id}/hold",
+      "summary": "Hold an offer during an investigation (Ineligible, staff_hold) with a reason and review date",
+      "auth": "staff",
+      "permission": "offers.offers.remove",
+      "params": {
+        "id": "uuid"
+      },
+      "body": "HoldOfferRequest",
+      "response": "OfferAdminDetail",
+      "errors": [
+        "ILLEGAL_TRANSITION"
+      ],
+      "audited": true,
+      "events": [
+        "offers.offer.status_changed"
+      ],
+      "screens": [
+        "admin/trust",
+        "admin/catalog"
+      ]
+    },
+    {
+      "id": "releaseOfferHold",
+      "area": "admin",
+      "method": "POST",
+      "path": "/offers/{id}/release-hold",
+      "summary": "Release a staff hold",
+      "auth": "staff",
+      "permission": "offers.offers.remove",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "reason": "text"
+      },
+      "response": "OfferAdminDetail",
+      "errors": [
+        "ILLEGAL_TRANSITION"
+      ],
+      "audited": true,
+      "events": [
+        "offers.offer.status_changed"
+      ],
+      "screens": [
+        "admin/trust"
+      ]
+    },
+    {
+      "id": "reinstateOffer",
+      "area": "admin",
+      "method": "POST",
+      "path": "/offers/{id}/reinstate",
+      "summary": "Reinstate a removed offer as Paused (e.g. after a successful appeal)",
+      "auth": "staff",
+      "permission": "offers.offers.remove",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "reason": "text"
+      },
+      "response": "OfferAdminDetail",
+      "errors": [
+        "ILLEGAL_TRANSITION"
+      ],
+      "audited": true,
+      "events": [
+        "offers.offer.status_changed"
+      ],
+      "screens": [
+        "admin/catalog"
+      ]
+    },
+    {
+      "id": "listOfficialOffers",
+      "area": "admin",
+      "method": "GET",
+      "path": "/official/offers",
+      "summary": "Official Store offers with price, cost, margin and sellable stock",
+      "auth": "staff",
+      "permission": "offers.official.manage",
+      "paging": true,
+      "query": {
+        "q": {
+          "type": "string?",
+          "desc": "Name or SKU"
+        },
+        "status": "enum(draft|active|paused|out_of_stock|ineligible|removed)?",
+        "stockState": "enum(in_stock|low_stock|out_of_stock)?",
+        "categoryId": "uuid?"
+      },
+      "response": "OfficialOfferRow",
+      "screens": [
+        "admin/official"
+      ]
+    },
+    {
+      "id": "createOfficialOffer",
+      "area": "admin",
+      "method": "POST",
+      "path": "/official/offers",
+      "summary": "Create an Official Store offer linked to a company stock item",
+      "auth": "staff",
+      "permission": "offers.official.manage",
+      "body": "OfficialOfferInput",
+      "response": "OfferAdminDetail",
+      "status": 201,
+      "errors": [
+        "VALIDATION_FAILED",
+        "PRODUCT_NOT_PURCHASABLE",
+        "DUPLICATE_OFFER",
+        "MISSING_ITEMS_REQUIRED",
+        "RETURN_TERMS_BELOW_BASELINE",
+        "WAS_PRICE_NOT_VERIFIED"
+      ],
+      "audited": true,
+      "events": [
+        "offers.offer.created",
+        "offers.offer.status_changed"
+      ],
+      "screens": [
+        "admin/official",
+        "ops/return-inspection"
+      ]
+    },
+    {
+      "id": "updateOfficialOffer",
+      "area": "admin",
+      "method": "PATCH",
+      "path": "/official/offers/{id}",
+      "summary": "Edit Official Store offer terms (not price; use price changes)",
+      "auth": "staff",
+      "permission": "offers.official.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "body": "OfferUpdate",
+      "response": "OfferAdminDetail",
+      "errors": [
+        "ILLEGAL_TRANSITION",
+        "MISSING_ITEMS_REQUIRED",
+        "RETURN_TERMS_BELOW_BASELINE"
+      ],
+      "audited": true,
+      "events": [
+        "offers.offer.updated"
+      ],
+      "screens": [
+        "admin/official"
+      ]
+    },
+    {
+      "id": "publishOfficialOffer",
+      "area": "admin",
+      "method": "POST",
+      "path": "/official/offers/{id}/publish",
+      "summary": "Publish an Official Store offer",
+      "auth": "staff",
+      "permission": "offers.official.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "OfferAdminDetail",
+      "errors": [
+        "ILLEGAL_TRANSITION",
+        "PRODUCT_NOT_PURCHASABLE"
+      ],
+      "audited": true,
+      "events": [
+        "offers.offer.status_changed"
+      ],
+      "screens": [
+        "admin/official"
+      ]
+    },
+    {
+      "id": "pauseOfficialOffer",
+      "area": "admin",
+      "method": "POST",
+      "path": "/official/offers/{id}/pause",
+      "summary": "Hide an Official Store offer",
+      "auth": "staff",
+      "permission": "offers.official.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "reason": "text"
+      },
+      "response": "OfferAdminDetail",
+      "errors": [
+        "ILLEGAL_TRANSITION"
+      ],
+      "audited": true,
+      "events": [
+        "offers.offer.status_changed"
+      ],
+      "screens": [
+        "admin/official"
+      ]
+    },
+    {
+      "id": "resumeOfficialOffer",
+      "area": "admin",
+      "method": "POST",
+      "path": "/official/offers/{id}/resume",
+      "summary": "Show a hidden Official Store offer again",
+      "auth": "staff",
+      "permission": "offers.official.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "OfferAdminDetail",
+      "errors": [
+        "ILLEGAL_TRANSITION"
+      ],
+      "audited": true,
+      "events": [
+        "offers.offer.status_changed"
+      ],
+      "screens": [
+        "admin/official"
+      ]
+    },
+    {
+      "id": "requestOfficialPriceChange",
+      "area": "admin",
+      "method": "POST",
+      "path": "/official/offers/{id}/price-changes",
+      "summary": "Change an Official Store price (now or scheduled) with a reason",
+      "desc": "Response shows margin before and after (from inventory unit cost) and other offers on the product. Within the caller's price-change limit the change is applied or scheduled; above it, it becomes an approval request in access and is applied only after approval. New price applies to new orders only; open carts see the change before checkout.",
+      "auth": "staff",
+      "permission": "offers.official.price",
+      "params": {
+        "id": "uuid"
+      },
+      "body": "PriceChangeRequest",
+      "response": "PriceChange",
+      "status": 201,
+      "errors": [
+        "VALIDATION_FAILED",
+        "ILLEGAL_TRANSITION",
+        "WAS_PRICE_NOT_VERIFIED",
+        "PRICE_CHANGE_PENDING"
+      ],
+      "audited": true,
+      "approval": "Approval action offers.prices.change. Changes larger than the caller's price-change limit (access approval limits; example: Official Store Manager ±30%) need Business Owner approval before going live",
+      "events": [
+        "offers.offer.price_changed"
+      ],
+      "screens": [
+        "admin/official"
+      ]
+    },
+    {
+      "id": "listPriceChanges",
+      "area": "admin",
+      "method": "GET",
+      "path": "/price-changes",
+      "summary": "Pending, scheduled and recent price changes",
+      "auth": "staff",
+      "permission": "offers.official.price",
+      "paging": true,
+      "query": {
+        "state": "enum(requested|pending_approval|scheduled|applied|reverted|rejected|cancelled)?",
+        "offerId": "uuid?",
+        "ownerType": "enum(official|seller)?"
+      },
+      "response": "PriceChange",
+      "screens": [
+        "admin/official"
+      ]
+    },
+    {
+      "id": "cancelPriceChange",
+      "area": "admin",
+      "method": "POST",
+      "path": "/price-changes/{id}/cancel",
+      "summary": "Cancel a scheduled or pending price change",
+      "auth": "staff",
+      "permission": "offers.official.price",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "reason": "text"
+      },
+      "response": "PriceChange",
+      "errors": [
+        "ILLEGAL_TRANSITION"
+      ],
+      "audited": true,
+      "screens": [
+        "admin/official"
+      ]
+    },
+    {
+      "id": "createOfficialBulkUpdate",
+      "area": "admin",
+      "method": "POST",
+      "path": "/official/bulk-updates",
+      "summary": "Upload an Official Store price file for preview",
+      "desc": "Quantities are not accepted here; company stock changes go through inventory adjustments.",
+      "auth": "staff",
+      "permission": "offers.official.price",
+      "body": {
+        "fileId": "uuid",
+        "reason": "text"
+      },
+      "response": "BulkUpdateJob",
+      "status": 202,
+      "errors": [
+        "BULK_FILE_INVALID"
+      ],
+      "audited": true,
+      "screens": [
+        "admin/official"
+      ],
+      "phase": 2
+    },
+    {
+      "id": "getOfficialBulkUpdate",
+      "area": "admin",
+      "method": "GET",
+      "path": "/official/bulk-updates/{id}",
+      "summary": "Official Store bulk job state and totals",
+      "auth": "staff",
+      "permission": "offers.official.price",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "BulkUpdateJob",
+      "screens": [
+        "admin/official"
+      ],
+      "phase": 2
+    },
+    {
+      "id": "listOfficialBulkUpdateRows",
+      "area": "admin",
+      "method": "GET",
+      "path": "/official/bulk-updates/{id}/rows",
+      "summary": "Official Store bulk preview rows",
+      "auth": "staff",
+      "permission": "offers.official.price",
+      "params": {
+        "id": "uuid"
+      },
+      "query": {
+        "result": "enum(ready|error|unchanged|applied|skipped|pending_approval)?"
+      },
+      "paging": true,
+      "response": "BulkUpdateRow",
+      "screens": [
+        "admin/official"
+      ],
+      "phase": 2
+    },
+    {
+      "id": "applyOfficialBulkUpdate",
+      "area": "admin",
+      "method": "POST",
+      "path": "/official/bulk-updates/{id}/apply",
+      "summary": "Apply valid rows; rows above the price-change limit become approval requests",
+      "auth": "staff",
+      "permission": "offers.official.price",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "BulkUpdateJob",
+      "status": 202,
+      "errors": [
+        "ILLEGAL_TRANSITION",
+        "BULK_JOB_EXPIRED"
+      ],
+      "audited": true,
+      "approval": "Approval action offers.prices.change. Rows above the caller's price-change limit are sent for approval individually",
+      "events": [
+        "offers.bulk_update.applied",
+        "offers.offer.price_changed"
+      ],
+      "screens": [
+        "admin/official"
+      ],
+      "phase": 2
+    },
+    {
+      "id": "getFeaturedRuleAdmin",
+      "area": "admin",
+      "method": "GET",
+      "path": "/featured-rule",
+      "summary": "Current, scheduled and past versions of the featured-offer rule",
+      "auth": "staff",
+      "permission": "offers.offers.view",
+      "response": {
+        "current": "FeaturedRule",
+        "scheduled": "FeaturedRule?",
+        "history": "FeaturedRule[]"
+      },
+      "screens": [
+        "admin/settings"
+      ]
+    },
+    {
+      "id": "publishFeaturedRule",
+      "area": "admin",
+      "method": "POST",
+      "path": "/featured-rule/versions",
+      "summary": "Publish a new version of the featured-offer rule with an effective date",
+      "desc": "The previous version stays in force until effectiveFrom. All featured decisions are recomputed when it takes effect.",
+      "auth": "staff",
+      "permission": "offers.featured-rule.manage",
+      "body": "FeaturedRuleInput",
+      "response": "FeaturedRule",
+      "status": 201,
+      "audited": true,
+      "events": [
+        "offers.featured_rule.published"
+      ],
+      "screens": [
+        "admin/settings"
+      ]
+    },
+    {
+      "id": "explainFeaturedOffer",
+      "area": "admin",
+      "method": "GET",
+      "path": "/products/{productId}/featured-decision",
+      "summary": "Why an offer is (or is not) featured for a variant and location",
+      "auth": "staff",
+      "permission": "offers.offers.view",
+      "params": {
+        "productId": "uuid"
+      },
+      "query": {
+        "variantId": "uuid",
+        "postalCode": "string?",
+        "conditionGroup": "enum(new|used|refurbished)?"
+      },
+      "response": "FeaturedDecision",
+      "screens": [
+        "admin/catalog",
+        "admin/seller"
+      ]
+    },
+    {
+      "id": "recomputeFeatured",
+      "area": "admin",
+      "method": "POST",
+      "path": "/featured-decisions/recompute",
+      "summary": "Recompute featured decisions for a product (or everything)",
+      "auth": "staff",
+      "permission": "offers.featured-rule.manage",
+      "body": {
+        "productId": "uuid?"
+      },
+      "response": {
+        "queued": "int"
+      },
+      "status": 202,
+      "audited": true
+    }
+  ],
+  "events": {
+    "publishes": [
+      {
+        "name": "offers.offer.created",
+        "when": "An offer is created (draft or published)",
+        "payload": {
+          "offerId": "uuid",
+          "productId": "uuid",
+          "variantId": "uuid",
+          "ownerType": "string",
+          "sellerId": "uuid?",
+          "condition": "string",
+          "stockItemId": "uuid"
+        }
+      },
+      {
+        "name": "offers.offer.updated",
+        "when": "Customer-visible terms change (termsVersion bumped)",
+        "payload": {
+          "offerId": "uuid",
+          "productId": "uuid",
+          "termsVersion": "int",
+          "fields": "string[]"
+        }
+      },
+      {
+        "name": "offers.offer.price_changed",
+        "when": "A new price takes effect (direct, scheduled start, revert or bulk)",
+        "payload": {
+          "offerId": "uuid",
+          "productId": "uuid",
+          "variantId": "uuid",
+          "sellerId": "uuid?",
+          "ownerType": "string",
+          "from": "Money",
+          "to": "Money",
+          "compareAt": "Money?",
+          "priceChangeId": "uuid?",
+          "termsVersion": "int"
+        }
+      },
+      {
+        "name": "offers.offer.status_changed",
+        "when": "Any offer status transition",
+        "payload": {
+          "offerId": "uuid",
+          "productId": "uuid",
+          "variantId": "uuid",
+          "sellerId": "uuid?",
+          "ownerType": "string",
+          "from": "string",
+          "to": "string",
+          "reasonCode": "string?",
+          "reason": "text?"
+        }
+      },
+      {
+        "name": "offers.offer.eligibility_changed",
+        "when": "An offer becomes eligible or ineligible to be featured",
+        "payload": {
+          "offerId": "uuid",
+          "sellerId": "uuid?",
+          "eligible": "bool",
+          "reasons": "string[]"
+        }
+      },
+      {
+        "name": "offers.featured.changed",
+        "when": "The featured offer for a variant and zone changes",
+        "payload": {
+          "productId": "uuid",
+          "variantId": "uuid",
+          "conditionGroup": "string",
+          "zoneKey": "string",
+          "fromOfferId": "uuid?",
+          "toOfferId": "uuid?"
+        }
+      },
+      {
+        "name": "offers.featured_rule.published",
+        "when": "A new featured-offer rule version is published",
+        "payload": {
+          "version": "int",
+          "effectiveFrom": "datetime"
+        }
+      },
+      {
+        "name": "offers.bulk_update.applied",
+        "when": "A bulk file is applied",
+        "payload": {
+          "jobId": "uuid",
+          "ownerType": "string",
+          "sellerId": "uuid?",
+          "applied": "int",
+          "skipped": "int",
+          "pendingApproval": "int"
+        }
+      }
+    ],
+    "consumes": [
+      {
+        "name": "sellers.seller.restricted",
+        "does": "Read affectedActivities and scope (categoryIds, conditions, offerIds, productIds; empty = whole account). sales: make the in-scope offers Ineligible (reason, affected activity and appeal route copied to statusReason; ineligible_source = restrictionId). new_listings / new_offers: refuse new in-scope offers and publishing drafts (SELLER_RESTRICTED). offer_reactivation: refuse resume and reactivation. Other sellers' offers are untouched (scenario 7)."
+      },
+      {
+        "name": "sellers.restriction.updated",
+        "does": "Re-apply the changed activities and scope: restore offers no longer covered, make newly covered offers Ineligible"
+      },
+      {
+        "name": "sellers.restriction.lifted",
+        "does": "restoreEligibility on offers whose ineligible_source is this restriction and that no remaining restriction covers"
+      },
+      {
+        "name": "sellers.seller.suspended",
+        "does": "Make all the seller's offers Ineligible (ineligible_source = suspensionId); new sales stop while open orders keep their snapshots"
+      },
+      {
+        "name": "sellers.seller.reinstated",
+        "does": "restoreEligibility on offers made ineligible by liftedRestrictionId or endedSuspensionId, except offers still covered by remainingRestrictionIds"
+      },
+      {
+        "name": "sellers.launch_review.decided",
+        "does": "outcome passed: publish the seller's drafts waiting with publish_on_approval (approved product, complete offer; out_of_stock when available = 0) and clear statusReason awaiting_launch_review. changes_needed: keep them in draft"
+      },
+      {
+        "name": "sellers.seller.closed",
+        "does": "Remove all the seller's offers (reason seller_closed)"
+      },
+      {
+        "name": "catalog.product.publication_changed",
+        "does": "Hidden or Suspended → offers Ineligible (product_hidden / product_suspended); Active → restoreEligibility"
+      },
+      {
+        "name": "catalog.product.approved",
+        "does": "Publish draft offers with publishOnApproval on that product; refresh content_gaps"
+      },
+      {
+        "name": "catalog.product.merged",
+        "does": "Move offers from the duplicate to the kept product, mapping variants by options; unmatched variants are paused and the seller told"
+      },
+      {
+        "name": "catalog.product.updated",
+        "does": "Flag offers whose missingItems name items no longer in the product's box; seller asked to review; refresh content_gaps on the product's offers from catalog.getProductAdmin (missing images / identifiers)"
+      },
+      {
+        "name": "inventory.stock.changed",
+        "does": "available 0 → stockDepleted; available > 0 → stockRestored; mark featured decisions dirty"
+      },
+      {
+        "name": "access.approval.decided",
+        "does": "Approve or reject pending price changes (and pending bulk rows)"
+      },
+      {
+        "name": "trust.enforcement.recorded",
+        "does": "Remove or hold offers named in an enforcement (counterfeit, abuse)"
+      },
+      {
+        "name": "promotions.campaign.started",
+        "does": "Mark featured decisions dirty for offers whose automatic discount changes the comparable total"
+      },
+      {
+        "name": "promotions.campaign.ended",
+        "does": "Same as started"
+      }
+    ]
+  },
+  "permissions": [
+    {
+      "key": "offers.offers.manage",
+      "audience": "seller",
+      "desc": "Create, edit, publish, pause and end own offers"
+    },
+    {
+      "key": "offers.offers.export",
+      "audience": "seller",
+      "desc": "Export own offer lists"
+    },
+    {
+      "key": "offers.prices.manage",
+      "audience": "seller",
+      "desc": "Change own offer prices"
+    },
+    {
+      "key": "offers.bulk.update",
+      "audience": "seller",
+      "desc": "Upload and apply bulk price and quantity files"
+    },
+    {
+      "key": "offers.offers.view",
+      "audience": "staff",
+      "desc": "View all offers, featured decisions and the featured rule"
+    },
+    {
+      "key": "offers.offers.remove",
+      "audience": "staff",
+      "desc": "Remove, hold, release and reinstate offers (reason required)"
+    },
+    {
+      "key": "offers.official.manage",
+      "audience": "staff",
+      "desc": "Create and edit Official Store offers"
+    },
+    {
+      "key": "offers.official.price",
+      "audience": "staff",
+      "desc": "Change Official Store prices within the approval limit set in access"
+    },
+    {
+      "key": "offers.featured-rule.manage",
+      "audience": "staff",
+      "desc": "Publish featured-offer rule versions and force recomputation"
+    }
+  ],
+  "approvalActions": [
+    {
+      "key": "offers.prices.change",
+      "desc": "Change an Official Store offer price (single change, scheduled change or bulk-file row)",
+      "limit": "percent",
+      "secondReviewer": "above-limit",
+      "approvers": "Official Store Manager within ±30% of the current price (example); Business Owner above it"
+    }
+  ],
+  "jobs": [
+    {
+      "name": "offers.apply-price-schedule",
+      "schedule": "every 1 min",
+      "does": "Start scheduled price changes whose startsAt has passed; revert applied changes whose endsAt has passed; publish offers.offer.price_changed"
+    },
+    {
+      "name": "offers.recompute-featured",
+      "schedule": "every 2 min (dirty rows) + nightly full",
+      "does": "Recompute featured_offers rows marked dirty for each delivery zone; publish offers.featured.changed when the winner changes"
+    },
+    {
+      "name": "offers.reevaluate-eligibility",
+      "schedule": "hourly",
+      "does": "Read seller performance (on-time dispatch over the window, delivery reviews, open restrictions) from sellers and update offer_eligibility; publish offers.offer.eligibility_changed"
+    },
+    {
+      "name": "offers.verify-compare-at",
+      "schedule": "daily 02:00 market time",
+      "does": "Drop compare-at prices whose basis no longer holds (e.g. no longer the 30-day low before the sale) and tell the owner"
+    },
+    {
+      "name": "offers.expire-bulk-previews",
+      "schedule": "hourly",
+      "does": "Expire preview_ready jobs past expiresAt"
+    },
+    {
+      "name": "offers.parse-bulk-file",
+      "schedule": "on demand (queue)",
+      "does": "Parse uploaded CSV, resolve seller SKUs, validate rows, build preview"
+    }
+  ],
+  "settings": [
+    {
+      "key": "featuredZoneGranularity",
+      "default": "postal3",
+      "desc": "Delivery zone key used to cache featured decisions (first 3 digits of the postal code)"
+    },
+    {
+      "key": "wasPriceLookbackDays",
+      "default": 30,
+      "desc": "Window for the lowest_30_days compare-at basis"
+    },
+    {
+      "key": "largeSellerPriceChangePct",
+      "default": 50,
+      "desc": "Seller price changes above this need explicit confirmation"
+    },
+    {
+      "key": "minimumPriceByCategory",
+      "default": {},
+      "desc": "Category id → minimum price in minor units (e.g. Cables and adapters 500)"
+    },
+    {
+      "key": "maxPurchaseLimit",
+      "default": null,
+      "desc": "Platform cap on per-customer purchase limits, if any"
+    },
+    {
+      "key": "bulkMaxRows",
+      "default": 5000,
+      "desc": "Rows per bulk file"
+    },
+    {
+      "key": "bulkPreviewHours",
+      "default": 24,
+      "desc": "How long a preview can be applied"
+    },
+    {
+      "key": "maxSelectedPriceChanges",
+      "default": 100,
+      "desc": "Items per changeOwnPrices call"
+    }
+  ],
+  "integrations": [
+    {
+      "name": "Media storage",
+      "purpose": "Bulk CSV uploads, generated templates and correction reports (through media)"
+    }
+  ],
+  "errorCodes": {
+    "PRODUCT_NOT_PURCHASABLE": {
+      "status": 409,
+      "meaning": "The product is not approved and Active. Save as draft with publishOnApproval, or wait for review."
+    },
+    "VARIANT_NOT_IN_PRODUCT": {
+      "status": 400,
+      "meaning": "variantId does not belong to productId"
+    },
+    "DUPLICATE_OFFER": {
+      "status": 409,
+      "meaning": "This seller already has a New offer for this variant, or the seller SKU is in use. details.offerId"
+    },
+    "SELLER_RESTRICTED": {
+      "status": 409,
+      "meaning": "A restriction covers this activity. details.reason, details.affectedActivity, details.appealRoute"
+    },
+    "MISSING_ITEMS_REQUIRED": {
+      "status": 400,
+      "meaning": "Used or refurbished offers need condition notes, and items absent from the product's box must be listed in missingItems"
+    },
+    "RETURN_TERMS_BELOW_BASELINE": {
+      "status": 400,
+      "meaning": "Return terms are less generous than the platform baseline for this category. details.baseline"
+    },
+    "PRICE_BELOW_MINIMUM": {
+      "status": 400,
+      "meaning": "Price is below the category minimum. details.minimum"
+    },
+    "WAS_PRICE_NOT_VERIFIED": {
+      "status": 400,
+      "meaning": "The compare-at price is not supported by this offer's price history or the list price on file"
+    },
+    "SHIPPING_PROFILE_INVALID": {
+      "status": 400,
+      "meaning": "The shipping profile does not exist, is not the seller's, or does not cover the variant's size"
+    },
+    "LARGE_PRICE_CHANGE_UNCONFIRMED": {
+      "status": 409,
+      "meaning": "Price changes above the large-change threshold need confirmLargeChange. details.offers"
+    },
+    "PRICE_CHANGE_PENDING": {
+      "status": 409,
+      "meaning": "Another price change is scheduled or awaiting approval for this offer. Cancel it first. details.priceChangeId"
+    },
+    "OFFER_UNAVAILABLE": {
+      "status": 409,
+      "meaning": "The offer can no longer be bought (removed, ineligible or out of stock). details.alternatives lists other offers to choose explicitly"
+    },
+    "BULK_FILE_INVALID": {
+      "status": 400,
+      "meaning": "Not a readable CSV, wrong columns or over the row limit. details.issues"
+    },
+    "BULK_JOB_EXPIRED": {
+      "status": 409,
+      "meaning": "The preview is older than the allowed window; upload again"
+    }
+  },
+  "notes": [
+    "Product vs offer (plan ch. 5, 8): offers never edit shared content; corrections go through catalog suggestCorrection from the offer form.",
+    "Featured-offer rule (published, versioned, default v1): (1) Eligible: offer Active, seller in good standing with no open restriction, on-time dispatch ≥ minOnTimeDispatchPct over performanceWindowDays, not under delivery review, product purchasable. (2) Available: available > 0 and ships to the delivery location. (3) Delivery: each business day slower than the fastest eligible offer adds deliveryDayAdjustmentPct of the item price to the ranking total. (4) Total price: item + shipping − automatic discounts. Lowest adjusted total wins; ties by higher on-time dispatch, then earlier publication. Only competingConditions (New) compete by default; used/refurbished compete within their condition filter. Advertising never affects it.",
+    "A customer's explicit offer choice is passed as offerId; the purchase box and cart keep that seller. revalidate reports changes but never substitutes another seller (scenario 2).",
+    "Comparable totals need a delivery location: postalCode query → customer default address → market default (settings). Shipping estimates come from shipping.quote(profileId, postalCode, variant dimensions); when shipping is off, delivery shows the dispatch label only.",
+    "Was-price authenticity: compareAt is shown only when verified (price history or list price on file) and carries its explanation; the nightly job drops stale ones.",
+    "Prices and promotions: offers owns the offer (regular) price, its history and direct price changes (seller edits, Official Store price changes with start/end and approval). Campaign markdowns, flash prices and coupons are promotions; store views call promotions.priceOffers and show the campaign price with regularPrice beside it. promotions.referencePrice reads offers.lowestPrice, so there is one price history.",
+    "Return terms: the effective terms come from returns.resolveTerms(sellerId, categoryId, condition); an offer may only choose terms at least as generous (kind = extended), never less (RETURN_TERMS_BELOW_BASELINE).",
+    "Seller stock lives in inventory with one stock item per seller offer; Official Store offers link to company stock items (one per company SKU, e.g. HAL-AUR-BLK-LN for a used-like-new unit created from a return outcome). Seller stock is never mixed with company stock.",
+    "The seller bulk file covers price and quantity together because both are keyed by seller SKU, which offers owns; offers validates every row and applies quantities through inventory.applyBulkQuantities (recorded as 'Bulk update' adjustments). Bulk file tools are plan phase 2; selected-row price changes are phase 1.",
+    "Official Store price-change limits are approval limits in access (a role limit, not a setting here). Granting someone offers.official.price does not raise their limit.",
+    "Company trading figures on admin/official (sales, margin, discounts, returns) come from finance/reports; offers supplies per-offer margin using inventory unit cost.",
+    "Dependencies differ from the architecture table only by optional ones: shipping (delivery quotes), returns (baseline validation), promotions (automatic discounts in comparable totals), access (approval requests), audit.",
+    "Seller list support: content_gaps is a copy of the product's missing images / identifiers (catalog ProductAdmin.missing), kept on each offer row so GET /offers can filter by missingContent without a cross-module join. Tab counts combine offer status with the product review state copied from catalog.",
+    "Exports: seller offer exports run through reports (registerDataset / requestExport) like every other module's exports. Offers registers dataset offers.seller.offers (seller audience; columns: product, variant, seller SKU, condition, price, compare-at, available, review state, publication, status, updated at) and serves it from POST /api/seller/offers/offers/exports. Bulk hide of selected rows (POST /offers/bulk-pause) is phase 1 like selected-row price changes."
+  ]
+}

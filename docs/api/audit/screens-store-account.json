@@ -1,0 +1,2887 @@
+[
+  {
+    "screen": "auth/sign-in",
+    "element": "Sign in (email, password, Keep me signed in)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/public/identity/sessions"
+    ],
+    "note": "keepSignedIn and guestSessionId in SignInRequest; the guest cart is claimed on sign-in. SignInResult can be second_factor_required, but the prototype has no customer 2-step code step (UI gap; the API covers it with POST /api/public/identity/sign-in-challenges/{id}/verify)."
+  },
+  {
+    "screen": "auth/sign-in",
+    "state": "Wrong password",
+    "element": "Error alert with attempts left before the 15-minute pause, field error",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/public/identity/sessions"
+    ],
+    "note": "INVALID_CREDENTIALS details.attemptsLeft; ACCOUNT_LOCKED details.lockedUntil."
+  },
+  {
+    "screen": "auth/sign-in",
+    "element": "Show password toggle",
+    "kind": "action",
+    "status": "client-only",
+    "api": []
+  },
+  {
+    "screen": "auth/sign-in",
+    "element": "Continue with Google / Continue with Apple",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/public/identity/external-sign-ins"
+    ],
+    "note": "The identity spec marks externalSignIn as phase 2, and app-config features.externalSignIn hides the buttons until then. The plan does not schedule social sign-in."
+  },
+  {
+    "screen": "auth/sign-in",
+    "element": "Checking out? Continue as guest",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/public/identity/guest-sessions"
+    ],
+    "note": "Starts the guest session. The checkout session itself belongs to store/checkout."
+  },
+  {
+    "screen": "auth/register",
+    "state": "Create account",
+    "element": "Live password rules checklist",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/public/identity/password-policy"
+    ]
+  },
+  {
+    "screen": "auth/register",
+    "state": "Create account",
+    "element": "Create account (first, last, email, password, marketing opt-in unchecked)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/public/identity/registrations",
+      "GET /api/store/content/policies"
+    ],
+    "note": "RegistrationRequest.marketingOptIn and acceptedTermsVersion (the current Purchase terms/Privacy version from content)."
+  },
+  {
+    "screen": "auth/register",
+    "state": "Create account",
+    "element": "Continue with Google / Continue with Apple",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/public/identity/external-sign-ins"
+    ],
+    "note": "The identity spec marks it phase 2."
+  },
+  {
+    "screen": "auth/register",
+    "state": "Verify email",
+    "element": "Sent-to address and 10-minute code expiry",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/public/identity/registrations"
+    ],
+    "note": "VerificationChallenge.emailMasked/expiresAt. The prototype shows the full address but the API returns it masked (a privacy choice; the client already knows what was typed)."
+  },
+  {
+    "screen": "auth/register",
+    "state": "Verify email",
+    "element": "Enter 6-digit code and Verify email (signs in)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/public/identity/verifications/{id}/confirm"
+    ]
+  },
+  {
+    "screen": "auth/register",
+    "state": "Verify email",
+    "element": "Resend code with countdown",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/public/identity/verifications/{id}/resend"
+    ],
+    "note": "resendAvailableAt drives the timer."
+  },
+  {
+    "screen": "auth/recover",
+    "state": "Request link",
+    "element": "Send reset link",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/public/identity/password-resets"
+    ]
+  },
+  {
+    "screen": "auth/recover",
+    "state": "Check your email",
+    "element": "Masked email, 30-minute expiry, resend availability",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/public/identity/password-resets"
+    ]
+  },
+  {
+    "screen": "auth/recover",
+    "state": "Check your email",
+    "element": "Resend link (after countdown)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/public/identity/password-resets"
+    ],
+    "note": "A new request invalidates the previous link."
+  },
+  {
+    "screen": "auth/recover",
+    "state": "Check your email",
+    "element": "Support phone and hours",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/public/settings/app-config"
+    ]
+  },
+  {
+    "screen": "auth/recover",
+    "state": "Set new password",
+    "element": "Reset link check and account shown",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/public/identity/password-resets/{token}"
+    ],
+    "note": "Returns emailMasked, while the prototype shows the full address."
+  },
+  {
+    "screen": "auth/recover",
+    "state": "Set new password",
+    "element": "Live password rules",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/public/identity/password-resets/{token}"
+    ],
+    "note": "PasswordResetStatus.policy."
+  },
+  {
+    "screen": "auth/recover",
+    "state": "Set new password",
+    "element": "Save new password with Sign me out on all other devices",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/public/identity/password-resets/{token}/complete"
+    ]
+  },
+  {
+    "screen": "auth/guest-orders",
+    "state": "Look up",
+    "element": "Find order (order reference + checkout email)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/customers/guest-orders/lookup"
+    ]
+  },
+  {
+    "screen": "auth/guest-orders",
+    "state": "Look up",
+    "element": "Email me my order links",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/customers/guest-orders/links"
+    ]
+  },
+  {
+    "screen": "auth/guest-orders",
+    "state": "Found",
+    "element": "Order header: reference, placed date, guest email",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}"
+    ],
+    "note": "The guest session has access after lookup (contact.email, placedAt)."
+  },
+  {
+    "screen": "auth/guest-orders",
+    "state": "Found",
+    "element": "Status strip: order status, payment method and amount with Accepted, delivery address",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}"
+    ],
+    "note": "statusLabel, progress.payment, deliveryAddress."
+  },
+  {
+    "screen": "auth/guest-orders",
+    "state": "Found",
+    "element": "Packages by seller with carrier, tracking number, ETA and item-level status and price",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}",
+      "GET /api/store/shipping/orders/{orderId}/shipments"
+    ]
+  },
+  {
+    "screen": "auth/guest-orders",
+    "state": "Found",
+    "element": "Track package",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/shipping/shipments/{id}/tracking"
+    ]
+  },
+  {
+    "screen": "auth/guest-orders",
+    "state": "Found",
+    "element": "Get help",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/orders/{orderId}/problem-context",
+      "POST /api/store/support/cases"
+    ],
+    "note": "Both accept a guest session (auth shopper)."
+  },
+  {
+    "screen": "auth/guest-orders",
+    "state": "Found",
+    "element": "Totals: items, shipping per seller, tax, total charged",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}"
+    ],
+    "note": "totals plus groups[].totals.shipping."
+  },
+  {
+    "screen": "auth/guest-orders",
+    "state": "Found",
+    "element": "Create an account with this email prompt",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/customers/guest-orders/lookup",
+      "POST /api/public/identity/registrations"
+    ],
+    "note": "canCreateAccount. guestSessionId attaches guest orders after verification."
+  },
+  {
+    "screen": "account/overview",
+    "element": "Greeting: avatar, first name, email, member since",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/customers/overview",
+      "gql store/AccountOverview"
+    ]
+  },
+  {
+    "screen": "account/overview",
+    "element": "Tiles: orders in progress (1 package delayed), open returns (1 needs drop-off), unread messages (from names)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/customers/overview",
+      "gql store/AccountOverview"
+    ]
+  },
+  {
+    "screen": "account/overview",
+    "element": "Store credit tile",
+    "kind": "data",
+    "status": "later",
+    "api": [
+      "GET /api/store/wallet/credit"
+    ],
+    "note": "Plan ch. 15 lists store credit under Later services, and the wallet module is phase 3. Until then the overview returns the tile with available=false or lists it in unavailable."
+  },
+  {
+    "screen": "account/overview",
+    "element": "Delayed item alert with options and case link",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/customers/overview",
+      "gql store/AccountOverview"
+    ],
+    "note": "alerts[] kind item_delayed with caseRef and actions."
+  },
+  {
+    "screen": "account/overview",
+    "element": "Recent orders (3): thumbnails, ref, status, date, total, package count, item-level state badges",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/customers/overview",
+      "gql store/AccountOverview"
+    ],
+    "note": "recentOrders[].itemStates."
+  },
+  {
+    "screen": "account/overview",
+    "element": "Open support cases card: subject, status, case ref, order, seller, handler, next update",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/customers/overview",
+      "GET /api/store/support/cases",
+      "gql store/AccountOverview"
+    ]
+  },
+  {
+    "screen": "account/overview",
+    "element": "Returns and refunds card: open returns with return status and refund status",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/customers/overview",
+      "gql store/AccountOverview"
+    ]
+  },
+  {
+    "screen": "account/overview",
+    "element": "Account menu (desktop side menu and Account tab) with Messages and Notifications count badges, customer name and member since",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/customers/overview",
+      "GET /api/store/messaging/unread-count",
+      "GET /api/store/notifications/inbox/summary",
+      "GET /api/store/customers/profile"
+    ],
+    "note": "Shared accountLayout chrome on every account/* screen. The overview response carries menuCounts."
+  },
+  {
+    "screen": "account/overview",
+    "element": "Help and support row: Contact us hours",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/public/settings/app-config"
+    ],
+    "note": "support.hoursLabel / openNow."
+  },
+  {
+    "screen": "account/overview",
+    "element": "App settings: Appearance (System, Light, Dark)",
+    "kind": "action",
+    "status": "client-only",
+    "api": [],
+    "note": "The theme is stored on the device."
+  },
+  {
+    "screen": "account/overview",
+    "element": "App settings: Push notifications summary (Order updates on, Promotions off)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/notifications/preferences",
+      "GET /api/store/customers/marketing-preferences"
+    ],
+    "note": "push.orderUpdates / push.available and pushPromotions."
+  },
+  {
+    "screen": "account/overview",
+    "element": "App settings: turn order-update push notices on or off (and register the device)",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "PUT /api/store/notifications/preferences/push",
+      "POST /api/store/notifications/push-devices"
+    ],
+    "note": "Plan ch. 19 says SMS and push notices can be added later, and the notifications module marks both endpoints phase 3. UI gap: the row links to account/profile, which only has the Push promotions toggle, not an order-update push toggle."
+  },
+  {
+    "screen": "account/overview",
+    "element": "App settings: Country and language value (United States, English, USD)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/public/settings/app-config"
+    ],
+    "note": "market.country, locale, currency."
+  },
+  {
+    "screen": "account/overview",
+    "element": "Sign out",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/public/identity/sessions/sign-out"
+    ],
+    "note": "From phase 3 the app also calls DELETE /api/store/notifications/push-devices/{id}."
+  },
+  {
+    "screen": "account/overview",
+    "element": "App version line",
+    "kind": "data",
+    "status": "client-only",
+    "api": [],
+    "note": "Comes from the app build. app-config.android is only used for update prompts."
+  },
+  {
+    "screen": "account/orders",
+    "element": "Search by order number or product",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders",
+      "gql store/OrderList"
+    ],
+    "note": "q"
+  },
+  {
+    "screen": "account/orders",
+    "element": "Date range select",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders",
+      "GET /api/store/orders/orders/counts",
+      "gql store/OrderList"
+    ],
+    "note": "range"
+  },
+  {
+    "screen": "account/orders",
+    "element": "Status tabs with counts (All, In progress, Delivered, Returns, Cancelled)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/counts",
+      "gql store/OrderList"
+    ]
+  },
+  {
+    "screen": "account/orders",
+    "element": "Header total (23 orders since Aug 2026)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders",
+      "GET /api/store/customers/profile"
+    ],
+    "note": "Paging total plus memberSince."
+  },
+  {
+    "screen": "account/orders",
+    "state": "Orders",
+    "element": "Order cards: ref, placed, total, seller and package counts, per-package seller/status/note, thumbnails, order note",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders",
+      "gql store/OrderList"
+    ]
+  },
+  {
+    "screen": "account/orders",
+    "state": "Orders",
+    "element": "Per-order actions (View, Track, Return items, Cancel items, Write a review, Buy again)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders",
+      "gql store/OrderList"
+    ],
+    "note": "actions[]. Buy again opens the product; adding to the cart uses POST /api/store/cart/cart/items."
+  },
+  {
+    "screen": "account/orders",
+    "state": "Orders",
+    "element": "Pagination (Showing 1–5 of 23)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders"
+    ]
+  },
+  {
+    "screen": "account/orders",
+    "state": "No matches",
+    "element": "Empty result for the search with Clear filters",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders"
+    ],
+    "note": "Empty items[]. Clear filters re-queries without q/range."
+  },
+  {
+    "screen": "account/order",
+    "element": "Header: order ref, placed date, items/sellers/total summary line",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}",
+      "gql store/OrderDetail"
+    ]
+  },
+  {
+    "screen": "account/order",
+    "element": "Download receipt",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}/documents",
+      "GET /api/store/orders/orders/{id}/documents/{documentId}"
+    ]
+  },
+  {
+    "screen": "account/order",
+    "element": "Overall status, packages delivered count, returns open count",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}",
+      "gql store/OrderDetail"
+    ]
+  },
+  {
+    "screen": "account/order",
+    "element": "Payment, Delivery and Returns indicators (separate progress)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}",
+      "gql store/OrderDetail"
+    ],
+    "note": "progress.payment/delivery/returns, including packageStates for the mini track."
+  },
+  {
+    "screen": "account/order",
+    "element": "Package cards: seller logo, name, verified badge, package label, status, ETA, carrier and tracking number",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}",
+      "GET /api/store/shipping/orders/{orderId}/shipments",
+      "gql store/OrderDetail"
+    ]
+  },
+  {
+    "screen": "account/order",
+    "element": "Package progress track",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/OrderDetail",
+      "GET /api/store/orders/orders/{id}"
+    ],
+    "note": "groups[].status; gql shipments.steps/currentStep."
+  },
+  {
+    "screen": "account/order",
+    "element": "Late package alert with revised date and case link",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}",
+      "gql store/OrderDetail"
+    ],
+    "note": "groups[].alert (GroupAlert with caseRef)."
+  },
+  {
+    "screen": "account/order",
+    "element": "Items: thumbnail, name, variant, qty, price, item state and note",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}",
+      "gql store/OrderDetail"
+    ]
+  },
+  {
+    "screen": "account/order",
+    "element": "Per-item actions (Write a review, Return item, View return, Track package, Cancel item, Report a problem)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}",
+      "gql store/OrderDetail"
+    ],
+    "note": "items[].actions and afterSales."
+  },
+  {
+    "screen": "account/order",
+    "element": "Package footer handling note",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}"
+    ],
+    "note": "groups[].handlingNote"
+  },
+  {
+    "screen": "account/order",
+    "element": "Contact seller",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/messaging/conversations"
+    ]
+  },
+  {
+    "screen": "account/order",
+    "element": "Payment summary: items, coupon, shipping, tax, total, paid with, refunded so far, expected refund",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}",
+      "gql store/OrderDetail"
+    ],
+    "note": "totals, including expectedRefunds."
+  },
+  {
+    "screen": "account/order",
+    "element": "Delivery address with address-change note",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}"
+    ]
+  },
+  {
+    "screen": "account/order",
+    "element": "Documents list (receipt and per-seller invoices) with download",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}/documents",
+      "GET /api/store/orders/orders/{id}/documents/{documentId}"
+    ]
+  },
+  {
+    "screen": "account/order",
+    "element": "Need help card: link to open case",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}",
+      "gql store/OrderDetail"
+    ],
+    "note": "cases[]"
+  },
+  {
+    "screen": "account/tracking",
+    "element": "Header: package x of y, order ref",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/shipping/shipments/{id}/tracking",
+      "gql store/OrderDetail"
+    ]
+  },
+  {
+    "screen": "account/tracking",
+    "element": "Estimate headline and note, status, progress steps",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/shipping/shipments/{id}/tracking",
+      "gql store/OrderDetail"
+    ]
+  },
+  {
+    "screen": "account/tracking",
+    "element": "Carrier with Open on usps.com link, tracking number",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/shipping/shipments/{id}/tracking"
+    ],
+    "note": "carrier.externalUrl"
+  },
+  {
+    "screen": "account/tracking",
+    "element": "Copy tracking number",
+    "kind": "action",
+    "status": "client-only",
+    "api": []
+  },
+  {
+    "screen": "account/tracking",
+    "state": "Delivery failed",
+    "element": "Failed delivery alert: reason, held at, choose-by date",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/shipping/shipments/{id}/tracking"
+    ],
+    "note": "failedDelivery"
+  },
+  {
+    "screen": "account/tracking",
+    "state": "Delivery failed",
+    "element": "Next-step options with costs (redeliver, pickup, return to seller) and redelivery dates",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/shipping/shipments/{id}/tracking"
+    ]
+  },
+  {
+    "screen": "account/tracking",
+    "state": "Delivery failed",
+    "element": "Confirm redelivery (with date)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/shipping/shipments/{id}/delivery-choice"
+    ]
+  },
+  {
+    "screen": "account/tracking",
+    "element": "Tracking history events",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/shipping/shipments/{id}/tracking",
+      "gql store/OrderDetail"
+    ]
+  },
+  {
+    "screen": "account/tracking",
+    "element": "In this package: item thumbnail, name, variant, qty, seller line, ships from",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/shipping/shipments/{id}/tracking",
+      "GET /api/store/orders/orders/{id}",
+      "gql store/OrderDetail"
+    ],
+    "note": "REST ShipmentLine has no image, so the client joins orderItemId to the order items. The gql query returns both."
+  },
+  {
+    "screen": "account/tracking",
+    "element": "Other packages with status",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/shipping/shipments/{id}/tracking"
+    ]
+  },
+  {
+    "screen": "account/tracking",
+    "element": "Contact Pixel & Port",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/messaging/conversations"
+    ]
+  },
+  {
+    "screen": "account/tracking",
+    "element": "Help note (tracking says delivered)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/shipping/shipments/{id}/tracking"
+    ],
+    "note": "helpNote"
+  },
+  {
+    "screen": "account/cancel",
+    "state": "Select items",
+    "element": "Cancellation cutoff rule",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}/cancellation-options"
+    ]
+  },
+  {
+    "screen": "account/cancel",
+    "state": "Select items",
+    "element": "Items with eligibility, reason, alternative link (track, return, view return), price and refund",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}/cancellation-options"
+    ]
+  },
+  {
+    "screen": "account/cancel",
+    "state": "Select items",
+    "element": "Select items: refund preview updates (item, coupon share, shipping, estimated refund, refund to)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/orders/orders/{id}/cancellation-preview"
+    ]
+  },
+  {
+    "screen": "account/cancel",
+    "state": "Select items",
+    "element": "Reason select and note for the seller",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/orders/orders/{id}/cancellations"
+    ],
+    "note": "reasonCode enum + note."
+  },
+  {
+    "screen": "account/cancel",
+    "state": "Select items",
+    "element": "Request cancellation",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/orders/orders/{id}/cancellations"
+    ]
+  },
+  {
+    "screen": "account/cancel",
+    "state": "Cancellation requested",
+    "element": "Item being cancelled with status",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}/cancellations/{cancellationId}",
+      "gql store/OrderDetail"
+    ]
+  },
+  {
+    "screen": "account/cancel",
+    "state": "Cancellation requested",
+    "element": "What happens next timeline with seller confirm deadline",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}/cancellations/{cancellationId}"
+    ],
+    "note": "respondBy, timeline"
+  },
+  {
+    "screen": "account/cancel",
+    "state": "Cancellation requested",
+    "element": "Refund card: status, breakdown, destination",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}/cancellations/{cancellationId}"
+    ],
+    "note": "refundStatus, refundPreview"
+  },
+  {
+    "screen": "account/cancel",
+    "state": "Cancellation requested",
+    "element": "Message Casa Verde Home",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/messaging/conversations"
+    ]
+  },
+  {
+    "screen": "account/returns",
+    "element": "Stat cards: open returns, refunds on the way, refunded this year",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/returns/requests/overview"
+    ]
+  },
+  {
+    "screen": "account/returns",
+    "element": "Tabs Open / Completed / All with counts",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/returns/requests",
+      "GET /api/store/returns/requests/overview"
+    ],
+    "note": "The state query filters. The Open count comes from overview.openReturns; the other counts come from the paging total (one limit=1 call per tab)."
+  },
+  {
+    "screen": "account/returns",
+    "element": "Return rows: ref, opened, order, product image and name, seller, refund amount, return status, refund status, next step",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/returns/requests"
+    ]
+  },
+  {
+    "screen": "account/return-new",
+    "state": "Choose items",
+    "element": "Delivered items with eligibility, reason when not available, quantity select",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/returns/orders/{orderId}/returnable-items"
+    ]
+  },
+  {
+    "screen": "account/return-new",
+    "state": "Choose items",
+    "element": "Return policy summary card",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/returns/policy"
+    ]
+  },
+  {
+    "screen": "account/return-new",
+    "state": "Reason and remedy",
+    "element": "Reason select and who-pays-return-shipping table",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/store/returns/eligibility",
+      "GET /api/store/returns/policy"
+    ],
+    "note": "terms.responsibilities"
+  },
+  {
+    "screen": "account/return-new",
+    "state": "Reason and remedy",
+    "element": "Photos or video upload",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/media/uploads",
+      "POST /api/store/media/uploads/{id}/complete",
+      "DELETE /api/store/media/assets/{id}"
+    ]
+  },
+  {
+    "screen": "account/return-new",
+    "state": "Reason and remedy",
+    "element": "Remedy options (refund, replacement, store credit) with descriptions",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/store/returns/eligibility"
+    ],
+    "note": "remedies[] with available/unavailableReason."
+  },
+  {
+    "screen": "account/return-new",
+    "state": "Reason and remedy",
+    "element": "Eligibility panel: return by, ships back to, return shipping, response time",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/store/returns/eligibility"
+    ]
+  },
+  {
+    "screen": "account/return-new",
+    "state": "Review",
+    "element": "Check your request summary, including send-back method and deadline",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/store/returns/eligibility"
+    ],
+    "note": "labelMethod, returnBy. The other rows are the customer inputs."
+  },
+  {
+    "screen": "account/return-new",
+    "state": "Review",
+    "element": "Refund estimate: item, shipping, coupon share, return shipping, estimated refund",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/store/returns/eligibility"
+    ],
+    "note": "estimate (RefundBreakdown)"
+  },
+  {
+    "screen": "account/return-new",
+    "state": "Review",
+    "element": "Request return",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/returns/requests"
+    ]
+  },
+  {
+    "screen": "account/return",
+    "element": "Header: return ref, order, requested date",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/returns/requests/{id}",
+      "gql store/ReturnDetail"
+    ]
+  },
+  {
+    "screen": "account/return",
+    "element": "Item, variant, qty, reason, seller; return status track",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/returns/requests/{id}",
+      "gql store/ReturnDetail"
+    ]
+  },
+  {
+    "screen": "account/return",
+    "state": "Approved: send it back",
+    "element": "Drop-off card: QR code, steps, nearest drop-off point, deadline, destination address",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/returns/requests/{id}/label",
+      "gql store/ReturnDetail"
+    ]
+  },
+  {
+    "screen": "account/return",
+    "state": "Approved: send it back",
+    "element": "Email me the code",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/returns/requests/{id}/label/email"
+    ]
+  },
+  {
+    "screen": "account/return",
+    "state": "Approved: send it back",
+    "element": "Print label instead",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/returns/requests/{id}/label"
+    ],
+    "note": "labelUrl"
+  },
+  {
+    "screen": "account/return",
+    "element": "Return shipment card: carrier, tracking, route, status, timeline",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/returns/requests/{id}",
+      "gql store/ReturnDetail"
+    ]
+  },
+  {
+    "screen": "account/return",
+    "state": "Approved: send it back",
+    "element": "Refund card: status, track, breakdown, destination",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/returns/requests/{id}",
+      "GET /api/store/payments/refunds/{id}",
+      "gql store/ReturnDetail"
+    ]
+  },
+  {
+    "screen": "account/return",
+    "state": "Refund sent",
+    "element": "Refund sent alert with date, destination and bank reference",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/returns/requests/{id}",
+      "gql store/ReturnDetail"
+    ],
+    "note": "refund.sentAt, bankReference"
+  },
+  {
+    "screen": "account/return",
+    "state": "Replacement on the way",
+    "element": "Replacement alert and Remedy card (refund due 0, no charge)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/returns/requests/{id}",
+      "gql store/ReturnDetail"
+    ],
+    "note": "replacement.chargeNote, remedy"
+  },
+  {
+    "screen": "account/return",
+    "state": "Replacement on the way",
+    "element": "Replacement shipment: ETA, carrier, tracking, steps, events",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/ReturnDetail",
+      "GET /api/store/shipping/shipments/{id}/tracking"
+    ],
+    "note": "REST reads it via replacement.shippingShipmentId."
+  },
+  {
+    "screen": "account/return",
+    "element": "Copy tracking number",
+    "kind": "action",
+    "status": "client-only",
+    "api": []
+  },
+  {
+    "screen": "account/return",
+    "state": "Replacement on the way",
+    "element": "Original order card (status, total, unchanged)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/ReturnDetail",
+      "GET /api/store/orders/orders/{id}"
+    ]
+  },
+  {
+    "screen": "account/return",
+    "element": "Message Marketly Official",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/messaging/conversations"
+    ],
+    "note": "returnId in StartConversationInput."
+  },
+  {
+    "screen": "account/return",
+    "element": "Open a support case",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/returns/requests/{id}/escalate"
+    ]
+  },
+  {
+    "screen": "account/messages",
+    "element": "Inbox: counterparty logo/name, subject, preview, time, unread dot",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/messaging/conversations"
+    ]
+  },
+  {
+    "screen": "account/messages",
+    "element": "Search messages",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/messaging/conversations"
+    ],
+    "note": "q"
+  },
+  {
+    "screen": "account/messages",
+    "element": "Thread header: counterparty, verified badge, response time, location",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/messaging/conversations/{id}"
+    ]
+  },
+  {
+    "screen": "account/messages",
+    "element": "Linked order strip: order ref, package label, item, live status",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/messaging/conversations/{id}"
+    ],
+    "note": "subject"
+  },
+  {
+    "screen": "account/messages",
+    "element": "Conversation: messages, author labels, system lines, attachments",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/messaging/conversations/{id}/messages"
+    ]
+  },
+  {
+    "screen": "account/messages",
+    "element": "Mark read when the thread opens",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/messaging/conversations/{id}/read"
+    ]
+  },
+  {
+    "screen": "account/messages",
+    "element": "Attach a photo or file",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/media/uploads",
+      "POST /api/store/media/uploads/{id}/complete"
+    ]
+  },
+  {
+    "screen": "account/messages",
+    "element": "Send message",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/messaging/conversations/{id}/messages"
+    ]
+  },
+  {
+    "screen": "account/messages",
+    "element": "Rules note (keep payments and contact details on Marketly)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/messaging/conversations/{id}"
+    ],
+    "note": "rulesNote"
+  },
+  {
+    "screen": "account/notifications",
+    "element": "Mark all as read",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/notifications/inbox/read-all"
+    ]
+  },
+  {
+    "screen": "account/notifications",
+    "element": "Filter chips (All, Orders, Returns & refunds, Cases, Account, Promotions)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/notifications/inbox"
+    ],
+    "note": "group"
+  },
+  {
+    "screen": "account/notifications",
+    "element": "Order and account updates grouped Today / This week: icon, tone, title, body, time, tag, linked ref, unread",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/notifications/inbox"
+    ]
+  },
+  {
+    "screen": "account/notifications",
+    "element": "Open a notice (marks it read)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/notifications/inbox/{id}/read"
+    ]
+  },
+  {
+    "screen": "account/notifications",
+    "element": "Promotions and alerts section",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/notifications/inbox"
+    ],
+    "note": "category promotional / group promotions"
+  },
+  {
+    "screen": "account/addresses",
+    "state": "Addresses",
+    "element": "Address cards: label, default badge, name, address, phone",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/customers/addresses"
+    ]
+  },
+  {
+    "screen": "account/addresses",
+    "state": "Addresses",
+    "element": "Set as default",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/customers/addresses/{id}/make-default"
+    ]
+  },
+  {
+    "screen": "account/addresses",
+    "state": "Addresses",
+    "element": "Remove",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "DELETE /api/store/customers/addresses/{id}"
+    ]
+  },
+  {
+    "screen": "account/addresses",
+    "state": "Addresses",
+    "element": "Open order link in the address-change notice",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders"
+    ],
+    "note": "tab=in_progress"
+  },
+  {
+    "screen": "account/addresses",
+    "state": "Edit address",
+    "element": "Save address (label, name, street, apt, city, state, ZIP, phone, delivery instructions, make default)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PATCH /api/store/customers/addresses/{id}",
+      "POST /api/store/customers/addresses"
+    ]
+  },
+  {
+    "screen": "account/addresses",
+    "state": "Edit address",
+    "element": "ZIP validation error",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/store/customers/addresses/validate"
+    ],
+    "note": "Saving also returns VALIDATION_FAILED with details.issues."
+  },
+  {
+    "screen": "account/profile",
+    "element": "Personal details form and Save changes (name, phone)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/customers/profile",
+      "PATCH /api/store/customers/profile"
+    ]
+  },
+  {
+    "screen": "account/profile",
+    "element": "Email with Verified status and date",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/customers/profile"
+    ]
+  },
+  {
+    "screen": "account/profile",
+    "element": "Change email (verification to new address)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/identity/email-changes",
+      "POST /api/public/identity/verifications/{id}/confirm"
+    ]
+  },
+  {
+    "screen": "account/profile",
+    "element": "Change mobile phone (verification code)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PATCH /api/store/customers/profile",
+      "POST /api/public/identity/verifications/{id}/confirm"
+    ]
+  },
+  {
+    "screen": "account/profile",
+    "element": "Order and account messages: always-on explanation",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/notifications/preferences"
+    ],
+    "note": "essential"
+  },
+  {
+    "screen": "account/profile",
+    "element": "Promotions toggles: email, SMS, push promotions, wishlist alerts",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/customers/marketing-preferences",
+      "PUT /api/store/customers/marketing-preferences"
+    ]
+  },
+  {
+    "screen": "account/profile",
+    "element": "Request my data",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/customers/data-requests/exports",
+      "GET /api/store/customers/data-requests"
+    ]
+  },
+  {
+    "screen": "account/profile",
+    "element": "Close account: blockers (open orders, returns, cases) and disabled button",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/customers/closure-eligibility"
+    ]
+  },
+  {
+    "screen": "account/profile",
+    "element": "Close account",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/customers/data-requests/closure",
+      "POST /api/store/identity/reauth"
+    ]
+  },
+  {
+    "screen": "account/security",
+    "element": "2-step verification is off warning",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/identity/security"
+    ],
+    "note": "warnings"
+  },
+  {
+    "screen": "account/security",
+    "element": "Password card: last changed",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/identity/security"
+    ]
+  },
+  {
+    "screen": "account/security",
+    "element": "Change password",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PUT /api/store/identity/password"
+    ]
+  },
+  {
+    "screen": "account/security",
+    "element": "2-step verification status badge",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/identity/security"
+    ]
+  },
+  {
+    "screen": "account/security",
+    "element": "Turn on 2-step verification with an authenticator app",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/identity/two-step/setups",
+      "POST /api/store/identity/two-step/setups/{id}/confirm"
+    ]
+  },
+  {
+    "screen": "account/security",
+    "element": "2-step by text message option",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/store/identity/two-step/setups",
+      "POST /api/public/identity/sign-in-challenges/{id}/send-sms"
+    ],
+    "note": "The identity spec puts the SMS method in phase 2 (TwoStepSetupRequest.phone and send-sms are phase 2). Plan ch. 19 adds SMS later."
+  },
+  {
+    "screen": "account/security",
+    "element": "Email verification card",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/identity/security"
+    ]
+  },
+  {
+    "screen": "account/security",
+    "element": "Where you are signed in: devices with this-device badge, location, last active",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/identity/devices",
+      "GET /api/store/identity/security"
+    ]
+  },
+  {
+    "screen": "account/security",
+    "element": "Sign out a device",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/identity/devices/{id}/sign-out"
+    ]
+  },
+  {
+    "screen": "account/security",
+    "element": "Sign out everywhere",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/identity/devices/sign-out-all"
+    ]
+  },
+  {
+    "screen": "account/security",
+    "element": "Recent security activity table",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/identity/security-activity"
+    ]
+  },
+  {
+    "screen": "account/payment-methods",
+    "element": "Saved cards: label, brand, last 4, expiry, expired, default, billing summary",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/payments/methods"
+    ]
+  },
+  {
+    "screen": "account/payment-methods",
+    "element": "Update expiry",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PATCH /api/store/payments/methods/{id}"
+    ]
+  },
+  {
+    "screen": "account/payment-methods",
+    "element": "Make default",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/payments/methods/{id}/make-default"
+    ]
+  },
+  {
+    "screen": "account/payment-methods",
+    "element": "Remove card",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "DELETE /api/store/payments/methods/{id}"
+    ]
+  },
+  {
+    "screen": "account/payment-methods",
+    "element": "Accepted card brands",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/payments/options"
+    ],
+    "note": "acceptedBrands. GET options declares amount/currency as required, so the account page must send placeholder values unless the spec makes them optional."
+  },
+  {
+    "screen": "account/payment-methods",
+    "element": "Billing address choices (saved addresses or a new one)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/customers/addresses"
+    ]
+  },
+  {
+    "screen": "account/payment-methods",
+    "element": "Add a card and Save card (provider fields, label, billing address, make default)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/payments/methods/setup",
+      "POST /api/store/payments/methods"
+    ]
+  },
+  {
+    "screen": "account/review",
+    "element": "Product header: Verified Purchase, delivered date, order ref, seller",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/reviews/me/review-context/{orderItemId}"
+    ]
+  },
+  {
+    "screen": "account/review",
+    "element": "Product review: rating, headline, text (min length), show name",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/reviews/me/reviews",
+      "PATCH /api/store/reviews/me/reviews/{id}"
+    ]
+  },
+  {
+    "screen": "account/review",
+    "element": "Add review photos",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/media/uploads",
+      "POST /api/store/media/uploads/{id}/complete",
+      "PATCH /api/store/media/assets/{id}"
+    ]
+  },
+  {
+    "screen": "account/review",
+    "element": "Seller feedback: as described, dispatch speed, communication, comment",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/reviews/me/feedback",
+      "PATCH /api/store/reviews/me/feedback/{id}"
+    ]
+  },
+  {
+    "screen": "account/review",
+    "element": "Dispatch speed caption (arrived 1 day early)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/reviews/me/review-context/{orderItemId}",
+      "gql store/OrderDetail"
+    ],
+    "note": "deliveredAt comes from the review context and the promised arrival from the order."
+  },
+  {
+    "screen": "account/review",
+    "element": "Review guidelines",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/reviews/me/review-context/{orderItemId}"
+    ]
+  },
+  {
+    "screen": "account/review",
+    "element": "Save draft (product review and seller feedback)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/reviews/me/feedback",
+      "PATCH /api/store/reviews/me/feedback/{id}"
+    ],
+    "proposal": {
+      "module": "reviews",
+      "change": "add field draft: bool? to FeedbackInput (and status draft to MyFeedback) so the seller feedback part can be saved as a draft like the product review"
+    },
+    "note": "ReviewInput.draft exists, but FeedbackInput has no draft field. Fixed: Added draft to FeedbackInput/FeedbackUpdateInput and status draft to MyFeedback and the seller feedback state machine.",
+    "resolvedBy": "people"
+  },
+  {
+    "screen": "account/review",
+    "element": "Post review",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/reviews/me/reviews",
+      "POST /api/store/reviews/me/feedback"
+    ]
+  },
+  {
+    "screen": "account/reviews",
+    "element": "Tabs with counts (Product reviews, Seller feedback, Reports you made)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/reviews/me/reviews",
+      "GET /api/store/reviews/me/feedback",
+      "GET /api/store/reviews/me/reports",
+      "GET /api/store/trust/reports"
+    ],
+    "note": "The counts come from paging totals."
+  },
+  {
+    "screen": "account/reviews",
+    "state": "Product reviews",
+    "element": "Waiting for your review list with Write a review",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/reviews/me/pending"
+    ]
+  },
+  {
+    "screen": "account/reviews",
+    "state": "Product reviews",
+    "element": "Your reviews: stars, headline, text, status, Verified Purchase, posted date, helpful count, visibility",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/reviews/me/reviews"
+    ]
+  },
+  {
+    "screen": "account/reviews",
+    "state": "Product reviews",
+    "element": "Moderation outcome: hidden under review with decision date; removed with reason and appeal-by",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/reviews/me/reviews"
+    ],
+    "note": "moderation, appeal"
+  },
+  {
+    "screen": "account/reviews",
+    "state": "Product reviews",
+    "element": "Edit / Edit and resubmit",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PATCH /api/store/reviews/me/reviews/{id}"
+    ]
+  },
+  {
+    "screen": "account/reviews",
+    "state": "Product reviews",
+    "element": "Delete review",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "DELETE /api/store/reviews/me/reviews/{id}"
+    ]
+  },
+  {
+    "screen": "account/reviews",
+    "state": "Product reviews",
+    "element": "Appeal this decision",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/reviews/me/appeals"
+    ]
+  },
+  {
+    "screen": "account/reviews",
+    "state": "Seller feedback",
+    "element": "Waiting for your feedback (eligible, or disabled with available-after-delivery note)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/reviews/me/pending"
+    ]
+  },
+  {
+    "screen": "account/reviews",
+    "state": "Seller feedback",
+    "element": "Feedback you gave: seller, order, posted date, as described, dispatch, communication, comment, seller public reply, status",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/reviews/me/feedback"
+    ]
+  },
+  {
+    "screen": "account/reviews",
+    "state": "Seller feedback",
+    "element": "Edit / Delete feedback",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PATCH /api/store/reviews/me/feedback/{id}",
+      "DELETE /api/store/reviews/me/feedback/{id}"
+    ]
+  },
+  {
+    "screen": "account/reviews",
+    "state": "Reports you made",
+    "element": "Reports: what, about, you said, date, status, outcome, case ref",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/reviews/me/reports",
+      "GET /api/store/trust/reports"
+    ],
+    "note": "Two sources are merged. Spec inconsistency: the trust listMyReports description points to GET /api/store/reviews/my-reports, but the real path is /api/store/reviews/me/reports."
+  },
+  {
+    "screen": "account/wishlist",
+    "element": "Header: saved item count",
+    "kind": "data",
+    "status": "later",
+    "api": [
+      "GET /api/store/wishlist/wishlist"
+    ],
+    "note": "Plan ch. 3 lists Saved shopping as Growth and ch. 20 puts Wishlist in phase 3. The wishlist module is phase 3."
+  },
+  {
+    "screen": "account/wishlist",
+    "element": "Share list",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/store/wishlist/lists/{id}/share"
+    ],
+    "note": "Plan ch. 3 lists Saved shopping as Growth and ch. 20 puts Wishlist in phase 3. The wishlist module is phase 3."
+  },
+  {
+    "screen": "account/wishlist",
+    "element": "Saved item cards: image, name, seller, price/was, price hint, stock",
+    "kind": "data",
+    "status": "later",
+    "api": [
+      "GET /api/store/wishlist/wishlist"
+    ],
+    "note": "Plan ch. 3 lists Saved shopping as Growth and ch. 20 puts Wishlist in phase 3. The wishlist module is phase 3."
+  },
+  {
+    "screen": "account/wishlist",
+    "element": "Remove item from wishlist",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "DELETE /api/store/wishlist/items/{id}"
+    ],
+    "note": "Plan ch. 3 lists Saved shopping as Growth and ch. 20 puts Wishlist in phase 3. The wishlist module is phase 3."
+  },
+  {
+    "screen": "account/wishlist",
+    "element": "Price-drop and back-in-stock toggles",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "PUT /api/store/wishlist/items/{id}/alerts"
+    ],
+    "note": "Plan ch. 3 lists Saved shopping as Growth and ch. 20 puts Wishlist in phase 3. The wishlist module is phase 3."
+  },
+  {
+    "screen": "account/wishlist",
+    "element": "Move to cart",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/store/wishlist/items/{id}/move-to-cart"
+    ],
+    "note": "Plan ch. 3 lists Saved shopping as Growth and ch. 20 puts Wishlist in phase 3. The wishlist module is phase 3."
+  },
+  {
+    "screen": "account/wishlist",
+    "element": "Your alerts table: item, alert, condition, status",
+    "kind": "data",
+    "status": "later",
+    "api": [
+      "GET /api/store/wishlist/alerts"
+    ],
+    "note": "Plan ch. 3 lists Saved shopping as Growth and ch. 20 puts Wishlist in phase 3. The wishlist module is phase 3."
+  },
+  {
+    "screen": "account/wishlist",
+    "element": "Remove alert",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "DELETE /api/store/wishlist/alerts/{id}"
+    ],
+    "note": "Plan ch. 3 lists Saved shopping as Growth and ch. 20 puts Wishlist in phase 3. The wishlist module is phase 3."
+  },
+  {
+    "screen": "account/wishlist",
+    "element": "Recently viewed strip with prices",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/customers/recently-viewed"
+    ]
+  },
+  {
+    "screen": "account/wishlist",
+    "element": "Clear history",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "DELETE /api/store/customers/recently-viewed"
+    ]
+  },
+  {
+    "screen": "account/coupons",
+    "element": "Store credit balance, expiry, how to use",
+    "kind": "data",
+    "status": "later",
+    "api": [
+      "GET /api/store/wallet/credit"
+    ],
+    "note": "Plan ch. 15 lists store credit under Later services, and the wallet module is phase 3."
+  },
+  {
+    "screen": "account/coupons",
+    "element": "Credit history table",
+    "kind": "data",
+    "status": "later",
+    "api": [
+      "GET /api/store/wallet/credit/entries"
+    ],
+    "note": "Plan ch. 15 lists store credit under Later services, and the wallet module is phase 3."
+  },
+  {
+    "screen": "account/coupons",
+    "element": "Available coupons: amount, unit, title, conditions, code, expiry, clipped state",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/promotions/coupons"
+    ]
+  },
+  {
+    "screen": "account/coupons",
+    "element": "Clip coupon",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/promotions/coupons/{campaignId}/clip"
+    ]
+  },
+  {
+    "screen": "account/coupons",
+    "element": "Coupon terms",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/promotions/coupons",
+      "GET /api/store/promotions/campaigns/{id}/eligible-products"
+    ],
+    "note": "CouponCard.terms"
+  },
+  {
+    "screen": "account/coupons",
+    "element": "Coupon rules note",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/promotions/coupons"
+    ],
+    "note": "rules"
+  },
+  {
+    "screen": "account/coupons",
+    "element": "Used and expired coupons",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/promotions/coupons"
+    ],
+    "note": "usedOrExpired with usedOn"
+  },
+  {
+    "screen": "help/center",
+    "element": "Greeting with first name",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/customers/profile"
+    ]
+  },
+  {
+    "screen": "help/center",
+    "element": "Search help",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/help/articles"
+    ],
+    "note": "q"
+  },
+  {
+    "screen": "help/center",
+    "element": "Popular search links",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/help"
+    ]
+  },
+  {
+    "screen": "help/center",
+    "element": "Browse by topic",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/help"
+    ]
+  },
+  {
+    "screen": "help/center",
+    "element": "Popular articles",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/help"
+    ]
+  },
+  {
+    "screen": "help/center",
+    "element": "Contact cards (chat, phone, message) with hours and wait, seller-first note",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/help",
+      "GET /api/store/support/contact-options",
+      "GET /api/public/settings/app-config"
+    ]
+  },
+  {
+    "screen": "help/center",
+    "element": "Start chat",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/support/cases"
+    ],
+    "note": "replyChannel=chat starts a case whose thread is the chat (POST /api/store/support/cases/{id}/messages). There is no realtime transport, so the client polls the case."
+  },
+  {
+    "screen": "help/center",
+    "element": "Get help with a recent order: 3 orders with thumbnails, ref, date, item and seller counts, status",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders",
+      "gql store/OrderList"
+    ]
+  },
+  {
+    "screen": "help/center",
+    "element": "Your support cases: open count and next action",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/cases"
+    ],
+    "note": "state=open"
+  },
+  {
+    "screen": "help/article",
+    "element": "Article: breadcrumb, title, effective and updated dates, read time, body with steps and who-pays table",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/help/articles/{slug}"
+    ]
+  },
+  {
+    "screen": "help/article",
+    "element": "Was this helpful? Yes / No",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/content/help/articles/{id}/feedback"
+    ]
+  },
+  {
+    "screen": "help/article",
+    "element": "Related articles",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/help/articles/{slug}"
+    ]
+  },
+  {
+    "screen": "help/contact",
+    "element": "Topic select",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/contact-options"
+    ]
+  },
+  {
+    "screen": "help/contact",
+    "element": "Order select",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders"
+    ]
+  },
+  {
+    "screen": "help/contact",
+    "element": "Item select for the chosen order",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/orders/{orderId}/problem-context"
+    ]
+  },
+  {
+    "screen": "help/contact",
+    "element": "Existing open case note for the item",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/orders/{orderId}/problem-context"
+    ],
+    "note": "openCases"
+  },
+  {
+    "screen": "help/contact",
+    "element": "Attachments upload",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/media/uploads",
+      "POST /api/store/media/uploads/{id}/complete"
+    ]
+  },
+  {
+    "screen": "help/contact",
+    "element": "Reply channel options with expected response, reply email and call-back phone",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/contact-options",
+      "GET /api/store/customers/profile"
+    ]
+  },
+  {
+    "screen": "help/contact",
+    "element": "Send message",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/support/cases"
+    ],
+    "note": "kind customer_help, replyChannel, callbackPhone, mediaIds."
+  },
+  {
+    "screen": "help/contact",
+    "element": "Support hours card and seller-first note",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/contact-options"
+    ]
+  },
+  {
+    "screen": "help/order-problem",
+    "element": "Header: order ref and placed date",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/orders/{orderId}/problem-context"
+    ]
+  },
+  {
+    "screen": "help/order-problem",
+    "element": "Affected items per package with seller badge, status; preselected item",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/orders/{orderId}/problem-context"
+    ]
+  },
+  {
+    "screen": "help/order-problem",
+    "element": "Problem type options",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/orders/{orderId}/problem-context"
+    ],
+    "note": "problemTypes"
+  },
+  {
+    "screen": "help/order-problem",
+    "element": "Package warning (due date, new estimate, no tracking)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/orders/{orderId}/problem-context"
+    ],
+    "note": "packages[].warning"
+  },
+  {
+    "screen": "help/order-problem",
+    "element": "Add photos",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/media/uploads",
+      "POST /api/store/media/uploads/{id}/complete",
+      "DELETE /api/store/media/assets/{id}"
+    ]
+  },
+  {
+    "screen": "help/order-problem",
+    "element": "Remedy choices with amount",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/orders/{orderId}/problem-context"
+    ],
+    "note": "remedyChoices"
+  },
+  {
+    "screen": "help/order-problem",
+    "element": "Who handles this: seller first, reply-by date, when Marketly steps in",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/orders/{orderId}/problem-context"
+    ]
+  },
+  {
+    "screen": "help/order-problem",
+    "element": "Other items in this order note",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/orders/{orderId}/problem-context"
+    ]
+  },
+  {
+    "screen": "help/order-problem",
+    "element": "Send to Casa Verde Home",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/support/cases"
+    ],
+    "note": "kind order_problem, problemType, desiredRemedy."
+  },
+  {
+    "screen": "help/cases",
+    "element": "Needs your reply alert",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/cases"
+    ],
+    "note": "nextAction.youNeedToAct"
+  },
+  {
+    "screen": "help/cases",
+    "element": "Tabs Open / Closed / All with counts",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/cases"
+    ],
+    "note": "The state query filters; the counts come from paging totals."
+  },
+  {
+    "screen": "help/cases",
+    "element": "Cases: ref, subject with image, order, status, handled by and role, next action, expected reply",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/cases"
+    ]
+  },
+  {
+    "screen": "help/case",
+    "element": "Header: case ref, status, subject, opened, category, priority",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/cases/{id}",
+      "gql store/CaseDetail"
+    ]
+  },
+  {
+    "screen": "help/case",
+    "element": "Owner strip: handled by, next action and who must act, expected response",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/cases/{id}",
+      "gql store/CaseDetail"
+    ]
+  },
+  {
+    "screen": "help/case",
+    "element": "Conversation with labelled messages and attachments",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/cases/{id}",
+      "gql store/CaseDetail"
+    ]
+  },
+  {
+    "screen": "help/case",
+    "state": "Open",
+    "element": "Reply with Add photos and Send reply",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/support/cases/{id}/messages",
+      "POST /api/store/media/uploads",
+      "POST /api/store/media/uploads/{id}/complete"
+    ]
+  },
+  {
+    "screen": "help/case",
+    "state": "Decision made",
+    "element": "Decision card: outcome, reason, remedy, refund to, funded by",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/cases/{id}",
+      "gql store/CaseDetail"
+    ],
+    "note": "decision, remedies (chargedTo, destination)"
+  },
+  {
+    "screen": "help/case",
+    "state": "Decision made",
+    "element": "Refund progress track",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/cases/{id}",
+      "gql store/CaseDetail"
+    ],
+    "note": "remedies[].track/currentStep"
+  },
+  {
+    "screen": "help/case",
+    "state": "Decision made",
+    "element": "Appeal deadline and route",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/cases/{id}",
+      "gql store/CaseDetail"
+    ]
+  },
+  {
+    "screen": "help/case",
+    "state": "Decision made",
+    "element": "Appeal this decision",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/support/cases/{id}/appeal"
+    ]
+  },
+  {
+    "screen": "help/case",
+    "state": "Decision made",
+    "element": "Reopen rules",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/cases/{id}"
+    ],
+    "note": "reopenRules, reopenUntil"
+  },
+  {
+    "screen": "help/case",
+    "state": "Decision made",
+    "element": "Reply",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/support/cases/{id}/messages"
+    ]
+  },
+  {
+    "screen": "help/case",
+    "element": "Linked item card: item, options, price, order, package, item status, estimate",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/cases/{id}",
+      "gql store/CaseDetail"
+    ]
+  },
+  {
+    "screen": "help/case",
+    "element": "Attachments with file size",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/CaseDetail",
+      "GET /api/store/media/assets/{id}/download"
+    ]
+  },
+  {
+    "screen": "help/case",
+    "element": "Case timeline",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/support/cases/{id}",
+      "gql store/CaseDetail"
+    ]
+  },
+  {
+    "screen": "info/policy",
+    "element": "Policy list (side menu and phone picker)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/policies"
+    ]
+  },
+  {
+    "screen": "info/policy",
+    "element": "Policy header: effective date, version, owner",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/policies/{key}"
+    ]
+  },
+  {
+    "screen": "info/policy",
+    "element": "Previous versions",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/policies/{key}/versions",
+      "GET /api/store/content/policy-versions/{id}"
+    ]
+  },
+  {
+    "screen": "info/policy",
+    "element": "Orders keep the terms accepted at purchase alert",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/policies/{key}"
+    ],
+    "note": "ordersNote"
+  },
+  {
+    "screen": "info/policy",
+    "element": "Policy body with tables",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/policies/{key}"
+    ]
+  },
+  {
+    "screen": "info/policy",
+    "state": "Returns",
+    "element": "Who pays return shipping and category exceptions tables",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/policies/{key}",
+      "GET /api/store/returns/policy"
+    ]
+  },
+  {
+    "screen": "info/about",
+    "element": "About page: hybrid model, how sellers are checked, label meanings, company facts, contact details",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/pages/{slug}",
+      "GET /api/store/content/navigation"
+    ]
+  },
+  {
+    "screen": "sell/landing",
+    "element": "Hero stats: launch categories, example commission, payout schedule, monthly fee; apply CTA availability",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/program"
+    ],
+    "note": "applicationsOpen"
+  },
+  {
+    "screen": "sell/landing",
+    "element": "What you can sell and not allowed",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/program"
+    ]
+  },
+  {
+    "screen": "sell/landing",
+    "element": "Seller requirements",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/program"
+    ]
+  },
+  {
+    "screen": "sell/landing",
+    "element": "Fees by category (example) and how a sale works out",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/program",
+      "GET /api/public/finance/fee-schedule"
+    ]
+  },
+  {
+    "screen": "sell/landing",
+    "element": "When you get paid timeline",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/program"
+    ],
+    "note": "payoutTiming"
+  },
+  {
+    "screen": "sell/landing",
+    "element": "Who ships (launch / later)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/program"
+    ],
+    "note": "fulfillmentModels"
+  },
+  {
+    "screen": "sell/landing",
+    "element": "Service expectations",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/program"
+    ],
+    "note": "serviceTargets"
+  },
+  {
+    "screen": "sell/landing",
+    "element": "How to join steps, FAQ, seller team contact",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/program"
+    ]
+  },
+  {
+    "screen": "sell/apply",
+    "element": "Progress: step x of 6, percent complete, draft saved time",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/applications/current"
+    ]
+  },
+  {
+    "screen": "sell/apply",
+    "element": "Save draft and exit",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PATCH /api/store/sellers/applications/{id}"
+    ]
+  },
+  {
+    "screen": "sell/apply",
+    "element": "What you'll need checklist",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/applications/current"
+    ],
+    "note": "completedSteps, missing"
+  },
+  {
+    "screen": "sell/apply",
+    "state": "Seller account",
+    "element": "Account choice, contact, phone, work email, store name, seller type, market, tips opt-in; Create account and continue",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/sellers/applications",
+      "POST /api/public/identity/registrations",
+      "POST /api/public/identity/verifications/{id}/confirm"
+    ],
+    "note": "new_seller_login registers through identity first."
+  },
+  {
+    "screen": "sell/apply",
+    "state": "Seller account",
+    "element": "Password rules",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/public/identity/password-policy"
+    ]
+  },
+  {
+    "screen": "sell/apply",
+    "state": "Business details",
+    "element": "Business form and categories to sell; Continue",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PATCH /api/store/sellers/applications/{id}",
+      "GET /api/store/sellers/program"
+    ],
+    "note": "launchCategories"
+  },
+  {
+    "screen": "sell/apply",
+    "state": "Verification",
+    "element": "Business owner with verification status; uploaded ID files",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/applications/current"
+    ],
+    "note": "verification.owners[].verificationState, documents"
+  },
+  {
+    "screen": "sell/apply",
+    "state": "Verification",
+    "element": "Upload business registration document",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/media/uploads",
+      "POST /api/store/media/uploads/{id}/complete",
+      "POST /api/store/sellers/applications/{id}/documents"
+    ]
+  },
+  {
+    "screen": "sell/apply",
+    "state": "Verification",
+    "element": "EIN and W-9 method; Continue to payout",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PATCH /api/store/sellers/applications/{id}"
+    ]
+  },
+  {
+    "screen": "sell/apply",
+    "state": "Payout and return address",
+    "element": "Payout account form; Return address (same as business)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PATCH /api/store/sellers/applications/{id}"
+    ]
+  },
+  {
+    "screen": "sell/apply",
+    "state": "Payout and return address",
+    "element": "Payout schedule (example)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/program"
+    ]
+  },
+  {
+    "screen": "sell/apply",
+    "state": "Agreement",
+    "element": "Agreement documents with versions and read links",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/applications/current"
+    ],
+    "note": "agreementsRequired"
+  },
+  {
+    "screen": "sell/apply",
+    "state": "Agreement",
+    "element": "Application summary",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/applications/current"
+    ]
+  },
+  {
+    "screen": "sell/apply",
+    "state": "Agreement",
+    "element": "Typed signature and Accept and submit application",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/sellers/applications/{id}/submit"
+    ]
+  },
+  {
+    "screen": "sell/status",
+    "element": "Header: application ref, business, status",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/applications/current"
+    ]
+  },
+  {
+    "screen": "sell/status",
+    "element": "Application progress timeline",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/applications/current"
+    ]
+  },
+  {
+    "screen": "sell/status",
+    "element": "Your application card: applicant, business, categories, submitted",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/applications/current"
+    ]
+  },
+  {
+    "screen": "sell/status",
+    "state": "Information required",
+    "element": "Deadline alert: due date, days left, requested by",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/applications/current"
+    ],
+    "note": "informationRequest"
+  },
+  {
+    "screen": "sell/status",
+    "state": "Information required",
+    "element": "Requested items with what is wrong and the step they are needed for",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/applications/current"
+    ]
+  },
+  {
+    "screen": "sell/status",
+    "state": "Information required",
+    "element": "Upload registration record",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/media/uploads",
+      "POST /api/store/media/uploads/{id}/complete",
+      "POST /api/store/sellers/applications/{id}/documents"
+    ]
+  },
+  {
+    "screen": "sell/status",
+    "state": "Information required",
+    "element": "Street return address form and Save draft",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PATCH /api/store/sellers/applications/{id}"
+    ]
+  },
+  {
+    "screen": "sell/status",
+    "state": "Information required",
+    "element": "Send for review",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/sellers/applications/{id}/respond"
+    ]
+  },
+  {
+    "screen": "sell/status",
+    "state": "Approved",
+    "element": "Approved by and date",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/applications/current"
+    ],
+    "note": "decision"
+  },
+  {
+    "screen": "sell/status",
+    "state": "Approved",
+    "element": "Account status, Product approval and Payout readiness indicators, and the Next: finish setup checklist",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/applications/current"
+    ],
+    "proposal": {
+      "module": "sellers",
+      "change": "add field setupSummary { accountStatus, productApproval: ProductApprovalSummary, payoutReadiness: PayoutReadiness, steps: SetupStep[] } to SellerApplication when state=approved (from the same sources as SetupChecklist)"
+    },
+    "note": "This data exists only in GET /api/seller/sellers/setup, which is in the seller area and needs a seller session. sell/status is a store screen on a customer session. Fixed: Added SellerApplication.setupSummary (ApplicationSetupSummary) when approved.",
+    "resolvedBy": "people"
+  },
+  {
+    "screen": "sell/status",
+    "state": "Rejected",
+    "element": "Reason with rule reference",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/applications/current"
+    ],
+    "note": "decision.explanation, ruleRef"
+  },
+  {
+    "screen": "sell/status",
+    "state": "Rejected",
+    "element": "Appeal deadline and reapply date",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/applications/current"
+    ],
+    "note": "appealDeadline, canReapplyFrom"
+  },
+  {
+    "screen": "sell/status",
+    "state": "Rejected",
+    "element": "Appeal this decision",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/sellers/applications/{id}/appeal"
+    ]
+  },
+  {
+    "screen": "sell/status",
+    "state": "Rejected",
+    "element": "Contact the seller team",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/program"
+    ],
+    "note": "Opens the email/phone from program.contact."
+  },
+  {
+    "screen": "sell/status",
+    "state": "Rejected",
+    "element": "Documents kept 90 days note",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/sellers/applications/current"
+    ],
+    "note": "documents[].deleteAfter"
+  }
+]

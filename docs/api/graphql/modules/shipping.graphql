@@ -1,0 +1,546 @@
+# shipping: delivery estimates, shipments with tracking, failed-delivery choices and delivery exceptions.
+# Adds OrderGroup.shipments, Offer.deliveryEstimate(postalCode), OrderGroup.deliveryExceptions (seller),
+# Order.deliveryExceptions (admin), Seller.shippingSummary (storefront shipping section), ReturnReplacement.shipment,
+# Offer.deliveryEstimate in Seller Center (own offers) and Query.myShippingSetup (seller record-shipment form).
+# Shipping owns dispatch time: sellers' Seller.dispatchLabel is a card shortcut copied from the dispatch schedule.
+# Missing tracking never implies delivery: until a carrier scan, statusLabel reads 'Shipped, tracking pending'.
+
+"""
+One package: carrier, tracking, contents and events. Outbound, replacement and return parcels share this type.
+Store: the customer's own orders. Seller area: the caller's own shipments.
+"""
+type Shipment {
+  id: UUID!
+  kind: ShipmentKind!
+  orderId: UUID!
+  orderRef: String!
+  groupId: UUID!
+  "Set for return parcels"
+  returnId: UUID
+  "'Package 2 of 3'"
+  packageLabel: String!
+  sellerName: String!
+  shipFrom: String!
+  carrierCode: String
+  carrierName: String
+  "e.g. 'UPS Ground'"
+  serviceName: String
+  trackingNumber: String
+  "Carrier tracking page"
+  trackingUrl: URL
+  status: ShipmentStatus!
+  "'Shipped, tracking pending' until a carrier scan; never says delivered without carrier confirmation"
+  statusLabel: String!
+  "Progress steps, e.g. ['Shipped', 'In transit', 'Out for delivery', 'Delivered']"
+  steps: [String!]!
+  "Index into steps"
+  currentStep: Int!
+  "Items and quantities in this package"
+  contents: [ShipmentLine!]!
+  shippedAt: DateTime
+  estimatedFrom: Date
+  estimatedTo: Date
+  "'Fri, Oct 9 – Sat, Oct 10'"
+  estimateLabel: String
+  deliveredAt: DateTime
+  "Set after a failed delivery attempt: options with costs and the choose-by date"
+  failedDelivery: ShipmentFailedDelivery
+  "Carrier and recorded events, newest first"
+  events: [TrackingEvent!]!
+
+  # ---- Store only
+  "'Estimated delivery' or 'Delivery attempt failed'"
+  headline: String! @areas(in: [STORE])
+  "'By 8:00 PM · to Jordan Lee, Portland, OR 97205'"
+  estimateNote: String @areas(in: [STORE])
+  "'If tracking shows delivered but you don't have it, wait until the end of the next day, then report it.'"
+  helpNote: String! @areas(in: [STORE])
+  "Live service notices for the tracking surface"
+  notices: [ShippingNotice!]! @areas(in: [STORE])
+
+  # ---- Seller Center and Admin Center
+  "Format check and first carrier scan; invalid or missing opens a missing_tracking exception"
+  trackingState: ShipmentTrackingState! @areas(in: [SELLER, ADMIN])
+  dispatchedOnTime: Boolean @areas(in: [SELLER, ADMIN])
+  "Label bought through Marketly, if any"
+  label: ShipmentLabel @areas(in: [SELLER, ADMIN])
+  "Tracking corrections with reason and whether the buyer was told"
+  corrections: [ShipmentTrackingCorrection!]! @areas(in: [SELLER, ADMIN])
+  "Open delivery exceptions on this package"
+  openExceptions: [DeliveryException!]! @areas(in: [SELLER, ADMIN])
+  recordedBy: Actor! @areas(in: [SELLER, ADMIN])
+  createdAt: DateTime! @areas(in: [SELLER, ADMIN])
+}
+
+type ShipmentLine {
+  orderItemId: UUID!
+  title: String!
+  variantLabel: String!
+  quantity: Int!
+}
+
+type TrackingEvent {
+  at: DateTime!
+  code: TrackingEventCode!
+  "e.g. 'Arrived at USPS regional facility'"
+  label: String!
+  detail: String
+  "e.g. 'Portland, OR'"
+  location: String
+  source: TrackingEventSource! @areas(in: [SELLER, ADMIN])
+}
+
+type ShipmentFailedDelivery {
+  reason: String!
+  "e.g. 'Portland Main Post Office'"
+  heldAt: String
+  chooseBy: DateTime!
+  options: [ShipmentDeliveryChoiceOption!]!
+  chosen: ShipmentDeliveryChoice
+  "What happens when the customer does not choose (return to seller)"
+  defaultIfNoChoice: ShipmentDeliveryChoiceKind!
+}
+
+type ShipmentDeliveryChoiceOption {
+  choice: ShipmentDeliveryChoiceKind!
+  title: String!
+  description: String!
+  cost: Money!
+  "e.g. return shipping the seller may deduct if the package is auto-returned"
+  costIfNoChoice: Money
+  dates: [Date!]!
+  pickupLocation: String
+}
+
+type ShipmentDeliveryChoice {
+  choice: ShipmentDeliveryChoiceKind!
+  redeliveryDate: Date
+  chosenAt: DateTime!
+  chosenBy: Actor!
+}
+
+type ShipmentLabel @areas(in: [SELLER, ADMIN]) {
+  id: UUID!
+  carrierName: String!
+  serviceName: String!
+  cost: Money!
+  trackingNumber: String!
+  status: ShipmentLabelStatus!
+  purchasedBy: Actor!
+  purchasedAt: DateTime!
+  voidedAt: DateTime
+}
+
+type ShipmentTrackingCorrection @areas(in: [SELLER, ADMIN]) {
+  at: DateTime!
+  from: String!
+  to: String!
+  reason: String!
+  by: Actor!
+  customerNotified: Boolean!
+}
+
+"Holiday or service-interruption notice shown to customers"
+type ShippingNotice {
+  id: UUID!
+  kind: String!
+  title: String!
+  message: String!
+  from: Date!
+  to: Date!
+}
+
+"""
+Delivery estimate for one offer at a location: the default (cheapest eligible) option, flattened for the
+product page and the offers list. Seller Center shows the same estimate on the seller's own offer form
+("what customers see").
+"""
+type DeliveryEstimate @areas(in: [STORE, SELLER]) {
+  shipsToLocation: Boolean!
+  "Customer-facing reason when the offer does not ship there"
+  reason: String
+  "Where the estimate is for: a saved address, the postal code given, or the market default"
+  basis: DeliveryEstimateBasis!
+  "'Portland, OR 97205'"
+  locationLabel: String!
+  methodName: String
+  "'UPS Ground' or 'UPS Ground or USPS Ground Advantage'"
+  carrierService: String
+  price: Money
+  free: Boolean!
+  "'Free over $35'"
+  freeReason: String
+  "Offer price plus this option's shipping, for comparing offers"
+  totalWithShipping: Money
+  arrivalFrom: Date
+  arrivalTo: Date
+  "'Arrives Wed, Oct 14'"
+  arrivalLabel: String
+  dispatchBy: DateTime
+  "'Ships today from Reno, NV'"
+  dispatchLabel: String
+  "Order before this time to keep the date ('Order within 2 h 18 min')"
+  cutoffAt: DateTime
+  notices: [String!]!
+  "Other methods available at checkout"
+  otherOptions: Int!
+}
+
+"A dispatch or delivery problem with its required response, owner and deadline"
+type DeliveryException @areas(in: [SELLER, ADMIN]) {
+  id: UUID!
+  kind: DeliveryExceptionKind!
+  orderId: UUID!
+  orderRef: String!
+  groupId: UUID!
+  shipmentId: UUID
+  sellerName: String!
+  itemsSummary: String!
+  "e.g. 'USPS number not recognized' or 'Label created, no scan 36 h'"
+  situation: String!
+  "The plan's required response for the kind"
+  requiredResponse: String!
+  "e.g. 'Cancel item, refund $112.00'"
+  nextStep: String!
+  customerNotifiedAt: DateTime
+  sellerNotifiedAt: DateTime
+  deadline: Deadline!
+  deadlineLabel: String!
+  status: DeliveryExceptionStatus!
+  escalatedTo: DeliveryExceptionEscalation
+  sellerResponse: DeliverySellerResponse
+  resolution: DeliveryExceptionResolution
+  caseRef: String
+  history: [TimelineEvent!]!
+  openedAt: DateTime!
+
+  # ---- Admin Center only
+  owner: DeliveryExceptionOwner @areas(in: [ADMIN])
+  "Carrier claim filed for a lost or damaged package"
+  claimId: UUID @areas(in: [ADMIN])
+  openedBy: Actor! @areas(in: [ADMIN])
+}
+
+type DeliverySellerResponse @areas(in: [SELLER, ADMIN]) {
+  action: DeliverySellerResponseAction!
+  note: String
+  shipBy: DateTime
+  at: DateTime!
+  by: Actor!
+}
+
+type DeliveryExceptionResolution @areas(in: [SELLER, ADMIN]) {
+  kind: DeliveryExceptionResolutionKind!
+  note: String!
+  by: Actor!
+  at: DateTime!
+}
+
+type DeliveryExceptionOwner @areas(in: [ADMIN]) {
+  staffId: UUID
+  name: String!
+  role: String
+}
+
+type DeliveryExceptionPage implements Paged @areas(in: [ADMIN]) {
+  items: [DeliveryException!]!
+  nextCursor: String
+  page: Int
+  totalPages: Int
+  total: Int
+}
+
+"Open exceptions per kind (queue tiles)"
+type DeliveryExceptionCounts @areas(in: [ADMIN]) {
+  sellerCannotFulfill: Int!
+  lateDispatch: Int!
+  missingTracking: Int!
+  lostOrDamaged: Int!
+  failedDelivery: Int!
+  customerNotNotified: Int!
+}
+
+input DeliveryExceptionFilter @areas(in: [ADMIN]) {
+  kind: DeliveryExceptionKind
+  status: DeliveryExceptionStatus
+  sellerType: ShippingSellerType
+  ownerStaffId: UUID
+  customerNotNotified: Boolean
+  "Order reference, tracking number or seller"
+  q: String
+}
+
+# ------------------------------------------------------------------ enums
+
+enum ShipmentKind {
+  OUTBOUND
+  REPLACEMENT
+  RETURN
+}
+
+enum ShipmentStatus {
+  LABEL_CREATED
+  SHIPPED
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  DELIVERY_FAILED
+  HELD_FOR_PICKUP
+  RETURNING
+  RETURNED_TO_SENDER
+  LOST
+  CANCELLED
+}
+
+enum ShipmentTrackingState @areas(in: [SELLER, ADMIN]) {
+  PENDING
+  VALID
+  INVALID
+  MISSING
+}
+
+enum TrackingEventCode {
+  LABEL_CREATED
+  ACCEPTED
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  ATTEMPT_FAILED
+  HELD_FOR_PICKUP
+  RETURNING
+  RETURNED
+  EXCEPTION
+  INFO
+}
+
+enum TrackingEventSource @areas(in: [SELLER, ADMIN]) {
+  CARRIER_WEBHOOK
+  CARRIER_POLL
+  SELLER
+  STAFF
+  WAREHOUSE
+}
+
+enum ShipmentDeliveryChoiceKind {
+  REDELIVER
+  PICKUP
+  RETURN_TO_SELLER
+}
+
+enum ShipmentLabelStatus @areas(in: [SELLER, ADMIN]) {
+  PURCHASED
+  USED
+  VOIDED
+}
+
+enum DeliveryEstimateBasis @areas(in: [STORE, SELLER]) {
+  ADDRESS
+  POSTAL_CODE
+  DEFAULT_REGION
+}
+
+enum DeliveryExceptionKind @areas(in: [SELLER, ADMIN]) {
+  SELLER_CANNOT_FULFILL
+  LATE_DISPATCH
+  MISSING_TRACKING
+  LOST_OR_DAMAGED
+  FAILED_DELIVERY
+}
+
+enum DeliveryExceptionStatus @areas(in: [SELLER, ADMIN]) {
+  OPEN
+  IN_PROGRESS
+  ESCALATED
+  RESOLVED
+  CLOSED
+}
+
+enum DeliveryExceptionEscalation @areas(in: [SELLER, ADMIN]) {
+  SELLER_MANAGER
+  SUPPORT
+  FINANCE
+  RETURNS
+}
+
+enum DeliverySellerResponseAction @areas(in: [SELLER, ADMIN]) {
+  TRACKING_PROVIDED
+  WILL_SHIP_BY
+  CANNOT_FULFILL
+  REPLACEMENT_SENT
+  OTHER
+}
+
+enum DeliveryExceptionResolutionKind @areas(in: [SELLER, ADMIN]) {
+  SHIPPED
+  TRACKING_PROVIDED
+  CANCELLED_REFUNDED
+  REPLACEMENT_SENT
+  REDELIVERED
+  PICKED_UP
+  RETURNED_TO_SELLER
+  CLAIM_FILED
+  NO_ACTION
+}
+
+enum ShippingSellerType @areas(in: [ADMIN]) {
+  ALL
+  OFFICIAL
+  MARKETPLACE
+}
+
+# ------------------------------------------------------------------ storefront shipping section
+
+enum ShippingCoverageArea @areas(in: [STORE]) {
+  CONTIGUOUS_48_DC
+  ALL_50
+  CUSTOM
+}
+
+"""
+Storefront shipping section, from the seller's active shipping settings and default profile. Per-offer delivery
+dates and prices come from Offer.deliveryEstimate.
+"""
+type ShippingSellerSummary @areas(in: [STORE]) {
+  "e.g. Portland, OR"
+  shipsFrom: String
+  coverage: ShippingCoverageArea!
+  "e.g. Ships to the contiguous US and DC"
+  coverageLabel: String!
+  "e.g. PO boxes, military addresses, Alaska, Hawaii"
+  excluded: [String!]!
+  "Default business days to dispatch"
+  handlingDays: Int!
+  "Orders before this time (market time, HH:mm) count from the same business day"
+  sameDayCutoff: String
+  "e.g. Ships in 1 business day · order by 2:00 PM PT to ship today"
+  dispatchLabel: String!
+  "e.g. Mon–Fri"
+  businessDaysLabel: String!
+  "Upcoming closures customers should know about (holidays, inventory days)"
+  closures: [ShippingSellerClosure!]!
+  "Carrier names, e.g. UPS, USPS"
+  carriers: [String!]!
+  methods: [ShippingSellerMethod!]!
+  freeShippingThreshold: Money
+  "e.g. Free Standard shipping on orders over $49 from this seller"
+  freeShippingLabel: String
+  "Live holiday or service notices that affect this seller's carriers"
+  notices: [ShippingNotice!]!
+}
+
+type ShippingSellerClosure @areas(in: [STORE]) {
+  name: String!
+  from: Date!
+  to: Date!
+}
+
+"A shipping method the seller offers, e.g. Standard · 3–5 business days · $5.99 or free over $49"
+type ShippingSellerMethod @areas(in: [STORE]) {
+  name: String!
+  transitMinDays: Int!
+  transitMaxDays: Int!
+  "e.g. $5.99, Free, From $4.99"
+  priceLabel: String!
+}
+
+# ------------------------------------------------------------------ seller shipment setup
+
+"""
+What the seller can use to record a shipment or buy a label (SellerOrderDetail): enabled carriers and services with
+tracking formats, whether labels can be bought in Seller Center, and the default package that pre-fills the form.
+Only the caller's own shipping settings.
+"""
+type ShippingSellerSetup @areas(in: [SELLER]) {
+  carriers: [ShippingSetupCarrier!]!
+  "Labels can be bought in Seller Center: the seller turned on Buy labels and at least one enabled service supports labels"
+  labelPurchaseAvailable: Boolean!
+  "Why label purchase is off, e.g. Turn on Buy labels in Shipping settings"
+  labelUnavailableReason: String
+  "Package that pre-fills the form; null when the seller has not saved one"
+  defaultPackage: ShippingPackage
+  "e.g. Ships in 1 business day · order by 2:00 PM PT to ship today"
+  dispatchLabel: String!
+}
+
+"A carrier the seller can choose when recording tracking"
+type ShippingSetupCarrier @areas(in: [SELLER]) {
+  "ups, usps, fedex, ontrac, other"
+  code: String!
+  name: String!
+  "Carrier events arrive automatically (webhook or polling); otherwise tracking is checked by format only"
+  trackingConnected: Boolean!
+  services: [ShippingSetupService!]!
+}
+
+type ShippingSetupService @areas(in: [SELLER]) {
+  id: UUID!
+  code: String!
+  "e.g. UPS Ground"
+  name: String!
+  transitMinDays: Int!
+  transitMaxDays: Int!
+  "A label can be bought through Marketly for this service"
+  labelSupported: Boolean!
+  "Regex the tracking number must match (checked before saving)"
+  trackingPattern: String
+}
+
+"Parcel size and weight saved by the seller"
+type ShippingPackage @areas(in: [SELLER]) {
+  weightGrams: Int!
+  lengthCm: Int
+  widthCm: Int
+  heightCm: Int
+  "e.g. Medium box · 30 × 20 × 15 cm · 1.2 kg"
+  label: String!
+}
+
+# ------------------------------------------------------------------ queries and extensions
+
+extend type Query {
+  "Carriers, services, label purchase and the default package for the record-shipment and buy-label forms (caller's own settings)"
+  myShippingSetup: ShippingSellerSetup! @areas(in: [SELLER]) @auth(requires: SELLER, permission: "shipping.seller-shipments.view") @source(module: "shipping", fn: "getSellerShippingSetup")
+
+  "Track one package (store: the customer's or guest's own order; seller: own shipments)"
+  shipment(id: UUID!): Shipment @areas(in: [STORE, SELLER]) @source(module: "shipping", fn: "getShipment")
+
+  "Shipment history with events, corrections, label and exceptions (staff)"
+  shipmentAdmin(id: UUID!): Shipment @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "shipping.shipments.view") @source(module: "shipping", fn: "getShipment")
+
+  "Dispatch and delivery exceptions with owner, deadline and whether the customer was notified"
+  deliveryExceptions(filter: DeliveryExceptionFilter, paging: PageInput): DeliveryExceptionPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "shipping.exceptions.view") @source(module: "shipping", fn: "listExceptions")
+
+  "Open exceptions per kind (ops queue tiles, admin dashboard)"
+  deliveryExceptionCounts: DeliveryExceptionCounts! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "shipping.exceptions.view") @source(module: "shipping", fn: "countOpenExceptions") @cost(weight: 3)
+}
+
+extend type OrderGroup {
+  "Packages of this seller group (partial shipments give several). Default kinds: OUTBOUND and REPLACEMENT."
+  shipments(kinds: [ShipmentKind!]): [Shipment!]! @source(module: "shipping", fn: "listShipmentsForGroups")
+
+  "Open and recent delivery exceptions on the seller's own group that need its response"
+  deliveryExceptions: [DeliveryException!]! @areas(in: [SELLER]) @auth(requires: SELLER, permission: "shipping.seller-shipments.view") @source(module: "shipping", fn: "listExceptionsForOrder")
+}
+
+extend type Order {
+  "Every delivery exception on the order, across sellers (order 360)"
+  deliveryExceptions: [DeliveryException!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "shipping.exceptions.view") @source(module: "shipping", fn: "listExceptionsForOrder")
+}
+
+extend type Offer {
+  """
+  Default delivery option for this offer at a postal code (or the shopper's saved or default location when omitted).
+  Seller area: only the caller's own offers are reachable (myOffers, myOffer); the postal code defaults to the market default.
+  """
+  deliveryEstimate(postalCode: String): DeliveryEstimate @areas(in: [STORE, SELLER]) @source(module: "shipping", fn: "estimateOffers") @cost(weight: 2)
+}
+
+extend type Seller {
+  "Storefront shipping section: ships from, coverage, dispatch time, carriers, methods and free-shipping threshold. Null without an active profile."
+  shippingSummary: ShippingSellerSummary @areas(in: [STORE]) @source(module: "shipping", fn: "getSellerShippingSummaries")
+}
+
+extend type ReturnReplacement {
+  "The replacement or exchange parcel (a REPLACEMENT shipment) with tracking steps and events. Null until it is recorded."
+  shipment: Shipment @source(module: "shipping", fn: "shipmentsForReplacements")
+}

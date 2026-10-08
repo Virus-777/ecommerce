@@ -1,0 +1,498 @@
+# offers: how one seller (or the Official Store) sells one variant in one condition.
+# Adds Product.offers (all offers with comparable totals), Product.featuredOffer, Product.offerCount,
+# Product.priceRange, Product.offer(id) (purchase box), Variant.offerSummary, Product.myOffers (seller),
+# Product.featuredDecision (admin) and SellerCollection.offers (storefront featured collections).
+# Other modules hang fields on Offer: sellers → Offer.seller, inventory → Offer.availability / Offer.stock,
+# shipping → Offer.deliveryEstimate(postalCode), promotions → Offer.deal.
+
+"""
+One seller's (or the Official Store's) offer for one variant in one condition: price, terms and status.
+Location-dependent numbers (comparable total, featured flag) are on `quote(postalCode)`.
+"""
+type Offer {
+  id: UUID!
+  ownerType: OfferOwnerType!
+  "Null for the Official Store"
+  sellerId: UUID
+  sellerName: String!
+  "True for the Official Store"
+  official: Boolean!
+  "Resolved by reference (catalog)"
+  product: Product!
+  variant: Variant!
+  condition: OfferCondition!
+  "e.g. Used – Like new"
+  conditionLabel: String!
+  "Required for used and refurbished; shown beside the price"
+  conditionNotes: String
+  "What is in this seller's box (defaults to the product's included items)"
+  includedItems: [String!]!
+  "Standard items this offer does not include, shown as 'Missing: …'"
+  missingItems: [String!]!
+  "True when nothing is missing"
+  complete: Boolean!
+  "Offer (regular) price. The price a customer pays now, with campaign markdowns, is quote.price."
+  price: Money!
+  "Was-price. Only verified was-prices are returned."
+  compareAt: OfferCompareAt
+  saleEndsAt: DateTime
+  "Maximum units per customer"
+  purchaseLimit: Int
+  dispatch: OfferDispatch!
+  "Offer-level view of returns.resolveTerms (seller, category, condition); returns owns the terms. Storefront: Seller.returnTerms."
+  returnTerms: OfferReturnTerms!
+  warranty: OfferWarranty!
+  status: OfferStatus!
+  "Increments on any customer-visible change; carts compare it to detect changes"
+  termsVersion: Int!
+  publishedAt: DateTime
+
+  """
+  Comparable total for a delivery location: item price (campaign price when a markdown applies)
+  + shipping − automatic discount, before tax. Postal code: argument → customer default address → market default.
+  Pass the same postalCode as Product.offers / Product.featuredOffer; their results are primed into this loader.
+  """
+  quote(postalCode: String, quantity: Int = 1): OfferQuote! @source(module: "offers", fn: "quoteOffer")
+
+  # ---- Seller Center and Admin Center only
+  "Seller's own code; customers never see it"
+  sellerSku: String @areas(in: [SELLER, ADMIN])
+  "Why the offer is paused, ineligible or removed (with appeal route)"
+  statusReason: OfferStatusReason @areas(in: [SELLER, ADMIN])
+  "Featured-offer eligibility with reason codes and how to fix them"
+  featuredEligibility: OfferEligibility! @areas(in: [SELLER, ADMIN])
+  "shipping module profile (rates, services, coverage)"
+  shippingProfileId: UUID @areas(in: [SELLER, ADMIN])
+  "Draft on a product still in catalog review goes live when the product is approved"
+  publishOnApproval: Boolean @areas(in: [SELLER, ADMIN])
+  "Price context shown on the offer form: lowest New offer and Official Store price for the same variant"
+  priceContext: OfferPriceContext @areas(in: [SELLER, ADMIN]) @cost(weight: 3)
+  "Prices in force over time, newest first"
+  priceHistory(limit: Int = 20): [OfferPricePoint!]! @areas(in: [SELLER, ADMIN])
+  "Status changes with reasons and who made them, newest first"
+  statusLog(limit: Int = 20): [OfferStatusEntry!]! @areas(in: [SELLER, ADMIN])
+  "Requested, pending, scheduled and recent price changes (Official Store approvals)"
+  priceChanges: [OfferPriceChange!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "offers.offers.view")
+  createdAt: DateTime! @areas(in: [SELLER, ADMIN])
+  updatedAt: DateTime! @areas(in: [SELLER, ADMIN])
+}
+
+enum OfferOwnerType {
+  OFFICIAL
+  SELLER
+}
+
+enum OfferCondition {
+  NEW
+  USED_LIKE_NEW
+  USED_GOOD
+  USED_ACCEPTABLE
+  REFURBISHED
+}
+
+"Condition filter on the all-offers page and product cards. USED covers the three used grades."
+enum OfferConditionFilter {
+  ALL
+  NEW
+  USED
+  REFURBISHED
+}
+
+enum OfferStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  OUT_OF_STOCK
+  INELIGIBLE
+  REMOVED
+}
+
+enum OfferSort {
+  "Item + shipping − automatic discount, lowest first"
+  TOTAL_COST
+  FASTEST_DELIVERY
+}
+
+"Was-price with its basis. Unverified was-prices are never shown."
+type OfferCompareAt {
+  amount: Money!
+  basis: OfferCompareAtBasis!
+  verified: Boolean!
+  "e.g. 'Was price is the Official Store's lowest price in the 30 days before the sale.'"
+  explanation: String!
+}
+
+enum OfferCompareAtBasis {
+  LOWEST_30_DAYS
+  LIST_PRICE
+}
+
+"When the seller dispatches"
+type OfferDispatch {
+  "0 = same business day"
+  businessDays: Int!
+  "Local cutoff HH:mm for same-day dispatch, market time zone"
+  sameDayCutoff: String
+  "City and region, e.g. 'Reno, NV'"
+  shipsFrom: String!
+  "e.g. 'Ships today', 'Ships in 1 business day'"
+  label: String!
+}
+
+"Return terms the offer promises (platform baseline or more generous)"
+type OfferReturnTerms {
+  kind: OfferReturnTermsKind!
+  windowDays: Int!
+  freeReturnShipping: Boolean!
+  "Category exception text shown before purchase"
+  categoryException: String
+  "e.g. '30-day returns. You pay return shipping unless the item is faulty.'"
+  summary: String!
+}
+
+enum OfferReturnTermsKind {
+  BASELINE
+  "More generous than the platform baseline for the category"
+  EXTENDED
+}
+
+type OfferWarranty {
+  kind: OfferWarrantyKind!
+  months: Int
+  handledBy: OfferWarrantyHandler
+  "e.g. '2-year manufacturer warranty'"
+  summary: String!
+}
+
+enum OfferWarrantyKind {
+  MANUFACTURER
+  SELLER
+  NONE
+}
+
+enum OfferWarrantyHandler {
+  MANUFACTURER
+  SELLER
+  OFFICIAL_STORE
+}
+
+"Location-dependent price view of one offer: the comparable total used on the all-offers page and the purchase box"
+type OfferQuote {
+  "Delivery location the numbers are for"
+  deliverTo: OfferDeliverTo!
+  quantity: Int!
+  "Price the customer pays now: the campaign price when a markdown or flash sale applies, else the offer price"
+  price: Money!
+  "Offer price when a campaign price applies (badges, was-price and countdown: Offer.deal from promotions)"
+  regularPrice: Money
+  "Seller or platform discount the customer qualifies for without a code"
+  automaticDiscount: OfferAutomaticDiscount
+  "Null when the offer does not ship to the location"
+  shippingCost: Money
+  freeShipping: Boolean!
+  "Free-shipping threshold for this seller, if any"
+  freeShippingOver: Money
+  "Item price × quantity + shipping − automatic discount, before tax. The comparable total."
+  total: Money!
+  "Featured offer for this variant and location under the published rule"
+  featured: Boolean!
+  featuredEligible: Boolean!
+  "Customer-safe note under ineligible offers, e.g. 'Not eligible for featured offer: delivery performance under review'"
+  ineligibleNote: String
+}
+
+type OfferAutomaticDiscount {
+  label: String!
+  amount: Money!
+  fundedBy: String!
+}
+
+"Where comparable totals are computed for"
+type OfferDeliverTo {
+  postalCode: String!
+  "e.g. 'Portland 97205'"
+  label: String!
+  source: OfferDeliverToSource!
+}
+
+enum OfferDeliverToSource {
+  CUSTOMER_ADDRESS
+  ENTERED
+  MARKET_DEFAULT
+}
+
+"All offers for one product variant compared by total cost (all-offers page)"
+type OfferComparison {
+  productId: UUID!
+  variantId: UUID!
+  deliverTo: OfferDeliverTo!
+  sort: OfferSort!
+  condition: OfferConditionFilter!
+  "Featured offer for this variant and location; null when no offer is eligible"
+  featuredOfferId: UUID
+  "Offers in the requested order; ineligible offers are listed with quote.ineligibleNote. Bounded (max 100)."
+  items: [Offer!]!
+  "Counts for the condition chips: All (4), New (2), Used (1), Refurbished (1)"
+  conditionCounts: OfferConditionCounts!
+  "'How we choose the featured offer'"
+  rule: OfferFeaturedRuleSummary!
+  "'Totals include shipping; sales tax is added at checkout.'"
+  taxNote: String!
+}
+
+type OfferConditionCounts {
+  all: Int!
+  new: Int!
+  used: Int!
+  refurbished: Int!
+}
+
+"Published featured-offer rule in customer wording"
+type OfferFeaturedRuleSummary {
+  version: Int!
+  steps: [String!]!
+  notes: [String!]!
+}
+
+"'From' price of a product: the lowest eligible offer, always named"
+type OfferPriceRange {
+  lowest: Money!
+  highest: Money!
+  "The eligible offer that has the lowest price"
+  lowestOfferId: UUID!
+  lowestSellerName: String!
+  offerCount: Int!
+}
+
+"Variant chooser cue on the product page, e.g. '$189.00 · In stock' or '2 offers from $184.00'"
+type VariantOfferSummary {
+  variantId: UUID!
+  offerCount: Int!
+  lowestPrice: Money
+  inStock: Boolean!
+  summary: String!
+}
+
+"Customer-safe eligibility for the featured offer, with seller-facing next steps"
+type OfferEligibility @areas(in: [SELLER, ADMIN]) {
+  eligible: Boolean!
+  reasons: [OfferIneligibilityReason!]!
+  evaluatedAt: DateTime!
+}
+
+type OfferIneligibilityReason @areas(in: [SELLER, ADMIN]) {
+  code: OfferIneligibilityCode!
+  "e.g. 'Not eligible for featured offer: delivery performance under review'"
+  message: String!
+  "Seller-facing next step"
+  howToFix: String
+}
+
+enum OfferIneligibilityCode @areas(in: [SELLER, ADMIN]) {
+  OFFER_NOT_ACTIVE
+  OUT_OF_STOCK
+  SELLER_RESTRICTED
+  SELLER_SUSPENDED
+  DELIVERY_PERFORMANCE_UNDER_REVIEW
+  ON_TIME_DISPATCH_BELOW_STANDARD
+  PRODUCT_NOT_PURCHASABLE
+  DOES_NOT_SHIP_TO_LOCATION
+  CONDITION_NOT_COMPETING
+  STAFF_HOLD
+}
+
+type OfferStatusReason @areas(in: [SELLER, ADMIN]) {
+  code: OfferStatusReasonCode!
+  text: String!
+  "For restrictions: what is stopped, e.g. 'Refurbished offers and new listings'"
+  affectedActivity: String
+  "For restrictions and removals: how to appeal"
+  appealRoute: String
+  "For holds"
+  reviewDate: Date
+  actor: Actor
+  at: DateTime!
+}
+
+enum OfferStatusReasonCode @areas(in: [SELLER, ADMIN]) {
+  AWAITING_LAUNCH_REVIEW
+  SELLER_RESTRICTED
+  SELLER_SUSPENDED
+  SELLER_CLOSED
+  PRODUCT_HIDDEN
+  PRODUCT_SUSPENDED
+  PRODUCT_MERGED
+  STAFF_HOLD
+  REMOVED_BY_STAFF
+  ENDED_BY_SELLER
+  ENFORCEMENT
+}
+
+"Market price context for one variant, shown on the seller offer form"
+type OfferPriceContext @areas(in: [SELLER, ADMIN]) {
+  lowestNewPrice: Money
+  officialStorePrice: Money
+  "Other active offers on the same product"
+  otherOfferCount: Int!
+}
+
+type OfferPricePoint @areas(in: [SELLER, ADMIN]) {
+  price: Money!
+  compareAt: Money
+  from: DateTime!
+  to: DateTime
+  changedBy: Actor!
+}
+
+type OfferStatusEntry @areas(in: [SELLER, ADMIN]) {
+  from: OfferStatus
+  to: OfferStatus!
+  event: String!
+  reasonCode: String
+  reason: String
+  actor: Actor!
+  at: DateTime!
+}
+
+"A direct price change (seller edit or Official Store change with start/end and approval)"
+type OfferPriceChange @areas(in: [ADMIN]) {
+  id: UUID!
+  from: Money!
+  to: Money!
+  "Signed, e.g. -31.7"
+  changePct: Float!
+  compareAt: Money
+  startsAt: DateTime
+  endsAt: DateTime
+  revertTo: Money
+  "Official Store only, from inventory unit cost"
+  marginBeforePct: Float
+  marginAfterPct: Float
+  reason: String
+  source: OfferPriceChangeSource!
+  state: OfferPriceChangeState!
+  approval: ApprovalInfo
+  requestedBy: Actor!
+  createdAt: DateTime!
+  appliedAt: DateTime
+}
+
+enum OfferPriceChangeSource @areas(in: [ADMIN]) {
+  SELLER
+  SELLER_BULK
+  OFFICIAL
+  OFFICIAL_BULK
+}
+
+enum OfferPriceChangeState @areas(in: [ADMIN]) {
+  REQUESTED
+  PENDING_APPROVAL
+  SCHEDULED
+  APPLIED
+  REVERTED
+  REJECTED
+  CANCELLED
+}
+
+"Why an offer is (or is not) featured for a variant and delivery location"
+type OfferFeaturedDecision @areas(in: [ADMIN]) {
+  productId: UUID!
+  variantId: UUID!
+  deliverTo: OfferDeliverTo!
+  ruleVersion: Int!
+  winnerOfferId: UUID
+  candidates: [OfferFeaturedCandidate!]!
+  computedAt: DateTime!
+}
+
+type OfferFeaturedCandidate @areas(in: [ADMIN]) {
+  offer: Offer!
+  eligible: Boolean!
+  reasons: [OfferIneligibilityReason!]!
+  total: Money!
+  arrivesTo: Date
+  "Total + delivery-day adjustment used for ranking"
+  adjustedTotal: Money!
+  rank: Int
+}
+
+"Paged offers (staff list with filters)"
+type OfferPage implements Paged @areas(in: [SELLER, ADMIN]) {
+  items: [Offer!]!
+  nextCursor: String
+  page: Int
+  totalPages: Int
+  total: Int
+}
+
+input OfferAdminFilter @areas(in: [ADMIN]) {
+  sellerId: UUID
+  "Official Store offers only"
+  official: Boolean
+  productId: UUID
+  status: [OfferStatus!]
+  "false = featured-ineligible offers only"
+  featuredEligible: Boolean
+  ineligibilityCode: OfferIneligibilityCode
+  "Seller SKU, product title or offer id"
+  q: String
+}
+
+# ------------------------------------------------------------------ extensions
+
+extend type Product {
+  """
+  All offers for one variant compared by comparable total to a delivery location (all-offers page).
+  variantId omitted = the product's default variant. Postal code: argument → customer default address → market default.
+  """
+  offers(variantId: UUID, condition: OfferConditionFilter = ALL, postalCode: String, sort: OfferSort = TOTAL_COST): OfferComparison @areas(in: [STORE, ADMIN]) @source(module: "offers", fn: "compareOffers") @cost(weight: 10)
+
+  """
+  Featured offer under the published rule for the variant and location (purchase box, product cards).
+  Null when no offer is eligible; the product page then explains why (out of stock, no offers, not shippable).
+  """
+  featuredOffer(variantId: UUID, postalCode: String): Offer @areas(in: [STORE, ADMIN]) @source(module: "offers", fn: "getFeaturedOfferForProduct")
+
+  """
+  The offer shown in the purchase box: the offer with this id when it is an active offer on this product, otherwise
+  (id null, or the offer is no longer available) the featured offer for the variant and location, as featuredOffer.
+  Lets ProductPage pass a nullable $offerId for the seller the shopper picked without loading every offer.
+  """
+  offer(id: UUID, variantId: UUID, postalCode: String): Offer @areas(in: [STORE, ADMIN]) @source(module: "offers", fn: "getPurchaseBoxOffer")
+
+  "Active offers across all variants, e.g. '4 offers'"
+  offerCount(condition: OfferConditionFilter = ALL): Int! @source(module: "offers", fn: "getOfferStats")
+
+  "Lowest and highest active offer price; 'from' prices name the offer they belong to"
+  priceRange(condition: OfferConditionFilter = ALL): OfferPriceRange @source(module: "offers", fn: "getOfferStats")
+
+  "This seller's own offers on the product, any status (Seller Center product detail)"
+  myOffers: [Offer!]! @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "offers", fn: "listOwnOffersForProduct")
+
+  "Why each offer is or is not featured for a variant and location"
+  featuredDecision(variantId: UUID, postalCode: String): OfferFeaturedDecision @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "offers.offers.view") @source(module: "offers", fn: "getFeaturedDecision") @cost(weight: 5)
+}
+
+extend type SellerCollection {
+  "Active offers of a storefront featured collection in the seller's order (inactive ones are left out), for the collection cards"
+  offers(limit: Int = 8): [Offer!]! @areas(in: [STORE, ADMIN]) @source(module: "offers", fn: "listActiveOffersByIds") @cost(weight: 5)
+}
+
+extend type Variant {
+  "Variant chooser cue: offer count, lowest price and whether any offer is in stock"
+  offerSummary(postalCode: String): VariantOfferSummary @areas(in: [STORE, ADMIN]) @source(module: "offers", fn: "getVariantOfferSummaries")
+}
+
+extend type Query {
+  "One offer as the customer sees it (chosen seller in the purchase box, review changes)"
+  offer(id: UUID!): Offer @areas(in: [STORE]) @source(module: "offers", fn: "getOffer")
+
+  "One of this seller's own offers with price history, status log and eligibility"
+  myOffer(id: UUID!): Offer @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "offers", fn: "getOwnOffer")
+
+  "Any offer with status log, price history, price changes and eligibility reasons (staff)"
+  offerAdmin(id: UUID!): Offer @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "offers.offers.view") @source(module: "offers", fn: "getOfferAdmin")
+
+  "All offers with filters (seller, product, status, featured eligibility and reason)"
+  offersAdmin(filter: OfferAdminFilter, paging: PageInput): OfferPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "offers.offers.view") @source(module: "offers", fn: "listOffersAdmin")
+}

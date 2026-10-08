@@ -1,0 +1,267 @@
+{
+  "name": "cart",
+  "title": "Cart",
+  "group": "Buying",
+  "phase": 1,
+  "chapters": [5, 6],
+  "summary": "One cart across the Official Store and marketplace sellers for customers and guests. Every line is bound to the exact offer the customer chose, lines are grouped into seller packages with delivery estimates and shipping, and every read re-checks price, stock and eligibility so changes are explained per item instead of discarding the cart.",
+  "owns": [
+    "Customer carts and guest carts (guest session), one active cart per owner",
+    "Merging a guest cart into the customer cart on sign-in, with a per-line merge report",
+    "Cart lines bound to an explicit offer (seller, condition, variant); a seller is never switched silently",
+    "Grouping lines into seller packages with ship-from, delivery estimate, shipping cost and return terms per package",
+    "Quantity limits: offer purchase limit, available stock and a platform line maximum",
+    "Change detection on every read: price increased or decreased, out of stock, reduced quantity, offer ended, seller restricted, not shippable to the chosen location, with a notice per item",
+    "Preserving eligible items while one item is unavailable (unavailable lines stay visible and are excluded from checkout)",
+    "Coupon preview in the cart (applied amount, covered items, rejection reason)",
+    "Deliver-to location used for cart estimates",
+    "Save for later (later phase)"
+  ],
+  "notOwns": [
+    "Prices, conditions, purchase limits and offer status: offers",
+    "Stock quantities and reservations: inventory (the cart never reserves stock; checkout does at Place order)",
+    "Delivery estimates, shipping rates and coverage: shipping",
+    "Coupon rules and discount allocation: promotions (the cart only previews)",
+    "Final totals, tax, revalidation and order placement: checkout",
+    "Back-in-stock alerts and wishlist: wishlist (phase 3)"
+  ],
+  "dependsOn": ["offers", "inventory"],
+  "optionalDeps": ["catalog", "shipping", "promotions", "customers", "identity", "media"],
+  "publicApi": [
+    { "name": "getCartForCheckout", "signature": "(owner: CartOwner, itemIds?: uuid[]) => CheckoutCartSnapshot", "desc": "Eligible lines (offer, seller, variant, quantity, accepted unit price, package key) and coupon codes, after a fresh change check. Unavailable lines are returned separately so checkout can explain them.", "usedBy": ["checkout"] },
+    { "name": "removePurchasedItems", "signature": "(cartId: uuid, itemIds: uuid[], orderId: uuid) => void", "desc": "Remove lines that became an accepted order; other lines stay. Marks the cart converted when it becomes empty.", "usedBy": ["checkout"] },
+    { "name": "restoreItems", "signature": "(cartId: uuid, lines: CartLineInput[]) => void", "desc": "Put lines back after a declined payment on an order that was pending, so the customer can pay another way without rebuilding the cart.", "usedBy": ["checkout"] },
+    { "name": "countOfferInCarts", "signature": "(offerId: uuid) => int", "desc": "How many active carts hold an offer (used to warn a seller before ending an offer).", "usedBy": ["offers", "reports"] },
+    { "name": "getCartView", "signature": "(owner: CartOwner) => CartView | null", "desc": "The shopper's cart grouped by package, after a fresh price, stock and eligibility check (same as GET /cart)", "usedBy": ["graphql"] }
+  ],
+  "types": {
+    "CartOwner": { "kind": "enum(customer|guest)", "customerId": "uuid?", "guestSessionId": "uuid?" },
+    "SellerLabel": { "ownerType": "enum(official|seller)", "id": { "type": "uuid?", "desc": "Seller id; null for the Official Store (as in offers)" }, "name": "string", "slug": "string", "official": { "type": "bool", "desc": "Marketly Official Store" }, "verified": "bool", "logo": "MediaRef?" },
+    "CartDestination": {
+      "postalCode": "string",
+      "country": { "type": "string", "desc": "ISO 3166-1 alpha-2" },
+      "region": "string?",
+      "city": "string?",
+      "addressId": { "type": "uuid?", "desc": "Saved customer address the location came from" },
+      "source": { "type": "enum(address|postal_code|default_region)", "desc": "default_region = no location known; estimates use the market default and the summary says shipping and tax depend on the address" }
+    },
+    "OfferAlternativesHint": { "count": "int", "lowestPrice": "Money?", "productId": "uuid", "variantId": "uuid", "condition": "string" },
+    "CartNotice": {
+      "id": "uuid",
+      "kind": { "type": "enum(price_increased|price_decreased|out_of_stock|quantity_reduced|purchase_limit_reduced|offer_ended|seller_unavailable|product_unavailable|not_shippable|delivery_estimate_changed|coupon_no_longer_applies)", "desc": "What changed since the customer added or last accepted the line" },
+      "severity": { "type": "enum(info|warning|blocking)", "desc": "blocking = the line is excluded from checkout until resolved; warning = included only after the customer accepts; info = shown once" },
+      "message": { "type": "string", "desc": "Customer-facing sentence, e.g. 'Price changed since you added it: was $94.99, now $99.99. Northwind Audio updated this offer on Oct 8.'" },
+      "previousPrice": "Money?",
+      "currentPrice": "Money?",
+      "previousQuantity": "int?",
+      "availableQuantity": "int?",
+      "changedBy": { "type": "string?", "desc": "Seller name when the seller changed the offer" },
+      "changedAt": "datetime?",
+      "alternatives": { "type": "OfferAlternativesHint?", "desc": "Other offers for the same variant and condition. Shown as a link; never applied automatically" },
+      "actions": { "type": "enum(remove|accept|reduce_quantity|choose_offer|save_for_later|notify_me)[]", "desc": "Actions the UI offers. notify_me needs the wishlist module (phase 3)" },
+      "detectedAt": "datetime"
+    },
+    "CartItem": {
+      "id": "uuid",
+      "offerId": "uuid",
+      "productId": "uuid",
+      "variantId": "uuid",
+      "seller": "SellerLabel",
+      "title": "string",
+      "variantLabel": { "type": "string", "desc": "e.g. 'Queen · Sage'" },
+      "options": "map<string>",
+      "condition": { "type": "enum(new|used_like_new|used_good|used_acceptable|refurbished)" },
+      "conditionNote": "string?",
+      "sku": "string?",
+      "image": "MediaRef?",
+      "quantity": "int",
+      "maxQuantity": { "type": "int", "desc": "min(offer purchase limit, available stock, platform line maximum)" },
+      "purchaseLimit": { "type": "int?", "desc": "Offer limit per customer, shown as 'Limit 3 per customer'" },
+      "availableQuantity": { "type": "int?", "desc": "Only shown when low or below the requested quantity" },
+      "unitPrice": { "type": "Money", "desc": "Current offer price" },
+      "compareAtPrice": { "type": "Money?", "desc": "Was price with its basis, from offers/promotions" },
+      "acceptedUnitPrice": { "type": "Money", "desc": "Price the customer added or last accepted; the baseline for change detection" },
+      "acceptedTermsVersion": { "type": "int", "desc": "offers termsVersion the customer last saw; a higher version triggers a re-check through offers.revalidate" },
+      "lineTotal": "Money",
+      "state": { "type": "enum(ok|needs_attention|unavailable)", "desc": "Derived from the open notices" },
+      "includedInCheckout": "bool",
+      "notices": "CartNotice[]",
+      "addedAt": "datetime"
+    },
+    "PackageDelivery": {
+      "methodName": { "type": "string", "desc": "Default (cheapest eligible) method, e.g. Standard" },
+      "arrival": "DateRange",
+      "arrivalLabel": { "type": "string", "desc": "e.g. 'Arrives Mon, Oct 19 – Tue, Oct 20'" },
+      "shipping": "Money",
+      "free": "bool",
+      "freeShippingNote": { "type": "string?", "desc": "e.g. 'Free over $35'" },
+      "amountToFreeShipping": "Money?",
+      "estimateBasis": { "type": "enum(address|postal_code|default_region)" },
+      "serviceNotices": { "type": "string[]", "desc": "Holiday or service interruption notes from shipping" }
+    },
+    "CartPackage": {
+      "key": { "type": "string", "desc": "Stable grouping key: owner type + seller id + ship-from (offers DispatchTerms.shipsFrom)" },
+      "label": { "type": "string", "desc": "'Package 2 of 3'" },
+      "seller": "SellerLabel",
+      "shipsFrom": { "type": "string", "desc": "e.g. 'Reno, NV warehouse'" },
+      "items": "CartItem[]",
+      "delivery": { "type": "PackageDelivery?", "desc": "Null when every item in the package is unavailable or shipping is disabled" },
+      "returnTerms": { "type": "string", "desc": "Summary of the seller's return terms for these items" },
+      "subtotal": { "type": "Money", "desc": "Eligible items plus package shipping" },
+      "notShippable": { "type": "bool", "desc": "The seller does not ship to the deliver-to location" }
+    },
+    "DiscountLine": { "code": "string?", "label": "string", "amount": "Money", "fundedBy": "enum(platform|seller|shared)" },
+    "CouponPreview": {
+      "code": "string",
+      "status": "enum(applied|rejected|needs_sign_in)",
+      "amount": "Money?",
+      "label": { "type": "string", "desc": "e.g. '$20 off your first order over $100'" },
+      "fundedBy": "enum(platform|seller|shared)?",
+      "reason": { "type": "string?", "desc": "Why it was rejected, in plain words" },
+      "coverage": { "type": "CouponCoverage[]", "desc": "Items that receive the discount and their share" },
+      "notCovered": "CouponExclusion[]"
+    },
+    "CouponCoverage": { "itemId": "uuid", "title": "string", "amount": "Money" },
+    "CouponExclusion": { "itemId": "uuid", "title": "string", "reason": { "type": "string", "desc": "e.g. 'already on a seller markdown'" } },
+    "CartTotals": {
+      "itemCount": "int",
+      "itemsSubtotal": { "type": "Money", "desc": "Eligible items only" },
+      "discounts": "DiscountLine[]",
+      "shippingByPackage": "PackageShippingLine[]",
+      "shippingTotal": "Money",
+      "taxNote": { "type": "string", "desc": "'Calculated after you enter an address' (tax is computed in checkout)" },
+      "total": { "type": "Money", "desc": "Total before tax" },
+      "excludedItemCount": "int"
+    },
+    "PackageShippingLine": { "packageKey": "string", "sellerName": "string", "amount": "Money", "free": "bool" },
+    "CartView": {
+      "id": "uuid",
+      "owner": "enum(customer|guest)",
+      "currency": "string",
+      "itemCount": "int",
+      "sellerCount": "int",
+      "packageCount": "int",
+      "destination": "CartDestination?",
+      "packages": "CartPackage[]",
+      "attention": { "type": "CartAttention?", "desc": "Banner: '2 items need your attention'" },
+      "coupons": "CouponPreview[]",
+      "totals": "CartTotals",
+      "checkoutReady": { "type": "bool", "desc": "At least one eligible line and no warning notice left unaccepted" },
+      "checkoutBlockers": "string[]",
+      "retentionNote": { "type": "string", "desc": "'Items stay in your cart for 30 days. Prices and stock are checked again at checkout.'" },
+      "savedForLaterCount": "int",
+      "checkedAt": { "type": "datetime", "desc": "When prices and stock were last re-read" }
+    },
+    "CartAttention": { "count": "int", "title": "string", "message": "string" },
+    "CartBadge": { "itemCount": "int", "attentionCount": "int" },
+    "AddItemInput": { "offerId": "uuid", "quantity": "int", "source": { "type": "enum(product_page|offers_list|deal|saved_for_later|buy_again|recommendation)?", "desc": "For cart-addition reports" } },
+    "AddItemResult": { "cart": "CartView", "itemId": "uuid", "outcome": { "type": "enum(added|quantity_increased|capped_at_limit)", "desc": "capped_at_limit includes the maximum in the message" }, "message": "string" },
+    "MergeLine": { "itemId": "uuid?", "offerId": "uuid", "title": "string", "outcome": "enum(added|quantity_combined|capped_at_limit|kept_separate_offer|dropped_unavailable)", "note": "string" },
+    "MergeReport": { "mergedFromCartId": "uuid?", "lines": "MergeLine[]", "message": { "type": "string?", "desc": "Shown once after sign-in, e.g. 'We added 2 items from before you signed in'" } },
+    "MergeResult": { "cart": "CartView", "report": "MergeReport" },
+    "SavedItem": { "id": "uuid", "offerId": "uuid", "productId": "uuid", "variantId": "uuid", "seller": "SellerLabel", "title": "string", "variantLabel": "string", "image": "MediaRef?", "currentPrice": "Money?", "available": "bool", "unavailableReason": "string?", "savedAt": "datetime" },
+    "CartLineInput": { "offerId": "uuid", "quantity": "int", "acceptedUnitPrice": "Money" },
+    "CheckoutCartLine": { "itemId": "uuid", "offerId": "uuid", "ownerType": "enum(official|seller)", "sellerId": "uuid?", "stockItemId": "uuid", "acceptedTermsVersion": "int", "productId": "uuid", "variantId": "uuid", "packageKey": "string", "quantity": "int", "acceptedUnitPrice": "Money", "currentUnitPrice": "Money" },
+    "CheckoutCartSnapshot": { "cartId": "uuid", "eligible": "CheckoutCartLine[]", "excluded": "CartItem[]", "couponCodes": "string[]", "destination": "CartDestination?" },
+    "CartAdminSummary": { "id": "uuid", "owner": "CartOwner", "status": "enum(active|merged|converted|expired)", "itemCount": "int", "itemsSubtotal": "Money", "openNotices": "int", "updatedAt": "datetime", "expiresAt": "datetime" }
+  },
+  "tables": [
+    { "name": "carts", "desc": "One active cart per customer or guest session", "columns": { "id": "uuid pk", "owner_kind": "text (customer|guest)", "customer_id": "uuid?", "guest_session_id": "uuid?", "status": "text (active|merged|converted|expired)", "currency": "text", "destination": "jsonb?", "coupon_codes": "jsonb", "merged_into_id": "uuid? → carts", "checked_at": "timestamptz?", "created_at": "timestamptz", "updated_at": "timestamptz", "expires_at": "timestamptz" }, "indexes": ["unique (customer_id) where status = 'active'", "unique (guest_session_id) where status = 'active'", "(status, expires_at)"] },
+    { "name": "cart_items", "desc": "Lines bound to an offer; one line per offer per cart", "columns": { "id": "uuid pk", "cart_id": "uuid → carts", "offer_id": "uuid", "owner_type": "text (official|seller)", "seller_id": "uuid?", "product_id": "uuid", "variant_id": "uuid", "stock_item_id": "uuid", "ships_from": "text", "quantity": "int", "price_at_add": "int (minor units)", "accepted_price": "int (minor units)", "accepted_terms_version": "int", "currency": "text", "source": "text?", "added_at": "timestamptz", "updated_at": "timestamptz", "last_checked_at": "timestamptz?" }, "indexes": ["unique (cart_id, offer_id)", "(offer_id)", "(seller_id)"] },
+    { "name": "cart_item_notices", "desc": "Detected changes per line; kept until accepted, resolved or the line is removed", "columns": { "id": "uuid pk", "item_id": "uuid → cart_items", "kind": "text", "severity": "text", "previous": "jsonb", "current": "jsonb", "detected_at": "timestamptz", "accepted_at": "timestamptz?", "resolved_at": "timestamptz?" }, "indexes": ["(item_id) where resolved_at is null"] },
+    { "name": "saved_items", "desc": "Save for later (phase 3)", "columns": { "id": "uuid pk", "owner_kind": "text", "customer_id": "uuid?", "guest_session_id": "uuid?", "offer_id": "uuid", "product_id": "uuid", "variant_id": "uuid", "saved_at": "timestamptz" }, "indexes": ["unique (customer_id, offer_id)", "(guest_session_id)"] },
+    { "name": "cart_merges", "desc": "Guest-to-customer merges with their report", "columns": { "id": "uuid pk", "from_cart_id": "uuid → carts", "into_cart_id": "uuid → carts", "report": "jsonb", "at": "timestamptz" } },
+    { "name": "recheck_queue", "desc": "Lines touched by offer, stock or seller events; the recheck job refreshes their notices", "columns": { "item_id": "uuid pk → cart_items", "reason": "text", "queued_at": "timestamptz" } }
+  ],
+  "stateMachines": [
+    {
+      "name": "Cart lifecycle", "field": "CartAdminSummary.status", "initial": "active",
+      "transitions": [["active", "merge", "merged"], ["active", "convert", "converted"], ["active", "expire", "expired"], ["converted", "restore", "active"]],
+      "notes": "merge: a guest cart is folded into the customer cart on sign-in. convert: the last eligible lines became an accepted order. restore: a pending payment was declined and checkout put the lines back. A cart with unavailable lines left after an order stays active."
+    },
+    {
+      "name": "Cart line availability", "field": "CartItem.state", "initial": "ok",
+      "transitions": [
+        ["ok", "detect_change", "needs_attention"],
+        ["needs_attention", "accept", "ok"],
+        ["needs_attention", "reduce_quantity", "ok"],
+        ["ok", "become_unavailable", "unavailable"],
+        ["needs_attention", "become_unavailable", "unavailable"],
+        ["unavailable", "become_available", "needs_attention"]
+      ],
+      "notes": "Derived on every read from open notices. needs_attention lines are included in checkout only after the customer accepts (price increase) or reduces quantity. unavailable lines (out of stock, offer ended, seller unavailable, not shippable) stay in the cart, are excluded from checkout and never replaced by another seller's offer. Price decreases are info notices and accepted automatically."
+    }
+  ],
+  "endpoints": [
+    { "id": "getCart", "area": "store", "method": "GET", "path": "/cart", "summary": "Cart grouped by package, with change detection", "desc": "Every call re-reads offers, stock and coverage for all lines (batched) and returns per-item notices. Unavailable lines stay in their package with includedInCheckout=false. Creates nothing; an owner without a cart gets an empty view.", "auth": "shopper", "query": { "postalCode": { "type": "string?", "desc": "Override the deliver-to location for this read only" } }, "response": "CartView", "screens": ["store/cart"] },
+    { "id": "getCartBadge", "area": "store", "method": "GET", "path": "/cart/badge", "summary": "Item count and attention count for the header and app tab bar", "auth": "shopper", "response": "CartBadge", "screens": ["store/home", "store/product", "store/cart"] },
+    { "id": "addItem", "area": "store", "method": "POST", "path": "/cart/items", "summary": "Add an offer to the cart (Add to cart)", "desc": "Adding an offer already in the cart increases its quantity. Adding a different offer for the same variant creates a second line; the existing line is never switched. Quantity above the maximum is capped with outcome capped_at_limit.", "auth": "shopper", "body": "AddItemInput", "response": "AddItemResult", "status": 201, "errors": ["OFFER_UNAVAILABLE", "QUANTITY_LIMIT_EXCEEDED", "CART_FULL"], "events": ["cart.item.added"], "screens": ["store/product", "store/offers", "store/deals", "store/cart"] },
+    { "id": "updateItemQuantity", "area": "store", "method": "PATCH", "path": "/cart/items/{id}", "summary": "Change a line's quantity", "auth": "shopper", "params": { "id": "uuid" }, "body": { "quantity": "int" }, "response": "CartView", "errors": ["QUANTITY_LIMIT_EXCEEDED", "OFFER_UNAVAILABLE"], "screens": ["store/cart"] },
+    { "id": "removeItem", "area": "store", "method": "DELETE", "path": "/cart/items/{id}", "summary": "Remove a line", "auth": "shopper", "params": { "id": "uuid" }, "response": "CartView", "events": ["cart.item.removed"], "screens": ["store/cart"] },
+    { "id": "acceptItemChanges", "area": "store", "method": "POST", "path": "/cart/items/{id}/accept", "summary": "Accept a changed price or reduced quantity for a line", "desc": "Moves the accepted price baseline to the current price (or the quantity to what is available) and closes the warning notices. Blocking notices cannot be accepted.", "auth": "shopper", "params": { "id": "uuid" }, "body": { "noticeIds": "uuid[]" }, "response": "CartView", "errors": ["ILLEGAL_TRANSITION", "CONFLICT"], "screens": ["store/cart"] },
+    { "id": "switchItemOffer", "area": "store", "method": "POST", "path": "/cart/items/{id}/switch-offer", "summary": "Replace a line's offer with one the customer explicitly chose", "desc": "Only on an explicit customer action (e.g. 'See other offers' then Choose). Must be the same variant. The response shows the new seller, price and package.", "auth": "shopper", "params": { "id": "uuid" }, "body": { "offerId": "uuid", "quantity": "int?" }, "response": "CartView", "errors": ["OFFER_UNAVAILABLE", "OFFER_MISMATCH", "QUANTITY_LIMIT_EXCEEDED"], "events": ["cart.item.offer_switched"], "screens": ["store/cart", "store/offers"] },
+    { "id": "removeUnavailableItems", "area": "store", "method": "POST", "path": "/cart/remove-unavailable", "summary": "Remove every unavailable line in one action", "auth": "shopper", "response": "CartView", "events": ["cart.item.removed"], "screens": ["store/cart"] },
+    { "id": "setDestination", "area": "store", "method": "PUT", "path": "/cart/destination", "summary": "Set the deliver-to location used for estimates", "desc": "Either a saved address (customers) or a postal code. Checkout starts from this location but asks for a full address.", "auth": "shopper", "body": { "addressId": "uuid?", "postalCode": "string?", "country": "string?" }, "response": "CartView", "errors": ["VALIDATION_FAILED"], "screens": ["store/cart", "store/product"] },
+    { "id": "previewCoupon", "area": "store", "method": "POST", "path": "/cart/coupons", "summary": "Apply a coupon code for preview", "desc": "Returns 200 with the coupon's status: applied (amount, covered items, items not covered and why) or rejected (reason). Account coupons for guests return needs_sign_in. Codes are carried into checkout and evaluated again there.", "auth": "shopper", "body": { "code": "string" }, "response": { "cart": "CartView", "result": "CouponPreview" }, "errors": ["RATE_LIMITED"], "screens": ["store/cart"] },
+    { "id": "removeCoupon", "area": "store", "method": "DELETE", "path": "/cart/coupons/{code}", "summary": "Remove a coupon code", "auth": "shopper", "params": { "code": "string" }, "response": "CartView", "screens": ["store/cart"] },
+    { "id": "mergeGuestCart", "area": "store", "method": "POST", "path": "/cart/merge", "summary": "Merge the guest cart into the customer cart after sign-in", "desc": "Send with the customer session and the X-Guest-Session header of the guest cart. Same offer: quantities combine up to the limit. Different offer for the same variant: both lines kept. Unavailable guest lines are dropped with a note. Idempotent by guest cart: a second call returns the same report.", "auth": "customer", "body": { "guestSessionId": "uuid" }, "response": "MergeResult", "errors": ["NOT_FOUND"], "events": ["cart.cart.merged"], "screens": ["auth/sign-in", "store/cart", "store/checkout"] },
+
+    { "id": "saveForLater", "area": "store", "method": "POST", "path": "/cart/items/{id}/save-for-later", "summary": "Move a line to Saved for later", "auth": "shopper", "params": { "id": "uuid" }, "response": "CartView", "events": ["cart.item.removed"], "screens": ["store/cart"], "phase": 3 },
+    { "id": "listSavedItems", "area": "store", "method": "GET", "path": "/cart/saved", "summary": "Saved for later", "auth": "shopper", "paging": true, "response": "SavedItem", "screens": ["store/cart"], "phase": 3 },
+    { "id": "moveSavedToCart", "area": "store", "method": "POST", "path": "/cart/saved/{id}/move-to-cart", "summary": "Move a saved item back into the cart", "auth": "shopper", "params": { "id": "uuid" }, "body": { "quantity": "int?" }, "response": "AddItemResult", "errors": ["OFFER_UNAVAILABLE", "QUANTITY_LIMIT_EXCEEDED"], "events": ["cart.item.added"], "screens": ["store/cart"], "phase": 3 },
+    { "id": "deleteSavedItem", "area": "store", "method": "DELETE", "path": "/cart/saved/{id}", "summary": "Delete a saved item", "auth": "shopper", "params": { "id": "uuid" }, "response": null, "screens": ["store/cart"], "phase": 3 },
+
+    { "id": "listCartsAdmin", "area": "admin", "method": "GET", "path": "/carts", "summary": "Find a customer's or guest's cart (support)", "desc": "Read-only, for answering 'my cart changed' questions. Guest carts are found by guest session id from a support case.", "auth": "staff", "permission": "cart.carts.view", "paging": true, "query": { "customerId": "uuid?", "guestSessionId": "uuid?", "status": "enum(active|merged|converted|expired)?" }, "response": "CartAdminSummary", "screens": ["admin/customers"] },
+    { "id": "getCartAdmin", "area": "admin", "method": "GET", "path": "/carts/{id}", "summary": "One cart with lines, notices and merge history", "auth": "staff", "permission": "cart.carts.view", "params": { "id": "uuid" }, "response": { "summary": "CartAdminSummary", "cart": "CartView", "merges": "MergeReport[]" }, "screens": ["admin/customers"] }
+  ],
+  "events": {
+    "publishes": [
+      { "name": "cart.item.added", "when": "A line is added or its quantity increased by an add", "payload": { "cartId": "uuid", "itemId": "uuid", "offerId": "uuid", "productId": "uuid", "sellerId": "uuid?", "quantity": "int", "unitPrice": "Money", "ownerKind": "string", "source": "string?" } },
+      { "name": "cart.item.removed", "when": "A line is removed, saved for later or removed as unavailable", "payload": { "cartId": "uuid", "itemId": "uuid", "offerId": "uuid", "reason": "enum(customer|unavailable|saved_for_later|purchased)" } },
+      { "name": "cart.item.offer_switched", "when": "The customer explicitly picked another offer for a line", "payload": { "cartId": "uuid", "itemId": "uuid", "fromOfferId": "uuid", "toOfferId": "uuid" } },
+      { "name": "cart.cart.merged", "when": "A guest cart is merged into a customer cart", "payload": { "fromCartId": "uuid", "intoCartId": "uuid", "customerId": "uuid", "lines": "int" } },
+      { "name": "cart.cart.expired", "when": "An idle cart passes its retention period", "payload": { "cartId": "uuid", "ownerKind": "string", "itemCount": "int" } }
+    ],
+    "consumes": [
+      { "name": "offers.offer.price_changed", "does": "Queue lines holding the offer for a notice refresh (price increased or decreased)" },
+      { "name": "offers.offer.status_changed", "does": "Queue lines; an ended or hidden offer becomes an offer_ended blocking notice" },
+      { "name": "inventory.stock.changed", "does": "Queue lines whose quantity may exceed availability (out_of_stock or quantity_reduced)" },
+      { "name": "sellers.seller.restricted", "does": "Lines from offers the restriction hides get seller_unavailable notices; nothing is switched to another seller" },
+      { "name": "sellers.seller.suspended", "does": "Same as restricted" },
+      { "name": "catalog.product.publication_changed", "does": "Hidden or suspended products give their lines a product_unavailable notice" },
+      { "name": "identity.guest_session.claimed", "does": "Merge the claimed guest session's cart into the account's customer cart (same rules and report as POST /cart/merge; idempotent). This is how sign-in merges carts on every client; identity only publishes the event and calls nothing in cart" }
+    ]
+  },
+  "permissions": [
+    { "key": "cart.carts.view", "audience": "staff", "desc": "Read customers' and guests' carts for support" }
+  ],
+  "jobs": [
+    { "name": "cart.recheck-queued", "schedule": "every 2 min", "does": "Refresh notices for lines queued by offer, stock and seller events so the next read is fast; GET /cart still re-checks authoritatively" },
+    { "name": "cart.expire-idle", "schedule": "daily 03:00 PT", "does": "Expire guest carts idle longer than guestCartRetentionDays and customer carts idle longer than customerCartRetentionDays; publishes cart.cart.expired" }
+  ],
+  "settings": [
+    { "key": "guestCartRetentionDays", "default": 30, "desc": "Idle days before a guest cart expires ('Items stay in your cart for 30 days')" },
+    { "key": "customerCartRetentionDays", "default": 90, "desc": "Idle days before a customer cart expires" },
+    { "key": "maxLines", "default": 50, "desc": "Distinct lines per cart (CART_FULL above)" },
+    { "key": "maxQuantityPerLine", "default": 10, "desc": "Upper bound when an offer has no purchase limit" },
+    { "key": "showPriceDecreaseNotices", "default": true, "desc": "Show an info notice when a price drops (accepted automatically)" },
+    { "key": "couponPreviewRateLimitPerHour", "default": 30, "desc": "Coupon attempts per owner per hour" }
+  ],
+  "errorCodes": {
+    "OFFER_UNAVAILABLE": { "status": 409, "meaning": "The offer is ended, hidden, out of stock or its seller cannot sell now. details.reason, details.alternatives (count, lowest price)." },
+    "QUANTITY_LIMIT_EXCEEDED": { "status": 422, "meaning": "Requested quantity is above the purchase limit or available stock. details.max, details.limitKind (purchase_limit|stock|line_maximum)." },
+    "CART_FULL": { "status": 422, "meaning": "The cart already has the maximum number of lines. details.max." },
+    "OFFER_MISMATCH": { "status": 422, "meaning": "The chosen offer is for a different variant than the line." }
+  },
+  "notes": [
+    "Dependencies: architecture lists offers and inventory. catalog is optional and only used for display fields that offers does not return; shipping (package estimates, coverage) and promotions (coupon preview, was-price) are optional so the cart still works with flat offer data when they are off; customers resolves saved address ids for the deliver-to location.",
+    "Owner resolution: a customer session uses the customer's cart; otherwise the X-Guest-Session header identifies the guest cart (guest sessions are issued by identity). Requests with neither get UNAUTHORIZED.",
+    "Never switch sellers: a line's offerId only changes through POST /cart/items/{id}/switch-offer. Alternatives are only hinted (count and lowest price), never applied.",
+    "Change detection runs on every GET /cart and before getCartForCheckout through offers.revalidate (lines with offerId, quantity, acceptedTermsVersion, acceptedUnitPrice; postal code of the deliver-to location) plus inventory.getAvailability; OfferChange kinds map to notices (price → price_increased/price_decreased, availability → out_of_stock/quantity_reduced, delivery → delivery_estimate_changed or not_shippable, removed → offer_ended, seller_restricted → seller_unavailable). Promotion-driven price changes come from promotions.priceOffers. Baseline = acceptedUnitPrice and the quantity the customer chose. Increases create a warning notice that must be accepted; decreases are info notices accepted automatically. Out of stock, offer ended, seller unavailable, product unavailable and not shippable are blocking: the line stays visible, is excluded from checkout and the rest of the cart is unchanged.",
+    "Packages: lines group by seller and ship-from location. Delivery estimate and shipping per package come from shipping.quoteOptions for the default (cheapest eligible) method; checkout lets the customer pick other options. Package labels ('Package 2 of 3') are computed per view, not stored.",
+    "Quantity limits: the line maximum is min(offer purchase limit, available stock, maxQuantityPerLine). Per-customer limits that count earlier orders are enforced in checkout, which can read order history.",
+    "Merge on sign-in: same offer combines up to the limit; different offers for the same variant are both kept (kept_separate_offer); unavailable guest lines are dropped and listed in the report; guest coupon codes are carried over when still valid.",
+    "The cart never reserves stock. Reservations start at Place order in checkout.",
+    "Save for later is listed in the plan as a later addition (ch. 6) and belongs with saved shopping (Growth), so its endpoints are phase 3. 'Tell me when it's back' is a wishlist alert (phase 3)."
+  ]
+}

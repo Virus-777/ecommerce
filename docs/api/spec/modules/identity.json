@@ -1,0 +1,2641 @@
+{
+  "name": "identity",
+  "title": "Identity",
+  "group": "Platform",
+  "phase": 1,
+  "chapters": [
+    6,
+    7,
+    10,
+    18
+  ],
+  "summary": "Who someone is and how they prove it: accounts for customers, seller members and staff, credentials, email verification, sessions and refresh tokens for the website and the Android app, password recovery, 2-step verification, signed-in devices, guest sessions and the security activity log.",
+  "owns": [
+    "Accounts in two realms: member (customers and seller members share one account) and staff (invite-only, 2-step verification required)",
+    "Registration with email verification codes (6 digits, 10 minutes, resend timer)",
+    "Phone number verification codes (requested by customers when the mobile number changes)",
+    "Sign-in for the store, Seller Center and Admin Center; access tokens plus rotating refresh tokens; keep me signed in",
+    "Failed sign-in counting and temporary lockout (attempts left shown to the user)",
+    "Password recovery links (single use, 30 minutes) that never reveal whether an account exists; password change; forced reset by staff",
+    "2-step verification (authenticator app at launch, text message later), recovery codes, trusted devices",
+    "Signed-in devices with sign-out of one device or everywhere",
+    "Seller context: which seller accounts a member may act for, and switching between them",
+    "Invitations for staff and seller members (accept link, password set-up, staff 2-step set-up)",
+    "Guest sessions (X-Guest-Session) for cart, recently viewed and guest checkout; guest order access grants on a guest session; emailed order links",
+    "Security activity log per account (sign-ins, failures, password and 2-step changes, staff actions on the account)",
+    "Staff tools to lock, unlock, force a password reset, reset 2-step, sign out and disable accounts",
+    "Recent re-authentication (re-auth tokens) before sensitive actions such as account closure or payout destination changes"
+  ],
+  "notOwns": [
+    "Customer profile, phone number on the profile, addresses, marketing consent and account closure rules (open orders, returns, cases): customers. identity closes the credential when customers calls closeAccount",
+    "Guest order lookup form (order reference + checkout email) and 'email me my order links': customers. It verifies the order with orders, then calls grantGuestOrderAccess / issueOrderLink here",
+    "Seller members, seller roles and seller permissions (who may change payouts, etc.): sellers. identity only stores which sellers an account may act for (grantSellerContext)",
+    "Staff roles, permissions, approval limits and the combined 'invite staff with roles' action: access (it calls inviteStaff here)",
+    "Sending emails and texts (codes, reset links, security alerts): notifications, which consumes identity events",
+    "Notification channel preferences: notifications; promotional (marketing) consent: customers",
+    "Material staff action history: audit (identity also keeps its own security activity log per account)"
+  ],
+  "dependsOn": [],
+  "optionalDeps": [
+    "audit",
+    "sellers",
+    "customers"
+  ],
+  "publicApi": [
+    {
+      "name": "authenticate",
+      "signature": "(accessToken: string) => Principal | null",
+      "desc": "Verify an access token and return who is calling. Used by the kernel HTTP layer for every area; seller principals carry the chosen sellerId and memberId.",
+      "usedBy": [
+        "kernel"
+      ]
+    },
+    {
+      "name": "verifyGuestSession",
+      "signature": "(guestSessionId: uuid) => GuestSession | null",
+      "desc": "Validate the X-Guest-Session header and touch its expiry",
+      "usedBy": [
+        "kernel",
+        "cart",
+        "checkout",
+        "customers"
+      ]
+    },
+    {
+      "name": "getAccount",
+      "signature": "(accountId: uuid) => AccountSummary | null",
+      "desc": "Email, display name, status, 2-step state",
+      "usedBy": [
+        "customers",
+        "sellers",
+        "access",
+        "notifications",
+        "audit",
+        "support"
+      ]
+    },
+    {
+      "name": "getAccounts",
+      "signature": "(accountIds: uuid[]) => AccountSummary[]",
+      "desc": "Batch lookup for lists (staff directory, seller members, audit names)",
+      "usedBy": [
+        "access",
+        "sellers",
+        "audit",
+        "notifications"
+      ]
+    },
+    {
+      "name": "findAccountByEmail",
+      "signature": "(email: string, realm: 'member' | 'staff') => AccountSummary | null",
+      "desc": "Used when inviting someone who may already have an account",
+      "usedBy": [
+        "sellers",
+        "access"
+      ]
+    },
+    {
+      "name": "inviteStaff",
+      "signature": "(input: { email: string, name: string, invitedBy: Actor }) => Invitation",
+      "desc": "Create an invited staff account and send the accept link (event identity.invitation.created). access assigns the roles.",
+      "usedBy": [
+        "access"
+      ]
+    },
+    {
+      "name": "inviteSellerMember",
+      "signature": "(input: { email: string, name: string, sellerId: uuid, sellerName: string, invitedBy: Actor }) => Invitation",
+      "desc": "Invite a person to act for a seller. Reuses an existing member account when the email has one.",
+      "usedBy": [
+        "sellers"
+      ]
+    },
+    {
+      "name": "grantSellerContext",
+      "signature": "(input: { accountId: uuid, sellerId: uuid, memberId: uuid, sellerName: string, roleLabel: string, isOwner: bool }) => void",
+      "desc": "Allow an account to sign in to Seller Center for this seller. Called again to refresh the label.",
+      "usedBy": [
+        "sellers"
+      ]
+    },
+    {
+      "name": "revokeSellerContext",
+      "signature": "(accountId: uuid, sellerId: uuid, reason: string) => void",
+      "desc": "Remove seller access and revoke sessions bound to that seller",
+      "usedBy": [
+        "sellers"
+      ]
+    },
+    {
+      "name": "revokeSessions",
+      "signature": "(accountId: uuid, reason: string, audience?: 'store' | 'seller' | 'admin') => int",
+      "desc": "Sign an account out everywhere (or in one area). Returns the number of sessions revoked.",
+      "usedBy": [
+        "access",
+        "sellers",
+        "trust"
+      ]
+    },
+    {
+      "name": "verifyStepUp",
+      "signature": "(accountId: uuid, proof: { password?: string, code?: string }) => bool",
+      "desc": "Re-check the password or a 2-step code before a sensitive action (payout destination change, approval of a large payout)",
+      "usedBy": [
+        "finance",
+        "access"
+      ]
+    },
+    {
+      "name": "grantGuestOrderAccess",
+      "signature": "(guestSessionId: uuid, orderId: uuid, email: string, via: 'checkout' | 'lookup' | 'link') => GuestSession",
+      "desc": "Let a guest session open one order (after guest checkout, a successful lookup in customers, or an emailed link)",
+      "usedBy": [
+        "checkout",
+        "customers"
+      ]
+    },
+    {
+      "name": "hasGuestOrderAccess",
+      "signature": "(guestSessionId: uuid, orderId: uuid) => bool",
+      "desc": "Gate guest access to order detail, tracking, returns and help",
+      "usedBy": [
+        "orders",
+        "shipping",
+        "returns",
+        "support",
+        "customers",
+        "media"
+      ]
+    },
+    {
+      "name": "issueOrderLink",
+      "signature": "(orderId: uuid, email: string) => { url: url, expiresAt: datetime }",
+      "desc": "Signed link for confirmation and 'email me my order links' emails; redeemed at POST /api/public/identity/order-links/{token}/redeem",
+      "usedBy": [
+        "checkout",
+        "customers",
+        "notifications"
+      ]
+    },
+    {
+      "name": "closeAccount",
+      "signature": "(accountId: uuid, reason: string) => void",
+      "desc": "Close the member credential after customers completes a closure. Revokes all sessions; keeps Seller Center access if the account still belongs to a seller.",
+      "usedBy": [
+        "customers"
+      ]
+    },
+    {
+      "name": "sendPasswordReset",
+      "signature": "(accountId: uuid, input: { reason: string, by: Actor, revokeSessions: bool }) => void",
+      "desc": "Staff-initiated reset from another module's screen (customers account actions)",
+      "usedBy": [
+        "customers"
+      ]
+    },
+    {
+      "name": "startPhoneVerification",
+      "signature": "(accountId: uuid, phone: string) => VerificationChallenge",
+      "desc": "Text a 6-digit code to a new mobile number (needs SMS, phase 2; until then the number stays unverified). Confirmed at POST /api/public/identity/verifications/{id}/confirm; publishes identity.user.verified with channel phone.",
+      "usedBy": [
+        "customers"
+      ]
+    },
+    {
+      "name": "verifyReauthToken",
+      "signature": "(accountId: uuid, token: string) => bool",
+      "desc": "Check and consume a re-auth token from POST /api/store/identity/reauth or POST /api/seller/identity/reauth (valid 5 minutes, single use)",
+      "usedBy": [
+        "customers",
+        "sellers",
+        "finance"
+      ]
+    },
+    {
+      "name": "accountSecurityOf",
+      "signature": "(accountIds: uuid[], opts?: { activityLimit?: int }) => Map<uuid, AccountSecurity>",
+      "desc": "Batched staff view of sign-in security for customer 360 views: AccountAdmin (lock, forced reset, 2-step, devices, recent security activity) plus email status, warnings and a one-line sign-in summary. Callers pass identity account ids (Customer.userId).",
+      "usedBy": [
+        "graphql"
+      ]
+    }
+  ],
+  "types": {
+    "Principal": {
+      "kind": "enum(customer|seller|staff|guest)",
+      "accountId": "uuid?",
+      "sessionId": "uuid?",
+      "sellerId": {
+        "type": "uuid?",
+        "desc": "Seller the session acts for (seller audience only)"
+      },
+      "sellerMemberId": "uuid?",
+      "guestSessionId": "uuid?",
+      "authenticatedAt": "datetime?",
+      "twoStepVerifiedAt": {
+        "type": "datetime?",
+        "desc": "Set when this session passed 2-step verification; used for step-up checks"
+      }
+    },
+    "AccountSummary": {
+      "id": "uuid",
+      "realm": "enum(member|staff)",
+      "email": "email",
+      "displayName": "string",
+      "status": "enum(invited|pending_verification|active|locked|disabled|closed)",
+      "emailVerified": "bool",
+      "twoStepEnabled": "bool",
+      "lastActiveAt": "datetime?"
+    },
+    "DeviceInfo": {
+      "kind": "enum(web|android)",
+      "name": {
+        "type": "string?",
+        "desc": "Client label, e.g. 'Marketly app on Pixel 8'. The website sends nothing; the server derives 'Chrome on Windows 11' from the User-Agent."
+      },
+      "appVersion": {
+        "type": "string?",
+        "desc": "Android versionName, e.g. 1.4.2"
+      },
+      "installationId": {
+        "type": "string?",
+        "desc": "Stable per app install; lets the app keep one device record across sign-ins"
+      }
+    },
+    "SessionTokens": {
+      "sessionId": "uuid",
+      "audience": "enum(store|seller|admin)",
+      "accessToken": {
+        "type": "string",
+        "desc": "Short-lived bearer token (15 min)"
+      },
+      "accessTokenExpiresAt": "datetime",
+      "refreshToken": {
+        "type": "string",
+        "desc": "Rotates on every refresh; reuse of an old one revokes the whole session"
+      },
+      "refreshTokenExpiresAt": "datetime",
+      "sellerId": "uuid?"
+    },
+    "SellerContext": {
+      "sellerId": "uuid",
+      "sellerName": "string",
+      "memberId": "uuid",
+      "roleLabel": {
+        "type": "string",
+        "desc": "Owner, Shipping, Customer service, Custom permissions…"
+      },
+      "isOwner": "bool",
+      "lastUsedAt": "datetime?"
+    },
+    "SignInRequest": {
+      "email": "email",
+      "password": "string",
+      "audience": {
+        "type": "enum(store|seller|admin)",
+        "desc": "store = customer account; seller = Seller Center; admin = Admin and Operations Center (staff realm)"
+      },
+      "keepSignedIn": {
+        "type": "bool",
+        "desc": "Long refresh token (30 days) instead of 24 hours; ignored for staff (12 h max)"
+      },
+      "device": "DeviceInfo",
+      "guestSessionId": {
+        "type": "uuid?",
+        "desc": "Guest cart and guest orders to attach to the account after sign-in"
+      },
+      "sellerId": {
+        "type": "uuid?",
+        "desc": "Preferred seller for seller audience (e.g. last used on this device)"
+      }
+    },
+    "SignInChallenge": {
+      "id": "uuid",
+      "methods": "enum(totp|sms|recovery_code)[]",
+      "smsPhoneMasked": "string?",
+      "expiresAt": "datetime"
+    },
+    "SignInResult": {
+      "status": {
+        "type": "enum(signed_in|second_factor_required|seller_context_required|password_reset_required)",
+        "desc": "seller_context_required: signed in, but the member belongs to several sellers and must pick one (POST /api/seller/identity/session/seller-context)"
+      },
+      "tokens": "SessionTokens?",
+      "account": "AccountSummary?",
+      "challenge": "SignInChallenge?",
+      "sellerContexts": "SellerContext[]",
+      "passwordResetToken": {
+        "type": "string?",
+        "desc": "Only when staff forced a reset: continue at the set-new-password step"
+      }
+    },
+    "SecondFactorRequest": {
+      "method": "enum(totp|sms|recovery_code)",
+      "code": "string",
+      "rememberDevice": {
+        "type": "bool",
+        "desc": "Skip 2-step on this device for 30 days (members only; staff always verify)"
+      }
+    },
+    "RegistrationRequest": {
+      "email": "email",
+      "password": "string",
+      "firstName": "string",
+      "lastName": "string",
+      "marketingOptIn": {
+        "type": "bool",
+        "desc": "Unchecked by default. Forwarded to notifications as promotional email consent."
+      },
+      "acceptedTermsVersion": {
+        "type": "string",
+        "desc": "Purchase terms / privacy version shown on the form (content module)"
+      },
+      "guestSessionId": "uuid?",
+      "device": "DeviceInfo"
+    },
+    "VerificationChallenge": {
+      "id": "uuid",
+      "purpose": "enum(email_verification|email_change|phone_verification)",
+      "emailMasked": {
+        "type": "string",
+        "desc": "Masked destination: j••••••••@example.com or (503) •••-0148"
+      },
+      "codeLength": "int",
+      "expiresAt": "datetime",
+      "resendAvailableAt": "datetime",
+      "attemptsLeft": "int"
+    },
+    "VerifyCodeRequest": {
+      "code": {
+        "type": "string",
+        "desc": "6 digits"
+      },
+      "keepSignedIn": "bool?",
+      "device": "DeviceInfo?"
+    },
+    "VerifyResult": {
+      "verified": "bool",
+      "account": "AccountSummary",
+      "tokens": {
+        "type": "SessionTokens?",
+        "desc": "Registration verification signs the customer in"
+      }
+    },
+    "PasswordPolicy": {
+      "minLength": {
+        "type": "int",
+        "desc": "10 for members, 12 for staff"
+      },
+      "requireNumber": "bool",
+      "requireUppercase": "bool",
+      "disallowNameOrEmail": "bool",
+      "rejectBreached": {
+        "type": "bool",
+        "desc": "Checked against a breached-password list"
+      }
+    },
+    "PasswordResetStatus": {
+      "valid": "bool",
+      "emailMasked": "string?",
+      "expiresAt": "datetime?",
+      "policy": "PasswordPolicy",
+      "forced": {
+        "type": "bool",
+        "desc": "Staff required this reset"
+      }
+    },
+    "CompleteResetRequest": {
+      "newPassword": "string",
+      "signOutOtherDevices": {
+        "type": "bool",
+        "desc": "Default true on the screen"
+      }
+    },
+    "ChangePasswordRequest": {
+      "currentPassword": "string",
+      "newPassword": "string",
+      "signOutOtherDevices": "bool"
+    },
+    "TwoStepMethod": {
+      "id": "uuid",
+      "method": "enum(totp|sms)",
+      "label": {
+        "type": "string",
+        "desc": "Authenticator app, Text message to (503) •••-0148"
+      },
+      "phoneMasked": "string?",
+      "addedAt": "datetime",
+      "lastUsedAt": "datetime?"
+    },
+    "TwoStepStatus": {
+      "enabled": "bool",
+      "required": {
+        "type": "bool",
+        "desc": "Always true for staff"
+      },
+      "methods": "TwoStepMethod[]",
+      "recoveryCodesRemaining": "int"
+    },
+    "TwoStepSetupRequest": {
+      "method": "enum(totp|sms)",
+      "phone": {
+        "type": "string?",
+        "desc": "E.164, sms only (phase 2)"
+      },
+      "currentPassword": "string"
+    },
+    "TwoStepSetup": {
+      "setupId": "uuid",
+      "method": "enum(totp|sms)",
+      "otpauthUri": {
+        "type": "string?",
+        "desc": "otpauth://totp/… for the QR code"
+      },
+      "manualEntryKey": {
+        "type": "string?",
+        "desc": "Base32 secret grouped for typing"
+      },
+      "phoneMasked": "string?",
+      "expiresAt": "datetime"
+    },
+    "RecoveryCodes": {
+      "codes": {
+        "type": "string[]",
+        "desc": "10 single-use codes, shown once"
+      },
+      "generatedAt": "datetime"
+    },
+    "Device": {
+      "id": "uuid",
+      "kind": "enum(web|android)",
+      "label": {
+        "type": "string",
+        "desc": "Chrome on Windows 11 · Marketly app on Pixel 8"
+      },
+      "location": {
+        "type": "string?",
+        "desc": "Approximate, from IP: Portland, OR"
+      },
+      "current": {
+        "type": "bool",
+        "desc": "The device making this request"
+      },
+      "audiences": "enum(store|seller|admin)[]",
+      "firstSeenAt": "datetime",
+      "lastActiveAt": "datetime",
+      "twoStepTrustedUntil": "datetime?"
+    },
+    "SecurityEvent": {
+      "id": "uuid",
+      "at": "datetime",
+      "kind": "enum(signed_in|signed_in_new_device|sign_in_failed|sign_in_blocked|signed_out|signed_out_everywhere|session_revoked|refresh_token_reused|password_changed|password_reset_requested|password_reset_completed|forced_password_reset|email_verified|email_changed|two_step_enabled|two_step_disabled|recovery_codes_regenerated|account_locked|account_unlocked|account_disabled|account_enabled|seller_context_switched|seller_access_granted|seller_access_revoked)",
+      "label": {
+        "type": "string",
+        "desc": "Human text: '3 wrong passwords, sign-in blocked for 15 min'"
+      },
+      "device": "string?",
+      "location": "string?",
+      "audience": "enum(store|seller|admin)?",
+      "result": "enum(completed|failed|blocked)",
+      "actor": {
+        "type": "Actor?",
+        "desc": "Staff member when the change was made by staff"
+      },
+      "reason": "text?"
+    },
+    "SecurityOverview": {
+      "account": "AccountSummary",
+      "passwordChangedAt": "datetime?",
+      "email": {
+        "type": "EmailStatus"
+      },
+      "twoStep": "TwoStepStatus",
+      "devices": "Device[]",
+      "recentActivity": {
+        "type": "SecurityEvent[]",
+        "desc": "Last 30 days, newest first, max 10"
+      },
+      "warnings": {
+        "type": "SecurityWarning[]",
+        "desc": "e.g. 2-step verification is off"
+      }
+    },
+    "EmailStatus": {
+      "address": "email",
+      "verifiedAt": "datetime?",
+      "pendingChangeTo": "email?"
+    },
+    "SecurityWarning": {
+      "code": "enum(two_step_off|recovery_codes_low|password_old|unrecognised_sign_in)",
+      "message": "string"
+    },
+    "GuestSession": {
+      "id": {
+        "type": "uuid",
+        "desc": "Send as X-Guest-Session"
+      },
+      "createdAt": "datetime",
+      "expiresAt": "datetime",
+      "orderIds": {
+        "type": "uuid[]",
+        "desc": "Orders this guest session may open"
+      }
+    },
+    "Invitation": {
+      "id": "uuid",
+      "realm": "enum(member|staff)",
+      "purpose": "enum(staff|seller_member)",
+      "email": "email",
+      "name": "string",
+      "status": "enum(pending|accepted|expired|revoked)",
+      "contextRef": {
+        "type": "string?",
+        "desc": "sellerId for seller members"
+      },
+      "contextLabel": {
+        "type": "string?",
+        "desc": "Seller name shown on the accept page"
+      },
+      "invitedBy": "Actor",
+      "sentAt": "datetime",
+      "expiresAt": "datetime",
+      "acceptedAt": "datetime?",
+      "accountId": "uuid?"
+    },
+    "InvitationView": {
+      "purpose": "enum(staff|seller_member)",
+      "emailMasked": "string",
+      "name": "string",
+      "contextLabel": "string?",
+      "existingAccount": {
+        "type": "bool",
+        "desc": "True: confirm with the current password instead of creating one"
+      },
+      "requiresTwoStepSetup": "bool",
+      "policy": "PasswordPolicy",
+      "expiresAt": "datetime"
+    },
+    "AcceptInvitationRequest": {
+      "password": {
+        "type": "string?",
+        "desc": "New accounts"
+      },
+      "currentPassword": {
+        "type": "string?",
+        "desc": "Existing member accounts"
+      },
+      "name": "string?",
+      "device": "DeviceInfo"
+    },
+    "AcceptInvitationResult": {
+      "status": "enum(signed_in|two_step_setup_required)",
+      "account": "AccountSummary",
+      "tokens": "SessionTokens?",
+      "twoStepSetup": {
+        "type": "TwoStepSetup?",
+        "desc": "Staff must confirm an authenticator code before the first session"
+      }
+    },
+    "AccountListItem": {
+      "account": "AccountSummary",
+      "lockedUntil": "datetime?",
+      "mustResetPassword": "bool",
+      "sellerCount": {
+        "type": "int",
+        "desc": "Sellers this member may act for"
+      },
+      "createdAt": "datetime",
+      "lastSignInAt": "datetime?"
+    },
+    "AccountAdmin": {
+      "account": "AccountSummary",
+      "lockedUntil": "datetime?",
+      "lockReason": "text?",
+      "mustResetPassword": "bool",
+      "failedSignInsInWindow": "int",
+      "createdAt": "datetime",
+      "lastSignInAt": "datetime?",
+      "passwordChangedAt": "datetime?",
+      "twoStep": "TwoStepStatus",
+      "devices": "Device[]",
+      "sellerContexts": "SellerContext[]",
+      "invitation": "Invitation?",
+      "recentActivity": "SecurityEvent[]"
+    },
+    "LockRequest": {
+      "reason": "text",
+      "until": {
+        "type": "datetime?",
+        "desc": "Empty = until unlocked by staff"
+      }
+    },
+    "ReauthRequest": {
+      "password": "string?",
+      "code": {
+        "type": "string?",
+        "desc": "2-step code instead of the password"
+      }
+    },
+    "ReauthToken": {
+      "reauthToken": "string",
+      "expiresAt": "datetime"
+    },
+    "OrderLinkRedemption": {
+      "guestSession": "GuestSession",
+      "orderId": "uuid",
+      "emailMasked": "string"
+    }
+  },
+  "tables": [
+    {
+      "name": "accounts",
+      "desc": "One row per account. Email is unique per realm (the same person can have a member account and a staff account).",
+      "columns": {
+        "id": "uuid pk",
+        "realm": "text (member|staff)",
+        "email": "text",
+        "email_normalized": "text",
+        "email_verified_at": "timestamptz?",
+        "display_name": "text",
+        "status": "text",
+        "password_hash": "text? (argon2id)",
+        "password_changed_at": "timestamptz?",
+        "must_reset_password": "bool",
+        "failed_sign_ins": "int",
+        "failed_window_started_at": "timestamptz?",
+        "locked_until": "timestamptz?",
+        "lock_reason": "text?",
+        "locked_by": "text?",
+        "closed_at": "timestamptz?",
+        "accepted_terms_version": "text?",
+        "created_at": "timestamptz",
+        "last_sign_in_at": "timestamptz?",
+        "last_active_at": "timestamptz?",
+        "version": "int"
+      },
+      "indexes": [
+        "unique (realm, email_normalized)",
+        "(status, id)",
+        "(realm, created_at)"
+      ]
+    },
+    {
+      "name": "password_history",
+      "desc": "Last N hashes to block reuse",
+      "columns": {
+        "id": "uuid pk",
+        "account_id": "uuid → accounts",
+        "password_hash": "text",
+        "created_at": "timestamptz"
+      },
+      "indexes": [
+        "(account_id, created_at desc)"
+      ]
+    },
+    {
+      "name": "two_step_methods",
+      "columns": {
+        "id": "uuid pk",
+        "account_id": "uuid → accounts",
+        "method": "text (totp|sms)",
+        "secret_encrypted": "bytea?",
+        "phone_e164_encrypted": "bytea?",
+        "phone_masked": "text?",
+        "confirmed_at": "timestamptz?",
+        "last_used_at": "timestamptz?",
+        "last_used_step": "bigint? (TOTP replay guard)",
+        "removed_at": "timestamptz?"
+      },
+      "indexes": [
+        "(account_id) where removed_at is null"
+      ]
+    },
+    {
+      "name": "recovery_codes",
+      "columns": {
+        "id": "uuid pk",
+        "account_id": "uuid → accounts",
+        "code_hash": "text",
+        "batch_id": "uuid",
+        "used_at": "timestamptz?"
+      },
+      "indexes": [
+        "(account_id, batch_id)"
+      ]
+    },
+    {
+      "name": "challenges",
+      "desc": "Email verification, email change, phone verification, 2-step sign-in and 2-step setup challenges",
+      "columns": {
+        "id": "uuid pk",
+        "account_id": "uuid? → accounts",
+        "purpose": "text (email_verification|email_change|phone_verification|sign_in_second_factor|two_step_setup)",
+        "target_email": "text?",
+        "code_hash": "text?",
+        "payload": "jsonb (setup secret, pending session request)",
+        "attempts": "int",
+        "max_attempts": "int",
+        "status": "text",
+        "expires_at": "timestamptz",
+        "resend_available_at": "timestamptz?",
+        "created_at": "timestamptz",
+        "completed_at": "timestamptz?",
+        "target_phone_encrypted": "bytea?"
+      },
+      "indexes": [
+        "(account_id, purpose, status)",
+        "(expires_at)"
+      ]
+    },
+    {
+      "name": "password_resets",
+      "columns": {
+        "id": "uuid pk",
+        "account_id": "uuid → accounts",
+        "token_hash": "text unique",
+        "forced_by": "text?",
+        "forced_reason": "text?",
+        "expires_at": "timestamptz",
+        "used_at": "timestamptz?",
+        "requested_ip": "inet?",
+        "created_at": "timestamptz"
+      },
+      "indexes": [
+        "(account_id, created_at desc)"
+      ]
+    },
+    {
+      "name": "devices",
+      "desc": "A browser or app install seen for an account",
+      "columns": {
+        "id": "uuid pk",
+        "account_id": "uuid → accounts",
+        "kind": "text (web|android)",
+        "label": "text",
+        "installation_id": "text?",
+        "user_agent": "text?",
+        "app_version": "text?",
+        "last_ip": "inet?",
+        "last_location": "text?",
+        "two_step_trusted_until": "timestamptz?",
+        "first_seen_at": "timestamptz",
+        "last_active_at": "timestamptz"
+      },
+      "indexes": [
+        "(account_id, last_active_at desc)",
+        "unique (account_id, installation_id) where installation_id is not null"
+      ]
+    },
+    {
+      "name": "sessions",
+      "desc": "One per sign-in. Refresh tokens rotate inside a session (family); reuse of a rotated token revokes the session.",
+      "columns": {
+        "id": "uuid pk",
+        "account_id": "uuid → accounts",
+        "device_id": "uuid → devices",
+        "audience": "text (store|seller|admin)",
+        "seller_id": "uuid?",
+        "seller_member_id": "uuid?",
+        "refresh_token_hash": "text unique",
+        "previous_token_hash": "text?",
+        "keep_signed_in": "bool",
+        "two_step_verified_at": "timestamptz?",
+        "created_at": "timestamptz",
+        "last_refreshed_at": "timestamptz",
+        "expires_at": "timestamptz",
+        "absolute_expires_at": "timestamptz",
+        "revoked_at": "timestamptz?",
+        "revoke_reason": "text?"
+      },
+      "indexes": [
+        "(account_id) where revoked_at is null",
+        "(device_id)",
+        "(seller_id) where revoked_at is null"
+      ]
+    },
+    {
+      "name": "seller_access",
+      "desc": "Sellers an account may act for. Written only by the sellers module through grantSellerContext / revokeSellerContext.",
+      "columns": {
+        "account_id": "uuid → accounts",
+        "seller_id": "uuid",
+        "seller_member_id": "uuid",
+        "seller_name": "text",
+        "role_label": "text",
+        "is_owner": "bool",
+        "granted_at": "timestamptz",
+        "revoked_at": "timestamptz?",
+        "last_used_at": "timestamptz?"
+      },
+      "indexes": [
+        "pk (account_id, seller_id)",
+        "(seller_id)"
+      ]
+    },
+    {
+      "name": "invitations",
+      "columns": {
+        "id": "uuid pk",
+        "realm": "text",
+        "purpose": "text (staff|seller_member)",
+        "email": "text",
+        "name": "text",
+        "account_id": "uuid? → accounts",
+        "context_ref": "text?",
+        "context_label": "text?",
+        "token_hash": "text unique",
+        "invited_by_kind": "text",
+        "invited_by_id": "text",
+        "status": "text",
+        "sent_at": "timestamptz",
+        "expires_at": "timestamptz",
+        "accepted_at": "timestamptz?",
+        "revoked_at": "timestamptz?",
+        "revoke_reason": "text?"
+      },
+      "indexes": [
+        "(status, expires_at)",
+        "(email)"
+      ]
+    },
+    {
+      "name": "guest_sessions",
+      "columns": {
+        "id": "uuid pk",
+        "device_kind": "text",
+        "created_at": "timestamptz",
+        "last_seen_at": "timestamptz",
+        "expires_at": "timestamptz",
+        "claimed_by_account_id": "uuid?",
+        "claimed_at": "timestamptz?"
+      },
+      "indexes": [
+        "(expires_at)"
+      ]
+    },
+    {
+      "name": "guest_order_grants",
+      "desc": "Orders a guest session may open",
+      "columns": {
+        "guest_session_id": "uuid → guest_sessions",
+        "order_id": "uuid",
+        "email_normalized": "text",
+        "via": "text (checkout|lookup|link)",
+        "granted_at": "timestamptz",
+        "expires_at": "timestamptz"
+      },
+      "indexes": [
+        "pk (guest_session_id, order_id)",
+        "(email_normalized)"
+      ]
+    },
+    {
+      "name": "order_links",
+      "desc": "Emailed order links (token hash only)",
+      "columns": {
+        "id": "uuid pk",
+        "token_hash": "text unique",
+        "order_id": "uuid",
+        "email_normalized": "text",
+        "expires_at": "timestamptz",
+        "last_redeemed_at": "timestamptz?",
+        "redeem_count": "int"
+      },
+      "indexes": [
+        "(order_id)"
+      ]
+    },
+    {
+      "name": "security_events",
+      "desc": "Per-account security activity (append-only)",
+      "columns": {
+        "id": "uuid pk",
+        "account_id": "uuid → accounts",
+        "kind": "text",
+        "result": "text",
+        "audience": "text?",
+        "device_id": "uuid?",
+        "device_label": "text?",
+        "ip": "inet?",
+        "location": "text?",
+        "actor_kind": "text?",
+        "actor_id": "text?",
+        "reason": "text?",
+        "detail": "jsonb",
+        "at": "timestamptz"
+      },
+      "indexes": [
+        "(account_id, at desc)",
+        "(kind, at)"
+      ]
+    },
+    {
+      "name": "sign_in_attempts",
+      "desc": "Rate limiting by email and IP, including unknown emails",
+      "columns": {
+        "id": "bigserial pk",
+        "email_normalized": "text",
+        "ip": "inet",
+        "succeeded": "bool",
+        "at": "timestamptz"
+      },
+      "indexes": [
+        "(email_normalized, at)",
+        "(ip, at)"
+      ]
+    },
+    {
+      "name": "reauth_tokens",
+      "desc": "Short-lived proof of a recent password or 2-step check",
+      "columns": {
+        "token_hash": "text pk",
+        "account_id": "uuid → accounts",
+        "session_id": "uuid → sessions",
+        "expires_at": "timestamptz",
+        "used_at": "timestamptz?"
+      },
+      "indexes": [
+        "(expires_at)"
+      ]
+    }
+  ],
+  "stateMachines": [
+    {
+      "name": "Account status",
+      "field": "AccountSummary.status",
+      "initial": "pending_verification",
+      "transitions": [
+        [
+          "pending_verification",
+          "verifyEmail",
+          "active"
+        ],
+        [
+          "invited",
+          "acceptInvitation",
+          "active"
+        ],
+        [
+          "invited",
+          "revokeInvitation",
+          "closed"
+        ],
+        [
+          "active",
+          "lock",
+          "locked"
+        ],
+        [
+          "active",
+          "tooManyFailedSignIns",
+          "locked"
+        ],
+        [
+          "locked",
+          "unlock",
+          "active"
+        ],
+        [
+          "locked",
+          "lockExpires",
+          "active"
+        ],
+        [
+          "active",
+          "disable",
+          "disabled"
+        ],
+        [
+          "locked",
+          "disable",
+          "disabled"
+        ],
+        [
+          "disabled",
+          "enable",
+          "active"
+        ],
+        [
+          "active",
+          "close",
+          "closed"
+        ],
+        [
+          "locked",
+          "close",
+          "closed"
+        ]
+      ],
+      "notes": "Staff accounts start as invited (initial state for that realm); member accounts start pending_verification and cannot sign in until the email code is confirmed (sign-in returns EMAIL_NOT_VERIFIED with a fresh challenge). Automatic locks (failed sign-ins) expire after lockoutMinutes; staff locks have an optional end date. Every move writes a security_events row; staff-initiated moves are also audited. Unverified accounts older than 7 days are deleted by identity.purge-expired."
+    },
+    {
+      "name": "Session",
+      "field": "SessionTokens.sessionId (sessions.revoked_at / expires_at)",
+      "initial": "active",
+      "transitions": [
+        [
+          "active",
+          "refresh",
+          "active"
+        ],
+        [
+          "active",
+          "selectSeller",
+          "active"
+        ],
+        [
+          "active",
+          "signOut",
+          "revoked"
+        ],
+        [
+          "active",
+          "revokeByUser",
+          "revoked"
+        ],
+        [
+          "active",
+          "revokeByStaff",
+          "revoked"
+        ],
+        [
+          "active",
+          "passwordChanged",
+          "revoked"
+        ],
+        [
+          "active",
+          "refreshTokenReused",
+          "revoked"
+        ],
+        [
+          "active",
+          "expire",
+          "expired"
+        ]
+      ],
+      "notes": "refresh rotates the refresh token; presenting the previous token again (reuse) revokes the session and records refresh_token_reused. passwordChanged revokes other sessions only when signOutOtherDevices is chosen (always for forced resets). Staff sessions have an absolute limit of 12 hours."
+    },
+    {
+      "name": "Verification challenge",
+      "field": "challenges.status",
+      "initial": "pending",
+      "transitions": [
+        [
+          "pending",
+          "resend",
+          "pending"
+        ],
+        [
+          "pending",
+          "confirm",
+          "completed"
+        ],
+        [
+          "pending",
+          "wrongCodeLimitReached",
+          "locked"
+        ],
+        [
+          "pending",
+          "expire",
+          "expired"
+        ],
+        [
+          "pending",
+          "supersede",
+          "expired"
+        ]
+      ],
+      "notes": "Codes are 6 digits, stored hashed, valid 10 minutes, 5 attempts. Resend issues a new code on the same challenge after resendAvailableAt (60 s). A new email change supersedes the previous one."
+    },
+    {
+      "name": "Invitation",
+      "field": "Invitation.status",
+      "initial": "pending",
+      "transitions": [
+        [
+          "pending",
+          "resend",
+          "pending"
+        ],
+        [
+          "pending",
+          "accept",
+          "accepted"
+        ],
+        [
+          "pending",
+          "expire",
+          "expired"
+        ],
+        [
+          "pending",
+          "revoke",
+          "revoked"
+        ],
+        [
+          "expired",
+          "resend",
+          "pending"
+        ]
+      ],
+      "notes": "Links are valid 7 days. Resend issues a new token and invalidates the old one."
+    }
+  ],
+  "endpoints": [
+    {
+      "id": "register",
+      "area": "public",
+      "method": "POST",
+      "path": "/registrations",
+      "summary": "Create a customer account and send an email code",
+      "desc": "Always answers 202 with a challenge so the form cannot be used to discover accounts: if the email already has an account, the email says so and offers sign-in and password reset, and the code will not verify. Password rules are checked live with GET /password-policy and again here.",
+      "auth": "anyone",
+      "body": "RegistrationRequest",
+      "response": "VerificationChallenge",
+      "status": 202,
+      "errors": [
+        "VALIDATION_FAILED",
+        "WEAK_PASSWORD",
+        "RATE_LIMITED"
+      ],
+      "events": [
+        "identity.user.registered",
+        "identity.verification.code_issued"
+      ],
+      "screens": [
+        "auth/register",
+        "auth/guest-orders",
+        "store/confirmation"
+      ]
+    },
+    {
+      "id": "confirmVerification",
+      "area": "public",
+      "method": "POST",
+      "path": "/verifications/{id}/confirm",
+      "summary": "Confirm an email or phone code (registration, email change, phone change)",
+      "desc": "Registration: activates the account and signs the customer in; guest orders placed with this email can then be attached (identity.user.verified, consumed by customers). Email change: switches the sign-in email and alerts the old address. Phone: marks the number verified (identity.user.verified with channel phone).",
+      "auth": "anyone",
+      "params": {
+        "id": "uuid"
+      },
+      "body": "VerifyCodeRequest",
+      "response": "VerifyResult",
+      "errors": [
+        "CODE_INVALID",
+        "CODE_EXPIRED",
+        "CHALLENGE_LOCKED",
+        "NOT_FOUND"
+      ],
+      "events": [
+        "identity.user.verified",
+        "identity.email.changed"
+      ],
+      "screens": [
+        "auth/register",
+        "account/profile"
+      ]
+    },
+    {
+      "id": "resendVerification",
+      "area": "public",
+      "method": "POST",
+      "path": "/verifications/{id}/resend",
+      "summary": "Send a new code",
+      "auth": "anyone",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "VerificationChallenge",
+      "errors": [
+        "RESEND_TOO_SOON",
+        "CODE_EXPIRED"
+      ],
+      "events": [
+        "identity.verification.code_issued"
+      ],
+      "screens": [
+        "auth/register"
+      ]
+    },
+    {
+      "id": "signIn",
+      "area": "public",
+      "method": "POST",
+      "path": "/sessions",
+      "summary": "Sign in with email and password",
+      "desc": "Returns tokens, or a 2-step challenge, or (seller audience with several sellers) the list of sellers to choose from. Wrong passwords return INVALID_CREDENTIALS with details.attemptsLeft; at the limit the account locks for lockoutMinutes and ACCOUNT_LOCKED carries details.lockedUntil. Unknown emails get the same answer and timing. A guest session passed in is claimed (cart and recently viewed merge). A sign-in from a device not seen before publishes identity.session.new_device for the security alert.",
+      "auth": "anyone",
+      "body": "SignInRequest",
+      "response": "SignInResult",
+      "errors": [
+        "INVALID_CREDENTIALS",
+        "ACCOUNT_LOCKED",
+        "ACCOUNT_DISABLED",
+        "EMAIL_NOT_VERIFIED",
+        "NO_SELLER_ACCESS",
+        "RATE_LIMITED"
+      ],
+      "events": [
+        "identity.session.new_device",
+        "identity.guest_session.claimed",
+        "identity.account.locked"
+      ],
+      "screens": [
+        "auth/sign-in",
+        "store/checkout"
+      ]
+    },
+    {
+      "id": "verifySecondFactor",
+      "area": "public",
+      "method": "POST",
+      "path": "/sign-in-challenges/{id}/verify",
+      "summary": "Complete sign-in with a 2-step code or recovery code",
+      "auth": "anyone",
+      "params": {
+        "id": "uuid"
+      },
+      "body": "SecondFactorRequest",
+      "response": "SignInResult",
+      "errors": [
+        "CODE_INVALID",
+        "CODE_EXPIRED",
+        "CHALLENGE_LOCKED"
+      ],
+      "events": [
+        "identity.session.new_device",
+        "identity.guest_session.claimed"
+      ],
+      "screens": [
+        "auth/sign-in"
+      ]
+    },
+    {
+      "id": "sendSignInSms",
+      "area": "public",
+      "method": "POST",
+      "path": "/sign-in-challenges/{id}/send-sms",
+      "summary": "Text the 2-step code to the saved phone",
+      "auth": "anyone",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "SignInChallenge",
+      "errors": [
+        "RESEND_TOO_SOON",
+        "CODE_EXPIRED"
+      ],
+      "events": [
+        "identity.verification.code_issued"
+      ],
+      "screens": [
+        "auth/sign-in"
+      ],
+      "phase": 2
+    },
+    {
+      "id": "refreshSession",
+      "area": "public",
+      "method": "POST",
+      "path": "/sessions/refresh",
+      "summary": "Exchange a refresh token for new tokens",
+      "desc": "Rotates the refresh token. Presenting an already-rotated token revokes the session (theft signal) and returns REFRESH_TOKEN_INVALID. The Android app calls this when an access token expires.",
+      "auth": "anyone",
+      "body": {
+        "refreshToken": "string"
+      },
+      "response": "SessionTokens",
+      "errors": [
+        "REFRESH_TOKEN_INVALID",
+        "ACCOUNT_LOCKED",
+        "ACCOUNT_DISABLED"
+      ]
+    },
+    {
+      "id": "signOut",
+      "area": "public",
+      "method": "POST",
+      "path": "/sessions/sign-out",
+      "summary": "Sign out this device",
+      "desc": "Works for every audience; the refresh token identifies the session. Idempotent.",
+      "auth": "anyone",
+      "body": {
+        "refreshToken": "string"
+      },
+      "response": null
+    },
+    {
+      "id": "requestPasswordReset",
+      "area": "public",
+      "method": "POST",
+      "path": "/password-resets",
+      "summary": "Email a password reset link",
+      "desc": "Always 202 with the masked email, whether or not an account exists. The link works once and expires in 30 minutes; a new request invalidates the previous link.",
+      "auth": "anyone",
+      "body": {
+        "email": "email"
+      },
+      "response": {
+        "emailMasked": "string",
+        "expiresInMinutes": "int",
+        "resendAvailableAt": "datetime"
+      },
+      "status": 202,
+      "errors": [
+        "RATE_LIMITED"
+      ],
+      "events": [
+        "identity.password_reset.requested"
+      ],
+      "screens": [
+        "auth/recover"
+      ]
+    },
+    {
+      "id": "getPasswordReset",
+      "area": "public",
+      "method": "GET",
+      "path": "/password-resets/{token}",
+      "summary": "Check a reset link before showing the new-password form",
+      "auth": "anyone",
+      "params": {
+        "token": "string"
+      },
+      "response": "PasswordResetStatus",
+      "screens": [
+        "auth/recover"
+      ]
+    },
+    {
+      "id": "completePasswordReset",
+      "area": "public",
+      "method": "POST",
+      "path": "/password-resets/{token}/complete",
+      "summary": "Set a new password from a reset link",
+      "desc": "Clears lockouts. Signs out other devices when chosen (always for forced resets). The account owner gets a confirmation email.",
+      "auth": "anyone",
+      "params": {
+        "token": "string"
+      },
+      "body": "CompleteResetRequest",
+      "response": null,
+      "errors": [
+        "RESET_LINK_INVALID",
+        "WEAK_PASSWORD",
+        "PASSWORD_REUSED"
+      ],
+      "events": [
+        "identity.password.changed"
+      ],
+      "screens": [
+        "auth/recover"
+      ]
+    },
+    {
+      "id": "getPasswordPolicy",
+      "area": "public",
+      "method": "GET",
+      "path": "/password-policy",
+      "summary": "Password rules for the live checklist",
+      "auth": "anyone",
+      "query": {
+        "realm": "enum(member|staff)?"
+      },
+      "response": "PasswordPolicy",
+      "screens": [
+        "auth/register",
+        "auth/recover",
+        "account/security"
+      ]
+    },
+    {
+      "id": "createGuestSession",
+      "area": "public",
+      "method": "POST",
+      "path": "/guest-sessions",
+      "summary": "Start a guest session (cart, guest checkout)",
+      "desc": "Created lazily on the first add to cart or product view. The id is sent as X-Guest-Session. Expires after guestSessionTtlDays without activity; order grants on it last guestOrderAccessDays.",
+      "auth": "anyone",
+      "body": {
+        "device": "DeviceInfo"
+      },
+      "response": "GuestSession",
+      "status": 201,
+      "errors": [
+        "RATE_LIMITED"
+      ],
+      "screens": [
+        "store/cart",
+        "store/checkout"
+      ]
+    },
+    {
+      "id": "redeemOrderLink",
+      "area": "public",
+      "method": "POST",
+      "path": "/order-links/{token}/redeem",
+      "summary": "Open an order from an emailed link",
+      "desc": "Grants the (new or given) guest session access to that order. Signed-in customers whose verified email matches see it in their account instead.",
+      "auth": "anyone",
+      "params": {
+        "token": "string"
+      },
+      "body": {
+        "guestSessionId": "uuid?"
+      },
+      "response": "OrderLinkRedemption",
+      "errors": [
+        "ORDER_LINK_INVALID"
+      ],
+      "screens": [
+        "auth/guest-orders",
+        "account/order"
+      ]
+    },
+    {
+      "id": "getInvitation",
+      "area": "public",
+      "method": "GET",
+      "path": "/invitations/{token}",
+      "summary": "Show an invitation (staff or seller member)",
+      "auth": "anyone",
+      "params": {
+        "token": "string"
+      },
+      "response": "InvitationView",
+      "errors": [
+        "INVITATION_INVALID"
+      ]
+    },
+    {
+      "id": "acceptInvitation",
+      "area": "public",
+      "method": "POST",
+      "path": "/invitations/{token}/accept",
+      "summary": "Accept an invitation and set a password",
+      "desc": "Seller members: signs in to Seller Center for the inviting seller. Staff: returns a 2-step set-up that must be confirmed before the first session.",
+      "auth": "anyone",
+      "params": {
+        "token": "string"
+      },
+      "body": "AcceptInvitationRequest",
+      "response": "AcceptInvitationResult",
+      "errors": [
+        "INVITATION_INVALID",
+        "WEAK_PASSWORD",
+        "INVALID_CREDENTIALS"
+      ],
+      "events": [
+        "identity.invitation.accepted"
+      ]
+    },
+    {
+      "id": "confirmInvitationTwoStep",
+      "area": "public",
+      "method": "POST",
+      "path": "/invitations/{token}/two-step",
+      "summary": "Staff: confirm the authenticator code and start the first session",
+      "auth": "anyone",
+      "params": {
+        "token": "string"
+      },
+      "body": {
+        "setupId": "uuid",
+        "code": "string",
+        "device": "DeviceInfo"
+      },
+      "response": {
+        "tokens": "SessionTokens",
+        "recoveryCodes": "RecoveryCodes"
+      },
+      "errors": [
+        "CODE_INVALID",
+        "CODE_EXPIRED",
+        "INVITATION_INVALID"
+      ],
+      "events": [
+        "identity.two_step.changed"
+      ]
+    },
+    {
+      "id": "externalSignIn",
+      "area": "public",
+      "method": "POST",
+      "path": "/external-sign-ins",
+      "summary": "Continue with Google or Apple",
+      "desc": "Members only. Links to an existing account only when the provider confirms the same verified email.",
+      "auth": "anyone",
+      "body": {
+        "provider": "enum(google|apple)",
+        "idToken": "string",
+        "audience": "enum(store|seller)",
+        "device": "DeviceInfo",
+        "guestSessionId": "uuid?",
+        "marketingOptIn": "bool?"
+      },
+      "response": "SignInResult",
+      "errors": [
+        "INVALID_CREDENTIALS",
+        "ACCOUNT_LOCKED",
+        "ACCOUNT_DISABLED"
+      ],
+      "events": [
+        "identity.user.registered",
+        "identity.session.new_device"
+      ],
+      "screens": [
+        "auth/sign-in",
+        "auth/register"
+      ],
+      "phase": 2
+    },
+    {
+      "id": "getSecurity",
+      "area": "store",
+      "method": "GET",
+      "path": "/security",
+      "summary": "Sign-in and security page in one call",
+      "desc": "Also used by seller members from Seller Center (same member account; the store-area security endpoints accept a member session of either audience).",
+      "auth": "customer",
+      "response": "SecurityOverview",
+      "screens": [
+        "account/security",
+        "account/profile"
+      ]
+    },
+    {
+      "id": "changePassword",
+      "area": "store",
+      "method": "PUT",
+      "path": "/password",
+      "summary": "Change password",
+      "auth": "customer",
+      "body": "ChangePasswordRequest",
+      "response": null,
+      "errors": [
+        "CURRENT_PASSWORD_WRONG",
+        "WEAK_PASSWORD",
+        "PASSWORD_REUSED",
+        "RATE_LIMITED"
+      ],
+      "events": [
+        "identity.password.changed"
+      ],
+      "screens": [
+        "account/security"
+      ]
+    },
+    {
+      "id": "requestEmailChange",
+      "area": "store",
+      "method": "POST",
+      "path": "/email-changes",
+      "summary": "Change sign-in email (sends a code to the new address)",
+      "desc": "Confirmed with POST /api/public/identity/verifications/{id}/confirm. The old address stays active until then.",
+      "auth": "customer",
+      "body": {
+        "newEmail": "email",
+        "currentPassword": "string"
+      },
+      "response": "VerificationChallenge",
+      "status": 202,
+      "errors": [
+        "EMAIL_IN_USE",
+        "CURRENT_PASSWORD_WRONG"
+      ],
+      "events": [
+        "identity.verification.code_issued"
+      ],
+      "screens": [
+        "account/profile"
+      ]
+    },
+    {
+      "id": "reauthenticate",
+      "area": "store",
+      "method": "POST",
+      "path": "/reauth",
+      "summary": "Confirm it's you before a sensitive action",
+      "desc": "Returns a single-use re-auth token valid 5 minutes, required by account closure (customers). Seller Center uses POST /api/seller/identity/reauth for payout account and business changes.",
+      "auth": "customer",
+      "body": "ReauthRequest",
+      "response": "ReauthToken",
+      "errors": [
+        "CURRENT_PASSWORD_WRONG",
+        "CODE_INVALID",
+        "RATE_LIMITED"
+      ],
+      "screens": [
+        "account/profile",
+        "account/security"
+      ]
+    },
+    {
+      "id": "reauthenticateSeller",
+      "area": "seller",
+      "method": "POST",
+      "path": "/reauth",
+      "summary": "Confirm it is you before a sensitive Seller Center action",
+      "desc": "Same check as the store re-auth (password or 2-step code) on the seller session. Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account and the current seller context; required by payout account changes, business change requests and account close (sellers).",
+      "auth": "seller",
+      "body": "ReauthRequest",
+      "response": "ReauthToken",
+      "errors": [
+        "CURRENT_PASSWORD_WRONG",
+        "CODE_INVALID",
+        "RATE_LIMITED"
+      ],
+      "audited": true,
+      "screens": [
+        "seller/finance",
+        "seller/store"
+      ]
+    },
+    {
+      "id": "startTwoStepSetup",
+      "area": "store",
+      "method": "POST",
+      "path": "/two-step/setups",
+      "summary": "Start turning on 2-step verification",
+      "auth": "customer",
+      "body": "TwoStepSetupRequest",
+      "response": "TwoStepSetup",
+      "status": 201,
+      "errors": [
+        "CURRENT_PASSWORD_WRONG",
+        "METHOD_NOT_AVAILABLE"
+      ],
+      "screens": [
+        "account/security"
+      ]
+    },
+    {
+      "id": "confirmTwoStepSetup",
+      "area": "store",
+      "method": "POST",
+      "path": "/two-step/setups/{id}/confirm",
+      "summary": "Confirm the first code; returns recovery codes once",
+      "auth": "customer",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "code": "string"
+      },
+      "response": "RecoveryCodes",
+      "errors": [
+        "CODE_INVALID",
+        "CODE_EXPIRED"
+      ],
+      "events": [
+        "identity.two_step.changed"
+      ],
+      "screens": [
+        "account/security"
+      ]
+    },
+    {
+      "id": "removeTwoStepMethod",
+      "area": "store",
+      "method": "POST",
+      "path": "/two-step/methods/{id}/remove",
+      "summary": "Turn off a 2-step method",
+      "desc": "Staff accounts cannot remove their last method (TWO_STEP_REQUIRED).",
+      "auth": "customer",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "currentPassword": "string",
+        "code": "string"
+      },
+      "response": "TwoStepStatus",
+      "errors": [
+        "CURRENT_PASSWORD_WRONG",
+        "CODE_INVALID",
+        "TWO_STEP_REQUIRED"
+      ],
+      "events": [
+        "identity.two_step.changed"
+      ],
+      "screens": [
+        "account/security"
+      ]
+    },
+    {
+      "id": "regenerateRecoveryCodes",
+      "area": "store",
+      "method": "POST",
+      "path": "/two-step/recovery-codes",
+      "summary": "Replace recovery codes",
+      "auth": "customer",
+      "body": {
+        "currentPassword": "string"
+      },
+      "response": "RecoveryCodes",
+      "errors": [
+        "CURRENT_PASSWORD_WRONG"
+      ],
+      "screens": [
+        "account/security"
+      ]
+    },
+    {
+      "id": "listDevices",
+      "area": "store",
+      "method": "GET",
+      "path": "/devices",
+      "summary": "Where you're signed in",
+      "desc": "Small and bounded (maxDevicesPerAccount), so not paged.",
+      "auth": "customer",
+      "response": "Device[]",
+      "screens": [
+        "account/security"
+      ]
+    },
+    {
+      "id": "signOutDevice",
+      "area": "store",
+      "method": "POST",
+      "path": "/devices/{id}/sign-out",
+      "summary": "Sign out one device",
+      "auth": "customer",
+      "params": {
+        "id": "uuid"
+      },
+      "response": null,
+      "errors": [
+        "NOT_FOUND"
+      ],
+      "screens": [
+        "account/security"
+      ]
+    },
+    {
+      "id": "signOutEverywhere",
+      "area": "store",
+      "method": "POST",
+      "path": "/devices/sign-out-all",
+      "summary": "Sign out everywhere",
+      "auth": "customer",
+      "body": {
+        "keepThisDevice": "bool"
+      },
+      "response": {
+        "sessionsRevoked": "int"
+      },
+      "screens": [
+        "account/security"
+      ]
+    },
+    {
+      "id": "listSecurityActivity",
+      "area": "store",
+      "method": "GET",
+      "path": "/security-activity",
+      "summary": "Recent security activity",
+      "auth": "customer",
+      "paging": true,
+      "query": {
+        "days": {
+          "type": "int?",
+          "desc": "Default 30, max 365"
+        },
+        "result": "enum(completed|failed|blocked)?"
+      },
+      "response": "SecurityEvent",
+      "screens": [
+        "account/security"
+      ]
+    },
+    {
+      "id": "listSellerContexts",
+      "area": "seller",
+      "method": "GET",
+      "path": "/session/sellers",
+      "summary": "Sellers this member can act for (seller switcher)",
+      "desc": "Allowed with a seller-audience session even before a seller is chosen.",
+      "auth": "seller",
+      "response": "SellerContext[]",
+      "screens": [
+        "seller/dashboard",
+        "seller/setup"
+      ]
+    },
+    {
+      "id": "switchSellerContext",
+      "area": "seller",
+      "method": "POST",
+      "path": "/session/seller-context",
+      "summary": "Choose or switch the seller this session acts for",
+      "desc": "Re-issues tokens bound to the chosen seller. Every later seller-area request acts only for that seller.",
+      "auth": "seller",
+      "body": {
+        "sellerId": "uuid"
+      },
+      "response": "SessionTokens",
+      "errors": [
+        "NO_SELLER_ACCESS"
+      ],
+      "screens": [
+        "seller/dashboard"
+      ]
+    },
+    {
+      "id": "listAccounts",
+      "area": "admin",
+      "method": "GET",
+      "path": "/accounts",
+      "summary": "Find accounts (staff or members)",
+      "desc": "Staff realm results need identity.staff-accounts.manage as well. Roles of staff come from GET /api/admin/access/members.",
+      "auth": "staff",
+      "permission": "identity.accounts.view",
+      "paging": true,
+      "query": {
+        "realm": "enum(member|staff)",
+        "q": {
+          "type": "string?",
+          "desc": "Email or name"
+        },
+        "status": "enum(invited|pending_verification|active|locked|disabled|closed)?",
+        "twoStepEnabled": "bool?"
+      },
+      "response": "AccountListItem",
+      "screens": [
+        "admin/staff",
+        "admin/customers"
+      ]
+    },
+    {
+      "id": "getAccount",
+      "area": "admin",
+      "method": "GET",
+      "path": "/accounts/{id}",
+      "summary": "Account security detail (devices, lockout, recent activity)",
+      "auth": "staff",
+      "permission": "identity.accounts.view",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "AccountAdmin",
+      "screens": [
+        "admin/staff",
+        "admin/customers"
+      ]
+    },
+    {
+      "id": "lockAccount",
+      "area": "admin",
+      "method": "POST",
+      "path": "/accounts/{id}/lock",
+      "summary": "Lock an account (suspected compromise, offboarding)",
+      "desc": "Revokes all sessions. Staff-realm targets need identity.staff-accounts.manage; nobody can lock their own account.",
+      "auth": "staff",
+      "permission": "identity.accounts.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "body": "LockRequest",
+      "response": "AccountAdmin",
+      "errors": [
+        "ILLEGAL_TRANSITION",
+        "SELF_ACTION_NOT_ALLOWED"
+      ],
+      "audited": true,
+      "events": [
+        "identity.account.locked"
+      ],
+      "screens": [
+        "admin/staff",
+        "admin/customers"
+      ]
+    },
+    {
+      "id": "unlockAccount",
+      "area": "admin",
+      "method": "POST",
+      "path": "/accounts/{id}/unlock",
+      "summary": "Unlock an account",
+      "auth": "staff",
+      "permission": "identity.accounts.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "reason": "text"
+      },
+      "response": "AccountAdmin",
+      "errors": [
+        "ILLEGAL_TRANSITION"
+      ],
+      "audited": true,
+      "events": [
+        "identity.account.unlocked"
+      ],
+      "screens": [
+        "admin/staff",
+        "admin/customers"
+      ]
+    },
+    {
+      "id": "forcePasswordReset",
+      "area": "admin",
+      "method": "POST",
+      "path": "/accounts/{id}/force-password-reset",
+      "summary": "Require a new password at next sign-in",
+      "desc": "Revokes all sessions and emails a reset link. Sign-in returns password_reset_required until done.",
+      "auth": "staff",
+      "permission": "identity.accounts.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "reason": "text",
+        "sendLink": "bool"
+      },
+      "response": "AccountAdmin",
+      "errors": [
+        "SELF_ACTION_NOT_ALLOWED"
+      ],
+      "audited": true,
+      "events": [
+        "identity.password_reset.requested"
+      ],
+      "screens": [
+        "admin/staff",
+        "admin/customers"
+      ]
+    },
+    {
+      "id": "resetTwoStep",
+      "area": "admin",
+      "method": "POST",
+      "path": "/accounts/{id}/reset-two-step",
+      "summary": "Remove 2-step methods after an identity check (lost phone)",
+      "desc": "Staff accounts must set up 2-step again at next sign-in. The identity check performed is recorded.",
+      "auth": "staff",
+      "permission": "identity.accounts.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "reason": "text",
+        "identityCheck": {
+          "type": "text",
+          "desc": "How the person was verified (video call, ID document…)"
+        }
+      },
+      "response": "AccountAdmin",
+      "errors": [
+        "SELF_ACTION_NOT_ALLOWED"
+      ],
+      "audited": true,
+      "events": [
+        "identity.two_step.changed"
+      ],
+      "screens": [
+        "admin/staff",
+        "admin/customers"
+      ]
+    },
+    {
+      "id": "signOutAccount",
+      "area": "admin",
+      "method": "POST",
+      "path": "/accounts/{id}/sign-out-all",
+      "summary": "Sign an account out everywhere",
+      "auth": "staff",
+      "permission": "identity.accounts.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "reason": "text"
+      },
+      "response": {
+        "sessionsRevoked": "int"
+      },
+      "audited": true,
+      "screens": [
+        "admin/staff",
+        "admin/customers"
+      ]
+    },
+    {
+      "id": "disableAccount",
+      "area": "admin",
+      "method": "POST",
+      "path": "/accounts/{id}/disable",
+      "summary": "Disable a staff account (offboarding)",
+      "desc": "Revokes sessions. access consumes identity.account.disabled to end role assignments and flag lead/backup gaps.",
+      "auth": "staff",
+      "permission": "identity.staff-accounts.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "reason": "text"
+      },
+      "response": "AccountAdmin",
+      "errors": [
+        "ILLEGAL_TRANSITION",
+        "SELF_ACTION_NOT_ALLOWED"
+      ],
+      "audited": true,
+      "events": [
+        "identity.account.disabled"
+      ],
+      "screens": [
+        "admin/staff"
+      ]
+    },
+    {
+      "id": "enableAccount",
+      "area": "admin",
+      "method": "POST",
+      "path": "/accounts/{id}/enable",
+      "summary": "Re-enable a disabled staff account",
+      "desc": "Roles are not restored automatically; assign them again in access.",
+      "auth": "staff",
+      "permission": "identity.staff-accounts.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "reason": "text"
+      },
+      "response": "AccountAdmin",
+      "errors": [
+        "ILLEGAL_TRANSITION"
+      ],
+      "audited": true,
+      "events": [
+        "identity.account.enabled"
+      ],
+      "screens": [
+        "admin/staff"
+      ]
+    },
+    {
+      "id": "listAccountActivity",
+      "area": "admin",
+      "method": "GET",
+      "path": "/accounts/{id}/security-activity",
+      "summary": "Security activity of one account",
+      "auth": "staff",
+      "permission": "identity.accounts.view",
+      "params": {
+        "id": "uuid"
+      },
+      "paging": true,
+      "query": {
+        "kind": "string?",
+        "result": "enum(completed|failed|blocked)?",
+        "from": "date?",
+        "to": "date?"
+      },
+      "response": "SecurityEvent",
+      "screens": [
+        "admin/staff",
+        "admin/customers"
+      ]
+    },
+    {
+      "id": "listInvitations",
+      "area": "admin",
+      "method": "GET",
+      "path": "/invitations",
+      "summary": "Staff invitations",
+      "auth": "staff",
+      "permission": "identity.staff-accounts.manage",
+      "paging": true,
+      "query": {
+        "status": "enum(pending|accepted|expired|revoked)?"
+      },
+      "response": "Invitation",
+      "screens": [
+        "admin/staff"
+      ]
+    },
+    {
+      "id": "resendInvitation",
+      "area": "admin",
+      "method": "POST",
+      "path": "/invitations/{id}/resend",
+      "summary": "Resend a staff invitation (new 7-day link)",
+      "auth": "staff",
+      "permission": "identity.staff-accounts.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "Invitation",
+      "errors": [
+        "ILLEGAL_TRANSITION"
+      ],
+      "audited": true,
+      "events": [
+        "identity.invitation.created"
+      ],
+      "screens": [
+        "admin/staff"
+      ]
+    },
+    {
+      "id": "revokeInvitation",
+      "area": "admin",
+      "method": "POST",
+      "path": "/invitations/{id}/revoke",
+      "summary": "Cancel a staff invitation",
+      "auth": "staff",
+      "permission": "identity.staff-accounts.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "reason": "text"
+      },
+      "response": "Invitation",
+      "errors": [
+        "ILLEGAL_TRANSITION"
+      ],
+      "audited": true,
+      "events": [
+        "identity.invitation.revoked"
+      ],
+      "screens": [
+        "admin/staff"
+      ]
+    }
+  ],
+  "events": {
+    "publishes": [
+      {
+        "name": "identity.user.registered",
+        "when": "A customer account is created (before email verification)",
+        "payload": {
+          "accountId": "uuid",
+          "email": "email",
+          "firstName": "string",
+          "lastName": "string",
+          "marketingOptIn": "bool",
+          "acceptedTermsVersion": "string",
+          "guestSessionId": "uuid?",
+          "at": "datetime"
+        }
+      },
+      {
+        "name": "identity.user.verified",
+        "when": "The registration email code, or a new phone number's code, is confirmed",
+        "payload": {
+          "accountId": "uuid",
+          "channel": "enum(email|phone)",
+          "email": "email",
+          "phone": "string?",
+          "guestSessionId": "uuid?",
+          "at": "datetime"
+        }
+      },
+      {
+        "name": "identity.password.changed",
+        "when": "A password is changed, reset or force-reset",
+        "payload": {
+          "accountId": "uuid",
+          "realm": "enum(member|staff)",
+          "via": "enum(change|reset|forced_reset)",
+          "otherSessionsRevoked": "bool",
+          "at": "datetime"
+        }
+      },
+      {
+        "name": "identity.verification.code_issued",
+        "when": "An email or SMS code is issued (registration, email change, 2-step SMS)",
+        "payload": {
+          "challengeId": "uuid",
+          "accountId": "uuid?",
+          "purpose": "enum(email_verification|email_change|phone_verification|sign_in_second_factor)",
+          "channel": "enum(email|sms)",
+          "to": {
+            "type": "string",
+            "desc": "Email address or E.164 phone"
+          },
+          "code": {
+            "type": "string",
+            "desc": "SENSITIVE: in-process delivery only, never persisted to the outbox or logs"
+          },
+          "existingAccount": {
+            "type": "bool",
+            "desc": "Registration attempt for an email that already has an account: send the 'you already have an account' email instead of a code"
+          },
+          "expiresAt": "datetime"
+        }
+      },
+      {
+        "name": "identity.password_reset.requested",
+        "when": "A reset link is issued (self-service or forced by staff)",
+        "payload": {
+          "accountId": "uuid",
+          "email": "email",
+          "resetUrl": {
+            "type": "url",
+            "desc": "SENSITIVE: in-process only"
+          },
+          "expiresAt": "datetime",
+          "forcedBy": "Actor?"
+        }
+      },
+      {
+        "name": "identity.session.new_device",
+        "when": "Someone signs in from a device not seen before for this account",
+        "payload": {
+          "accountId": "uuid",
+          "realm": "enum(member|staff)",
+          "deviceLabel": "string",
+          "location": "string?",
+          "at": "datetime"
+        }
+      },
+      {
+        "name": "identity.account.locked",
+        "when": "An account is locked by failed sign-ins, refresh-token reuse or staff",
+        "payload": {
+          "accountId": "uuid",
+          "realm": "enum(member|staff)",
+          "cause": "enum(failed_sign_ins|refresh_token_reused|staff_action)",
+          "until": "datetime?",
+          "by": "Actor?",
+          "reason": "text?"
+        }
+      },
+      {
+        "name": "identity.account.unlocked",
+        "when": "Staff unlock an account",
+        "payload": {
+          "accountId": "uuid",
+          "by": "Actor"
+        }
+      },
+      {
+        "name": "identity.account.disabled",
+        "when": "A staff account is disabled",
+        "payload": {
+          "accountId": "uuid",
+          "realm": "enum(member|staff)",
+          "reason": "text",
+          "by": "Actor"
+        }
+      },
+      {
+        "name": "identity.account.enabled",
+        "when": "A disabled account is enabled again",
+        "payload": {
+          "accountId": "uuid",
+          "by": "Actor"
+        }
+      },
+      {
+        "name": "identity.account.closed",
+        "when": "The member credential is closed after customers completes an account closure",
+        "payload": {
+          "accountId": "uuid",
+          "at": "datetime"
+        }
+      },
+      {
+        "name": "identity.email.changed",
+        "when": "A sign-in email change is confirmed",
+        "payload": {
+          "accountId": "uuid",
+          "oldEmail": "email",
+          "newEmail": "email"
+        }
+      },
+      {
+        "name": "identity.two_step.changed",
+        "when": "2-step verification is turned on, a method removed, or reset by staff",
+        "payload": {
+          "accountId": "uuid",
+          "enabled": "bool",
+          "method": "enum(totp|sms)?",
+          "by": "Actor"
+        }
+      },
+      {
+        "name": "identity.invitation.created",
+        "when": "A staff or seller-member invitation is sent or resent",
+        "payload": {
+          "invitationId": "uuid",
+          "purpose": "enum(staff|seller_member)",
+          "email": "email",
+          "name": "string",
+          "acceptUrl": {
+            "type": "url",
+            "desc": "SENSITIVE: in-process only"
+          },
+          "contextRef": "string?",
+          "contextLabel": "string?",
+          "invitedBy": "Actor",
+          "expiresAt": "datetime"
+        }
+      },
+      {
+        "name": "identity.invitation.accepted",
+        "when": "An invitation is accepted",
+        "payload": {
+          "invitationId": "uuid",
+          "accountId": "uuid",
+          "purpose": "enum(staff|seller_member)",
+          "contextRef": "string?"
+        }
+      },
+      {
+        "name": "identity.invitation.revoked",
+        "when": "An invitation is cancelled",
+        "payload": {
+          "invitationId": "uuid",
+          "purpose": "enum(staff|seller_member)",
+          "contextRef": "string?"
+        }
+      },
+      {
+        "name": "identity.guest_session.claimed",
+        "when": "A guest session is attached to an account at sign-in or registration",
+        "payload": {
+          "guestSessionId": "uuid",
+          "accountId": "uuid"
+        }
+      }
+    ],
+    "consumes": [
+      {
+        "name": "customers.account.closed",
+        "does": "Backstop for closeAccount (idempotent): make sure the member credential is closed and sessions revoked"
+      }
+    ]
+  },
+  "permissions": [
+    {
+      "key": "identity.accounts.view",
+      "audience": "staff",
+      "desc": "Look up accounts, devices and security activity (support, Platform Administrator)"
+    },
+    {
+      "key": "identity.accounts.manage",
+      "audience": "staff",
+      "desc": "Lock, unlock, force password reset, reset 2-step and sign out member accounts (reason required)"
+    },
+    {
+      "key": "identity.staff-accounts.manage",
+      "audience": "staff",
+      "desc": "Same actions on staff accounts, plus disable/enable and staff invitations (Platform Administrator)"
+    }
+  ],
+  "jobs": [
+    {
+      "name": "identity.purge-expired",
+      "schedule": "hourly",
+      "does": "Delete expired challenges, reset tokens, re-auth tokens, order links and guest sessions past their TTL (keeping grants for orders still open), and member accounts never verified after 7 days"
+    },
+    {
+      "name": "identity.expire-invitations",
+      "schedule": "hourly",
+      "does": "Move pending invitations past expires_at to expired"
+    },
+    {
+      "name": "identity.expire-sessions",
+      "schedule": "every 15 min",
+      "does": "Mark sessions past expires_at or absolute_expires_at as expired; prune revoked sessions older than 90 days"
+    },
+    {
+      "name": "identity.prune-security-events",
+      "schedule": "daily",
+      "does": "Delete security events older than securityEventRetentionDays and sign-in attempts older than 30 days"
+    }
+  ],
+  "settings": [
+    {
+      "key": "accessTokenTtlMinutes",
+      "default": 15,
+      "desc": "Access token lifetime"
+    },
+    {
+      "key": "refreshTtlHours",
+      "default": 24,
+      "desc": "Refresh lifetime without 'keep me signed in'"
+    },
+    {
+      "key": "keepSignedInDays",
+      "default": 30,
+      "desc": "Refresh lifetime with 'keep me signed in' (members)"
+    },
+    {
+      "key": "staffSessionMaxHours",
+      "default": 12,
+      "desc": "Absolute limit for staff sessions"
+    },
+    {
+      "key": "maxFailedSignIns",
+      "default": 5,
+      "desc": "Wrong passwords before a temporary lock"
+    },
+    {
+      "key": "lockoutMinutes",
+      "default": 15,
+      "desc": "Length of the automatic lock"
+    },
+    {
+      "key": "verificationCodeTtlMinutes",
+      "default": 10,
+      "desc": "Email and SMS code lifetime"
+    },
+    {
+      "key": "codeResendSeconds",
+      "default": 60,
+      "desc": "Wait before a code or reset link can be resent"
+    },
+    {
+      "key": "maxCodeAttempts",
+      "default": 5,
+      "desc": "Wrong codes before a challenge locks"
+    },
+    {
+      "key": "passwordResetTtlMinutes",
+      "default": 30,
+      "desc": "Reset link lifetime"
+    },
+    {
+      "key": "memberMinPasswordLength",
+      "default": 10,
+      "desc": "Members (register screen: at least 10 characters, one number, one uppercase)"
+    },
+    {
+      "key": "staffMinPasswordLength",
+      "default": 12,
+      "desc": "Staff accounts"
+    },
+    {
+      "key": "passwordHistoryCount",
+      "default": 5,
+      "desc": "Recent passwords that cannot be reused"
+    },
+    {
+      "key": "staffTwoStepRequired",
+      "default": true,
+      "desc": "Staff must use 2-step verification"
+    },
+    {
+      "key": "trustedDeviceDays",
+      "default": 30,
+      "desc": "Members can skip 2-step on a remembered device"
+    },
+    {
+      "key": "invitationTtlDays",
+      "default": 7,
+      "desc": "Invitation link lifetime"
+    },
+    {
+      "key": "guestSessionTtlDays",
+      "default": 30,
+      "desc": "Guest session lifetime after last activity"
+    },
+    {
+      "key": "maxDevicesPerAccount",
+      "default": 20,
+      "desc": "Oldest sessions are revoked beyond this"
+    },
+    {
+      "key": "securityEventRetentionDays",
+      "default": 400,
+      "desc": "Security activity kept per account (screen shows 30 days)"
+    },
+    {
+      "key": "reauthTokenMinutes",
+      "default": 5,
+      "desc": "Re-auth token lifetime"
+    },
+    {
+      "key": "guestOrderAccessDays",
+      "default": 90,
+      "desc": "How long a guest order grant on a session lasts"
+    },
+    {
+      "key": "orderLinkTtlDays",
+      "default": 180,
+      "desc": "Emailed order link lifetime"
+    }
+  ],
+  "integrations": [
+    {
+      "name": "Password hashing",
+      "purpose": "argon2id with per-account salt; parameters upgraded on next sign-in"
+    },
+    {
+      "name": "Breached password list",
+      "purpose": "k-anonymity range check (e.g. Have I Been Pwned) when setting a password; skipped if unreachable"
+    },
+    {
+      "name": "IP geolocation (offline database)",
+      "purpose": "Approximate city/region for devices and security activity"
+    },
+    {
+      "name": "Google / Apple sign-in",
+      "purpose": "Phase 2: verify ID tokens for 'Continue with Google / Apple'"
+    }
+  ],
+  "errorCodes": {
+    "INVALID_CREDENTIALS": {
+      "status": 401,
+      "meaning": "Email and password don't match. details.attemptsLeft before a temporary lock."
+    },
+    "ACCOUNT_LOCKED": {
+      "status": 423,
+      "meaning": "Sign-in is paused. details.lockedUntil (null = until staff unlock) and details.cause."
+    },
+    "ACCOUNT_DISABLED": {
+      "status": 403,
+      "meaning": "The account is disabled or closed."
+    },
+    "EMAIL_NOT_VERIFIED": {
+      "status": 403,
+      "meaning": "Confirm the email first. details.challenge is a fresh VerificationChallenge."
+    },
+    "NO_SELLER_ACCESS": {
+      "status": 403,
+      "meaning": "This account cannot act for that seller (or for any seller)."
+    },
+    "CODE_INVALID": {
+      "status": 400,
+      "meaning": "The code is wrong. details.attemptsLeft."
+    },
+    "CODE_EXPIRED": {
+      "status": 410,
+      "meaning": "The code or challenge has expired; request a new one."
+    },
+    "CHALLENGE_LOCKED": {
+      "status": 429,
+      "meaning": "Too many wrong codes; start again."
+    },
+    "RESEND_TOO_SOON": {
+      "status": 429,
+      "meaning": "Wait until details.resendAvailableAt."
+    },
+    "WEAK_PASSWORD": {
+      "status": 400,
+      "meaning": "The password breaks a rule. details.failed lists the rules (min_length, number, uppercase, personal_info, breached)."
+    },
+    "PASSWORD_REUSED": {
+      "status": 400,
+      "meaning": "The password was used recently on this account."
+    },
+    "CURRENT_PASSWORD_WRONG": {
+      "status": 400,
+      "meaning": "The current password is incorrect."
+    },
+    "RESET_LINK_INVALID": {
+      "status": 410,
+      "meaning": "The reset link was used, replaced or has expired."
+    },
+    "REFRESH_TOKEN_INVALID": {
+      "status": 401,
+      "meaning": "Refresh token unknown, expired, revoked or reused; sign in again."
+    },
+    "EMAIL_IN_USE": {
+      "status": 409,
+      "meaning": "Another account in this realm uses that email."
+    },
+    "METHOD_NOT_AVAILABLE": {
+      "status": 400,
+      "meaning": "That 2-step method is not enabled yet (SMS is phase 2)."
+    },
+    "TWO_STEP_REQUIRED": {
+      "status": 409,
+      "meaning": "Staff accounts must keep at least one 2-step method."
+    },
+    "INVITATION_INVALID": {
+      "status": 410,
+      "meaning": "The invitation was accepted, revoked or has expired."
+    },
+    "SELF_ACTION_NOT_ALLOWED": {
+      "status": 403,
+      "meaning": "Staff cannot lock, disable or reset their own account."
+    },
+    "ORDER_LINK_INVALID": {
+      "status": 410,
+      "meaning": "The order link has expired; use Guest order lookup."
+    }
+  },
+  "notes": [
+    "Realms: a member account serves both the store and Seller Center; seller access comes from seller_access rows that only the sellers module writes. Staff accounts are separate, invite-only and always use 2-step verification. The same email may exist once in each realm.",
+    "Audience is chosen at sign-in (store | seller | admin). A token for one audience is rejected by the other API areas with UNAUTHORIZED, except that the store-area security endpoints (/security, /password, /two-step/*, /devices, /security-activity) accept any member session, so seller staff manage their own sign-in security with the same endpoints.",
+    "Seller context: a seller-audience session acts for exactly one seller at a time. With one seller the context is set at sign-in; with several, sign-in returns seller_context_required and the app calls POST /api/seller/identity/session/seller-context. Seller-area paths never contain a seller id; the token carries it.",
+    "Account discovery is prevented: registration, password reset and sign-in respond the same way (and with similar timing) whether or not the email exists.",
+    "Events marked SENSITIVE (codes, reset and invitation links) are delivered in-process to notifications only. When the outbox is introduced these events are excluded from it and from logs; notifications must not store the code or link in the delivery log (it stores the template version and a redacted body).",
+    "Guest flow: a guest session (X-Guest-Session) is created on the first add to cart and carries the cart, recently viewed and guest checkout. After guest checkout, checkout calls grantGuestOrderAccess (via checkout) and issueOrderLink (link in the confirmation email). The lookup form and 'email me my order links' are served by customers, which verifies the order with orders and then calls grantGuestOrderAccess (via lookup) or issueOrderLink. orders, shipping, returns and support check hasGuestOrderAccess. When a customer verifies an email (identity.user.verified) or signs in with a guest session (identity.guest_session.claimed), customers, orders, cart and search attach the guest data by consuming the event; identity calls none of them in-process.",
+    "Staff 'invite with roles' is one action in access (POST /api/admin/access/staff-invitations) which calls inviteStaff here; identity's admin endpoints cover resend, revoke and account security only.",
+    "Every security-relevant change writes a security_events row (shown to the account owner). Staff actions on accounts are also recorded in audit via audit.record (optional dependency: if audit is disabled they are still in security_events).",
+    "Rate limits: sign-in 10/min per IP and 5/15 min per email; registration and password reset 5/hour per email and 20/hour per IP; guest sessions 30/hour per IP.",
+    "Business values (lockout length, password rules, token lifetimes) are defaults to confirm; screen copy differs (register says 10 characters, the security page says 12): proposal is 10 for members and 12 for staff."
+  ]
+}

@@ -1,0 +1,102 @@
+<!doctype html>
+<title>Marketly UI Prototype</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Figtree:ital,wght@0,400..800;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="ui.css">
+<style>
+  /* Viewer chrome. Layout: top bar (areas, device, theme) · left screen index · stage with a device frame. */
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--surface-2); color: var(--text); font-family: var(--font-ui); font-size: 14px; }
+  .sh { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; }
+  .sh-top svg.lucide, .sh-nav svg.lucide, .sh-meta svg.lucide { width: 17px; height: 17px; stroke-width: 1.75; flex: none; }
+  .sh-top { display: flex; align-items: center; gap: 12px; padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .sh-brand { display: flex; align-items: center; gap: 8px; font-family: var(--font-display); font-weight: 700; font-size: 17px; white-space: nowrap; }
+  .sh-brand svg { width: 26px; height: 26px; }
+  .sh-brand small { font-family: var(--font-ui); font-weight: 600; font-size: 12px; color: var(--text-3); }
+  .sh-areas { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; flex: 1 1 auto; min-width: 0; }
+  .sh-areas a { display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; min-height: 36px; border-radius: 8px; color: var(--text-2); font-weight: 600; text-decoration: none; white-space: nowrap; font-size: 13px; }
+  .sh-areas a:hover { background: var(--surface-2); color: var(--text); }
+  .sh-areas a.is-active { background: var(--text); color: var(--text-inverse); }
+  .sh-areas a .c { font-size: 11px; opacity: 0.7; font-variant-numeric: tabular-nums; }
+  .sh-tools { display: flex; align-items: center; gap: 8px; }
+  .sh-tools .seg > * { min-height: 32px; font-size: 12px; }
+  .sh-iconbtn { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text-2); cursor: pointer; }
+  .sh-iconbtn:hover { color: var(--text); background: var(--surface-2); }
+  .sh-body { display: grid; grid-template-columns: 264px minmax(0, 1fr); min-height: 0; }
+  .sh-nav { background: var(--surface); border-right: 1px solid var(--border); overflow: auto; padding: 12px 10px 32px; }
+  .sh-nav .find { display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-3); margin-bottom: 8px; }
+  .sh-nav .find input { flex: 1; min-width: 0; border: 0; background: transparent; font: inherit; color: var(--text); }
+  .sh-nav .find input:focus { outline: none; }
+  .sh-nav h3 { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); margin: 16px 8px 6px; }
+  .sh-nav a { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; color: var(--text-2); text-decoration: none; font-size: 13px; line-height: 1.3; }
+  .sh-nav a:hover { background: var(--surface-2); color: var(--text); }
+  .sh-nav a.is-active { background: var(--brand-soft); color: var(--brand-text); font-weight: 700; }
+  .sh-nav a .id { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: var(--text-3); }
+  .sh-nav a.is-missing { color: var(--danger); }
+  .sh-stage { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; }
+  .sh-meta { display: flex; align-items: flex-start; gap: 12px 16px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--surface); flex-wrap: wrap; }
+  .sh-meta .ttl { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 320px; }
+  .sh-meta .ttl .path { font-size: 12px; color: var(--text-3); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .sh-meta .ttl h1 { margin: 0; font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .sh-meta .ttl p { margin: 0; font-size: 13px; color: var(--text-2); max-width: 90ch; }
+  .sh-meta .ctl { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .sh-meta select { height: 36px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; padding: 0 8px; max-width: 100%; }
+  .sh-meta .ref { font-family: var(--font-mono); font-size: 11px; padding: 2px 6px; border-radius: 4px; background: var(--surface-2); color: var(--text-2); font-weight: 500; }
+  .sh-viewport { position: relative; overflow: hidden; min-height: 0; display: flex; justify-content: center; padding: 20px; }
+  .sh-box { position: relative; flex: none; }
+  .sh-frame { position: absolute; top: 0; left: 0; transform-origin: 0 0; overflow: auto; border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: var(--sh-2); background: var(--bg); overscroll-behavior: contain; }
+  .sh-frame.phone { border-radius: 28px; border-width: 6px; border-color: var(--text); }
+  .sh-frame.tablet { border-radius: 22px; border-width: 6px; border-color: var(--text); }
+  .sh-frame.locked { overflow: hidden; }
+  .sh-missing { padding: 64px 24px; text-align: center; color: var(--text-2); display: flex; flex-direction: column; gap: 8px; align-items: center; }
+  .sh-select-wrap { display: none; }
+  @media (max-width: 900px) {
+    .sh-body { grid-template-columns: minmax(0, 1fr); }
+    .sh-nav { display: none; }
+    .sh-select-wrap { display: block; width: 100%; }
+    .sh-select-wrap select { width: 100%; }
+    .sh-viewport { padding: 10px; }
+    .sh-meta { padding: 10px 12px; }
+    .sh-top { padding: 8px 12px; }
+    .sh-areas { order: 3; flex-basis: 100%; }
+  }
+</style>
+
+<div class="sh">
+  <header class="sh-top">
+    <div class="sh-brand" id="shBrand"></div>
+    <nav class="sh-areas" id="shAreas" aria-label="Areas"></nav>
+    <div class="sh-tools">
+      <div class="seg" id="shDevices" role="group" aria-label="Preview width"></div>
+      <button type="button" class="sh-iconbtn" id="shTheme" aria-label="Switch light or dark theme"></button>
+    </div>
+  </header>
+  <div class="sh-body">
+    <aside class="sh-nav" id="shNav" aria-label="Screens"></aside>
+    <main class="sh-stage">
+      <div class="sh-meta" id="shMeta"></div>
+      <div class="sh-viewport" id="shViewport">
+        <div class="sh-box" id="shBox"><div class="app sh-frame" id="frame"></div></div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+<script src="js/core.js"></script>
+<script src="js/data.js"></script>
+<script src="js/screens/theme.js"></script>
+<script src="js/screens/home.js"></script>
+<script src="js/screens/store-shopping.js"></script>
+<script src="js/screens/store-purchase.js"></script>
+<script src="js/screens/store-account.js"></script>
+<script src="js/screens/seller-a.js"></script>
+<script src="js/screens/seller-b.js"></script>
+<script src="js/screens/admin-dashboard.js"></script>
+<script src="js/screens/admin-a.js"></script>
+<script src="js/screens/admin-b.js"></script>
+<script src="js/screens/admin-c-ops.js"></script>
+<script src="js/shell.js"></script>

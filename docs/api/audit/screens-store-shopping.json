@@ -1,0 +1,2229 @@
+[
+  {
+    "screen": "store/chrome",
+    "element": "Header search box submit (website and app)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/products",
+      "GET /api/store/search/facets",
+      "gql store/SearchResults"
+    ]
+  },
+  {
+    "screen": "store/chrome",
+    "element": "Search suggestions while typing (queries, categories, brands, stores, products, recent)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/suggestions",
+      "gql store:Query.searchSuggestions"
+    ]
+  },
+  {
+    "screen": "store/chrome",
+    "element": "Scan a barcode button (app search bar)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/barcodes/{code}",
+      "GET /api/store/search/products"
+    ],
+    "note": "Search q matches names, brands, keywords and sellers; nothing resolves a scanned GTIN/UPC although catalog stores Variant.gtin. Fixed: New barcode lookup → BarcodeMatch (productId, variantId, slug, card, or fallbackQuery). GTINs copied from catalog variants into search_documents.gtins; a full GTIN in q also matches.",
+    "proposal": {
+      "module": "search",
+      "method": "GET",
+      "area": "store",
+      "path": "/barcodes/{code}",
+      "summary": "Resolve a scanned GTIN/UPC to a product and variant (or no match with a search fallback)",
+      "fields": [
+        "code",
+        "match:bool",
+        "productId?",
+        "variantId?",
+        "slug?",
+        "title?",
+        "fallbackQuery?"
+      ]
+    },
+    "resolvedBy": "fulfilment"
+  },
+  {
+    "screen": "store/chrome",
+    "element": "Deliver to location (Portland 97205)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/cart/cart",
+      "gql store:Cart.destination"
+    ],
+    "note": "Read from CartView.destination (postal code, city, source); there is no lighter read, the header must load the cart view or the badge would need the destination."
+  },
+  {
+    "screen": "store/chrome",
+    "element": "Deliver to: change location",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PUT /api/store/cart/cart/destination"
+    ]
+  },
+  {
+    "screen": "store/chrome",
+    "element": "Account greeting \"Hello, Jordan\"",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/customers/profile",
+      "gql store:Customer.firstName"
+    ]
+  },
+  {
+    "screen": "store/chrome",
+    "element": "Notifications bell unread count",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/notifications/inbox/summary",
+      "gql store:Query.unreadNotificationCount"
+    ]
+  },
+  {
+    "screen": "store/chrome",
+    "element": "Cart badge count (header, app bar and bottom tab bar)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/cart/cart/badge"
+    ]
+  },
+  {
+    "screen": "store/chrome",
+    "element": "Shop navigation links (header) and footer link groups",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/navigation"
+    ]
+  },
+  {
+    "screen": "store/chrome",
+    "element": "Footer support phone, hours and company / service-region line",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/navigation",
+      "GET /api/public/settings/app-config",
+      "gql store:Query.storeInfo"
+    ]
+  },
+  {
+    "screen": "store/chrome",
+    "element": "Service strip above the header (\"Free delivery on Official Store orders over $35 · 30-day returns · Delivery details\")",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/navigation",
+      "PUT /api/admin/content/navigation"
+    ],
+    "note": "Content-managed message with a business threshold; SiteNavigation has header, footer, contact and companyLine only. Fixed: Added SiteNavigation.serviceStrip: ServiceStrip { text, link, activeFrom, activeUntil } (editable through updateNavigation; navigation table area service_strip).",
+    "proposal": {
+      "module": "content",
+      "change": "Add serviceStrip { text, link: LinkRef?, activeUntil? } to SiteNavigation (GET /api/store/content/navigation)"
+    },
+    "resolvedBy": "platform"
+  },
+  {
+    "screen": "store/home",
+    "element": "Campaign banner (Home Week hero with two CTAs)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/HomePage",
+      "GET /api/store/content/home"
+    ]
+  },
+  {
+    "screen": "store/home",
+    "element": "Shop by category shortcuts",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/HomePage",
+      "gql store:HomeSection.categories"
+    ]
+  },
+  {
+    "screen": "store/home",
+    "element": "Flash deals strip: countdown, % off, limit, deal and was price, claimed meter",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/HomePage",
+      "gql store:HomeSection.flashSales",
+      "GET /api/store/promotions/flash-sales/{campaignId}"
+    ]
+  },
+  {
+    "screen": "store/home",
+    "element": "Official Store highlights (product cards)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/HomePage",
+      "gql store:HomeSection.products"
+    ]
+  },
+  {
+    "screen": "store/home",
+    "element": "Featured for you grid (cards with rating, from price, delivery, seller)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/HomePage",
+      "gql store:HomeSection.products"
+    ]
+  },
+  {
+    "screen": "store/home",
+    "element": "Sponsored product card inside Featured for you",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/store/advertising/decisions",
+      "POST /api/store/advertising/events"
+    ]
+  },
+  {
+    "screen": "store/home",
+    "element": "Sponsored brand placement (Halden Audio, product count, two products)",
+    "kind": "data",
+    "status": "later",
+    "api": [
+      "POST /api/store/advertising/decisions"
+    ],
+    "note": "Sponsored store/brand is phase 3 (plan ch. 16 launch scope, ch. 20 phase 3 \"more ad formats\"; advertising.json notes: sponsored store/brand placement ships disabled). When built, AdImpression needs promotedOffers[] (it has one promotedOffer), advertiser logo and productCount."
+  },
+  {
+    "screen": "store/home",
+    "element": "Featured sellers (logo, verified badge, positive %, location, dispatch)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/HomePage",
+      "gql store:HomeSection.sellers"
+    ]
+  },
+  {
+    "screen": "store/home",
+    "element": "New arrivals row",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/HomePage",
+      "gql store:HomeSection.products"
+    ]
+  },
+  {
+    "screen": "store/home",
+    "element": "Brand collections (logo, name, product count)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/HomePage",
+      "gql store:HomeSection.brands"
+    ]
+  },
+  {
+    "screen": "store/home",
+    "element": "Recently viewed row",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/HomePage",
+      "gql store:Query.recentlyViewed",
+      "GET /api/store/customers/recently-viewed"
+    ]
+  },
+  {
+    "screen": "store/home",
+    "element": "Recently viewed: Clear",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "DELETE /api/store/customers/recently-viewed"
+    ]
+  },
+  {
+    "screen": "store/home",
+    "element": "Our promise strip (4 items with icon, title and text)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/home",
+      "gql store:HomeSection.promiseItems"
+    ],
+    "note": "HomeSectionKind has PROMISE_STRIP but HomeSection has no field for its items. Fixed: Added PromiseItem { icon, title, body } as HomeSection.promiseItems and SectionInput.promiseItems; GraphQL ContentPromiseItem; HomePage query selects it.",
+    "proposal": {
+      "module": "content",
+      "change": "Add items: [{ icon, title, body }] to HomeSection (REST Homepage and gql HomeSection) for kind promise_strip"
+    },
+    "resolvedBy": "platform"
+  },
+  {
+    "screen": "store/home",
+    "element": "Wishlist heart on product cards (save state and toggle)",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/store/wishlist/items",
+      "GET /api/store/wishlist/saved",
+      "gql store:Product.saved"
+    ],
+    "note": "Wishlist is phase 3 (plan ch. 3 \"Saved shopping: Growth\", ch. 20 phase 3; wishlist.json phase 3). When built: un-saving from a card needs the saved item id, but GET /wishlist/saved returns map<bool>; return item ids or add DELETE /items?productId=."
+  },
+  {
+    "screen": "store/categories",
+    "element": "Category tree (top categories, subcategories, Coming soon flags)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/catalog/categories",
+      "gql store:Query.categories",
+      "gql store:Category.children"
+    ]
+  },
+  {
+    "screen": "store/categories",
+    "element": "In-stock counts per category and subcategory, total product count, category images",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/catalog/categories",
+      "gql store:Category.productCount",
+      "gql store:Category.image"
+    ],
+    "note": "Category has no count or image; search facets give counts for one category at a time only. Fixed: Category gains productCount (in-stock products incl. subcategories) and image (REST and GraphQL); create/update category take imageId.",
+    "proposal": {
+      "module": "catalog",
+      "change": "Add inStockCount:int and image:MediaRef? to Category (GET /api/store/catalog/categories tree and gql Category), counts read from search"
+    },
+    "resolvedBy": "catalog"
+  },
+  {
+    "screen": "store/categories",
+    "element": "Phone rail: Popular brands for the selected category",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/catalog/brands"
+    ],
+    "note": "GET /catalog/brands only takes q; the brand facet of search has counts but no logos. Fixed: listBrands gains categorySlug and sort=popular (brand_stats per top-level category).",
+    "proposal": {
+      "module": "catalog",
+      "change": "Add category (slug) and sort=popular query to GET /api/store/catalog/brands"
+    },
+    "resolvedBy": "catalog"
+  },
+  {
+    "screen": "store/categories",
+    "element": "Phone rail: category deals teaser (Electronics deals card)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/products",
+      "gql store:SearchFilterInput.onSale"
+    ],
+    "note": "Deals are not filterable by category (only clearance is) and search has no on-sale filter. Fixed: Added onSale filter (REST query and GraphQL SearchFilterInput), backed by search_documents.on_sale (active campaign price or verified compare-at); teaser = category + onSale=true.",
+    "proposal": {
+      "module": "search",
+      "change": "Add onSale:bool (active deal price) filter to GET /api/store/search/products and gql SearchFilterInput"
+    },
+    "resolvedBy": "fulfilment"
+  },
+  {
+    "screen": "store/category",
+    "element": "Breadcrumb, title and \"128 results from 9 sellers\"",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/CategoryPage",
+      "GET /api/store/catalog/categories/{slug}",
+      "GET /api/store/search/facets"
+    ]
+  },
+  {
+    "screen": "store/category",
+    "element": "Subcategory chips",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/CategoryPage"
+    ]
+  },
+  {
+    "screen": "store/category",
+    "element": "Banner ad (labeled, advertiser named)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/store/advertising/decisions",
+      "POST /api/store/advertising/events"
+    ]
+  },
+  {
+    "screen": "store/category",
+    "element": "Filters: category tree with counts, price, rating, brand (+ more), seller with Official Store note, condition, availability, delivery, headphone attributes",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "gql store/CategoryPage",
+      "GET /api/store/search/facets",
+      "GET /api/store/search/products"
+    ]
+  },
+  {
+    "screen": "store/category",
+    "element": "Sort by (5 orders)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "gql store/CategoryPage",
+      "GET /api/store/search/products"
+    ]
+  },
+  {
+    "screen": "store/category",
+    "element": "Product grid with ratings, from prices, delivery and seller cues",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/CategoryPage",
+      "GET /api/store/search/products"
+    ]
+  },
+  {
+    "screen": "store/category",
+    "element": "Sponsored cards in the grid",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/store/advertising/decisions",
+      "GET /api/store/reviews/rating-summaries"
+    ]
+  },
+  {
+    "screen": "store/category",
+    "element": "\"From\" price note and ranking note / How results are ranked",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/CategoryPage",
+      "GET /api/store/search/ranking-policy"
+    ]
+  },
+  {
+    "screen": "store/category",
+    "element": "Pagination (website) and infinite scroll (app)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "gql store/CategoryPage",
+      "GET /api/store/search/products"
+    ]
+  },
+  {
+    "screen": "store/category",
+    "element": "Open a result (click tracking, return to results)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/search/searches/{searchId}/clicks"
+    ]
+  },
+  {
+    "screen": "store/category",
+    "state": "Filters (phone sheet)",
+    "element": "Sheet: sort, filters, Clear all, \"Show 128 results\" live count",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/facets",
+      "gql store/CategoryPage"
+    ]
+  },
+  {
+    "screen": "store/category",
+    "element": "Wishlist heart on product cards (save state and toggle)",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/store/wishlist/items",
+      "GET /api/store/wishlist/saved",
+      "gql store:Product.saved"
+    ],
+    "note": "Wishlist is phase 3 (plan ch. 3 \"Saved shopping: Growth\", ch. 20 phase 3; wishlist.json phase 3). When built: un-saving from a card needs the saved item id, but GET /wishlist/saved returns map<bool>; return item ids or add DELETE /items?productId=."
+  },
+  {
+    "screen": "store/search",
+    "element": "Query title, spelling correction and \"Search instead for\"",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/SearchResults",
+      "GET /api/store/search/facets"
+    ]
+  },
+  {
+    "screen": "store/search",
+    "element": "Search instead for the original query",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/products",
+      "gql store/SearchResults"
+    ]
+  },
+  {
+    "screen": "store/search",
+    "element": "Active filter chips: remove one, Clear all",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "gql store/SearchResults",
+      "GET /api/store/search/products"
+    ]
+  },
+  {
+    "screen": "store/search",
+    "element": "Store match card (Northwind Audio, rating, products, location)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/SearchResults"
+    ]
+  },
+  {
+    "screen": "store/search",
+    "element": "Sponsored products row",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/store/advertising/decisions",
+      "GET /api/store/reviews/rating-summaries",
+      "POST /api/store/advertising/events"
+    ]
+  },
+  {
+    "screen": "store/search",
+    "element": "Filter panel with counts and phone Filters (3) button",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "gql store/SearchResults",
+      "GET /api/store/search/facets"
+    ]
+  },
+  {
+    "screen": "store/search",
+    "element": "Result count and sort",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "gql store/SearchResults",
+      "GET /api/store/search/products"
+    ]
+  },
+  {
+    "screen": "store/search",
+    "element": "Result grid, from note, ranking note, pagination",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/SearchResults",
+      "GET /api/store/search/products"
+    ]
+  },
+  {
+    "screen": "store/search",
+    "element": "Open a result (click tracking)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/search/searches/{searchId}/clicks"
+    ]
+  },
+  {
+    "screen": "store/search",
+    "state": "Suggestions open",
+    "element": "Suggestions panel: queries, category-scoped query, brands, store, products",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/suggestions",
+      "gql store:Query.searchSuggestions"
+    ]
+  },
+  {
+    "screen": "store/search",
+    "state": "Suggestions open",
+    "element": "Recent searches list",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/recent-searches"
+    ],
+    "note": "UI says recent searches are saved on this device and can be turned off in Profile; the API stores them per customer or guest session and has no on/off preference. Align the copy or add a preference."
+  },
+  {
+    "screen": "store/search",
+    "state": "Suggestions open",
+    "element": "Recent searches: remove one, Clear all",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "DELETE /api/store/search/recent-searches/{id}",
+      "DELETE /api/store/search/recent-searches"
+    ]
+  },
+  {
+    "screen": "store/search",
+    "element": "Wishlist heart on product cards (save state and toggle)",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/store/wishlist/items",
+      "GET /api/store/wishlist/saved",
+      "gql store:Product.saved"
+    ],
+    "note": "Wishlist is phase 3 (plan ch. 3 \"Saved shopping: Growth\", ch. 20 phase 3; wishlist.json phase 3). When built: un-saving from a card needs the saved item id, but GET /wishlist/saved returns map<bool>; return item ids or add DELETE /items?productId=."
+  },
+  {
+    "screen": "store/search-empty",
+    "state": "No results",
+    "element": "No-results message with filters applied count",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/SearchResults",
+      "GET /api/store/search/facets"
+    ]
+  },
+  {
+    "screen": "store/search-empty",
+    "state": "No results",
+    "element": "Remove single filter buttons with result counts, Clear all filters (12 results)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "gql store/SearchResults",
+      "GET /api/store/search/facets"
+    ]
+  },
+  {
+    "screen": "store/search-empty",
+    "state": "No results",
+    "element": "Nearby categories and search tips",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/SearchResults"
+    ]
+  },
+  {
+    "screen": "store/search-empty",
+    "state": "No results",
+    "element": "Popular in Headphones cards",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/SearchResults"
+    ]
+  },
+  {
+    "screen": "store/search-empty",
+    "state": "Product unavailable",
+    "element": "Product header: brand, title, rating, Out of stock badge, restock note with expected date",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/catalog/products/{id}",
+      "GET /api/store/offers/products/{productId}/purchase-box",
+      "GET /api/store/reviews/products/{productId}/rating-summary",
+      "gql store/ProductPage"
+    ]
+  },
+  {
+    "screen": "store/search-empty",
+    "state": "Product unavailable",
+    "element": "Color chips with availability per variant",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/offers/products/{productId}/purchase-box",
+      "gql store/ProductPage"
+    ]
+  },
+  {
+    "screen": "store/search-empty",
+    "state": "Product unavailable",
+    "element": "Email me when it's back (back-in-stock alert)",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/store/wishlist/alerts"
+    ],
+    "note": "Availability alerts are Growth (plan ch. 3 \"Saved shopping\"; ch. 20 phase 3); wishlist.json phase 3."
+  },
+  {
+    "screen": "store/search-empty",
+    "state": "Product unavailable",
+    "element": "Available from other sellers list (seller, condition, price, shipping, arrival, returns, note)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/offers/products/{productId}/offers",
+      "gql store/OffersPage"
+    ]
+  },
+  {
+    "screen": "store/search-empty",
+    "state": "Product unavailable",
+    "element": "Discontinued model from recently viewed (\"No longer available\")",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/customers/recently-viewed",
+      "gql store:Query.recentlyViewed"
+    ],
+    "note": "RecentlyViewedItem.available=false; the replacement explanation text has no field (replacedBy) and would be generic copy."
+  },
+  {
+    "screen": "store/search-empty",
+    "state": "Product unavailable",
+    "element": "Similar headphones in stock",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/products/{productId}/similar",
+      "gql store:Product.related"
+    ]
+  },
+  {
+    "screen": "store/product",
+    "element": "Gallery photos and product video",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/ProductPage",
+      "GET /api/store/catalog/products/{id}"
+    ]
+  },
+  {
+    "screen": "store/product",
+    "element": "Brand link, title, rating, ratings count, answered questions count",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/ProductPage",
+      "gql store:Product.reviewSummary",
+      "GET /api/store/reviews/products/{productId}/rating-summary"
+    ]
+  },
+  {
+    "screen": "store/product",
+    "element": "Best seller rank badge (#3 in Headphones)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store:Product.bestSellerRank"
+    ]
+  },
+  {
+    "screen": "store/product",
+    "element": "Variant picker with per-variant price/offer/stock cue (updates photos, offers, price)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "gql store/ProductPage",
+      "GET /api/store/offers/products/{productId}/purchase-box"
+    ]
+  },
+  {
+    "screen": "store/product",
+    "element": "Key features, About this item, In the box, Specifications",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/ProductPage",
+      "GET /api/store/catalog/products/{id}"
+    ]
+  },
+  {
+    "screen": "store/product",
+    "element": "Purchase box: price, was price rule, sale end, stock, condition, delivery date with cutoff, ships from/carrier, seller with rating, returns, warranty, quantity limit",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/ProductPage",
+      "GET /api/store/offers/products/{productId}/purchase-box",
+      "GET /api/store/promotions/products/{productId}",
+      "GET /api/store/shipping/estimates",
+      "GET /api/store/returns/terms"
+    ]
+  },
+  {
+    "screen": "store/product",
+    "element": "Deliver to: Change location",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PUT /api/store/cart/cart/destination"
+    ]
+  },
+  {
+    "screen": "store/product",
+    "element": "Add to cart (purchase box and phone action bar)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/cart/cart/items"
+    ]
+  },
+  {
+    "screen": "store/product",
+    "element": "Buy now (to checkout with totals)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/checkout/sessions"
+    ]
+  },
+  {
+    "screen": "store/product",
+    "state": "Official Store offer",
+    "element": "Other sellers cue (\"3 offers from $184\")",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/ProductPage",
+      "GET /api/store/offers/products/{productId}/purchase-box"
+    ]
+  },
+  {
+    "screen": "store/product",
+    "state": "Seller offer selected",
+    "element": "Chosen seller notice and the featured offer summary with Choose",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/offers/products/{productId}/purchase-box",
+      "gql store:Product.featuredOffer"
+    ],
+    "note": "ProductPage selects only offer(id); add featuredOffer to the persisted query to show both on GraphQL."
+  },
+  {
+    "screen": "store/product",
+    "element": "Save to wishlist (gallery heart)",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/store/wishlist/items",
+      "gql store:Product.saved"
+    ],
+    "note": "Wishlist is phase 3 (plan ch. 20; wishlist.json phase 3)."
+  },
+  {
+    "screen": "store/product",
+    "element": "Share",
+    "kind": "action",
+    "status": "client-only",
+    "api": []
+  },
+  {
+    "screen": "store/product",
+    "element": "Record product view (recently viewed, discovery signals)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/customers/recently-viewed",
+      "POST /api/store/reports/signals"
+    ]
+  },
+  {
+    "screen": "store/product",
+    "element": "Review summary: average, counts, star distribution",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/ProductPage",
+      "GET /api/store/reviews/products/{productId}/rating-summary"
+    ]
+  },
+  {
+    "screen": "store/product",
+    "element": "Review filters (stars, Verified only, With photos, Critical, variant)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/reviews/products/{productId}/reviews",
+      "gql store:Product.reviews"
+    ],
+    "note": "gql Product.reviews has no critical (1–2 stars) argument; REST has critical."
+  },
+  {
+    "screen": "store/product",
+    "element": "Review list: author, Verified Purchase, stars, headline, date, variant, sold by, text, seller response, See all",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/ProductPage",
+      "GET /api/store/reviews/products/{productId}/reviews"
+    ]
+  },
+  {
+    "screen": "store/product",
+    "element": "Review Helpful (count)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/reviews/votes"
+    ]
+  },
+  {
+    "screen": "store/product",
+    "element": "Review Report",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/reviews/reports"
+    ]
+  },
+  {
+    "screen": "store/product",
+    "element": "Ask a question",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/reviews/products/{productId}/questions"
+    ]
+  },
+  {
+    "screen": "store/product",
+    "element": "Search questions and answers",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/reviews/products/{productId}/questions",
+      "gql store:Product.questions"
+    ]
+  },
+  {
+    "screen": "store/product",
+    "element": "Questions with answers labeled Seller / Marketly staff / Customer",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/ProductPage",
+      "GET /api/store/reviews/products/{productId}/questions"
+    ]
+  },
+  {
+    "screen": "store/product",
+    "state": "No reviews yet",
+    "element": "Unanswered question with expected answer time (\"usually answers within 1 business day\")",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/reviews/products/{productId}/questions",
+      "gql store:Question.answerExpectation"
+    ],
+    "note": "Question has askedAt and answerCount but no expected answer time for the seller. Fixed: Added Question.answerExpectation (REST and GraphQL, selected in ProductPage) from setting questionAnswerTargetBusinessDays and the main offer's seller.",
+    "proposal": {
+      "module": "reviews",
+      "change": "Add answerExpectation:string? to Question (from the selling party's reply target)"
+    },
+    "resolvedBy": "people"
+  },
+  {
+    "screen": "store/product",
+    "state": "No reviews yet",
+    "element": "New listing badge, listed date, \"No reviews yet\" honest state, Only offer / no other sellers",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/ProductPage",
+      "GET /api/store/reviews/products/{productId}/rating-summary",
+      "GET /api/store/offers/products/{productId}/purchase-box"
+    ]
+  },
+  {
+    "screen": "store/product",
+    "element": "Related products",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store:Product.related",
+      "GET /api/store/search/products/{productId}/similar"
+    ]
+  },
+  {
+    "screen": "store/product",
+    "element": "Sponsored products related to this item",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/store/advertising/decisions",
+      "GET /api/store/reviews/rating-summaries",
+      "POST /api/store/advertising/events"
+    ]
+  },
+  {
+    "screen": "store/product",
+    "element": "Wishlist heart on related and sponsored product cards",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/store/wishlist/items",
+      "GET /api/store/wishlist/saved",
+      "gql store:Product.saved"
+    ],
+    "note": "Wishlist is phase 3 (plan ch. 3 \"Saved shopping: Growth\", ch. 20 phase 3; wishlist.json phase 3)."
+  },
+  {
+    "screen": "store/offers",
+    "element": "Product header: image, title, chosen color with Change, rating",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/OffersPage"
+    ]
+  },
+  {
+    "screen": "store/offers",
+    "element": "Condition chips with counts",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "gql store/OffersPage",
+      "GET /api/store/offers/products/{productId}/offers"
+    ]
+  },
+  {
+    "screen": "store/offers",
+    "element": "Sort by Total cost / Fastest delivery",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "gql store/OffersPage",
+      "GET /api/store/offers/products/{productId}/offers"
+    ]
+  },
+  {
+    "screen": "store/offers",
+    "element": "Deliver-to and tax note",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/OffersPage"
+    ]
+  },
+  {
+    "screen": "store/offers",
+    "element": "Offer rows: seller and verification, total cost (price + shipping), condition with notes, missing or complete accessories, delivery and carrier, seller quality (positive %, ratings, on-time dispatch), returns and warranty, Featured badge, not-eligible note",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/OffersPage",
+      "GET /api/store/offers/products/{productId}/offers"
+    ]
+  },
+  {
+    "screen": "store/offers",
+    "element": "Add to cart per offer",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/cart/cart/items"
+    ]
+  },
+  {
+    "screen": "store/offers",
+    "element": "How we choose the featured offer",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/OffersPage",
+      "GET /api/store/offers/featured-offer-rule"
+    ]
+  },
+  {
+    "screen": "store/brand",
+    "element": "Brand header: logo, name, product count, description",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/catalog/brands/{slug}",
+      "gql store:Query.brand"
+    ]
+  },
+  {
+    "screen": "store/brand",
+    "element": "Brand banner image",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/catalog/brands/{slug}",
+      "gql store:Brand.banner"
+    ],
+    "proposal": {
+      "module": "catalog",
+      "change": "Add banner:MediaRef? to Brand"
+    },
+    "note": "Fixed: Added Brand.banner (REST and GraphQL); create/update brand take bannerId.",
+    "resolvedBy": "catalog"
+  },
+  {
+    "screen": "store/brand",
+    "element": "Brand collections (title, product count, image)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/collections"
+    ],
+    "note": "StorePage supports collectionKind brand, but nothing lists the collections of one brand. Fixed: New paged endpoint listing published collections as CollectionCard { slug, url, title, productCount, image } filtered by brandId or collectionKind; PageInput gains brandId and coverImage (pages.brand_id).",
+    "proposal": {
+      "module": "content",
+      "method": "GET",
+      "area": "store",
+      "path": "/pages",
+      "summary": "Published collection pages filtered by brand (or seller)",
+      "fields": [
+        "brand?",
+        "collectionKind?",
+        "items: { slug, title, productCount, image }"
+      ]
+    },
+    "resolvedBy": "platform"
+  },
+  {
+    "screen": "store/brand",
+    "element": "Category chips with counts",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/facets"
+    ]
+  },
+  {
+    "screen": "store/brand",
+    "element": "All brand products grid, count, sort, pagination",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/products",
+      "GET /api/store/search/facets"
+    ]
+  },
+  {
+    "screen": "store/brand",
+    "element": "Wishlist heart on product cards (save state and toggle)",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/store/wishlist/items",
+      "GET /api/store/wishlist/saved",
+      "gql store:Product.saved"
+    ],
+    "note": "Wishlist is phase 3 (plan ch. 3 \"Saved shopping: Growth\", ch. 20 phase 3; wishlist.json phase 3)."
+  },
+  {
+    "screen": "store/seller",
+    "element": "Store header: banner tagline, logo, name, verified badge, rating, location, dispatch, selling since, introduction",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/SellerStorefront",
+      "GET /api/store/sellers/stores/{slug}"
+    ]
+  },
+  {
+    "screen": "store/seller",
+    "element": "Contact seller",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/messaging/conversations"
+    ],
+    "note": "Requires orderId (order messages only, plan ch. 17); shoppers without an order are routed to product questions (Storefront contact.productQuestions)."
+  },
+  {
+    "screen": "store/seller",
+    "element": "Share store",
+    "kind": "action",
+    "status": "client-only",
+    "api": []
+  },
+  {
+    "screen": "store/seller",
+    "element": "Tabs with counts (Products, Feedback, About and policies)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/SellerStorefront"
+    ]
+  },
+  {
+    "screen": "store/seller",
+    "element": "Seller promotion banner and Shop eligible items",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "gql store:Seller.activePromotions",
+      "GET /api/store/promotions/campaigns/{id}/eligible-products"
+    ]
+  },
+  {
+    "screen": "store/seller",
+    "element": "Featured collection with items",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/SellerStorefront",
+      "GET /api/store/sellers/stores/{slug}/collections/{collectionId}"
+    ]
+  },
+  {
+    "screen": "store/seller",
+    "element": "All products: category chips, search this store, sort, grid, pagination",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "gql store/SellerStorefront",
+      "GET /api/store/search/products",
+      "GET /api/store/search/facets"
+    ]
+  },
+  {
+    "screen": "store/seller",
+    "element": "Seller feedback stats (positive %, on-time dispatch, replies within 24 h)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/SellerStorefront",
+      "GET /api/store/reviews/sellers/{sellerId}/feedback-summary"
+    ]
+  },
+  {
+    "screen": "store/seller",
+    "element": "Seller feedback list with seller replies, See all",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/SellerStorefront",
+      "GET /api/store/reviews/sellers/{sellerId}/feedback"
+    ]
+  },
+  {
+    "screen": "store/seller",
+    "element": "What we verified (checked, not checked, last checked)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/SellerStorefront"
+    ]
+  },
+  {
+    "screen": "store/seller",
+    "element": "Shipping and returns summary (ships from/to, dispatch, carriers, returns, warranty, replies)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/SellerStorefront"
+    ]
+  },
+  {
+    "screen": "store/seller",
+    "element": "Wishlist heart on product cards (save state and toggle)",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/store/wishlist/items",
+      "GET /api/store/wishlist/saved",
+      "gql store:Product.saved"
+    ],
+    "note": "Wishlist is phase 3 (plan ch. 3 \"Saved shopping: Growth\", ch. 20 phase 3; wishlist.json phase 3)."
+  },
+  {
+    "screen": "store/official",
+    "element": "Hero, service promises and featured collections",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/pages/{slug}",
+      "gql store:Query.contentPage"
+    ],
+    "note": "The Official Store has no seller row (sellers.json), so GET /sellers/stores/{slug} does not serve it; this assumes the page is a content page with collectionKind official (hero, text and banner blocks)."
+  },
+  {
+    "screen": "store/official",
+    "element": "Shop by category shortcuts with images",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/catalog/categories",
+      "gql store:Category.image"
+    ],
+    "proposal": {
+      "module": "catalog",
+      "change": "Add inStockCount:int and image:MediaRef? to Category (GET /api/store/catalog/categories tree and gql Category), counts read from search"
+    },
+    "note": "Fixed: Category.image added (same change as store/categories).",
+    "resolvedBy": "catalog"
+  },
+  {
+    "screen": "store/official",
+    "element": "All Official Store items: count, sort, grid, pagination",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/products",
+      "GET /api/store/search/facets"
+    ]
+  },
+  {
+    "screen": "store/official",
+    "element": "Wishlist heart on product cards (save state and toggle)",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/store/wishlist/items",
+      "GET /api/store/wishlist/saved",
+      "gql store:Product.saved"
+    ],
+    "note": "Wishlist is phase 3 (plan ch. 3 \"Saved shopping: Growth\", ch. 20 phase 3; wishlist.json phase 3)."
+  },
+  {
+    "screen": "store/deals",
+    "element": "Deal tabs with counts",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/promotions/deals",
+      "gql store:DealsOverview.tabs"
+    ]
+  },
+  {
+    "screen": "store/deals",
+    "element": "Flash sale: period, countdown, deal cards (% off, deal/was price, seller, limit, claimed meter)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/promotions/deals",
+      "GET /api/store/promotions/flash-sales/{campaignId}",
+      "gql store:DealsOverview.flashSales"
+    ]
+  },
+  {
+    "screen": "store/deals",
+    "element": "Sold-out deal with claimed time and the regular offer shown separately",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/promotions/deals",
+      "gql store:DealsOverview.flashSales"
+    ]
+  },
+  {
+    "screen": "store/deals",
+    "element": "Coupons: amount, title, conditions, expiry, funded by, clipped state",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/promotions/deals",
+      "GET /api/store/promotions/deals/coupons",
+      "gql store:DealsOverview.coupons"
+    ]
+  },
+  {
+    "screen": "store/deals",
+    "element": "Clip coupon",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/promotions/coupons/{campaignId}/clip"
+    ]
+  },
+  {
+    "screen": "store/deals",
+    "element": "Coupon: Eligible items",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/promotions/campaigns/{id}/eligible-products"
+    ]
+  },
+  {
+    "screen": "store/deals",
+    "element": "Clearance grid and See all",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/promotions/deals/clearance",
+      "gql store:DealsOverview.clearance"
+    ]
+  },
+  {
+    "screen": "store/deals",
+    "element": "Upcoming events list",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/promotions/deals",
+      "gql store:DealsOverview.upcomingEvents"
+    ]
+  },
+  {
+    "screen": "store/deals",
+    "element": "Remind me (event reminder)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/promotions/events/{campaignId}/reminder",
+      "DELETE /api/store/promotions/events/{campaignId}/reminder"
+    ]
+  },
+  {
+    "screen": "store/deals",
+    "element": "Wishlist heart on product cards (save state and toggle)",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/store/wishlist/items",
+      "GET /api/store/wishlist/saved",
+      "gql store:Product.saved"
+    ],
+    "note": "Wishlist is phase 3 (plan ch. 3 \"Saved shopping: Growth\", ch. 20 phase 3; wishlist.json phase 3)."
+  },
+  {
+    "screen": "store/collection",
+    "element": "Collection header (title, intro, rule, period, curator)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/pages/{slug}",
+      "gql store:Query.contentPage"
+    ]
+  },
+  {
+    "screen": "store/collection",
+    "state": "New arrivals",
+    "element": "Category chips and products grouped by date added, pagination",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/pages/{slug}/products",
+      "gql store:Collection.products",
+      "gql store:ContentProductTile.group"
+    ]
+  },
+  {
+    "screen": "store/collection",
+    "state": "Best sellers",
+    "element": "Category tabs, ranked cards (rank, Top 3), last updated",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/pages/{slug}/products",
+      "gql store:Collection.products",
+      "gql store:Collection.refreshedAt"
+    ]
+  },
+  {
+    "screen": "store/collection",
+    "state": "Seasonal",
+    "element": "Campaign hero with period and countdown, category sections, terms",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/pages/{slug}",
+      "gql store:ContentPage.blocks",
+      "gql store:ContentPage.campaign"
+    ]
+  },
+  {
+    "screen": "store/collection",
+    "state": "Curated collection",
+    "element": "Curator line, availability note, sections with editor notes",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/pages/{slug}",
+      "gql store:ContentPage.blocks"
+    ]
+  },
+  {
+    "screen": "store/collection",
+    "state": "Curated collection",
+    "element": "Live availability on each card (status, quantity, checked time)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/content/pages/{slug}",
+      "gql store:ContentProductTile.checkedAt"
+    ]
+  },
+  {
+    "screen": "store/collection",
+    "element": "Section chips (jump to section)",
+    "kind": "action",
+    "status": "client-only",
+    "api": []
+  },
+  {
+    "screen": "store/collection",
+    "element": "Wishlist heart on product cards (save state and toggle)",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/store/wishlist/items",
+      "GET /api/store/wishlist/saved",
+      "gql store:Product.saved"
+    ],
+    "note": "Wishlist is phase 3 (plan ch. 3 \"Saved shopping: Growth\", ch. 20 phase 3; wishlist.json phase 3)."
+  },
+  {
+    "screen": "store/not-found",
+    "element": "Search the store form",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/search/products",
+      "gql store/SearchResults"
+    ]
+  },
+  {
+    "screen": "store/not-found",
+    "element": "Popular categories chips",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/catalog/categories"
+    ],
+    "note": "Chip icons depend on the Category image proposal."
+  },
+  {
+    "screen": "store/not-found",
+    "state": "Something went wrong",
+    "element": "Try again",
+    "kind": "action",
+    "status": "client-only",
+    "api": [],
+    "note": "Repeats the failed request."
+  },
+  {
+    "screen": "store/not-found",
+    "state": "Something went wrong",
+    "element": "Live service status note with updated time",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/public/settings/app-config",
+      "gql store:StoreInfoMaintenance.updatedAt"
+    ],
+    "note": "MaintenanceNotice has active, message, until; no incident kind or updated time. Fixed: Added kind enum(maintenance|incident) and updatedAt to MaintenanceNotice and GraphQL StoreInfoMaintenance.",
+    "proposal": {
+      "module": "settings",
+      "change": "Add kind:enum(maintenance|incident) and updatedAt:datetime to MaintenanceNotice (AppConfig.maintenance and gql StoreInfo.maintenance)"
+    },
+    "resolvedBy": "platform"
+  },
+  {
+    "screen": "store/not-found",
+    "state": "Something went wrong",
+    "element": "Error reference (ERR-7F3A-2210)",
+    "kind": "data",
+    "status": "client-only",
+    "api": [],
+    "note": "Shows the X-Request-Id echoed on the failed response (common.json headers)."
+  },
+  {
+    "screen": "store/cart",
+    "state": "Default",
+    "element": "Heading counts, attention alert, retention note",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/CartPage",
+      "GET /api/store/cart/cart"
+    ]
+  },
+  {
+    "screen": "store/cart",
+    "state": "Default",
+    "element": "Packages: seller, badge, package label, ships from, arrival, shipping, return terms, package subtotal",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/CartPage",
+      "GET /api/store/cart/cart"
+    ]
+  },
+  {
+    "screen": "store/cart",
+    "state": "Default",
+    "element": "Cart lines: image, name, variant, condition, SKU, price and was price",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/CartPage",
+      "GET /api/store/cart/cart"
+    ]
+  },
+  {
+    "screen": "store/cart",
+    "state": "Default",
+    "element": "Quantity stepper",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PATCH /api/store/cart/cart/items/{id}"
+    ]
+  },
+  {
+    "screen": "store/cart",
+    "state": "Default",
+    "element": "Remove line",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "DELETE /api/store/cart/cart/items/{id}"
+    ]
+  },
+  {
+    "screen": "store/cart",
+    "state": "Default",
+    "element": "Save for later",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/store/cart/cart/items/{id}/save-for-later"
+    ],
+    "note": "Plan ch. 6 \"later, save for later\"; cart.json phase 3."
+  },
+  {
+    "screen": "store/cart",
+    "state": "Default",
+    "element": "Price changed notice (previous/current price, who changed it and when)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/CartPage",
+      "GET /api/store/cart/cart"
+    ]
+  },
+  {
+    "screen": "store/cart",
+    "state": "Default",
+    "element": "Out of stock notice with See other offers (2 from $39.50)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/CartPage",
+      "GET /api/store/cart/cart"
+    ]
+  },
+  {
+    "screen": "store/cart",
+    "state": "Default",
+    "element": "Out of stock: Tell me when it's back",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/store/wishlist/alerts"
+    ],
+    "note": "Availability alerts are Growth (plan ch. 3; ch. 20 phase 3); wishlist.json phase 3."
+  },
+  {
+    "screen": "store/cart",
+    "state": "Default",
+    "element": "Order summary: subtotal, discounts, shipping per seller, tax note, total (also phone action bar)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/CartPage",
+      "GET /api/store/cart/cart"
+    ]
+  },
+  {
+    "screen": "store/cart",
+    "state": "Default",
+    "element": "Coupon code Apply and applied coupon Remove",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/cart/cart/coupons",
+      "DELETE /api/store/cart/cart/coupons/{code}"
+    ]
+  },
+  {
+    "screen": "store/cart",
+    "state": "Default",
+    "element": "Check out",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/checkout/sessions"
+    ]
+  },
+  {
+    "screen": "store/cart",
+    "state": "Empty",
+    "element": "Saved for later list",
+    "kind": "data",
+    "status": "later",
+    "api": [
+      "GET /api/store/cart/cart/saved",
+      "gql store:Cart.savedForLater"
+    ],
+    "note": "Plan ch. 6 \"later, save for later\"; cart.json phase 3."
+  },
+  {
+    "screen": "store/cart",
+    "state": "Empty",
+    "element": "Saved for later: Move to cart",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/store/cart/cart/saved/{id}/move-to-cart"
+    ],
+    "note": "Phase 3 (plan ch. 6; cart.json)."
+  },
+  {
+    "screen": "store/cart",
+    "state": "Empty",
+    "element": "Recently viewed cards",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/CartPage",
+      "GET /api/store/customers/recently-viewed"
+    ]
+  },
+  {
+    "screen": "store/cart",
+    "element": "Wishlist heart on product cards (save state and toggle)",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/store/wishlist/items",
+      "GET /api/store/wishlist/saved",
+      "gql store:Product.saved"
+    ],
+    "note": "Wishlist is phase 3 (plan ch. 3 \"Saved shopping: Growth\", ch. 20 phase 3; wishlist.json phase 3)."
+  },
+  {
+    "screen": "store/checkout",
+    "element": "Step progress",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/CheckoutReview",
+      "GET /api/store/checkout/sessions/{id}"
+    ]
+  },
+  {
+    "screen": "store/checkout",
+    "state": "Signed in",
+    "element": "Account card (name, email)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/CheckoutReview"
+    ]
+  },
+  {
+    "screen": "store/checkout",
+    "state": "Guest checkout",
+    "element": "Guest contact: email, phone, create account after checkout",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "PUT /api/store/checkout/sessions/{id}/contact"
+    ]
+  },
+  {
+    "screen": "store/checkout",
+    "state": "Signed in",
+    "element": "Saved address cards and select",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "gql store/CheckoutReview",
+      "GET /api/store/customers/addresses",
+      "PUT /api/store/checkout/sessions/{id}/address"
+    ]
+  },
+  {
+    "screen": "store/checkout",
+    "state": "Signed in",
+    "element": "Add a new address",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/customers/addresses",
+      "PUT /api/store/checkout/sessions/{id}/address"
+    ]
+  },
+  {
+    "screen": "store/checkout",
+    "state": "Guest checkout",
+    "element": "Address form with validation",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/customers/addresses/validate",
+      "PUT /api/store/checkout/sessions/{id}/address"
+    ]
+  },
+  {
+    "screen": "store/checkout",
+    "element": "Shippability check (\"All 4 items can ship to this address\")",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/CheckoutReview"
+    ]
+  },
+  {
+    "screen": "store/checkout",
+    "element": "Delivery options per package (arrival, price, method, carrier, cutoff)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "gql store/CheckoutReview",
+      "PUT /api/store/checkout/sessions/{id}/delivery"
+    ]
+  },
+  {
+    "screen": "store/checkout",
+    "element": "Coupon Apply and Remove; applied coupon with funding and covered / not covered items",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/checkout/sessions/{id}/coupons",
+      "DELETE /api/store/checkout/sessions/{id}/coupons/{code}",
+      "gql store/CheckoutReview"
+    ]
+  },
+  {
+    "screen": "store/checkout",
+    "state": "Coupon rejected",
+    "element": "Rejected coupon reason",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/store/checkout/sessions/{id}/coupons",
+      "gql store/CheckoutReview"
+    ]
+  },
+  {
+    "screen": "store/checkout",
+    "state": "Guest checkout",
+    "element": "Account coupons and credit need sign-in",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/store/checkout/sessions/{id}/coupons"
+    ],
+    "note": "CouponResult status needs_sign_in."
+  },
+  {
+    "screen": "store/checkout",
+    "state": "Signed in",
+    "element": "Use my Marketly credit ($12.50 available, source)",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "PUT /api/store/checkout/sessions/{id}/credit",
+      "GET /api/store/wallet/credit"
+    ],
+    "note": "Store credit is a later service (plan ch. 15; ch. 20 phase 3); checkout.json and wallet.json phase 3."
+  },
+  {
+    "screen": "store/checkout",
+    "element": "Payment methods: saved card, new card (provider fields), digital wallet, charge note",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/payments/options",
+      "PUT /api/store/checkout/sessions/{id}/payment-method",
+      "gql store/CheckoutReview"
+    ]
+  },
+  {
+    "screen": "store/checkout",
+    "element": "Review: packages with seller, items, arrival, return terms, seller support",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/CheckoutReview"
+    ]
+  },
+  {
+    "screen": "store/checkout",
+    "element": "Order total with tax line, legal text, support phone",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/CheckoutReview",
+      "gql store:Query.storeInfo"
+    ]
+  },
+  {
+    "screen": "store/checkout",
+    "element": "Place order (idempotent, revalidates)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/checkout/sessions/{id}/place",
+      "POST /api/store/checkout/sessions/{id}/revalidate"
+    ]
+  },
+  {
+    "screen": "store/checkout",
+    "element": "Back to cart (leave checkout, release holds)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "DELETE /api/store/checkout/sessions/{id}"
+    ]
+  },
+  {
+    "screen": "store/checkout-review-changes",
+    "element": "Changes list (price up, less stock, delivery moved, coupon ended) with choices",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/checkout/sessions/{id}/changes/{changeSetId}",
+      "gql store/CheckoutReview"
+    ]
+  },
+  {
+    "screen": "store/checkout-review-changes",
+    "element": "Alternative offers from other sellers",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/checkout/sessions/{id}/changes/{changeSetId}",
+      "GET /api/store/offers/offers/{id}"
+    ]
+  },
+  {
+    "screen": "store/checkout-review-changes",
+    "element": "Previous total, deltas and new total",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/CheckoutReview"
+    ]
+  },
+  {
+    "screen": "store/checkout-review-changes",
+    "element": "Accept changes and continue",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/checkout/sessions/{id}/changes/{changeSetId}/accept"
+    ]
+  },
+  {
+    "screen": "store/payment-result",
+    "state": "Payment failed",
+    "element": "Decline title, method, bank reason and code",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/payments/intents/{id}",
+      "GET /api/store/checkout/sessions/{id}"
+    ]
+  },
+  {
+    "screen": "store/payment-result",
+    "state": "Payment failed",
+    "element": "Try again: method options and Pay",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/payments/options",
+      "POST /api/store/checkout/sessions/{id}/retry-payment",
+      "POST /api/store/checkout/sessions/{id}/complete-action"
+    ]
+  },
+  {
+    "screen": "store/payment-result",
+    "state": "Payment failed",
+    "element": "Cart and coupon saved, prices held until",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/checkout/sessions/{id}"
+    ]
+  },
+  {
+    "screen": "store/payment-result",
+    "element": "Your order mini summary (items, seller, arrival, total)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/checkout/sessions/{id}"
+    ]
+  },
+  {
+    "screen": "store/payment-result",
+    "state": "Checking payment",
+    "element": "Order reference, pending status, method and amount, last checked, auto re-check, email note, hold warning",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/payments/intents/{id}",
+      "GET /api/store/checkout/sessions/{id}"
+    ]
+  },
+  {
+    "screen": "store/payment-result",
+    "state": "Checking payment",
+    "element": "Check now",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/payments/intents/{id}/check"
+    ]
+  },
+  {
+    "screen": "store/payment-result",
+    "state": "Checking payment",
+    "element": "What happens next timeline (order received time)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}"
+    ]
+  },
+  {
+    "screen": "store/payment-result",
+    "state": "Checking payment",
+    "element": "Support phone and hours",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "GET /api/public/settings/app-config"
+    ]
+  },
+  {
+    "screen": "store/confirmation",
+    "element": "Greeting, email, order reference, charged total and method, delivery address",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/OrderConfirmation",
+      "GET /api/store/checkout/sessions/{id}/confirmation"
+    ]
+  },
+  {
+    "screen": "store/confirmation",
+    "element": "Packages with seller, arrival and item status",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/OrderConfirmation"
+    ]
+  },
+  {
+    "screen": "store/confirmation",
+    "element": "Totals and next steps",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "gql store/OrderConfirmation"
+    ]
+  },
+  {
+    "screen": "store/confirmation",
+    "element": "Download receipt",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "GET /api/store/orders/orders/{id}/documents/{documentId}"
+    ]
+  },
+  {
+    "screen": "ads/opening",
+    "element": "Decide whether to show the opening ad (entry page, once per visit)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/store/advertising/decisions"
+    ]
+  },
+  {
+    "screen": "ads/opening",
+    "state": "Platform campaign",
+    "element": "Ad label, eyebrow, headline, body, image, CTA, footnote",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/store/advertising/decisions"
+    ]
+  },
+  {
+    "screen": "ads/opening",
+    "state": "Sponsored brand",
+    "element": "Advertiser logo and name, promoted product price and was price, seller and sale end",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/store/advertising/decisions"
+    ],
+    "note": "AdImpression has advertiserName, image and promotedOffer but no advertiser logo. Fixed: Added AdImpression.advertiserLogo: MediaRef?.",
+    "proposal": {
+      "module": "advertising",
+      "change": "Add advertiserLogo:MediaRef? to AdImpression"
+    },
+    "resolvedBy": "platform"
+  },
+  {
+    "screen": "ads/opening",
+    "element": "Skip / Close ad, CTA click, Continue to home page",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/advertising/events"
+    ]
+  },
+  {
+    "screen": "ads/popup",
+    "state": "Coupon",
+    "element": "Welcome coupon pop-up (code, terms, CTA)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/store/advertising/decisions"
+    ]
+  },
+  {
+    "screen": "ads/popup",
+    "state": "Coupon",
+    "element": "Copy code",
+    "kind": "action",
+    "status": "client-only",
+    "api": []
+  },
+  {
+    "screen": "ads/popup",
+    "state": "Coupon",
+    "element": "Start shopping / No thanks / Close",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/advertising/events"
+    ]
+  },
+  {
+    "screen": "ads/popup",
+    "state": "Announcement",
+    "element": "Announcement panel (label, image, headline, body, CTA)",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/store/advertising/decisions"
+    ]
+  },
+  {
+    "screen": "ads/popup",
+    "state": "Announcement",
+    "element": "Dismiss (never shown again)",
+    "kind": "action",
+    "status": "covered",
+    "api": [
+      "POST /api/store/advertising/events"
+    ]
+  },
+  {
+    "screen": "ads/formats",
+    "state": "All placements",
+    "element": "Banner ad",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/store/advertising/decisions",
+      "POST /api/store/advertising/events"
+    ]
+  },
+  {
+    "screen": "ads/formats",
+    "state": "All placements",
+    "element": "Sponsored product cards",
+    "kind": "data",
+    "status": "covered",
+    "api": [
+      "POST /api/store/advertising/decisions",
+      "GET /api/store/reviews/rating-summaries"
+    ]
+  },
+  {
+    "screen": "ads/formats",
+    "state": "All placements",
+    "element": "Sponsored store feature (logo, verified, rating, location, dispatch, two products)",
+    "kind": "data",
+    "status": "later",
+    "api": [
+      "POST /api/store/advertising/decisions"
+    ],
+    "note": "Sponsored store/brand is phase 3 (plan ch. 20; advertising.json notes). When built, AdImpression needs promotedOffers[] and store stats (verified, positivePct, location, dispatchLabel)."
+  },
+  {
+    "screen": "ads/formats",
+    "state": "All placements",
+    "element": "Video ad with play and mute",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/store/advertising/decisions",
+      "POST /api/store/advertising/events"
+    ],
+    "note": "Video is later (plan ch. 16 launch scope; advertising.json: video later)."
+  },
+  {
+    "screen": "ads/formats",
+    "state": "All placements",
+    "element": "Placement legend (prototype annotation)",
+    "kind": "data",
+    "status": "client-only",
+    "api": []
+  },
+  {
+    "screen": "ads/formats",
+    "state": "Sticky ad",
+    "element": "Floating / sticky ad strip and Close",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/store/advertising/decisions",
+      "POST /api/store/advertising/events"
+    ],
+    "note": "Floating is phase 3 (plan ch. 20 \"more ad formats\"; advertising.json notes)."
+  },
+  {
+    "screen": "ads/formats",
+    "state": "Interstitial",
+    "element": "Interstitial between category and product (View offer, Skip ad)",
+    "kind": "action",
+    "status": "later",
+    "api": [
+      "POST /api/store/advertising/decisions",
+      "POST /api/store/advertising/events"
+    ],
+    "note": "Interstitial is phase 3 (plan ch. 20; advertising.json notes)."
+  }
+]

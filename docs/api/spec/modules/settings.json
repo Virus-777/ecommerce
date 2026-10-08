@@ -1,0 +1,292 @@
+{
+  "name": "settings",
+  "title": "Settings",
+  "group": "Platform",
+  "phase": 1,
+  "chapters": [18, 21],
+  "summary": "Market-level platform settings: country and service region, currency, time zone, business hours, support contacts, guest checkout, Android app versions and feature flags, plus the effective-dated change process (impact preview, approval, schedule, apply) for every runtime setting a module declares. It also assembles the Admin Center settings page from sections owned by other modules.",
+  "owns": [
+    "Market: country, service region, currency, time zone, locale",
+    "Business hours, support closures and support contact details (used for business-hour deadlines and the Help pages)",
+    "Checkout toggles: guest checkout, offer an account after a guest purchase",
+    "App configuration for the website and the Android app: support hours, feature flags, minimum and latest Android version, maintenance notice",
+    "Setting definition registry: runtime settings declared by any module (key, type, default, approval rule, minimum notice)",
+    "Effective-dated values with history: every change has an effective date, an apply scope (new orders only or open commitments), a reason and an impact preview before saving",
+    "Setting change requests: draft → approval when required → scheduled → applied, and cancellation",
+    "Feature flags for runtime switches inside enabled modules",
+    "The settings overview page: settings-owned sections plus summaries of sections owned by other modules, and all scheduled changes in one list"
+  ],
+  "notOwns": [
+    "Returns baseline, category exceptions and who pays return shipping: returns (versioned policy with its own approval and impact preview). settings only shows its summary and scheduled change on the page",
+    "Commission rules, fee basis, payout schedule, availability delay, minimum payout and hold rules: finance (fee rule versions, payout settings). settings shows them as a linked section",
+    "Shipping defaults (seller dispatch target, Official Store cutoff, free-delivery threshold, missing-tracking flag), carrier services and no-dispatch holidays: shipping",
+    "Advertising rules (opening-ad frequency, overlays per page, no-ad pages, labels, paid seller ads): advertising global rules",
+    "Seller performance targets: sellers; support SLA targets per case category: support",
+    "Which modules are installed at all: modules.config.ts (code). Feature flags only switch behaviour inside enabled modules",
+    "Staff roles and approval limits: access; the Business Owner approval itself is an access approval request",
+    "Policy texts shown to customers (returns policy page, purchase terms): content"
+  ],
+  "dependsOn": ["access"],
+  "optionalDeps": ["audit", "notifications"],
+  "publicApi": [
+    { "name": "get", "signature": "<T>(key: string, at?: datetime) => T", "desc": "Value in force at a time (default now), falling back to the declared default. Cached; invalidated by settings.setting.changed.", "usedBy": ["*"] },
+    { "name": "market", "signature": "() => MarketSettings", "desc": "Country, region, currency, time zone, locale, business hours", "usedBy": ["checkout", "orders", "shipping", "finance", "reports", "promotions", "advertising", "support", "workqueues"] },
+    { "name": "businessCalendar", "signature": "() => { isOpen(at: datetime): bool, addBusinessMinutes(from: datetime, minutes: int): datetime, nextOpen(after: datetime): datetime }", "desc": "Business-hour arithmetic in the market time zone for SLA deadlines", "usedBy": ["support", "workqueues", "returns", "sellers"] },
+    { "name": "isEnabled", "signature": "(flagKey: string, subject?: { accountId?: uuid, realm?: string }) => bool", "desc": "Feature flag check", "usedBy": ["*"] },
+    { "name": "registerSection", "signature": "(provider: { key: string, order: int, load: () => SettingsSection }) => void", "desc": "Called at boot by modules that own a section of the settings page (returns, finance, shipping, advertising) so the overview shows their current values, last change and scheduled changes with a link to their own edit endpoints", "usedBy": ["returns", "finance", "shipping", "advertising", "sellers", "support"] },
+    { "name": "registerImpactEstimator", "signature": "(keyPrefix: string, estimate: (change: { key: string, from: json, to: json, effectiveAt: datetime, applyScope: string }) => ImpactItem[]) => void", "desc": "Owning modules explain what a change of their declared settings does to existing commitments (open orders, sellers, content)", "usedBy": ["checkout", "orders", "shipping", "support", "content", "notifications"] },
+    { "name": "storeInfo", "signature": "() => { market: PublicMarket, support: PublicSupport & { email?: email }, closures: Closure[], maintenance: MaintenanceNotice | null, guestCheckoutEnabled: bool, features: { key: string, enabled: bool }[], configVersion: string }", "desc": "Public market facts for any screen: support hours and open now, closures in the next 60 days, active maintenance notice, guest checkout and public feature flags (the web-facing subset of AppConfig)", "usedBy": ["graphql"] },
+    { "name": "upcomingChangesForSellers", "signature": "(principal: identity.Principal) => UpcomingChange[]", "desc": "Scheduled changes that affect sellers, soonest first (same as GET /api/seller/settings/upcoming-changes)", "usedBy": ["graphql"] }
+  ],
+  "types": {
+    "DayHours": { "weekday": "enum(mon|tue|wed|thu|fri|sat|sun)", "opens": { "type": "string", "desc": "Local time HH:MM" }, "closes": "string" },
+    "Closure": { "date": "date", "label": "string", "kind": "enum(closed|reduced_hours)", "opens": "string?", "closes": "string?" },
+    "SupportContacts": { "phone": "string", "email": "email?", "phoneHoursLabel": { "type": "string", "desc": "Mon–Sat, 8 AM–8 PM PT" }, "chatHoursLabel": "string", "closedLabel": { "type": "string?", "desc": "Closed Sundays and US holidays" } },
+    "MarketSettings": {
+      "country": { "type": "string", "desc": "ISO 3166-1 alpha-2, e.g. US" },
+      "serviceRegion": "ServiceRegion",
+      "currency": { "type": "string", "desc": "ISO 4217, fixed for launch (USD)" },
+      "timeZone": { "type": "string", "desc": "IANA, e.g. America/Los_Angeles; used for deadlines, reports and campaign schedules" },
+      "locale": "string",
+      "businessHours": "DayHours[]",
+      "businessHoursLabel": { "type": "string", "desc": "Mon–Sat, 8:00 AM – 8:00 PM PT" },
+      "closures": "Closure[]",
+      "support": "SupportContacts"
+    },
+    "ServiceRegion": { "code": "string", "label": { "type": "string", "desc": "United States, 48 contiguous states" }, "includedRegions": { "type": "string[]", "desc": "State codes" }, "note": "string?" },
+    "AndroidConfig": {
+      "minVersionCode": { "type": "int", "desc": "Older apps must update before continuing" },
+      "latestVersionCode": "int",
+      "latestVersionName": "string",
+      "updateUrl": "url",
+      "updateMessage": "string?",
+      "updateRequired": { "type": "bool", "desc": "Computed for the calling app when it sends appVersionCode" },
+      "updateSuggested": "bool"
+    },
+    "AppConfig": {
+      "configVersion": { "type": "string", "desc": "Changes whenever any value changes; the app caches by it (ETag)" },
+      "generatedAt": "datetime",
+      "market": { "type": "PublicMarket" },
+      "support": "PublicSupport",
+      "checkout": "CheckoutSettings",
+      "features": { "type": "map<bool>", "desc": "Public feature flags, e.g. { \"wishlist\": false, \"paidSellerAds\": false, \"externalSignIn\": false }" },
+      "android": "AndroidConfig",
+      "maintenance": "MaintenanceNotice"
+    },
+    "PublicMarket": { "country": "string", "currency": "string", "timeZone": "string", "locale": "string", "serviceRegionLabel": "string" },
+    "PublicSupport": { "hoursLabel": "string", "openNow": "bool", "nextOpenAt": "datetime?", "phone": "string", "chatHoursLabel": "string", "closedLabel": "string?" },
+    "CheckoutSettings": { "guestCheckoutEnabled": "bool", "offerAccountAfterGuestPurchase": "bool" },
+    "MaintenanceNotice": { "active": "bool", "kind": { "type": "enum(maintenance|incident)?", "desc": "maintenance = planned work; incident = live service problem (the error page shows it as a status note)" }, "message": "string?", "until": "datetime?", "updatedAt": { "type": "datetime?", "desc": "When the notice was last changed, shown as Updated 9:42 AM PT" } },
+    "SettingDefinition": {
+      "key": { "type": "string", "desc": "<module>.<name>, e.g. market.timeZone, checkout.guestCheckoutEnabled, catalog.maxImagesPerProduct" },
+      "module": "string",
+      "section": { "type": "string", "desc": "Settings page section key" },
+      "label": "string",
+      "description": "text",
+      "valueType": "enum(bool|int|number|string|text|money|duration|enum|time|weekly_hours|closures|json)",
+      "enumValues": "string[]",
+      "unit": { "type": "string?", "desc": "days after delivery, hours, %" },
+      "default": "json",
+      "min": "number?",
+      "max": "number?",
+      "editable": { "type": "bool", "desc": "False = shown read-only (e.g. currency fixed for launch)" },
+      "approval": { "type": "enum(none|second_reviewer|business_owner)", "desc": "Rule applied on submit through access" },
+      "minLeadDays": { "type": "int", "desc": "Earliest effective date after saving (e.g. 14 so sellers and Help content can update)" },
+      "applyScopes": "enum(new_only|open_commitments)[]",
+      "sellerVisible": { "type": "bool", "desc": "Scheduled changes are announced to sellers" },
+      "public": { "type": "bool", "desc": "Included in GET /api/public/settings/app-config" },
+      "exampleValue": { "type": "bool", "desc": "The default is a business example still to confirm" },
+      "editPermission": { "type": "string", "desc": "Permission needed to propose a change (default settings.changes.propose)" }
+    },
+    "SettingVersion": {
+      "key": "string",
+      "version": "int",
+      "value": "json",
+      "valueText": "string",
+      "effectiveFrom": "datetime",
+      "effectiveTo": "datetime?",
+      "applyScope": "enum(new_only|open_commitments)",
+      "changeId": "uuid?",
+      "changedBy": "Actor",
+      "approvedBy": "Actor?",
+      "reason": "text?"
+    },
+    "SettingDetail": { "definition": "SettingDefinition", "current": "SettingVersion", "scheduled": "SettingVersion[]", "recent": { "type": "SettingVersion[]", "desc": "Last 10 versions" } },
+    "ChangeItemInput": { "key": "string", "value": "json" },
+    "ChangeInput": {
+      "items": "ChangeItemInput[]",
+      "effectiveAt": { "type": "datetime", "desc": "Must respect each item's minLeadDays" },
+      "applyScope": { "type": "enum(new_only|open_commitments)", "desc": "new_only: orders placed on or after the effective date; open_commitments: also orders not yet delivered (only where the definition allows)" },
+      "reason": "text"
+    },
+    "ChangeItem": { "key": "string", "label": "string", "section": "string", "from": "json", "to": "json", "fromText": "string", "toText": "string" },
+    "ImpactItem": {
+      "module": "string",
+      "kind": "enum(orders|sellers|offers|customers|content|campaigns|payouts|staff|other)",
+      "count": "int?",
+      "message": { "type": "string", "desc": "1,284 open orders keep their current terms · 23 sellers are notified today · 3 Help articles need an update before Nov 1" },
+      "severity": "enum(info|warning|blocking)",
+      "owner": { "type": "string?", "desc": "Who must act, e.g. Content Manager" },
+      "screen": "string?"
+    },
+    "ImpactPreview": {
+      "computedAt": "datetime",
+      "items": "ImpactItem[]",
+      "blocking": { "type": "string[]", "desc": "Reasons the change cannot be submitted, e.g. effective date earlier than the 14-day notice" },
+      "needsApproval": "bool",
+      "approvalRule": "enum(none|second_reviewer|business_owner)",
+      "approvers": "string[]"
+    },
+    "SettingChange": {
+      "id": "uuid",
+      "ref": { "type": "string", "desc": "SC-YYMMDD-NNN" },
+      "status": "enum(draft|pending_approval|scheduled|applied|rejected|cancelled)",
+      "items": "ChangeItem[]",
+      "effectiveAt": "datetime",
+      "applyScope": "enum(new_only|open_commitments)",
+      "reason": "text",
+      "impact": "ImpactPreview",
+      "createdBy": "Actor",
+      "createdAt": "datetime",
+      "submittedAt": "datetime?",
+      "approval": "ApprovalInfo?",
+      "appliedAt": "datetime?",
+      "cancelReason": "text?",
+      "timeline": "TimelineEvent[]"
+    },
+    "SectionValue": { "key": "string?", "label": "string", "valueText": "string", "hint": "string?", "exampleValue": "bool" },
+    "SectionLink": { "module": "string", "area": "enum(admin)", "path": { "type": "string", "desc": "Owning module endpoint that edits this section, e.g. /api/admin/returns/policies" }, "screen": "string?" },
+    "ScheduledChange": {
+      "source": "enum(settings|module)",
+      "module": "string",
+      "ref": "string",
+      "title": { "type": "string", "desc": "Electronics return window changes from 30 to 15 days" },
+      "effectiveAt": "datetime",
+      "appliesTo": { "type": "string", "desc": "Orders placed before then keep 30 days" },
+      "status": "enum(pending_approval|scheduled)",
+      "approvedBy": "Actor?",
+      "sellerVisible": "bool"
+    },
+    "SettingsSection": {
+      "key": { "type": "string", "desc": "market, checkout, apps, shipping_defaults, returns_baseline, fees, payouts_holds, advertising_rules…" },
+      "title": "string",
+      "subtitle": "string?",
+      "ownerModule": "string",
+      "ownedHere": { "type": "bool", "desc": "True: edit through POST /changes. False: edit with link (owning module)" },
+      "values": "SectionValue[]",
+      "lastChange": "LastChange?",
+      "scheduled": "ScheduledChange[]",
+      "link": "SectionLink?",
+      "available": { "type": "bool", "desc": "False when the owning module is disabled" }
+    },
+    "LastChange": { "by": "Actor", "approvedBy": "Actor?", "at": "datetime", "effectiveFrom": "datetime" },
+    "SettingsOverview": { "market": "MarketSettings", "sections": "SettingsSection[]", "scheduled": "ScheduledChange[]" },
+    "FeatureFlag": {
+      "key": "string",
+      "module": "string",
+      "label": "string",
+      "description": "text",
+      "enabled": "bool",
+      "rollout": "enum(everyone|staff_only|percentage)",
+      "percentage": "int?",
+      "public": { "type": "bool", "desc": "Exposed in app-config.features" },
+      "plannedPhase": { "type": "int?", "desc": "Launch phase the feature belongs to (shows a 'Later' badge)" },
+      "updatedBy": "Actor?",
+      "updatedAt": "datetime?"
+    },
+    "UpcomingChange": { "ref": "string", "module": "string", "title": "string", "description": "text?", "effectiveAt": "datetime", "appliesTo": "string", "helpLink": "string?", "postedAt": { "type": "datetime", "desc": "When the change was announced to sellers" } },
+    "BusinessDay": { "date": "date", "open": "bool", "opensAt": "datetime?", "closesAt": "datetime?", "label": "string?" }
+  },
+  "tables": [
+    { "name": "definitions", "desc": "Registry synced at boot from module manifests (runtime settings)", "columns": { "key": "text pk", "module": "text", "section": "text", "label": "text", "description": "text", "value_type": "text", "schema": "jsonb (enum values, min, max, unit)", "default_value": "jsonb", "editable": "bool", "approval": "text", "min_lead_days": "int", "apply_scopes": "jsonb", "seller_visible": "bool", "public": "bool", "example_value": "bool", "edit_permission": "text", "registered_at": "timestamptz", "unavailable_since": "timestamptz?" }, "indexes": ["(module)", "(section)"] },
+    { "name": "values", "desc": "Effective-dated versions; the row in force has effective_from <= now and (effective_to is null or > now)", "columns": { "id": "uuid pk", "key": "text → definitions", "version": "int", "value": "jsonb", "effective_from": "timestamptz", "effective_to": "timestamptz?", "apply_scope": "text", "change_id": "uuid? → changes", "changed_by_kind": "text", "changed_by_id": "text", "approved_by_id": "text?", "reason": "text?", "created_at": "timestamptz" }, "indexes": ["unique (key, version)", "(key, effective_from desc)"] },
+    { "name": "changes", "columns": { "id": "uuid pk", "ref": "text unique", "status": "text", "items": "jsonb", "effective_at": "timestamptz", "apply_scope": "text", "reason": "text", "impact": "jsonb", "created_by_kind": "text", "created_by_id": "text", "created_at": "timestamptz", "submitted_at": "timestamptz?", "approval_request_id": "uuid?", "applied_at": "timestamptz?", "cancel_reason": "text?", "version": "int", "announced_at": "timestamptz? (seller-visible changes: when sellers were told)" }, "indexes": ["(status, effective_at)", "(created_at desc)"] },
+    { "name": "change_keys", "desc": "Keys touched by open changes, to block overlapping scheduled changes", "columns": { "change_id": "uuid → changes", "key": "text", "open": "bool" }, "indexes": ["unique (key) where open"] },
+    { "name": "feature_flags", "columns": { "key": "text pk", "module": "text", "label": "text", "description": "text", "enabled": "bool", "rollout": "text", "percentage": "int?", "public": "bool", "planned_phase": "int?", "updated_by": "text?", "updated_at": "timestamptz?" } }
+  ],
+  "stateMachines": [
+    {
+      "name": "Setting change", "field": "SettingChange.status", "initial": "draft",
+      "transitions": [
+        ["draft", "submitNoApproval", "scheduled"],
+        ["draft", "submit", "pending_approval"],
+        ["pending_approval", "approve", "scheduled"],
+        ["pending_approval", "reject", "rejected"],
+        ["pending_approval", "return", "draft"],
+        ["draft", "cancel", "cancelled"],
+        ["pending_approval", "cancel", "cancelled"],
+        ["scheduled", "cancel", "cancelled"],
+        ["scheduled", "apply", "applied"]
+      ],
+      "notes": "submit is refused while the impact preview has blocking items (effective date inside minLeadDays, invalid value) or another open change touches the same key (CHANGE_CONFLICT). The strictest approval rule among the items applies (business_owner > second_reviewer > none); approval goes through access (action settings.changes.apply) and finishes on access.approval.decided. apply runs at effectiveAt (job) and writes a new version per key; a change whose effectiveAt is now applies immediately after approval. Applied changes are never edited: a correction is a new change."
+    }
+  ],
+  "endpoints": [
+    { "id": "getAppConfig", "area": "public", "method": "GET", "path": "/app-config", "summary": "Configuration for the website and Android app", "desc": "Market, support hours (open now?), guest checkout, public feature flags, Android minimum/latest version and maintenance notice in one cacheable response (ETag = configVersion, Cache-Control max-age appConfigCacheSeconds). The app calls it at start and when resumed.", "auth": "anyone", "query": { "appVersionCode": { "type": "int?", "desc": "Android versionCode, to compute updateRequired" }, "platform": "enum(web|android)?" }, "response": "AppConfig", "screens": ["store/home", "auth/sign-in", "store/checkout", "help/contact", "help/center", "store/not-found", "account/overview"] },
+
+    { "id": "listUpcomingChanges", "area": "seller", "method": "GET", "path": "/upcoming-changes", "summary": "Scheduled platform changes that affect sellers", "desc": "Seller-visible scheduled setting changes plus scheduled changes reported by owning modules' sections (e.g. returns baseline, fee rules).", "auth": "seller", "paging": true, "response": "UpcomingChange", "screens": ["seller/dashboard", "seller/help"] },
+
+    { "id": "getOverview", "area": "admin", "method": "GET", "path": "/overview", "summary": "Settings page: market, every section and all scheduled changes", "auth": "staff", "permission": "settings.view", "response": "SettingsOverview", "screens": ["admin/settings"] },
+    { "id": "listDefinitions", "area": "admin", "method": "GET", "path": "/definitions", "summary": "Runtime setting definitions", "auth": "staff", "permission": "settings.view", "query": { "module": "string?", "section": "string?" }, "response": "SettingDefinition[]", "screens": ["admin/settings"] },
+    { "id": "getSetting", "area": "admin", "method": "GET", "path": "/values/{key}", "summary": "One setting: value in force, scheduled versions, recent history", "auth": "staff", "permission": "settings.view", "params": { "key": "string" }, "response": "SettingDetail", "screens": ["admin/settings"] },
+    { "id": "listSettingHistory", "area": "admin", "method": "GET", "path": "/values/{key}/history", "summary": "All versions of a setting", "auth": "staff", "permission": "settings.view", "params": { "key": "string" }, "paging": true, "response": "SettingVersion", "screens": ["admin/settings"] },
+    { "id": "getBusinessCalendar", "area": "admin", "method": "GET", "path": "/business-calendar", "summary": "Open hours per day for a date range (business hours minus closures)", "auth": "staff", "permission": "settings.view", "query": { "from": "date", "to": "date" }, "response": "BusinessDay[]", "screens": ["admin/settings"] },
+    { "id": "createChange", "area": "admin", "method": "POST", "path": "/changes", "summary": "Draft a change and see its impact before saving", "desc": "Validates each value against its definition and returns the draft with an impact preview from the owning modules' estimators (open orders keeping their terms, sellers notified, content to update).", "auth": "staff", "permission": "settings.changes.propose", "body": "ChangeInput", "response": "SettingChange", "status": 201, "errors": ["UNKNOWN_SETTING", "SETTING_NOT_EDITABLE", "VALIDATION_FAILED"], "screens": ["admin/settings"] },
+    { "id": "updateChange", "area": "admin", "method": "PATCH", "path": "/changes/{id}", "summary": "Edit a draft (values, effective date, scope, reason)", "auth": "staff", "permission": "settings.changes.propose", "params": { "id": "uuid" }, "body": "ChangeInput", "response": "SettingChange", "errors": ["ILLEGAL_TRANSITION", "UNKNOWN_SETTING", "VALIDATION_FAILED"], "screens": ["admin/settings"] },
+    { "id": "previewChange", "area": "admin", "method": "POST", "path": "/changes/{id}/preview", "summary": "Recalculate the impact preview", "auth": "staff", "permission": "settings.view", "params": { "id": "uuid" }, "response": "ImpactPreview", "screens": ["admin/settings"] },
+    { "id": "submitChange", "area": "admin", "method": "POST", "path": "/changes/{id}/submit", "summary": "Save: schedule, or send for approval", "desc": "Settings that need approval go to access (Business Owner or second reviewer) and are scheduled only after approval. Sellers are notified of seller-visible changes when scheduled.", "auth": "staff", "permission": "settings.changes.propose", "params": { "id": "uuid" }, "response": "SettingChange", "errors": ["ILLEGAL_TRANSITION", "IMPACT_BLOCKING", "CHANGE_CONFLICT", "LEAD_TIME_TOO_SHORT"], "audited": true, "approval": "Approval action settings.changes.apply. Per definition: none, second reviewer, or Business Owner", "events": ["settings.change.submitted", "settings.change.scheduled"], "screens": ["admin/settings"] },
+    { "id": "cancelChange", "area": "admin", "method": "POST", "path": "/changes/{id}/cancel", "summary": "Cancel a draft, pending or scheduled change", "auth": "staff", "permission": "settings.changes.propose", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "SettingChange", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["settings.change.cancelled"], "screens": ["admin/settings"] },
+    { "id": "listChanges", "area": "admin", "method": "GET", "path": "/changes", "summary": "Setting changes (scheduled by default)", "auth": "staff", "permission": "settings.view", "paging": true, "query": { "status": "enum(draft|pending_approval|scheduled|applied|rejected|cancelled)?", "key": "string?", "section": "string?" }, "response": "SettingChange", "screens": ["admin/settings", "admin/audit"] },
+    { "id": "getChange", "area": "admin", "method": "GET", "path": "/changes/{id}", "summary": "One change with impact, approval and timeline", "auth": "staff", "permission": "settings.view", "params": { "id": "uuid" }, "response": "SettingChange", "screens": ["admin/settings"] },
+    { "id": "listFeatureFlags", "area": "admin", "method": "GET", "path": "/feature-flags", "summary": "Feature flags", "auth": "staff", "permission": "settings.view", "response": "FeatureFlag[]", "screens": ["admin/settings"] },
+    { "id": "setFeatureFlag", "area": "admin", "method": "PUT", "path": "/feature-flags/{key}", "summary": "Turn a feature flag on or off", "desc": "Immediate. Flags that change money or customer commitments are declared as settings with approval instead.", "auth": "staff", "permission": "settings.flags.manage", "params": { "key": "string" }, "body": { "enabled": "bool", "rollout": "enum(everyone|staff_only|percentage)?", "percentage": "int?", "reason": "text" }, "response": "FeatureFlag", "errors": ["NOT_FOUND"], "audited": true, "events": ["settings.feature_flag.changed"], "screens": ["admin/settings"] }
+  ],
+  "events": {
+    "publishes": [
+      { "name": "settings.change.submitted", "when": "A change is sent for approval", "payload": { "changeId": "uuid", "ref": "string", "keys": "string[]", "effectiveAt": "datetime", "approvalRequestId": "uuid" } },
+      { "name": "settings.change.scheduled", "when": "A change is scheduled (directly or after approval)", "payload": { "changeId": "uuid", "ref": "string", "keys": "string[]", "effectiveAt": "datetime", "applyScope": "enum(new_only|open_commitments)", "sellerVisible": "bool", "summary": "string" } },
+      { "name": "settings.change.cancelled", "when": "A change is cancelled or its approval is rejected", "payload": { "changeId": "uuid", "ref": "string", "keys": "string[]", "outcome": "enum(cancelled|rejected)", "reason": "text?" } },
+      { "name": "settings.setting.changed", "when": "A new value takes effect", "payload": { "key": "string", "module": "string", "version": "int", "from": "json", "to": "json", "effectiveFrom": "datetime", "applyScope": "enum(new_only|open_commitments)", "changeId": "uuid?" } },
+      { "name": "settings.feature_flag.changed", "when": "A feature flag is switched", "payload": { "key": "string", "enabled": "bool", "rollout": "string", "by": "Actor" } }
+    ],
+    "consumes": [
+      { "name": "access.approval.decided", "does": "For settings.changes.apply requests: approved → scheduled (applied at once if effectiveAt has passed); rejected/expired → rejected; cancelled → cancelled" },
+      { "name": "access.approval.returned", "does": "Move the change back to draft with the reviewer's comment on its timeline" }
+    ]
+  },
+  "permissions": [
+    { "key": "settings.view", "audience": "staff", "desc": "View the settings page, definitions, history and changes" },
+    { "key": "settings.changes.propose", "audience": "staff", "desc": "Draft, submit and cancel setting changes (Platform Administrator). Approval rules still apply." },
+    { "key": "settings.flags.manage", "audience": "staff", "desc": "Switch feature flags" }
+  ],
+  "approvalActions": [
+    { "key": "settings.changes.apply", "desc": "Apply a change request to effective-dated platform settings", "limit": "none", "secondReviewer": "above-limit", "approvers": "Per setting definition: none, a second reviewer, or the Business Owner (the strictest rule among the changed items applies)" }
+  ],
+  "jobs": [
+    { "name": "settings.sync-definitions", "schedule": "on boot", "does": "Upsert definitions and feature flags declared by enabled modules; mark those of disabled modules unavailable; seed market defaults on first boot" },
+    { "name": "settings.apply-due-changes", "schedule": "every minute", "does": "Apply scheduled changes whose effectiveAt has passed: close the previous versions, write new ones, publish settings.setting.changed per key, bump configVersion" },
+    { "name": "settings.refresh-impact", "schedule": "daily", "does": "Recompute the impact preview of scheduled changes so counts on the page stay current" }
+  ],
+  "settings": [
+    { "key": "appConfigCacheSeconds", "default": 300, "desc": "Cache lifetime of GET /app-config" },
+    { "key": "defaultMinLeadDays", "default": 0, "desc": "Minimum notice for definitions that do not set one" },
+    { "key": "sellerVisibleMinLeadDays", "default": 14, "desc": "Minimum notice for changes announced to sellers" }
+  ],
+  "errorCodes": {
+    "UNKNOWN_SETTING": { "status": 400, "meaning": "No enabled module declares details.key." },
+    "SETTING_NOT_EDITABLE": { "status": 409, "meaning": "The setting is read-only (e.g. currency fixed for launch) or owned by a module section that is edited there (details.link)." },
+    "IMPACT_BLOCKING": { "status": 409, "meaning": "The impact preview has blocking items; details.blocking lists them." },
+    "CHANGE_CONFLICT": { "status": 409, "meaning": "Another open change touches the same setting (details.changeRef). Cancel it or combine them." },
+    "LEAD_TIME_TOO_SHORT": { "status": 409, "meaning": "The effective date is earlier than the setting's minimum notice (details.earliest)." }
+  },
+  "notes": [
+    "Boundary: settings owns market-level values (market.*, support.*, checkout.*, apps.*) and the generic store for runtime settings that modules declare in their manifest (the same `settings` entries as in their specs, opted in with editable: true). Versioned business rule sets with their own lifecycle stay in their modules: returns baseline and category exceptions (returns), fee rules and payout/hold settings (finance), shipping defaults and holidays (shipping), advertising global rules (advertising), seller performance targets (sellers), SLA targets (support). Those modules register a section provider so GET /overview shows their values, last change and scheduled changes, and the page edits them through the owning module's endpoint (SectionLink).",
+    "Every change states its effective date and its impact on existing commitments before saving (plan ch. 18). applyScope new_only means orders placed before the effective date keep what they accepted; purchase snapshots in orders already guarantee this for terms copied at purchase.",
+    "Settings-owned keys and their defaults (examples to confirm): market.country = US; market.serviceRegion = 48 contiguous states (Alaska, Hawaii and territories later); market.currency = USD (not editable at launch); market.timeZone = America/Los_Angeles; market.locale = en-US; support.businessHours = Mon–Sat 08:00–20:00; support.closures = Thanksgiving, Christmas, New Year; support.phone = 1-800-555-0136; checkout.guestCheckoutEnabled = true (approval: business_owner); checkout.offerAccountAfterGuestPurchase = true; apps.android.minVersionCode, apps.android.latestVersionCode, apps.android.updateUrl; apps.maintenance.",
+    "Launch has one market (plan ch. 1: one service region and one main currency; no other languages are planned). AppConfig.market (United States · English (US) · USD) is still returned for formatting, but the apps show no market row and no market or language picker and no supportedMarkets list until an expansion project adds a second market.",
+    "apps.maintenance holds { active, kind, message, until }; every change sets updatedAt. kind incident is used by the Platform Administrator for live service problems so error pages can show the current status note.",
+    "Changing market.timeZone or market.currency after launch needs a migration plan: both are business_owner approval, minLeadDays 30, and currency stays read-only in phase 1 (one currency, plan ch. 1).",
+    "Feature flags never replace module enablement: a disabled module's endpoints do not exist, whatever a flag says. Public flags appear in app-config so the Android app can hide features (e.g. wishlist in phase 3).",
+    "Seller support hours share the general support business hours and closures; there is no separate seller schedule, and GET /api/seller/support/categories (hoursLabel, openNow) reads the same values."
+  ]
+}

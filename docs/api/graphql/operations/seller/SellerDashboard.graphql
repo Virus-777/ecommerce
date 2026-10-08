@@ -1,0 +1,141 @@
+# screens: seller/dashboard
+# replaces: GET sellers/account, GET reports/dashboard, GET orders/orders, GET orders/orders/counts, GET inventory/summary, GET returns/requests/counts, GET messaging/response-stats, GET finance/balances, GET sellers/performance, GET settings/upcoming-changes, GET notifications/inbox/summary
+# why: The dashboard combines today's work, deadlines, payouts, sales, performance and announcements from nine modules into one request.
+query SellerDashboard($period: DashboardPeriod, $dispatchPaging: PageInput) {
+  unreadNotificationCount
+  mySeller {
+    id
+    storeName
+    logo {
+      url
+      alt
+    }
+    status
+    sellingNow
+    membership {
+      role
+      isOwner
+      permissions
+    }
+    balance {
+      asOf
+      pending {
+        ...Amount
+      }
+      available {
+        ...Amount
+      }
+      held {
+        ...Amount
+      }
+      negative
+      nextPayout {
+        scheduledFor
+        estimatedAmount {
+          ...Amount
+        }
+      }
+      settlementRules {
+        text
+      }
+      destination {
+        label
+        status
+      }
+    }
+    performance {
+      from
+      to
+      orderCount
+      overall
+      metrics {
+        key
+        label
+        value
+        display
+        status
+        detail
+        target {
+          display
+          isExample
+        }
+      }
+    }
+  }
+  sellerDashboard(period: $period) {
+    asOf
+    from
+    to
+    basisLabel
+    mayStillChange
+    workToday {
+      key
+      count
+      sub
+      tone
+      screen
+      screenState
+    }
+    kpis {
+      metricKey
+      label
+      display
+      note
+      delta {
+        value
+        unit
+        direction
+        good
+      }
+    }
+    series {
+      key
+      label
+      unit
+      points {
+        date
+        label
+        value
+      }
+    }
+    unavailable
+  }
+  # Next dispatches: New and Preparing together, soonest dispatch deadline first
+  sellerOrders(filter: { tabs: [NEW, PREPARING], sort: DISPATCH_DEADLINE }, paging: $dispatchPaging) {
+    total
+    items {
+      id
+      ref
+      placedAt
+      buyerName
+      groups {
+        id
+        itemsSummary
+        units
+        status
+        nextAction
+        deadlineLabel
+        dispatchDeadline {
+          dueAt
+          state
+        }
+      }
+    }
+  }
+  upcomingChanges {
+    ref
+    module
+    title
+    description
+    effectiveAt
+    appliesTo
+    helpLink
+    postedAt
+  }
+}
+
+fragment Amount on Money {
+  amount
+  currency
+  formatted
+}

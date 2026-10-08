@@ -1,0 +1,116 @@
+# screens: help/case
+# replaces: GET support/cases/{id}, GET media/assets/{id}/download
+# why: The case page shows who handles it, the next action, linked items, the labelled conversation, decision, remedy progress, appeal and reopen rules; one persisted query keeps the web and Android case views identical and refreshes in one call after each REST reply.
+query CaseDetail($ref: String!) {
+  case(ref: $ref) {
+    id
+    ref
+    kind
+    subject
+    status
+    statusLabel
+    priority
+    openedAt
+    updatedAt
+    open
+    expectedReply
+    orderId
+    orderRef
+    returnId
+    returnRef
+    reopenUntil
+    reopenRules
+    category { key label }
+    handledBy {
+      kind
+      name
+      team
+      supportFollowing
+      staff { kind name }
+    }
+    nextAction {
+      label
+      whoMustAct
+      youNeedToAct
+      note
+      due { dueAt state }
+    }
+    expectedResponse { dueAt state }
+    items {
+      orderItemId
+      title
+      quantity
+      imageUrl
+      ownerType
+      sellerName
+      packageLabel
+      itemStatus
+      estimate
+      options { name value }
+      price { ...MoneyFields }
+    }
+    messages {
+      id
+      authorLabel
+      role
+      audience
+      body
+      at
+      author { kind name }
+      attachments { ...ImageFields }
+    }
+    attachments { ...ImageFields }
+    offers {
+      id
+      from
+      kind
+      shipBy
+      note
+      status
+      respondBy
+      createdAt
+      amount { ...MoneyFields }
+    }
+    decision {
+      outcome
+      reason
+      decidedAt
+      publishedAt
+      appealDeadline
+      appealRoute
+      final
+      decidedBy { kind name }
+    }
+    remedies {
+      id
+      kind
+      chargedTo
+      status
+      statusLabel
+      track
+      currentStep
+      dueAt
+      destination
+      note
+      amount { ...MoneyFields }
+    }
+    appeal { id status reason submittedAt decidedAt outcome }
+    timeline { at label detail }
+    can { reply escalate appeal reopen respondToOffer addEvidence }
+  }
+}
+
+fragment MoneyFields on Money {
+  amount
+  currency
+  formatted
+}
+
+fragment ImageFields on MediaRef {
+  id
+  url
+  alt
+  width
+  height
+  bytes
+}

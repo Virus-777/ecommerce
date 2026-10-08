@@ -1,0 +1,108 @@
+# advertising: read-only campaign summaries for the Admin dashboard (and promotion detail).
+#
+# AD SERVING IS NOT IN GRAPHQL. Deciding which ad shows (opening full-screen, banners, pop-ups,
+# sponsored products) is a side effect: each decision issues signed impression tokens, applies
+# frequency caps and dismissal suppression, and the client then records displays, clicks and
+# dismissals. That stays on REST:
+#   POST /api/store/advertising/decisions   (which ads to show on this page view)
+#   POST /api/store/advertising/events      (display, click, dismiss tracking)
+# Homepage ad slots appear in content's HomeSection (kind AD_POSITION, adPlacementKey) only as
+# markers; sponsored product cards in results are merged by search/catalog through the in-process API.
+# Seller sponsored-campaign screens are single-module and also stay on REST.
+
+enum AdCampaignStatus @areas(in: [ADMIN]) {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  SCHEDULED
+  LIVE
+  PAUSED
+  FINISHED
+  ARCHIVED
+  REJECTED
+}
+
+enum AdAdvertiserKind @areas(in: [ADMIN]) {
+  PLATFORM
+  OFFICIAL_STORE
+  SELLER
+  BRAND
+}
+
+"Who the ad is for. Own promotions (platform, Official Store) are unpaid; seller and brand ads may be paid."
+type AdAdvertiser @areas(in: [ADMIN]) {
+  kind: AdAdvertiserKind!
+  sellerId: UUID
+  brandId: UUID
+  name: String!
+  paid: Boolean!
+}
+
+"One ad campaign as a dashboard or list row"
+type AdCampaignSummary @areas(in: [ADMIN]) {
+  id: UUID!
+  "AD-YYMMDD-NNNN"
+  ref: String!
+  name: String!
+  advertiser: AdAdvertiser!
+  placementKey: String!
+  "e.g. Full-screen, Home banner, Pop-up"
+  placementName: String!
+  pagesLabel: String!
+  startsAt: DateTime
+  endsAt: DateTime
+  "e.g. ends Oct 19; starts Oct 10"
+  periodLabel: String!
+  "e.g. Internal, $1,240 of $3,000, $500 limit"
+  budgetLabel: String!
+  "Frequency cap and audience in one line, e.g. once per session · new visitors"
+  deliveryLabel: String!
+  displays: Int!
+  clicks: Int!
+  status: AdCampaignStatus!
+  "e.g. Paused by you Oct 3, needs Content review"
+  statusNote: String
+  "REST actions the caller may take, e.g. pause, finish, resume, review"
+  allowedActions: [String!]!
+}
+
+type AdLiveCount @areas(in: [ADMIN]) {
+  total: Int!
+  "Platform and Official Store promotions"
+  own: Int!
+  "Paid seller and brand ads"
+  paid: Int!
+}
+
+"Advertising tile of the Admin dashboard: what is live, starting, ending and waiting for approval"
+type AdDashboardSummary @areas(in: [ADMIN]) {
+  liveNow: AdLiveCount!
+  startingIn7Days: Int!
+  nextStartAt: DateTime
+  endingSoon: Int!
+  waitingApproval: Int!
+  oldestWaitingDays: Int
+  spendThisMonth: Money!
+  attributedOrders: Int!
+  attributedSales: Money!
+  "A purchase counts when it happens within this many days of a click"
+  attributionDays: Int!
+  live: [AdCampaignSummary!]!
+  upcomingStarts: [AdCampaignSummary!]!
+  endingSoonList: [AdCampaignSummary!]!
+  waitingList: [AdCampaignSummary!]!
+}
+
+# ------------------------------------------------------------------ fields on other modules' types
+
+extend type PromotionCampaign {
+  "Ads linked to this promotion (they stop when it ends or runs out of budget)"
+  adCampaigns: [AdCampaignSummary!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "advertising.campaigns.view") @source(module: "advertising", fn: "campaignsForPromotion")
+}
+
+# ------------------------------------------------------------------ queries
+
+extend type Query {
+  "Advertising today for the Admin dashboard (read-only; records nothing)"
+  adDashboard(listLimit: Int = 3): AdDashboardSummary @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "advertising.campaigns.view") @cost(weight: 5) @source(module: "advertising", fn: "dashboardSummary")
+}

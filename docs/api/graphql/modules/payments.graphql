@@ -1,0 +1,382 @@
+# payments: charging, refunds executed (Requested → Processing → Sent / Failed), disputes and saved methods.
+# Adds Order.payment, Order.refunds, Order.refundable (admin), Order.paymentDisputes (admin) and Customer.paymentMethods.
+# Approval of refunds lives in returns; payments only shows execution states (never "Approved").
+# Checkout reads PaymentOptions and PaymentStatus through its own CheckoutSession fields.
+
+"""
+The payment of an order. Store: the customer view (Accepted, Pending, Failed, Partly refunded, Refunded).
+Admin: adds the intent status, captures, attempts and provider references.
+"""
+type Payment @areas(in: [STORE, ADMIN]) {
+  id: UUID!
+  "Customer-facing state; refunded states are derived from sent refunds"
+  state: PaymentState!
+  stateLabel: String!
+  "e.g. 'Visa •••• 4417'; kept even after the saved card is removed"
+  methodLabel: String!
+  method: PaymentMethodSnapshot!
+  amount: Money!
+  capturedAmount: Money!
+  "Refunds sent"
+  refundedAmount: Money!
+  "Refunds requested or processing"
+  refundsInFlight: Money!
+  "When the customer was charged (capture, or authorization when capture is per group)"
+  chargedAt: DateTime
+
+  # ---- Admin Center only
+  "PAY-XXXXXXXX"
+  ref: String! @areas(in: [ADMIN])
+  status: PaymentIntentStatus! @areas(in: [ADMIN])
+  provider: String! @areas(in: [ADMIN])
+  "Processor reference, e.g. ch_3PqK8e2L0dX41"
+  providerRef: String @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.payments.view")
+  authorizedAmount: Money! @areas(in: [ADMIN])
+  authorizedAt: DateTime @areas(in: [ADMIN])
+  capturedAt: DateTime @areas(in: [ADMIN])
+  authorizationExpiresAt: DateTime @areas(in: [ADMIN])
+  lastCheckedAt: DateTime @areas(in: [ADMIN])
+  "Last decline on this checkout's attempts, if any"
+  decline: PaymentDecline @areas(in: [ADMIN])
+  "Share of the payment per seller group"
+  allocations: [PaymentAllocation!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.payments.view")
+  captures: [PaymentCapture!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.payments.view")
+  "Every payment attempt of the checkout session (declines, retries)"
+  attempts: [PaymentAttempt!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.payments.view")
+  "Provider calls (authorize, capture, refund, retrieve) with outcomes"
+  providerCalls: [PaymentProviderCall!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.payments.view") @cost(weight: 5)
+}
+
+"How the customer paid, as recorded on the payment"
+type PaymentMethodSnapshot @areas(in: [STORE, ADMIN]) {
+  kind: PaymentMethodKind!
+  brand: String
+  last4: String
+  wallet: PaymentWallet
+  "'Visa •••• 4417'"
+  label: String!
+}
+
+"A saved card or wallet (Payment methods page, checkout)"
+type PaymentMethod @areas(in: [STORE]) {
+  id: UUID!
+  kind: PaymentMethodKind!
+  brand: String!
+  "Customer's name for it, e.g. 'Work Mastercard'"
+  label: String!
+  last4: String!
+  expMonth: Int!
+  expYear: Int!
+  expired: Boolean!
+  isDefault: Boolean!
+  "'Home, Portland 97205'"
+  billingSummary: String!
+  createdAt: DateTime!
+}
+
+"Payment choices at checkout. New-card setup sessions come from REST (POST /methods/setup)."
+type PaymentOptions @areas(in: [STORE]) {
+  acceptedBrands: [String!]!
+  savedMethods: [PaymentMethod!]!
+  walletAvailable: Boolean!
+  walletKinds: [PaymentWallet!]!
+  "'Your card is charged once, when the order is accepted. Each seller is paid by Marketly after delivery.'"
+  chargeNote: String!
+}
+
+"Customer-facing result of a payment attempt (payment-result page, checkout after a decline)"
+type PaymentStatus @areas(in: [STORE]) {
+  intentId: UUID!
+  state: PaymentAttemptState!
+  title: String!
+  "Pending: 'We're confirming your payment with your bank. Don't pay again.'"
+  message: String!
+  methodLabel: String!
+  amount: Money!
+  orderRef: String
+  lastCheckedAt: DateTime
+  nextCheckInSeconds: Int
+  decline: PaymentDecline
+  retryAllowed: Boolean!
+  "'Your bank may show a temporary hold for $429.98…'"
+  holdNote: String
+}
+
+type PaymentDecline @areas(in: [STORE, ADMIN]) {
+  "Provider or bank code, e.g. 05"
+  code: String!
+  category: PaymentDeclineCategory!
+  "'Your bank declined Visa •••• 4417. Nothing was charged.'"
+  message: String!
+  advice: String!
+  retryable: Boolean!
+}
+
+type PaymentAllocation @areas(in: [ADMIN]) {
+  groupId: UUID!
+  "Seller id; null for the Official Store"
+  sellerId: UUID
+  amount: Money!
+}
+
+type PaymentCapture @areas(in: [ADMIN]) {
+  id: UUID!
+  groupId: UUID
+  amount: Money!
+  status: PaymentCaptureStatus!
+  providerRef: String
+  at: DateTime!
+}
+
+type PaymentAttempt @areas(in: [ADMIN]) {
+  id: UUID!
+  ref: String!
+  attemptNo: Int!
+  amount: Money!
+  methodLabel: String!
+  status: PaymentIntentStatus!
+  statusLabel: String!
+  decline: PaymentDecline
+  createdAt: DateTime!
+}
+
+type PaymentProviderCall @areas(in: [ADMIN]) {
+  at: DateTime!
+  operation: String!
+  "ok, declined, error or timeout"
+  outcome: String!
+  providerRef: String
+  message: String
+}
+
+"""
+A refund being executed. Store: the customer view with steps (Requested, Processing, Sent) and failure action.
+Admin: adds attempts, provider outcome and history.
+"""
+type Refund @areas(in: [STORE, ADMIN]) {
+  id: UUID!
+  "RF-YYMMDD-NNNN, or the returns request reference when handed over by returns"
+  ref: String!
+  orderId: UUID!
+  orderRef: String!
+  origin: PaymentRefundOrigin!
+  "e.g. RT-261006-0193, CS-261007-0412"
+  originRef: String
+  items: [PaymentRefundItem!]!
+  amount: Money!
+  destination: PaymentRefundDestination!
+  "'Visa •••• 4417' or 'Marketly store credit'"
+  destinationLabel: String!
+  status: PaymentRefundStatus!
+  statusLabel: String!
+  "['Requested', 'Processing', 'Sent']"
+  steps: [String!]!
+  currentStep: Int!
+  sentAt: DateTime
+  "'Card refunds usually arrive 3–5 business days after we send them.'"
+  arrivalNote: String!
+  "'Sent means we've sent it to your bank; it usually shows in 3–5 business days.'"
+  explanation: String!
+  "Set when the refund failed and the customer must act"
+  failure: PaymentRefundFailure
+  createdAt: DateTime!
+
+  # ---- Admin Center only
+  attempts: Int! @areas(in: [ADMIN])
+  maxAttempts: Int! @areas(in: [ADMIN])
+  "Provider did not answer; the next step is a status check, never a resend"
+  outcomeUnknown: Boolean! @areas(in: [ADMIN])
+  failureCode: String @areas(in: [ADMIN])
+  "e.g. 'Card closed by the issuer'"
+  failureReason: String @areas(in: [ADMIN])
+  nextStep: String @areas(in: [ADMIN])
+  providerRef: String @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.refunds.view")
+  reason: String @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.refunds.view")
+  requestedBy: Actor @areas(in: [ADMIN])
+  history: [TimelineEvent!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.refunds.view")
+}
+
+type PaymentRefundItem @areas(in: [STORE, ADMIN]) {
+  orderItemId: UUID!
+  title: String!
+  groupId: UUID!
+  amount: Money!
+}
+
+type PaymentRefundFailure @areas(in: [STORE, ADMIN]) {
+  reason: String!
+  action: PaymentRefundFailureAction!
+}
+
+"Remaining refundable amount per item: the cap shown in refund dialogs"
+type PaymentRefundable @areas(in: [ADMIN]) {
+  captured: Money!
+  refunded: Money!
+  "Requested or processing refunds"
+  inFlight: Money!
+  remaining: Money!
+  items: [PaymentRefundableItem!]!
+}
+
+type PaymentRefundableItem @areas(in: [ADMIN]) {
+  orderItemId: UUID!
+  title: String!
+  groupId: UUID!
+  sellerName: String!
+  paid: Money!
+  refunded: Money!
+  inFlight: Money!
+  remaining: Money!
+  "e.g. 'In transit: refund after delivery or a confirmed loss'"
+  blockedReason: String
+}
+
+"A chargeback or payment dispute on an order"
+type PaymentDispute @areas(in: [ADMIN]) {
+  id: UUID!
+  "CB-YYMMDD-NNNN for chargebacks, DP- for wallet or provider disputes"
+  ref: String!
+  kind: PaymentDisputeKind!
+  provider: String!
+  providerCaseId: String!
+  groupId: UUID
+  sellerName: String
+  reasonCode: String!
+  "'Item not received (card issuer)'"
+  reason: String!
+  amount: Money!
+  evidenceDue: Deadline
+  status: PaymentDisputeStatus!
+  statusLabel: String!
+  "From finance, e.g. 'Held $480.00' or 'Company sale. A loss is recorded in company trading.'"
+  sellerBalanceEffect: String!
+  evidenceText: String
+  evidenceFiles: [MediaRef!]!
+  evidenceSubmittedAt: DateTime
+  owner: String
+  history: [TimelineEvent!]!
+  openedAt: DateTime!
+  decidedAt: DateTime
+}
+
+# ------------------------------------------------------------------ enums
+
+enum PaymentState @areas(in: [STORE, ADMIN]) {
+  ACCEPTED
+  PENDING
+  FAILED
+  PARTLY_REFUNDED
+  REFUNDED
+}
+
+"State of one payment attempt as the customer sees it"
+enum PaymentAttemptState @areas(in: [STORE]) {
+  ACCEPTED
+  PENDING
+  FAILED
+  REQUIRES_ACTION
+}
+
+enum PaymentIntentStatus @areas(in: [ADMIN]) {
+  CREATED
+  REQUIRES_ACTION
+  AUTHORIZING
+  PENDING_CHECK
+  AUTHORIZED
+  PARTIALLY_CAPTURED
+  CAPTURED
+  FAILED
+  VOIDED
+  EXPIRED
+}
+
+enum PaymentMethodKind @areas(in: [STORE, ADMIN]) {
+  CARD
+  DIGITAL_WALLET
+  STORE_CREDIT
+}
+
+enum PaymentWallet @areas(in: [STORE, ADMIN]) {
+  APPLE_PAY
+  GOOGLE_PAY
+}
+
+enum PaymentDeclineCategory @areas(in: [STORE, ADMIN]) {
+  INSUFFICIENT_FUNDS
+  CARD_DECLINED
+  EXPIRED_CARD
+  INCORRECT_DETAILS
+  AUTHENTICATION_FAILED
+  PROCESSING_ERROR
+  FRAUD_SUSPECTED
+}
+
+enum PaymentCaptureStatus @areas(in: [ADMIN]) {
+  PENDING
+  SUCCEEDED
+  FAILED
+  UNKNOWN
+}
+
+enum PaymentRefundOrigin @areas(in: [STORE, ADMIN]) {
+  CANCELLATION
+  RETURN
+  CASE
+  EXCEPTION
+  CORRECTION
+  ORPHAN_PAYMENT
+}
+
+enum PaymentRefundDestination @areas(in: [STORE, ADMIN]) {
+  ORIGINAL_METHOD
+  STORE_CREDIT
+  NEW_METHOD
+}
+
+enum PaymentRefundStatus @areas(in: [STORE, ADMIN]) {
+  REQUESTED
+  PROCESSING
+  SENT
+  FAILED
+  CANCELLED
+}
+
+enum PaymentRefundFailureAction @areas(in: [STORE, ADMIN]) {
+  CHOOSE_NEW_DESTINATION
+  WAIT_FOR_RETRY
+  CONTACT_SUPPORT
+}
+
+enum PaymentDisputeKind @areas(in: [ADMIN]) {
+  CHARGEBACK
+  INQUIRY
+  WALLET_DISPUTE
+}
+
+enum PaymentDisputeStatus @areas(in: [ADMIN]) {
+  OPENED
+  UNDER_REVIEW
+  WON
+  LOST
+}
+
+# ------------------------------------------------------------------ extensions
+
+extend type Order {
+  "The accepted payment of this order (null while none is linked)"
+  payment: Payment @areas(in: [STORE, ADMIN]) @source(module: "payments", fn: "getPaymentForOrder")
+
+  "Refund executions on this order, newest first. Each names its items, so a partial refund never marks other items refunded."
+  refunds: [Refund!]! @areas(in: [STORE, ADMIN]) @source(module: "payments", fn: "listRefundsForOrder")
+
+  "Paid, refunded, in-flight and remaining per item: the cap for the Issue refund dialog"
+  refundable: PaymentRefundable @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.payments.view") @source(module: "payments", fn: "remainingRefundable") @cost(weight: 3)
+
+  "Chargebacks and payment disputes on this order (order 360, dispute case)"
+  paymentDisputes: [PaymentDispute!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.disputes.manage") @source(module: "payments", fn: "listDisputesForOrder")
+}
+
+extend type Customer {
+  "Saved cards and wallets"
+  paymentMethods: [PaymentMethod!]! @areas(in: [STORE]) @source(module: "payments", fn: "listSavedMethods")
+}

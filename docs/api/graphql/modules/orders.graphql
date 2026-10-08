@@ -1,0 +1,968 @@
+# orders: the accepted purchase. Order → seller groups (one per seller package) → items with their own state.
+# Purchase snapshots are frozen at placement; payment, delivery and returns progress are separate.
+# Other modules add fields: payments → Order.payment / Order.refunds, shipping → OrderGroup.shipments,
+# returns → Order.returns / OrderItem.returnEligibility, support → Order.cases, messaging → Order.conversations,
+# reviews → OrderItem.reviewStatus, audit → Order.auditTrail, warehouse → OrderGroup.warehouseTask.
+#
+# Orders adds: Customer.orderCounts / delayedItems, Case.order, Return.order, RefundRequest.order (admin),
+# Seller.orderCounts (admin). Seller 360 recent orders and customer 360 recent orders use
+# ordersAdmin(filter: { sellerId }) and ordersAdmin(filter: { customerId }); no extra field is needed.
+#
+# Areas: the store sees the customer's (or guest's) own orders; the seller area sees the same Order type
+# with only the caller's own groups and seller-safe fields; the admin area sees everything.
+#
+# Viewer scoping of sub-lists: order sub-lists resolved by other modules (Order.returns, Order.cases,
+# Order.conversations, OrderGroup.shipments, …) receive the viewer (area + customer or guest session id, or seller id)
+# with the order ids, not just the ids. In the seller area they return only the caller's own records (its groups'
+# returns, cases and conversations), never another seller's. The same applies in reverse: Case.order, Return.order and
+# RefundRequest.order resolve through getOrdersByIds with the viewer, so a seller gets only its own groups.
+
+"""
+One accepted purchase (one checkout). In the seller area `groups` holds only the caller's own groups
+and the order-wide fields (totals, progress, other sellers) are not in the schema.
+"""
+type Order {
+  id: UUID!
+  "Human reference, e.g. MK-260914-48213"
+  ref: String!
+  placedAt: DateTime!
+  "When the payment was accepted (null while payment_pending)"
+  acceptedAt: DateTime
+  "One group per seller package. Seller area: only the caller's own groups."
+  groups: [OrderGroup!]!
+  "False while the payment is still being checked; sellers must not ship before it is true"
+  paymentAccepted: Boolean!
+
+  # ---- Seller Center only
+  "First name and last initial, e.g. Sam R."
+  buyerName: String @areas(in: [SELLER])
+  "'The customer's order also has items from other sellers. You only see and handle your own items.' Null for single-seller orders."
+  mixedOrderNote: String @areas(in: [SELLER])
+
+  # ---- Store and Admin Center
+  contact: OrderContact! @areas(in: [STORE, ADMIN])
+  lifecycle: OrderLifecycle! @areas(in: [STORE, ADMIN])
+  "Overall status derived from the items (first match wins, see the REST spec notes)"
+  status: OrderStatus! @areas(in: [STORE, ADMIN])
+  statusFlags: [OrderStatusFlag!]! @areas(in: [STORE, ADMIN])
+  statusLabel: String! @areas(in: [STORE, ADMIN])
+  "'4 items from 3 sellers · $513.98'"
+  summaryLine: String! @areas(in: [STORE, ADMIN])
+  itemCount: Int! @areas(in: [STORE, ADMIN])
+  sellerCount: Int! @areas(in: [STORE, ADMIN])
+  packageCount: Int! @areas(in: [STORE, ADMIN])
+  "Item images for order lists (first few items)"
+  thumbnails: [MediaRef!]! @areas(in: [STORE, ADMIN])
+  "List note, e.g. '1 package delayed'"
+  note: String @areas(in: [STORE, ADMIN])
+  "Payment, delivery and returns progress, kept separate (none changes another)"
+  progress: OrderProgress! @areas(in: [STORE, ADMIN])
+  totals: OrderTotals! @areas(in: [STORE, ADMIN])
+  "Copy taken at placement; address book changes don't affect it"
+  deliveryAddress: Address! @areas(in: [STORE, ADMIN])
+  "'To change where a package goes, contact the seller before it ships…'"
+  addressNote: String! @areas(in: [STORE, ADMIN])
+  "Returns, shipping and purchase-terms versions accepted at purchase"
+  policyVersions: [OrderPolicyVersion!]! @areas(in: [STORE, ADMIN])
+  "Receipt and per-seller invoices. Download links come from REST GET /orders/{id}/documents/{documentId}."
+  documents: [OrderDocument!]! @areas(in: [STORE, ADMIN])
+  "Customer-visible timeline"
+  timeline: [TimelineEvent!]! @areas(in: [STORE, ADMIN])
+  canCancelSomething: Boolean! @areas(in: [STORE, ADMIN])
+  "Order-level actions for the order list card"
+  actions: [OrderAction!]! @areas(in: [STORE])
+
+  # ---- Admin Center only
+  channel: OrderChannel! @areas(in: [ADMIN])
+  "Customer panel. Email and phone are masked unless the staff member has orders.customers.view-contact."
+  customer: OrderAdminCustomer! @areas(in: [ADMIN])
+  flags: [OrderFlag!]! @areas(in: [ADMIN])
+  "Banners, e.g. 'Package 3 is 16 days past its dispatch deadline'"
+  alerts: [OrderAlert!]! @areas(in: [ADMIN])
+  "Cancellations, returns and refunds per item with owner"
+  afterSales: [OrderAdminAfterSales!]! @areas(in: [ADMIN])
+  "Money split per seller group: who funded discounts, fee and earnings"
+  moneyBySeller: [OrderGroupMoney!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view")
+  "e.g. 'WELCOME20 is platform-funded; sellers receive their full price.'"
+  couponFundingNote: String @areas(in: [ADMIN])
+  "Internal notes, never shown to customers or sellers"
+  notes: [OrderInternalNote!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view")
+  "Staff action history with names and reasons (latest 20; full list via REST GET /orders/{id}/history)"
+  history: [TimelineEvent!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view") @cost(weight: 5)
+  allowedActions: [OrderAdminAction!]! @areas(in: [ADMIN])
+}
+
+"One seller package of an order (the seller's fulfillment task). The Official Store is its own group."
+type OrderGroup {
+  id: UUID!
+  "'Package 3 of 3'"
+  packageLabel: String!
+  "Seller as shown at purchase"
+  seller: OrderSellerLabel!
+  "e.g. 'Reno, NV warehouse'"
+  shipsFrom: String!
+  fulfilledBy: OrderFulfilledBy!
+  "Delivery method, price and arrival range promised at checkout"
+  delivery: OrderDeliveryPromise!
+  dispatchDeadline: Deadline!
+  status: OrderGroupStatus!
+  statusLabel: String!
+  items: [OrderItem!]!
+  "Items, discounts, shipping, tax and total for this group"
+  totals: OrderAmounts!
+  "Cancellation requests on this group's items (customer, seller or staff)"
+  cancellations: [OrderCancellation!]!
+
+  # ---- Store and Admin Center
+  "'Arrives Mon, Oct 12' or 'Delivered Tue, Oct 6'"
+  estimateLabel: String! @areas(in: [STORE, ADMIN])
+  returnTermsSummary: String! @areas(in: [STORE, ADMIN])
+  "'Official Store item. Marketly handles returns.' or 'Casa Verde Home handles this package. Marketly support can step in.'"
+  handlingNote: String! @areas(in: [STORE, ADMIN])
+  "Late or problem banner for this package"
+  alert: OrderAlert @areas(in: [STORE, ADMIN])
+
+  # ---- Seller Center and Admin Center
+  "'Due today 5:00 PM', 'Overdue 3 h', 'Shipped Oct 6 · 1 day late'"
+  deadlineLabel: String! @areas(in: [SELLER, ADMIN])
+  "'Shipped on time' once dispatched"
+  dispatchResult: String @areas(in: [SELLER, ADMIN])
+  "Full ship-to address and carrier phone. Seller area: only while the task is open plus the return window, null after."
+  shipTo: Address @areas(in: [SELLER, ADMIN])
+  giftNote: String @areas(in: [SELLER, ADMIN])
+  hidePricesOnSlip: Boolean! @areas(in: [SELLER, ADMIN])
+  "e.g. 'Halden Pocket Bluetooth Speaker, Teal × 2'"
+  itemsSummary: String! @areas(in: [SELLER, ADMIN])
+  units: Int! @areas(in: [SELLER, ADMIN])
+  "Item subtotal, seller-funded discounts, shipping charged, fee and earnings estimate"
+  money: OrderSellerMoney! @areas(in: [SELLER, ADMIN])
+  "Seller-visible timeline of this group"
+  timeline: [TimelineEvent!]! @areas(in: [SELLER, ADMIN])
+
+  # ---- Seller Center only
+  nextAction: OrderSellerNextAction! @areas(in: [SELLER])
+  "What the seller can do now (writes stay on REST)"
+  allowedActions: [OrderSellerAction!]! @areas(in: [SELLER])
+}
+
+"One order line with its own state. Partial cancels, shipments and returns split a line (splitFromItemId)."
+type OrderItem {
+  id: UUID!
+  productId: UUID!
+  variantId: UUID!
+  offerId: UUID!
+  title: String!
+  "e.g. 'Queen · Sage'"
+  variantLabel: String!
+  image: MediaRef
+  quantity: Int!
+  unitPrice: Money!
+  lineSubtotal: Money!
+  state: OrderItemState!
+  stateLabel: String!
+  "Product as it was at purchase (catalog snapshot frozen on the order)"
+  product: OrderProductSnapshot!
+  "Offer terms as accepted at purchase: condition, notes, missing items, warranty"
+  offerTerms: OrderOfferTerms!
+  "Return terms as accepted at purchase"
+  returnTerms: OrderReturnTerms!
+  "Shipment carrying this line (see OrderGroup.shipments)"
+  shipmentId: UUID
+  deliveredAt: DateTime
+  returnWindowEndsAt: DateTime
+  splitFromItemId: UUID
+  replacementOfItemId: UUID
+  "Cancellation, return, refund and case references mirrored onto the item"
+  afterSales: OrderItemAfterSales!
+
+  # ---- Store and Admin Center
+  "Discount allocations with who funded them"
+  discounts: [OrderDiscount!]! @areas(in: [STORE, ADMIN])
+  shippingShare: Money! @areas(in: [STORE, ADMIN])
+  taxShare: Money! @areas(in: [STORE, ADMIN])
+  "lineSubtotal − discounts + shippingShare + taxShare; the refund cap starts here"
+  paidAmount: Money! @areas(in: [STORE, ADMIN])
+  "e.g. 'Not shipped yet. You can cancel it until Casa Verde ships it.'"
+  stateNote: String @areas(in: [STORE, ADMIN])
+
+  # ---- Store only
+  "What the customer can do with this item now"
+  actions: [OrderItemAction!]! @areas(in: [STORE])
+
+  # ---- Seller Center and Admin Center
+  shippedQuantity: Int! @areas(in: [SELLER, ADMIN])
+  cancelledQuantity: Int! @areas(in: [SELLER, ADMIN])
+}
+
+type OrderPage implements Paged {
+  items: [Order!]!
+  nextCursor: String
+  page: Int
+  totalPages: Int
+  total: Int
+}
+
+"Seller as shown on the order (snapshot of the label at purchase)"
+type OrderSellerLabel {
+  "Seller id; null for the Official Store"
+  id: UUID
+  name: String!
+  slug: String!
+  "Marketly Official Store"
+  official: Boolean!
+  verified: Boolean!
+  logo: MediaRef
+}
+
+type OrderProductSnapshot {
+  productId: UUID!
+  variantId: UUID!
+  productVersion: Int!
+  title: String!
+  brandName: String
+  "Variant options at purchase, e.g. color → Sage"
+  options: [OrderOption!]!
+  modelNumber: String
+  imageUrl: URL
+  takenAt: DateTime!
+}
+
+type OrderOption {
+  name: String!
+  value: String!
+}
+
+type OrderOfferTerms {
+  offerId: UUID!
+  termsVersion: Int!
+  condition: OrderItemCondition!
+  "e.g. 'Used, like new'"
+  conditionLabel: String!
+  conditionNotes: String
+  missingItems: [String!]!
+  compareAtPrice: Money
+  "e.g. 'Ships in 1 business day'"
+  dispatchLabel: String!
+  warranty: String
+  sellerSku: String @areas(in: [SELLER, ADMIN])
+}
+
+type OrderReturnTerms {
+  "'30-day returns. Buyer pays return shipping for change of mind.'"
+  summary: String!
+  windowDays: Int!
+  returnShippingPaidBy: OrderReturnShippingPayer!
+  "Content policy version in force at purchase"
+  policyVersionId: UUID
+}
+
+type OrderItemAfterSales {
+  cancellationId: UUID
+  returnId: UUID
+  returnRef: String
+  "Mirrored from returns and payments; APPROVED never means money arrived"
+  refundStatus: OrderItemRefundStatus!
+  refundedAmount: Money!
+  caseRef: String
+}
+
+type OrderDiscount {
+  code: String
+  "e.g. 'WELCOME20' or 'Fall Home Sale'"
+  label: String!
+  amount: Money!
+  fundedBy: OrderFundedBy!
+}
+
+type OrderDeliveryPromise {
+  methodName: String!
+  carrier: String
+  service: String
+  price: Money!
+  free: Boolean!
+  "Who pays the shipping when it is free to the customer"
+  fundedBy: OrderShippingFundedBy!
+  arrivalFrom: Date!
+  arrivalTo: Date!
+  dispatchBy: DateTime!
+}
+
+"Items, discounts, shipping, tax and total"
+type OrderAmounts {
+  items: Money!
+  discounts: Money!
+  shipping: Money!
+  tax: Money!
+  total: Money!
+}
+
+type OrderAlert @areas(in: [STORE, ADMIN]) {
+  tone: OrderTone!
+  title: String!
+  message: String!
+  caseRef: String
+}
+
+type OrderContact @areas(in: [STORE, ADMIN]) {
+  kind: OrderContactKind!
+  customerId: UUID
+  name: String!
+  "Admin area: masked unless orders.customers.view-contact"
+  email: String!
+  phone: String
+}
+
+type OrderProgress @areas(in: [STORE, ADMIN]) {
+  payment: OrderPaymentProgress!
+  delivery: OrderDeliveryProgress!
+  returns: OrderReturnsProgress!
+}
+
+type OrderPaymentProgress @areas(in: [STORE, ADMIN]) {
+  state: OrderPaymentState!
+  label: String!
+  amountCharged: Money!
+  chargedAt: DateTime
+  "e.g. 'Visa •••• 4417'"
+  methodLabel: String!
+  "'Visa •••• 4417 charged Sep 14. No refunds sent yet.'"
+  note: String!
+}
+
+type OrderDeliveryProgress @areas(in: [STORE, ADMIN]) {
+  state: OrderDeliveryState!
+  label: String!
+  packagesTotal: Int!
+  packagesDelivered: Int!
+  "Per package, in package order, e.g. ['Delivered', 'In transit', 'Delayed']"
+  packageStates: [String!]!
+}
+
+type OrderReturnsProgress @areas(in: [STORE, ADMIN]) {
+  state: OrderReturnsState!
+  label: String!
+  openReturns: Int!
+  note: String
+}
+
+type OrderTotals @areas(in: [STORE, ADMIN]) {
+  itemCount: Int!
+  items: Money!
+  discounts: [OrderDiscount!]!
+  discountTotal: Money!
+  shippingTotal: Money!
+  "'Shipping (3 packages)'"
+  shippingLabel: String!
+  tax: Money!
+  "e.g. 'Sales tax (OR)'"
+  taxLabel: String!
+  total: Money!
+  "e.g. 'Visa •••• 4417'"
+  paidWith: String!
+  refundedSoFar: Money!
+  "Refunds requested or approved but not sent yet"
+  expectedRefunds: [OrderExpectedRefund!]!
+}
+
+type OrderExpectedRefund @areas(in: [STORE, ADMIN]) {
+  label: String!
+  ref: String
+  amount: Money!
+  status: String!
+}
+
+type OrderPolicyVersion @areas(in: [STORE, ADMIN]) {
+  policyKey: OrderPolicyKey!
+  versionId: UUID!
+  version: String!
+  effectiveAt: DateTime!
+}
+
+type OrderDocument @areas(in: [STORE, ADMIN]) {
+  id: UUID!
+  kind: OrderDocumentKind!
+  "'Order receipt' or 'Invoice, Pixel & Port'"
+  label: String!
+  groupId: UUID
+  number: String!
+  "Always pdf at launch"
+  format: String!
+  issuedAt: DateTime!
+}
+
+"A cancellation request for some items of one group"
+type OrderCancellation {
+  id: UUID!
+  groupId: UUID!
+  initiatedBy: OrderCancellationInitiator!
+  reasonCode: String!
+  reason: String
+  items: [OrderCancellationLine!]!
+  status: OrderCancellationStatus!
+  "Seller confirmation deadline for customer requests"
+  respondBy: Deadline
+  decidedBy: Actor
+  decidedAt: DateTime
+  declineReason: String
+  refundPreview: OrderRefundPreview!
+  refundStatus: OrderCancellationRefundStatus!
+  createdAt: DateTime!
+  timeline: [TimelineEvent!]!
+}
+
+type OrderCancellationLine {
+  itemId: UUID!
+  title: String!
+  variantLabel: String!
+  quantity: Int!
+  shipped: Boolean!
+}
+
+"Refund estimate for cancelled items: item amount minus coupon share, plus shipping and tax refunds"
+type OrderRefundPreview {
+  lines: [OrderRefundPreviewLine!]!
+  itemAmount: Money!
+  "Coupon share deducted (coupons are split across items by value)"
+  discountShare: Money!
+  shippingRefund: Money!
+  taxRefund: Money!
+  total: Money!
+  "e.g. 'Visa •••• 4417'"
+  destination: String!
+  timingNote: String!
+  "'Requested means no money has moved yet.'"
+  statusNote: String!
+}
+
+type OrderRefundPreviewLine {
+  itemId: UUID!
+  title: String!
+  quantity: Int!
+  itemAmount: Money!
+  discountShare: Money!
+  shippingRefund: Money!
+  taxRefund: Money!
+  refund: Money!
+}
+
+"Seller's money for one group. Fee and earnings come from finance when it is on, else null."
+type OrderSellerMoney @areas(in: [SELLER, ADMIN]) {
+  itemSubtotal: Money!
+  sellerDiscounts: Money!
+  shippingCharged: Money!
+  "'Shipping charged (Standard, free over $49)'"
+  shippingLabel: String!
+  platformFeeEstimate: Money
+  earningsEstimate: Money
+  "'Earnings stay pending until delivery and the hold period end.'"
+  earningsNote: String!
+}
+
+"Customer account tile and status-tab counts"
+type OrderCounts @areas(in: [STORE, ADMIN]) {
+  all: Int!
+  inProgress: Int!
+  delivered: Int!
+  returns: Int!
+  cancelled: Int!
+  "Packages past their dispatch deadline or promised arrival ('1 package delayed')"
+  delayedPackages: Int!
+}
+
+"Account overview delay alert with the new estimate and the customer's options"
+type OrderDelayedItem @areas(in: [STORE]) {
+  orderId: UUID!
+  orderRef: String!
+  groupId: UUID!
+  title: String!
+  sellerName: String!
+  newDispatchBy: DateTime
+  newArrivalFrom: Date
+  newArrivalTo: Date
+  options: [OrderDelayOption!]!
+  caseRef: String
+}
+
+"Seller Center order tab counts"
+type OrderSellerCounts @areas(in: [SELLER]) {
+  new: Int!
+  preparing: Int!
+  shipped: Int!
+  completed: Int!
+  cancellationRequests: Int!
+  overdue: Int!
+  dueToday: Int!
+}
+
+type OrderAdminCustomer @areas(in: [ADMIN]) {
+  customerId: UUID
+  guest: Boolean!
+  name: String!
+  "Masked unless orders.customers.view-contact"
+  email: String!
+  phone: String
+  customerSince: Date
+  orderCount: Int
+}
+
+type OrderFlag @areas(in: [ADMIN]) {
+  kind: OrderFlagKind!
+  tone: OrderTone!
+  label: String!
+}
+
+type OrderAdminAfterSales @areas(in: [ADMIN]) {
+  itemId: UUID!
+  title: String!
+  sellerName: String!
+  "e.g. 'Return RT-261006-0193 · refund without return proposed'"
+  request: String!
+  amount: Money
+  status: String!
+  owner: String
+}
+
+type OrderGroupMoney @areas(in: [ADMIN]) {
+  groupId: UUID!
+  seller: OrderSellerLabel!
+  items: Money!
+  platformFunded: Money!
+  sellerFunded: Money!
+  customerPaid: Money!
+  "From finance; null for the Official Store (company sales)"
+  marketplaceFee: Money
+  sellerEarnings: Money
+  companySale: Boolean!
+}
+
+type OrderInternalNote @areas(in: [ADMIN]) {
+  id: UUID!
+  text: String!
+  author: Actor!
+  at: DateTime!
+}
+
+# ------------------------------------------------------------------ inputs
+
+input OrderListFilter @areas(in: [STORE]) {
+  "Order reference or product title"
+  q: String
+  range: OrderDateRange
+  from: Date
+  to: Date
+  tab: OrderTab
+}
+
+input OrderSellerFilter @areas(in: [SELLER]) {
+  tab: OrderSellerTab
+  "Several tabs at once, e.g. [NEW, PREPARING] for the dashboard's next dispatches (combined with tab when both are given)"
+  tabs: [OrderSellerTab!]
+  "Order reference, buyer name or seller SKU"
+  q: String
+  placedFrom: Date
+  placedTo: Date
+  overdueOnly: Boolean
+  sort: OrderSellerSort
+}
+
+input OrderAdminFilter @areas(in: [ADMIN]) {
+  q: String
+  sellerType: OrderSellerType
+  sellerId: UUID
+  "For the customer 360 view"
+  customerId: UUID
+  fulfillmentStatus: OrderFulfillmentFilter
+  paymentState: OrderPaymentFilter
+  placedFrom: Date
+  placedTo: Date
+  flag: OrderFlagKind
+  savedFilterId: UUID
+}
+
+# ------------------------------------------------------------------ enums
+
+enum OrderStatus @areas(in: [STORE, ADMIN]) {
+  PAYMENT_PENDING
+  CONFIRMED
+  PREPARING
+  DELAYED
+  PARTLY_SHIPPED
+  SHIPPED
+  PARTLY_DELIVERED
+  DELIVERED
+  PARTLY_CANCELLED
+  CANCELLED
+  PARTLY_REFUNDED
+  REFUNDED
+  COMPLETED
+}
+
+enum OrderStatusFlag @areas(in: [STORE, ADMIN]) {
+  CANCELLATION_REQUESTED
+  RETURN_OPEN
+  DELIVERY_ISSUE
+  CASE_OPEN
+  PAYMENT_CHECKING
+}
+
+enum OrderLifecycle @areas(in: [STORE, ADMIN]) {
+  PAYMENT_PENDING
+  OPEN
+  COMPLETED
+  CANCELLED
+}
+
+enum OrderChannel @areas(in: [ADMIN]) {
+  WEB
+  ANDROID
+}
+
+enum OrderContactKind @areas(in: [STORE, ADMIN]) {
+  CUSTOMER
+  GUEST
+}
+
+enum OrderAction @areas(in: [STORE]) {
+  VIEW
+  TRACK
+  RETURN
+  CANCEL
+  REVIEW
+  BUY_AGAIN
+}
+
+enum OrderItemState {
+  PENDING_PAYMENT
+  CONFIRMED
+  PREPARING
+  DELAYED
+  SHIPPED
+  DELIVERED
+  CANCELLATION_REQUESTED
+  CANCELLED
+  RETURN_REQUESTED
+  RETURNED
+  REFUNDED
+}
+
+enum OrderItemAction @areas(in: [STORE]) {
+  CANCEL
+  RETURN
+  TRACK
+  VIEW_RETURN
+  REVIEW
+  REPORT_PROBLEM
+  CONTACT_SELLER
+  BUY_AGAIN
+}
+
+enum OrderItemCondition {
+  NEW
+  USED_LIKE_NEW
+  USED_GOOD
+  USED_ACCEPTABLE
+  REFURBISHED
+}
+
+enum OrderReturnShippingPayer {
+  SELLER
+  CUSTOMER
+  DEPENDS_ON_REASON
+}
+
+enum OrderItemRefundStatus {
+  NONE
+  REQUESTED
+  UNDER_REVIEW
+  APPROVED
+  PROCESSING
+  SENT
+  FAILED
+}
+
+enum OrderFundedBy {
+  PLATFORM
+  SELLER
+  SHARED
+}
+
+enum OrderShippingFundedBy {
+  CUSTOMER
+  SELLER
+  COMPANY
+  PLATFORM
+}
+
+enum OrderFulfilledBy {
+  OFFICIAL_WAREHOUSE
+  SELLER
+  MARKETLY_SERVICE
+}
+
+enum OrderGroupStatus {
+  NEW
+  PREPARING
+  DELAYED
+  PARTLY_SHIPPED
+  SHIPPED
+  PARTLY_DELIVERED
+  DELIVERED
+  PARTLY_CANCELLED
+  CANCELLED
+}
+
+enum OrderTone @areas(in: [STORE, ADMIN]) {
+  INFO
+  WARNING
+  DANGER
+}
+
+enum OrderPaymentState @areas(in: [STORE, ADMIN]) {
+  PENDING
+  ACCEPTED
+  FAILED
+  PARTLY_REFUNDED
+  REFUNDED
+}
+
+enum OrderDeliveryState @areas(in: [STORE, ADMIN]) {
+  NOT_SHIPPED
+  PARTLY_SHIPPED
+  SHIPPED
+  PARTLY_DELIVERED
+  DELIVERED
+  DELIVERY_ISSUE
+  CANCELLED
+}
+
+enum OrderReturnsState @areas(in: [STORE, ADMIN]) {
+  NONE
+  REQUESTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum OrderPolicyKey @areas(in: [STORE, ADMIN]) {
+  RETURNS
+  SHIPPING
+  PURCHASE_TERMS
+}
+
+enum OrderDocumentKind @areas(in: [STORE, ADMIN]) {
+  RECEIPT
+  INVOICE
+  CREDIT_NOTE
+}
+
+enum OrderCancellationInitiator {
+  CUSTOMER
+  SELLER
+  STAFF
+  SYSTEM
+}
+
+enum OrderCancellationStatus {
+  REQUESTED
+  ACCEPTED
+  DECLINED
+  WITHDRAWN
+}
+
+enum OrderCancellationRefundStatus {
+  NONE
+  REQUESTED
+  PROCESSING
+  SENT
+  FAILED
+}
+
+enum OrderDelayOption @areas(in: [STORE]) {
+  WAIT
+  CANCEL
+  CONTACT_SUPPORT
+}
+
+enum OrderTab @areas(in: [STORE]) {
+  ALL
+  IN_PROGRESS
+  DELIVERED
+  RETURNS
+  CANCELLED
+}
+
+enum OrderDateRange @areas(in: [STORE, ADMIN]) {
+  LAST_30_DAYS
+  LAST_3_MONTHS
+  LAST_6_MONTHS
+  THIS_YEAR
+  ALL
+}
+
+enum OrderSellerNextAction @areas(in: [SELLER]) {
+  PREPARE
+  RECORD_SHIPMENT
+  SHIP_REMAINING
+  VIEW_TRACKING
+  RESPOND_CANCELLATION
+  VIEW
+}
+
+enum OrderSellerAction @areas(in: [SELLER]) {
+  START_PREPARING
+  REPORT_DELAY
+  RECORD_SHIPMENT
+  CANCEL_ITEMS
+  RESPOND_CANCELLATION
+  PRINT_PACKING_SLIP
+}
+
+enum OrderSellerTab @areas(in: [SELLER]) {
+  NEW
+  PREPARING
+  SHIPPED
+  COMPLETED
+  CANCELLATION_REQUESTS
+}
+
+enum OrderSellerSort @areas(in: [SELLER]) {
+  DISPATCH_DEADLINE
+  NEWEST
+  OLDEST
+}
+
+enum OrderFlagKind @areas(in: [ADMIN]) {
+  PAYMENT_FAILED
+  PAYMENT_CHECKING
+  OVERDUE_DISPATCH
+  DUE_SOON
+  CANCELLATION_REQUESTED
+  RETURN_REQUESTED
+  CASE_OPEN
+  SELLER_RESTRICTED
+  CHARGEBACK
+  DELIVERY_ISSUE
+}
+
+enum OrderAdminAction @areas(in: [ADMIN]) {
+  CANCEL_ITEMS
+  ISSUE_REFUND
+  CONTACT_SELLER
+  OPEN_CASE
+  ADD_NOTE
+  EXTEND_DEADLINE
+  RESEND_CONFIRMATION
+}
+
+enum OrderSellerType @areas(in: [ADMIN]) {
+  ALL
+  OFFICIAL
+  MARKETPLACE
+}
+
+enum OrderFulfillmentFilter @areas(in: [ADMIN]) {
+  NEW
+  PREPARING
+  OVERDUE
+  SHIPPED
+  PARTLY_DELIVERED
+  DELIVERED
+  CANCELLATION_REQUESTED
+  CANCELLED
+}
+
+enum OrderPaymentFilter @areas(in: [ADMIN]) {
+  PENDING_CHECK
+  CAPTURED
+  FAILED
+  PARTLY_REFUNDED
+  REFUNDED
+}
+
+# ------------------------------------------------------------------ queries and extensions
+
+extend type Query {
+  "Order detail for the signed-in customer, or a guest session with access to this order (identity.hasGuestOrderAccess)"
+  order(ref: String!): Order @areas(in: [STORE]) @auth(requires: SHOPPER) @source(module: "orders", fn: "getOrderForViewer")
+
+  "Order history with search, date range and status tab (OrderList, AccountOverview recent orders with paging.limit)"
+  orders(filter: OrderListFilter, paging: PageInput): OrderPage! @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "orders", fn: "listOrdersForCustomer")
+
+  "One order as the calling seller sees it: only its own groups, items, money and timeline. Another seller's order returns null (NOT_FOUND)."
+  sellerOrder(ref: String!): Order @areas(in: [SELLER]) @auth(requires: SELLER, permission: "orders.fulfillment.view") @source(module: "orders", fn: "getOrderForSeller")
+
+  "The seller's orders by stage with dispatch deadlines (dashboard 'to ship' list, Orders page)"
+  sellerOrders(filter: OrderSellerFilter, paging: PageInput): OrderPage! @areas(in: [SELLER]) @auth(requires: SELLER, permission: "orders.fulfillment.view") @source(module: "orders", fn: "listOrdersForSeller")
+
+  "Tab counts plus overdue and due today"
+  sellerOrderCounts: OrderSellerCounts! @areas(in: [SELLER]) @auth(requires: SELLER, permission: "orders.fulfillment.view") @source(module: "orders", fn: "countSellerOrders")
+
+  "Order 360 across all sellers (staff)"
+  orderAdmin(ref: String!): Order @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view") @source(module: "orders", fn: "getOrderAdmin")
+
+  "Order list for staff; also feeds the customer 360 (filter.customerId) and seller 360 (filter.sellerId)"
+  ordersAdmin(filter: OrderAdminFilter, paging: PageInput): OrderPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view") @source(module: "orders", fn: "listOrdersAdmin") @cost(weight: 20)
+}
+
+extend type Customer {
+  "Status-tab counts and delayed packages (AccountOverview tiles, OrderList tabs, customer 360)"
+  orderCounts(range: OrderDateRange): OrderCounts! @areas(in: [STORE, ADMIN]) @source(module: "orders", fn: "countOrdersByTab") @cost(weight: 3)
+
+  "Delay alerts with the new estimate and options (AccountOverview)"
+  delayedItems: [OrderDelayedItem!]! @areas(in: [STORE]) @source(module: "orders", fn: "listDelayedItemsForCustomer")
+}
+
+"Seller 360 order tiles (staff)"
+type OrderAdminSellerCounts @areas(in: [ADMIN]) {
+  "Orders with a group of this seller not yet delivered or cancelled"
+  open: Int!
+  "Groups past their dispatch deadline and not shipped"
+  overdueDispatch: Int!
+  dueToday: Int!
+  "Customer cancellation requests waiting for the seller"
+  cancellationRequests: Int!
+  "Items cancelled in the last 30 days (any initiator)"
+  cancellations30d: Int!
+}
+
+extend type Seller {
+  "Open, overdue-dispatch and cancellation counts (seller 360). Recent orders: ordersAdmin(filter: { sellerId })."
+  orderCounts: OrderAdminSellerCounts @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view") @source(module: "orders", fn: "countOrdersForSellers") @cost(weight: 3)
+}
+
+# ---- The order behind a case, return or refund request. One batched call (getOrdersByIds) with the viewer;
+# ---- each area keeps the same visibility as order / sellerOrder / orderAdmin. Null when not visible.
+
+extend type Case {
+  "The customer's own order behind the case (CaseDetail). Null for cases without an order."
+  order: Order @areas(in: [STORE]) @auth(requires: SHOPPER) @source(module: "orders", fn: "getOrdersByIds")
+}
+
+extend type Return {
+  "The customer's own order behind the return (ReturnDetail)"
+  order: Order @areas(in: [STORE]) @auth(requires: SHOPPER) @source(module: "orders", fn: "getOrdersByIds")
+}
+
+extend type Case {
+  "The order as the calling seller sees it: only its own groups (like sellerOrder)"
+  order: Order @areas(in: [SELLER]) @auth(requires: SELLER, permission: "orders.fulfillment.view") @source(module: "orders", fn: "getOrdersByIds")
+}
+
+extend type Return {
+  "The order as the calling seller sees it: only its own groups (SellerReturnDetail)"
+  order: Order @areas(in: [SELLER]) @auth(requires: SELLER, permission: "orders.fulfillment.view") @source(module: "orders", fn: "getOrdersByIds")
+}
+
+extend type Case {
+  "Order 360 behind the dispute: groups, items, money by seller; shipments via OrderGroup.shipments (AdminCase)"
+  order: Order @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view") @source(module: "orders", fn: "getOrdersByIds")
+}
+
+extend type Return {
+  "Order 360 behind the return (staff)"
+  order: Order @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view") @source(module: "orders", fn: "getOrdersByIds")
+}
+
+extend type RefundRequest {
+  "Order 360 behind the refund request (Finance approval view)"
+  order: Order @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view") @source(module: "orders", fn: "getOrdersByIds")
+}

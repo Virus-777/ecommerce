@@ -1,0 +1,265 @@
+# messaging: private service conversations about an order, item, return or case (customer with seller or the Official Store,
+# Marketly Support can join from a case). No promotional messages.
+# Adds Order.conversations, Return.conversation, Customer.unreadMessages (store), Seller.inbox (seller) and Seller.replyStats.
+# Store and Seller Center only: staff read private conversations through REST, with a logged reason. The admin
+# screens (AdminCustomer, AdminCase, AdminOrder) load conversations with that REST call, never through GraphQL.
+# Admin gets only Customer.conversationSummary: counts, last message time and counterparties, never message content.
+# Seller area: Order.conversations and Return.conversation return only the caller's own conversations.
+
+"A conversation as one participant sees it (counterparty, subject, reply state and messages)"
+type Conversation @areas(in: [STORE, SELLER]) {
+  id: UUID!
+  kind: ConversationKind!
+  "The other side, from the caller's point of view"
+  counterparty: ConversationCounterparty!
+  participants: [ConversationParticipant!]!
+  "Linked order, item, return or case with its live status"
+  subject: ConversationSubject!
+  status: ConversationStatus!
+  lockedReason: String
+  replyState: ConversationReplyState!
+  replyDue: Deadline
+  "e.g. Only you, the buyer and Marketly support can see it"
+  privacyNote: String!
+  "e.g. Keep payments and contact details on Marketly. No promotional messages."
+  rulesNote: String!
+  canSend: Boolean!
+  createdAt: DateTime!
+  lastMessageAt: DateTime!
+  lastMessagePreview: String!
+  lastFromMe: Boolean!
+  unreadCount: Int!
+  "Messages, newest first (cursor for older)"
+  messages(paging: PageInput): MessagePage! @cost(weight: 5)
+
+  # ---- Seller Center only
+  "e.g. Overdue 2 h / Reply by Oct 9, 8:15 AM / Replied in 1 h"
+  replyLabel: String @areas(in: [SELLER])
+  "e.g. Dispatch deadline was Oct 8, 12:00 PM. It is now overdue."
+  dispatchWarning: String @areas(in: [SELLER])
+}
+
+enum ConversationKind @areas(in: [STORE, SELLER]) {
+  ORDER
+  SUPPORT
+  "Started by Marketly staff with a seller or seller applicant"
+  STAFF_SELLER
+}
+
+enum ConversationStatus @areas(in: [STORE, SELLER]) {
+  OPEN
+  LOCKED
+  ARCHIVED
+}
+
+"Only customer–seller conversations have a reply state"
+enum ConversationReplyState @areas(in: [STORE, SELLER]) {
+  NONE
+  AWAITING_SELLER
+  REPLIED
+  OVERDUE
+}
+
+type ConversationCounterparty @areas(in: [STORE, SELLER]) {
+  kind: ConversationPartyKind!
+  id: String
+  name: String!
+  logoUrl: URL
+  verified: Boolean
+  "e.g. Usually replies within 4 hours"
+  responseTimeLabel: String
+  location: String
+}
+
+enum ConversationPartyKind @areas(in: [STORE, SELLER]) {
+  SELLER
+  OFFICIAL_STORE
+  MARKETPLACE_SUPPORT
+  CUSTOMER
+}
+
+type ConversationParticipant @areas(in: [STORE, SELLER]) {
+  kind: ConversationParticipantKind!
+  id: String!
+  name: String!
+  "e.g. Marketly Support"
+  label: String!
+  joinedAt: DateTime!
+  joinedFromCaseId: UUID
+}
+
+enum ConversationParticipantKind @areas(in: [STORE, SELLER]) {
+  CUSTOMER
+  SELLER
+  STAFF
+}
+
+"What the conversation is about"
+type ConversationSubject @areas(in: [STORE, SELLER]) {
+  kind: ConversationSubjectKind!
+  orderId: UUID
+  orderRef: String
+  orderItemId: UUID
+  returnId: UUID
+  returnRef: String
+  caseId: UUID
+  caseRef: String
+  "e.g. Linen duvet cover"
+  title: String!
+  imageUrl: URL
+  "e.g. Package 3 of 3"
+  packageLabel: String
+  "Live item or return status, e.g. Delayed"
+  statusLabel: String
+}
+
+enum ConversationSubjectKind @areas(in: [STORE, SELLER]) {
+  ORDER
+  ORDER_ITEM
+  RETURN
+  CASE
+  SELLER_ACCOUNT
+  APPLICATION
+}
+
+type ConversationPage implements Paged @areas(in: [STORE, SELLER]) {
+  items: [Conversation!]!
+  nextCursor: String
+  page: Int
+  totalPages: Int
+  total: Int
+}
+
+"One message. Contact details and links are masked by the content filter."
+type Message @areas(in: [STORE, SELLER]) {
+  id: UUID!
+  conversationId: UUID!
+  kind: MessageKind!
+  author: Actor
+  "e.g. Marisol, Casa Verde Home / You"
+  authorLabel: String!
+  fromMe: Boolean!
+  body: String!
+  attachments: [MediaRef!]!
+  "Parts masked by the content filter"
+  redactions: [MessageRedaction!]!
+  "Hidden by moderation; body is empty"
+  hidden: Boolean!
+  at: DateTime!
+}
+
+enum MessageKind @areas(in: [STORE, SELLER]) {
+  TEXT
+  "e.g. Marketly Support joined from case CS-261005-3381"
+  SYSTEM
+}
+
+enum MessageRedaction @areas(in: [STORE, SELLER]) {
+  CONTACT_DETAILS
+  LINK
+}
+
+type MessagePage implements Paged @areas(in: [STORE, SELLER]) {
+  items: [Message!]!
+  nextCursor: String
+  page: Int
+  totalPages: Int
+  total: Int
+}
+
+"Unread badge for the account header and overview tile"
+type MessagingUnread @areas(in: [STORE]) {
+  "Conversations with unread messages"
+  conversations: Int!
+  messages: Int!
+  "Who wrote, e.g. Casa Verde Home, Marketly Support"
+  fromNames: [String!]!
+}
+
+"Seller inbox tiles for the dashboard"
+type MessagingSellerInbox @areas(in: [SELLER]) {
+  "Customer conversations waiting for the seller's reply"
+  awaitingReply: Int!
+  overdue: Int!
+  oldestWaitingSince: DateTime
+  unreadConversations: Int!
+  targetHours: Int!
+}
+
+"How quickly a seller replies to customer messages"
+type MessagingReplyStats {
+  targetHours: Int!
+  "e.g. 94 (% replied within the target)"
+  repliedWithinTargetPct: Float
+  averageReplyMinutes: Int
+  "e.g. Usually replies within 4 hours"
+  label: String!
+  periodDays: Int!
+}
+
+# ---------------------------------------------------------------- fields on other modules' types
+
+extend type Order {
+  "Conversations about this order or its items. Store: the customer's; seller: the caller's own with this buyer."
+  conversations: [Conversation!]! @areas(in: [STORE, SELLER]) @source(module: "messaging", fn: "listForOrder")
+}
+
+extend type Return {
+  "The conversation linked to this return (customer and the seller or Official Store)"
+  conversation: Conversation @areas(in: [STORE, SELLER]) @source(module: "messaging", fn: "getForSubject")
+}
+
+extend type Customer {
+  "Unread messages for the account overview tile and header badge"
+  unreadMessages: MessagingUnread! @areas(in: [STORE]) @source(module: "messaging", fn: "unreadSummary")
+}
+
+"""
+Who a customer has been messaging and how recently, for the customer 360. Never includes message content: staff read a
+conversation through REST GET /api/admin/messaging/conversations/{id}/messages with a logged reason.
+"""
+type MessagingCustomerSummary @areas(in: [ADMIN]) {
+  conversationCount: Int!
+  openCount: Int!
+  "Conversations with a message report or a lock"
+  reportedCount: Int!
+  lastMessageAt: DateTime
+  "Sellers (and the Official Store) the customer has talked to, most recent first"
+  counterparties: [MessagingCounterpartySummary!]!
+}
+
+type MessagingCounterpartySummary @areas(in: [ADMIN]) {
+  "SELLER or OFFICIAL_STORE"
+  kind: String!
+  "Null for the Official Store"
+  sellerId: UUID
+  name: String!
+  conversationCount: Int!
+  lastMessageAt: DateTime!
+}
+
+extend type Customer {
+  "Conversation counts, last message time and counterparties (no message content)"
+  conversationSummary: MessagingCustomerSummary @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "messaging.conversations.read") @source(module: "messaging", fn: "customerConversationSummaries") @cost(weight: 2)
+}
+
+extend type Seller {
+  "Unanswered and overdue customer messages for the seller dashboard"
+  inbox: MessagingSellerInbox @areas(in: [SELLER]) @auth(requires: SELLER, permission: "messaging.conversations.reply") @source(module: "messaging", fn: "sellerInboxSummary")
+  "Reply performance, last 30 days (storefront, offer comparison, seller 360)"
+  replyStats: MessagingReplyStats @source(module: "messaging", fn: "sellerResponseStats")
+}
+
+extend type Query {
+  "Inbox: conversations with sellers and Marketly Support, newest first"
+  conversations(unreadOnly: Boolean, paging: PageInput): ConversationPage! @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "messaging", fn: "listInbox")
+
+  "One conversation with its messages"
+  conversation(id: UUID!): Conversation @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "messaging", fn: "getConversation")
+
+  "Order messages with reply deadlines, overdue first"
+  sellerConversations(replyState: ConversationReplyState, paging: PageInput): ConversationPage! @areas(in: [SELLER]) @auth(requires: SELLER, permission: "messaging.conversations.reply") @source(module: "messaging", fn: "listInbox")
+
+  "One conversation with the buyer, order status and dispatch warning"
+  sellerConversation(id: UUID!): Conversation @areas(in: [SELLER]) @auth(requires: SELLER, permission: "messaging.conversations.reply") @source(module: "messaging", fn: "getConversation")
+}

@@ -1,0 +1,424 @@
+{
+  "name": "purchasing",
+  "title": "Purchasing",
+  "group": "Catalog and stock",
+  "phase": 1,
+  "chapters": [9, 2],
+  "summary": "Buying stock for the Official Store: suppliers and their price lists, purchase orders (Draft, Sent, Partly received, Received, Cancelled) with buying costs and expected deliveries, receiving records (expected vs received, shortages, damage) that feed inventory, and supplier claims.",
+  "owns": [
+    "Suppliers: contacts, payment terms, lead time, on-time and accuracy performance",
+    "Supplier price lists (supplier SKU, unit cost, minimum order, lead time)",
+    "Purchase orders (PUR-YYMM-NNNN) with lines, buying costs, freight and approval above the buyer's limit",
+    "Expected deliveries: carrier, reference, arrival window, delays and reschedules",
+    "Receiving records (REC-YYMMDD-NN): expected vs received, shortages, damaged units with photos, put-away bin",
+    "Supplier claims for shortages and damage",
+    "Reorder suggestions from low stock and incoming quantities"
+  ],
+  "notOwns": [
+    "Stock quantities and making received units sellable: inventory (Inventory Manager confirms)",
+    "Bins and put-away tasks: warehouse",
+    "Paying supplier invoices and company cost accounting: finance",
+    "Seller stock: sellers buy their own stock outside the platform"
+  ],
+  "dependsOn": ["inventory"],
+  "optionalDeps": ["access", "audit", "media", "notifications", "finance", "warehouse", "reports"],
+  "publicApi": [
+    { "name": "getPreferredSupplier", "signature": "(stockItemId: uuid) => { supplierId: uuid, name: string, supplierSku: string|null, unitCost: Money, returnAuthorizationRequired: bool } | null", "desc": "Used when a return outcome is 'return to supplier'", "usedBy": ["returns", "inventory"] },
+    { "name": "getOpenPurchaseOrders", "signature": "(stockItemId: uuid) => { purchaseOrderId: uuid, ref: string, quantityOpen: int, expectedDate: date|null }[]", "desc": "Incoming detail for stock screens and restock estimates", "usedBy": ["inventory", "offers"] },
+    { "name": "exportRows", "signature": "(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }", "desc": "Export rows for reports dataset purchasing.admin.receiving (receiving records)", "usedBy": ["reports"] }
+  ],
+  "types": {
+    "Supplier": {
+      "id": "uuid",
+      "name": "string",
+      "location": { "type": "string", "desc": "City and region, e.g. 'Los Angeles, CA'" },
+      "contactName": "string?",
+      "email": "email?",
+      "phone": "string?",
+      "address": "Address?",
+      "paymentTerms": { "type": "string", "desc": "e.g. 'Net 30 from invoice'" },
+      "leadTimeDays": { "type": "int", "desc": "Agreed lead time" },
+      "actualLeadTimeDays": { "type": "number?", "desc": "Average over the last 90 days" },
+      "onTimePct": { "type": "number?", "desc": "Deliveries arriving within the window, last 90 days" },
+      "openPurchaseOrders": "int",
+      "active": "bool",
+      "notes": "text?",
+      "createdAt": "datetime"
+    },
+    "SupplierInput": {
+      "name": "string",
+      "contactName": "string?",
+      "email": "email?",
+      "phone": "string?",
+      "address": "Address?",
+      "paymentTerms": "string?",
+      "leadTimeDays": "int?",
+      "notes": "text?",
+      "active": "bool?"
+    },
+    "SupplierItem": {
+      "stockItemId": "uuid",
+      "sku": "string",
+      "label": "string",
+      "supplierSku": "string?",
+      "unitCost": "Money",
+      "minOrderQuantity": "int?",
+      "leadTimeDays": "int?",
+      "preferred": { "type": "bool", "desc": "Preferred supplier for this SKU (used by reorder suggestions)" }
+    },
+    "SupplierItemInput": { "stockItemId": "uuid", "supplierSku": "string?", "unitCost": "Money", "minOrderQuantity": "int?", "leadTimeDays": "int?", "preferred": "bool?" },
+    "SupplierPerformance": { "windowDays": "int", "onTimePct": "number?", "avgLeadTimeDays": "number?", "shortageRatePct": "number?", "damageRatePct": "number?", "deliveries": "int" },
+    "SupplierDetail": {
+      "supplier": "Supplier",
+      "items": "SupplierItem[]",
+      "performance": "SupplierPerformance",
+      "recentPurchaseOrders": "PurchaseOrderRow[]",
+      "openClaims": "SupplierClaim[]"
+    },
+    "PurchaseOrderLine": {
+      "id": "uuid",
+      "stockItemId": "uuid",
+      "sku": "string",
+      "label": "string",
+      "image": "MediaRef?",
+      "quantityOrdered": "int",
+      "quantityReceived": "int",
+      "quantityDamaged": "int",
+      "quantityClosed": { "type": "int", "desc": "Closed short (will not be delivered)" },
+      "quantityOpen": "int",
+      "unitCost": "Money",
+      "lineTotal": "Money",
+      "expectedDate": "date?",
+      "note": { "type": "string?", "desc": "e.g. 'Rest due Oct 13', 'Complete'" }
+    },
+    "PurchaseOrderLineInput": { "stockItemId": "uuid", "quantity": "int", "unitCost": "Money", "expectedDate": "date?" },
+    "PurchaseOrderInput": {
+      "supplierId": "uuid",
+      "shipToLocationId": { "type": "uuid", "desc": "inventory location" },
+      "lines": "PurchaseOrderLineInput[]",
+      "freight": "Money?",
+      "paymentTerms": "string?",
+      "expectedDate": "date?",
+      "notes": "text?",
+      "attachmentIds": "uuid[]?"
+    },
+    "PurchaseOrderUpdate": {
+      "lines": { "type": "PurchaseOrderLineInput[]?", "desc": "Draft only; replaces all lines" },
+      "freight": "Money?",
+      "paymentTerms": "string?",
+      "expectedDate": "date?",
+      "lineExpectedDates": { "type": "map<date>?", "desc": "Line id → new expected date (allowed after sending)" },
+      "notes": "text?",
+      "attachmentIds": "uuid[]?"
+    },
+    "PurchaseOrder": {
+      "id": "uuid",
+      "ref": { "type": "string", "desc": "PUR-YYMM-NNNN" },
+      "supplier": "SupplierCue",
+      "shipToLocationId": "uuid",
+      "shipToName": "string",
+      "status": "enum(draft|sent|partly_received|received|cancelled)",
+      "approval": { "type": "ApprovalInfo?", "desc": "Set when the total is above the buyer's purchase limit (e.g. $25,000)" },
+      "paymentTerms": "string",
+      "expectedDate": "date?",
+      "lines": "PurchaseOrderLine[]",
+      "linesSubtotal": "Money",
+      "freight": "Money",
+      "total": "Money",
+      "receivedValue": { "type": "Money", "desc": "Received units at unit cost" },
+      "claimsValue": "Money",
+      "deliveries": "Delivery[]",
+      "receipts": "ReceiptSummary[]",
+      "claims": "SupplierClaim[]",
+      "attachments": "MediaRef[]",
+      "notes": "text?",
+      "timeline": "TimelineEvent[]",
+      "createdBy": "Actor",
+      "createdAt": "datetime",
+      "sentAt": "datetime?",
+      "closedAt": "datetime?"
+    },
+    "SupplierCue": { "id": "uuid", "name": "string", "location": "string?" },
+    "PurchaseOrderRow": {
+      "id": "uuid",
+      "ref": "string",
+      "supplierName": "string",
+      "lineCount": "int",
+      "units": "int",
+      "total": "Money",
+      "expectedLabel": { "type": "string", "desc": "e.g. 'Oct 6 · 80 due Oct 13' or 'Not set'" },
+      "status": "enum(draft|sent|partly_received|received|cancelled)",
+      "approvalNote": { "type": "string?", "desc": "e.g. 'Over $25,000: needs Morgan Hale'" },
+      "lateOrShort": "bool"
+    },
+    "PurchasingSummary": {
+      "openPurchaseOrders": "int",
+      "committed": "Money",
+      "incomingUnits": "int",
+      "nextArrival": "date?",
+      "lateOrShort": "int",
+      "lateOrShortNote": "string?",
+      "lowStockItems": "int",
+      "reorderSuggested": "int"
+    },
+    "ReorderSuggestion": {
+      "stockItemId": "uuid",
+      "sku": "string",
+      "label": "string",
+      "available": "int",
+      "reorderPoint": "int?",
+      "incoming": "int",
+      "avgDailySales": "number?",
+      "suggestedQuantity": "int",
+      "supplier": "SupplierCue?",
+      "unitCost": "Money?",
+      "estimatedCost": "Money?"
+    },
+    "Delivery": {
+      "id": "uuid",
+      "purchaseOrderId": "uuid",
+      "purchaseOrderRef": "string",
+      "supplierName": "string",
+      "carrier": { "type": "string?", "desc": "e.g. 'UPS Freight', 'Freight · 2 pallets'" },
+      "trackingRef": { "type": "string?", "desc": "BOL, PRO or tracking number" },
+      "windowFrom": "datetime",
+      "windowTo": "datetime",
+      "lineCount": "int",
+      "units": "int",
+      "status": "enum(expected|delayed|arrived|receiving|received|received_with_issues|cancelled)",
+      "delayReason": "string?",
+      "arrivedAt": "datetime?",
+      "dock": "string?",
+      "receiptId": "uuid?"
+    },
+    "ReceivingStats": {
+      "date": { "type": "date", "desc": "Receiving day in the location's time zone (default today)" },
+      "expectedToday": "int",
+      "expectedTodayUnits": "int",
+      "arrivedNotReceived": { "type": "int", "desc": "Deliveries in status arrived (at the dock, receiving not started)" },
+      "arrivedNote": { "type": "string?", "desc": "e.g. 'PUR-2610-0042 at dock 2' (oldest arrival)" },
+      "receivedThisWeek": { "type": "int", "desc": "Deliveries received (with or without issues) since the start of the week" },
+      "receivedThisWeekUnits": "int",
+      "openShortages": { "type": "int", "desc": "Receipt lines with a shortage or damage not yet covered by a settled or rejected supplier claim" },
+      "shortageOwner": { "type": "Actor?", "desc": "Purchasing owner following up (open claim owner, else the purchase order buyer); shown as 'with Ken Watanabe'" },
+      "tabCounts": { "expected": { "type": "int", "desc": "expected + delayed + arrived" }, "receiving": "int", "receivedWithIssues": "int", "completed": { "type": "int", "desc": "Received in the last 30 days" } }
+    },
+    "DeliveryInput": { "carrier": "string?", "trackingRef": "string?", "windowFrom": "datetime", "windowTo": "datetime", "units": "int?", "note": "text?" },
+    "DeliveryUpdate": { "carrier": "string?", "trackingRef": "string?", "windowFrom": "datetime?", "windowTo": "datetime?", "delayed": "bool?", "reason": { "type": "text", "desc": "Why the window or status changed; shown on the receiving screen" } },
+    "ReceiptLine": {
+      "purchaseOrderLineId": "uuid",
+      "stockItemId": "uuid",
+      "sku": "string",
+      "label": "string",
+      "image": "MediaRef?",
+      "expected": "int",
+      "received": "int",
+      "damaged": "int",
+      "shortage": { "type": "int", "desc": "max(expected − received, 0)" },
+      "over": { "type": "int", "desc": "max(received − expected, 0)" },
+      "binCode": { "type": "string?", "desc": "Put-away bin suggested by warehouse" },
+      "photos": "MediaRef[]",
+      "note": "text?"
+    },
+    "ReceiptLineInput": { "purchaseOrderLineId": "uuid", "received": "int", "damaged": "int", "binCode": "string?", "photoIds": "uuid[]?", "note": "text?" },
+    "Receipt": {
+      "id": "uuid",
+      "ref": { "type": "string", "desc": "REC-YYMMDD-NN" },
+      "purchaseOrderId": "uuid",
+      "purchaseOrderRef": "string",
+      "deliveryId": "uuid",
+      "supplierName": "string",
+      "locationId": "uuid",
+      "status": "enum(in_progress|awaiting_confirmation|confirmed|cancelled)",
+      "lines": "ReceiptLine[]",
+      "totals": "ReceiptTotals",
+      "buyingCost": { "type": "Money", "desc": "Received units at unit cost" },
+      "note": "text?",
+      "receivedBy": "Actor",
+      "startedAt": "datetime",
+      "submittedAt": "datetime?",
+      "confirmedBy": { "type": "Actor?", "desc": "Inventory Manager who made the units sellable" },
+      "confirmedAt": "datetime?"
+    },
+    "ReceiptTotals": { "expected": "int", "received": "int", "damaged": "int", "shortage": "int", "sellable": "int?" },
+    "ReceiptSummary": { "id": "uuid", "ref": "string", "status": "string", "received": "int", "damaged": "int", "shortage": "int", "receivedBy": "Actor", "submittedAt": "datetime?" },
+    "ClaimLine": { "stockItemId": "uuid", "sku": "string", "quantity": "int", "unitCost": "Money" },
+    "SupplierClaim": {
+      "id": "uuid",
+      "ref": "string",
+      "supplierId": "uuid",
+      "supplierName": "string",
+      "purchaseOrderId": "uuid",
+      "purchaseOrderRef": "string",
+      "receiptId": "uuid?",
+      "kind": "enum(shortage|damage|wrong_item|other)",
+      "lines": "ClaimLine[]",
+      "amount": "Money",
+      "status": "enum(open|submitted|settled|rejected|withdrawn)",
+      "settlement": "enum(credit_note|refund|replacement)?",
+      "settledAmount": "Money?",
+      "owner": "Actor",
+      "notes": "text?",
+      "createdAt": "datetime",
+      "decidedAt": "datetime?"
+    },
+    "ClaimInput": { "purchaseOrderId": "uuid", "receiptId": "uuid?", "kind": "enum(shortage|damage|wrong_item|other)", "lines": "ClaimLine[]", "notes": "text?" }
+  },
+  "tables": [
+    { "name": "suppliers", "columns": { "id": "uuid pk", "name": "text", "location": "text?", "contact_name": "text?", "email": "text?", "phone": "text?", "address": "jsonb?", "payment_terms": "text", "lead_time_days": "int", "active": "bool", "notes": "text?", "created_at": "timestamptz" }, "indexes": ["(active, name)"] },
+    { "name": "supplier_items", "desc": "Supplier price list per company stock item", "columns": { "supplier_id": "uuid → suppliers", "stock_item_id": "uuid", "supplier_sku": "text?", "unit_cost_amount": "bigint", "currency": "char(3)", "min_order_qty": "int?", "lead_time_days": "int?", "preferred": "bool", "updated_at": "timestamptz" }, "indexes": ["pk (supplier_id, stock_item_id)", "(stock_item_id) where preferred"] },
+    { "name": "supplier_performance", "desc": "Nightly figures per supplier", "columns": { "supplier_id": "uuid pk → suppliers", "window_days": "int", "on_time_pct": "numeric(5,2)?", "avg_lead_time_days": "numeric(6,2)?", "shortage_rate_pct": "numeric(5,2)?", "damage_rate_pct": "numeric(5,2)?", "deliveries": "int", "computed_at": "timestamptz" } },
+    { "name": "purchase_orders", "columns": { "id": "uuid pk", "ref": "text unique", "supplier_id": "uuid → suppliers", "ship_to_location_id": "uuid", "status": "text", "payment_terms": "text", "expected_date": "date?", "freight_amount": "bigint", "currency": "char(3)", "total_amount": "bigint", "approval_request_id": "uuid?", "approval_state": "text? (pending|approved|rejected)", "notes": "text?", "attachment_media_ids": "jsonb", "created_by": "text", "created_at": "timestamptz", "sent_at": "timestamptz?", "closed_at": "timestamptz?", "close_reason": "text?" }, "indexes": ["(status, expected_date)", "(supplier_id, created_at)", "(approval_request_id)"] },
+    { "name": "purchase_order_lines", "columns": { "id": "uuid pk", "purchase_order_id": "uuid → purchase_orders", "stock_item_id": "uuid", "sku": "text", "label": "text", "qty_ordered": "int", "qty_received": "int", "qty_damaged": "int", "qty_closed": "int", "unit_cost_amount": "bigint", "expected_date": "date?" }, "indexes": ["(purchase_order_id)", "(stock_item_id)"] },
+    { "name": "purchase_order_events", "desc": "PO timeline (created, sent, approval, backorder, received, closed)", "columns": { "id": "uuid pk", "purchase_order_id": "uuid → purchase_orders", "label": "text", "detail": "text?", "actor_kind": "text", "actor_id": "text?", "at": "timestamptz" }, "indexes": ["(purchase_order_id, at)"] },
+    { "name": "deliveries", "desc": "Expected inbound deliveries per purchase order", "columns": { "id": "uuid pk", "purchase_order_id": "uuid → purchase_orders", "carrier": "text?", "tracking_ref": "text?", "window_from": "timestamptz", "window_to": "timestamptz", "units": "int", "status": "text", "delay_reason": "text?", "arrived_at": "timestamptz?", "dock": "text?" }, "indexes": ["(status, window_from)", "(purchase_order_id)"] },
+    { "name": "receipts", "columns": { "id": "uuid pk", "ref": "text unique", "purchase_order_id": "uuid → purchase_orders", "delivery_id": "uuid → deliveries", "location_id": "uuid", "status": "text", "note": "text?", "received_by": "text", "started_at": "timestamptz", "submitted_at": "timestamptz?", "confirmed_by": "text?", "confirmed_at": "timestamptz?" }, "indexes": ["(status, started_at)", "unique (delivery_id) where status = 'in_progress'"] },
+    { "name": "receipt_lines", "columns": { "receipt_id": "uuid → receipts", "purchase_order_line_id": "uuid → purchase_order_lines", "stock_item_id": "uuid", "expected": "int", "received": "int", "damaged": "int", "bin_code": "text?", "photo_media_ids": "jsonb", "note": "text?" }, "indexes": ["pk (receipt_id, purchase_order_line_id)"] },
+    { "name": "supplier_claims", "columns": { "id": "uuid pk", "ref": "text unique", "supplier_id": "uuid → suppliers", "purchase_order_id": "uuid → purchase_orders", "receipt_id": "uuid? → receipts", "kind": "text", "lines": "jsonb", "amount": "bigint", "currency": "char(3)", "status": "text", "settlement": "text?", "settled_amount": "bigint?", "owner_id": "text", "notes": "text?", "created_at": "timestamptz", "decided_at": "timestamptz?" }, "indexes": ["(status, created_at)", "(supplier_id)"] }
+  ],
+  "stateMachines": [
+    {
+      "name": "Purchase order", "field": "PurchaseOrder.status", "initial": "draft",
+      "transitions": [
+        ["draft", "send", "sent"],
+        ["draft", "cancel", "cancelled"],
+        ["sent", "cancel", "cancelled"],
+        ["sent", "receivePart", "partly_received"],
+        ["sent", "receiveAll", "received"],
+        ["partly_received", "receivePart", "partly_received"],
+        ["partly_received", "receiveAll", "received"],
+        ["partly_received", "closeShort", "received"]
+      ],
+      "notes": "send checks the buyer's purchase limit in access (example: Purchasing Manager up to $25,000). Above it the PO stays Draft with approval.required and an approval request; it is sent automatically when access.approval.decided approves. send adds Incoming in inventory (expectIncoming). cancel from Sent only while nothing was received; it removes Incoming. receivePart / receiveAll follow submitted receipts. closeShort ends a partly received PO with a reason; open quantities leave Incoming and a shortage claim can be raised."
+    },
+    {
+      "name": "Delivery", "field": "Delivery.status", "initial": "expected",
+      "transitions": [
+        ["expected", "reschedule", "expected"],
+        ["expected", "delay", "delayed"],
+        ["delayed", "reschedule", "expected"],
+        ["expected", "arrive", "arrived"],
+        ["delayed", "arrive", "arrived"],
+        ["arrived", "startReceiving", "receiving"],
+        ["receiving", "complete", "received"],
+        ["receiving", "completeWithIssues", "received_with_issues"],
+        ["expected", "cancel", "cancelled"],
+        ["delayed", "cancel", "cancelled"]
+      ],
+      "notes": "delay is set by the buyer or by the late-delivery job when the window passes without arrival. completeWithIssues when the submitted receipt has shortages, damage or over-receipt."
+    },
+    {
+      "name": "Receipt", "field": "Receipt.status", "initial": "in_progress",
+      "transitions": [
+        ["in_progress", "submit", "awaiting_confirmation"],
+        ["awaiting_confirmation", "confirm", "confirmed"],
+        ["in_progress", "cancel", "cancelled"]
+      ],
+      "notes": "Warehouse staff count lines (received, damaged with photos, bin) and submit. Units stay in Incoming until the Inventory Manager confirms in inventory; confirm comes from inventory.receipt.confirmed."
+    },
+    {
+      "name": "Supplier claim", "field": "SupplierClaim.status", "initial": "open",
+      "transitions": [
+        ["open", "submit", "submitted"],
+        ["submitted", "settle", "settled"],
+        ["submitted", "reject", "rejected"],
+        ["open", "withdraw", "withdrawn"]
+      ],
+      "notes": "Damaged units stay in Damaged or held (inventory) until the claim is settled; settlement is reported to finance."
+    }
+  ],
+  "endpoints": [
+    { "id": "getPurchasingSummary", "area": "admin", "method": "GET", "path": "/summary", "summary": "Open purchase orders, committed cost, incoming units, late or short, low-stock items", "auth": "staff", "permission": "purchasing.orders.view", "response": "PurchasingSummary", "screens": ["admin/purchasing", "admin/dashboard"] },
+    { "id": "listSuppliers", "area": "admin", "method": "GET", "path": "/suppliers", "summary": "Suppliers with lead time, on-time rate and open POs", "auth": "staff", "permission": "purchasing.orders.view", "paging": true, "query": { "q": "string?", "active": "bool?" }, "response": "Supplier", "screens": ["admin/purchasing"] },
+    { "id": "createSupplier", "area": "admin", "method": "POST", "path": "/suppliers", "summary": "Add a supplier", "auth": "staff", "permission": "purchasing.suppliers.manage", "body": "SupplierInput", "response": "Supplier", "status": 201, "audited": true, "screens": ["admin/purchasing"] },
+    { "id": "getSupplier", "area": "admin", "method": "GET", "path": "/suppliers/{id}", "summary": "Supplier with price list, performance, recent POs and open claims", "auth": "staff", "permission": "purchasing.orders.view", "params": { "id": "uuid" }, "response": "SupplierDetail", "screens": ["admin/purchasing"] },
+    { "id": "updateSupplier", "area": "admin", "method": "PATCH", "path": "/suppliers/{id}", "summary": "Edit or deactivate a supplier", "auth": "staff", "permission": "purchasing.suppliers.manage", "params": { "id": "uuid" }, "body": "SupplierInput", "response": "Supplier", "audited": true, "screens": ["admin/purchasing"] },
+    { "id": "putSupplierItems", "area": "admin", "method": "PUT", "path": "/suppliers/{id}/items", "summary": "Replace a supplier's price list (buying costs per SKU)", "auth": "staff", "permission": "purchasing.suppliers.manage", "params": { "id": "uuid" }, "body": { "items": "SupplierItemInput[]" }, "response": "SupplierItem[]", "errors": ["STOCK_ITEM_NOT_COMPANY"], "audited": true, "screens": ["admin/purchasing"] },
+
+    { "id": "listPurchaseOrders", "area": "admin", "method": "GET", "path": "/purchase-orders", "summary": "Purchase orders with status, cost and expected arrival", "auth": "staff", "permission": "purchasing.orders.view", "paging": true, "query": { "q": { "type": "string?", "desc": "PUR ref, supplier or SKU" }, "status": "enum(draft|sent|partly_received|received|cancelled)?", "supplierId": "uuid?", "lateOrShort": "bool?", "awaitingApproval": "bool?" }, "response": "PurchaseOrderRow", "screens": ["admin/purchasing"] },
+    { "id": "createPurchaseOrder", "area": "admin", "method": "POST", "path": "/purchase-orders", "summary": "Create a draft purchase order", "auth": "staff", "permission": "purchasing.orders.manage", "body": "PurchaseOrderInput", "response": "PurchaseOrder", "status": 201, "errors": ["SUPPLIER_INACTIVE", "STOCK_ITEM_NOT_COMPANY"], "audited": true, "screens": ["admin/purchasing"] },
+    { "id": "getPurchaseOrder", "area": "admin", "method": "GET", "path": "/purchase-orders/{id}", "summary": "Purchase order: lines expected vs received, costs, deliveries, receipts, claims, approval and timeline", "auth": "staff", "permission": "purchasing.orders.view", "params": { "id": "uuid" }, "response": "PurchaseOrder", "screens": ["admin/purchasing", "ops/receiving"] },
+    { "id": "updatePurchaseOrder", "area": "admin", "method": "PATCH", "path": "/purchase-orders/{id}", "summary": "Edit a draft, or update expected dates and notes after sending", "auth": "staff", "permission": "purchasing.orders.manage", "params": { "id": "uuid" }, "body": "PurchaseOrderUpdate", "response": "PurchaseOrder", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["purchasing.delivery.rescheduled"], "screens": ["admin/purchasing"] },
+    { "id": "sendPurchaseOrder", "area": "admin", "method": "POST", "path": "/purchase-orders/{id}/send", "summary": "Send to the supplier (or request approval when above the buyer's limit)", "desc": "Within the limit: status Sent, Incoming added in inventory, supplier emailed if asked. Above it: stays Draft with approval details and is sent automatically once approved.", "auth": "staff", "permission": "purchasing.orders.manage", "params": { "id": "uuid" }, "body": { "emailSupplier": "bool?", "message": "text?" }, "response": "PurchaseOrder", "errors": ["ILLEGAL_TRANSITION", "SUPPLIER_INACTIVE", "VALIDATION_FAILED"], "audited": true, "approval": "Approval action purchasing.orders.send. Purchase orders above the buyer's purchase limit in access (example: Purchasing Manager $25,000) need Business Owner approval before sending", "events": ["purchasing.purchase_order.sent", "purchasing.purchase_order.status_changed"], "screens": ["admin/purchasing"] },
+    { "id": "cancelPurchaseOrder", "area": "admin", "method": "POST", "path": "/purchase-orders/{id}/cancel", "summary": "Cancel a draft or a sent PO with nothing received", "auth": "staff", "permission": "purchasing.orders.manage", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "PurchaseOrder", "errors": ["ILLEGAL_TRANSITION", "PO_HAS_RECEIPTS"], "audited": true, "events": ["purchasing.purchase_order.status_changed"], "screens": ["admin/purchasing"] },
+    { "id": "closePurchaseOrder", "area": "admin", "method": "POST", "path": "/purchase-orders/{id}/close", "summary": "Close a partly received PO short (remaining units will not arrive)", "auth": "staff", "permission": "purchasing.orders.manage", "params": { "id": "uuid" }, "body": { "reason": "text", "raiseShortageClaim": "bool?" }, "response": "PurchaseOrder", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["purchasing.purchase_order.status_changed"], "screens": ["admin/purchasing"] },
+    { "id": "listReorderSuggestions", "area": "admin", "method": "GET", "path": "/reorder-suggestions", "summary": "SKUs at or below reorder point after incoming stock, with suggested quantity and preferred supplier", "auth": "staff", "permission": "purchasing.orders.view", "paging": true, "query": { "supplierId": "uuid?" }, "response": "ReorderSuggestion", "screens": ["admin/purchasing"] },
+    { "id": "createFromSuggestions", "area": "admin", "method": "POST", "path": "/purchase-orders/from-suggestions", "summary": "Create draft POs (one per preferred supplier) from selected suggestions", "auth": "staff", "permission": "purchasing.orders.manage", "body": { "stockItemIds": "uuid[]", "quantities": { "type": "map<int>?", "desc": "stockItemId → quantity override" } }, "response": "PurchaseOrder[]", "status": 201, "audited": true, "screens": ["admin/purchasing"] },
+
+    { "id": "listDeliveries", "area": "admin", "method": "GET", "path": "/deliveries", "summary": "Expected and arrived purchase deliveries for receiving", "auth": "staff", "permission": "purchasing.orders.view", "paging": true, "query": { "date": "date?", "status": "enum(expected|delayed|arrived|receiving|received|received_with_issues|cancelled)?", "purchaseOrderId": "uuid?" }, "response": "Delivery", "screens": ["ops/receiving"] },
+    { "id": "addDelivery", "area": "admin", "method": "POST", "path": "/purchase-orders/{id}/deliveries", "summary": "Add an expected delivery (carrier, reference, arrival window)", "auth": "staff", "permission": "purchasing.orders.manage", "params": { "id": "uuid" }, "body": "DeliveryInput", "response": "Delivery", "status": 201, "errors": ["ILLEGAL_TRANSITION"], "screens": ["admin/purchasing"] },
+    { "id": "updateDelivery", "area": "admin", "method": "PATCH", "path": "/deliveries/{id}", "summary": "Reschedule or mark a delivery delayed, with a reason", "auth": "staff", "permission": "purchasing.orders.manage", "params": { "id": "uuid" }, "body": "DeliveryUpdate", "response": "Delivery", "errors": ["ILLEGAL_TRANSITION"], "events": ["purchasing.delivery.rescheduled"], "screens": ["ops/receiving", "admin/purchasing"] },
+    { "id": "arriveDelivery", "area": "admin", "method": "POST", "path": "/deliveries/{id}/arrive", "summary": "Check in a delivery at the dock", "auth": "staff", "permission": "purchasing.receipts.record", "params": { "id": "uuid" }, "body": { "dock": "string?", "arrivedAt": "datetime?", "note": "text?" }, "response": "Delivery", "errors": ["ILLEGAL_TRANSITION"], "events": ["purchasing.delivery.arrived"], "screens": ["ops/receiving"] },
+    { "id": "startReceipt", "area": "admin", "method": "POST", "path": "/deliveries/{id}/receipts", "summary": "Start receiving: creates the receiving record with expected quantities", "auth": "staff", "permission": "purchasing.receipts.record", "params": { "id": "uuid" }, "response": "Receipt", "status": 201, "errors": ["ILLEGAL_TRANSITION", "RECEIPT_IN_PROGRESS"], "screens": ["ops/receiving"] },
+    { "id": "getReceivingStats", "area": "admin", "method": "GET", "path": "/deliveries/stats", "summary": "Receiving KPIs and tab counts", "desc": "Expected today (deliveries and units), arrived not received (dock), received this week (deliveries and units), open shortages with their owner, and counts for the Expected / Receiving / Received with issues / Completed tabs.", "auth": "staff", "permission": "purchasing.orders.view", "query": { "date": "date?", "locationId": "uuid?" }, "response": "ReceivingStats", "screens": ["ops/receiving"] },
+    { "id": "listReceipts", "area": "admin", "method": "GET", "path": "/receipts", "summary": "Receiving records (in progress, waiting for confirmation, with issues, completed)", "auth": "staff", "permission": "purchasing.orders.view", "paging": true, "query": { "status": "enum(in_progress|awaiting_confirmation|confirmed|cancelled)?", "withIssues": "bool?", "purchaseOrderId": "uuid?" }, "response": "Receipt", "screens": ["ops/receiving"] },
+    { "id": "getReceipt", "area": "admin", "method": "GET", "path": "/receipts/{id}", "summary": "One receiving record: expected vs received, damage photos, bins, buying cost", "auth": "staff", "permission": "purchasing.orders.view", "params": { "id": "uuid" }, "response": "Receipt", "screens": ["ops/receiving"] },
+    { "id": "updateReceipt", "area": "admin", "method": "PATCH", "path": "/receipts/{id}", "summary": "Record counted, damaged, bin and photos per line (save and finish later)", "auth": "staff", "permission": "purchasing.receipts.record", "params": { "id": "uuid" }, "body": { "lines": "ReceiptLineInput[]", "note": "text?" }, "response": "Receipt", "errors": ["ILLEGAL_TRANSITION", "OVER_RECEIPT"], "screens": ["ops/receiving"] },
+    { "id": "submitReceipt", "area": "admin", "method": "POST", "path": "/receipts/{id}/submit", "summary": "Finish counting: shortages go to Purchasing, units wait in Incoming for Inventory to confirm", "desc": "Sends the counted lines to inventory (submitInbound); damaged lines need photos; shortages update the PO and can raise a claim.", "auth": "staff", "permission": "purchasing.receipts.record", "params": { "id": "uuid" }, "body": { "raiseClaims": "bool?" }, "response": "Receipt", "errors": ["ILLEGAL_TRANSITION", "DAMAGE_PHOTOS_REQUIRED", "OVER_RECEIPT"], "audited": true, "events": ["purchasing.receipt.recorded", "purchasing.purchase_order.status_changed"], "screens": ["ops/receiving"] },
+    { "id": "cancelReceipt", "area": "admin", "method": "POST", "path": "/receipts/{id}/cancel", "summary": "Discard a receiving record started by mistake", "auth": "staff", "permission": "purchasing.receipts.record", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "Receipt", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "screens": ["ops/receiving"] },
+
+    { "id": "listClaims", "area": "admin", "method": "GET", "path": "/claims", "summary": "Supplier claims for shortages and damage", "auth": "staff", "permission": "purchasing.orders.view", "paging": true, "query": { "status": "enum(open|submitted|settled|rejected|withdrawn)?", "supplierId": "uuid?" }, "response": "SupplierClaim", "screens": ["admin/purchasing"] },
+    { "id": "createClaim", "area": "admin", "method": "POST", "path": "/claims", "summary": "Open a supplier claim", "auth": "staff", "permission": "purchasing.claims.manage", "body": "ClaimInput", "response": "SupplierClaim", "status": 201, "audited": true, "screens": ["admin/purchasing"] },
+    { "id": "submitClaim", "area": "admin", "method": "POST", "path": "/claims/{id}/submit", "summary": "Mark a claim as sent to the supplier", "auth": "staff", "permission": "purchasing.claims.manage", "params": { "id": "uuid" }, "body": { "supplierReference": "string?" }, "response": "SupplierClaim", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "screens": ["admin/purchasing"] },
+    { "id": "settleClaim", "area": "admin", "method": "POST", "path": "/claims/{id}/settle", "summary": "Record the supplier's settlement (credit note, refund or replacement)", "auth": "staff", "permission": "purchasing.claims.manage", "params": { "id": "uuid" }, "body": { "settlement": "enum(credit_note|refund|replacement)", "amount": "Money", "reason": "text" }, "response": "SupplierClaim", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["purchasing.claim.settled"], "screens": ["admin/purchasing"] },
+    { "id": "closeClaim", "area": "admin", "method": "POST", "path": "/claims/{id}/close", "summary": "Close a claim as rejected by the supplier or withdrawn", "auth": "staff", "permission": "purchasing.claims.manage", "params": { "id": "uuid" }, "body": { "outcome": "enum(rejected|withdrawn)", "reason": "text" }, "response": "SupplierClaim", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "screens": ["admin/purchasing"] }
+  ],
+  "events": {
+    "publishes": [
+      { "name": "purchasing.purchase_order.sent", "when": "A PO is sent to the supplier", "payload": { "purchaseOrderId": "uuid", "ref": "string", "supplierId": "uuid", "locationId": "uuid", "total": "Money", "lines": "PurchaseOrderLine[]" } },
+      { "name": "purchasing.purchase_order.status_changed", "when": "Any PO status transition", "payload": { "purchaseOrderId": "uuid", "ref": "string", "from": "string", "to": "string", "reason": "text?" } },
+      { "name": "purchasing.delivery.rescheduled", "when": "An expected arrival window changes or a delivery is marked delayed", "payload": { "deliveryId": "uuid?", "purchaseOrderId": "uuid", "ref": "string", "windowFrom": "datetime?", "windowTo": "datetime?", "reason": "text" } },
+      { "name": "purchasing.delivery.late", "when": "A delivery window passed without arrival", "payload": { "deliveryId": "uuid", "purchaseOrderId": "uuid", "ref": "string", "supplierName": "string" } },
+      { "name": "purchasing.delivery.arrived", "when": "A delivery is checked in at the dock", "payload": { "deliveryId": "uuid", "purchaseOrderId": "uuid", "ref": "string", "arrivedAt": "datetime", "dock": "string?" } },
+      { "name": "purchasing.receipt.recorded", "when": "A receiving record is submitted", "payload": { "receiptId": "uuid", "ref": "string", "purchaseOrderId": "uuid", "locationId": "uuid", "lines": "ReceiptLine[]", "hasIssues": "bool" } },
+      { "name": "purchasing.claim.settled", "when": "A supplier settles a claim", "payload": { "claimId": "uuid", "supplierId": "uuid", "purchaseOrderId": "uuid", "settlement": "string", "amount": "Money" } }
+    ],
+    "consumes": [
+      { "name": "inventory.receipt.confirmed", "does": "Mark the receipt confirmed (who made the stock sellable) and add it to the PO timeline" },
+      { "name": "inventory.stock.low", "does": "Refresh reorder suggestions for company stock items" },
+      { "name": "access.approval.decided", "does": "Send an approved PO; record a rejection on the PO timeline" }
+    ]
+  },
+  "permissions": [
+    { "key": "purchasing.orders.view", "audience": "staff", "desc": "View suppliers, purchase orders, deliveries, receipts and claims" },
+    { "key": "purchasing.suppliers.manage", "audience": "staff", "desc": "Create and edit suppliers and price lists" },
+    { "key": "purchasing.orders.manage", "audience": "staff", "desc": "Create, edit, send, cancel and close purchase orders; manage expected deliveries (spending limits from access)" },
+    { "key": "purchasing.receipts.record", "audience": "staff", "desc": "Check in deliveries and record received, damaged and bins (warehouse staff)" },
+    { "key": "purchasing.claims.manage", "audience": "staff", "desc": "Open, submit, settle and close supplier claims" }
+  ],
+  "approvalActions": [
+    { "key": "purchasing.orders.send", "desc": "Send a purchase order to the supplier", "limit": "money", "secondReviewer": "above-limit", "approvers": "Purchasing Manager up to $25,000 per purchase order (example); Business Owner above it" }
+  ],
+  "jobs": [
+    { "name": "purchasing.flag-late-deliveries", "schedule": "every 30 min", "does": "Deliveries past windowTo + grace without arrival → delayed; publish purchasing.delivery.late (work queue for the Purchasing Manager)" },
+    { "name": "purchasing.supplier-performance", "schedule": "nightly 02:30 market time", "does": "Recompute on-time %, average lead time, shortage and damage rates per supplier over the window" },
+    { "name": "purchasing.reorder-suggestions", "schedule": "hourly", "does": "Rebuild suggestions from inventory low stock, incoming quantities and 30-day sales velocity" }
+  ],
+  "settings": [
+    { "key": "purchaseOrderRefFormat", "default": "PUR-YYMM-NNNN", "desc": "Human reference for purchase orders" },
+    { "key": "receiptRefFormat", "default": "REC-YYMMDD-NN", "desc": "Human reference for receiving records" },
+    { "key": "damagePhotosRequired", "default": true, "desc": "Damaged lines need at least one photo" },
+    { "key": "overReceiptAllowedPct", "default": 0, "desc": "Received above ordered allowed without a new PO line" },
+    { "key": "deliveryLateGraceMinutes", "default": 60, "desc": "Grace after the arrival window before a delivery counts as late" },
+    { "key": "reorderCoverDays", "default": 30, "desc": "Days of sales a suggested reorder should cover" },
+    { "key": "performanceWindowDays", "default": 90, "desc": "Window for supplier performance figures" }
+  ],
+  "integrations": [
+    { "name": "Email (through notifications)", "purpose": "Send purchase orders and claims to supplier contacts" }
+  ],
+  "errorCodes": {
+    "SUPPLIER_INACTIVE": { "status": 409, "meaning": "The supplier is deactivated" },
+    "STOCK_ITEM_NOT_COMPANY": { "status": 400, "meaning": "Purchase order lines must be Official Store stock items" },
+    "PO_HAS_RECEIPTS": { "status": 409, "meaning": "Units were already received; close the PO short instead of cancelling" },
+    "RECEIPT_IN_PROGRESS": { "status": 409, "meaning": "This delivery already has a receiving record in progress. details.receiptId" },
+    "DAMAGE_PHOTOS_REQUIRED": { "status": 400, "meaning": "Damaged lines need at least one photo. details.lines" },
+    "OVER_RECEIPT": { "status": 400, "meaning": "Received exceeds ordered beyond the allowed over-receipt. details.lines" }
+  },
+  "notes": [
+    "Where responsibilities meet (plan ch. 2): the Purchasing Manager orders stock, the Warehouse Manager's staff receive it (purchasing.receipts.record), the Inventory Manager confirms the sellable quantity in inventory (purchasing calls inventory.submitInbound; the admin endpoint confirmInbound publishes inventory.receipt.confirmed, which purchasing consumes). A receipt is only a count; nothing becomes sellable here.",
+    "Purchase limits and second approval come from access approval limits for the role; granting purchasing.orders.manage never raises the limit.",
+    "Buying cost per received line (PO unit cost; freight is allocated pro rata by line value) is passed to inventory, which keeps the weighted average unit cost used for margins and valuation.",
+    "Seller stock is not purchased here; only company (Official Store) stock items can appear on purchase orders.",
+    "Put-away bins are suggested by warehouse and recorded on receipt lines; warehouse consumes purchasing.receipt.recorded to create put-away tasks."
+  ]
+}
