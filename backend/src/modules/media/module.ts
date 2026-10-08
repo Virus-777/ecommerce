@@ -1,4 +1,5 @@
 import { hmacWebhookVerifier } from '../../kernel/http/webhooks.js';
+import { secretFor } from '../../kernel/lib/secrets.js';
 import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/media.js';
 import { storeRoutes } from './http/store.js';
@@ -26,7 +27,7 @@ export default defineModule({
     // Providers: deterministic dev adapters (no network). S3-compatible storage, ClamAV and an image /
     // transcoding service replace them behind the same ports (ports.ts).
     const providers = {
-      storage: createDevStorage({ secret: ctx.config.webhookSecrets['media-storage'] ?? ctx.config.webhookSecrets['*'] ?? 'dev-storage-signing-secret', clock: ctx.clock }),
+      storage: createDevStorage({ secret: secretFor(ctx.config, 'media.storage'), clock: ctx.clock }),
       scanner: createDevScanner(),
       processor: createDevProcessor(),
     };

@@ -221,7 +221,7 @@ export class Sender {
     const full: Record<string, unknown> = { ...ctx };
     if (p.unsubscribe && p.address) {
       const token = core.sign({ k: 'u', aud: p.unsubscribe.audience, a: p.unsubscribe.accountId, e: p.address, c: p.channel, g: p.unsubscribe.topicGroup });
-      full.unsubscribe = { url: p.unsubscribe.audience === 'customer' ? `${core.linkUrl('customer', { kind: 'account', id: 'unsubscribe', screen: 'unsubscribe' })}?token=${token}` : `https://seller.marketly.example/seller/notifications/preferences?token=${token}` };
+      full.unsubscribe = { url: p.unsubscribe.audience === 'customer' ? `${core.linkUrl('customer', { kind: 'account', id: 'unsubscribe', screen: 'unsubscribe' })}?token=${token}` : `${core.appUrl('seller')}/seller/notifications/preferences?token=${token}` };
     }
     const tpl = input.templateVersionId ? await this.#versionContent(input.templateVersionId, t, p.channel) : (await core.liveTemplate(t, p.channel)).content;
     const m = render(t, p.channel, tpl, full);

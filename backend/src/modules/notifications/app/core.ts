@@ -4,6 +4,7 @@
  */
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { isNotImplemented } from '../../../kernel/errors/index.js';
+import { secretFor } from '../../../kernel/lib/secrets.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type { ModuleContext } from '../../../kernel/module-system/index.js';
 import type { Actor } from '../../../spec/common.js';
@@ -19,12 +20,6 @@ import type { NotificationsRepository, Providers, TemplateRow, TopicRow, Version
 export const LANGUAGE = 'en-US';
 export const SYSTEM: Actor = { kind: 'system' };
 
-/** Public app addresses used for links in emails when a notice has no url */
-export const APP_URLS: Record<Audience, string> = {
-  customer: 'https://marketly.example',
-  seller: 'https://seller.marketly.example',
-  staff: 'https://admin.marketly.example',
-};
 
 const TTL_MS = 30_000;
 
@@ -60,13 +55,15 @@ export class Core {
     this.repo = deps.repo;
     this.ctx = deps.ctx;
     this.providers = deps.providers;
-    const s = deps.ctx.config.webhookSecrets;
-    const configured = s['notifications-tokens'] ?? s['notifications'] ?? s['*'];
-    if (!configured) deps.ctx.log.warn('notifications: no token secret configured (WEBHOOK_SECRETS["notifications-tokens"]); unsubscribe and reply links stop working after a restart');
-    this.#secret = createHash('sha256').update(`marketly-notifications:${configured ?? randomBytes(32).toString('hex')}`).digest('hex');
+    this.#secret = secretFor(deps.ctx.config, 'notifications.tokens');
   }
 
   now = () => this.ctx.clock.now();
+  /** Public app address for links in emails when a notice has no url (STORE_URL, SELLER_URL, ADMIN_URL) */
+  appUrl(audience: Audience): string {
+    const u = this.ctx.config.publicUrls;
+    return audience === 'customer' ? u.store : audience === 'seller' ? u.seller : u.admin;
+  }
   get launchPhase() {
     return this.ctx.config.launchPhase;
   }
@@ -186,7 +183,7 @@ export class Core {
 
   linkUrl(audience: Audience, link: NoticeLink): string {
     if (link.url) return link.url;
-    return `${APP_URLS[audience]}/${link.screen.replace(/^\/+/, '')}/${encodeURIComponent(link.id)}`;
+    return `${this.appUrl(audience)}/${link.screen.replace(/^\/+/, '')}/${encodeURIComponent(link.id)}`;
   }
 
   sign(payload: Record<string, unknown>) {

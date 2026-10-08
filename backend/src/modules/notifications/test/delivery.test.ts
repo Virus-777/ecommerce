@@ -192,7 +192,7 @@ describe('quiet hours and the dispatch queue', () => {
     clock.advance(9 * 3_600_000 + 60_000); // 08:01
     await app.kernel.jobs.runNow('notifications.dispatch');
     expect(devOutbox.sms.find((s) => s.message.to === '+15553334444')?.message.text).toContain('Reply STOP');
-    expect(emailsTo(c.email)[0]!.message.headers['List-Unsubscribe']).toMatch(/^<https:\/\/marketly\.example\/unsubscribe\/unsubscribe\?token=/);
+    expect(emailsTo(c.email)[0]!.message.headers['List-Unsubscribe']).toMatch(/^<http:\/\/localhost:3000\/unsubscribe\/unsubscribe\?token=/); // STORE_URL (development default)
   });
 });
 

@@ -38,6 +38,12 @@ const schema = z.object({
   AUTH_ISSUER: z.string().default('marketly-identity'),
   /** Identity's private signing key (Ed25519 JWK with kid); its public part is trusted automatically. Development uses the dev key. */
   AUTH_SIGNING_JWK: z.string().optional(),
+  /** Root secret for links and tokens modules sign themselves (unsubscribe, reply-to, storage URLs, checkpoints); see kernel/lib/secrets.ts */
+  APP_SECRET: z.string().min(32).optional(),
+  /** Public addresses of the apps, for links in emails and documents */
+  STORE_URL: z.url().optional(),
+  SELLER_URL: z.url().optional(),
+  ADMIN_URL: z.url().optional(),
   /** Webhook signing secrets per provider: {"stripe":"…","carrier":"…"} (development and tests default to "dev-webhook-secret") */
   WEBHOOK_SECRETS: z.string().optional(),
   /** How often each server pulls session revocations from identity */
@@ -76,6 +82,9 @@ export interface Config {
   jobsEnabled: boolean;
   graphqlPersistedOnly: boolean;
   auth: { jwks: string | undefined; issuer: string; revocationPollMs: number; signingJwk?: Jwk & { kid?: string } };
+  /** Root secret for module-signed links and tokens (derive per purpose with secretFor) */
+  appSecret: string;
+  publicUrls: { store: string; seller: string; admin: string };
   /** Webhook HMAC secrets per provider; `*` applies to any provider (development and tests only) */
   webhookSecrets: Record<string, string>;
   /** Development and tests: sign and accept dev-key tokens */
@@ -117,6 +126,12 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     jobsEnabled: e.JOBS_ENABLED ?? false,
     graphqlPersistedOnly: e.GRAPHQL_PERSISTED_ONLY ?? prod,
     auth: { jwks: e.AUTH_JWKS || undefined, issuer: e.AUTH_ISSUER, revocationPollMs: e.REVOCATION_POLL_MS, signingJwk: e.AUTH_SIGNING_JWK ? JSON.parse(e.AUTH_SIGNING_JWK) : undefined },
+    appSecret: e.APP_SECRET ?? (devTokens ? 'dev-app-secret-not-for-production-use-0000' : ''),
+    publicUrls: {
+      store: (e.STORE_URL ?? 'http://localhost:3000').replace(/\/$/, ''),
+      seller: (e.SELLER_URL ?? 'http://localhost:3001').replace(/\/$/, ''),
+      admin: (e.ADMIN_URL ?? 'http://localhost:3002').replace(/\/$/, ''),
+    },
     webhookSecrets: { ...(devTokens ? { '*': 'dev-webhook-secret' } : {}), ...(e.WEBHOOK_SECRETS ? JSON.parse(e.WEBHOOK_SECRETS) : {}) },
     devTokens,
     devSigning: { file: e.DEV_SIGNING_KEY_FILE },
@@ -130,6 +145,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   };
   if (prod && config.devTokens) throw new Error('DEV_TOKENS cannot be enabled in production');
   if (prod && config.appProof.allowDev) throw new Error('The "dev" app proof cannot be accepted in production');
+  if (prod && !config.appSecret) throw new Error('APP_SECRET is required in production (signs unsubscribe, reply and download links)');
+  if (prod && !(e.STORE_URL && e.SELLER_URL && e.ADMIN_URL)) throw new Error('STORE_URL, SELLER_URL and ADMIN_URL are required in production (links in emails)');
   if (prod && !config.rateLimits) throw new Error('RATE_LIMITS cannot be turned off in production');
   if (prod && !config.auth.jwks) throw new Error('AUTH_JWKS is required in production (the public keys that verify tokens)');
   return config;
