@@ -1,0 +1,1019 @@
+/**
+ * Routing rules: platform event → topic, recipients, link, template variables and dedupe key.
+ * One table for every event in the spec's events.consumes; the service runs it (consumers.ts).
+ *
+ * Conventions for keys other modules may also use:
+ *   dispatch:<groupId>                    seller/staff overdue dispatch notices (resolved on dispatch)
+ *   seller.dispatch.reminder:<groupId>    the seller reminder shipping/orders schedule (cancelled on dispatch)
+ *   return:<returnId>:respond|inspect     seller return action notices
+ *   case:<caseId>                         case action notices (resolved on decided/resolved)
+ *   approval:<requestId>                  approver notices and scheduled due reminders
+ *   workitem:<itemId>                     work queue notices (resolved by workqueues.item.resolved)
+ *   payout:<payoutId>                     failed payout action notices (resolved when paid)
+ */
+import type { EventName, EventPayload } from '../../../kernel/events/index.js';
+import type { Money } from '../../../spec/common.js';
+import type { NoticeLink } from '../../../spec/notifications.js';
+import type { spec } from '../../../spec/notifications.js';
+
+export type RecipientReason = 'lead' | 'backup' | 'member' | 'direct' | 'requester' | 'approver' | 'mention';
+export type RecipientKind = 'customer' | 'guest_email' | 'seller_member' | 'staff_member';
+export type SubjectKey = 'orderId' | 'returnId' | 'caseId' | 'conversationId' | 'groupId';
+
+export type Target =
+  /** A customer by identity account or customers id */
+  | { kind: 'customer'; accountId?: string | null; customerId?: string | null }
+  /** Guest checkout email: email only */
+  | { kind: 'guest'; email: string }
+  /** A bare email address (codes, links, invitations): email only, no inbox */
+  | { kind: 'email'; email: string; accountId?: string | null; recipientKind?: RecipientKind }
+  /** A bare phone number (SMS codes) */
+  | { kind: 'phone'; phone: string; accountId?: string | null }
+  /** A seller workspace (members by permission and preference), or one member of it */
+  | { kind: 'seller'; sellerId: string; accountId?: string | null; memberId?: string | null }
+  /** A staff role: its lead, or the covering backup while the lead is away (the lead keeps a copy) */
+  | { kind: 'role'; roleKey: string }
+  /** One staff member */
+  | { kind: 'staff'; accountId: string; reason?: RecipientReason };
+
+export type RouteTarget =
+  | Target
+  /** Whoever received earlier notices about this order, return, case or conversation */
+  | { kind: 'subject'; audience: 'customer' | 'seller'; key: SubjectKey; value: string | null | undefined }
+  /** An identity account: its customer inbox (member realm) or staff inbox (staff realm) */
+  | { kind: 'account'; accountId: string }
+  /** The email address of an identity account (no inbox) */
+  | { kind: 'account_email'; accountId: string; recipientKind: RecipientKind }
+  /** Every active seller workspace */
+  | { kind: 'all_sellers' };
+
+export interface RouteSend {
+  /** A topic, or one per identity realm (resolved from realmOf) */
+  topic: string | { member: string; staff: string; realmOf: string };
+  to: (RouteTarget | null | undefined | false)[];
+  link: NoticeLink;
+  context?: Record<string, unknown>;
+  subjects?: Partial<Record<SubjectKey, string | null | undefined>>;
+  dedupe: string;
+  actionRequired?: boolean;
+  deadline?: string | null;
+  sellerId?: string | null;
+  group?: string;
+  replyTo?: { module: 'support' | 'messaging'; refId: string };
+  /** Guests get the order link minted by identity (issueOrderLink) */
+  guestOrderLink?: { orderId: string; email: string };
+  /** Skip when this topic was just sent about the same subject (combined notices) */
+  skipIfRecent?: { topic: string; key: SubjectKey; value: string };
+}
+
+export type Effect = 'refreshConsent' | 'customerClosed' | 'reroute' | 'awayEnded' | 'dropOffReminder' | 'approvalDueReminder' | 'dispatchReminder';
+
+export interface EventRoute<P> {
+  /** Done first: action notices resolved (resolve(dedupeKey)) */
+  resolve?: (p: P) => (string | null | undefined)[];
+  /** Done first: scheduled notices cancelled (cancelScheduled(dedupeKey)) */
+  cancel?: (p: P) => (string | null | undefined)[];
+  sends?: (p: P, f: Fmt) => (RouteSend | null | undefined | false | '' | 0)[];
+  /** Side effects the service performs after the sends */
+  effects?: Effect[];
+}
+
+export interface Fmt {
+  money(m: Money | null | undefined): string;
+  date(iso: string | null | undefined): string;
+  dateTime(iso: string | null | undefined): string;
+  /** snake_case code → words */
+  human(code: string | null | undefined): string;
+  /** "in 10 minutes" style */
+  until(iso: string | null | undefined): string;
+}
+
+type Consumed = keyof (typeof spec)['events']['consumes'] & EventName;
+export type Routes = { [N in Consumed]: EventRoute<EventPayload<N>> };
+
+/* ------------------------------------------------------------------ links */
+
+const L = (kind: string, id: string, screen: string, label?: string, ref?: string | null, url?: string | null): NoticeLink => ({ kind, id, screen, ...(label ? { label } : {}), ...(ref ? { ref } : {}), ...(url ? { url } : {}) });
+
+const orderLink = (orderId: string, ref?: string | null) => L('order', orderId, 'account/order', 'View order', ref);
+const returnLink = (returnId: string, ref?: string | null, label = 'View return') => L('return', returnId, 'account/return', label, ref);
+const caseLink = (caseId: string, ref?: string | null) => L('case', caseId, 'account/case', 'View case', ref);
+const sellerOrderLink = (groupId: string, ref?: string | null, label = 'Open order') => L('seller_order', groupId, 'seller/order', label, ref);
+const sellerReturnLink = (returnId: string, ref?: string | null) => L('return', returnId, 'seller/return', 'Open return', ref);
+const accountHealth = (id: string) => L('restriction', id, 'seller/account-health', 'View account health');
+
+const customer = (customerId: string | null | undefined): RouteTarget | null => (customerId ? { kind: 'customer', customerId } : null);
+const seller = (sellerId: string | null | undefined): RouteTarget | null => (sellerId ? { kind: 'seller', sellerId } : null);
+const role = (roleKey: string): RouteTarget => ({ kind: 'role', roleKey });
+const staff = (accountId: string | null | undefined, reason: RecipientReason = 'direct'): RouteTarget | null => (accountId && isUuid(accountId) ? { kind: 'staff', accountId, reason } : null);
+const byOrder = (orderId: string | null | undefined): RouteTarget | null => (orderId ? { kind: 'subject', audience: 'customer', key: 'orderId', value: orderId } : null);
+const byReturn = (returnId: string | null | undefined): RouteTarget | null => (returnId ? { kind: 'subject', audience: 'customer', key: 'returnId', value: returnId } : null);
+const byCase = (caseId: string | null | undefined): RouteTarget | null => (caseId ? { kind: 'subject', audience: 'customer', key: 'caseId', value: caseId } : null);
+const sellerByCase = (caseId: string): RouteTarget => ({ kind: 'subject', audience: 'seller', key: 'caseId', value: caseId });
+
+const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+
+/** Escalation targets of support cases (support's staffEscalate `to`) */
+const CASE_TEAMS: Record<string, string> = {
+  returns: 'returns_manager',
+  finance: 'finance_manager',
+  trust: 'trust_and_risk_manager',
+  seller_management: 'seller_manager',
+  support_lead: 'customer_support_manager',
+};
+
+const ROLE_AREA: Record<string, string> = {
+  returns_manager: 'Returns',
+  finance_manager: 'Finance',
+  trust_and_risk_manager: 'Trust',
+  seller_manager: 'Sellers',
+  customer_support_manager: 'Support',
+};
+
+/** Staff work area of a work queue */
+export function queueArea(queueKey: string): string {
+  const k = queueKey.toLowerCase();
+  if (/dispatch|tracking|deliver|ship|carrier/.test(k)) return 'Shipping';
+  if (/return|inspection/.test(k)) return 'Returns';
+  if (/financ|payout|refund|recon|deposit/.test(k)) return 'Finance';
+  if (/case|support|dispute/.test(k)) return 'Support';
+  if (/seller|application/.test(k)) return 'Sellers';
+  if (/stock|inventory|receiv|purchas/.test(k)) return 'Inventory';
+  if (/pick|pack|warehouse/.test(k)) return 'Operations';
+  if (/trust|risk|fraud/.test(k)) return 'Trust';
+  if (/content|moderation|review/.test(k)) return 'Content';
+  return 'Operations';
+}
+
+const REVIEW_STATES = new Set(['pending_review', 'submitted', 'in_review', 'pending_approval']);
+
+/* ------------------------------------------------------------------ the table */
+
+export const ROUTES: Routes = {
+  /* ---------------------------------------------------------------- identity */
+  'identity.verification.code_issued': {
+    sends: (p, f) => [
+      p.existingAccount
+        ? { topic: 'customer.account.already_registered', to: [{ kind: 'email', email: p.to, accountId: p.accountId }], link: L('account', p.accountId ?? p.challengeId, 'account/sign-in', 'Sign in'), dedupe: `code:${p.challengeId}` }
+        : {
+            topic: 'customer.account.verification_code',
+            to: [p.channel === 'sms' ? { kind: 'phone', phone: p.to, accountId: p.accountId } : { kind: 'email', email: p.to, accountId: p.accountId }],
+            link: L('account', p.accountId ?? p.challengeId, 'account/verify', 'Enter code'),
+            context: { code: { value: p.code, expires: f.until(p.expiresAt) } },
+            dedupe: `code:${p.challengeId}`,
+          },
+    ],
+  },
+  'identity.password_reset.requested': {
+    sends: (p) => [
+      {
+        topic: { member: 'customer.account.password_reset', staff: 'staff.account.password_reset', realmOf: p.accountId },
+        to: [{ kind: 'email', email: p.email, accountId: p.accountId }],
+        link: L('account', p.accountId, 'account/reset-password', 'Reset password', null, p.resetUrl),
+        context: { reset: { url: p.resetUrl } },
+        dedupe: `reset:${p.accountId}:${p.expiresAt}`,
+      },
+    ],
+  },
+  'identity.password.changed': {
+    sends: (p) => [
+      {
+        topic: p.realm === 'staff' ? 'staff.account.password_changed' : 'customer.account.password_changed',
+        to: [p.realm === 'staff' ? staff(p.accountId) : { kind: 'customer', accountId: p.accountId }],
+        link: L('account', p.accountId, p.realm === 'staff' ? 'admin/security' : 'account/security', 'Review security'),
+        dedupe: `password:${p.accountId}:${p.at}`,
+      },
+    ],
+  },
+  'identity.session.new_device': {
+    sends: (p) => [
+      {
+        topic: p.realm === 'staff' ? 'staff.account.new_device' : 'customer.account.new_device',
+        to: [p.realm === 'staff' ? staff(p.accountId) : { kind: 'customer', accountId: p.accountId }],
+        link: L('account', p.accountId, p.realm === 'staff' ? 'admin/security' : 'account/security', 'Review security'),
+        context: { device: { label: p.deviceLabel, location: p.location ?? 'unknown location' } },
+        dedupe: `device:${p.accountId}:${p.at}`,
+      },
+    ],
+  },
+  'identity.email.changed': {
+    sends: (p) => [
+      {
+        topic: { member: 'customer.account.email_changed', staff: 'staff.account.email_changed', realmOf: p.accountId },
+        to: [{ kind: 'account', accountId: p.accountId }, { kind: 'email', email: p.oldEmail, accountId: p.accountId }, { kind: 'email', email: p.newEmail, accountId: p.accountId }],
+        link: L('account', p.accountId, 'account/security', 'Review security'),
+        context: { email: { old: maskEmail(p.oldEmail), new: maskEmail(p.newEmail) } },
+        dedupe: `email:${p.accountId}:${p.newEmail.toLowerCase()}`,
+      },
+    ],
+  },
+  'identity.two_step.changed': {
+    sends: (p) => [
+      {
+        topic: { member: 'customer.account.two_step_changed', staff: 'staff.account.two_step_changed', realmOf: p.accountId },
+        to: [{ kind: 'account', accountId: p.accountId }],
+        link: L('account', p.accountId, 'account/security', 'Review security'),
+        context: { twostep: { state: p.enabled ? 'turned on' : 'turned off' } },
+        dedupe: `twostep:${p.accountId}:${p.enabled}:${p.method ?? ''}`,
+      },
+    ],
+  },
+  'identity.account.locked': {
+    sends: (p, f) => [
+      {
+        topic: p.realm === 'staff' ? 'staff.account.locked' : 'customer.account.locked',
+        to: [p.realm === 'staff' ? staff(p.accountId) : { kind: 'customer', accountId: p.accountId }],
+        link: L('account', p.accountId, p.realm === 'staff' ? 'admin/security' : 'account/security', 'Reset password'),
+        context: { lock: { until: p.until ? f.dateTime(p.until) : 'you reset your password' } },
+        dedupe: `locked:${p.accountId}:${p.until ?? p.cause}`,
+      },
+      p.realm === 'staff' && {
+        topic: 'staff.security.account_locked',
+        to: [role('platform_administrator')],
+        link: L('account', p.accountId, 'admin/staff', 'Open staff member'),
+        context: { lock: { until: p.until ? `until ${f.dateTime(p.until)}` : f.human(p.cause) } },
+        dedupe: `locked:${p.accountId}:${p.until ?? p.cause}`,
+      },
+    ],
+  },
+  'identity.invitation.created': {
+    sends: (p) => [
+      {
+        topic: p.purpose === 'staff' ? 'staff.account.invitation' : 'seller.member.invitation',
+        to: [{ kind: 'email', email: p.email, recipientKind: p.purpose === 'staff' ? 'staff_member' : 'seller_member' }],
+        link: L('account', p.invitationId, 'accept-invitation', 'Accept invitation', p.contextRef, p.acceptUrl),
+        context: { invite: { url: p.acceptUrl, context: p.contextLabel ?? 'Marketly', by: p.invitedBy.name ?? 'Marketly' }, recipient: { name: p.name } },
+        dedupe: `invite:${p.invitationId}`,
+      },
+    ],
+  },
+  'identity.user.verified': {
+    sends: (p) => [
+      p.channel === 'email' && { topic: 'customer.account.welcome', to: [{ kind: 'customer', accountId: p.accountId }], link: L('account', p.accountId, 'account/overview', 'Go to my account'), dedupe: `welcome:${p.accountId}` },
+    ],
+  },
+
+  /* ---------------------------------------------------------------- customers */
+  'customers.marketing_preferences.changed': { effects: ['refreshConsent'] },
+  'customers.account.closed': { effects: ['customerClosed'] },
+  'customers.data_export.ready': {
+    sends: (p, f) => [
+      { topic: 'customer.account.data_export_ready', to: [customer(p.customerId)], link: L('account', p.requestId, 'account/privacy', 'Download'), context: { export: { expires: f.date(p.expiresAt) } }, dedupe: `export:${p.requestId}` },
+    ],
+  },
+
+  /* ---------------------------------------------------------------- orders */
+  'orders.order.accepted': {
+    effects: ['dispatchReminder'],
+    sends: (p, f) => [
+      {
+        topic: 'customer.order.accepted',
+        to: [p.customerId ? customer(p.customerId) : { kind: 'guest', email: p.contactEmail }],
+        link: orderLink(p.orderId, p.ref),
+        context: { order: { ref: p.ref, total: f.money(p.total) } },
+        subjects: { orderId: p.orderId },
+        dedupe: `order:${p.orderId}:accepted`,
+        ...(p.customerId ? {} : { guestOrderLink: { orderId: p.orderId, email: p.contactEmail } }),
+      },
+      ...p.groups
+        .filter((g) => g.ownerType === 'seller' && g.sellerId)
+        .map((g) => ({
+          topic: 'seller.order.new',
+          to: [seller(g.sellerId)],
+          link: sellerOrderLink(g.groupId, p.ref),
+          context: { order: { ref: p.ref, total: f.money(g.total) }, due: { date: f.dateTime(g.dispatchBy) } },
+          subjects: { orderId: p.orderId, groupId: g.groupId },
+          sellerId: g.sellerId,
+          dedupe: `order:${p.orderId}:${g.groupId}:new`,
+        })),
+    ],
+  },
+  'orders.item.cancelled': {
+    sends: (p, f) => [
+      {
+        topic: 'customer.order.item_cancelled',
+        to: [byOrder(p.orderId)],
+        link: orderLink(p.orderId, p.ref),
+        context: { order: { ref: p.ref }, item: { count: p.quantity }, refund: { amount: f.money(p.refund.total) } },
+        subjects: { orderId: p.orderId, groupId: p.groupId },
+        dedupe: `cancellation:${p.cancellationId}:${p.itemId}`,
+      },
+      p.ownerType === 'seller' &&
+        p.initiatedBy !== 'seller' && {
+          topic: 'seller.order.item_cancelled',
+          to: [seller(p.sellerId)],
+          link: sellerOrderLink(p.groupId, p.ref),
+          context: { order: { ref: p.ref }, item: { count: p.quantity } },
+          subjects: { orderId: p.orderId, groupId: p.groupId },
+          sellerId: p.sellerId,
+          dedupe: `cancellation:${p.cancellationId}:${p.itemId}`,
+        },
+    ],
+  },
+  'orders.item.delayed': {
+    sends: (p, f) => [
+      {
+        topic: 'customer.order.delayed',
+        to: [byOrder(p.orderId)],
+        link: L('order', p.orderId, 'account/order', 'See your options'),
+        context: { delay: { dispatchBy: p.expectedDispatchBy ? f.date(p.expectedDispatchBy) : 'to be confirmed', reason: p.reason } },
+        subjects: { orderId: p.orderId, groupId: p.groupId },
+        dedupe: `delay:${p.groupId}:${p.expectedDispatchBy ?? p.source}`,
+      },
+    ],
+  },
+  'orders.cancellation.decided': {
+    sends: (p) => [
+      {
+        topic: 'customer.order.cancellation_decided',
+        to: [byOrder(p.orderId)],
+        link: orderLink(p.orderId),
+        context: { cancellation: { outcome: p.outcome === 'auto_accepted' ? 'accepted' : p.outcome } },
+        subjects: { orderId: p.orderId },
+        dedupe: `cancellation:${p.cancellationId}:decided`,
+      },
+    ],
+  },
+
+  /* ---------------------------------------------------------------- payments */
+  'payments.payment.captured': {
+    sends: (p, f) => [
+      {
+        topic: 'customer.payment.captured',
+        to: [byOrder(p.orderId)],
+        link: orderLink(p.orderId),
+        context: { payment: { amount: f.money(p.amount) } },
+        subjects: { orderId: p.orderId },
+        dedupe: `payment:${p.captureId}`,
+        skipIfRecent: { topic: 'customer.order.accepted', key: 'orderId', value: p.orderId },
+      },
+    ],
+  },
+  'payments.payment.failed': {
+    sends: (p) => [
+      p.orderId && { topic: 'customer.payment.failed', to: [byOrder(p.orderId)], link: L('order', p.orderId, 'account/order', 'Try again'), subjects: { orderId: p.orderId }, dedupe: `payment-failed:${p.intentId}:${p.at}` },
+    ],
+  },
+  'payments.payment.pending_check': {
+    sends: (p, f) => [
+      p.orderId && { topic: 'customer.payment.pending_check', to: [byOrder(p.orderId)], link: L('order', p.orderId, 'account/order', 'View order status'), context: { payment: { amount: f.money(p.amount) } }, subjects: { orderId: p.orderId }, dedupe: `payment-check:${p.intentId}` },
+    ],
+  },
+  'payments.refund.sent': {
+    sends: (p, f) => [
+      {
+        topic: 'customer.refund.sent',
+        to: [byOrder(p.orderId)],
+        link: L('refund', p.refundId, 'account/refund', 'Track refund', p.ref),
+        context: { refund: { amount: f.money(p.amount), destination: p.destination } },
+        subjects: { orderId: p.orderId },
+        dedupe: `refund:${p.refundId}:sent`,
+      },
+    ],
+  },
+  'payments.refund.failed': {
+    sends: (p, f) => [
+      p.finalAttempt && { topic: 'customer.refund.failed', to: [byOrder(p.orderId)], link: L('refund', p.refundId, 'account/refund', 'View refund', p.ref), context: { refund: { amount: f.money(p.amount), reason: p.reason } }, subjects: { orderId: p.orderId }, dedupe: `refund:${p.refundId}:failed` },
+      p.finalAttempt && {
+        topic: 'staff.finance.refund_failed',
+        to: [role('finance_manager')],
+        link: L('refund', p.refundId, 'admin/refunds', 'Open refund', p.ref),
+        context: { refund: { amount: f.money(p.amount), reason: p.reason } },
+        subjects: { orderId: p.orderId },
+        dedupe: `refund:${p.refundId}`,
+      },
+    ],
+  },
+  'payments.chargeback.opened': {
+    sends: (p, f) => [
+      {
+        topic: 'staff.finance.chargeback_opened',
+        to: [role('finance_manager')],
+        link: L('chargeback', p.disputeId, 'admin/disputes', 'Open dispute', p.ref),
+        context: { chargeback: { ref: p.ref, amount: f.money(p.amount) } },
+        subjects: { orderId: p.orderId },
+        dedupe: `chargeback:${p.disputeId}`,
+      },
+      p.sellerId && {
+        topic: 'seller.order.dispute_opened',
+        to: [seller(p.sellerId)],
+        link: p.groupId ? sellerOrderLink(p.groupId, p.ref, 'Add evidence') : L('chargeback', p.disputeId, 'seller/disputes', 'Add evidence', p.ref),
+        context: { chargeback: { ref: p.ref, amount: f.money(p.amount) }, due: { date: f.dateTime(p.evidenceDueAt) } },
+        subjects: { orderId: p.orderId, groupId: p.groupId },
+        sellerId: p.sellerId,
+        deadline: p.evidenceDueAt,
+        dedupe: `chargeback:${p.disputeId}`,
+      },
+    ],
+  },
+
+  /* ---------------------------------------------------------------- shipping */
+  'shipping.shipment.dispatched': {
+    resolve: (p) => [`dispatch:${p.groupId}`, `seller.dispatch.reminder:${p.groupId}`],
+    cancel: (p) => [`dispatch:${p.groupId}`, `seller.dispatch.reminder:${p.groupId}`],
+    sends: (p, f) => [
+      p.kind !== 'return' && {
+        topic: 'customer.shipment.dispatched',
+        to: [byOrder(p.orderId)],
+        link: L('shipment', p.shipmentId, 'account/tracking', 'Track package'),
+        context: {
+          package: { items: p.lines.map((l) => `${l.title}${l.variantLabel ? ` (${l.variantLabel})` : ''} × ${l.quantity}`).join(', ') },
+          delivery: { estimate: p.estimatedArrival ? `${f.date(p.estimatedArrival.from)}–${f.date(p.estimatedArrival.to)}` : 'shown in tracking' },
+        },
+        subjects: { orderId: p.orderId, groupId: p.groupId, ...(p.returnId ? { returnId: p.returnId } : {}) },
+        dedupe: `shipment:${p.shipmentId}:dispatched`,
+      },
+    ],
+  },
+  'shipping.shipment.delivered': {
+    sends: (p) => [
+      p.kind !== 'return' && {
+        topic: 'customer.shipment.delivered',
+        to: [byOrder(p.orderId)],
+        link: L('order', p.orderId, 'account/order', 'View order'),
+        context: { package: { items: p.lines.map((l) => `${l.title} × ${l.quantity}`).join(', ') } },
+        subjects: { orderId: p.orderId, groupId: p.groupId },
+        dedupe: `shipment:${p.shipmentId}:delivered`,
+      },
+    ],
+  },
+  'shipping.shipment.exception': {
+    sends: (p, f) => [
+      p.kind !== 'missing_tracking' && {
+        topic: 'customer.shipment.exception',
+        to: [byOrder(p.orderId)],
+        link: L('shipment', p.shipmentId ?? p.orderId, 'account/tracking', 'See next steps'),
+        context: { exception: { kind: f.human(p.kind), action: p.customerAction ?? 'we will update you' }, due: { date: f.dateTime(p.dueAt) } },
+        subjects: { orderId: p.orderId, groupId: p.groupId },
+        actionRequired: Boolean(p.customerAction),
+        deadline: p.customerAction ? p.dueAt : null,
+        dedupe: `exception:${p.exceptionId}`,
+      },
+      {
+        topic: 'staff.shipping.exception',
+        to: [role('shipping_manager')],
+        link: L('order', p.orderId, 'ops/dispatch', 'Open exception'),
+        context: { exception: { kind: f.human(p.kind) }, due: { date: f.dateTime(p.dueAt) } },
+        subjects: { orderId: p.orderId, groupId: p.groupId },
+        deadline: p.dueAt,
+        dedupe: `exception:${p.exceptionId}`,
+      },
+    ],
+  },
+  'shipping.dispatch.overdue': {
+    sends: (p, f) => [
+      p.ownerType === 'seller' &&
+        p.sellerId && {
+          topic: 'seller.dispatch.overdue',
+          to: [seller(p.sellerId)],
+          link: sellerOrderLink(p.groupId, p.orderRef),
+          context: { order: { ref: p.orderRef }, due: { date: f.dateTime(p.dueAt) } },
+          subjects: { orderId: p.orderId, groupId: p.groupId },
+          sellerId: p.sellerId,
+          deadline: p.dueAt,
+          dedupe: `dispatch:${p.groupId}`,
+        },
+      {
+        topic: 'staff.shipping.dispatch_overdue',
+        to: [role('shipping_manager')],
+        link: L('order', p.orderId, 'ops/dispatch', 'Open dispatch queue', p.orderRef),
+        context: { order: { ref: p.orderRef }, seller: { name: p.ownerType === 'official' ? 'The Official Store' : 'The seller' }, due: { date: f.dateTime(p.dueAt) } },
+        subjects: { orderId: p.orderId, groupId: p.groupId },
+        deadline: p.dueAt,
+        dedupe: `dispatch:${p.groupId}`,
+      },
+    ],
+  },
+
+  /* ---------------------------------------------------------------- returns */
+  'returns.return.requested': {
+    sends: (p, f) => [
+      p.ownerType === 'seller' &&
+        p.sellerId && {
+          topic: 'seller.return.requested',
+          to: [seller(p.sellerId)],
+          link: sellerReturnLink(p.returnId, p.ref),
+          context: { return: { ref: p.ref, reason: f.human(p.reason) }, due: { date: f.dateTime(p.responseDueAt) } },
+          subjects: { returnId: p.returnId, orderId: p.orderId },
+          sellerId: p.sellerId,
+          deadline: p.responseDueAt,
+          dedupe: `return:${p.returnId}:respond`,
+        },
+    ],
+  },
+  'returns.return.info_requested': {
+    sends: (p, f) => [
+      { topic: 'customer.return.info_requested', to: [byReturn(p.returnId)], link: returnLink(p.returnId, null, 'Reply'), context: { due: { date: f.dateTime(p.replyDueAt) } }, subjects: { returnId: p.returnId }, deadline: p.replyDueAt, dedupe: `return:${p.returnId}:info:${p.replyDueAt}` },
+    ],
+  },
+  'returns.return.approved': {
+    resolve: (p) => [`return:${p.returnId}:respond`],
+    sends: (p, f) => [
+      {
+        topic: 'customer.return.approved',
+        to: [byReturn(p.returnId)],
+        link: returnLink(p.returnId),
+        context: { return: { outcome: p.withoutReturn ? "You don't need to send the item back." : p.dropOffBy ? `Drop the package off by ${f.date(p.dropOffBy)}.` : 'We will send your return label or drop-off instructions.' } },
+        subjects: { returnId: p.returnId },
+        deadline: p.dropOffBy ?? null,
+        dedupe: `return:${p.returnId}:approved`,
+      },
+    ],
+  },
+  'returns.return.rejected': {
+    resolve: (p) => [`return:${p.returnId}:respond`],
+    sends: (p, f) => [
+      { topic: 'customer.return.rejected', to: [byReturn(p.returnId)], link: returnLink(p.returnId, null, 'Get help'), context: { return: { reason: f.human(p.reasonCode) } }, subjects: { returnId: p.returnId }, dedupe: `return:${p.returnId}:rejected` },
+    ],
+  },
+  'returns.label.created': {
+    effects: ['dropOffReminder'],
+    sends: (p) => [
+      { topic: 'customer.return.label_ready', to: [byReturn(p.returnId) ?? byOrder(p.orderId)], link: returnLink(p.returnId, null, 'Get label'), subjects: { returnId: p.returnId, orderId: p.orderId }, dedupe: `return:${p.returnId}:label:${p.labelId}` },
+    ],
+  },
+  'returns.return.received': {
+    cancel: (p) => [`return-dropoff:${p.returnId}`],
+    sends: (p) => [
+      { topic: 'customer.return.received', to: [byReturn(p.returnId)], link: returnLink(p.returnId), subjects: { returnId: p.returnId }, dedupe: `return:${p.returnId}:received` },
+      p.ownerType === 'seller' && p.sellerId && { topic: 'seller.return.received', to: [seller(p.sellerId)], link: sellerReturnLink(p.returnId), subjects: { returnId: p.returnId }, sellerId: p.sellerId, dedupe: `return:${p.returnId}:inspect` },
+    ],
+  },
+  'returns.return.inspected': {
+    resolve: (p) => [`return:${p.returnId}:inspect`],
+    sends: (p, f) => [
+      { topic: 'customer.return.inspected', to: [byReturn(p.returnId)], link: returnLink(p.returnId), context: { return: { outcome: f.human(p.conditionOutcome) } }, subjects: { returnId: p.returnId }, dedupe: `return:${p.returnId}:inspected` },
+    ],
+  },
+  'returns.return.escalated': {
+    sends: (p, f) => [
+      { topic: 'staff.returns.escalated', to: [role('returns_manager')], link: L('return', p.returnId, 'admin/returns', 'Open return'), context: { return: { reason: f.human(p.reason) } }, subjects: { returnId: p.returnId, orderId: p.orderId }, dedupe: `return:${p.returnId}:escalated` },
+      p.ownerType === 'seller' && p.sellerId && { topic: 'seller.return.escalated', to: [seller(p.sellerId)], link: sellerReturnLink(p.returnId), context: { return: { reason: f.human(p.reason) } }, subjects: { returnId: p.returnId, orderId: p.orderId }, sellerId: p.sellerId, dedupe: `return:${p.returnId}:escalated` },
+    ],
+  },
+  'returns.refund.approved': {
+    sends: (p, f) => [
+      {
+        topic: 'customer.refund.approved',
+        to: [p.returnId ? byReturn(p.returnId) : p.caseId ? byCase(p.caseId) : byOrder(p.orderId), byOrder(p.orderId)],
+        link: L('refund', p.refundRequestId, 'account/refund', 'Track refund'),
+        context: { refund: { amount: f.money(p.total) } },
+        subjects: { orderId: p.orderId, returnId: p.returnId, caseId: p.caseId },
+        dedupe: `refund-request:${p.refundRequestId}`,
+      },
+    ],
+  },
+  'returns.replacement.created': {
+    sends: (p) => [
+      { topic: 'customer.replacement.created', to: [byReturn(p.returnId), byOrder(p.orderId)], link: orderLink(p.orderId), subjects: { returnId: p.returnId, orderId: p.orderId }, dedupe: `replacement:${p.replacementId}` },
+    ],
+  },
+
+  /* ---------------------------------------------------------------- support */
+  'support.case.opened': {
+    sends: (p, f) => [
+      p.customerId && {
+        topic: 'customer.case.opened',
+        to: [customer(p.customerId)],
+        link: caseLink(p.caseId, p.ref),
+        context: { case: { ref: p.ref }, due: { date: p.nextResponseDueAt ? f.dateTime(p.nextResponseDueAt) : 'the next business day' } },
+        subjects: { caseId: p.caseId, orderId: p.orderId },
+        dedupe: `case:${p.caseId}`,
+      },
+      p.sellerId &&
+        p.kind !== 'seller_request' && {
+          topic: 'seller.case.opened',
+          to: [seller(p.sellerId)],
+          link: L('case', p.caseId, 'seller/case', 'Respond', p.ref),
+          context: { case: { ref: p.ref }, due: { date: p.nextResponseDueAt ? f.dateTime(p.nextResponseDueAt) : 'as soon as possible' } },
+          subjects: { caseId: p.caseId, orderId: p.orderId },
+          sellerId: p.sellerId,
+          actionRequired: p.handler === 'seller',
+          deadline: p.handler === 'seller' ? p.nextResponseDueAt : null,
+          dedupe: `case:${p.caseId}`,
+        },
+    ],
+  },
+  'support.case.message_added': {
+    sends: (p) => [
+      p.audience !== 'internal' &&
+        p.audience !== 'seller' &&
+        p.authorRole !== 'customer' && { topic: 'customer.case.reply', to: [byCase(p.caseId)], link: caseLink(p.caseId), subjects: { caseId: p.caseId }, replyTo: { module: 'support', refId: p.caseId }, dedupe: `case-message:${p.messageId}` },
+      p.audience !== 'internal' &&
+        p.audience !== 'customer' &&
+        p.authorRole !== 'seller' && { topic: 'seller.case.reply', to: [sellerByCase(p.caseId)], link: L('case', p.caseId, 'seller/case', 'View reply'), subjects: { caseId: p.caseId }, replyTo: { module: 'support', refId: p.caseId }, dedupe: `case-message:${p.messageId}` },
+    ],
+  },
+  'support.case.escalated': {
+    sends: (p, f) => {
+      const roleKey = CASE_TEAMS[p.to] ?? (p.to in ROLE_AREA ? p.to : 'customer_support_manager');
+      return [
+        {
+          topic: 'staff.case.escalated',
+          to: [role(roleKey)],
+          link: L('case', p.caseId, 'admin/case', 'Open case', p.ref),
+          context: { case: { ref: p.ref }, escalation: { reason: f.human(p.reason) } },
+          subjects: { caseId: p.caseId, orderId: p.orderId },
+          group: ROLE_AREA[roleKey] ?? 'Support',
+          dedupe: `case:${p.caseId}:escalated:${p.to}`,
+        },
+      ];
+    },
+  },
+  'support.case.overdue': {
+    sends: (p, f) => [
+      { topic: 'staff.case.overdue', to: [role('customer_support_manager')], link: L('case', p.caseId, 'admin/case', 'Open case'), context: { due: { date: f.dateTime(p.dueAt) } }, subjects: { caseId: p.caseId }, deadline: p.dueAt, dedupe: `case:${p.caseId}:overdue:${p.dueAt}` },
+    ],
+  },
+  'support.case.decided': {
+    resolve: (p) => [`case:${p.caseId}`],
+    sends: (p, f) => [
+      {
+        topic: 'customer.case.decided',
+        to: [byCase(p.caseId)],
+        link: caseLink(p.caseId, p.ref),
+        context: { case: { ref: p.ref, outcome: f.human(p.outcome) }, appeal: { deadline: p.appealDeadline ? f.date(p.appealDeadline) : 'the date shown in the case' } },
+        subjects: { caseId: p.caseId, orderId: p.orderId, returnId: p.returnId },
+        dedupe: `case:${p.caseId}:decided:${p.final}`,
+      },
+      p.sellerId && {
+        topic: 'seller.case.decided',
+        to: [seller(p.sellerId)],
+        link: L('case', p.caseId, 'seller/case', 'View decision', p.ref),
+        context: { case: { ref: p.ref, outcome: f.human(p.outcome) }, appeal: { deadline: p.appealDeadline ? f.date(p.appealDeadline) : 'the date shown in the case' } },
+        subjects: { caseId: p.caseId, orderId: p.orderId },
+        sellerId: p.sellerId,
+        dedupe: `case:${p.caseId}:decided:${p.final}`,
+      },
+    ],
+  },
+  'support.case.resolved': {
+    resolve: (p) => [`case:${p.caseId}`],
+    sends: (p) => [{ topic: 'customer.case.resolved', to: [byCase(p.caseId)], link: caseLink(p.caseId, p.ref), context: { case: { ref: p.ref } }, subjects: { caseId: p.caseId }, dedupe: `case:${p.caseId}:resolved` }],
+  },
+
+  /* ---------------------------------------------------------------- messaging */
+  'messaging.message.sent': {
+    sends: (p) => {
+      const from = p.authorKind === 'seller' ? 'the seller' : p.authorKind === 'customer' ? 'a customer' : 'Marketly';
+      return [
+        p.recipientKinds.includes('customer') &&
+          p.customerId && {
+            topic: 'customer.message.new',
+            to: [customer(p.customerId)],
+            link: L('conversation', p.conversationId, 'account/messages', 'Read message'),
+            context: { message: { from } },
+            subjects: { conversationId: p.conversationId, orderId: p.orderId },
+            replyTo: { module: 'messaging', refId: p.conversationId },
+            dedupe: `message:${p.messageId}`,
+          },
+        p.recipientKinds.includes('seller') &&
+          p.sellerId && {
+            topic: 'seller.message.new',
+            to: [seller(p.sellerId)],
+            link: L('conversation', p.conversationId, 'seller/messages', 'Reply'),
+            context: { message: { from } },
+            subjects: { conversationId: p.conversationId, orderId: p.orderId },
+            sellerId: p.sellerId,
+            replyTo: { module: 'messaging', refId: p.conversationId },
+            dedupe: `message:${p.messageId}`,
+          },
+      ];
+    },
+  },
+
+  /* ---------------------------------------------------------------- sellers */
+  'sellers.application.submitted': {
+    sends: (p) => [{ topic: 'staff.seller.application_submitted', to: [role('seller_manager')], link: L('seller', p.sellerId, 'admin/seller-application', 'Review application'), dedupe: `seller-application:${p.applicationId}` }],
+  },
+  'sellers.application.information_requested': {
+    sends: (p, f) => [
+      { topic: 'seller.application.information_requested', to: [seller(p.sellerId)], link: L('seller', p.applicationId, 'seller/application', 'Answer now'), context: { due: { date: f.dateTime(p.dueAt) } }, sellerId: p.sellerId, deadline: p.dueAt, dedupe: `seller-application:${p.applicationId}:info` },
+    ],
+  },
+  'sellers.application.decided': {
+    resolve: (p) => [`seller-application:${p.applicationId}`, `seller-application:${p.applicationId}:info`],
+    sends: (p) => [
+      { topic: 'seller.application.decided', to: [seller(p.sellerId)], link: L('seller', p.applicationId, 'seller/application', 'See next steps'), context: { change: { outcome: p.outcome } }, sellerId: p.sellerId, dedupe: `seller-application:${p.applicationId}:decided` },
+    ],
+  },
+  'sellers.seller.restricted': {
+    sends: (p, f) => [
+      {
+        topic: 'seller.account.restricted',
+        to: [seller(p.sellerId)],
+        link: accountHealth(p.restrictionId),
+        context: { restriction: { reason: p.reason, activities: p.affectedActivities.map((a) => f.human(a)).join(', ') }, appeal: { deadline: f.date(p.appealDeadline) } },
+        sellerId: p.sellerId,
+        dedupe: `restriction:${p.restrictionId}`,
+      },
+    ],
+  },
+  'sellers.seller.suspended': {
+    sends: (p, f) => [
+      { topic: 'seller.account.suspended', to: [seller(p.sellerId)], link: accountHealth(p.suspensionId), context: { restriction: { reason: p.reason }, appeal: { deadline: f.date(p.appealDeadline) } }, sellerId: p.sellerId, dedupe: `suspension:${p.suspensionId}` },
+    ],
+  },
+  'sellers.seller.reinstated': {
+    sends: (p) => [
+      { topic: 'seller.account.reinstated', to: [seller(p.sellerId)], link: accountHealth(p.liftedRestrictionId ?? p.endedSuspensionId ?? p.sellerId), sellerId: p.sellerId, dedupe: `reinstated:${p.sellerId}:${p.liftedRestrictionId ?? p.endedSuspensionId ?? p.to}` },
+    ],
+  },
+  'sellers.warning.issued': {
+    sends: (p) => [{ topic: 'seller.account.warning', to: [seller(p.sellerId)], link: accountHealth(p.warningId), context: { warning: { title: p.title } }, sellerId: p.sellerId, dedupe: `warning:${p.warningId}` }],
+  },
+  'sellers.appeal.decided': {
+    sends: (p, f) => [{ topic: 'seller.appeal.decided', to: [seller(p.sellerId)], link: L('appeal', p.appealId, 'seller/account-health', 'View appeal'), context: { appeal: { outcome: f.human(p.outcome) } }, sellerId: p.sellerId, dedupe: `appeal:${p.appealId}` }],
+  },
+  'sellers.payout_account.changed': {
+    sends: (p) => [
+      { topic: 'seller.payout_account.changed', to: [seller(p.sellerId)], link: L('payout_account', p.changeId, 'seller/payout-settings', 'Review payout settings'), context: { destination: { label: p.label } }, sellerId: p.sellerId, dedupe: `payout-account:${p.changeId}` },
+    ],
+  },
+  'sellers.change_request.decided': {
+    sends: (p, f) => [
+      {
+        topic: 'seller.change_request.decided',
+        to: [seller(p.sellerId)],
+        link: L('change_request', p.changeRequestId, 'seller/settings', 'View request'),
+        context: { change: { kind: f.human(p.kind), outcome: p.approved ? 'approved' : 'rejected' } },
+        sellerId: p.sellerId,
+        dedupe: `change-request:${p.changeRequestId}`,
+      },
+    ],
+  },
+  'sellers.verification.changed': {
+    sends: (p, f) => [
+      { topic: 'seller.verification.changed', to: [seller(p.sellerId)], link: L('seller', p.sellerId, 'seller/account-health', 'View verification'), context: { verification: { state: f.human(p.state) } }, sellerId: p.sellerId, dedupe: `verification:${p.sellerId}:${p.state}` },
+    ],
+  },
+  'sellers.launch_review.decided': {
+    sends: (p) => [
+      {
+        topic: 'seller.launch_review.decided',
+        to: [seller(p.sellerId)],
+        link: L('seller', p.sellerId, 'seller/launch', 'View launch checklist'),
+        context: { review: { outcome: p.outcome === 'passed' ? 'passed' : 'needs changes' } },
+        sellerId: p.sellerId,
+        dedupe: `launch-review:${p.sellerId}:${p.decidedAt}`,
+      },
+    ],
+  },
+
+  /* ---------------------------------------------------------------- finance (destinations), catalog, inventory */
+  'finance.destination.verified': {
+    sends: (p) => [{ topic: 'seller.payout_destination.verified', to: [seller(p.sellerId)], link: L('payout_account', p.reviewId, 'seller/payout-settings', 'View payout settings'), sellerId: p.sellerId, dedupe: `destination:${p.reviewId}` }],
+  },
+  'finance.destination.rejected': {
+    sends: (p) => [
+      { topic: 'seller.payout_destination.rejected', to: [seller(p.sellerId)], link: L('payout_account', p.reviewId, 'seller/payout-settings', 'Update payout settings'), context: { destination: { reason: p.reason } }, sellerId: p.sellerId, dedupe: `destination:${p.reviewId}` },
+    ],
+  },
+  'catalog.product.changes_requested': {
+    sends: (p) => [
+      p.ownerSellerId && {
+        topic: 'seller.product.changes_requested',
+        to: [seller(p.ownerSellerId)],
+        link: L('product', p.productId, 'seller/product', 'Fix product'),
+        context: { product: { reason: [p.reason, ...Object.entries(p.fields ?? {}).map(([k, v]) => `${k}: ${v}`)].filter(Boolean).join('; ') } },
+        sellerId: p.ownerSellerId,
+        dedupe: `product:${p.productId}:changes`,
+      },
+    ],
+  },
+  'catalog.product.approved': {
+    resolve: (p) => [`product:${p.productId}:changes`],
+    sends: (p) => [p.ownerSellerId && { topic: 'seller.product.approved', to: [seller(p.ownerSellerId)], link: L('product', p.productId, 'seller/product', 'View product'), sellerId: p.ownerSellerId, dedupe: `product:${p.productId}:approved` }],
+  },
+  'catalog.product.rejected': {
+    resolve: (p) => [`product:${p.productId}:changes`],
+    sends: (p) => [
+      p.ownerSellerId && { topic: 'seller.product.rejected', to: [seller(p.ownerSellerId)], link: L('product', p.productId, 'seller/product', 'View product'), context: { product: { reason: p.reason } }, sellerId: p.ownerSellerId, dedupe: `product:${p.productId}:rejected` },
+    ],
+  },
+  'inventory.stock.low': {
+    sends: (p) => [
+      p.ownerType !== 'official' &&
+        p.sellerId && { topic: 'seller.stock.low', to: [seller(p.sellerId)], link: L('stock', p.stockItemId, 'seller/stock', 'Update stock', p.sku), context: { stock: { label: p.label, available: p.available } }, sellerId: p.sellerId, dedupe: `stock:${p.stockItemId}` },
+      p.ownerType === 'official' && { topic: 'staff.inventory.stock_shortage', to: [role('inventory_manager')], link: L('stock', p.stockItemId, 'ops/stock', 'Open stock', p.sku), context: { stock: { label: p.label, available: p.available } }, dedupe: `stock:${p.stockItemId}` },
+    ],
+  },
+
+  /* ---------------------------------------------------------------- finance */
+  'finance.payout.paid': {
+    resolve: (p) => [`payout:${p.payoutId}`],
+    sends: (p, f) => [
+      { topic: 'seller.payout.paid', to: [seller(p.sellerId)], link: L('payout', p.payoutId, 'seller/payouts', 'View payout', p.ref), context: { payout: { ref: p.ref, amount: f.money(p.amount) } }, sellerId: p.sellerId, dedupe: `payout:${p.payoutId}:paid` },
+    ],
+  },
+  'finance.payout.failed': {
+    sends: (p, f) => [
+      { topic: 'seller.payout.failed', to: [seller(p.sellerId)], link: L('payout', p.payoutId, 'seller/payouts', 'Fix payout settings', p.ref), context: { payout: { ref: p.ref, amount: f.money(p.amount), reason: p.failureReason } }, sellerId: p.sellerId, dedupe: `payout:${p.payoutId}` },
+      { topic: 'staff.finance.payout_failed', to: [role('finance_manager')], link: L('payout', p.payoutId, 'admin/payouts', 'Open payout', p.ref), context: { payout: { ref: p.ref, amount: f.money(p.amount), reason: p.failureReason } }, dedupe: `payout:${p.payoutId}` },
+    ],
+  },
+  'finance.hold.placed': {
+    sends: (p, f) => [
+      { topic: 'seller.hold.placed', to: [seller(p.sellerId)], link: L('hold', p.holdId, 'seller/payouts', 'View hold'), context: { hold: { amount: f.money(p.amount), reason: p.reason, reviewDate: f.date(p.reviewDate) } }, sellerId: p.sellerId, dedupe: `hold:${p.holdId}:placed` },
+    ],
+  },
+  'finance.hold.released': {
+    sends: (p, f) => [{ topic: 'seller.hold.released', to: [seller(p.sellerId)], link: L('hold', p.holdId, 'seller/payouts', 'View balance'), context: { hold: { amount: f.money(p.amount) } }, sellerId: p.sellerId, dedupe: `hold:${p.holdId}:released` }],
+  },
+  'finance.balance.negative': {
+    sends: (p, f) => [
+      { topic: 'seller.balance.negative', to: [seller(p.sellerId)], link: L('balance', p.sellerId, 'seller/payouts', 'View balance', p.cause.ref), context: { balance: { amount: f.money(p.available) } }, sellerId: p.sellerId, dedupe: `balance:${p.sellerId}:${p.cause.id}` },
+      { topic: 'staff.finance.balance_negative', to: [role('finance_manager')], link: L('seller', p.sellerId, 'admin/seller-balance', 'Open balance', p.cause.ref), context: { balance: { amount: f.money(p.available) } }, dedupe: `balance:${p.sellerId}:${p.cause.id}` },
+    ],
+  },
+  'finance.statement.issued': {
+    sends: (p, f) => [
+      { topic: 'seller.statement.issued', to: [seller(p.sellerId)], link: L('statement', p.statementId, 'seller/statements', 'View statement'), context: { statement: { period: `${f.date(p.period.from)}–${f.date(p.period.to)}` } }, sellerId: p.sellerId, dedupe: `statement:${p.statementId}` },
+    ],
+  },
+  'finance.reconciliation.mismatch_found': {
+    sends: (p, f) => [
+      { topic: 'staff.finance.reconciliation_mismatch', to: [role('finance_manager')], link: L('reconciliation', p.itemId, 'ops/finance-checks', 'Open finance checks'), context: { mismatch: { check: f.human(p.check), difference: f.money(p.difference) } }, dedupe: `reconciliation:${p.itemId}` },
+    ],
+  },
+
+  /* ---------------------------------------------------------------- promotions, advertising, reviews, trust, wishlist */
+  'promotions.participation.invited': {
+    sends: (p, f) =>
+      p.sellerIds.map((sellerId) => ({
+        topic: 'seller.promotion.invited',
+        to: [seller(sellerId)],
+        link: L('campaign', p.campaignId, 'seller/campaigns', 'Review invitation'),
+        context: { campaign: { respondBy: f.date(p.respondBy) } },
+        sellerId,
+        deadline: p.respondBy,
+        dedupe: `campaign:${p.campaignId}:invite`,
+      })),
+  },
+  'advertising.campaign.status_changed': {
+    resolve: (p) => [REVIEW_STATES.has(p.from) && !REVIEW_STATES.has(p.to) ? `ad-campaign:${p.campaignId}:review` : null],
+    sends: (p, f) => [
+      p.sellerId &&
+        p.advertiserKind === 'seller' &&
+        !REVIEW_STATES.has(p.to) && {
+          topic: 'seller.advertising.campaign_status',
+          to: [seller(p.sellerId)],
+          link: L('campaign', p.campaignId, 'seller/advertising', 'View campaign'),
+          context: { campaign: { status: f.human(p.to) } },
+          sellerId: p.sellerId,
+          dedupe: `ad-campaign:${p.campaignId}:${p.to}`,
+        },
+      REVIEW_STATES.has(p.to) && { topic: 'staff.advertising.approval_waiting', to: [role('advertising_manager'), role('content_manager')], link: L('campaign', p.campaignId, 'admin/advertising', 'Review campaign'), dedupe: `ad-campaign:${p.campaignId}:review` },
+    ],
+  },
+  'reviews.invite.due': {
+    sends: (p) => [{ topic: 'customer.review.invite', to: [customer(p.customerId)], link: L('product', p.productId, 'account/write-review', 'Write a review'), dedupe: `review-invite:${p.orderItemId}` }],
+  },
+  'reviews.report.created': {
+    sends: (p, f) => [
+      { topic: 'staff.moderation.report', to: [role('content_manager')], link: L('report', p.reportId, 'admin/moderation', 'Open moderation queue'), context: { report: { type: f.human(p.reason) } }, dedupe: `review-report:${p.reportId}` },
+    ],
+  },
+  'trust.report.created': {
+    sends: (p, f) => [
+      { topic: 'staff.trust.report', to: [role('trust_and_risk_manager')], link: L('report', p.reportId, 'admin/trust', 'Open report', p.ref), context: { report: { ref: p.ref, type: f.human(p.type) } }, dedupe: `trust-report:${p.reportId}` },
+    ],
+  },
+  'wishlist.alert.triggered': {
+    sends: (p, f) => [
+      {
+        topic: 'customer.wishlist.alert',
+        to: [customer(p.customerId)],
+        link: L('product', p.productId, 'store/product', 'View product'),
+        context: { wishlist: { product: p.kind === 'back_in_stock' ? 'An item on your wishlist is back in stock' : 'An item on your wishlist', price: p.price ? f.money(p.price) : 'available again' } },
+        dedupe: `wishlist:${p.alertId}`,
+      },
+    ],
+  },
+
+  /* ---------------------------------------------------------------- access */
+  'access.approval.requested': {
+    effects: ['approvalDueReminder'],
+    sends: (p, f) => {
+      const approvers = [p.nominatedReviewerId, ...p.eligibleAccountIds].filter((x): x is string => Boolean(x));
+      return [
+        {
+          topic: 'staff.approval.waiting',
+          to: approvers.length ? [...new Set(approvers)].map((id) => staff(id, 'approver')) : p.eligibleRoleKeys.map(role),
+          link: L('approval', p.requestId, 'admin/approvals', 'Review request', p.ref),
+          context: { approval: { summary: p.summary, by: p.requestedBy.name ?? 'A colleague' }, due: { date: p.dueAt ? f.dateTime(p.dueAt) : 'soon' } },
+          deadline: p.dueAt ?? null,
+          dedupe: `approval:${p.requestId}`,
+        },
+      ];
+    },
+  },
+  'access.approval.partially_approved': {
+    sends: (p) => [
+      {
+        topic: 'staff.approval.second_needed',
+        to: p.eligibleAccountIds.map((id) => staff(id, 'approver')),
+        link: L('approval', p.requestId, 'admin/approvals', 'Review request', p.target.ref),
+        context: { approval: { summary: p.target.label ?? p.actionKey, by: p.approvedBy.name ?? 'An approver' } },
+        dedupe: `approval:${p.requestId}`,
+      },
+    ],
+  },
+  'access.approval.returned': {
+    resolve: (p) => [`approval:${p.requestId}`],
+    sends: (p) => [
+      {
+        topic: 'staff.approval.returned',
+        to: [staff(p.requestedById, 'requester')],
+        link: L('approval', p.requestId, 'admin/approvals', 'Update request', p.target.ref),
+        context: { approval: { by: p.by.name ?? 'An approver', comment: p.comment } },
+        dedupe: `approval:${p.requestId}`,
+      },
+    ],
+  },
+  'access.approval.decided': {
+    resolve: (p) => [`approval:${p.requestId}`],
+    cancel: (p) => [`approval:${p.requestId}`],
+    sends: (p) => [
+      {
+        topic: 'staff.approval.decided',
+        to: [staff(p.requestedById, 'requester')],
+        link: L('approval', p.requestId, 'admin/approvals', 'View request', p.ref),
+        context: { approval: { outcome: p.outcome } },
+        dedupe: `approval:${p.requestId}:decided`,
+      },
+    ],
+  },
+  'access.approval.reminder_sent': {
+    sends: (p) => [
+      { topic: 'staff.approval.reminder', to: p.toAccountIds.map((id) => staff(id, 'approver')), link: L('approval', p.requestId, 'admin/approvals', 'Review request'), context: { approval: { comment: p.message ?? '' } }, dedupe: `approval:${p.requestId}` },
+    ],
+  },
+  'access.coverage.changed': { effects: ['reroute'] },
+  'access.away.ended': { effects: ['awayEnded'] },
+
+  /* ---------------------------------------------------------------- workqueues */
+  'workqueues.item.overdue': {
+    sends: (p, f) => [
+      {
+        topic: 'staff.queue.item_overdue',
+        to: [staff(p.leadId, 'lead'), staff(p.backupId, 'backup'), staff(p.assigneeId, 'direct')],
+        link: L('queue', p.itemId, 'ops/queues', 'Open queue', p.subjectRef),
+        context: { queue: { item: p.subjectRef ?? f.human(p.kind), name: f.human(p.queueKey) }, due: { date: f.dateTime(p.dueAt) } },
+        group: queueArea(p.queueKey),
+        deadline: p.dueAt,
+        dedupe: `workitem:${p.itemId}`,
+      },
+    ],
+  },
+  'workqueues.item.escalated': {
+    sends: (p, f) => [
+      {
+        topic: 'staff.queue.item_escalated',
+        to: [p.toKind === 'role' ? role(p.to) : staff(p.to, 'direct')],
+        link: L('queue', p.itemId, 'ops/queues', 'Open queue'),
+        context: { queue: { name: f.human(p.queueKey) }, escalation: { reason: p.reason } },
+        group: queueArea(p.queueKey),
+        dedupe: `workitem:${p.itemId}`,
+      },
+    ],
+  },
+  'workqueues.item.resolved': { resolve: (p) => [`workitem:${p.itemId}`] },
+
+  /* ---------------------------------------------------------------- settings, audit, reports */
+  'settings.change.scheduled': {
+    sends: (p, f) => [
+      p.sellerVisible && {
+        topic: 'seller.platform.change_scheduled',
+        to: [{ kind: 'all_sellers' }],
+        link: L('setting_change', p.changeId, 'seller/upcoming-changes', 'View change', p.ref),
+        context: { change: { summary: p.summary, effective: f.date(p.effectiveAt) } },
+        dedupe: `setting-change:${p.changeId}`,
+      },
+    ],
+  },
+  'audit.integrity.failed': {
+    sends: (p) => [
+      { topic: 'staff.audit.integrity_failed', to: [role('platform_administrator'), role('business_owner')], link: L('audit', String(p.brokenAtSeq), 'admin/audit', 'Open action history'), context: { integrity: { seq: p.brokenAtSeq } }, dedupe: `integrity:${p.brokenAtSeq}` },
+    ],
+  },
+  'reports.export.ready': {
+    sends: (p, f) => [
+      p.requestedBy.kind === 'staff' &&
+        p.requestedBy.id && { topic: 'staff.export.ready', to: [staff(p.requestedBy.id)], link: L('export', p.exportId, 'admin/exports', 'Download'), context: { export: { expires: f.date(p.expiresAt) } }, dedupe: `report-export:${p.exportId}` },
+      p.requestedBy.kind === 'seller' &&
+        p.requestedBy.id && {
+          topic: 'seller.export.ready',
+          to: [{ kind: 'account_email', accountId: p.requestedBy.id, recipientKind: 'seller_member' }],
+          link: L('export', p.exportId, 'seller/exports', 'Download'),
+          context: { export: { expires: f.date(p.expiresAt) } },
+          dedupe: `report-export:${p.exportId}`,
+        },
+    ],
+  },
+};
+
+function maskEmail(email: string) {
+  const [user = '', domain = ''] = email.split('@');
+  return `${user.slice(0, 2)}***@${domain}`;
+}

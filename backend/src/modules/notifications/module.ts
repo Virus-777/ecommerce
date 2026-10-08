@@ -9,6 +9,10 @@ import { webhooksRoutes } from './http/webhooks.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresNotificationsRepository } from './infra/postgres/repository.js';
 import { NotificationsService } from './service.js';
+import { hmacWebhookVerifier } from '../../kernel/http/webhooks.js';
+import { createDevEmailProvider } from './infra/email/dev.js';
+import { createDevSmsProvider } from './infra/sms/dev.js';
+import { createDevPushProvider } from './infra/push/dev.js';
 
 /**
  * Notifications: Who is told what, on which channel: notification topics for customers, sellers and staff, routing from platform events to recipients (staff by role, with backups), templates with versions and preview, in-app inboxes for the store, Seller Center and Admin Center, email delivery with retries and suppression, seller and staff channel preferences, promotional broadcasts under consent, and Android push devices (phase 3).
@@ -18,14 +22,19 @@ import { NotificationsService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '0.1.0',
+  version: '1.0.0',
   migrations,
   graphql: typeDefs,
-  register(ctx) {
-    const service = new NotificationsService({ repo: createPostgresNotificationsRepository(ctx.db), ctx });
+  async register(ctx) {
+    // Providers: deterministic development adapters (no network); real adapters plug in behind the same ports
+    const providers = { email: createDevEmailProvider(), sms: createDevSmsProvider(), push: createDevPushProvider() };
+    const service = new NotificationsService({ repo: createPostgresNotificationsRepository(ctx.db), ctx, providers });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), webhooksRoutes(service));
+    ctx.http.webhookVerifier(hmacWebhookVerifier(ctx.config, ctx.name));
     ctx.graphql.resolvers(resolvers(service));
+    // topic catalogue and default templates (idempotent; retried lazily on first use if the tables are not ready)
+    await service.seed().catch((err) => ctx.log.warn({ err }, 'notifications: seeding topics and templates failed; retrying on first use'));
 
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("identity.verification.code_issued", (e) => service.onVerificationCodeIssuedFromIdentity(e.payload));
