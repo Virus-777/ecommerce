@@ -7,6 +7,7 @@ import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { publicRoutes } from './http/public.js';
 import { migrations } from './infra/postgres/migrations/index.js';
+import { devExternalIdentityVerifier } from './infra/external-id/dev.js';
 import { createPostgresIdentityRepository } from './infra/postgres/repository.js';
 import { IdentityService } from './service.js';
 
@@ -18,11 +19,13 @@ import { IdentityService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '0.1.0',
+  version: '1.0.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const service = new IdentityService({ repo: createPostgresIdentityRepository(ctx.db), ctx });
+    // Google / Apple ID tokens: the deterministic dev verifier in development and tests; no provider is wired for production yet
+    const externalIds = ctx.config.devTokens ? devExternalIdentityVerifier : undefined;
+    const service = new IdentityService({ repo: createPostgresIdentityRepository(ctx.db), ctx, externalIds });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), publicRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

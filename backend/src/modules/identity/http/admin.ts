@@ -1,37 +1,38 @@
-import { notImplemented, routes } from '../../../kernel/http/index.js';
+import { routes } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/identity.js';
 import type { IdentityService } from '../service.js';
+import { caller } from './client.js';
 
 /**
  * Admin API: /api/admin/identity/…  (docs/api/modules/identity.md)
- * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
+ * Staff-realm targets also need identity.staff-accounts.manage (checked in the service, which knows the realm).
  */
 export const adminRoutes = (service: IdentityService) =>
   routes(endpoints, 'admin', {
     /** GET /accounts: Find accounts (staff or members) */
-    listAccounts: notImplemented,
+    listAccounts: async ({ query, page, can }) => service.listAccounts(query, page, can),
     /** GET /accounts/{id}: Account security detail (devices, lockout, recent activity) */
-    getAccount: notImplemented,
+    getAccount: async ({ params, can }) => service.getAccountAdmin(params.id, can),
     /** POST /accounts/{id}/lock: Lock an account (suspected compromise, offboarding) */
-    lockAccount: notImplemented,
+    lockAccount: async (input) => service.lockAccount(input.params.id, input.body, caller(input), input.can),
     /** POST /accounts/{id}/unlock: Unlock an account */
-    unlockAccount: notImplemented,
+    unlockAccount: async (input) => service.unlockAccount(input.params.id, input.body.reason, caller(input), input.can),
     /** POST /accounts/{id}/force-password-reset: Require a new password at next sign-in */
-    forcePasswordReset: notImplemented,
+    forcePasswordReset: async (input) => service.forcePasswordReset(input.params.id, input.body, caller(input), input.can),
     /** POST /accounts/{id}/reset-two-step: Remove 2-step methods after an identity check (lost phone) */
-    resetTwoStep: notImplemented,
+    resetTwoStep: async (input) => service.resetTwoStep(input.params.id, input.body, caller(input), input.can),
     /** POST /accounts/{id}/sign-out-all: Sign an account out everywhere */
-    signOutAccount: notImplemented,
+    signOutAccount: async (input) => service.signOutAccount(input.params.id, input.body.reason, caller(input), input.can),
     /** POST /accounts/{id}/disable: Disable a staff account (offboarding) */
-    disableAccount: notImplemented,
+    disableAccount: async (input) => service.disableAccount(input.params.id, input.body.reason, caller(input), input.can),
     /** POST /accounts/{id}/enable: Re-enable a disabled staff account */
-    enableAccount: notImplemented,
+    enableAccount: async (input) => service.enableAccount(input.params.id, input.body.reason, caller(input), input.can),
     /** GET /accounts/{id}/security-activity: Security activity of one account */
-    listAccountActivity: notImplemented,
+    listAccountActivity: async ({ params, query, page, can }) => service.listAccountActivity(params.id, query, page, can),
     /** GET /invitations: Staff invitations */
-    listInvitations: notImplemented,
+    listInvitations: async ({ query, page }) => service.listInvitations(query.status, page),
     /** POST /invitations/{id}/resend: Resend a staff invitation (new 7-day link) */
-    resendInvitation: notImplemented,
+    resendInvitation: async (input) => service.resendInvitation(input.params.id, caller(input)),
     /** POST /invitations/{id}/revoke: Cancel a staff invitation */
-    revokeInvitation: notImplemented,
+    revokeInvitation: async (input) => service.revokeInvitation(input.params.id, input.body.reason, caller(input)),
   });
