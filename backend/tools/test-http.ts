@@ -30,7 +30,8 @@ import { devSigner, newDevJwk, signAccessToken, type Audience } from '../src/ker
 import { loadConfig } from '../src/kernel/config/index.js';
 import { startHealthServer } from '../src/kernel/http/health.js';
 import { urlOf } from '../src/kernel/http/register.js';
-import { allSpecs } from '../src/kernel/module-system/loader.js';
+import { hmacWebhookVerifier, signWebhook } from '../src/kernel/http/webhooks.js';
+import { allSpecs, withDependencies } from '../src/kernel/module-system/loader.js';
 import type { Area, AuthKind, EndpointDef } from '../src/kernel/spec/define.js';
 import { sampleParams, sampleQuery, validSample } from '../src/testing/samples.js';
 
@@ -41,9 +42,11 @@ const external = values.url?.replace(/\/$/, '');
 /* ---------------------------------------------------------------- server and credentials */
 
 const REFRESH = 'http-test-refresh-token';
-const SIGNATURE = 'http-test-signature';
+const WEBHOOK_SECRET = 'dev-webhook-secret';
 const ORIGIN = 'http://localhost:3000';
+// modules whose endpoints are tested; the server also runs their dependencies
 const modules = only ?? Object.keys(allSpecs);
+const booted = only ? withDependencies(only) : modules;
 
 let base: string;
 let healthBase: string | undefined;
@@ -60,13 +63,12 @@ if (external) {
   const jwk = newDevJwk();
   signer = devSigner({ jwk });
   issuer = 'marketly-identity';
-  const verifiers: Record<string, WebhookVerifier> = Object.fromEntries(
-    modules.map((m) => [m, (req, provider) => (req.headers['x-signature'] === SIGNATURE ? { provider: provider ?? m, eventId: String(req.headers['x-event-id'] ?? '') || undefined } : false)]),
-  );
+  // modules that don't verify their webhooks yet get the standard HMAC verifier
+  const verifiers: Record<string, WebhookVerifier> = Object.fromEntries(booted.map((m) => [m, hmacWebhookVerifier(loadConfig({ NODE_ENV: 'test' }), m)]));
   const t0 = Date.now();
   const app = await buildApp({
     env: { NODE_ENV: 'test' },
-    modules,
+    modules: booted,
     config: { launchPhase: 4, rateLimits: false, devTokens: true, devSigning: { file: '', jwk }, migrateOnStart: true, responseValidation: true, cors: { store: [ORIGIN], seller: [], admin: [] } },
     authorities: (a) => ({ ...a, verifyRefreshToken: async (t) => (t === REFRESH ? { sessionId: 'http-test-session', accountId: null, audience: 'store', kind: 'customer' } : a.verifyRefreshToken(t)) }),
     webhookVerifiers: verifiers,
@@ -108,7 +110,7 @@ function rightToken(d: EndpointDef): Record<string, string> {
     case 'refresh':
       return { cookie: `__Host-mk_refresh=${REFRESH}` };
     case 'provider':
-      return { 'x-signature': SIGNATURE, 'x-event-id': crypto.randomUUID() };
+      return { 'x-event-id': crypto.randomUUID() }; // signed per request in send()
     case 'bootstrap':
       return { 'x-app-proof': 'dev' };
   }
@@ -124,8 +126,11 @@ interface Res {
 
 async function send(method: string, url: string, headers: Record<string, string> = {}, body?: unknown): Promise<Res> {
   const h: Record<string, string> = { ...headers };
-  if (body !== undefined) h['content-type'] = 'application/json';
-  const res = await fetch(base + url, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body), redirect: 'manual' });
+  const raw = body === undefined ? undefined : JSON.stringify(body);
+  if (raw !== undefined) h['content-type'] = 'application/json';
+  // webhooks: sign the exact body, unless the case sends its own (forged) signature
+  if (url.startsWith('/webhooks/') && 'x-event-id' in h && !('x-signature' in h)) Object.assign(h, signWebhook(WEBHOOK_SECRET, raw ?? ''));
+  const res = await fetch(base + url, { method, headers: h, body: raw, redirect: 'manual' });
   const text = await res.text();
   let parsed: unknown = text;
   try {
@@ -200,7 +205,7 @@ async function testEndpoint(module: string, id: string, d: EndpointDef) {
     seller: bearer(`${tok('seller').slice(0, -8)}AAAAAAAA`),
     staff: bearer(sign(devClaims('staff'), 60, new Date(Date.now() - 3_600_000))),
     refresh: { cookie: '__Host-mk_refresh=not-a-refresh-token' },
-    provider: { 'x-signature': 'forged' },
+    provider: { 'x-signature': 'sha256=forged', 'x-timestamp': String(Math.floor(Date.now() / 1000)) },
     bootstrap: { 'x-app-proof': 'forged' },
   };
   await call('invalid token', { ...extra, ...invalid[d.auth] }, payload(), (r) => expectStatus(r, 401, unauthorized));
@@ -250,9 +255,15 @@ async function testEndpoint(module: string, id: string, d: EndpointDef) {
   }
   const r = await send(d.method, url, { ...extra, ...rightToken(d) }, payload(proof));
   if (later(r)) return record(op, 'right token', null, 'later launch phase');
+  // the middleware's refusals; a handler may still refuse for business reasons on made-up data (403 without these, 400 with its own message)
+  const endpointPermissions = new Set([d.permission, ...(d.permissionWhen ?? []).map((w) => w.permission)]);
+  const byMiddleware =
+    r.status === 401 ||
+    r.status === 429 ||
+    (r.status === 403 && (['WRONG_AUDIENCE', 'OWNER_ONLY', 'NO_SELLER_ACCESS', 'STEP_UP_REQUIRED'].includes(code(r) ?? '') || (code(r) === 'FORBIDDEN' && endpointPermissions.has(r.body?.error?.details?.permission))));
   const refused = (() => {
-    if ([401, 403, 429].includes(r.status)) return `refused by the middleware: ${brief(r)}`;
-    if (r.status === 400 && body.valid) return `valid input refused: ${brief(r)} ${JSON.stringify(r.body?.error?.details?.issues?.[0] ?? '')}`;
+    if (byMiddleware) return `refused by the middleware: ${brief(r)}`;
+    if (r.status === 400 && body.valid && r.body?.error?.message === 'Some fields are missing or invalid') return `valid input refused: ${brief(r)} ${JSON.stringify(r.body?.error?.details?.issues?.[0] ?? '')}`;
     if (r.status === 404 && /^No route/.test(r.body?.error?.message ?? '')) return `not routed: ${brief(r)}`;
     if (r.status >= 500 && r.status !== 501 && r.status !== 503) return `server error: ${brief(r)}`;
     return null;

@@ -36,6 +36,10 @@ const schema = z.object({
   /** Public keys that verify access and visitor tokens: {"keys":[{kty:"OKP",crv:"Ed25519",x,kid}]} */
   AUTH_JWKS: z.string().optional(),
   AUTH_ISSUER: z.string().default('marketly-identity'),
+  /** Identity's private signing key (Ed25519 JWK with kid); its public part is trusted automatically. Development uses the dev key. */
+  AUTH_SIGNING_JWK: z.string().optional(),
+  /** Webhook signing secrets per provider: {"stripe":"…","carrier":"…"} (development and tests default to "dev-webhook-secret") */
+  WEBHOOK_SECRETS: z.string().optional(),
   /** How often each server pulls session revocations from identity */
   REVOCATION_POLL_MS: z.coerce.number().int().min(500).default(3000),
   /** Development and tests only: sign and accept tokens with a per-machine dev key */
@@ -71,7 +75,9 @@ export interface Config {
   responseValidation: boolean;
   jobsEnabled: boolean;
   graphqlPersistedOnly: boolean;
-  auth: { jwks: string | undefined; issuer: string; revocationPollMs: number };
+  auth: { jwks: string | undefined; issuer: string; revocationPollMs: number; signingJwk?: Jwk & { kid?: string } };
+  /** Webhook HMAC secrets per provider; `*` applies to any provider (development and tests only) */
+  webhookSecrets: Record<string, string>;
   /** Development and tests: sign and accept dev-key tokens */
   devTokens: boolean;
   devSigning: { file: string; jwk?: Jwk };
@@ -110,7 +116,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     responseValidation: e.RESPONSE_VALIDATION ?? !prod,
     jobsEnabled: e.JOBS_ENABLED ?? false,
     graphqlPersistedOnly: e.GRAPHQL_PERSISTED_ONLY ?? prod,
-    auth: { jwks: e.AUTH_JWKS || undefined, issuer: e.AUTH_ISSUER, revocationPollMs: e.REVOCATION_POLL_MS },
+    auth: { jwks: e.AUTH_JWKS || undefined, issuer: e.AUTH_ISSUER, revocationPollMs: e.REVOCATION_POLL_MS, signingJwk: e.AUTH_SIGNING_JWK ? JSON.parse(e.AUTH_SIGNING_JWK) : undefined },
+    webhookSecrets: { ...(devTokens ? { '*': 'dev-webhook-secret' } : {}), ...(e.WEBHOOK_SECRETS ? JSON.parse(e.WEBHOOK_SECRETS) : {}) },
     devTokens,
     devSigning: { file: e.DEV_SIGNING_KEY_FILE },
     rateLimits: e.RATE_LIMITS ?? true,

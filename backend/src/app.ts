@@ -17,6 +17,7 @@ import { postgresIdempotencyStore } from './kernel/http/idempotency.js';
 import { createOpenApiObjectTransform, createOpenApiTransform } from './kernel/http/openapi.js';
 import { registerEndpoints } from './kernel/http/register.js';
 import { createServer } from './kernel/http/server.js';
+import type { PublicApiMap } from './kernel/module-system/public-apis.js';
 import { JobScheduler } from './kernel/jobs/index.js';
 import { systemClock, type Clock } from './kernel/lib/clock.js';
 import { createRefGenerator } from './kernel/lib/refs.js';
@@ -41,6 +42,11 @@ export interface BuildOptions {
   authorities?: (base: Authorities) => Authorities;
   /** Verifiers for modules that don't register their own yet (tests) */
   webhookVerifiers?: Record<string, WebhookVerifier>;
+  /**
+   * Tests: replace public API functions of enabled modules, e.g. a dependency built in a later
+   * tranche: { identity: { getAccount: async () => ({ … }) } }. Functions not listed keep the module's own.
+   */
+  apiStubs?: { [M in keyof PublicApiMap]?: Partial<PublicApiMap[M]> };
 }
 
 export interface Kernel {
@@ -64,6 +70,14 @@ declare module 'fastify' {
   interface FastifyInstance {
     kernel: Kernel;
   }
+}
+
+/** A module's API with some functions replaced (the module's own methods keep their `this`). */
+function withStubs(api: object | undefined, stub: object): object {
+  return new Proxy(api ?? {}, {
+    get: (target, key) => (key in stub ? (stub as Record<PropertyKey, unknown>)[key] : Reflect.get(target, key, target)),
+    has: (target, key) => key in stub || key in target,
+  });
 }
 
 export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance> {
@@ -109,6 +123,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
   const boot = await bootModules(defs, { config, log: app.log, database, clock, events, jobs, refs });
   for (const w of boot.warnings) app.log.debug(w);
   for (const [m, v] of Object.entries(opts.webhookVerifiers ?? {})) if (!boot.webhookVerifiers.has(m)) boot.webhookVerifiers.set(m, v);
+  for (const [m, stub] of Object.entries(opts.apiStubs ?? {})) boot.apis.set(m, withStubs(boot.apis.get(m), stub as object));
 
   /* ---------------------------------------------------------------- authorization: a token on every request, verified here */
   const { auth, revocations } = await createAuthChain({

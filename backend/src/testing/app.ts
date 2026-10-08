@@ -15,6 +15,7 @@ import { withDependencies } from '../kernel/module-system/loader.js';
 export const TEST_JWK = newDevJwk();
 const signer = devSigner({ jwk: TEST_JWK });
 export const ISSUER = 'marketly-identity';
+export { signWebhook } from '../kernel/http/webhooks.js';
 
 /** A PGlite database with every module's tables, started from the dump made by global-setup.ts. */
 export async function testDatabase(): Promise<Database> {
