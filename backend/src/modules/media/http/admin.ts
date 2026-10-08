@@ -1,5 +1,6 @@
-import { notImplemented, routes } from '../../../kernel/http/index.js';
-import { endpoints } from '../../../spec/media.js';
+import { routes } from '../../../kernel/http/index.js';
+import { endpoints, type MediaOwner } from '../../../spec/media.js';
+import { defaultStaffOwnerKind } from '../domain/rules.js';
 import type { MediaService } from '../service.js';
 
 /**
@@ -9,23 +10,44 @@ import type { MediaService } from '../service.js';
 export const adminRoutes = (service: MediaService) =>
   routes(endpoints, 'admin', {
     /** POST /uploads: Start a staff upload (Official Store products, content, ad creatives, inspection photos, evidence) */
-    createAdminUpload: notImplemented,
+    createAdminUpload: async ({ body, principal, actor, requestId, request }) => {
+      // content, ads and Official Store files belong to the platform; evidence to the staff member
+      const kind = body.ownerKind ?? defaultStaffOwnerKind(body.upload.purpose);
+      const owner: MediaOwner = kind === 'platform' ? { kind: 'platform', id: null } : { kind: 'staff', id: principal.accountId ?? null, label: principal.name ?? null };
+      return service.createUpload({ uploader: 'staff', owner, request: body.upload, createdBy: { kind: 'staff', id: principal.accountId ?? null }, clientIp: request.ip, by: { actor, requestId } });
+    },
     /** POST /uploads/{id}/complete: Confirm a staff upload */
-    completeAdminUpload: notImplemented,
+    completeAdminUpload: async ({ params, actor, requestId }) => service.completeUpload(params.id, { by: { actor, requestId } }),
     /** GET /assets: All files with filters */
-    listAssetsAdmin: notImplemented,
+    listAssetsAdmin: async ({ query, page, can }) =>
+      service.listAssets(
+        {
+          ownerKind: query.ownerKind,
+          ownerId: query.ownerId,
+          purpose: query.purpose,
+          kind: query.kind,
+          statuses: query.status ? [query.status] : undefined,
+          inUse: query.inUse,
+          failedChecks: query.failedChecks,
+          q: query.q,
+        },
+        page,
+        { signPrivate: await can('media.assets.view-private') },
+      ),
     /** GET /assets/{id}: File detail with usages, checks and history */
-    getAssetAdmin: notImplemented,
+    getAssetAdmin: async ({ params, can }) => service.assetDetail(params.id, { signPrivate: await can('media.assets.view-private'), area: 'admin' }),
     /** PATCH /assets/{id}: Edit alt text or title of a platform file */
-    updateAssetAdmin: notImplemented,
+    updateAssetAdmin: async ({ params, body, actor, requestId }) => service.updateAsset(params.id, body, { platformOnly: true, by: { actor, requestId } }),
     /** POST /assets/{id}/checks: Check an image against rules */
-    checkImageAdmin: notImplemented,
+    checkImageAdmin: async ({ params, body }) => service.runImageCheck(params.id, body.rules, { rulesSource: body.rulesSource }),
     /** POST /assets/{id}/remove: Take a file down (policy, rights, privacy) with a reason */
-    removeAsset: notImplemented,
+    removeAsset: async ({ params, body, actor, requestId }) => service.removeAsset(params.id, body, { actor, requestId }),
     /** POST /assets/{id}/restore: Restore a removed file */
-    restoreAsset: notImplemented,
+    restoreAsset: async ({ params, body, actor, requestId }) => service.restoreAsset(params.id, body.reason, { actor, requestId }),
     /** DELETE /assets/{id}: Delete an unused platform file */
-    deleteAssetAdmin: notImplemented,
+    deleteAssetAdmin: async ({ params, actor, requestId }) => {
+      await service.deleteAsset(params.id, { platformOnly: true, audited: true, by: { actor, requestId } });
+    },
     /** GET /assets/{id}/download: Signed link to a private file (verification documents, evidence) */
-    getAdminDownload: notImplemented,
+    getAdminDownload: async ({ params, query, actor, requestId }) => service.staffDownload(params.id, query.reason, { actor, requestId }),
   });

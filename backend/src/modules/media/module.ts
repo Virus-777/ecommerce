@@ -1,3 +1,4 @@
+import { hmacWebhookVerifier } from '../../kernel/http/webhooks.js';
 import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/media.js';
 import { storeRoutes } from './http/store.js';
@@ -6,6 +7,9 @@ import { adminRoutes } from './http/admin.js';
 import { webhooksRoutes } from './http/webhooks.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresMediaRepository } from './infra/postgres/repository.js';
+import { createDevProcessor } from './infra/processing/dev.js';
+import { createDevScanner } from './infra/scanner/dev.js';
+import { createDevStorage } from './infra/storage/dev.js';
 import { MediaService } from './service.js';
 
 /**
@@ -16,12 +20,21 @@ import { MediaService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '0.1.0',
+  version: '1.0.0',
   migrations,
   register(ctx) {
-    const service = new MediaService({ repo: createPostgresMediaRepository(ctx.db), ctx });
+    // Providers: deterministic dev adapters (no network). S3-compatible storage, ClamAV and an image /
+    // transcoding service replace them behind the same ports (ports.ts).
+    const providers = {
+      storage: createDevStorage({ secret: ctx.config.webhookSecrets['media-storage'] ?? ctx.config.webhookSecrets['*'] ?? 'dev-storage-signing-secret', clock: ctx.clock }),
+      scanner: createDevScanner(),
+      processor: createDevProcessor(),
+    };
+    const service = new MediaService({ repo: createPostgresMediaRepository(ctx.db), ctx, providers });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), webhooksRoutes(service));
+    // storage notifications and transcoding results are signed with HMAC (WEBHOOK_SECRETS.media)
+    ctx.http.webhookVerifier(hmacWebhookVerifier(ctx.config, ctx.name));
 
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("sellers.seller.closed", (e) => service.onSellerClosedFromSellers(e.payload));
