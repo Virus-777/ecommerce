@@ -23,7 +23,8 @@
     "check:boundaries": "tsx tools/check-boundaries.ts",
     "test:http": "tsx --env-file-if-exists=.env tools/test-http.ts",
     "check": "npm run gen:check && npm run typecheck && npm run check:boundaries && npm run check:api && npm test && npm run test:http",
-    "token": "tsx --env-file-if-exists=.env tools/token.ts"
+    "token": "tsx --env-file-if-exists=.env tools/token.ts",
+    "bootstrap-owner": "tsx --env-file-if-exists=.env tools/bootstrap-owner.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",

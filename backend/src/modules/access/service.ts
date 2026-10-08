@@ -67,7 +67,7 @@ import {
   type SecondMode,
   type Snapshot,
 } from './domain/limits.js';
-import { BUSINESS_OWNER, SYSTEM_ROLES, actionNoun, areaOf, defaultEligibleRoleKeys, expandPermissions, permissionLabel, slugKey } from './domain/seed.js';
+import { BUSINESS_OWNER, PLATFORM_ADMINISTRATOR, SYSTEM_ROLES, actionNoun, areaOf, defaultEligibleRoleKeys, expandPermissions, permissionLabel, slugKey } from './domain/seed.js';
 import { approvalRequestMachine, awayPeriodMachine, limitChangeMachine, roleAssignmentMachine } from './domain/state-machines.js';
 import {
   OPEN_ASSIGNMENT,
@@ -708,6 +708,59 @@ export class AccessService implements AccessPublicApi {
       accounts.set(accountId, { id: accountId, realm: 'staff', email: input.email, displayName: input.name, status: 'invited', emailVerified: false, twoStepEnabled: false });
     }
     return (await this.memberViews([accountId], fresh, accounts))[0]!;
+  }
+
+  /**
+   * The first Business Owner (operator command `npm run bootstrap-owner`, never reachable over HTTP).
+   * Every other Business Owner grant needs a Business Owner's approval, so the first one is created
+   * here, only while nobody holds or awaits the role. The person also gets Platform Administrator, so
+   * they can invite the rest of the staff (the Business Owner role itself doesn't manage staff); they can
+   * hand that role to someone else later. Invites the person through identity; the roles become active
+   * when they accept (onInvitationAcceptedFromIdentity).
+   */
+  async bootstrapBusinessOwner(input: { email: string; name: string }): Promise<{ accountId: string; invitationId: string }> {
+    await this.ready();
+    const dir = await loadDirectory(this.repo, this.now());
+    const role = dir.roleByKey.get(BUSINESS_OWNER);
+    const admin = dir.roleByKey.get(PLATFORM_ADMINISTRATOR);
+    if (!role || !admin) throw new Error('The Business Owner and Platform Administrator roles are not seeded');
+    if ((await this.repo.listAssignments({ roleId: role.id, statuses: OPEN_ASSIGNMENT })).length) {
+      throw new AppError('CONFLICT', 'A Business Owner already exists or is invited; invite other staff from the Admin Center');
+    }
+    const system: common.Actor = { kind: 'system', name: 'bootstrap' };
+    const idp = this.ctx.use('identity');
+    const invitation = await idp.inviteStaff({ email: input.email, name: input.name, invitedBy: system });
+    const accountId = invitation.accountId ?? (await idp.findAccountByEmail(input.email, 'staff'))?.id;
+    if (!accountId) throw new AppError('CONFLICT', 'The staff account could not be created; try again');
+    for (const r of [role, admin]) {
+      const row = await this.repo.insertAssignment({
+        id: newId(),
+        account_id: accountId,
+        role_id: r.id,
+        status: roleAssignmentMachine.initial,
+        granted_by_kind: 'system',
+        granted_by_id: '',
+        reason: 'First Business Owner',
+        granted_at: this.now(),
+        expires_at: null,
+        revoked_at: null,
+        revoked_by: null,
+        revoke_reason: null,
+        approval_request_id: null,
+      });
+      await this.audit(
+        {
+          action: 'access.role.assign',
+          actionLabel: `Gave ${r.name} to the first Business Owner`,
+          target: { type: 'staff', id: accountId, label: input.name },
+          relatedTargets: [this.roleTarget(r)],
+          after: { roleKey: r.key, status: row.status, email: input.email },
+          reason: 'First Business Owner (bootstrap)',
+        },
+        { actor: system },
+      );
+    }
+    return { accountId, invitationId: invitation.id };
   }
 
   async assignRole(caller: Caller, input: { accountId: string; roleId: string; reason: string; expiresAt?: string | null }): Promise<RoleAssignment> {

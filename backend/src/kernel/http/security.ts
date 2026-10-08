@@ -47,7 +47,8 @@ export function installSecurity(app: FastifyInstance, config: Config) {
       reply.header('cache-control', 'private, no-store').header('x-content-type-options', 'nosniff').header('referrer-policy', 'no-referrer');
       if (config.env === 'production') reply.header('strict-transport-security', 'max-age=31536000; includeSubDomains');
     }
-    if (reply.statusCode === 401 && typeof payload === 'string') {
+    // only the middleware's UNAUTHORIZED is about the token; business 401s (INVALID_CREDENTIALS …) are not
+    if (reply.statusCode === 401 && typeof payload === 'string' && payload.includes('"code":"UNAUTHORIZED"')) {
       const m = /"reason":"token_(\w+)"/.exec(payload);
       reply.header('www-authenticate', m && m[1] !== 'missing' ? 'Bearer error="invalid_token"' : 'Bearer');
     }

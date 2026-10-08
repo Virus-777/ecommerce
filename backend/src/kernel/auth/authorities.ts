@@ -68,13 +68,13 @@ export function devAuthorities(next: Authorities, claimsOf: (p: Principal) => Ac
       return dev ? Boolean(dev.permissions?.includes(key) || dev.permissions?.includes('*')) : next.hasPermission(p, key);
     },
     async verifyReauthToken(p, token, purpose) {
-      return token === `dev-reauth.${purpose}` || next.verifyReauthToken(p, token, purpose);
+      return (claimsOf(p)?.dev !== undefined && token === `dev-reauth.${purpose}`) || next.verifyReauthToken(p, token, purpose); // dev-key tokens only
     },
     async consumeReauthToken(token) {
       if (!token.startsWith('dev-reauth.')) await next.consumeReauthToken(token);
     },
     async verifyStepUpCode(p, code) {
-      return (claimsOf(p) !== undefined && code === '000000') || next.verifyStepUpCode(p, code);
+      return (claimsOf(p)?.dev !== undefined && code === '000000') || next.verifyStepUpCode(p, code); // dev-key tokens only
     },
   };
 }

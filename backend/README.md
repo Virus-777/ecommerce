@@ -86,6 +86,7 @@ Build in dependency order: identity → access → audit → settings → … (`
 | `npm run gen` | Spec → code (`--check` in CI) |
 | `npm run check:api` | Boots all 33 modules and compares the server's OpenAPI with `docs/api/openapi.json`, field by field |
 | `npm run check:boundaries` | Modules import only kernel, spec and other modules' `contract.ts` |
+| `npm run bootstrap-owner -- --email … --name "…"` | Invites the first Business Owner (also Platform Administrator) on a fresh database (DATABASE_URL or PGLITE_DIR) and prints the accept link. Refuses once a Business Owner exists |
 | `npm run test:http` | Boots all 33 modules on a real port and calls every endpoint over HTTP with input generated from the spec: no token, invalid token, another app's token, wrong caller, missing permission, missing step-up, right token. `-- --url http://localhost:4000` tests a running dev server (`RATE_LIMITS=false`); report in `.data/test-http-report.json` |
 | `npm run modules` | Phase, on/off, endpoints built, dependencies; `--graph` (Mermaid), `--without <m>` |
 | `npm run module:new <name>` | Scaffold a module from a new spec file |

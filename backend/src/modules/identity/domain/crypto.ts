@@ -154,16 +154,15 @@ export const normalizeRecoveryCode = (code: string) => code.toLowerCase().replac
 
 /**
  * Identity's secrets for HMACs (codes, recovery codes, refresh rotation) and for encrypting 2-step
- * secrets, derived (HKDF) from the private key it signs tokens with, so there is one secret to manage.
+ * secrets, derived (HKDF) from identity's data key (secretFor(config, 'identity.data'), from APP_SECRET), so
+ * rotating the token signing key never breaks stored 2-step secrets.
  */
 export class IdentityKeys {
   readonly #ikm: Buffer;
   readonly #cache = new Map<string, Buffer>();
 
-  constructor(signingKey: KeyObject) {
-    const d = signingKey.export({ format: 'jwk' }).d;
-    if (!d) throw new Error('identity signing key has no private part');
-    this.#ikm = Buffer.from(d, 'base64url');
+  constructor(dataKeyHex: string) {
+    this.#ikm = Buffer.from(dataKeyHex, 'hex');
   }
 
   key(purpose: string): Buffer {

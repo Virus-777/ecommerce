@@ -158,7 +158,7 @@ const record = (operation: string, check: string, failure: string | null | undef
 /** Headers every API response carries, whatever its status */
 function headerProblems(r: Res, url: string): string | null {
   if (/^\/(api|graphql|webhooks)\//.test(url) && r.headers.get('cache-control') !== 'private, no-store') return `cache-control is ${r.headers.get('cache-control')}`;
-  if (r.status === 401 && !r.headers.get('www-authenticate')) return '401 without WWW-Authenticate';
+  if (r.status === 401 && code(r) === 'UNAUTHORIZED' && !r.headers.get('www-authenticate')) return '401 without WWW-Authenticate';
   return null;
 }
 
@@ -258,7 +258,7 @@ async function testEndpoint(module: string, id: string, d: EndpointDef) {
   // the middleware's refusals; a handler may still refuse for business reasons on made-up data (403 without these, 400 with its own message)
   const endpointPermissions = new Set([d.permission, ...(d.permissionWhen ?? []).map((w) => w.permission)]);
   const byMiddleware =
-    r.status === 401 ||
+    (r.status === 401 && code(r) === 'UNAUTHORIZED') ||
     r.status === 429 ||
     (r.status === 403 && (['WRONG_AUDIENCE', 'OWNER_ONLY', 'NO_SELLER_ACCESS', 'STEP_UP_REQUIRED'].includes(code(r) ?? '') || (code(r) === 'FORBIDDEN' && endpointPermissions.has(r.body?.error?.details?.permission))));
   const refused = (() => {

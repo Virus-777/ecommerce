@@ -62,7 +62,7 @@ describe('staff invitations', () => {
     expect(invitation).toMatchObject({ realm: 'staff', purpose: 'staff', status: 'pending', email, invitedBy: { kind: 'staff', id: inviter.id } });
     const created = kit.last('identity.invitation.created');
     expect(created).toMatchObject({ invitationId: invitation.id, purpose: 'staff', email, name: 'Nina Staff' });
-    expect(created.acceptUrl).toMatch(/^https:\/\/admin\.marketly\.example\/invitation#token=/);
+    expect(created.acceptUrl).toMatch(/^http:\/\/localhost:3002\/invitation#token=/); // ADMIN_URL (development default)
     const token = new URL(created.acceptUrl).hash.replace('#token=', '');
     expect((await identity.findAccountByEmail(email, 'staff'))!.status).toBe('invited');
     await expect(identity.inviteStaff({ email, name: 'Nina Staff', invitedBy: inviter })).resolves.toMatchObject({ status: 'pending' });
@@ -135,8 +135,9 @@ describe('staff invitations', () => {
     expect(reauth.status).toBe(403); // store /reauth is for customers only (spec gap: staff have no re-auth endpoint)
     expect(reauth.body.error.code).toBe('WRONG_AUDIENCE');
     const last = await kit.call('POST', `${STORE}/two-step/methods/${methods[0].id}/remove`, { token: refreshed.body.accessToken, body: { reauthToken: 'dev-reauth.two-step-removal', code: '123456' } });
-    expect(last.status).toBe(409);
-    expect(last.body.error.code).toBe('TWO_STEP_REQUIRED');
+    // the development re-auth proof only works for dev tokens; staff have no re-auth endpoint yet (spec gap)
+    expect(last.status).toBe(403);
+    expect(last.body.error.code).toBe('STEP_UP_REQUIRED');
     kit.clock.advance(30_000);
   });
 

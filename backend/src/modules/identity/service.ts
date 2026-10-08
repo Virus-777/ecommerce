@@ -2,6 +2,7 @@ import type { KeyObject } from 'node:crypto';
 import { isIP } from 'node:net';
 import type { Principal as KernelPrincipal } from '../../kernel/auth/index.js';
 import { keyRing, tokenSigner } from '../../kernel/auth/setup.js';
+import { secretFor } from '../../kernel/lib/secrets.js';
 import { signAccessToken, verifyAccessToken, type AccessClaims, type KeyRing, type TokenKind } from '../../kernel/auth/tokens.js';
 import { AppError } from '../../kernel/errors/index.js';
 import type { EventPayload } from '../../kernel/events/index.js';
@@ -138,12 +139,6 @@ export interface AccountSecurity {
   recentActivity: (args?: { limit?: number }) => (Omit<SecurityEvent, 'result'> & { result: string })[];
 }
 
-/** Website pages the emailed links open; the one-time token travels in the fragment, never to a server. */
-const APP_URLS: Record<Audience, string> = {
-  store: 'https://marketly.example',
-  seller: 'https://seller.marketly.example',
-  admin: 'https://admin.marketly.example',
-};
 
 const KIND_OF: Record<Audience, Exclude<TokenKind, 'visitor'>> = { store: 'customer', seller: 'seller', admin: 'staff' };
 const MIN = 60_000;
@@ -189,8 +184,13 @@ export class IdentityService implements IdentityPublicApi {
     return this.#signer;
   }
   private get keys() {
-    this.#keys ??= new IdentityKeys(this.signer.key);
+    this.#keys ??= new IdentityKeys(secretFor(this.ctx.config, 'identity.data'));
     return this.#keys;
+  }
+
+  /** Website pages the emailed links open (STORE_URL, SELLER_URL, ADMIN_URL); the one-time token travels in the fragment, never to a server. */
+  private appUrl(app: Audience): string {
+    return this.ctx.config.publicUrls[app];
   }
 
   /** Every setting this module reads, in force now (read before a transaction opens). */
@@ -1379,7 +1379,7 @@ export class IdentityService implements IdentityPublicApi {
   /* ================================================================ public: password reset, policy */
 
   private resetUrl(realm: Realm, token: string) {
-    return `${APP_URLS[realm === 'staff' ? 'admin' : 'store']}/reset-password#token=${token}`;
+    return `${this.appUrl(realm === 'staff' ? 'admin' : 'store')}/reset-password#token=${token}`;
   }
 
   /** Issues a reset link for an account (self-service or by staff) and publishes it */
@@ -1476,7 +1476,7 @@ export class IdentityService implements IdentityPublicApi {
   /* ================================================================ public: invitations */
 
   private invitationUrl(i: Pick<InvitationRow, 'purpose'>, token: string) {
-    return `${APP_URLS[i.purpose === 'staff' ? 'admin' : 'seller']}/invitation#token=${token}`;
+    return `${this.appUrl(i.purpose === 'staff' ? 'admin' : 'seller')}/invitation#token=${token}`;
   }
 
   private invitationCreated(i: InvitationRow, token: string, by?: { actor?: common.Actor; requestId?: string }) {
@@ -1872,7 +1872,7 @@ export class IdentityService implements IdentityPublicApi {
     const token = randomToken();
     const expiresAt = new Date(now.getTime() + s.orderLinkTtlDays * DAY);
     await this.repo.insertOrderLink({ id: newId(), token_hash: tokenHash(token), order_id: orderId, email_normalized: normalizeEmail(email), expires_at: expiresAt, last_redeemed_at: null, redeem_count: 0 });
-    return { url: `${APP_URLS.store}/orders/open#token=${token}`, expiresAt: map.iso(expiresAt) };
+    return { url: `${this.appUrl('store')}/orders/open#token=${token}`, expiresAt: map.iso(expiresAt) };
   }
 
   /** POST /order-links/redeem: grants the caller's visitor session (or a new guest session) the order */

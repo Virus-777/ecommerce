@@ -109,7 +109,7 @@ describe('seller-member invitations', () => {
     await kit.app.kernel.events.drain();
     expect(inv).toMatchObject({ purpose: 'seller_member', realm: 'member', contextRef: sellerId, contextLabel: 'Gamma Tools', accountId: null });
     const token = new URL(kit.last('identity.invitation.created').acceptUrl).hash.replace('#token=', '');
-    expect(kit.last('identity.invitation.created').acceptUrl).toMatch(/^https:\/\/seller\.marketly\.example\//);
+    expect(kit.last('identity.invitation.created').acceptUrl).toMatch(/^http:\/\/localhost:3001\//); // SELLER_URL (development default)
     const v = await visitor(kit, 'seller');
     const view = await kit.call('POST', `${PUBLIC}/invitations/lookups`, { token: v.accessToken, body: { token } });
     expect(view.body).toMatchObject({ purpose: 'seller_member', existingAccount: false, requiresTwoStepSetup: false, contextLabel: 'Gamma Tools' });
@@ -148,7 +148,7 @@ describe('guest sessions and order links', () => {
     await expect(identity.grantGuestOrderAccess(newId(), orderId, 'x@example.com', 'lookup')).rejects.toMatchObject({ code: 'NOT_FOUND' });
 
     const link = await identity.issueOrderLink(orderId, 'guest@example.com');
-    expect(link.url).toMatch(/^https:\/\/marketly\.example\/orders\/open#token=/);
+    expect(link.url).toMatch(/^http:\/\/localhost:3000\/orders\/open#token=/); // STORE_URL (development default)
     const token = new URL(link.url).hash.replace('#token=', '');
     const other = await visitor(kit);
     const redeemed = await kit.call('POST', `${PUBLIC}/order-links/redeem`, { token: other.accessToken, body: { token } });
