@@ -1,4 +1,4 @@
-import { notImplemented, routes } from '../../../kernel/http/index.js';
+import { routes } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/settings.js';
 import type { SettingsService } from '../service.js';
 
@@ -8,6 +8,19 @@ import type { SettingsService } from '../service.js';
  */
 export const publicRoutes = (service: SettingsService) =>
   routes(endpoints, 'public', {
-    /** GET /app-config: Configuration for the website and Android app */
-    getAppConfig: notImplemented,
+    /**
+     * GET /app-config: Configuration for the website and Android app.
+     * ETag = configVersion; a matching If-None-Match answers 304. (The kernel sends Cache-Control:
+     * private, no-store on every API response, so max-age appConfigCacheSeconds is not sent: spec gap.)
+     */
+    getAppConfig: async ({ query, request, reply }) => {
+      const { config } = await service.appConfig(query);
+      const etag = `"${config.configVersion}"`;
+      reply.header('etag', etag);
+      const match = request.headers['if-none-match'];
+      if (match && match.split(',').some((t) => t.trim().replace(/^W\//, '') === etag)) {
+        await reply.code(304).send();
+      }
+      return config;
+    },
   });

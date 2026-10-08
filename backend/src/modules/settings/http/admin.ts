@@ -1,4 +1,4 @@
-import { notImplemented, routes } from '../../../kernel/http/index.js';
+import { routes } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/settings.js';
 import type { SettingsService } from '../service.js';
 
@@ -9,31 +9,31 @@ import type { SettingsService } from '../service.js';
 export const adminRoutes = (service: SettingsService) =>
   routes(endpoints, 'admin', {
     /** GET /overview: Settings page: market, every section and all scheduled changes */
-    getOverview: notImplemented,
+    getOverview: async () => service.overview(),
     /** GET /definitions: Runtime setting definitions */
-    listDefinitions: notImplemented,
+    listDefinitions: async ({ query }) => service.listDefinitions(query),
     /** GET /values/{key}: One setting: value in force, scheduled versions, recent history */
-    getSetting: notImplemented,
+    getSetting: async ({ params }) => service.getSetting(params.key),
     /** GET /values/{key}/history: All versions of a setting */
-    listSettingHistory: notImplemented,
+    listSettingHistory: async ({ params, page }) => service.settingHistory(params.key, page),
     /** GET /business-calendar: Open hours per day for a date range (business hours minus closures) */
-    getBusinessCalendar: notImplemented,
+    getBusinessCalendar: async ({ query }) => service.businessDays(query.from, query.to),
     /** POST /changes: Draft a change and see its impact before saving */
-    createChange: notImplemented,
+    createChange: async ({ body, actor, principal, requestId, can }) => service.createChange(body, { actor, principal, requestId, can }),
     /** PATCH /changes/{id}: Edit a draft (values, effective date, scope, reason) */
-    updateChange: notImplemented,
+    updateChange: async ({ params, body, actor, principal, requestId, can }) => service.updateChange(params.id, body, { actor, principal, requestId, can }),
     /** POST /changes/{id}/preview: Recalculate the impact preview */
-    previewChange: notImplemented,
+    previewChange: async ({ params }) => service.previewChange(params.id),
     /** POST /changes/{id}/submit: Save: schedule, or send for approval */
-    submitChange: notImplemented,
+    submitChange: async ({ params, actor, principal, requestId, can }) => service.submitChange(params.id, { actor, principal, requestId, can }),
     /** POST /changes/{id}/cancel: Cancel a draft, pending or scheduled change */
-    cancelChange: notImplemented,
+    cancelChange: async ({ params, body, actor, principal, requestId }) => service.cancelChange(params.id, body.reason, { actor, principal, requestId }),
     /** GET /changes: Setting changes (scheduled by default) */
-    listChanges: notImplemented,
+    listChanges: async ({ query, page }) => service.listChanges(query, page),
     /** GET /changes/{id}: One change with impact, approval and timeline */
-    getChange: notImplemented,
+    getChange: async ({ params }) => service.getChange(params.id),
     /** GET /feature-flags: Feature flags */
-    listFeatureFlags: notImplemented,
+    listFeatureFlags: async () => service.listFeatureFlags(),
     /** PUT /feature-flags/{key}: Turn a feature flag on or off */
-    setFeatureFlag: notImplemented,
+    setFeatureFlag: async ({ params, body, actor, requestId }) => service.setFeatureFlag(params.key, body, { actor, requestId }),
   });

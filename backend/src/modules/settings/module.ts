@@ -7,6 +7,7 @@ import { adminRoutes } from './http/admin.js';
 import { publicRoutes } from './http/public.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresSettingsRepository } from './infra/postgres/repository.js';
+import { enabledModules } from '../../modules.config.js';
 import { SettingsService } from './service.js';
 
 /**
@@ -17,12 +18,18 @@ import { SettingsService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '0.1.0',
+  version: '1.0.0',
   migrations,
   graphql: typeDefs,
-  register(ctx) {
-    const service = new SettingsService({ repo: createPostgresSettingsRepository(ctx.db), ctx });
+  async register(ctx) {
+    const service = new SettingsService({
+      repo: createPostgresSettingsRepository(ctx.db),
+      ctx,
+      // the kernel does not tell a module which modules run; this mirrors app.ts (spec gap, see report)
+      enabledModules: ctx.config.modules ?? enabledModules,
+    });
     ctx.provide(service);
+    await service.warmUp();
     ctx.http.routes(sellerRoutes(service), adminRoutes(service), publicRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
 
