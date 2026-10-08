@@ -7,7 +7,9 @@ import { specs } from '../../spec/index.js';
 import type { ModuleSpecDef } from '../spec/define.js';
 import type { ModuleDefinition } from './index.js';
 
-const specOf = (name: string): ModuleSpecDef | undefined => (specs as Record<string, ModuleSpecDef>)[name];
+/** Every module spec, as the kernel reads them */
+export const allSpecs: Readonly<Record<string, ModuleSpecDef>> = specs;
+export const specOf = (name: string): ModuleSpecDef | undefined => allSpecs[name];
 
 export function dependencyProblems(enabled: readonly string[], available: readonly string[]): string[] {
   const on = new Set(enabled);
@@ -110,12 +112,11 @@ export async function loadDefinitions(
   const problems = dependencyProblems(enabled, Object.keys(loaders));
   if (problems.length) throw new Error(`Cannot start: module configuration problems\n${problems.map((p) => `  - ${p}`).join('\n')}`);
   const order = loadOrder(enabled);
-  const defs: ModuleDefinition[] = [];
-  for (const name of order) {
-    const def = (await loaders[name]!()).default;
+  const defs = await Promise.all(order.map(async (name) => (await loaders[name]!()).default));
+  for (const [i, def] of defs.entries()) {
+    const name = order[i]!;
     if (def.spec.name !== name) throw new Error(`src/modules/${name}/module.ts declares spec "${def.spec.name}"`);
     if (def.spec !== specOf(name)) throw new Error(`src/modules/${name}/module.ts must use the generated spec from src/spec/${name}.ts`);
-    defs.push(def);
   }
   return defs;
 }

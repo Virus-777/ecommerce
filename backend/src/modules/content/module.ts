@@ -20,8 +20,7 @@ export default defineModule({
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const repo = createPostgresContentRepository(ctx.db);
-    const service = new ContentService({ repo, ctx });
+    const service = new ContentService({ repo: createPostgresContentRepository(ctx.db), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

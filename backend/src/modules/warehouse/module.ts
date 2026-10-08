@@ -19,8 +19,7 @@ export default defineModule({
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const repo = createPostgresWarehouseRepository(ctx.db);
-    const service = new WarehouseService({ repo, ctx });
+    const service = new WarehouseService({ repo: createPostgresWarehouseRepository(ctx.db), ctx });
     ctx.provide(service);
     ctx.http.routes(adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

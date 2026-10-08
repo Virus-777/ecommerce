@@ -4,5 +4,4 @@
  */
 
 /** Persistence for this module's own tables: purchasing.suppliers, purchasing.supplier_items, purchasing.supplier_performance, purchasing.purchase_orders, purchasing.purchase_order_lines, purchasing.purchase_order_events, purchasing.deliveries, purchasing.receipts, purchasing.receipt_lines, purchasing.supplier_claims. */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface PurchasingRepository {}

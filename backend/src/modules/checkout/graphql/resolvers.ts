@@ -10,7 +10,4 @@ import type { CheckoutService } from '../service.js';
  *   CheckoutSession.confirmation → service.getConfirmation
  *   Query.checkoutSession → service.getSessionView
  */
-export const resolvers = (service: CheckoutService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: CheckoutService): ModuleResolvers => ({});

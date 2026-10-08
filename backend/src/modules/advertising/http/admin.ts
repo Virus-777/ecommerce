@@ -6,9 +6,8 @@ import type { AdvertisingService } from '../service.js';
  * Admin API: /api/admin/advertising/…  (docs/api/modules/advertising.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: AdvertisingService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: AdvertisingService) =>
+  routes(endpoints, 'admin', {
     /** GET /dashboard: Live now, upcoming starts, ending soon, waiting approvals, spending and performance */
     adsDashboard: notImplemented,
     /** GET /campaigns: Own promotions and paid ads in every lifecycle status */
@@ -76,4 +75,3 @@ export const adminRoutes = (service: AdvertisingService) => {
     /** POST /charges/{id}/void: Void an accrued charge or credit a posted one (invalid traffic, cancelled delivery) */
     voidAdCharge: notImplemented,
   });
-};

@@ -7,19 +7,23 @@
  *   npm run token -- seller [--seller <uuid>] [--permissions a,b]   owner unless --permissions is given
  *   npm run token -- staff  [--permissions catalog.products.review,…] all permissions by default
  */
-import { issueDevToken, type DevTokenClaims } from '../src/kernel/auth/authenticators.js';
+import { parseArgs } from 'node:util';
+import { devClaims, issueDevToken } from '../src/kernel/auth/authenticators.js';
 import { loadConfig } from '../src/kernel/config/index.js';
-import { newId } from '../src/kernel/lib/ids.js';
 
-const [kind = 'customer', ...rest] = process.argv.slice(2);
-const opt = (k: string) => (rest.includes(`--${k}`) ? rest[rest.indexOf(`--${k}`) + 1] : undefined);
-const permissions = opt('permissions')?.split(',');
-const { devTokenSecret } = loadConfig();
-const base = { accountId: opt('account') ?? newId(), sessionId: newId(), exp: Math.floor(Date.now() / 1000) + 12 * 3600 };
-
-let claims: DevTokenClaims;
-if (kind === 'staff') claims = { kind: 'staff', ...base, permissions: permissions ?? ['*'] };
-else if (kind === 'seller') claims = { kind: 'seller', ...base, sellerId: opt('seller') ?? newId(), isOwner: !permissions, permissions: permissions ?? [] };
-else claims = { kind: 'customer', ...base };
-
-console.log(issueDevToken(devTokenSecret, claims));
+const { positionals, values } = parseArgs({
+  allowPositionals: true,
+  options: { permissions: { type: 'string' }, seller: { type: 'string' }, account: { type: 'string' } },
+});
+const kind = positionals[0] ?? 'customer';
+if (kind !== 'customer' && kind !== 'seller' && kind !== 'staff') {
+  console.error('Usage: npm run token -- <customer|seller|staff> [--permissions a,b] [--seller <uuid>] [--account <uuid>]');
+  process.exit(1);
+}
+const claims = devClaims(kind, {
+  permissions: values.permissions?.split(','),
+  sellerId: values.seller,
+  accountId: values.account,
+  expiresInSeconds: 12 * 3600,
+});
+console.log(issueDevToken(loadConfig().devTokenSecret, claims));

@@ -19,8 +19,7 @@ export default defineModule({
   version: '0.1.0',
   migrations,
   register(ctx) {
-    const repo = createPostgresMediaRepository(ctx.db);
-    const service = new MediaService({ repo, ctx });
+    const service = new MediaService({ repo: createPostgresMediaRepository(ctx.db), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), webhooksRoutes(service));
 

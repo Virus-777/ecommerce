@@ -6,9 +6,8 @@ import type { NotificationsService } from '../service.js';
  * Seller API: /api/seller/notifications/…  (docs/api/modules/notifications.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const sellerRoutes = (service: NotificationsService) => {
-  void service;
-  return routes(endpoints, 'seller', {
+export const sellerRoutes = (service: NotificationsService) =>
+  routes(endpoints, 'seller', {
     /** GET /inbox: Seller workspace notifications */
     listSellerInbox: notImplemented,
     /** GET /inbox/summary: Unread, needs action (sorted by deadline) */
@@ -26,4 +25,3 @@ export const sellerRoutes = (service: NotificationsService) => {
     /** DELETE /push-devices/{id}: Stop seller push notices on a device */
     removeSellerPushDevice: notImplemented,
   });
-};

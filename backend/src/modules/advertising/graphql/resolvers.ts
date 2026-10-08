@@ -10,7 +10,4 @@ import type { AdvertisingService } from '../service.js';
  *   PromotionCampaign.adCampaigns → service.campaignsForPromotion
  *   Query.adDashboard → service.dashboardSummary
  */
-export const resolvers = (service: AdvertisingService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: AdvertisingService): ModuleResolvers => ({});

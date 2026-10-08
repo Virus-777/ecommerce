@@ -6,9 +6,8 @@ import type { ReturnsService } from '../service.js';
  * Seller API: /api/seller/returns/…  (docs/api/modules/returns.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const sellerRoutes = (service: ReturnsService) => {
-  void service;
-  return routes(endpoints, 'seller', {
+export const sellerRoutes = (service: ReturnsService) =>
+  routes(endpoints, 'seller', {
     /** POST /requests/exports: Export own returns and cases (current tab and filters) as CSV */
     exportSellerReturns: notImplemented,
     /** GET /requests/exports/{id}: Returns export status and download link (requesting member only) */
@@ -42,4 +41,3 @@ export const sellerRoutes = (service: ReturnsService) => {
     /** PUT /terms: Change return terms or return address */
     updateSellerTerms: notImplemented,
   });
-};

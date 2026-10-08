@@ -20,8 +20,7 @@ export default defineModule({
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const repo = createPostgresWishlistRepository(ctx.db);
-    const service = new WishlistService({ repo, ctx });
+    const service = new WishlistService({ repo: createPostgresWishlistRepository(ctx.db), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

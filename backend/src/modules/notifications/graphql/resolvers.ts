@@ -11,7 +11,4 @@ import type { NotificationsService } from '../service.js';
  *   Query.unreadNotificationCount → service.unreadCount
  *   Query.notificationInbox → service.inboxSummary
  */
-export const resolvers = (service: NotificationsService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: NotificationsService): ModuleResolvers => ({});

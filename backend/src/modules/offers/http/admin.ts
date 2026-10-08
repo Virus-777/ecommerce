@@ -6,9 +6,8 @@ import type { OffersService } from '../service.js';
  * Admin API: /api/admin/offers/…  (docs/api/modules/offers.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: OffersService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: OffersService) =>
+  routes(endpoints, 'admin', {
     /** GET /offers: All offers with filters (seller, product, status, eligibility) */
     listOffersAdmin: notImplemented,
     /** GET /offers/{id}: Offer with status log, price history and price changes */
@@ -56,4 +55,3 @@ export const adminRoutes = (service: OffersService) => {
     /** POST /featured-decisions/recompute: Recompute featured decisions for a product (or everything) */
     recomputeFeatured: notImplemented,
   });
-};

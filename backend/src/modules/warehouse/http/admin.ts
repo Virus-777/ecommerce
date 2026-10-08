@@ -6,9 +6,8 @@ import type { WarehouseService } from '../service.js';
  * Admin API: /api/admin/warehouse/…  (docs/api/modules/warehouse.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: WarehouseService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: WarehouseService) =>
+  routes(endpoints, 'admin', {
     /** GET /summary: Today's work: to pick, to pack, on hold, at risk, put-away and return parcels */
     getWarehouseSummary: notImplemented,
     /** GET /scan: Resolve a scanned barcode (bin, item, order, package or return label) */
@@ -76,4 +75,3 @@ export const adminRoutes = (service: WarehouseService) => {
     /** POST /return-parcels/{id}/hand-over: Hand a received parcel to returns inspection */
     handOverReturnParcel: notImplemented,
   });
-};

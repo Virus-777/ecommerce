@@ -20,7 +20,4 @@ import type { FinanceService } from '../service.js';
  *   Query.refundImpactPreview → service.previewRefundImpactForOrder
  *   Query.payoutRuns → service.listPayoutRuns
  */
-export const resolvers = (service: FinanceService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: FinanceService): ModuleResolvers => ({});

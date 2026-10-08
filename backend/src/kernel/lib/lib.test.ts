@@ -27,15 +27,9 @@ describe('state machines', () => {
   });
 
   it('rejects illegal moves with ILLEGAL_TRANSITION and the allowed events', () => {
-    const err = (() => {
-      try {
-        m.next('draft', 'pause');
-      } catch (e) {
-        return e as AppError;
-      }
-    })();
-    expect(err).toBeInstanceOf(AppError);
-    expect(err).toMatchObject({ code: 'ILLEGAL_TRANSITION', status: 409, details: { from: 'draft', event: 'pause', allowed: ['submit'] } });
+    expect(() => m.next('draft', 'pause')).toThrow(
+      expect.objectContaining({ code: 'ILLEGAL_TRANSITION', status: 409, details: expect.objectContaining({ from: 'draft', event: 'pause', allowed: ['submit'] }) }),
+    );
   });
 
   it('makes the service choose the target of a guarded transition', () => {

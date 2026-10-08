@@ -6,9 +6,8 @@ import type { SupportService } from '../service.js';
  * Admin API: /api/admin/support/…  (docs/api/modules/support.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: SupportService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: SupportService) =>
+  routes(endpoints, 'admin', {
     /** GET /cases/stats: Queue KPIs: open, past target, unassigned, disputes, median first reply */
     caseStats: notImplemented,
     /** GET /cases: Cases and disputes queue, overdue first */
@@ -52,4 +51,3 @@ export const adminRoutes = (service: SupportService) => {
     /** PUT /categories/{key}: Create or change a category and its targets */
     updateCategory: notImplemented,
   });
-};

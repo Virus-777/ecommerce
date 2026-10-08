@@ -6,9 +6,8 @@ import type { ReturnsService } from '../service.js';
  * Admin API: /api/admin/returns/…  (docs/api/modules/returns.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: ReturnsService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: ReturnsService) =>
+  routes(endpoints, 'admin', {
     /** GET /requests/stats: Returns queue KPIs and queue owner */
     adminReturnStats: notImplemented,
     /** GET /requests: Returns and refunds queue with reason, owner, deadline, amount and flags */
@@ -68,4 +67,3 @@ export const adminRoutes = (service: ReturnsService) => {
     /** PATCH /category-exceptions/{id}: Change or retire a category exception from a date */
     updateCategoryException: notImplemented,
   });
-};

@@ -6,9 +6,8 @@ import type { FinanceService } from '../service.js';
  * Admin API: /api/admin/finance/…  (docs/api/modules/finance.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: FinanceService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: FinanceService) =>
+  routes(endpoints, 'admin', {
     /** GET /overview: Collected payments, company sales, fee income, owed to sellers, refunds, holds and discount funding */
     getOverview: notImplemented,
     /** GET /marketplace-income: Marketplace fee income, ad income and amounts owed to sellers (separate from company trading) */
@@ -98,4 +97,3 @@ export const adminRoutes = (service: FinanceService) => {
     /** POST /reconciliation/days/{date}/complete: Sign off the day's checks */
     completeReconDay: notImplemented,
   });
-};

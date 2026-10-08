@@ -6,9 +6,8 @@ import type { CatalogService } from '../service.js';
  * Store API: /api/store/catalog/…  (docs/api/modules/catalog.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const storeRoutes = (service: CatalogService) => {
-  void service;
-  return routes(endpoints, 'store', {
+export const storeRoutes = (service: CatalogService) =>
+  routes(endpoints, 'store', {
     /** GET /categories: Visible category tree with in-stock counts and images */
     listCategories: notImplemented,
     /** GET /categories/{slug}: Category with breadcrumb, subcategories and filterable attributes */
@@ -20,4 +19,3 @@ export const storeRoutes = (service: CatalogService) => {
     /** GET /products/{id}: Product detail (shared content only) */
     getProduct: notImplemented,
   });
-};

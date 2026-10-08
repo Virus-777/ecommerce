@@ -6,9 +6,8 @@ import type { CheckoutService } from '../service.js';
  * Store API: /api/store/checkout/…  (docs/api/modules/checkout.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const storeRoutes = (service: CheckoutService) => {
-  void service;
-  return routes(endpoints, 'store', {
+export const storeRoutes = (service: CheckoutService) =>
+  routes(endpoints, 'store', {
     /** POST /sessions: Start checkout from the cart or Buy now */
     startCheckout: notImplemented,
     /** GET /sessions/{id}: The whole checkout: steps, contact, address, packages with options, coupons, payment, review and totals */
@@ -46,4 +45,3 @@ export const storeRoutes = (service: CheckoutService) => {
     /** DELETE /sessions/{id}: Leave checkout (releases holds, voids any authorization) */
     abandonCheckout: notImplemented,
   });
-};

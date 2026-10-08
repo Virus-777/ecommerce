@@ -12,7 +12,4 @@ import type { CustomersService } from '../service.js';
  *   Query.customer → service.getCustomer
  *   Query.customers → service.searchCustomers
  */
-export const resolvers = (service: CustomersService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: CustomersService): ModuleResolvers => ({});

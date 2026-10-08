@@ -12,18 +12,33 @@ export function money(amount: number, currency = 'USD'): Money {
   return { amount, currency };
 }
 
-const same = (a: Money, b: Money) => {
+function assertSameCurrency(a: Money, b: Money) {
   if (a.currency !== b.currency) throw new AppError('VALIDATION_FAILED', `Currency mismatch: ${a.currency} vs ${b.currency}`);
-};
+}
 
-export const add = (a: Money, b: Money): Money => (same(a, b), money(a.amount + b.amount, a.currency));
-export const subtract = (a: Money, b: Money): Money => (same(a, b), money(a.amount - b.amount, a.currency));
-export const sum = (items: Money[], currency = 'USD'): Money => items.reduce((acc, m) => add(acc, m), money(0, currency));
+export function add(a: Money, b: Money): Money {
+  assertSameCurrency(a, b);
+  return money(a.amount + b.amount, a.currency);
+}
+
+export function subtract(a: Money, b: Money): Money {
+  assertSameCurrency(a, b);
+  return money(a.amount - b.amount, a.currency);
+}
+
+export function compare(a: Money, b: Money): number {
+  assertSameCurrency(a, b);
+  return Math.sign(a.amount - b.amount);
+}
+
+export const sum = (items: Money[], currency = 'USD'): Money => items.reduce(add, money(0, currency));
 export const isZero = (m: Money) => m.amount === 0;
-export const compare = (a: Money, b: Money) => (same(a, b), Math.sign(a.amount - b.amount));
 
 /** Multiply by a rate (e.g. a 12.5% fee) and round half away from zero to a whole minor unit. */
-export const multiply = (m: Money, factor: number): Money => money(Math.sign(m.amount * factor) * Math.round(Math.abs(m.amount * factor)), m.currency);
+export function multiply(m: Money, factor: number): Money {
+  const exact = m.amount * factor;
+  return money(Math.sign(exact) * Math.round(Math.abs(exact)), m.currency);
+}
 
 /** Split an amount into parts proportional to weights without losing a cent (largest remainder). */
 export function allocate(m: Money, weights: number[]): Money[] {
@@ -32,11 +47,10 @@ export function allocate(m: Money, weights: number[]): Money[] {
   const raw = weights.map((w) => (m.amount * w) / total);
   const parts = raw.map(Math.floor);
   let rest = m.amount - parts.reduce((a, b) => a + b, 0);
-  const order = raw.map((r, i) => [r - Math.floor(r), i] as const).sort((a, b) => b[0] - a[0]);
-  for (const [, i] of order) {
-    if (rest <= 0) break;
+  const byRemainder = raw.map((r, i) => ({ i, frac: r - Math.floor(r) })).sort((a, b) => b.frac - a.frac);
+  for (const { i } of byRemainder) {
+    if (rest-- <= 0) break;
     parts[i]! += 1;
-    rest -= 1;
   }
   return parts.map((p) => money(p, m.currency));
 }

@@ -6,9 +6,8 @@ import type { PaymentsService } from '../service.js';
  * Admin API: /api/admin/payments/…  (docs/api/modules/payments.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: PaymentsService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: PaymentsService) =>
+  routes(endpoints, 'admin', {
     /** GET /payments: Payments with status and flags (pending check, orphan, capture failed, chargeback) */
     listPaymentsAdmin: notImplemented,
     /** GET /payments/{id}: Payment with tenders, allocations, captures, refunds, disputes, provider calls and webhooks */
@@ -48,4 +47,3 @@ export const adminRoutes = (service: PaymentsService) => {
     /** POST /disputes/{id}/accept: Concede the dispute (the provider keeps the money) */
     acceptDispute: notImplemented,
   });
-};

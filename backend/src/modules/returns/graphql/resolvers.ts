@@ -24,7 +24,4 @@ import type { ReturnsService } from '../service.js';
  *   Query.refundRequests → service.listRefundRequests
  *   Query.refundRequest → service.getRefundRequest
  */
-export const resolvers = (service: ReturnsService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: ReturnsService): ModuleResolvers => ({});

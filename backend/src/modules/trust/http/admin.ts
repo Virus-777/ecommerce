@@ -6,9 +6,8 @@ import type { TrustService } from '../service.js';
  * Admin API: /api/admin/trust/…  (docs/api/modules/trust.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: TrustService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: TrustService) =>
+  routes(endpoints, 'admin', {
     /** GET /overview: Open reports by type, high risk, appeals waiting */
     getTrustOverview: notImplemented,
     /** GET /reports: Trust queue, highest risk first */
@@ -68,4 +67,3 @@ export const adminRoutes = (service: TrustService) => {
     /** PATCH /detection-rules/{key}: Turn a rule on or off or change its thresholds */
     updateDetectionRule: notImplemented,
   });
-};

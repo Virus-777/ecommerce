@@ -16,8 +16,7 @@ export default defineModule({
   version: '0.1.0',
   migrations,
   register(ctx) {
-    const repo = createPostgresPurchasingRepository(ctx.db);
-    const service = new PurchasingService({ repo, ctx });
+    const service = new PurchasingService({ repo: createPostgresPurchasingRepository(ctx.db), ctx });
     ctx.provide(service);
     ctx.http.routes(adminRoutes(service));
 

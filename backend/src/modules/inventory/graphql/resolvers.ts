@@ -13,7 +13,4 @@ import type { InventoryService } from '../service.js';
  *   Query.myStockSummary → service.getSellerStockSummary
  *   Query.stockSummary → service.getStockSummary
  */
-export const resolvers = (service: InventoryService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: InventoryService): ModuleResolvers => ({});

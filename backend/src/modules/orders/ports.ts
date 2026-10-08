@@ -4,5 +4,4 @@
  */
 
 /** Persistence for this module's own tables: orders.orders, orders.seller_groups, orders.order_items, orders.item_state_log, orders.cancellations, orders.shipment_refs, orders.timeline, orders.notes, orders.documents, orders.saved_filters, orders.ref_sequences. */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface OrdersRepository {}

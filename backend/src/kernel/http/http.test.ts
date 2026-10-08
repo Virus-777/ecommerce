@@ -15,12 +15,12 @@ import { migrate } from '../migrations/index.js';
 import { defineEndpoints } from '../spec/define.js';
 import { postgresIdempotencyStore } from './idempotency.js';
 import { notImplemented, routes } from './index.js';
-import { registerEndpoints, type EndpointRegistration } from './register.js';
+import { registerEndpoints, registrationsOf } from './register.js';
 import { createServer } from './server.js';
 
 const Item = z.object({ id: z.uuid(), name: z.string(), price: common.Money });
 
-const endpoints = defineEndpoints('demo', {
+const endpoints = defineEndpoints({
   getItem: { area: 'store', method: 'GET', path: '/items/{id}', auth: 'anyone', summary: 'One item', params: () => z.object({ id: z.uuid() }), response: () => Item, status: 200, phase: 1 },
   listItems: { area: 'store', method: 'GET', path: '/items', auth: 'customer', summary: 'Items', query: () => z.object({ q: z.string().optional() }), paging: true, response: () => Item, status: 200, phase: 1 },
   placeOrder: { area: 'store', method: 'POST', path: '/orders', auth: 'shopper', summary: 'Place', body: () => z.object({ itemId: z.uuid(), quantity: z.number().int().min(1) }), response: () => z.object({ orderId: z.string(), n: z.number().int() }), status: 201, idempotent: true, phase: 1 },
@@ -56,10 +56,7 @@ beforeAll(async () => {
   db = await createDatabase();
   await migrate(db, []);
   app = createServer(config);
-  const regs: EndpointRegistration[] = sets.flatMap((s) =>
-    Object.entries(s.handlers).map(([id, handler]) => ({ module: 'demo', moduleTitle: 'Demo', moduleErrorCodes: {}, id, def: endpoints[id as keyof typeof endpoints], handler })),
-  );
-  registerEndpoints(app, regs, {
+  registerEndpoints(app, registrationsOf('demo', 'Demo', sets), {
     config,
     authenticator: devAuthenticator(TEST_SECRET, moduleAuthenticator(() => undefined)),
     idempotency: postgresIdempotencyStore(db.kysely),

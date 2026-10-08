@@ -6,9 +6,8 @@ import type { FinanceService } from '../service.js';
  * Seller API: /api/seller/finance/…  (docs/api/modules/finance.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const sellerRoutes = (service: FinanceService) => {
-  void service;
-  return routes(endpoints, 'seller', {
+export const sellerRoutes = (service: FinanceService) =>
+  routes(endpoints, 'seller', {
     /** GET /balances: Sales proceeds, pending, available, held (with reasons and review dates), negative balance and next payout */
     getBalances: notImplemented,
     /** GET /ledger: Transactions with running balance */
@@ -34,4 +33,3 @@ export const sellerRoutes = (service: FinanceService) => {
     /** GET /payout-destination: Verification status of the payout account and any change under review */
     getPayoutDestination: notImplemented,
   });
-};

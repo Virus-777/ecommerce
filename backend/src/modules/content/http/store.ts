@@ -6,9 +6,8 @@ import type { ContentService } from '../service.js';
  * Store API: /api/store/content/…  (docs/api/modules/content.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const storeRoutes = (service: ContentService) => {
-  void service;
-  return routes(endpoints, 'store', {
+export const storeRoutes = (service: ContentService) =>
+  routes(endpoints, 'store', {
     /** GET /home: Homepage sections in order, resolved for display */
     getHomepage: notImplemented,
     /** GET /pages/{slug}: Campaign page, collection, About or landing page */
@@ -36,4 +35,3 @@ export const storeRoutes = (service: ContentService) => {
     /** GET /policy-versions/{id}: One past or current policy version (linked from order details) */
     getPublicPolicyVersion: notImplemented,
   });
-};

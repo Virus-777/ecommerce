@@ -4,54 +4,62 @@
  *   - @areas(in: […]) keeps a type or field only in the listed areas (no @areas = all three);
  *   - fields whose types come from a disabled module are dropped, repeatedly, until the schema is stable.
  */
-import type { DefinitionNode, DocumentNode, GraphQLSchema, TypeNode } from 'graphql';
-import { graphql } from './runtime.js';
-
-const { buildASTSchema, Kind, parse, visit } = graphql;
+import {
+  buildASTSchema,
+  isTypeDefinitionNode,
+  isTypeExtensionNode,
+  Kind,
+  parse,
+  specifiedScalarTypes,
+  valueFromASTUntyped,
+  visit,
+  type ConstDirectiveNode,
+  type DefinitionNode,
+  type DocumentNode,
+  type GraphQLSchema,
+  type TypeNode,
+} from 'graphql';
 
 export type GraphQLArea = 'store' | 'seller' | 'admin';
+export const AREAS: readonly GraphQLArea[] = ['store', 'seller', 'admin'];
 
-const DEF_KINDS = new Set<string>([Kind.OBJECT_TYPE_DEFINITION, Kind.ENUM_TYPE_DEFINITION, Kind.INPUT_OBJECT_TYPE_DEFINITION, Kind.UNION_TYPE_DEFINITION, Kind.INTERFACE_TYPE_DEFINITION, Kind.SCALAR_TYPE_DEFINITION]);
-const EXT_KINDS = new Set<string>([Kind.OBJECT_TYPE_EXTENSION, Kind.ENUM_TYPE_EXTENSION, Kind.INPUT_OBJECT_TYPE_EXTENSION, Kind.UNION_TYPE_EXTENSION, Kind.INTERFACE_TYPE_EXTENSION]);
-const BUILTIN = new Set(['String', 'Int', 'Float', 'Boolean', 'ID']);
+type WithDirectives = { readonly directives?: readonly ConstDirectiveNode[] } | null | undefined;
 
-type Node = { kind: string; directives?: readonly { name: { value: string }; arguments?: readonly { name: { value: string }; value: { kind: string; values?: readonly { value?: string }[] } }[] }[] };
+const BUILTIN = new Set(specifiedScalarTypes.map((t) => t.name));
+const FILTERED = new Set<string>([Kind.FIELD_DEFINITION, Kind.ENUM_VALUE_DEFINITION, Kind.INPUT_VALUE_DEFINITION]);
 
-function areasOf(node: Node): string[] | null {
-  const d = node.directives?.find((x) => x.name.value === 'areas');
-  const v = d?.arguments?.find((a) => a.name.value === 'in')?.value;
-  return v?.kind === Kind.LIST ? (v.values ?? []).map((x) => String(x.value)) : null;
+/** Argument of a directive on a schema node, e.g. directiveArg(field.astNode, 'source', 'module') */
+export function directiveArg(node: WithDirectives, directive: string, arg: string): unknown {
+  const value = node?.directives?.find((d) => d.name.value === directive)?.arguments?.find((a) => a.name.value === arg)?.value;
+  return value && valueFromASTUntyped(value);
 }
 
 function filterForArea(doc: DocumentNode, area: GraphQLArea): DocumentNode {
   const A = area.toUpperCase();
   return visit(doc, {
     enter(node) {
-      const n = node as unknown as Node;
-      if ((DEF_KINDS.has(n.kind) || EXT_KINDS.has(n.kind) || n.kind === Kind.FIELD_DEFINITION || n.kind === Kind.ENUM_VALUE_DEFINITION || n.kind === Kind.INPUT_VALUE_DEFINITION) && n.directives) {
-        const a = areasOf(n);
-        if (a && !a.includes(A)) return null;
-      }
-      return undefined;
+      if (!(isTypeDefinitionNode(node) || isTypeExtensionNode(node) || FILTERED.has(node.kind))) return;
+      const areas = directiveArg(node as WithDirectives, 'areas', 'in') as string[] | undefined;
+      if (areas && !areas.includes(A)) return null;
     },
   });
 }
 
 type WithFields = DefinitionNode & { name: { value: string }; fields?: readonly { name: { value: string }; type: TypeNode; arguments?: readonly { type: TypeNode }[] }[] };
 
-function pruneMissing(defs: DefinitionNode[], dropped: string[]): DefinitionNode[] {
-  for (;;) {
-    const defined = new Set(defs.filter((d) => DEF_KINDS.has(d.kind)).map((d) => (d as WithFields).name.value));
-    const ok = (t: TypeNode) => {
-      let n: TypeNode = t;
-      while (n.kind !== Kind.NAMED_TYPE) n = n.type;
-      return BUILTIN.has(n.name.value) || defined.has(n.name.value);
-    };
-    let changed = false;
+const namedType = (t: TypeNode): string => (t.kind === Kind.NAMED_TYPE ? t.name.value : namedType(t.type));
+
+/** Drops extensions of missing types and fields whose types are missing, until nothing changes. */
+function pruneMissing(input: readonly DefinitionNode[]) {
+  const dropped: string[] = [];
+  let defs = input;
+  for (let changed = true; changed; ) {
+    changed = false;
+    const defined = new Set(defs.filter(isTypeDefinitionNode).map((d) => d.name.value));
+    const ok = (t: TypeNode) => BUILTIN.has(namedType(t)) || defined.has(namedType(t));
     const next: DefinitionNode[] = [];
-    for (const raw of defs) {
-      const d = raw as WithFields;
-      if (EXT_KINDS.has(d.kind) && !defined.has(d.name.value)) {
+    for (const d of defs as WithFields[]) {
+      if (isTypeExtensionNode(d) && !defined.has(d.name.value)) {
         dropped.push(`${d.name.value} (all fields added by this fragment)`);
         changed = true;
         continue;
@@ -60,20 +68,16 @@ function pruneMissing(defs: DefinitionNode[], dropped: string[]): DefinitionNode
         next.push(d);
         continue;
       }
-      const fields = d.fields.filter((f) => {
-        const keep = ok(f.type) && (f.arguments ?? []).every((a) => ok(a.type));
-        if (!keep) {
-          dropped.push(`${d.name.value}.${f.name.value}`);
-          changed = true;
-        }
-        return keep;
-      });
-      if (fields.length || !EXT_KINDS.has(d.kind)) next.push({ ...d, fields } as unknown as DefinitionNode);
-      else changed = true;
+      const fields = d.fields.filter((f) => ok(f.type) && (f.arguments ?? []).every((a) => ok(a.type)));
+      if (fields.length !== d.fields.length) {
+        changed = true;
+        for (const f of d.fields) if (!fields.includes(f)) dropped.push(`${d.name.value}.${f.name.value}`);
+      }
+      if (fields.length || !isTypeExtensionNode(d)) next.push({ ...d, fields } as unknown as DefinitionNode);
     }
     defs = next;
-    if (!changed) return defs;
   }
+  return { defs, dropped };
 }
 
 export interface Fragment {
@@ -81,25 +85,11 @@ export interface Fragment {
   typeDefs: string;
 }
 
-export interface Composed {
-  schema: GraphQLSchema;
-  /** Which module contributed each field: "Type.field" → module */
-  fieldOwner: Map<string, string>;
-  dropped: string[];
-}
+/** Parse base.graphql and the fragments once; each area is composed from the parsed documents. */
+export const parseFragments = (baseTypeDefs: string, fragments: readonly Fragment[]): DocumentNode[] => [parse(baseTypeDefs), ...fragments.map((f) => parse(f.typeDefs))];
 
-export function composeSchema(area: GraphQLArea, baseTypeDefs: string, fragments: Fragment[]): Composed {
-  const parsed = [{ module: 'base', doc: parse(baseTypeDefs) }, ...fragments.map((f) => ({ module: f.module, doc: parse(f.typeDefs) }))];
-  const fieldOwner = new Map<string, string>();
-  for (const { module, doc } of parsed) {
-    for (const d of doc.definitions as WithFields[]) for (const f of d.fields ?? []) fieldOwner.set(`${d.name.value}.${f.name.value}`, module);
-  }
-  let defs = parsed
-    .map((p) => filterForArea(p.doc, area))
-    .flatMap((d) => [...d.definitions])
-    .filter((d) => !(d.kind === Kind.OBJECT_TYPE_EXTENSION && !((d as WithFields).fields ?? []).length));
-  const dropped: string[] = [];
-  defs = pruneMissing(defs, dropped);
-  const schema = buildASTSchema({ kind: Kind.DOCUMENT, definitions: defs }, { assumeValidSDL: false });
-  return { schema, fieldOwner, dropped };
+export function composeSchema(area: GraphQLArea, docs: readonly DocumentNode[]): { schema: GraphQLSchema; dropped: string[] } {
+  const all = docs.flatMap((d) => filterForArea(d, area).definitions).filter((d) => !(d.kind === Kind.OBJECT_TYPE_EXTENSION && !d.fields?.length));
+  const { defs, dropped } = pruneMissing(all);
+  return { schema: buildASTSchema({ kind: Kind.DOCUMENT, definitions: defs }), dropped };
 }

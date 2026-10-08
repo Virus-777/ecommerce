@@ -4,6 +4,5 @@ import type { WarehouseRepository } from '../../ports.js';
 
 /** Postgres adapter for WarehouseRepository. `db` is scoped to the `warehouse` schema. */
 export function createPostgresWarehouseRepository(db: Kysely<WarehouseDb>): WarehouseRepository {
-  void db;
   return {};
 }

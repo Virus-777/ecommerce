@@ -4,6 +4,5 @@ import type { PurchasingRepository } from '../../ports.js';
 
 /** Postgres adapter for PurchasingRepository. `db` is scoped to the `purchasing` schema. */
 export function createPostgresPurchasingRepository(db: Kysely<PurchasingDb>): PurchasingRepository {
-  void db;
   return {};
 }

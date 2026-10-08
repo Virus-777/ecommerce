@@ -4,5 +4,4 @@
  */
 
 /** Persistence for this module's own tables: checkout.sessions, checkout.session_lines, checkout.session_packages, checkout.change_sets, checkout.place_requests, checkout.session_log. */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface CheckoutRepository {}

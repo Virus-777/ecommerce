@@ -4,5 +4,4 @@
  */
 
 /** Persistence for this module's own tables: media.assets, media.renditions, media.uploads, media.usages, media.processing_jobs, media.upload_counters. */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface MediaRepository {}

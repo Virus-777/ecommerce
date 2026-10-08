@@ -1,5 +1,4 @@
 /** Permission keys and approval actions this module declares (spec permissions, approvalActions). */
 import { spec } from '../../spec/purchasing.js';
 
-export const permissions = spec.permissions;
-export const approvalActions = spec.approvalActions;
+export const { permissions, approvalActions } = spec;

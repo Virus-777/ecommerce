@@ -13,7 +13,4 @@ import type { PaymentsService } from '../service.js';
  *   Order.paymentDisputes → service.listDisputesForOrder
  *   Customer.paymentMethods → service.listSavedMethods
  */
-export const resolvers = (service: PaymentsService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: PaymentsService): ModuleResolvers => ({});

@@ -6,9 +6,8 @@ import type { SellersService } from '../service.js';
  * Admin API: /api/admin/sellers/…  (docs/api/modules/sellers.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: SellersService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: SellersService) =>
+  routes(endpoints, 'admin', {
     /** GET /sellers: All sellers with status, verification, rating, on-time dispatch, cases, balance and restrictions */
     listSellers: notImplemented,
     /** GET /sellers/stats: Counts for the sellers header and status tabs */
@@ -88,4 +87,3 @@ export const adminRoutes = (service: SellersService) => {
     /** POST /sellers/exports: Export the filtered seller list */
     exportSellers: notImplemented,
   });
-};

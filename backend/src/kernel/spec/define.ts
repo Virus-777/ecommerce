@@ -39,16 +39,8 @@ export interface EndpointDef {
 
 export type EndpointTable = Record<string, EndpointDef>;
 
-const endpointModule = new WeakMap<object, string>();
-
-export function defineEndpoints<const T extends EndpointTable>(module: string, endpoints: T): T {
-  endpointModule.set(endpoints, module);
-  return endpoints;
-}
-
-export function moduleOfEndpoints(endpoints: EndpointTable): string | undefined {
-  return endpointModule.get(endpoints);
-}
+/** Keeps the literal types of an endpoint table (areas, auth kinds, schemas) for typed handlers. */
+export const defineEndpoints = <const T extends EndpointTable>(endpoints: T): T => endpoints;
 
 export interface StateMachineDef {
   readonly field: string;

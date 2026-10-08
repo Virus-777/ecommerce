@@ -17,8 +17,7 @@ export default defineModule({
   version: '0.1.0',
   migrations,
   register(ctx) {
-    const repo = createPostgresFulfillmentServiceRepository(ctx.db);
-    const service = new FulfillmentServiceService({ repo, ctx });
+    const service = new FulfillmentServiceService({ repo: createPostgresFulfillmentServiceRepository(ctx.db), ctx });
     ctx.provide(service);
     ctx.http.routes(sellerRoutes(service), adminRoutes(service));
 

@@ -6,9 +6,8 @@ import type { PromotionsService } from '../service.js';
  * Seller API: /api/seller/promotions/…  (docs/api/modules/promotions.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const sellerRoutes = (service: PromotionsService) => {
-  void service;
-  return routes(endpoints, 'seller', {
+export const sellerRoutes = (service: PromotionsService) =>
+  routes(endpoints, 'seller', {
     /** GET /discounts: Discounts this seller funds */
     listSellerDiscounts: notImplemented,
     /** POST /discounts/preview: What the customer sees and the seller earns per unit */
@@ -38,4 +37,3 @@ export const sellerRoutes = (service: PromotionsService) => {
     /** POST /invitations/{id}/withdraw: Leave a campaign */
     withdrawParticipation: notImplemented,
   });
-};

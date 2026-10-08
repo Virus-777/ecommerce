@@ -4,6 +4,5 @@ import type { MediaRepository } from '../../ports.js';
 
 /** Postgres adapter for MediaRepository. `db` is scoped to the `media` schema. */
 export function createPostgresMediaRepository(db: Kysely<MediaDb>): MediaRepository {
-  void db;
   return {};
 }

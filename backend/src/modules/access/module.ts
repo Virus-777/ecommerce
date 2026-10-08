@@ -19,8 +19,7 @@ export default defineModule({
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const repo = createPostgresAccessRepository(ctx.db);
-    const service = new AccessService({ repo, ctx });
+    const service = new AccessService({ repo: createPostgresAccessRepository(ctx.db), ctx });
     ctx.provide(service);
     ctx.http.routes(adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

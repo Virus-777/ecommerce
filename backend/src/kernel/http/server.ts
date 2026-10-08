@@ -1,14 +1,13 @@
 /**
- * The Fastify server every API area runs on: Zod validation, the spec's error format
- * `{ error: { code, message, details } }`, X-Request-Id, and raw bodies for webhook signatures.
+ * The Fastify server every API area runs on: the spec's error format `{ error: { code, message, details } }`,
+ * X-Request-Id, and raw bodies for webhook signatures. Spec routes bring their own Zod compilers
+ * (register.ts); everything else (GraphQL, /docs) keeps Fastify's defaults.
  */
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
-import { hasZodFastifySchemaValidationErrors, isResponseSerializationError, serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
+import { hasZodFastifySchemaValidationErrors, isResponseSerializationError } from 'fastify-type-provider-zod';
 import type { Config } from '../config/index.js';
-import { AppError } from '../errors/index.js';
+import { AppError, codeForStatus, isNotImplemented } from '../errors/index.js';
 import { newId } from '../lib/ids.js';
-
-const isZod = (s: unknown) => typeof s === 'object' && s !== null && '_zod' in s;
 
 export function createServer(config: Config): FastifyInstance {
   const app = Fastify({
@@ -24,29 +23,22 @@ export function createServer(config: Config): FastifyInstance {
     bodyLimit: 2 * 1024 * 1024,
   });
 
-  // Spec routes use Zod schemas; plugin routes (GraphQL, /docs) bring plain JSON schemas
-  app.setValidatorCompiler((route) => (isZod(route.schema) ? validatorCompiler(route as never) : (data: unknown) => ({ value: data })));
-  app.setSerializerCompiler((route) =>
-    isZod(route.schema) && config.responseValidation ? serializerCompiler(route as never) : (data: unknown) => JSON.stringify(data),
-  );
-
-  app.addHook('onSend', async (request, reply) => {
+  app.addHook('onRequest', (request, reply, done) => {
     reply.header('x-request-id', request.id);
+    done();
   });
 
-  // webhook signatures are computed over the raw body
+  // Fastify's JSON parser (with its prototype-poisoning protection), keeping the raw text for webhook signatures
+  const parseJson = app.getDefaultJsonParser('error', 'error');
   app.addContentTypeParser('application/json', { parseAs: 'string' }, (request, body, done) => {
-    try {
-      if (request.url.startsWith('/webhooks/')) request.rawBody = body as string;
-      done(null, body === '' ? undefined : JSON.parse(body as string));
-    } catch (err) {
-      done(new AppError('VALIDATION_FAILED', 'Request body is not valid JSON', { issues: [{ path: 'body', message: (err as Error).message }] }) as never, undefined);
-    }
+    if (request.url.startsWith('/webhooks/')) request.rawBody = body as string;
+    if (body === '') return done(null, undefined);
+    parseJson(request, body as string, done);
   });
 
-  app.setErrorHandler((err: FastifyError | AppError, request, reply) => {
+  app.setErrorHandler((err: FastifyError, request, reply) => {
     if (err instanceof AppError) {
-      if (err.status >= 500 && err.code !== 'NOT_IMPLEMENTED') request.log.error({ err }, err.message);
+      if (err.status >= 500 && !isNotImplemented(err)) request.log.error({ err }, err.message);
       return reply.code(err.status).send(err.toBody());
     }
     if (hasZodFastifySchemaValidationErrors(err)) {
@@ -56,15 +48,14 @@ export function createServer(config: Config): FastifyInstance {
     if (isResponseSerializationError(err)) {
       request.log.error({ err, issues: err.cause?.issues }, 'response does not match the spec');
       const details = config.env === 'production' ? undefined : { issues: err.cause?.issues };
-      return reply.code(500).send({ error: { code: 'INTERNAL_ERROR', message: 'The response did not match the API spec', ...(details ? { details } : {}) } });
+      return reply.code(500).send(new AppError('INTERNAL_ERROR', 'The response did not match the API spec', details, 500).toBody());
     }
-    const status = (err as FastifyError).statusCode ?? 500;
+    const status = err.statusCode ?? 500;
     if (status >= 500) {
       request.log.error({ err }, 'unhandled error');
-      return reply.code(500).send({ error: { code: 'INTERNAL_ERROR', message: 'Something went wrong. Include the X-Request-Id when reporting it.' } });
+      return reply.code(500).send(new AppError('INTERNAL_ERROR', 'Something went wrong. Include the X-Request-Id when reporting it.', undefined, 500).toBody());
     }
-    const code = status === 404 ? 'NOT_FOUND' : status === 401 ? 'UNAUTHORIZED' : status === 403 ? 'FORBIDDEN' : status === 429 ? 'RATE_LIMITED' : 'VALIDATION_FAILED';
-    return reply.code(status).send(new AppError(code, err.message, undefined, status).toBody());
+    return reply.code(status).send(new AppError(codeForStatus(status), err.message, undefined, status).toBody());
   });
 
   app.setNotFoundHandler((request, reply) => {

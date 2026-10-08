@@ -22,8 +22,7 @@ export default defineModule({
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const repo = createPostgresNotificationsRepository(ctx.db);
-    const service = new NotificationsService({ repo, ctx });
+    const service = new NotificationsService({ repo: createPostgresNotificationsRepository(ctx.db), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), webhooksRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

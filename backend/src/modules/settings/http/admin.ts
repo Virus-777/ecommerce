@@ -6,9 +6,8 @@ import type { SettingsService } from '../service.js';
  * Admin API: /api/admin/settings/…  (docs/api/modules/settings.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: SettingsService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: SettingsService) =>
+  routes(endpoints, 'admin', {
     /** GET /overview: Settings page: market, every section and all scheduled changes */
     getOverview: notImplemented,
     /** GET /definitions: Runtime setting definitions */
@@ -38,4 +37,3 @@ export const adminRoutes = (service: SettingsService) => {
     /** PUT /feature-flags/{key}: Turn a feature flag on or off */
     setFeatureFlag: notImplemented,
   });
-};

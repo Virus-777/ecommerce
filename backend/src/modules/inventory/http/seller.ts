@@ -6,9 +6,8 @@ import type { InventoryService } from '../service.js';
  * Seller API: /api/seller/inventory/…  (docs/api/modules/inventory.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const sellerRoutes = (service: InventoryService) => {
-  void service;
-  return routes(endpoints, 'seller', {
+export const sellerRoutes = (service: InventoryService) =>
+  routes(endpoints, 'seller', {
     /** GET /stock-items: Quantities for the seller's offers: available, reserved, low-stock threshold, status */
     listOwnStock: notImplemented,
     /** GET /summary: In stock, low, out of stock and reserved totals */
@@ -28,4 +27,3 @@ export const sellerRoutes = (service: InventoryService) => {
     /** GET /movements: Adjustment and movement history (reason, person, time) */
     listOwnMovements: notImplemented,
   });
-};

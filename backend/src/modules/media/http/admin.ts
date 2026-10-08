@@ -6,9 +6,8 @@ import type { MediaService } from '../service.js';
  * Admin API: /api/admin/media/…  (docs/api/modules/media.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: MediaService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: MediaService) =>
+  routes(endpoints, 'admin', {
     /** POST /uploads: Start a staff upload (Official Store products, content, ad creatives, inspection photos, evidence) */
     createAdminUpload: notImplemented,
     /** POST /uploads/{id}/complete: Confirm a staff upload */
@@ -30,4 +29,3 @@ export const adminRoutes = (service: MediaService) => {
     /** GET /assets/{id}/download: Signed link to a private file (verification documents, evidence) */
     getAdminDownload: notImplemented,
   });
-};

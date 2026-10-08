@@ -16,7 +16,4 @@ import type { ContentService } from '../service.js';
  *   Query.homePagePreview → service.previewHomePage
  *   Query.contentPagePreview → service.previewPage
  */
-export const resolvers = (service: ContentService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: ContentService): ModuleResolvers => ({});

@@ -8,8 +8,8 @@
  * A Postgres-backed queue (pg-boss) can replace it behind the same interface.
  */
 import type { FastifyBaseLogger } from 'fastify';
-import { isAppError } from '../errors/index.js';
-import { zonedTimeToUtc, dateInZone } from '../lib/clock.js';
+import { isNotImplemented } from '../errors/index.js';
+import { dateInZone, systemClock, zonedTimeToUtc, type Clock } from '../lib/clock.js';
 
 export type Schedule =
   | { kind: 'interval'; ms: number; window?: 'business-hours' }
@@ -57,11 +57,13 @@ export class JobScheduler {
   readonly #timers = new Set<NodeJS.Timeout>();
   readonly #log: FastifyBaseLogger;
   readonly #timeZone: string;
+  readonly #clock: Clock;
   #started = false;
 
-  constructor(log: FastifyBaseLogger, timeZone: string) {
+  constructor(log: FastifyBaseLogger, timeZone: string, clock: Clock = systemClock) {
     this.#log = log;
     this.#timeZone = timeZone;
+    this.#clock = clock;
   }
 
   declare(def: JobDefinition) {
@@ -75,7 +77,7 @@ export class JobScheduler {
   }
 
   list() {
-    return [...this.#jobs.values()].map(({ name, module, schedule, parsed, run, lastRunAt, lastError }) => ({ name, module, schedule, parsed, handled: Boolean(run), lastRunAt, lastError }));
+    return [...this.#jobs.values()].map(({ run, running: _running, ...job }) => ({ ...job, handled: Boolean(run) }));
   }
 
   async runNow(name: string) {
@@ -88,11 +90,11 @@ export class JobScheduler {
       job.lastError = undefined;
     } catch (err) {
       job.lastError = (err as Error).message;
-      const level = isAppError(err) && err.code === 'NOT_IMPLEMENTED' ? 'debug' : 'error';
+      const level = isNotImplemented(err) ? 'debug' : 'error';
       this.#log[level]({ err, job: name }, `job ${name} failed`);
     } finally {
       job.running = false;
-      job.lastRunAt = new Date();
+      job.lastRunAt = this.#clock.now();
     }
   }
 
@@ -107,12 +109,12 @@ export class JobScheduler {
         const t = setInterval(() => void this.runNow(job.name), p.ms);
         t.unref();
         this.#timers.add(t);
-      } else if (p.kind === 'daily' || p.kind === 'weekly' || p.kind === 'monthly') this.#scheduleAt(job, p);
+      } else if ('time' in p) this.#scheduleAt(job, p);
     }
   }
 
   #scheduleAt(job: Registered, p: Extract<Schedule, { time: string }>) {
-    const now = new Date();
+    const now = this.#clock.now();
     let date = dateInZone(now, this.#timeZone);
     let next = zonedTimeToUtc(date, p.time, this.#timeZone);
     const step = () => {

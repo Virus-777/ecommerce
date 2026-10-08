@@ -6,9 +6,8 @@ import type { PromotionsService } from '../service.js';
  * Admin API: /api/admin/promotions/…  (docs/api/modules/promotions.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: PromotionsService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: PromotionsService) =>
+  routes(endpoints, 'admin', {
     /** GET /dashboard: KPIs, tab counts, daily discount cost and campaign results */
     promotionsDashboard: notImplemented,
     /** GET /campaigns: All campaigns and seller discounts */
@@ -66,4 +65,3 @@ export const adminRoutes = (service: PromotionsService) => {
     /** GET /campaigns/{id}/history: Submission, decisions, status changes and edits with reasons */
     getCampaignHistory: notImplemented,
   });
-};

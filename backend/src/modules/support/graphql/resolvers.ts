@@ -17,7 +17,4 @@ import type { SupportService } from '../service.js';
  *   Query.sellerCase → service.getCaseForSeller
  *   Query.caseAdmin → service.getCaseAdmin
  */
-export const resolvers = (service: SupportService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: SupportService): ModuleResolvers => ({});

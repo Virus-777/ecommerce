@@ -10,7 +10,4 @@ import type { SettingsService } from '../service.js';
  *   Query.storeInfo → service.storeInfo
  *   Query.upcomingChanges → service.upcomingChangesForSellers
  */
-export const resolvers = (service: SettingsService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: SettingsService): ModuleResolvers => ({});

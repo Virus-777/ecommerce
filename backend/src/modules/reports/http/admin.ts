@@ -6,9 +6,8 @@ import type { ReportsService } from '../service.js';
  * Admin API: /api/admin/reports/…  (docs/api/modules/reports.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: ReportsService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: ReportsService) =>
+  routes(endpoints, 'admin', {
     /** GET /catalogue: Report library by group with owners */
     getCatalogue: notImplemented,
     /** GET /reports/{key}: One report: metrics, filters, layout and definitions */
@@ -58,4 +57,3 @@ export const adminRoutes = (service: ReportsService) => {
     /** POST /read-models/{key}/rebuild: Rebuild a read model from the event log or source snapshots */
     rebuildReadModel: notImplemented,
   });
-};

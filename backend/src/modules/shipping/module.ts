@@ -22,8 +22,7 @@ export default defineModule({
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const repo = createPostgresShippingRepository(ctx.db);
-    const service = new ShippingService({ repo, ctx });
+    const service = new ShippingService({ repo: createPostgresShippingRepository(ctx.db), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), webhooksRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

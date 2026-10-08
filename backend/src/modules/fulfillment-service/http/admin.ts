@@ -6,9 +6,8 @@ import type { FulfillmentServiceService } from '../service.js';
  * Admin API: /api/admin/fulfillment-service/…  (docs/api/modules/fulfillment-service.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: FulfillmentServiceService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: FulfillmentServiceService) =>
+  routes(endpoints, 'admin', {
     /** GET /enrollments: Seller enrollments */
     listEnrollmentsAdmin: notImplemented,
     /** POST /enrollments/{id}/decide: Approve with capacity, reject or request information */
@@ -44,4 +43,3 @@ export const adminRoutes = (service: FulfillmentServiceService) => {
     /** POST /fees/{id}/reverse: Reverse a fee charge with a reason */
     reverseFeeCharge: notImplemented,
   });
-};

@@ -111,7 +111,7 @@ export async function authorize(
       if (!principal.sellerId || !principal.accountId) throw new AppError('UNAUTHORIZED', 'Choose the seller account to act for', { reason: 'seller_context_required' });
       const access = await auth.getMemberAccess(principal.sellerId, principal.accountId);
       if (!access) throw forbidden(undefined, 'You are no longer a member of this seller account');
-      if (endpoint.permission && !access.isOwner && !access.permissions.includes(endpoint.permission)) throw forbidden(endpoint.permission);
+      if (!sellerMayDo(access, endpoint.permission)) throw forbidden(endpoint.permission);
       return { principal: { ...principal, sellerMemberId: access.memberId }, sellerAccess: access };
     }
     case 'staff':
@@ -121,6 +121,10 @@ export async function authorize(
   }
   throw unauthorized('Unsupported auth');
 }
+
+/** Seller owners may do everything in their account; other members need the permission. */
+export const sellerMayDo = (access: SellerMemberAccess, permission: string | undefined) =>
+  !permission || access.isOwner || access.permissions.includes(permission);
 
 const audienceOf = (p: Principal) => (p.kind === 'staff' ? 'admin' : p.kind === 'seller' ? 'seller' : 'store');
 

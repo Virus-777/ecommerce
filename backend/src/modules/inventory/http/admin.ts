@@ -6,9 +6,8 @@ import type { InventoryService } from '../service.js';
  * Admin API: /api/admin/inventory/…  (docs/api/modules/inventory.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: InventoryService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: InventoryService) =>
+  routes(endpoints, 'admin', {
     /** GET /stock-items: Stock by SKU with all five groups, bin, reorder point, cost and status */
     listStockItems: notImplemented,
     /** GET /summary: Units and value at cost per stock group, low and out-of-stock counts */
@@ -70,4 +69,3 @@ export const adminRoutes = (service: InventoryService) => {
     /** POST /counts/{id}/submit: Submit a count; differences become count-correction adjustments */
     submitCount: notImplemented,
   });
-};

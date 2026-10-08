@@ -57,38 +57,23 @@ export function parseColumn(name: string, notation: string, where: string, probl
 }
 
 /** Postgres column type → TypeScript type of the value Kysely returns (see kernel/db type parsers). */
+const TS_OF_SQL: Record<string, string> = {
+  ...Object.fromEntries(['int', 'integer', 'smallint', 'bigint', 'bigserial', 'serial'].map((t) => [t, 'number'])),
+  bool: 'boolean',
+  boolean: 'boolean',
+  timestamptz: 'Date',
+  timestamp: 'Date',
+  jsonb: 'Json',
+  json: 'Json',
+  bytea: 'Uint8Array',
+};
+
 export function tsOfColumn(c: Column): string {
   const base = c.sqlType.replace(/\(.*\)/, '');
   const arr = base.endsWith('[]');
   const t = arr ? base.slice(0, -2) : base;
-  let ts: string;
-  switch (t) {
-    case 'int':
-    case 'integer':
-    case 'smallint':
-    case 'bigint':
-    case 'bigserial':
-    case 'serial':
-      ts = 'number';
-      break;
-    case 'bool':
-    case 'boolean':
-      ts = 'boolean';
-      break;
-    case 'timestamptz':
-    case 'timestamp':
-      ts = 'Date';
-      break;
-    case 'jsonb':
-    case 'json':
-      ts = 'Json';
-      break;
-    case 'bytea':
-      ts = 'Uint8Array';
-      break;
-    default:
-      ts = 'string'; // uuid, text, char, date (parsed as text), time, inet, numeric (exact, as text), tsvector
-  }
+  // everything else is text in JS: uuid, text, char, date (parsed as text), time, inet, numeric (exact), tsvector
+  let ts = TS_OF_SQL[t] ?? 'string';
   if (c.enumValues && ts === 'string') ts = c.enumValues.map((v) => `'${v}'`).join(' | ');
   if (arr) ts = `${ts.includes('|') ? `(${ts})` : ts}[]`;
   if (c.nullable || t === 'tsvector') ts += ' | null';
@@ -128,12 +113,11 @@ export function migrationSql(mod: ModuleSpec, plans: TablePlan[], problems: stri
   for (const { table, columns } of plans) {
     const lines: string[] = [];
     for (const c of columns) {
-      let type = c.sqlType;
-      if (type === 'tsvector') {
+      if (c.sqlType === 'tsvector') {
         lines.push(`  ${c.name} tsvector`);
         continue;
       }
-      const parts = [`  ${ident(c.name)} ${type}`];
+      const parts = [`  ${ident(c.name)} ${c.sqlType}`];
       if (c.identity) parts.push('generated always as identity');
       if (!c.nullable && !c.pk) parts.push('not null');
       if (c.pk) parts.push('primary key');
@@ -142,8 +126,7 @@ export function migrationSql(mod: ModuleSpec, plans: TablePlan[], problems: stri
       if (c.check) parts.push(`check (${c.check})`);
       lines.push(parts.join(' '));
       if (c.ref) {
-        const target = c.ref.includes('.') ? c.ref.split('.') : [c.ref, null];
-        const [tName, tCol] = target as [string, string | null];
+        const [tName, tCol] = c.ref.split('.') as [string, string?];
         if (!plans.some((p) => p.table.name === tName)) {
           problems.push(`${mod.name}.${table.name}.${c.name}: references unknown table "${c.ref}" (no cross-module foreign keys)`);
         } else {

@@ -6,9 +6,8 @@ import type { SearchService } from '../service.js';
  * Store API: /api/store/search/…  (docs/api/modules/search.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const storeRoutes = (service: SearchService) => {
-  void service;
-  return routes(endpoints, 'store', {
+export const storeRoutes = (service: SearchService) =>
+  routes(endpoints, 'store', {
     /** GET /products: Search results or category listing (product cards with sponsored slots marked) */
     searchProducts: notImplemented,
     /** GET /facets: Everything around the results for the same query: total, correction, applied filters, facets with counts, sorts, store match, category context, empty guidance */
@@ -32,4 +31,3 @@ export const storeRoutes = (service: SearchService) => {
     /** GET /ranking-policy: Published 'How results are ranked' */
     getRankingPolicy: notImplemented,
   });
-};

@@ -4,5 +4,4 @@
  */
 
 /** Persistence for this module's own tables: support.case_categories, support.cases, support.case_items, support.case_messages, support.case_evidence, support.case_offers, support.case_remedies, support.case_appeals, support.case_events. */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface SupportRepository {}

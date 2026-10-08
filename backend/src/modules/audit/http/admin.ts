@@ -6,9 +6,8 @@ import type { AuditService } from '../service.js';
  * Admin API: /api/admin/audit/…  (docs/api/modules/audit.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: AuditService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: AuditService) =>
+  routes(endpoints, 'admin', {
     /** GET /entries: Action history with filters */
     listEntries: notImplemented,
     /** GET /entries/{id}: One entry with evidence and approval history */
@@ -30,4 +29,3 @@ export const adminRoutes = (service: AuditService) => {
     /** GET /integrity: Hash-chain check result */
     getIntegrity: notImplemented,
   });
-};

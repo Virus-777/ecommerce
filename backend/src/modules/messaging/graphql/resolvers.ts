@@ -18,7 +18,4 @@ import type { MessagingService } from '../service.js';
  *   Query.sellerConversations → service.listInbox
  *   Query.sellerConversation → service.getConversation
  */
-export const resolvers = (service: MessagingService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: MessagingService): ModuleResolvers => ({});

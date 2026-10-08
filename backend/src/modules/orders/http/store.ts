@@ -6,9 +6,8 @@ import type { OrdersService } from '../service.js';
  * Store API: /api/store/orders/…  (docs/api/modules/orders.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const storeRoutes = (service: OrdersService) => {
-  void service;
-  return routes(endpoints, 'store', {
+export const storeRoutes = (service: OrdersService) =>
+  routes(endpoints, 'store', {
     /** GET /orders: Order history with search, date range and status tab */
     listMyOrders: notImplemented,
     /** GET /orders/counts: Counts per status tab */
@@ -30,4 +29,3 @@ export const storeRoutes = (service: OrdersService) => {
     /** GET /orders/{id}/documents/{documentId}: Short-lived download link for a receipt or invoice PDF */
     downloadOrderDocument: notImplemented,
   });
-};

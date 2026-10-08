@@ -6,9 +6,8 @@ import type { ReportsService } from '../service.js';
  * Seller API: /api/seller/reports/…  (docs/api/modules/reports.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const sellerRoutes = (service: ReportsService) => {
-  void service;
-  return routes(endpoints, 'seller', {
+export const sellerRoutes = (service: ReportsService) =>
+  routes(endpoints, 'seller', {
     /** GET /dashboard: Today at this seller: work tiles, dispatch deadlines, sales, payouts, performance, announcements */
     getSellerDashboard: notImplemented,
     /** GET /catalogue: Reports available to sellers */
@@ -22,4 +21,3 @@ export const sellerRoutes = (service: ReportsService) => {
     /** GET /exports/{id}: Seller export status and link (requester only) */
     getSellerExport: notImplemented,
   });
-};

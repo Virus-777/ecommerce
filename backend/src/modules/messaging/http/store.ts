@@ -6,9 +6,8 @@ import type { MessagingService } from '../service.js';
  * Store API: /api/store/messaging/…  (docs/api/modules/messaging.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const storeRoutes = (service: MessagingService) => {
-  void service;
-  return routes(endpoints, 'store', {
+export const storeRoutes = (service: MessagingService) =>
+  routes(endpoints, 'store', {
     /** GET /conversations: Inbox: conversations with sellers and Marketly support */
     listCustomerConversations: notImplemented,
     /** GET /conversations/{id}: Conversation header: counterparty, response time, linked order or item and its status */
@@ -26,4 +25,3 @@ export const storeRoutes = (service: MessagingService) => {
     /** POST /messages/{id}/report: Report an abusive, promotional or off-platform message */
     customerReportMessage: notImplemented,
   });
-};

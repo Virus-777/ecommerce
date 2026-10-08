@@ -4,5 +4,4 @@
  */
 
 /** Persistence for this module's own tables: messaging.conversations, messaging.participants, messaging.messages, messaging.message_reports, messaging.reply_templates, messaging.staff_access_log. */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface MessagingRepository {}

@@ -10,9 +10,9 @@ import { pg_trgm } from '@electric-sql/pglite/contrib/pg_trgm';
 import { Kysely, PGliteDialect, PostgresDialect } from 'kysely';
 import pg from 'pg';
 
-const INT8 = 20;
-const DATE = 1082;
-const NUMERIC = 1700;
+const { INT8, DATE, NUMERIC } = pg.types.builtins;
+const asText = (v: string) => v;
+const PARSERS: Record<number, (value: string) => unknown> = { [INT8]: Number, [DATE]: asText, [NUMERIC]: asText };
 
 export interface Database {
   kind: 'postgres' | 'pglite';
@@ -21,19 +21,21 @@ export interface Database {
   /** Run a multi-statement SQL script (migrations). */
   exec(script: string): Promise<void>;
   close(): Promise<void>;
+  /** PGlite only: the whole database as a tarball, to start other databases from */
+  dump?(): Promise<Blob>;
 }
 
 export interface DatabaseOptions {
   url?: string;
   /** PGlite data directory; omitted = in memory */
   pgliteDir?: string;
+  /** Start PGlite from a dump (tests start from a database that is already migrated) */
+  pgliteDump?: Blob;
 }
 
 export async function createDatabase(opts: DatabaseOptions = {}): Promise<Database> {
   if (opts.url) {
-    pg.types.setTypeParser(INT8, (v) => Number(v));
-    pg.types.setTypeParser(DATE, (v) => v);
-    pg.types.setTypeParser(NUMERIC, (v) => v);
+    for (const [oid, parse] of Object.entries(PARSERS)) pg.types.setTypeParser(Number(oid), parse);
     const pool = new pg.Pool({ connectionString: opts.url, max: 20 });
     const kysely = new Kysely<any>({ dialect: new PostgresDialect({ pool }) });
     return {
@@ -43,6 +45,9 @@ export async function createDatabase(opts: DatabaseOptions = {}): Promise<Databa
         const client = await pool.connect();
         try {
           await client.query(script);
+        } catch (err) {
+          await client.query('rollback').catch(() => {}); // the script may have opened a transaction
+          throw err;
         } finally {
           client.release();
         }
@@ -50,21 +55,24 @@ export async function createDatabase(opts: DatabaseOptions = {}): Promise<Databa
       close: () => kysely.destroy(),
     };
   }
-  const pglite = await PGlite.create({
-    ...(opts.pgliteDir ? { dataDir: opts.pgliteDir } : {}),
-    extensions: { pg_trgm },
-    parsers: { [INT8]: (v: string) => Number(v), [DATE]: (v: string) => v, [NUMERIC]: (v: string) => v },
-  });
+  const pglite = await PGlite.create({ dataDir: opts.pgliteDir, loadDataDir: opts.pgliteDump, extensions: { pg_trgm }, parsers: PARSERS });
   const kysely = new Kysely<any>({ dialect: new PGliteDialect({ pglite }) });
   return {
     kind: 'pglite',
     kysely,
     async exec(script) {
-      await pglite.exec(script);
+      try {
+        await pglite.exec(script);
+      } catch (err) {
+        await pglite.exec('rollback').catch(() => {});
+        throw err;
+      }
     },
+    dump: () => pglite.dumpDataDir('none') as Promise<Blob>,
     async close() {
       await kysely.destroy();
       if (!pglite.closed) await pglite.close();
     },
   };
 }
+

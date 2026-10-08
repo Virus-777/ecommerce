@@ -56,4 +56,3 @@ export function zoneOffsetMs(at: Date, timeZone: string): number {
   return asUtc - Math.floor(at.getTime() / 1000) * 1000;
 }
 
-export const toIso = (d: Date | string | null | undefined): string | null => (d == null ? null : new Date(d).toISOString());

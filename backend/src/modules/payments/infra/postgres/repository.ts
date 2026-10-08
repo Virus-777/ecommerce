@@ -4,6 +4,5 @@ import type { PaymentsRepository } from '../../ports.js';
 
 /** Postgres adapter for PaymentsRepository. `db` is scoped to the `payments` schema. */
 export function createPostgresPaymentsRepository(db: Kysely<PaymentsDb>): PaymentsRepository {
-  void db;
   return {};
 }

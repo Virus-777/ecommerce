@@ -6,9 +6,8 @@ import type { CustomersService } from '../service.js';
  * Admin API: /api/admin/customers/…  (docs/api/modules/customers.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: CustomersService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: CustomersService) =>
+  routes(endpoints, 'admin', {
     /** GET /guest-buyers: Guest buyers (orders without an account) with order count and spend */
     listGuestBuyers: notImplemented,
     /** GET /customers: Customer accounts with orders, spend, open cases, status and verification */
@@ -30,4 +29,3 @@ export const adminRoutes = (service: CustomersService) => {
     /** POST /data-requests/{id}/retry: Retry a failed export */
     retryDataRequest: notImplemented,
   });
-};

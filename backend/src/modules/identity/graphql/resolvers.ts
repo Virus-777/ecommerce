@@ -9,7 +9,4 @@ import type { IdentityService } from '../service.js';
  * Fields to resolve:
  *   Customer.security → service.accountSecurityOf
  */
-export const resolvers = (service: IdentityService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: IdentityService): ModuleResolvers => ({});

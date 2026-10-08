@@ -4,6 +4,5 @@ import type { ReportsRepository } from '../../ports.js';
 
 /** Postgres adapter for ReportsRepository. `db` is scoped to the `reports` schema. */
 export function createPostgresReportsRepository(db: Kysely<ReportsDb>): ReportsRepository {
-  void db;
   return {};
 }

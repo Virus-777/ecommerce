@@ -20,8 +20,7 @@ export default defineModule({
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const repo = createPostgresAuditRepository(ctx.db);
-    const service = new AuditService({ repo, ctx });
+    const service = new AuditService({ repo: createPostgresAuditRepository(ctx.db), ctx });
     ctx.provide(service);
     ctx.http.routes(sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

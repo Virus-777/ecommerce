@@ -6,9 +6,8 @@ import type { ShippingService } from '../service.js';
  * Admin API: /api/admin/shipping/…  (docs/api/modules/shipping.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: ShippingService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: ShippingService) =>
+  routes(endpoints, 'admin', {
     /** GET /summary: Live notices, exception counts, overdue dispatch and Official Store on-time rate */
     getShippingSummary: notImplemented,
     /** GET /carriers: Carriers with services, tracking connection and on-time rate */
@@ -94,4 +93,3 @@ export const adminRoutes = (service: ShippingService) => {
     /** POST /claims/{id}/status: Submit, record the carrier's decision or withdraw a claim */
     updateClaimStatus: notImplemented,
   });
-};

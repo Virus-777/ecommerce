@@ -6,9 +6,8 @@ import type { AdvertisingService } from '../service.js';
  * Seller API: /api/seller/advertising/…  (docs/api/modules/advertising.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const sellerRoutes = (service: AdvertisingService) => {
-  void service;
-  return routes(endpoints, 'seller', {
+export const sellerRoutes = (service: AdvertisingService) =>
+  routes(endpoints, 'seller', {
     /** GET /summary: Ad spend, clicks and attributed orders for a period */
     sellerAdsSummary: notImplemented,
     /** GET /campaigns: Own sponsored campaigns with status and spend vs limit */
@@ -36,4 +35,3 @@ export const sellerRoutes = (service: AdvertisingService) => {
     /** GET /charges: Own ad charges by day (they appear on statements as a separate line) */
     listSellerAdCharges: notImplemented,
   });
-};

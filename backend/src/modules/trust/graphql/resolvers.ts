@@ -14,7 +14,4 @@ import type { TrustService } from '../service.js';
  *   SellerRestriction.trustReport → service.getReportSummaries
  *   CustomerRestriction.trustReport → service.getReportSummaries
  */
-export const resolvers = (service: TrustService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: TrustService): ModuleResolvers => ({});

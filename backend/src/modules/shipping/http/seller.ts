@@ -6,9 +6,8 @@ import type { ShippingService } from '../service.js';
  * Seller API: /api/seller/shipping/…  (docs/api/modules/shipping.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const sellerRoutes = (service: ShippingService) => {
-  void service;
-  return routes(endpoints, 'seller', {
+export const sellerRoutes = (service: ShippingService) =>
+  routes(endpoints, 'seller', {
     /** GET /settings: Coverage, profiles with methods and rates, dispatch schedule, closures, labels and customer preview */
     getSellerSettings: notImplemented,
     /** PUT /settings: Change coverage, dispatch schedule or label preference (now or from a date) */
@@ -58,4 +57,3 @@ export const sellerRoutes = (service: ShippingService) => {
     /** GET /shipping-setup: Carriers, services, label purchase and the default package for recording a shipment */
     getShippingSetup: notImplemented,
   });
-};

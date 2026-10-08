@@ -6,9 +6,8 @@ import type { IdentityService } from '../service.js';
  * Public API: /api/public/identity/…  (docs/api/modules/identity.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const publicRoutes = (service: IdentityService) => {
-  void service;
-  return routes(endpoints, 'public', {
+export const publicRoutes = (service: IdentityService) =>
+  routes(endpoints, 'public', {
     /** POST /registrations: Create a customer account and send an email code */
     register: notImplemented,
     /** POST /verifications/{id}/confirm: Confirm an email or phone code (registration, email change, phone change) */
@@ -46,4 +45,3 @@ export const publicRoutes = (service: IdentityService) => {
     /** POST /external-sign-ins: Continue with Google or Apple */
     externalSignIn: notImplemented,
   });
-};

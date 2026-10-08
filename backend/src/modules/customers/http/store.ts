@@ -6,9 +6,8 @@ import type { CustomersService } from '../service.js';
  * Store API: /api/store/customers/…  (docs/api/modules/customers.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const storeRoutes = (service: CustomersService) => {
-  void service;
-  return routes(endpoints, 'store', {
+export const storeRoutes = (service: CustomersService) =>
+  routes(endpoints, 'store', {
     /** GET /overview: Account tab home: tiles, alerts, recent orders, open cases and returns */
     getAccountOverview: notImplemented,
     /** GET /profile: Profile, verification state and active restrictions */
@@ -54,4 +53,3 @@ export const storeRoutes = (service: CustomersService) => {
     /** POST /guest-orders/links: Email fresh links to every guest order placed with this email */
     sendGuestOrderLinks: notImplemented,
   });
-};

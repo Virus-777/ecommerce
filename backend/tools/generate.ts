@@ -15,16 +15,17 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
-import { Kind, parse, print, visit, type ConstDirectiveNode } from 'graphql';
+import { parseArgs } from 'node:util';
+import { parse, print, valueFromASTUntyped } from 'graphql';
 import { emitCommon, emitModule, GENERATED } from './lib/emit.js';
 import { scaffoldFiles } from './lib/scaffold.js';
 import { apiDir, backendDir, camel, gqlDir, loadCommon, loadFragment, loadModules, type ModuleSpec } from './lib/spec.js';
 import { TypeContext } from './lib/types.js';
 
-const args = process.argv.slice(2);
-const CHECK = args.includes('--check');
-const ALL = args.includes('--all');
-const only = args.includes('--only') ? args[args.indexOf('--only') + 1] : null;
+const { values: opts } = parseArgs({ options: { check: { type: 'boolean' }, all: { type: 'boolean' }, only: { type: 'string' } } });
+const CHECK = Boolean(opts.check);
+const ALL = Boolean(opts.all);
+const only = opts.only ?? null;
 const srcDir = join(backendDir, 'src');
 const modulesDir = join(srcDir, 'modules');
 
@@ -102,26 +103,21 @@ export const persistedQueries: Record<'store' | 'seller' | 'admin', Record<strin
 }
 
 /* ---------------------------------------------------------------- per-module generated files */
-const sourceFieldsOf = (m: ModuleSpec, fragment: string | null) => {
-  if (!fragment) return [];
+/** GraphQL fields a module resolves: those whose @source names it */
+function sourceFieldsOf(m: ModuleSpec, fragment: string | null) {
   const out: { field: string; fn: string }[] = [];
-  const doc = parse(fragment);
-  for (const d of doc.definitions) {
-    if (!('fields' in d) || !d.fields || !('name' in d) || !d.name) continue;
+  for (const d of fragment ? parse(fragment).definitions : []) {
+    if (!('fields' in d) || !d.fields || !('name' in d)) continue;
     for (const f of d.fields) {
-      const src = (f.directives ?? []).find((x: ConstDirectiveNode) => x.name.value === 'source');
-      if (!src) continue;
-      const arg = (k: string) => {
-        const v = src.arguments?.find((a) => a.name.value === k)?.value;
-        return v?.kind === Kind.STRING ? v.value : '';
-      };
-      if (arg('module') === m.name) out.push({ field: `${d.name.value}.${f.name.value}`, fn: arg('fn') });
+      const src = f.directives?.find((x) => x.name.value === 'source');
+      const arg = (k: string) => String(valueFromASTUntyped(src!.arguments!.find((a) => a.name.value === k)!.value));
+      if (src && arg('module') === m.name) out.push({ field: `${d.name.value}.${f.name.value}`, fn: arg('fn') });
     }
   }
-  void visit;
   return out;
-};
+}
 
+const commonTypes = new Set(Object.keys(common.types));
 const scaffolded: string[] = [];
 const missingHand: string[] = [];
 for (const m of modules) {
@@ -146,13 +142,13 @@ export const typeDefs = ${JSON.stringify(fragment)};
 `,
     );
   }
-  const files = scaffoldFiles(m, () => new TypeContext(m, new Set(Object.keys(common.types)), byName), Boolean(fragment), sourceFieldsOf(m, fragment));
+  const files = scaffoldFiles({ mod: m, common, types: new TypeContext(m, commonTypes, byName), hasFragment: Boolean(fragment), sourceFields: sourceFieldsOf(m, fragment) });
   for (const [rel, content] of Object.entries(files)) {
     const p = join(dir, rel);
     if (existsSync(p)) continue;
-    if (scaffoldNow && (!only || only === m.name)) {
+    if (scaffoldNow) {
       mkdirSync(dirname(p), { recursive: true });
-      writeFileSync(p, content);
+      writeFileSync(p, content());
       scaffolded.push(relative(backendDir, p));
     } else if (exists) missingHand.push(relative(backendDir, p));
   }

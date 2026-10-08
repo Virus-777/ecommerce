@@ -6,9 +6,8 @@ import type { CartService } from '../service.js';
  * Store API: /api/store/cart/…  (docs/api/modules/cart.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const storeRoutes = (service: CartService) => {
-  void service;
-  return routes(endpoints, 'store', {
+export const storeRoutes = (service: CartService) =>
+  routes(endpoints, 'store', {
     /** GET /cart: Cart grouped by package, with change detection */
     getCart: notImplemented,
     /** GET /cart/badge: Item count and attention count for the header and app tab bar */
@@ -42,4 +41,3 @@ export const storeRoutes = (service: CartService) => {
     /** DELETE /cart/saved/{id}: Delete a saved item */
     deleteSavedItem: notImplemented,
   });
-};

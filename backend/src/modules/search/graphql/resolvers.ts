@@ -16,7 +16,4 @@ import type { SearchService } from '../service.js';
  *   Query.categoryProducts → service.listCategoryProducts
  *   Query.searchSuggestions → service.getSuggestions
  */
-export const resolvers = (service: SearchService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: SearchService): ModuleResolvers => ({});

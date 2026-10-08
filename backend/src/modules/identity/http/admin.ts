@@ -6,9 +6,8 @@ import type { IdentityService } from '../service.js';
  * Admin API: /api/admin/identity/…  (docs/api/modules/identity.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: IdentityService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: IdentityService) =>
+  routes(endpoints, 'admin', {
     /** GET /accounts: Find accounts (staff or members) */
     listAccounts: notImplemented,
     /** GET /accounts/{id}: Account security detail (devices, lockout, recent activity) */
@@ -36,4 +35,3 @@ export const adminRoutes = (service: IdentityService) => {
     /** POST /invitations/{id}/revoke: Cancel a staff invitation */
     revokeInvitation: notImplemented,
   });
-};

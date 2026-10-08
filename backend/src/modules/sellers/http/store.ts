@@ -6,9 +6,8 @@ import type { SellersService } from '../service.js';
  * Store API: /api/store/sellers/…  (docs/api/modules/sellers.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const storeRoutes = (service: SellersService) => {
-  void service;
-  return routes(endpoints, 'store', {
+export const storeRoutes = (service: SellersService) =>
+  routes(endpoints, 'store', {
     /** GET /program: Sell with us: requirements, categories, example fees, payout timing, targets, steps */
     getSellerProgram: notImplemented,
     /** POST /applications: Start a seller application (step 1: seller account) */
@@ -34,4 +33,3 @@ export const storeRoutes = (service: SellersService) => {
     /** GET /stores/{slug}/collections/{collectionId}: One featured collection with its offer ids */
     getStorefrontCollection: notImplemented,
   });
-};

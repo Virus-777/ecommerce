@@ -2,5 +2,4 @@
  * Public surface of the content module: the ONLY file other modules may import from this folder
  * (`npm run check:boundaries`). Types, event payloads and the public API come from the spec.
  */
-export type { ContentPublicApi } from '../../spec/content.js';
 export type * from '../../spec/content.js';

@@ -6,9 +6,8 @@ import type { WorkqueuesService } from '../service.js';
  * Admin API: /api/admin/workqueues/…  (docs/api/modules/workqueues.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: WorkqueuesService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: WorkqueuesService) =>
+  routes(endpoints, 'admin', {
     /** GET /me: My work queues: stats, queues with lead, backup and escalation, routine, day-end review, saved filters */
     getMyQueues: notImplemented,
     /** GET /queues: Queue definitions with live counts */
@@ -80,4 +79,3 @@ export const adminRoutes = (service: WorkqueuesService) => {
     /** DELETE /saved-filters/{id}: Delete a saved filter (owner only) */
     deleteSavedFilter: notImplemented,
   });
-};

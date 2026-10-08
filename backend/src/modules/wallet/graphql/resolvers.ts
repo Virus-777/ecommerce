@@ -10,7 +10,4 @@ import type { WalletService } from '../service.js';
  *   Customer.wallet → service.getBalance
  *   Customer.walletAdmin → service.getCustomerWallet
  */
-export const resolvers = (service: WalletService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: WalletService): ModuleResolvers => ({});

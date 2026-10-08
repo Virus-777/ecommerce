@@ -6,9 +6,8 @@ import type { MessagingService } from '../service.js';
  * Seller API: /api/seller/messaging/…  (docs/api/modules/messaging.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const sellerRoutes = (service: MessagingService) => {
-  void service;
-  return routes(endpoints, 'seller', {
+export const sellerRoutes = (service: MessagingService) =>
+  routes(endpoints, 'seller', {
     /** GET /conversations: Order messages with reply deadlines; overdue first */
     listSellerConversations: notImplemented,
     /** GET /conversations/{id}: Conversation with order status and dispatch warning */
@@ -34,4 +33,3 @@ export const sellerRoutes = (service: MessagingService) => {
     /** DELETE /templates/{id}: Delete a reply template */
     deleteTemplate: notImplemented,
   });
-};

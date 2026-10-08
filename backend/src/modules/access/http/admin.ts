@@ -6,9 +6,8 @@ import type { AccessService } from '../service.js';
  * Admin API: /api/admin/access/…  (docs/api/modules/access.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: AccessService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: AccessService) =>
+  routes(endpoints, 'admin', {
     /** GET /roles: Roles with people, lead, backups and approval-limit summary */
     listRoles: notImplemented,
     /** GET /roles/{id}: Role editor: permissions by area, approval limits, pending changes */
@@ -76,4 +75,3 @@ export const adminRoutes = (service: AccessService) => {
     /** GET /me: My roles, permissions, limits and approvals waiting */
     getMyAccess: notImplemented,
   });
-};

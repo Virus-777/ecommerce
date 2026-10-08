@@ -18,6 +18,13 @@ export interface MigrationUnit {
   migrations: Migration[];
 }
 
+/** The PostgreSQL schema a module owns: its name in snake_case (fulfillment-service → fulfillment_service). */
+export const schemaOf = (module: string) => module.replace(/-/g, '_');
+
+/** Migration units of module definitions, in the order given (dependency order). */
+export const migrationUnits = (defs: readonly { spec: { name: string }; migrations: Migration[] }[]): MigrationUnit[] =>
+  defs.map((d) => ({ module: d.spec.name, schema: schemaOf(d.spec.name), migrations: d.migrations }));
+
 const KERNEL: MigrationUnit = {
   module: 'kernel',
   schema: 'kernel',
@@ -68,11 +75,7 @@ create table if not exists kernel.schema_migrations (
   applied_at timestamptz not null default now(),
   primary key (module, id)
 );`);
-  const { rows } = await db.kysely
-    .selectFrom('kernel.schema_migrations')
-    .select(['module', 'id', 'checksum'])
-    .execute()
-    .then((r) => ({ rows: r as { module: string; id: string; checksum: string }[] }));
+  const rows: { module: string; id: string; checksum: string }[] = await db.kysely.selectFrom('kernel.schema_migrations').select(['module', 'id', 'checksum']).execute();
   const done = new Map(rows.map((r) => [`${r.module}/${r.id}`, r.checksum]));
   const applied: MigrationResult['applied'] = [];
 
@@ -96,7 +99,6 @@ commit;`;
       try {
         await db.exec(script);
       } catch (e) {
-        await db.exec('rollback;').catch(() => {});
         throw new Error(`Module ${unit.module}: migration ${m.id} failed: ${(e as Error).message}`);
       }
       applied.push({ module: unit.module, id: m.id });

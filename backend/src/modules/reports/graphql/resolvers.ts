@@ -10,7 +10,4 @@ import type { ReportsService } from '../service.js';
  *   Query.adminDashboard → service.getAdminDashboard
  *   Query.sellerDashboard → service.getSellerDashboard
  */
-export const resolvers = (service: ReportsService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: ReportsService): ModuleResolvers => ({});

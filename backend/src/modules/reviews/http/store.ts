@@ -6,9 +6,8 @@ import type { ReviewsService } from '../service.js';
  * Store API: /api/store/reviews/…  (docs/api/modules/reviews.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const storeRoutes = (service: ReviewsService) => {
-  void service;
-  return routes(endpoints, 'store', {
+export const storeRoutes = (service: ReviewsService) =>
+  routes(endpoints, 'store', {
     /** GET /products/{productId}/reviews: Published product reviews with filters and sorting */
     listProductReviews: notImplemented,
     /** GET /products/{productId}/rating-summary: Average, count, distribution and answered questions (honest no-reviews state) */
@@ -54,4 +53,3 @@ export const storeRoutes = (service: ReviewsService) => {
     /** POST /me/appeals: Appeal a moderation decision on my content */
     customerAppeal: notImplemented,
   });
-};

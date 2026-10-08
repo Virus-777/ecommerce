@@ -6,9 +6,8 @@ import type { NotificationsService } from '../service.js';
  * Admin API: /api/admin/notifications/…  (docs/api/modules/notifications.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: NotificationsService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: NotificationsService) =>
+  routes(endpoints, 'admin', {
     /** GET /inbox: My staff notices (routed by role, including roles I cover as backup) */
     listStaffInbox: notImplemented,
     /** GET /inbox/summary: Counts and today's routing for my roles */
@@ -62,4 +61,3 @@ export const adminRoutes = (service: NotificationsService) => {
     /** POST /broadcasts/{id}/cancel: Cancel a draft or scheduled broadcast */
     cancelBroadcast: notImplemented,
   });
-};

@@ -9,7 +9,4 @@ import type { CartService } from '../service.js';
  * Fields to resolve:
  *   Query.cart → service.getCartView
  */
-export const resolvers = (service: CartService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: CartService): ModuleResolvers => ({});

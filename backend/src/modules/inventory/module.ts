@@ -20,8 +20,7 @@ export default defineModule({
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const repo = createPostgresInventoryRepository(ctx.db);
-    const service = new InventoryService({ repo, ctx });
+    const service = new InventoryService({ repo: createPostgresInventoryRepository(ctx.db), ctx });
     ctx.provide(service);
     ctx.http.routes(sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

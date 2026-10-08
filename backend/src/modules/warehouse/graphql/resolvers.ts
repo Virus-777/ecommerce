@@ -10,7 +10,4 @@ import type { WarehouseService } from '../service.js';
  *   OrderGroup.warehouseTask → service.getTasksForOrderGroups
  *   Query.warehouseToday → service.getTodaySummary
  */
-export const resolvers = (service: WarehouseService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: WarehouseService): ModuleResolvers => ({});

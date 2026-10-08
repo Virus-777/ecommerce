@@ -17,7 +17,4 @@ import type { AccessService } from '../service.js';
  *   RefundRequest.approvalRequest → service.approvalForTargets
  *   Seller.pendingApprovals → service.approvalsForSellers
  */
-export const resolvers = (service: AccessService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: AccessService): ModuleResolvers => ({});

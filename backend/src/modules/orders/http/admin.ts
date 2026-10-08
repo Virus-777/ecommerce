@@ -6,9 +6,8 @@ import type { OrdersService } from '../service.js';
  * Admin API: /api/admin/orders/…  (docs/api/modules/orders.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: OrdersService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: OrdersService) =>
+  routes(endpoints, 'admin', {
     /** GET /orders: Company and seller orders with payment and fulfillment columns and flags */
     listOrdersAdmin: notImplemented,
     /** GET /orders/{id}: Order with item states per seller group, money by seller, after-sales per item, payment, notes and history */
@@ -36,4 +35,3 @@ export const adminRoutes = (service: OrdersService) => {
     /** GET /exports/{id}: Export status and download link (download is logged) */
     getOrdersExport: notImplemented,
   });
-};

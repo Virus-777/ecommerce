@@ -231,7 +231,7 @@ export const info = {
   "title": "Marketly API",
   "version": "0.1.0-design",
   "description": "Design of the Marketly marketplace API: Customer Store (website + Android app), Seller Center, Admin Center and Operations. One backend, organised in removable modules. Generated from docs/api/spec/*.json."
-} as const;
+};
 
 export const servers = [
   {

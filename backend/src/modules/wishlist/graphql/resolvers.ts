@@ -12,7 +12,4 @@ import type { WishlistService } from '../service.js';
  *   Customer.wishlistAlerts → service.listAlerts
  *   Product.saved → service.isSaved
  */
-export const resolvers = (service: WishlistService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: WishlistService): ModuleResolvers => ({});

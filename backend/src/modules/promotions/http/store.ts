@@ -6,9 +6,8 @@ import type { PromotionsService } from '../service.js';
  * Store API: /api/store/promotions/…  (docs/api/modules/promotions.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const storeRoutes = (service: PromotionsService) => {
-  void service;
-  return routes(endpoints, 'store', {
+export const storeRoutes = (service: PromotionsService) =>
+  routes(endpoints, 'store', {
     /** GET /deals: Deals page: flash sales, coupons, clearance and upcoming events */
     getDeals: notImplemented,
     /** GET /deals/clearance: More clearance products */
@@ -36,4 +35,3 @@ export const storeRoutes = (service: PromotionsService) => {
     /** DELETE /events/{campaignId}/reminder: Cancel an event reminder */
     removeEventReminder: notImplemented,
   });
-};

@@ -9,12 +9,12 @@ let seq = 0;
 
 export function newId(now: number = Date.now()): string {
   // 48-bit timestamp, 4-bit version, 12-bit sequence (monotonic within a millisecond), 2-bit variant, 62 random bits
+  const b = randomBytes(16);
   if (now === lastMs) seq = (seq + 1) & 0xfff;
   else {
     lastMs = now;
-    seq = randomBytes(2).readUInt16BE() & 0x7ff;
+    seq = b.readUInt16BE(6) & 0x7ff; // random start, with room to count up within the millisecond
   }
-  const b = randomBytes(16);
   b.writeUIntBE(now, 0, 6);
   b[6] = 0x70 | ((seq >> 8) & 0x0f);
   b[7] = seq & 0xff;

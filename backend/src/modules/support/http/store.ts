@@ -6,9 +6,8 @@ import type { SupportService } from '../service.js';
  * Store API: /api/store/support/…  (docs/api/modules/support.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const storeRoutes = (service: SupportService) => {
-  void service;
-  return routes(endpoints, 'store', {
+export const storeRoutes = (service: SupportService) =>
+  routes(endpoints, 'store', {
     /** GET /contact-options: Topics, channels, hours and expected reply times */
     getContactOptions: notImplemented,
     /** GET /orders/{orderId}/problem-context: Order problem form context: packages and items, who handles first, when Marketly steps in, open cases */
@@ -30,4 +29,3 @@ export const storeRoutes = (service: SupportService) => {
     /** POST /cases/{id}/reopen: Reopen a resolved case within the reopen window */
     customerReopen: notImplemented,
   });
-};

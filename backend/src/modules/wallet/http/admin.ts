@@ -6,9 +6,8 @@ import type { WalletService } from '../service.js';
  * Admin API: /api/admin/wallet/…  (docs/api/modules/wallet.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: WalletService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: WalletService) =>
+  routes(endpoints, 'admin', {
     /** GET /customers/{customerId}: A customer's credit balance, lots, goodwill in the last 30 days and pending grants */
     getCustomerWallet: notImplemented,
     /** GET /customers/{customerId}/entries: A customer's credit ledger */
@@ -28,4 +27,3 @@ export const adminRoutes = (service: WalletService) => {
     /** POST /gift-cards/{id}/void: Void a gift card (lost, fraud) */
     voidGiftCard: notImplemented,
   });
-};

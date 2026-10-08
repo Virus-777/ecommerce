@@ -6,9 +6,8 @@ import type { IdentityService } from '../service.js';
  * Store API: /api/store/identity/…  (docs/api/modules/identity.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const storeRoutes = (service: IdentityService) => {
-  void service;
-  return routes(endpoints, 'store', {
+export const storeRoutes = (service: IdentityService) =>
+  routes(endpoints, 'store', {
     /** GET /security: Sign-in and security page in one call */
     getSecurity: notImplemented,
     /** PUT /password: Change password */
@@ -34,4 +33,3 @@ export const storeRoutes = (service: IdentityService) => {
     /** GET /security-activity: Recent security activity */
     listSecurityActivity: notImplemented,
   });
-};

@@ -7,10 +7,13 @@
  * An outbox table replaces this in-memory dispatch later without changing module code.
  */
 import type { FastifyBaseLogger } from 'fastify';
+import { setImmediate } from 'node:timers/promises';
 import type { z } from 'zod';
 import type { Actor } from '../../spec/common.js';
-import { isAppError } from '../errors/index.js';
+import { isNotImplemented } from '../errors/index.js';
+import { systemClock, type Clock } from '../lib/clock.js';
 import { newId } from '../lib/ids.js';
+import type { ModuleSpecDef } from '../spec/define.js';
 import type { EventMap } from './event-map.js';
 
 export type { EventMap };
@@ -38,32 +41,24 @@ type Handler = (e: EventEnvelope) => unknown;
 export class EventBus {
   readonly #handlers = new Map<string, { module: string; fn: Handler }[]>();
   readonly #schemas = new Map<string, () => z.ZodType>();
-  readonly #pending = new Set<Promise<unknown>>();
+  readonly #pending = new Set<Promise<void>>();
   readonly #log: FastifyBaseLogger;
   readonly #validate: boolean;
+  readonly #clock: Clock;
 
-  constructor(log: FastifyBaseLogger, opts: { validatePayloads: boolean }) {
+  constructor(log: FastifyBaseLogger, opts: { validatePayloads: boolean; clock?: Clock }) {
     this.#log = log;
     this.#validate = opts.validatePayloads;
+    this.#clock = opts.clock ?? systemClock;
   }
 
-  /** Payload schemas from the specs, used to check what modules publish. */
-  registerSchema(name: string, schema: () => z.ZodType) {
-    this.#schemas.set(name, schema);
-  }
-
-  knows(name: string) {
-    return this.#schemas.has(name);
+  /** Payload schemas of every event the specs declare, used to check what modules publish. */
+  registerSpecs(specs: Iterable<ModuleSpecDef>) {
+    for (const spec of specs) for (const [name, e] of Object.entries(spec.events.publishes)) this.#schemas.set(name, e.payload);
   }
 
   subscribe(module: string, name: string, fn: Handler) {
-    const list = this.#handlers.get(name) ?? [];
-    list.push({ module, fn });
-    this.#handlers.set(name, list);
-  }
-
-  subscribers(name: string) {
-    return (this.#handlers.get(name) ?? []).map((h) => h.module);
+    this.#handlers.set(name, [...(this.#handlers.get(name) ?? []), { module, fn }]);
   }
 
   publish(source: string, name: string, payload: unknown, meta: PublishMeta = {}): EventEnvelope {
@@ -73,23 +68,32 @@ export class EventBus {
       const r = schema().safeParse(payload);
       if (!r.success) throw new Error(`Event ${name} payload does not match the spec: ${r.error.message}`);
     }
-    const envelope = { id: newId(), name, at: new Date().toISOString(), source, payload, ...meta } as EventEnvelope;
-    for (const h of this.#handlers.get(name) ?? []) {
-      const p = new Promise<void>((resolve) => setImmediate(resolve))
-        .then(() => h.fn(envelope))
-        .catch((err: unknown) => {
-          const level = isAppError(err) && err.code === 'NOT_IMPLEMENTED' ? 'debug' : 'error';
-          this.#log[level]({ err, event: name, subscriber: h.module }, `subscriber ${h.module} failed on ${name}`);
-        })
-        .finally(() => this.#pending.delete(p));
-      this.#pending.add(p);
+    const envelope = { id: newId(), name, at: this.#clock.now().toISOString(), source, payload, ...meta } as EventEnvelope;
+    const handlers = this.#handlers.get(name);
+    if (handlers?.length) {
+      const delivery = this.#deliver(envelope, handlers).finally(() => this.#pending.delete(delivery));
+      this.#pending.add(delivery);
     }
     return envelope;
   }
 
+  async #deliver(envelope: EventEnvelope, handlers: { module: string; fn: Handler }[]) {
+    await setImmediate(); // after the publisher's own work, like the outbox will
+    await Promise.all(
+      handlers.map(async (h) => {
+        try {
+          await h.fn(envelope);
+        } catch (err) {
+          const level = isNotImplemented(err) ? 'debug' : 'error';
+          this.#log[level]({ err, event: envelope.name, subscriber: h.module }, `subscriber ${h.module} failed on ${envelope.name}`);
+        }
+      }),
+    );
+  }
+
   /** Wait until every delivery started so far has finished (tests, graceful shutdown). */
   async drain() {
-    while (this.#pending.size) await Promise.allSettled([...this.#pending]);
+    while (this.#pending.size) await Promise.all(this.#pending);
   }
 }
 
@@ -99,16 +103,15 @@ export interface ModuleEvents<Own extends string = string, Consumed extends stri
   on<N extends Consumed & EventName>(name: N, handler: (e: EventEnvelope<N>) => unknown): void;
 }
 
-export function moduleEvents(bus: EventBus, module: string, publishes: readonly string[], consumes: readonly string[]): ModuleEvents {
-  const own = new Set(publishes);
-  const consumed = new Set(consumes);
+export function moduleEvents(bus: EventBus, spec: ModuleSpecDef): ModuleEvents {
+  const { name: module, events } = spec;
   return {
     publish(name, payload, meta) {
-      if (!own.has(name)) throw new Error(`Module ${module} cannot publish ${name}: not in its spec events.publishes`);
+      if (!(name in events.publishes)) throw new Error(`Module ${module} cannot publish ${name}: not in its spec events.publishes`);
       return bus.publish(module, name, payload, meta) as never;
     },
     on(name, handler) {
-      if (!consumed.has(name)) throw new Error(`Module ${module} subscribes to ${name}, which is not in its spec events.consumes`);
+      if (!(name in events.consumes)) throw new Error(`Module ${module} subscribes to ${name}, which is not in its spec events.consumes`);
       bus.subscribe(module, name, handler as Handler);
     },
   };

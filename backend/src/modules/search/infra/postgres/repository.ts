@@ -4,6 +4,5 @@ import type { SearchRepository } from '../../ports.js';
 
 /** Postgres adapter for SearchRepository. `db` is scoped to the `search` schema. */
 export function createPostgresSearchRepository(db: Kysely<SearchDb>): SearchRepository {
-  void db;
   return {};
 }

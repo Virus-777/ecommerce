@@ -4,6 +4,5 @@ import type { SupportRepository } from '../../ports.js';
 
 /** Postgres adapter for SupportRepository. `db` is scoped to the `support` schema. */
 export function createPostgresSupportRepository(db: Kysely<SupportDb>): SupportRepository {
-  void db;
   return {};
 }

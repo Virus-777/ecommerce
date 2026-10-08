@@ -6,9 +6,8 @@ import type { ReturnsService } from '../service.js';
  * Store API: /api/store/returns/…  (docs/api/modules/returns.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const storeRoutes = (service: ReturnsService) => {
-  void service;
-  return routes(endpoints, 'store', {
+export const storeRoutes = (service: ReturnsService) =>
+  routes(endpoints, 'store', {
     /** GET /policy: Current returns baseline, category exceptions and who pays return shipping */
     getPublicPolicy: notImplemented,
     /** GET /terms: Effective return terms for a seller and category */
@@ -38,4 +37,3 @@ export const storeRoutes = (service: ReturnsService) => {
     /** POST /requests/{id}/escalate: Ask Marketly to step in */
     escalateReturn: notImplemented,
   });
-};

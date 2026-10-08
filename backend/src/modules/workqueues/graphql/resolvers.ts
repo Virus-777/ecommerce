@@ -13,7 +13,4 @@ import type { WorkqueuesService } from '../service.js';
  *   Query.workItems → service.listItems
  *   Query.workItem → service.getItem
  */
-export const resolvers = (service: WorkqueuesService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: WorkqueuesService): ModuleResolvers => ({});

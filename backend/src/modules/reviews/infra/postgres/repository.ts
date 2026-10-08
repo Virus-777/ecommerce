@@ -4,6 +4,5 @@ import type { ReviewsRepository } from '../../ports.js';
 
 /** Postgres adapter for ReviewsRepository. `db` is scoped to the `reviews` schema. */
 export function createPostgresReviewsRepository(db: Kysely<ReviewsDb>): ReviewsRepository {
-  void db;
   return {};
 }

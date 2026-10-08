@@ -1,7 +1,10 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { isUuid, newId } from '../lib/ids.js';
+import type { PublicApiMap } from '../module-system/public-apis.js';
 import type { Authenticator, Principal, SellerMemberAccess } from './index.js';
 
-type Lookup = (module: 'identity' | 'access' | 'sellers') => any;
+/** A module's public API if the module is enabled. */
+type Lookup = <M extends 'identity' | 'access' | 'sellers'>(module: M) => PublicApiMap[M] | undefined;
 
 /**
  * The production authenticator: asks identity, access and sellers through their public APIs.
@@ -10,23 +13,13 @@ type Lookup = (module: 'identity' | 'access' | 'sellers') => any;
  */
 export function moduleAuthenticator(lookup: Lookup): Authenticator {
   return {
-    async authenticate(token) {
-      const identity = lookup('identity');
-      return identity ? ((await identity.authenticate(token)) as Principal | null) : null;
-    },
+    authenticate: async (token) => (await lookup('identity')?.authenticate(token)) ?? null,
     async verifyGuestSession(id) {
-      const identity = lookup('identity');
-      const g = identity ? ((await identity.verifyGuestSession(id)) as { id: string } | null) : null;
+      const g = await lookup('identity')?.verifyGuestSession(id);
       return g ? { id: g.id } : null;
     },
-    async hasPermission(principal, key) {
-      const access = lookup('access');
-      return access ? Boolean(await access.hasPermission(principal, key)) : false;
-    },
-    async getMemberAccess(sellerId, accountId) {
-      const sellers = lookup('sellers');
-      return sellers ? ((await sellers.getMemberAccess(sellerId, accountId)) as SellerMemberAccess | null) : null;
-    },
+    hasPermission: async (principal, key) => (await lookup('access')?.hasPermission(principal, key)) ?? false,
+    getMemberAccess: async (sellerId, accountId) => (await lookup('sellers')?.getMemberAccess(sellerId, accountId)) ?? null,
   };
 }
 
@@ -42,6 +35,17 @@ export interface DevTokenClaims extends Principal {
 }
 
 const sign = (secret: string, body: string) => createHmac('sha256', secret).update(body).digest('base64url');
+
+/**
+ * Claims for a development caller: staff get every permission and sellers are owners unless
+ * permissions are given.
+ */
+export function devClaims(kind: 'customer' | 'seller' | 'staff', o: { permissions?: string[]; sellerId?: string; accountId?: string; expiresInSeconds?: number } = {}): DevTokenClaims {
+  const base = { accountId: o.accountId ?? newId(), sessionId: newId(), ...(o.expiresInSeconds ? { exp: Math.floor(Date.now() / 1000) + o.expiresInSeconds } : {}) };
+  if (kind === 'staff') return { kind, ...base, permissions: o.permissions ?? ['*'] };
+  if (kind === 'seller') return { kind, ...base, sellerId: o.sellerId ?? newId(), isOwner: !o.permissions, permissions: o.permissions ?? [] };
+  return { kind, ...base };
+}
 
 /** `dev.<claims>.<signature>`: lets developers and tests call any area before identity is built. */
 export function issueDevToken(secret: string, claims: DevTokenClaims): string {
@@ -93,7 +97,7 @@ export function devAuthenticator(secret: string, next: Authenticator): Authentic
       } catch {
         /* identity not built yet */
       }
-      return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ? { id } : null;
+      return isUuid(id) ? { id } : null;
     },
     async hasPermission(principal, key) {
       const c = claimsOf.get(principal);

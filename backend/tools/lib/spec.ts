@@ -78,6 +78,7 @@ export interface ModuleSpec {
 
 export interface CommonSpec {
   info: { title: string; version: string; description: string };
+  servers?: { url: string; description?: string }[];
   areas: Record<string, { prefix: string; title: string; audience: string; auth: string }>;
   auth: Record<string, string>;
   types: Record<string, ObjectExpr>;
@@ -108,4 +109,23 @@ export const pascal = (s: string) => {
   const c = camel(s);
   return c.charAt(0).toUpperCase() + c.slice(1);
 };
-export const snake = (s: string) => s.replace(/-/g, '_');
+export { schemaOf as snake } from '../../src/kernel/migrations/index.js';
+
+/** Dotted or snake_case words → PascalCase: 'orders.order.price_changed' → 'OrdersOrderPriceChanged' */
+export const pascalWords = (s: string) => s.split(/[._-]/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join('');
+
+/** A property key as written in TypeScript: bare when it is an identifier, quoted otherwise */
+export const propKey = (k: string) => (/^[A-Za-z_$][\w$]*$/.test(k) ? k : JSON.stringify(k));
+
+/** Text that is safe inside a comment, on one line */
+export const commentText = (text: string) => text.replace(/\s+/g, ' ').replace(/\*\//g, '*\\/');
+
+/** A one-line JSDoc comment */
+export const doc = (text: string | undefined, indent = '') => (text ? `${indent}/** ${commentText(text)} */\n` : '');
+
+/** One handler per consumed event, even when the spec lists an event twice with two reactions. */
+export function mergeConsumes(mod: ModuleSpec) {
+  const byName = new Map<string, string[]>();
+  for (const c of mod.events?.consumes ?? []) byName.set(c.name, [...(byName.get(c.name) ?? []), c.does]);
+  return [...byName].map(([name, does]) => ({ name, does: does.join(' Also: ') }));
+}

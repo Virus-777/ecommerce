@@ -16,7 +16,4 @@ import type { CatalogService } from '../service.js';
  *   Query.productAdmin → service.getProductAdmin
  *   Seller.catalogCounts → service.countProductsForSellers
  */
-export const resolvers = (service: CatalogService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: CatalogService): ModuleResolvers => ({});

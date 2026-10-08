@@ -20,7 +20,4 @@ import type { PromotionsService } from '../service.js';
  *   Query.flashSales → service.liveDeals
  *   Query.flashSale → service.getFlashSale
  */
-export const resolvers = (service: PromotionsService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: PromotionsService): ModuleResolvers => ({});

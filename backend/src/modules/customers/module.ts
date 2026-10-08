@@ -21,8 +21,7 @@ export default defineModule({
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const repo = createPostgresCustomersRepository(ctx.db);
-    const service = new CustomersService({ repo, ctx });
+    const service = new CustomersService({ repo: createPostgresCustomersRepository(ctx.db), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), adminRoutes(service), publicRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
@@ -34,7 +33,6 @@ export default defineModule({
     ctx.events.on("identity.guest_session.claimed", (e) => service.onGuestSessionClaimedFromIdentity(e.payload));
     ctx.events.on("identity.email.changed", (e) => service.onEmailChangedFromIdentity(e.payload));
     ctx.events.on("identity.account.closed", (e) => service.onAccountClosedFromIdentity(e.payload));
-    ctx.events.on("orders.order.placed", (e) => service.onOrderPlacedFromOrders(e.payload));
     ctx.events.on("trust.enforcement.recorded", (e) => service.onEnforcementRecordedFromTrust(e.payload));
     ctx.events.on("catalog.product.merged", (e) => service.onProductMergedFromCatalog(e.payload));
 

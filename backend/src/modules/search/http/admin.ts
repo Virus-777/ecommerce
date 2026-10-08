@@ -6,9 +6,8 @@ import type { SearchService } from '../service.js';
  * Admin API: /api/admin/search/…  (docs/api/modules/search.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: SearchService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: SearchService) =>
+  routes(endpoints, 'admin', {
     /** GET /lookup: Back-office top-bar quick search across orders, sellers, products and customers */
     adminLookup: notImplemented,
     /** GET /synonyms: Search synonyms */
@@ -32,4 +31,3 @@ export const adminRoutes = (service: SearchService) => {
     /** POST /ranking-policies: Publish a new ranking policy version (wording and recommended-sort weights) */
     publishRankingPolicy: notImplemented,
   });
-};

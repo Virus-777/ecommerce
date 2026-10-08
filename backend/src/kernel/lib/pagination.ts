@@ -74,13 +74,11 @@ export async function paginate<DB, TB extends keyof DB, O extends Record<string,
   };
 
   if (req.mode === 'page') {
-    const countRow = await query
-      .clearSelect()
-      .clearOrderBy()
-      .select(sql<number>`count(*)::int`.as('n'))
-      .executeTakeFirst();
-    const total = Number((countRow as { n?: number } | undefined)?.n ?? 0);
-    const items = (await sorted.limit(req.limit).offset((req.page - 1) * req.limit).execute()) as O[];
+    const [countRow, items] = await Promise.all([
+      query.clearSelect().clearOrderBy().select(sql<number>`count(*)::int`.as('n')).executeTakeFirst(),
+      sorted.limit(req.limit).offset((req.page - 1) * req.limit).execute() as Promise<O[]>,
+    ]);
+    const total = (countRow as { n: number } | undefined)?.n ?? 0;
     const totalPages = Math.max(1, Math.ceil(total / req.limit));
     const last = items.at(-1);
     return { items, nextCursor: req.page < totalPages && last ? cursorOf(last) : null, page: req.page, totalPages, total };

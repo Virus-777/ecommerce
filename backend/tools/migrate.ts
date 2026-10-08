@@ -5,7 +5,7 @@
  */
 import { loadConfig } from '../src/kernel/config/index.js';
 import { createDatabase } from '../src/kernel/db/index.js';
-import { migrate } from '../src/kernel/migrations/index.js';
+import { migrate, migrationUnits } from '../src/kernel/migrations/index.js';
 import { loadDefinitions } from '../src/kernel/module-system/loader.js';
 import { enabledModules } from '../src/modules.config.js';
 import { moduleLoaders } from '../src/modules/index.js';
@@ -17,10 +17,6 @@ if (!config.databaseUrl && !config.pgliteDir) {
 }
 const db = await createDatabase({ url: config.databaseUrl, pgliteDir: config.pgliteDir });
 const defs = await loadDefinitions(config.modules ?? enabledModules, moduleLoaders);
-const { applied } = await migrate(
-  db,
-  defs.map((d) => ({ module: d.spec.name, schema: d.spec.name.replace(/-/g, '_'), migrations: d.migrations })),
-  (m) => console.log(m),
-);
+const { applied } = await migrate(db, migrationUnits(defs), (m) => console.log(m));
 console.log(applied.length ? `Applied ${applied.length} migration(s).` : 'Database is up to date.');
 await db.close();

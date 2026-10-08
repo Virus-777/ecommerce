@@ -3,7 +3,7 @@
  * TypeScript types and Zod schemas. Resolution order matches docs/api/tools/build.mjs:
  * primitives, common.json types, `module.Type`, then the module's own types.
  */
-import { camel, type ModuleSpec, type ObjectExpr, type TypeExpr } from './spec.js';
+import { camel, doc, propKey, type ModuleSpec, type ObjectExpr, type TypeExpr } from './spec.js';
 
 export type Mode = 'data' | 'query';
 
@@ -22,7 +22,20 @@ export interface Parsed {
   desc?: string;
 }
 
-const PRIMS = new Set(['string', 'text', 'int', 'number', 'bool', 'json', 'uuid', 'email', 'url', 'date', 'datetime']);
+/** Spec primitive → TypeScript type, Zod schema, and Zod schema in a query string (where values arrive as text) */
+const PRIM: Record<string, { ts: string; zod: string; query?: string }> = {
+  string: { ts: 'string', zod: 'z.string()' },
+  text: { ts: 'string', zod: 'z.string()' },
+  int: { ts: 'number', zod: 'z.number().int()', query: 'z.coerce.number().int()' },
+  number: { ts: 'number', zod: 'z.number()', query: 'z.coerce.number()' },
+  bool: { ts: 'boolean', zod: 'z.boolean()', query: 'z.stringbool()' },
+  json: { ts: 'unknown', zod: 'z.unknown()' },
+  uuid: { ts: 'string', zod: 'z.uuid()' },
+  email: { ts: 'string', zod: 'z.email()' },
+  url: { ts: 'string', zod: 'z.url()' },
+  date: { ts: 'string', zod: 'z.iso.date()' },
+  datetime: { ts: 'string', zod: 'z.iso.datetime({ offset: true })' },
+};
 
 export class TypeContext {
   /** Other spec files this module's generated file must import (module names), plus 'common'. */
@@ -63,9 +76,9 @@ export class TypeContext {
     if (/^enum\(.+\)$/.test(t)) return { k: 'enum', values: t.slice(5, -1).split('|').map((s) => s.trim()) };
     if (/^map<.+>$/.test(t)) return { k: 'map', of: this.parse(t.slice(4, -1), where) };
     if (/^Page<.+>$/.test(t)) return { k: 'page', of: this.parse(t.slice(5, -1), where) };
-    if (PRIMS.has(t)) return { k: 'prim', name: t };
+    if (t in PRIM) return { k: 'prim', name: t };
     if (this.commonTypes.has(t)) {
-      if (this.mod) this.imports.add('common');
+      this.useCommon();
       return { k: 'ref', ns: this.mod ? 'common' : null, name: t };
     }
     if (t.includes('.')) {
@@ -95,7 +108,7 @@ export class TypeContext {
     const n = p.node;
     switch (n.k) {
       case 'prim':
-        return n.name === 'int' || n.name === 'number' ? 'number' : n.name === 'bool' ? 'boolean' : n.name === 'json' ? 'unknown' : 'string';
+        return PRIM[n.name]!.ts;
       case 'enum':
         return n.values.map((v) => JSON.stringify(v)).join(' | ');
       case 'array': {
@@ -105,12 +118,12 @@ export class TypeContext {
       case 'map':
         return `Record<string, ${this.tsValue(n.of, indent)}>`;
       case 'page':
-        if (this.mod) this.imports.add('common');
-        return `${this.mod ? 'common.' : ''}Page<${this.tsValue(n.of, indent)}>`;
+        this.useCommon();
+        return `${this.c()}Page<${this.tsValue(n.of, indent)}>`;
       case 'ref':
         return n.ns ? `${n.ns}.${n.name}` : n.name;
       case 'object':
-        return this.tsObject(n.fields, indent, 'data');
+        return this.tsObject(n.fields, indent);
     }
   }
 
@@ -120,16 +133,13 @@ export class TypeContext {
     return p.optional ? `${t} | null` : t;
   }
 
-  tsObject(fields: [string, Parsed][], indent: string, mode: Mode): string {
+  tsObject(fields: [string, Parsed][], indent: string): string {
     if (!fields.length) return 'Record<string, never>';
     const inner = `${indent}  `;
     const lines = fields.map(([k, f]) => {
-      const doc = f.desc ? `${inner}/** ${f.desc.replace(/\*\//g, '*\\/')} */\n` : '';
-      const key = /^[A-Za-z_$][\w$]*$/.test(k) ? k : JSON.stringify(k);
-      const t = this.ts(f, inner);
       // `json` fields are optional in Zod's output type, so they are optional here too
       const opt = f.optional || (f.node.k === 'prim' && f.node.name === 'json');
-      return `${doc}${inner}${key}${opt ? '?' : ''}: ${t}${f.optional && mode === 'data' ? ' | null' : ''};`;
+      return `${doc(f.desc, inner)}${inner}${propKey(k)}${opt ? '?' : ''}: ${this.ts(f, inner)}${f.optional ? ' | null' : ''};`;
     });
     return `{\n${lines.join('\n')}\n${indent}}`;
   }
@@ -143,7 +153,7 @@ export class TypeContext {
     let lazy = false;
     switch (n.k) {
       case 'prim':
-        code = zPrim(n.name, mode);
+        code = (mode === 'query' && PRIM[n.name]!.query) || PRIM[n.name]!.zod;
         break;
       case 'enum':
         code = `z.enum([${n.values.map((v) => JSON.stringify(v)).join(', ')}])`;
@@ -189,7 +199,7 @@ export class TypeContext {
     if (!fields.length) return 'z.object({})';
     const inner = `${indent}  `;
     const lines = fields.map(([k, f]) => {
-      const key = /^[A-Za-z_$][\w$]*$/.test(k) ? k : JSON.stringify(k);
+      const key = propKey(k);
       const r = this.zod(f, mode, inner);
       const code = f.optional ? `${r.code}${mode === 'query' ? '.optional()' : '.nullish()'}` : r.code;
       return r.lazy ? `${inner}get ${key}() {\n${inner}  return ${code};\n${inner}},` : `${inner}${key}: ${code},`;
@@ -206,39 +216,9 @@ export class TypeContext {
   }
 }
 
-function zPrim(name: string, mode: Mode): string {
-  const q = mode === 'query';
-  switch (name) {
-    case 'string':
-    case 'text':
-      return 'z.string()';
-    case 'int':
-      return q ? 'z.coerce.number().int()' : 'z.number().int()';
-    case 'number':
-      return q ? 'z.coerce.number()' : 'z.number()';
-    case 'bool':
-      return q ? 'z.stringbool()' : 'z.boolean()';
-    case 'json':
-      return 'z.unknown()';
-    case 'uuid':
-      return 'z.uuid()';
-    case 'email':
-      return 'z.email()';
-    case 'url':
-      return 'z.url()';
-    case 'date':
-      return 'z.iso.date()';
-    case 'datetime':
-      return 'z.iso.datetime({ offset: true })';
-    default:
-      return 'z.unknown()';
-  }
-}
-
 /* ------------------------------------------------------------ public API signatures */
 
 const TS_BUILTINS = new Set(['Partial', 'Record', 'Map', 'Promise', 'ReadableStream', 'Array', 'Pick', 'Omit', 'Uint8Array', 'Buffer', 'null', 'void', 'undefined', 'true', 'false', 'string', 'number', 'boolean', 'unknown', 'never']);
-const SIG_PRIMS: Record<string, string> = { uuid: 'string', email: 'string', url: 'string', date: 'string', datetime: 'string', text: 'string', string: 'string', int: 'number', number: 'number', bool: 'boolean', json: 'unknown' };
 
 /**
  * Converts a publicApi signature such as
@@ -319,7 +299,7 @@ function convertTypeText(text: string, ctx: TypeContext, typeParams: Set<string>
 
 function mapIdent(word: string, ctx: TypeContext, typeParams: Set<string>, where: string): string {
   if (typeParams.has(word)) return word;
-  if (SIG_PRIMS[word]) return SIG_PRIMS[word]!;
+  if (word in PRIM) return PRIM[word]!.ts;
   if (word === 'Page' || word === 'Paged') {
     ctx.imports.add('common');
     return 'common.Page';

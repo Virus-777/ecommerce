@@ -19,7 +19,4 @@ import type { ShippingService } from '../service.js';
  *   Seller.shippingSummary → service.getSellerShippingSummaries
  *   ReturnReplacement.shipment → service.shipmentsForReplacements
  */
-export const resolvers = (service: ShippingService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: ShippingService): ModuleResolvers => ({});

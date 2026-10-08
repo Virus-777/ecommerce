@@ -11,9 +11,10 @@ import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { newId } from '../kernel/lib/ids.js';
-import { urlOf } from '../kernel/http/register.js';
-import type { EndpointDef, ModuleSpecDef } from '../kernel/spec/define.js';
-import { specs } from '../spec/index.js';
+import { routeUrlOf, urlOf } from '../kernel/http/register.js';
+import { schemaOf } from '../kernel/migrations/index.js';
+import { specOf } from '../kernel/module-system/loader.js';
+import type { EndpointDef } from '../kernel/spec/define.js';
 import { auth, buildTestApp, callers } from './app.js';
 
 const PG_TYPE: Record<string, string> = {
@@ -52,14 +53,14 @@ function sessionFor(def: EndpointDef, permissions: 'all' | 'none' = 'all'): Reco
     case 'seller':
       return auth(permissions === 'none' ? callers.seller({ isOwner: false, permissions: [] }) : callers.seller());
     case 'staff':
-      return auth(callers.staff(permissions === 'none' ? [] : ['*']));
+      return auth(callers.staff(permissions === 'none' ? [] : undefined));
     default:
       return {};
   }
 }
 
-export function describeModule(name: keyof typeof specs) {
-  const spec = specs[name] as unknown as ModuleSpecDef;
+export function describeModule(name: string) {
+  const spec = specOf(name)!;
   const endpoints = Object.entries(spec.endpoints);
 
   describe(`${name} module`, () => {
@@ -79,7 +80,7 @@ export function describeModule(name: keyof typeof specs) {
     });
 
     it('creates the tables and columns of its spec', async () => {
-      const schema = name.replace(/-/g, '_');
+      const schema = schemaOf(name);
       const rows = await sql<{ table_name: string; column_name: string; is_nullable: string; udt_name: string }>`
         select table_name, column_name, is_nullable, udt_name from information_schema.columns where table_schema = ${schema}`.execute(app.kernel.database.kysely);
       const actual = new Map(rows.rows.map((r) => [`${r.table_name}.${r.column_name}`, r]));

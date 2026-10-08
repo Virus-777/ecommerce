@@ -6,9 +6,8 @@ import type { PurchasingService } from '../service.js';
  * Admin API: /api/admin/purchasing/…  (docs/api/modules/purchasing.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: PurchasingService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: PurchasingService) =>
+  routes(endpoints, 'admin', {
     /** GET /summary: Open purchase orders, committed cost, incoming units, late or short, low-stock items */
     getPurchasingSummary: notImplemented,
     /** GET /suppliers: Suppliers with lead time, on-time rate and open POs */
@@ -72,4 +71,3 @@ export const adminRoutes = (service: PurchasingService) => {
     /** POST /claims/{id}/close: Close a claim as rejected by the supplier or withdrawn */
     closeClaim: notImplemented,
   });
-};

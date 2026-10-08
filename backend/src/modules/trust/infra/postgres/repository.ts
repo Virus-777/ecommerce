@@ -4,6 +4,5 @@ import type { TrustRepository } from '../../ports.js';
 
 /** Postgres adapter for TrustRepository. `db` is scoped to the `trust` schema. */
 export function createPostgresTrustRepository(db: Kysely<TrustDb>): TrustRepository {
-  void db;
   return {};
 }

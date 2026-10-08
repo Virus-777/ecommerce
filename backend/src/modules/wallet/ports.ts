@@ -4,5 +4,4 @@
  */
 
 /** Persistence for this module's own tables: wallet.accounts, wallet.lots, wallet.ledger, wallet.holds, wallet.goodwill_grants, wallet.gift_cards, wallet.loyalty_entries. */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface WalletRepository {}

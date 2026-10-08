@@ -6,9 +6,8 @@ import type { WalletService } from '../service.js';
  * Store API: /api/store/wallet/…  (docs/api/modules/wallet.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const storeRoutes = (service: WalletService) => {
-  void service;
-  return routes(endpoints, 'store', {
+export const storeRoutes = (service: WalletService) =>
+  routes(endpoints, 'store', {
     /** GET /credit: Store credit balance, lots with expiry and recent history */
     getMyCredit: notImplemented,
     /** GET /credit/entries: Credit history */
@@ -20,4 +19,3 @@ export const storeRoutes = (service: WalletService) => {
     /** GET /loyalty: Loyalty points (experiment; NOT_IMPLEMENTED until a program is defined) */
     getMyLoyalty: notImplemented,
   });
-};

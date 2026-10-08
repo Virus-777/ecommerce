@@ -25,7 +25,4 @@ import type { OrdersService } from '../service.js';
  *   Return.order → service.getOrdersByIds
  *   RefundRequest.order → service.getOrdersByIds
  */
-export const resolvers = (service: OrdersService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: OrdersService): ModuleResolvers => ({});

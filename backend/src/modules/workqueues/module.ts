@@ -20,8 +20,7 @@ export default defineModule({
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const repo = createPostgresWorkqueuesRepository(ctx.db);
-    const service = new WorkqueuesService({ repo, ctx });
+    const service = new WorkqueuesService({ repo: createPostgresWorkqueuesRepository(ctx.db), ctx });
     ctx.provide(service);
     ctx.http.routes(sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

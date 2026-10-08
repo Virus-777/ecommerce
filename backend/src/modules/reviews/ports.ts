@@ -4,5 +4,4 @@
  */
 
 /** Persistence for this module's own tables: reviews.product_reviews, reviews.seller_feedback, reviews.seller_responses, reviews.questions, reviews.answers, reviews.helpful_votes, reviews.reports, reviews.moderation_items, reviews.moderation_decisions, reviews.appeals, reviews.product_rating_summaries, reviews.seller_feedback_summaries. */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface ReviewsRepository {}

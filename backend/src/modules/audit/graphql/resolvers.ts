@@ -14,7 +14,4 @@ import type { AuditService } from '../service.js';
  *   Customer.auditTrail → service.trailOf
  *   PayoutRun.auditTrail → service.trailOf
  */
-export const resolvers = (service: AuditService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: AuditService): ModuleResolvers => ({});

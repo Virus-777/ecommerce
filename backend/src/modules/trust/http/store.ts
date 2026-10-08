@@ -6,9 +6,8 @@ import type { TrustService } from '../service.js';
  * Store API: /api/store/trust/…  (docs/api/modules/trust.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const storeRoutes = (service: TrustService) => {
-  void service;
-  return routes(endpoints, 'store', {
+export const storeRoutes = (service: TrustService) =>
+  routes(endpoints, 'store', {
     /** POST /reports: Report a listing, seller, order or message */
     createStoreReport: notImplemented,
     /** GET /reports: Reports I made, with status and outcome */
@@ -24,4 +23,3 @@ export const storeRoutes = (service: TrustService) => {
     /** GET /appeals: My appeals */
     listCustomerAppeals: notImplemented,
   });
-};

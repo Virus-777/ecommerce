@@ -4,5 +4,4 @@
  */
 
 /** Persistence for this module's own tables: wishlist.lists, wishlist.items, wishlist.alerts. */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface WishlistRepository {}

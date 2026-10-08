@@ -22,8 +22,7 @@ export default defineModule({
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const repo = createPostgresFinanceRepository(ctx.db);
-    const service = new FinanceService({ repo, ctx });
+    const service = new FinanceService({ repo: createPostgresFinanceRepository(ctx.db), ctx });
     ctx.provide(service);
     ctx.http.routes(sellerRoutes(service), adminRoutes(service), publicRoutes(service), webhooksRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

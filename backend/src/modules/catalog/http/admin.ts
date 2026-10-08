@@ -6,9 +6,8 @@ import type { CatalogService } from '../service.js';
  * Admin API: /api/admin/catalog/…  (docs/api/modules/catalog.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: CatalogService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: CatalogService) =>
+  routes(endpoints, 'admin', {
     /** GET /review-queue: Submissions waiting for review, oldest first */
     reviewQueue: notImplemented,
     /** GET /products: All products with filters */
@@ -68,4 +67,3 @@ export const adminRoutes = (service: CatalogService) => {
     /** POST /brands/{id}/status: Activate, flag for review or block a brand (decides seller brand requests) */
     setBrandStatus: notImplemented,
   });
-};

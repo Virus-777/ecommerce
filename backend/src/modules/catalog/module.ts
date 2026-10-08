@@ -21,8 +21,7 @@ export default defineModule({
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const repo = createPostgresCatalogRepository(ctx.db);
-    const service = new CatalogService({ repo, ctx });
+    const service = new CatalogService({ repo: createPostgresCatalogRepository(ctx.db), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

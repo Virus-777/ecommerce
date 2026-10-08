@@ -6,9 +6,8 @@ import type { OffersService } from '../service.js';
  * Seller API: /api/seller/offers/…  (docs/api/modules/offers.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const sellerRoutes = (service: OffersService) => {
-  void service;
-  return routes(endpoints, 'seller', {
+export const sellerRoutes = (service: OffersService) =>
+  routes(endpoints, 'seller', {
     /** GET /offers: This seller's offers with review state, publication and stock as separate columns */
     listOwnOffers: notImplemented,
     /** GET /offers/counts: Counts for the list tabs and the page heading */
@@ -54,4 +53,3 @@ export const sellerRoutes = (service: OffersService) => {
     /** GET /bulk-updates/{id}/correction-report: CSV of skipped rows with what to fix */
     getCorrectionReport: notImplemented,
   });
-};

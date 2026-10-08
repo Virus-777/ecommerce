@@ -6,20 +6,14 @@
  *   - another module's contract.ts, and nothing else of it.
  * The kernel and the spec layer never import modules.
  */
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { backendDir } from './lib/spec.js';
 
 const src = join(backendDir, 'src');
-const files: string[] = [];
-const walk = (d: string) => {
-  for (const f of readdirSync(d)) {
-    const p = join(d, f);
-    if (statSync(p).isDirectory()) walk(p);
-    else if (f.endsWith('.ts')) files.push(p);
-  }
-};
-walk(src);
+const files = readdirSync(src, { recursive: true, encoding: 'utf8' })
+  .filter((f) => f.endsWith('.ts'))
+  .map((f) => join(src, f));
 
 const IMPORT = /(?:import|export)\s[^'"]*?from\s+['"]([^'"]+)['"]|import\(\s*['"]([^'"]+)['"]\s*\)/g;
 const problems: string[] = [];

@@ -6,9 +6,8 @@ import type { MessagingService } from '../service.js';
  * Admin API: /api/admin/messaging/…  (docs/api/modules/messaging.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: MessagingService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: MessagingService) =>
+  routes(endpoints, 'admin', {
     /** GET /conversations: Find conversations by order, customer or seller */
     listAdminConversations: notImplemented,
     /** GET /conversations/{id}/messages: Read a private conversation (reason required, logged) */
@@ -28,4 +27,3 @@ export const adminRoutes = (service: MessagingService) => {
     /** GET /sellers/{sellerId}/response-stats: A seller's reply performance */
     getSellerResponseAdmin: notImplemented,
   });
-};

@@ -4,5 +4,4 @@
  */
 
 /** Persistence for this module's own tables: access.roles, access.permissions, access.role_permissions, access.role_assignments, access.role_coverage, access.approval_actions, access.approval_limits, access.limit_changes, access.approval_requests, access.approval_decisions, access.away_periods, access.away_coverage. */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface AccessRepository {}

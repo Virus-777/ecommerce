@@ -18,14 +18,13 @@ import { createServer } from './kernel/http/server.js';
 import { JobScheduler } from './kernel/jobs/index.js';
 import { systemClock, type Clock } from './kernel/lib/clock.js';
 import { createRefGenerator } from './kernel/lib/refs.js';
-import { migrate } from './kernel/migrations/index.js';
+import { migrate, migrationUnits } from './kernel/migrations/index.js';
 import { bootModules, type BootResult } from './kernel/module-system/boot.js';
-import { loadDefinitions } from './kernel/module-system/loader.js';
+import { allSpecs, loadDefinitions } from './kernel/module-system/loader.js';
 import { enabledModules } from './modules.config.js';
 import { moduleLoaders } from './modules/index.js';
 import * as common from './spec/common.js';
 import { baseTypeDefs } from './spec/graphql.js';
-import { specs } from './spec/index.js';
 
 export interface BuildOptions {
   /** Environment to read the config from (default process.env) */
@@ -62,11 +61,17 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
   const config = loadConfig(opts.env ?? process.env, opts.config);
   const app = createServer(config);
 
+  // independent startup work runs in parallel: the database and the module imports
+  const [database, defs] = await Promise.all([
+    opts.database ?? createDatabase({ url: config.databaseUrl, pgliteDir: config.pgliteDir }),
+    loadDefinitions(opts.modules ?? config.modules ?? enabledModules, moduleLoaders),
+  ]);
+
   /* ---------------------------------------------------------------- OpenAPI at /docs (generated from the same Zod schemas) */
   await app.register(swagger, {
     openapi: {
       openapi: '3.1.0',
-      info: { title: common.info.title, version: common.info.version, description: common.info.description },
+      info: common.info,
       servers: common.servers,
       components: {
         securitySchemes: {
@@ -76,45 +81,33 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
         },
       },
     },
-    transform: createOpenApiTransform(common.apiTypes, ['/docs', '/health']) as never,
-    transformObject: createOpenApiObjectTransform(common.apiTypes) as never,
+    transform: createOpenApiTransform(common.apiTypes, ['/docs', '/health']),
+    transformObject: createOpenApiObjectTransform(common.apiTypes),
   });
   await app.register(swaggerUi, { routePrefix: '/docs' });
 
   /* ---------------------------------------------------------------- kernel services */
-  const database = opts.database ?? (await createDatabase({ url: config.databaseUrl, pgliteDir: config.pgliteDir }));
   const clock = opts.clock ?? systemClock;
-  const events = new EventBus(app.log, { validatePayloads: config.env !== 'production' });
-  const jobs = new JobScheduler(app.log, config.market.timeZone);
+  const events = new EventBus(app.log, { validatePayloads: config.env !== 'production', clock });
+  const jobs = new JobScheduler(app.log, config.market.timeZone, clock);
   const refs = createRefGenerator(database.kysely, clock, config.market.timeZone);
-  for (const spec of Object.values(specs)) {
-    registerErrorCodes(spec.errorCodes);
-    for (const [name, e] of Object.entries(spec.events.publishes)) events.registerSchema(name, (e as { payload: () => never }).payload);
-  }
+  for (const spec of Object.values(allSpecs)) registerErrorCodes(spec.name, spec.errorCodes);
+  events.registerSpecs(Object.values(allSpecs));
 
   /* ---------------------------------------------------------------- modules */
-  const enabled = opts.modules ?? config.modules ?? enabledModules;
-  const defs = await loadDefinitions(enabled, moduleLoaders);
-  if (config.migrateOnStart) {
-    await migrate(
-      database,
-      defs.map((d) => ({ module: d.spec.name, schema: d.spec.name.replace(/-/g, '_'), migrations: d.migrations })),
-      (m) => app.log.info(m),
-    );
-  }
+  if (config.migrateOnStart) await migrate(database, migrationUnits(defs), (m) => app.log.info(m));
   const boot = await bootModules(defs, { config, log: app.log, database, clock, events, jobs, refs });
   for (const w of boot.warnings) app.log.debug(w);
 
-  const lookup = (m: 'identity' | 'access' | 'sellers') => (boot.apis.has(m) ? boot.apis.get(m) : undefined);
-  let authenticator: Authenticator = moduleAuthenticator(lookup);
+  let authenticator: Authenticator = moduleAuthenticator((m) => boot.apis.get(m) as never);
   if (config.devTokens) authenticator = devAuthenticator(config.devTokenSecret, authenticator);
   if (opts.authenticator) authenticator = opts.authenticator(authenticator);
 
-  registerEndpoints(app, boot.endpoints, { config, authenticator, idempotency: postgresIdempotencyStore(database.kysely), webhookVerifiers: boot.webhookVerifiers });
+  registerEndpoints(app, boot.endpoints, { config, authenticator, idempotency: postgresIdempotencyStore(database.kysely, clock), webhookVerifiers: boot.webhookVerifiers });
   const graphql = await registerGraphQL(app, {
     config,
     baseTypeDefs,
-    fragments: defs.filter((d) => d.graphql).map((d) => ({ module: d.spec.name, typeDefs: d.graphql! })),
+    fragments: defs.flatMap((d) => (d.graphql ? [{ module: d.spec.name, typeDefs: d.graphql }] : [])),
     resolvers: boot.resolvers,
     authenticator,
   });

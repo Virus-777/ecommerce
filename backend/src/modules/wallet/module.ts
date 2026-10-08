@@ -20,8 +20,7 @@ export default defineModule({
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const repo = createPostgresWalletRepository(ctx.db);
-    const service = new WalletService({ repo, ctx });
+    const service = new WalletService({ repo: createPostgresWalletRepository(ctx.db), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

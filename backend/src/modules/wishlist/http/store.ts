@@ -6,9 +6,8 @@ import type { WishlistService } from '../service.js';
  * Store API: /api/store/wishlist/…  (docs/api/modules/wishlist.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const storeRoutes = (service: WishlistService) => {
-  void service;
-  return routes(endpoints, 'store', {
+export const storeRoutes = (service: WishlistService) =>
+  routes(endpoints, 'store', {
     /** GET /wishlist: Wishlist page: lists, first batch of items with price hints and stock, and alerts */
     getWishlist: notImplemented,
     /** GET /lists/{id}/items: More items of a list */
@@ -46,4 +45,3 @@ export const storeRoutes = (service: WishlistService) => {
     /** DELETE /alerts/{id}: Remove an alert */
     removeAlert: notImplemented,
   });
-};

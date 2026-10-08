@@ -6,9 +6,8 @@ import type { SellersService } from '../service.js';
  * Seller API: /api/seller/sellers/…  (docs/api/modules/sellers.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const sellerRoutes = (service: SellersService) => {
-  void service;
-  return routes(endpoints, 'seller', {
+export const sellerRoutes = (service: SellersService) =>
+  routes(endpoints, 'seller', {
     /** GET /account: Account status, verification, product approval, payout readiness and active restrictions */
     getAccount: notImplemented,
     /** GET /setup: Setup checklist and what will go live after the launch review */
@@ -84,4 +83,3 @@ export const sellerRoutes = (service: SellersService) => {
     /** POST /account/close: Owner asks to close the seller account */
     requestSellerClosure: notImplemented,
   });
-};

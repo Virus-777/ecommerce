@@ -14,7 +14,4 @@ import type { SellersService } from '../service.js';
  *   Query.sellerAdmin → service.getSeller
  *   Query.sellers → service.searchSellers
  */
-export const resolvers = (service: SellersService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: SellersService): ModuleResolvers => ({});

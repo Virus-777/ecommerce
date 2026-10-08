@@ -6,9 +6,8 @@ import type { ContentService } from '../service.js';
  * Admin API: /api/admin/content/…  (docs/api/modules/content.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: ContentService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: ContentService) =>
+  routes(endpoints, 'admin', {
     /** GET /homepage: Homepage sections with owner, schedule, status and locked ad positions */
     getHomepageAdmin: notImplemented,
     /** POST /homepage/sections: Add a section to the draft layout */
@@ -106,4 +105,3 @@ export const adminRoutes = (service: ContentService) => {
     /** PUT /navigation: Replace header and footer links */
     updateNavigation: notImplemented,
   });
-};

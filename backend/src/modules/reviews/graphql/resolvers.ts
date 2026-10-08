@@ -15,7 +15,4 @@ import type { ReviewsService } from '../service.js';
  *   Offer.sellerRating → service.getOfferSellerRatings
  *   OrderItem.reviewStatus → service.reviewStatusForItems
  */
-export const resolvers = (service: ReviewsService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: ReviewsService): ModuleResolvers => ({});

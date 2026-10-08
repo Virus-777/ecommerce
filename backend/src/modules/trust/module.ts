@@ -22,8 +22,7 @@ export default defineModule({
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const repo = createPostgresTrustRepository(ctx.db);
-    const service = new TrustService({ repo, ctx });
+    const service = new TrustService({ repo: createPostgresTrustRepository(ctx.db), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), publicRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

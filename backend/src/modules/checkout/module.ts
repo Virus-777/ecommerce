@@ -20,8 +20,7 @@ export default defineModule({
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const repo = createPostgresCheckoutRepository(ctx.db);
-    const service = new CheckoutService({ repo, ctx });
+    const service = new CheckoutService({ repo: createPostgresCheckoutRepository(ctx.db), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

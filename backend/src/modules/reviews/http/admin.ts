@@ -6,9 +6,8 @@ import type { ReviewsService } from '../service.js';
  * Admin API: /api/admin/reviews/…  (docs/api/modules/reviews.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: ReviewsService) => {
-  void service;
-  return routes(endpoints, 'admin', {
+export const adminRoutes = (service: ReviewsService) =>
+  routes(endpoints, 'admin', {
     /** GET /moderation-items: Reported and held content: reviews, feedback, questions, answers, seller responses */
     moderationQueue: notImplemented,
     /** GET /moderation-items/summary: Open moderation counts for the nav badge and tabs */
@@ -32,4 +31,3 @@ export const adminRoutes = (service: ReviewsService) => {
     /** GET /moderation-reasons: Policy reasons for decisions */
     listModerationReasons: notImplemented,
   });
-};

@@ -6,9 +6,8 @@ import type { CatalogService } from '../service.js';
  * Seller API: /api/seller/catalog/…  (docs/api/modules/catalog.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const sellerRoutes = (service: CatalogService) => {
-  void service;
-  return routes(endpoints, 'seller', {
+export const sellerRoutes = (service: CatalogService) =>
+  routes(endpoints, 'seller', {
     /** GET /match: Search the catalog before adding a product */
     matchCatalog: notImplemented,
     /** GET /brands: Brands for the submission form */
@@ -28,4 +27,3 @@ export const sellerRoutes = (service: CatalogService) => {
     /** GET /categories/{id}/attributes: Attributes (own and inherited) and image standards for a category (drives the submission form) */
     listCategoryAttributes: notImplemented,
   });
-};

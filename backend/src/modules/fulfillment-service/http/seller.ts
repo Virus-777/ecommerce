@@ -6,9 +6,8 @@ import type { FulfillmentServiceService } from '../service.js';
  * Seller API: /api/seller/fulfillment-service/…  (docs/api/modules/fulfillment-service.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const sellerRoutes = (service: FulfillmentServiceService) => {
-  void service;
-  return routes(endpoints, 'seller', {
+export const sellerRoutes = (service: FulfillmentServiceService) =>
+  routes(endpoints, 'seller', {
     /** GET /overview: Enrollment, stock held by Marketly, open inbound shipments and fees */
     getServiceOverview: notImplemented,
     /** POST /enrollment: Apply for storage and shipping by Marketly and accept the service terms */
@@ -54,4 +53,3 @@ export const sellerRoutes = (service: FulfillmentServiceService) => {
     /** GET /skus/{id}/movements: Ownership ledger for one SKU (every unit movement with reason) */
     listStockMovements: notImplemented,
   });
-};

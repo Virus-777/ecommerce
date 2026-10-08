@@ -6,9 +6,8 @@ import type { PaymentsService } from '../service.js';
  * Store API: /api/store/payments/…  (docs/api/modules/payments.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const storeRoutes = (service: PaymentsService) => {
-  void service;
-  return routes(endpoints, 'store', {
+export const storeRoutes = (service: PaymentsService) =>
+  routes(endpoints, 'store', {
     /** GET /options: Accepted methods, saved cards, wallet availability and new-card setup */
     getPaymentOptions: notImplemented,
     /** GET /intents/{id}: Payment result for the payment-result page (accepted, pending check, failed) */
@@ -34,4 +33,3 @@ export const storeRoutes = (service: PaymentsService) => {
     /** POST /refunds/{id}/destination: Choose where a failed refund should go instead */
     chooseRefundDestination: notImplemented,
   });
-};

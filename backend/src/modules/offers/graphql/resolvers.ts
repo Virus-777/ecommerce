@@ -22,7 +22,4 @@ import type { OffersService } from '../service.js';
  *   Query.offerAdmin → service.getOfferAdmin
  *   Query.offersAdmin → service.listOffersAdmin
  */
-export const resolvers = (service: OffersService): ModuleResolvers => {
-  void service;
-  return {};
-};
+export const resolvers = (service: OffersService): ModuleResolvers => ({});
