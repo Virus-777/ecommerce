@@ -175,7 +175,12 @@ function registerEndpoint(app: FastifyInstance, r: EndpointRegistration, k: Http
     preHandler: [hooks.preHandlerBefore, ...(idempotent ? [idempotent] : []), hooks.preHandlerAfter],
     onResponse: hooks.onResponse,
     async handler(request, reply) {
-      if (request.webhookDuplicate) return reply.header('x-webhook-duplicate', 'true').code(d.status).send(d.response ? {} : undefined);
+      if (request.webhookDuplicate) {
+        // the first delivery was processed: acknowledge without running the handler again (providers only need a 2xx);
+        // the body is not the endpoint's response type, so it bypasses response validation
+        reply.header('x-webhook-duplicate', 'true').code(d.status);
+        return d.response ? reply.type('application/json').serializer(JSON.stringify).send({ received: true, duplicate: true }) : reply.send();
+      }
       const authState = request.auth;
       const principal = authState?.principal ?? null;
       try {

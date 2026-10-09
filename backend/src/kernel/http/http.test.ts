@@ -20,6 +20,7 @@ import { postgresIdempotencyStore } from './idempotency.js';
 import { notImplemented, routes } from './index.js';
 import { registerEndpoints, registrationsOf } from './register.js';
 import { createServer } from './server.js';
+import { hmacWebhookVerifier, signWebhook } from './webhooks.js';
 
 const Item = z.object({ id: z.uuid(), name: z.string(), price: common.Money });
 
@@ -39,6 +40,12 @@ const endpoints = defineEndpoints({
   payouts: { area: 'seller', method: 'POST', path: '/payout-account', auth: 'seller', scope: 'own-seller', permission: 'demo.payouts.manage', stepUp: { kind: 'reauth', purpose: 'payout-account' }, summary: 'Owner only, fresh proof', body: () => z.object({ reauthToken: z.string().optional() }), response: null, status: 204, phase: 1 },
   hook: { area: 'webhooks', method: 'POST', path: '/provider', auth: 'provider', scope: 'public', summary: 'Provider callback', body: () => z.unknown(), response: null, status: 204, phase: 1 },
 });
+
+/** A second module whose webhooks are verified and answer a body */
+const ackEndpoints = defineEndpoints({
+  ack: { area: 'webhooks', method: 'POST', path: '/events', auth: 'provider', scope: 'public', summary: 'Acknowledged callback', body: () => z.unknown(), response: () => z.object({ received: z.boolean() }), status: 200, phase: 1 },
+});
+let acked = 0;
 
 let placed = 0;
 const item = (id: string) => ({ id, name: 'Trail runner', price: { amount: 18900, currency: 'USD' } });
@@ -60,6 +67,7 @@ const sets = [
   routes(endpoints, 'seller', { mine: async ({ sellerId }) => ({ sellerId: sellerId! }), payouts: async () => undefined }),
   routes(endpoints, 'webhooks', { hook: async () => undefined }),
 ];
+const ackSets = [routes(ackEndpoints, 'webhooks', { ack: async () => (acked++, { received: true }) })];
 
 const REFRESH = 'refresh-token-ok';
 let app: FastifyInstance;
@@ -77,11 +85,11 @@ beforeAll(async () => {
     db: db.kysely,
     authorities: moduleAuthorities(() => undefined),
     wrap: (a) => ({ ...a, verifyRefreshToken: async (t) => (t === REFRESH ? { sessionId: 'session-1', audience: 'store', kind: 'customer' } : null) }),
-    webhookVerifiers: new Map(),
+    webhookVerifiers: new Map([['acks', hmacWebhookVerifier(config, 'acks')]]),
     ownerOnly: new Set(['demo.payouts.manage']),
   });
   chain.install(app);
-  registerEndpoints(app, registrationsOf('demo', 'Demo', sets), { config, auth: chain, idempotency: postgresIdempotencyStore(db.kysely) });
+  registerEndpoints(app, [...registrationsOf('demo', 'Demo', sets), ...registrationsOf('acks', 'Acks', ackSets)], { config, auth: chain, idempotency: postgresIdempotencyStore(db.kysely) });
   await app.ready();
 });
 
@@ -211,6 +219,20 @@ describe('tokens other than bearer', () => {
     expect((await app.inject({ method: 'POST', url, payload: { refreshToken: 'wrong' } })).statusCode).toBe(401);
     expect((await app.inject({ method: 'POST', url, payload: { refreshToken: REFRESH } })).json()).toEqual({ sessionId: 'session-1' });
     expect((await app.inject({ method: 'POST', url, headers: { cookie: `__Host-mk_refresh=${REFRESH}` }, payload: {} })).statusCode).toBe(200);
+  });
+
+  it('processes a signed webhook once and acknowledges replays without running the handler', async () => {
+    const body = JSON.stringify({ id: 'evt_1' });
+    const headers = { 'content-type': 'application/json', 'x-event-id': 'evt_1' };
+    const first = await app.inject({ method: 'POST', url: '/webhooks/acks/events', headers: { ...headers, ...signWebhook('dev-webhook-secret', body) }, payload: body });
+    expect(first.statusCode, first.body).toBe(200);
+    expect(first.json()).toEqual({ received: true });
+    const replay = await app.inject({ method: 'POST', url: '/webhooks/acks/events', headers: { ...headers, ...signWebhook('dev-webhook-secret', body) }, payload: body });
+    expect(replay.statusCode, replay.body).toBe(200);
+    expect(replay.headers['x-webhook-duplicate']).toBe('true');
+    expect(acked).toBe(1);
+    const forged = await app.inject({ method: 'POST', url: '/webhooks/acks/events', headers: { ...headers, 'x-signature': 'sha256=00', 'x-timestamp': '1' }, payload: body });
+    expect(forged.statusCode).toBe(401);
   });
 
   it('refuses webhooks until the module verifies signatures', async () => {
