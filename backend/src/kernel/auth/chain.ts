@@ -72,12 +72,17 @@ const REFRESH_COOKIE = '__Host-mk_refresh';
 /** Small TTL cache for answers from access, sellers and customers */
 class TtlCache<V> {
   readonly #m = new Map<string, { v: V; at: number }>();
-  constructor(private readonly clock: Clock) {}
+  /** keepMissing: false = a null answer isn't remembered (a record created a moment later must be found) */
+  constructor(
+    private readonly clock: Clock,
+    private readonly keepMissing = true,
+  ) {}
   async get(key: string, load: () => Promise<V>): Promise<V> {
     const now = this.clock.now().getTime();
     const hit = this.#m.get(key);
     if (hit && now - hit.at < CACHE_MS) return hit.v;
     const v = await load();
+    if (v === null && !this.keepMissing) return v;
     if (this.#m.size > 50_000) this.#m.clear();
     this.#m.set(key, { v, at: now });
     return v;
@@ -95,7 +100,7 @@ export class AuthChain {
   constructor(readonly k: AuthKernel) {
     this.permissions = new TtlCache(k.clock);
     this.members = new TtlCache(k.clock);
-    this.customers = new TtlCache(k.clock);
+    this.customers = new TtlCache(k.clock, false); // a customer created after the first request must be in scope at once
   }
 
   /* ---------------------------------------------------------------- every URL */
