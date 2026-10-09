@@ -143,7 +143,7 @@ Granting a permission never grants financial authority: `check` is the only sour
 
 ## 9b. Modules already built
 
-Tranche 1 is built and merged: **identity, access, settings, audit, media, notifications**. Call their
+Built and merged: tranche 1 **identity, access, settings, audit, media, notifications**; tranche 2 **customers, catalog, inventory, sellers, purchasing, workqueues**. Real end-to-end flows for tests (staff with roles, customers, seller sign-in) are in `src/testing/flows.ts`; see `src/integration/*.test.ts`. Call their
 public APIs for real; in tests boot them (`only: [...]` pulls dependencies) rather than stubbing, unless
 you need to control an answer. Notifications already consumes the events your spec publishes and turns
 them into notices, so publish exactly the spec's events and payloads. Stub only modules that are not
