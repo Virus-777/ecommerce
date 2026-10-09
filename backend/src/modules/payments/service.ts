@@ -22,6 +22,7 @@ import type {
 import { ACCEPTED, customerState, is } from './domain/rules.js';
 import type { IntentRec } from './ports.js';
 import { Core, SYSTEM, notFound, type By, type PaymentsServiceDeps } from './service/core.js';
+import { Credit } from './service/credit.js';
 import { Disputes } from './service/disputes.js';
 import { Intents } from './service/intents.js';
 import { Methods } from './service/methods.js';
@@ -39,6 +40,7 @@ export type { PaymentsServiceDeps };
 export class PaymentsService implements PaymentsPublicApi {
   readonly core: Core;
   readonly views: Views;
+  readonly credit: Credit;
   readonly intents: Intents;
   readonly refunds: Refunds;
   readonly disputes: Disputes;
@@ -48,8 +50,9 @@ export class PaymentsService implements PaymentsPublicApi {
   constructor(deps: PaymentsServiceDeps) {
     this.core = new Core(deps);
     this.views = new Views(this.core);
-    this.intents = new Intents(this.core, this.views);
-    this.refunds = new Refunds(this.core, this.views, this.intents);
+    this.credit = new Credit(this.core);
+    this.intents = new Intents(this.core, this.views, this.credit);
+    this.refunds = new Refunds(this.core, this.views, this.intents, this.credit);
     this.disputes = new Disputes(this.core, this.views);
     this.methods = new Methods(this.core, this.views);
     this.webhooks = new Webhooks(this.core, this.intents, this.refunds, this.disputes, this.methods);

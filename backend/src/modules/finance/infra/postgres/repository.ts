@@ -1,6 +1,7 @@
 import { sql, type Kysely } from 'kysely';
 import { paginate } from '../../../../kernel/lib/pagination.js';
 import type { FinanceDb } from '../../../../spec/finance.js';
+import type { Inbox } from '../../../../kernel/events/inbox.js';
 import type { EntryRec, FinanceRepository } from '../../ports.js';
 
 /** jsonb columns per table: values are sent as JSON text (pg would turn JS arrays into PG arrays) */
@@ -44,14 +45,18 @@ function applyWhere(q: any, where: Record<string, unknown>): any {
 const like = (s: string) => `%${s.trim().toLowerCase().replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 
 /** Postgres adapter for FinanceRepository. `db` is scoped to the `finance` schema. */
-export function createPostgresFinanceRepository(db: Kysely<FinanceDb>): FinanceRepository {
+export function createPostgresFinanceRepository(db: Kysely<FinanceDb>, inbox?: Inbox): FinanceRepository {
   // generic table access: the row types are checked at the FinanceRepository boundary
   const d: any = db;
 
   const repo: FinanceRepository = {
     async transaction(fn) {
       if (db.isTransaction) return fn(repo);
-      return db.transaction().execute((trx) => fn(createPostgresFinanceRepository(trx)));
+      return db.transaction().execute((trx) => fn(createPostgresFinanceRepository(trx, inbox)));
+    },
+    async claim(key) {
+      if (!inbox) throw new Error('finance repository: no inbox');
+      return inbox.claim(db, key);
     },
 
     /* ---------------------------------------------------------------- generic */

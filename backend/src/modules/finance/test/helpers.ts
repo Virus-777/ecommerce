@@ -32,6 +32,8 @@ export interface FakeItem {
   sellerDiscount?: number;
   platformDiscount?: number;
   shipping?: number;
+  /** product category at purchase (category fee rates) */
+  categoryId?: string | null;
   splitFromItemId?: string | null;
 }
 
@@ -98,6 +100,7 @@ function orderDetail(o: FakeOrder): any {
         paidAmount: USD(sub - disc + (i.shipping ?? 0)),
         state: 'confirmed',
         splitFromItemId: i.splitFromItemId ?? null,
+        categoryId: i.categoryId ?? null,
       };
     });
     const total = items.reduce((s, i) => s + i.paidAmount.amount, 0);

@@ -14,8 +14,21 @@ type Db = PaymentsDb;
 /** intents.method: the MethodSnapshot plus the bank challenge waiting for the customer (no column for it in the spec) */
 export type StoredMethod = MethodSnapshot & { pendingAction?: NextAction | null };
 
+/**
+ * A store-credit share given back through wallet, keyed by what returned it (a refund id, or the intent id when a
+ * cancelled order's credit came back). Reserved under the intent lock before wallet is called, so concurrent
+ * refunds never return the same credit twice; `sent` once wallet confirmed it.
+ */
+export interface CreditReturn {
+  amount: number;
+  sent: boolean;
+}
+
+/** intents.tenders: the Tender of the API; the store-credit tender also keeps what went back to credit (no column for it in the spec) */
+export type StoredTender = Tender & { creditReturns?: Record<string, CreditReturn> };
+
 export interface IntentRec extends Omit<Db['intents'], 'tenders' | 'method' | 'decline'> {
-  tenders: Tender[];
+  tenders: StoredTender[];
   method: StoredMethod;
   decline: Decline | null;
 }

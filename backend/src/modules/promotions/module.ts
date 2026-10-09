@@ -21,7 +21,7 @@ export default defineModule({
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const service = new PromotionsService({ repo: createPostgresPromotionsRepository(ctx.db), ctx });
+    const service = new PromotionsService({ repo: createPostgresPromotionsRepository(ctx.db, ctx.inbox), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

@@ -11,7 +11,7 @@ import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { FeeLine, Statement, StatementLine, StatementSection, StatementSummary } from '../../../spec/finance.js';
 import { renderPdf, type PdfLine } from '../domain/pdf.js';
-import { addDays, feeBasisNote, fmt, marketDate, SECTION_OF, SECTIONS, type EntryType, type SectionKey } from '../domain/rules.js';
+import { addDays, feeBasisNote, fmt, marketDate, sectionOf, SECTIONS, type EntryType, type SectionKey } from '../domain/rules.js';
 import { statementMachine } from '../domain/state-machines.js';
 import { reference, toStatementSummary } from '../mappers.js';
 import type { EntryRec, FinanceRepository, StatementRec } from '../ports.js';
@@ -65,7 +65,7 @@ export class StatementsPart extends Part {
         otherLines.push({ label: `Payout ${e.ref_label ?? ''} sent outside a payout run`.replace('  ', ' '), amount: { amount: e.amount, currency: cur } });
         continue;
       }
-      const key = SECTION_OF[type];
+      const key = sectionOf(type, e.ref_kind);
       if (!key) continue;
       if (e.bucket === 'held' && (type === 'hold' || type === 'hold_release')) continue; // the available side of the pair is the line
       const counted = e.bucket !== 'held';

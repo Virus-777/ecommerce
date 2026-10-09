@@ -69,6 +69,8 @@ export interface DailyTypeSum {
 
 export interface FinanceRepository {
   transaction<R>(fn: (tx: FinanceRepository) => Promise<R>): Promise<R>;
+  /** Inbox (kernel ctx.inbox): true the first time this key is claimed; inside a transaction it commits with the effects */
+  claim(key: string): Promise<boolean>;
 
   /* generic table access */
   get<T extends IdTable>(table: T, id: string, o?: { forUpdate?: boolean }): Promise<Db[T] | undefined>;

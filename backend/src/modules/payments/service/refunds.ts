@@ -11,7 +11,7 @@
  *     answer is only ever retrieved, and resent with the same key only after the provider says it never got it.
  */
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
-import { AppError } from '../../../kernel/errors/index.js';
+import { AppError, isAppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type * as common from '../../../spec/common.js';
 import type { ItemPaidAmount } from '../../../spec/orders.js';
@@ -21,6 +21,7 @@ import { ACCEPTED, is, isExpired, methodLabel, refundBackoffMs, retryableRefundF
 import { ProviderError, type IntentRec, type PaymentsRepository, type ProviderRefund, type RefundDestination, type RefundItemRec, type RefundLogRec, type RefundRec } from '../ports.js';
 import type { Scope } from '../../../kernel/auth/scope.js';
 import { Batch, SYSTEM, illegal, invalid, notFound, type By, type Cfg, type Core, type Lookup, type OrderInfo } from './core.js';
+import { refundKey, type Credit } from './credit.js';
 import type { Intents } from './intents.js';
 import type { Views } from './views.js';
 
@@ -43,7 +44,19 @@ export class Refunds {
     private readonly core: Core,
     private readonly views: Views,
     private readonly intents: Intents,
+    private readonly credit: Credit,
   ) {}
+
+  /**
+   * What the order's payment took and refunds can still count against: the card captures plus the store credit used,
+   * less credit given back outside the live refunds (cancellation, excess, cancelled refunds whose credit part was sent)
+   */
+  private async charged(repo: PaymentsRepository, i: IntentRec): Promise<number> {
+    const t = this.credit.tender(i);
+    const keys = Object.keys(t?.creditReturns ?? {}).filter((k) => k.startsWith('refund:')).map((k) => k.slice('refund:'.length));
+    const cancelled = keys.length ? new Set((await repo.find('refunds', { id: keys, status: 'cancelled' })).map((r) => r.id)) : new Set<string>();
+    return i.captured_amount + this.credit.paid(i) - this.credit.returned(i, { notRefunds: true, cancelledRefunds: cancelled });
+  }
 
   private get repo() {
     return this.core.repo;
@@ -64,6 +77,8 @@ export class Refunds {
 
   /** Groups whose money was captured (a whole-payment capture covers every group) */
   private async capturedGroups(repo: PaymentsRepository, intent: IntentRec | undefined): Promise<{ all: boolean; groups: Set<string> }> {
+    // paid entirely with store credit: the whole order is charged once the payment is captured (nothing goes to a card)
+    if (intent && intent.status === 'captured' && this.credit.card(intent) === 0 && this.credit.paid(intent) > 0) return { all: true, groups: new Set() };
     if (!intent || intent.captured_amount <= 0) return { all: false, groups: new Set() };
     const captures = await repo.find('captures', { intent_id: intent.id, status: 'succeeded' });
     return { all: captures.some((c) => c.group_id === null) || !captures.length, groups: new Set(captures.map((c) => c.group_id).filter((g): g is string => Boolean(g))) };
@@ -83,7 +98,7 @@ export class Refunds {
       const isCaptured = captured.all || captured.groups.has(p.groupId);
       return { orderItemId: p.orderItemId, groupId: p.groupId, sellerId: p.sellerId ?? null, paid: p.paid.amount, sent, inFlight, remaining: isCaptured ? Math.max(0, p.paid.amount - sent - inFlight) : 0, captured: isCaptured };
     });
-    return { items, sent: payment.sent, inFlight: payment.inFlight, captured: intent?.captured_amount ?? 0 };
+    return { items, sent: payment.sent, inFlight: payment.inFlight, captured: intent ? await this.charged(repo, intent) : 0 };
   }
 
   async remainingRefundable(orderId: string, orderItemIds?: string[]): Promise<RefundableSummary> {
@@ -166,7 +181,7 @@ export class Refunds {
     if (unknown.length) throw invalid(unknown.map((x) => ({ path: 'items', message: `Item ${x.orderItemId} is not part of this order` })));
     const currency = intent?.currency ?? paid[0]!.paid.currency;
     if (input.items.some((x) => x.amount.currency !== currency)) throw invalid([{ path: 'items', message: `Refunds are in ${currency}` }]);
-    if (!intent || !is(ACCEPTED, intent.status) || intent.captured_amount <= 0) {
+    if (!intent || !is(ACCEPTED, intent.status) || (await this.charged(this.repo, intent)) <= 0) {
       throw this.core.error('REFUND_EXCEEDS_REFUNDABLE', 'Nothing was charged for this order yet, so there is nothing to refund.', { items: input.items.map((x) => ({ orderItemId: x.orderItemId, remaining: this.m(0, currency) })) });
     }
     const ref = await this.refFor(input.requestRef);
@@ -181,7 +196,7 @@ export class Refunds {
         .filter(({ x, cap }) => x.amount.amount > cap.remaining)
         .map(({ x, cap }) => ({ orderItemId: x.orderItemId, requested: x.amount, remaining: this.m(cap.remaining, currency) }));
       const total = input.items.reduce((s, x) => s + x.amount.amount, 0);
-      const paymentLeft = locked.captured_amount - c.sent - c.inFlight;
+      const paymentLeft = c.captured - c.sent - c.inFlight;
       if (over.length || total > paymentLeft) {
         throw this.core.error('REFUND_EXCEEDS_REFUNDABLE', undefined, {
           items: c.items.filter((i) => input.items.some((x) => x.orderItemId === i.orderItemId)).map((i) => ({ orderItemId: i.orderItemId, remaining: this.m(i.remaining, currency) })),
@@ -309,7 +324,7 @@ export class Refunds {
       if (separate) return null;
       const c = await this.caps(tx, e.orderId, locked, paid);
       const cap = c.items.find((i) => i.orderItemId === e.itemId);
-      const amount = Math.min(e.refund.total.amount, cap?.remaining ?? 0, Math.max(0, locked.captured_amount - c.sent - c.inFlight));
+      const amount = Math.min(e.refund.total.amount, cap?.remaining ?? 0, Math.max(0, c.captured - c.sent - c.inFlight));
       if (!cap || amount <= 0) {
         this.core.ctx.log.warn({ orderId: e.orderId, itemId: e.itemId }, 'payments: cancelled item has nothing left to refund');
         return null;
@@ -419,12 +434,30 @@ export class Refunds {
   /** Sends the attempt started by log entry `logId` and applies the answer */
   private async send(r: RefundRec, logId: string, destination: RefundDestination | null, by: By, cfg: Cfg): Promise<RefundRec> {
     const intent = (await this.repo.get('intents', r.intent_id))!;
+    const creditUnavailable: ProviderRefund = { status: 'failed', failure: { code: 'store_credit_unavailable', reason: 'Store credit could not be added right now', retryable: true } };
+    // a mixed payment: the store-credit part goes back first (reserved once per refund, so a retry sends the same split)
+    const key = refundKey(r.id);
+    const share = this.credit.tender(intent) ? await this.credit.reserve(intent.id, key, r.amount) : { amount: 0, sent: true };
     if (r.destination === 'store_credit') {
+      // all of it to store credit: wallet gives the order's credit back first and adds the rest as a refund to credit
       const credited = await this.core.soft('wallet', 'creditRefund', (w) =>
         w.creditRefund({ customerId: intent.customer_id!, refundId: r.id, orderId: r.order_id, amount: this.m(r.amount, r.currency), reason: r.reason }, `refund:${r.id}`),
       );
-      return this.apply(r.id, credited ? { status: 'succeeded', providerRef: credited.id ?? null } : { status: 'failed', failure: { code: 'store_credit_unavailable', reason: 'Store credit could not be added right now', retryable: true } }, by, cfg);
+      if (credited && !share.sent) await this.credit.confirm(intent.id, key);
+      return this.apply(r.id, credited ? { status: 'succeeded', providerRef: credited.id ?? null } : creditUnavailable, by, cfg);
     }
+    let creditEntry: string | null = null;
+    if (!share.sent) {
+      try {
+        creditEntry = await this.credit.giveBack(intent, key, share, r.reason);
+      } catch (err) {
+        if (!isAppError(err)) throw err;
+        this.core.ctx.log.warn({ err, refundId: r.id }, 'payments: the store-credit part of a refund could not be given back');
+        return this.apply(r.id, creditUnavailable, by, cfg);
+      }
+    }
+    const cardAmount = r.amount - share.amount;
+    if (cardAmount <= 0) return this.apply(r.id, { status: 'succeeded', providerRef: creditEntry }, by, cfg); // all of it was store credit
     if (r.destination === 'original_method' && !intent.provider_ref) {
       return this.apply(r.id, { status: 'failed', failure: { code: 'no_payment', reason: 'The original payment has no processor reference', retryable: false } }, by, cfg);
     }
@@ -432,7 +465,7 @@ export class Refunds {
       const result = await this.core.call(
         'refund',
         { intentId: intent.id, refundId: r.id },
-        () => this.core.provider.refund({ providerRef: intent.provider_ref ?? '', amount: this.m(r.amount, r.currency), idempotencyKey: `refund:${logId}`, destination, refundId: r.id }),
+        () => this.core.provider.refund({ providerRef: intent.provider_ref ?? '', amount: this.m(cardAmount, r.currency), idempotencyKey: `refund:${logId}`, destination, refundId: r.id }),
         (x) => ({ outcome: x.status === 'failed' ? 'declined' : 'ok', providerRef: x.providerRef, message: x.failure ? `${x.failure.code}: ${x.failure.reason}` : `refund ${x.status}` }),
       );
       return this.apply(r.id, result, by, cfg);
@@ -455,6 +488,9 @@ export class Refunds {
   private async apply(refundId: string, p: ProviderRefund, by: By, cfg: Cfg): Promise<RefundRec> {
     const batch = new Batch();
     let changed: { r: RefundRec; from: RefundStatus } | null = null;
+    const pre = await this.repo.get('refunds', refundId);
+    const payer = pre ? await this.repo.get('intents', pre.intent_id) : undefined;
+    const who = payer ? await this.core.contactOf({ customer_id: payer.customer_id, guest_email: payer.guest_email, order_id: pre!.order_id }) : { customerId: null, contactEmail: null };
     const after = await this.repo.transaction(async (tx) => {
       const r = (await tx.get('refunds', refundId, { forUpdate: true }))!;
       if (r.status !== 'processing') return r;
@@ -487,7 +523,7 @@ export class Refunds {
         updated_at: now,
       });
       await this.log(tx, r.id, 'processing', to, f.reason, by.actor);
-      batch.push('payments.refund.failed', { refundId: r.id, ref: r.ref, orderId: r.order_id, origin: r.origin, originId: r.origin_id, amount: this.m(r.amount, r.currency), reason: f.reason, attempts: r.attempts, finalAttempt: final });
+      batch.push('payments.refund.failed', { refundId: r.id, ref: r.ref, orderId: r.order_id, ...who, origin: r.origin, originId: r.origin_id, amount: this.m(r.amount, r.currency), reason: f.reason, attempts: r.attempts, finalAttempt: final });
       changed = { r: updated, from: 'processing' };
       return updated;
     });
@@ -496,7 +532,7 @@ export class Refunds {
       await this.publishChange(c.r, c.from, c.r.status, by);
       if (c.r.status === 'sent') {
         const items = await this.views.refundItems(c.r, await this.repo.find('refund_items', { refund_id: c.r.id }), this.core.lookup());
-        this.core.publish('payments.refund.sent', { refundId: c.r.id, ref: c.r.ref, orderId: c.r.order_id, origin: c.r.origin, originId: c.r.origin_id, amount: this.m(c.r.amount, c.r.currency), items, destination: c.r.destination, sentAt: c.r.sent_at!.toISOString() }, by);
+        this.core.publish('payments.refund.sent', { refundId: c.r.id, ref: c.r.ref, orderId: c.r.order_id, ...who, origin: c.r.origin, originId: c.r.origin_id, amount: this.m(c.r.amount, c.r.currency), items, destination: c.r.destination, sentAt: c.r.sent_at!.toISOString() }, by);
       }
     }
     this.core.flush(batch, by);
@@ -649,6 +685,7 @@ export class Refunds {
     const before = await this.get(refundId);
     const moved = await this.move(refundId, 'cancel', by, `Cancelled: ${reason.trim()}`, { strict: true, patch: { next_attempt_at: null } });
     const after = moved?.r ?? (await this.get(refundId));
+    if (after.status === 'cancelled') await this.credit.unreserve(after.intent_id, refundKey(after.id)); // a store-credit part not given back yet is free again
     await this.core.audit({ action: 'payments.refund.cancel', actionLabel: 'Cancelled a refund', category: 'financial', target: { type: 'refund', id: before.id, ref: before.ref, label: before.destination_label, screen: 'admin/finance' }, reason, before: { status: before.status, amount: before.amount }, after: { status: after.status } }, by);
     return this.toApi(after);
   }

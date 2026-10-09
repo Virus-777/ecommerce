@@ -274,7 +274,10 @@ export class StaffCredit {
         if (g.state !== 'pending_approval') return null;
         return tx.updateGrant(g.id, { state: goodwillGrantMachine.next('pending_approval', 'reject'), decided_by: actorText(decider) });
       });
-      if (after) await this.core.audit({ action: 'wallet.goodwill.reject', actionLabel: 'Goodwill credit not approved', category: 'financial', target: this.target(after), reason: e.reason ?? `Approval ${e.outcome}`, approvalRequestId: e.requestId }, by);
+      if (after) {
+        this.decided(after, 'rejected', by);
+        await this.core.audit({ action: 'wallet.goodwill.reject', actionLabel: 'Goodwill credit not approved', category: 'financial', target: this.target(after), reason: e.reason ?? `Approval ${e.outcome}`, approvalRequestId: e.requestId }, by);
+      }
       return;
     }
     const [orderRefs, caseRefs] = await Promise.all([this.core.orderRefs([g0.order_id]), this.core.caseRefs([{ caseId: g0.case_id, orderId: g0.order_id }])]);
@@ -288,7 +291,15 @@ export class StaffCredit {
       return this.credit(tx, acct, g, decider, { caseRef: g.case_id ? caseRefs.get(g.case_id) : undefined, orderRef: g.order_id ? orderRefs.get(g.order_id) : undefined, months, expiresInDays: details?.expiresInDays ?? null, out });
     });
     this.core.flush(out, by);
+    if (after) this.decided(after, 'granted', by);
     if (after) await this.core.audit({ action: 'wallet.goodwill.grant', actionLabel: 'Granted goodwill credit after approval', category: 'financial', target: this.target(after), reason: after.reason, after: { amount: m(after.amount, after.currency), ledgerEntryId: after.ledger_entry_id, requestedBy: actorFrom(after.requested_by) }, approvalRequestId: e.requestId }, by);
+  }
+
+  /** wallet.goodwill.decided: a grant that waited for approval was granted or rejected (support tells the case) */
+  private decided(g: GrantRow, status: 'granted' | 'rejected', by: By) {
+    const out = new Outbox();
+    out.push('wallet.goodwill.decided', { grantId: g.id, customerId: g.customer_id, status, amount: m(g.amount, g.currency), caseId: g.case_id });
+    this.core.flush(out, by);
   }
 
   private async correctionDecided(e: EventPayload<'access.approval.decided'>) {

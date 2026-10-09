@@ -106,14 +106,16 @@ describe('cart evaluation and redemption', () => {
     expect(ev2.packages[0]).toMatchObject({ freeShipping: false, shippingDiscount: USD(0) });
   });
 
-  it('releases holds on payment failure, commits on orders.order.placed and expires stale reservations', async () => {
+  it('keeps holds through a payment failure until checkout releases them, commits on orders.order.placed and expires stale reservations', async () => {
     const o = k.offer({ sellerId: SELLER_A, categoryId: HOME, price: USD(10000) });
     const camp = await liveCampaign(k, campaignInput(k.clock, { code: 'REL10', discount: { kind: 'percent_coupon', percentOffBps: 1000 }, limits: { budget: USD(100_000) } }));
     const session = newId();
     const ev = await cart([line(o, 1)], { codes: ['REL10'] });
-    await k.svc.reserveRedemption(ev.evaluationId, session);
+    const res = await k.svc.reserveRedemption(ev.evaluationId, session);
     expect((await campaignRow(camp.id))!.budget_used).toBe(1000);
     await k.emit('payments.payment.failed', { intentId: newId(), checkoutSessionId: session, orderId: null, declineCategory: 'card_declined', afterPendingCheck: false, at: new Date().toISOString() });
+    expect(await campaignRow(camp.id)).toMatchObject({ budget_used: 1000, usage_count: 1 }); // kept for the retry window
+    await k.svc.releaseRedemption(res.reservationId); // checkout: the session was abandoned
     expect(await campaignRow(camp.id)).toMatchObject({ budget_used: 0, usage_count: 0 });
 
     const session2 = newId();

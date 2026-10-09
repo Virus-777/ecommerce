@@ -127,6 +127,8 @@ export type EntryType =
   | 'hold_release'
   | 'adjustment'
   | 'ad_charge'
+  | 'service_fee'
+  | 'charge_credit'
   | 'label_charge'
   | 'chargeback'
   | 'payout'
@@ -146,6 +148,8 @@ export const TYPE_LABELS: Record<EntryType, string> = {
   hold_release: 'Hold released',
   adjustment: 'Adjustment',
   ad_charge: 'Ad charge',
+  service_fee: 'Fulfillment service fee',
+  charge_credit: 'Charge credited back',
   label_charge: 'Label charge',
   chargeback: 'Chargeback',
   payout: 'Payout',
@@ -161,7 +165,7 @@ export const TYPE_GROUPS: Record<string, EntryType[]> = {
   refunds: ['refund', 'refund_after_payout', 'chargeback'],
   payouts: ['payout', 'payout_returned'],
   holds: ['hold', 'hold_release'],
-  adjustments: ['adjustment', 'owed_offset', 'label_charge'],
+  adjustments: ['adjustment', 'owed_offset', 'label_charge', 'service_fee', 'charge_credit'],
   ads: ['ad_charge'],
 };
 
@@ -185,16 +189,22 @@ export const SECTION_OF: Record<EntryType, SectionKey | null> = {
   label_charge: 'adjustments',
   payout_returned: 'adjustments',
   ad_charge: 'ads',
+  // fulfillment-service fees stay apart from commission; a credit follows its charge (sectionOf)
+  service_fee: 'adjustments',
+  charge_credit: 'adjustments',
   payout: null,
 };
+
+/** Statement section of an entry: credits of an ad charge sit with the ad charges */
+export const sectionOf = (type: EntryType, refKind: string | null | undefined): SectionKey | null => (type === 'charge_credit' && refKind === 'ad_campaign' ? 'ads' : SECTION_OF[type]);
 
 export const SECTIONS: { key: SectionKey; title: string; subtitle: string; totalLabel: string }[] = [
   { key: 'sales', title: 'Sales', subtitle: 'Items whose earnings settle in this statement, with shipping you charged and your discounts', totalLabel: 'Sales proceeds' },
   { key: 'fees', title: 'Marketplace fees', subtitle: 'Fee per item with the basis it was charged on, and fees returned on refunds', totalLabel: 'Fees total' },
   { key: 'refunds', title: 'Refunds', subtitle: 'Refunds and cancellations, including refunds after a payout', totalLabel: 'Refunds total' },
   { key: 'holds', title: 'Holds and releases', subtitle: 'Earnings withheld with a reason and review date, and earlier holds released', totalLabel: 'Holds net' },
-  { key: 'adjustments', title: 'Adjustments', subtitle: 'Credits and debits with reasons, label charges and returned payouts', totalLabel: 'Adjustments net' },
-  { key: 'ads', title: 'Advertising', subtitle: 'Ad charges, separate from commission', totalLabel: 'Ad charges' },
+  { key: 'adjustments', title: 'Adjustments', subtitle: 'Credits and debits with reasons, label charges, fulfillment service fees and returned payouts', totalLabel: 'Adjustments net' },
+  { key: 'ads', title: 'Advertising', subtitle: 'Ad charges and ad credits, separate from commission', totalLabel: 'Ad charges' },
 ];
 
 /* ---------------------------------------------------------------- dates */

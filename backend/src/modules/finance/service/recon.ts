@@ -181,6 +181,30 @@ export class ReconPart extends Part {
     await this.upsertItem({ id: detId(`capture:${e.captureId}`), date, check: 'payments_vs_orders', ref_kind: 'capture', ref_id: e.captureId, subject: order.ref, description: group ? `Capture for package ${group.packageLabel} against its total` : 'Capture against the order total', expected, actual: e.amount.amount, difference: e.amount.amount - expected });
   }
 
+  /** A refund payments gave up on (final attempt failed): money owed to the customer that was not sent */
+  async refundFailed(e: EventPayload<'payments.refund.failed'>) {
+    await this.upsertItem({
+      id: detId(`refund_failed:${e.refundId}`),
+      date: this.core.today(),
+      check: 'payments_vs_orders',
+      ref_kind: 'refund',
+      ref_id: e.refundId,
+      subject: e.ref,
+      description: `Refund ${e.ref} failed after ${e.attempts} attempt${e.attempts === 1 ? '' : 's'} and was not sent: ${e.reason}`,
+      expected: e.amount.amount,
+      actual: 0,
+      difference: -e.amount.amount,
+    });
+  }
+
+  /** The failed refund was sent after all (a later retry or a new destination): its open item matches */
+  async refundSent(refundId: string, amount: number) {
+    const id = detId(`refund_failed:${refundId}`);
+    const row = await this.repo.get('recon_items', id);
+    if (row?.status !== 'open') return;
+    await this.repo.update('recon_items', id, { status: this.core.step(reconciliationItemMachine, 'open', 'autoMatch'), actual: amount, difference: amount - row.expected, note: 'Sent after a later attempt' });
+  }
+
   /** Job finance.reconcile.daily: yesterday's checks */
   async daily() {
     const date = addDays(this.core.today(), -1);

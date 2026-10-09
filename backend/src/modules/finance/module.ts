@@ -26,7 +26,7 @@ export default defineModule({
   register(ctx) {
     // payout provider: the deterministic development adapter until a real one is wired behind the same port
     const provider = createDevPayoutProvider(ctx.clock);
-    const service = new FinanceService({ repo: createPostgresFinanceRepository(ctx.db), ctx, provider });
+    const service = new FinanceService({ repo: createPostgresFinanceRepository(ctx.db, ctx.inbox), ctx, provider });
     ctx.provide(service);
     ctx.http.routes(sellerRoutes(service), adminRoutes(service), publicRoutes(service), webhooksRoutes(service));
     ctx.http.webhookVerifier(hmacWebhookVerifier(ctx.config, ctx.name));
@@ -43,6 +43,7 @@ export default defineModule({
     ctx.events.on("payments.payment.captured", (e) => service.onPaymentCapturedFromPayments(e.payload));
     ctx.events.on("returns.refund.approved", (e) => service.onRefundApprovedFromReturns(e.payload));
     ctx.events.on("payments.refund.sent", (e) => service.onRefundSentFromPayments(e.payload));
+    ctx.events.on("payments.refund.failed", (e) => service.onRefundFailedFromPayments(e.payload, e.id));
     ctx.events.on("payments.chargeback.opened", (e) => service.onChargebackOpenedFromPayments(e.payload));
     ctx.events.on("payments.chargeback.decided", (e) => service.onChargebackDecidedFromPayments(e.payload));
     ctx.events.on("returns.label.created", (e) => service.onLabelCreatedFromReturns(e.payload));
@@ -50,6 +51,7 @@ export default defineModule({
     ctx.events.on("shipping.label.voided", (e) => service.onLabelVoidedFromShipping(e.payload));
     ctx.events.on("shipping.claim.status_changed", (e) => service.onClaimStatusChangedFromShipping(e.payload));
     ctx.events.on("promotions.coupon.redeemed", (e) => service.onCouponRedeemedFromPromotions(e.payload));
+    ctx.events.on("promotions.redemption.reversed", (e) => service.onRedemptionReversedFromPromotions(e.payload, e.id));
     ctx.events.on("sellers.seller.approved", (e) => service.onSellerApprovedFromSellers(e.payload));
     ctx.events.on("sellers.seller.suspended", (e) => service.onSellerSuspendedFromSellers(e.payload));
     ctx.events.on("sellers.seller.closed", (e) => service.onSellerClosedFromSellers(e.payload));

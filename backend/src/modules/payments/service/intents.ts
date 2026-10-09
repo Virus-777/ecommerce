@@ -15,6 +15,7 @@ import { paymentIntentMachine } from '../domain/state-machines.js';
 import { ACCEPTED, DAY, ENDED, HOUR, MINUTE, PENDING, checkBackoffMs, declineOf, is, isExpired, methodLabel, type IntentStatus } from '../domain/rules.js';
 import { ProviderError, type AllocationRec, type CaptureRec, type CardDetails, type IntentRec, type PaymentsRepository, type ProviderCapture, type ProviderPayment, type StoredMethod } from '../ports.js';
 import { Batch, SYSTEM, illegal, invalid, notFound, type By, type Cfg, type Core, type Lookup, type OrderInfo } from './core.js';
+import { CANCELLED_KEY, EXCESS_KEY, type Credit } from './credit.js';
 import type { Views } from './views.js';
 
 type Ev = Parameters<typeof paymentIntentMachine.next>[1];
@@ -29,6 +30,7 @@ export class Intents {
   constructor(
     private readonly core: Core,
     private readonly views: Views,
+    private readonly credit: Credit,
   ) {}
 
   private get repo() {
@@ -197,6 +199,8 @@ export class Intents {
     const cfg = o.cfg ?? (await this.core.cfg());
     const batch = new Batch();
     let releaseHold: string | null = null;
+    const pre = await this.repo.get('intents', intentId);
+    const who = pre ? await this.core.contactOf(pre) : { customerId: null, contactEmail: null };
     const after = await this.repo.transaction(async (tx) => {
       const i = await tx.get('intents', intentId, { forUpdate: true });
       if (!i) throw notFound();
@@ -233,7 +237,7 @@ export class Intents {
             const captured = p.capturedAmount || authorized;
             const capture = await tx.insertIfNew('captures', { id: newId(), intent_id: i.id, group_id: null, amount: captured, status: 'succeeded', provider_ref: p.providerRef ?? i.provider_ref, idempotency_key: `${i.id}:capture:provider`, at: now });
             Object.assign(patch, { captured_amount: captured, captured_at: now });
-            if (capture && i.order_id) batch.push('payments.payment.captured', await this.capturedPayload(tx, i, capture, null));
+            if (capture && i.order_id) batch.push('payments.payment.captured', await this.capturedPayload(tx, i, capture, null, who));
           }
           break;
         }
@@ -254,7 +258,7 @@ export class Intents {
           patch.decline = declineOf(d.code, d.category, i.method.label);
           patch.next_check_at = null;
           patch.method = { ...i.method, pendingAction: null };
-          batch.push('payments.payment.failed', { intentId: i.id, checkoutSessionId: i.checkout_session_id, orderId: i.order_id, declineCategory: d.category, afterPendingCheck: wasPending, at: now.toISOString() });
+          batch.push('payments.payment.failed', { intentId: i.id, checkoutSessionId: i.checkout_session_id, orderId: i.order_id, ...who, declineCategory: d.category, afterPendingCheck: wasPending, at: now.toISOString() });
           releaseHold = i.tenders.find((t) => t.creditHoldId)?.creditHoldId ?? null;
           break;
         }
@@ -280,6 +284,8 @@ export class Intents {
   /** authorizing (or a challenge being completed) → pending_check: the status-check job takes over */
   async markUncertain(intentId: string, by: By): Promise<IntentRec> {
     const batch = new Batch();
+    const pre = await this.repo.get('intents', intentId);
+    const who = pre ? await this.core.contactOf(pre) : { customerId: null, contactEmail: null };
     const after = await this.repo.transaction(async (tx) => {
       const i = await tx.get('intents', intentId, { forUpdate: true });
       if (!i) throw notFound();
@@ -288,7 +294,7 @@ export class Intents {
       if (status !== 'authorizing') return i;
       status = paymentIntentMachine.next('authorizing', 'timeout') as IntentStatus;
       const now = this.core.now();
-      batch.push('payments.payment.pending_check', { intentId: i.id, checkoutSessionId: i.checkout_session_id, orderId: i.order_id, amount: this.m(i.amount, i.currency), since: now.toISOString() });
+      batch.push('payments.payment.pending_check', { intentId: i.id, checkoutSessionId: i.checkout_session_id, orderId: i.order_id, ...who, amount: this.m(i.amount, i.currency), since: now.toISOString() });
       return tx.update('intents', i.id, { status, next_check_at: new Date(now.getTime() + checkBackoffMs(0)), check_attempts: 0, updated_at: now, method: { ...i.method, pendingAction: null } });
     });
     this.core.flush(batch, by);
@@ -453,12 +459,13 @@ export class Intents {
 
   /* ---------------------------------------------------------------- capture */
 
-  private async capturedPayload(tx: PaymentsRepository, i: IntentRec, c: CaptureRec, groupId: string | null) {
+  private async capturedPayload(tx: PaymentsRepository, i: IntentRec, c: CaptureRec, groupId: string | null, who: { customerId: string | null; contactEmail: string | null }) {
     const allocations = await tx.find('allocations', { intent_id: i.id, ...(groupId ? { group_id: groupId } : {}) });
     return {
       intentId: i.id,
       captureId: c.id,
       orderId: i.order_id!,
+      ...who,
       groupId,
       amount: this.m(c.amount, i.currency),
       allocations: allocations.map((a) => ({ groupId: a.group_id, ownerType: a.owner_type as 'official' | 'seller', sellerId: a.seller_id, amount: this.m(a.amount, i.currency) })),
@@ -472,6 +479,7 @@ export class Intents {
    * event never captures twice. `final` releases what is left of the authorization.
    */
   async capture(intentId: string, o: { key: string; groupId?: string | null; amount?: number | null; final?: boolean; by: By; strict?: boolean }): Promise<CaptureRec | null> {
+    let excessCredit = 0;
     const prepared = await this.repo.transaction(async (tx) => {
       const i = await tx.get('intents', intentId, { forUpdate: true });
       if (!i) throw notFound();
@@ -479,6 +487,11 @@ export class Intents {
       if (existing) return { i, capture: existing, fresh: false };
       if (i.status !== 'authorized' && i.status !== 'partially_captured') {
         if (o.strict) paymentIntentMachine.next(i.status as never, 'capture'); // ILLEGAL_TRANSITION
+        return null;
+      }
+      if (this.credit.card(i) === 0) {
+        // paid entirely with store credit (used when the order was placed): nothing to ask a card processor
+        if (i.status === 'authorized' && i.order_id) await tx.update('intents', i.id, { status: paymentIntentMachine.next('authorized', 'capture'), captured_at: this.core.now(), updated_at: this.core.now() });
         return null;
       }
       if (!i.provider_ref) throw illegal('The authorization has no processor reference yet');
@@ -492,10 +505,16 @@ export class Intents {
           const a = allocations.find((x) => x.group_id === o.groupId);
           const done = captures.filter((c) => c.group_id === o.groupId && c.status !== 'failed').reduce((s, c) => s + c.amount, 0);
           amount = a ? Math.max(0, a.amount - done) : 0;
+          // a mixed payment: the store credit paid part of the order, so the card holds less than the groups add up to
+          if (this.credit.tender(i)) amount = Math.min(amount, Math.max(0, remaining));
         } else {
           const groupsDone = captures.filter((c) => c.group_id && c.status !== 'failed');
           const total = allocations.length ? allocations.filter((a) => !groupsDone.some((c) => c.group_id === a.group_id)).reduce((s, a) => s + a.amount, 0) : remaining;
-          amount = Math.min(total, remaining);
+          // the card pays what the store credit did not: items cancelled before the capture come off the card, and
+          // credit beyond what is left of the order goes back to the customer's credit
+          const credit = allocations.length && !groupsDone.length ? this.credit.left(i) : 0;
+          excessCredit = Math.max(0, credit - total);
+          amount = Math.min(Math.max(0, total - credit), remaining);
         }
       }
       if (!Number.isSafeInteger(amount) || amount < 0) throw invalid([{ path: 'amount', message: 'Enter an amount of zero or more' }]);
@@ -510,6 +529,10 @@ export class Intents {
       const capture = await tx.insert('captures', { id: newId(), intent_id: i.id, group_id: o.groupId ?? null, amount, status: 'pending', provider_ref: null, idempotency_key: o.key, at: this.core.now() });
       return { i, capture, fresh: true };
     });
+    if (excessCredit > 0) {
+      const i = (await this.repo.get('intents', intentId))!;
+      await this.credit.returnOutsideRefund(i, EXCESS_KEY, excessCredit, 'Items were cancelled before the payment was taken: the store credit they no longer need is returned');
+    }
     if (!prepared) return null;
     const { i, capture } = prepared;
     if (capture.status === 'succeeded' || capture.status === 'failed') return capture;
@@ -534,6 +557,9 @@ export class Intents {
   /** Applies a capture outcome under the intent lock; publishes payments.payment.captured once */
   async finishCapture(captureId: string, r: ProviderCapture, o: { final?: boolean; by: By; unknown?: boolean }): Promise<CaptureRec> {
     const batch = new Batch();
+    const pre = await this.repo.get('captures', captureId);
+    const owner = pre ? await this.repo.get('intents', pre.intent_id) : undefined;
+    const who = owner ? await this.core.contactOf(owner) : { customerId: null, contactEmail: null };
     const after = await this.repo.transaction(async (tx) => {
       const c0 = await tx.get('captures', captureId);
       if (!c0) throw notFound('Capture');
@@ -555,7 +581,7 @@ export class Intents {
         if (!final && i.status === 'partially_captured') status = 'partially_captured';
       }
       await tx.update('intents', i.id, { captured_amount: captured, captured_at: now, status, updated_at: now });
-      if (i.order_id) batch.push('payments.payment.captured', await this.capturedPayload(tx, i, updated, c.group_id));
+      if (i.order_id) batch.push('payments.payment.captured', await this.capturedPayload(tx, i, updated, c.group_id, who));
       return updated;
     });
     this.core.flush(batch, o.by);
@@ -605,10 +631,12 @@ export class Intents {
       if (o.strict) paymentIntentMachine.next('partially_captured', 'void');
       return this.closeRemainder(i, reason, by);
     }
-    try {
-      await this.core.call('void', { intentId }, () => this.core.provider.void({ providerRef: i.provider_ref!, idempotencyKey: `${i.id}:void` }), () => ({ outcome: 'ok', providerRef: i.provider_ref }));
-    } catch (err) {
-      return this.core.unavailable(err);
+    if (this.credit.card(i) > 0) {
+      try {
+        await this.core.call('void', { intentId }, () => this.core.provider.void({ providerRef: i.provider_ref!, idempotencyKey: `${i.id}:void` }), () => ({ outcome: 'ok', providerRef: i.provider_ref }));
+      } catch (err) {
+        return this.core.unavailable(err);
+      }
     }
     const batch = new Batch();
     const after = await this.repo.transaction(async (tx) => {
@@ -618,8 +646,10 @@ export class Intents {
       return tx.update('intents', x.id, { status: paymentIntentMachine.next('authorized', 'void'), updated_at: this.core.now() });
     });
     this.core.flush(batch, by);
+    // without an order the checkout's credit hold was never used: release it. An order's credit was used when the
+    // order was placed; it goes back when the order is cancelled (onOrderCancelled), never by releasing the hold.
     const hold = i.tenders.find((t) => t.creditHoldId)?.creditHoldId;
-    if (hold && after.status === 'voided') await this.core.soft('wallet', 'releaseHold', (w) => w.releaseHold(hold));
+    if (hold && after.status === 'voided' && !after.order_id) await this.core.soft('wallet', 'releaseHold', (w) => w.releaseHold(hold));
     return after;
   }
 
@@ -686,6 +716,12 @@ export class Intents {
       } catch (err) {
         this.core.ctx.log.warn({ err, intentId: i.id }, 'payments: could not release the authorization of a cancelled order');
       }
+    }
+    // store credit used by an order cancelled before its card was charged goes back to the customer's credit (once
+    // the card was charged, the cancellation refunds give the credit back first)
+    for (const i of await this.repo.find('intents', { order_id: e.orderId })) {
+      if (!this.credit.tender(i) || i.captured_amount > 0 || i.status === 'captured') continue;
+      await this.credit.returnOutsideRefund(i, CANCELLED_KEY, this.credit.left(i), 'Order cancelled before the payment was taken');
     }
   }
 

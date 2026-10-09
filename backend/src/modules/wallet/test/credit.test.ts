@@ -164,11 +164,11 @@ describe('holds at checkout', () => {
     await invariant(c.id);
   });
 
-  it('uses the credit again when checkout captures a hold that was released after a declined payment', async () => {
+  it('uses the credit again when checkout captures a hold that expired while the payment was being checked', async () => {
     const c = h.customer();
     await h.give(c.id, 3000);
     const hold = await h.service.holdCredit(c.id, newId(), USD(1800), newId());
-    await h.service.releaseHold(hold.id); // payments: declined
+    await h.service.ledger.releaseHold(hold.id, 'expire'); // wallet.release-stale-holds: the pending check outlived the hold
     const orderId = newId();
     const used = await h.service.captureHold(hold.id, orderId); // checkout: the retry was accepted
     expect(used).toMatchObject({ state: 'captured', orderId, amount: USD(1800) });

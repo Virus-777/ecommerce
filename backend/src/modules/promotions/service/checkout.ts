@@ -198,15 +198,36 @@ export class CheckoutPart extends Part {
     return { stored: row.result as unknown as StoredEvaluation, validUntil: new Date(row.valid_until) };
   }
 
+  /**
+   * Holds the quote's discounts. The same evaluation and key answer with the reservation that still holds them
+   * (state reserved); one that was released, expired, committed or reversed is never handed out again, so the next
+   * reservation of that evaluation and key gets a new id (its generation) and new rows.
+   */
   async reserve(evaluationId: string, idempotencyKey: string): Promise<RedemptionReservation> {
     if (!idempotencyKey?.trim()) throw invalid([{ path: 'idempotencyKey', message: 'An idempotency key is required' }]);
-    const reservationId = stableUuid(`${evaluationId}:${idempotencyKey}`);
-    const existing = await this.repo.find('redemptions', { reservation_id: reservationId });
     const ttl = await this.core.ttlMinutes();
-    if (existing.length && existing.some((r) => r.state !== 'expired')) {
-      const exp = existing.map((r) => r.expires_at).filter(Boolean).map((d) => new Date(d!).getTime());
-      return { reservationId, evaluationId, expiresAt: new Date(exp.length ? Math.min(...exp) : this.now().getTime() + ttl * 60_000).toISOString() };
+    const holding = async (): Promise<RedemptionReservation | null> => {
+      const live = (await this.repo.find('redemptions', { evaluation_id: evaluationId, idempotency_key: idempotencyKey, state: 'reserved' }, { orderBy: [['created_at', 'desc']] }))[0];
+      if (!live) return null;
+      const rows = await this.repo.find('redemptions', { reservation_id: live.reservation_id, state: 'reserved' });
+      const exp = rows.map((r) => r.expires_at).filter(Boolean).map((d) => new Date(d!).getTime());
+      return { reservationId: live.reservation_id, evaluationId, expiresAt: new Date(exp.length ? Math.min(...exp) : this.now().getTime() + ttl * 60_000).toISOString() };
+    };
+    const live = await holding();
+    if (live) return live;
+    const generations = new Set((await this.repo.find('redemptions', { evaluation_id: evaluationId, idempotency_key: idempotencyKey })).map((r) => r.reservation_id)).size;
+    const reservationId = stableUuid(generations ? `${evaluationId}:${idempotencyKey}:${generations}` : `${evaluationId}:${idempotencyKey}`);
+    try {
+      return await this.reserveNew(evaluationId, idempotencyKey, reservationId, ttl);
+    } catch (err) {
+      // a concurrent reserve of the same evaluation and key took this generation first (unique reservation and campaign)
+      const winner = await holding();
+      if (winner?.reservationId === reservationId) return winner;
+      throw err;
     }
+  }
+
+  private async reserveNew(evaluationId: string, idempotencyKey: string, reservationId: string, ttl: number): Promise<RedemptionReservation> {
     // the same checkout reserving a newer quote: the older hold goes back first
     for (const old of new Set((await this.repo.find('redemptions', { idempotency_key: idempotencyKey, state: 'reserved' })).map((r) => r.reservation_id))) {
       if (old !== reservationId) await this.release(old);
@@ -291,7 +312,13 @@ export class CheckoutPart extends Part {
     return rows.map((r) => toRedemption(r, { code: r.code_id ? (codes.get(r.code_id) ?? null) : null, orderRef: null, items: lines.filter((l) => l.redemption_id === r.id).reduce((a, l) => a + l.quantity, 0) }));
   }
 
-  async commit(reservationId: string, orderId: string, orderItemIds: Record<string, string>, by: By = { actor: SYSTEM }): Promise<Redemption[]> {
+  /**
+   * Binds a reservation to the placed order. Idempotent: rows already committed to this order are not committed
+   * again (coupon.redeemed is published once, deal stock claimed once), but their lines still get the order items.
+   * The explicit commit (checkout, with the line → order item map) sets its lines; the orders.order.placed fallback
+   * (`fallback`, claimed once through the inbox) only fills lines nobody bound, so it never overwrites checkout's map.
+   */
+  async commit(reservationId: string, orderId: string, orderItemIds: Record<string, string>, by: By = { actor: SYSTEM }, o: { fallback?: { inboxKey: string } } = {}): Promise<Redemption[]> {
     const rows = await this.repo.find('redemptions', { reservation_id: reservationId });
     if (!rows.length) return [];
     const done = rows.filter((r) => r.state !== 'reserved' && r.state !== 'expired');
@@ -299,18 +326,24 @@ export class CheckoutPart extends Part {
     if (rows.every((r) => r.state === 'expired')) throw new AppError('CONFLICT', 'The reservation has expired. Check the cart again.', { reservationId });
     const committed: RedemptionRec[] = [];
     await this.repo.transaction(async (tx) => {
+      if (o.fallback && !(await tx.claim(o.fallback.inboxKey))) return; // this placed order was handled already
       for (const r of rows) {
         const cur = await tx.get('redemptions', r.id, { forUpdate: true });
-        if (!cur || cur.state !== 'reserved') continue;
-        const state = this.core.step(redemptionMachine, cur.state, 'commit');
-        committed.push(await tx.update('redemptions', r.id, { state, order_id: orderId, expires_at: null }));
+        if (!cur) continue;
+        const fresh = cur.state === 'reserved';
+        if (!fresh && cur.order_id !== orderId) continue; // released, or another order's (checked above)
         const lines = await tx.find('redemption_lines', { redemption_id: r.id });
+        if (fresh) {
+          const state = this.core.step(redemptionMachine, cur.state, 'commit');
+          committed.push(await tx.update('redemptions', r.id, { state, order_id: orderId, expires_at: null }));
+          const camp = await tx.get('campaigns', r.campaign_id);
+          if (camp?.kind === 'flash_sale') for (const l of lines) if (l.quantity > 0) await tx.claimDealStock(r.campaign_id, l.offer_id, l.quantity);
+        }
         for (const l of lines) {
           const item = orderItemIds[l.line_id];
-          if (item) await tx.updateWhere('redemption_lines', { redemption_id: r.id, line_id: l.line_id }, { order_item_id: item });
+          if (!item || item === l.order_item_id || (o.fallback && l.order_item_id)) continue;
+          await tx.updateWhere('redemption_lines', { redemption_id: r.id, line_id: l.line_id }, { order_item_id: item });
         }
-        const camp = await tx.get('campaigns', r.campaign_id);
-        if (camp?.kind === 'flash_sale') for (const l of lines) if (l.quantity > 0) await tx.claimDealStock(r.campaign_id, l.offer_id, l.quantity);
       }
     });
     for (const r of committed) this.core.publish('promotions.coupon.redeemed', { redemptionId: r.id, campaignId: r.campaign_id, orderId, amount: m(r.amount, r.currency), platformPart: m(r.platform_part, r.currency), sellerPart: m(r.seller_part, r.currency) }, by);
@@ -441,11 +474,25 @@ export class CheckoutPart extends Part {
 
   /* ---------------------------------------------------------------- events consumed */
 
+  /**
+   * orders.order.placed: the fallback when checkout did not commit (commitRedemption). Lines are bound to the order's
+   * items by offer where that is unambiguous; checkout's explicit commit, before or after, keeps its own line map.
+   */
   async onOrderPlaced(e: EventPayload<'orders.order.placed'>) {
     const reserved = await this.repo.find('redemptions', { idempotency_key: e.checkoutSessionId, state: 'reserved' });
+    if (!reserved.length) return; // checkout committed (or nothing was reserved)
+    const order = await this.core.optional('orders', (o) => o.getOrder(e.orderId));
+    const items = (order?.groups ?? []).flatMap((g) => g.items);
     for (const rid of new Set(reserved.map((r) => r.reservation_id))) {
       try {
-        await this.commit(rid, e.orderId, {});
+        const lines = await this.repo.find('redemption_lines', { redemption_id: reserved.filter((r) => r.reservation_id === rid).map((r) => r.id) });
+        const byLine: Record<string, string> = {};
+        for (const l of lines) {
+          const same = items.filter((i) => i.offer.offerId === l.offer_id);
+          const linesOfOffer = new Set(lines.filter((x) => x.offer_id === l.offer_id).map((x) => x.line_id));
+          if (same.length === 1 && linesOfOffer.size === 1) byLine[l.line_id] = same[0]!.id;
+        }
+        await this.commit(rid, e.orderId, byLine, { actor: SYSTEM }, { fallback: { inboxKey: `order-placed:${e.orderId}:${rid}` } });
       } catch (err) {
         this.ctx.log.warn({ err, orderId: e.orderId }, 'promotions: could not commit the reservation of a placed order');
       }
@@ -480,9 +527,21 @@ export class CheckoutPart extends Part {
     }
   }
 
+  /**
+   * payments.payment.failed: a declined checkout keeps its discounts for the retry window (checkout: "payment_failed
+   * keeps ... the promotion reservation until holdUntil"), so the reservation is not released here but kept for at
+   * least reservationTtlMinutes from the decline (the retry window has the same default). It goes back when it
+   * expires (release-expired-reservations), when checkout abandons or expires the session (releaseRedemption), or
+   * when the retry reserves a changed quote.
+   */
   async onPaymentFailed(e: EventPayload<'payments.payment.failed'>) {
+    const at = new Date(e.at);
+    const until = new Date((Number.isNaN(at.getTime()) ? this.now() : at).getTime() + (await this.core.ttlMinutes()) * 60_000);
     const reserved = await this.repo.find('redemptions', { idempotency_key: e.checkoutSessionId, state: 'reserved' });
-    for (const rid of new Set(reserved.map((r) => r.reservation_id))) await this.release(rid);
+    for (const r of reserved) {
+      if (r.expires_at && new Date(r.expires_at).getTime() >= until.getTime()) continue;
+      await this.repo.updateWhere('redemptions', { id: r.id, state: 'reserved' }, { expires_at: until });
+    }
   }
 
   /** Job: release reservations past expiresAt; drop old unused evaluations */

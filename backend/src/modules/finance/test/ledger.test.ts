@@ -218,3 +218,125 @@ describe('a refund after payout (scenario 6)', () => {
     expect((await k.call('GET', `${SELLER}/payouts/${(await k.svc.core.repo.find('payouts', { seller_id: S }))[0]!.id}`, k.sellerToken(OTHER))).status).toBe(404);
   });
 });
+
+describe('the spec correctness pass, replayed on the ledger', () => {
+  const S3 = newId();
+  const CATEGORY = newId();
+  const repo = () => k.svc.core.repo;
+  const today = () => k.svc.core.today();
+
+  it('charges the category fee rate of the category the order item was bought in', async () => {
+    const rule = await k.svc.core.activeRule();
+    await repo().insert('fee_category_rates', { rule_set_id: rule.id, category_id: CATEGORY, rate_bps: 1500 });
+    const ord = k.order(S3, [
+      { title: 'Espresso machine', quantity: 1, price: 20_000, categoryId: CATEGORY },
+      { title: 'Milk jug', quantity: 1, price: 2_000 },
+    ]);
+    await k.accept(ord);
+    const t = await expectLedgerMatches(k, S3);
+    expect(t.pending).toBe(20_000 - 3_000 + 2_000 - 200);
+    expect(await repo().findOne('fee_charges', { order_item_id: ord.groups[0]!.items[0]!.id })).toMatchObject({ rate_bps: 1500, fee: 3_000 });
+    expect(await repo().findOne('fee_charges', { order_item_id: ord.groups[0]!.items[1]!.id })).toMatchObject({ rate_bps: 1000, fee: 200 });
+  });
+
+  it('posts a fulfillment-service fee once per key and credits it back, never more than the fee', async () => {
+    const before = await expectLedgerMatches(k, S3);
+    const input = { sellerId: S3, amount: USD(1_200), kind: 'storage', reference: { kind: 'fulfillment_service' as const, id: newId(), ref: 'FS-2610-STORAGE' }, description: 'Storage, October', idempotencyKey: 'fs-storage-2610' };
+    const fee = await k.svc.recordServiceFee(input);
+    expect(fee).toMatchObject({ type: 'service_fee', amount: USD(-1_200), reference: { kind: 'fulfillment_service', ref: 'FS-2610-STORAGE' } });
+    expect((await k.svc.recordServiceFee(input)).id).toBe(fee.id);
+    expect((await expectLedgerMatches(k, S3)).available).toBe(before.available - 1_200);
+
+    const credit = { sellerId: S3, amount: USD(500), originalEntryId: fee.id, reason: 'Storage overcharged', idempotencyKey: 'fs-credit-1' };
+    const c1 = await k.svc.creditSellerCharge(credit);
+    expect(c1).toMatchObject({ type: 'charge_credit', amount: USD(500), reference: { kind: 'fulfillment_service', ref: 'FS-2610-STORAGE' } });
+    expect((await k.svc.creditSellerCharge(credit)).id).toBe(c1.id); // same key: the first entry
+    await expect(k.svc.creditSellerCharge({ ...credit, amount: USD(701), idempotencyKey: 'fs-credit-2' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    await k.svc.creditSellerCharge({ ...credit, amount: USD(700), idempotencyKey: 'fs-credit-3' });
+    await expect(k.svc.creditSellerCharge({ ...credit, amount: USD(1), idempotencyKey: 'fs-credit-4' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    await expect(k.svc.creditSellerCharge({ ...credit, sellerId: newId(), idempotencyKey: 'fs-credit-5' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const sale = (await repo().findOne('ledger_entries', { seller_id: S3, type: 'sale' }))!;
+    await expect(k.svc.creditSellerCharge({ ...credit, originalEntryId: sale.id, idempotencyKey: 'fs-credit-6' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect((await expectLedgerMatches(k, S3)).available).toBe(before.available);
+
+    // ad charges are credited back the same way (ad income is net of the credit)
+    const ad = await k.svc.recordAdCharge({ sellerId: S3, campaignId: newId(), campaignRef: 'AD-77', period: { from: today(), to: today() }, amount: USD(900), description: 'Sponsored listings' });
+    await k.svc.creditSellerCharge({ sellerId: S3, amount: USD(300), originalEntryId: ad.id, reason: 'Invalid clicks', idempotencyKey: 'ad-credit-1' });
+    const adj = await k.call('GET', `${SELLER}/ledger?type=adjustments`, k.sellerToken(S3));
+    expect(adj.body.items.map((e: any) => e.amount.amount).sort((a: number, b: number) => a - b)).toEqual([-1_200, 300, 500, 700]);
+    expect((await expectLedgerMatches(k, S3)).available).toBe(before.available - 600);
+    const inc = await k.svc.marketplaceIncomeByDay({ from: today(), to: today() }, S3);
+    expect(inc[0]!.adIncome).toEqual(USD(600));
+  });
+
+  it('marks the funding split of a failed refund, posts nothing until it is sent and lists a final failure in the daily checks', async () => {
+    const ord = k.order(S3, [{ title: 'Grinder', quantity: 1, price: 8_000 }]);
+    await k.accept(ord);
+    const before = await expectLedgerMatches(k, S3);
+    const item = ord.groups[0]!.items[0]!;
+    const refundRequestId = newId();
+    await k.emit('returns.refund.approved', { refundRequestId, returnId: newId(), caseId: null, orderId: ord.id, orderItemIds: [item.id], ownerType: 'seller', sellerId: S3, source: 'return', trustReportId: null, total: USD(8_000), breakdown: { itemAmount: USD(8_000), discountShare: USD(0), shippingRefund: USD(0), returnShippingDeduction: USD(0), deductions: [], total: USD(8_000), maxRefundable: USD(8_000), destination: 'Visa •••• 4417', isEstimate: false }, fundedBy: 'seller', sellerShare: USD(8_000), platformShare: USD(0), approvedBy: { kind: 'staff', id: newId() } });
+    const refundId = newId();
+    const failed = { refundId, ref: 'RF-261010-0001', orderId: ord.id, customerId: newId(), contactEmail: 'ana@example.com', origin: 'return', originId: refundRequestId, amount: USD(8_000), reason: 'The card was closed', attempts: 1, finalAttempt: false };
+    await k.emit('payments.refund.failed', failed);
+    expect(await expectLedgerMatches(k, S3)).toEqual(before);
+    const alloc = (await repo().findOne('refund_allocations', { refund_request_id: refundRequestId }))!;
+    expect(alloc).toMatchObject({ payment_refund_id: refundId, applied_at: null });
+    expect((alloc.breakdown as any).failure).toMatchObject({ refundId, attempts: 1, finalAttempt: false });
+    expect(await repo().find('recon_items', { ref_kind: 'refund', ref_id: refundId })).toEqual([]);
+
+    const final = { ...failed, attempts: 3, finalAttempt: true };
+    const eventId = newId();
+    await k.svc.onRefundFailedFromPayments(final, eventId);
+    await k.svc.onRefundFailedFromPayments(final, eventId); // redelivered: claimed once
+    await k.app.kernel.events.drain();
+    const items = await repo().find('recon_items', { ref_kind: 'refund', ref_id: refundId });
+    expect(items).toEqual([expect.objectContaining({ check: 'payments_vs_orders', status: 'open', expected: 8_000, actual: 0, difference: -8_000 })]);
+    expect(k.of('finance.reconciliation.mismatch_found').filter((e) => e.itemId === items[0]!.id)).toHaveLength(1);
+    expect(((await repo().findOne('refund_allocations', { refund_request_id: refundRequestId }))!.breakdown as any).failure).toMatchObject({ attempts: 3, finalAttempt: true });
+    expect((await k.call('GET', `${ADMIN}/overview?from=${today()}&to=${today()}`, k.staff)).body.refundsFailing).toBeGreaterThanOrEqual(1);
+    expect(await expectLedgerMatches(k, S3)).toEqual(before);
+
+    // sent after all (the customer chose a new card): the refund posts and the check item matches
+    await k.emit('payments.refund.sent', { refundId, ref: failed.ref, orderId: ord.id, customerId: failed.customerId, contactEmail: failed.contactEmail, origin: 'return', originId: refundRequestId, amount: USD(8_000), items: [{ orderItemId: item.id, title: 'Grinder', groupId: ord.groups[0]!.id, sellerId: S3, amount: USD(8_000) }], destination: 'new_method', sentAt: k.clock.now().toISOString() });
+    const after = await expectLedgerMatches(k, S3);
+    expect(after.total).toBe(before.total - 8_000 + 800); // the refund, and the fee returned
+    expect((await repo().get('recon_items', items[0]!.id))!.status).toBe('matched');
+  });
+
+  it('reverses discount funding once per reversal event', async () => {
+    const redemptionId = newId();
+    const orderId = newId();
+    const orderItemId = newId();
+    await k.emit('promotions.coupon.redeemed', { redemptionId, campaignId: newId(), orderId, amount: USD(1_500), platformPart: USD(1_000), sellerPart: USD(500) });
+    const part = { redemptionId, orderItemId, amount: USD(600), platformPart: USD(400), sellerPart: USD(200) };
+    const eventId = newId();
+    await k.svc.onRedemptionReversedFromPromotions(part, eventId);
+    await k.svc.onRedemptionReversedFromPromotions(part, eventId); // redelivered
+    const rows = async () => repo().find('trading_entries', { ref_id: redemptionId });
+    const net = async (kind: string) => (await rows()).filter((r) => r.ref_kind === kind).reduce((s, r) => s + r.amount, 0);
+    expect([await net('coupon_redemption'), await net('coupon_seller_part')]).toEqual([600, 300]);
+    expect((await rows()).find((r) => r.amount === -400)).toMatchObject({ order_id: orderId, order_item_id: orderItemId });
+    await k.emit('promotions.redemption.reversed', { redemptionId, orderItemId, amount: USD(900), platformPart: USD(600), sellerPart: USD(300) });
+    expect([await net('coupon_redemption'), await net('coupon_seller_part')]).toEqual([0, 0]);
+  });
+
+  it('books only platform-funded goodwill as a cost; seller-charged goodwill comes out of the seller earnings', async () => {
+    const before = await expectLedgerMatches(k, S3);
+    const ids = { platform: newId(), seller: newId(), refund: newId(), gift: newId() };
+    const base = { customerId: newId(), caseId: newId(), orderId: newId() };
+    await k.emit('wallet.credit.granted', { ...base, entryId: ids.platform, kind: 'goodwill', amount: USD(1_000), chargedTo: 'platform', sellerId: null });
+    const seller = { ...base, entryId: ids.seller, kind: 'goodwill', amount: USD(700), chargedTo: 'seller', sellerId: S3 };
+    await k.emit('wallet.credit.granted', seller);
+    await k.emit('wallet.credit.granted', seller); // redelivered
+    await k.emit('wallet.credit.granted', { ...base, entryId: ids.refund, kind: 'refund_to_credit', amount: USD(2_500), chargedTo: null, sellerId: null, caseId: null });
+    await k.emit('wallet.credit.granted', { customerId: base.customerId, entryId: ids.gift, kind: 'gift_card_redeemed', amount: USD(5_000), chargedTo: null, sellerId: null, caseId: null, orderId: null });
+    const costs = await repo().find('trading_entries', { ref_kind: 'wallet_credit', ref_id: Object.values(ids) });
+    expect(costs.map((c) => [c.ref_id, c.amount])).toEqual([[ids.platform, 1_000]]);
+    const liability = await repo().find('trading_entries', { ref_kind: 'wallet_liability', ref_id: Object.values(ids) });
+    expect(liability.reduce((s, r) => s + r.amount, 0)).toBe(1_000 + 700 + 2_500 + 5_000);
+    expect((await expectLedgerMatches(k, S3)).total).toBe(before.total - 700);
+    const adj = await k.call('GET', `${ADMIN}/adjustments?sellerId=${S3}`, k.staff);
+    expect(adj.body.items).toEqual([expect.objectContaining({ reasonCode: 'goodwill', direction: 'debit', amount: USD(700) })]);
+  });
+});

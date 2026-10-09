@@ -100,9 +100,10 @@ export class Disputes {
     };
     const inserted = await this.insertDispute(row);
     if (!inserted) return 'known';
+    const who = await this.core.contactOf(intent);
     this.core.publish(
       'payments.chargeback.opened',
-      { disputeId: row.id, ref: row.ref, kind, orderId: row.order_id, groupId: row.group_id, sellerId: row.seller_id, amount: { amount, currency: row.currency }, evidenceDueAt: row.evidence_due_at?.toISOString() ?? null },
+      { disputeId: row.id, ref: row.ref, kind, orderId: row.order_id, ...who, groupId: row.group_id, sellerId: row.seller_id, amount: { amount, currency: row.currency }, evidenceDueAt: row.evidence_due_at?.toISOString() ?? null },
       { actor: PROVIDER_ACTOR },
     );
     return 'opened';

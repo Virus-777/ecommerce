@@ -17,8 +17,10 @@ import { invalid, notFound, Outbox, Part, type NewEntry } from './core.js';
 
 type Item = orders.OrderItem;
 
+const REFERENCE_KINDS: readonly Reference['kind'][] = ['order', 'order_item', 'return', 'refund', 'case', 'chargeback', 'payout', 'adjustment', 'ad_campaign', 'fulfillment_service', 'statement', 'seller', 'reconciliation'];
+
 /** Kinds of trading_entries rows that are platform (marketplace) facts, never Official Store trading */
-export const PLATFORM_KINDS = ['platform_label', 'platform_refund', 'platform_claim', 'coupon_redemption', 'coupon_seller_part', 'wallet_credit', 'wallet_credit_used'];
+export const PLATFORM_KINDS = ['platform_label', 'platform_refund', 'platform_claim', 'coupon_redemption', 'coupon_seller_part', 'wallet_credit', 'wallet_credit_used', 'wallet_liability'];
 
 export class LedgerPart extends Part {
   /* ---------------------------------------------------------------- lookups */
@@ -106,7 +108,8 @@ export class LedgerPart extends Part {
     await this.repo.transaction(async (tx) => {
       for (const item of items) {
         const split = splits.get(item.id)!;
-        const calc = calculate(rule, { itemPrice: item.lineSubtotal.amount, sellerDiscount: split.seller, platformDiscount: split.platform, shippingCharged: item.shippingShare.amount }, cur);
+        // category fee rates apply to the product category at purchase (the order item's snapshot)
+        const calc = calculate(rule, { categoryId: item.categoryId ?? null, itemPrice: item.lineSubtotal.amount, sellerDiscount: split.seller, platformDiscount: split.platform, shippingCharged: item.shippingShare.amount }, cur);
         const lotId = detId(`lot:${item.id}`);
         await tx.insertIgnore('earnings_lots', { id: lotId, seller_id: sellerId, order_id: order.id, order_item_id: item.id, state: 'pending', gross: item.lineSubtotal.amount, fee: calc.fee.amount, net: 0, delivered_at: null, available_at: null, payout_id: null });
         const lot = (await tx.findOne('earnings_lots', { order_item_id: item.id }))!;
@@ -254,6 +257,7 @@ export class LedgerPart extends Part {
   }
 
   async onRefundSent(e: EventPayload<'payments.refund.sent'>) {
+    await this.parts.recon.refundSent(e.refundId, e.amount.amount); // a refund listed after its final failure was sent after all
     if (['cancellation', 'correction', 'orphan_payment'].includes(e.origin)) return; // cancellations were reversed from orders.item.cancelled
     const alloc = (await this.repo.findOne('refund_allocations', { payment_refund_id: e.refundId })) ?? (e.originId && isUuid(e.originId) ? await this.repo.findOne('refund_allocations', { refund_request_id: e.originId }) : undefined);
     if (alloc?.applied_at && alloc.payment_refund_id && alloc.payment_refund_id !== e.refundId) return;
@@ -316,6 +320,23 @@ export class LedgerPart extends Part {
     this.core.flush(out);
   }
 
+  /**
+   * payments.refund.failed: nothing is posted until payments.refund.sent. The stored funding split (from
+   * returns.refund.approved) is marked failed with the attempt, and a final failure is listed in the daily checks.
+   * Claimed once per event (inbox) together with the mark.
+   */
+  async onRefundFailed(e: EventPayload<'payments.refund.failed'>, eventId: string) {
+    if (e.finalAttempt) await this.parts.recon.refundFailed(e); // idempotent per refund (one item)
+    await this.repo.transaction(async (tx) => {
+      if (!(await tx.claim(`payments.refund.failed:${eventId}`))) return;
+      const alloc = (await tx.findOne('refund_allocations', { payment_refund_id: e.refundId })) ?? (e.originId && isUuid(e.originId) ? await tx.findOne('refund_allocations', { refund_request_id: e.originId }) : undefined);
+      if (!alloc || alloc.applied_at) return;
+      const breakdown = (alloc.breakdown ?? {}) as Record<string, unknown>;
+      const failure = { refundId: e.refundId, ref: e.ref, reason: e.reason, attempts: e.attempts, finalAttempt: e.finalAttempt, at: this.now().toISOString() };
+      await tx.updateWhere('refund_allocations', { refund_request_id: alloc.refund_request_id }, { payment_refund_id: e.refundId, breakdown: { ...breakdown, failure } as never });
+    });
+  }
+
   /* ---------------------------------------------------------------- labels and claims */
 
   async chargeLabel(o: { labelId: string; sellerId: string; cost: number; ref: NewEntry['ref']; description: string }) {
@@ -369,12 +390,51 @@ export class LedgerPart extends Part {
     });
   }
 
-  async onCreditGranted(e: EventPayload<'wallet.credit.granted'>) {
-    await this.repo.transaction((tx) => this.trading(tx, `wallet:${e.entryId}`, { at: this.now(), kind: 'discount', amount: e.amount.amount, order_id: e.orderId ?? null, order_item_id: null, variant_id: null, ref_kind: 'wallet_credit', ref_id: e.entryId }));
+  /**
+   * promotions.redemption.reversed: the discount funding recorded from promotions.coupon.redeemed is reversed by
+   * the platform and seller parts given, once per event (inbox), so discount reports match after a cancellation or
+   * refund. Seller earnings were already corrected by the cancellation or refund itself.
+   */
+  async onRedemptionReversed(e: EventPayload<'promotions.redemption.reversed'>, eventId: string) {
+    const redeemed = await this.repo.get('trading_entries', detId(`trading:coupon:${e.redemptionId}`));
+    await this.repo.transaction(async (tx) => {
+      if (!(await tx.claim(`promotions.redemption.reversed:${eventId}`))) return;
+      const base = { at: this.now(), order_id: redeemed?.order_id ?? null, order_item_id: isUuid(e.orderItemId) ? e.orderItemId : null, variant_id: null, ref_id: e.redemptionId };
+      await this.trading(tx, `coupon_reversed:${eventId}`, { ...base, kind: 'discount', amount: -e.platformPart.amount, ref_kind: 'coupon_redemption' });
+      await this.trading(tx, `coupon_seller_reversed:${eventId}`, { ...base, kind: 'discount', amount: -e.sellerPart.amount, ref_kind: 'coupon_seller_part' });
+    });
   }
 
+  /**
+   * wallet.credit.granted: every grant adds to the store-credit liability (wallet_liability). Only goodwill funded
+   * by the platform is a platform cost (wallet_credit); goodwill or a price adjustment charged to a seller is taken
+   * from that seller's earnings (adjustment, reason goodwill). Refunds to credit and gift card redemptions are not
+   * costs: the refund was already booked from payments.refund.sent, the gift card when it was sold.
+   */
+  async onCreditGranted(e: EventPayload<'wallet.credit.granted'>) {
+    const at = this.now();
+    const base = { at, order_id: e.orderId ?? null, order_item_id: null, variant_id: null, ref_id: e.entryId };
+    await this.repo.transaction(async (tx) => {
+      await this.trading(tx, `wallet_liability:${e.entryId}`, { ...base, kind: 'discount', amount: e.amount.amount, currency: e.amount.currency, ref_kind: 'wallet_liability' });
+      if (e.kind === 'goodwill' && e.chargedTo === 'platform') await this.trading(tx, `wallet:${e.entryId}`, { ...base, kind: 'discount', amount: e.amount.amount, currency: e.amount.currency, ref_kind: 'wallet_credit' });
+    });
+    if (e.chargedTo !== 'seller' || (e.kind !== 'goodwill' && e.kind !== 'price_adjustment')) return;
+    if (!e.sellerId || !isUuid(e.sellerId)) return void this.ctx.log.warn({ entryId: e.entryId }, 'finance: seller-funded store credit without a seller');
+    const what = e.kind === 'goodwill' ? 'Goodwill store credit' : 'Price adjustment store credit';
+    await this.parts.holds.recordSystemAdjustment({
+      key: `wallet_credit:${e.entryId}`,
+      sellerId: e.sellerId,
+      direction: 'debit',
+      amount: e.amount.amount,
+      reasonCode: 'goodwill',
+      reason: `${what} given to your customer, charged to you`,
+      reference: e.caseId ? { kind: 'case', id: e.caseId, ref: null } : e.orderId ? { kind: 'order', id: e.orderId, ref: null } : null,
+    });
+  }
+
+  /** wallet.credit.used: store credit paying for an order reduces the liability */
   async onCreditUsed(e: EventPayload<'wallet.credit.used'>) {
-    await this.repo.transaction((tx) => this.trading(tx, `wallet_used:${e.orderId}`, { at: this.now(), kind: 'discount', amount: -e.amount.amount, order_id: e.orderId, order_item_id: null, variant_id: null, ref_kind: 'wallet_credit_used', ref_id: e.orderId }));
+    await this.repo.transaction((tx) => this.trading(tx, `wallet_used:${e.orderId}`, { at: this.now(), kind: 'discount', amount: -e.amount.amount, currency: e.amount.currency, order_id: e.orderId, order_item_id: null, variant_id: null, ref_kind: 'wallet_liability', ref_id: e.orderId }));
   }
 
   /* ---------------------------------------------------------------- public API: ad charges, company costs */
@@ -390,7 +450,66 @@ export class LedgerPart extends Part {
     return toEntry(row, new Map());
   }
 
-  async recordCompanyCost(input: { kind: 'buying_cost' | 'shipping_expense' | 'return_loss' | 'write_off' | 'supplier_credit'; amount: common.Money; reference: Reference; at: string }): Promise<void> {
+  /** A fulfillment-service fee (storage, handling, receiving, returns processing, removal) as service_fee, once per idempotency key */
+  async recordServiceFee(input: { sellerId: string; amount: common.Money; kind: string; reference: Reference; description: string; idempotencyKey: string }): Promise<LedgerEntry> {
+    if (!isUuid(input.sellerId)) throw notFound('Seller');
+    const issues: { path: string; message: string }[] = [];
+    if (!Number.isSafeInteger(input.amount?.amount) || input.amount.amount <= 0) issues.push({ path: 'amount', message: 'Service fees are positive amounts in minor units' });
+    else if (input.amount.currency !== this.core.currency()) issues.push({ path: 'amount.currency', message: `Seller ledgers are in ${this.core.currency()}` });
+    if (!input.idempotencyKey?.trim()) issues.push({ path: 'idempotencyKey', message: 'Required' });
+    if (!input.reference?.id || !REFERENCE_KINDS.includes(input.reference.kind)) issues.push({ path: 'reference', message: 'A reference to the fee charge' });
+    if (issues.length) throw invalid(issues);
+    const key = `service_fee:${input.idempotencyKey}`;
+    const known = await this.repo.findOne('ledger_entries', { source_event_id: key });
+    if (known) return toEntry(known, new Map());
+    const out = new Outbox();
+    const description = input.description?.trim() || `Fulfillment service fee (${input.kind.replace(/_/g, ' ')})`;
+    await this.repo.transaction((tx) => this.core.post(tx, input.sellerId, [{ key, type: 'service_fee', amount: -input.amount.amount, bucket: 'available', ref: { kind: input.reference.kind, id: input.reference.id, label: input.reference.ref ?? null }, description }], out));
+    this.core.flush(out);
+    return toEntry((await this.repo.findOne('ledger_entries', { source_event_id: key }))!, new Map());
+  }
+
+  /**
+   * Credits back all or part of an ad charge or service fee as charge_credit, never more than the charge minus the
+   * credits already given (decided under the seller account lock). The credit carries the charge's reference; its
+   * key names the charge (charge_credit:<originalEntryId>:<idempotencyKey>), so the same key returns the first entry.
+   */
+  async creditSellerCharge(input: { sellerId: string; amount: common.Money; originalEntryId: string; reason: string; idempotencyKey: string }): Promise<LedgerEntry> {
+    if (!isUuid(input.sellerId)) throw notFound('Seller');
+    if (!isUuid(input.originalEntryId)) throw notFound('Charge');
+    const issues: { path: string; message: string }[] = [];
+    if (!Number.isSafeInteger(input.amount?.amount) || input.amount.amount <= 0) issues.push({ path: 'amount', message: 'Credits are positive amounts in minor units' });
+    if (!input.reason?.trim()) issues.push({ path: 'reason', message: 'Give the reason for the credit' });
+    if (!input.idempotencyKey?.trim()) issues.push({ path: 'idempotencyKey', message: 'Required' });
+    if (issues.length) throw invalid(issues);
+    const escaped = input.idempotencyKey.replace(/[\\%_]/g, (c) => `\\${c}`);
+    const first = async (repo: FinanceRepository) => repo.findOne('ledger_entries', { seller_id: input.sellerId, type: 'charge_credit', source_event_id: { op: 'like', value: `charge_credit:%:${escaped}` } }, { orderBy: [['at', 'asc']] });
+    const known = await first(this.repo);
+    if (known) return toEntry(known, new Map());
+    const key = `charge_credit:${input.originalEntryId}:${input.idempotencyKey}`;
+    const out = new Outbox();
+    const posted = await this.repo.transaction(async (tx) => {
+      await tx.lockAccount(input.sellerId, this.core.currency(), this.now()); // one decision per seller at a time
+      const again = await first(tx);
+      if (again) return again;
+      const original = await tx.get('ledger_entries', input.originalEntryId);
+      if (!original || original.seller_id !== input.sellerId) throw notFound('Charge');
+      if (original.type !== 'ad_charge' && original.type !== 'service_fee') throw invalid([{ path: 'originalEntryId', message: 'Only ad charges and fulfillment service fees can be credited back' }]);
+      if (input.amount.currency !== original.currency) throw invalid([{ path: 'amount.currency', message: `The charge is in ${original.currency}` }]);
+      const credited = await tx.sum('ledger_entries', 'amount', { seller_id: input.sellerId, type: 'charge_credit', source_event_id: { op: 'like', value: `charge_credit:${original.id}:%` } });
+      const left = -original.amount - credited;
+      if (input.amount.amount > left) {
+        throw invalid([{ path: 'amount', message: left > 0 ? `At most ${fmt(left, original.currency)} of this charge can still be credited back` : 'This charge was already credited back in full' }], 'The credit is more than what is left of the charge');
+      }
+      const what = original.type === 'ad_charge' ? 'ad charge' : 'service fee';
+      const [row] = await this.core.post(tx, input.sellerId, [{ key, type: 'charge_credit', amount: input.amount.amount, bucket: 'available', ref: { kind: original.ref_kind as Reference['kind'], id: original.ref_id, label: original.ref_label }, description: `Credit of ${what}${original.ref_label ? ` ${original.ref_label}` : ''}: ${input.reason.trim()}` }], out);
+      return row!;
+    });
+    this.core.flush(out);
+    return toEntry(posted, new Map());
+  }
+
+  async recordCompanyCost(input:{ kind: 'buying_cost' | 'shipping_expense' | 'return_loss' | 'write_off' | 'supplier_credit'; amount: common.Money; reference: Reference; at: string }): Promise<void> {
     const kind = input.kind === 'return_loss' ? 'return' : input.kind;
     if (!Number.isSafeInteger(input.amount.amount)) throw invalid([{ path: 'amount', message: 'Whole minor units' }]);
     const at = new Date(input.at);

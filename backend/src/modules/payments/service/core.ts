@@ -221,6 +221,15 @@ export class Core {
     }
   }
 
+  /**
+   * Who customer-facing events are about: the customers-module id (null for guests) and the contact email (the
+   * guest's checkout email, else the order's contact email). Read before a transaction: orders answers on its own connection.
+   */
+  async contactOf(i: { customer_id: string | null; guest_email: string | null; order_id: string | null }, lookup: Lookup = this.lookup()): Promise<{ customerId: string | null; contactEmail: string | null }> {
+    const contactEmail = i.guest_email ?? (i.order_id ? ((await lookup.order(i.order_id))?.contactEmail ?? null) : null);
+    return { customerId: i.customer_id, contactEmail: contactEmail || null };
+  }
+
   /** Daily reference from payments.ref_sequences: RF-261009-0001, CB-…, DP-… (outside or inside a transaction) */
   async nextRef(prefix: 'RF' | 'CB' | 'DP', repo: PaymentsRepository = this.repo): Promise<string> {
     const day = this.today();

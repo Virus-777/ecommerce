@@ -1,6 +1,7 @@
 import { sql, type Kysely } from 'kysely';
 import { paginate } from '../../../../kernel/lib/pagination.js';
 import type { PromotionsDb } from '../../../../spec/promotions.js';
+import type { Inbox } from '../../../../kernel/events/inbox.js';
 import type { CostTotals, PromotionsRepository, Where } from '../../ports.js';
 
 /** jsonb columns per table: values are sent as JSON text (pg would turn JS arrays into PG arrays) */
@@ -39,14 +40,18 @@ const like = (s: string) => `%${s.trim().toLowerCase().replace(/[\\%_]/g, (c) =>
 const upperAll = (codes: readonly string[]) => [...new Set(codes.map((c) => c.trim().toUpperCase()).filter(Boolean))];
 
 /** Postgres adapter for PromotionsRepository. `db` is scoped to the `promotions` schema. */
-export function createPostgresPromotionsRepository(db: Kysely<PromotionsDb>): PromotionsRepository {
+export function createPostgresPromotionsRepository(db: Kysely<PromotionsDb>, inbox?: Inbox): PromotionsRepository {
   // generic table access: the row types are checked at the PromotionsRepository boundary
   const d: any = db;
 
   const repo: PromotionsRepository = {
     async transaction(fn) {
       if (db.isTransaction) return fn(repo);
-      return db.transaction().execute((trx) => fn(createPostgresPromotionsRepository(trx)));
+      return db.transaction().execute((trx) => fn(createPostgresPromotionsRepository(trx, inbox)));
+    },
+    async claim(key) {
+      if (!inbox) throw new Error('promotions repository: no inbox');
+      return inbox.claim(db, key);
     },
 
     /* ---------------------------------------------------------------- generic */

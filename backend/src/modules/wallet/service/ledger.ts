@@ -13,7 +13,7 @@
 import { newId } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
-import type { CreditBalance, CreditHold, CreditLot, LedgerEntry, WalletOverview } from '../../../spec/wallet.js';
+import type { CreditBalance, CreditHold, CreditLot, LedgerEntry, WalletCreditGrantedEvent, WalletOverview } from '../../../spec/wallet.js';
 import { creditHoldMachine } from '../domain/state-machines.js';
 import { allocate, HOW_TO_USE, m, RESERVATION_KINDS, SYSTEM, USABLE_ON, type EntryKind, type LotSource } from '../domain/rules.js';
 import { allocationsOf, toEntry, toHold, toLot, type EntryFacts } from '../mappers.js';
@@ -180,10 +180,11 @@ export class Ledger {
   }
 
   /**
-   * The order was accepted with a store-credit tender whose hold had already been released (the payment was
-   * declined and then retried within the checkout's retry window, or the hold reached holdTtlMinutes while
-   * the payment was being checked). The released hold stays released; the credit is reserved and used again
-   * as a new hold for the same checkout, captured at once, so the tender payments counted is really paid.
+   * The order was accepted with a store-credit tender whose hold had already been released: the hold reached its
+   * expiry while the payment was being checked (PENDING_CHECK_HOLD_HOURS) and the check then ended accepted. (A
+   * declined payment no longer gets here: checkout drops the released hold and holds the credit again on the retry.)
+   * The released hold stays released; the credit is reserved and used again as a new hold for the same checkout,
+   * captured at once, so the tender payments counted is really paid.
    */
   private async lateCapture(tx: WalletRepository, acct: AccountRow, released: HoldRow, orderId: string, out: Outbox): Promise<HoldRow> {
     const key = `recapture:${released.id}`;
@@ -312,7 +313,7 @@ export class Ledger {
       // the credit part of the order comes back first (kind order_refund_returned), the rest is a refund to credit
       const usage = input.orderId ? await tx.orderCredit(input.customerId, input.orderId) : { used: 0, returned: 0 };
       const back = Math.min(input.amount.amount, Math.max(0, usage.used - usage.returned));
-      const parts: [EntryKind, number][] = [
+      const parts: [WalletCreditGrantedEvent['kind'] & EntryKind, number][] = [
         ['order_refund_returned', back],
         ['refund_to_credit', input.amount.amount - back],
       ];

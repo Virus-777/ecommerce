@@ -75,7 +75,9 @@ describe('goodwill credit', () => {
     expect((await h.service.getBalance(c.id)).available).toEqual(USD(8000));
     const granted = await h.call('GET', `${ADMIN}/goodwill?state=granted`, agent());
     expect(granted.body.items.find((g: { id: string }) => g.id === grantId)).toMatchObject({ decidedBy: { name: 'Fiona Finance' }, ledgerEntryId: expect.any(String) });
-    expect(h.named('wallet.credit.granted').filter((e) => e.customerId === c.id)).toHaveLength(1);
+    expect(h.named('wallet.credit.granted').filter((e) => e.customerId === c.id)).toEqual([expect.objectContaining({ kind: 'goodwill', chargedTo: 'platform' })]);
+    // support learns the decision of a grant that waited (once, even though access delivered twice)
+    expect(h.named('wallet.goodwill.decided').filter((e) => e.customerId === c.id)).toEqual([{ grantId, customerId: c.id, status: 'granted', amount: USD(8000), caseId: null }]);
   });
 
   it('in-process (support) keeps the pending grant instead of an error; a rejection closes it', async () => {
@@ -87,9 +89,12 @@ describe('goodwill credit', () => {
     const same = await h.service.grantGoodwill({ customerId: c.id, amount: USD(6000), reason: 'Case decision', reasonCode: 'service_failure', caseId, chargedTo: 'platform' }, { kind: 'staff', id: STAFF_ID }, `case:${caseId}:goodwill:0:6000`);
     expect(same.id).toBe(grant.id);
     await h.decide(grant.approval!.approvalRequestId!, 'rejected');
+    await h.decide(grant.approval!.approvalRequestId!, 'rejected'); // delivered twice
     const list = await h.call('GET', `${ADMIN}/goodwill?state=rejected`, agent());
     expect(list.body.items.find((g: { id: string }) => g.id === grant.id)).toMatchObject({ state: 'rejected' });
     expect((await h.service.getBalance(c.id)).available).toEqual(USD(0));
+    expect(h.named('wallet.goodwill.decided').filter((e) => e.grantId === grant.id)).toEqual([{ grantId: grant.id, customerId: c.id, status: 'rejected', amount: USD(6000), caseId }]);
+    expect(h.named('wallet.credit.granted').filter((e) => e.customerId === c.id)).toEqual([]);
   });
 
   it("keeps each customer's goodwill within 30-day limit; only Finance may grant beyond it", async () => {

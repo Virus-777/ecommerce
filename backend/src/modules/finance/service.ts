@@ -68,6 +68,16 @@ export class FinanceService implements FinancePublicApi {
     return this.ledger.recordAdCharge(input);
   }
 
+  /** Posts a fulfillment-service fee to the seller ledger as service_fee; same idempotencyKey returns the first entry */
+  recordServiceFee(input: { sellerId: string; amount: common.Money; kind: string; reference: Reference; description: string; idempotencyKey: string }): Promise<LedgerEntry> {
+    return this.ledger.recordServiceFee(input);
+  }
+
+  /** Credits back all or part of an ad charge or service fee as charge_credit (never more than what is left of it) */
+  creditSellerCharge(input: { sellerId: string; amount: common.Money; originalEntryId: string; reason: string; idempotencyKey: string }): Promise<LedgerEntry> {
+    return this.ledger.creditSellerCharge(input);
+  }
+
   /** Company trading costs for the Official Store margin */
   recordCompanyCost(input: { kind: 'buying_cost' | 'shipping_expense' | 'return_loss' | 'write_off' | 'supplier_credit'; amount: common.Money; reference: Reference; at: string }): Promise<void> {
     return this.ledger.recordCompanyCost(input);
@@ -161,6 +171,11 @@ export class FinanceService implements FinancePublicApi {
     return this.ledger.onRefundSent(event);
   }
 
+  /** payments.refund.failed: the stored funding split is marked failed; a final failure goes to the daily checks */
+  onRefundFailedFromPayments(event: EventPayload<'payments.refund.failed'>, eventId: string) {
+    return this.ledger.onRefundFailed(event, eventId);
+  }
+
   onChargebackOpenedFromPayments(event: EventPayload<'payments.chargeback.opened'>) {
     return this.holds.onChargebackOpened(event);
   }
@@ -187,6 +202,11 @@ export class FinanceService implements FinancePublicApi {
 
   onCouponRedeemedFromPromotions(event: EventPayload<'promotions.coupon.redeemed'>) {
     return this.ledger.onCouponRedeemed(event);
+  }
+
+  /** promotions.redemption.reversed: the recorded discount funding (platform and seller parts) is reversed */
+  onRedemptionReversedFromPromotions(event: EventPayload<'promotions.redemption.reversed'>, eventId: string) {
+    return this.ledger.onRedemptionReversed(event, eventId);
   }
 
   onSellerApprovedFromSellers(event: EventPayload<'sellers.seller.approved'>) {

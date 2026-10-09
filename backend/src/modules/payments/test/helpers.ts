@@ -48,7 +48,7 @@ export interface Harness {
   webhook(body: unknown, o?: { eventId?: string; provider?: string; sign?: boolean }): Promise<{ status: number; body: any; headers: Record<string, unknown> }>;
 }
 
-export async function harness(): Promise<Harness> {
+export async function harness(o: { modules?: string[] } = {}): Promise<Harness> {
   const clock = movingClock();
   // jobs move the clock days ahead: tokens are signed at the app's time so they stay valid
   tokenClock.now = () => clock.now();
@@ -65,7 +65,7 @@ export async function harness(): Promise<Harness> {
     files: new Set<string>(),
   };
   const app = await buildTestApp({
-    only: ['payments', 'orders', 'customers', 'identity', 'audit', 'access', 'checkout', 'media'],
+    only: ['payments', 'orders', 'customers', 'identity', 'audit', 'access', 'checkout', 'media', ...(o.modules ?? [])],
     clock,
     config: { rateLimits: false, launchPhase: 4 },
     apiStubs: {

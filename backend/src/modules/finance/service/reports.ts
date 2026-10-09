@@ -82,7 +82,8 @@ export class ReportsPart extends Part {
       owedAvailable: this.money(accounts.reduce((s, a) => s + Math.max(0, a.available), 0)),
       refundsSent: this.money(refunds.reduce((s, a) => s + a.seller_share + a.platform_share, 0)),
       refundsSentCount: refunds.length,
-      refundsFailing: 0,
+      // refunds payments could not send (payments.refund.failed marks their funding split), not sent since
+      refundsFailing: (await this.repo.find('refund_allocations', { applied_at: null })).filter((a) => (a.breakdown as { failure?: unknown } | null)?.failure).length,
       holds: this.money(held),
       holdSellers: accounts.filter((a) => a.held > 0).length,
       paidOut: this.money(paid.reduce((s, p) => s + p.amount, 0)),
@@ -107,7 +108,7 @@ export class ReportsPart extends Part {
       feeIncome: this.money(feeIncome),
       feeRefunds: this.money(feeRefunds),
       netFeeIncome: this.money(feeIncome - feeRefunds),
-      adIncome: this.money(-get('ad_charge')),
+      adIncome: this.money(-get('ad_charge') - (await this.adCredits(r.from, r.to)).reduce((s, e) => s + e.amount, 0)),
       platformDiscountCost: this.money(trading.filter((t) => t.ref_kind === 'coupon_redemption').reduce((s, t) => s + t.amount, 0)),
       owedToSellers: this.money(accounts.reduce((s, a) => s + Math.max(0, a.pending + a.available + a.held), 0)),
       holds: this.money(accounts.reduce((s, a) => s + Math.max(0, a.held), 0)),
@@ -124,11 +125,25 @@ export class ReportsPart extends Part {
       const v = out.get(key) ?? { date: row.day, sellerId: row.sellerId, feeIncome: this.money(0), feeRefunds: this.money(0), netFeeIncome: this.money(0), adIncome: this.money(0) };
       if (row.type === 'marketplace_fee') v.feeIncome = this.money(-row.amount);
       if (row.type === 'fee_refund') v.feeRefunds = this.money(row.amount);
-      if (row.type === 'ad_charge') v.adIncome = this.money(-row.amount);
+      if (row.type === 'ad_charge') v.adIncome = this.money(v.adIncome.amount - row.amount);
       v.netFeeIncome = this.money(v.feeIncome.amount - v.feeRefunds.amount);
       out.set(key, v);
     }
+    // ad charges credited back reduce that day's ad income
+    for (const e of await this.adCredits(r.from, r.to, sellerId)) {
+      const day = marketDate(e.at, this.core.tz());
+      const key = `${day}|${e.seller_id}`;
+      const v = out.get(key) ?? { date: day, sellerId: e.seller_id, feeIncome: this.money(0), feeRefunds: this.money(0), netFeeIncome: this.money(0), adIncome: this.money(0) };
+      v.adIncome = this.money(v.adIncome.amount - e.amount);
+      out.set(key, v);
+    }
     return [...out.values()];
+  }
+
+  /** Credits of ad charges (charge_credit on an ad campaign) in a range */
+  async adCredits(from: Date, to: Date, sellerId?: string) {
+    const rows = await this.repo.find('ledger_entries', { type: 'charge_credit', ref_kind: 'ad_campaign', at: { op: '>=', value: from }, ...(sellerId ? { seller_id: sellerId } : {}) });
+    return rows.filter((e) => e.at < to);
   }
 
   /* ---------------------------------------------------------------- company trading */

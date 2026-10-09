@@ -62,6 +62,8 @@ export interface CostTotals {
 
 export interface PromotionsRepository {
   transaction<R>(fn: (tx: PromotionsRepository) => Promise<R>): Promise<R>;
+  /** Inbox (kernel ctx.inbox): true the first time this key is claimed; inside a transaction it commits with the effects */
+  claim(key: string): Promise<boolean>;
 
   /* generic table access */
   get<T extends IdTable>(table: T, id: string, o?: { forUpdate?: boolean }): Promise<Db[T] | undefined>;
