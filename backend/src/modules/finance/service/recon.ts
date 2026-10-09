@@ -155,30 +155,56 @@ export class ReconPart extends Part {
     return { ...res, items: await this.itemViews(res.items) };
   }
 
-  /** Records a check result; new mismatches are published for Finance's queue */
+  /**
+   * An open (or correction-pending) item is closed: matched (automatically or by a later event), explained or
+   * corrected. Workqueues closes the work item it opened for the mismatch.
+   */
+  closed(row: Pick<ReconItemRec, 'id' | 'check' | 'date'>, outcome: 'matched' | 'explained' | 'corrected', by: { actor?: common.Actor; requestId?: string } = {}) {
+    this.core.publish('finance.reconciliation.item_closed', { itemId: row.id, check: row.check, date: row.date, outcome }, by);
+  }
+
+  /** Records a check result; new mismatches are published for Finance's queue, an open item that now matches is closed */
   async upsertItem(row: Omit<ReconItemRec, 'status' | 'note' | 'owner_staff_id' | 'correction' | 'approval_request_id' | 'currency' | 'detected_at'>) {
     await this.ensureDay(row.date);
     const matched = row.difference === 0;
     const inserted = await this.repo.insertIgnore('recon_items', { ...row, currency: this.core.currency(), detected_at: this.now(), status: matched ? this.core.step(reconciliationItemMachine, 'open', 'autoMatch') : 'open', note: null, owner_staff_id: null, correction: null, approval_request_id: null });
     if (!inserted) {
-      const existing = (await this.repo.get('recon_items', row.id))!;
-      if (existing.status === 'open' && matched) await this.repo.update('recon_items', row.id, { status: this.core.step(reconciliationItemMachine, 'open', 'autoMatch'), actual: row.actual, difference: 0 });
+      if (!matched) return;
+      // compare-and-set: only the run that moves the item out of open publishes that it closed
+      const changed = await this.repo.updateWhere('recon_items', { id: row.id, status: 'open' }, { status: this.core.step(reconciliationItemMachine, 'open', 'autoMatch'), actual: row.actual, difference: 0 });
+      if (changed) this.closed(row, 'matched');
       return;
     }
     if (!matched) this.core.publish('finance.reconciliation.mismatch_found', { itemId: row.id, check: row.check, difference: this.money(row.difference) });
   }
 
+  /**
+   * payments.payment.captured: the card amount plus the store credit applied (creditAmount) against the order (or
+   * package) total less the items cancelled before they were charged. Stored as the card amount (actual, what the
+   * provider deposits) against what the card had to pay (the total less cancelled items less the store credit),
+   * so a mixed card and credit payment is no mismatch and the deposit check still adds up card money only.
+   */
   async onPaymentCaptured(e: EventPayload<'payments.payment.captured'>) {
     const at = new Date(e.capturedAt);
     const date = this.core.today(Number.isNaN(at.getTime()) ? this.now() : at);
+    const card = e.amount.amount;
+    const credit = e.creditAmount && e.creditAmount.amount > 0 ? e.creditAmount.amount : 0;
+    const creditNote = credit ? ` (store credit ${fmt(credit, e.creditAmount!.currency)} also applied)` : '';
     const order = await this.parts.ledger.order(e.orderId);
     if (!order) {
-      await this.upsertItem({ id: detId(`capture:${e.captureId}`), date, check: 'unexplained_amount', ref_kind: 'capture', ref_id: e.captureId, subject: e.providerRef ?? 'Captured payment', description: 'Captured payment with no matching order', expected: 0, actual: e.amount.amount, difference: e.amount.amount });
+      await this.upsertItem({ id: detId(`capture:${e.captureId}`), date, check: 'unexplained_amount', ref_kind: 'capture', ref_id: e.captureId, subject: e.providerRef ?? 'Captured payment', description: `Captured payment with no matching order${creditNote}`, expected: 0, actual: card, difference: card });
       return;
     }
     const group = e.groupId ? order.groups.find((g) => g.id === e.groupId) : undefined;
-    const expected = group ? group.totals.total.amount : order.totals.total.amount;
-    await this.upsertItem({ id: detId(`capture:${e.captureId}`), date, check: 'payments_vs_orders', ref_kind: 'capture', ref_id: e.captureId, subject: order.ref, description: group ? `Capture for package ${group.packageLabel} against its total` : 'Capture against the order total', expected, actual: e.amount.amount, difference: e.amount.amount - expected });
+    const total = group ? group.totals.total.amount : order.totals.total.amount;
+    const items = group ? group.items : order.groups.flatMap((g) => g.items);
+    // items cancelled before they were charged are not part of the capture; ones cancelled after it are refunds
+    const cancelled = items.filter((i) => i.state === 'cancelled' && (i.afterSales?.refundStatus ?? 'none') === 'none' && !((i.afterSales?.refundedAmount?.amount ?? 0) > 0)).reduce((s, i) => s + i.paidAmount.amount, 0);
+    const due = total - cancelled;
+    const cur = order.totals.total.currency;
+    const against = `${group ? `package ${group.packageLabel}` : 'the order'} total ${fmt(total, cur)}${cancelled ? ` less ${fmt(cancelled, cur)} of cancelled items` : ''}`;
+    const description = credit ? `Card capture ${fmt(card, cur)} plus store credit ${fmt(credit, cur)} against ${against}` : `Capture against ${against}`;
+    await this.upsertItem({ id: detId(`capture:${e.captureId}`), date, check: 'payments_vs_orders', ref_kind: 'capture', ref_id: e.captureId, subject: order.ref, description, expected: due - credit, actual: card, difference: card + credit - due });
   }
 
   /** A refund payments gave up on (final attempt failed): money owed to the customer that was not sent */
@@ -202,13 +228,17 @@ export class ReconPart extends Part {
     const id = detId(`refund_failed:${refundId}`);
     const row = await this.repo.get('recon_items', id);
     if (row?.status !== 'open') return;
-    await this.repo.update('recon_items', id, { status: this.core.step(reconciliationItemMachine, 'open', 'autoMatch'), actual: amount, difference: amount - row.expected, note: 'Sent after a later attempt' });
+    const changed = await this.repo.updateWhere('recon_items', { id, status: 'open' }, { status: this.core.step(reconciliationItemMachine, 'open', 'autoMatch'), actual: amount, difference: amount - row.expected, note: 'Sent after a later attempt' });
+    if (changed) this.closed(row, 'matched');
   }
 
   /** Job finance.reconcile.daily: yesterday's checks */
   async daily() {
     const date = addDays(this.core.today(), -1);
     await this.ensureDay(date);
+    // earlier seller mismatches still open: closed as matched once the seller's balance matches the ledger again
+    const openSeller = new Map<string, ReconItemRec[]>();
+    for (const r of await this.repo.find('recon_items', { check: 'seller_amounts', status: 'open' }, { limit: 5000 })) if (r.ref_id) openSeller.set(r.ref_id, [...(openSeller.get(r.ref_id) ?? []), r]);
     // seller balances against the ledger
     for (const a of await this.repo.find('seller_accounts', {}, { limit: 5000 })) {
       const total = await this.repo.sum('ledger_entries', 'amount', { seller_id: a.seller_id });
@@ -216,7 +246,12 @@ export class ReconPart extends Part {
       const pending = await this.repo.pendingFromLedger(a.seller_id);
       const actual = a.pending + a.available + a.held;
       const diff = actual - total || a.held - held || a.pending - pending;
-      if (diff !== 0) {
+      if (diff === 0) {
+        for (const r of openSeller.get(a.seller_id) ?? []) {
+          const changed = await this.repo.updateWhere('recon_items', { id: r.id, status: 'open' }, { status: this.core.step(reconciliationItemMachine, 'open', 'autoMatch'), difference: 0, note: `The balance matches the ledger again (checked for ${date})` });
+          if (changed) this.closed(r, 'matched');
+        }
+      } else {
         const name = await this.core.sellerName(a.seller_id);
         await this.upsertItem({ id: detId(`seller_amounts:${date}:${a.seller_id}`), date, check: 'seller_amounts', ref_kind: 'seller', ref_id: a.seller_id, subject: name, description: `Balance ${fmt(actual, a.currency)} vs ledger ${fmt(total, a.currency)} (held ${fmt(a.held, a.currency)} vs ${fmt(held, a.currency)})`, expected: total, actual, difference: diff });
       }
@@ -243,7 +278,11 @@ export class ReconPart extends Part {
     if (!body.note?.trim()) throw invalid([{ path: 'note', message: 'Explain the difference' }]);
     const row = isUuid(id) ? await this.repo.get('recon_items', id) : undefined;
     if (!row) throw notFound('Reconciliation item');
-    await this.repo.update('recon_items', id, { status: this.core.step(reconciliationItemMachine, row.status, 'explain'), note: `${body.reasonCode.replace('_', ' ')}: ${body.note}` });
+    const status = this.core.step(reconciliationItemMachine, row.status, 'explain');
+    // compare-and-set on the status read: a concurrent explain or match closes the item once
+    const changed = await this.repo.updateWhere('recon_items', { id, status: row.status }, { status, note: `${body.reasonCode.replace('_', ' ')}: ${body.note}` });
+    if (!changed) throw new AppError('ILLEGAL_TRANSITION', 'This item was closed in the meantime', { from: row.status, event: 'explain' });
+    this.closed(row, 'explained', by);
     await this.core.audit({ action: 'finance.reconciliation.explain', actionLabel: 'Explained a finance difference', category: 'financial', target: { type: 'reconciliation_item', id, label: row.subject, screen: 'ops/finance-checks' }, reason: `${body.reasonCode}: ${body.note}` }, by);
     return this.itemView(id);
   }
@@ -300,6 +339,7 @@ export class ReconPart extends Part {
       result = { kind: 'refund', id: refund.id, ref: refund.ref };
     }
     await this.repo.update('recon_items', id, { status: this.core.step(reconciliationItemMachine, row.status, 'applyCorrection'), correction: { ...c, status: 'applied', resultReference: result } as never });
+    this.closed(row, 'corrected', by);
     if (!sellerId && c.type !== 'other' && c.type !== 'adjust_order_total') this.core.publish('finance.adjustment.recorded', { adjustmentId: id, sellerId: null, direction: amount > 0 ? 'credit' : 'debit', amount: { amount: Math.abs(amount), currency: c.amount.currency }, reasonCode: c.reasonCode }, by);
   }
 

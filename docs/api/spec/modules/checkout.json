@@ -307,16 +307,16 @@
     { "name": "checkout.purge-idempotency", "schedule": "daily 03:30 PT", "does": "Delete place_requests older than idempotencyRetentionDays" }
   ],
   "settings": [
-    { "key": "guestCheckoutEnabled", "default": true, "desc": "Allow guest purchases. Market-level value owned by the settings module (checkout.guestCheckoutEnabled, changed in admin/settings with business-owner approval); read here" },
-    { "key": "offerAccountAfterGuestPurchase", "default": true, "desc": "Offer to create an account after a guest purchase (owned by settings, checkout.offerAccountAfterGuestPurchase)" },
-    { "key": "sessionTtlMinutes", "default": 60, "desc": "Idle time before an open checkout expires" },
-    { "key": "stockHoldMinutes", "default": 15, "desc": "Stock hold created at Place order" },
-    { "key": "retryWindowMinutes", "default": 30, "desc": "After a decline, prices, stock and coupons are held this long ('held until 3:15 PM PT')" },
-    { "key": "pendingHoldHours", "default": 24, "desc": "Stock stays reserved while a payment result is being checked" },
-    { "key": "maxPaymentAttempts", "default": 5, "desc": "Payment attempts per checkout" },
-    { "key": "couponAttemptsPerHour", "default": 20, "desc": "Coupon codes tried per session per hour" },
-    { "key": "purchaseLimitWindowDays", "default": 30, "desc": "Window for per-customer purchase limits that count earlier orders" },
-    { "key": "idempotencyRetentionDays", "default": 7, "desc": "How long Place order keys are kept" }
+    { "key": "guestCheckoutEnabled", "type": "bool", "default": true, "desc": "Allow guest purchases. Market-level value owned by the settings module (checkout.guestCheckoutEnabled, changed in admin/settings with business-owner approval); read here", "approval": "business_owner" },
+    { "key": "offerAccountAfterGuestPurchase", "type": "bool", "default": true, "desc": "Offer to create an account after a guest purchase (owned by settings, checkout.offerAccountAfterGuestPurchase)" },
+    { "key": "sessionTtlMinutes", "type": "duration", "default": 60, "desc": "Idle time before an open checkout expires", "unit": "minutes", "min": 5 },
+    { "key": "stockHoldMinutes", "type": "duration", "default": 15, "desc": "Stock hold created at Place order", "unit": "minutes", "min": 1, "max": 60 },
+    { "key": "retryWindowMinutes", "type": "duration", "default": 30, "desc": "After a decline, prices, stock and coupons are held this long ('held until 3:15 PM PT')", "unit": "minutes", "min": 1 },
+    { "key": "pendingHoldHours", "type": "duration", "default": 24, "desc": "Stock stays reserved while a payment result is being checked", "unit": "hours", "min": 1 },
+    { "key": "maxPaymentAttempts", "type": "int", "default": 5, "desc": "Payment attempts per checkout", "min": 1, "max": 20 },
+    { "key": "couponAttemptsPerHour", "type": "int", "default": 20, "desc": "Coupon codes tried per session per hour", "min": 1 },
+    { "key": "purchaseLimitWindowDays", "type": "duration", "default": 30, "desc": "Window for per-customer purchase limits that count earlier orders", "unit": "days", "min": 1, "sellerVisible": true },
+    { "key": "idempotencyRetentionDays", "type": "duration", "default": 7, "desc": "How long Place order keys are kept", "unit": "days", "min": 1 }
   ],
   "integrations": [
     { "name": "Sales tax rates", "purpose": "Tax per item and shipping by destination state; a rate table in settings at launch, a tax service adapter later" }

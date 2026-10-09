@@ -3737,39 +3737,68 @@ export const spec = defineModuleSpec({
   settings: {
     "marketTimeZone": {
       "default": "America/Los_Angeles",
-      "desc": "Default time zone for new campaigns"
+      "desc": "Default time zone for new campaigns",
+      "type": "string",
+      "sellerVisible": false
     },
     "reservationTtlMinutes": {
       "default": 30,
-      "desc": "How long a checkout reservation holds budget, usage and deal stock"
+      "desc": "How long a checkout reservation holds budget, usage and deal stock",
+      "type": "duration",
+      "min": 1,
+      "unit": "minutes",
+      "sellerVisible": false
     },
     "couponsPerSellerPackage": {
       "default": 1,
-      "desc": "Coupons per seller package (plan default: one coupon per seller per order)"
+      "desc": "Coupons per seller package (plan default: one coupon per seller per order)",
+      "type": "int",
+      "min": 1,
+      "approval": "second_reviewer",
+      "sellerVisible": true
     },
     "referencePriceDays": {
       "default": 30,
-      "desc": "Look-back window passed to offers.lowestPrice for the was price (keep equal to offers' compare-at window)"
+      "desc": "Look-back window passed to offers.lowestPrice for the was price (keep equal to offers' compare-at window)",
+      "type": "duration",
+      "min": 1,
+      "unit": "days",
+      "approval": "business_owner",
+      "sellerVisible": true
     },
     "budgetWarningPct": {
       "default": 90,
-      "desc": "Notify Marketing and Finance when budget use crosses this"
+      "desc": "Notify Marketing and Finance when budget use crosses this",
+      "type": "number",
+      "min": 1,
+      "max": 100,
+      "unit": "%",
+      "sellerVisible": false
     },
     "restoreUsageOnCancel": {
       "default": true,
-      "desc": "Give the use back to the customer when an item is cancelled before dispatch"
+      "desc": "Give the use back to the customer when an item is cancelled before dispatch",
+      "type": "bool",
+      "sellerVisible": false
     },
     "refundRestoresBudget": {
       "default": false,
-      "desc": "Whether refunds after delivery free budget"
+      "desc": "Whether refunds after delivery free budget",
+      "type": "bool",
+      "approval": "second_reviewer",
+      "sellerVisible": false
     },
     "sellerLeaveCutoff": {
       "default": "campaign start",
-      "desc": "Until when a seller can leave without approval"
+      "desc": "Until when a seller can leave without approval",
+      "type": "string",
+      "sellerVisible": true
     },
     "codeCheckRateLimit": {
       "default": "10 per minute per session",
-      "desc": "Brute-force protection for code lookups"
+      "desc": "Brute-force protection for code lookups",
+      "type": "string",
+      "sellerVisible": false
     }
   },
   errorCodes: {

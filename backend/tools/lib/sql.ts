@@ -4,7 +4,8 @@
  * Column notation: `<type>[?] [pk] [unique] [→ table] [check <expr>] [(comment)]`, e.g.
  *   "uuid pk", "uuid? → items", "text unique (MK-YYMMDD-NNNNN)", "int check >= 0", "text (open|closed)".
  * A parenthesised list of plain words separated by | becomes a CHECK constraint.
- * Index notation: "(a, b)", "unique (a) where …", "(a, b) unique", "pk (a, b)", "gin(expr)".
+ * Index notation: "(a, b)", "unique (a) where …", "(a, b) unique", "unique nulls not distinct (a, b)" (null keys count as
+ * equal: one row per key even when some key columns are null), "pk (a, b)", "gin(expr)".
  */
 import { snake, type ModuleSpec, type TableSpec } from './spec.js';
 
@@ -166,6 +167,11 @@ function indexSql(idx: string, table: string): string | null {
     where = ` where ${w[1]}`;
     s = s.slice(0, w.index).trim();
   }
+  let nullsNotDistinct = false;
+  if (/^unique\s+nulls\s+not\s+distinct\b/i.test(s)) {
+    nullsNotDistinct = true;
+    s = s.replace(/^unique\s+nulls\s+not\s+distinct\s*/i, 'unique ');
+  }
   if (/^unique\b/.test(s)) {
     unique = true;
     s = s.replace(/^unique\s*/, '');
@@ -189,7 +195,7 @@ function indexSql(idx: string, table: string): string | null {
     if (/\(/.test(c) && !/^\(/.test(c) && !/^\w+\s+\w+_ops$/.test(c)) return `(${c})`;
     return c.replace(/^\w+/, (w) => ident(w));
   });
-  return `create ${unique ? 'unique ' : ''}index on ${table}${using} (${cols.join(', ')})${where};`;
+  return `create ${unique ? 'unique ' : ''}index on ${table}${using} (${cols.join(', ')})${nullsNotDistinct ? ' nulls not distinct' : ''}${where};`;
 }
 
 function splitTopLevel(s: string): string[] {

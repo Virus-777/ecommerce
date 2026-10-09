@@ -33,7 +33,7 @@ beforeAll(async () => {
     only: withDependencies(['identity', 'access', 'audit', 'media', 'notifications', 'settings', 'customers', 'sellers', 'catalog', 'inventory', 'offers', 'orders', 'finance', 'warehouse', 'fulfillment-service']),
     clock,
     config: { rateLimits: false, launchPhase: 4 },
-    // finance.recordServiceFee / creditSellerCharge are being built in finance: stubbed per src/spec/finance.ts
+    // finance.recordServiceFee / creditSellerCharge / creditSeller are being built in finance: stubbed per src/spec/finance.ts
     apiStubs: { finance: financeStubs(financeLedger) as never },
   });
   f = flows(app, clock);

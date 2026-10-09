@@ -741,17 +741,17 @@ Indexes: `(search_id)`, `(product_id, at)`
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| pageSize | `24` | Default results per page |
-| typoSimilarityThreshold | `0.35` | Trigram similarity for misspelling tolerance |
-| autoCorrectBelowResults | `3` | Apply a confident correction when the original query has fewer results |
-| recentSearchesMax | `10` | Recent searches kept per customer or guest |
-| recentSearchRetentionDays | `90` | Recent searches older than this are deleted |
-| newArrivalsWindowDays | `30` | 'New arrivals' = first listed within this window |
-| bestSellingMinOrders | `500` | Platform orders in 30 days before best-selling sort is offered |
-| excludeOutOfStockByDefault | `true` | Out-of-stock products appear only with 'Include out of stock' |
-| searchEngine | `"postgres"` | postgres | external (adapter added later) |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| pageSize | `24` | int, 1–100 | Default results per page |
+| typoSimilarityThreshold | `0.35` | number, 0–1 | Trigram similarity for misspelling tolerance |
+| autoCorrectBelowResults | `3` | int, 0–… | Apply a confident correction when the original query has fewer results |
+| recentSearchesMax | `10` | int, 0–… | Recent searches kept per customer or guest |
+| recentSearchRetentionDays | `90` | duration, days, 1–… | Recent searches older than this are deleted |
+| newArrivalsWindowDays | `30` | duration, days, 1–… | 'New arrivals' = first listed within this window |
+| bestSellingMinOrders | `500` | int, 0–… | Platform orders in 30 days before best-selling sort is offered |
+| excludeOutOfStockByDefault | `true` | bool | Out-of-stock products appear only with 'Include out of stock' |
+| searchEngine | `"postgres"` | enum (postgres \| external), approval: second reviewer | postgres | external (adapter added later) |
 
 ## Integrations
 - **PostgreSQL full-text search and pg_trgm**: Ranking, misspelling tolerance and suggestions at launch

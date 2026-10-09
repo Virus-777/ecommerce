@@ -46,7 +46,7 @@ One JSON file per backend module: `docs/api/spec/modules/<module>.json`.
       "approvers": "Finance Manager; Business Owner above $50,000 (example)" }
   ],
   "jobs": [ { "name": "catalog.reindex-stale", "schedule": "every 10 min", "does": "…" } ],
-  "settings": [ { "key": "maxImagesPerProduct", "default": 12, "desc": "…" } ],
+  "settings": [ { "key": "maxImagesPerProduct", "type": "int", "default": 12, "desc": "…", "min": 1, "max": 30 } ],   // see "Settings"
   "integrations": [ { "name": "S3-compatible storage", "purpose": "…" } ],
   "notes": ["Anything a builder must know"]
 }
@@ -96,7 +96,8 @@ Used in `types`, `body`, `query`, event `payload` and inline objects.
   "params": { "id": "uuid" },              // must match {placeholders} in path
   "query": { "q": "string?" },
   "paging": true,                          // adds cursor/page/limit and wraps response in Page<…>
-  "body": { "note": "string?" },           // type name, inline object, or omitted
+  "body": { "note": "string?" },           // type name, inline object, "binary" (raw bytes, any content type; the handler
+                                           //   gets a Uint8Array, up to 512 MB, and enforces its own limit), or omitted
   "response": "Product",                   // type, "Product[]", inline object, or null for 204
   "status": 200,                           // success status (default 200; 201 create; 202 accepted; 204 no content)
   "errors": ["ILLEGAL_TRANSITION"],        // codes from common.json or module-specific UPPER_SNAKE
@@ -108,6 +109,30 @@ Used in `types`, `body`, `query`, event `payload` and inline objects.
   "phase": 1                               // optional: later phase than the module
 }
 ```
+
+## Tables
+
+Column notation: `<type>[?] [pk] [unique] [→ table] [check <expr>] [(comment)]`, e.g. `"uuid? → items"`, `"text (open|closed)"` (a list of plain words becomes a CHECK). Index notation: `"(a, b)"`, `"(a, b) unique"`, `"unique (a) where …"`, `"pk (a, b)"`, `"gin(expr)"`, and `"unique nulls not distinct (a, b)"` when null key columns must count as equal (one row per key, e.g. a saved product with no variant). The generator turns them into the module's first migration (`backend/tools/lib/sql.ts`); later migrations must match what the spec says.
+
+## Settings
+
+Runtime settings a module reads through `ctx.settings`. The settings module lists them on the settings page and changes them with an effective date. Only `key`, `default` and `desc` are required; whatever else is left out, the settings module infers (type from the default, unit from the key name, `min` 0 for numbers, approval and seller visibility from the module).
+
+```jsonc
+{ "key": "minimumPayout",                  // camelCase; read as <module>.<key>
+  "type": "money",                         // int | number | bool | string | money | duration | time | enum | json
+  "default": { "amount": 2500, "currency": "USD" },
+  "desc": "Smaller balances roll to the next run",
+  "min": 0, "max": 100000,                 // numbers: amount in minor units for money
+  "choices": ["weekly", "monthly"],        // enum only
+  "unit": "days",                          // shown after the value: days, hours, business days, %, MB…
+  "approval": "second_reviewer",           // none | second_reviewer | business_owner (who approves a change)
+  "sellerVisible": true,                   // scheduled changes are announced to sellers
+  "minLeadDays": 14,                       // earliest effective date after saving (seller-visible keys also get settings.sellerVisibleMinLeadDays)
+  "editable": false }                      // shown read-only (default true)
+```
+
+`duration` is a whole number in `unit` (days, hours, minutes, business days); `time` is `HH:MM` in the market time zone. Declare `type`, bounds and `approval` for every setting that moves money, sets a limit or deadline customers or sellers rely on, or needs approval; purely technical keys (cache seconds, batch sizes) may carry only `type`.
 
 Module-specific error codes go in `"errorCodes": { "OFFER_CHANGED": { "status": 409, "meaning": "…" } }` at the top level of the module file.
 

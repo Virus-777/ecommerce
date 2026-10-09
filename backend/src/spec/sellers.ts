@@ -3404,7 +3404,7 @@ export const endpoints = defineEndpoints({
     permission: "sellers.account-health.manage",
     scope: "own-seller",
     summary: "Upload documents that resolve a restriction (e.g. brand authorisation)",
-    desc: "Creates a work item for the Seller Manager to review; it is not an appeal.",
+    desc: "Creates a work item for the Seller Manager to review; it is not an appeal. The item closes when the restriction is lifted or updated (sellers.restriction.lifted, sellers.restriction.updated); a restriction kept unchanged is resolved by hand.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -5217,47 +5217,95 @@ export const spec = defineModuleSpec({
   settings: {
     "applicationsOpen": {
       "default": false,
-      "desc": "Invite-only at launch; true opens applications to everyone"
+      "desc": "Invite-only at launch; true opens applications to everyone",
+      "type": "bool",
+      "approval": "business_owner",
+      "sellerVisible": false
     },
     "decisionTargetBusinessDays": {
       "default": 5,
-      "desc": "Target from submission to decision"
+      "desc": "Target from submission to decision",
+      "type": "duration",
+      "min": 1,
+      "unit": "business days",
+      "sellerVisible": false
     },
     "infoRequestDefaultDays": {
       "default": 14,
-      "desc": "Default reply window for information requests"
+      "desc": "Default reply window for information requests",
+      "type": "duration",
+      "min": 1,
+      "unit": "days",
+      "sellerVisible": true
     },
     "infoReminderDaysBefore": {
       "default": 3,
-      "desc": "Reminder before the information deadline"
+      "desc": "Reminder before the information deadline",
+      "type": "duration",
+      "min": 0,
+      "unit": "days",
+      "sellerVisible": false
     },
     "appealWindowDays": {
       "default": 14,
-      "desc": "Days a seller has to appeal"
+      "desc": "Days a seller has to appeal",
+      "type": "duration",
+      "min": 7,
+      "unit": "days",
+      "approval": "second_reviewer",
+      "sellerVisible": true
     },
     "appealDecisionBusinessDays": {
       "default": 5,
-      "desc": "Target to decide an appeal"
+      "desc": "Target to decide an appeal",
+      "type": "duration",
+      "min": 1,
+      "unit": "business days",
+      "sellerVisible": true
     },
     "documentRetentionDays": {
       "default": 90,
-      "desc": "ID documents and rejected application documents are deleted after this"
+      "desc": "ID documents and rejected application documents are deleted after this",
+      "type": "duration",
+      "min": 30,
+      "unit": "days",
+      "approval": "second_reviewer",
+      "sellerVisible": false
     },
     "invitationValidDays": {
       "default": 7,
-      "desc": "Seller member invitation lifetime"
+      "desc": "Seller member invitation lifetime",
+      "type": "duration",
+      "min": 1,
+      "max": 30,
+      "unit": "days",
+      "sellerVisible": false
     },
     "sellerInvitationValidDays": {
       "default": 30,
-      "desc": "Invitation to apply lifetime"
+      "desc": "Invitation to apply lifetime",
+      "type": "duration",
+      "min": 1,
+      "unit": "days",
+      "sellerVisible": false
     },
     "performanceWindowDays": {
       "default": 30,
-      "desc": "Window for performance metrics"
+      "desc": "Window for performance metrics",
+      "type": "duration",
+      "min": 7,
+      "unit": "days",
+      "approval": "second_reviewer",
+      "sellerVisible": true
     },
     "violationWindowDays": {
       "default": 90,
-      "desc": "Window for policy violations"
+      "desc": "Window for policy violations",
+      "type": "duration",
+      "min": 30,
+      "unit": "days",
+      "approval": "second_reviewer",
+      "sellerVisible": true
     },
     "defaultTargets": {
       "default": {
@@ -5269,30 +5317,50 @@ export const spec = defineModuleSpec({
         "unresolved_cases_past_deadline": 0,
         "policy_violations": 0
       },
-      "desc": "Example targets until the business confirms them"
+      "desc": "Example targets until the business confirms them",
+      "type": "json",
+      "approval": "second_reviewer",
+      "sellerVisible": true
     },
     "riskReviewCategories": {
       "default": [
         "e-bike batteries",
         "high-value electronics"
       ],
-      "desc": "Product plans that are referred to Trust and Risk automatically"
+      "desc": "Product plans that are referred to Trust and Risk automatically",
+      "type": "json",
+      "sellerVisible": false
     },
     "introMaxChars": {
       "default": 400,
-      "desc": "Storefront introduction length"
+      "desc": "Storefront introduction length",
+      "type": "int",
+      "min": 1,
+      "unit": "characters",
+      "sellerVisible": true
     },
     "maxCollections": {
       "default": 6,
-      "desc": "Featured collections per storefront"
+      "desc": "Featured collections per storefront",
+      "type": "int",
+      "min": 0,
+      "sellerVisible": true
     },
     "claimReviewBusinessDays": {
       "default": 2,
-      "desc": "Target to review store name changes and public claims"
+      "desc": "Target to review store name changes and public claims",
+      "type": "duration",
+      "min": 1,
+      "unit": "business days",
+      "sellerVisible": true
     },
     "launchReviewBusinessDays": {
       "default": 1,
-      "desc": "Target for the launch readiness review"
+      "desc": "Target for the launch readiness review",
+      "type": "duration",
+      "min": 1,
+      "unit": "business days",
+      "sellerVisible": true
     }
   },
   errorCodes: {

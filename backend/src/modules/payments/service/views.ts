@@ -98,7 +98,7 @@ export class Views {
       customerId: i.customer_id,
       guestEmail: i.guest_email,
       amount: this.m(i.amount, i.currency),
-      tenders: i.tenders.map(({ creditReturns: _returns, ...t }) => t),
+      tenders: i.tenders.map(({ creditReturns: _returns, captureCredits: _shares, ...t }) => t),
       method: snapshotOf(i),
       provider: i.provider,
       providerRef: i.provider_ref,

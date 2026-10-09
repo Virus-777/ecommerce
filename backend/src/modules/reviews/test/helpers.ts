@@ -102,7 +102,10 @@ export async function boot(): Promise<Kit> {
     apiStubs: {
       orders: {
         getOrder: async (id) => structuredClone(h.orders.get(id) ?? null),
-        getOrderItem: async (id) => itemInfos().find((i) => i.id === id) ?? null,
+        getOrderItem: async (id) => {
+          rec('orders.getOrderItem', id);
+          return itemInfos().find((i) => i.id === id) ?? null;
+        },
         listDeliveredItems: async (customerId, since) => {
           rec('orders.listDeliveredItems', customerId, since);
           return itemInfos().filter((i) => i.customerId === customerId && i.deliveredAt && (!since || i.deliveredAt >= since));

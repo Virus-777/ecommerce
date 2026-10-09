@@ -128,8 +128,8 @@ export class Handling {
         { kind: 'inspected', label: `Inspected: ${human(input.conditionOutcome)}`, detail: input.conditionOutcome === 'as_described' ? 'Your refund or replacement follows.' : 'We will explain any change to your refund.', visibility: 'customer', actor: by.actor },
         { kind: 'inspection_detail', label: `Grade ${human(input.grade)}, proposed stock outcome ${human(input.proposedStockOutcome)}`, detail: input.notes ?? null, visibility: 'seller', actor: by.actor },
       ]);
-      for (const i of a.items) {
-        batch.push('returns.return.inspected', { returnId: id, ...this.core.recipient(a.ret), ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, conditionOutcome: input.conditionOutcome, proposedStockOutcome: input.proposedStockOutcome, variantId: i.variant_id, quantity: i.quantity });
+      for (const i of this.core.returnedItems(a)) {
+        batch.push('returns.return.inspected', { returnId: id, ...this.core.recipient(a.ret), ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, conditionOutcome: input.conditionOutcome, proposedStockOutcome: input.proposedStockOutcome, orderItemId: i.orderItemId, variantId: i.variantId, stockItemId: i.stockItemId ?? null, quantity: i.quantity });
       }
     });
     if (party === 'staff') {

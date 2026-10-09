@@ -2406,11 +2406,19 @@ export const spec = defineModuleSpec({
   settings: {
     "maxImagesPerProduct": {
       "default": 12,
-      "desc": "Images per product"
+      "desc": "Images per product",
+      "type": "int",
+      "min": 1,
+      "max": 30,
+      "sellerVisible": true
     },
     "minDescriptionLength": {
       "default": 40,
-      "desc": "Characters required before submission"
+      "desc": "Characters required before submission",
+      "type": "int",
+      "min": 0,
+      "unit": "characters",
+      "sellerVisible": true
     }
   },
   errorCodes: {

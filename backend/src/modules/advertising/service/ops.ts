@@ -294,31 +294,41 @@ export class OpsPart extends Part {
     );
   }
 
-  /** Remind owners of campaigns ending within the ending-soon window to finish or renew deliberately (once per campaign) */
-  async endingSoonNotice(): Promise<void> {
+  /**
+   * Publishes advertising.campaign.ending_soon for live and scheduled campaigns ending within endingSoonDays, so
+   * owners finish or renew deliberately (notifications tells the seller or the staff owner). Once per campaign and
+   * end date: the inbox key commits with the timeline entry, so a rerun (or a second instance) sends nothing new;
+   * a campaign renewed to a later end is reminded again before that end.
+   */
+  async endingSoonNotice(): Promise<number> {
     const now = this.now();
     const days = await this.core.num('endingSoonDays', 3);
-    const rows = (await this.repo.find('campaigns', { status: ['scheduled', 'live', 'paused'], ends_at: { op: '>', value: now } }, { limit: BATCH * 4 })).filter((r) => r.ends_at && r.ends_at.getTime() <= now.getTime() + days * 86_400_000);
-    if (!rows.length) return;
-    const done = await this.repo.lastLogs(
-      rows.map((r) => r.id),
-      ['ending_soon_notice'],
-    );
-    for (const r of rows.filter((x) => !done.has(x.id))) {
-      const when = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: r.time_zone || this.core.tz() }).format(r.ends_at!);
-      await this.core.log(this.repo, r.id, 'ending_soon_notice', { actor: SYSTEM }, { reason: `Ends ${when}: finish or renew deliberately` });
-      if (r.seller_id) {
-        await this.core.optional('notifications', (n) =>
-          n.notify({
-            topic: 'seller.advertising.campaign_status',
-            recipients: [{ kind: 'seller', sellerId: r.seller_id }],
-            context: { campaign: { status: `ending ${when}` } },
-            link: { kind: 'campaign', id: r.id, ref: r.ref, label: 'View campaign', screen: 'seller/advertising' },
-            dedupeKey: `ad-campaign:${r.id}:ending-soon`,
-            sellerId: r.seller_id,
-          }),
-        );
-      }
+    const horizon = new Date(now.getTime() + days * 86_400_000);
+    // ends after now and within the window (the window's start is checked below)
+    const rows = await this.repo.find('campaigns', { status: ['scheduled', 'live'], ends_at: { op: '<=', value: horizon } }, { orderBy: [['ends_at', 'desc']], limit: BATCH * 4 });
+    let sent = 0;
+    for (const r of rows) {
+      if (!r.ends_at || r.ends_at <= now || r.ends_at > horizon) continue;
+      const endsAt = r.ends_at;
+      const when = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: r.time_zone || this.core.tz() }).format(endsAt);
+      const claimed = await this.repo.transaction(async (tx) => {
+        if (!(await tx.claim(`ending-soon:${r.id}:${endsAt.toISOString()}`))) return false;
+        await this.core.log(tx, r.id, 'ending_soon_notice', { actor: SYSTEM }, { reason: `Ends ${when}: finish or renew deliberately` });
+        return true;
+      });
+      if (!claimed) continue;
+      this.core.publish('advertising.campaign.ending_soon', {
+        campaignId: r.id,
+        ref: r.ref,
+        name: r.name,
+        advertiserKind: r.advertiser_kind,
+        sellerId: r.seller_id,
+        ownerStaffId: r.owner_staff_id,
+        endsAt: endsAt.toISOString(),
+        daysLeft: Math.max(0, Math.ceil((endsAt.getTime() - now.getTime()) / 86_400_000)),
+      });
+      sent++;
     }
+    return sent;
   }
 }

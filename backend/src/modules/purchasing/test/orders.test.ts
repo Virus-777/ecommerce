@@ -150,9 +150,10 @@ describe('purchase orders', () => {
     expect(res.json()).toMatchObject({ status: 'sent', sentAt: expect.any(String), approval: null });
     expect(stubs.access.check).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'staff', accountId: ken.id }), 'purchasing.orders.send', { money: usd(982000) });
     expect(stubs.inventory.expectIncoming).toHaveBeenCalledWith(po.id, po.ref, LOCATION, [{ stockItemId: headphones, quantity: 100, expectedDate: '2026-10-16' }]);
-    expect(stubs.notifications.notify).toHaveBeenCalledWith(expect.objectContaining({ recipients: [{ kind: 'guest_email', email: 'orders@halden.example' }] }));
+    // the supplier email is sent by notifications from the event, not called directly
+    expect(stubs.notifications.notify).not.toHaveBeenCalled();
     await app.kernel.events.drain();
-    expect(events['purchasing.purchase_order.sent']!.at(-1)).toMatchObject({ purchaseOrderId: po.id, supplierId: s.id, locationId: LOCATION, total: usd(982000) });
+    expect(events['purchasing.purchase_order.sent']!.at(-1)).toMatchObject({ purchaseOrderId: po.id, supplierId: s.id, supplierName: s.name, supplierEmail: 'orders@halden.example', emailSupplier: true, message: null, locationId: LOCATION, total: usd(982000) });
     expect(events['purchasing.purchase_order.status_changed']!.at(-1)).toMatchObject({ purchaseOrderId: po.id, from: 'draft', to: 'sent' });
     expect(auditActions(stubs).at(-1)).toBe('purchasing.purchase_order.send');
     const timeline = (await call('GET', `/purchase-orders/${po.id}`)).json().timeline.map((t: { label: string }) => t.label);
@@ -174,6 +175,20 @@ describe('purchase orders', () => {
     const again = await call('POST', `/purchase-orders/${po.id}/send`, {});
     expect(again.statusCode).toBe(409);
     expect(again.json().error.code).toBe('ILLEGAL_TRANSITION');
+  });
+
+  it('sends without emailing the supplier when the buyer did not ask (the event says so for notifications)', async () => {
+    const s = await supplier();
+    const po = await draft(s.id);
+    const res = await call('POST', `/purchase-orders/${po.id}/send`, { message: 'Call me when it ships' });
+    expect(res.statusCode, res.body).toBe(200);
+    await app.kernel.events.drain();
+    expect(events['purchasing.purchase_order.sent']!.filter((e) => e.purchaseOrderId === po.id)).toEqual([
+      expect.objectContaining({ supplierName: s.name, supplierEmail: 'orders@halden.example', emailSupplier: false, message: 'Call me when it ships' }),
+    ]);
+    const timeline = (await call('GET', `/purchase-orders/${po.id}`)).json().timeline.map((t: { label: string }) => t.label);
+    expect(timeline.filter((l: string) => /email/i.test(l))).toEqual([]);
+    expect(stubs.notifications.notify).not.toHaveBeenCalled();
   });
 
   it('above the limit: stays Draft with approval, sent automatically when approved', async () => {
@@ -203,7 +218,9 @@ describe('purchase orders', () => {
     const sent = (await call('GET', `/purchase-orders/${po.id}`)).json();
     expect(sent).toMatchObject({ status: 'sent', approval: { approvalRequestId: requestId } });
     expect(stubs.inventory.expectIncoming).toHaveBeenCalledTimes(1);
-    expect(stubs.notifications.notify).toHaveBeenLastCalledWith(expect.objectContaining({ dedupeKey: `purchasing.po.sent:${po.id}` })); // emailSupplier from the request details
+    // emailSupplier and the message come from the approval request details
+    expect(events['purchasing.purchase_order.sent']!.at(-1)).toMatchObject({ purchaseOrderId: po.id, emailSupplier: true, message: 'Please confirm', supplierName: s.name });
+    expect(stubs.notifications.notify).not.toHaveBeenCalled();
     decide('approved'); // delivered twice: same result
     await app.kernel.events.drain();
     expect(stubs.inventory.expectIncoming).toHaveBeenCalledTimes(1);

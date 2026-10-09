@@ -1295,15 +1295,26 @@ export const spec = defineModuleSpec({
   settings: {
     "appConfigCacheSeconds": {
       "default": 300,
-      "desc": "Cache lifetime of GET /app-config"
+      "desc": "Cache lifetime of GET /app-config",
+      "type": "duration",
+      "min": 0,
+      "unit": "seconds"
     },
     "defaultMinLeadDays": {
       "default": 0,
-      "desc": "Minimum notice for definitions that do not set one"
+      "desc": "Minimum notice for definitions that do not set one",
+      "type": "duration",
+      "min": 0,
+      "unit": "days",
+      "approval": "business_owner"
     },
     "sellerVisibleMinLeadDays": {
       "default": 14,
-      "desc": "Minimum notice for changes announced to sellers"
+      "desc": "Minimum notice for changes announced to sellers",
+      "type": "duration",
+      "min": 0,
+      "unit": "days",
+      "approval": "business_owner"
     }
   },
   errorCodes: {

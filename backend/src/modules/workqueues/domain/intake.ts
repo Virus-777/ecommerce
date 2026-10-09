@@ -13,6 +13,8 @@
  *   appeal:<appealId>                   restriction_evidence:<restrictionId> seller_performance:<sellerId>
  *   change_request:<changeRequestId>    trust_report:<reportId>            trust_recommendation:<recommendationId>
  *   reply_overdue:<conversationId>      data_request:<requestId>
+ * Raised by warehouse (raise()): return_parcel:<parcelId> (unexpected), return_parcel_overdue:<parcelId>,
+ * both with the parcel as subject ('other'); queues per kind are in domain/catalog.ts KIND_QUEUES.
  */
 import type { EventName, EventPayload } from '../../../kernel/events/index.js';
 import type { Money } from '../../../spec/common.js';
@@ -422,14 +424,14 @@ export const INTAKE: IntakeTable = {
     opens: [
       {
         kind: 'payment_mismatch',
-        queues: ['finance.daily_checks'],
+        queues: ['finance.payment_checks'],
         title: 'Reconciliation mismatch: {check}',
         dedupe: 'payment_mismatch:{itemId}',
         deadline: 'now + queue default (business hours)',
         priority: 'high over $1,000, else normal',
         build: (p) => [
           {
-            queueKey: 'finance.daily_checks',
+            queueKey: 'finance.payment_checks',
             title: `Reconciliation mismatch: ${human(p.check)}`,
             summary: `Difference of ${(p.difference.amount / 100).toFixed(2)} ${p.difference.currency}`,
             subject: { type: 'reconciliation_check', id: p.itemId, label: human(p.check) },
@@ -442,18 +444,21 @@ export const INTAKE: IntakeTable = {
       },
     ],
   },
+  'finance.reconciliation.item_closed': {
+    closes: [{ kinds: ['payment_mismatch'], subjects: (p) => [M('reconciliation_check', p.itemId)], note: (p) => `Reconciliation item ${p.outcome} (${human(p.check)}, ${p.date})` }],
+  },
   'payments.payment.pending_check': {
     opens: [
       {
         kind: 'payment_check',
-        queues: ['finance.daily_checks'],
+        queues: ['finance.payment_checks'],
         title: 'Payment status uncertain',
         dedupe: 'payment_check:{intentId}',
         deadline: 'now + queue default (business hours)',
         priority: 'normal',
         build: (p) => [
           {
-            queueKey: 'finance.daily_checks',
+            queueKey: 'finance.payment_checks',
             title: 'Payment status uncertain',
             summary: `The provider's answer is uncertain since ${p.since}; the status check is running`,
             subject: { type: 'payment', id: p.intentId, label: 'Payment' },
@@ -472,18 +477,21 @@ export const INTAKE: IntakeTable = {
   'payments.payment.failed': {
     closes: [{ kinds: ['payment_check'], subjects: (p) => [M('payment', p.intentId)], note: (p) => `Payment failed (${human(p.declineCategory)}); the customer is told by payments` }],
   },
+  'payments.payment.authorized': {
+    closes: [{ kinds: ['payment_check'], subjects: (p) => [M('payment', p.intentId)], note: () => 'Payment authorized; capture follows with the order' }],
+  },
   'payments.chargeback.opened': {
     opens: [
       {
         kind: 'chargeback',
-        queues: ['finance.daily_checks'],
+        queues: ['finance.chargebacks'],
         title: 'Chargeback {ref}',
         dedupe: 'chargeback:{disputeId}',
         deadline: 'event.evidenceDueAt, else queue default',
         priority: 'high',
         build: (p) => [
           {
-            queueKey: 'finance.daily_checks',
+            queueKey: 'finance.chargebacks',
             title: `Chargeback ${p.ref}`,
             summary: `${human(p.kind)} opened by the provider`,
             subject: { type: 'other', id: p.disputeId, ref: p.ref, label: 'Chargeback' },
@@ -498,6 +506,10 @@ export const INTAKE: IntakeTable = {
         ],
       },
     ],
+  },
+
+  'payments.chargeback.decided': {
+    closes: [{ kinds: ['chargeback'], subjects: (p) => [M('other', p.disputeId)], note: (p) => `Chargeback ${p.outcome}` }],
   },
 
   /* ---------------------------------------------------------------- catalog */
@@ -586,14 +598,14 @@ export const INTAKE: IntakeTable = {
     opens: [
       {
         kind: 'launch_review',
-        queues: ['sellers.applications'],
+        queues: ['sellers.launch_reviews'],
         title: 'Launch readiness review',
         dedupe: 'launch_review:{sellerId}',
         deadline: 'now + queue default (business hours)',
         priority: 'normal',
         build: (p) => [
           {
-            queueKey: 'sellers.applications',
+            queueKey: 'sellers.launch_reviews',
             title: 'Launch readiness review',
             subject: { type: 'seller', id: p.sellerId },
             sellerId: p.sellerId,
@@ -640,14 +652,14 @@ export const INTAKE: IntakeTable = {
     opens: [
       {
         kind: 'restriction_evidence',
-        queues: ['sellers.appeals'],
+        queues: ['sellers.restrictions'],
         title: 'Restriction evidence to review',
         dedupe: 'restriction_evidence:{restrictionId}',
         deadline: 'now + queue default (business hours)',
         priority: 'normal',
         build: (p) => [
           {
-            queueKey: 'sellers.appeals',
+            queueKey: 'sellers.restrictions',
             title: 'Restriction evidence to review',
             summary: 'The seller uploaded documents to lift a restriction',
             subject: { type: 'restriction', id: p.restrictionId },
@@ -660,6 +672,13 @@ export const INTAKE: IntakeTable = {
       },
     ],
   },
+  'sellers.restriction.lifted': {
+    closes: [{ kinds: ['restriction_evidence', 'restriction_review'], subjects: (p) => [M('restriction', p.restrictionId)], note: (p) => `Restriction lifted: ${p.reason}` }],
+  },
+  'sellers.restriction.updated': {
+    closes: [{ kinds: ['restriction_evidence'], subjects: (p) => [M('restriction', p.restrictionId)], note: (p) => `Evidence reviewed; the restriction was changed (review date ${p.reviewDate})` }],
+  },
+  /** seller_performance is closed by hand: sellers publishes no back-on-target event */
   'sellers.performance.below_target': {
     opens: [
       {
@@ -688,14 +707,14 @@ export const INTAKE: IntakeTable = {
     opens: [
       {
         kind: 'storefront_review',
-        queues: ['sellers.applications'],
+        queues: ['sellers.launch_reviews'],
         title: 'Store change to review ({kind})',
         dedupe: 'change_request:{changeRequestId}',
         deadline: 'now + queue default (business hours)',
         priority: 'normal',
         build: (p) => [
           {
-            queueKey: 'sellers.applications',
+            queueKey: 'sellers.launch_reviews',
             title: `Store change to review (${human(p.kind)})`,
             subject: { type: 'change_request', id: p.changeRequestId, label: human(p.kind) },
             related: list(S('seller', p.sellerId)),
@@ -821,6 +840,11 @@ export const INTAKE: IntakeTable = {
   },
   'customers.data_export.ready': {
     closes: [{ kinds: ['data_request'], subjects: (p) => [M('data_request', p.requestId)], note: () => 'Export ready and sent to the customer' }],
+  },
+
+  /* ---------------------------------------------------------------- warehouse (raise() opens; unexpected_return_parcel is closed by hand) */
+  'warehouse.return_parcel.received': {
+    closes: [{ kinds: ['return_parcel_overdue'], subjects: (p) => [M('other', p.parcelId), M('return', p.returnId)], note: (p) => `Parcel received at ${p.receivedAt} (${human(p.parcelCondition)})` }],
   },
 };
 

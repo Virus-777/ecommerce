@@ -127,6 +127,9 @@ export function validateValue(def: Definition, value: unknown, path = 'value'): 
     case 'money': {
       const r = money.safeParse(value);
       if (!r.success) return zodIssues(path, r.error);
+      // min and max of a money setting are amounts in minor units
+      if (def.min != null && r.data.amount < def.min) return bad(`Must be at least ${moneyText({ currency: r.data.currency, amount: def.min })}`);
+      if (def.max != null && r.data.amount > def.max) return bad(`Must be at most ${moneyText({ currency: r.data.currency, amount: def.max })}`);
       break;
     }
     case 'weekly_hours': {

@@ -48,7 +48,7 @@ export interface UploadTicket {
   uploadId: string;
   assetId: string;
   method: "PUT" | "POST";
-  /** Signed storage URL; upload the bytes directly to it */
+  /** Signed storage URL; upload the bytes directly to it. With development storage it is this API's PUT /uploads/{id}/content in the same area */
   url: string;
   headers: Record<string, string>;
   /** Form fields for POST policy uploads */
@@ -61,7 +61,7 @@ export const UploadTicket: z.ZodType<UploadTicket> = z.object({
   uploadId: z.uuid(),
   assetId: z.uuid(),
   method: z.enum(["PUT", "POST"]),
-  url: z.url().describe("Signed storage URL; upload the bytes directly to it"),
+  url: z.url().describe("Signed storage URL; upload the bytes directly to it. With development storage it is this API's PUT /uploads/{id}/content in the same area"),
   headers: z.record(z.string(), z.string()),
   fields: z.record(z.string(), z.string()).describe("Form fields for POST policy uploads"),
   maxBytes: z.number().int(),
@@ -592,6 +592,25 @@ export const endpoints = defineEndpoints({
     screens: ["account/return-new","help/order-problem","account/review","sell/apply"],
     phase: 1,
   },
+  uploadStoreContent: {
+    area: "store",
+    method: "PUT",
+    path: "/uploads/{id}/content",
+    auth: "shopper",
+    scope: "own-customer",
+    summary: "Send the file bytes of an upload (development storage)",
+    desc: "Development storage only: receives the file bytes for a signed upload ticket (real storage takes the bytes directly at the ticket URL). Answers 409 when a real storage adapter is configured. The body is the raw file (any content type), at most the ticket's maxBytes.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    bodyFormat: "binary",
+    body: () => z.instanceof(Uint8Array),
+    response: null,
+    status: 204,
+    errors: ["DEV_STORAGE_ONLY","UPLOAD_EXPIRED","FILE_TOO_LARGE","ILLEGAL_TRANSITION"],
+    phase: 1,
+  },
   getStoreAsset: {
     area: "store",
     method: "GET",
@@ -690,6 +709,26 @@ export const endpoints = defineEndpoints({
     status: 202,
     errors: ["UPLOAD_INCOMPLETE","UPLOAD_EXPIRED","CHECKSUM_MISMATCH"],
     screens: ["seller/product-new","seller/store","seller/ad-request","seller/bulk-update"],
+    phase: 1,
+  },
+  uploadSellerContent: {
+    area: "seller",
+    method: "PUT",
+    path: "/uploads/{id}/content",
+    auth: "seller",
+    permission: "media.assets.upload",
+    scope: "own-seller",
+    summary: "Send the file bytes of an upload (development storage)",
+    desc: "Development storage only: receives the file bytes for a signed upload ticket (real storage takes the bytes directly at the ticket URL). Answers 409 when a real storage adapter is configured. The body is the raw file (any content type), at most the ticket's maxBytes.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    bodyFormat: "binary",
+    body: () => z.instanceof(Uint8Array),
+    response: null,
+    status: 204,
+    errors: ["DEV_STORAGE_ONLY","UPLOAD_EXPIRED","FILE_TOO_LARGE","ILLEGAL_TRANSITION"],
     phase: 1,
   },
   listSellerAssets: {
@@ -842,6 +881,26 @@ export const endpoints = defineEndpoints({
     status: 202,
     errors: ["UPLOAD_INCOMPLETE","UPLOAD_EXPIRED","CHECKSUM_MISMATCH"],
     screens: ["admin/official","admin/content","admin/ad-assets"],
+    phase: 1,
+  },
+  uploadAdminContent: {
+    area: "admin",
+    method: "PUT",
+    path: "/uploads/{id}/content",
+    auth: "staff",
+    permission: "media.assets.manage",
+    scope: "staff",
+    summary: "Send the file bytes of a staff upload (development storage)",
+    desc: "Development storage only: receives the file bytes for a signed upload ticket (real storage takes the bytes directly at the ticket URL). Answers 409 when a real storage adapter is configured. The body is the raw file (any content type), at most the ticket's maxBytes.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    bodyFormat: "binary",
+    body: () => z.instanceof(Uint8Array),
+    response: null,
+    status: 204,
+    errors: ["DEV_STORAGE_ONLY","UPLOAD_EXPIRED","FILE_TOO_LARGE","ILLEGAL_TRANSITION"],
     phase: 1,
   },
   listAssetsAdmin: {
@@ -1240,7 +1299,9 @@ export const spec = defineModuleSpec({
           ]
         }
       },
-      "desc": "Size and type limits per purpose (others default to 20 MB images, 25 MB documents)"
+      "desc": "Size and type limits per purpose (others default to 20 MB images, 25 MB documents)",
+      "type": "json",
+      "sellerVisible": true
     },
     "renditionWidths": {
       "default": {
@@ -1250,7 +1311,8 @@ export const spec = defineModuleSpec({
         "large": 1280,
         "zoom": 2048
       },
-      "desc": "Image rendition widths (WebP plus JPEG fallback)"
+      "desc": "Image rendition widths (WebP plus JPEG fallback)",
+      "type": "json"
     },
     "baselineImageRules": {
       "default": {
@@ -1262,39 +1324,68 @@ export const spec = defineModuleSpec({
           "heic"
         ]
       },
-      "desc": "Checks applied to every image regardless of caller rules"
+      "desc": "Checks applied to every image regardless of caller rules",
+      "type": "json",
+      "sellerVisible": true
     },
     "uploadUrlTtlMinutes": {
       "default": 15,
-      "desc": "Signed upload URL lifetime"
+      "desc": "Signed upload URL lifetime",
+      "type": "duration",
+      "min": 1,
+      "max": 60,
+      "unit": "minutes"
     },
     "downloadUrlTtlMinutes": {
       "default": 10,
-      "desc": "Signed download URL lifetime"
+      "desc": "Signed download URL lifetime",
+      "type": "duration",
+      "min": 1,
+      "max": 60,
+      "unit": "minutes"
     },
     "pendingUploadExpiryHours": {
       "default": 24,
-      "desc": "Pending uploads expire after this"
+      "desc": "Pending uploads expire after this",
+      "type": "duration",
+      "min": 1,
+      "unit": "hours"
     },
     "orphanGraceDays": {
       "default": 30,
-      "desc": "Never-attached files are deleted after this"
+      "desc": "Never-attached files are deleted after this",
+      "type": "duration",
+      "min": 1,
+      "unit": "days"
     },
     "evidenceRetentionDays": {
       "default": 730,
-      "desc": "Evidence files are kept at least this long after their last use (business decision to confirm)"
+      "desc": "Evidence files are kept at least this long after their last use (business decision to confirm)",
+      "type": "duration",
+      "min": 365,
+      "unit": "days",
+      "approval": "business_owner"
     },
     "deletedGraceDays": {
       "default": 7,
-      "desc": "Storage objects of deleted files are erased after this"
+      "desc": "Storage objects of deleted files are erased after this",
+      "type": "duration",
+      "min": 0,
+      "unit": "days"
     },
     "customerUploadsPerDay": {
       "default": 50,
-      "desc": "Uploads per customer or guest per day"
+      "desc": "Uploads per customer or guest per day",
+      "type": "int",
+      "min": 1
     },
     "sellerStorageQuotaGB": {
       "default": 20,
-      "desc": "Storage per seller (QUOTA_EXCEEDED above it)"
+      "desc": "Storage per seller (QUOTA_EXCEEDED above it)",
+      "type": "int",
+      "min": 1,
+      "unit": "GB",
+      "sellerVisible": true
     }
   },
   errorCodes: {
@@ -1337,6 +1428,10 @@ export const spec = defineModuleSpec({
     "ASSET_NOT_OWNED": {
       "status": 403,
       "meaning": "The file belongs to another owner and cannot be attached here."
+    },
+    "DEV_STORAGE_ONLY": {
+      "status": 409,
+      "meaning": "A real storage adapter is configured: upload the bytes to the ticket URL instead."
     }
   },
   tables: {

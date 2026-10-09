@@ -36610,7 +36610,7 @@
           "Admin API · Finance"
         ],
         "summary": "Close a difference with a recorded reason (no money moves)",
-        "description": "**Permission:** `finance.reconciliation.work`\n\n**Audited:** recorded in the action history.\n\n**Screens:** ops/finance-checks",
+        "description": "**Permission:** `finance.reconciliation.work`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `finance.reconciliation.item_closed`\n\n**Screens:** ops/finance-checks",
         "security": [
           {
             "bearer": []
@@ -36724,6 +36724,9 @@
         "x-screens": [
           "ops/finance-checks"
         ],
+        "x-events": [
+          "finance.reconciliation.item_closed"
+        ],
         "x-audited": true,
         "x-phase": 1
       }
@@ -36735,7 +36738,7 @@
           "Admin API · Finance"
         ],
         "summary": "Record a correction with a reason",
-        "description": "**Permission:** `finance.reconciliation.work`\n\n**Approval:** Approval action finance.reconciliation.correct. Corrections above correctionSecondReviewerThreshold need a second Finance reviewer (access)\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `finance.adjustment.recorded`\n\n**Screens:** ops/finance-checks, admin/finance",
+        "description": "**Permission:** `finance.reconciliation.work`\n\n**Approval:** Approval action finance.reconciliation.correct. Corrections above correctionSecondReviewerThreshold need a second Finance reviewer (access)\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `finance.adjustment.recorded`, `finance.reconciliation.item_closed`\n\n**Screens:** ops/finance-checks, admin/finance",
         "security": [
           {
             "bearer": []
@@ -36842,7 +36845,8 @@
           "admin/finance"
         ],
         "x-events": [
-          "finance.adjustment.recorded"
+          "finance.adjustment.recorded",
+          "finance.reconciliation.item_closed"
         ],
         "x-idempotent": true,
         "x-audited": true,
@@ -42563,7 +42567,7 @@
                       "string",
                       "null"
                     ],
-                    "description": "Android; the website sends the __Host-mk_refresh cookie instead"
+                    "description": "Android; the website sends the __Secure-mk_refresh cookie instead"
                   }
                 }
               }
@@ -42654,7 +42658,7 @@
                       "string",
                       "null"
                     ],
-                    "description": "Android; the website sends the __Host-mk_refresh cookie instead"
+                    "description": "Android; the website sends the __Secure-mk_refresh cookie instead"
                   }
                 }
               }
@@ -51723,6 +51727,123 @@
         "x-phase": 1
       }
     },
+    "/api/store/media/uploads/{id}/content": {
+      "put": {
+        "operationId": "media.uploadStoreContent",
+        "tags": [
+          "Store API · Media"
+        ],
+        "summary": "Send the file bytes of an upload (development storage)",
+        "description": "Development storage only: receives the file bytes for a signed upload ticket (real storage takes the bytes directly at the ticket URL). Answers 409 when a real storage adapter is configured. The body is the raw file (any content type), at most the ticket's maxBytes.",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "The raw bytes (any content type)",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Success, no content"
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked. Only this error should trigger a token refresh (WWW-Authenticate: Bearer error=\"invalid_token\").",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "DEV_STORAGE_ONLY: A real storage adapter is configured: upload the bytes to the ticket URL instead.\nILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "UPLOAD_EXPIRED: The upload URL expired; start a new upload.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "FILE_TOO_LARGE: Above the size limit for this purpose. details.maxBytes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "media",
+        "x-area": "store",
+        "x-auth": "shopper",
+        "x-phase": 1
+      }
+    },
     "/api/store/media/assets/{id}": {
       "get": {
         "operationId": "media.getStoreAsset",
@@ -52304,6 +52425,124 @@
           "seller/ad-request",
           "seller/bulk-update"
         ],
+        "x-phase": 1
+      }
+    },
+    "/api/seller/media/uploads/{id}/content": {
+      "put": {
+        "operationId": "media.uploadSellerContent",
+        "tags": [
+          "Seller API · Media"
+        ],
+        "summary": "Send the file bytes of an upload (development storage)",
+        "description": "Development storage only: receives the file bytes for a signed upload ticket (real storage takes the bytes directly at the ticket URL). Answers 409 when a real storage adapter is configured. The body is the raw file (any content type), at most the ticket's maxBytes.\n\n**Permission:** `media.assets.upload`",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "The raw bytes (any content type)",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Success, no content"
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked. Only this error should trigger a token refresh (WWW-Authenticate: Bearer error=\"invalid_token\").",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "DEV_STORAGE_ONLY: A real storage adapter is configured: upload the bytes to the ticket URL instead.\nILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "UPLOAD_EXPIRED: The upload URL expired; start a new upload.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "FILE_TOO_LARGE: Above the size limit for this purpose. details.maxBytes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "media",
+        "x-area": "seller",
+        "x-auth": "seller",
+        "x-permission": "media.assets.upload",
         "x-phase": 1
       }
     },
@@ -53220,6 +53459,124 @@
           "admin/content",
           "admin/ad-assets"
         ],
+        "x-phase": 1
+      }
+    },
+    "/api/admin/media/uploads/{id}/content": {
+      "put": {
+        "operationId": "media.uploadAdminContent",
+        "tags": [
+          "Admin API · Media"
+        ],
+        "summary": "Send the file bytes of a staff upload (development storage)",
+        "description": "Development storage only: receives the file bytes for a signed upload ticket (real storage takes the bytes directly at the ticket URL). Answers 409 when a real storage adapter is configured. The body is the raw file (any content type), at most the ticket's maxBytes.\n\n**Permission:** `media.assets.manage`",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "The raw bytes (any content type)",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Success, no content"
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked. Only this error should trigger a token refresh (WWW-Authenticate: Bearer error=\"invalid_token\").",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "DEV_STORAGE_ONLY: A real storage adapter is configured: upload the bytes to the ticket URL instead.\nILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "UPLOAD_EXPIRED: The upload URL expired; start a new upload.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "FILE_TOO_LARGE: Above the size limit for this purpose. details.maxBytes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "media",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "media.assets.manage",
         "x-phase": 1
       }
     },
@@ -107370,7 +107727,7 @@
           "Seller API · Sellers"
         ],
         "summary": "Upload documents that resolve a restriction (e.g. brand authorisation)",
-        "description": "Creates a work item for the Seller Manager to review; it is not an appeal.\n\n**Permission:** `sellers.account-health.manage`\n\n**Publishes:** `sellers.restriction.evidence_submitted`\n\n**Screens:** seller/performance",
+        "description": "Creates a work item for the Seller Manager to review; it is not an appeal. The item closes when the restriction is lifted or updated (sellers.restriction.lifted, sellers.restriction.updated); a restriction kept unchanged is resolved by hand.\n\n**Permission:** `sellers.account-health.manage`\n\n**Publishes:** `sellers.restriction.evidence_submitted`\n\n**Screens:** seller/performance",
         "security": [
           {
             "bearer": []
@@ -128314,7 +128671,7 @@
           "Public API · Trust and risk"
         ],
         "summary": "Brand or rights owner reports counterfeit listings",
-        "description": "Contact details and proof of rights are required; confirmed by email before review.\n\n**Publishes:** `trust.report.created`\n\n**Launch phase:** 2",
+        "description": "Contact details and proof of rights are required. The contact gets an email confirmation with the reference (trust.rights_report.received) before review.\n\n**Publishes:** `trust.report.created`, `trust.rights_report.received`\n\n**Launch phase:** 2",
         "security": [
           {
             "bearer": []
@@ -128435,7 +128792,8 @@
         "x-area": "public",
         "x-auth": "visitor",
         "x-events": [
-          "trust.report.created"
+          "trust.report.created",
+          "trust.rights_report.received"
         ],
         "x-phase": 2
       }
@@ -159085,6 +159443,7 @@
               "ad_charge",
               "service_fee",
               "charge_credit",
+              "seller_credit",
               "label_charge",
               "chargeback",
               "payout",
@@ -159153,6 +159512,79 @@
           "amount",
           "bucket",
           "balanceAfter"
+        ]
+      },
+      "finance.SellerCredit": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sellerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "reference": {
+            "$ref": "#/components/schemas/finance.Reference",
+            "description": "What the credit is for, e.g. the fulfillment-service lost-unit claim"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "posted",
+              "pending_approval",
+              "rejected"
+            ]
+          },
+          "ledgerEntry": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/finance.LedgerEntry"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The seller_credit entry once posted"
+          },
+          "approvalRequestId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "requestedBy": {
+            "$ref": "#/components/schemas/Actor"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decidedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "sellerId",
+          "amount",
+          "reason",
+          "reference",
+          "status",
+          "requestedBy",
+          "createdAt"
         ]
       },
       "finance.EarningsLot": {
@@ -166526,7 +166958,7 @@
           "url": {
             "type": "string",
             "format": "uri",
-            "description": "Signed storage URL; upload the bytes directly to it"
+            "description": "Signed storage URL; upload the bytes directly to it. With development storage it is this API's PUT /uploads/{id}/content in the same area"
           },
           "headers": {
             "type": "object",
@@ -168121,8 +168553,10 @@
               "seller",
               "seller_member",
               "staff_role",
-              "staff_member"
-            ]
+              "staff_member",
+              "external_email"
+            ],
+            "description": "external_email: a contact outside Marketly (supplier, rights owner, scheduled-report address); email only, essential topics only"
           },
           "accountId": {
             "type": [
@@ -168138,7 +168572,7 @@
               "null"
             ],
             "format": "email",
-            "description": "Guests (checkout email)"
+            "description": "Guests (checkout email) and external_email recipients"
           },
           "sellerId": {
             "type": [
@@ -168628,8 +169062,10 @@
             "enum": [
               "customer",
               "seller",
-              "staff"
-            ]
+              "staff",
+              "external"
+            ],
+            "description": "external: suppliers and rights owners, by email only"
           },
           "category": {
             "type": "string",
@@ -175984,6 +176420,32 @@
           "stockItemId",
           "quantity",
           "state"
+        ]
+      },
+      "orders.AcceptedItem": {
+        "type": "object",
+        "properties": {
+          "orderItemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "offerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stockItemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "orderItemId",
+          "offerId",
+          "stockItemId",
+          "quantity"
         ]
       },
       "orders.PlacedGroup": {
@@ -188254,6 +188716,27 @@
           "refundsWithFinance",
           "refundsWithFinanceAmount",
           "tabCounts"
+        ]
+      },
+      "reviews.ContentParty": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "customer",
+              "seller"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Customers-module id or seller id"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
         ]
       },
       "reviews.Author": {
@@ -203265,6 +203748,50 @@
           "message"
         ]
       },
+      "trust.ReportReporter": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "customer",
+              "seller",
+              "rights_owner"
+            ]
+          },
+          "customerId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "sellerId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "contactName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "contactEmail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "email",
+            "description": "Rights owners, and guests who reported by email"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
       "trust.StaffRef": {
         "type": "object",
         "properties": {
@@ -207521,9 +208048,11 @@
               "trust_recommendation",
               "data_request",
               "seller_reply_overdue",
+              "unexpected_return_parcel",
+              "return_parcel_overdue",
               "manual_task"
             ],
-            "description": "What kind of work"
+            "description": "What kind of work; how each kind closes is in the notes"
           },
           "title": {
             "type": "string"
@@ -208528,8 +209057,8 @@
       "refreshCookie": {
         "type": "apiKey",
         "in": "cookie",
-        "name": "__Host-mk_refresh",
-        "description": "Website refresh token (HttpOnly). Android sends refreshToken in the body instead."
+        "name": "__Secure-mk_refresh",
+        "description": "Website refresh token (HttpOnly; Secure; SameSite=Strict; Path=/api/public/identity/sessions, sent only to refresh and sign-out). Android sends refreshToken in the body instead."
       },
       "appProof": {
         "type": "apiKey",

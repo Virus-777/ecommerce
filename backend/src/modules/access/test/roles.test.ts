@@ -171,6 +171,45 @@ describe('role assignments', () => {
     expect((await f.svc.check(f.principal(id), 'support.remedies.approve', { money: usd(10) })).decision).toBe('allowed');
   });
 
+  it('an approved sensitive grant for someone still invited waits for acceptance (guarded approve)', async () => {
+    const invite = async (email: string, name: string) => {
+      const res = await f.call('POST', '/staff-invitations', f.token(admin), { email, name, roleIds: [await f.roleId('finance_staff')], reason: 'Finance hire' }, { 'x-step-up-code': '000000' });
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      const id = res.body.account.id as string;
+      const assignment = (await f.svc.getMember(f.principal(owner) as never, id)).assignments[0]!;
+      expect(assignment.status).toBe('pending_approval');
+      return { id, assignmentId: assignment.id, requestId: assignment.approval!.approvalRequestId! };
+    };
+    const statusOf = async (id: string, assignmentId: string) => (await f.svc.getMember(f.principal(owner) as never, id)).assignments.find((a) => a.id === assignmentId)!.status;
+    const accept = async (id: string) => {
+      f.accounts.set(id, { ...f.accounts.get(id)!, status: 'active' });
+      await f.svc.onInvitationAcceptedFromIdentity({ invitationId: newId(), accountId: id, purpose: 'staff' });
+    };
+
+    // approved before the person accepts: pending_acceptance, no permissions, no role event yet
+    const fay = await invite('fay.finance@marketly.test', 'Fay Finance');
+    await f.svc.decide(fay.requestId, f.principal(admin2), { kind: 'approve' });
+    expect(await statusOf(fay.id, fay.assignmentId)).toBe('pending_acceptance');
+    expect(await f.svc.hasPermission(f.principal(fay.id), 'finance.ledger.view')).toBe(false);
+    await f.drain();
+    expect(f.eventsNamed('access.role.changed').filter((e) => e.accountId === fay.id)).toEqual([]);
+    // accepting activates it (twice: same result)
+    await accept(fay.id);
+    await f.svc.onInvitationAcceptedFromIdentity({ invitationId: newId(), accountId: fay.id, purpose: 'staff' });
+    expect(await statusOf(fay.id, fay.assignmentId)).toBe('active');
+    expect(await f.svc.hasPermission(f.principal(fay.id), 'finance.ledger.view')).toBe(true);
+    await f.drain();
+    expect(f.eventsNamed('access.role.changed').filter((e) => e.accountId === fay.id).map((e) => e.change)).toEqual(['assigned']);
+
+    // accepted before the approval: the grant keeps waiting for its approval, then goes straight to active
+    const finn = await invite('finn.finance@marketly.test', 'Finn Finance');
+    await accept(finn.id);
+    expect(await statusOf(finn.id, finn.assignmentId)).toBe('pending_approval');
+    await f.svc.decide(finn.requestId, f.principal(admin2), { kind: 'approve' });
+    expect(await statusOf(finn.id, finn.assignmentId)).toBe('active');
+    expect(await f.svc.hasPermission(f.principal(finn.id), 'finance.ledger.view')).toBe(true);
+  });
+
   it('revokes everything and removes cover when identity disables an account', async () => {
     const lead = await f.staff('Lou Lead', ['shipping_manager']);
     const backup = await f.staff('Bo Backup', ['shipping_manager']);

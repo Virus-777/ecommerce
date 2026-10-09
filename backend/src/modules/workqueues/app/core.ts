@@ -134,22 +134,23 @@ export class Core {
       });
     }
     const existing = new Set((await this.repo.listQueues()).map((q) => q.key));
-    await this.repo.upsertIntakeRules(
-      intakeRuleDocs()
-        .filter((r) => existing.has(r.queueKey))
-        .map((r) => ({
-          id: stableId(`${r.event}|${r.kind}|${r.queueKey}`),
-          event: r.event,
-          queue_key: r.queueKey,
-          kind: r.kind,
-          title_template: r.titleTemplate,
-          dedupe_key_template: r.dedupeKeyTemplate,
-          deadline_rule: r.deadline,
-          priority: r.priority,
-          resolves_on: r.resolvesOn as never,
-          active: true,
-        })),
-    );
+    const rules = intakeRuleDocs()
+      .filter((r) => existing.has(r.queueKey))
+      .map((r) => ({
+        id: stableId(`${r.event}|${r.kind}|${r.queueKey}`),
+        event: r.event,
+        queue_key: r.queueKey,
+        kind: r.kind,
+        title_template: r.titleTemplate,
+        dedupe_key_template: r.dedupeKeyTemplate,
+        deadline_rule: r.deadline,
+        priority: r.priority,
+        resolves_on: r.resolvesOn as never,
+        active: true,
+      }));
+    await this.repo.upsertIntakeRules(rules);
+    // an event re-routed to another queue (e.g. chargebacks to finance.chargebacks) leaves its old rule inactive
+    await this.repo.deactivateIntakeRulesExcept(rules.map((r) => r.id));
     if ((await this.repo.countTemplates()) === 0) {
       for (const t of DEFAULT_TEMPLATES) {
         await this.repo.upsertTemplate({ id: stableId(`routine|${t.title}`), title: t.title, area_label: t.areaLabel, owner_roles: t.ownerRoles as never, due_time: t.dueTime, weekdays: t.weekdays as never, active: true });

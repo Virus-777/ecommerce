@@ -1,4 +1,5 @@
 import { sql, type Kysely } from 'kysely';
+import type { Inbox } from '../../../../kernel/events/inbox.js';
 import { paginate, type PageRequest } from '../../../../kernel/lib/pagination.js';
 import type { ContentDb } from '../../../../spec/content.js';
 import type {
@@ -45,16 +46,23 @@ function enc(table: keyof ContentDb, row: object): any {
 const contains = (q: string) => `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 
 /** Postgres adapter for ContentRepository. `db` is scoped to the `content` schema. */
-export function createPostgresContentRepository(db: Db): ContentRepository {
-  return new PgContentRepository(db);
+export function createPostgresContentRepository(db: Db, inbox: Inbox): ContentRepository {
+  return new PgContentRepository(db, inbox);
 }
 
 class PgContentRepository implements ContentRepository {
-  constructor(private readonly db: Db) {}
+  constructor(
+    private readonly db: Db,
+    private readonly inbox: Inbox,
+  ) {}
 
   async transaction<T>(fn: (tx: ContentRepository) => Promise<T>): Promise<T> {
     if (this.db.isTransaction) return fn(this);
-    return this.db.transaction().execute((trx) => fn(new PgContentRepository(trx)));
+    return this.db.transaction().execute((trx) => fn(new PgContentRepository(trx, this.inbox)));
+  }
+
+  claim(key: string): Promise<boolean> {
+    return this.inbox.claim(this.db, key);
   }
 
   /* ================================================================ sections */

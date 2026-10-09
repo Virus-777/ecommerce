@@ -1802,43 +1802,71 @@ export const spec = defineModuleSpec({
   settings: {
     "guestCheckoutEnabled": {
       "default": true,
-      "desc": "Allow guest purchases. Market-level value owned by the settings module (checkout.guestCheckoutEnabled, changed in admin/settings with business-owner approval); read here"
+      "desc": "Allow guest purchases. Market-level value owned by the settings module (checkout.guestCheckoutEnabled, changed in admin/settings with business-owner approval); read here",
+      "type": "bool",
+      "approval": "business_owner"
     },
     "offerAccountAfterGuestPurchase": {
       "default": true,
-      "desc": "Offer to create an account after a guest purchase (owned by settings, checkout.offerAccountAfterGuestPurchase)"
+      "desc": "Offer to create an account after a guest purchase (owned by settings, checkout.offerAccountAfterGuestPurchase)",
+      "type": "bool"
     },
     "sessionTtlMinutes": {
       "default": 60,
-      "desc": "Idle time before an open checkout expires"
+      "desc": "Idle time before an open checkout expires",
+      "type": "duration",
+      "min": 5,
+      "unit": "minutes"
     },
     "stockHoldMinutes": {
       "default": 15,
-      "desc": "Stock hold created at Place order"
+      "desc": "Stock hold created at Place order",
+      "type": "duration",
+      "min": 1,
+      "max": 60,
+      "unit": "minutes"
     },
     "retryWindowMinutes": {
       "default": 30,
-      "desc": "After a decline, prices, stock and coupons are held this long ('held until 3:15 PM PT')"
+      "desc": "After a decline, prices, stock and coupons are held this long ('held until 3:15 PM PT')",
+      "type": "duration",
+      "min": 1,
+      "unit": "minutes"
     },
     "pendingHoldHours": {
       "default": 24,
-      "desc": "Stock stays reserved while a payment result is being checked"
+      "desc": "Stock stays reserved while a payment result is being checked",
+      "type": "duration",
+      "min": 1,
+      "unit": "hours"
     },
     "maxPaymentAttempts": {
       "default": 5,
-      "desc": "Payment attempts per checkout"
+      "desc": "Payment attempts per checkout",
+      "type": "int",
+      "min": 1,
+      "max": 20
     },
     "couponAttemptsPerHour": {
       "default": 20,
-      "desc": "Coupon codes tried per session per hour"
+      "desc": "Coupon codes tried per session per hour",
+      "type": "int",
+      "min": 1
     },
     "purchaseLimitWindowDays": {
       "default": 30,
-      "desc": "Window for per-customer purchase limits that count earlier orders"
+      "desc": "Window for per-customer purchase limits that count earlier orders",
+      "type": "duration",
+      "min": 1,
+      "unit": "days",
+      "sellerVisible": true
     },
     "idempotencyRetentionDays": {
       "default": 7,
-      "desc": "How long Place order keys are kept"
+      "desc": "How long Place order keys are kept",
+      "type": "duration",
+      "min": 1,
+      "unit": "days"
     }
   },
   errorCodes: {

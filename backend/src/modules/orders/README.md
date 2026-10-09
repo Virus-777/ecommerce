@@ -794,6 +794,15 @@ The accepted purchase: one order per checkout, one seller group per seller packa
 | deliveredAt | `datetime?` |
 | returnWindowEndsAt | `datetime?` |
 
+### AcceptedItem
+
+| Field | Type |
+|---|---|
+| orderItemId | `uuid` |
+| offerId | `uuid` |
+| stockItemId | `uuid` |
+| quantity | `int` |
+
 ### PlacedGroup
 
 | Field | Type |
@@ -1170,13 +1179,13 @@ Indexes: `(order_id, at desc)`
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
 | `orders.order.placed` | An order is created after an authorized or pending payment | `{ orderId: uuid, ref: string, checkoutSessionId: uuid, customerId: uuid?, guestEmail: email?, paymentIntentId: uuid, paymentState: enum(accepted|pending_check), total: Money, couponCodes: string[], groups: PlacedGroup[], placedAt: datetime }` | advertising, customers, fulfillment-service, payments, promotions, reports, search, trust, wallet |
-| `orders.order.accepted` | Payment accepted: fulfillment tasks start, confirmation is sent | `{ orderId: uuid, ref: string, customerId: uuid?, contactEmail: email, total: Money, groups: PlacedGroup[], reservationId: uuid?, acceptedAt: datetime }` | finance, inventory, notifications, payments, reports, sellers, shipping, warehouse |
+| `orders.order.accepted` | Payment accepted: fulfillment tasks start, confirmation is sent | `{ orderId: uuid, ref: string, customerId: uuid?, contactEmail: email, total: Money, groups: PlacedGroup[], items: AcceptedItem[], reservationId: uuid?, acceptedAt: datetime }` | finance, inventory, notifications, payments, reports, sellers, shipping, warehouse |
 | `orders.order.cancelled` | A pending payment was declined, or every item was cancelled | `{ orderId: uuid, ref: string, reason: enum(payment_declined|all_items_cancelled), checkoutSessionId: uuid }` | checkout, payments |
 | `orders.order.completed` | Every item is final and no return, case or refund is open | `{ orderId: uuid, ref: string, completedAt: datetime }` | messaging, reports |
 | `orders.item.state_changed` | Any item state change (for timelines, notifications and reports) | `{ orderId: uuid, groupId: uuid, itemId: uuid, from: string, to: string, actor: Actor, at: datetime }` | - |
 | `orders.item.cancelled` | Items are cancelled (customer request accepted, seller cannot fulfill, staff) | `{ orderId: uuid, ref: string, customerId: uuid?, contactEmail: email?, groupId: uuid, ownerType: enum(official|seller), sellerId: uuid?, itemId: uuid, offerId: uuid, stockItemId: uuid, quantity: int, cancellationId: uuid, initiatedBy: enum(customer|seller|staff|system), reasonCode: string, beforeDispatch: bool, countsAgainstSeller: bool, refund: RefundBreakdownPayload, paymentIntentId: uuid, trustReportId: uuid? }` | advertising, finance, fulfillment-service, inventory, notifications, payments, promotions, reports, returns, reviews, sellers, shipping, support, trust, warehouse, workqueues |
 | `orders.item.delayed` | Items become Delayed (seller report or overdue dispatch) | `{ orderId: uuid, customerId: uuid?, contactEmail: email?, groupId: uuid, itemIds: uuid[], source: enum(seller|overdue), expectedDispatchBy: datetime?, reason: string }` | notifications |
-| `orders.item.delivered` | Items in a delivered shipment become Delivered | `{ orderId: uuid, groupId: uuid, ownerType: enum(official|seller), sellerId: uuid?, itemId: uuid, quantity: int, deliveredAt: datetime, returnWindowEndsAt: datetime }` | finance, reports, returns, reviews |
+| `orders.item.delivered` | Items in a delivered shipment become Delivered | `{ orderId: uuid, groupId: uuid, ownerType: enum(official|seller), sellerId: uuid?, itemId: uuid, quantity: int, deliveredAt: datetime, returnWindowEndsAt: datetime, customerId: uuid?, contactEmail: email? }` | finance, reports, returns, reviews |
 | `orders.cancellation.requested` | A customer asks to cancel items that need the seller's confirmation | `{ cancellationId: uuid, orderId: uuid, groupId: uuid, sellerId: uuid?, itemIds: uuid[], respondBy: datetime }` | - |
 | `orders.cancellation.decided` | A request is accepted, auto-accepted, declined or withdrawn | `{ cancellationId: uuid, orderId: uuid, customerId: uuid?, contactEmail: email?, outcome: enum(accepted|auto_accepted|declined|withdrawn), by: Actor }` | notifications |
 | `orders.dispatch_deadline.changed` | A group's dispatch deadline is recalculated or extended by staff | `{ orderId: uuid, groupId: uuid, dueAt: datetime, previousDueAt: datetime, reason: string, by: Actor }` | shipping |
@@ -1278,13 +1287,13 @@ Indexes: `(order_id, at desc)`
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| orderRefPrefix | `"MK"` | Prefix of MK-YYMMDD-NNNNN (date in market time zone) |
-| sellerCancellationResponse | `"next_business_day_17:00"` | When a seller must answer a customer cancellation request before it is auto-accepted |
-| officialCancelUntil | `"picking_started"` | Official Store items are cancelled instantly until warehouse picking starts |
-| dueSoonMinutes | `120` | Flag 'Due soon' this long before a dispatch deadline |
-| sellerAddressVisibleDays | `30` | Days after delivery the seller still sees the full ship-to address |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| orderRefPrefix | `"MK"` | string, read-only | Prefix of MK-YYMMDD-NNNNN (date in market time zone) |
+| sellerCancellationResponse | `"next_business_day_17:00"` | string, approval: second reviewer, seller-visible | When a seller must answer a customer cancellation request before it is auto-accepted |
+| officialCancelUntil | `"picking_started"` | string | Official Store items are cancelled instantly until warehouse picking starts |
+| dueSoonMinutes | `120` | duration, minutes, 0–…, seller-visible | Flag 'Due soon' this long before a dispatch deadline |
+| sellerAddressVisibleDays | `30` | duration, days, 0–…, approval: second reviewer, seller-visible | Days after delivery the seller still sees the full ship-to address |
 
 ## Notes
 - Order shape (plan ch. 7, 12): Order → seller groups (one per seller package; Official Store is its own group) → items → shipments (from shipping). A group can ship in several packages (partial shipments); shipment references live on items.

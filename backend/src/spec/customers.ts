@@ -1912,39 +1912,65 @@ export const spec = defineModuleSpec({
   settings: {
     "maxAddresses": {
       "default": 20,
-      "desc": "Saved addresses per customer"
+      "desc": "Saved addresses per customer",
+      "type": "int",
+      "min": 1
     },
     "recentlyViewedShown": {
       "default": 12,
-      "desc": "Items returned to the home page by default"
+      "desc": "Items returned to the home page by default",
+      "type": "int",
+      "min": 1
     },
     "recentlyViewedRetained": {
       "default": 50,
-      "desc": "Items kept per owner"
+      "desc": "Items kept per owner",
+      "type": "int",
+      "min": 1
     },
     "recentlyViewedRetentionDays": {
       "default": 90,
-      "desc": "Days a view is kept"
+      "desc": "Days a view is kept",
+      "type": "duration",
+      "min": 1,
+      "unit": "days"
     },
     "dataExportSlaHours": {
       "default": 48,
-      "desc": "Promised time to deliver a data export"
+      "desc": "Promised time to deliver a data export",
+      "type": "duration",
+      "min": 1,
+      "max": 720,
+      "unit": "hours",
+      "approval": "second_reviewer"
     },
     "exportLinkValidDays": {
       "default": 7,
-      "desc": "Download link lifetime"
+      "desc": "Download link lifetime",
+      "type": "duration",
+      "min": 1,
+      "unit": "days"
     },
     "closureCoolingOffDays": {
       "default": 14,
-      "desc": "Days before a requested closure completes; the customer can cancel until then"
+      "desc": "Days before a requested closure completes; the customer can cancel until then",
+      "type": "duration",
+      "min": 0,
+      "unit": "days",
+      "approval": "second_reviewer"
     },
     "guestLookupAttemptsPerHour": {
       "default": 10,
-      "desc": "Lookups per IP and per email"
+      "desc": "Lookups per IP and per email",
+      "type": "int",
+      "min": 1
     },
     "overviewSourceTimeoutMs": {
       "default": 300,
-      "desc": "Per-module budget for the account overview aggregate"
+      "desc": "Per-module budget for the account overview aggregate",
+      "type": "duration",
+      "min": 50,
+      "unit": "milliseconds"
     }
   },
   errorCodes: {

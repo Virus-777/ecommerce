@@ -559,14 +559,14 @@ Indexes: `unique (customer_id, offer_id)`, `(guest_session_id)`
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| guestCartRetentionDays | `30` | Idle days before a guest cart expires ('Items stay in your cart for 30 days') |
-| customerCartRetentionDays | `90` | Idle days before a customer cart expires |
-| maxLines | `50` | Distinct lines per cart (CART_FULL above) |
-| maxQuantityPerLine | `10` | Upper bound when an offer has no purchase limit |
-| showPriceDecreaseNotices | `true` | Show an info notice when a price drops (accepted automatically) |
-| couponPreviewRateLimitPerHour | `30` | Coupon attempts per owner per hour |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| guestCartRetentionDays | `30` | duration, days, 1–… | Idle days before a guest cart expires ('Items stay in your cart for 30 days') |
+| customerCartRetentionDays | `90` | duration, days, 1–… | Idle days before a customer cart expires |
+| maxLines | `50` | int, 1–… | Distinct lines per cart (CART_FULL above) |
+| maxQuantityPerLine | `10` | int, 1–… | Upper bound when an offer has no purchase limit |
+| showPriceDecreaseNotices | `true` | bool | Show an info notice when a price drops (accepted automatically) |
+| couponPreviewRateLimitPerHour | `30` | int, 1–… | Coupon attempts per owner per hour |
 
 ## Notes
 - Dependencies: architecture lists offers and inventory. catalog is optional and only used for display fields that offers does not return; shipping (package estimates, coverage) and promotions (coupon preview, was-price) are optional so the cart still works with flat offer data when they are off; customers resolves saved address ids for the deliver-to location.

@@ -26,7 +26,8 @@ export type IdTable =
   | 'statements'
   | 'trading_entries'
   | 'trading_targets'
-  | 'recon_items';
+  | 'recon_items'
+  | 'seller_credits';
 
 export type AccountRec = Db['seller_accounts'];
 export type EntryRec = Db['ledger_entries'];
@@ -47,6 +48,7 @@ export type TradingRec = Db['trading_entries'];
 export type TargetRec = Db['trading_targets'];
 export type ReconDayRec = Db['recon_days'];
 export type ReconItemRec = Db['recon_items'];
+export type SellerCreditRec = Db['seller_credits'];
 
 /** A column condition: a value (=), a list (in), null (is null) or an operator */
 export type Cond<V> = V | readonly V[] | { op: '<' | '<=' | '>' | '>=' | '<>' | 'is not' | 'like' | 'not in'; value: V | readonly V[] | null };

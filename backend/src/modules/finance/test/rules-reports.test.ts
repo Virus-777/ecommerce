@@ -249,6 +249,11 @@ describe('daily finance checks', () => {
     expect(k.refunds).toEqual([expect.objectContaining({ origin: 'correction', originId: mismatchId, items: [expect.objectContaining({ amount: USD(200) })] })]);
     const done = await k.call('GET', `${ADMIN}/reconciliation/items?status=corrected`, k.staff);
     expect(done.body.items[0]).toMatchObject({ id: mismatchId, correction: { status: 'applied', resultReference: { kind: 'refund' } } });
+    // closing an item tells workqueues: explained, then corrected once the approved correction was applied
+    expect(k.of('finance.reconciliation.item_closed').filter((x) => [orphanId, mismatchId].includes(x.itemId))).toEqual([
+      { itemId: orphanId, check: 'unexplained_amount', date: today(), outcome: 'explained' },
+      { itemId: mismatchId, check: 'payments_vs_orders', date: today(), outcome: 'corrected' },
+    ]);
     const signed = await k.call('POST', `${ADMIN}/reconciliation/days/${today()}/complete`, k.staff, { note: 'All explained' });
     expect(signed.status, JSON.stringify(signed.body)).toBe(200);
     expect(signed.body).toMatchObject({ status: 'completed', openMismatches: 0 });
@@ -263,6 +268,90 @@ describe('daily finance checks', () => {
     const items = await k.call('GET', `${ADMIN}/reconciliation/items?date=${day}&check=provider_deposit`, k.staff);
     expect(items.body.items).toEqual([expect.objectContaining({ check: 'provider_deposit', difference: USD(-50), status: 'open' })]);
     expect((await k.call('GET', `${ADMIN}/reconciliation/items?check=seller_amounts`, k.staff)).body.items).toEqual([]);
+
+    // the provider corrects its report: the same day's check run again now matches and the item is closed
+    k.provider.setDeposit(day, USD(12_000 + 12_200 + 999));
+    await k.app.kernel.jobs.runNow('finance.reconcile.daily');
+    await k.app.kernel.events.drain();
+    const deposit = (await k.call('GET', `${ADMIN}/reconciliation/items?date=${day}&check=provider_deposit&status=matched`, k.staff)).body.items;
+    expect(deposit).toEqual([expect.objectContaining({ status: 'matched', difference: USD(0) })]);
+    expect(k.of('finance.reconciliation.item_closed').filter((x) => x.itemId === deposit[0].id)).toEqual([{ itemId: deposit[0].id, check: 'provider_deposit', date: day, outcome: 'matched' }]);
+    await k.app.kernel.jobs.runNow('finance.reconcile.daily'); // nothing more to close
+    await k.app.kernel.events.drain();
+    expect(k.of('finance.reconciliation.item_closed').filter((x) => x.itemId === deposit[0].id)).toHaveLength(1);
+  });
+
+  it('compares card captures plus store credit with the total less the items cancelled before the capture', async () => {
+    const S = newId();
+    const captured = (orderId: string, o: { card: number; credit?: number; groupId?: string }) => {
+      const captureId = newId();
+      return {
+        captureId,
+        emit: () => k.emit('payments.payment.captured', { intentId: newId(), captureId, orderId, groupId: o.groupId ?? null, amount: USD(o.card), creditAmount: o.credit === undefined ? null : USD(o.credit), allocations: [], providerRef: `ch_${captureId.slice(0, 6)}`, capturedAt: k.clock.now().toISOString() }),
+      };
+    };
+    const itemOf = async (captureId: string) => (await k.svc.core.repo.findOne('recon_items', { ref_kind: 'capture', ref_id: captureId }))!;
+
+    // a mixed payment: 7 000 on the card and 3 000 of store credit for a 10 000 order is no mismatch
+    const mixed = k.order(S, [{ title: 'Lamp', quantity: 1, price: 6_000 }, { title: 'Shade', quantity: 1, price: 4_000 }]);
+    const c1 = captured(mixed.id, { card: 7_000, credit: 3_000 });
+    await c1.emit();
+    expect(await itemOf(c1.captureId)).toMatchObject({ check: 'payments_vs_orders', status: 'matched', expected: 7_000, actual: 7_000, difference: 0 });
+    expect((await itemOf(c1.captureId)).description).toContain('plus store credit $30.00');
+
+    // per package with an item cancelled before it was charged: the package total less that item
+    const split = k.order(S, [{ title: 'Desk', quantity: 1, price: 9_000 }, { title: 'Chair', quantity: 1, price: 5_000, state: 'cancelled' }]);
+    const group = split.groups[0]!;
+    const c2 = captured(split.id, { card: 6_000, credit: 3_000, groupId: group.id });
+    await c2.emit();
+    expect(await itemOf(c2.captureId)).toMatchObject({ status: 'matched', expected: 6_000, actual: 6_000, difference: 0 });
+    expect((await itemOf(c2.captureId)).description).toContain('less $50.00 of cancelled items');
+
+    // an item cancelled after the capture was refunded, not left out of the capture
+    const after = k.order(S, [{ title: 'Rug', quantity: 1, price: 8_000, state: 'cancelled', refunded: true }]);
+    const c3 = captured(after.id, { card: 8_000 });
+    await c3.emit();
+    expect(await itemOf(c3.captureId)).toMatchObject({ status: 'matched', difference: 0 });
+
+    // a real difference is still a mismatch: card plus credit 100 more than the order
+    const over = k.order(S, [{ title: 'Vase', quantity: 1, price: 5_000 }]);
+    const c4 = captured(over.id, { card: 2_100, credit: 3_000 });
+    await c4.emit();
+    const mismatch = await itemOf(c4.captureId);
+    expect(mismatch).toMatchObject({ status: 'open', expected: 2_000, actual: 2_100, difference: 100 });
+    expect(k.of('finance.reconciliation.mismatch_found')).toContainEqual({ itemId: mismatch.id, check: 'payments_vs_orders', difference: USD(100) });
+    await c4.emit(); // redelivered: nothing new
+    expect(k.of('finance.reconciliation.mismatch_found').filter((x) => x.itemId === mismatch.id)).toHaveLength(1);
+    const ids = await Promise.all([c1, c2, c3, c4].map(async (c) => (await itemOf(c.captureId)).id));
+    expect(k.of('finance.reconciliation.item_closed').filter((x) => ids.includes(x.itemId))).toEqual([]); // items matched at once never opened
+
+    // the provider deposit is card money only
+    const day = k.svc.core.today();
+    k.provider.setDeposit(day, USD(7_000 + 6_000 + 8_000 + 2_100));
+    k.clock.advance(DAY);
+    await k.app.kernel.jobs.runNow('finance.reconcile.daily');
+    await k.app.kernel.events.drain();
+    expect((await k.call('GET', `${ADMIN}/reconciliation/items?date=${day}&check=provider_deposit&status=matched`, k.staff)).body.items).toEqual([expect.objectContaining({ difference: USD(0) })]);
+  });
+
+  it('closes an earlier seller balance mismatch once the balance matches the ledger again', async () => {
+    const S = newId();
+    await k.accept(k.order(S, [{ title: 'Kettle', quantity: 1, price: 3_000 }]));
+    const repo = k.svc.core.repo;
+    const acct = (await repo.findOne('seller_accounts', { seller_id: S }))!;
+    await repo.updateWhere('seller_accounts', { seller_id: S }, { available: acct.available + 5 });
+    const first = k.svc.core.today();
+    k.clock.advance(DAY);
+    await k.app.kernel.jobs.runNow('finance.reconcile.daily');
+    await k.app.kernel.events.drain();
+    const open = await repo.find('recon_items', { check: 'seller_amounts', ref_id: S });
+    expect(open).toEqual([expect.objectContaining({ status: 'open', difference: 5, date: first })]);
+    await repo.updateWhere('seller_accounts', { seller_id: S }, { available: acct.available });
+    k.clock.advance(DAY);
+    await k.app.kernel.jobs.runNow('finance.reconcile.daily');
+    await k.app.kernel.events.drain();
+    expect(await repo.get('recon_items', open[0]!.id)).toMatchObject({ status: 'matched', difference: 0 });
+    expect(k.of('finance.reconciliation.item_closed').filter((x) => x.itemId === open[0]!.id)).toEqual([{ itemId: open[0]!.id, check: 'seller_amounts', date: first, outcome: 'matched' }]);
   });
 });
 

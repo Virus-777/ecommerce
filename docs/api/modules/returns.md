@@ -1295,7 +1295,7 @@ Indexes: `(return_id, at)`
 | `returns.return.escalated` | Customer asks Marketly to step in, a seller misses a deadline, or staff take over | `{ returnId: uuid, ownerType: enum(official|seller), sellerId: uuid?, orderId: uuid, reason: string, by: Actor }` | notifications, support, workqueues |
 | `returns.return.shipped` | Return parcel dropped off (first carrier scan or customer tracking) | `{ returnId: uuid, trackingNumber: string? }` | - |
 | `returns.return.received` | Return received at the warehouse or seller address | `{ returnId: uuid, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, items: ReturnedItem[], receivedAt: datetime }` | fulfillment-service, inventory, notifications, orders |
-| `returns.return.inspected` | Inspection recorded | `{ returnId: uuid, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, conditionOutcome: string, proposedStockOutcome: string, variantId: uuid, quantity: int }` | inventory, notifications, reports |
+| `returns.return.inspected` | Inspection recorded | `{ returnId: uuid, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, conditionOutcome: string, proposedStockOutcome: string, orderItemId: uuid, variantId: uuid, stockItemId: uuid?, quantity: int }` | inventory, notifications, reports |
 | `returns.return.completed` | The remedy finished (refund sent, replacement shipped, credit issued) | `{ returnId: uuid, outcome: enum(refunded|partly_refunded|replaced|exchanged|credited) }` | - |
 | `returns.return.cancelled` | Customer withdraws, information or drop-off deadline expires | `{ returnId: uuid, by: Actor, reason: string? }` | orders |
 | `returns.label.created` | A prepaid return label is issued; finance charges the payer | `{ returnId: uuid, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, labelId: uuid, orderId: uuid, cost: Money, paidBy: enum(seller|customer|platform) }` | finance, notifications |
@@ -1406,17 +1406,17 @@ Checked through the access module (limits per role, second reviewer).
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| baselineWindowDays | `30` | Fallback when no policy version is active (example) |
-| changeOfMindReturnFee | `{"amount":799,"currency":"USD"}` | Deducted when the customer pays return shipping (example) |
-| sellerResponseBusinessDays | `2` | Respond-by target for sellers (example) |
-| platformInterventionGraceHours | `0` | Hours after a missed seller deadline before Marketly takes over |
-| autoApproveOfficialWithinWindow | `true` | Official Store returns inside the window are approved automatically |
-| maxPhotosPerReturn | `6` | Photos or short videos per return request |
-| maxMediaMb | `10` | Upload size per file |
-| inspectionChecksByCategory | `{}` | Category id → functional and hygiene checks added to the inspection checklist (e.g. Headphones: powers on and pairs, ear cushions clean) |
-| refundRefPrefix | `"RF-"` | Human reference prefix for refund requests |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| baselineWindowDays | `30` | duration, days, 1–…, approval: business owner, seller-visible, 14 d notice | Fallback when no policy version is active (example) |
+| changeOfMindReturnFee | `{"amount":799,"currency":"USD"}` | money, 0–…, approval: business owner, seller-visible, 14 d notice | Deducted when the customer pays return shipping (example) |
+| sellerResponseBusinessDays | `2` | duration, business days, 1–…, approval: second reviewer, seller-visible | Respond-by target for sellers (example) |
+| platformInterventionGraceHours | `0` | duration, hours, 0–…, seller-visible | Hours after a missed seller deadline before Marketly takes over |
+| autoApproveOfficialWithinWindow | `true` | bool, approval: second reviewer | Official Store returns inside the window are approved automatically |
+| maxPhotosPerReturn | `6` | int, 1–20 | Photos or short videos per return request |
+| maxMediaMb | `10` | int, MB, 1–… | Upload size per file |
+| inspectionChecksByCategory | `{}` | json | Category id → functional and hygiene checks added to the inspection checklist (e.g. Headphones: powers on and pairs, ear cushions clean) |
+| refundRefPrefix | `"RF-"` | string, read-only | Human reference prefix for refund requests |
 
 ## Integrations
 - **Carrier return labels (through shipping)**: Prepaid labels and QR drop-off codes; tracking events for return parcels

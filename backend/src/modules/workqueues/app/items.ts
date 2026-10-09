@@ -9,14 +9,14 @@ import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type { Actor, Money, Page } from '../../../spec/common.js';
 import type { EscalationStep, SellerTask, WorkItem, WorkItemNote, WorkSubject } from '../../../spec/workqueues.js';
-import { ACTIVE_STATES, bump, isActive, isArea, priorityRank, PRIORITIES, sellerScreen, type Kind, type Priority } from '../domain/catalog.js';
+import { ACTIVE_STATES, bump, isActive, isArea, KIND_QUEUES, priorityRank, PRIORITIES, sellerScreen, type Kind, type Priority } from '../domain/catalog.js';
 import type { Link } from '../domain/intake.js';
 import { deadlineState, durationLabel, nextStep, parseDuration, stepTarget } from '../domain/rules.js';
 import { workItemMachine } from '../domain/state-machines.js';
 import type { ItemQuery, ItemRow, ItemSort, Match, QueueRow, WorkqueuesRepository } from '../ports.js';
 import { SYSTEM, type By, type Core, type Viewer } from './core.js';
 
-const KINDS = new Set<string>(['overdue_dispatch', 'missing_tracking', 'delivery_exception', 'seller_cannot_fulfill', 'low_stock', 'receiving', 'pick_pack', 'return_inspection', 'return_decision', 'approval_waiting', 'case_past_target', 'case_escalated', 'payout_failed', 'payment_check', 'payment_mismatch', 'chargeback', 'hold_review', 'product_review', 'application_waiting', 'launch_review', 'appeal_due', 'restriction_review', 'restriction_evidence', 'seller_performance', 'storefront_review', 'trust_report', 'trust_recommendation', 'data_request', 'seller_reply_overdue', 'manual_task']);
+const KINDS = new Set<string>(['overdue_dispatch', 'missing_tracking', 'delivery_exception', 'seller_cannot_fulfill', 'low_stock', 'receiving', 'pick_pack', 'return_inspection', 'return_decision', 'approval_waiting', 'case_past_target', 'case_escalated', 'payout_failed', 'payment_check', 'payment_mismatch', 'chargeback', 'hold_review', 'product_review', 'application_waiting', 'launch_review', 'appeal_due', 'restriction_review', 'restriction_evidence', 'seller_performance', 'storefront_review', 'trust_report', 'trust_recommendation', 'data_request', 'seller_reply_overdue', 'unexpected_return_parcel', 'return_parcel_overdue', 'manual_task']);
 const STATES = new Set<string>(['open', 'assigned', 'in_progress', 'waiting', 'resolved', 'dismissed']);
 const DEADLINES = new Set<string>(['on_time', 'due_soon', 'overdue']);
 const SORTS = new Set<string>(['deadline', 'oldest', 'priority', 'amount']);
@@ -93,8 +93,7 @@ export class Items {
     if (spec.priority && !PRIORITIES.includes(spec.priority)) throw invalid('priority', 'Unknown priority');
     if (spec.sellerId && !isUuid(spec.sellerId)) throw invalid('sellerId', 'Not a seller id');
     if (spec.customerId && !isUuid(spec.customerId)) throw invalid('customerId', 'Not a customer id');
-    const queue = await this.repo.getQueue(spec.queueKey);
-    if (!queue) throw invalid('queueKey', `Unknown queue ${spec.queueKey}`);
+    const queue = await this.#queueFor(spec);
     const dueAt = spec.dueAt ? new Date(spec.dueAt) : null;
     if (dueAt && Number.isNaN(dueAt.getTime())) throw invalid('dueAt', 'Not a date-time');
     const now = core.now();
@@ -185,6 +184,18 @@ export class Items {
         throw err;
       }
     }
+  }
+
+  /** The queue of a raise: the kind's own queue when it is installed and active (KIND_QUEUES), else the one named */
+  async #queueFor(spec: RaiseSpec): Promise<QueueRow> {
+    const home = KIND_QUEUES[spec.kind as Kind];
+    if (home && home !== spec.queueKey) {
+      const q = await this.repo.getQueue(home);
+      if (q?.active) return q;
+    }
+    const queue = await this.repo.getQueue(spec.queueKey);
+    if (!queue) throw invalid('queueKey', `Unknown queue ${spec.queueKey}`);
+    return queue;
   }
 
   #content(spec: RaiseSpec): Partial<ItemRow> {

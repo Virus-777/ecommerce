@@ -340,3 +340,82 @@ describe('the spec correctness pass, replayed on the ledger', () => {
     expect(adj.body.items).toEqual([expect.objectContaining({ reasonCode: 'goodwill', direction: 'debit', amount: USD(700) })]);
   });
 });
+
+describe('seller credits without an original charge (creditSeller), replayed on the ledger', () => {
+  const S4 = newId();
+  const repo = () => k.svc.core.repo;
+  const lostUnit = (n: string) => ({ kind: 'fulfillment_service' as const, id: newId(), ref: `FS-CLAIM-${n}` });
+  const claim1 = lostUnit('1');
+
+  it('posts a credit up to creditSecondReviewerThreshold at once, once per key', async () => {
+    const before = await expectLedgerMatches(k, S4);
+    const input = { sellerId: S4, amount: USD(50_000), reason: 'Unit lost in the warehouse', reference: claim1, idempotencyKey: 'fs-lost-1' };
+    const credit = await k.svc.creditSeller(input);
+    expect(credit).toMatchObject({ sellerId: S4, status: 'posted', amount: USD(50_000), reference: claim1, approvalRequestId: null, requestedBy: { kind: 'system' }, ledgerEntry: { type: 'seller_credit', typeLabel: 'Credit from Marketly', amount: USD(50_000), bucket: 'available', reference: { kind: 'fulfillment_service', ref: 'FS-CLAIM-1' } } });
+    expect(credit.decidedAt).toBeTruthy();
+    const again = await k.svc.creditSeller({ ...input, amount: USD(1) }); // same key: the first credit
+    expect(again).toMatchObject({ id: credit.id, amount: USD(50_000), ledgerEntry: { id: credit.ledgerEntry!.id } });
+    expect((await expectLedgerMatches(k, S4)).available).toBe(before.available + 50_000);
+    expect(k.of('finance.seller_credit.decided').filter((e) => e.creditId === credit.id)).toEqual([]); // nothing waited for approval
+    expect(k.audits).toContainEqual(expect.objectContaining({ action: 'finance.seller_credit.post', target: expect.objectContaining({ type: 'seller_credit', id: credit.id, sellerId: S4 }) }));
+    // the seller sees it with the adjustments
+    const adj = await k.call('GET', `${SELLER}/ledger?type=adjustments`, k.sellerToken(S4));
+    expect(adj.body.items).toEqual([expect.objectContaining({ type: 'seller_credit', amount: USD(50_000) })]);
+  });
+
+  it('rejects invalid credits', async () => {
+    const base = { sellerId: S4, amount: USD(100), reason: 'Goodwill', reference: lostUnit('x'), idempotencyKey: newId() };
+    await expect(k.svc.creditSeller({ ...base, sellerId: 'nope' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    for (const bad of [{ amount: USD(0) }, { amount: USD(-5) }, { amount: { amount: 100, currency: 'EUR' } }, { reason: ' ' }, { idempotencyKey: '' }, { reference: { kind: 'nonsense', id: 'x' } }]) {
+      await expect(k.svc.creditSeller({ ...base, ...(bad as object) } as never)).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    }
+    expect(await repo().count('seller_credits', { seller_id: S4 })).toBe(1);
+  });
+
+  it('waits for a Finance reviewer above the threshold, then posts once on approval', async () => {
+    const before = await expectLedgerMatches(k, S4);
+    const input = { sellerId: S4, amount: USD(50_001), reason: 'Pallet damaged on receipt', reference: lostUnit('2'), idempotencyKey: 'fs-lost-2' };
+    const pending = await k.svc.creditSeller(input);
+    expect(pending).toMatchObject({ status: 'pending_approval', ledgerEntry: null, decidedAt: null });
+    expect(pending.approvalRequestId).toBeTruthy();
+    expect(k.approvals.get(pending.approvalRequestId!)).toMatchObject({ action: 'finance.credits.issue', target: { type: 'seller_credit', id: pending.id, sellerId: S4 }, amount: USD(50_001) });
+    expect((await k.svc.creditSeller(input)).id).toBe(pending.id);
+    expect(await expectLedgerMatches(k, S4)).toEqual(before); // nothing posted yet
+
+    await k.decide(pending.approvalRequestId!, 'approved');
+    await k.decide(pending.approvalRequestId!, 'approved'); // redelivered
+    const posted = (await repo().get('seller_credits', pending.id))!;
+    expect(posted).toMatchObject({ status: 'posted' });
+    expect(posted.ledger_entry_id).toBeTruthy();
+    expect((await expectLedgerMatches(k, S4)).available).toBe(before.available + 50_001);
+    const decided = k.of('finance.seller_credit.decided').filter((e) => e.creditId === pending.id);
+    expect(decided).toEqual([{ creditId: pending.id, sellerId: S4, reference: input.reference, idempotencyKey: 'fs-lost-2', amount: USD(50_001), outcome: 'posted', ledgerEntryId: posted.ledger_entry_id }]);
+    expect(await k.svc.creditSeller(input)).toMatchObject({ id: pending.id, status: 'posted', ledgerEntry: { id: posted.ledger_entry_id, recordedBy: { kind: 'staff' } } });
+  });
+
+  it('posts nothing when the credit is rejected', async () => {
+    const before = await expectLedgerMatches(k, S4);
+    const claim3 = lostUnit('3');
+    const pending = await k.svc.creditSeller({ sellerId: S4, amount: USD(90_000), reason: 'Claimed lost units', reference: claim3, idempotencyKey: 'fs-lost-3' });
+    await k.decide(pending.approvalRequestId!, 'rejected');
+    expect(await k.svc.creditSeller({ sellerId: S4, amount: USD(90_000), reason: 'again', reference: claim3, idempotencyKey: 'fs-lost-3' })).toMatchObject({ id: pending.id, status: 'rejected', ledgerEntry: null });
+    expect(k.of('finance.seller_credit.decided').filter((e) => e.creditId === pending.id)).toEqual([expect.objectContaining({ outcome: 'rejected', ledgerEntryId: null, amount: USD(90_000) })]);
+    expect(await expectLedgerMatches(k, S4)).toEqual(before);
+    // a later decision of the same request changes nothing
+    await k.decide(pending.approvalRequestId!, 'approved');
+    expect((await repo().get('seller_credits', pending.id))!.status).toBe('rejected');
+    expect(await expectLedgerMatches(k, S4)).toEqual(before);
+  });
+
+  it('keeps the balances equal to the ledger entries through immediate and approved credits', async () => {
+    const t = await expectLedgerMatches(k, S4);
+    expect(t).toEqual({ total: 100_001, pending: 0, held: 0, available: 100_001 });
+    const entries = await repo().find('ledger_entries', { seller_id: S4, type: 'seller_credit' });
+    expect(entries.map((e) => e.amount).sort((a, b) => a - b)).toEqual([50_000, 50_001]);
+    // the daily check finds no difference between the seller's balances and the ledger
+    k.clock.advance(DAY);
+    await k.app.kernel.jobs.runNow('finance.reconcile.daily');
+    await k.app.kernel.events.drain();
+    expect(await repo().count('recon_items', { check: 'seller_amounts', ref_id: S4 })).toBe(0);
+  });
+});

@@ -160,6 +160,75 @@ export function reservationStateOf(lines: { state: string }[]): ReservationState
   return 'released';
 }
 
+export interface MappableLine {
+  id: string;
+  stockItemId: string;
+  /** Units of the line (open units for a line nothing has left yet) */
+  quantity: number;
+  orderItemId: string | null;
+  /** Nothing fulfilled or released yet, so the line may be split between order items */
+  splittable: boolean;
+}
+
+export interface LineMapping {
+  lineId: string;
+  orderItemId: string | null;
+  /** The line's new quantity (the first piece) */
+  quantity: number;
+  /** Further pieces, each a new line at the same location (orderItemId null: units the order did not ask for) */
+  extra: { orderItemId: string | null; quantity: number }[];
+}
+
+/**
+ * Maps a reservation's lines to the order's items (orders.order.accepted items) by stock item and quantity.
+ * Lines already mapped (checkout's attachOrder) keep their order item and count against it; free lines are
+ * matched on exact quantity first, then filled in item order, splitting a line when it spans two order items
+ * (a hold has one line per stock item and location, an order one item per offer line). Only lines that change
+ * are returned.
+ */
+export function mapLinesToItems(lines: MappableLine[], items: { orderItemId: string; stockItemId: string; quantity: number }[]): LineMapping[] {
+  const out: LineMapping[] = [];
+  for (const stockItemId of new Set(lines.map((l) => l.stockItemId))) {
+    const need = new Map<string, number>();
+    for (const i of items) if (i.stockItemId === stockItemId && i.quantity > 0) need.set(i.orderItemId, (need.get(i.orderItemId) ?? 0) + i.quantity);
+    if (!need.size) continue;
+    const own = lines.filter((l) => l.stockItemId === stockItemId);
+    for (const l of own) if (l.orderItemId && need.has(l.orderItemId)) need.set(l.orderItemId, Math.max(0, need.get(l.orderItemId)! - l.quantity));
+    const free = own.filter((l) => !l.orderItemId && l.quantity > 0);
+    const done = new Set<string>();
+    // exact quantity first
+    for (const l of free) {
+      const hit = [...need].find(([, n]) => n === l.quantity);
+      if (!hit) continue;
+      need.set(hit[0], 0);
+      done.add(l.id);
+      out.push({ lineId: l.id, orderItemId: hit[0], quantity: l.quantity, extra: [] });
+    }
+    for (const l of free.filter((x) => !done.has(x.id))) {
+      const open = [...need].filter(([, n]) => n > 0);
+      if (!open.length) break;
+      if (!l.splittable) {
+        const [oid, n] = open.reduce((a, b) => (b[1] > a[1] ? b : a));
+        need.set(oid, Math.max(0, n - l.quantity));
+        out.push({ lineId: l.id, orderItemId: oid, quantity: l.quantity, extra: [] });
+        continue;
+      }
+      const pieces: { orderItemId: string | null; quantity: number }[] = [];
+      let left = l.quantity;
+      for (const [oid, n] of open) {
+        if (left <= 0) break;
+        const take = Math.min(left, n);
+        need.set(oid, n - take);
+        pieces.push({ orderItemId: oid, quantity: take });
+        left -= take;
+      }
+      if (left > 0) pieces.push({ orderItemId: null, quantity: left });
+      out.push({ lineId: l.id, orderItemId: pieces[0]!.orderItemId, quantity: pieces[0]!.quantity, extra: pieces.slice(1) });
+    }
+  }
+  return out;
+}
+
 /** Customer-facing label of an offer's stock */
 export function availabilityLabel(state: StockState, quantity: number, purchaseLimit: number | null): string {
   if (state === 'out_of_stock') return 'Out of stock';

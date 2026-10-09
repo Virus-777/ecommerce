@@ -477,6 +477,36 @@ export class WorkqueuesService implements WorkqueuesPublicApi {
     await this.intake.handle('customers.data_export.ready', event);
   }
 
+  /** finance.reconciliation.item_closed: Resolve the payment_mismatch item for that reconciliation item */
+  async onReconciliationItemClosedFromFinance(event: EventPayload<'finance.reconciliation.item_closed'>): Promise<void> {
+    await this.intake.handle('finance.reconciliation.item_closed', event);
+  }
+
+  /** payments.payment.authorized: Resolve the payment_check item when the pending check ends authorized */
+  async onPaymentAuthorizedFromPayments(event: EventPayload<'payments.payment.authorized'>): Promise<void> {
+    await this.intake.handle('payments.payment.authorized', event);
+  }
+
+  /** payments.chargeback.decided: Resolve the chargeback item (won or lost) */
+  async onChargebackDecidedFromPayments(event: EventPayload<'payments.chargeback.decided'>): Promise<void> {
+    await this.intake.handle('payments.chargeback.decided', event);
+  }
+
+  /** sellers.restriction.lifted: Resolve restriction_evidence and restriction_review items for that restriction */
+  async onRestrictionLiftedFromSellers(event: EventPayload<'sellers.restriction.lifted'>): Promise<void> {
+    await this.intake.handle('sellers.restriction.lifted', event);
+  }
+
+  /** sellers.restriction.updated: Resolve the restriction_evidence item (the restriction was changed instead of lifted) */
+  async onRestrictionUpdatedFromSellers(event: EventPayload<'sellers.restriction.updated'>): Promise<void> {
+    await this.intake.handle('sellers.restriction.updated', event);
+  }
+
+  /** warehouse.return_parcel.received: Resolve the return_parcel_overdue item for that parcel */
+  async onReturnParcelReceivedFromWarehouse(event: EventPayload<'warehouse.return_parcel.received'>): Promise<void> {
+    await this.intake.handle('warehouse.return_parcel.received', event);
+  }
+
   /* ---------------- jobs */
 
   /** Job workqueues.deadline-sweep (every 1 min): Move items to due_soon and overdue; publish workqueues.item.overdue once; escalate along each queue's route; route to the backup when the lead is away (access absences) */
@@ -494,9 +524,9 @@ export class WorkqueuesService implements WorkqueuesPublicApi {
     await this.routines.late();
   }
 
-  /** Job workqueues.day-end-prepare (daily 15:00 market time): Build today's day-end review from open items and other modules' forecasts */
+  /** Job workqueues.day-end-prepare (daily 15:00 market time): Build today's day-end review and publish workqueues.day_end.prepared (once per date) */
   async dayEndPrepare(): Promise<void> {
-    await this.dayEnd.prepare();
+    await this.dayEnd.prepareAndAnnounce();
   }
 
   /** Job workqueues.day-end-close (daily 23:59 market time): Mark an uncompleted review missed; snapshot daily_counts */

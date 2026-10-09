@@ -3186,35 +3186,66 @@ export const spec = defineModuleSpec({
   settings: {
     "featuredZoneGranularity": {
       "default": "postal3",
-      "desc": "Delivery zone key used to cache featured decisions (first 3 digits of the postal code)"
+      "desc": "Delivery zone key used to cache featured decisions (first 3 digits of the postal code)",
+      "type": "enum",
+      "choices": [
+        "postal3",
+        "postal5"
+      ],
+      "sellerVisible": false
     },
     "wasPriceLookbackDays": {
       "default": 30,
-      "desc": "Window for the lowest_30_days compare-at basis"
+      "desc": "Window for the lowest_30_days compare-at basis",
+      "type": "duration",
+      "min": 1,
+      "unit": "days",
+      "approval": "business_owner",
+      "sellerVisible": true
     },
     "largeSellerPriceChangePct": {
       "default": 50,
-      "desc": "Seller price changes above this need explicit confirmation"
+      "desc": "Seller price changes above this need explicit confirmation",
+      "type": "number",
+      "min": 1,
+      "unit": "%",
+      "sellerVisible": true
     },
     "minimumPriceByCategory": {
       "default": {},
-      "desc": "Category id → minimum price in minor units (e.g. Cables and adapters 500)"
+      "desc": "Category id → minimum price in minor units (e.g. Cables and adapters 500)",
+      "type": "json",
+      "approval": "second_reviewer",
+      "sellerVisible": true
     },
     "maxPurchaseLimit": {
       "default": null,
-      "desc": "Platform cap on per-customer purchase limits, if any"
+      "desc": "Platform cap on per-customer purchase limits, if any",
+      "type": "int",
+      "min": 1,
+      "sellerVisible": true
     },
     "bulkMaxRows": {
       "default": 5000,
-      "desc": "Rows per bulk file"
+      "desc": "Rows per bulk file",
+      "type": "int",
+      "min": 1,
+      "sellerVisible": true
     },
     "bulkPreviewHours": {
       "default": 24,
-      "desc": "How long a preview can be applied"
+      "desc": "How long a preview can be applied",
+      "type": "duration",
+      "min": 1,
+      "unit": "hours",
+      "sellerVisible": false
     },
     "maxSelectedPriceChanges": {
       "default": 100,
-      "desc": "Items per changeOwnPrices call"
+      "desc": "Items per changeOwnPrices call",
+      "type": "int",
+      "min": 1,
+      "sellerVisible": true
     }
   },
   errorCodes: {

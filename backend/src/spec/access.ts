@@ -2221,6 +2221,11 @@ export const spec = defineModuleSpec({
         ],
         [
           "pending_approval",
+          "approve",
+          "pending_acceptance"
+        ],
+        [
+          "pending_approval",
           "reject",
           "revoked"
         ],
@@ -2287,7 +2292,7 @@ export const spec = defineModuleSpec({
       "access.away.ended": { when: "An away period ends (on time or early)", payload: () => AccessAwayEndedEvent },
     },
     consumes: {
-      "identity.invitation.accepted": "Activate pending_acceptance role assignments of a newly accepted staff member",
+      "identity.invitation.accepted": "Activate pending_acceptance role assignments of a newly accepted staff member (including sensitive grants already approved); assignments still pending_approval wait for their approval and then become active",
       "identity.account.disabled": "Revoke all role assignments, remove the person as lead/backup, drop them from eligible approvers of open requests, and publish access.coverage.changed with the gap",
       "identity.account.locked": "Treat a locked staff member as unavailable for routing (backup receives) until unlocked",
       "identity.account.unlocked": "Restore routing to the unlocked staff member"
@@ -2322,26 +2327,42 @@ export const spec = defineModuleSpec({
   settings: {
     "approvalRequestTtlHours": {
       "default": 72,
-      "desc": "Open requests without a due date expire after this"
+      "desc": "Open requests without a due date expire after this",
+      "type": "duration",
+      "min": 1,
+      "unit": "hours",
+      "approval": "second_reviewer"
     },
     "reminderHoursBeforeDue": {
       "default": 4,
-      "desc": "Remind reviewers this long before dueAt"
+      "desc": "Remind reviewers this long before dueAt",
+      "type": "duration",
+      "min": 0,
+      "unit": "hours"
     },
     "reminderAfterHours": {
       "default": 24,
-      "desc": "Remind reviewers of undated requests waiting this long"
+      "desc": "Remind reviewers of undated requests waiting this long",
+      "type": "duration",
+      "min": 1,
+      "unit": "hours"
     },
     "reminderMinIntervalMinutes": {
       "default": 60,
-      "desc": "Manual reminders per request"
+      "desc": "Manual reminders per request",
+      "type": "duration",
+      "min": 1,
+      "unit": "minutes"
     },
     "stepUpAbove": {
       "default": {
         "amount": 1000000,
         "currency": "USD"
       },
-      "desc": "Money approvals above this need a fresh 2-step code"
+      "desc": "Money approvals above this need a fresh 2-step code",
+      "type": "money",
+      "min": 0,
+      "approval": "business_owner"
     },
     "sensitivePermissionPrefixes": {
       "default": [
@@ -2351,7 +2372,9 @@ export const spec = defineModuleSpec({
         "audit.entries.export",
         "settings.changes."
       ],
-      "desc": "Granting these needs a second reviewer"
+      "desc": "Granting these needs a second reviewer",
+      "type": "json",
+      "approval": "business_owner"
     }
   },
   errorCodes: {

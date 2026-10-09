@@ -9,7 +9,7 @@ import { decodeCursor, encodeCursor, toPageRequest, type PageRequest } from '../
 import type * as common from '../../../spec/common.js';
 import type * as identity from '../../../spec/identity.js';
 import type * as reports from '../../../spec/reports.js';
-import type { EvidenceInput, EvidenceItem, EvidenceRequest, MyReport, ReportRow, StoreReportInput, TrustOverview, TrustReport, TrustSubject } from '../../../spec/trust.js';
+import type { EvidenceInput, EvidenceItem, EvidenceRequest, MyReport, ReportReporter, ReportRow, StoreReportInput, TrustOverview, TrustReport, TrustSubject } from '../../../spec/trust.js';
 import { trustReportMachine, evidenceRequestMachine } from '../domain/state-machines.js';
 import { ACTIVE, FORM_TYPES, humanize, OUTCOMES, REPORT_TYPES, riskLevel, SUBJECT_TYPES, TYPE_LABELS, type ReportStatus, type SubjectType } from '../domain/rules.js';
 import type { Assessment, EvidenceRec, ReportFilter, ReportRec, TrustRepository } from '../ports.js';
@@ -483,8 +483,52 @@ export class Reports {
       },
       by,
     );
-    // no notification topic exists for rights-owner confirmations yet (see the report): the reference is the receipt
-    return { ref: agg.report.ref, confirmationSent: false };
+    // the receipt with the TR reference: notifications emails it to the contact address
+    this.core.publish('trust.rights_report.received', { reportId: id, ref: agg.report.ref, brandName: body.brandName.trim(), contactName: body.contactName.trim(), contactEmail: email }, by);
+    return { ref: agg.report.ref, confirmationSent: (this.core.ctx.modules as readonly string[]).includes('notifications') };
+  }
+
+  /**
+   * Who is told the outcome of a report: the customers, sellers and rights owners who filed it or a duplicate merged
+   * into it, once each (staff, detectors and other modules are not told). Customers stored under their account id
+   * are named by their customer id when the customers module knows them.
+   */
+  async reportersOf(reportId: string): Promise<ReportReporter[]> {
+    const rows: ReportRec[] = [];
+    const first = await this.core.repo.get('reports', reportId);
+    if (first) rows.push(first);
+    const seen = new Set([reportId]);
+    for (let frontier = [reportId]; frontier.length; ) {
+      const merged = (await this.core.repo.find('reports', { merged_into_id: frontier })).filter((r) => !seen.has(r.id));
+      merged.forEach((r) => seen.add(r.id));
+      rows.push(...merged);
+      frontier = merged.map((r) => r.id);
+    }
+    const out = new Map<string, ReportReporter>();
+    for (const r of rows) {
+      const name = r.reporter_name?.trim() || null;
+      if (r.reporter_kind === 'seller' && r.reporter_id && isUuid(r.reporter_id)) {
+        if (!out.has(`seller:${r.reporter_id}`)) out.set(`seller:${r.reporter_id}`, { kind: 'seller', sellerId: r.reporter_id, contactName: name });
+      } else if (r.reporter_kind === 'customer' && r.reporter_id && isUuid(r.reporter_id)) {
+        const customerId = await this.customerIdOf(r.reporter_id);
+        const key = customerId ? `customer:${customerId}` : `customer-contact:${r.reporter_contact ?? ''}`;
+        if ((customerId || r.reporter_contact) && !out.has(key)) out.set(key, { kind: 'customer', customerId, contactName: name, contactEmail: r.reporter_contact });
+      } else if (r.reporter_kind === 'brand_owner' && r.reporter_contact) {
+        // stored as "Contact Name (Brand)"
+        const contactName = name?.replace(/\s*\([^()]*\)$/, '') || name;
+        if (!out.has(`rights_owner:${r.reporter_contact}`)) out.set(`rights_owner:${r.reporter_contact}`, { kind: 'rights_owner', contactName, contactEmail: r.reporter_contact });
+      }
+    }
+    return [...out.values()];
+  }
+
+  /** The customer id of a stored customer reporter (stored under the account id when customers did not know them) */
+  private async customerIdOf(storedId: string): Promise<string | null> {
+    const c = await this.core.soft('customers', 'getCustomer', (m) => m.getCustomer(storedId));
+    if (c) return c.id;
+    if (c === undefined) return storedId; // customers is off or failing: the stored id is the best we have
+    const byAccount = await this.core.soft('customers', 'getCustomerByUserId', (m) => m.getCustomerByUserId(storedId));
+    return byAccount?.id ?? null;
   }
 
   /* ================================================================ reporter views */
@@ -794,6 +838,7 @@ export class Reports {
     if (issues.length) throw invalid(issues);
     const pre = await this.core.required(id);
     if (!['seller_application', 'account_risk'].includes(pre.report.type)) throw invalidField('type', 'Assessments are recorded on seller application and account risk reports');
+    const reporters = await this.reportersOf(id);
     const { after, payload } = await this.core.write(id, by, async (tx, agg, batch) => {
       const r = agg.report;
       let status = r.status;
@@ -820,7 +865,7 @@ export class Reports {
       await this.core.timeline(tx, id, [{ kind: 'assessed', label: `Assessment recorded: ${body.level} risk`, text: assessment.recommendation, actor: by.actor }]);
       const payload = { reportId: id, subjectType, subjectId, level: body.level, flags: assessment.flags, recommendation: assessment.recommendation, recommendedHoldDays: assessment.recommendedHoldDays ?? null };
       batch.push('trust.assessment.completed', payload);
-      batch.push('trust.report.resolved', { reportId: id, outcome: 'referred', reporterOutcome: null });
+      batch.push('trust.report.resolved', { reportId: id, ref: r.ref, outcome: 'referred', reporterOutcome: null, reporters });
       return { after, payload };
     });
     await this.core.audit({ action: 'trust.assessment.record', actionLabel: 'Recorded a risk assessment', target: this.target(after), after: payload }, by);
@@ -840,6 +885,7 @@ export class Reports {
     if (!text(body.summary)) issues.push({ path: 'summary', message: 'Summarise the decision' });
     if (!text(body.reporterOutcome)) issues.push({ path: 'reporterOutcome', message: 'What the reporter is told' });
     if (issues.length) throw invalid(issues);
+    const reporters = isUuid(id) ? await this.reportersOf(id) : [];
     const { before, after } = await this.core.write(id, by, async (tx, agg, batch) => {
       const status = this.ensure(agg.report.status, 'resolve');
       const open = agg.recommendations.filter((r) => r.state === 'sent_to_owner');
@@ -853,7 +899,7 @@ export class Reports {
       });
       await this.cancelOpenRequests(tx, agg, 'The report was resolved');
       await this.core.timeline(tx, id, [{ kind: 'resolved', label: `Resolved: ${humanize(body.outcome)}`, text: body.summary.trim(), actor: by.actor }]);
-      batch.push('trust.report.resolved', { reportId: id, outcome: body.outcome, reporterOutcome: body.reporterOutcome.trim() });
+      batch.push('trust.report.resolved', { reportId: id, ref: agg.report.ref, outcome: body.outcome, reporterOutcome: body.reporterOutcome.trim(), reporters });
       return { before: agg.report, after };
     });
     await this.core.audit({ action: 'trust.report.resolve', actionLabel: 'Resolved a trust report', target: this.target(after), reason: body.summary, before: { status: before.status }, after: { status: after.status, outcome: body.outcome, reporterOutcome: body.reporterOutcome } }, by);
@@ -865,6 +911,7 @@ export class Reports {
     if (!text(body.reason)) issues.push({ path: 'reason', message: 'Why is it dismissed?' });
     if (!text(body.reporterOutcome)) issues.push({ path: 'reporterOutcome', message: 'What the reporter is told' });
     if (issues.length) throw invalid(issues);
+    const reporters = isUuid(id) ? await this.reportersOf(id) : [];
     const { before, after } = await this.core.write(id, by, async (tx, agg, batch) => {
       const status = this.ensure(agg.report.status, 'dismiss');
       const now = this.core.now();
@@ -876,7 +923,7 @@ export class Reports {
       });
       await this.cancelOpenRequests(tx, agg, 'The report was dismissed');
       await this.core.timeline(tx, id, [{ kind: 'dismissed', label: 'Dismissed', text: body.reason.trim(), actor: by.actor }]);
-      batch.push('trust.report.resolved', { reportId: id, outcome: 'dismissed', reporterOutcome: body.reporterOutcome.trim() });
+      batch.push('trust.report.resolved', { reportId: id, ref: agg.report.ref, outcome: 'dismissed', reporterOutcome: body.reporterOutcome.trim(), reporters });
       return { before: agg.report, after };
     });
     await this.core.audit({ action: 'trust.report.dismiss', actionLabel: 'Dismissed a trust report', target: this.target(after), reason: body.reason, before: { status: before.status }, after: { status: after.status, reporterOutcome: body.reporterOutcome } }, by);

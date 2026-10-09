@@ -32,6 +32,7 @@ Every uploaded or generated file: images, video and documents. Signed direct upl
 |---|---|---|---|---|
 | POST | `/api/store/media/uploads` | Start an upload (return photos, case evidence, review photos, message attachments, seller application documents) | shopper | `UploadRequest` → `UploadTicket` |
 | POST | `/api/store/media/uploads/{id}/complete` | Confirm the bytes are uploaded; processing starts | shopper | `MediaAsset` |
+| PUT | `/api/store/media/uploads/{id}/content` | Send the file bytes of an upload (development storage) | shopper | raw bytes → 204 No content |
 | GET | `/api/store/media/assets/{id}` | My upload (poll until ready) | shopper | `MediaAsset` |
 | PATCH | `/api/store/media/assets/{id}` | Describe my photo (alt text) | shopper | `AssetUpdate` → `MediaAsset` |
 | DELETE | `/api/store/media/assets/{id}` | Remove my upload before submitting | shopper | 204 No content |
@@ -43,6 +44,7 @@ Every uploaded or generated file: images, video and documents. Signed direct upl
 |---|---|---|---|---|
 | POST | `/api/seller/media/uploads` | Start an upload (product images and video, store logo and banner, ad creatives, documents, inspection photos, case evidence, bulk files) | seller<br>`media.assets.upload` | `UploadRequest` → `UploadTicket` |
 | POST | `/api/seller/media/uploads/{id}/complete` | Confirm the upload; processing starts | seller<br>`media.assets.upload` | `MediaAsset` |
+| PUT | `/api/seller/media/uploads/{id}/content` | Send the file bytes of an upload (development storage) | seller<br>`media.assets.upload` | raw bytes → 204 No content |
 | GET | `/api/seller/media/assets` | Seller media library | seller | Page<MediaAsset> |
 | GET | `/api/seller/media/assets/{id}` | One file with where it is used and whether it can be deleted | seller | `MediaAssetDetail` |
 | PATCH | `/api/seller/media/assets/{id}` | Edit alt text or title | seller<br>`media.assets.upload` | `AssetUpdate` → `MediaAsset` |
@@ -56,6 +58,7 @@ Every uploaded or generated file: images, video and documents. Signed direct upl
 |---|---|---|---|---|
 | POST | `/api/admin/media/uploads` | Start a staff upload (Official Store products, content, ad creatives, inspection photos, evidence) | staff<br>`media.assets.manage` | `{ upload: UploadRequest, ownerKind: enum(platform|staff)? }` → `UploadTicket` |
 | POST | `/api/admin/media/uploads/{id}/complete` | Confirm a staff upload | staff<br>`media.assets.manage` | `MediaAsset` |
+| PUT | `/api/admin/media/uploads/{id}/content` | Send the file bytes of a staff upload (development storage) | staff<br>`media.assets.manage` | raw bytes → 204 No content |
 | GET | `/api/admin/media/assets` | All files with filters | staff<br>`media.assets.view` | Page<MediaAsset> |
 | GET | `/api/admin/media/assets/{id}` | File detail with usages, checks and history | staff<br>`media.assets.view` | `MediaAssetDetail` |
 | PATCH | `/api/admin/media/assets/{id}` | Edit alt text or title of a platform file | staff<br>`media.assets.manage` | `AssetUpdate` → `MediaAsset` |
@@ -100,7 +103,7 @@ Every uploaded or generated file: images, video and documents. Signed direct upl
 | uploadId | `uuid` |
 | assetId | `uuid` |
 | method | `enum(PUT|POST)` |
-| url | `url` Signed storage URL; upload the bytes directly to it |
+| url | `url` Signed storage URL; upload the bytes directly to it. With development storage it is this API's PUT /uploads/{id}/content in the same area |
 | headers | `map<string>` |
 | fields | `map<string>` Form fields for POST policy uploads |
 | maxBytes | `int` |
@@ -447,6 +450,7 @@ Indexes: `pk (owner_kind, owner_id, day)`
 | `ASSET_IN_USE` | 409 | The file is used by details.usages (product, offer, ad, page…); remove it there first. |
 | `ASSET_RETAINED` | 409 | The file is kept as evidence until details.retainUntil. |
 | `ASSET_NOT_OWNED` | 403 | The file belongs to another owner and cannot be attached here. |
+| `DEV_STORAGE_ONLY` | 409 | A real storage adapter is configured: upload the bytes to the ticket URL instead. |
 
 ## Background jobs
 
@@ -461,19 +465,19 @@ Indexes: `pk (owner_kind, owner_id, day)`
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| limitsByPurpose | `{"product_image":{"maxMB":20,"types":["jpeg","png","webp","heic"]},"product_video":{"maxMB":500,"types":["mp4","mov"]},"ad_creative":{"maxMB":5,"types":["jpeg","png","webp"]},"verification_document":{"maxMB":10,"types":["pdf","jpeg","png"]},"return_evidence":{"maxMB":15,"types":["jpeg","png","webp","heic","mp4"]},"bulk_file":{"maxMB":25,"types":["csv","xlsx"]}}` | Size and type limits per purpose (others default to 20 MB images, 25 MB documents) |
-| renditionWidths | `{"thumb":160,"small":320,"medium":640,"large":1280,"zoom":2048}` | Image rendition widths (WebP plus JPEG fallback) |
-| baselineImageRules | `{"minShortSide":500,"formats":["jpeg","png","webp","heic"]}` | Checks applied to every image regardless of caller rules |
-| uploadUrlTtlMinutes | `15` | Signed upload URL lifetime |
-| downloadUrlTtlMinutes | `10` | Signed download URL lifetime |
-| pendingUploadExpiryHours | `24` | Pending uploads expire after this |
-| orphanGraceDays | `30` | Never-attached files are deleted after this |
-| evidenceRetentionDays | `730` | Evidence files are kept at least this long after their last use (business decision to confirm) |
-| deletedGraceDays | `7` | Storage objects of deleted files are erased after this |
-| customerUploadsPerDay | `50` | Uploads per customer or guest per day |
-| sellerStorageQuotaGB | `20` | Storage per seller (QUOTA_EXCEEDED above it) |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| limitsByPurpose | `{"product_image":{"maxMB":20,"types":["jpeg","png","webp","heic"]},"product_video":{"maxMB":500,"types":["mp4","mov"]},"ad_creative":{"maxMB":5,"types":["jpeg","png","webp"]},"verification_document":{"maxMB":10,"types":["pdf","jpeg","png"]},"return_evidence":{"maxMB":15,"types":["jpeg","png","webp","heic","mp4"]},"bulk_file":{"maxMB":25,"types":["csv","xlsx"]}}` | json, seller-visible | Size and type limits per purpose (others default to 20 MB images, 25 MB documents) |
+| renditionWidths | `{"thumb":160,"small":320,"medium":640,"large":1280,"zoom":2048}` | json | Image rendition widths (WebP plus JPEG fallback) |
+| baselineImageRules | `{"minShortSide":500,"formats":["jpeg","png","webp","heic"]}` | json, seller-visible | Checks applied to every image regardless of caller rules |
+| uploadUrlTtlMinutes | `15` | duration, minutes, 1–60 | Signed upload URL lifetime |
+| downloadUrlTtlMinutes | `10` | duration, minutes, 1–60 | Signed download URL lifetime |
+| pendingUploadExpiryHours | `24` | duration, hours, 1–… | Pending uploads expire after this |
+| orphanGraceDays | `30` | duration, days, 1–… | Never-attached files are deleted after this |
+| evidenceRetentionDays | `730` | duration, days, 365–…, approval: business owner | Evidence files are kept at least this long after their last use (business decision to confirm) |
+| deletedGraceDays | `7` | duration, days, 0–… | Storage objects of deleted files are erased after this |
+| customerUploadsPerDay | `50` | int, 1–… | Uploads per customer or guest per day |
+| sellerStorageQuotaGB | `20` | int, GB, 1–…, seller-visible | Storage per seller (QUOTA_EXCEEDED above it) |
 
 ## Integrations
 - **S3-compatible storage**: Two buckets: public (renditions behind the CDN, immutable URLs) and private (originals, documents, evidence, generated files). Presigned PUT/POST for uploads, presigned GET for downloads, object-created notifications. Local disk adapter for development and tests.

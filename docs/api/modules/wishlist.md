@@ -219,7 +219,7 @@ Indexes: `(customer_id)`, `unique (customer_id) where is_default`
 | note | text? |
 | added_at | timestamptz |
 
-Indexes: `unique (list_id, product_id, variant_id)`, `(customer_id, product_id)`, `(product_id)`
+Indexes: `unique nulls not distinct (list_id, product_id, variant_id)`, `(customer_id, product_id)`, `(product_id)`
 
 **alerts**
 
@@ -292,14 +292,14 @@ Indexes: `(product_id, kind, state)`, `(customer_id, state)`
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| maxLists | `10` | Lists per customer |
-| maxItemsPerList | `500` | Items per list |
-| maxActiveAlerts | `100` | Active alerts per customer |
-| alertCooldownHours | `24` | Minimum time between notices for the same alert |
-| priceHintDays | `30` | Window for Lowest in N days |
-| minDropPct | `1` | Smallest drop that counts for 'any drop' |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| maxLists | `10` | int, 1–… | Lists per customer |
+| maxItemsPerList | `500` | int, 1–… | Items per list |
+| maxActiveAlerts | `100` | int, 0–… | Active alerts per customer |
+| alertCooldownHours | `24` | duration, hours, 1–… | Minimum time between notices for the same alert |
+| priceHintDays | `30` | duration, days, 1–… | Window for Lowest in N days |
+| minDropPct | `1` | number, %, 0–100 | Smallest drop that counts for 'any drop' |
 
 ## Notes
 - Phase 3 (plan ch. 20 Customer growth): the module ships as a scaffold and stays off at launch; account/wishlist is marked 'coming later'.

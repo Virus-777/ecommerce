@@ -378,11 +378,12 @@
         ["pending_acceptance", "accept", "active"],
         ["pending_acceptance", "revoke", "revoked"],
         ["pending_approval", "approve", "active"],
+        ["pending_approval", "approve", "pending_acceptance"],
         ["pending_approval", "reject", "revoked"],
         ["active", "revoke", "revoked"],
         ["active", "expire", "expired"]
       ],
-      "notes": "Assignments to invited staff wait for identity.invitation.accepted. Assigning a role that carries sensitive permissions, or assigning any role to yourself, creates pending_approval with a second reviewer (action access.roles.sensitive-grant). Disabling the account (identity.account.disabled) revokes all assignments."
+      "notes": "Assignments to invited staff wait for identity.invitation.accepted. Assigning a role that carries sensitive permissions, or assigning any role to yourself, creates pending_approval with a second reviewer (action access.roles.sensitive-grant). approve is guarded: it leads to active when the person has already accepted their invitation (an existing staff account), otherwise to pending_acceptance until identity.invitation.accepted. Disabling the account (identity.account.disabled) revokes all assignments."
     },
     {
       "name": "Away period", "field": "AwayPeriod.status", "initial": "scheduled",
@@ -449,7 +450,7 @@
       { "name": "access.away.ended", "when": "An away period ends (on time or early)", "payload": { "awayPeriodId": "uuid", "accountId": "uuid" } }
     ],
     "consumes": [
-      { "name": "identity.invitation.accepted", "does": "Activate pending_acceptance role assignments of a newly accepted staff member" },
+      { "name": "identity.invitation.accepted", "does": "Activate pending_acceptance role assignments of a newly accepted staff member (including sensitive grants already approved); assignments still pending_approval wait for their approval and then become active" },
       { "name": "identity.account.disabled", "does": "Revoke all role assignments, remove the person as lead/backup, drop them from eligible approvers of open requests, and publish access.coverage.changed with the gap" },
       { "name": "identity.account.locked", "does": "Treat a locked staff member as unavailable for routing (backup receives) until unlocked" },
       { "name": "identity.account.unlocked", "does": "Restore routing to the unlocked staff member" }
@@ -477,12 +478,12 @@
     { "name": "access.expire-assignments", "schedule": "hourly", "does": "Expire role assignments past expiresAt (temporary access)" }
   ],
   "settings": [
-    { "key": "approvalRequestTtlHours", "default": 72, "desc": "Open requests without a due date expire after this" },
-    { "key": "reminderHoursBeforeDue", "default": 4, "desc": "Remind reviewers this long before dueAt" },
-    { "key": "reminderAfterHours", "default": 24, "desc": "Remind reviewers of undated requests waiting this long" },
-    { "key": "reminderMinIntervalMinutes", "default": 60, "desc": "Manual reminders per request" },
-    { "key": "stepUpAbove", "default": { "amount": 1000000, "currency": "USD" }, "desc": "Money approvals above this need a fresh 2-step code" },
-    { "key": "sensitivePermissionPrefixes", "default": ["access.", "identity.staff-accounts.", "finance.", "audit.entries.export", "settings.changes."], "desc": "Granting these needs a second reviewer" }
+    { "key": "approvalRequestTtlHours", "type": "duration", "default": 72, "desc": "Open requests without a due date expire after this", "unit": "hours", "min": 1, "approval": "second_reviewer" },
+    { "key": "reminderHoursBeforeDue", "type": "duration", "default": 4, "desc": "Remind reviewers this long before dueAt", "unit": "hours", "min": 0 },
+    { "key": "reminderAfterHours", "type": "duration", "default": 24, "desc": "Remind reviewers of undated requests waiting this long", "unit": "hours", "min": 1 },
+    { "key": "reminderMinIntervalMinutes", "type": "duration", "default": 60, "desc": "Manual reminders per request", "unit": "minutes", "min": 1 },
+    { "key": "stepUpAbove", "type": "money", "default": { "amount": 1000000, "currency": "USD" }, "desc": "Money approvals above this need a fresh 2-step code", "min": 0, "approval": "business_owner" },
+    { "key": "sensitivePermissionPrefixes", "type": "json", "default": ["access.", "identity.staff-accounts.", "finance.", "audit.entries.export", "settings.changes."], "desc": "Granting these needs a second reviewer", "approval": "business_owner" }
   ],
   "errorCodes": {
     "SELF_APPROVAL_NOT_ALLOWED": { "status": 403, "meaning": "You cannot approve or reject your own request." },

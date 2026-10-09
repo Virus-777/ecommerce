@@ -578,11 +578,11 @@ Checked through the access module (limits per role, second reviewer).
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| appConfigCacheSeconds | `300` | Cache lifetime of GET /app-config |
-| defaultMinLeadDays | `0` | Minimum notice for definitions that do not set one |
-| sellerVisibleMinLeadDays | `14` | Minimum notice for changes announced to sellers |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| appConfigCacheSeconds | `300` | duration, seconds, 0–… | Cache lifetime of GET /app-config |
+| defaultMinLeadDays | `0` | duration, days, 0–…, approval: business owner | Minimum notice for definitions that do not set one |
+| sellerVisibleMinLeadDays | `14` | duration, days, 0–…, approval: business owner | Minimum notice for changes announced to sellers |
 
 ## Notes
 - Boundary: settings owns market-level values (market.*, support.*, checkout.*, apps.*) and the generic store for runtime settings that modules declare in their manifest (the same `settings` entries as in their specs, opted in with editable: true). Versioned business rule sets with their own lifecycle stay in their modules: returns baseline and category exceptions (returns), fee rules and payout/hold settings (finance), shipping defaults and holidays (shipping), advertising global rules (advertising), seller performance targets (sellers), SLA targets (support). Those modules register a section provider so GET /overview shows their values, last change and scheduled changes, and the page edits them through the owning module's endpoint (SectionLink).

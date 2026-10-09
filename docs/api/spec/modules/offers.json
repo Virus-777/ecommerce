@@ -2844,44 +2844,44 @@
   ],
   "settings": [
     {
-      "key": "featuredZoneGranularity",
+      "key": "featuredZoneGranularity", "type": "enum",
       "default": "postal3",
-      "desc": "Delivery zone key used to cache featured decisions (first 3 digits of the postal code)"
+      "desc": "Delivery zone key used to cache featured decisions (first 3 digits of the postal code)", "choices": ["postal3", "postal5"], "sellerVisible": false
     },
     {
-      "key": "wasPriceLookbackDays",
+      "key": "wasPriceLookbackDays", "type": "duration",
       "default": 30,
-      "desc": "Window for the lowest_30_days compare-at basis"
+      "desc": "Window for the lowest_30_days compare-at basis", "unit": "days", "min": 1, "approval": "business_owner", "sellerVisible": true
     },
     {
-      "key": "largeSellerPriceChangePct",
+      "key": "largeSellerPriceChangePct", "type": "number",
       "default": 50,
-      "desc": "Seller price changes above this need explicit confirmation"
+      "desc": "Seller price changes above this need explicit confirmation", "min": 1, "unit": "%", "sellerVisible": true
     },
     {
-      "key": "minimumPriceByCategory",
+      "key": "minimumPriceByCategory", "type": "json",
       "default": {},
-      "desc": "Category id → minimum price in minor units (e.g. Cables and adapters 500)"
+      "desc": "Category id → minimum price in minor units (e.g. Cables and adapters 500)", "approval": "second_reviewer", "sellerVisible": true
     },
     {
-      "key": "maxPurchaseLimit",
+      "key": "maxPurchaseLimit", "type": "int",
       "default": null,
-      "desc": "Platform cap on per-customer purchase limits, if any"
+      "desc": "Platform cap on per-customer purchase limits, if any", "min": 1, "sellerVisible": true
     },
     {
-      "key": "bulkMaxRows",
+      "key": "bulkMaxRows", "type": "int",
       "default": 5000,
-      "desc": "Rows per bulk file"
+      "desc": "Rows per bulk file", "min": 1, "sellerVisible": true
     },
     {
-      "key": "bulkPreviewHours",
+      "key": "bulkPreviewHours", "type": "duration",
       "default": 24,
-      "desc": "How long a preview can be applied"
+      "desc": "How long a preview can be applied", "unit": "hours", "min": 1, "sellerVisible": false
     },
     {
-      "key": "maxSelectedPriceChanges",
+      "key": "maxSelectedPriceChanges", "type": "int",
       "default": 100,
-      "desc": "Items per changeOwnPrices call"
+      "desc": "Items per changeOwnPrices call", "min": 1, "sellerVisible": true
     }
   ],
   "integrations": [

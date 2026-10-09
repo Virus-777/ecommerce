@@ -1450,7 +1450,7 @@ export const endpoints = defineEndpoints({
     summary: "Exchange a refresh token for new tokens",
     desc: "Rotates the refresh token. Presenting an already-rotated token revokes the session (theft signal) and returns REFRESH_TOKEN_INVALID. The Android app calls this when an access token expires.",
     body: () => z.object({
-      refreshToken: z.string().describe("Android; the website sends the __Host-mk_refresh cookie instead").nullish(),
+      refreshToken: z.string().describe("Android; the website sends the __Secure-mk_refresh cookie instead").nullish(),
     }),
     response: () => SessionTokens,
     status: 200,
@@ -1466,7 +1466,7 @@ export const endpoints = defineEndpoints({
     summary: "Sign out this device",
     desc: "Works for every audience; the refresh token identifies the session. Idempotent.",
     body: () => z.object({
-      refreshToken: z.string().describe("Android; the website sends the __Host-mk_refresh cookie instead").nullish(),
+      refreshToken: z.string().describe("Android; the website sends the __Secure-mk_refresh cookie instead").nullish(),
     }),
     response: null,
     status: 204,
@@ -2480,107 +2480,220 @@ export const spec = defineModuleSpec({
   settings: {
     "accessTokenTtlMinutes": {
       "default": 15,
-      "desc": "Access token lifetime"
+      "desc": "Access token lifetime",
+      "type": "duration",
+      "min": 5,
+      "max": 60,
+      "unit": "minutes",
+      "approval": "second_reviewer"
     },
     "refreshTtlHours": {
       "default": 24,
-      "desc": "Refresh lifetime without 'keep me signed in'"
+      "desc": "Refresh lifetime without 'keep me signed in'",
+      "type": "duration",
+      "min": 1,
+      "unit": "hours",
+      "approval": "second_reviewer"
     },
     "keepSignedInDays": {
       "default": 30,
-      "desc": "Refresh lifetime with 'keep me signed in' (members)"
+      "desc": "Refresh lifetime with 'keep me signed in' (members)",
+      "type": "duration",
+      "min": 1,
+      "max": 90,
+      "unit": "days",
+      "approval": "second_reviewer"
     },
     "staffSessionMaxHours": {
       "default": 12,
-      "desc": "Absolute limit for staff sessions"
+      "desc": "Absolute limit for staff sessions",
+      "type": "duration",
+      "min": 1,
+      "max": 24,
+      "unit": "hours",
+      "approval": "second_reviewer"
     },
     "maxFailedSignIns": {
       "default": 5,
-      "desc": "Wrong passwords before a temporary lock"
+      "desc": "Wrong passwords before a temporary lock",
+      "type": "int",
+      "min": 3,
+      "max": 20,
+      "approval": "second_reviewer"
     },
     "lockoutMinutes": {
       "default": 15,
-      "desc": "Length of the automatic lock"
+      "desc": "Length of the automatic lock",
+      "type": "duration",
+      "min": 1,
+      "unit": "minutes",
+      "approval": "second_reviewer"
     },
     "verificationCodeTtlMinutes": {
       "default": 10,
-      "desc": "Email and SMS code lifetime"
+      "desc": "Email and SMS code lifetime",
+      "type": "duration",
+      "min": 1,
+      "max": 60,
+      "unit": "minutes",
+      "approval": "second_reviewer"
     },
     "codeResendSeconds": {
       "default": 60,
-      "desc": "Wait before a code or reset link can be resent"
+      "desc": "Wait before a code or reset link can be resent",
+      "type": "duration",
+      "min": 10,
+      "unit": "seconds",
+      "approval": "second_reviewer"
     },
     "maxCodeAttempts": {
       "default": 5,
-      "desc": "Wrong codes before a challenge locks"
+      "desc": "Wrong codes before a challenge locks",
+      "type": "int",
+      "min": 1,
+      "max": 10,
+      "approval": "second_reviewer"
     },
     "passwordResetTtlMinutes": {
       "default": 30,
-      "desc": "Reset link lifetime"
+      "desc": "Reset link lifetime",
+      "type": "duration",
+      "min": 5,
+      "max": 120,
+      "unit": "minutes",
+      "approval": "second_reviewer"
     },
     "memberMinPasswordLength": {
       "default": 10,
-      "desc": "Members (register screen: at least 10 characters, one number, one uppercase)"
+      "desc": "Members (register screen: at least 10 characters, one number, one uppercase)",
+      "type": "int",
+      "min": 8,
+      "max": 64,
+      "unit": "characters",
+      "approval": "second_reviewer"
     },
     "staffMinPasswordLength": {
       "default": 12,
-      "desc": "Staff accounts"
+      "desc": "Staff accounts",
+      "type": "int",
+      "min": 12,
+      "max": 64,
+      "unit": "characters",
+      "approval": "second_reviewer"
     },
     "passwordHistoryCount": {
       "default": 5,
-      "desc": "Recent passwords that cannot be reused"
+      "desc": "Recent passwords that cannot be reused",
+      "type": "int",
+      "min": 0,
+      "max": 24,
+      "approval": "second_reviewer"
     },
     "staffTwoStepRequired": {
       "default": true,
-      "desc": "Staff must use 2-step verification"
+      "desc": "Staff must use 2-step verification",
+      "type": "bool",
+      "approval": "business_owner"
     },
     "trustedDeviceDays": {
       "default": 30,
-      "desc": "Members can skip 2-step on a remembered device"
+      "desc": "Members can skip 2-step on a remembered device",
+      "type": "duration",
+      "min": 0,
+      "max": 90,
+      "unit": "days",
+      "approval": "second_reviewer"
     },
     "invitationTtlDays": {
       "default": 7,
-      "desc": "Invitation link lifetime"
+      "desc": "Invitation link lifetime",
+      "type": "duration",
+      "min": 1,
+      "max": 30,
+      "unit": "days",
+      "approval": "second_reviewer"
     },
     "guestSessionTtlDays": {
       "default": 30,
-      "desc": "Guest session lifetime after last activity"
+      "desc": "Guest session lifetime after last activity",
+      "type": "duration",
+      "min": 1,
+      "unit": "days",
+      "approval": "second_reviewer"
     },
     "maxDevicesPerAccount": {
       "default": 20,
-      "desc": "Oldest sessions are revoked beyond this"
+      "desc": "Oldest sessions are revoked beyond this",
+      "type": "int",
+      "min": 1,
+      "approval": "second_reviewer"
     },
     "securityEventRetentionDays": {
       "default": 400,
-      "desc": "Security activity kept per account (screen shows 30 days)"
+      "desc": "Security activity kept per account (screen shows 30 days)",
+      "type": "duration",
+      "min": 30,
+      "unit": "days",
+      "approval": "second_reviewer"
     },
     "reauthTokenMinutes": {
       "default": 5,
-      "desc": "Re-auth token lifetime"
+      "desc": "Re-auth token lifetime",
+      "type": "duration",
+      "min": 1,
+      "max": 15,
+      "unit": "minutes",
+      "approval": "second_reviewer"
     },
     "guestOrderAccessDays": {
       "default": 90,
-      "desc": "How long a guest order grant on a session lasts"
+      "desc": "How long a guest order grant on a session lasts",
+      "type": "duration",
+      "min": 1,
+      "unit": "days",
+      "approval": "second_reviewer"
     },
     "orderLinkTtlDays": {
       "default": 180,
-      "desc": "Emailed order link lifetime"
+      "desc": "Emailed order link lifetime",
+      "type": "duration",
+      "min": 1,
+      "unit": "days",
+      "approval": "second_reviewer"
     },
     "staffIdleMinutes": {
       "default": 30,
-      "desc": "Staff sessions end after this long without activity"
+      "desc": "Staff sessions end after this long without activity",
+      "type": "duration",
+      "min": 5,
+      "max": 240,
+      "unit": "minutes",
+      "approval": "second_reviewer"
     },
     "maxStaffSessions": {
       "default": 3,
-      "desc": "Concurrent staff sessions per account; the oldest is signed out"
+      "desc": "Concurrent staff sessions per account; the oldest is signed out",
+      "type": "int",
+      "min": 1,
+      "max": 10,
+      "approval": "second_reviewer"
     },
     "refreshReuseGraceSeconds": {
       "default": 20,
-      "desc": "A just-rotated refresh token presented again within this window returns the same new tokens (parallel refresh)"
+      "desc": "A just-rotated refresh token presented again within this window returns the same new tokens (parallel refresh)",
+      "type": "duration",
+      "min": 0,
+      "max": 120,
+      "unit": "seconds",
+      "approval": "second_reviewer"
     },
     "visitorRefreshDays": {
       "default": 30,
-      "desc": "Visitor refresh token lifetime after last activity"
+      "desc": "Visitor refresh token lifetime after last activity",
+      "type": "duration",
+      "min": 1,
+      "unit": "days",
+      "approval": "second_reviewer"
     }
   },
   errorCodes: {

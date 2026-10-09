@@ -3,8 +3,9 @@ import { isUuid } from '../../kernel/lib/ids.js';
 import { toPageRequest } from '../../kernel/lib/pagination.js';
 import type * as common from '../../spec/common.js';
 import type * as identity from '../../spec/identity.js';
-import type { DailySellerIncome, DestinationReview, EarningsPreview, FeeCalcInput, FeeCalculation, FinancePublicApi, Hold, LedgerEntry, Payout, PayoutRun, Reference, RefundImpactPreview, RunPayoutRow, SellerBalances, SellerFinanceDetail, Statement } from '../../spec/finance.js';
+import type { DailySellerIncome, DestinationReview, EarningsPreview, FeeCalcInput, FeeCalculation, FinancePublicApi, Hold, LedgerEntry, Payout, PayoutRun, Reference, RefundImpactPreview, RunPayoutRow, SellerBalances, SellerCredit, SellerFinanceDetail, Statement } from '../../spec/finance.js';
 import { Core, type FinanceServiceDeps } from './service/core.js';
+import { CREDIT_ACTION, CreditsPart } from './service/credits.js';
 import { DestinationsPart } from './service/destinations.js';
 import { FeesPart } from './service/fees.js';
 import { HoldsPart } from './service/holds.js';
@@ -30,6 +31,7 @@ export class FinanceService implements FinancePublicApi {
   readonly destinations: DestinationsPart;
   readonly reports: ReportsPart;
   readonly recon: ReconPart;
+  readonly credits: CreditsPart;
 
   constructor(deps: FinanceServiceDeps) {
     this.core = new Core(deps);
@@ -41,7 +43,8 @@ export class FinanceService implements FinancePublicApi {
     this.destinations = new DestinationsPart(this.core);
     this.reports = new ReportsPart(this.core);
     this.recon = new ReconPart(this.core);
-    this.core.parts = { ledger: this.ledger, fees: this.fees, holds: this.holds, payouts: this.payouts, statements: this.statements, destinations: this.destinations, reports: this.reports, recon: this.recon };
+    this.credits = new CreditsPart(this.core);
+    this.core.parts = { ledger: this.ledger, fees: this.fees, holds: this.holds, payouts: this.payouts, statements: this.statements, destinations: this.destinations, reports: this.reports, recon: this.recon, credits: this.credits };
   }
 
   /* ---------------- public API (in-process) */
@@ -76,6 +79,11 @@ export class FinanceService implements FinancePublicApi {
   /** Credits back all or part of an ad charge or service fee as charge_credit (never more than what is left of it) */
   creditSellerCharge(input: { sellerId: string; amount: common.Money; originalEntryId: string; reason: string; idempotencyKey: string }): Promise<LedgerEntry> {
     return this.ledger.creditSellerCharge(input);
+  }
+
+  /** Credits a seller without an original charge as seller_credit: posted at once up to creditSecondReviewerThreshold, above it after finance.credits.issue; same idempotencyKey returns the first credit */
+  creditSeller(input: { sellerId: string; amount: common.Money; reason: string; reference: Reference; idempotencyKey: string }): Promise<SellerCredit> {
+    return this.credits.creditSeller(input);
   }
 
   /** Company trading costs for the Official Store margin */
@@ -233,6 +241,8 @@ export class FinanceService implements FinancePublicApi {
         return this.fees.onApprovalDecided(event);
       case 'finance.payouts.release':
         return this.payouts.onApprovalDecided(event);
+      case CREDIT_ACTION:
+        return this.credits.onApprovalDecided(event);
       case 'finance.reconciliation.correct':
         return this.recon.onApprovalDecided(event);
       case 'finance.holds.place':

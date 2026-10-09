@@ -133,10 +133,11 @@ describe('bootstrap with a deputy Business Owner', () => {
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
     expect(ok.body.status).toBe('approved');
     await app.kernel.events.drain();
-    // the spec's state machine has pending_approval → active only; the invited account still can't sign in until it accepts
-    expect((await assignmentsOf(owner.accessToken, accountId)).map((a) => [a.role.key, a.status])).toEqual([['finance_manager', 'active']]);
+    // approve is guarded: Felix hasn't accepted his invitation yet, so the approved grant waits for acceptance
+    expect((await assignmentsOf(owner.accessToken, accountId)).map((a) => [a.role.key, a.status])).toEqual([['finance_manager', 'pending_acceptance']]);
     const felix = await f.acceptStaffInvitation('felix@marketly.test');
     expect(felix.accountId).toBe(accountId);
+    expect((await assignmentsOf(owner.accessToken, accountId)).map((a) => [a.role.key, a.status])).toEqual([['finance_manager', 'active']]);
     expect((await f.call('GET', '/api/admin/access/me', { token: felix.accessToken })).status).toBe(200);
   });
 

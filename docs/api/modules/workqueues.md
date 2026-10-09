@@ -168,7 +168,7 @@ The Operations Center's shared to-do system: queue definitions with an owner rol
 | queueKey | `string` |
 | queueName | `string` |
 | area | `string` |
-| kind | `enum(overdue_dispatch|missing_tracking|delivery_exception|seller_cannot_fulfill|low_stock|receiving|pick_pack|return_inspection|return_decision|approval_waiting|case_past_target|case_escalated|payout_failed|payment_check|payment_mismatch|chargeback|hold_review|product_review|application_waiting|launch_review|appeal_due|restriction_review|restriction_evidence|seller_performance|storefront_review|trust_report|trust_recommendation|data_request|seller_reply_overdue|manual_task)` What kind of work |
+| kind | `enum(overdue_dispatch|missing_tracking|delivery_exception|seller_cannot_fulfill|low_stock|receiving|pick_pack|return_inspection|return_decision|approval_waiting|case_past_target|case_escalated|payout_failed|payment_check|payment_mismatch|chargeback|hold_review|product_review|application_waiting|launch_review|appeal_due|restriction_review|restriction_evidence|seller_performance|storefront_review|trust_report|trust_recommendation|data_request|seller_reply_overdue|unexpected_return_parcel|return_parcel_overdue|manual_task)` What kind of work; how each kind closes is in the notes |
 | title | `string` |
 | summary | `text?` |
 | subject | `WorkSubject` |
@@ -633,6 +633,7 @@ Indexes: `unique(queue_key, date)`
 | `workqueues.item.resolved` | An item is resolved or dismissed | `{ itemId: uuid, queueKey: string, outcome: string }` | notifications |
 | `workqueues.queue.changed` | Lead, backup or escalation route changes | `{ queueKey: string, leadId: uuid, backupId: uuid }` | - |
 | `workqueues.day_end.completed` | The day-end review is completed | `{ reviewId: uuid, date: date, openItems: int }` | - |
+| `workqueues.day_end.prepared` | Today's day-end review is built (the day-end summary for dayEndSharedRoles) | `{ reviewId: uuid, date: date, dueAt: datetime, openItems: int, overdueItems: int, roleKeys: string[] }` | notifications |
 
 | Consumes | From | Does |
 |---|---|---|
@@ -655,11 +656,14 @@ Indexes: `unique(queue_key, date)`
 | `returns.refund.approved` | returns | Resolve return decision items for that return |
 | `finance.payout.failed` | finance | Open a payout_failed item (also listed in the day-end review) |
 | `finance.payout.paid` | finance | Resolve payout_failed items for that payout |
-| `finance.reconciliation.mismatch_found` | finance | Open a payment_mismatch item in Daily finance checks |
-| `payments.payment.pending_check` | payments | Open a payment_check item |
+| `finance.reconciliation.mismatch_found` | finance | Open a payment_mismatch item in finance.payment_checks |
+| `finance.reconciliation.item_closed` | finance | Resolve the payment_mismatch item for that reconciliation item (matched, explained or corrected) |
+| `payments.payment.pending_check` | payments | Open a payment_check item in finance.payment_checks |
 | `payments.payment.captured` | payments | Resolve payment_check items |
 | `payments.payment.failed` | payments | Resolve payment_check items (the customer is told by payments) |
-| `payments.chargeback.opened` | payments | Open a chargeback item for Finance |
+| `payments.payment.authorized` | payments | Resolve the payment_check item when the pending check ends authorized (capture may come later) |
+| `payments.chargeback.opened` | payments | Open a chargeback item in finance.chargebacks |
+| `payments.chargeback.decided` | payments | Resolve the chargeback item (won, lost or conceded; inquiries that close without a chargeback end as won) |
 | `catalog.product.submitted` | catalog | Open a product_review item |
 | `catalog.product.approved` | catalog | Resolve product review items |
 | `catalog.product.changes_requested` | catalog | Resolve product review items |
@@ -667,13 +671,15 @@ Indexes: `unique(queue_key, date)`
 | `sellers.application.submitted` | sellers | Open an application_waiting item with the decision target as deadline |
 | `sellers.application.information_provided` | sellers | Reopen the application item for review |
 | `sellers.application.decided` | sellers | Resolve application items |
-| `sellers.launch_review.requested` | sellers | Open a launch_review item |
+| `sellers.launch_review.requested` | sellers | Open a launch_review item in sellers.launch_reviews |
 | `sellers.launch_review.decided` | sellers | Resolve the launch review item |
 | `sellers.appeal.submitted` | sellers | Open an appeal_due item with decideBy as deadline |
 | `sellers.appeal.decided` | sellers | Resolve appeal items |
-| `sellers.restriction.evidence_submitted` | sellers | Open a restriction_evidence item for the Seller Manager |
-| `sellers.performance.below_target` | sellers | Open a seller_performance item |
-| `sellers.change_request.submitted` | sellers | Open a storefront_review item |
+| `sellers.restriction.evidence_submitted` | sellers | Open a restriction_evidence item in sellers.restrictions for the Seller Manager |
+| `sellers.restriction.lifted` | sellers | Resolve restriction_evidence and restriction_review items for that restriction (lifted, expired or overturned) |
+| `sellers.restriction.updated` | sellers | Resolve the restriction_evidence item: staff reviewed the evidence and changed the restriction instead of lifting it |
+| `sellers.performance.below_target` | sellers | Open or refresh a seller_performance item in sellers.performance (closed by hand once the follow-up is done; sellers publishes no back-on-target event) |
+| `sellers.change_request.submitted` | sellers | Open a storefront_review item in sellers.launch_reviews |
 | `sellers.change_request.decided` | sellers | Resolve storefront review items |
 | `trust.report.created` | trust | Open a trust_report item (priority from risk score) |
 | `trust.report.resolved` | trust | Resolve trust report items |
@@ -683,6 +689,7 @@ Indexes: `unique(queue_key, date)`
 | `messaging.message.sent` | messaging | Resolve seller_reply_overdue when the seller replies |
 | `customers.data_export.requested` | customers | Open a data_request item with the promised delivery time |
 | `customers.data_export.ready` | customers | Resolve the data request item |
+| `warehouse.return_parcel.received` | warehouse | Resolve the return_parcel_overdue item for that parcel |
 
 ## In-process API (for other modules)
 
@@ -729,21 +736,23 @@ Indexes: `unique(queue_key, date)`
 | `workqueues.deadline-sweep` | every 1 min | Move items to due_soon and overdue; publish workqueues.item.overdue once; escalate along each queue's route; route to the backup when the lead is away (access absences) |
 | `workqueues.routine-generate` | daily 00:05 market time | Create today's routine checks from templates; mark yesterday's unfinished checks late |
 | `workqueues.routine-late` | every 15 min | Mark routine checks past their due time as late |
-| `workqueues.day-end-prepare` | daily 15:00 market time | Build today's day-end review from open items and other modules' forecasts |
+| `workqueues.day-end-prepare` | daily 15:00 market time | Build today's day-end review from open items and other modules' forecasts; publish workqueues.day_end.prepared (the summary notifications sends) |
 | `workqueues.day-end-close` | daily 23:59 market time | Mark an uncompleted review missed; snapshot daily_counts |
 | `workqueues.archive` | monthly | Move resolved items older than itemRetentionDays to cold storage |
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| dueSoonMinutes | `60` | When an item turns due soon |
-| dayEndReviewTime | `"17:30"` | Day-end review due time, market time |
-| dayEndSharedRoles | `["order_manager","shipping_manager","inventory_manager","warehouse_manager","finance_manager","customer_support_manager","seller_manager","advertising_manager"]` | Who sees and receives the day-end review |
-| itemRetentionDays | `400` | Resolved items kept online |
-| seedQueues | `["shipping.overdue_dispatch","shipping.missing_tracking","shipping.delivery_exceptions","orders.seller_cannot_fulfill","warehouse.pick_pack","purchasing.receiving","returns.inspection","returns.decisions","finance.daily_checks","finance.payout_failures","support.cases_waiting","catalog.product_review","sellers.applications","sellers.appeals","sellers.performance","trust.reports","access.approvals","customers.data_requests"]` | Queues created at install with placeholder leads that must be set before launch |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| dueSoonMinutes | `60` | duration, minutes, 0–… | When an item turns due soon |
+| dayEndReviewTime | `"17:30"` | time | Day-end review due time, market time |
+| dayEndSharedRoles | `["order_manager","shipping_manager","inventory_manager","warehouse_manager","finance_manager","customer_support_manager","seller_manager","advertising_manager"]` | json | Who sees and receives the day-end review |
+| itemRetentionDays | `400` | duration, days, 30–… | Resolved items kept online |
+| seedQueues | `["shipping.overdue_dispatch","shipping.missing_tracking","shipping.delivery_exceptions","orders.seller_cannot_fulfill","warehouse.pick_pack","warehouse.return_parcels","purchasing.receiving","inventory.low_stock","returns.inspection","returns.decisions","finance.daily_checks","finance.payment_checks","finance.chargebacks","finance.payout_failures","support.cases_waiting","catalog.product_review","sellers.applications","sellers.launch_reviews","sellers.restrictions","sellers.appeals","sellers.performance","trust.reports","access.approvals","customers.data_requests"]` | json, read-only | Queues created at install with placeholder leads that must be set before launch |
 
 ## Notes
+- Queues per kind (seedQueues): payment_check and payment_mismatch → finance.payment_checks; chargeback → finance.chargebacks; payout_failed → finance.payout_failures; hold_review → finance.daily_checks; launch_review and storefront_review → sellers.launch_reviews; restriction_evidence and restriction_review → sellers.restrictions; appeal_due → sellers.appeals; seller_performance → sellers.performance; low_stock → inventory.low_stock; unexpected_return_parcel and return_parcel_overdue (raised by warehouse) → warehouse.return_parcels.
+- How kinds close: event-raised kinds close on the events listed under consumes (chargeback on payments.chargeback.decided, payment_mismatch on finance.reconciliation.item_closed, restriction_evidence on sellers.restriction.lifted or updated, return_parcel_overdue on warehouse.return_parcel.received). seller_performance and unexpected_return_parcel are closed by hand (resolve with a note). Kinds raised through raise() (receiving, pick_pack, return_inspection, hold_review, restriction_review) are closed by the raising module with resolveBySource, or by hand.
 - Work queues never do the work: each item links to the owning module's screen and API. Most items close themselves when the source event arrives (resolvesOn), so a queue reflects reality without double entry.
 - Every queue has a named lead, a different backup and an escalation route (plan ch. 2). Install creates seedQueues with placeholders; launch readiness requires real people. Who receives an item right now comes from access.resolveRecipients(ownerRole) (lead, or the first available backup while the lead is away); queue lead and backup default to the role's lead and backup and can be set per queue.
 - Events consumed here use the canonical names; finance's daily reconciliation also calls raise() directly for checks that have no event. Modules without a matching event (e.g. warehouse pick-pack, purchasing receiving) call raise() and resolveBySource().

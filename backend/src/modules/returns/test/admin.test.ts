@@ -73,7 +73,7 @@ describe('Official Store returns', () => {
     expect(draft.body.savedBy).toMatchObject({ id: me });
     const inspected = await h.call('POST', `/api/admin/returns/requests/${m.ret.id}/inspection`, inspector, { conditionOutcome: 'as_described', grade: 'damaged', proposedStockOutcome: 'return_to_supplier', checks: [{ label: 'Heats up', passed: false }] });
     expect(inspected.status, JSON.stringify(inspected.body)).toBe(200);
-    expect(h.named('returns.return.inspected').find((e) => e.returnId === m.ret.id)).toMatchObject({ ownerType: 'official', variantId: m.p.variantId, quantity: 1, proposedStockOutcome: 'return_to_supplier' });
+    expect(h.named('returns.return.inspected').find((e) => e.returnId === m.ret.id)).toMatchObject({ ownerType: 'official', orderItemId: m.items[0]![0]!, variantId: m.p.variantId, stockItemId: m.p.stockItemId, quantity: 1, proposedStockOutcome: 'return_to_supplier' });
     expect(h.audits.at(-1)).toMatchObject({ action: 'returns.inspection.record' });
 
     const remedy = await h.call('POST', `/api/admin/returns/requests/${m.ret.id}/remedy`, staff(), { kind: 'full_refund' }, idem());

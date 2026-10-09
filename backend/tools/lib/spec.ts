@@ -28,6 +28,7 @@ export interface EndpointSpec {
   params?: ObjectExpr;
   query?: ObjectExpr;
   paging?: boolean;
+  /** A type, or "binary": the raw request bytes (any content type), received as a Uint8Array */
   body?: TypeExpr;
   response?: TypeExpr | null;
   status?: number;
@@ -52,10 +53,37 @@ export interface TableSpec {
   name: string;
   desc?: string;
   columns: Record<string, string>;
+  /** "(a, b)", "unique (a) where …", "unique nulls not distinct (a, b)", "pk (a, b)", "gin(expr)" (lib/sql.ts) */
   indexes?: string[];
   /** Tenant column override; false = not a tenant table */
   tenant?: string | false;
 }
+
+/** A runtime setting a module reads through ctx.settings; the settings module shows and changes it (docs/api/spec/FORMAT.md "Settings") */
+export interface SettingSpec {
+  key: string;
+  default: unknown;
+  desc: string;
+  type?: SettingType;
+  min?: number;
+  max?: number;
+  /** enum: the allowed values */
+  choices?: string[];
+  unit?: string;
+  /** Who approves a change: none, a second reviewer, or the Business Owner */
+  approval?: SettingApproval;
+  /** Changes are announced to sellers before they take effect */
+  sellerVisible?: boolean;
+  /** Earliest effective date after saving, in days */
+  minLeadDays?: number;
+  /** False = shown read-only (default true) */
+  editable?: boolean;
+}
+
+export const SETTING_TYPES = ['int', 'number', 'bool', 'string', 'money', 'duration', 'time', 'enum', 'json'] as const;
+export type SettingType = (typeof SETTING_TYPES)[number];
+export const SETTING_APPROVALS = ['none', 'second_reviewer', 'business_owner'] as const;
+export type SettingApproval = (typeof SETTING_APPROVALS)[number];
 
 export interface ModuleSpec {
   name: string;
@@ -80,7 +108,7 @@ export interface ModuleSpec {
   permissions?: { key: string; audience: 'staff' | 'seller'; desc: string; ownerOnly?: boolean; delegable?: boolean }[];
   approvalActions?: { key: string; desc: string; limit: string; secondReviewer: string; approvers?: string }[];
   jobs?: { name: string; schedule: string; does: string }[];
-  settings?: { key: string; default: unknown; desc: string }[];
+  settings?: SettingSpec[];
   integrations?: { name: string; purpose: string }[];
   errorCodes?: Record<string, { status: number; meaning: string }>;
   notes?: string[];

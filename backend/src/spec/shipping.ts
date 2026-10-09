@@ -4343,49 +4343,83 @@ export const spec = defineModuleSpec({
   settings: {
     "defaultSellerHandlingDays": {
       "default": 2,
-      "desc": "Dispatch within business days when a seller sets nothing"
+      "desc": "Dispatch within business days when a seller sets nothing",
+      "type": "duration",
+      "min": 1,
+      "unit": "business days",
+      "approval": "second_reviewer",
+      "sellerVisible": true
     },
     "sellerHandlingRange": {
       "default": [
         1,
         3
       ],
-      "desc": "Allowed seller handling days (HANDLING_OUT_OF_RANGE outside)"
+      "desc": "Allowed seller handling days (HANDLING_OUT_OF_RANGE outside)",
+      "type": "json",
+      "approval": "second_reviewer",
+      "sellerVisible": true
     },
     "officialCutoff": {
       "default": "14:00",
-      "desc": "Official Store same-day cutoff, market time"
+      "desc": "Official Store same-day cutoff, market time",
+      "type": "time",
+      "sellerVisible": false
     },
     "dispatchDueTime": {
       "default": "17:00",
-      "desc": "Local time a dispatch deadline falls on"
+      "desc": "Local time a dispatch deadline falls on",
+      "type": "time",
+      "sellerVisible": true
     },
     "validTrackingWithinHours": {
       "default": 24,
-      "desc": "Tracking must be valid this long after dispatch"
+      "desc": "Tracking must be valid this long after dispatch",
+      "type": "duration",
+      "min": 1,
+      "unit": "hours",
+      "sellerVisible": true
     },
     "labelScanGraceHours": {
       "default": 36,
-      "desc": "Label created without a carrier scan before missing_tracking opens"
+      "desc": "Label created without a carrier scan before missing_tracking opens",
+      "type": "duration",
+      "min": 1,
+      "unit": "hours",
+      "sellerVisible": true
     },
     "stalledNoScanDays": {
       "default": 7,
-      "desc": "No scan for this long opens a lost_or_damaged review"
+      "desc": "No scan for this long opens a lost_or_damaged review",
+      "type": "duration",
+      "min": 1,
+      "unit": "days",
+      "sellerVisible": false
     },
     "failedDeliveryChoiceDays": {
       "default": 14,
-      "desc": "Days the customer has to choose a next step after a failed delivery"
+      "desc": "Days the customer has to choose a next step after a failed delivery",
+      "type": "duration",
+      "min": 1,
+      "unit": "days",
+      "sellerVisible": false
     },
     "claimFinanceApprovalAbove": {
       "default": {
         "amount": 100000,
         "currency": "USD"
       },
-      "desc": "Carrier claims above this need Finance approval (example value)"
+      "desc": "Carrier claims above this need Finance approval (example value)",
+      "type": "money",
+      "min": 0,
+      "approval": "business_owner",
+      "sellerVisible": false
     },
     "marketDefaultPostalCode": {
       "default": "97205",
-      "desc": "Location for estimates when nothing is known (example)"
+      "desc": "Location for estimates when nothing is known (example)",
+      "type": "string",
+      "sellerVisible": false
     }
   },
   errorCodes: {

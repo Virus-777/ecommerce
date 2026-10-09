@@ -1940,23 +1940,45 @@ export const spec = defineModuleSpec({
   settings: {
     "longTermStorageDays": {
       "default": 365,
-      "desc": "Age after which the long-term storage rate applies"
+      "desc": "Age after which the long-term storage rate applies",
+      "type": "duration",
+      "min": 1,
+      "unit": "days",
+      "approval": "second_reviewer",
+      "sellerVisible": true,
+      "minLeadDays": 30
     },
     "discrepancyResponseDays": {
       "default": 14,
-      "desc": "Time for the seller to accept or claim a receiving discrepancy"
+      "desc": "Time for the seller to accept or claim a receiving discrepancy",
+      "type": "duration",
+      "min": 1,
+      "unit": "days",
+      "sellerVisible": true
     },
     "sellerNoticeDays": {
       "default": 30,
-      "desc": "Notice before a new fee schedule takes effect"
+      "desc": "Notice before a new fee schedule takes effect",
+      "type": "duration",
+      "min": 0,
+      "unit": "days",
+      "approval": "business_owner",
+      "sellerVisible": true
     },
     "warehouseAddress": {
       "default": "Reno, NV warehouse (placeholder)",
-      "desc": "Inbound destination"
+      "desc": "Inbound destination",
+      "type": "string",
+      "sellerVisible": true
     },
     "unsellableDisposalDays": {
       "default": 60,
-      "desc": "Unsellable units not removed by the seller are disposed after this (with notice)"
+      "desc": "Unsellable units not removed by the seller are disposed after this (with notice)",
+      "type": "duration",
+      "min": 30,
+      "unit": "days",
+      "approval": "second_reviewer",
+      "sellerVisible": true
     }
   },
   errorCodes: {

@@ -108,7 +108,7 @@ function rightToken(d: EndpointDef): Record<string, string> {
     case 'staff':
       return bearer(tok('staff'));
     case 'refresh':
-      return { cookie: `__Host-mk_refresh=${REFRESH}` };
+      return { cookie: `__Secure-mk_refresh=${REFRESH}` };
     case 'provider':
       return { 'x-event-id': crypto.randomUUID() }; // signed per request in send()
     case 'bootstrap':
@@ -204,7 +204,7 @@ async function testEndpoint(module: string, id: string, d: EndpointDef) {
     account: bearer(signAccessToken(devSigner({ jwk: newDevJwk() }), devClaims('customer'), { issuer })),
     seller: bearer(`${tok('seller').slice(0, -8)}AAAAAAAA`),
     staff: bearer(sign(devClaims('staff'), 60, new Date(Date.now() - 3_600_000))),
-    refresh: { cookie: '__Host-mk_refresh=not-a-refresh-token' },
+    refresh: { cookie: '__Secure-mk_refresh=not-a-refresh-token' },
     provider: { 'x-signature': 'sha256=forged', 'x-timestamp': String(Math.floor(Date.now() / 1000)) },
     bootstrap: { 'x-app-proof': 'forged' },
   };

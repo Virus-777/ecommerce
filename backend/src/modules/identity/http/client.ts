@@ -3,18 +3,19 @@
  * website's refresh cookie. Services never see the request or reply.
  */
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { REFRESH_COOKIE, REFRESH_COOKIE_PATH } from '../../../kernel/auth/chain.js';
 import type { Principal } from '../../../kernel/auth/index.js';
 import type { Actor } from '../../../spec/common.js';
 import { clientInfo, type Caller, type WithCookie } from '../service.js';
 
-/** The kernel reads this cookie on the refresh and sign-out endpoints (kernel/auth/chain.ts). */
-export const REFRESH_COOKIE = '__Host-mk_refresh';
 /**
- * Browsers only accept a `__Host-` cookie with `Path=/` (and Secure, no Domain), so the cookie
- * can't be narrowed to /api/public/identity/sessions/ without renaming it; it is HttpOnly and
- * SameSite=Strict, and only the refresh and sign-out endpoints read it.
+ * The website's refresh cookie (`__Secure-mk_refresh`). The kernel reads it on the refresh and
+ * sign-out endpoints (kernel/auth/chain.ts). It is HttpOnly, Secure, SameSite=Strict and scoped to
+ * REFRESH_COOKIE_PATH, so browsers send it only to /api/public/identity/sessions/* (refresh and
+ * sign-out). Responses that start, rotate or end a session set or clear it.
  */
-const COOKIE_ATTRS = 'Path=/; HttpOnly; Secure; SameSite=Strict';
+export { REFRESH_COOKIE, REFRESH_COOKIE_PATH };
+const COOKIE_ATTRS = `Path=${REFRESH_COOKIE_PATH}; HttpOnly; Secure; SameSite=Strict`;
 
 export function caller(input: { principal: Principal | null; actor: Actor; requestId: string; request: FastifyRequest }): Caller {
   return { principal: input.principal, actor: input.actor, requestId: input.requestId, client: clientInfo(input.request) };

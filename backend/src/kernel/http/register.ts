@@ -129,6 +129,8 @@ export function buildRouteSchema(r: EndpointRegistration) {
   if (d.stepUp?.kind === 'code') headers['x-step-up-code'] = z.string().min(1).max(20).describe(common.headers['X-Step-Up-Code']);
   if (Object.keys(headers).length) schema.headers = z.looseObject(headers);
   if (d.body) schema.body = d.body();
+  // a binary body is the raw request bytes (a Buffer), documented as application/octet-stream
+  if (d.bodyFormat === 'binary') schema.consumes = ['application/octet-stream'];
   // Named types keep their registry id (a $ref in /docs), so they are used as they are, without .describe()
   const item = d.response?.();
   const response = new Map<number, z.ZodType>([[d.status, item ? (d.paging ? common.page(item) : item) : z.null().describe('Success, no content')]]);
@@ -143,11 +145,24 @@ export function registerEndpoints(app: FastifyInstance, regs: EndpointRegistrati
     scope.setValidatorCompiler(validatorCompiler);
     if (k.config.responseValidation) scope.setSerializerCompiler(serializerCompiler);
     else scope.setSerializerCompiler(() => (data) => JSON.stringify(data));
-    for (const r of regs) registerEndpoint(scope, r, k);
+    for (const r of regs) if (r.def.bodyFormat !== 'binary') registerEndpoint(scope, r, k);
+    // Raw-bytes endpoints (e.g. media's development upload target) in their own scope: any content type
+    // is read as a Buffer, up to BINARY_BODY_LIMIT; the handler enforces its own, smaller limit
+    const binary = regs.filter((r) => r.def.bodyFormat === 'binary');
+    if (binary.length) {
+      await scope.register(async (raw) => {
+        raw.removeAllContentTypeParsers();
+        raw.addContentTypeParser('*', { parseAs: 'buffer', bodyLimit: BINARY_BODY_LIMIT }, (_request, body, done) => done(null, body));
+        for (const r of binary) registerEndpoint(raw, r, k, { bodyLimit: BINARY_BODY_LIMIT });
+      });
+    }
   });
 }
 
-function registerEndpoint(app: FastifyInstance, r: EndpointRegistration, k: HttpKernel) {
+/** Upper bound for raw-bytes request bodies (the largest media upload purpose is 500 MB) */
+export const BINARY_BODY_LIMIT = 512 * 1024 * 1024;
+
+function registerEndpoint(app: FastifyInstance, r: EndpointRegistration, k: HttpKernel, opts: { bodyLimit?: number } = {}) {
   const { module, id, def: d, handler } = r;
   const operationId = `${module}.${id}`;
   const { idempotency, auth } = k;
@@ -169,6 +184,7 @@ function registerEndpoint(app: FastifyInstance, r: EndpointRegistration, k: Http
     url: routeUrlOf(module, d),
     schema: buildRouteSchema(r),
     config: { operationId, auth: d.auth },
+    ...(opts.bodyLimit ? { bodyLimit: opts.bodyLimit } : {}),
     onRequest: hooks.onRequest,
     preValidation: hooks.preValidation,
     // conditional permissions → Idempotency-Key replay → step-up (a replay never spends a re-auth token)

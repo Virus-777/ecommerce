@@ -29,5 +29,8 @@ export const reconciliationItemMachine = createStateMachine("Reconciliation item
 /** Amount owed: AmountOwed.status. Created when a negative balance is not covered within negativeBalanceOwedAfterDays. New earnings offset it first. Write-off needs a reason and approval. */
 export const amountOwedMachine = createStateMachine("Amount owed", spec.stateMachines["Amount owed"]);
 
+/** Seller credit: SellerCredit.status. creditSeller posts credits up to creditSecondReviewerThreshold at once (created posted). Larger credits wait for finance.credits.issue and finish on access.approval.decided. */
+export const sellerCreditMachine = createStateMachine("Seller credit", spec.stateMachines["Seller credit"]);
+
 /** Statement: Statement.status. Issued at the payout cutoff; immutable afterwards. */
 export const statementMachine = createStateMachine("Statement", spec.stateMachines["Statement"]);

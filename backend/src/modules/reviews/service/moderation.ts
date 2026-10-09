@@ -11,6 +11,7 @@ import type {
   AppealRow,
   AppealView,
   Author,
+  ContentParty,
   ModerationDecisionInput,
   ModerationDetail,
   ModerationItem,
@@ -76,6 +77,21 @@ const REMOVED_STATE: Record<ContentType, string> = {
 };
 
 const actorId = (a: common.Actor) => (a.id && isUuid(a.id) ? a.id : SYSTEM_MODERATOR_ID);
+
+/** The author as the event names them (staff answers have no party to tell) */
+const partyOf = (c: Content): ContentParty | null => {
+  const a = authorOf(c);
+  return a.kind === 'staff' || !isUuid(a.id) ? null : { kind: a.kind, id: a.id };
+};
+
+/** Customers and sellers whose reports a decision answers, once each (system and Trust reports have no one to tell) */
+const reportersOf = (reports: readonly ReportRec[]): ContentParty[] => {
+  const seen = new Map<string, ContentParty>();
+  for (const r of reports) {
+    if ((r.reporter_kind === 'customer' || r.reporter_kind === 'seller') && r.reporter_id && isUuid(r.reporter_id)) seen.set(`${r.reporter_kind}:${r.reporter_id}`, { kind: r.reporter_kind, id: r.reporter_id });
+  }
+  return [...seen.values()];
+};
 
 export class ModerationPart {
   constructor(
@@ -665,12 +681,20 @@ export class ModerationPart {
         appeal_by: ADVERSE.has(input.decision) ? addDays(now, appealDays) : null,
       });
       await tx.update('moderation_items', item.id, { status, decided_at: now });
-      await tx.updateWhere(
-        'reports',
-        { moderation_item_id: item.id, status: 'open' },
-        { status: 'decided', outcome_text: decision.message_to_reporter ?? reporterOutcomeText(input.decision, input.reasonCode, noun), decided_at: now },
-      );
-      fx.emit('reviews.moderation.decided', { moderationItemId: item.id, contentType: type, contentId: item.content_id, decision: input.decision, reasonCode: input.reasonCode });
+      const answered = await tx.find('reports', { moderation_item_id: item.id, status: 'open' });
+      const reporterOutcome = decision.message_to_reporter ?? reporterOutcomeText(input.decision, input.reasonCode, noun);
+      await tx.updateWhere('reports', { moderation_item_id: item.id, status: 'open' }, { status: 'decided', outcome_text: reporterOutcome, decided_at: now });
+      fx.emit('reviews.moderation.decided', {
+        moderationItemId: item.id,
+        contentType: type,
+        contentId: item.content_id,
+        decision: input.decision,
+        reasonCode: input.reasonCode,
+        author: partyOf(c),
+        reporters: reportersOf(answered),
+        reporterOutcome,
+        appealUntil: decision.appeal_by?.toISOString() ?? null,
+      });
       return moved;
     });
     fx.takedownReason = `Review removed: ${reasonLabel(input.reasonCode)}`;
@@ -881,7 +905,9 @@ export class ModerationPart {
         const locked = await loadContent(tx, c.type, c.row.id, { forUpdate: true });
         if (!locked || locked.row.status === target || locked.row.status === 'deleted') return false;
         const outcome = `We removed this ${CONTENT_NOUN[c.type]} after a Trust and Risk investigation.`;
+        const answered: ReportRec[] = [];
         for (const open of await tx.find('moderation_items', { content_type: c.type, content_id: c.row.id, status: 'open' })) {
+          answered.push(...(await tx.find('reports', { moderation_item_id: open.id, status: 'open' })));
           await tx.update('moderation_items', open.id, { status: 'decided', decided_at: now });
           await tx.updateWhere('reports', { moderation_item_id: open.id, status: 'open' }, { status: 'decided', outcome_text: outcome, decided_at: now });
         }
@@ -925,7 +951,18 @@ export class ModerationPart {
         });
         const events = c.type === 'seller_response' ? RESPONSE_MODERATION_EVENTS : MODERATION_EVENTS;
         await moveContent(this.core, tx, fx, locked, target, events, { byModeration: true, reasonCode: 'proven_fake', takedown: true });
-        fx.emit('reviews.moderation.decided', { moderationItemId: item.id, contentType: c.type, contentId: c.row.id, decision: 'remove', reasonCode: 'proven_fake' });
+        fx.emit('reviews.moderation.decided', {
+          moderationItemId: item.id,
+          contentType: c.type,
+          contentId: c.row.id,
+          decision: 'remove',
+          reasonCode: 'proven_fake',
+          author: partyOf(locked),
+          reporters: reportersOf(answered),
+          reporterOutcome: outcome,
+          // an enforcement is appealed through Trust and Risk, not the moderation appeal
+          appealUntil: null,
+        });
         return true;
       });
       if (done) {

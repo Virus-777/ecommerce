@@ -1113,7 +1113,7 @@ export class EnforcementPart extends Part {
     for (const r of await this.repo.find('restrictions', { state: 'active', review_date: { op: '<=', value: today } }, { limit: 500 })) {
       const seller = await this.repo.get('sellers', r.seller_id);
       await this.core.raise({
-        queueKey: 'sellers.performance',
+        queueKey: 'sellers.restrictions',
         kind: 'restriction_review',
         title: `Review restriction ${r.ref}: ${r.title}`,
         summary: `${seller?.store_name ?? ''}: review date ${r.review_date}`,
@@ -1126,8 +1126,9 @@ export class EnforcementPart extends Part {
     for (const s of await this.repo.find('suspensions', { state: 'active', review_date: { op: '<=', value: today } }, { limit: 500 })) {
       const seller = await this.repo.get('sellers', s.seller_id);
       await this.core.raise({
-        queueKey: 'sellers.performance',
-        kind: 'suspension_review',
+        // workqueues has no suspension kind: a suspension's review date is a restriction review
+        queueKey: 'sellers.restrictions',
+        kind: 'restriction_review',
         title: `Review suspension of ${seller?.store_name ?? s.seller_id}`,
         subject: { type: 'seller', id: s.seller_id, ref: seller?.ref ?? null, label: seller?.store_name ?? null },
         sellerId: s.seller_id,
@@ -1146,14 +1147,15 @@ export class EnforcementPart extends Part {
       const overdue = a.decide_by.getTime() < this.now().getTime();
       await this.core.raise({
         queueKey: 'sellers.appeals',
-        kind: overdue ? 'appeal_overdue' : 'appeal_due',
+        kind: 'appeal_due',
         title: `Appeal ${a.ref} ${overdue ? 'is past its decision target' : 'is due within a day'}`,
         subject: { type: 'appeal', id: a.id, ref: a.ref, label: seller?.store_name ?? null },
         sellerId: a.seller_id,
         sellerName: seller?.store_name ?? null,
         dueAt: a.decide_by.toISOString(),
         priority: overdue ? 'high' : 'normal',
-        dedupeKey: `appeal_deadline:${a.id}:${overdue ? 'overdue' : 'due'}`,
+        // the item workqueues opened on sellers.appeal.submitted: refreshed, and high priority once overdue
+        dedupeKey: `appeal:${a.id}`,
       });
     }
   }

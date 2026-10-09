@@ -1580,39 +1580,64 @@ export const spec = defineModuleSpec({
   settings: {
     "pageSize": {
       "default": 24,
-      "desc": "Default results per page"
+      "desc": "Default results per page",
+      "type": "int",
+      "min": 1,
+      "max": 100
     },
     "typoSimilarityThreshold": {
       "default": 0.35,
-      "desc": "Trigram similarity for misspelling tolerance"
+      "desc": "Trigram similarity for misspelling tolerance",
+      "type": "number",
+      "min": 0,
+      "max": 1
     },
     "autoCorrectBelowResults": {
       "default": 3,
-      "desc": "Apply a confident correction when the original query has fewer results"
+      "desc": "Apply a confident correction when the original query has fewer results",
+      "type": "int",
+      "min": 0
     },
     "recentSearchesMax": {
       "default": 10,
-      "desc": "Recent searches kept per customer or guest"
+      "desc": "Recent searches kept per customer or guest",
+      "type": "int",
+      "min": 0
     },
     "recentSearchRetentionDays": {
       "default": 90,
-      "desc": "Recent searches older than this are deleted"
+      "desc": "Recent searches older than this are deleted",
+      "type": "duration",
+      "min": 1,
+      "unit": "days"
     },
     "newArrivalsWindowDays": {
       "default": 30,
-      "desc": "'New arrivals' = first listed within this window"
+      "desc": "'New arrivals' = first listed within this window",
+      "type": "duration",
+      "min": 1,
+      "unit": "days"
     },
     "bestSellingMinOrders": {
       "default": 500,
-      "desc": "Platform orders in 30 days before best-selling sort is offered"
+      "desc": "Platform orders in 30 days before best-selling sort is offered",
+      "type": "int",
+      "min": 0
     },
     "excludeOutOfStockByDefault": {
       "default": true,
-      "desc": "Out-of-stock products appear only with 'Include out of stock'"
+      "desc": "Out-of-stock products appear only with 'Include out of stock'",
+      "type": "bool"
     },
     "searchEngine": {
       "default": "postgres",
-      "desc": "postgres | external (adapter added later)"
+      "desc": "postgres | external (adapter added later)",
+      "type": "enum",
+      "choices": [
+        "postgres",
+        "external"
+      ],
+      "approval": "second_reviewer"
     }
   },
   errorCodes: {

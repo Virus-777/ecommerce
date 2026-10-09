@@ -949,18 +949,18 @@ Checked through the access module (limits per role, second reviewer).
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| firstResponseBusinessHours | `4` | Default first reply target (example) |
-| sellerReplyBusinessDays | `2` | Seller reply target before Marketly steps in (example) |
-| disputeDecisionBusinessDays | `5` | Decision target from escalation (example) |
-| appealWindowDays | `14` | Appeal deadline after a decision (purchase terms say 14 days) |
-| appealReplyBusinessDays | `3` | Appeal review target |
-| reopenWindowDays | `30` | Reopen a resolved case if the promised remedy did not happen |
-| autoCloseAfterDays | `7` | Resolved → closed |
-| lateItemRefundAfterDays | `14` | Items not shipped this long after the estimate qualify for a full refund (purchase terms) |
-| maxAttachments | `5` | Files per message |
-| maxAttachmentMb | `10` | Size per file |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| firstResponseBusinessHours | `4` | duration, business hours, 1–… | Default first reply target (example) |
+| sellerReplyBusinessDays | `2` | duration, business days, 1–…, approval: second reviewer, seller-visible | Seller reply target before Marketly steps in (example) |
+| disputeDecisionBusinessDays | `5` | duration, business days, 1–… | Decision target from escalation (example) |
+| appealWindowDays | `14` | duration, days, 1–…, approval: business owner | Appeal deadline after a decision (purchase terms say 14 days) |
+| appealReplyBusinessDays | `3` | duration, business days, 1–… | Appeal review target |
+| reopenWindowDays | `30` | duration, days, 1–… | Reopen a resolved case if the promised remedy did not happen |
+| autoCloseAfterDays | `7` | duration, days, 1–… | Resolved → closed |
+| lateItemRefundAfterDays | `14` | duration, days, 1–…, approval: business owner, seller-visible | Items not shipped this long after the estimate qualify for a full refund (purchase terms) |
+| maxAttachments | `5` | int, 0–20 | Files per message |
+| maxAttachmentMb | `10` | int, MB, 1–… | Size per file |
 
 ## Integrations
 - **Email reply-by-email (through notifications)**: Customers can answer case emails; replies are added to the case thread

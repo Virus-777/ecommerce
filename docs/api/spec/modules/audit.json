@@ -205,9 +205,9 @@
     { "name": "audit.purge-expired", "schedule": "monthly", "does": "Drop month partitions entirely older than retainYears (never below minimumRetentionYears), keep a signed checkpoint hash so the chain still verifies, record the purge as an entry" }
   ],
   "settings": [
-    { "key": "retainYears", "default": 7, "desc": "Years entries are kept (example value on the prototype)" },
-    { "key": "minimumRetentionYears", "default": 7, "desc": "Legal floor; changed only by configuration, not the API" },
-    { "key": "redactKeys", "default": ["password", "token", "secret", "accountNumber", "cardNumber"], "desc": "Keys masked in before/after JSON at record time" }
+    { "key": "retainYears", "type": "duration", "default": 7, "desc": "Years entries are kept (example value on the prototype)", "unit": "years", "min": 7, "approval": "business_owner" },
+    { "key": "minimumRetentionYears", "type": "duration", "default": 7, "desc": "Legal floor; changed only by configuration, not the API", "unit": "years", "min": 1, "editable": false },
+    { "key": "redactKeys", "type": "json", "default": ["password", "token", "secret", "accountNumber", "cardNumber"], "desc": "Keys masked in before/after JSON at record time", "approval": "second_reviewer" }
   ],
   "errorCodes": {
     "EXPORT_TOO_LARGE": { "status": 400, "meaning": "The filters match more than reports.maxExportRows; narrow the date range. details.matched." },

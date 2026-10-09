@@ -55,7 +55,8 @@ export class Refunds {
     const t = this.credit.tender(i);
     const keys = Object.keys(t?.creditReturns ?? {}).filter((k) => k.startsWith('refund:')).map((k) => k.slice('refund:'.length));
     const cancelled = keys.length ? new Set((await repo.find('refunds', { id: keys, status: 'cancelled' })).map((r) => r.id)) : new Set<string>();
-    return i.captured_amount + this.credit.paid(i) - this.credit.returned(i, { notRefunds: true, cancelledRefunds: cancelled });
+    // the card captures plus the credit charged with them, less credit of cancelled refunds that went back anyway
+    return i.captured_amount + this.credit.taken(i) - (this.credit.returned(i, { notRefunds: true, cancelledRefunds: cancelled }) - this.credit.outside(i));
   }
 
   private get repo() {
@@ -306,8 +307,10 @@ export class Refunds {
     if (!intent) return this.core.ctx.log.info({ orderId: e.orderId }, 'payments: cancelled item of an order without a payment');
     const captured = await this.capturedGroups(this.repo, intent);
     if (!captured.all && !captured.groups.has(e.groupId)) {
-      // nothing charged for this group yet: the authorization (its allocation) shrinks instead
+      // nothing charged for this group yet: the authorization (its allocation) shrinks by the item's card share, its
+      // store-credit share goes back to the wallet, and an authorization with no card amount left is voided
       if (is(ACCEPTED, intent.status) || intent.status === 'pending_check') await this.intents.refreshAllocations(intent, order);
+      await this.intents.onUncapturedItemCancelled(intent.id, e.itemId, order);
       return;
     }
     const paid = await this.paidAmounts(e.orderId);

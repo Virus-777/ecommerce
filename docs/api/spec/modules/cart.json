@@ -241,12 +241,12 @@
     { "name": "cart.expire-idle", "schedule": "daily 03:00 PT", "does": "Expire guest carts idle longer than guestCartRetentionDays and customer carts idle longer than customerCartRetentionDays; publishes cart.cart.expired" }
   ],
   "settings": [
-    { "key": "guestCartRetentionDays", "default": 30, "desc": "Idle days before a guest cart expires ('Items stay in your cart for 30 days')" },
-    { "key": "customerCartRetentionDays", "default": 90, "desc": "Idle days before a customer cart expires" },
-    { "key": "maxLines", "default": 50, "desc": "Distinct lines per cart (CART_FULL above)" },
-    { "key": "maxQuantityPerLine", "default": 10, "desc": "Upper bound when an offer has no purchase limit" },
-    { "key": "showPriceDecreaseNotices", "default": true, "desc": "Show an info notice when a price drops (accepted automatically)" },
-    { "key": "couponPreviewRateLimitPerHour", "default": 30, "desc": "Coupon attempts per owner per hour" }
+    { "key": "guestCartRetentionDays", "type": "duration", "default": 30, "desc": "Idle days before a guest cart expires ('Items stay in your cart for 30 days')", "unit": "days", "min": 1 },
+    { "key": "customerCartRetentionDays", "type": "duration", "default": 90, "desc": "Idle days before a customer cart expires", "unit": "days", "min": 1 },
+    { "key": "maxLines", "type": "int", "default": 50, "desc": "Distinct lines per cart (CART_FULL above)", "min": 1 },
+    { "key": "maxQuantityPerLine", "type": "int", "default": 10, "desc": "Upper bound when an offer has no purchase limit", "min": 1 },
+    { "key": "showPriceDecreaseNotices", "type": "bool", "default": true, "desc": "Show an info notice when a price drops (accepted automatically)" },
+    { "key": "couponPreviewRateLimitPerHour", "type": "int", "default": 30, "desc": "Coupon attempts per owner per hour", "min": 1 }
   ],
   "errorCodes": {
     "OFFER_UNAVAILABLE": { "status": 409, "meaning": "The offer is ended, hidden, out of stock or its seller cannot sell now. details.reason, details.alternatives (count, lowest price)." },

@@ -69,7 +69,7 @@ describe('customers named by the event', () => {
       contactEmail: email,
       total: money(4900),
       groups: [{ groupId: p.groupId, ownerType: 'official', sellerId: null, fulfilledBy: 'official_warehouse', dispatchBy: new Date(Date.now() + 86_400_000).toISOString(), itemIds: [newId()], total: money(4900) }],
-      acceptedAt: new Date().toISOString(),
+      items: [], acceptedAt: new Date().toISOString(),
     });
     // shipping and payments name the guest the same way (no earlier notice is needed)
     await publish(app, 'shipping.shipment.delivered', {
@@ -159,7 +159,7 @@ describe('seller members from sellers', () => {
       contactEmail: guestEmail(),
       total: money(18900),
       groups: [{ groupId, ownerType: 'seller', sellerId, fulfilledBy: 'seller', dispatchBy: new Date(Date.now() + 86_400_000).toISOString(), itemIds: [newId()], total: money(18900) }],
-      acceptedAt: new Date().toISOString(),
+      items: [], acceptedAt: new Date().toISOString(),
     });
     expect(emailsTo(owner.email).map((m) => m.message.subject)).toContain('New order MK-261010-40077');
     expect(emailsTo(packer.email)).toHaveLength(0);

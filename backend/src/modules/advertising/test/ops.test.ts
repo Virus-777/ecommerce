@@ -166,10 +166,18 @@ describe('jobs', () => {
     await k.job('advertising.finish-due');
     expect(await get(c.id)).toMatchObject({ status: 'finished', finishedReason: 'delivery_cap_reached' });
 
-    const ending = await liveCampaign(k, { name: 'Ending soon', endsAt: new Date(k.clock.now().getTime() + 2 * 86_400_000).toISOString() });
+    const ownerStaffId = newId();
+    const endsAt = new Date(k.clock.now().getTime() + 2 * 86_400_000 - 60_000).toISOString();
+    const ending = await liveCampaign(k, { name: 'Ending soon', endsAt, ownerStaffId });
+    const later = await liveCampaign(k, { name: 'Ends later', endsAt: new Date(k.clock.now().getTime() + 10 * 86_400_000).toISOString() });
     await k.job('advertising.ending-soon-notice');
     await k.job('advertising.ending-soon-notice');
     expect((await get(ending.id)).timeline.filter((t: any) => t.label === 'Owner reminded: ending soon')).toHaveLength(1);
+    // published once, with what notifications needs to tell the owner
+    expect(k.of('advertising.campaign.ending_soon').filter((e) => e.campaignId === ending.id)).toEqual([
+      { campaignId: ending.id, ref: ending.ref, name: 'Ending soon', advertiserKind: ending.advertiser.kind, sellerId: null, ownerStaffId, endsAt, daysLeft: 2 },
+    ]);
+    expect(k.of('advertising.campaign.ending_soon').filter((e) => e.campaignId === later.id)).toEqual([]);
     await k.job('advertising.expire-frequency-state');
     await k.job('advertising.link-check');
   });

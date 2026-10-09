@@ -1,4 +1,5 @@
 import { sql, type Expression, type ExpressionBuilder, type Kysely, type SqlBool, type Transaction } from 'kysely';
+import type { Inbox } from '../../../../kernel/events/inbox.js';
 import { isUuid } from '../../../../kernel/lib/ids.js';
 import { paginate, type PageRequest } from '../../../../kernel/lib/pagination.js';
 import type { WorkqueuesDb } from '../../../../spec/workqueues.js';
@@ -83,17 +84,20 @@ function conditions(eb: ItemsEb, q: ItemQuery): Expression<SqlBool>[] {
 const relatedRef = (ref: string) => sql<SqlBool>`related_subjects @> ${JSON.stringify([{ ref }])}::jsonb`;
 
 /** Postgres adapter for WorkqueuesRepository. `db` is scoped to the `workqueues` schema. */
-export function createPostgresWorkqueuesRepository(db: Kysely<WorkqueuesDb>): WorkqueuesRepository {
-  return repo(db, false);
+export function createPostgresWorkqueuesRepository(db: Kysely<WorkqueuesDb>, inbox: Inbox): WorkqueuesRepository {
+  return repo(db, false, inbox);
 }
 
-function repo(db: Db, inTx: boolean): WorkqueuesRepository {
+function repo(db: Db, inTx: boolean, inbox: Inbox): WorkqueuesRepository {
   const filtered = (q: ItemQuery) => db.selectFrom('items').where((eb) => eb.and(conditions(eb, q)));
 
   const self: WorkqueuesRepository = {
     async transaction(fn) {
       if (inTx) return fn(self);
-      return (db as Kysely<WorkqueuesDb>).transaction().execute((trx) => fn(repo(trx, true)));
+      return (db as Kysely<WorkqueuesDb>).transaction().execute((trx) => fn(repo(trx, true, inbox)));
+    },
+    claim(key) {
+      return inbox.claim(db, key);
     },
 
     /* ---------------------------------------------------------------- queues */
@@ -127,9 +131,16 @@ function repo(db: Db, inTx: boolean): WorkqueuesRepository {
             deadline_rule: eb.ref('excluded.deadline_rule'),
             priority: eb.ref('excluded.priority'),
             resolves_on: eb.ref('excluded.resolves_on'),
+            active: eb.ref('excluded.active'),
           })),
         )
         .execute();
+    },
+    async deactivateIntakeRulesExcept(ids) {
+      let q = db.updateTable('intake_rules').set({ active: false }).where('active', '=', true);
+      if (ids.length) q = q.where('id', 'not in', ids);
+      const r = await q.executeTakeFirst();
+      return Number(r.numUpdatedRows ?? 0);
     },
     async listIntakeRules(filter) {
       let q = db.selectFrom('intake_rules').selectAll().orderBy('queue_key').orderBy('event');

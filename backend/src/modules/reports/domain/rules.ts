@@ -110,6 +110,13 @@ export interface Delta {
 }
 
 /** Change against the comparison period: percent change for amounts and counts, points for percentages */
+/** A report period for people: Oct 9, 2026 · Sep 27 – Oct 10, 2026 · Dec 28, 2025 – Jan 3, 2026 */
+export function periodLabel(r: DayRange): string {
+  const full = (day: string) => `${dayLabel(day)}, ${day.slice(0, 4)}`;
+  if (r.from === r.to) return full(r.from);
+  return `${r.from.slice(0, 4) === r.to.slice(0, 4) ? dayLabel(r.from) : full(r.from)} – ${full(r.to)}`;
+}
+
 export function deltaOf(current: number, previous: number, unit: MetricDefinition['unit'], higherIsBetter = true): Delta | null {
   if (unit === 'percent') {
     const value = Math.round((current - previous) * 10) / 10;

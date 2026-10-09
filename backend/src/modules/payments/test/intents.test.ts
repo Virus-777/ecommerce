@@ -193,7 +193,7 @@ describe('capture', () => {
     expect(captured[0]).toMatchObject({ orderId: placed.order.id, groupId: null, amount: USD(23000) });
     expect(captured[0].allocations.map((a: any) => a.amount.amount).sort()).toEqual([11000, 12000]);
     // the accepted event again (replay) does not capture twice
-    await h.publish('orders', 'orders.order.accepted', { orderId: placed.order.id, ref: placed.order.ref, customerId, contactEmail: 'sam@example.com', total: USD(23000), groups: [], acceptedAt: new Date().toISOString() });
+    await h.publish('orders', 'orders.order.accepted', { orderId: placed.order.id, ref: placed.order.ref, customerId, contactEmail: 'sam@example.com', total: USD(23000), groups: [], items: [], acceptedAt: new Date().toISOString() });
     expect(h.named('payments.payment.captured')).toHaveLength(1);
     expect(await h.calls(placed.intentId, 'capture')).toHaveLength(1);
 

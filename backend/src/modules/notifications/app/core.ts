@@ -62,7 +62,8 @@ export class Core {
   /** Public app address for links in emails when a notice has no url (STORE_URL, SELLER_URL, ADMIN_URL) */
   appUrl(audience: Audience): string {
     const u = this.ctx.config.publicUrls;
-    return audience === 'customer' ? u.store : audience === 'seller' ? u.seller : u.admin;
+    // external contacts (suppliers, rights owners) can only open public store pages
+    return audience === 'customer' || audience === 'external' ? u.store : audience === 'seller' ? u.seller : u.admin;
   }
   get launchPhase() {
     return this.ctx.config.launchPhase;

@@ -228,7 +228,7 @@ describe('pending reviews, context and item status', () => {
 });
 
 describe('invitations', () => {
-  const deliveredEvent = (b: ReturnType<typeof buyer>) => ({ orderId: b.orderId, groupId: b.groups[0]!.groupId, ownerType: 'seller', sellerId: newId(), itemId: b.itemId, quantity: 1, deliveredAt: k.clock.now().toISOString(), returnWindowEndsAt: new Date(k.clock.now().getTime() + 30 * DAY).toISOString() });
+  const deliveredEvent = (b: ReturnType<typeof buyer>) => ({ orderId: b.orderId, groupId: b.groups[0]!.groupId, ownerType: 'seller', sellerId: newId(), itemId: b.itemId, quantity: 1, deliveredAt: k.clock.now().toISOString(), returnWindowEndsAt: new Date(k.clock.now().getTime() + 30 * DAY).toISOString(), customerId: b.customerId, contactEmail: 'buyer@example.com' });
   const invitesOf = (customerId: string) => k.of('reviews.invite.due').filter((e) => e.customerId === customerId);
   const runInvites = async () => {
     await k.app.kernel.jobs.runNow('reviews.invites');
@@ -238,7 +238,9 @@ describe('invitations', () => {
   it('publishes reviews.invite.due inviteDelayDays after delivery (from orders.listDeliveredItems), once', async () => {
     const b = buyer({ deliveredDaysAgo: 0 });
     await k.emit('orders', 'orders.item.delivered', deliveredEvent(b));
+    // the event names the customer: orders is not asked who it was
     expect(k.svc.summaries.inviteCustomers.has(b.customerId)).toBe(true);
+    expect(k.callsOf('orders.getOrderItem')).toEqual([]);
     await runInvites();
     expect(invitesOf(b.customerId)).toEqual([]);
     k.clock.advance(6 * DAY);
@@ -281,6 +283,10 @@ describe('invitations', () => {
     Object.assign(item, { state: 'cancelled', deliveredAt: null });
     await k.svc.onItemCancelledFromOrders({ ...deliveredEvent(c) } as never);
     await k.emit('orders', 'orders.item.delivered', { ...deliveredEvent(c), itemId: newId() });
+    // a guest's delivery (no customerId) is not watched
+    const guestsBefore = k.svc.summaries.inviteCustomers.size;
+    await k.emit('orders', 'orders.item.delivered', { ...deliveredEvent(c), itemId: newId(), customerId: null });
+    expect(k.svc.summaries.inviteCustomers.size).toBe(guestsBefore);
     k.clock.advance(6 * DAY);
     await runInvites();
     expect(invitesOf(b.customerId)).toEqual([]);

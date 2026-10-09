@@ -82,6 +82,13 @@ Product reviews (Verified Purchase), seller feedback kept separate from product 
 
 ## Types
 
+### ContentParty
+
+| Field | Type |
+|---|---|
+| kind | `enum(customer|seller)` |
+| id | `uuid` Customers-module id or seller id |
+
 ### Author
 
 | Field | Type |
@@ -907,7 +914,7 @@ Indexes: `(status, submitted_at)`
 | `reviews.question.asked` | A question is published (sellers with an offer are told) | `{ questionId: uuid, productId: uuid }` | - |
 | `reviews.answer.published` | An answer is published | `{ answerId: uuid, questionId: uuid, productId: uuid, label: string }` | - |
 | `reviews.response.published` | A seller response is published or held | `{ responseId: uuid, sellerId: uuid, targetType: string, status: string }` | - |
-| `reviews.moderation.decided` | A moderation decision is recorded (reporter and author are notified) | `{ moderationItemId: uuid, contentType: string, contentId: uuid, decision: string, reasonCode: string }` | - |
+| `reviews.moderation.decided` | A moderation decision is recorded (reporter and author are notified) | `{ moderationItemId: uuid, contentType: string, contentId: uuid, decision: string, reasonCode: string, author: ContentParty?, reporters: ContentParty[], reporterOutcome: text?, appealUntil: datetime? }` | notifications |
 | `reviews.appeal.submitted` | An author appeals | `{ appealId: uuid, contentType: string, contentId: uuid }` | - |
 | `reviews.appeal.decided` | An appeal is decided | `{ appealId: uuid, overturned: bool }` | - |
 | `reviews.content.referred` | Content is referred to Trust and Risk | `{ moderationItemId: uuid, contentType: string, contentId: uuid, authorId: string, note: text }` | trust |
@@ -971,21 +978,21 @@ Indexes: `(status, submitted_at)`
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| minReviewLength | `50` | Characters for a written review |
-| maxReviewPhotos | `6` | Photos per review |
-| reviewWindowDays | `365` | Days after delivery to write a review |
-| sellerFeedbackWindowDays | `90` | Days after delivery to leave seller feedback |
-| responseEditDays | `7` | Seller can edit a public response for this long |
-| appealWindowDays | `30` | Days to appeal a moderation decision |
-| hideOnReportReasons | `["personal_information","hate_or_harassment"]` | Report reasons that hide content while it is reviewed |
-| inviteDelayDays | `5` | Ask for a review this long after delivery |
-| sellerRatingPeriodMonths | `12` | Period for the seller positive percentage |
-| positiveThreshold | `4` | Overall rating counted as positive (4–5); 3 is neutral |
-| moderationTargetHours | `48` | Decision target for reported content (example) |
-| reportCooldownDays | `30` | Repeat reports on decided content attach without reopening |
-| questionAnswerTargetBusinessDays | `1` | Expected answer time shown under unanswered questions (Question.answerExpectation), example |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| minReviewLength | `50` | int, characters, 0–… | Characters for a written review |
+| maxReviewPhotos | `6` | int, 0–20 | Photos per review |
+| reviewWindowDays | `365` | duration, days, 30–… | Days after delivery to write a review |
+| sellerFeedbackWindowDays | `90` | duration, days, 1–…, seller-visible | Days after delivery to leave seller feedback |
+| responseEditDays | `7` | duration, days, 0–…, seller-visible | Seller can edit a public response for this long |
+| appealWindowDays | `30` | duration, days, 1–… | Days to appeal a moderation decision |
+| hideOnReportReasons | `["personal_information","hate_or_harassment"]` | json, approval: second reviewer | Report reasons that hide content while it is reviewed |
+| inviteDelayDays | `5` | duration, days, 0–… | Ask for a review this long after delivery |
+| sellerRatingPeriodMonths | `12` | duration, months, 1–…, approval: second reviewer, seller-visible | Period for the seller positive percentage |
+| positiveThreshold | `4` | int, 1–5, approval: second reviewer, seller-visible | Overall rating counted as positive (4–5); 3 is neutral |
+| moderationTargetHours | `48` | duration, hours, 1–… | Decision target for reported content (example) |
+| reportCooldownDays | `30` | duration, days, 0–… | Repeat reports on decided content attach without reopening |
+| questionAnswerTargetBusinessDays | `1` | duration, business days, 1–…, seller-visible | Expected answer time shown under unanswered questions (Question.answerExpectation), example |
 
 ## Notes
 - Product reviews describe the item and appear on the product page for all sellers; seller feedback describes buying from a seller (as described, dispatch, communication) and appears only on the seller profile. They are separate tables, summaries and screens (plan ch. 17).

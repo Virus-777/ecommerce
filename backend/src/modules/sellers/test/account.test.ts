@@ -264,7 +264,7 @@ describe('members', () => {
 
     await kit.emit('identity', 'identity.account.closed', { accountId: s.accountId, at: kit.clock.now().toISOString() });
     expect(await kit.svc.getMemberAccess(s.sellerId, s.accountId)).toBeNull();
-    expect(kit.work.some((w) => w.kind === 'owner_account_closed')).toBe(true);
+    expect(kit.work.some((w) => w.kind === 'seller_performance' && w.dedupeKey === `owner_account_closed:${s.sellerId}`)).toBe(true);
   });
 });
 

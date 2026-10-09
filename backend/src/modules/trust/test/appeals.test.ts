@@ -88,10 +88,10 @@ describe('appeals on trust enforcement', () => {
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     kit.clock.advance(6.5 * 86_400_000);
     await kit.job('trust.appeal-deadlines');
-    expect(kit.work.at(-1)).toMatchObject({ queueKey: 'trust.reports', kind: 'trust_appeal_due', dedupeKey: `trust_appeal:${res.body.id}:due` });
+    expect(kit.work.at(-1)).toMatchObject({ queueKey: 'trust.reports', kind: 'trust_report', dedupeKey: `trust_appeal:${res.body.id}` });
     kit.clock.advance(86_400_000);
     await kit.job('trust.appeal-deadlines');
-    expect(kit.work.at(-1)).toMatchObject({ kind: 'trust_appeal_overdue' });
+    expect(kit.work.at(-1)).toMatchObject({ kind: 'trust_report', priority: 'high', dedupeKey: `trust_appeal:${res.body.id}` });
     const o = await kit.call('GET', `${ADMIN}/overview`, staff());
     expect(o.body.appealsWaiting).toBeGreaterThan(0);
     expect(o.body.nextAppealDecideBy).toEqual(expect.any(String));

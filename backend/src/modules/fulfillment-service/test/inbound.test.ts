@@ -1,7 +1,7 @@
 /** Inbound shipments: plan, edit, submit with labels, ship, cancel, arrive, receive into seller-owned stock, discrepancies. */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { A, ADDRESS, arrivedInbound, boot, S, type Kit } from './helpers.js';
+import { A, ADDRESS, arrivedInbound, boot, decideCredit, S, type Kit } from './helpers.js';
 
 let k: Kit;
 beforeAll(async () => {
@@ -172,18 +172,44 @@ describe('inbound shipments', () => {
     await k.publish('access', 'access.approval.decided', { requestId: pending.body.error.details.approvalRequestId, ref: 'AP-1', actionKey: req.action, module: 'fulfillment-service', target: req.target, outcome: 'approved', decidedBy: { kind: 'staff', id: newId(), name: 'Finance' }, reason: null, amount: { amount: 90_000, currency: 'USD' }, approverIds: [], requestedById: newId() });
     expect((await k.call('GET', S(`/inbound/${c}`), { token: s.token })).body.fees.filter((f: any) => f.type === 'reimbursement')).toHaveLength(1);
 
-    // posting: fees go to the ledger as service_fee; a reimbursement is credited against the largest fee posted for
-    // its inbound (finance.creditSellerCharge); one larger than that fee stays accrued
+    // posting: fees go to the ledger as service_fee; a reimbursement is a seller credit without an original charge
+    // (finance.creditSeller), posted at once up to finance's threshold
     await k.app.kernel.jobs.runNow('fulfillment-service.post-fees');
     const bFees = (await k.call('GET', S(`/inbound/${b}`), { token: s.token })).body.fees as any[];
     expect(bFees.find((f) => f.id === reimbursement.id)).toMatchObject({ state: 'posted' });
-    const largest = bFees.filter((f) => f.amount.amount > 0).sort((x, y) => y.amount.amount - x.amount.amount)[0];
-    const feeEntry = k.financeLedger.find((e) => e.type === 'service_fee' && e.reference?.id === largest.id)!;
-    expect(k.financeLedger.filter((e) => e.type === 'charge_credit' && e.sellerId === s.sellerId)).toEqual([
-      expect.objectContaining({ amount: { amount: 80, currency: 'USD' }, originalEntryId: feeEntry.id, reason: 'Lost at the dock', idempotencyKey: `fulfillment-service:reimbursement:${reimbursement.id}` }),
+    const key80 = `fulfillment-service:reimbursement:${reimbursement.id}`;
+    expect(k.financeLedger.filter((e) => e.type === 'seller_credit' && e.sellerId === s.sellerId)).toEqual([
+      expect.objectContaining({ amount: { amount: 80, currency: 'USD' }, reason: 'Lost at the dock', idempotencyKey: key80, reference: { kind: 'fulfillment_service', id: reimbursement.id, ref: expect.any(String) } }),
     ]);
-    const cFees = (await k.call('GET', S(`/inbound/${c}`), { token: s.token })).body.fees as any[];
-    expect(cFees.find((f) => f.type === 'reimbursement')).toMatchObject({ amount: { amount: -90_000 }, state: 'accrued' });
+    expect(k.financeLedger.filter((e) => e.type === 'charge_credit' && e.sellerId === s.sellerId)).toEqual([]);
+    expect(k.events('fulfillment-service.fee.charged')).toEqual(expect.arrayContaining([expect.objectContaining({ chargeId: reimbursement.id, type: 'reimbursement', amount: { amount: -80, currency: 'USD' } })]));
+
+    // above finance's threshold the credit waits for Finance: the charge stays accrued; later runs read the credit back
+    const cCharge = () => k.call('GET', S(`/inbound/${c}`), { token: s.token }).then((r) => (r.body.fees as any[]).find((f) => f.type === 'reimbursement'));
+    expect(await cCharge()).toMatchObject({ amount: { amount: -90_000 }, state: 'accrued' });
+    const cCredit = k.financeCredits.find((x) => x.amount.amount === 90_000 && x.sellerId === s.sellerId)!;
+    expect(cCredit).toMatchObject({ status: 'pending_approval', idempotencyKey: `fulfillment-service:reimbursement:${(await cCharge()).id}` });
+    await k.app.kernel.jobs.runNow('fulfillment-service.post-fees');
+    expect(await cCharge()).toMatchObject({ state: 'accrued' });
+    expect(k.financeCredits.filter((x) => x.idempotencyKey === cCredit.idempotencyKey)).toHaveLength(1);
+    decideCredit(k.financeLedger, cCredit, 'posted');
+    await k.app.kernel.jobs.runNow('fulfillment-service.post-fees');
+    expect(await cCharge()).toMatchObject({ state: 'posted' });
+    expect(k.financeLedger.filter((e) => e.type === 'seller_credit' && e.idempotencyKey === cCredit.idempotencyKey)).toHaveLength(1);
+
+    // a credit Finance rejects reverses the reimbursement
+    const e = await short();
+    await k.call('POST', S(`/inbound/${e}/discrepancy-response`), { token: s.token, body: { response: 'claimed', note: 'Missing unit' } });
+    expect((await k.call('POST', A(`/inbound/${e}/discrepancy-decision`), { body: { decision: 'reimburse', amount: { amount: 60_000, currency: 'USD' }, reason: 'Crushed carton' }, headers: key() })).status).toBe(200);
+    await k.app.kernel.jobs.runNow('fulfillment-service.post-fees');
+    const eCredit = k.financeCredits.find((x) => x.amount.amount === 60_000 && x.sellerId === s.sellerId)!;
+    expect(eCredit.status).toBe('pending_approval');
+    decideCredit(k.financeLedger, eCredit, 'rejected');
+    await k.app.kernel.jobs.runNow('fulfillment-service.post-fees');
+    const eCharge = ((await k.call('GET', S(`/inbound/${e}`), { token: s.token })).body.fees as any[]).find((f) => f.type === 'reimbursement');
+    expect(eCharge).toMatchObject({ state: 'reversed', reason: 'Finance did not approve the reimbursement' });
+    expect(k.events('fulfillment-service.fee.reversed')).toEqual(expect.arrayContaining([expect.objectContaining({ chargeId: eCharge.id, amount: { amount: -60_000, currency: 'USD' } })]));
+    expect(k.financeLedger.filter((x) => x.idempotencyKey === eCredit.idempotencyKey)).toEqual([]);
 
     // nobody answers: closed by the daily job after 14 days
     const d = await short();

@@ -803,11 +803,19 @@ export const spec = defineModuleSpec({
   settings: {
     "retainYears": {
       "default": 7,
-      "desc": "Years entries are kept (example value on the prototype)"
+      "desc": "Years entries are kept (example value on the prototype)",
+      "type": "duration",
+      "min": 7,
+      "unit": "years",
+      "approval": "business_owner"
     },
     "minimumRetentionYears": {
       "default": 7,
-      "desc": "Legal floor; changed only by configuration, not the API"
+      "desc": "Legal floor; changed only by configuration, not the API",
+      "type": "duration",
+      "min": 1,
+      "unit": "years",
+      "editable": false
     },
     "redactKeys": {
       "default": [
@@ -817,7 +825,9 @@ export const spec = defineModuleSpec({
         "accountNumber",
         "cardNumber"
       ],
-      "desc": "Keys masked in before/after JSON at record time"
+      "desc": "Keys masked in before/after JSON at record time",
+      "type": "json",
+      "approval": "second_reviewer"
     }
   },
   errorCodes: {

@@ -636,32 +636,34 @@ export class ContentHelp extends ContentHomepage {
     return n;
   }
 
-  /** Flags articles past their review date (once per due date) and tells their owners */
-  async articleReviewDue(): Promise<void> {
+  /**
+   * Flags published articles past their review date and publishes content.article.review_due (notifications tells
+   * the owner), once per article and due date: the inbox key commits with the flag in the publication log.
+   * Publishing a new version is the review: it sets the next due date, so the next period is flagged again.
+   */
+  async articleReviewDue(): Promise<number> {
     const now = this.now();
     const due = await this.repo.listArticles({ statuses: ['published'], reviewDueBefore: now });
-    const notifications = this.ctx.tryUse('notifications');
+    let sent = 0;
     for (const a of due) {
-      const dueKey = a.review_due_at!.toISOString().slice(0, 10);
-      const flagged = await this.repo.logsOf('article', a.id, 'review_due');
-      if (flagged.some((l) => l.reason === dueKey)) continue;
-      await this.logAction('article', a.id, 'review_due', SYSTEM, dueKey);
-      if (notifications && a.owner_staff_id) {
-        await this.soft(
-          'notifications.notify',
-          () =>
-            notifications.notify({
-              topic: 'content.article.review_due',
-              recipients: [{ kind: 'staff_member', accountId: a.owner_staff_id }],
-              context: { article: { title: a.title, slug: a.slug }, dueAt: a.review_due_at!.toISOString() },
-              link: { kind: 'help_article', id: a.id, label: 'Review article', screen: 'admin/help-content' },
-              dedupeKey: `content.article.review_due:${a.id}:${dueKey}`,
-              actionRequired: true,
-            }),
-          null,
-        );
-      }
+      if (!a.review_due_at) continue;
+      const dueSince = a.review_due_at;
+      const claimed = await this.repo.transaction(async (tx) => {
+        if (!(await tx.claim(`article-review-due:${a.id}:${dueSince.toISOString()}`))) return false;
+        await this.logAction('article', a.id, 'review_due', SYSTEM, dueSince.toISOString().slice(0, 10), tx);
+        return true;
+      });
+      if (!claimed) continue;
+      // the live version's publication is the last review (it set this due date)
+      const live = a.live_version_id ? await this.repo.getVersion(a.live_version_id) : undefined;
+      this.ctx.events.publish(
+        'content.article.review_due',
+        { articleId: a.id, slug: a.slug, title: a.title, ownerStaffId: a.owner_staff_id, lastReviewedAt: live?.published_at?.toISOString() ?? null, dueSince: dueSince.toISOString() },
+        { actor: SYSTEM.actor },
+      );
+      sent++;
     }
+    return sent;
   }
 }
 

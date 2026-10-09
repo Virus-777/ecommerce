@@ -1,7 +1,7 @@
 /**
  * The day-end review: built before dayEndReviewTime from open items and other modules' forecasts,
- * checked item by item (a note is required where overdue work is still open), completed with a
- * summary to the shared roles, or marked missed at the end of the market day (then listed on the
+ * checked item by item (a note is required where overdue work is still open), completed (the summary
+ * goes to the shared roles when it is prepared: workqueues.day_end.prepared), or marked missed at the end of the market day (then listed on the
  * next day's review). The close job also snapshots daily_counts.
  */
 import { AppError } from '../../../kernel/errors/index.js';
@@ -14,7 +14,7 @@ import { ACTIVE_STATES } from '../domain/catalog.js';
 import { addDays, median } from '../domain/rules.js';
 import { dayEndReviewMachine } from '../domain/state-machines.js';
 import type { DayEndReviewRow } from '../ports.js';
-import type { By, Core, Viewer } from './core.js';
+import { SYSTEM, type By, type Core, type Viewer } from './core.js';
 
 type Key = DayEndItem['key'];
 
@@ -143,6 +143,27 @@ export class DayEnd {
     });
   }
 
+  /**
+   * Job day-end-prepare: build today's review and publish workqueues.day_end.prepared once per date
+   * (notifications sends the summary to the shared roles). A review already built on first read is
+   * announced by the job; a second run changes nothing.
+   */
+  async prepareAndAnnounce(date = this.core.today()): Promise<DayEndReviewRow> {
+    const core = this.core;
+    const built = await this.prepare(date);
+    const roles = (built.shared_with_roles ?? []) as string[];
+    const notifying = (core.ctx.modules as readonly string[]).includes('notifications');
+    const now = core.now();
+    const [openItems, overdueItems] = await Promise.all([this.repo.countItems({ states: ACTIVE }), this.repo.countItems({ states: ACTIVE, deadlineStates: ['overdue'], now })]);
+    const row = await this.repo.transaction(async (tx) => {
+      if (!(await tx.claim(`day-end-prepared:${date}`))) return null;
+      return tx.updateReview(built.id, { summary_sent_to: (notifying ? roles : []) as never });
+    });
+    if (!row) return built;
+    core.ctx.events.publish('workqueues.day_end.prepared', { reviewId: row.id, date: row.date, dueAt: row.due_at.toISOString(), openItems, overdueItems, roleKeys: roles }, { actor: SYSTEM });
+    return row;
+  }
+
   /* ---------------------------------------------------------------- reading */
 
   async view(row: DayEndReviewRow): Promise<DayEndReview> {
@@ -211,38 +232,16 @@ export class DayEnd {
     const unchecked = ((existing.items ?? []) as unknown as DayEndItem[]).filter((i) => !i.checked).map((i) => i.key);
     if (unchecked.length) throw new AppError('DAY_END_INCOMPLETE', `${unchecked.length} item${unchecked.length === 1 ? ' is' : 's are'} not checked yet`, { items: unchecked });
     const openItems = await this.repo.countItems({ states: [...ACTIVE] });
-    const roles = (existing.shared_with_roles ?? []) as string[];
-    const me = await core.staffRef(v.staffId);
-    const sentTo = await this.#sendSummary(existing, roles, me.name, openItems, note?.trim() || null);
+    // the summary went to the shared roles when the review was prepared (workqueues.day_end.prepared, sent by notifications)
+    const sentTo = (existing.summary_sent_to ?? []) as string[];
     const row = await this.repo.transaction(async (tx) => {
       const r = (await tx.getReview(id, { forUpdate: true }))!;
       dayEndReviewMachine.next(r.state as never, 'complete');
-      return tx.updateReview(id, { state, completed_by: v.staffId, completed_at: core.now(), summary_sent_to: sentTo as never });
+      return tx.updateReview(id, { state, completed_by: v.staffId, completed_at: core.now() });
     });
     core.ctx.events.publish('workqueues.day_end.completed', { reviewId: id, date: row.date, openItems }, by);
     await core.audit({ action: 'workqueues.day_end.complete', actionLabel: 'Completed the day-end review', target: { type: 'day_end_review', id, ref: row.date, label: `Day-end review ${row.date}` }, reason: note ?? null, after: { state: row.state, openItems, summarySentTo: sentTo } }, by);
     return this.view(row);
-  }
-
-  /** The summary goes to the shared roles through notifications (empty when notifications is off) */
-  async #sendSummary(review: DayEndReviewRow, roles: string[], by: string, openItems: number, note: string | null): Promise<string[]> {
-    const notifications = this.core.ctx.tryUse('notifications');
-    if (!notifications || !roles.length) return [];
-    const items = (review.items ?? []) as unknown as DayEndItem[];
-    const text = [`Day-end review ${review.date} completed with ${openItems} open work items.`, ...items.map((i) => `${i.title}: ${i.summary}${i.note ? ` (${i.note})` : ''}`), ...(note ? [note] : [])].join(' ');
-    try {
-      await notifications.notify({
-        topic: 'staff.mention',
-        recipients: roles.map((roleKey) => ({ kind: 'staff_role', roleKey })),
-        link: { kind: 'queue', id: review.id, ref: review.date, screen: 'ops/queues', label: 'Open day-end review' },
-        context: { mention: { by, text } },
-        dedupeKey: `day-end:${review.date}`,
-      });
-      return roles;
-    } catch (err) {
-      this.core.log.warn({ err }, 'workqueues: the day-end summary could not be sent');
-      return [];
-    }
   }
 
   /* ---------------------------------------------------------------- end of day */

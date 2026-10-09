@@ -668,7 +668,7 @@ Indexes: `(status, expected_by)`, `(return_id)`, `(tracking_number)`
 | `warehouse.damage.reported` | A damaged unit is found at pick or pack | `{ fulfillmentId: uuid, orderId: uuid, stockItemId: uuid, quantity: int, discrepancyId: uuid }` | - |
 | `warehouse.package.packed` | A package is packed with its label | `{ packageId: uuid, fulfillmentId: uuid, orderId: uuid, sellerGroupId: uuid, items: PackageItem[], carrier: string, service: string, trackingNumber: string, weight: Weight, dimensions: Dimensions? }` | shipping |
 | `warehouse.bin.assigned` | A stock item's bins change or put-away completes | `{ stockItemId: uuid, binId: uuid, binCode: string, primary: bool }` | inventory |
-| `warehouse.return_parcel.received` | A return parcel is scanned in at the warehouse | `{ parcelId: uuid, returnId: uuid?, unexpected: bool, parcelCondition: string, receivedAt: datetime }` | - |
+| `warehouse.return_parcel.received` | A return parcel is scanned in at the warehouse | `{ parcelId: uuid, returnId: uuid?, unexpected: bool, parcelCondition: string, receivedAt: datetime }` | workqueues |
 | `warehouse.return_parcel.handed_over` | A parcel is handed to returns inspection | `{ parcelId: uuid, returnId: uuid?, inspectorId: uuid? }` | - |
 
 | Consumes | From | Does |
@@ -729,15 +729,15 @@ Indexes: `(status, expected_by)`, `(return_id)`, `(tracking_number)`
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| requireBinScan | `true` | Pickers must scan the bin before the item |
-| requireItemScan | `true` | Every unit is scanned at pick and pack |
-| autoWaveEnabled | `false` | Create waves automatically |
-| carrierPickupTimes | `["16:00"]` | Daily carrier pickups (market time) used for waves and ship-by |
-| atRiskMinutes | `60` | Minutes before ship-by when an unpacked order is at risk |
-| weightUnit | `"lb"` | Scale unit |
-| packingSlipShowsPrices | `false` | Packing slips list items and quantities only |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| requireBinScan | `true` | bool, approval: second reviewer | Pickers must scan the bin before the item |
+| requireItemScan | `true` | bool, approval: second reviewer | Every unit is scanned at pick and pack |
+| autoWaveEnabled | `false` | bool | Create waves automatically |
+| carrierPickupTimes | `["16:00"]` | json | Daily carrier pickups (market time) used for waves and ship-by |
+| atRiskMinutes | `60` | duration, minutes, 0–… | Minutes before ship-by when an unpacked order is at risk |
+| weightUnit | `"lb"` | enum (lb \| kg) | Scale unit |
+| packingSlipShowsPrices | `false` | bool | Packing slips list items and quantities only |
 
 ## Integrations
 - **Barcode scanners and handhelds**: Keyboard-wedge or camera scanning into the scan fields (no driver integration needed)

@@ -1324,27 +1324,45 @@ export const spec = defineModuleSpec({
   settings: {
     "sellerReplyTargetHours": {
       "default": 24,
-      "desc": "Seller reply target shown to sellers (example)"
+      "desc": "Seller reply target shown to sellers (example)",
+      "type": "duration",
+      "min": 1,
+      "unit": "hours",
+      "sellerVisible": true
     },
     "maskContactDetails": {
       "default": true,
-      "desc": "Mask phone numbers, emails and outside links in messages"
+      "desc": "Mask phone numbers, emails and outside links in messages",
+      "type": "bool",
+      "approval": "second_reviewer"
     },
     "maxAttachments": {
       "default": 5,
-      "desc": "Files per message"
+      "desc": "Files per message",
+      "type": "int",
+      "min": 0,
+      "max": 20
     },
     "maxAttachmentMb": {
       "default": 10,
-      "desc": "Size per file"
+      "desc": "Size per file",
+      "type": "int",
+      "min": 1,
+      "unit": "MB"
     },
     "messageMaxLength": {
       "default": 4000,
-      "desc": "Characters per message"
+      "desc": "Characters per message",
+      "type": "int",
+      "min": 1,
+      "unit": "characters"
     },
     "archiveAfterDays": {
       "default": 180,
-      "desc": "Days after order completion"
+      "desc": "Days after order completion",
+      "type": "duration",
+      "min": 30,
+      "unit": "days"
     }
   },
   errorCodes: {

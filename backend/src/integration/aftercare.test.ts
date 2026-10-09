@@ -6,18 +6,22 @@
  *   → Trust and Risk reports the seller, a Seller Manager accepts the restriction → the seller can
  *     no longer sell and the cart says so → the Business Owner sees it in the action history
  *   → the seller dashboard in reports shows the sale.
+ * Gap pass 2: credits to a seller without an original charge (a small one posts at once, a larger one
+ * waits for the Finance Manager).
  */
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { withDependencies } from '../kernel/module-system/loader.js';
 import { buildTestApp, movingClock, signWebhook } from '../testing/app.js';
 import { flows, type Flows, type Listing, type Staff } from '../testing/flows.js';
+import type { FinanceService } from '../modules/finance/service.js';
 
 const clock = movingClock();
 let app: FastifyInstance;
 let f: Flows;
 let listing: Listing;
 let trustManager: Staff;
+let financeManager: Staff;
 let buyer: Awaited<ReturnType<Flows['customer']>>;
 let orderId: string;
 let itemId: string;
@@ -89,6 +93,7 @@ describe('after the order', () => {
 
     // a fresh install can staff Finance: the owner invites a Finance Manager, the deputy approves the grant
     const finance = await f.staffWithSensitiveRoles(listing.owner, listing.deputy, 'fay@marketly.test', 'Fay Finance', ['finance_manager']);
+    financeManager = finance;
     const approved = await f.call('POST', `/api/admin/returns/refunds/${accepted.body.remedies[0].refundRequestId}/approve`, {
       token: finance.accessToken,
       body: { note: 'Seller offered it', stepUpCode: f.code(finance) },
@@ -104,6 +109,27 @@ describe('after the order', () => {
     // another customer can't see the case
     const other = await f.customer('nosy@example.com');
     expect((await f.call('GET', `/api/store/support/cases/${caseId}`, { token: other.accessToken })).status).toBe(404);
+  });
+
+  it('credits the seller without an original charge: a small credit posts at once, a larger one waits for the Finance Manager', async () => {
+    const finance = app.kernel.boot.apis.get('finance') as unknown as FinanceService;
+    const reference = { kind: 'fulfillment_service' as const, id: crypto.randomUUID(), ref: 'FS-CLAIM-1' };
+    const small = await finance.creditSeller({ sellerId: listing.sellerId, amount: { amount: 2_500, currency: 'USD' }, reason: 'Lost unit at our warehouse', reference, idempotencyKey: 'fs:lost:1' });
+    expect(small).toMatchObject({ status: 'posted', amount: { amount: 2_500 } });
+    expect(small.ledgerEntry).toBeTruthy();
+    // the same key returns the first credit
+    expect((await finance.creditSeller({ sellerId: listing.sellerId, amount: { amount: 2_500, currency: 'USD' }, reason: 'Lost unit at our warehouse', reference, idempotencyKey: 'fs:lost:1' })).id).toBe(small.id);
+
+    const big = await finance.creditSeller({ sellerId: listing.sellerId, amount: { amount: 75_000, currency: 'USD' }, reason: 'Pallet damaged at our warehouse', reference: { ...reference, ref: 'FS-CLAIM-2' }, idempotencyKey: 'fs:lost:2' });
+    expect(big).toMatchObject({ status: 'pending_approval' });
+    expect(big.approvalRequestId).toBeTruthy();
+    const ok = await f.call('POST', `/api/admin/access/approval-requests/${big.approvalRequestId}/approve`, { token: financeManager.accessToken, body: { note: 'Checked the claim' }, headers: { 'x-step-up-code': f.code(financeManager) } });
+    expect(ok.status, JSON.stringify(ok.body)).toBeLessThan(300);
+    await app.kernel.events.drain();
+
+    const ledger = await f.call('GET', '/api/seller/finance/ledger?limit=100', { token: listing.sellerToken });
+    const credits = (ledger.body.items as { type: string; amount: { amount: number } }[]).filter((e) => e.type === 'seller_credit');
+    expect(credits.map((e) => e.amount.amount).sort((a, b) => a - b), JSON.stringify(ledger.body.items)).toEqual([2_500, 75_000]);
   });
 
   it('restricts the seller through Trust and Risk; the offer stops selling and the cart explains it', async () => {

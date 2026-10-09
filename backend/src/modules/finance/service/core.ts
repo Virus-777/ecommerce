@@ -70,6 +70,7 @@ export interface Parts {
   destinations: import('./destinations.js').DestinationsPart;
   reports: import('./reports.js').ReportsPart;
   recon: import('./recon.js').ReconPart;
+  credits: import('./credits.js').CreditsPart;
 }
 
 export class Core {

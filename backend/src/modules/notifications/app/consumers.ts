@@ -12,7 +12,7 @@ import { format } from '../../../kernel/lib/money.js';
 import type { NotifyInput, Recipient } from '../../../spec/notifications.js';
 import { TOPICS } from '../domain/catalog.js';
 import { ROUTES, type EventRoute, type Fmt, type RouteSend, type RouteTarget, type Routes, type SubjectKey, type Target } from '../domain/routing.js';
-import { formatDate } from '../domain/rules.js';
+import { formatDate, hashAddress } from '../domain/rules.js';
 import { Core } from './core.js';
 import type { Sender } from './sender.js';
 
@@ -76,9 +76,17 @@ export class Consumers {
     }
 
     if (send.skipIfRecent) {
-      const recent = await repo.latestNotice({ topicKey: send.skipIfRecent.topic, subject: { key: send.skipIfRecent.key, value: send.skipIfRecent.value } });
-      const window = Number(await core.setting('dedupeWindowMinutes')) * 60_000;
-      if (recent && core.now().getTime() - recent.created_at.getTime() < window) return;
+      const s = send.skipIfRecent;
+      const since = new Date(core.now().getTime() - Number(await core.setting('dedupeWindowMinutes')) * 60_000);
+      const recent = await repo.latestNotice({ topicKey: s.topic, subject: { key: s.key, value: s.value } });
+      if (recent && recent.created_at.getTime() > since.getTime()) return;
+      // guests have no inbox: the delivery log tells whether the combined email just went to their address
+      const guests = send.to.filter((t): t is Extract<RouteTarget, { kind: 'guest' }> => Boolean(t) && (t as RouteTarget).kind === 'guest');
+      if (guests.length) {
+        let sent = true;
+        for (const g of guests) sent &&= await repo.deliveryExists({ dedupeKey: s.dedupe, topicKey: s.topic, addressHash: hashAddress('email', g.email), channel: 'email', since });
+        if (sent) return;
+      }
     }
 
     const subjects: Record<string, string> = {};

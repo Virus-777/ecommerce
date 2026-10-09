@@ -3,8 +3,10 @@
  * storage and long-term storage from the daily snapshots, posting of accrued charges to the seller ledger
  * through finance (fee.charged), the seller's own fee list, and reversals within the caller's limit.
  *
- * Fees post as service_fee (finance.recordServiceFee); reversals of posted fees and reimbursements are credits
- * against a posted fee's ledger entry (finance.creditSellerCharge), kept on the charge as ledger_entry_id.
+ * Fees post as service_fee (finance.recordServiceFee); reversals of posted fees are credits against the fee's
+ * ledger entry (finance.creditSellerCharge). Reimbursements are seller credits without an original charge
+ * (finance.creditSeller, any size; above finance's creditSecondReviewerThreshold they wait for Finance approval).
+ * The ledger entry is kept on the charge as ledger_entry_id.
  */
 import { AppError } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
@@ -230,26 +232,18 @@ export class FeesPart extends Part {
   /* ---------------------------------------------------------------- posting to finance */
 
   /**
-   * The posted fee a reimbursement is credited against (finance.creditSellerCharge needs an original entry): the
-   * largest posted fee charged for the same reference (the inbound shipment). Finance refuses more than that fee
-   * minus earlier credits.
-   */
-  private async reimbursementOriginal(c: ChargeRec): Promise<string | null> {
-    if (!c.reference) return null;
-    const fees = await this.repo.find('fee_charges', { seller_id: c.seller_id, reference: c.reference, state: 'posted', amount: { op: '>', value: 0 } }, { orderBy: [['amount', 'desc']] });
-    return fees.find((f) => f.ledger_entry_id)?.ledger_entry_id ?? null;
-  }
-
-  /**
    * Job fulfillment-service.post-fees: accrued fees go to the seller ledger as service_fee
-   * (finance.recordServiceFee), accrued reimbursements as a credit (finance.creditSellerCharge against the fee
-   * charged for the same inbound); both idempotent per charge. The entry is kept on the charge
-   * (ledger_entry_id) and fee.charged is published.
+   * (finance.recordServiceFee), accrued reimbursements as a seller credit (finance.creditSeller); both idempotent
+   * per charge. The entry is kept on the charge (ledger_entry_id) and fee.charged is published.
+   *
+   * A reimbursement above finance's creditSecondReviewerThreshold comes back pending_approval: the charge stays
+   * accrued and the next run asks again with the same idempotency key, which returns the same credit with its
+   * current status (the spec gives this module no finance.seller_credit.decided consumer). Posted → the charge is
+   * posted; rejected by Finance → the charge is reversed with Finance's decision as the reason.
    */
   async postAll(): Promise<{ posted: number }> {
     const finance = this.ctx.use('finance');
-    // fees first: a reimbursement is credited against a fee posted for the same inbound
-    const due = (await this.repo.find('fee_charges', { state: 'accrued' }, { orderBy: [['id', 'asc']], limit: 2000 })).filter((c) => c.amount !== 0).sort((a, b) => Number(b.amount > 0) - Number(a.amount > 0));
+    const due = (await this.repo.find('fee_charges', { state: 'accrued' }, { orderBy: [['id', 'asc']], limit: 2000 })).filter((c) => c.amount !== 0);
     let posted = 0;
     for (const c of due) {
       try {
@@ -265,19 +259,22 @@ export class FeesPart extends Part {
           });
           entryId = entry.id;
         } else {
-          const originalEntryId = await this.reimbursementOriginal(c);
-          if (!originalEntryId) {
-            this.ctx.log.warn({ chargeId: c.id, reference: c.reference }, 'fulfillment-service: reimbursement waits: no posted fee for its inbound to credit against');
-            continue;
-          }
-          const entry = await finance.creditSellerCharge({
+          const credit = await finance.creditSeller({
             sellerId: c.seller_id,
             amount: this.core.money(-c.amount, c.currency),
-            originalEntryId,
             reason: c.reason ?? `Reimbursement${c.reference ? ` for ${c.reference}` : ''}`,
+            reference: { kind: 'fulfillment_service', id: c.id, ref: c.reference ?? null },
             idempotencyKey: `fulfillment-service:reimbursement:${c.id}`,
           });
-          entryId = entry.id;
+          if (credit.status === 'rejected') {
+            await this.applyReversal(c.id, 'Finance did not approve the reimbursement', { actor: SYSTEM });
+            continue;
+          }
+          if (credit.status !== 'posted' || !credit.ledgerEntry) {
+            this.ctx.log.info({ chargeId: c.id, creditId: credit.id, approvalRequestId: credit.approvalRequestId }, 'fulfillment-service: reimbursement waits for Finance approval');
+            continue;
+          }
+          entryId = credit.ledgerEntry.id;
         }
         const done = await this.repo.transaction(async (tx) => {
           const locked = await tx.get('fee_charges', c.id, { forUpdate: true });

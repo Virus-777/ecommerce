@@ -1614,18 +1614,18 @@ Checked through the access module (limits per role, second reviewer).
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| defaultSellerHandlingDays | `2` | Dispatch within business days when a seller sets nothing |
-| sellerHandlingRange | `[1,3]` | Allowed seller handling days (HANDLING_OUT_OF_RANGE outside) |
-| officialCutoff | `"14:00"` | Official Store same-day cutoff, market time |
-| dispatchDueTime | `"17:00"` | Local time a dispatch deadline falls on |
-| validTrackingWithinHours | `24` | Tracking must be valid this long after dispatch |
-| labelScanGraceHours | `36` | Label created without a carrier scan before missing_tracking opens |
-| stalledNoScanDays | `7` | No scan for this long opens a lost_or_damaged review |
-| failedDeliveryChoiceDays | `14` | Days the customer has to choose a next step after a failed delivery |
-| claimFinanceApprovalAbove | `{"amount":100000,"currency":"USD"}` | Carrier claims above this need Finance approval (example value) |
-| marketDefaultPostalCode | `"97205"` | Location for estimates when nothing is known (example) |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| defaultSellerHandlingDays | `2` | duration, business days, 1–…, approval: second reviewer, seller-visible | Dispatch within business days when a seller sets nothing |
+| sellerHandlingRange | `[1,3]` | json, approval: second reviewer, seller-visible | Allowed seller handling days (HANDLING_OUT_OF_RANGE outside) |
+| officialCutoff | `"14:00"` | time | Official Store same-day cutoff, market time |
+| dispatchDueTime | `"17:00"` | time, seller-visible | Local time a dispatch deadline falls on |
+| validTrackingWithinHours | `24` | duration, hours, 1–…, seller-visible | Tracking must be valid this long after dispatch |
+| labelScanGraceHours | `36` | duration, hours, 1–…, seller-visible | Label created without a carrier scan before missing_tracking opens |
+| stalledNoScanDays | `7` | duration, days, 1–… | No scan for this long opens a lost_or_damaged review |
+| failedDeliveryChoiceDays | `14` | duration, days, 1–… | Days the customer has to choose a next step after a failed delivery |
+| claimFinanceApprovalAbove | `{"amount":100000,"currency":"USD"}` | money, 0–…, approval: business owner | Carrier claims above this need Finance approval (example value) |
+| marketDefaultPostalCode | `"97205"` | string | Location for estimates when nothing is known (example) |
 
 ## Integrations
 - **Carrier APIs (UPS, USPS, FedEx) or a multi-carrier aggregator**: Rates for labels, label purchase and void, tracking webhooks and polling, address type checks (PO box, military)

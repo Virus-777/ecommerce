@@ -15,7 +15,7 @@ import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { CreditBalance, CreditHold, CreditLot, LedgerEntry, WalletCreditGrantedEvent, WalletOverview } from '../../../spec/wallet.js';
 import { creditHoldMachine } from '../domain/state-machines.js';
-import { allocate, HOW_TO_USE, m, RESERVATION_KINDS, SYSTEM, USABLE_ON, type EntryKind, type LotSource } from '../domain/rules.js';
+import { allocate, daysLeft, dueReminder, HOW_TO_USE, m, reminderDays, RESERVATION_KINDS, SYSTEM, USABLE_ON, type EntryKind, type LotSource } from '../domain/rules.js';
 import { allocationsOf, toEntry, toHold, toLot, type EntryFacts } from '../mappers.js';
 import type { AccountRow, EntryRow, HoldRow, LotAllocation, LotRow, WalletRepository } from '../ports.js';
 import { conflict, invalid, notFound, Outbox, type By, type WalletCore } from './core.js';
@@ -363,7 +363,7 @@ export class Ledger {
 
   /* ================================================================ expiry */
 
-  /** Job wallet.expire-lots: expire due lots (per customer, in batches), then remind about credit expiring in 30 and 7 days */
+  /** Job wallet.expire-lots: expire due lots (per customer, in batches), then publish wallet.credit.expiring for lots at a reminder day */
   async expireLots(): Promise<{ expiredCustomers: number; reminders: number }> {
     const done = new Set<string>();
     for (let round = 0; round < 50; round++) {
@@ -386,33 +386,42 @@ export class Ledger {
     return { expiredCustomers: done.size, reminders: await this.remindExpiring() };
   }
 
-  /** Customers with credit expiring in 30 and in 7 days (the job runs daily: one day's window each) */
+  /**
+   * wallet.credit.expiring for lots with credit left that reached one of expiryReminderDays (notifications
+   * tells the customer). Once per lot and reminder day: the inbox key `credit-expiring:<lotId>:<day>` makes a
+   * second run (or a run after a missed day) change nothing, and a lot gets the latest reminder it reached.
+   */
   private async remindExpiring(): Promise<number> {
-    const notifications = this.core.ctx.tryUse('notifications');
-    if (!notifications) return 0;
-    const now = this.core.now().getTime();
-    let sent = 0;
-    for (const days of [30, 7]) {
-      const lots = await this.repo.lotsExpiringBetween(new Date(now + (days - 1) * DAY), new Date(now + days * DAY), 1_000);
-      const byCustomer = new Map<string, LotRow[]>();
-      for (const l of lots) byCustomer.set(l.customer_id, [...(byCustomer.get(l.customer_id) ?? []), l]);
-      for (const [customerId, own] of byCustomer) {
-        const customer = await this.core.soft('customers.getCustomer', () => this.core.customer(customerId));
-        if (!customer) continue;
-        const amount = own.reduce((s, l) => s + l.remaining, 0);
-        const ok = await this.core.soft('notifications.notify', () =>
-          notifications.notify({
-            topic: 'credit.expiring',
-            recipients: [{ kind: 'customer', accountId: customer.userId }],
-            context: { credit: { amount: this.core.fmt(amount), days, expiresAt: own[0]!.expires_at!.toISOString() } },
-            link: { kind: 'account', id: customerId, label: 'View store credit', screen: 'account/coupons' },
-            dedupeKey: `wallet:expiring:${customerId}:${days}:${own[0]!.expires_at!.toISOString().slice(0, 10)}`,
-          }),
-        );
-        if (ok) sent++;
+    const days = reminderDays(await this.core.ctx.settings.get('expiryReminderDays'));
+    const now = this.core.now();
+    const to = new Date(now.getTime() + days[0]! * DAY + 1);
+    const currencies = new Map<string, string>();
+    let from = now;
+    let published = 0;
+    for (let round = 0; round < 50; round++) {
+      const lots = await this.repo.lotsExpiringBetween(from, to, 1_000);
+      for (const lot of lots) {
+        const left = daysLeft(lot.expires_at!, now);
+        const day = dueReminder(left, days);
+        if (day === null) continue;
+        const claimed = await this.repo.transaction((tx) => tx.claim(`credit-expiring:${lot.id}:${day}`));
+        if (!claimed) continue;
+        if (!currencies.has(lot.customer_id)) currencies.set(lot.customer_id, (await this.repo.getAccount(lot.customer_id))?.currency ?? this.core.currency);
+        this.core.ctx.events.publish('wallet.credit.expiring', {
+          customerId: lot.customer_id,
+          lotId: lot.id,
+          amount: m(lot.remaining, currencies.get(lot.customer_id)!),
+          expiresAt: lot.expires_at!.toISOString(),
+          daysLeft: left,
+        });
+        published++;
       }
+      if (lots.length < 1_000) break;
+      const last = lots.at(-1)!.expires_at!;
+      if (last.getTime() === from.getTime()) break;
+      from = last;
     }
-    return sent;
+    return published;
   }
 
   /* ================================================================ balance check */

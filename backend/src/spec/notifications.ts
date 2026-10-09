@@ -11,10 +11,11 @@ import * as identity from './identity.js';
 /* ------------------------------------------------------------------ types */
 
 export interface Recipient {
-  kind: "customer" | "guest_email" | "seller" | "seller_member" | "staff_role" | "staff_member";
+  /** external_email: a contact outside Marketly (supplier, rights owner, scheduled-report address); email only, essential topics only */
+  kind: "customer" | "guest_email" | "seller" | "seller_member" | "staff_role" | "staff_member" | "external_email";
   /** Identity account (customer, seller member, staff member) */
   accountId?: string | null;
-  /** Guests (checkout email) */
+  /** Guests (checkout email) and external_email recipients */
   email?: string | null;
   /** seller: all members who should get this topic; seller_member: one member */
   sellerId?: string | null;
@@ -24,9 +25,9 @@ export interface Recipient {
 }
 
 export const Recipient: z.ZodType<Recipient> = z.object({
-  kind: z.enum(["customer", "guest_email", "seller", "seller_member", "staff_role", "staff_member"]),
+  kind: z.enum(["customer", "guest_email", "seller", "seller_member", "staff_role", "staff_member", "external_email"]).describe("external_email: a contact outside Marketly (supplier, rights owner, scheduled-report address); email only, essential topics only"),
   accountId: z.uuid().describe("Identity account (customer, seller member, staff member)").nullish(),
-  email: z.email().describe("Guests (checkout email)").nullish(),
+  email: z.email().describe("Guests (checkout email) and external_email recipients").nullish(),
   sellerId: z.uuid().describe("seller: all members who should get this topic; seller_member: one member").nullish(),
   memberId: z.uuid().nullish(),
   roleKey: z.string().describe("staff_role: resolved through access (lead, or covering backup)").nullish(),
@@ -259,7 +260,8 @@ export const TemplateVariable: z.ZodType<TemplateVariable> = z.object({
 export interface Topic {
   /** customer.shipment.dispatched, seller.dispatch.reminder, staff.approval.waiting… */
   key: string;
-  audience: "customer" | "seller" | "staff";
+  /** external: suppliers and rights owners, by email only */
+  audience: "customer" | "seller" | "staff" | "external";
   category: "essential" | "optional" | "promotional";
   group: string;
   label: string;
@@ -284,7 +286,7 @@ export interface Topic {
 
 export const Topic: z.ZodType<Topic> = z.object({
   key: z.string().describe("customer.shipment.dispatched, seller.dispatch.reminder, staff.approval.waiting…"),
-  audience: z.enum(["customer", "seller", "staff"]),
+  audience: z.enum(["customer", "seller", "staff", "external"]).describe("external: suppliers and rights owners, by email only"),
   category: z.enum(["essential", "optional", "promotional"]),
   group: z.string(),
   label: z.string(),
@@ -2426,7 +2428,16 @@ export const spec = defineModuleSpec({
       "workqueues.item.resolved": "Resolve the action notices for that work item",
       "settings.change.scheduled": "Sellers (seller-visible changes): upcoming platform change with its effective date",
       "audit.integrity.failed": "Staff: urgent notice to Platform Administrator and Business Owner",
-      "reports.export.ready": "Export ready to the requester (staff or seller member), including audit, orders and module list exports"
+      "reports.export.ready": "Export ready to the requester (staff or seller member), including audit, orders and module list exports",
+      "reports.scheduled_report.ready": "Phase 2: each recipient address (external_email, topic staff.report.scheduled, email only): the scheduled report with its download link and expiry",
+      "purchasing.purchase_order.sent": "Supplier (external_email, topic supplier.purchase_order.sent, email only) when emailSupplier is true and supplierEmail is set: the purchase order with its lines, delivery location and the buyer's message; in-app copy to the Purchasing Manager role",
+      "wallet.credit.expiring": "Customer (account group, topic customer.credit.expiring): unused store credit amount and expiry date, with a link to shop",
+      "workqueues.day_end.prepared": "Staff (topic staff.day_end.summary, to roleKeys): today's day-end review is ready with open and overdue counts and the due time; action required",
+      "advertising.campaign.ending_soon": "Seller (members with advertising permission, topic seller.campaign.ending_soon) for seller campaigns; staff (ownerStaffId, else the Advertising Manager role; topic staff.campaign.ending_soon) for own and brand campaigns: ends on endsAt, renew or let it finish",
+      "content.article.review_due": "Staff (ownerStaffId, else the Content Manager role; topic staff.article.review_due): help article due for review, action required",
+      "reviews.moderation.decided": "Reporters (topic customer.review_report.decided, seller variant for sellers): reporterOutcome; author (topic customer.review.moderated, seller.content.moderated for responses and answers): kept, edited or removed with the reason and appealUntil",
+      "trust.report.resolved": "Each reporter (customers and sellers in-app and email, rights owners by external_email; topic trust.report.resolved): the reporterOutcome text, never the reported party's details",
+      "trust.rights_report.received": "Rights owner (external_email, topic rights_owner.report.received): confirmation with the TR reference and what happens next"
     },
   },
   jobs: {
@@ -2458,15 +2469,24 @@ export const spec = defineModuleSpec({
   settings: {
     "noticeRetentionMonths": {
       "default": 12,
-      "desc": "Notices are kept for 12 months (seller inbox copy)"
+      "desc": "Notices are kept for 12 months (seller inbox copy)",
+      "type": "duration",
+      "min": 1,
+      "unit": "months"
     },
     "deliveryLogRetentionDays": {
       "default": 180,
-      "desc": "Delivery log retention"
+      "desc": "Delivery log retention",
+      "type": "duration",
+      "min": 30,
+      "unit": "days"
     },
     "maxDeliveryAttempts": {
       "default": 6,
-      "desc": "Attempts before a delivery fails"
+      "desc": "Attempts before a delivery fails",
+      "type": "int",
+      "min": 1,
+      "max": 20
     },
     "retryBackoffMinutes": {
       "default": [
@@ -2476,11 +2496,15 @@ export const spec = defineModuleSpec({
         60,
         240
       ],
-      "desc": "Delay before each retry"
+      "desc": "Delay before each retry",
+      "type": "json"
     },
     "dedupeWindowMinutes": {
       "default": 30,
-      "desc": "Same dedupeKey and recipient is sent once in this window"
+      "desc": "Same dedupeKey and recipient is sent once in this window",
+      "type": "duration",
+      "min": 0,
+      "unit": "minutes"
     },
     "senders": {
       "default": {
@@ -2489,28 +2513,40 @@ export const spec = defineModuleSpec({
         "sellers": "Marketly Seller Center <sellers@marketly.example>",
         "promotions": "Marketly Deals <deals@marketly.example>"
       },
-      "desc": "From addresses per topic family"
+      "desc": "From addresses per topic family",
+      "type": "json",
+      "approval": "second_reviewer"
     },
     "replyDomain": {
       "default": "reply.marketly.example",
-      "desc": "Domain for reply-to tokens on case and message emails"
+      "desc": "Domain for reply-to tokens on case and message emails",
+      "type": "string",
+      "approval": "second_reviewer"
     },
     "testSendDomains": {
       "default": [
         "marketly.example"
       ],
-      "desc": "Test sends only to these domains"
+      "desc": "Test sends only to these domains",
+      "type": "json",
+      "approval": "second_reviewer"
     },
     "sellerDispatchReminderHours": {
       "default": 4,
-      "desc": "Hours before the dispatch deadline for the seller reminder (scheduled when shipping or orders call schedule)"
+      "desc": "Hours before the dispatch deadline for the seller reminder (scheduled when shipping or orders call schedule)",
+      "type": "duration",
+      "min": 1,
+      "unit": "hours",
+      "sellerVisible": true
     },
     "promotionalQuietHours": {
       "default": {
         "from": "21:00",
         "to": "08:00"
       },
-      "desc": "No promotional SMS or push in this local window"
+      "desc": "No promotional SMS or push in this local window",
+      "type": "json",
+      "approval": "second_reviewer"
     }
   },
   errorCodes: {

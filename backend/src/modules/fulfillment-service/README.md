@@ -703,13 +703,13 @@ Checked through the access module (limits per role, second reviewer).
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| longTermStorageDays | `365` | Age after which the long-term storage rate applies |
-| discrepancyResponseDays | `14` | Time for the seller to accept or claim a receiving discrepancy |
-| sellerNoticeDays | `30` | Notice before a new fee schedule takes effect |
-| warehouseAddress | `"Reno, NV warehouse (placeholder)"` | Inbound destination |
-| unsellableDisposalDays | `60` | Unsellable units not removed by the seller are disposed after this (with notice) |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| longTermStorageDays | `365` | duration, days, 1–…, approval: second reviewer, seller-visible, 30 d notice | Age after which the long-term storage rate applies |
+| discrepancyResponseDays | `14` | duration, days, 1–…, seller-visible | Time for the seller to accept or claim a receiving discrepancy |
+| sellerNoticeDays | `30` | duration, days, 0–…, approval: business owner, seller-visible | Notice before a new fee schedule takes effect |
+| warehouseAddress | `"Reno, NV warehouse (placeholder)"` | string, seller-visible | Inbound destination |
+| unsellableDisposalDays | `60` | duration, days, 30–…, approval: second reviewer, seller-visible | Unsellable units not removed by the seller are disposed after this (with notice) |
 
 ## Notes
 - Phase 4 (plan ch. 1, 12, 20): introduced only when warehouse responsibilities and service terms are ready; the module is off at launch and the prototype has no dedicated screens, so screen ids point at the existing inventory, receiving, pick-pack and finance screens that will host these views.

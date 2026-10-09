@@ -212,7 +212,7 @@ describe('seller decisions and the return parcel', () => {
     const inspected = await h.call('POST', `/api/seller/returns/requests/${m.ret.id}/inspection`, m.seller, { conditionOutcome: 'as_described', grade: 'good', proposedStockOutcome: 'restock', checks: [{ label: 'Powers on', passed: true }] });
     expect(inspected.status, JSON.stringify(inspected.body)).toBe(200);
     expect(inspected.body).toMatchObject({ detail: { status: 'awaiting_remedy', statusLabel: 'Inspected' }, inspection: { conditionOutcome: 'as_described', grade: 'good' }, inspectionDraft: null });
-    expect(h.named('returns.return.inspected').filter((e) => e.returnId === m.ret.id)).toEqual([expect.objectContaining({ variantId: m.pa.variantId, quantity: 2, proposedStockOutcome: 'restock', customerId: m.customerId, contactEmail: 'sam@example.com' })]);
+    expect(h.named('returns.return.inspected').filter((e) => e.returnId === m.ret.id)).toEqual([expect.objectContaining({ orderItemId: m.items[0]![0]!, variantId: m.pa.variantId, stockItemId: m.pa.stockItemId, quantity: 2, proposedStockOutcome: 'restock', customerId: m.customerId, contactEmail: 'sam@example.com' })]);
 
     const partial = await h.call('POST', `/api/seller/returns/requests/${m.ret.id}/remedy`, m.seller, { kind: 'partial_refund' }, idem());
     expect(partial.status).toBe(400);

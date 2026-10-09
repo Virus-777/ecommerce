@@ -1567,6 +1567,31 @@ export const AdvertisingBudgetReachedEvent: z.ZodType<AdvertisingBudgetReachedEv
   limit: z.enum(["daily", "total"]),
 });
 
+/** advertising.campaign.ending_soon: A live or scheduled campaign ends within endingSoonDays (daily, once per campaign) */
+export interface AdvertisingCampaignEndingSoonEvent {
+  campaignId: string;
+  ref: string;
+  name: string;
+  advertiserKind: string;
+  /** Seller campaigns: the seller told */
+  sellerId?: string | null;
+  /** Own and brand campaigns: the staff owner */
+  ownerStaffId?: string | null;
+  endsAt: string;
+  daysLeft: number;
+}
+
+export const AdvertisingCampaignEndingSoonEvent: z.ZodType<AdvertisingCampaignEndingSoonEvent> = z.object({
+  campaignId: z.uuid(),
+  ref: z.string(),
+  name: z.string(),
+  advertiserKind: z.string(),
+  sellerId: z.uuid().describe("Seller campaigns: the seller told").nullish(),
+  ownerStaffId: z.uuid().describe("Own and brand campaigns: the staff owner").nullish(),
+  endsAt: z.iso.datetime({ offset: true }),
+  daysLeft: z.number().int(),
+});
+
 /* ------------------------------------------------------------------ public API (in-process) */
 
 /** What other modules may call in-process: `ctx.use('advertising')` (or `ctx.tryUse` for an optional dependency). */
@@ -3014,6 +3039,7 @@ export const spec = defineModuleSpec({
       "advertising.charge.posted": { when: "Daily seller ad charges are posted for seller statements", payload: () => AdvertisingChargePostedEvent },
       "advertising.charge.credited": { when: "A posted charge is credited or an accrued one voided", payload: () => AdvertisingChargeCreditedEvent },
       "advertising.budget.reached": { when: "A paid campaign reaches its daily or total spending limit", payload: () => AdvertisingBudgetReachedEvent },
+      "advertising.campaign.ending_soon": { when: "A live or scheduled campaign ends within endingSoonDays (daily, once per campaign)", payload: () => AdvertisingCampaignEndingSoonEvent },
     },
     consumes: {
       "promotions.campaign.ended": "Finish linked ads with stopWithPromotion (reason promotion_ended)",
@@ -3068,37 +3094,67 @@ export const spec = defineModuleSpec({
     },
     "advertising.ending-soon-notice": {
       "schedule": "daily 08:00 market time",
-      "does": "Notify owners of campaigns ending within 3 days to finish or renew deliberately"
+      "does": "Publish advertising.campaign.ending_soon for campaigns ending within endingSoonDays (once per campaign), so owners finish or renew deliberately"
     }
   },
   settings: {
     "decisionTtlSeconds": {
       "default": 60,
-      "desc": "How long clients may reuse a serve decision; pausing takes effect within this time"
+      "desc": "How long clients may reuse a serve decision; pausing takes effect within this time",
+      "type": "duration",
+      "min": 0,
+      "max": 3600,
+      "unit": "seconds",
+      "sellerVisible": false
     },
     "attributionDays": {
       "default": 7,
-      "desc": "Default attribution period after a click (also in global rules)"
+      "desc": "Default attribution period after a click (also in global rules)",
+      "type": "duration",
+      "min": 1,
+      "max": 30,
+      "unit": "days",
+      "sellerVisible": true
     },
     "minPromotedStock": {
       "default": 10,
-      "desc": "Sponsored ads pause when the promoted offer's available stock falls below this"
+      "desc": "Sponsored ads pause when the promoted offer's available stock falls below this",
+      "type": "int",
+      "min": 0,
+      "sellerVisible": true
     },
     "endingSoonDays": {
       "default": 3,
-      "desc": "Window for the Ending soon list"
+      "desc": "Window for the Ending soon list",
+      "type": "duration",
+      "min": 1,
+      "max": 30,
+      "unit": "days",
+      "sellerVisible": false
     },
     "maxImageBytes": {
       "default": 1048576,
-      "desc": "Upload limit for own-campaign images (seller uploads 5 MB)"
+      "desc": "Upload limit for own-campaign images (seller uploads 5 MB)",
+      "type": "int",
+      "min": 1,
+      "unit": "bytes",
+      "sellerVisible": false
     },
     "eventRetentionMonths": {
       "default": 13,
-      "desc": "Raw ad event retention"
+      "desc": "Raw ad event retention",
+      "type": "duration",
+      "min": 1,
+      "unit": "months",
+      "sellerVisible": false
     },
     "headlineMaxChars": {
       "default": 60,
-      "desc": "Overlay headline limit (seller card headline 40)"
+      "desc": "Overlay headline limit (seller card headline 40)",
+      "type": "int",
+      "min": 1,
+      "unit": "characters",
+      "sellerVisible": false
     }
   },
   errorCodes: {
@@ -3870,6 +3926,7 @@ declare module '../kernel/events/event-map.js' {
     "advertising.charge.posted": AdvertisingChargePostedEvent;
     "advertising.charge.credited": AdvertisingChargeCreditedEvent;
     "advertising.budget.reached": AdvertisingBudgetReachedEvent;
+    "advertising.campaign.ending_soon": AdvertisingCampaignEndingSoonEvent;
   }
 }
 

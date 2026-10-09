@@ -1,7 +1,7 @@
 import { routes } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/media.js';
 import type { MediaService } from '../service.js';
-import { storeCaller } from './callers.js';
+import { storeCaller, uploadTarget } from './callers.js';
 
 /**
  * Store API: /api/store/media/…  (docs/api/modules/media.md)
@@ -13,8 +13,11 @@ export const storeRoutes = (service: MediaService) =>
     /** POST /uploads: Start an upload (return photos, case evidence, review photos, message attachments, seller application documents) */
     createStoreUpload: async ({ body, scope, principal, actor, requestId, request }) => {
       const c = storeCaller(scope, principal);
-      return service.createUpload({ uploader: c.uploader, owner: c.owner, request: body, createdBy: c.createdBy, clientIp: request.ip, by: { actor, requestId } });
+      return service.createUpload({ uploader: c.uploader, owner: c.owner, request: body, createdBy: c.createdBy, clientIp: request.ip, target: uploadTarget('store', request), by: { actor, requestId } });
     },
+    /** PUT /uploads/{id}/content: Development storage only: the file bytes for an upload ticket */
+    uploadStoreContent: async ({ params, body, scope, principal }) =>
+      service.receiveUploadContent(params.id, body, { area: 'store', owner: storeCaller(scope, principal).filter }),
     /** POST /uploads/{id}/complete: Confirm the bytes are uploaded; processing starts */
     completeStoreUpload: async ({ params, scope, principal, actor, requestId }) =>
       service.completeUpload(params.id, { owner: storeCaller(scope, principal).filter, by: { actor, requestId } }),

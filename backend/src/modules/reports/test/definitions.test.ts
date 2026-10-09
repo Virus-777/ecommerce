@@ -185,12 +185,37 @@ describe('scheduled report emails (phase 2)', () => {
     expect(new Date(s.body.nextRunAt).getTime()).toBeGreaterThan(h.clock.now().getTime());
     expect((await h.call('GET', '/api/admin/reports/schedules', h.tokens.staff())).body.map((x: any) => x.id)).toContain(s.body.id);
 
+    const ready: any[] = [];
+    h.app.kernel.events.subscribe('test', 'reports.scheduled_report.ready', (e) => void ready.push(e.payload));
     h.clock.advance(26 * 3_600_000);
     await h.app.kernel.jobs.runNow('reports.run-schedules');
+    await h.app.kernel.jobs.runNow('reports.run-schedules');
     const mine = await h.call('GET', '/api/admin/reports/exports', h.tokens.staff(undefined, owner));
-    expect(mine.body.items.some((j: any) => j.reportKey === 'commerce.sales' && j.requestedBy.id === owner)).toBe(true);
+    const runs = mine.body.items.filter((j: any) => j.reportKey === 'commerce.sales' && j.requestedBy.id === owner);
+    expect(runs).toHaveLength(1);
     const next = (await h.call('GET', '/api/admin/reports/schedules', h.tokens.staff())).body.find((x: any) => x.id === s.body.id);
     expect(new Date(next.nextRunAt).getTime()).toBeGreaterThan(h.clock.now().getTime());
+
+    // the file is made by the export runner; then the schedule's recipients are told, once
+    expect(ready).toEqual([]);
+    await h.app.kernel.jobs.runNow('reports.run-exports');
+    await h.app.kernel.jobs.runNow('reports.run-exports');
+    await h.app.kernel.events.drain();
+    const file = (await h.call('GET', '/api/admin/reports/exports', h.tokens.staff(undefined, owner))).body.items.find((j: any) => j.id === runs[0].id);
+    expect(file.state).toBe('ready');
+    expect(ready).toEqual([
+      {
+        scheduleId: s.body.id,
+        reportKey: 'commerce.sales',
+        reportTitle: expect.any(String),
+        exportId: runs[0].id,
+        format: 'csv',
+        periodLabel: expect.stringMatching(/^[A-Z][a-z]{2} \d{1,2}(, \d{4})? – [A-Z][a-z]{2} \d{1,2}, \d{4}$/),
+        recipients: ['lead@marketly.test'],
+        expiresAt: file.expiresAt,
+      },
+    ]);
+    expect(ready[0].reportTitle.length).toBeGreaterThan(0);
 
     expect((await h.call('DELETE', `/api/admin/reports/schedules/${s.body.id}`, h.tokens.staff())).status).toBe(204);
     expect((await h.call('GET', '/api/admin/reports/schedules', h.tokens.staff())).body.map((x: any) => x.id)).not.toContain(s.body.id);

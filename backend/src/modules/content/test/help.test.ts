@@ -158,13 +158,18 @@ describe('help articles', () => {
     await h.app.kernel.events.drain();
     expect((await h.store('GET', '/help/articles/payout-schedule')).statusCode).toBe(200);
     expect((await h.store('GET', '/help?audience=seller')).json().popular.map((x: any) => x.id)).toContain(aid);
+    const publishedAt = h.clock.now().getTime();
 
     h.clock.advance(91 * DAY);
     await h.app.kernel.jobs.runNow('content.article-review-due');
     await h.app.kernel.jobs.runNow('content.article-review-due');
-    const toOwner = h.notices.filter((n: any) => n.recipients[0].accountId === owner);
-    expect(toOwner).toHaveLength(1);
-    expect(toOwner[0]).toMatchObject({ topic: 'content.article.review_due', link: { kind: 'help_article', id: aid } });
+    await h.app.kernel.events.drain();
+    // published once per due date; notifications tells the owner (no direct notice from content)
+    const due = h.eventsNamed('content.article.review_due').filter((e) => e.articleId === aid);
+    expect(due).toEqual([{ articleId: aid, slug: 'payout-schedule', title: 'Payout schedule', ownerStaffId: owner, lastReviewedAt: expect.any(String), dueSince: expect.any(String) }]);
+    expect(Math.abs(Date.parse(due[0].lastReviewedAt) - publishedAt)).toBeLessThan(60_000);
+    expect(Date.parse(due[0].dueSince)).toBe(Date.parse(due[0].lastReviewedAt) + 90 * DAY);
+    expect(h.notices.filter((n: any) => n.recipients?.[0]?.accountId === owner)).toEqual([]);
     const summary = (await h.admin('GET', '/help/summary')).json();
     expect(summary).toMatchObject({ publishedArticles: 1, articlesNeedingReview: 1, policies: 1, helpfulWindowDays: 30 });
     const needs = (await h.admin('GET', '/help/items?needsReview=true')).json();

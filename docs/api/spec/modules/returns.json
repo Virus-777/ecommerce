@@ -760,7 +760,7 @@
       { "name": "returns.return.escalated", "when": "Customer asks Marketly to step in, a seller misses a deadline, or staff take over", "payload": { "returnId": "uuid", "ownerType": "enum(official|seller)", "sellerId": "uuid?", "orderId": "uuid", "reason": "string", "by": "Actor" } },
       { "name": "returns.return.shipped", "when": "Return parcel dropped off (first carrier scan or customer tracking)", "payload": { "returnId": "uuid", "trackingNumber": "string?" } },
       { "name": "returns.return.received", "when": "Return received at the warehouse or seller address", "payload": { "returnId": "uuid", "customerId": { "type": "uuid?", "desc": "Customers-module id; null for guests" }, "contactEmail": { "type": "email?", "desc": "Order contact email, for guests" }, "ownerType": "enum(official|seller)", "sellerId": "uuid?", "items": "ReturnedItem[]", "receivedAt": "datetime" } },
-      { "name": "returns.return.inspected", "when": "Inspection recorded", "payload": { "returnId": "uuid", "customerId": { "type": "uuid?", "desc": "Customers-module id; null for guests" }, "contactEmail": { "type": "email?", "desc": "Order contact email, for guests" }, "ownerType": "enum(official|seller)", "sellerId": "uuid?", "conditionOutcome": "string", "proposedStockOutcome": "string", "variantId": "uuid", "quantity": "int" } },
+      { "name": "returns.return.inspected", "when": "Inspection recorded", "payload": { "returnId": "uuid", "customerId": { "type": "uuid?", "desc": "Customers-module id; null for guests" }, "contactEmail": { "type": "email?", "desc": "Order contact email, for guests" }, "ownerType": "enum(official|seller)", "sellerId": "uuid?", "conditionOutcome": "string", "proposedStockOutcome": "string", "orderItemId": "uuid", "variantId": "uuid", "stockItemId": "uuid?", "quantity": "int" } },
       { "name": "returns.return.completed", "when": "The remedy finished (refund sent, replacement shipped, credit issued)", "payload": { "returnId": "uuid", "outcome": "enum(refunded|partly_refunded|replaced|exchanged|credited)" } },
       { "name": "returns.return.cancelled", "when": "Customer withdraws, information or drop-off deadline expires", "payload": { "returnId": "uuid", "by": "Actor", "reason": "string?" } },
       { "name": "returns.label.created", "when": "A prepaid return label is issued; finance charges the payer", "payload": { "returnId": "uuid", "customerId": { "type": "uuid?", "desc": "Customers-module id; null for guests" }, "contactEmail": { "type": "email?", "desc": "Order contact email, for guests" }, "ownerType": "enum(official|seller)", "sellerId": "uuid?", "labelId": "uuid", "orderId": "uuid", "cost": "Money", "paidBy": "enum(seller|customer|platform)" } },
@@ -814,15 +814,15 @@
     { "name": "returns.policy-activation", "schedule": "every 5 min", "does": "Activate scheduled baseline versions and category exceptions at their effective time" }
   ],
   "settings": [
-    { "key": "baselineWindowDays", "default": 30, "desc": "Fallback when no policy version is active (example)" },
-    { "key": "changeOfMindReturnFee", "default": { "amount": 799, "currency": "USD" }, "desc": "Deducted when the customer pays return shipping (example)" },
-    { "key": "sellerResponseBusinessDays", "default": 2, "desc": "Respond-by target for sellers (example)" },
-    { "key": "platformInterventionGraceHours", "default": 0, "desc": "Hours after a missed seller deadline before Marketly takes over" },
-    { "key": "autoApproveOfficialWithinWindow", "default": true, "desc": "Official Store returns inside the window are approved automatically" },
-    { "key": "maxPhotosPerReturn", "default": 6, "desc": "Photos or short videos per return request" },
-    { "key": "maxMediaMb", "default": 10, "desc": "Upload size per file" },
-    { "key": "inspectionChecksByCategory", "default": {}, "desc": "Category id → functional and hygiene checks added to the inspection checklist (e.g. Headphones: powers on and pairs, ear cushions clean)" },
-    { "key": "refundRefPrefix", "default": "RF-", "desc": "Human reference prefix for refund requests" }
+    { "key": "baselineWindowDays", "type": "duration", "default": 30, "desc": "Fallback when no policy version is active (example)", "unit": "days", "min": 1, "approval": "business_owner", "sellerVisible": true, "minLeadDays": 14 },
+    { "key": "changeOfMindReturnFee", "type": "money", "default": { "amount": 799, "currency": "USD" }, "desc": "Deducted when the customer pays return shipping (example)", "min": 0, "approval": "business_owner", "sellerVisible": true, "minLeadDays": 14 },
+    { "key": "sellerResponseBusinessDays", "type": "duration", "default": 2, "desc": "Respond-by target for sellers (example)", "unit": "business days", "min": 1, "approval": "second_reviewer", "sellerVisible": true },
+    { "key": "platformInterventionGraceHours", "type": "duration", "default": 0, "desc": "Hours after a missed seller deadline before Marketly takes over", "unit": "hours", "min": 0, "sellerVisible": true },
+    { "key": "autoApproveOfficialWithinWindow", "type": "bool", "default": true, "desc": "Official Store returns inside the window are approved automatically", "approval": "second_reviewer", "sellerVisible": false },
+    { "key": "maxPhotosPerReturn", "type": "int", "default": 6, "desc": "Photos or short videos per return request", "min": 1, "max": 20, "sellerVisible": false },
+    { "key": "maxMediaMb", "type": "int", "default": 10, "desc": "Upload size per file", "min": 1, "unit": "MB", "sellerVisible": false },
+    { "key": "inspectionChecksByCategory", "type": "json", "default": {}, "desc": "Category id → functional and hygiene checks added to the inspection checklist (e.g. Headphones: powers on and pairs, ear cushions clean)", "sellerVisible": false },
+    { "key": "refundRefPrefix", "type": "string", "default": "RF-", "desc": "Human reference prefix for refund requests", "editable": false, "sellerVisible": false }
   ],
   "integrations": [
     { "name": "Carrier return labels (through shipping)", "purpose": "Prepaid labels and QR drop-off codes; tracking events for return parcels" }

@@ -984,6 +984,7 @@ Indexes: `unique (policy_id, version)`, `(policy_id, state, effective_at)`
 | `content.page.unpublished` | A page is unpublished or reaches its removal time | `{ pageId: uuid, slug: string, reason: text? }` | - |
 | `content.page.removed` | A correction or removal action takes content down | `{ entity: string, entityId: uuid, kind: enum(correction|removal), reason: text }` | - |
 | `content.article.published` | A help article version goes live | `{ articleId: uuid, slug: string, version: int }` | - |
+| `content.article.review_due` | A published help article has not been reviewed for articleReviewDays (daily, once per review period) | `{ articleId: uuid, slug: string, title: string, ownerStaffId: uuid?, lastReviewedAt: datetime?, dueSince: datetime }` | notifications |
 | `content.policy.submitted` | A policy version is sent for approval | `{ policyVersionId: uuid, policyKey: string }` | - |
 | `content.policy.scheduled` | An approved policy version is published with an effective date (customers and sellers are notified when flagged) | `{ policyVersionId: uuid, policyKey: string, version: string, effectiveAt: datetime, changeSummary: text?, notifyCustomers: bool, notifySellers: bool }` | - |
 | `content.policy.effective` | A policy version takes effect and supersedes the previous one | `{ policyVersionId: uuid, policyKey: string, version: string, supersededVersionId: uuid? }` | sellers |
@@ -1055,19 +1056,19 @@ Checked through the access module (limits per role, second reviewer).
 | `content.run-schedules` | every 1 min | Publish and unpublish sections, pages and articles whose publishAt / unpublishAt has passed; record a homepage version when the visible layout changes |
 | `content.policy-effective` | every 1 min | Scheduled policy versions past effectiveAt → current; previous → superseded |
 | `content.refresh-collections` | hourly | Rebuild rule-based collections (best sellers hourly, new arrivals daily) and re-check availability of curated items, replacing or removing sold-out ones |
-| `content.article-review-due` | daily 07:00 market time | Flag articles not reviewed for articleReviewDays; notify their owners |
+| `content.article-review-due` | daily 07:00 market time | Flag articles not reviewed for articleReviewDays; publish content.article.review_due (notifications tells the owner) |
 | `content.cache-warm` | every 5 min | Rebuild the resolved homepage for desktop, phone and app |
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| marketTimeZone | `"America/Los_Angeles"` | Default time zone for schedules |
-| policyNoticeDays | `14` | Minimum days between publishing and the effective date of customer-facing policy changes |
-| articleReviewDays | `90` | Articles older than this are flagged for review |
-| reviewRequired | `{"page":false,"section":false,"article":true}` | Whether the review step is required before publishing |
-| availabilityCheckMinutes | `60` | How often curated collections re-check stock |
-| maxSectionProducts | `24` | Products per homepage section |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| marketTimeZone | `"America/Los_Angeles"` | string | Default time zone for schedules |
+| policyNoticeDays | `14` | duration, days, 0–…, approval: business owner | Minimum days between publishing and the effective date of customer-facing policy changes |
+| articleReviewDays | `90` | duration, days, 1–… | Articles older than this are flagged for review |
+| reviewRequired | `{"page":false,"section":false,"article":true}` | json, approval: second reviewer | Whether the review step is required before publishing |
+| availabilityCheckMinutes | `60` | duration, minutes, 5–… | How often curated collections re-check stock |
+| maxSectionProducts | `24` | int, 1–… | Products per homepage section |
 
 ## Notes
 - Homepage sections each have their own schedule; the published layout version is the ordered list of section snapshots. Reordering or editing creates a draft layout; customers see it after Publish. Scheduled sections appear automatically at showFrom without a new manual publish (the job records a new version so history stays complete).

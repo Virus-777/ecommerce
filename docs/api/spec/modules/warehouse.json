@@ -358,13 +358,13 @@
     { "name": "warehouse.overdue-return-parcels", "schedule": "daily 08:00 market time", "does": "List expected return parcels past their expected date for returns follow-up" }
   ],
   "settings": [
-    { "key": "requireBinScan", "default": true, "desc": "Pickers must scan the bin before the item" },
-    { "key": "requireItemScan", "default": true, "desc": "Every unit is scanned at pick and pack" },
-    { "key": "autoWaveEnabled", "default": false, "desc": "Create waves automatically" },
-    { "key": "carrierPickupTimes", "default": ["16:00"], "desc": "Daily carrier pickups (market time) used for waves and ship-by" },
-    { "key": "atRiskMinutes", "default": 60, "desc": "Minutes before ship-by when an unpacked order is at risk" },
-    { "key": "weightUnit", "default": "lb", "desc": "Scale unit" },
-    { "key": "packingSlipShowsPrices", "default": false, "desc": "Packing slips list items and quantities only" }
+    { "key": "requireBinScan", "type": "bool", "default": true, "desc": "Pickers must scan the bin before the item", "approval": "second_reviewer" },
+    { "key": "requireItemScan", "type": "bool", "default": true, "desc": "Every unit is scanned at pick and pack", "approval": "second_reviewer" },
+    { "key": "autoWaveEnabled", "type": "bool", "default": false, "desc": "Create waves automatically" },
+    { "key": "carrierPickupTimes", "type": "json", "default": ["16:00"], "desc": "Daily carrier pickups (market time) used for waves and ship-by" },
+    { "key": "atRiskMinutes", "type": "duration", "default": 60, "desc": "Minutes before ship-by when an unpacked order is at risk", "unit": "minutes", "min": 0 },
+    { "key": "weightUnit", "type": "enum", "default": "lb", "desc": "Scale unit", "choices": ["lb", "kg"] },
+    { "key": "packingSlipShowsPrices", "type": "bool", "default": false, "desc": "Packing slips list items and quantities only" }
   ],
   "integrations": [
     { "name": "Barcode scanners and handhelds", "purpose": "Keyboard-wedge or camera scanning into the scan fields (no driver integration needed)" },

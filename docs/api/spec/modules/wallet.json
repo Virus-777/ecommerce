@@ -126,6 +126,7 @@
       { "name": "wallet.credit.granted", "when": "Credit is added (refund to credit, goodwill, price adjustment, gift card)", "payload": { "customerId": "uuid", "entryId": "uuid", "kind": { "type": "enum(refund_to_credit|order_refund_returned|goodwill|price_adjustment|gift_card_redeemed)", "desc": "What the credit is; finance books only platform-funded goodwill as a platform cost" }, "amount": "Money", "chargedTo": { "type": "enum(platform|seller)?", "desc": "Who funds it: goodwill and price adjustments only; null for refunds and gift cards" }, "sellerId": "uuid?", "caseId": "uuid?", "orderId": "uuid?" } },
       { "name": "wallet.credit.used", "when": "A hold is captured on an accepted order", "payload": { "customerId": "uuid", "orderId": "uuid", "amount": "Money" } },
       { "name": "wallet.credit.expired", "when": "A lot expires unused", "payload": { "customerId": "uuid", "lotId": "uuid", "amount": "Money" } },
+      { "name": "wallet.credit.expiring", "when": "A lot with an unused balance reaches one of expiryReminderDays before it expires", "payload": { "customerId": "uuid", "lotId": "uuid", "amount": { "type": "Money", "desc": "Unused balance of the lot" }, "expiresAt": "datetime", "daysLeft": "int" } },
       { "name": "wallet.credit.reversed", "when": "A goodwill grant is reversed", "payload": { "customerId": "uuid", "grantId": "uuid", "amount": "Money", "reason": "text" } },
       { "name": "wallet.credit.corrected", "when": "Staff correct a balance", "payload": { "customerId": "uuid", "entryId": "uuid", "amount": "Money", "reason": "text" } },
       { "name": "wallet.goodwill.decided", "when": "A goodwill grant waiting for approval is granted or rejected", "payload": { "grantId": "uuid", "customerId": "uuid", "status": "enum(granted|rejected)", "amount": "Money", "caseId": "uuid?" } },
@@ -151,16 +152,17 @@
     { "key": "wallet.gift-cards.issue", "desc": "Issue a batch of gift cards (batch total)", "limit": "money", "secondReviewer": "above-limit", "approvers": "Within the caller's limit; Finance Manager above it" }
   ],
   "jobs": [
-    { "name": "wallet.expire-lots", "schedule": "daily 00:30 market time", "does": "Expire lots past expiresAt; notify customers 30 and 7 days before expiry" },
+    { "name": "wallet.expire-lots", "schedule": "daily 00:30 market time", "does": "Expire lots past expiresAt (wallet.credit.expired); publish wallet.credit.expiring for lots expiryReminderDays (30 and 7) days before expiry, once per lot and reminder" },
     { "name": "wallet.release-stale-holds", "schedule": "every 1 min", "does": "Release holds past expiresAt" },
     { "name": "wallet.balance-check", "schedule": "daily", "does": "Verify every account balance equals the ledger sum; flag differences to Finance checks" }
   ],
   "settings": [
-    { "key": "creditExpiryMonths", "default": 12, "desc": "Default expiry of goodwill and price-adjustment credit (refund credit follows local rules; default none)" },
-    { "key": "goodwillMaxPerCustomer30Days", "default": { "amount": 10000, "currency": "USD" }, "desc": "Goodwill a customer can receive in 30 days before Finance approval is always needed" },
-    { "key": "holdTtlMinutes", "default": 30, "desc": "Checkout hold lifetime" },
-    { "key": "giftCardsEnabled", "default": false, "desc": "Gift cards are a later service" },
-    { "key": "loyaltyEnabled", "default": false, "desc": "Loyalty experiment (phase 4)" }
+    { "key": "creditExpiryMonths", "type": "duration", "default": 12, "desc": "Default expiry of goodwill and price-adjustment credit (refund credit follows local rules; default none)", "unit": "months", "min": 1, "approval": "business_owner" },
+    { "key": "expiryReminderDays", "type": "json", "default": [30, 7], "desc": "Days before a lot expires when the customer is reminded (wallet.credit.expiring)" },
+    { "key": "goodwillMaxPerCustomer30Days", "type": "money", "default": { "amount": 10000, "currency": "USD" }, "desc": "Goodwill a customer can receive in 30 days before Finance approval is always needed", "min": 0, "approval": "business_owner" },
+    { "key": "holdTtlMinutes", "type": "duration", "default": 30, "desc": "Checkout hold lifetime", "unit": "minutes", "min": 1 },
+    { "key": "giftCardsEnabled", "type": "bool", "default": false, "desc": "Gift cards are a later service", "approval": "business_owner" },
+    { "key": "loyaltyEnabled", "type": "bool", "default": false, "desc": "Loyalty experiment (phase 4)", "approval": "business_owner" }
   ],
   "integrations": [],
   "errorCodes": {

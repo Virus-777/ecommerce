@@ -143,7 +143,16 @@ export async function startUpload(t: MediaTestApp, area: Area, token: string, re
 }
 
 /**
- * The whole client flow: start, PUT the bytes to the signed URL, complete, and (by default) run the
+ * What a client does with a development ticket: PUT the bytes to ticket.url (this API's
+ * /api/{area}/media/uploads/{id}/content) with the ticket's headers and the caller's own token.
+ */
+export function putContent(t: MediaTestApp, ticket: Pick<UploadTicket, 'url' | 'headers'>, token: string, body: Buffer, headers: Record<string, string> = {}) {
+  const u = new URL(ticket.url);
+  return t.app.inject({ method: 'PUT', url: u.pathname + u.search, headers: { ...ticket.headers, ...auth(token), ...headers }, payload: body });
+}
+
+/**
+ * The whole client flow: start, PUT the bytes to the ticket URL, complete, and (by default) run the
  * processing worker. Returns the ticket and the asset as the owner sees it afterwards.
  */
 export async function uploadFile(
@@ -163,7 +172,8 @@ export async function uploadFile(
   );
   if (res.statusCode !== 201) throw new Error(`upload start failed: ${res.statusCode} ${res.body}`);
   const ticket = res.json() as UploadTicket;
-  await t.storage.acceptSignedPut(ticket.url, file.body, ticket.headers['content-type']);
+  const put = await putContent(t, ticket, token, file.body);
+  if (put.statusCode !== 204) throw new Error(`upload content failed: ${put.statusCode} ${put.body}`);
   const done = await t.app.inject({ method: 'POST', url: `/api/${area}/media/uploads/${ticket.uploadId}/complete`, headers: auth(token) });
   if (done.statusCode !== 202) throw new Error(`complete failed: ${done.statusCode} ${done.body}`);
   if (opts.process !== false) await t.app.kernel.jobs.runNow('media.process');

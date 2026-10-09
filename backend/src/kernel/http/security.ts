@@ -5,9 +5,11 @@
  *   - 401 for a bad token carries WWW-Authenticate, the only signal that a refresh can help.
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { REFRESH_COOKIE_PATH } from '../auth/chain.js';
 import type { Config } from '../config/index.js';
 
-const REFRESH_PATH = '/api/public/identity/sessions/';
+/** Refresh and sign-out: the only paths the refresh cookie is sent to, so the only ones with credentialed CORS */
+const REFRESH_PATH = `${REFRESH_COOKIE_PATH}/`;
 
 function areaOf(url: string): 'store' | 'seller' | 'admin' | 'public' | undefined {
   const m = /^\/(?:api|graphql)\/(store|seller|admin|public)\b/.exec(url);

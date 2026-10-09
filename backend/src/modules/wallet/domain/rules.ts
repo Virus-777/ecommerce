@@ -55,6 +55,25 @@ export function goodwillExpiry(now: Date, expiresInDays: number | null | undefin
   return months > 0 ? addMonths(now, months) : null;
 }
 
+/** expiryReminderDays setting → distinct positive whole days, largest first (anything unusable: [30, 7]) */
+export function reminderDays(setting: unknown): number[] {
+  const days = Array.isArray(setting) ? [...new Set(setting.map(Number).filter((d) => Number.isInteger(d) && d > 0))] : [];
+  return (days.length ? days : [30, 7]).sort((a, b) => b - a);
+}
+
+/** Whole days left until expiry, rounded up (a lot expiring in 6.5 days has 7 days left) */
+export const daysLeft = (expiresAt: Date, now: Date) => Math.ceil((expiresAt.getTime() - now.getTime()) / 86_400_000);
+
+/**
+ * The reminder a lot is due for: the smallest reminder day it has reached (days left ≤ day). A lot that
+ * skips a reminder (granted with 20 days left, or a missed run) gets the latest one it reached, never two at once.
+ */
+export function dueReminder(left: number, days: readonly number[]): number | null {
+  if (left <= 0) return null;
+  const reached = days.filter((d) => left <= d);
+  return reached.length ? Math.min(...reached) : null;
+}
+
 const REASONS: Record<string, string | null> = {
   late_delivery: 'late delivery',
   service_failure: 'service issue',

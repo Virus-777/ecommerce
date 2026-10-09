@@ -256,7 +256,10 @@ export class ReportsService implements ReportsPublicApi {
     return this.readModels.pullDaily();
   }
 
-  /** Job reports.run-schedules (every 15 min): Phase 2: send scheduled report emails */
+  /**
+   * Job reports.run-schedules (every 15 min): Phase 2: run due schedules into export files; when a file is ready
+   * the export runner publishes reports.scheduled_report.ready (notifications sends the emails)
+   */
   async runSchedules(): Promise<void> {
     const now = this.core.now();
     const cfg = await this.core.cfg();
@@ -264,11 +267,15 @@ export class ReportsService implements ReportsPublicApi {
       const report = await this.core.repo.getReport(s.report_key);
       const view = s.saved_view_id ? await this.core.repo.getSavedView(s.saved_view_id) : undefined;
       const next = nextRun({ frequency: s.frequency as 'daily', dayOfWeek: s.day_of_week, time: s.time }, now, cfg.timeZone);
-      // claim the run first so a slow run never sends twice
-      await this.core.repo.updateSchedule(s.id, { next_run_at: next });
-      if (!report || !report.active) continue;
-      // the schedule owner gets the export (links are single-user; notifications tell them it is ready),
-      // as long as they may still see the report
+      // claim the run first (inbox key of this due time, committed with the next run time) so a run is never sent twice
+      const claimed = await this.core.repo.transaction(async (tx) => {
+        if (!(await tx.claim(`schedule-run:${s.id}:${s.next_run_at.toISOString()}`))) return false;
+        await tx.updateSchedule(s.id, { next_run_at: next });
+        return true;
+      });
+      if (!claimed || !report || !report.active) continue;
+      // the export belongs to the schedule owner, as long as they may still see the report; the file's
+      // readiness is announced to the schedule's recipients (reports.scheduled_report.ready)
       const owner = { kind: 'staff' as const, accountId: s.owner_staff_id };
       if (!(await this.core.principalCan(owner, report.permission))) {
         this.core.ctx.log.warn({ scheduleId: s.id }, 'reports: schedule owner may no longer see the report; run skipped');
@@ -279,6 +286,7 @@ export class ReportsService implements ReportsPublicApi {
           { dataset: REPORT_DATASET, reportKey: report.key, query: (view?.query as ReportQuery | undefined) ?? {}, format: 'csv' },
           { principal: owner, actor: SYSTEM, can: (perm) => this.core.principalCan(owner, perm) },
           'api',
+          { scheduleId: s.id },
         );
       } catch (err) {
         this.core.ctx.log.warn({ err, scheduleId: s.id }, 'reports: scheduled report not queued');

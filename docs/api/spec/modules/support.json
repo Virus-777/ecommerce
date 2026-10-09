@@ -549,16 +549,16 @@
     { "name": "support.auto-close", "schedule": "daily 03:00 PT", "does": "Close resolved cases after autoCloseAfterDays; end reopen and appeal windows" }
   ],
   "settings": [
-    { "key": "firstResponseBusinessHours", "default": 4, "desc": "Default first reply target (example)" },
-    { "key": "sellerReplyBusinessDays", "default": 2, "desc": "Seller reply target before Marketly steps in (example)" },
-    { "key": "disputeDecisionBusinessDays", "default": 5, "desc": "Decision target from escalation (example)" },
-    { "key": "appealWindowDays", "default": 14, "desc": "Appeal deadline after a decision (purchase terms say 14 days)" },
-    { "key": "appealReplyBusinessDays", "default": 3, "desc": "Appeal review target" },
-    { "key": "reopenWindowDays", "default": 30, "desc": "Reopen a resolved case if the promised remedy did not happen" },
-    { "key": "autoCloseAfterDays", "default": 7, "desc": "Resolved → closed" },
-    { "key": "lateItemRefundAfterDays", "default": 14, "desc": "Items not shipped this long after the estimate qualify for a full refund (purchase terms)" },
-    { "key": "maxAttachments", "default": 5, "desc": "Files per message" },
-    { "key": "maxAttachmentMb", "default": 10, "desc": "Size per file" }
+    { "key": "firstResponseBusinessHours", "type": "duration", "default": 4, "desc": "Default first reply target (example)", "unit": "business hours", "min": 1 },
+    { "key": "sellerReplyBusinessDays", "type": "duration", "default": 2, "desc": "Seller reply target before Marketly steps in (example)", "unit": "business days", "min": 1, "approval": "second_reviewer", "sellerVisible": true },
+    { "key": "disputeDecisionBusinessDays", "type": "duration", "default": 5, "desc": "Decision target from escalation (example)", "unit": "business days", "min": 1 },
+    { "key": "appealWindowDays", "type": "duration", "default": 14, "desc": "Appeal deadline after a decision (purchase terms say 14 days)", "unit": "days", "min": 1, "approval": "business_owner" },
+    { "key": "appealReplyBusinessDays", "type": "duration", "default": 3, "desc": "Appeal review target", "unit": "business days", "min": 1 },
+    { "key": "reopenWindowDays", "type": "duration", "default": 30, "desc": "Reopen a resolved case if the promised remedy did not happen", "unit": "days", "min": 1 },
+    { "key": "autoCloseAfterDays", "type": "duration", "default": 7, "desc": "Resolved → closed", "unit": "days", "min": 1 },
+    { "key": "lateItemRefundAfterDays", "type": "duration", "default": 14, "desc": "Items not shipped this long after the estimate qualify for a full refund (purchase terms)", "unit": "days", "min": 1, "approval": "business_owner", "sellerVisible": true },
+    { "key": "maxAttachments", "type": "int", "default": 5, "desc": "Files per message", "min": 0, "max": 20 },
+    { "key": "maxAttachmentMb", "type": "int", "default": 10, "desc": "Size per file", "min": 1, "unit": "MB" }
   ],
   "integrations": [
     { "name": "Email reply-by-email (through notifications)", "purpose": "Customers can answer case emails; replies are added to the case thread" }

@@ -10,6 +10,7 @@ import { newId } from '../../../kernel/lib/ids.js';
 import { withDependencies } from '../../../kernel/module-system/loader.js';
 import { buildTestApp, movingClock, tokenClock } from '../../../testing/app.js';
 import { flows, type Flows, type Staff } from '../../../testing/flows.js';
+import type { AccessPublicApi } from '../../../spec/access.js';
 import type { FinanceService } from '../service.js';
 
 const ADMIN = '/api/admin/finance';
@@ -21,6 +22,7 @@ let svc: FinanceService;
 let managerA: Staff;
 let managerB: Staff;
 let specialist: Staff;
+let owner: Staff;
 const S = newId();
 
 beforeAll(async () => {
@@ -33,7 +35,7 @@ beforeAll(async () => {
   });
   f = flows(app, clock);
   svc = app.kernel.boot.apis.get('finance') as FinanceService;
-  const owner = await f.bootstrapOwner();
+  owner = await f.bootstrapOwner();
   managerA = await f.staffWithRoles(owner, 'fran@marketly.test', 'Fran Finance', ['finance_manager']);
   managerB = await f.staffWithRoles(owner, 'gus@marketly.test', 'Gus Ledger', ['finance_manager']);
   specialist = await f.staffWithRoles(owner, 'sam@marketly.test', 'Sam Specialist', ['finance_staff']);
@@ -92,6 +94,20 @@ describe('approval limits from access', () => {
     expect(second.body.status).toBe('approved');
     const released = await f.call('POST', `${ADMIN}/payout-runs/${run.body.id}/release`, { token: managerB.accessToken, headers: { 'idempotency-key': newId() } });
     expect(released.body.status).toBe('releasing');
+  });
+
+  it('a seller credit above creditSecondReviewerThreshold waits for a Finance reviewer in access, then posts', async () => {
+    const before = (await svc.core.repo.findOne('seller_accounts', { seller_id: S }))!.available;
+    const credit = await svc.creditSeller({ sellerId: S, amount: USD(60_000), reason: 'Units lost in the warehouse', reference: { kind: 'fulfillment_service', id: newId(), ref: 'FS-CLAIM-77' }, idempotencyKey: `real-access-${newId()}` });
+    expect(credit).toMatchObject({ status: 'pending_approval' });
+    const request = await (app.kernel.boot.apis.get('access') as AccessPublicApi).getApproval(credit.approvalRequestId!);
+    expect(request).toMatchObject({ status: 'pending', target: { type: 'seller_credit', id: credit.id } });
+    // access has no Finance limits for finance.credits.issue yet (seed), so the Business Owner decides it
+    const approved = await f.call('POST', `/api/admin/access/approval-requests/${credit.approvalRequestId}/approve`, { token: owner.accessToken, body: { note: 'Claim checked', stepUpCode: f.code(owner) } });
+    expect(approved.status, JSON.stringify(approved.body)).toBe(200);
+    await app.kernel.events.drain();
+    expect((await svc.core.repo.get('seller_credits', credit.id))?.status).toBe('posted');
+    expect((await svc.core.repo.findOne('seller_accounts', { seller_id: S }))!.available).toBe(before + 60_000);
   });
 
   it('a Finance Specialist cannot approve payouts at all', async () => {
