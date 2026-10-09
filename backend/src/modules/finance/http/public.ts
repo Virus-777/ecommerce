@@ -1,4 +1,4 @@
-import { notImplemented, routes } from '../../../kernel/http/index.js';
+import { routes } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/finance.js';
 import type { FinanceService } from '../service.js';
 
@@ -9,5 +9,5 @@ import type { FinanceService } from '../service.js';
 export const publicRoutes = (service: FinanceService) =>
   routes(endpoints, 'public', {
     /** GET /fee-schedule: Published fee rules and an example calculation */
-    getPublicFeeSchedule: notImplemented,
+    getPublicFeeSchedule: async () => service.fees.schedule(),
   });
