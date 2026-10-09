@@ -13,7 +13,7 @@ import { PurchasingService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '0.1.0',
+  version: '1.0.0',
   migrations,
   register(ctx) {
     const service = new PurchasingService({ repo: createPostgresPurchasingRepository(ctx.db), ctx });
@@ -21,7 +21,7 @@ export default defineModule({
     ctx.http.routes(adminRoutes(service));
 
     // Events this module reacts to (spec events.consumes)
-    ctx.events.on("inventory.receipt.confirmed", (e) => service.onReceiptConfirmedFromInventory(e.payload));
+    ctx.events.on("inventory.receipt.confirmed", (e) => service.onReceiptConfirmedFromInventory(e.payload, { at: e.at }));
     ctx.events.on("inventory.stock.low", (e) => service.onStockLowFromInventory(e.payload));
     ctx.events.on("access.approval.decided", (e) => service.onApprovalDecidedFromAccess(e.payload));
 
@@ -29,5 +29,8 @@ export default defineModule({
     ctx.jobs.handle("purchasing.flag-late-deliveries", () => service.flagLateDeliveries());
     ctx.jobs.handle("purchasing.supplier-performance", () => service.supplierPerformance());
     ctx.jobs.handle("purchasing.reorder-suggestions", () => service.reorderSuggestions());
+
+    // reports reads the receiving export through exportRows
+    ctx.afterBoot(() => service.registerExportDataset());
   },
 });
