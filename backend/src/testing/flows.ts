@@ -201,9 +201,10 @@ export function flows(app: FastifyInstance, clock: { now(): Date; advance(ms: nu
     async upload(area, token, file) {
       const start = await call('POST', `/api/${area}/media/uploads`, { token, body: { purpose: file.purpose, fileName: file.fileName, contentType: file.contentType, sizeBytes: file.body.length } });
       expect(start.status, JSON.stringify(start.body)).toBe(201);
-      // stands in for the browser's PUT to object storage (the dev storage adapter checks the signature)
-      const storage = (app.kernel.boot.apis.get('media') as any).providers.storage;
-      await storage.acceptSignedPut(start.body.url, file.body, start.body.headers['content-type']);
+      // the browser's PUT to the ticket URL: with development storage it is this API's content endpoint
+      const ticket = new URL(start.body.url);
+      const put = await call('PUT', ticket.pathname + ticket.search, { token, body: file.body, headers: start.body.headers });
+      expect(put.status, JSON.stringify(put.body)).toBe(204);
       const done = await call('POST', `/api/${area}/media/uploads/${start.body.uploadId}/complete`, { token });
       expect(done.status, JSON.stringify(done.body)).toBe(202);
       await app.kernel.jobs.runNow('media.process');
