@@ -129,6 +129,7 @@ export type EntryType =
   | 'ad_charge'
   | 'service_fee'
   | 'charge_credit'
+  | 'seller_credit'
   | 'label_charge'
   | 'chargeback'
   | 'payout'
@@ -150,6 +151,7 @@ export const TYPE_LABELS: Record<EntryType, string> = {
   ad_charge: 'Ad charge',
   service_fee: 'Fulfillment service fee',
   charge_credit: 'Charge credited back',
+  seller_credit: 'Credit from Marketly',
   label_charge: 'Label charge',
   chargeback: 'Chargeback',
   payout: 'Payout',
@@ -165,7 +167,7 @@ export const TYPE_GROUPS: Record<string, EntryType[]> = {
   refunds: ['refund', 'refund_after_payout', 'chargeback'],
   payouts: ['payout', 'payout_returned'],
   holds: ['hold', 'hold_release'],
-  adjustments: ['adjustment', 'owed_offset', 'label_charge', 'service_fee', 'charge_credit'],
+  adjustments: ['adjustment', 'owed_offset', 'label_charge', 'service_fee', 'charge_credit', 'seller_credit'],
   ads: ['ad_charge'],
 };
 
@@ -192,6 +194,8 @@ export const SECTION_OF: Record<EntryType, SectionKey | null> = {
   // fulfillment-service fees stay apart from commission; a credit follows its charge (sectionOf)
   service_fee: 'adjustments',
   charge_credit: 'adjustments',
+  // credits without an original charge (fulfillment-service reimbursements, goodwill to a seller)
+  seller_credit: 'adjustments',
   payout: null,
 };
 

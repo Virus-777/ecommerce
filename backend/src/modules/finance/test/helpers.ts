@@ -35,6 +35,9 @@ export interface FakeItem {
   /** product category at purchase (category fee rates) */
   categoryId?: string | null;
   splitFromItemId?: string | null;
+  /** order item state (default confirmed) and whether a refund was sent for it */
+  state?: string;
+  refunded?: boolean;
 }
 
 export interface FakeGroup {
@@ -98,7 +101,8 @@ function orderDetail(o: FakeOrder): any {
         shippingShare: USD(i.shipping ?? 0),
         taxShare: USD(0),
         paidAmount: USD(sub - disc + (i.shipping ?? 0)),
-        state: 'confirmed',
+        state: i.state ?? 'confirmed',
+        afterSales: { refundStatus: i.refunded ? 'sent' : 'none', refundedAmount: USD(i.refunded ? sub - disc + (i.shipping ?? 0) : 0) },
         splitFromItemId: i.splitFromItemId ?? null,
         categoryId: i.categoryId ?? null,
       };
@@ -235,6 +239,7 @@ export async function boot(o: { modules?: string[] } = {}): Promise<Kit> {
         contactEmail: 'ana@example.com',
         total: detail.totals.total,
         groups: ord.groups.map((g, i) => ({ groupId: g.id, ownerType: g.sellerId ? 'seller' : 'official', sellerId: g.sellerId, fulfilledBy: g.sellerId ? 'seller' : 'official_warehouse', dispatchBy: clock.now().toISOString(), itemIds: g.items.map((x) => x.id), total: detail.groups[i].totals.total })),
+        items: ord.groups.flatMap((g) => g.items.map((x) => ({ orderItemId: x.id, offerId: newId(), stockItemId: newId(), quantity: x.quantity }))),
         acceptedAt: clock.now().toISOString(),
       });
     },

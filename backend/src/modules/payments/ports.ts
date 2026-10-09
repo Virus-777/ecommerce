@@ -24,8 +24,18 @@ export interface CreditReturn {
   sent: boolean;
 }
 
-/** intents.tenders: the Tender of the API; the store-credit tender also keeps what went back to credit (no column for it in the spec) */
-export type StoredTender = Tender & { creditReturns?: Record<string, CreditReturn> };
+/** The store-credit share of one capture (reported as creditAmount on payments.payment.captured) */
+export interface CaptureCredit {
+  amount: number;
+  groupId: string | null;
+}
+
+/**
+ * intents.tenders: the Tender of the API; the store-credit tender also keeps what went back to credit and the credit
+ * share of each capture (no columns for them in the spec). creditReturns is keyed by refund (refund:<id>), cancelled
+ * item (item:<orderItemId>), order cancellation or excess; captureCredits by capture id.
+ */
+export type StoredTender = Tender & { creditReturns?: Record<string, CreditReturn>; captureCredits?: Record<string, CaptureCredit> };
 
 export interface IntentRec extends Omit<Db['intents'], 'tenders' | 'method' | 'decline'> {
   tenders: StoredTender[];
