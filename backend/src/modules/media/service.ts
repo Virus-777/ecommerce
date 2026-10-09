@@ -407,6 +407,25 @@ export class MediaService implements MediaPublicApi {
   }
 
   /** POST /uploads/{id}/complete: verifies the stored object (size, sha256) and queues processing (202) */
+  /**
+   * PUT /uploads/{id}/content: development storage only. Receives the bytes of a pending upload the caller
+   * owns (real storage takes them directly at the signed ticket URL). The client then completes the upload.
+   */
+  async receiveUploadContent(uploadId: string, bytes: Uint8Array, contentType: string | undefined, opts: { owner?: OwnerFilter }): Promise<void> {
+    if (typeof (this.storage as { acceptSignedPut?: unknown }).acceptSignedPut !== 'function') {
+      throw this.ctx.error('DEV_STORAGE_ONLY', 'Upload the file to the storage URL in the upload ticket.');
+    }
+    const upload = await this.repo.getUpload(uploadId);
+    const asset = upload ? await this.repo.getAsset(upload.asset_id, { owner: opts.owner }) : null;
+    if (!upload || !asset) throw new AppError('NOT_FOUND', 'Upload not found');
+    if (asset.status === 'expired' || this.now() > upload.url_expires_at) throw new AppError('UPLOAD_EXPIRED', 'The upload link expired; start a new upload.');
+    if (asset.status !== 'pending_upload') throw new AppError('ILLEGAL_TRANSITION', 'This upload is already complete.', { status: asset.status });
+    if (bytes.byteLength > Number(upload.expected_bytes)) {
+      throw new AppError('FILE_TOO_LARGE', 'The file is larger than declared when the upload started.', { expectedBytes: Number(upload.expected_bytes), receivedBytes: bytes.byteLength });
+    }
+    await this.storage.put(asset.storage_bucket, asset.storage_key, bytes, contentType ?? asset.content_type);
+  }
+
   async completeUpload(uploadId: string, opts: { owner?: OwnerFilter; by: By }): Promise<MediaAsset> {
     const upload = await this.repo.getUpload(uploadId);
     if (!upload) throw new AppError('NOT_FOUND', 'Upload not found');

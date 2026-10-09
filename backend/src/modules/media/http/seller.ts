@@ -16,6 +16,9 @@ export const sellerRoutes = (service: MediaService) =>
       return service.createUpload({ uploader: c.uploader, owner: c.owner, request: body, createdBy: c.createdBy, clientIp: request.ip, by: { actor, requestId } });
     },
     /** POST /uploads/{id}/complete: Confirm the upload; processing starts */
+    /** PUT /uploads/{id}/content: Development storage only: the file bytes for an upload ticket */
+    uploadSellerContent: async ({ params, body, sellerId, principal, request }) =>
+      service.receiveUploadContent(params.id, body, request.headers['content-type'], { owner: sellerCaller(sellerId, principal).filter }),
     completeSellerUpload: async ({ params, sellerId, principal, actor, requestId }) =>
       service.completeUpload(params.id, { owner: sellerCaller(sellerId, principal).filter, by: { actor, requestId } }),
     /** GET /assets: Seller media library */

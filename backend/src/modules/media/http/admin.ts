@@ -17,6 +17,8 @@ export const adminRoutes = (service: MediaService) =>
       return service.createUpload({ uploader: 'staff', owner, request: body.upload, createdBy: { kind: 'staff', id: principal.accountId ?? null }, clientIp: request.ip, by: { actor, requestId } });
     },
     /** POST /uploads/{id}/complete: Confirm a staff upload */
+    /** PUT /uploads/{id}/content: Development storage only: the file bytes for an upload ticket */
+    uploadAdminContent: async ({ params, body, request }) => service.receiveUploadContent(params.id, body, request.headers['content-type'], {}),
     completeAdminUpload: async ({ params, actor, requestId }) => service.completeUpload(params.id, { by: { actor, requestId } }),
     /** GET /assets: All files with filters */
     listAssetsAdmin: async ({ query, page, can }) =>

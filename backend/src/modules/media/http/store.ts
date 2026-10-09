@@ -15,6 +15,9 @@ export const storeRoutes = (service: MediaService) =>
       const c = storeCaller(scope, principal);
       return service.createUpload({ uploader: c.uploader, owner: c.owner, request: body, createdBy: c.createdBy, clientIp: request.ip, by: { actor, requestId } });
     },
+    /** PUT /uploads/{id}/content: Development storage only: the file bytes for an upload ticket */
+    uploadStoreContent: async ({ params, body, scope, principal, request }) =>
+      service.receiveUploadContent(params.id, body, request.headers['content-type'], { owner: storeCaller(scope, principal).filter }),
     /** POST /uploads/{id}/complete: Confirm the bytes are uploaded; processing starts */
     completeStoreUpload: async ({ params, scope, principal, actor, requestId }) =>
       service.completeUpload(params.id, { owner: storeCaller(scope, principal).filter, by: { actor, requestId } }),
