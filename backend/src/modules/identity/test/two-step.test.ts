@@ -87,13 +87,15 @@ describe('sign-in with 2-step', () => {
   it('accepts each recovery code once', async () => {
     const c = await customer(kit);
     const { recoveryCodes } = await enableTotp(kit, c.tokens.accessToken, c.password);
-    const v = await visitor(kit);
-    const start = () => kit.call('POST', `${PUBLIC}/sessions`, { token: v.accessToken, body: { email: c.email, password: c.password, audience: 'store', keepSignedIn: false, device: android() } });
-    const s1 = await start();
-    const ok = await kit.call('POST', `${PUBLIC}/sign-in-challenges/${s1.body.challenge.id}/verify`, { token: v.accessToken, body: { method: 'recovery_code', code: recoveryCodes[0]!.toUpperCase(), rememberDevice: false } });
+    // each sign-in starts from a fresh visitor session: a successful sign-in claims (and revokes) the one it used
+    const start = (token: string) => kit.call('POST', `${PUBLIC}/sessions`, { token, body: { email: c.email, password: c.password, audience: 'store', keepSignedIn: false, device: android() } });
+    const v1 = await visitor(kit);
+    const s1 = await start(v1.accessToken);
+    const ok = await kit.call('POST', `${PUBLIC}/sign-in-challenges/${s1.body.challenge.id}/verify`, { token: v1.accessToken, body: { method: 'recovery_code', code: recoveryCodes[0]!.toUpperCase(), rememberDevice: false } });
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
-    const s2 = await start();
-    const used = await kit.call('POST', `${PUBLIC}/sign-in-challenges/${s2.body.challenge.id}/verify`, { token: v.accessToken, body: { method: 'recovery_code', code: recoveryCodes[0]!, rememberDevice: false } });
+    const v2 = await visitor(kit);
+    const s2 = await start(v2.accessToken);
+    const used = await kit.call('POST', `${PUBLIC}/sign-in-challenges/${s2.body.challenge.id}/verify`, { token: v2.accessToken, body: { method: 'recovery_code', code: recoveryCodes[0]!, rememberDevice: false } });
     expect(used.status).toBe(400);
     expect(used.body.error).toMatchObject({ code: 'CODE_INVALID', details: { attemptsLeft: 4 } });
     const sec = await kit.call('GET', `${STORE}/security`, { token: ok.body.tokens.accessToken });

@@ -272,7 +272,8 @@ describe('in-process API', () => {
     expect(kit.last('identity.user.registered')).toMatchObject({ email, firstName: 'Gia', lastName: 'Green', marketingOptIn: true });
     const again = await kit.call('POST', `${PUBLIC}/external-sign-ins`, { token: (await visitor(kit)).accessToken, body: { provider: 'apple', idToken: `dev:${email}`, audience: 'store', device: android() } });
     expect(again.body.account.id).toBe(res.body.account.id);
-    const unverified = await kit.call('POST', `${PUBLIC}/external-sign-ins`, { token: v.accessToken, body: { provider: 'google', idToken: `dev-unverified:${email}`, audience: 'store', device: web } });
+    // a fresh visitor session: the first sign-in claimed (and revoked) `v`
+    const unverified = await kit.call('POST', `${PUBLIC}/external-sign-ins`, { token: (await visitor(kit)).accessToken, body: { provider: 'google', idToken: `dev-unverified:${email}`, audience: 'store', device: web } });
     expect(unverified.body.error.code).toBe('INVALID_CREDENTIALS');
   });
 });
