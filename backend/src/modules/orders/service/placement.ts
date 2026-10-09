@@ -6,7 +6,7 @@ import { AppError, isAppError } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type * as offers from '../../../spec/offers.js';
-import type { OrderCreateInput, OrderDetail, PlacedGroup, SellerLabel } from '../../../spec/orders.js';
+import type { AcceptedItem, OrderCreateInput, OrderDetail, PlacedGroup, SellerLabel } from '../../../spec/orders.js';
 import { orderItemMachine, orderLifecycleMachine } from '../domain/state-machines.js';
 import { CONDITION_LABEL, discountSum, plural } from '../domain/rules.js';
 import type { GroupRec, ItemRec, OrderRec, StoredProduct } from '../ports.js';
@@ -29,6 +29,11 @@ export class Placement {
       itemIds: agg.items.filter((i) => i.group_id === g.id).map((i) => i.id),
       total: this.views.m(g.total, agg),
     }));
+  }
+
+  /** Every item line with its stock item: inventory allocates the reservation from these (orders.order.accepted) */
+  acceptedItems(agg: Agg): AcceptedItem[] {
+    return agg.items.map((i) => ({ orderItemId: i.id, offerId: i.offer_id, stockItemId: i.stock_item_id, quantity: i.quantity }));
   }
 
   async detailOf(orderId: string): Promise<OrderDetail> {
@@ -251,7 +256,7 @@ export class Placement {
     });
     if (accepted) {
       for (const i of items) batch.push('orders.item.state_changed', { orderId, groupId: i.group_id, itemId: i.id, from: 'pending_payment', to: itemState, actor: SYSTEM, at: now.toISOString() });
-      batch.push('orders.order.accepted', { orderId, ref, customerId: order.customer_id, contactEmail: order.contact_email, total: this.views.m(order.total, agg), groups: placed, reservationId: order.reservation_id, acceptedAt: now.toISOString() });
+      batch.push('orders.order.accepted', { orderId, ref, customerId: order.customer_id, contactEmail: order.contact_email, total: this.views.m(order.total, agg), groups: placed, items: this.acceptedItems(agg), reservationId: order.reservation_id, acceptedAt: now.toISOString() });
     }
     this.core.flush(batch);
     return this.views.detail(agg, await this.core.timelineOf(orderId, ['customer']), 'internal', cfg);
@@ -290,6 +295,7 @@ export class Placement {
         contactEmail: fresh.order.contact_email,
         total: this.views.m(fresh.order.total, fresh),
         groups: this.placedGroups(fresh),
+        items: this.acceptedItems(fresh),
         reservationId: fresh.order.reservation_id,
         acceptedAt: now.toISOString(),
       });

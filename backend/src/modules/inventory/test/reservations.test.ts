@@ -31,6 +31,7 @@ const accepted = (orderId: string, ref: string, itemIds: string[]) =>
     contactEmail: 'sam@example.com',
     total: { amount: 18900, currency: 'USD' },
     groups: [{ groupId: newId(), ownerType: 'official', sellerId: null, fulfilledBy: 'official_warehouse', dispatchBy: new Date().toISOString(), itemIds, total: { amount: 18900, currency: 'USD' } }],
+    items: [], // these orders were attached by checkout (attachOrder); see correctness.test.ts for allocation from items
     acceptedAt: new Date().toISOString(),
   });
 

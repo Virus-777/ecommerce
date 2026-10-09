@@ -46,7 +46,8 @@ describe('stock hold on orders.order.accepted', () => {
     const reservationId = newId();
     const order = await h.service.createOrder({ ...checkout([group(h, [line(p, 1)], { sellerId })], { customerId: newId() }), reservationId });
     await h.app.kernel.events.drain();
-    expect(h.named('orders.order.accepted').find((e) => e.orderId === order.id)).toMatchObject({ reservationId });
+    const item = order.groups[0]!.items[0]!;
+    expect(h.named('orders.order.accepted').find((e) => e.orderId === order.id)).toMatchObject({ reservationId, items: [{ orderItemId: item.id, offerId: p.offerId, stockItemId: p.stockItemId, quantity: 1 }] });
   });
 
   it('carries it from acceptOrder after a pending payment check, and is null without one', async () => {
@@ -59,7 +60,8 @@ describe('stock hold on orders.order.accepted', () => {
     expect(h.named('orders.order.accepted').some((e) => e.orderId === order.id)).toBe(false);
     await h.service.acceptOrder(order.id, input.paymentIntentId);
     await h.app.kernel.events.drain();
-    expect(h.named('orders.order.accepted').find((e) => e.orderId === order.id)).toMatchObject({ reservationId });
+    const item = order.groups[0]!.items[0]!;
+    expect(h.named('orders.order.accepted').find((e) => e.orderId === order.id)).toMatchObject({ reservationId, items: [{ orderItemId: item.id, offerId: p.offerId, stockItemId: p.stockItemId, quantity: 1 }] });
 
     const plain = await h.service.createOrder(checkout([group(h, [line(p, 1)], { sellerId })], { customerId: newId() }));
     await h.app.kernel.events.drain();

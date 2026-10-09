@@ -307,6 +307,7 @@ export class Fulfillment {
           quantity: i.quantity,
           deliveredAt: at.toISOString(),
           returnWindowEndsAt: windowEnd.toISOString(),
+          ...this.core.recipient(agg.order),
         });
       }
       const prev = agg.shipments.find((s) => s.shipment_id === e.shipmentId);

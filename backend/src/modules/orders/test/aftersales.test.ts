@@ -54,7 +54,7 @@ describe('shipping and delivery', () => {
     await h.publish('shipping', 'shipping.shipment.status_changed', { shipmentId: s1, kind: 'outbound', orderId: m.order.id, groupId: m.gA.id, from: 'shipped', to: 'in_transit', statusLabel: 'In transit', estimatedArrival: null, at: now() });
     await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId: s1, kind: 'outbound', orderId: m.order.id, groupId: m.gA.id, sellerId: m.sellerA, lines: [{ orderItemId: item.id, title: 'x', variantLabel: '', quantity: 1 }], deliveredAt: now() });
     const delivered = h.named('orders.item.delivered').find((e) => e.itemId === item.id);
-    expect(delivered).toMatchObject({ orderId: m.order.id, ownerType: 'seller', sellerId: m.sellerA, quantity: 1 });
+    expect(delivered).toMatchObject({ orderId: m.order.id, ownerType: 'seller', sellerId: m.sellerA, quantity: 1, customerId: m.customerId, contactEmail: 'sam@example.com' });
     expect(new Date(delivered.returnWindowEndsAt).getTime() - new Date(delivered.deliveredAt).getTime()).toBe(30 * 86_400_000);
     o = (await h.service.getOrder(m.order.id))!;
     expect(o.status.value).toBe('partly_delivered');

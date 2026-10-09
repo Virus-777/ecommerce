@@ -60,6 +60,7 @@ import {
   GROUPS,
   FIELD,
   lineStateAfter,
+  mapLinesToItems,
   onHand,
   openQty,
   reasonLabel,
@@ -542,7 +543,10 @@ export class InventoryService implements InventoryPublicApi {
     return this.#reservationApi(reservationId);
   }
 
-  /** Links a hold to the placed order so acceptance can allocate it */
+  /**
+   * Links a hold to the placed order and maps its free lines to order items. Acceptance no longer depends on it
+   * (orders.order.accepted maps the lines itself), so a late call never remaps a line that already has an order item.
+   */
   async attachOrder(reservationId: string, orderId: string, lines: { stockItemId: string; orderItemId: string }[]): Promise<Reservation> {
     await this.repo.transaction(async (tx) => {
       const r = await tx.get('reservations', reservationId, { forUpdate: true });
@@ -554,8 +558,7 @@ export class InventoryService implements InventoryPublicApi {
         const matches = own.filter((x) => x.stock_item_id === l.stockItemId);
         if (!matches.length) throw invalid(`lines[${i}].stockItemId`, 'This stock item is not part of the hold');
         if (matches.some((x) => x.order_item_id === l.orderItemId)) continue;
-        const free = matches.filter((x) => !x.order_item_id);
-        for (const x of free.length ? free : matches) {
+        for (const x of matches.filter((m) => !m.order_item_id)) {
           await tx.update('reservation_lines', x.id, { order_item_id: l.orderItemId });
           x.order_item_id = l.orderItemId;
         }
@@ -2033,14 +2036,16 @@ export class InventoryService implements InventoryPublicApi {
   /* ================================================================ events consumed */
 
   /**
-   * orders.order.accepted: Allocate the order's held reservation lines to order items. The order's hold is the
-   * one checkout attached (attachOrder), or, when the event arrives first, the payload's reservationId; the
-   * hold is then linked to the order here and attachOrder later only maps its lines to order items. Each
-   * allocation claims `order-accepted:<orderId>:<reservationId>` in its own transaction (kernel inbox).
+   * orders.order.accepted: Allocate the order's held reservation (reservationId) to its order items: each
+   * reservation line is matched to an entry of `items` by stock item and quantity (lines are split when one
+   * spans two order items), so allocation never depends on checkout's attachOrder; lines it already attached
+   * keep their order item, and an attachOrder arriving later finds nothing left to map. Without a
+   * reservationId, the holds checkout attached to the order are allocated. Each allocation claims
+   * `order-accepted:<orderId>:<reservationId>` in its own transaction (kernel inbox).
    */
   async onOrderAcceptedFromOrders(event: EventPayload<'orders.order.accepted'>): Promise<void> {
-    let reservations = await this.repo.reservationsByOrder(event.orderId);
-    if (!reservations.length && event.reservationId) {
+    let reservations: Row<'reservations'>[];
+    if (event.reservationId) {
       const r = isUuid(event.reservationId) ? await this.repo.get('reservations', event.reservationId) : undefined;
       if (!r) {
         this.ctx.log.info({ orderId: event.orderId, reservationId: event.reservationId }, 'inventory: accepted order names an unknown stock hold, nothing to allocate');
@@ -2051,6 +2056,8 @@ export class InventoryService implements InventoryPublicApi {
         return;
       }
       reservations = [r];
+    } else {
+      reservations = await this.repo.reservationsByOrder(event.orderId);
     }
     if (!reservations.length) {
       this.ctx.log.info({ orderId: event.orderId }, 'inventory: accepted order has no stock hold, nothing to allocate');
@@ -2062,6 +2069,7 @@ export class InventoryService implements InventoryPublicApi {
           const locked = (await tx.get('reservations', r.id, { forUpdate: true }))!;
           if (locked.state !== 'held' || (locked.order_id && locked.order_id !== event.orderId)) return null;
           if (!(await tx.claimEvent(`order-accepted:${event.orderId}:${r.id}`))) return null;
+          await this.#mapToOrderItems(tx, (await tx.lines([r.id], { forUpdate: true })).filter((l) => l.state === 'held'), event.items);
           const lines = await tx.lines([r.id], { forUpdate: true });
           const allocated: Row<'reservation_lines'>[] = [];
           for (const l of lines) if (l.state === 'held') allocated.push(await tx.update('reservation_lines', l.id, { state: 'allocated' }));
@@ -2071,6 +2079,22 @@ export class InventoryService implements InventoryPublicApi {
         if (done?.length) await this.#publishAllocated(r.id, event.orderId, done);
       } else if (r.state === 'expired' && !reservations.some((x) => x.state === 'allocated' || x.state === 'fulfilled')) {
         await this.#reallocateExpired(r, event);
+      }
+    }
+  }
+
+  /** Maps reservation lines to the accepted order's items (mapLinesToItems), splitting lines where needed. Inside the caller's transaction. */
+  async #mapToOrderItems(tx: InventoryRepository, lines: Row<'reservation_lines'>[], items: EventPayload<'orders.order.accepted'>['items'] | undefined): Promise<void> {
+    if (!items?.length || !lines.length) return;
+    const plan = mapLinesToItems(
+      lines.map((l) => ({ id: l.id, stockItemId: l.stock_item_id, quantity: l.quantity, orderItemId: l.order_item_id, splittable: l.fulfilled_qty === 0 && l.released_qty === 0 })),
+      items,
+    );
+    for (const m of plan) {
+      const l = lines.find((x) => x.id === m.lineId)!;
+      await tx.update('reservation_lines', l.id, { order_item_id: m.orderItemId, quantity: m.quantity });
+      for (const p of m.extra) {
+        await tx.insert('reservation_lines', { id: newId(), reservation_id: l.reservation_id, stock_item_id: l.stock_item_id, location_id: l.location_id, order_item_id: p.orderItemId, quantity: p.quantity, fulfilled_qty: 0, released_qty: 0, state: l.state });
       }
     }
   }
@@ -2103,7 +2127,8 @@ export class InventoryService implements InventoryPublicApi {
           }
           if (left > 0) throw inventoryError('INSUFFICIENT_STOCK', 'Not enough stock to allocate the order', { lines: [{ stockItemId: l.stock_item_id, requested: l.quantity, available: l.quantity - left }] });
         }
-        return out;
+        await this.#mapToOrderItems(st.tx, out, event.items);
+        return out.length ? st.tx.lines([id]) : out;
       });
       if (lines) await this.#publishAllocated(id, event.orderId, lines);
     } catch (err) {
@@ -2177,25 +2202,71 @@ export class InventoryService implements InventoryPublicApi {
     });
   }
 
-  /** returns.return.received: Official Store items: add the units to Returned at the receiving warehouse. Seller returns are recorded by sellers through adjustments. */
-  async onReturnReceivedFromReturns(event: EventPayload<'returns.return.received'>): Promise<void> {
-    // The event names no items or quantities, so the units are added to Returned when inspection
-    // reports the variant and quantity (returns.return.inspected), once per return and item.
-    if (event.ownerType !== 'official') return;
-    this.ctx.log.debug({ returnId: event.returnId }, 'inventory: official return received; units are added to Returned on inspection');
+  /**
+   * The company stock item of a returned unit: the one the event names when it is company stock, otherwise the
+   * company stock item of the variant (new condition first).
+   */
+  async #returnStockItem(stockItemId: string | null | undefined, variantId: string): Promise<Row<'stock_items'> | undefined> {
+    if (stockItemId && isUuid(stockItemId)) {
+      const named = await this.repo.get('stock_items', stockItemId);
+      if (named?.owner_type === 'official') return named;
+    }
+    return (await this.repo.items({ ownerType: 'official', variantIds: [variantId] })).sort((a, b) => Number(b.condition === 'new') - Number(a.condition === 'new'))[0];
   }
 
-  /** returns.return.inspected: Create a pending return stock outcome with the inspector's proposed outcome */
+  /** Where returned units of an item are put: its first stock location, else the default company location */
+  async #returnLocation(itemId: string): Promise<string | undefined> {
+    return (await this.repo.levels([itemId]))[0]?.location_id ?? (await this.#officialDefault())?.id;
+  }
+
+  /**
+   * Adds a return item's units to Returned, once per return item: returns.return.received and (when that event
+   * never came) returns.return.inspected claim the same key, so whichever runs first moves the units.
+   */
+  async #addReturned(st: StockTx, returnId: string, orderItemId: string, itemId: string, locationId: string, quantity: number): Promise<boolean> {
+    if (!(await st.tx.claimEvent(`return-units:${returnId}:${orderItemId}`))) return false;
+    const short = returnId.slice(0, 8).toUpperCase();
+    await st.move(itemId, locationId, 'outside', 'returned', quantity, { reason: 'return_received', ref: { kind: 'return', id: returnId, label: `Return RT-${short}` }, actor: SYSTEM_ACTOR });
+    return true;
+  }
+
+  /**
+   * returns.return.received: Official Store items: add each listed item's units (items[].stockItemId, quantity) to
+   * Returned at the receiving warehouse, once per return item. Seller returns are recorded by sellers through adjustments.
+   */
+  async onReturnReceivedFromReturns(event: EventPayload<'returns.return.received'>): Promise<void> {
+    if (event.ownerType !== 'official') return;
+    const units: { orderItemId: string; itemId: string; locationId: string; quantity: number }[] = [];
+    for (const i of event.items) {
+      if (!(i.quantity > 0)) continue;
+      const item = await this.#returnStockItem(i.stockItemId, i.variantId);
+      const locationId = item && (await this.#returnLocation(item.id));
+      if (!item || !locationId) {
+        this.ctx.log.warn({ returnId: event.returnId, orderItemId: i.orderItemId, variantId: i.variantId }, 'inventory: received return item has no company stock item or location, ignored');
+        continue;
+      }
+      units.push({ orderItemId: i.orderItemId, itemId: item.id, locationId, quantity: i.quantity });
+    }
+    if (!units.length) return;
+    await this.#stock('return_received', async (st) => {
+      await st.lock(units.map((u) => u.itemId));
+      for (const u of units) await this.#addReturned(st, event.returnId, u.orderItemId, u.itemId, u.locationId, u.quantity);
+    });
+  }
+
+  /**
+   * returns.return.inspected: Create a pending return stock outcome with the inspector's proposed outcome. The units
+   * stay in Returned until the outcome is recorded (recordReturnOutcome moves them); units that never arrived
+   * through returns.return.received are added to Returned first, so a missed event loses no stock. Once per return item.
+   */
   async onReturnInspectedFromReturns(event: EventPayload<'returns.return.inspected'>, envelope?: Pick<EventEnvelope, 'at'>): Promise<void> {
     if (event.ownerType !== 'official') return;
-    const candidates = (await this.repo.items({ ownerType: 'official', variantIds: [event.variantId] })).sort((a, b) => Number(b.condition === 'new') - Number(a.condition === 'new'));
-    const item = candidates[0];
+    const item = await this.#returnStockItem(event.stockItemId, event.variantId);
     if (!item) {
       this.ctx.log.warn({ returnId: event.returnId, variantId: event.variantId }, 'inventory: inspected return has no company stock item for its variant, ignored');
       return;
     }
-    if ((await this.repo.returnOutcomesWhere({ returnId: event.returnId })).some((o) => o.stock_item_id === item.id)) return;
-    const location = (await this.repo.levels([item.id]))[0]?.location_id ?? (await this.#officialDefault())?.id;
+    const location = await this.#returnLocation(item.id);
     if (!location) {
       this.ctx.log.warn({ returnId: event.returnId }, 'inventory: no company location for an inspected return, ignored');
       return;
@@ -2204,6 +2275,9 @@ export class InventoryService implements InventoryPublicApi {
     const quantity = Math.max(1, event.quantity);
     const short = event.returnId.slice(0, 8).toUpperCase();
     await this.#stock('return_received', async (st) => {
+      if (!(await st.tx.claimEvent(`return-inspected:${event.returnId}:${event.orderItemId}`))) return;
+      await st.lock([item.id]);
+      await this.#addReturned(st, event.returnId, event.orderItemId, item.id, location, quantity);
       const row = await st.tx.insert(
         'return_outcomes',
         {
@@ -2225,8 +2299,11 @@ export class InventoryService implements InventoryPublicApi {
         },
         { ignoreConflict: true },
       );
-      if (!row) return;
-      await st.move(item.id, location, 'outside', 'returned', quantity, { reason: 'return_received', ref: { kind: 'return', id: event.returnId, label: `Return RT-${short}` }, actor: SYSTEM_ACTOR });
+      if (row) return;
+      // another item of the same return and stock item (one outcome per return and stock item): add its units
+      const same = (await st.tx.returnOutcomesWhere({ returnId: event.returnId })).find((o) => o.stock_item_id === item.id);
+      if (same?.state === 'pending') await st.tx.update('return_outcomes', same.id, { quantity: same.quantity + quantity });
+      else this.ctx.log.warn({ returnId: event.returnId, orderItemId: event.orderItemId, stockItemId: item.id }, 'inventory: the stock outcome of this return and item is already recorded; its units stay in Returned');
     });
   }
 

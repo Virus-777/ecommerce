@@ -30,7 +30,7 @@ beforeEach(async () => {
 const staffActor = { kind: 'staff' as const, id: newId(), name: 'Jordan Lee' };
 const usd = (amount: number) => ({ amount, currency: 'USD' });
 
-const accept = async (orderId: string, ref: string) => {
+const accept = async (orderId: string, ref: string, reservationId: string, items: { orderItemId: string; stockItemId: string; quantity: number }[]) => {
   h.app.kernel.events.publish('orders', 'orders.order.accepted', {
     orderId,
     ref,
@@ -38,18 +38,19 @@ const accept = async (orderId: string, ref: string) => {
     contactEmail: 'sam@example.com',
     total: usd(100),
     groups: [],
+    items: items.map((i) => ({ ...i, offerId: newId() })),
+    reservationId,
     acceptedAt: new Date().toISOString(),
   });
   await h.app.kernel.events.drain();
 };
 
-/** An accepted order holding `quantity` units of an item */
+/** An accepted order holding `quantity` units of an item (allocated from the hold named on the event, no attachOrder) */
 async function order(itemId: string, quantity: number) {
   const r = await h.api.hold(`chk-${newId()}`, [{ stockItemId: itemId, quantity }]);
   const orderId = newId();
   const orderItemId = newId();
-  await h.api.attachOrder(r.id, orderId, [{ stockItemId: itemId, orderItemId }]);
-  await accept(orderId, `MK-261009-${String(Math.floor(Math.random() * 1e5)).padStart(5, '0')}`);
+  await accept(orderId, `MK-261009-${String(Math.floor(Math.random() * 1e5)).padStart(5, '0')}`, r.id, [{ orderItemId, stockItemId: itemId, quantity }]);
   return { reservationId: r.id, orderId, orderItemId };
 }
 
@@ -140,20 +141,33 @@ describe('receiving', () => {
 });
 
 describe('returns', () => {
-  const inspected = async (returnId: string, variantId: string, quantity: number, proposed = 'restock') => {
-    h.app.kernel.events.publish('returns', 'returns.return.inspected', { returnId, ownerType: 'official', sellerId: null, conditionOutcome: 'Like new, opened', proposedStockOutcome: proposed, variantId, quantity });
+  const inspected = async (returnId: string, variantId: string, quantity: number, proposed = 'restock', o: { orderItemId?: string; stockItemId?: string | null } = {}) => {
+    h.app.kernel.events.publish('returns', 'returns.return.inspected', { returnId, ownerType: 'official', sellerId: null, conditionOutcome: 'Like new, opened', proposedStockOutcome: proposed, orderItemId: o.orderItemId ?? newId(), variantId, stockItemId: o.stockItemId ?? null, quantity });
+    await h.app.kernel.events.drain();
+  };
+  const received = async (returnId: string, items: { orderItemId: string; quantity: number; variantId: string; stockItemId?: string | null }[], ownerType: 'official' | 'seller' = 'official') => {
+    h.app.kernel.events.publish('returns', 'returns.return.received', { returnId, ownerType, sellerId: ownerType === 'seller' ? newId() : null, items, receivedAt: new Date().toISOString() });
     await h.app.kernel.events.drain();
   };
 
-  it('puts inspected Official Store returns into Returned with a pending outcome, once', async () => {
+  it('adds received Official Store units to Returned once per return item; inspection only creates the pending outcome', async () => {
     const a = await officialItem(h, loc.id, 0);
+    const b = await officialItem(h, loc.id, 0);
     const returnId = newId();
-    await inspected(returnId, a.variantId, 2);
-    await inspected(returnId, a.variantId, 2); // replay
-    h.app.kernel.events.publish('returns', 'returns.return.inspected', { returnId: newId(), ownerType: 'seller', sellerId: newId(), conditionOutcome: 'x', proposedStockOutcome: 'restock', variantId: a.variantId, quantity: 1 });
-    h.app.kernel.events.publish('returns', 'returns.return.received', { returnId, ownerType: 'official', sellerId: null, items: [{ orderItemId: newId(), quantity: 2, variantId: a.variantId, stockItemId: a.id }], receivedAt: new Date().toISOString() });
-    await h.app.kernel.events.drain();
+    const itemA = newId();
+    const itemB = newId();
+    await received(returnId, [{ orderItemId: itemA, quantity: 2, variantId: a.variantId, stockItemId: a.id }, { orderItemId: itemB, quantity: 1, variantId: b.variantId }]);
+    await received(returnId, [{ orderItemId: itemA, quantity: 2, variantId: a.variantId, stockItemId: a.id }, { orderItemId: itemB, quantity: 1, variantId: b.variantId }]); // replay
+    await received(newId(), [{ orderItemId: newId(), quantity: 1, variantId: a.variantId, stockItemId: a.id }], 'seller'); // seller returns: adjustments
     expect(await quantities(h, a.id)).toMatchObject({ returned: 2, available: 0 });
+    expect(await quantities(h, b.id)).toMatchObject({ returned: 1 }); // found through the variant
+    expect((await admin(h, 'GET', `/movements?stockItemId=${a.id}&reasonCode=return_received`)).json().items).toEqual([expect.objectContaining({ fromGroup: 'outside', toGroup: 'returned', quantity: 2, reference: expect.objectContaining({ kind: 'return', id: returnId }) })]);
+
+    await inspected(returnId, a.variantId, 2, 'restock', { orderItemId: itemA, stockItemId: a.id });
+    await inspected(returnId, a.variantId, 2, 'restock', { orderItemId: itemA, stockItemId: a.id }); // replay
+    h.app.kernel.events.publish('returns', 'returns.return.inspected', { returnId: newId(), ownerType: 'seller', sellerId: newId(), conditionOutcome: 'x', proposedStockOutcome: 'restock', orderItemId: newId(), variantId: a.variantId, quantity: 1 });
+    await h.app.kernel.events.drain();
+    expect(await quantities(h, a.id)).toMatchObject({ returned: 2, available: 0 }); // inspection moves nothing
     const pending = (await admin(h, 'GET', '/return-outcomes?state=pending')).json().items.filter((o: { returnId: string }) => o.returnId === returnId);
     expect(pending).toEqual([expect.objectContaining({ stockItemId: a.id, quantity: 2, inspectedCondition: 'Like new, opened', proposedOutcome: 'restock', state: 'pending', movements: [expect.objectContaining({ toGroup: 'returned', quantity: 2 })] })]);
 
@@ -163,6 +177,33 @@ describe('returns', () => {
     expect(await quantities(h, a.id)).toMatchObject({ returned: 0, available: 2 });
     expect(eventsNamed(h, 'inventory.return_outcome.recorded')).toEqual([{ returnId, stockItemId: a.id, outcome: 'restock', targetStockItemId: null, quantity: 2, valueAtCost: null }]);
     expect((await admin(h, 'POST', `/return-outcomes/${pending[0].id}/record`, { outcome: 'restock' })).statusCode).toBe(409);
+
+    // a received event arriving again after the outcome was recorded adds nothing
+    await received(returnId, [{ orderItemId: itemA, quantity: 2, variantId: a.variantId, stockItemId: a.id }]);
+    expect(await quantities(h, a.id)).toMatchObject({ returned: 0, available: 2 });
+    expect(await ledgerMismatches(h)).toEqual([]);
+  });
+
+  it('adds the units to Returned on inspection when no received event came, and a late received event adds nothing', async () => {
+    const a = await officialItem(h, loc.id, 0);
+    const returnId = newId();
+    const item1 = newId();
+    const item2 = newId();
+    // two return items of the same stock item: one pending outcome with both items' units
+    await inspected(returnId, a.variantId, 1, 'damaged_stock', { orderItemId: item1, stockItemId: a.id });
+    await inspected(returnId, a.variantId, 2, 'damaged_stock', { orderItemId: item2, stockItemId: a.id });
+    await inspected(returnId, a.variantId, 2, 'damaged_stock', { orderItemId: item2, stockItemId: a.id }); // replay
+    expect(await quantities(h, a.id)).toMatchObject({ returned: 3, damagedHeld: 0 });
+    await received(returnId, [{ orderItemId: item1, quantity: 1, variantId: a.variantId, stockItemId: a.id }, { orderItemId: item2, quantity: 2, variantId: a.variantId, stockItemId: a.id }]);
+    expect(await quantities(h, a.id)).toMatchObject({ returned: 3 });
+    const pending = (await admin(h, 'GET', '/return-outcomes?state=pending&limit=100')).json().items.filter((o: { returnId: string }) => o.returnId === returnId);
+    expect(pending).toEqual([expect.objectContaining({ stockItemId: a.id, quantity: 3, proposedOutcome: 'damaged_stock', state: 'pending' })]);
+
+    // the stock moves when the outcome is recorded: damaged → Damaged or held
+    const res = await admin(h, 'POST', `/return-outcomes/${pending[0].id}/record`, { outcome: 'damaged_stock', reviewDate: '2026-12-01', note: 'Cracked housing' });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(await quantities(h, a.id)).toMatchObject({ returned: 0, damagedHeld: 3, available: 0 });
+    expect(await ledgerMismatches(h)).toEqual([]);
   });
 
   it('records a different condition at the original cost, holds for repair, writes off at cost', async () => {
@@ -237,7 +278,7 @@ describe('discrepancies', () => {
     expect(await reservedMismatches(h)).toEqual([]);
 
     const b = await officialItem(h, loc.id, 0);
-    h.app.kernel.events.publish('returns', 'returns.return.inspected', { returnId: newId(), ownerType: 'official', sellerId: null, conditionOutcome: 'New', proposedStockOutcome: 'restock', variantId: b.variantId, quantity: 1 });
+    h.app.kernel.events.publish('returns', 'returns.return.inspected', { returnId: newId(), ownerType: 'official', sellerId: null, conditionOutcome: 'New', proposedStockOutcome: 'restock', orderItemId: newId(), variantId: b.variantId, quantity: 1 });
     await h.app.kernel.events.drain();
     await admin(h, 'POST', '/adjustments', { stockItemId: b.id, fromGroup: 'outside', toGroup: 'available', quantity: 1, reasonCode: 'found_stock' });
     const ob = await order(b.id, 1);
