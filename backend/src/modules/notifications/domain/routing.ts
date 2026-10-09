@@ -17,7 +17,7 @@ import type { NoticeLink } from '../../../spec/notifications.js';
 import type { spec } from '../../../spec/notifications.js';
 
 export type RecipientReason = 'lead' | 'backup' | 'member' | 'direct' | 'requester' | 'approver' | 'mention';
-export type RecipientKind = 'customer' | 'guest_email' | 'seller_member' | 'staff_member';
+export type RecipientKind = 'customer' | 'guest_email' | 'seller_member' | 'staff_member' | 'external_email';
 export type SubjectKey = 'orderId' | 'returnId' | 'caseId' | 'conversationId' | 'groupId';
 
 export type Target =
@@ -27,6 +27,8 @@ export type Target =
   | { kind: 'guest'; email: string }
   /** A bare email address (codes, links, invitations): email only, no inbox */
   | { kind: 'email'; email: string; accountId?: string | null; recipientKind?: RecipientKind }
+  /** A contact outside Marketly (supplier, rights owner, scheduled-report address): essential topics, email only, never an inbox notice */
+  | { kind: 'external'; email: string; name?: string | null }
   /** A bare phone number (SMS codes) */
   | { kind: 'phone'; phone: string; accountId?: string | null }
   /** A seller workspace (members by permission and preference), or one member of it */
@@ -62,8 +64,11 @@ export interface RouteSend {
   replyTo?: { module: 'support' | 'messaging'; refId: string };
   /** Guests get the order link minted by identity (issueOrderLink) */
   guestOrderLink?: { orderId: string; email: string };
-  /** Skip when this topic was just sent about the same subject (combined notices) */
-  skipIfRecent?: { topic: string; key: SubjectKey; value: string };
+  /**
+   * Skip when this topic was just sent about the same subject (combined notices): an in-app notice for
+   * signed-in customers, the delivery log (dedupe key) for guest addresses, who have no inbox
+   */
+  skipIfRecent?: { topic: string; key: SubjectKey; value: string; dedupe: string };
 }
 
 export type Effect = 'refreshConsent' | 'customerClosed' | 'reroute' | 'awayEnded' | 'dropOffReminder' | 'approvalDueReminder' | 'dispatchReminder';
@@ -105,6 +110,7 @@ const accountHealth = (id: string) => L('restriction', id, 'seller/account-healt
 const customer = (customerId: string | null | undefined): RouteTarget | null => (customerId ? { kind: 'customer', customerId } : null);
 const seller = (sellerId: string | null | undefined): RouteTarget | null => (sellerId ? { kind: 'seller', sellerId } : null);
 const role = (roleKey: string): RouteTarget => ({ kind: 'role', roleKey });
+const external = (email: string | null | undefined, name?: string | null): RouteTarget | null => (email ? { kind: 'external', email, name: name ?? null } : null);
 const staff = (accountId: string | null | undefined, reason: RecipientReason = 'direct'): RouteTarget | null => (accountId && isUuid(accountId) ? { kind: 'staff', accountId, reason } : null);
 const byOrder = (orderId: string | null | undefined): RouteTarget | null => (orderId ? { kind: 'subject', audience: 'customer', key: 'orderId', value: orderId } : null);
 const byReturn = (returnId: string | null | undefined): RouteTarget | null => (returnId ? { kind: 'subject', audience: 'customer', key: 'returnId', value: returnId } : null);
@@ -367,7 +373,7 @@ export const ROUTES: Routes = {
         context: { payment: { amount: f.money(p.amount) } },
         subjects: { orderId: p.orderId },
         dedupe: `payment:${p.captureId}`,
-        skipIfRecent: { topic: 'customer.order.accepted', key: 'orderId', value: p.orderId },
+        skipIfRecent: { topic: 'customer.order.accepted', key: 'orderId', value: p.orderId, dedupe: `order:${p.orderId}:accepted` },
         ...guestLink(p, p.orderId),
       },
     ],
@@ -1091,6 +1097,183 @@ export const ROUTES: Routes = {
         },
     ],
   },
+  'reports.scheduled_report.ready': {
+    // phase 2 topic: the schedule's recipients are addresses (external_email), whoever they belong to
+    sends: (p, f) => [
+      {
+        topic: 'staff.report.scheduled',
+        to: [...new Set(p.recipients.map((e) => e.trim().toLowerCase()))].map((email) => external(email)),
+        link: L('export', p.exportId, 'admin/reports', 'Download'),
+        context: { report: { title: p.reportTitle, period: p.periodLabel, format: p.format.toUpperCase() }, export: { expires: f.date(p.expiresAt) } },
+        dedupe: `scheduled-report:${p.exportId}`,
+      },
+    ],
+  },
+
+  /* ---------------------------------------------------------------- purchasing, wallet, workqueues day end */
+  'purchasing.purchase_order.sent': {
+    sends: (p, f) => {
+      // only when the buyer asked for it and the supplier has an address; the Purchasing Manager role gets the in-app copy
+      if (!p.emailSupplier || !p.supplierEmail) return [];
+      const context = {
+        po: {
+          ref: p.ref,
+          total: f.money(p.total),
+          lines: p.lines.map((l) => `${l.label} (${l.sku}) × ${l.quantityOrdered}`).join('; '),
+          message: p.message?.trim() ? `Message from your buyer: ${p.message.trim()}` : '',
+        },
+        supplier: { name: p.supplierName },
+      };
+      const dedupe = `purchase-order:${p.purchaseOrderId}:sent`;
+      return [
+        { topic: 'supplier.purchase_order.sent', to: [external(p.supplierEmail, p.supplierName)], link: L('purchase_order', p.purchaseOrderId, 'admin/purchasing', undefined, p.ref), context, dedupe },
+        { topic: 'staff.purchasing.po_sent', to: [role('purchasing_manager')], link: L('purchase_order', p.purchaseOrderId, 'admin/purchasing', 'Open purchase order', p.ref), context, dedupe },
+      ];
+    },
+  },
+  'wallet.credit.expiring': {
+    sends: (p, f) => [
+      {
+        topic: 'customer.credit.expiring',
+        to: [customer(p.customerId)],
+        link: L('store_credit', p.lotId, 'account/coupons', 'Shop now'),
+        context: { credit: { amount: f.money(p.amount), expires: f.date(p.expiresAt), days: p.daysLeft } },
+        dedupe: `credit-expiring:${p.lotId}:${p.expiresAt}`,
+      },
+    ],
+  },
+  'workqueues.day_end.prepared': {
+    sends: (p, f) => [
+      {
+        topic: 'staff.day_end.summary',
+        to: [...new Set(p.roleKeys)].map(role),
+        link: L('day_end', p.reviewId, 'ops/queues', 'Open day-end review'),
+        // a calendar date: read at midday so the market time zone keeps the same day
+        context: { dayend: { date: f.date(`${p.date}T12:00:00Z`), open: p.openItems, overdue: p.overdueItems }, due: { date: f.dateTime(p.dueAt) } },
+        deadline: p.dueAt,
+        dedupe: `day-end:${p.reviewId}`,
+      },
+    ],
+  },
+
+  /* ---------------------------------------------------------------- advertising, content (daily reminders) */
+  'advertising.campaign.ending_soon': {
+    sends: (p, f) => {
+      const context = { campaign: { name: p.name, ends: f.date(p.endsAt), days: p.daysLeft } };
+      const dedupe = `ad-campaign:${p.campaignId}:ending:${p.endsAt}`;
+      return [
+        p.advertiserKind === 'seller' &&
+          p.sellerId && { topic: 'seller.campaign.ending_soon', to: [seller(p.sellerId)], link: L('campaign', p.campaignId, 'seller/ad-request', 'View campaign', p.ref), context, sellerId: p.sellerId, dedupe },
+        p.advertiserKind !== 'seller' && {
+          topic: 'staff.campaign.ending_soon',
+          to: [staff(p.ownerStaffId) ?? role('advertising_manager')],
+          link: L('campaign', p.campaignId, 'admin/ad-campaign', 'Open campaign', p.ref),
+          context,
+          dedupe,
+        },
+      ];
+    },
+  },
+  'content.article.review_due': {
+    sends: (p, f) => [
+      {
+        topic: 'staff.article.review_due',
+        to: [staff(p.ownerStaffId) ?? role('content_manager')],
+        link: L('article', p.articleId, 'admin/help-content', 'Review article'),
+        context: { article: { title: p.title, lastReviewed: p.lastReviewedAt ? f.date(p.lastReviewedAt) : 'not reviewed since it was published' } },
+        dedupe: `article-review:${p.articleId}:${p.dueSince}`,
+      },
+    ],
+  },
+
+  /* ---------------------------------------------------------------- reporters and authors (moderation, trust) */
+  'reviews.moderation.decided': {
+    sends: (p, f) => {
+      const what = CONTENT_WORDS[p.contentType] ?? f.human(p.contentType);
+      const outcome = DECISION_WORDS[p.decision] ?? f.human(p.decision);
+      const reported = { report: { outcome: p.reporterOutcome?.trim() || `We reviewed the ${what} you reported: it was ${outcome}.` } };
+      const authored = {
+        content: { type: what },
+        moderation: { outcome, reason: f.human(p.reasonCode) },
+        appeal: { deadline: p.appealUntil ? f.date(p.appealUntil) : '', text: p.appealUntil ? `You can appeal until ${f.date(p.appealUntil)}.` : '' },
+      };
+      const key = `review-moderation:${p.moderationItemId}`;
+      const customers = p.reporters.filter((r) => r.kind === 'customer');
+      const author = p.author ?? null;
+      return [
+        customers.length > 0 && { topic: 'customer.review_report.decided', to: customers.map((r) => customer(r.id)), link: L('review', p.contentId, 'account/reviews', 'View details'), context: reported, dedupe: `${key}:reporter` },
+        ...p.reporters
+          .filter((r) => r.kind === 'seller')
+          .map((r) => ({ topic: 'seller.review_report.decided', to: [seller(r.id)], link: L('review', p.contentId, 'seller/performance', 'View details'), context: reported, sellerId: r.id, dedupe: `${key}:reporter` })),
+        author?.kind === 'customer' && {
+          topic: 'customer.review.moderated',
+          to: [customer(author.id)],
+          link: L('review', p.contentId, 'account/reviews', 'View your reviews'),
+          context: authored,
+          dedupe: `${key}:author`,
+        },
+        author?.kind === 'seller' && {
+          topic: 'seller.content.moderated',
+          to: [seller(author.id)],
+          link: L('review', p.contentId, 'seller/performance', 'View reviews'),
+          context: authored,
+          sellerId: author.id,
+          dedupe: `${key}:author`,
+        },
+      ];
+    },
+  },
+  'trust.report.resolved': {
+    // the staff action notice of the report (trust.report.created) is done
+    resolve: (p) => [`trust-report:${p.reportId}`],
+    sends: (p, f) => {
+      const context = { report: { ref: p.ref, outcome: p.reporterOutcome?.trim() || `Outcome: ${f.human(p.outcome)}.` } };
+      const dedupe = `trust-report:${p.reportId}:resolved`;
+      // customers in-app and email, guests who reported by email, rights owners by external email; sellers get their own topic
+      const people = p.reporters
+        .filter((r) => r.kind !== 'seller')
+        .map((r): RouteTarget | null => (r.kind === 'rights_owner' ? external(r.contactEmail, r.contactName) : r.customerId ? customer(r.customerId) : r.contactEmail ? { kind: 'guest', email: r.contactEmail } : null));
+      return [
+        people.some(Boolean) && { topic: 'trust.report.resolved', to: people, link: L('report', p.reportId, 'help/case', 'View details', p.ref), context, dedupe },
+        ...p.reporters
+          .filter((r) => r.kind === 'seller' && r.sellerId)
+          .map((r) => ({ topic: 'seller.trust_report.resolved', to: [seller(r.sellerId)], link: L('report', p.reportId, 'seller/performance', 'View details', p.ref), context, sellerId: r.sellerId, dedupe })),
+      ];
+    },
+  },
+  'trust.rights_report.received': {
+    sends: (p) => [
+      {
+        topic: 'rights_owner.report.received',
+        to: [external(p.contactEmail, p.contactName)],
+        link: L('help', 'rights-owner-reports', 'help/article', 'How we handle reports', p.ref),
+        context: { report: { ref: p.ref }, rights: { brand: p.brandName } },
+        dedupe: `rights-report:${p.reportId}`,
+      },
+    ],
+  },
+};
+
+/** Moderation decisions (decide endpoint values and stored states) in words */
+const DECISION_WORDS: Record<string, string> = {
+  keep: 'kept',
+  kept: 'kept',
+  remove: 'removed',
+  removed: 'removed',
+  reject_response: 'removed',
+  request_edit: 'sent back for an edit',
+  edit_requested: 'sent back for an edit',
+  publish: 'published',
+  published: 'published',
+  hidden_pending_review: 'hidden while it is reviewed',
+};
+
+const CONTENT_WORDS: Record<string, string> = {
+  product_review: 'review',
+  seller_feedback: 'seller feedback',
+  question: 'question',
+  answer: 'answer',
+  seller_response: 'response',
 };
 
 function maskEmail(email: string) {

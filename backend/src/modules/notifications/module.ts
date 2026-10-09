@@ -125,6 +125,15 @@ export default defineModule({
     ctx.events.on("settings.change.scheduled", (e) => service.onChangeScheduledFromSettings(e.payload, e.id));
     ctx.events.on("audit.integrity.failed", (e) => service.onIntegrityFailedFromAudit(e.payload, e.id));
     ctx.events.on("reports.export.ready", (e) => service.onExportReadyFromReports(e.payload, e.id));
+    ctx.events.on("reports.scheduled_report.ready", (e) => service.onScheduledReportReadyFromReports(e.payload, e.id));
+    ctx.events.on("purchasing.purchase_order.sent", (e) => service.onPurchaseOrderSentFromPurchasing(e.payload, e.id));
+    ctx.events.on("wallet.credit.expiring", (e) => service.onCreditExpiringFromWallet(e.payload, e.id));
+    ctx.events.on("workqueues.day_end.prepared", (e) => service.onDayEndPreparedFromWorkqueues(e.payload, e.id));
+    ctx.events.on("advertising.campaign.ending_soon", (e) => service.onCampaignEndingSoonFromAdvertising(e.payload, e.id));
+    ctx.events.on("content.article.review_due", (e) => service.onArticleReviewDueFromContent(e.payload, e.id));
+    ctx.events.on("reviews.moderation.decided", (e) => service.onModerationDecidedFromReviews(e.payload, e.id));
+    ctx.events.on("trust.report.resolved", (e) => service.onReportResolvedFromTrust(e.payload, e.id));
+    ctx.events.on("trust.rights_report.received", (e) => service.onRightsReportReceivedFromTrust(e.payload, e.id));
 
     // Background jobs (spec jobs)
     ctx.jobs.handle("notifications.dispatch", () => service.dispatch());

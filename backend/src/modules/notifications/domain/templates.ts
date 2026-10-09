@@ -74,6 +74,7 @@ export function validateContent(topic: TopicDef, channel: Channel, content: Temp
 export function footerFor(topic: TopicDef): string {
   if (topic.category === 'promotional') return "You're receiving this because you opted in to Marketly promotions. Unsubscribe with one click: {{unsubscribe.url}}";
   if (topic.category === 'optional') return 'You can turn these emails off in your notification settings.';
+  if (topic.audience === 'external') return 'Marketly sent you this email about your purchase order or report. Reply to the contact named in it if you have questions.';
   if (topic.audience === 'staff') return 'Staff notice from Marketly Admin Center. Change your email preferences in Admin Center.';
   if (topic.audience === 'seller') return "You can't turn off essential Seller Center notices for the account owner.";
   return "You can't unsubscribe from order updates because they're about your account and orders.";

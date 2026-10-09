@@ -85,7 +85,8 @@ export class Admin {
     return {
       customer: pick((t) => t.audience === 'customer' && t.category !== 'promotional'),
       seller: pick((t) => t.audience === 'seller' && t.category !== 'promotional'),
-      staff: pick((t) => t.audience === 'staff'),
+      // TopicMatrix has no external list: the supplier and rights-owner emails are staff-managed
+      staff: pick((t) => t.audience === 'staff' || t.audience === 'external'),
       promotional: pick((t) => t.category === 'promotional'),
       stats: await this.stats(7),
     };

@@ -45,6 +45,10 @@ function targetOf(r: Recipient, topic: string): Target {
     case 'staff_member':
       if (!r.accountId) throw new AppError('VALIDATION_FAILED', 'Staff recipients need accountId', { issues: [{ path: 'recipients.accountId', message: 'required for staff_member' }] });
       return { kind: 'staff', accountId: r.accountId, reason: topic === 'staff.mention' ? 'mention' : 'direct' };
+    case 'external_email':
+      if (!r.email) throw new AppError('VALIDATION_FAILED', 'External recipients need email', { issues: [{ path: 'recipients.email', message: 'required for external_email' }] });
+      if (topicDef(topic)?.category !== 'essential') throw new AppError('VALIDATION_FAILED', 'External recipients only receive essential topics', { issues: [{ path: 'recipients.kind', message: `${topic} is not an essential topic` }] });
+      return { kind: 'external', email: r.email };
   }
 }
 
@@ -628,6 +632,42 @@ export class NotificationsService implements NotificationsPublicApi {
   /** reports.export.ready: Export ready to the requester (staff or seller member), including audit, orders and module list exports */
   async onExportReadyFromReports(event: EventPayload<'reports.export.ready'>, eventId?: string): Promise<void> {
     await this.consumers.handle('reports.export.ready', event, eventId);
+  }
+
+  async onScheduledReportReadyFromReports(event: EventPayload<'reports.scheduled_report.ready'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('reports.scheduled_report.ready', event, eventId);
+  }
+
+  async onPurchaseOrderSentFromPurchasing(event: EventPayload<'purchasing.purchase_order.sent'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('purchasing.purchase_order.sent', event, eventId);
+  }
+
+  async onCreditExpiringFromWallet(event: EventPayload<'wallet.credit.expiring'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('wallet.credit.expiring', event, eventId);
+  }
+
+  async onDayEndPreparedFromWorkqueues(event: EventPayload<'workqueues.day_end.prepared'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('workqueues.day_end.prepared', event, eventId);
+  }
+
+  async onCampaignEndingSoonFromAdvertising(event: EventPayload<'advertising.campaign.ending_soon'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('advertising.campaign.ending_soon', event, eventId);
+  }
+
+  async onArticleReviewDueFromContent(event: EventPayload<'content.article.review_due'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('content.article.review_due', event, eventId);
+  }
+
+  async onModerationDecidedFromReviews(event: EventPayload<'reviews.moderation.decided'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('reviews.moderation.decided', event, eventId);
+  }
+
+  async onReportResolvedFromTrust(event: EventPayload<'trust.report.resolved'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('trust.report.resolved', event, eventId);
+  }
+
+  async onRightsReportReceivedFromTrust(event: EventPayload<'trust.rights_report.received'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('trust.rights_report.received', event, eventId);
   }
 
   /* ---------------------------------------------------------------- jobs */

@@ -51,6 +51,8 @@ export const INBOX_GROUPS: Record<Audience, readonly string[]> = {
   customer: ['orders', 'returns_refunds', 'cases', 'account', 'promotions'],
   seller: ['orders', 'returns_cases', 'products', 'account_finance'],
   staff: ['Shipping', 'Inventory', 'Approvals', 'Support', 'Returns', 'Finance', 'Sellers', 'Content', 'Trust', 'Advertising', 'Operations', 'Platform', 'Security', 'Reports'],
+  /** People outside Marketly have no inbox; the groups only label their topics */
+  external: ['suppliers', 'rights_owners'],
 };
 
 /** Staff role keys seeded by access, with display names */
@@ -182,6 +184,30 @@ const VARIABLE_EXAMPLES: Record<string, string> = {
   'wishlist.price': '$159.00',
   'unsubscribe.url': 'https://marketly.example/unsubscribe/…',
   'guest.url': 'https://marketly.example/orders/link/…',
+  'po.ref': 'PO-261009-0042',
+  'po.lines': 'Aurora Desk Lamp, black (LAMP-BLK) × 24; Aurora Desk Lamp, white (LAMP-WHT) × 12',
+  'po.total': '$2,268.00',
+  'po.message': 'Please confirm the delivery date by Friday.',
+  'supplier.name': 'Northwind Supply Co.',
+  'credit.amount': '$15.00',
+  'credit.expires': 'Oct 31',
+  'credit.days': '7',
+  'dayend.date': 'Oct 9',
+  'dayend.open': '14',
+  'dayend.overdue': '3',
+  'campaign.ends': 'Oct 14',
+  'campaign.days': '3',
+  'article.title': 'How returns work',
+  'article.lastReviewed': 'Apr 2',
+  'report.title': 'Weekly sales',
+  'report.period': 'Week of Oct 5, 2026',
+  'report.format': 'PDF',
+  'report.outcome': 'We removed the listing after reviewing your report.',
+  'content.type': 'review',
+  'moderation.outcome': 'removed',
+  'moderation.reason': 'personal information',
+  'appeal.text': 'You can appeal until Oct 23.',
+  'rights.brand': 'Northwind Audio',
 };
 
 /* ------------------------------------------------------------------ topics */
@@ -256,7 +282,7 @@ export const variablesIn = (...texts: (string | null | undefined)[]) => [...new 
 function topic(audience: Audience, key: string, i: TopicInput): TopicDef {
   const supports = i.supports ?? ['in_app', 'email', 'push'];
   const channels: Record<Channel, boolean> = { in_app: false, email: false, sms: false, push: false };
-  for (const c of supports) channels[c] = c === 'in_app' || c === 'email' || (c === 'push' && audience !== 'staff');
+  for (const c of supports) channels[c] = c === 'in_app' || c === 'email' || (c === 'push' && audience !== 'staff' && audience !== 'external');
   Object.assign(channels, i.channels ?? {});
   for (const c of CHANNELS) if (!supports.includes(c)) channels[c] = false;
   const vars = variablesIn(i.t.title, i.t.body, i.t.subject).filter((v) => !(v in STANDARD_VARIABLES));
@@ -280,7 +306,7 @@ function topic(audience: Audience, key: string, i: TopicInput): TopicDef {
     prefGroup: i.pref ?? null,
     urgent: i.urgent ?? false,
     sensitive: i.sensitive ?? false,
-    family: i.family ?? (audience === 'seller' ? 'sellers' : audience === 'staff' ? 'account' : 'orders'),
+    family: i.family ?? (audience === 'seller' ? 'sellers' : audience === 'staff' || audience === 'external' ? 'account' : 'orders'),
     icon: i.icon ?? 'bell',
     tone: i.tone ?? 'info',
     template: i.t,
@@ -293,6 +319,8 @@ const se = (key: string, i: TopicInput) => topic('seller', `seller.${key}`, i);
 const st = (key: string, i: TopicInput) => topic('staff', `staff.${key}`, { supports: ['in_app', 'email'], ...i });
 
 const EMAIL_ONLY: Channel[] = ['email'];
+/** People outside Marketly (suppliers, rights owners): essential email only, never an inbox notice */
+const ex = (key: string, i: TopicInput) => topic('external', key, { ...i, supports: EMAIL_ONLY, category: 'essential' });
 
 export const TOPICS: readonly TopicDef[] = [
   /* ---------------------------------------------------------------- customer: orders */
@@ -386,6 +414,18 @@ export const TOPICS: readonly TopicDef[] = [
   cu('account.reply_not_delivered', { group: 'account', label: 'Email reply not delivered', opens: 'Account', supports: EMAIL_ONLY, family: 'account', icon: 'mail-x',
     description: "Automatic answer to replies with an unknown or expired reply address",
     t: { title: 'Please reply in your account', body: "We couldn't match your email to a conversation. Please sign in and reply in your account.", subject: 'Please reply in your Marketly account', button: 'Open my account' } }),
+  cu('credit.expiring', { group: 'account', label: 'Store credit expiring', opens: 'Store credit', triggers: ['wallet.credit.expiring'], phase: 3, family: 'account', icon: 'wallet', tone: 'warning',
+    description: 'Unused store credit about to expire, with its amount and expiry date',
+    t: { title: '{{credit.amount}} of store credit expires {{credit.expires}}', body: 'You have {{credit.amount}} of unused store credit that expires on {{credit.expires}} ({{credit.days}} days left). It is applied at checkout automatically.', subject: 'Your {{credit.amount}} store credit expires {{credit.expires}}', button: 'Shop now' } }),
+
+  /* ---------------------------------------------------------------- customer: reports and moderation */
+  cu('review_report.decided', { group: 'cases', label: 'Reported content: result', opens: 'My reviews', triggers: ['reviews.moderation.decided'], icon: 'flag',
+    t: { title: 'We reviewed the content you reported', body: '{{report.outcome}} Thank you for helping keep Marketly reviews useful.', subject: 'We reviewed the content you reported', button: 'View details' } }),
+  cu('review.moderated', { group: 'account', label: 'Your review was moderated', opens: 'My reviews', triggers: ['reviews.moderation.decided'], icon: 'star', tone: 'warning',
+    t: { title: 'Your {{content.type}} was {{moderation.outcome}}', body: 'After a report, your {{content.type}} was {{moderation.outcome}} ({{moderation.reason}}). {{appeal.text}}', subject: 'Your {{content.type}} on Marketly was {{moderation.outcome}}', button: 'View your reviews' } }),
+  topic('customer', 'trust.report.resolved', { group: 'cases', label: 'Your report: result', opens: 'Report', triggers: ['trust.report.resolved'], icon: 'shield-check',
+    description: 'The outcome of a report a customer, guest or rights owner made (never the reported party\'s details); sellers get seller.trust_report.resolved',
+    t: { title: 'Your report {{report.ref}} was reviewed', body: 'We finished reviewing your report {{report.ref}}. {{report.outcome}}', subject: 'Update on your report {{report.ref}}', button: 'View details' } }),
 
   /* ---------------------------------------------------------------- customer: promotional */
   cu('promotions.newsletter', { group: 'promotions', label: 'Deals and coupons newsletter', opens: 'Deals', category: 'promotional', frequency: 'Weekly', family: 'promotions', icon: 'percent', tone: 'deal', supports: ['email', 'sms', 'push'], channels: { sms: true },
@@ -432,6 +472,15 @@ export const TOPICS: readonly TopicDef[] = [
     t: { title: 'Low stock: {{stock.label}}', body: 'Only {{stock.available}} left of {{stock.label}}.', subject: 'Low stock: {{stock.label}}', button: 'Update stock' } }),
   se('advertising.campaign_status', { group: 'products', label: 'Sponsored campaign update', opens: 'Campaign', triggers: ['advertising.campaign.status_changed'], category: 'optional', permission: 'advertising.requests.manage', icon: 'megaphone',
     t: { title: 'Campaign {{campaign.status}}', body: 'Your sponsored campaign is now {{campaign.status}}.', subject: 'Your sponsored campaign is {{campaign.status}}', button: 'View campaign' } }),
+  se('campaign.ending_soon', { group: 'products', label: 'Sponsored campaign ending soon', opens: 'Campaign', triggers: ['advertising.campaign.ending_soon'], category: 'optional', permission: 'advertising.requests.manage', icon: 'megaphone', tone: 'warning',
+    t: { title: '{{campaign.name}} ends {{campaign.ends}}', body: 'Your sponsored campaign {{campaign.name}} ends on {{campaign.ends}} ({{campaign.days}} days left). Renew it or let it finish.', subject: 'Your campaign {{campaign.name}} ends {{campaign.ends}}', button: 'View campaign' } }),
+  se('review_report.decided', { group: 'products', label: 'Reported content: result', opens: 'Reviews', triggers: ['reviews.moderation.decided'], pref: 'products', permission: 'reviews.responses.post', icon: 'flag',
+    t: { title: 'We reviewed the content you reported', body: '{{report.outcome}}', subject: 'We reviewed the content you reported', button: 'View details' } }),
+  se('content.moderated', { group: 'products', label: 'Response or answer moderated', opens: 'Reviews', triggers: ['reviews.moderation.decided'], pref: 'products', permission: 'reviews.responses.post', icon: 'message-square', tone: 'warning',
+    t: { title: 'Your {{content.type}} was {{moderation.outcome}}', body: 'After a report, your {{content.type}} was {{moderation.outcome}} ({{moderation.reason}}). {{appeal.text}}', subject: 'Your {{content.type}} was {{moderation.outcome}}', button: 'View reviews' } }),
+  se('trust_report.resolved', { group: 'products', label: 'Your report: result', opens: 'Report', triggers: ['trust.report.resolved'], pref: 'products', icon: 'shield-check',
+    description: 'Seller variant of trust.report.resolved: the outcome of a report the seller made',
+    t: { title: 'Your report {{report.ref}} was reviewed', body: 'We finished reviewing your report {{report.ref}}. {{report.outcome}}', subject: 'Update on your report {{report.ref}}', button: 'View details' } }),
   se('promotion.invited', { group: 'products', label: 'Campaign invitation', opens: 'Campaign', triggers: ['promotions.participation.invited'], category: 'optional', pref: 'promotions', permission: 'promotions.campaigns.join', icon: 'percent', tone: 'deal',
     t: { title: "You're invited to a campaign", body: 'Join the campaign and see the expected earnings impact. Respond by {{campaign.respondBy}}.', subject: "You're invited to a Marketly campaign", button: 'Review invitation' } }),
 
@@ -554,10 +603,31 @@ export const TOPICS: readonly TopicDef[] = [
     t: { title: 'Your email address was changed', body: 'The email address of your staff account changed from {{email.old}} to {{email.new}}.', subject: 'Your staff email address was changed', button: 'Review security' } }),
   st('export.ready', { group: 'Reports', label: 'Export ready', opens: 'Exports', triggers: ['reports.export.ready'], icon: 'download',
     t: { title: 'Your export is ready', body: 'Your export is ready to download until {{export.expires}}.', subject: 'Your export is ready', button: 'Download' } }),
+  st('purchasing.po_sent', { group: 'Inventory', label: 'Purchase order emailed', opens: 'Purchase order', triggers: ['purchasing.purchase_order.sent'], roles: ['purchasing_manager'], supports: ['in_app'], icon: 'send',
+    description: 'In-app copy of the purchase order email sent to the supplier',
+    t: { title: 'Purchase order {{po.ref}} emailed', body: 'Purchase order {{po.ref}} ({{po.total}}) was emailed to {{supplier.name}}.' } }),
+  st('day_end.summary', { group: 'Operations', label: 'Day-end review ready', opens: 'Day-end review', triggers: ['workqueues.day_end.prepared'], action: true, icon: 'clipboard-check', tone: 'warning',
+    description: "Today's day-end review is ready (to the roles workqueues names in dayEndSharedRoles)",
+    t: { title: 'Day-end review for {{dayend.date}} is ready', body: '{{dayend.open}} open and {{dayend.overdue}} overdue items. Complete the review by {{due.date}}.', subject: 'Day-end review for {{dayend.date}} is ready', button: 'Open day-end review' } }),
+  st('campaign.ending_soon', { group: 'Advertising', label: 'Campaign ending soon', opens: 'Campaign', triggers: ['advertising.campaign.ending_soon'], roles: ['advertising_manager'], icon: 'megaphone',
+    t: { title: '{{campaign.name}} ends {{campaign.ends}}', body: 'Campaign {{campaign.name}} ends on {{campaign.ends}} ({{campaign.days}} days left). Renew it or let it finish.', subject: 'Campaign {{campaign.name}} ends {{campaign.ends}}', button: 'Open campaign' } }),
+  st('article.review_due', { group: 'Content', label: 'Help article due for review', opens: 'Help article', triggers: ['content.article.review_due'], roles: ['content_manager'], action: true, icon: 'book-open', tone: 'warning',
+    t: { title: 'Review due: {{article.title}}', body: 'The help article {{article.title}} is due for its review (last reviewed: {{article.lastReviewed}}). Check it is still correct and mark it reviewed.', subject: 'Help article due for review: {{article.title}}', button: 'Review article' } }),
+  st('report.scheduled', { group: 'Reports', label: 'Scheduled report', opens: 'Report download', triggers: ['reports.scheduled_report.ready'], supports: EMAIL_ONLY, phase: 2, icon: 'calendar',
+    description: "A scheduled report emailed to the schedule's recipient addresses",
+    t: { title: '{{report.title}}: {{report.period}}', body: 'Your scheduled report {{report.title}} for {{report.period}} ({{report.format}}) is ready. Download it before {{export.expires}}.', subject: '{{report.title}}: {{report.period}}', button: 'Download' } }),
   st('mention', { group: 'Operations', label: 'Mention', opens: 'Record', icon: 'at-sign',
     t: { title: '{{mention.by}} mentioned you', body: '{{mention.text}}', subject: '{{mention.by}} mentioned you', button: 'Open' } }),
   st('digest.daily', { group: 'Operations', label: 'Daily digest', opens: 'Inbox', triggers: ['scheduled'], supports: EMAIL_ONLY, icon: 'inbox',
     t: { title: 'Your daily summary', body: 'You have {{digest.count}} unread notices: {{digest.lines}}', subject: 'Your Marketly daily summary ({{digest.count}})', button: 'Open inbox' } }),
+
+  /* ---------------------------------------------------------------- external: suppliers and rights owners (email only) */
+  ex('supplier.purchase_order.sent', { group: 'suppliers', label: 'Purchase order to the supplier', opens: 'Email only', triggers: ['purchasing.purchase_order.sent'], icon: 'file-text',
+    description: 'The purchase order emailed to the supplier when the buyer asks for it: lines, total and the buyer\'s message',
+    t: { title: 'Purchase order {{po.ref}}', body: 'Hello {{supplier.name}},\n\nMarketly has sent you purchase order {{po.ref}} ({{po.total}}).\n\nLines: {{po.lines}}\n\n{{po.message}}\n\nPlease reply to your Marketly buyer to confirm the delivery date.', subject: 'Purchase order {{po.ref}} from Marketly' } }),
+  ex('rights_owner.report.received', { group: 'rights_owners', label: 'Rights report received', opens: 'How we handle reports', triggers: ['trust.rights_report.received'], icon: 'shield',
+    description: 'Confirmation to a rights owner with the TR reference and what happens next',
+    t: { title: 'We received your report {{report.ref}}', body: 'Hello {{recipient.name}},\n\nWe received your report about {{rights.brand}}. Your reference is {{report.ref}}.\n\nWhat happens next: our Trust team reviews the report and the listings it names, may ask you for more proof, and emails you at this address once it is decided. Please quote {{report.ref}} in any follow-up.', subject: 'We received your report {{report.ref}}', button: 'How we handle reports' } }),
 ];
 
 const BY_KEY = new Map(TOPICS.map((t) => [t.key, t]));
@@ -565,7 +635,8 @@ export const topicDef = (key: string): TopicDef | undefined => BY_KEY.get(key);
 
 /** Variables a topic's templates may use, with examples (TemplateVariable[]) */
 export function topicVariables(t: TopicDef): TemplateVariable[] {
-  const required = new Set<string>(t.supports.some((c) => c === 'email' || c === 'sms') ? ['link.url'] : []);
+  // people outside Marketly have no record to open: their emails may go without a link
+  const required = new Set<string>(t.audience !== 'external' && t.supports.some((c) => c === 'email' || c === 'sms') ? ['link.url'] : []);
   if (t.category === 'promotional' && t.supports.includes('email')) required.add('unsubscribe.url');
   const out: TemplateVariable[] = Object.entries(STANDARD_VARIABLES).map(([name, v]) => ({ name, desc: v.desc, example: v.example, required: required.has(name) }));
   if (t.category === 'promotional') out.push({ name: 'unsubscribe.url', desc: 'One-click unsubscribe link', example: VARIABLE_EXAMPLES['unsubscribe.url']!, required: required.has('unsubscribe.url') });
@@ -603,7 +674,7 @@ export function defaultContent(t: TopicDef, channel: Channel, senders: Record<st
         preheader: body.length > 90 ? `${body.slice(0, 87)}…` : body,
         title,
         body: promo ? `${body}\n\nUnsubscribe: {{unsubscribe.url}}` : body,
-        button: { label: button ?? 'Open', url: '{{link.url}}' },
+        button: t.audience === 'external' && !button ? null : { label: button ?? 'Open', url: '{{link.url}}' },
         sender: senders[t.family] ?? null,
         allowPromotionalContent: promo,
       };

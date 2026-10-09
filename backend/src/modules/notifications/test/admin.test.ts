@@ -123,7 +123,7 @@ describe('templates', () => {
 
     // the new live version is used
     const c = world.customer();
-    const order = { orderId: newId(), ref: 'MK-261009-55555', customerId: c.customerId, contactEmail: c.email, total: money(100), groups: [], acceptedAt: clock.now().toISOString() };
+    const order = { orderId: newId(), ref: 'MK-261009-55555', customerId: c.customerId, contactEmail: c.email, total: money(100), groups: [], items: [], acceptedAt: clock.now().toISOString() };
     await publish(app, 'orders.order.accepted', order);
     await publish(app, 'shipping.shipment.dispatched', { shipmentId: newId(), kind: 'outbound', orderId: order.orderId, groupId: newId(), returnId: null, ownerType: 'official', sellerId: null, lines: [{ orderItemId: newId(), title: 'Lamp', variantLabel: '', quantity: 2 }], shippedAt: clock.now().toISOString(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
     expect(emailsTo(c.email).map((e) => e.message.subject)).toContain('On its way: MK-261009-55555');
@@ -271,7 +271,7 @@ describe('customer preferences and push devices', () => {
     const again = await app.inject({ method: 'POST', url: '/api/store/notifications/push-devices', headers: as.customer(c), payload: { token: 'fcm-token-new654321', platform: 'android', appVersion: '1.0.1', installationId: 'inst-1' } });
     expect(again.json()).toMatchObject({ id: reg.json().id, tokenSuffix: '654321', appVersion: '1.0.1' });
 
-    await publish(app, 'orders.order.accepted', { orderId: newId(), ref: 'MK-261009-12121', customerId: c.customerId, contactEmail: c.email, total: money(100), groups: [], acceptedAt: clock.now().toISOString() });
+    await publish(app, 'orders.order.accepted', { orderId: newId(), ref: 'MK-261009-12121', customerId: c.customerId, contactEmail: c.email, total: money(100), groups: [], items: [], acceptedAt: clock.now().toISOString() });
     const push = devOutbox.push.find((p) => p.message.token === 'fcm-token-new654321')!.message;
     expect(push).toMatchObject({ title: 'Order MK-261009-12121 accepted', data: { kind: 'order', screen: 'account/order', ref: 'MK-261009-12121' } });
 
@@ -286,7 +286,7 @@ describe('customer preferences and push devices', () => {
   it('drops invalid tokens and closed accounts', async () => {
     const c = world.customer();
     await app.inject({ method: 'POST', url: '/api/store/notifications/push-devices', headers: as.customer(c), payload: { token: 'invalid-token-000001', platform: 'android', appVersion: '1.0.0' } });
-    await publish(app, 'orders.order.accepted', { orderId: newId(), ref: 'MK-261009-13131', customerId: c.customerId, contactEmail: c.email, total: money(100), groups: [], acceptedAt: clock.now().toISOString() });
+    await publish(app, 'orders.order.accepted', { orderId: newId(), ref: 'MK-261009-13131', customerId: c.customerId, contactEmail: c.email, total: money(100), groups: [], items: [], acceptedAt: clock.now().toISOString() });
     expect((await get('/api/store/notifications/preferences', as.customer(c))).push.devices).toEqual([]);
 
     const d = world.customer();

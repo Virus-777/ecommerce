@@ -38,7 +38,7 @@ function orderAccepted(o: { orderId?: string; customerId?: string | null; email:
       groups: o.sellerId
         ? [{ groupId, ownerType: 'seller', sellerId: o.sellerId, fulfilledBy: 'seller', dispatchBy: new Date(Date.now() + 86_400_000).toISOString(), itemIds: [newId()], total: money(18900) }]
         : [{ groupId, ownerType: 'official', sellerId: null, fulfilledBy: 'official_warehouse', dispatchBy: new Date(Date.now() + 86_400_000).toISOString(), itemIds: [newId()], total: money(18900) }],
-      acceptedAt: new Date().toISOString(),
+      items: [], acceptedAt: new Date().toISOString(),
     },
     orderId,
     groupId,
@@ -48,7 +48,7 @@ function orderAccepted(o: { orderId?: string; customerId?: string | null; email:
 describe('catalogue', () => {
   it('routes every consumed event and seeds valid default templates', () => {
     expect(Object.keys(ROUTES).sort()).toEqual(Object.keys(spec.events.consumes).sort());
-    expect(Object.keys(spec.events.consumes)).toHaveLength(88);
+    expect(Object.keys(spec.events.consumes)).toHaveLength(97);
     for (const t of TOPICS) {
       for (const channel of templateChannels(t)) {
         const v = validateContent(t, channel, defaultContent(t, channel, {}));
@@ -57,7 +57,15 @@ describe('catalogue', () => {
     }
     // every topic the routing table names exists
     const named = JSON.stringify(Object.values(ROUTES).map((r) => String((r as { sends?: unknown }).sends ?? '')));
-    for (const m of named.matchAll(/'((?:customer|seller|staff)\.[a-z_.]+)'/g)) expect(topicDef(m[1]!), m[1]).toBeDefined();
+    // the compiled source may quote with ' or " (escaped in the JSON)
+    const keys = [...named.matchAll(/(?:'|\\")((?:customer|seller|staff|supplier|rights_owner|trust)\.[a-z_.]+)(?:'|\\")/g)].map((m) => m[1]!);
+    for (const k of ['supplier.purchase_order.sent', 'rights_owner.report.received', 'trust.report.resolved', 'staff.day_end.summary']) expect(keys).toContain(k);
+    for (const k of keys) expect(topicDef(k), k).toBeDefined();
+    // external topics: essential, email only, no inbox
+    for (const t of TOPICS.filter((x) => x.audience === 'external')) {
+      expect(t.category, t.key).toBe('essential');
+      expect(t.supports, t.key).toEqual(['email']);
+    }
   });
 });
 

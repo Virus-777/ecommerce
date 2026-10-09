@@ -32,7 +32,7 @@ const orderFor = (c: { customerId: string; email: string }) => ({
   contactEmail: c.email,
   total: money(4900),
   groups: [{ groupId: newId(), ownerType: 'official', sellerId: null, fulfilledBy: 'official_warehouse', dispatchBy: new Date(clock.now().getTime() + 86_400_000).toISOString(), itemIds: [newId()], total: money(4900) }],
-  acceptedAt: clock.now().toISOString(),
+  items: [], acceptedAt: clock.now().toISOString(),
 });
 
 const webhook = (path: string, body: unknown, eventId = newId()) => {

@@ -272,6 +272,14 @@ export class Sender {
       case 'email':
         if (!(await this.core.live(t, 'email'))) return [];
         return [{ deliveries: [{ channel: 'email', recipientKind: target.recipientKind ?? 'guest_email', accountId: target.accountId ?? null, address: target.email }] }];
+      case 'external':
+        // people outside Marketly: essential topics only, by email, never an inbox notice
+        if (t.category !== 'essential') {
+          this.core.log.warn({ topic: t.key }, 'external recipients only receive essential topics; skipped');
+          return [];
+        }
+        if (!(await this.core.live(t, 'email'))) return [];
+        return [{ name: target.name ?? null, deliveries: [{ channel: 'email', recipientKind: 'external_email', accountId: null, address: target.email, name: target.name ?? null }] }];
       case 'phone':
         if (!(await this.core.live(t, 'sms'))) return [];
         return [{ deliveries: [{ channel: 'sms', recipientKind: target.accountId ? 'customer' : 'guest_email', accountId: target.accountId ?? null, address: target.phone }] }];
