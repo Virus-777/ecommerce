@@ -9,58 +9,25 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { EventEnvelope } from '../kernel/events/index.js';
 import { fixedClock } from '../kernel/lib/clock.js';
 import { withDependencies } from '../kernel/module-system/loader.js';
 import type { AccessService } from '../modules/access/service.js';
-import { auth, buildTestApp } from '../testing/app.js';
-import { totp } from '../testing/totp.js';
+import { buildTestApp } from '../testing/app.js';
+import { flows, type Flows, type Staff } from '../testing/flows.js';
 
 const clock = fixedClock(new Date());
 let app: FastifyInstance;
-const invitations: EventEnvelope[] = [];
-
-interface Staff {
-  accountId: string;
-  key: string;
-  accessToken: string;
-}
+let f: Flows;
 
 beforeAll(async () => {
   app = await buildTestApp({ only: withDependencies(['media', 'identity', 'access', 'settings', 'audit', 'notifications']), clock, config: { rateLimits: false } });
-  app.kernel.events.subscribe('test', 'identity.invitation.created', (e) => void invitations.push(e));
+  f = flows(app, clock);
 });
 afterAll(async () => {
   await app?.close();
 });
 
-async function call(method: string, url: string, o: { token?: string; body?: unknown; headers?: Record<string, string> } = {}) {
-  const res = await app.inject({ method: method as never, url, headers: { ...(o.token ? auth(o.token) : {}), ...o.headers }, ...(o.body !== undefined ? { payload: o.body as never } : {}) });
-  await app.kernel.events.drain();
-  return { status: res.statusCode, body: res.body ? JSON.parse(res.body) : null };
-}
-
-const device = () => ({ kind: 'android' as const, name: 'Pixel 8', appVersion: '1.4.2', installationId: `inst-${Math.random().toString(36).slice(2)}` });
-
-/** Accepts the emailed invitation through the public endpoints, as the Admin Center would */
-async function accept(email: string): Promise<Staff> {
-  const created = invitations.map((e) => e.payload as { email: string; acceptUrl: string }).findLast((p) => p.email === email);
-  expect(created, `invitation for ${email}`).toBeDefined();
-  const token = new URL(created!.acceptUrl).hash.replace('#token=', '');
-  const v = await call('POST', '/api/public/identity/app-sessions', { headers: { 'x-app-proof': 'dev' }, body: { audience: 'admin', device: device() } });
-  expect(v.status, JSON.stringify(v.body)).toBe(201);
-  const d = device();
-  const accepted = await call('POST', '/api/public/identity/invitations/accept', { token: v.body.accessToken, body: { token, password: 'Blue-Orchid-2026-Key', device: d } });
-  expect(accepted.status, JSON.stringify(accepted.body)).toBe(200);
-  const key = accepted.body.twoStepSetup.manualEntryKey as string;
-  const confirmed = await call('POST', '/api/public/identity/invitations/two-step', {
-    token: v.body.accessToken,
-    body: { token, setupId: accepted.body.twoStepSetup.setupId, code: totp(key, clock.now()), device: d },
-  });
-  expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(200);
-  clock.advance(30_000); // the next authenticator code
-  return { accountId: accepted.body.account.id, key, accessToken: confirmed.body.tokens.accessToken };
-}
+const call: Flows['call'] = (...args) => f.call(...args);
 
 let owner: Staff;
 let agent: Staff;
@@ -71,7 +38,7 @@ describe('the platform foundation, end to end', () => {
     await access.bootstrapBusinessOwner({ email: 'owner@marketly.test', name: 'Olivia Owner' });
     await app.kernel.events.drain();
     await expect(access.bootstrapBusinessOwner({ email: 'second@marketly.test', name: 'Someone Else' })).rejects.toMatchObject({ code: 'CONFLICT' });
-    owner = await accept('owner@marketly.test');
+    owner = await f.acceptStaffInvitation('owner@marketly.test');
   });
 
   it('serves protected admin screens to the owner with a token identity issued', async () => {
@@ -90,10 +57,9 @@ describe('the platform foundation, end to end', () => {
     const noCode = await call('POST', '/api/admin/access/staff-invitations', { token: owner.accessToken, body, headers: { 'x-step-up-code': '000000' } });
     expect(noCode.status, JSON.stringify(noCode.body)).toBe(403); // the dev code doesn't work for a real staff token
     expect(noCode.body.error.code, JSON.stringify(noCode.body)).toBe('STEP_UP_REQUIRED');
-    const invited = await call('POST', '/api/admin/access/staff-invitations', { token: owner.accessToken, body, headers: { 'x-step-up-code': totp(owner.key, clock.now()) } });
+    const invited = await call('POST', '/api/admin/access/staff-invitations', { token: owner.accessToken, body, headers: { 'x-step-up-code': f.code(owner) } });
     expect(invited.status, JSON.stringify(invited.body)).toBe(201);
-    clock.advance(30_000);
-    agent = await accept('agent@marketly.test');
+    agent = await f.acceptStaffInvitation('agent@marketly.test');
   });
 
   it('refuses the agent where the role does not reach, with the permission access decided', async () => {
