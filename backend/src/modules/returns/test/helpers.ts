@@ -4,7 +4,8 @@
  *
  * Built modules run for real: orders, customers, identity, media, notifications, reports' callers, access
  * (only its check / requestApproval / decide answers are controlled). Stubbed APIs:
- *   offers.snapshotForOrder, catalog.snapshotForOrder → purchase snapshots for orders.createOrder (as orders' tests).
+ *   offers.snapshotForOrder, catalog.snapshotForOrder → purchase snapshots for orders.createOrder (as orders' tests);
+ *     product({ categoryId }) puts the category on the snapshot, so orders keeps it on the order item.
  *   customers.getCustomerByUserId → the customer id equals the account id.
  *   identity.hasGuestOrderAccess → h.guestGrants ("sessionId:orderId").
  *   shipping (not built): createLabel returns a label and a return shipment (cost $6.50, QR for prepaid_qr,
@@ -266,13 +267,13 @@ export async function harness(o: { only?: string[] } = {}): Promise<Harness> {
 }
 
 /** An offer and its product snapshot registered in the stubs */
-export function product(h: Harness, o: { title: string; price: number; ownerType?: 'official' | 'seller'; sellerId?: string | null; windowDays?: number }) {
+export function product(h: Harness, o: { title: string; price: number; ownerType?: 'official' | 'seller'; sellerId?: string | null; windowDays?: number; categoryId?: string | null }) {
   const offerId = newId();
   const productId = newId();
   const variantId = newId();
   const stockItemId = newId();
   const ownerType = o.ownerType ?? 'seller';
-  h.products.set(variantId, { productId, variantId, productVersion: 1, title: o.title, brandName: 'Halden', options: { Color: 'Teal' }, modelNumber: 'H-100', imageUrl: 'https://cdn.example/p.jpg', takenAt: new Date().toISOString(), categoryId: null });
+  h.products.set(variantId, { productId, variantId, productVersion: 1, title: o.title, brandName: 'Halden', options: { Color: 'Teal' }, modelNumber: 'H-100', imageUrl: 'https://cdn.example/p.jpg', takenAt: new Date().toISOString(), categoryId: o.categoryId ?? null });
   h.offers.set(offerId, {
     offerId,
     termsVersion: 1,

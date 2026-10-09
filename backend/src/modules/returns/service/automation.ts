@@ -188,7 +188,7 @@ export class Automation {
             updated_at: now,
           });
           await this.core.timeline(tx, ret.id, [{ kind: 'case_decided', label: "Marketly decided your case: you don't need to send the item back", detail: e.outcome, visibility: 'customer' }]);
-          batch.push('returns.return.approved', { returnId: ret.id, ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, withoutReturn: true, platformDecision: true, dropOffBy: null });
+          batch.push('returns.return.approved', this.core.approvedEvent(a, { withoutReturn: true, platformDecision: true }));
         });
       } else if (!money && !label && e.final && is(['requested', 'info_requested', 'approved'], status)) {
         await this.requests.cancel(ret.id, 'withdraw', `Closed by case ${e.ref}`, by);

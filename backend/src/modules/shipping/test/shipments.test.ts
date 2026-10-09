@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { harness, idem, sellerOrder, tokens, ups, usps, type Harness } from './helpers.js';
+import { checkout, group, harness, idem, line, product, sellerOrder, tokens, ups, usps, type Harness } from './helpers.js';
 
 let h: Harness;
 beforeAll(async () => {
@@ -25,7 +25,7 @@ describe('recording shipments (seller)', () => {
     expect(res.body.contents).toEqual([{ orderItemId: o.speaker.id, title: 'Pocket Speaker', variantLabel: expect.any(String), quantity: 1 }]);
     expect(res.body.trackingUrl).toContain(tn);
     expect(h.named('shipping.shipment.created').at(-1)).toMatchObject({ shipmentId: res.body.id, orderId: o.order.id, trackingNumber: tn, lines: [expect.objectContaining({ quantity: 1 })] });
-    expect(h.named('shipping.shipment.dispatched').at(-1)).toMatchObject({ shipmentId: res.body.id, ownerType: 'seller', sellerId: o.sellerId, onTime: true, trackingValid: true });
+    expect(h.named('shipping.shipment.dispatched').at(-1)).toMatchObject({ shipmentId: res.body.id, ownerType: 'seller', sellerId: o.sellerId, onTime: true, trackingValid: true, customerId: o.customerId, contactEmail: 'jordan@example.com' });
     const order = (await h.orders.getOrder(o.order.id))!;
     const items = order.groups[0]!.items;
     expect(items.filter((i) => i.state === 'shipped').map((i) => i.quantity)).toEqual([1]);
@@ -131,7 +131,7 @@ describe('carrier tracking (webhooks) and the customer view', () => {
     await h.webhook('ups', { id: `evt-${tn}-2`, trackingNumber: tn, code: 'delivered', at: at(2), location: 'Portland, OR' });
     view = (await h.call('GET', `${ADMIN}/shipments/${s.id}`, tokens.staff())).body;
     expect(view).toMatchObject({ status: 'delivered', statusLabel: 'Delivered' });
-    expect(h.named('shipping.shipment.delivered').at(-1)).toMatchObject({ shipmentId: s.id, lines: expect.arrayContaining([expect.objectContaining({ orderItemId: o.lamp.id })]) });
+    expect(h.named('shipping.shipment.delivered').at(-1)).toMatchObject({ shipmentId: s.id, customerId: o.customerId, contactEmail: 'jordan@example.com', lines: expect.arrayContaining([expect.objectContaining({ orderItemId: o.lamp.id })]) });
     const order = (await h.orders.getOrder(o.order.id))!;
     expect(order.groups[0]!.items.every((i) => i.state === 'delivered')).toBe(true);
   });
@@ -177,7 +177,7 @@ describe('carrier tracking (webhooks) and the customer view', () => {
     expect(view.headline).toBe('Delivery attempt failed');
     expect(view.failedDelivery).toMatchObject({ reason: 'No one home', heldAt: 'Portland Main Post Office', defaultIfNoChoice: 'return_to_seller' });
     expect(view.failedDelivery.options.map((x: any) => x.choice)).toEqual(['redeliver', 'pickup', 'return_to_seller']);
-    expect(h.named('shipping.shipment.exception').at(-1)).toMatchObject({ kind: 'failed_delivery', shipmentId: s.id, customerAction: expect.any(String) });
+    expect(h.named('shipping.shipment.exception').at(-1)).toMatchObject({ kind: 'failed_delivery', shipmentId: s.id, customerAction: expect.any(String), customerId: o.customerId, contactEmail: 'jordan@example.com' });
     const date = view.failedDelivery.options[0].dates[0];
     expect((await h.call('POST', `${STORE}/shipments/${s.id}/delivery-choice`, tokens.customer(newId()), { choice: 'redeliver', redeliveryDate: date })).status).toBe(404);
     expect((await h.call('POST', `${STORE}/shipments/${s.id}/delivery-choice`, me, { choice: 'redeliver', redeliveryDate: '2000-01-01' })).status).toBe(400);
@@ -307,5 +307,21 @@ describe('reads for other modules', () => {
     expect(m).toMatchObject({ dispatched: 1, onTimePct: 100, late: 0 });
     const admin = await h.call('GET', `${ADMIN}/shipments?q=${encodeURIComponent(s.orderRef)}`, tokens.staff());
     expect(admin.body.items.map((x: any) => x.id)).toContain(s.id);
+  });
+});
+
+describe('who customer-facing shipment events reach', () => {
+  it("a guest order's events carry the contact email and no customer", async () => {
+    const sellerId = newId();
+    const p = product(h, { title: 'Wall Clock', price: 2500, sellerId });
+    const order = await h.orders.createOrder(checkout([group(h, [line(p, 1)], { sellerId })], { customerId: null }));
+    await h.app.kernel.events.drain();
+    const g = order.groups[0]!;
+    const tn = ups();
+    const res = await h.call('POST', `${SELLER}/shipments`, tokens.seller(sellerId), { groupId: g.id, carrierCode: 'ups', trackingNumber: tn, shippedAt: h.clock.now().toISOString(), items: [{ orderItemId: g.items[0]!.id, quantity: 1 }] });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(h.named('shipping.shipment.dispatched').find((e) => e.shipmentId === res.body.id)).toMatchObject({ orderId: order.id, customerId: null, contactEmail: 'gia@example.com' });
+    await h.webhook('ups', { id: `guest-${tn}`, trackingNumber: tn, code: 'delivered', at: h.clock.now().toISOString() });
+    expect(h.named('shipping.shipment.delivered').find((e) => e.shipmentId === res.body.id)).toMatchObject({ customerId: null, contactEmail: 'gia@example.com' });
   });
 });

@@ -62,6 +62,8 @@ export interface ReturnMeta {
   stockItems?: Record<string, string>;
   /** Offer of each returned order item */
   offers?: Record<string, string>;
+  /** Product category of each returned order item at purchase (inspection checks by category) */
+  categories?: Record<string, string | null>;
   /** Set when the return completes: refunded | partly_refunded | replaced | exchanged | credited */
   outcome?: string | null;
   /** Latest shipment estimate from shipping.shipment.status_changed */
@@ -131,6 +133,8 @@ export interface RefundExtras {
   kind: string;
   perItem: { orderItemId: string; amount: number }[];
   customerId?: string | null;
+  /** Order contact email (customer-facing events reach guests through it) */
+  contactEmail?: string | null;
   customerName?: string | null;
   sellerName?: string | null;
   orderRef?: string | null;

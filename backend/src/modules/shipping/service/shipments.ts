@@ -452,7 +452,7 @@ export class Shipments {
       this.dispatched(batch, after, lines);
       return after;
     });
-    this.core.flush(batch);
+    await this.core.flush(batch);
     await this.afterDispatch(s, g);
     if (trackingState !== 'pending') {
       await this.exceptions.openMissingTracking(s, trackingState === 'missing' ? `${carrier.name}: shipped without a tracking number` : `${carrier.name} number not recognized`, by);
@@ -496,7 +496,7 @@ export class Shipments {
       this.dispatched(batch, after, lines);
       return after;
     });
-    this.core.flush(batch);
+    await this.core.flush(batch);
     await this.afterDispatch(s);
     return this.view(s, by.principal);
   }
@@ -727,7 +727,7 @@ export class Shipments {
       batch.push('shipping.label.purchased', { labelId, shipmentId: id, orderId: g.task.orderId, groupId: g.task.groupId, sellerId: g.owner.sellerId, billedTo: o.billedTo, cost: o.cost, kind: kindInfo.kind, returnId: kindInfo.returnId });
       return l;
     });
-    this.core.flush(batch);
+    await this.core.flush(batch);
     await this.matchStored((await this.repo.get('shipments', id))!);
     return this.labelResult(label, by.principal);
   }
@@ -762,7 +762,7 @@ export class Shipments {
       batch.push('shipping.label.voided', { labelId, shipmentId: l.shipment_id, orderId: s?.order_id ?? '', kind: meta.kind, returnId: meta.returnId, sellerId: s?.seller_id ?? null, billedTo: meta.billedTo, cost: money(l.cost, l.currency) });
       return updated;
     });
-    this.core.flush(batch);
+    await this.core.flush(batch);
     return this.views.label(after, by.principal);
   }
 
@@ -798,7 +798,7 @@ export class Shipments {
       batch.push('shipping.tracking.corrected', { shipmentId: s.id, orderId: s.order_id, from: s.tracking_number ?? carrierNameOf(s.carrier_code) ?? '', to: tracking, reason: body.reason.trim(), by: by.actor });
       return updated;
     });
-    this.core.flush(batch);
+    await this.core.flush(batch);
     if (o.staff) await this.core.audit({ action: 'shipping.tracking.correct', actionLabel: 'Corrected tracking', category: 'orders', target: { type: 'shipment', id: s.id, ref: s.order_ref, label: toLabel }, before: { carrier: s.carrier_code, trackingNumber: s.tracking_number }, after: { carrier: carrier.code, trackingNumber: tracking, customerNotified: notified }, reason: body.reason }, by);
     await this.matchStored(after);
     return this.view((await this.repo.get('shipments', s.id))!, by.principal);
@@ -858,7 +858,7 @@ export class Shipments {
       if (carrierScan && s.carrier_code) await tx.updateWhere('carriers', { code: s.carrier_code }, { last_event_at: this.core.now() });
       return { s: current, changed: status !== s.status, duplicate: false, scanned, from: s.status };
     });
-    this.core.flush(batch);
+    await this.core.flush(batch);
     if (result.duplicate) return false;
     const s = result.s;
     if (result.from === 'label_created' && s.status !== 'label_created') await this.afterDispatch(s);
@@ -988,7 +988,7 @@ export class Shipments {
         return after;
       });
       if (!done) continue;
-      this.core.flush(batch);
+      await this.core.flush(batch);
       this.core.publish('shipping.delivery_choice.made', { shipmentId: s.id, orderId: s.order_id, choice: 'return_to_seller', redeliveryDate: null });
       await this.exceptions.defaultApplied(done);
     }
@@ -1044,7 +1044,7 @@ export class Shipments {
       this.dispatched(batch, after, []);
       return after;
     });
-    this.core.flush(batch);
+    await this.core.flush(batch);
     await this.matchStored(s);
     return this.view((await this.repo.get('shipments', id))!);
   }

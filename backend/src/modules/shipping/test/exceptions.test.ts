@@ -119,7 +119,7 @@ describe('staff handling of exceptions', () => {
     const opened = await h.call('POST', `${ADMIN}/exceptions`, staff, { kind: 'lost_or_damaged', groupId: o.groupId, orderItemIds: [o.lamp.id], situation: 'Customer called: box crushed' });
     expect(opened.status, JSON.stringify(opened.body)).toBe(201);
     expect(opened.body).toMatchObject({ kind: 'lost_or_damaged', status: 'open', itemsSummary: expect.stringContaining('Desk Lamp'), openedBy: { kind: 'staff' } });
-    expect(h.named('shipping.shipment.exception').at(-1)).toMatchObject({ exceptionId: opened.body.id, orderItemIds: [o.lamp.id] });
+    expect(h.named('shipping.shipment.exception').at(-1)).toMatchObject({ exceptionId: opened.body.id, orderItemIds: [o.lamp.id], customerId: o.customerId, contactEmail: 'jordan@example.com' });
     expect(h.audits.at(-1)).toMatchObject({ action: 'shipping.exception.open' });
     const dup = await h.call('POST', `${ADMIN}/exceptions`, staff, { kind: 'lost_or_damaged', groupId: o.groupId, situation: 'again' });
     expect(dup.status).toBe(409);

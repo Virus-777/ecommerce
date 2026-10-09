@@ -10,8 +10,6 @@ import type { RefundDeduction, ShippingResponsibility, TrackStep } from '../../.
 export const HOUR = 3_600_000;
 export const DAY = 86_400_000;
 
-/** EffectiveTerms.sellerId is required; the Official Store has no seller record (sellerId null everywhere else) */
-export const OFFICIAL_TERMS_ID = '00000000-0000-0000-0000-000000000000';
 /** Id of the baseline used while no policy version was ever proposed (settings fallback) */
 export const DEFAULT_POLICY_ID = '00000000-0000-4000-8000-000000000001';
 export const OFFICIAL_NAME = 'Marketly Official';

@@ -5,6 +5,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
+import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
 import { group, harness, idem, line, now, placeOrder, product, tokens, type Harness } from './helpers.js';
 
 let h: Harness;
@@ -307,5 +308,67 @@ describe('queues and views', () => {
     expect(await h.service.countOpenReturnsForProducts([m.p.productId])).toEqual({ [m.p.productId]: 1 });
     expect((await h.service.listForOrder(m.order.id, { area: 'seller', sellerId: newId() })).length).toBe(0);
     expect((await h.service.listForOrder(m.order.id, { area: 'admin' })).length).toBe(1);
+  });
+});
+
+describe('staff reads and case refunds for support', () => {
+  const breakdown = (total: number, item = total) => ({ itemAmount: { amount: item, currency: 'USD' }, discountShare: { amount: 0, currency: 'USD' }, shippingRefund: { amount: 0, currency: 'USD' }, returnShippingDeduction: { amount: 0, currency: 'USD' }, deductions: [], total: { amount: total, currency: 'USD' }, maxRefundable: { amount: item, currency: 'USD' }, destination: 'Visa', isEstimate: false });
+
+  it('gets any return by id in the staff view (warehouse)', async () => {
+    const m = await sellerReturn();
+    const ret = await h.service.getReturn(m.ret.id);
+    expect(ret).toMatchObject({ detail: { id: m.ret.id, ref: m.ret.ref }, policyApplied: { sellerId: m.sellerId } });
+    expect(ret!.activity.length).toBeGreaterThan(0);
+    expect(await h.service.getReturn(newId())).toBeNull();
+    expect(await h.service.getReturn('not-a-uuid')).toBeNull();
+  });
+
+  it('freezes the shared Official Store id on Official Store terms', async () => {
+    const m = await officialReturn();
+    expect((await h.service.getReturn(m.ret.id))!.policyApplied.sellerId).toBe(OFFICIAL_STORE_ID);
+    expect((await h.service.resolveTerms(null, null, null)).sellerId).toBe(OFFICIAL_STORE_ID);
+  });
+
+  it('cancels the refund requests of an overturned case decision; money already moving is reported', async () => {
+    const sellerId = newId();
+    const p1 = product(h, { title: 'Stool', price: 6000, sellerId });
+    const p2 = product(h, { title: 'Shelf', price: 4000, sellerId });
+    const p3 = product(h, { title: 'Clock', price: 3000, sellerId });
+    const m = await placeOrder(h, [group(h, [line(p1, 1), line(p2, 1), line(p3, 1)], { sellerId })]);
+    const caseId = newId();
+    const ask = (orderItemId: string, total: number) => h.service.requestRefund({ source: 'case', caseId, orderId: m.order.id, orderItemIds: [orderItemId], breakdown: breakdown(total), fundedBy: 'seller', reason: 'Case decision', proposedBy: { kind: 'staff', id: newId() } });
+    const review = await ask(m.items[0]![0]!, 2000);
+    const moving = await ask(m.items[0]![1]!, 1500);
+    expect((await h.call('POST', `/api/admin/returns/refunds/${moving.id}/approve`, staff(), {}, idem())).body.status).toBe('processing');
+    // above the approver's limit: waiting for access, cancelled with its approval request
+    h.authority.decision = 'approval_required';
+    const waiting = await ask(m.items[0]![2]!, 1000);
+    expect((await h.call('POST', `/api/admin/returns/refunds/${waiting.id}/approve`, staff(), {}, idem())).body.error.code).toBe('APPROVAL_REQUIRED');
+    expect((await h.service.listRefundRequestsForCase(caseId)).find((r) => r.id === waiting.id)!.approval).toMatchObject({ required: true });
+    const cancelledApprovals = h.calls.cancelledApprovals.length;
+
+    const res = await h.service.cancelRefundsForCase(caseId, 'The appeal changed the decision');
+    expect(res.cancelled.map((r) => r.id).sort()).toEqual([review.id, waiting.id].sort());
+    expect(res.cancelled.every((r) => r.status === 'cancelled')).toBe(true);
+    expect(res.notCancellable).toEqual([expect.objectContaining({ id: moving.id, status: 'processing' })]);
+    expect(h.calls.cancelledApprovals.length).toBe(cancelledApprovals + 1);
+    expect(h.audits.filter((a) => a.action === 'returns.refund.cancel').map((a) => a.target.id)).toEqual(expect.arrayContaining([review.id, waiting.id]));
+
+    // a second call changes nothing; a new refund for the cancelled items is no duplicate any more
+    const again = await h.service.cancelRefundsForCase(caseId, 'again');
+    expect(again.cancelled).toEqual([]);
+    expect(again.notCancellable.map((r) => r.id)).toEqual([moving.id]);
+    h.authority.decision = 'allowed';
+    expect((await ask(m.items[0]![0]!, 2500)).status).toBe('under_review');
+    expect(await h.service.cancelRefundsForCase(newId(), 'unknown case')).toEqual({ cancelled: [], notCancellable: [] });
+  });
+
+  it('carries the customer and contact email on refunds of a case without a return', async () => {
+    const sellerId = newId();
+    const p = product(h, { title: 'Bench', price: 9000, sellerId });
+    const m = await placeOrder(h, [group(h, [line(p, 1)], { sellerId })], { customerId: null });
+    const rr = await h.service.requestRefund({ source: 'case', caseId: newId(), orderId: m.order.id, orderItemIds: [m.items[0]![0]!], breakdown: breakdown(2000, 9000), fundedBy: 'seller', reason: 'Late', proposedBy: { kind: 'staff', id: newId() } });
+    expect((await h.call('POST', `/api/admin/returns/refunds/${rr.id}/approve`, staff(), {}, idem())).body.status).toBe('processing');
+    expect(h.named('returns.refund.approved').find((e) => e.refundRequestId === rr.id)).toMatchObject({ customerId: null, contactEmail: 'gia@example.com', returnId: null });
   });
 });

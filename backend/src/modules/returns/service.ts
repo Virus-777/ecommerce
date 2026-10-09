@@ -1,4 +1,5 @@
 import type { EventPayload } from '../../kernel/events/index.js';
+import { isUuid } from '../../kernel/lib/ids.js';
 import type * as common from '../../spec/common.js';
 import type * as identity from '../../spec/identity.js';
 import type { AdminReturnRow, CustomerReturnsOverview, EffectiveTerms, RefundBreakdown, RefundRequest, ReturnCase, ReturnDetail, ReturnEvidence, ReturnsPublicApi, ReturnSummary, SellerReturnCounts } from '../../spec/returns.js';
@@ -135,6 +136,15 @@ export class ReturnsService implements ReturnsPublicApi {
 
   exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[]; nextCursor?: string }> {
     return this.reads.exportRows(dataset, filters, principal, cursor);
+  }
+
+  async getReturn(returnId: string): Promise<ReturnCase | null> {
+    const agg = isUuid(returnId) ? await this.core.load(returnId) : undefined;
+    return agg ? this.views.returnCase(agg, 'admin') : null;
+  }
+
+  cancelRefundsForCase(caseId: string, reason: string): Promise<{ cancelled: RefundRequest[]; notCancellable: RefundRequest[] }> {
+    return this.refunds.cancelForCase(caseId, reason);
   }
 
   countOpenReturnsForProducts(productIds: string[]): Promise<Record<string, number>> {

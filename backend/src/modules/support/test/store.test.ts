@@ -74,7 +74,7 @@ describe('an order problem about a seller item', () => {
     expect(res.body.order).toMatchObject({ id: o.order.id, ref: o.order.ref });
     expect(res.body.can).toMatchObject({ reply: true, escalate: false, appeal: false, reopen: false });
     const opened = h.named('support.case.opened').find((e) => e.caseId === caseId);
-    expect(opened).toMatchObject({ ref, kind: 'order_problem', category: 'item_damaged', customerId: o.customerId, sellerId: o.sellerId, orderId: o.order.id, orderItemIds: [o.itemId], handler: 'seller' });
+    expect(opened).toMatchObject({ ref, kind: 'order_problem', category: 'item_damaged', customerId: o.customerId, contactEmail: 'sam@example.com', sellerId: o.sellerId, orderId: o.order.id, orderItemIds: [o.itemId], handler: 'seller' });
   });
 
   it('refuses a second case for the same item (DUPLICATE_CASE with the open case)', async () => {
@@ -123,7 +123,7 @@ describe('an order problem about a seller item', () => {
     const view = await h.call('GET', `/api/store/support/cases/${caseId}`, tokens.customer(o.customerId));
     expect(view.body.nextAction).toMatchObject({ whoMustAct: 'customer', youNeedToAct: true });
     expect(view.body.can).toMatchObject({ respondToOffer: true, escalate: true });
-    expect(h.named('support.case.message_added').some((e) => e.caseId === caseId && e.authorRole === 'seller')).toBe(true);
+    expect(h.named('support.case.message_added').find((e) => e.caseId === caseId && e.authorRole === 'seller')).toMatchObject({ customerId: o.customerId, contactEmail: 'sam@example.com', sellerId: o.sellerId, audience: 'all' });
   });
 
   it('accepting the offer creates a refund request in returns (Finance approves; approved is not sent)', async () => {
@@ -168,7 +168,7 @@ describe('an order problem about a seller item', () => {
     expect(resolved.status, JSON.stringify(resolved.body)).toBe(200);
     expect(resolved.body.case).toMatchObject({ status: 'resolved', can: expect.any(Object) });
     expect(resolved.body.case.reopenUntil).toBeTruthy();
-    expect(h.named('support.case.resolved').find((e) => e.caseId === caseId)).toMatchObject({ ref, sellerId: o.sellerId });
+    expect(h.named('support.case.resolved').find((e) => e.caseId === caseId)).toMatchObject({ ref, sellerId: o.sellerId, customerId: o.customerId, contactEmail: 'sam@example.com' });
     expect(h.audits.some((a) => a.action === 'support.case.resolve' && a.target.id === caseId)).toBe(true);
     const replyClosed = await h.call('POST', `/api/store/support/cases/${caseId}/messages`, tokens.customer(o.customerId), { body: 'Hello?' });
     expect(replyClosed.status).toBe(409);
@@ -231,6 +231,8 @@ describe('the customer and the case conversation', () => {
     h.guestGrants.add(`${session}:${o.order.id}`);
     const res = await h.call('POST', '/api/store/support/cases', guest, { kind: 'order_problem', category: 'item_damaged', orderId: o.order.id, orderItemIds: [o.itemId], problemType: 'damaged', message: 'Broken' }, idem());
     expect(res.status, JSON.stringify(res.body)).toBe(201);
+    // guests are reached through the order's contact email
+    expect(h.named('support.case.opened').find((e) => e.caseId === res.body.id)).toMatchObject({ customerId: null, contactEmail: 'gia@example.com' });
     expect((await h.call('GET', `/api/store/support/cases/${res.body.id}`, guest)).status).toBe(200);
     expect((await h.call('GET', `/api/store/support/cases/${res.body.id}`, tokens.visitor())).status).toBe(404);
     const g = await h.service.getCaseForCustomer(null, session, res.body.ref);

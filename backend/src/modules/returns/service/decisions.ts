@@ -129,8 +129,8 @@ export class Decisions {
           },
           ...(body.note ? [{ kind: 'note', label: 'Approval note', detail: body.note, visibility: 'seller' as const, actor: by.actor }] : []),
         ]);
-        batch.push('returns.return.approved', { returnId: id, ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, withoutReturn: false, platformDecision: decision.platformDecision, dropOffBy: row.drop_off_by?.toISOString() ?? null });
-        if (labelId && row.cost !== null) batch.push('returns.label.created', { returnId: id, ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, labelId, orderId: a.ret.order_id, cost: { amount: row.cost, currency: this.core.currency }, paidBy: row.paid_by as 'seller' | 'customer' | 'platform' });
+        batch.push('returns.return.approved', this.core.approvedEvent(a, { withoutReturn: false, platformDecision: decision.platformDecision, shipment: row }));
+        if (labelId && row.cost !== null) batch.push('returns.label.created', { returnId: id, ...this.core.recipient(a.ret), ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, labelId, orderId: a.ret.order_id, cost: { amount: row.cost, currency: this.core.currency }, paidBy: row.paid_by as 'seller' | 'customer' | 'platform' });
       });
     } catch (err) {
       await this.voidLabel(labelId, 'The return could not be approved');
@@ -163,7 +163,7 @@ export class Decisions {
         updated_at: now,
       });
       await this.core.timeline(tx, id, [{ kind: 'info_requested', label: 'Question about your return', detail: question.trim(), visibility: 'customer', actor: by.actor }]);
-      batch.push('returns.return.info_requested', { returnId: id, replyDueAt: replyDueAt.toISOString() });
+      batch.push('returns.return.info_requested', { returnId: id, ...this.core.recipient(a.ret), replyDueAt: replyDueAt.toISOString() });
     });
     if (mode === 'admin') await this.core.audit({ action: 'returns.return.request-info', actionLabel: `Asked the customer about return ${agg.ret.ref}`, target: this.target(agg), after: { question } }, by);
   }
@@ -177,7 +177,7 @@ export class Decisions {
       const status = returnMachine.next(a.ret.status as ReturnStatus, 'reject');
       await tx.update('returns', id, { status, decision, ...this.platformPatch(a, mode), updated_at: now });
       await this.core.timeline(tx, id, [{ kind: 'rejected', label: `Return rejected: ${REJECT_LABEL[body.reasonCode] ?? body.reasonCode}`, detail: body.explanation.trim(), visibility: 'customer', actor: by.actor }]);
-      batch.push('returns.return.rejected', { returnId: id, ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, reasonCode: body.reasonCode, platformDecision: decision.platformDecision });
+      batch.push('returns.return.rejected', { returnId: id, ...this.core.recipient(a.ret), ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, reasonCode: body.reasonCode, platformDecision: decision.platformDecision });
     });
     if (mode === 'admin') await this.core.audit({ action: 'returns.return.reject', actionLabel: `Rejected return ${agg.ret.ref}`, target: this.target(agg), before: { status: agg.ret.status }, after: { status: 'rejected', reasonCode: body.reasonCode }, reason: body.explanation }, by);
   }
@@ -226,7 +226,7 @@ export class Decisions {
           updated_at: now,
         });
         await this.core.timeline(tx, id, [{ kind: 'overturned', label: "Marketly approved your return. You don't need to send the item back.", detail: body.reason.trim(), visibility: 'customer', actor: by.actor }]);
-        batch.push('returns.return.approved', { returnId: id, ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, withoutReturn: true, platformDecision: true, dropOffBy: null });
+        batch.push('returns.return.approved', this.core.approvedEvent(a, { withoutReturn: true, platformDecision: true }));
       });
     } else {
       const method = body.labelMethod ?? 'prepaid_qr';
@@ -245,8 +245,8 @@ export class Decisions {
           });
           await tx.insert('return_shipments', row);
           await this.core.timeline(tx, id, [{ kind: 'overturned', label: 'Marketly approved your return', detail: `Drop off by ${shortDate(row.drop_off_by!, this.core.tz)}`, visibility: 'customer', actor: by.actor }]);
-          batch.push('returns.return.approved', { returnId: id, ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, withoutReturn: false, platformDecision: true, dropOffBy: row.drop_off_by?.toISOString() ?? null });
-          if (labelId && row.cost !== null) batch.push('returns.label.created', { returnId: id, ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, labelId, orderId: a.ret.order_id, cost: { amount: row.cost, currency: this.core.currency }, paidBy: row.paid_by as 'seller' | 'customer' | 'platform' });
+          batch.push('returns.return.approved', this.core.approvedEvent(a, { withoutReturn: false, platformDecision: true, shipment: row }));
+          if (labelId && row.cost !== null) batch.push('returns.label.created', { returnId: id, ...this.core.recipient(a.ret), ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, labelId, orderId: a.ret.order_id, cost: { amount: row.cost, currency: this.core.currency }, paidBy: row.paid_by as 'seller' | 'customer' | 'platform' });
         });
       } catch (err) {
         await this.voidLabel(labelId, 'The return could not be approved');
@@ -310,7 +310,7 @@ export class Decisions {
       let rr = null;
       if (plan) rr = await this.refunds.insertForReturn(tx, a, plan, { source: mode === 'seller' ? 'seller' : 'return', status: mode === 'seller' ? 'requested' : 'under_review', by, reasonCode: input.reasonCode, reason: input.details.trim(), ref: ref! });
       if (mode === 'seller') {
-        batch.push('returns.return.approved', { returnId: id, ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, withoutReturn: true, platformDecision: false, dropOffBy: null });
+        batch.push('returns.return.approved', this.core.approvedEvent(a, { withoutReturn: true, platformDecision: false }));
         batch.push('returns.exception.approved', { returnId: id, reasonCode: input.reasonCode, approvedBy: by.actor });
       } else {
         batch.push('returns.exception.proposed', { returnId: id, reasonCode: input.reasonCode });

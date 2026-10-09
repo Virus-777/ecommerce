@@ -21,7 +21,7 @@ export default defineModule({
   migrations,
   graphql: typeDefs,
   async register(ctx) {
-    const service = new SupportService({ repo: createPostgresSupportRepository(ctx.db), ctx });
+    const service = new SupportService({ repo: createPostgresSupportRepository(ctx.db, ctx.inbox), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
@@ -41,6 +41,7 @@ export default defineModule({
     ctx.events.on("orders.item.cancelled", (e) => service.onItemCancelledFromOrders(e.payload));
     ctx.events.on("sellers.seller.restricted", (e) => service.onSellerRestrictedFromSellers(e.payload));
     ctx.events.on("access.approval.decided", (e) => service.onApprovalDecidedFromAccess(e.payload));
+    ctx.events.on("wallet.goodwill.decided", (e) => service.onGoodwillDecidedFromWallet(e.payload));
 
     // Background jobs (spec jobs)
     ctx.jobs.handle("support.sla-timers", () => service.slaTimers());

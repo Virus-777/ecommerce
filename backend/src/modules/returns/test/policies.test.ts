@@ -4,7 +4,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { harness, tokens, type Harness } from './helpers.js';
+import { group, harness, idem, line, placeOrder, product, tokens, type Harness } from './helpers.js';
 
 let h: Harness;
 beforeAll(async () => {
@@ -170,5 +170,53 @@ describe('baseline versions', () => {
     } finally {
       h.clock.advance(-3 * day);
     }
+  });
+});
+
+describe("the order item's category", () => {
+  it('applies the category exception the item was bought under: terms, fault window and inspection checks', async () => {
+    const categoryId = newId();
+    const ex = await h.call('POST', '/api/admin/returns/category-exceptions', staff(), {
+      categoryId,
+      windowDays: 40,
+      changeOfMindAllowed: true,
+      condition: 'Unworn with tags attached',
+      faultReturnsWindowDays: 90,
+      shownOn: ['product_page', 'checkout', 'order'],
+      effectiveFrom: new Date(h.clock.now().getTime() - 60_000).toISOString(),
+      reason: 'Apparel',
+    });
+    expect(ex.status, JSON.stringify(ex.body)).toBe(201);
+    const sellerId = newId();
+    const p = product(h, { title: 'Jacket', price: 9000, sellerId, windowDays: 40, categoryId });
+    const m = await placeOrder(h, [group(h, [line(p, 1)], { sellerId })]);
+    const token = tokens.customer(m.customerId);
+    const itemId = m.items[0]![0]!;
+
+    const elig = await h.call('POST', '/api/store/returns/eligibility', token, { orderId: m.order.id, items: [{ orderItemId: itemId, quantity: 1 }], reason: 'damaged' });
+    expect(elig.status, JSON.stringify(elig.body)).toBe(200);
+    expect(elig.body.groups[0].terms).toMatchObject({ categoryId, source: 'category_exception', condition: 'Unworn with tags attached', windowDays: 40 });
+
+    // past the 40-day change-of-mind window, damaged items can still come back within the category's 90 days
+    h.clock.advance(60 * day);
+    try {
+      const items = await h.call('GET', `/api/store/returns/orders/${m.order.id}/returnable-items`, tokens.customer(m.customerId));
+      expect(items.body.items[0]).toMatchObject({ eligible: true, quantityReturnable: 1 });
+      expect(items.body.items[0].message).toContain('Only damaged, defective or wrong items');
+    } finally {
+      h.clock.advance(-60 * day);
+    }
+
+    const res = await h.call('POST', '/api/store/returns/requests', token, { orderId: m.order.id, items: [{ orderItemId: itemId, quantity: 1 }], reason: 'damaged', details: 'Torn seam', remedy: 'refund' }, idem());
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const id = res.body.returns[0].id;
+    const seller = tokens.seller(sellerId);
+    expect((await h.call('POST', `/api/seller/returns/requests/${id}/approve`, seller, { labelMethod: 'prepaid_qr' })).status).toBe(200);
+    expect((await h.call('POST', `/api/seller/returns/requests/${id}/receive`, seller, {})).status).toBe(200);
+    const agg = (await h.service.core.load(id))!;
+    expect(agg.ret.terms_snapshot.meta.categories).toEqual({ [itemId]: categoryId });
+    const labels = h.service.views.checklist(agg, { '*': ['Clean, no odour'], [categoryId]: ['Tags attached'], [newId()]: ['Powers on'] })!.items.map((i) => i.label);
+    expect(labels).toEqual(expect.arrayContaining(['Clean, no odour', 'Tags attached']));
+    expect(labels).not.toContain('Powers on');
   });
 });

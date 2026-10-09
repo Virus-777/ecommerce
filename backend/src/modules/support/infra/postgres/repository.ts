@@ -1,4 +1,5 @@
 import { sql, type Kysely } from 'kysely';
+import type { Inbox } from '../../../../kernel/events/inbox.js';
 import { decodeCursor, encodeCursor } from '../../../../kernel/lib/pagination.js';
 import type { SupportDb } from '../../../../spec/support.js';
 import { CLOSED_STATUSES } from '../../domain/rules.js';
@@ -97,14 +98,19 @@ function sorted(q: any, sort: CaseSort): any {
 }
 
 /** Postgres adapter for SupportRepository. `db` is scoped to the `support` schema. */
-export function createPostgresSupportRepository(db: Kysely<SupportDb>): SupportRepository {
+export function createPostgresSupportRepository(db: Kysely<SupportDb>, inbox?: Inbox): SupportRepository {
   // generic table access: the row types are checked at the SupportRepository boundary
   const d: any = db;
 
   const repo: SupportRepository = {
     async transaction(fn) {
       if (db.isTransaction) return fn(repo);
-      return db.transaction().execute((trx) => fn(createPostgresSupportRepository(trx)));
+      return db.transaction().execute((trx) => fn(createPostgresSupportRepository(trx, inbox)));
+    },
+
+    async claim(key) {
+      if (!inbox) throw new Error('support repository: no inbox to claim event keys');
+      return inbox.claim(db, key);
     },
 
     async get(table, id, o) {

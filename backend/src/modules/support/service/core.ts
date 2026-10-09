@@ -419,6 +419,16 @@ export class Core {
     return isOpen(c.status);
   }
 
+  /** Who customer-facing case events reach: the customer, or the contact email for guests */
+  recipient(c: CaseRec): { customerId: string | null; contactEmail: string | null } {
+    return { customerId: c.customer_id && isUuid(c.customer_id) ? c.customer_id : null, contactEmail: c.next_action.facts?.contactEmail ?? null };
+  }
+
+  /** support.case.message_added: the parties a visible message is for */
+  messageAdded(c: CaseRec, messageId: string, audience: string, authorRole: string): EventMap['support.case.message_added'] {
+    return { caseId: c.id, messageId, ...this.recipient(c), sellerId: c.seller_id, audience, authorRole };
+  }
+
   /* ---------------------------------------------------------------- people and files */
 
   /** Staff display names, batched (access.getStaffRef) */

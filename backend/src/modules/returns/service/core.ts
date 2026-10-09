@@ -327,6 +327,46 @@ export class Core {
     return agg.inspections.at(-1) ?? null;
   }
 
+  /* ---------------------------------------------------------------- event payload parts */
+
+  /** Who customer-facing events reach: the customer, or the order's contact email for guests */
+  recipient(ret: ReturnRec): { customerId: string | null; contactEmail: string | null } {
+    return { customerId: ret.customer_id, contactEmail: ret.terms_snapshot.meta.contactEmail ?? null };
+  }
+
+  /** The recipient of a refund request: its return's, what the request stored, or the order's contact */
+  async refundRecipient(rr: RefundRec, ret?: ReturnRec | null): Promise<{ customerId: string | null; contactEmail: string | null }> {
+    if (ret) return this.recipient(ret);
+    const x = rr.deductions;
+    if (x.contactEmail !== undefined) return { customerId: x.customerId ?? null, contactEmail: x.contactEmail ?? null };
+    const order = await this.quiet('order contact', () => this.ctx.use('orders').getOrder(rr.order_id));
+    return { customerId: x.customerId ?? order?.contact.customerId ?? null, contactEmail: order?.contact.email ?? null };
+  }
+
+  /** returns.return.approved for a return (items and the label's tracking number included) */
+  approvedEvent(a: Agg, o: { withoutReturn: boolean; platformDecision: boolean; shipment?: ShipmentRec | null }): EventMap['returns.return.approved'] {
+    const r = a.ret;
+    return {
+      returnId: r.id,
+      ref: r.ref,
+      orderId: r.order_id,
+      ...this.recipient(r),
+      ownerType: r.owner_type,
+      sellerId: r.seller_id,
+      items: a.items.map((i) => ({ orderItemId: i.order_item_id, quantity: i.quantity })),
+      withoutReturn: o.withoutReturn,
+      platformDecision: o.platformDecision,
+      dropOffBy: o.shipment?.drop_off_by?.toISOString() ?? null,
+      trackingNumber: o.shipment?.tracking_number ?? null,
+    };
+  }
+
+  /** The returned units with their variant and stock item (inventory and fulfillment restock from them) */
+  returnedItems(a: Agg): EventMap['returns.return.received']['items'] {
+    const stock = a.ret.terms_snapshot.meta.stockItems ?? {};
+    return a.items.map((i) => ({ orderItemId: i.order_item_id, quantity: i.quantity, variantId: i.variant_id, stockItemId: stock[i.order_item_id] ?? null }));
+  }
+
   /** When the parcel reached the destination (receipt time) */
   receivedAt(agg: Agg): Date | null {
     const e = [...agg.events].reverse().find((x) => x.kind === 'received_at');

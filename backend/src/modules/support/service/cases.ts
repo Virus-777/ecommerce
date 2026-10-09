@@ -245,6 +245,7 @@ export class Cases {
         category: d.category.key,
         priority,
         customerId: d.customerId && isUuid(d.customerId) ? d.customerId : null,
+        contactEmail: facts.contactEmail ?? null,
         sellerId,
         orderId: d.order?.id ?? null,
         orderItemIds: items.map((i) => i.order_item_id),
@@ -521,7 +522,7 @@ export class Cases {
       if (mediaIds.length) await tx.insert('case_evidence', { id: newId(), case_id: a.c.id, party: 'customer', kind: 'photo', media_ids: mediaIds, note: null, added_by: actorText(by.actor), at: this.core.now() });
       if (patch.status && patch.status !== a.c.status) await this.core.timeline(tx, a.c.id, [{ kind: 'customer_replied', label: 'Customer replied', visibility: 'all', actor: by.actor }]);
       await this.core.save(tx, a, patch, facts);
-      batch.push('support.case.message_added', { caseId: a.c.id, messageId: m.id, audience: 'all', authorRole: 'customer' });
+      batch.push('support.case.message_added', this.core.messageAdded(a.c, m.id, 'all', 'customer'));
     });
   }
 
@@ -591,7 +592,7 @@ export class Cases {
         await this.core.timeline(tx, a.c.id, [{ kind: 'offer_made', label: `${a.c.next_action.facts?.sellerName ?? 'The seller'} made an offer`, detail: body.offer.kind.replace(/_/g, ' '), visibility: 'all', actor: by.actor }]);
       }
       await this.core.save(tx, a, patch, facts);
-      batch.push('support.case.message_added', { caseId: a.c.id, messageId: m.id, audience: 'all', authorRole: 'seller' });
+      batch.push('support.case.message_added', this.core.messageAdded(a.c, m.id, 'all', 'seller'));
     });
   }
 
@@ -618,7 +619,7 @@ export class Cases {
       const m = await this.core.message(tx, a.c.id, { author: by.actor, authorLabel: internal ? `${name ?? 'Staff'} (internal note)` : `${name ?? 'Marketly'}, ${SUPPORT_NAME}`, role: internal ? 'internal_note' : 'marketly_staff', audience: body.audience, body: body.body.trim(), mediaIds });
       if (mediaIds.length && !internal) await tx.insert('case_evidence', { id: newId(), case_id: a.c.id, party: 'staff', kind: 'photo', media_ids: mediaIds, note: null, added_by: actorText(by.actor), at: now });
       await this.core.save(tx, a, patch);
-      if (!internal) batch.push('support.case.message_added', { caseId: a.c.id, messageId: m.id, audience: body.audience, authorRole: 'marketly_staff' });
+      if (!internal) batch.push('support.case.message_added', this.core.messageAdded(a.c, m.id, body.audience, 'marketly_staff'));
     });
   }
 
@@ -645,7 +646,7 @@ export class Cases {
       }
       if (body.note?.trim()) {
         const m = await this.core.message(tx, a.c.id, { author: by.actor, authorLabel: a.c.next_action.facts?.customerName ?? 'Customer', role: 'customer', audience: 'all', body: body.note.trim() });
-        batch.push('support.case.message_added', { caseId: a.c.id, messageId: m.id, audience: 'all', authorRole: 'customer' });
+        batch.push('support.case.message_added', this.core.messageAdded(a.c, m.id, 'all', 'customer'));
       }
       await this.core.timeline(tx, a.c.id, [{ kind: body.accept ? 'offer_accepted' : 'offer_declined', label: body.accept ? 'The customer accepted the offer' : 'The customer declined the offer', detail: o.kind.replace(/_/g, ' '), visibility: 'all', actor: by.actor }]);
       await this.core.save(tx, a, patch);
@@ -736,7 +737,7 @@ export class Cases {
     if (body.note?.trim()) {
       await this.core.write(agg.c.id, by, async (tx, a, batch) => {
         const m = await this.core.message(tx, a.c.id, { author: by.actor, authorLabel: a.c.next_action.facts?.customerName ?? 'Customer', role: 'customer', audience: 'all', body: body.note!.trim() });
-        batch.push('support.case.message_added', { caseId: a.c.id, messageId: m.id, audience: 'all', authorRole: 'customer' });
+        batch.push('support.case.message_added', this.core.messageAdded(a.c, m.id, 'all', 'customer'));
       });
     }
   }
@@ -766,7 +767,7 @@ export class Cases {
       const m = await this.core.message(tx, a.c.id, { author: by.actor, authorLabel: `${name ?? 'Marketly'}, ${SUPPORT_NAME}`, role: 'marketly_staff', audience: body.from, body: body.question.trim() });
       await this.core.timeline(tx, a.c.id, [{ kind: 'info_requested', label: body.from === 'customer' ? 'Marketly asked the customer for information' : 'Marketly asked the seller for information', detail: `Reply by ${due.toISOString()}`, visibility: body.from, actor: by.actor }]);
       await this.core.save(tx, a, { status, next_response_due_at: due, waiting_on: body.from, ...(a.c.first_replied_at ? {} : { first_replied_at: this.core.now() }) }, { infoRequest: { from: body.from, question: body.question.trim(), dueAt: due.toISOString(), askedAt: this.core.now().toISOString(), askedBy: by.actor } });
-      batch.push('support.case.message_added', { caseId: a.c.id, messageId: m.id, audience: body.from, authorRole: 'marketly_staff' });
+      batch.push('support.case.message_added', this.core.messageAdded(a.c, m.id, body.from, 'marketly_staff'));
     });
     await this.core.audit({ action: 'support.case.request_info', actionLabel: `Asked the ${body.from} for information`, target: this.target(agg), after: { from: body.from, question: body.question, dueAt: due.toISOString() } }, by);
   }

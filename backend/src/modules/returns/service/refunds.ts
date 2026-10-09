@@ -108,7 +108,7 @@ export class Refunds {
       discount_share: p.b.discountShare,
       shipping_refund: p.b.shippingRefund,
       return_shipping_deduction: p.b.returnShippingDeduction,
-      deductions: this.extras(p, { customerId: ret.customer_id, customerName: ret.terms_snapshot.meta.customerName, sellerName: ret.terms_snapshot.meta.sellerName, orderRef: ret.order_ref }),
+      deductions: this.extras(p, { customerId: ret.customer_id, contactEmail: ret.terms_snapshot.meta.contactEmail ?? null, customerName: ret.terms_snapshot.meta.customerName, sellerName: ret.terms_snapshot.meta.sellerName, orderRef: ret.order_ref }),
       total: p.b.total,
       currency: p.currency,
       funded_by: seller ? 'seller' : 'official_store',
@@ -204,6 +204,7 @@ export class Refunds {
         kind: 'exception',
         perItem,
         customerId: order.contact.customerId ?? null,
+        contactEmail: order.contact.email ?? null,
         customerName: order.contact.name,
         sellerName: group.seller.name,
         orderRef: order.ref,
@@ -299,6 +300,7 @@ export class Refunds {
         kind: input.source,
         perItem,
         customerId: order.contact.customerId ?? null,
+        contactEmail: order.contact.email ?? null,
         customerName: order.contact.name,
         sellerName: group.seller.name,
         orderRef: order.ref,
@@ -490,6 +492,7 @@ export class Refunds {
       return updated;
     });
     if (!after) return;
+    const recipient = await this.core.refundRecipient(after, after.return_id ? await this.repo.get('returns', after.return_id) : null);
     this.core.publish(
       'returns.refund.approved',
       {
@@ -497,6 +500,7 @@ export class Refunds {
         returnId: after.return_id,
         caseId: after.case_id,
         orderId: after.order_id,
+        ...recipient,
         orderItemIds: after.order_item_ids,
         ownerType: after.owner_type,
         sellerId: after.seller_id,
@@ -535,6 +539,50 @@ export class Refunds {
     await tx.update('returns', ret.id, { status: returnMachine.next(ret.status as ReturnStatus, 'complete'), completed_at: now, updated_at: now, terms_snapshot: { ...ret.terms_snapshot, meta: { ...ret.terms_snapshot.meta, outcome } } });
     await this.core.timeline(tx, ret.id, [{ kind: 'completed', label: outcome === 'partly_refunded' ? 'Partly refunded' : outcome === 'credited' ? 'Refunded as store credit' : 'Refunded', visibility: 'customer' }]);
     batch.push('returns.return.completed', { returnId: ret.id, outcome });
+  }
+
+  /* ---------------------------------------------------------------- cancelling (appeal overturned the case decision) */
+
+  /**
+   * Cancels the case's refund requests that have not been approved (requested, under review, declined).
+   * Approved, processing, sent and failed ones are money already moving: they come back in notCancellable.
+   * Already cancelled ones are left out, so a second call changes nothing.
+   */
+  async cancelForCase(caseId: string, reason: string): Promise<{ cancelled: RefundRequest[]; notCancellable: RefundRequest[] }> {
+    if (!isUuid(caseId)) return { cancelled: [], notCancellable: [] };
+    const why = reason?.trim() || 'The case decision was overturned on appeal';
+    const by: By = { actor: SYSTEM };
+    const now = this.core.now();
+    const { cancelled, kept } = await this.repo.transaction(async (tx) => {
+      const rows = await tx.find('refund_requests', { case_id: caseId }, { orderBy: [['created_at', 'asc']], forUpdate: true });
+      const cancelled: { before: RefundRec; after: RefundRec }[] = [];
+      const kept: RefundRec[] = [];
+      for (const rr of rows) {
+        if (rr.status === 'cancelled') continue;
+        if (!refundRequestMachine.can(rr.status as RefundStatus, 'cancel')) {
+          kept.push(rr);
+          continue;
+        }
+        const after = await tx.update('refund_requests', rr.id, {
+          status: refundRequestMachine.next(rr.status as RefundStatus, 'cancel'),
+          approval_request_id: null,
+          updated_at: now,
+          deductions: { ...rr.deductions, history: [...rr.deductions.history, { at: now.toISOString(), label: 'Refund cancelled', detail: why, actor: SYSTEM }] },
+        });
+        if (after.return_id) await this.core.timeline(tx, after.return_id, [{ kind: 'refund_cancelled', label: `Refund ${after.ref} cancelled`, detail: why, visibility: 'staff' }]);
+        cancelled.push({ before: rr, after });
+      }
+      return { cancelled, kept };
+    });
+    for (const { before, after } of cancelled) {
+      if (before.approval_request_id) await this.core.soft('access', 'cancel approval', (a) => a.cancelApproval(before.approval_request_id!, SYSTEM, 'Refund cancelled: case decision overturned'));
+      await this.core.audit(
+        { action: 'returns.refund.cancel', actionLabel: `Cancelled refund ${after.ref}`, category: 'financial', target: { type: 'refund_request', id: after.id, ref: after.ref, label: `Refund ${after.ref}` }, before: { status: before.status }, after: { status: after.status }, reason: why },
+        by,
+      );
+    }
+    const views = await this.views.refundRequests([...cancelled.map((c) => c.after), ...kept]);
+    return { cancelled: views.slice(0, cancelled.length), notCancellable: views.slice(cancelled.length) };
   }
 
   /* ---------------------------------------------------------------- decline and revise */

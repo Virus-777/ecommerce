@@ -58,7 +58,7 @@ export class Handling {
       ]);
       // the timeline row carries the receipt time
       await tx.insert('return_events', { id: newId(), return_id: id, kind: 'received_at', label: 'Parcel received', detail: at.toISOString(), visibility: 'staff', actor_kind: by.actor.kind, actor_id: by.actor.id ?? null, at });
-      batch.push('returns.return.received', { returnId: id, ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, receivedAt: at.toISOString() });
+      batch.push('returns.return.received', { returnId: id, ...this.core.recipient(a.ret), ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, items: this.core.returnedItems(a), receivedAt: at.toISOString() });
     });
   }
 
@@ -129,7 +129,7 @@ export class Handling {
         { kind: 'inspection_detail', label: `Grade ${human(input.grade)}, proposed stock outcome ${human(input.proposedStockOutcome)}`, detail: input.notes ?? null, visibility: 'seller', actor: by.actor },
       ]);
       for (const i of a.items) {
-        batch.push('returns.return.inspected', { returnId: id, ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, conditionOutcome: input.conditionOutcome, proposedStockOutcome: input.proposedStockOutcome, variantId: i.variant_id, quantity: i.quantity });
+        batch.push('returns.return.inspected', { returnId: id, ...this.core.recipient(a.ret), ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, conditionOutcome: input.conditionOutcome, proposedStockOutcome: input.proposedStockOutcome, variantId: i.variant_id, quantity: i.quantity });
       }
     });
     if (party === 'staff') {
@@ -258,7 +258,7 @@ export class Handling {
         delivered_at: null,
       });
       await this.core.timeline(tx, r.id, [{ kind: 'replacement', label: s.kind === 'exchange' ? 'Exchange on the way' : 'Replacement on the way', detail: `${item.title} × ${quantity}, no charge`, visibility: 'customer', actor: by.actor }]);
-      batch.push('returns.replacement.created', { replacementId, returnId: r.id, orderId: r.order_id, orderItemId: item.order_item_id, ownerType: r.owner_type, sellerId: r.seller_id, variantId: s.variantId, offerId: s.offerId, quantity, kind: s.kind });
+      batch.push('returns.replacement.created', { replacementId, returnId: r.id, orderId: r.order_id, ...this.core.recipient(a.ret), orderItemId: item.order_item_id, ownerType: r.owner_type, sellerId: r.seller_id, variantId: s.variantId, offerId: s.offerId, quantity, kind: s.kind });
     });
   }
 

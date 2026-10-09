@@ -134,6 +134,10 @@ export class SupportService implements SupportPublicApi {
     return this.automation.onRefundFailed(event);
   }
 
+  onGoodwillDecidedFromWallet(event: EventPayload<'wallet.goodwill.decided'>): Promise<void> {
+    return this.automation.onGoodwillDecided(event);
+  }
+
   /** returns.replacement.created: Link the replacement to its remedy */
   onReplacementCreatedFromReturns(event: EventPayload<'returns.replacement.created'>): Promise<void> {
     return this.automation.onReplacementCreated(event);

@@ -55,6 +55,14 @@ export class Batch {
 }
 
 export const SYSTEM: common.Actor = { kind: 'system', id: null };
+
+/** Who customer-facing shipment events reach */
+export interface Recipient {
+  customerId: string | null;
+  contactEmail: string | null;
+}
+/** Events notifications sends to the customer: they carry the order's customer and contact email */
+const TO_CUSTOMER = new Set<string>(['shipping.shipment.dispatched', 'shipping.shipment.delivered', 'shipping.shipment.exception']);
 export const OFFICIAL_NAME = 'Marketly Official Store';
 export const DEFAULT_CUTOFF = '14:00';
 
@@ -121,8 +129,32 @@ export class Core {
     this.ctx.events.publish(name as never, payload as never, { actor: by.actor ?? SYSTEM, ...(by.requestId ? { requestId: by.requestId } : {}) });
   }
 
-  flush(batch: Batch) {
-    for (const e of batch.events) this.publish(e.name, e.payload as never, batch.by);
+  /**
+   * Publishes what a transaction collected (after the commit). Customer-facing shipment events get the
+   * order's customer and contact email (orders.getOrder) here, outside the transaction.
+   */
+  async flush(batch: Batch) {
+    const recipients = new Map<string, Promise<Recipient>>();
+    for (const e of batch.events) {
+      let payload = e.payload as Record<string, unknown>;
+      if (TO_CUSTOMER.has(e.name) && typeof payload.orderId === 'string' && !('contactEmail' in payload)) {
+        const orderId = payload.orderId;
+        if (!recipients.has(orderId)) recipients.set(orderId, this.recipientOf(orderId));
+        payload = { ...payload, ...(await recipients.get(orderId)!) };
+      }
+      this.publish(e.name, payload as never, batch.by);
+    }
+  }
+
+  /** The order's customer (null for guests) and contact email; unknown order or orders failing → nulls */
+  async recipientOf(orderId: string): Promise<Recipient> {
+    try {
+      const order = await this.ctx.use('orders').getOrder(orderId);
+      return { customerId: order?.contact.customerId ?? null, contactEmail: order?.contact.email ?? null };
+    } catch (err) {
+      if (!isAppError(err)) this.ctx.log.warn({ err, orderId }, 'shipping: order contact lookup failed');
+      return { customerId: null, contactEmail: null };
+    }
   }
 
   async audit(entry: Omit<audit.RecordInput, 'actor' | 'module' | 'requestId'>, by: By) {

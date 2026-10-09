@@ -249,7 +249,7 @@ export class Decisions {
       await this.core.save(tx, a, { status, decision, decision_draft: null, appeal_deadline: appealDeadline, next_response_due_at: null, waiting_on: null, handler_kind: 'marketplace_support', support_following: true, ...(a.c.first_replied_at ? {} : { first_replied_at: now }) }, { infoRequest: null, appealWindowClosed: false });
       await this.core.timeline(tx, a.c.id, [{ kind: 'decided', label: `Decision: ${human(input.outcome)}`, detail: input.reason.trim(), visibility: 'all', actor: by.actor }]);
       if (input.notifyParties) await this.decisionMessage(tx, a, batch, decision, inserted, by);
-      batch.push('support.case.decided', { caseId: a.c.id, ref: a.c.ref, outcome: input.outcome, orderId: a.c.order_id, returnId: a.c.return_id, sellerId: a.c.seller_id, remedies: a.remedies.map((r) => this.views.remedy(r, this.core.currency)), appealDeadline: appealDeadline.toISOString(), final: false });
+      batch.push('support.case.decided', { caseId: a.c.id, ref: a.c.ref, outcome: input.outcome, orderId: a.c.order_id, ...this.core.recipient(a.c), returnId: a.c.return_id, sellerId: a.c.seller_id, remedies: a.remedies.map((r) => this.views.remedy(r, this.core.currency)), appealDeadline: appealDeadline.toISOString(), final: false });
       return inserted;
     });
     await this.core.audit(
@@ -288,7 +288,7 @@ export class Decisions {
     const what = remedies.length ? ` Remedy: ${remedies.map((r) => `${human(r.kind)}${r.amount ? ` $${(r.amount / 100).toFixed(2)}` : ''}`).join(', ')}.` : '';
     const appeal = d.final ? ' This decision is final.' : d.appealDeadline ? ` Either party can appeal until ${new Date(d.appealDeadline).toISOString().slice(0, 10)}.` : '';
     const m = await this.core.message(tx, a.c.id, { author: by.actor, authorLabel: 'Marketly decision', role: 'system', audience: 'all', body: `${human(d.outcome)}: ${d.reason}.${what}${appeal}`.replace(/\.\./g, '.') });
-    batch.push('support.case.message_added', { caseId: a.c.id, messageId: m.id, audience: 'all', authorRole: 'system' });
+    batch.push('support.case.message_added', this.core.messageAdded(a.c, m.id, 'all', 'system'));
   }
 
   async saveDraft(agg: Agg, input: DecisionInput, by: By): Promise<DecisionDraft> {
@@ -333,7 +333,7 @@ export class Decisions {
       await this.core.timeline(tx, a.c.id, [{ kind: 'appealed', label: party === 'seller' ? 'The seller appealed the decision' : 'The customer appealed the decision', detail: body.reason.trim(), visibility: 'all', actor: by.actor }]);
       await this.core.save(tx, a, { status, next_response_due_at: due, waiting_on: 'marketplace' });
       batch.push('support.case.appealed', { caseId: a.c.id, by: by.actor });
-      batch.push('support.case.message_added', { caseId: a.c.id, messageId: m.id, audience: 'all', authorRole: party });
+      batch.push('support.case.message_added', this.core.messageAdded(a.c, m.id, 'all', party));
     });
   }
 
@@ -348,6 +348,9 @@ export class Decisions {
     if (decider.kind === 'staff' && decider.id && by.actor.id && decider.id === by.actor.id) throw this.core.error('SAME_DECIDER', 'A different staff member must review the appeal');
     const planned = body.overturn ? await this.plan(agg, body.remedies ?? []) : [];
     if (!o.approved && planned.length) await this.authorize(agg, planned, { kind: 'appeal', appeal: { overturn: body.overturn, reason: body.reason, remedies: body.remedies ?? [] } }, body.reason.trim(), by);
+    // the overturned decision's refund requests are cancelled first (new refunds for the same items would be duplicates)
+    const refunds = body.overturn ? await this.core.soft('returns', 'cancel case refunds', (r) => r.cancelRefundsForCase(c.id, `Case ${c.ref}: the appeal changed the decision`)) : undefined;
+    const moving = new Set((refunds?.notCancellable ?? []).map((r) => r.id));
     const rows = await this.execute(agg, planned, body.reason.trim(), by);
     const now = this.core.now();
     const final = await this.core.write(c.id, by, async (tx, a, batch) => {
@@ -357,12 +360,25 @@ export class Decisions {
       const appealStatus = appealMachine.next(reviewing as never, body.overturn ? 'overturn' : 'keepDecision');
       await tx.update('case_appeals', ap.id, { status: appealStatus, reviewer_staff_id: by.actor.id && isUuid(by.actor.id) ? by.actor.id : null, decided_at: now, outcome: body.reason.trim() });
       if (body.overturn) {
-        for (const r of a.remedies.filter((x) => ['pending_approval', 'approved', 'failed'].includes(x.status))) {
+        // remedies whose refund is already approved or sent stay: the money is moving (reported below)
+        for (const r of a.remedies.filter((x) => ['pending_approval', 'approved', 'failed'].includes(x.status) && !(x.refund_request_id && moving.has(x.refund_request_id)))) {
           const path = remedyPath(r.status as RemedyStatus, 'cancelled');
           if (!path) continue;
           r.status = 'cancelled';
           await tx.update('case_remedies', r.id, { status: 'cancelled', note: 'Cancelled: the appeal changed the decision', updated_at: now });
         }
+      }
+      if (refunds?.cancelled.length) await this.core.timeline(tx, a.c.id, [{ kind: 'refunds_cancelled', label: `Cancelled ${refunds.cancelled.length === 1 ? 'refund request' : `${refunds.cancelled.length} refund requests`} of the earlier decision`, detail: refunds.cancelled.map((r) => r.ref).join(', '), visibility: 'staff', actor: by.actor }]);
+      if (refunds?.notCancellable.length) {
+        await this.core.timeline(tx, a.c.id, [
+          {
+            kind: 'refunds_not_cancellable',
+            label: 'Refunds of the earlier decision could not be cancelled: the money is already moving',
+            detail: refunds.notCancellable.map((r) => `${r.ref} (${r.status}, ${(r.breakdown.total.amount / 100).toFixed(2)} ${r.breakdown.total.currency})`).join(', '),
+            visibility: 'staff',
+            actor: by.actor,
+          },
+        ]);
       }
       await this.insertRemedies(tx, a, rows);
       const old = a.c.decision!;
@@ -373,9 +389,9 @@ export class Decisions {
       await this.core.save(tx, a, { status, decision, appeal_deadline: null, next_response_due_at: null, waiting_on: null, decision_draft: a.c.decision_draft?.draft ? { ...a.c.decision_draft, pending: null } : null });
       await this.core.timeline(tx, a.c.id, [{ kind: 'appeal_decided', label: body.overturn ? 'Appeal accepted: the decision was changed' : 'Appeal reviewed: the decision stands', detail: body.reason.trim(), visibility: 'all', actor: by.actor }]);
       const m = await this.core.message(tx, a.c.id, { author: by.actor, authorLabel: 'Marketly appeal review', role: 'system', audience: 'all', body: `${body.overturn ? `The appeal was accepted. New decision: ${human(decision.outcome)}` : 'The appeal was reviewed and the decision stands'}: ${body.reason.trim()}. This decision is final.` });
-      batch.push('support.case.message_added', { caseId: a.c.id, messageId: m.id, audience: 'all', authorRole: 'system' });
+      batch.push('support.case.message_added', this.core.messageAdded(a.c, m.id, 'all', 'system'));
       batch.push('support.case.appeal_decided', { caseId: a.c.id, overturned: body.overturn });
-      batch.push('support.case.decided', { caseId: a.c.id, ref: a.c.ref, outcome: decision.outcome, orderId: a.c.order_id, returnId: a.c.return_id, sellerId: a.c.seller_id, remedies: a.remedies.map((r) => this.views.remedy(r, this.core.currency)), appealDeadline: null, final: true });
+      batch.push('support.case.decided', { caseId: a.c.id, ref: a.c.ref, outcome: decision.outcome, orderId: a.c.order_id, ...this.core.recipient(a.c), returnId: a.c.return_id, sellerId: a.c.seller_id, remedies: a.remedies.map((r) => this.views.remedy(r, this.core.currency)), appealDeadline: null, final: true });
       return decision;
     });
     await this.core.audit(
@@ -386,7 +402,12 @@ export class Decisions {
         target: this.cases.target(agg),
         reason: body.reason,
         before: { outcome: c.decision.outcome, decidedBy: c.decision.decidedBy },
-        after: { outcome: final.outcome, overturned: body.overturn, remedies: rows.map((r) => ({ kind: r.kind, amount: r.amount })) },
+        after: {
+          outcome: final.outcome,
+          overturned: body.overturn,
+          remedies: rows.map((r) => ({ kind: r.kind, amount: r.amount })),
+          ...(refunds ? { refundsCancelled: refunds.cancelled.map((r) => r.ref), refundsNotCancellable: refunds.notCancellable.map((r) => ({ ref: r.ref, status: r.status })) } : {}),
+        },
         ...(o.approved ? { approvalRequestId: o.approved.requestId } : {}),
       },
       by,
@@ -410,8 +431,8 @@ export class Decisions {
       const m = await this.core.message(tx, a.c.id, { author: by.actor, authorLabel: `${name ?? 'Marketly'}, Marketly support`, role: 'marketly_staff', audience: 'all', body: body.summary.trim() });
       await this.core.timeline(tx, a.c.id, [{ kind: 'resolved', label: 'Case resolved', detail: body.summary.trim(), visibility: 'all', actor: by.actor }]);
       await this.core.save(tx, a, { status, resolved_at: now, reopen_until: reopenUntil, next_response_due_at: null, waiting_on: null, ...(a.c.first_replied_at ? {} : { first_replied_at: now }) });
-      batch.push('support.case.message_added', { caseId: a.c.id, messageId: m.id, audience: 'all', authorRole: 'marketly_staff' });
-      batch.push('support.case.resolved', { caseId: a.c.id, ref: a.c.ref, sellerId: a.c.seller_id, resolvedAt: now.toISOString() });
+      batch.push('support.case.message_added', this.core.messageAdded(a.c, m.id, 'all', 'marketly_staff'));
+      batch.push('support.case.resolved', { caseId: a.c.id, ref: a.c.ref, ...this.core.recipient(a.c), sellerId: a.c.seller_id, resolvedAt: now.toISOString() });
       return now;
     });
     await this.core.audit({ action: 'support.case.resolve', actionLabel: `Resolved case ${agg.c.ref}`, target: this.cases.target(agg), reason: body.summary, before: { status: agg.c.status }, after: { status: 'resolved', resolvedAt: resolvedAt.toISOString(), reopenUntil: reopenUntil.toISOString() } }, by);
@@ -428,7 +449,7 @@ export class Decisions {
       const status = caseMachine.next(a.c.status as CaseStatus, 'reopen');
       if (who === 'customer') {
         const m = await this.core.message(tx, a.c.id, { author: by.actor, authorLabel: a.c.next_action.facts?.customerName ?? 'Customer', role: 'customer', audience: 'all', body: body.reason.trim() });
-        batch.push('support.case.message_added', { caseId: a.c.id, messageId: m.id, audience: 'all', authorRole: 'customer' });
+        batch.push('support.case.message_added', this.core.messageAdded(a.c, m.id, 'all', 'customer'));
       } else await this.core.message(tx, a.c.id, { author: by.actor, authorLabel: 'Reopened (internal note)', role: 'internal_note', audience: 'internal', body: body.reason.trim() });
       await this.core.timeline(tx, a.c.id, [{ kind: 'reopened', label: who === 'customer' ? 'You reopened the case' : 'Marketly reopened the case', detail: body.reason.trim(), visibility: 'all', actor: by.actor, reason: body.reason.trim() }]);
       await this.core.save(tx, a, { status, reopen_count: a.c.reopen_count + 1, reopen_until: null, closed_at: null, handler_kind: 'marketplace_support', support_following: true, next_response_due_at: due, waiting_on: 'marketplace' });

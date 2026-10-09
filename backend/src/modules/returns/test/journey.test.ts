@@ -150,7 +150,7 @@ describe('seller decisions and the return parcel', () => {
     const ask = await h.call('POST', `/api/seller/returns/requests/${m.ret.id}/request-info`, m.seller, { question: 'Can you send a photo of the hinge?' });
     expect(ask.status, JSON.stringify(ask.body)).toBe(200);
     expect(ask.body.detail).toMatchObject({ status: 'info_requested', responseDue: null, infoRequest: { question: 'Can you send a photo of the hinge?' } });
-    expect(h.named('returns.return.info_requested').find((e) => e.returnId === m.ret.id)).toBeTruthy();
+    expect(h.named('returns.return.info_requested').find((e) => e.returnId === m.ret.id)).toMatchObject({ customerId: m.customerId, contactEmail: 'sam@example.com' });
     expect((await h.call('POST', `/api/seller/returns/requests/${m.ret.id}/approve`, m.seller, { labelMethod: 'prepaid_qr' })).status).toBe(409);
     const reply = await h.call('POST', `/api/store/returns/requests/${m.ret.id}/info`, m.token, { reply: 'Attached' });
     expect(reply.status).toBe(200);
@@ -167,8 +167,18 @@ describe('seller decisions and the return parcel', () => {
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
     expect(ok.body.detail).toMatchObject({ status: 'approved', decision: { kind: 'approved', platformDecision: false }, shipment: { status: 'label_issued', method: 'prepaid_qr', paidBy: 'seller', cost: { amount: 650 } } });
     expect(h.calls.labels.at(-1)).toMatchObject({ kind: 'return', returnId: m.ret.id, labelMethod: 'prepaid_qr', billedTo: 'seller' });
-    expect(h.named('returns.return.approved').find((e) => e.returnId === m.ret.id)).toMatchObject({ withoutReturn: false, platformDecision: false });
-    expect(h.named('returns.label.created').find((e) => e.returnId === m.ret.id)).toMatchObject({ paidBy: 'seller', cost: { amount: 650 } });
+    expect(h.named('returns.return.approved').find((e) => e.returnId === m.ret.id)).toMatchObject({
+      withoutReturn: false,
+      platformDecision: false,
+      ref: m.ret.ref,
+      orderId: m.order.id,
+      customerId: m.customerId,
+      contactEmail: 'sam@example.com',
+      items: [{ orderItemId: m.items[0]![0]!, quantity: 2 }],
+      trackingNumber: ok.body.detail.shipment.trackingNumber,
+    });
+    expect(ok.body.detail.shipment.trackingNumber).toBeTruthy();
+    expect(h.named('returns.label.created').find((e) => e.returnId === m.ret.id)).toMatchObject({ paidBy: 'seller', cost: { amount: 650 }, customerId: m.customerId, contactEmail: 'sam@example.com' });
 
     const label = await h.call('GET', `/api/store/returns/requests/${m.ret.id}/label?near=97201`, m.token);
     expect(label.status).toBe(200);
@@ -187,7 +197,13 @@ describe('seller decisions and the return parcel', () => {
     const received = await h.call('POST', `/api/seller/returns/requests/${m.ret.id}/receive`, m.seller, {});
     expect(received.body.detail.status).toBe('received');
     expect(received.body.inspectionChecklist.items.length).toBeGreaterThan(0);
-    expect(h.named('returns.return.received').find((e) => e.returnId === m.ret.id)).toMatchObject({ ownerType: 'seller', sellerId: m.sellerA });
+    expect(h.named('returns.return.received').find((e) => e.returnId === m.ret.id)).toMatchObject({
+      ownerType: 'seller',
+      sellerId: m.sellerA,
+      customerId: m.customerId,
+      contactEmail: 'sam@example.com',
+      items: [{ orderItemId: m.items[0]![0]!, quantity: 2, variantId: m.pa.variantId, stockItemId: m.pa.stockItemId }],
+    });
     expect((await h.orders.getOrder(m.order.id))!.groups[0]!.items[0]!.state).toBe('returned');
 
     const draft = await h.call('PUT', `/api/seller/returns/requests/${m.ret.id}/inspection-draft`, m.seller, { inspection: { grade: 'good' }, remedy: { kind: 'full_refund' } });
@@ -196,7 +212,7 @@ describe('seller decisions and the return parcel', () => {
     const inspected = await h.call('POST', `/api/seller/returns/requests/${m.ret.id}/inspection`, m.seller, { conditionOutcome: 'as_described', grade: 'good', proposedStockOutcome: 'restock', checks: [{ label: 'Powers on', passed: true }] });
     expect(inspected.status, JSON.stringify(inspected.body)).toBe(200);
     expect(inspected.body).toMatchObject({ detail: { status: 'awaiting_remedy', statusLabel: 'Inspected' }, inspection: { conditionOutcome: 'as_described', grade: 'good' }, inspectionDraft: null });
-    expect(h.named('returns.return.inspected').filter((e) => e.returnId === m.ret.id)).toEqual([expect.objectContaining({ variantId: m.pa.variantId, quantity: 2, proposedStockOutcome: 'restock' })]);
+    expect(h.named('returns.return.inspected').filter((e) => e.returnId === m.ret.id)).toEqual([expect.objectContaining({ variantId: m.pa.variantId, quantity: 2, proposedStockOutcome: 'restock', customerId: m.customerId, contactEmail: 'sam@example.com' })]);
 
     const partial = await h.call('POST', `/api/seller/returns/requests/${m.ret.id}/remedy`, m.seller, { kind: 'partial_refund' }, idem());
     expect(partial.status).toBe(400);
@@ -211,7 +227,7 @@ describe('seller decisions and the return parcel', () => {
     const startRefund = h.calls.refunds.at(-1)!;
     expect(startRefund).toMatchObject({ orderId: m.order.id, origin: 'return', originId: refund.body.refundRequest.id, destination: 'original_method' });
     expect(startRefund.items.reduce((s, i) => s + i.amount.amount, 0)).toBe(12000);
-    expect(h.named('returns.refund.approved').find((e) => e.returnId === m.ret.id)).toMatchObject({ source: 'seller', total: { amount: 12000 }, approvedBy: { kind: 'seller' } });
+    expect(h.named('returns.refund.approved').find((e) => e.returnId === m.ret.id)).toMatchObject({ source: 'seller', total: { amount: 12000 }, approvedBy: { kind: 'seller' }, customerId: m.customerId, contactEmail: 'sam@example.com' });
     expect((await h.call('POST', `/api/seller/returns/requests/${m.ret.id}/remedy`, m.seller, { kind: 'full_refund' }, idem())).body.error.code).toBe('DUPLICATE_REFUND');
 
     await h.publish('payments', 'payments.refund.sent', { refundId: newId(), ref: refund.body.refundRequest.ref, orderId: m.order.id, origin: 'return', originId: refund.body.refundRequest.id, amount: { amount: 12000, currency: 'USD' }, items: startRefund.items.map((i) => ({ ...i, title: 'Headphones', groupId: m.order.groups[0]!.id })), destination: 'Visa •••• 4417', sentAt: now() });
@@ -230,7 +246,7 @@ describe('seller decisions and the return parcel', () => {
     expect(early.body.error.details.availableFrom).toBeTruthy();
     const rejected = await h.call('POST', `/api/seller/returns/requests/${m.ret.id}/reject`, m.seller, { reasonCode: 'damaged_by_customer', explanation: 'The hinge was glued' });
     expect(rejected.body.detail).toMatchObject({ status: 'rejected', decision: { kind: 'rejected', reasonCode: 'damaged_by_customer' } });
-    expect(h.named('returns.return.rejected').find((e) => e.returnId === m.ret.id)).toMatchObject({ reasonCode: 'damaged_by_customer', platformDecision: false });
+    expect(h.named('returns.return.rejected').find((e) => e.returnId === m.ret.id)).toMatchObject({ reasonCode: 'damaged_by_customer', platformDecision: false, customerId: m.customerId, contactEmail: 'sam@example.com' });
     const esc = await h.call('POST', `/api/store/returns/requests/${m.ret.id}/escalate`, m.token, { reason: 'customer_disagrees', note: 'It was broken on arrival' });
     expect(esc.status, JSON.stringify(esc.body)).toBe(200);
     expect(esc.body).toMatchObject({ handledBy: 'marketplace_support', escalation: { reason: 'customer_disagrees', caseRef: 'CS-000123' } });

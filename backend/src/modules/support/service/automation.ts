@@ -4,12 +4,12 @@
  */
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
-import { caseMachine, caseOfferMachine } from '../domain/state-machines.js';
-import { CLOSED_STATUSES, nextActionOf, type CaseStatus } from '../domain/rules.js';
+import { caseMachine, caseOfferMachine, remedyMachine } from '../domain/state-machines.js';
+import { CLOSED_STATUSES, nextActionOf, type CaseStatus, type RemedyStatus } from '../domain/rules.js';
 import type { RemedyRec } from '../ports.js';
 import type { Cases } from './cases.js';
 import { DAY, SYSTEM, type By, type Core } from './core.js';
-import type { Decisions } from './decisions.js';
+import { remedyPath, type Decisions } from './decisions.js';
 
 const BATCH = 200;
 const SYS: By = { actor: SYSTEM };
@@ -107,6 +107,40 @@ export class Automation {
     const r = (await this.core.repo.find('case_remedies', { refund_request_id: e.originId }))[0];
     if (!r) return;
     await this.decisions.moveRemedy(r.id, 'failed', { label: 'Refund could not be sent yet', note: e.finalAttempt ? `Failed: ${e.reason}. Marketly support will contact you.` : `Failed: ${e.reason}. Retrying.` });
+  }
+
+  /* ================================================================ wallet */
+
+  /**
+   * wallet.goodwill.decided: the case's goodwill credit remedy waiting for approval is granted (completed) or
+   * rejected (cancelled), and the case goes back to the top of its owner's queue. The remedy keeps no grant id,
+   * so it is matched by case, kind and amount (the oldest pending one). Claimed once per grant in the inbox.
+   */
+  async onGoodwillDecided(e: EventPayload<'wallet.goodwill.decided'>): Promise<void> {
+    if (!e.caseId || !isUuid(e.caseId)) return;
+    const c = await this.core.repo.get('cases', e.caseId);
+    if (!c) return;
+    const granted = e.status === 'granted';
+    const amount = `${(e.amount.amount / 100).toFixed(2)} ${e.amount.currency}`;
+    await this.core.write(c.id, SYS, async (tx, a) => {
+      if (!(await tx.claim(`wallet.goodwill.decided:${e.grantId}`))) return;
+      const pending = a.remedies.filter((r) => r.kind === 'goodwill_credit' && r.status === 'pending_approval').sort((x, y) => x.created_at.getTime() - y.created_at.getTime());
+      const remedy = pending.find((r) => r.amount === e.amount.amount && (!r.currency || r.currency === e.amount.currency)) ?? pending[0];
+      if (!remedy) return;
+      const path = remedyPath(remedy.status as RemedyStatus, granted ? 'completed' : 'cancelled');
+      if (!path?.length) return;
+      let status = remedy.status as RemedyStatus;
+      for (const ev of path) status = remedyMachine.next(status, ev as never) as RemedyStatus;
+      const updated = await tx.update('case_remedies', remedy.id, { status, note: granted ? `${amount} added to your Marketly credit` : 'The goodwill credit was not approved', updated_at: this.core.now() });
+      Object.assign(remedy, updated);
+      await this.core.timeline(tx, a.c.id, [
+        granted
+          ? { kind: 'remedy_completed', label: 'Goodwill credit added', detail: `${amount} added to your Marketly credit`, visibility: 'all' }
+          : { kind: 'remedy_cancelled', label: 'Goodwill credit not approved', detail: `${amount} was not approved; choose another remedy`, visibility: 'staff' },
+      ]);
+      // back to the owner's queue: due now (the SLA job flags it)
+      await this.core.save(tx, a, { waiting_on: 'marketplace', next_response_due_at: this.core.now() });
+    });
   }
 
   /* ================================================================ shipping */

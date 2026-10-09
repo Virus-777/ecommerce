@@ -6,6 +6,7 @@
 import { AppError } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
+import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
 import type * as common from '../../../spec/common.js';
 import type * as settings from '../../../spec/settings.js';
 import type {
@@ -22,7 +23,7 @@ import type {
   ShippingResponsibility,
 } from '../../../spec/returns.js';
 import { categoryExceptionMachine, policyVersionMachine } from '../domain/state-machines.js';
-import { actorFrom, actorText, isEmail, isFault, nextVersion, OFFICIAL_TERMS_ID, reasonGroupOf, responsibilityFor, shortDate, shortensWindow, termsSummary, type WindowFacts } from '../domain/rules.js';
+import { actorFrom, actorText, isEmail, isFault, nextVersion, reasonGroupOf, responsibilityFor, shortDate, shortensWindow, termsSummary, type WindowFacts } from '../domain/rules.js';
 import type { CategoryExceptionRec, ReturnsRepository, TermsRec } from '../ports.js';
 import { invalid, invalidField, notFound, SYSTEM, type Baseline, type By, type Core } from './core.js';
 
@@ -77,7 +78,7 @@ export class Policies {
     const responsibilities = this.responsibilities(baseline.responsibilities, sellerId, terms);
     const free = !sellerId || responsibilities.find((r) => r.reasonGroup === 'change_of_mind')?.paidBy !== 'customer';
     return {
-      sellerId: sellerId ?? OFFICIAL_TERMS_ID,
+      sellerId: sellerId ?? OFFICIAL_STORE_ID,
       categoryId: categoryId ?? null,
       windowDays,
       changeOfMindAllowed,

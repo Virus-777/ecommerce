@@ -171,6 +171,8 @@ export type CaseSort = 'next_deadline' | 'newest' | 'priority' | 'updated';
 export interface SupportRepository {
   /** Runs fn in one transaction (nested calls join the outer one) */
   transaction<T>(fn: (tx: SupportRepository) => Promise<T>): Promise<T>;
+  /** Claims an event key in the module inbox (inside a transaction: commits with its effects); false once claimed */
+  claim(key: string): Promise<boolean>;
 
   /* generic table access (jsonb is mapped at this boundary); case_categories is keyed by key */
   get<T extends Exclude<Table, 'case_items'>>(table: T, id: string, o?: { forUpdate?: boolean }): Promise<Recs[T] | undefined>;

@@ -114,7 +114,7 @@ export class Exceptions {
     if (o.publish !== false) {
       this.core.publish(
         'shipping.shipment.exception',
-        { exceptionId: id, kind: o.kind, orderId: row.order_id, groupId: row.group_id, shipmentId: row.shipment_id, sellerId: row.seller_id, orderItemIds: o.itemIds, dueAt: row.due_at.toISOString(), customerAction: CUSTOMER_ACTION[o.kind] },
+        { exceptionId: id, kind: o.kind, orderId: row.order_id, ...(await this.core.recipientOf(row.order_id)), groupId: row.group_id, shipmentId: row.shipment_id, sellerId: row.seller_id, orderItemIds: o.itemIds, dueAt: row.due_at.toISOString(), customerAction: CUSTOMER_ACTION[o.kind] },
         o.by,
       );
     }

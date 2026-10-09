@@ -414,14 +414,18 @@ export class Views {
     return out;
   }
 
-  checklist(agg: Agg, checksByCategory: Record<string, unknown>): InspectionChecklist | null {
+  checklist(agg: Agg, checksByCategory: Record<string, unknown>, categories: Record<string, string | null> = agg.ret.terms_snapshot.meta.categories ?? {}): InspectionChecklist | null {
     if (!is(['received', 'awaiting_remedy', 'completed'], agg.ret.status)) return null;
     const items: InspectionChecklist['items'] = agg.items.map((i, n) => ({ key: `contents.${n + 1}`, kind: 'contents', label: `${i.title}${Object.keys(i.options ?? {}).length ? ` (${Object.values(i.options).join(', ')})` : ''} × ${i.quantity}`, expected: i.sku, required: true }));
     items.push({ key: 'condition.packaging', kind: 'condition', label: 'Original packaging and accessories', expected: null, required: false });
     items.push({ key: 'condition.match', kind: 'condition', label: 'Item matches the order (model and variant)', expected: null, required: true });
-    // category checks are keyed by category id; returns has no category for an order item (spec gap), so only "*" applies
-    const extra = checksByCategory['*'];
-    if (Array.isArray(extra)) extra.forEach((label, n) => typeof label === 'string' && items.push({ key: `functional.${n + 1}`, kind: /clean|hygien/i.test(label) ? 'hygiene' : 'functional', label, expected: null, required: false }));
+    // category checks are keyed by the order items' category at purchase; "*" applies to every return
+    const labels = new Set<string>();
+    for (const key of ['*', ...agg.items.map((i) => categories[i.order_item_id]).filter((c): c is string => !!c)]) {
+      const extra = checksByCategory[key];
+      if (Array.isArray(extra)) for (const label of extra) if (typeof label === 'string') labels.add(label);
+    }
+    [...labels].forEach((label, n) => items.push({ key: `functional.${n + 1}`, kind: /clean|hygien/i.test(label) ? 'hygiene' : 'functional', label, expected: null, required: false }));
     return { expectedContents: agg.items.map((i) => i.title), serialShipped: null, items };
   }
 
@@ -468,13 +472,23 @@ export class Views {
     };
   }
 
+  /** Category of each returned order item at purchase: copied at request time, else read from orders (older returns) */
+  async categoriesOf(agg: Agg): Promise<Record<string, string | null>> {
+    const stored = agg.ret.terms_snapshot.meta.categories;
+    if (stored) return stored;
+    if (!is(['received', 'awaiting_remedy', 'completed'], agg.ret.status)) return {};
+    const orders = this.core.ctx.use('orders');
+    const items = await Promise.all(agg.items.map((i) => this.core.quiet('order item category', () => orders.getOrderItem(i.order_item_id))));
+    return Object.fromEntries(agg.items.map((i, n) => [i.order_item_id, items[n]?.categoryId ?? null]));
+  }
+
   async returnCase(agg: Agg, area: 'seller' | 'admin'): Promise<ReturnCase> {
     const r = agg.ret;
     const refs = await this.refs(this.mediaIdsOf(agg));
     const rr = this.core.refundOf(agg);
     const ids = agg.items.map((i) => i.order_item_id);
     const currency = agg.items[0]?.currency ?? this.core.currency;
-    const [paid, remaining, methodLabel, impact, orders, ownerRef, checks] = await Promise.all([
+    const [paid, remaining, methodLabel, impact, orders, ownerRef, checks, categories] = await Promise.all([
       this.core.quiet('paid amounts', () => this.amounts.paidLines(r.order_id)),
       this.amounts.remaining(r.order_id, ids, false),
       this.amounts.methodLabel(r),
@@ -484,6 +498,7 @@ export class Views {
         : Promise.resolve(undefined),
       r.owner_staff_id ? this.core.soft('access', 'staff ref', (a) => a.getStaffRef(r.owner_staff_id!)) : Promise.resolve(undefined),
       this.core.ctx.settings.get('inspectionChecksByCategory'),
+      this.categoriesOf(agg),
     ]);
     let itemPaid = 0;
     let shippingPaid = 0;
@@ -522,7 +537,7 @@ export class Views {
         .filter((e) => VISIBLE[area].includes(e.visibility))
         .map((e) => this.event(e))
         .reverse(),
-      inspectionChecklist: this.checklist(agg, (checks ?? {}) as Record<string, unknown>),
+      inspectionChecklist: this.checklist(agg, (checks ?? {}) as Record<string, unknown>, categories),
       inspectionDraft: agg.draft ? { inspection: agg.draft.inspection, remedy: agg.draft.remedy, savedBy: agg.draft.saved_by, savedAt: agg.draft.saved_at.toISOString() } : null,
       inspector: r.inspector,
       evidence: agg.evidence.map((e) => this.evidenceView(e, refs)),

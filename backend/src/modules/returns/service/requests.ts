@@ -88,7 +88,14 @@ export class Requests {
   async itemsOf(order: OrderDetail): Promise<ItemCtx[]> {
     const items = order.groups.flatMap((g) => g.items.map((item) => ({ item, group: g })));
     const ids = items.map((x) => x.item.id);
-    const [used, rows, baseline] = await Promise.all([this.core.repo.usedQuantities(ids), this.core.repo.find('return_items', { order_item_id: ids }), this.core.baselineAt(new Date(order.placedAt))]);
+    const placed = new Date(order.placedAt);
+    const categories = [...new Set(items.map((x) => x.item.categoryId).filter((c): c is string => !!c))];
+    const [used, rows, baseline, exceptions] = await Promise.all([
+      this.core.repo.usedQuantities(ids),
+      this.core.repo.find('return_items', { order_item_id: ids }),
+      this.core.baselineAt(placed),
+      Promise.all(categories.map(async (c) => [c, await this.policies.activeException(c, placed)] as const)).then((x) => new Map(x)),
+    ]);
     const open = rows.length ? await this.core.repo.find('returns', { id: [...new Set(rows.map((r) => r.return_id))], status: ACTIVE_STATUSES }, { orderBy: [['requested_at', 'desc']] }) : [];
     const now = this.core.now();
     return items.map(({ item, group }) => {
@@ -106,7 +113,8 @@ export class Requests {
           openReturn,
         },
         now,
-        baseline.windowDays,
+        // damaged, defective or wrong items: the category exception's fault window when the item's category has one
+        (item.categoryId ? exceptions.get(item.categoryId)?.fault_returns_window_days : null) ?? baseline.windowDays,
         this.core.tz,
       );
       return { item, group, verdict, openReturn };
@@ -178,7 +186,10 @@ export class Requests {
     const placed = new Date(order.placedAt);
     const sellerId = group.seller.ownerType === 'seller' ? (group.seller.id ?? null) : null;
     const baseline = await this.core.baselineAt(placed);
-    const terms = await this.policies.resolveTerms(sellerId, null, null, { baseline, at: placed, terms: sellerId ? await this.core.sellerTerms(sellerId, placed) : null });
+    // the category of the item with the shortest window decides the group's category exception
+    const strictest = [...items].sort((a, b) => a.returnTerms.windowDays - b.returnTerms.windowDays)[0];
+    const categoryId = strictest?.categoryId ?? null;
+    const terms = await this.policies.resolveTerms(sellerId, categoryId, null, { baseline, at: placed, terms: sellerId ? await this.core.sellerTerms(sellerId, placed) : null });
     const windows = items.map((i) => i.returnTerms.windowDays);
     const windowDays = windows.length ? Math.min(...windows) : terms.windowDays;
     const changeOfMindAllowed = windowDays > 0;
@@ -187,7 +198,7 @@ export class Requests {
       windowDays,
       changeOfMindAllowed,
       summary: items[0]?.returnTerms.summary || terms.summary,
-      source: windowDays < baseline.windowDays ? 'category_exception' : terms.source,
+      source: terms.source === 'category_exception' || (!categoryId && windowDays < baseline.windowDays) ? 'category_exception' : terms.source,
     };
   }
 
@@ -360,6 +371,7 @@ export class Requests {
         images: Object.fromEntries(g.lines.map((l) => [l.ctx.item.id, l.ctx.item.image?.url ?? l.ctx.item.product.imageUrl ?? null])),
         stockItems: Object.fromEntries(g.lines.map((l) => [l.ctx.item.id, l.ctx.item.stockItemId])),
         offers: Object.fromEntries(g.lines.map((l) => [l.ctx.item.id, l.ctx.item.offer.offerId])),
+        categories: Object.fromEntries(g.lines.map((l) => [l.ctx.item.id, l.ctx.item.categoryId ?? null])),
       };
       const official = g.group.seller.ownerType === 'official';
       prepared.push({

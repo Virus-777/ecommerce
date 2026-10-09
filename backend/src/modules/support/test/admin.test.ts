@@ -5,6 +5,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
+import type { ReturnsPublicApi } from '../../../spec/returns.js';
 import { DAY, harness, idem, reportProblem, sellerOrder, tokens, USD, type Harness } from './helpers.js';
 
 let h: Harness;
@@ -16,6 +17,7 @@ afterAll(async () => {
 });
 
 const DECIDER = newId();
+const returnsApi = () => h.app.kernel.boot.apis.get('returns') as ReturnsPublicApi;
 const REVIEWER = newId();
 
 async function disputeCase(o: { price?: number } = {}) {
@@ -153,7 +155,7 @@ describe('decisions, drafts and appeals', () => {
     expect(c.remedies[0]).toMatchObject({ kind: 'refund', amount: USD(6000), chargedTo: 'seller', status: 'pending_approval' });
     expect(c.remedies[0].refundRequestId).toBeTruthy();
     const ev = h.named('support.case.decided').find((e) => e.caseId === d.caseId);
-    expect(ev).toMatchObject({ ref: d.ref, outcome: 'customer_favored', orderId: d.order.id, sellerId: d.sellerId, final: false });
+    expect(ev).toMatchObject({ ref: d.ref, outcome: 'customer_favored', orderId: d.order.id, customerId: d.customerId, contactEmail: 'sam@example.com', sellerId: d.sellerId, final: false });
     expect(ev.remedies[0]).toMatchObject({ kind: 'refund', status: 'pending_approval' });
     expect(h.audits.find((a) => a.action === 'support.case.decide' && a.target.id === d.caseId)).toMatchObject({ category: 'financial' });
     const store = await h.call('GET', `/api/store/support/cases/${d.caseId}`, tokens.customer(d.customerId));
@@ -183,12 +185,38 @@ describe('decisions, drafts and appeals', () => {
     expect(c.decision).toMatchObject({ outcome: 'seller_favored', final: true });
     expect(c.appeal).toMatchObject({ status: 'overturned', reviewer: { id: REVIEWER } });
     expect(c.remedies[0].status).toBe('cancelled');
+    // the earlier decision's refund request (still under review) is cancelled in returns
+    const refunds = await returnsApi().listRefundRequestsForCase(d.caseId);
+    expect(refunds.map((r) => r.status)).toEqual(['cancelled']);
+    const detail = await h.call('GET', `/api/admin/support/cases/${d.caseId}`, tokens.staff());
+    expect(detail.body.history.find((e: { kind?: string; label: string }) => /Cancelled refund request/.test(e.label))).toBeTruthy();
     expect(h.named('support.case.appeal_decided').find((e) => e.caseId === d.caseId)).toEqual({ caseId: d.caseId, overturned: true });
     expect(h.named('support.case.decided').filter((e) => e.caseId === d.caseId).at(-1)).toMatchObject({ final: true, appealDeadline: null });
     const appealAgain = await h.call('POST', `/api/store/support/cases/${d.caseId}/appeal`, tokens.customer(d.customerId), { reason: 'No' });
     expect(appealAgain.status).toBe(409);
     const resolved = await h.call('POST', `/api/admin/support/cases/${d.caseId}/resolve`, tokens.staff(), { summary: 'Closed after appeal' });
     expect(resolved.status).toBe(200);
+  });
+
+  it('an overturn keeps refunds whose money is already moving and reports them on the case', async () => {
+    const x = await disputeCase({ price: 5000 });
+    const decided = await h.call('POST', `/api/admin/support/cases/${x.caseId}/decide`, tokens.staff(undefined, DECIDER), { outcome: 'customer_favored', remedies: [{ kind: 'refund' }], reason: 'Damaged in transit', notifyParties: true }, idem());
+    expect(decided.status, JSON.stringify(decided.body)).toBe(200);
+    const refundRequestId = decided.body.case.remedies[0].refundRequestId as string;
+    const approved = await h.call('POST', `/api/admin/returns/refunds/${refundRequestId}/approve`, tokens.staff(), {}, idem());
+    expect(approved.status, JSON.stringify(approved.body)).toBe(200);
+    expect(approved.body.status).toBe('processing');
+    expect((await h.call('POST', `/api/seller/support/cases/${x.caseId}/appeal`, tokens.seller(x.sellerId), { reason: 'Not our fault' })).status).toBe(200);
+    const res = await h.call('POST', `/api/admin/support/cases/${x.caseId}/appeal/decide`, tokens.staff(undefined, REVIEWER), { overturn: true, reason: 'The carrier is at fault', remedies: [] }, idem());
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    // the refund is not cancelled and its remedy stays in progress
+    expect((await returnsApi().listRefundRequestsForCase(x.caseId)).map((r) => r.status)).toEqual(['processing']);
+    expect(res.body.case.remedies[0]).toMatchObject({ kind: 'refund', status: 'in_progress' });
+    const detail = await h.call('GET', `/api/admin/support/cases/${x.caseId}`, tokens.staff());
+    const note = detail.body.history.find((e: { label: string }) => /could not be cancelled/.test(e.label));
+    expect(note).toBeTruthy();
+    expect(note.detail).toContain(approved.body.ref);
+    expect(h.audits.filter((a) => a.action === 'support.appeal.decide' && a.target.id === x.caseId).at(-1)!.after).toMatchObject({ refundsCancelled: [], refundsNotCancellable: [{ ref: approved.body.ref, status: 'processing' }] });
   });
 
   it('an appeal after the deadline is refused (APPEAL_WINDOW_CLOSED)', async () => {

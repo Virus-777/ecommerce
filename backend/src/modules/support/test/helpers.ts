@@ -15,6 +15,7 @@
  *     resolveRecipients → h.lead as the lead of every role.
  *   media: attach records the usage (ids in h.missingFiles → NOT_FOUND), refs answers a URL per id.
  *   finance.previewRefundImpact (returns' refund view), audit.record and notifications.notify recorded.
+ *   wallet (only with harness({ wallet: true })): grantGoodwill answers a grant pending approval (h.calls.goodwill).
  */
 import type { FastifyInstance } from 'fastify';
 import { AppError } from '../../../kernel/errors/index.js';
@@ -25,6 +26,7 @@ import type * as catalog from '../../../spec/catalog.js';
 import type * as offers from '../../../spec/offers.js';
 import type { OrderDetail, OrderGroupInput, OrderItemInput, OrdersPublicApi } from '../../../spec/orders.js';
 import type * as payments from '../../../spec/payments.js';
+import type * as wallet from '../../../spec/wallet.js';
 import { auth, buildTestApp, callers, movingClock, tokenClock } from '../../../testing/app.js';
 import type { SupportService } from '../service.js';
 
@@ -61,14 +63,14 @@ export interface Harness {
   members: Record<string, access.StaffRef[]>;
   lead: string;
   missingFiles: Set<string>;
-  calls: { refunds: payments.StartRefundInput[]; approvals: access.RequestApprovalInput[]; attached: { assetId: string; kind: string; refId: string; owner: string }[] };
+  calls: { refunds: payments.StartRefundInput[]; approvals: access.RequestApprovalInput[]; attached: { assetId: string; kind: string; refId: string; owner: string }[]; goodwill: wallet.GoodwillGrant[] };
   call(method: string, url: string, token: string, body?: unknown, headers?: Record<string, string>): Promise<{ status: number; body: any }>;
   gql(area: 'store' | 'seller' | 'admin', token: string, query: string, variables?: Record<string, unknown>): Promise<any>;
   publish(source: string, name: string, payload: unknown): Promise<void>;
   named(name: string): any[];
 }
 
-export async function harness(): Promise<Harness> {
+export async function harness(o: { wallet?: boolean } = {}): Promise<Harness> {
   const clock = movingClock();
   tokenClock.now = () => clock.now();
   tokenClock.ttlSeconds = 90 * 86_400;
@@ -84,13 +86,13 @@ export async function harness(): Promise<Harness> {
     members: {} as Harness['members'],
     lead: newId(),
     missingFiles: new Set<string>(),
-    calls: { refunds: [], approvals: [], attached: [] } as Harness['calls'],
+    calls: { refunds: [], approvals: [], attached: [], goodwill: [] } as Harness['calls'],
   };
   const refunded = new Map<string, number>();
   const refundsByKey = new Map<string, payments.Refund>();
   let ordersApi: OrdersPublicApi;
   const app = await buildTestApp({
-    only: ['support', 'orders', 'returns', 'settings', 'customers', 'identity', 'media', 'audit', 'notifications', 'access', 'finance'],
+    only: ['support', 'orders', 'returns', 'settings', 'customers', 'identity', 'media', 'audit', 'notifications', 'access', 'finance', ...(o.wallet ? ['wallet'] : [])],
     clock,
     config: { rateLimits: false, launchPhase: 4 },
     apiStubs: {
@@ -167,6 +169,17 @@ export async function harness(): Promise<Harness> {
         membersOfRole: async (role) => h.members[role] ?? [],
         resolveRecipients: async (roleKey) => ({ roleKey, leadAccountId: h.lead, accountIds: [h.lead], ccAccountIds: [], viaBackup: false, escalationRoleKey: 'business_owner' }),
       },
+      ...(o.wallet
+        ? {
+            wallet: {
+              grantGoodwill: async (input: wallet.GoodwillInput, actor: Harness['calls']['goodwill'][number]['requestedBy']) => {
+                const grant: wallet.GoodwillGrant = { id: newId(), customerId: input.customerId, amount: input.amount, reason: input.reason, reasonCode: input.reasonCode, chargedTo: input.chargedTo ?? 'platform', sellerId: input.sellerId ?? null, state: 'pending_approval', requestedBy: actor, createdAt: clock.now().toISOString() };
+                h.calls.goodwill.push(grant);
+                return grant;
+              },
+            },
+          }
+        : {}),
       finance: {
         previewRefundImpact: async (_ids, refund) => ({ sellerEarningsChange: USD(-refund.amount), feeReturned: USD(Math.round(refund.amount / 10)), afterPayout: false, note: 'Deducted from the next payout' }),
       },
