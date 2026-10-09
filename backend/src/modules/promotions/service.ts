@@ -1,211 +1,194 @@
-import { notImplemented } from '../../kernel/errors/index.js';
+import { AppError } from '../../kernel/errors/index.js';
 import type { EventPayload } from '../../kernel/events/index.js';
-import type { ModuleContext } from '../../kernel/module-system/index.js';
 import type * as common from '../../spec/common.js';
 import type * as identity from '../../spec/identity.js';
-import type { PromotionsPublicApi, Redemption, OfferPromotion, PromoBanner, CouponCard, DealProduct, FlashSaleBlock, DealsPage, AccountCoupons, PublicCampaign, CartEvaluationInput, CartEvaluation, RedemptionReservation, FundingSplit, RefundShare } from '../../spec/promotions.js';
-import type { PromotionsRepository } from './ports.js';
+import type { AccountCoupons, CartEvaluation, CartEvaluationInput, CouponCard, DealProduct, DealsPage, FlashSaleBlock, FundingSplit, OfferPromotion, PromoBanner, PromotionsPublicApi, PublicCampaign, Redemption, RedemptionReservation, RefundShare } from '../../spec/promotions.js';
+import { CampaignsPart } from './service/campaigns.js';
+import { CheckoutPart } from './service/checkout.js';
+import { Core, type PromotionsServiceDeps } from './service/core.js';
+import { OpsPart } from './service/ops.js';
+import { ParticipationPart } from './service/participation.js';
+import { SellerDiscountsPart } from './service/seller-discounts.js';
+import { StorefrontPart } from './service/storefront.js';
 
-export interface PromotionsServiceDeps {
-  repo: PromotionsRepository;
-  ctx: ModuleContext<'promotions'>;
-}
+export type { PromotionsServiceDeps };
 
 /**
  * Promotions use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
- * Each method maps to a publicApi function, a consumed event or a job in docs/api/spec/modules/promotions.json.
+ * The work is split by area (service/*.ts); this class is the module's public API, its event consumers and jobs.
  */
 export class PromotionsService implements PromotionsPublicApi {
-  constructor(protected readonly deps: PromotionsServiceDeps) {}
+  readonly core: Core;
+  readonly campaigns: CampaignsPart;
+  readonly participation: ParticipationPart;
+  readonly sellerDiscounts: SellerDiscountsPart;
+  readonly storefront: StorefrontPart;
+  readonly checkout: CheckoutPart;
+  readonly ops: OpsPart;
+
+  constructor(deps: PromotionsServiceDeps) {
+    this.core = new Core(deps);
+    this.campaigns = new CampaignsPart(this.core);
+    this.participation = new ParticipationPart(this.core);
+    this.sellerDiscounts = new SellerDiscountsPart(this.core);
+    this.storefront = new StorefrontPart(this.core);
+    this.checkout = new CheckoutPart(this.core);
+    this.ops = new OpsPart(this.core);
+    this.core.parts = { campaigns: this.campaigns, participation: this.participation, sellerDiscounts: this.sellerDiscounts, storefront: this.storefront, checkout: this.checkout, ops: this.ops };
+  }
 
   /* ---------------- public API (in-process) */
 
-  /** Current markdown or flash price, was price, badges, purchase limit and countdown per offer. Used for product cards, the purchase box and cart lines so prices match everywhere (plan ch. 15: consistent across product page, cart, checkout and confirmation). */
-  async priceOffers(offerIds: string[], ctx: { customerId?: string, at?: string }): Promise<OfferPromotion[]> {
-    throw notImplemented("promotions.priceOffers");
+  priceOffers(offerIds: string[], ctx: { customerId?: string; at?: string }): Promise<OfferPromotion[]> {
+    return this.storefront.priceOffers(offerIds, ctx);
   }
 
-  /** Runs eligibility, stacking, limits and budgets for a cart or checkout quote. Returns per-line discounts with the funding split, free-shipping packages, applied codes with the items they cover and rejected codes with a reason the customer can read. Pure read: nothing is reserved. */
-  async evaluateCart(input: CartEvaluationInput): Promise<CartEvaluation> {
-    throw notImplemented("promotions.evaluateCart");
+  evaluateCart(input: CartEvaluationInput): Promise<CartEvaluation> {
+    return this.checkout.evaluateCart(input);
   }
 
-  /** Holds budget, usage counts and flash deal stock for a quote while payment runs. Fails with BUDGET_EXHAUSTED, USAGE_LIMIT_REACHED or DEAL_SOLD_OUT so checkout can show the revised total before the customer commits (plan ch. 6). */
-  async reserveRedemption(evaluationId: string, idempotencyKey: string): Promise<RedemptionReservation> {
-    throw notImplemented("promotions.reserveRedemption");
+  reserveRedemption(evaluationId: string, idempotencyKey: string): Promise<RedemptionReservation> {
+    return this.checkout.reserve(evaluationId, idempotencyKey);
   }
 
-  /** Binds a reservation to the placed order (line id → order item id). Also triggered by orders.order.placed. */
-  async commitRedemption(reservationId: string, orderId: string, orderItemIds: Record<string, string>): Promise<Redemption[]> {
-    throw notImplemented("promotions.commitRedemption");
+  commitRedemption(reservationId: string, orderId: string, orderItemIds: Record<string, string>): Promise<Redemption[]> {
+    return this.checkout.commit(reservationId, orderId, orderItemIds);
   }
 
-  /** Releases held budget, usage and deal stock when payment fails or the quote expires. */
-  async releaseRedemption(reservationId: string): Promise<void> {
-    throw notImplemented("promotions.releaseRedemption");
+  releaseRedemption(reservationId: string): Promise<void> {
+    return this.checkout.release(reservationId);
   }
 
-  /** Discount allocations of one order item with platform and seller parts. Finance charges commission on the price after the seller-funded part only and credits the platform-funded part to seller proceeds. */
-  async fundingSplitFor(orderItemId: string): Promise<FundingSplit> {
-    throw notImplemented("promotions.fundingSplitFor");
+  fundingSplitFor(orderItemId: string): Promise<FundingSplit> {
+    return this.checkout.fundingSplitFor(orderItemId);
   }
 
-  /** Coupon share to deduct when refunding part of an order (coupons are split across items by value). Used to cap refunds at the remaining refundable amount. */
-  async refundShare(orderItemId: string, quantity: number): Promise<RefundShare> {
-    throw notImplemented("promotions.refundShare");
+  refundShare(orderItemId: string, quantity: number): Promise<RefundShare> {
+    return this.checkout.refundShare(orderItemId, quantity);
   }
 
-  /** Name, period, terms and status for campaign pages, banners and ads. */
-  async getPublicCampaign(campaignId: string): Promise<PublicCampaign | null> {
-    throw notImplemented("promotions.getPublicCampaign");
+  getPublicCampaign(campaignId: string): Promise<PublicCampaign | null> {
+    return this.storefront.getPublicCampaign(campaignId);
   }
 
-  /** False when ended, paused, out of budget or sold out. Advertising stops linked ads; content hides teasers. */
-  async isCampaignActive(campaignId: string): Promise<{ active: boolean, reason?: string }> {
-    throw notImplemented("promotions.isCampaignActive");
+  isCampaignActive(campaignId: string): Promise<{ active: boolean; reason?: string }> {
+    return this.storefront.isCampaignActive(campaignId);
   }
 
-  /** Flash deals for the homepage Deals section. */
-  async liveDeals(opts: { limit: number }): Promise<FlashSaleBlock[]> {
-    throw notImplemented("promotions.liveDeals");
+  liveDeals(opts: { limit: number }): Promise<FlashSaleBlock[]> {
+    return this.storefront.liveDeals(opts);
   }
 
-  /** Honest 'was' price: delegates to offers.lowestPrice(offerId, referencePriceDays, campaignStart or now) and returns null when offers has no history for the window. No price history is kept in promotions. */
-  async referencePrice(offerId: string): Promise<common.Money | null> {
-    throw notImplemented("promotions.referencePrice");
+  referencePrice(offerId: string): Promise<common.Money | null> {
+    return this.storefront.referencePrice(offerId);
   }
 
-  /** Deals page data in one call: tab counts, live flash sales, clippable coupons (clipped state for the customer), the first clearance batch, upcoming events with reminder state, the combination rules and serverTime for countdowns. Same data as GET /api/store/promotions/deals. */
-  async getDealsPage(ctx: { customerId?: string, at?: string }): Promise<DealsPage> {
-    throw notImplemented("promotions.getDealsPage");
+  getDealsPage(ctx: { customerId?: string; at?: string }): Promise<DealsPage> {
+    return this.storefront.getDealsPage(ctx);
   }
 
-  /** Clearance products page by page (GET /deals/clearance). */
-  async listClearance(paging: common.PageInput): Promise<common.Page<DealProduct>> {
-    throw notImplemented("promotions.listClearance");
+  listClearance(paging: common.PageInput): Promise<common.Page<DealProduct>> {
+    return this.storefront.listClearance(paging);
   }
 
-  /** One flash sale with live claimed meters, deal stock and countdown (GET /flash-sales/{campaignId}). */
-  async getFlashSale(campaignId: string): Promise<FlashSaleBlock | null> {
-    throw notImplemented("promotions.getFlashSale");
+  getFlashSale(campaignId: string): Promise<FlashSaleBlock | null> {
+    return this.storefront.getFlashSale(campaignId);
   }
 
-  /** Clippable coupons that cover each product, with the customer's clipped state (the coupons part of GET /products/{productId}). Batched per request. */
-  async couponsForProduct(productIds: string[], ctx: { customerId?: string }): Promise<Record<string, CouponCard[]>> {
-    throw notImplemented("promotions.couponsForProduct");
+  couponsForProduct(productIds: string[], ctx: { customerId?: string }): Promise<Record<string, CouponCard[]>> {
+    return this.storefront.couponsForProduct(productIds, ctx);
   }
 
-  /** My coupons: available and clipped, used and expired, with the rules line (GET /coupons). */
-  async couponsForCustomer(customerId: string): Promise<AccountCoupons> {
-    throw notImplemented("promotions.couponsForCustomer");
+  couponsForCustomer(customerId: string): Promise<AccountCoupons> {
+    return this.storefront.couponsForCustomer(customerId);
   }
 
-  /** Live seller-funded promotions for the storefront (automatic or by code), soonest ending first. Same eligibility and period rules as priceOffers; platform campaigns are not included. */
-  async activeSellerPromotions(sellerIds: string[], ctx: { customerId?: string, at?: string }): Promise<Record<string, PromoBanner[]>> {
-    throw notImplemented("promotions.activeSellerPromotions");
+  activeSellerPromotions(sellerIds: string[], ctx: { customerId?: string; at?: string }): Promise<Record<string, PromoBanner[]>> {
+    return this.storefront.activeSellerPromotions(sellerIds, ctx);
   }
 
-  /** Export rows for reports dataset promotions.admin.campaigns (campaign results) */
-  async exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[], nextCursor?: string }> {
-    throw notImplemented("promotions.exportRows");
+  async exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[]; nextCursor?: string }> {
+    if (principal.kind !== 'staff') throw new AppError('FORBIDDEN', 'Campaign results are for staff');
+    return this.campaigns.exportRows(dataset, filters, cursor);
   }
 
   /* ---------------- events consumed */
 
-  /** orders.order.placed: Commit reservations referenced by the order (fallback when commitRedemption was not called) */
-  async onOrderPlacedFromOrders(event: EventPayload<"orders.order.placed">): Promise<void> {
-    throw notImplemented("promotions consumer of orders.order.placed");
+  onOrderPlacedFromOrders(event: EventPayload<'orders.order.placed'>) {
+    return this.checkout.onOrderPlaced(event);
   }
 
-  /** orders.item.cancelled: Reverse the item's allocations; restore usage and deal stock when cancelled before dispatch */
-  async onItemCancelledFromOrders(event: EventPayload<"orders.item.cancelled">): Promise<void> {
-    throw notImplemented("promotions consumer of orders.item.cancelled");
+  onItemCancelledFromOrders(event: EventPayload<'orders.item.cancelled'>) {
+    return this.checkout.onItemCancelled(event);
   }
 
-  /** returns.refund.approved: Partially reverse the item's allocations by the refunded quantity; count the return in campaign results */
-  async onRefundApprovedFromReturns(event: EventPayload<"returns.refund.approved">): Promise<void> {
-    throw notImplemented("promotions consumer of returns.refund.approved");
+  onRefundApprovedFromReturns(event: EventPayload<'returns.refund.approved'>) {
+    return this.checkout.onRefundApproved(event);
   }
 
-  /** payments.payment.failed: Release reservations of the failed quote */
-  async onPaymentFailedFromPayments(event: EventPayload<"payments.payment.failed">): Promise<void> {
-    throw notImplemented("promotions consumer of payments.payment.failed");
+  onPaymentFailedFromPayments(event: EventPayload<'payments.payment.failed'>) {
+    return this.checkout.onPaymentFailed(event);
   }
 
-  /** offers.offer.price_changed: Flag participations whose seller raised the price during the campaign (the was price itself is read from offers.lowestPrice) */
-  async onOfferPriceChangedFromOffers(event: EventPayload<"offers.offer.price_changed">): Promise<void> {
-    throw notImplemented("promotions consumer of offers.offer.price_changed");
+  onOfferPriceChangedFromOffers(event: EventPayload<'offers.offer.price_changed'>) {
+    return this.ops.onOfferPriceChanged(event);
   }
 
-  /** offers.offer.status_changed: Rebuild eligible offers; remove deactivated offers from flash sales */
-  async onOfferStatusChangedFromOffers(event: EventPayload<"offers.offer.status_changed">): Promise<void> {
-    throw notImplemented("promotions consumer of offers.offer.status_changed");
+  onOfferStatusChangedFromOffers(event: EventPayload<'offers.offer.status_changed'>) {
+    return this.ops.onOfferStatusChanged(event);
   }
 
-  /** inventory.stock.changed: Cap remaining flash deal stock at available stock; re-check participation stock rules */
-  async onStockChangedFromInventory(event: EventPayload<"inventory.stock.changed">): Promise<void> {
-    throw notImplemented("promotions consumer of inventory.stock.changed");
+  onStockChangedFromInventory(event: EventPayload<'inventory.stock.changed'>) {
+    return this.ops.onStockChanged(event);
   }
 
-  /** catalog.product.publication_changed: Exclude hidden or suspended products from live campaigns */
-  async onProductPublicationChangedFromCatalog(event: EventPayload<"catalog.product.publication_changed">): Promise<void> {
-    throw notImplemented("promotions consumer of catalog.product.publication_changed");
+  onProductPublicationChangedFromCatalog(event: EventPayload<'catalog.product.publication_changed'>) {
+    return this.ops.onProductPublicationChanged(event);
   }
 
-  /** catalog.product.merged: Retarget campaign targets and coupon product scopes from the duplicate to the kept product (variants mapped through newVariantId / intoVariantId); redemptions already made keep their order snapshots */
-  async onProductMergedFromCatalog(event: EventPayload<"catalog.product.merged">): Promise<void> {
-    throw notImplemented("promotions consumer of catalog.product.merged");
+  onProductMergedFromCatalog(event: EventPayload<'catalog.product.merged'>) {
+    return this.ops.onProductMerged(event);
   }
 
-  /** sellers.seller.restricted: Remove the seller's offers from campaigns where the restriction covers new sales (reason recorded) */
-  async onSellerRestrictedFromSellers(event: EventPayload<"sellers.seller.restricted">): Promise<void> {
-    throw notImplemented("promotions consumer of sellers.seller.restricted");
+  onSellerRestrictedFromSellers(event: EventPayload<'sellers.seller.restricted'>) {
+    return this.ops.onSellerRestricted(event);
   }
 
-  /** sellers.seller.suspended: Remove the seller from all upcoming and live campaigns; pause its own discounts */
-  async onSellerSuspendedFromSellers(event: EventPayload<"sellers.seller.suspended">): Promise<void> {
-    throw notImplemented("promotions consumer of sellers.seller.suspended");
+  onSellerSuspendedFromSellers(event: EventPayload<'sellers.seller.suspended'>) {
+    return this.ops.onSellerSuspended(event);
   }
 
-  /** access.approval.decided: Complete or reject a pending funding confirmation */
-  async onApprovalDecidedFromAccess(event: EventPayload<"access.approval.decided">): Promise<void> {
-    throw notImplemented("promotions consumer of access.approval.decided");
+  onApprovalDecidedFromAccess(event: EventPayload<'access.approval.decided'>) {
+    return this.campaigns.onApprovalDecided(event);
   }
 
   /* ---------------- jobs */
 
-  /** Job promotions.start-due (every 1 min): Scheduled campaigns whose startsAt has passed → live; publish promotions.campaign.started */
-  async startDue(): Promise<void> {
-    throw notImplemented("job promotions.start-due");
+  startDue() {
+    return this.ops.startDue();
   }
 
-  /** Job promotions.end-due (every 1 min): Live or paused campaigns past endsAt → ended (period_over); expire flash items */
-  async endDue(): Promise<void> {
-    throw notImplemented("job promotions.end-due");
+  endDue() {
+    return this.ops.endDue();
   }
 
-  /** Job promotions.release-expired-reservations (every 1 min): Release reservations past expiresAt and return deal stock and usage */
-  async releaseExpiredReservations(): Promise<void> {
-    throw notImplemented("job promotions.release-expired-reservations");
+  releaseExpiredReservations() {
+    return this.checkout.releaseExpired();
   }
 
-  /** Job promotions.invitation-deadlines (hourly): Remind sellers 24 h before respondBy; expire unanswered invitations */
-  async invitationDeadlines(): Promise<void> {
-    throw notImplemented("job promotions.invitation-deadlines");
+  invitationDeadlines() {
+    return this.participation.deadlines();
   }
 
-  /** Job promotions.refresh-eligible-offers (every 15 min): Rebuild eligible_offers for scheduled and live campaigns (stock, rating, dispatch, price-increase rules) */
-  async refreshEligibleOffers(): Promise<void> {
-    throw notImplemented("job promotions.refresh-eligible-offers");
+  refreshEligibleOffers() {
+    return this.ops.refreshEligible();
   }
 
-  /** Job promotions.results-rollup (every 15 min): Roll up campaign_results_daily from redemptions, orders and returns */
-  async resultsRollup(): Promise<void> {
-    throw notImplemented("job promotions.results-rollup");
+  resultsRollup() {
+    return this.ops.resultsRollup();
   }
 
-  /** Job promotions.event-reminders (every 5 min): Send reminders for events that start within the next 15 minutes (promotional preference permitting) */
-  async eventReminders(): Promise<void> {
-    throw notImplemented("job promotions.event-reminders");
+  eventReminders() {
+    return this.storefront.sendReminders();
   }
 }

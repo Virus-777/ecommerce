@@ -1,4 +1,4 @@
-import { notImplemented, routes } from '../../../kernel/http/index.js';
+import { routes } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/promotions.js';
 import type { PromotionsService } from '../service.js';
 
@@ -6,62 +6,81 @@ import type { PromotionsService } from '../service.js';
  * Admin API: /api/admin/promotions/…  (docs/api/modules/promotions.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const adminRoutes = (service: PromotionsService) =>
-  routes(endpoints, 'admin', {
+export const adminRoutes = (service: PromotionsService) => {
+  const c = service.campaigns;
+  const p = service.participation;
+  return routes(endpoints, 'admin', {
     /** GET /dashboard: KPIs, tab counts, daily discount cost and campaign results */
-    promotionsDashboard: notImplemented,
+    promotionsDashboard: async ({ query }) => c.dashboard(query),
     /** GET /campaigns: All campaigns and seller discounts */
-    listCampaigns: notImplemented,
+    listCampaigns: async ({ query, page }) => c.list(query, page),
     /** POST /campaigns: Create a campaign draft */
-    createCampaign: notImplemented,
+    createCampaign: async ({ body, actor, requestId, principal }) => c.createCampaign(body, { actor, requestId, principal }),
     /** GET /campaigns/{id}: Campaign with eligible count, funding review, readiness and participation summary */
-    getCampaign: notImplemented,
+    getCampaign: async ({ params }) => c.view(params.id),
     /** PATCH /campaigns/{id}: Edit a campaign */
-    updateCampaign: notImplemented,
+    updateCampaign: async ({ params, body, actor, requestId, principal }) => c.update(params.id, body, { actor, requestId, principal }),
     /** GET /campaigns/{id}/eligible-offers: Offers the scope resolves to, with exclusion and ineligibility reasons */
-    listEligibleOffers: notImplemented,
+    listEligibleOffers: async ({ params, query, page }) => c.listEligibleOffers(params.id, query, page),
     /** POST /campaigns/{id}/price-preview: Product card, cart and checkout preview for a sample offer */
-    previewCampaignPrice: notImplemented,
+    previewCampaignPrice: async ({ params, body }) => c.previewPrice(params.id, body.offerId),
     /** POST /campaigns/{id}/invitations: Invite sellers to join (consent required before their offers are included) */
-    inviteSellers: notImplemented,
+    inviteSellers: async ({ params, body, actor, requestId, principal }) => p.invite(params.id, body, { actor, requestId, principal }),
     /** GET /campaigns/{id}/participations: Sellers invited, with consent state and earnings per $100 sale */
-    listParticipations: notImplemented,
+    listParticipations: async ({ params, query, page }) => p.listForCampaign(params.id, query.state, page),
     /** POST /participations/{id}/decide-withdrawal: Approve or reject a seller's request to leave a live campaign */
-    decideWithdrawal: notImplemented,
+    decideWithdrawal: async ({ params, body, actor, requestId, principal }) => p.decideWithdrawal(params.id, body, { actor, requestId, principal }),
     /** POST /participations/{id}/remove: Remove a seller or some of its offers from a campaign */
-    removeParticipation: notImplemented,
+    removeParticipation: async ({ params, body, actor, requestId, principal }) => p.remove(params.id, body, { actor, requestId, principal }),
     /** PUT /campaigns/{id}/flash-items: Set flash sale offers, deal prices, deal stock and purchase limits */
-    putFlashItems: notImplemented,
+    putFlashItems: async ({ params, body, actor, requestId, principal }) => c.putFlashItems(params.id, body.items, body.reason, { actor, requestId, principal }),
     /** GET /campaigns/{id}/flash-items: Flash items with claimed and sold-out state */
-    listFlashItems: notImplemented,
+    listFlashItems: async ({ params }) => c.flashItems((await service.core.campaign(params.id)).model),
     /** POST /campaigns/{id}/submit: Send to Finance for funding confirmation */
-    submitCampaign: notImplemented,
+    submitCampaign: async ({ params, body, actor, requestId, principal }) => c.submit(params.id, body.note, { actor, requestId, principal }),
     /** POST /campaigns/{id}/withdraw: Take a campaign back from Finance review to draft */
-    withdrawCampaign: notImplemented,
+    withdrawCampaign: async ({ params, actor, requestId, principal }) => c.withdraw(params.id, { actor, requestId, principal }),
     /** POST /campaigns/{id}/confirm-funding: Finance confirms funding */
-    confirmFunding: notImplemented,
+    confirmFunding: async ({ params, body, actor, requestId, principal }) => c.confirmFunding(params.id, body, { actor, requestId, principal }),
     /** POST /campaigns/{id}/request-changes: Finance sends the campaign back with a reason */
-    requestCampaignChanges: notImplemented,
+    requestCampaignChanges: async ({ params, body, actor, requestId, principal }) => c.requestChanges(params.id, body.reason, { actor, requestId, principal }),
     /** POST /campaigns/{id}/schedule: Schedule an approved campaign */
-    scheduleCampaign: notImplemented,
+    scheduleCampaign: async ({ params, actor, requestId, principal }) => c.schedule(params.id, { actor, requestId, principal }),
     /** POST /campaigns/{id}/pause: Pause a scheduled or live campaign */
-    pauseCampaign: notImplemented,
+    pauseCampaign: async ({ params, body, actor, requestId, principal }) => {
+      const by = { actor, requestId, principal };
+      await c.pause(params.id, body.reason, by);
+      return c.audited(params.id, 'promotions.campaign.pause', 'Paused campaign', by, body.reason);
+    },
     /** POST /campaigns/{id}/resume: Resume a paused campaign */
-    resumeCampaign: notImplemented,
+    resumeCampaign: async ({ params, body, actor, requestId, principal }) => {
+      const by = { actor, requestId, principal };
+      await c.resume(params.id, body.reason ?? null, by);
+      return c.audited(params.id, 'promotions.campaign.resume', 'Resumed campaign', by, body.reason);
+    },
     /** POST /campaigns/{id}/end: End a live or paused campaign early */
-    endCampaign: notImplemented,
+    endCampaign: async ({ params, body, actor, requestId, principal }) => {
+      const by = { actor, requestId, principal };
+      await c.end(params.id, 'ended_early', by, body.reason);
+      return c.audited(params.id, 'promotions.campaign.end', 'Ended campaign early', by, body.reason);
+    },
     /** POST /campaigns/{id}/cancel: Cancel a campaign that has not started */
-    cancelCampaign: notImplemented,
+    cancelCampaign: async ({ params, body, actor, requestId, principal }) => {
+      const by = { actor, requestId, principal };
+      await c.cancel(params.id, body.reason, by);
+      return c.audited(params.id, 'promotions.campaign.cancel', 'Cancelled campaign', by, body.reason);
+    },
     /** POST /campaigns/{id}/codes: Generate unique single-use codes (e.g. for support or partners) */
-    generateCodes: notImplemented,
+    generateCodes: async ({ params, body, actor, requestId, principal }) => c.generateCodes(params.id, body, { actor, requestId, principal }),
     /** GET /campaigns/{id}/codes: Codes with redemptions */
-    listCodes: notImplemented,
+    listCodes: async ({ params, query, page }) => c.listCodes(params.id, query, page),
     /** POST /codes/{id}/deactivate: Deactivate a leaked or misused code */
-    deactivateCode: notImplemented,
+    deactivateCode: async ({ params, body, actor, requestId, principal }) => c.deactivateCode(params.id, body.reason, { actor, requestId, principal }),
     /** GET /campaigns/{id}/redemptions: Redemptions with funding split and reversals */
-    listRedemptions: notImplemented,
+    listRedemptions: async ({ params, query, page }) => c.listRedemptions(params.id, query.state, page),
     /** GET /campaigns/{id}/results: Sales, discount cost by funder, margin impact, redemptions, returns and seller participation */
-    getCampaignResults: notImplemented,
+    getCampaignResults: async ({ params }) => c.results(params.id),
     /** GET /campaigns/{id}/history: Submission, decisions, status changes and edits with reasons */
-    getCampaignHistory: notImplemented,
+    getCampaignHistory: async ({ params, page }) => c.history(params.id, page),
   });
+};
