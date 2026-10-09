@@ -102,7 +102,7 @@
       "resolution": { "type": "json?", "desc": "{ outcome: fixed_at_source|resolved|dismissed, note, by }" }
     },
     "RaiseInput": {
-      "queueKey": "string", "kind": "string", "title": "string", "summary": "text?",
+      "queueKey": "string", "kind": { "type": "enum(overdue_dispatch|missing_tracking|delivery_exception|seller_cannot_fulfill|low_stock|receiving|pick_pack|return_inspection|return_decision|approval_waiting|case_past_target|case_escalated|payout_failed|payment_check|payment_mismatch|chargeback|hold_review|product_review|application_waiting|launch_review|appeal_due|restriction_review|restriction_evidence|seller_performance|storefront_review|trust_report|trust_recommendation|data_request|seller_reply_overdue|unexpected_return_parcel|return_parcel_overdue|manual_task)", "desc": "One of the work item kinds" }, "title": "string", "summary": "text?",
       "subject": "WorkSubject", "relatedSubjects": "WorkSubject[]?", "sellerId": "uuid?", "sellerName": "string?", "customerId": "uuid?",
       "dueAt": { "type": "datetime?", "desc": "Default: now + the queue's defaultDeadlineMinutes" },
       "priority": "enum(low|normal|high|urgent)?", "amount": "Money?",
@@ -358,7 +358,7 @@
     { "key": "dayEndReviewTime", "type": "time", "default": "17:30", "desc": "Day-end review due time, market time" },
     { "key": "dayEndSharedRoles", "type": "json", "default": ["order_manager", "shipping_manager", "inventory_manager", "warehouse_manager", "finance_manager", "customer_support_manager", "seller_manager", "advertising_manager"], "desc": "Who sees and receives the day-end review" },
     { "key": "itemRetentionDays", "type": "duration", "default": 400, "desc": "Resolved items kept online", "unit": "days", "min": 30 },
-    { "key": "seedQueues", "type": "json", "default": ["shipping.overdue_dispatch", "shipping.missing_tracking", "shipping.delivery_exceptions", "orders.seller_cannot_fulfill", "warehouse.pick_pack", "warehouse.return_parcels", "purchasing.receiving", "inventory.low_stock", "returns.inspection", "returns.decisions", "finance.daily_checks", "finance.payment_checks", "finance.chargebacks", "finance.payout_failures", "support.cases_waiting", "catalog.product_review", "sellers.applications", "sellers.launch_reviews", "sellers.restrictions", "sellers.appeals", "sellers.performance", "trust.reports", "access.approvals", "customers.data_requests"], "desc": "Queues created at install with placeholder leads that must be set before launch", "editable": false }
+    { "key": "seedQueues", "type": "json", "default": ["shipping.overdue_dispatch", "shipping.missing_tracking", "shipping.delivery_exceptions", "orders.seller_cannot_fulfill", "warehouse.pick_pack", "warehouse.return_parcels", "purchasing.receiving", "inventory.low_stock", "inventory.reservations", "returns.inspection", "returns.decisions", "finance.daily_checks", "finance.payment_checks", "finance.chargebacks", "finance.payout_failures", "support.cases_waiting", "catalog.product_review", "sellers.applications", "sellers.launch_reviews", "sellers.restrictions", "sellers.appeals", "sellers.performance", "trust.reports", "access.approvals", "customers.data_requests"], "desc": "Queues created at install with placeholder leads that must be set before launch", "editable": false }
   ],
   "integrations": [],
   "errorCodes": {

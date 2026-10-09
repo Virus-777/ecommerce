@@ -336,7 +336,7 @@ export class PerformancePart extends Part {
         if (perSnap.length >= 3 && perSnap.every((s) => s.get(key)?.status === 'action_needed')) {
           await this.core.raise({
             queueKey: 'sellers.performance',
-            kind: 'restriction_proposal',
+            kind: 'seller_performance',
             title: `Consider restricting ${seller.store_name}: ${m.label}`,
             summary: `${m.detail}; action needed on three daily checks in a row. Restrictions are never applied automatically.`,
             subject: { type: 'seller', id: seller.id, ref: seller.ref, label: seller.store_name },

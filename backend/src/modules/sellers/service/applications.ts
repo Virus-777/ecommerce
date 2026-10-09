@@ -1203,7 +1203,7 @@ export class ApplicationsPart extends Part {
     for (const a of await this.repo.find('applications', { state: ['submitted', 'under_review'], decision_target_at: { op: '<', value: now } }, { limit: 500 })) {
       await this.core.raise({
         queueKey: 'sellers.applications',
-        kind: 'application_overdue',
+        kind: 'application_waiting',
         title: `Application ${a.ref} is past its decision target`,
         summary: this.storeNameOf(a),
         subject: { type: 'application', id: a.id, ref: a.ref, label: this.storeNameOf(a) },
@@ -1211,7 +1211,8 @@ export class ApplicationsPart extends Part {
         sellerName: this.storeNameOf(a),
         priority: 'high',
         dueAt: a.decision_target_at?.toISOString() ?? null,
-        dedupeKey: `application_overdue:${a.id}`,
+        // the item workqueues opened on sellers.application.submitted, raised to high priority
+        dedupeKey: `application:${a.id}`,
       });
     }
   }

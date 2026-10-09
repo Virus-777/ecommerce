@@ -290,7 +290,8 @@ export const WorkItem: z.ZodType<WorkItem> = z.object({
 
 export interface RaiseInput {
   queueKey: string;
-  kind: string;
+  /** One of the work item kinds */
+  kind: "overdue_dispatch" | "missing_tracking" | "delivery_exception" | "seller_cannot_fulfill" | "low_stock" | "receiving" | "pick_pack" | "return_inspection" | "return_decision" | "approval_waiting" | "case_past_target" | "case_escalated" | "payout_failed" | "payment_check" | "payment_mismatch" | "chargeback" | "hold_review" | "product_review" | "application_waiting" | "launch_review" | "appeal_due" | "restriction_review" | "restriction_evidence" | "seller_performance" | "storefront_review" | "trust_report" | "trust_recommendation" | "data_request" | "seller_reply_overdue" | "unexpected_return_parcel" | "return_parcel_overdue" | "manual_task";
   title: string;
   summary?: string | null;
   subject: WorkSubject;
@@ -310,7 +311,7 @@ export interface RaiseInput {
 
 export const RaiseInput: z.ZodType<RaiseInput> = z.object({
   queueKey: z.string(),
-  kind: z.string(),
+  kind: z.enum(["overdue_dispatch", "missing_tracking", "delivery_exception", "seller_cannot_fulfill", "low_stock", "receiving", "pick_pack", "return_inspection", "return_decision", "approval_waiting", "case_past_target", "case_escalated", "payout_failed", "payment_check", "payment_mismatch", "chargeback", "hold_review", "product_review", "application_waiting", "launch_review", "appeal_due", "restriction_review", "restriction_evidence", "seller_performance", "storefront_review", "trust_report", "trust_recommendation", "data_request", "seller_reply_overdue", "unexpected_return_parcel", "return_parcel_overdue", "manual_task"]).describe("One of the work item kinds"),
   title: z.string(),
   summary: z.string().nullish(),
   get subject() {
@@ -2023,6 +2024,7 @@ export const spec = defineModuleSpec({
         "warehouse.return_parcels",
         "purchasing.receiving",
         "inventory.low_stock",
+        "inventory.reservations",
         "returns.inspection",
         "returns.decisions",
         "finance.daily_checks",

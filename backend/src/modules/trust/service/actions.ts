@@ -703,7 +703,7 @@ export class Actions {
       await this.core.soft('workqueues', 'raise', (w) =>
         w.raise({
           queueKey: TEAM_QUEUES[team],
-          kind: 'trust_enforcement_unconfirmed',
+          kind: 'trust_recommendation',
           title: `Confirm enforcement ${e.ref}: ${humanize(e.action)}`,
           summary: `${failure}. Apply it in your screen, or record the reference on the recommendation.`,
           subject: { type: 'trust_report', id: e.report_id, ref: done.ref, label: humanize(e.action) },

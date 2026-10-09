@@ -187,7 +187,7 @@ describe('recommendations', () => {
     await kit.job('trust.execution-check');
     const failed = (await kit.call('GET', `${ADMIN}/enforcements?executionState=failed`, staff())).body.items.find((x: any) => x.id === ok.body.enforcement.id);
     expect(failed).toMatchObject({ failure: expect.stringContaining('No confirmation from Catalog') });
-    expect(kit.work.at(-1)).toMatchObject({ queueKey: 'catalog.product_review', kind: 'trust_enforcement_unconfirmed', dedupeKey: `trust_enforcement:${ok.body.enforcement.id}:unconfirmed` });
+    expect(kit.work.at(-1)).toMatchObject({ queueKey: 'catalog.product_review', kind: 'trust_recommendation', dedupeKey: `trust_enforcement:${ok.body.enforcement.id}:unconfirmed` });
     // the seller sees the hold on its offer, with the appeal route
     const mine = await kit.call('GET', '/api/seller/trust/enforcements', (await import('./helpers.js')).seller(l.sellerId));
     expect(mine.body).toEqual([]);

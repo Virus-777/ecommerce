@@ -43,6 +43,7 @@ import type {
   TransferLine,
 } from '../../spec/inventory.js';
 import type * as reports from '../../spec/reports.js';
+import type * as workqueues from '../../spec/workqueues.js';
 import {
   adjustmentMachine,
   discrepancyMachine,
@@ -2419,7 +2420,7 @@ export class InventoryService implements InventoryPublicApi {
   }
 
   /** Raises a work item when work queues run (they may not be built yet: logged, never fails the job) */
-  async #raise(input: { queueKey: string; kind: string; title: string; summary: string; subject: { type: string; id: string; ref?: string | null }; priority: 'low' | 'normal' | 'high' | 'urgent'; dedupeKey: string }) {
+  async #raise(input: { queueKey: string; kind: workqueues.RaiseInput['kind']; title: string; summary: string; subject: { type: string; id: string; ref?: string | null }; priority: 'low' | 'normal' | 'high' | 'urgent'; dedupeKey: string }) {
     const wq = this.ctx.tryUse('workqueues');
     if (!wq) return;
     try {

@@ -217,7 +217,7 @@ describe('deadline sweep and escalation', () => {
 
   it('a refreshed later deadline goes back to on time', async () => {
     const subjectId = newId();
-    const base = { queueKey: 'warehouse.pick_pack', kind: 'pick_pack', title: 'Pick', subject: { type: 'order' as const, id: subjectId }, dedupeKey: `pick_pack:${subjectId}`, dueAt: new Date(t.clock.now().getTime() - H).toISOString() };
+    const base = { queueKey: 'warehouse.pick_pack', kind: 'pick_pack' as const, title: 'Pick', subject: { type: 'order' as const, id: subjectId }, dedupeKey: `pick_pack:${subjectId}`, dueAt: new Date(t.clock.now().getTime() - H).toISOString() };
     const first = await t.service.raise(base);
     await sweep();
     expect((await t.service.core.repo.getItem(first.id))!.deadline_state).toBe('overdue');

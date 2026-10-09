@@ -435,7 +435,7 @@ describe('public API', () => {
   it('raise is idempotent on dedupeKey and refreshes title, deadline and amount; listForSubject, openCounts, sellerTaskCounts', async () => {
     const sellerId = newId();
     const subjectId = newId();
-    const base = { queueKey: 'warehouse.pick_pack', kind: 'pick_pack', title: 'Pick MK-1', subject: { type: 'order' as const, id: subjectId, ref: 'MK-1' }, sellerId, dedupeKey: `pick_pack:${subjectId}`, amount: money(1000), visibleToSeller: true };
+    const base = { queueKey: 'warehouse.pick_pack', kind: 'pick_pack' as const, title: 'Pick MK-1', subject: { type: 'order' as const, id: subjectId, ref: 'MK-1' }, sellerId, dedupeKey: `pick_pack:${subjectId}`, amount: money(1000), visibleToSeller: true };
     const first = await t.service.raise(base);
     const due = new Date(Date.now() + 5 * 3_600_000).toISOString();
     const second = await t.service.raise({ ...base, title: 'Pick MK-1 (2 lines)', dueAt: due, amount: money(2000) });
@@ -453,7 +453,7 @@ describe('public API', () => {
 
   it('raise refuses unknown queues and kinds', async () => {
     await expect(t.service.raise({ queueKey: 'nope.queue', kind: 'pick_pack', title: 'x', subject: { type: 'other', id: 'x' }, dedupeKey: 'x' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
-    await expect(t.service.raise({ queueKey: 'warehouse.pick_pack', kind: 'teleport', title: 'x', subject: { type: 'other', id: 'x' }, dedupeKey: 'x' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    await expect(t.service.raise({ queueKey: 'warehouse.pick_pack', kind: 'teleport' as never, title: 'x', subject: { type: 'other', id: 'x' }, dedupeKey: 'x' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
   });
 
   it('registers the export dataset with reports at boot', async () => {

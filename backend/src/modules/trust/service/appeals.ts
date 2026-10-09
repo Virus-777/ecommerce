@@ -170,7 +170,7 @@ export class Appeals {
       await this.core.soft('workqueues', 'raise', (w) =>
         w.raise({
           queueKey: TEAM_QUEUES[team],
-          kind: 'trust_appeal_change',
+          kind: 'trust_recommendation',
           title: `Apply appeal ${after.ref}: ${humanize(after.state)} (${enforcement.ref})`,
           summary: body.explanation.trim(),
           subject: { type: 'appeal', id: after.id, ref: after.ref, label: after.decision_appealed },
@@ -248,14 +248,16 @@ export class Appeals {
       await this.core.soft('workqueues', 'raise', (w) =>
         w.raise({
           queueKey: 'trust.reports',
-          kind: overdue ? 'trust_appeal_overdue' : 'trust_appeal_due',
+          // appeal_due belongs to sellers.appeals; trust appeals stay in trust.reports
+          kind: 'trust_report',
           title: `Appeal ${a.ref} ${overdue ? 'is past its decision target' : 'is due within a day'}`,
           summary: a.decision_appealed,
           subject: { type: 'appeal', id: a.id, ref: a.ref, label: a.appellant_name },
           ...(a.appellant_kind === 'seller' ? { sellerId: a.appellant_id } : {}),
           dueAt: a.decide_by.toISOString(),
           priority: overdue ? 'high' : 'normal',
-          dedupeKey: `trust_appeal:${a.id}:${overdue ? 'overdue' : 'due'}`,
+          // one item per appeal, refreshed to high priority once overdue
+          dedupeKey: `trust_appeal:${a.id}`,
           links: [{ label: 'Open appeal', screen: 'admin/trust', id: a.id }],
         }),
       );

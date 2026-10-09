@@ -275,7 +275,7 @@ export class MembersPart extends Part {
         await this.core.timeline(this.repo, m.seller_id, { kind: 'owner_account_closed', title: 'The owner’s Marketly account was closed', visibility: 'staff' });
         await this.core.raise({
           queueKey: 'sellers.performance',
-          kind: 'owner_account_closed',
+          kind: 'seller_performance',
           title: `Owner account closed: ${seller?.store_name ?? m.seller_id}`,
           summary: 'The seller has no active owner. Contact the business about an ownership change or closure.',
           subject: { type: 'seller', id: m.seller_id, ref: seller?.ref ?? null, label: seller?.store_name ?? null },

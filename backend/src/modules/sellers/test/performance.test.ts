@@ -23,6 +23,7 @@ async function orders(kit: Kit, sellerId: string, n: number) {
       contactEmail: 'a@example.com',
       total: money,
       groups: [{ groupId, ownerType: 'seller', sellerId, fulfilledBy: 'seller', dispatchBy: kit.clock.now().toISOString(), itemIds: [newId(), newId()], total: money }],
+      items: [],
       acceptedAt: kit.clock.now().toISOString(),
     });
   }
@@ -90,7 +91,7 @@ describe('performance', () => {
     await kit.svc.autoWarnings();
     await kit.app.kernel.events.drain();
     expect(kit.of('sellers.warning.issued').some((w) => w.sellerId === s.sellerId && w.title === 'Dispatch reliability below target')).toBe(true);
-    expect(kit.work.some((w) => w.kind === 'restriction_proposal' && w.dedupeKey.includes(s.sellerId))).toBe(true);
+    expect(kit.work.some((w) => w.kind === 'seller_performance' && w.dedupeKey.startsWith(`restriction_proposal:${s.sellerId}`))).toBe(true);
     expect((await kit.svc.core.repo.find('restrictions', { seller_id: s.sellerId })).length).toBe(restrictionsBefore);
     await kit.svc.autoWarnings(); // the open warning is not repeated
     expect(kit.of('sellers.warning.issued').filter((w) => w.sellerId === s.sellerId)).toHaveLength(1);
@@ -125,14 +126,14 @@ describe('jobs', () => {
     kit.clock.advance(10 * 86_400_000);
     await kit.svc.applicationDeadlines();
     kit.clock.advance(-10 * 86_400_000);
-    expect(kit.work.some((w) => w.dedupeKey === `application_overdue:${s.id}`)).toBe(true);
+    expect(kit.work.some((w) => w.kind === 'application_waiting' && w.dedupeKey === `application:${s.id}`)).toBe(true);
 
     const a = await approvedSeller(kit);
     const r = (await kit.call('POST', `${ADMIN}/sellers/${a.sellerId}/restrictions`, staff(), restrictionInput())).body;
     const ap = (await kit.call('POST', `${SELLER}/restrictions/${r.id}/appeals`, a.sellerToken, { argument: 'Please' })).body;
     kit.clock.advance(8 * 86_400_000);
     await kit.svc.appealDeadlines();
-    expect(kit.work.some((w) => w.queueKey === 'sellers.appeals' && w.dedupeKey.startsWith(`appeal_deadline:${ap.id}`))).toBe(true);
+    expect(kit.work.some((w) => w.queueKey === 'sellers.appeals' && w.kind === 'appeal_due' && w.dedupeKey === `appeal:${ap.id}`)).toBe(true);
 
     kit.clock.advance(100 * 86_400_000);
     const detachedBefore = kit.callsOf('media.detach').length;
