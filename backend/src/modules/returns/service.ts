@@ -1,226 +1,219 @@
-import { notImplemented } from '../../kernel/errors/index.js';
 import type { EventPayload } from '../../kernel/events/index.js';
-import type { ModuleContext } from '../../kernel/module-system/index.js';
 import type * as common from '../../spec/common.js';
 import type * as identity from '../../spec/identity.js';
-import type { ReturnsPublicApi, EffectiveTerms, RefundBreakdown, ReturnDetail, ReturnSummary, CustomerReturnsOverview, ReturnEvidence, RefundRequest, ReturnCase, SellerReturnCounts, AdminReturnRow } from '../../spec/returns.js';
-import type { ReturnsRepository } from './ports.js';
+import type { AdminReturnRow, CustomerReturnsOverview, EffectiveTerms, RefundBreakdown, RefundRequest, ReturnCase, ReturnDetail, ReturnEvidence, ReturnsPublicApi, ReturnSummary, SellerReturnCounts } from '../../spec/returns.js';
+import { Automation } from './service/automation.js';
+import { Core, type ReturnsServiceDeps } from './service/core.js';
+import { Decisions } from './service/decisions.js';
+import { Handling } from './service/handling.js';
+import { Policies } from './service/policies.js';
+import { Reads } from './service/reads.js';
+import { Refunds } from './service/refunds.js';
+import { Requests } from './service/requests.js';
+import { Views } from './service/views.js';
 
-export interface ReturnsServiceDeps {
-  repo: ReturnsRepository;
-  ctx: ModuleContext<'returns'>;
-}
+export type { ReturnsServiceDeps };
 
 /**
  * Returns use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
- * Each method maps to a publicApi function, a consumed event or a job in docs/api/spec/modules/returns.json.
+ * The work is split by area (service/*.ts); this class is the module's public API, its event consumers and jobs.
  */
 export class ReturnsService implements ReturnsPublicApi {
-  constructor(protected readonly deps: ReturnsServiceDeps) {}
+  readonly core: Core;
+  readonly views: Views;
+  readonly policies: Policies;
+  readonly refunds: Refunds;
+  readonly handling: Handling;
+  readonly decisions: Decisions;
+  readonly requests: Requests;
+  readonly reads: Reads;
+  readonly automation: Automation;
+
+  constructor(deps: ReturnsServiceDeps) {
+    this.core = new Core(deps);
+    this.views = new Views(this.core);
+    this.policies = new Policies(this.core);
+    this.refunds = new Refunds(this.core, this.views);
+    this.handling = new Handling(this.core, this.views, this.refunds);
+    this.decisions = new Decisions(this.core, this.refunds, this.handling);
+    this.requests = new Requests(this.core, this.views, this.policies, this.decisions, this.handling);
+    this.reads = new Reads(this.core, this.views);
+    this.automation = new Automation(this.core, this.views, this.requests, this.decisions, this.handling, this.refunds);
+  }
 
   /* ---------------- public API (in-process) */
 
-  /** sellerId null = Official Store (ownerType official). Effective return terms for an offer: baseline, category exception and seller terms combined. Shown before purchase and frozen on the order item. */
-  async resolveTerms(sellerId: string | null, categoryId: string | null, condition: string | null): Promise<EffectiveTerms> {
-    throw notImplemented("returns.resolveTerms");
+  resolveTerms(sellerId: string | null, categoryId: string | null, condition: string | null): Promise<EffectiveTerms> {
+    return this.policies.resolveTerms(sellerId, categoryId, condition);
   }
 
-  /** After-sales column of the order detail (return and refund progress per item) */
-  async returnStateForItems(orderItemIds: string[]): Promise<{ orderItemId: string, returnId: string | null, ref: string | null, status: string | null, refundStatus: string | null }[]> {
-    throw notImplemented("returns.returnStateForItems");
+  returnStateForItems(orderItemIds: string[]): Promise<{ orderItemId: string; returnId: string | null; ref: string | null; status: string | null; refundStatus: string | null }[]> {
+    return this.reads.returnStateForItems(orderItemIds);
   }
 
-  /** Creates a refund request in the Finance approval queue for remedies decided outside a return (dispute decisions). Approved does not mean sent. */
-  async requestRefund(input: { source: 'case' | 'exception', caseId?: string, orderId: string, orderItemIds: string[], breakdown: RefundBreakdown, fundedBy: string, reason: string, proposedBy: common.Actor }): Promise<RefundRequest> {
-    throw notImplemented("returns.requestRefund");
+  requestRefund(input: { source: 'case' | 'exception'; caseId?: string; orderId: string; orderItemIds: string[]; breakdown: RefundBreakdown; fundedBy: string; reason: string; proposedBy: common.Actor }): Promise<RefundRequest> {
+    return this.refunds.requestRefund(input);
   }
 
-  /** Called by warehouse when an Official Store return is scanned at the dock */
+  /** Warehouse scanned an Official Store return at the dock (a second scan changes nothing) */
   async recordWarehouseReceipt(returnId: string, receivedAt: string, receivedBy: common.Actor, trackingNumber: string | null): Promise<ReturnDetail> {
-    throw notImplemented("returns.recordWarehouseReceipt");
+    const agg = await this.core.visible(returnId, { area: 'admin' });
+    await this.handling.receive(returnId, { receivedAt, trackingNumber, rescanOk: true }, { actor: receivedBy }, agg);
+    return (await this.views.details([(await this.core.load(returnId))!], 'admin'))[0]!;
   }
 
-  /** Inputs to seller performance and reports */
-  async sellerReturnStats(sellerId: string, range: common.DateRange): Promise<{ requests: number, returnRatePct: number, respondedOnTimePct: number, unresolved: number }> {
-    throw notImplemented("returns.sellerReturnStats");
+  sellerReturnStats(sellerId: string, range: common.DateRange): Promise<{ requests: number; returnRatePct: number; respondedOnTimePct: number; unresolved: number }> {
+    return this.reads.sellerReturnStats(sellerId, range);
   }
 
-  /** Open returns of a customer, newest first (open = not closed or cancelled), for the account overview tile and list. */
-  async listOpenForCustomer(customerId: string, limit: number): Promise<{ items: ReturnSummary[], total: number }> {
-    throw notImplemented("returns.listOpenForCustomer");
+  listOpenForCustomer(customerId: string, limit: number): Promise<{ items: ReturnSummary[]; total: number }> {
+    return this.reads.listOpenForCustomer(customerId, limit);
   }
 
-  /** Return detail for the order's customer or guest order session (GraphQL store `return`) */
   async getReturnForCustomer(customerId: string | null, guestSessionId: string | null, ref: string): Promise<ReturnDetail | null> {
-    throw notImplemented("returns.getReturnForCustomer");
+    const agg = await this.reads.byRefFor(ref, { area: 'store', customerId, guestSessionId });
+    return agg ? (await this.views.details([agg], 'store'))[0]! : null;
   }
 
-  /** A customer's returns, newest first, return status and refund status side by side (store list, admin customer 360) */
-  async listForCustomer(customerId: string, filter: { state?: 'open' | 'completed' | 'all' }, page: common.PageInput): Promise<common.Page<ReturnSummary>> {
-    throw notImplemented("returns.listForCustomer");
+  listForCustomer(customerId: string, filter: { state?: 'open' | 'completed' | 'all' }, page: common.PageInput): Promise<common.Page<ReturnSummary>> {
+    return this.reads.listMine({ customerId }, { state: filter.state ?? 'all' }, this.reads.page(page));
   }
 
-  /** Open returns, refunds on the way and refunded this year for the account overview */
-  async customerOverview(customerId: string): Promise<CustomerReturnsOverview> {
-    throw notImplemented("returns.customerOverview");
+  customerOverview(customerId: string): Promise<CustomerReturnsOverview> {
+    return this.reads.customerOverview(customerId);
   }
 
-  /** A return of this seller with policy, payment, deadlines, shipment, inspection and earnings impact (GraphQL seller `sellerReturn`) */
   async getReturnForSeller(sellerId: string, ref: string): Promise<ReturnCase | null> {
-    throw notImplemented("returns.getReturnForSeller");
+    const agg = await this.reads.byRefFor(ref, { area: 'seller', sellerId });
+    return agg ? this.views.returnCase(agg, 'seller') : null;
   }
 
-  /** Any return with owner, exception record, refund request and action history (staff) */
   async getReturnAdmin(ref: string): Promise<ReturnCase | null> {
-    throw notImplemented("returns.getReturnAdmin");
+    const agg = await this.reads.byRef(ref);
+    return agg ? this.views.returnCase(agg, 'admin') : null;
   }
 
-  /** Returns on one order, newest first. Seller viewer: only that seller's returns; store viewer: customer fields only. Batched per order (Order.returns). */
-  async listForOrder(orderId: string, viewer: { area: 'store' | 'seller' | 'admin', customerId?: string, sellerId?: string }): Promise<ReturnCase[]> {
-    throw notImplemented("returns.listForOrder");
+  listForOrder(orderId: string, viewer: { area: 'store' | 'seller' | 'admin'; customerId?: string; sellerId?: string }): Promise<ReturnCase[]> {
+    return this.reads.listForOrder(orderId, viewer);
   }
 
-  /** Return eligibility now and the latest return per order item, batched (OrderItem.returnEligibility) */
-  async eligibilityForItems(orderItemIds: string[]): Promise<{ orderItemId: string, eligible: boolean, ineligibleReason: string | null, message: string, quantityPurchased: number, quantityReturnable: number, returnBy: string | null, latestReturn: { returnId: string, ref: string, status: string, statusLabel: string, refundStatus: string | null } | null }[]> {
-    throw notImplemented("returns.eligibilityForItems");
+  eligibilityForItems(orderItemIds: string[]): Promise<{ orderItemId: string; eligible: boolean; ineligibleReason: string | null; message: string; quantityPurchased: number; quantityReturnable: number; returnBy: string | null; latestReturn: { returnId: string; ref: string; status: string; statusLabel: string; refundStatus: string | null } | null }[]> {
+    return this.reads.eligibilityForItems(orderItemIds);
   }
 
-  /** Returns queue tiles for the seller dashboard: overdue, awaiting response, to inspect, disputes needing evidence */
-  async sellerQueueCounts(sellerId: string): Promise<SellerReturnCounts> {
-    throw notImplemented("returns.sellerQueueCounts");
+  sellerQueueCounts(sellerId: string): Promise<SellerReturnCounts> {
+    return this.reads.sellerCounts(sellerId);
   }
 
-  /** Evidence the seller (or staff) attached to a return before escalation; support copies it into the case it opens for this return */
-  async listEvidence(returnId: string): Promise<ReturnEvidence[]> {
-    throw notImplemented("returns.listEvidence");
+  listEvidence(returnId: string): Promise<ReturnEvidence[]> {
+    return this.reads.listEvidence(returnId);
   }
 
-  /** A seller's returns for the admin seller 360 */
-  async listForSeller(sellerId: string, filter: { state?: 'open' | 'completed' | 'all', q?: string }, page: common.PageInput): Promise<common.Page<AdminReturnRow>> {
-    throw notImplemented("returns.listForSeller");
+  listForSeller(sellerId: string, filter: { state?: 'open' | 'completed' | 'all'; q?: string }, page: common.PageInput): Promise<common.Page<AdminReturnRow>> {
+    return this.reads.listForSeller(sellerId, filter, page);
   }
 
-  /** Refund approval queue for Finance */
-  async listRefundRequests(filter: { status?: string, source?: string }, page: common.PageInput): Promise<common.Page<RefundRequest>> {
-    throw notImplemented("returns.listRefundRequests");
+  listRefundRequests(filter: { status?: string; source?: string }, page: common.PageInput): Promise<common.Page<RefundRequest>> {
+    return this.reads.listRefunds(filter, this.reads.page(page));
   }
 
-  /** One refund request with breakdown, funding, earnings impact and approval */
-  async getRefundRequest(ref: string): Promise<RefundRequest | null> {
-    throw notImplemented("returns.getRefundRequest");
+  getRefundRequest(ref: string): Promise<RefundRequest | null> {
+    return this.reads.refundByRef(ref);
   }
 
-  /** Refund requests of an order from returns, case decisions and exceptions (admin order 360) */
-  async listRefundRequestsForOrder(orderId: string): Promise<RefundRequest[]> {
-    throw notImplemented("returns.listRefundRequestsForOrder");
+  listRefundRequestsForOrder(orderId: string): Promise<RefundRequest[]> {
+    return this.reads.refundsWhere({ orderId });
   }
 
-  /** Refund requests created by a case decision, with Finance approval state (admin dispute view) */
-  async listRefundRequestsForCase(caseId: string): Promise<RefundRequest[]> {
-    throw notImplemented("returns.listRefundRequestsForCase");
+  listRefundRequestsForCase(caseId: string): Promise<RefundRequest[]> {
+    return this.reads.refundsWhere({ caseId });
   }
 
-  /** Storefront returns section: the seller's standard terms for new items (resolveTerms with no category or condition). Category exceptions and per-offer terms show on the product page and are frozen on the order item. */
-  async sellerReturnTermsFor(sellerIds: string[]): Promise<Record<string, EffectiveTerms>> {
-    throw notImplemented("returns.sellerReturnTermsFor");
+  sellerReturnTermsFor(sellerIds: string[]): Promise<Record<string, EffectiveTerms>> {
+    return this.policies.sellerReturnTermsFor(sellerIds);
   }
 
-  /** Export rows for reports datasets returns.admin.requests, returns.admin.inspections and returns.seller.requests (seller rows scoped to the principal's seller) */
-  async exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[], nextCursor?: string }> {
-    throw notImplemented("returns.exportRows");
+  exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[]; nextCursor?: string }> {
+    return this.reads.exportRows(dataset, filters, principal, cursor);
   }
 
-  /** Open return requests per product (not closed, refunded or rejected). Catalog publication-impact preview. */
-  async countOpenReturnsForProducts(productIds: string[]): Promise<Record<string, number>> {
-    throw notImplemented("returns.countOpenReturnsForProducts");
+  countOpenReturnsForProducts(productIds: string[]): Promise<Record<string, number>> {
+    return this.reads.countOpenReturnsForProducts(productIds);
   }
 
   /* ---------------- events consumed */
 
-  /** orders.item.delivered: Start the return window for the item (deadline = delivery + effective window) */
-  async onItemDeliveredFromOrders(event: EventPayload<"orders.item.delivered">): Promise<void> {
-    throw notImplemented("returns consumer of orders.item.delivered");
+  onItemDeliveredFromOrders(event: EventPayload<'orders.item.delivered'>): Promise<void> {
+    return this.automation.onItemDelivered(event);
   }
 
-  /** orders.item.cancelled: Mark the item not returnable; cancel any requested return for it */
-  async onItemCancelledFromOrders(event: EventPayload<"orders.item.cancelled">): Promise<void> {
-    throw notImplemented("returns consumer of orders.item.cancelled");
+  onItemCancelledFromOrders(event: EventPayload<'orders.item.cancelled'>): Promise<void> {
+    return this.automation.onItemCancelled(event);
   }
 
-  /** shipping.shipment.dispatched: Return label first scan → return shipment in transit; replacement shipment shipped */
-  async onShipmentDispatchedFromShipping(event: EventPayload<"shipping.shipment.dispatched">): Promise<void> {
-    throw notImplemented("returns consumer of shipping.shipment.dispatched");
+  onShipmentDispatchedFromShipping(event: EventPayload<'shipping.shipment.dispatched'>): Promise<void> {
+    return this.automation.onShipmentDispatched(event);
   }
 
-  /** shipping.shipment.delivered: Return parcel delivered to the destination; replacement delivered (completes the return) */
-  async onShipmentDeliveredFromShipping(event: EventPayload<"shipping.shipment.delivered">): Promise<void> {
-    throw notImplemented("returns consumer of shipping.shipment.delivered");
+  onShipmentDeliveredFromShipping(event: EventPayload<'shipping.shipment.delivered'>): Promise<void> {
+    return this.automation.onShipmentDelivered(event);
   }
 
-  /** shipping.shipment.exception: Flag return or replacement shipment exceptions to the owner */
-  async onShipmentExceptionFromShipping(event: EventPayload<"shipping.shipment.exception">): Promise<void> {
-    throw notImplemented("returns consumer of shipping.shipment.exception");
+  onShipmentExceptionFromShipping(event: EventPayload<'shipping.shipment.exception'>): Promise<void> {
+    return this.automation.onShipmentException(event);
   }
 
-  /** payments.refund.sent: Refund request → sent; completes the return when it is the remedy */
-  async onRefundSentFromPayments(event: EventPayload<"payments.refund.sent">): Promise<void> {
-    throw notImplemented("returns consumer of payments.refund.sent");
+  onRefundSentFromPayments(event: EventPayload<'payments.refund.sent'>): Promise<void> {
+    return this.refunds.onSent(event);
   }
 
-  /** payments.refund.failed: Refund request → failed with the reason; flags the return in the queue */
-  async onRefundFailedFromPayments(event: EventPayload<"payments.refund.failed">): Promise<void> {
-    throw notImplemented("returns consumer of payments.refund.failed");
+  onRefundFailedFromPayments(event: EventPayload<'payments.refund.failed'>): Promise<void> {
+    return this.refunds.onFailed(event);
   }
 
-  /** access.approval.decided: Finish an approval-required refund approval, baseline change or category exception (pending_approval → scheduled or rejected) */
-  async onApprovalDecidedFromAccess(event: EventPayload<"access.approval.decided">): Promise<void> {
-    throw notImplemented("returns consumer of access.approval.decided");
+  /** Refund approvals, baseline versions and category exceptions waiting for access */
+  async onApprovalDecidedFromAccess(event: EventPayload<'access.approval.decided'>): Promise<void> {
+    if (event.module && event.module !== 'returns') return;
+    if (await this.policies.onApprovalDecided(event)) return;
+    if (event.actionKey === 'returns.refunds.approve') await this.refunds.onApprovalDecided(event);
   }
 
-  /** sellers.seller.suspended: Open returns of the seller move to platform handling; existing returns stay accessible */
-  async onSellerSuspendedFromSellers(event: EventPayload<"sellers.seller.suspended">): Promise<void> {
-    throw notImplemented("returns consumer of sellers.seller.suspended");
+  onSellerSuspendedFromSellers(event: EventPayload<'sellers.seller.suspended'>): Promise<void> {
+    return this.automation.onSellerSuspended(event);
   }
 
-  /** sellers.seller.approved: Create version 1 of the seller's return terms from the current baseline (window, remedies, response targets) with returnAddress and returnContact from the application, so return labels and drop-off addresses work from the first order. The seller can change terms later, never below the baseline */
-  async onSellerApprovedFromSellers(event: EventPayload<"sellers.seller.approved">): Promise<void> {
-    throw notImplemented("returns consumer of sellers.seller.approved");
+  onSellerApprovedFromSellers(event: EventPayload<'sellers.seller.approved'>): Promise<void> {
+    return this.policies.onSellerApproved(event);
   }
 
-  /** shipping.shipment.status_changed: For kind = return: update the return shipment tracking step and estimated arrival shown on the return */
-  async onShipmentStatusChangedFromShipping(event: EventPayload<"shipping.shipment.status_changed">): Promise<void> {
-    throw notImplemented("returns consumer of shipping.shipment.status_changed");
+  onShipmentStatusChangedFromShipping(event: EventPayload<'shipping.shipment.status_changed'>): Promise<void> {
+    return this.automation.onShipmentStatusChanged(event);
   }
 
-  /** support.case.decided: Apply a dispute decision that concerns a return (overturn, approve without return, close) */
-  async onCaseDecidedFromSupport(event: EventPayload<"support.case.decided">): Promise<void> {
-    throw notImplemented("returns consumer of support.case.decided");
+  onCaseDecidedFromSupport(event: EventPayload<'support.case.decided'>): Promise<void> {
+    return this.automation.onCaseDecided(event);
   }
 
   /* ---------------- jobs */
 
-  /** Job returns.response-deadlines (every 15 min): Flag seller responses due soon and overdue; after the grace period move the return to platform handling and publish returns.return.escalated (workqueues picks it up) */
-  async responseDeadlines(): Promise<void> {
-    throw notImplemented("job returns.response-deadlines");
+  responseDeadlines(): Promise<void> {
+    return this.automation.responseDeadlines();
   }
 
-  /** Job returns.inspection-deadlines (every 30 min): Flag received returns past the inspection target and refunds past the refund target; escalate seller cases to the platform */
-  async inspectionDeadlines(): Promise<void> {
-    throw notImplemented("job returns.inspection-deadlines");
+  inspectionDeadlines(): Promise<void> {
+    return this.automation.inspectionDeadlines();
   }
 
-  /** Job returns.info-expiry (hourly): Cancel returns whose information request was not answered in time */
-  async infoExpiry(): Promise<void> {
-    throw notImplemented("job returns.info-expiry");
+  infoExpiry(): Promise<void> {
+    return this.automation.infoExpiry();
   }
 
-  /** Job returns.dropoff-expiry (daily 02:00 PT): Cancel approved returns not dropped off by the deadline; void unused labels through shipping */
-  async dropoffExpiry(): Promise<void> {
-    throw notImplemented("job returns.dropoff-expiry");
+  dropoffExpiry(): Promise<void> {
+    return this.automation.dropoffExpiry();
   }
 
-  /** Job returns.policy-activation (every 5 min): Activate scheduled baseline versions and category exceptions at their effective time */
-  async policyActivation(): Promise<void> {
-    throw notImplemented("job returns.policy-activation");
+  policyActivation(): Promise<void> {
+    return this.policies.activateDue();
   }
+
 }
