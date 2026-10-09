@@ -39,8 +39,8 @@ export async function buildTestApp(opts: BuildOptions & { only?: string[] } = {}
   return app;
 }
 
-/** Signs claims with the test dev key (ttl in seconds, default 15 minutes) */
-export const token = (claims: DevClaims, ttlSeconds = 900): string => signAccessToken(signer, claims, { issuer: ISSUER, ttlSeconds });
+/** Signs claims with the test dev key (ttl in seconds, default 15 minutes; `now` for apps on a fixed clock) */
+export const token = (claims: DevClaims, ttlSeconds = 900, now?: Date): string => signAccessToken(signer, claims, { issuer: ISSUER, ttlSeconds, now });
 
 /** A signed-in caller of each kind; `over` replaces claims (e.g. a seller member without permissions). */
 export const callers = {
