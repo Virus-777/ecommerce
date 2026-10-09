@@ -6,7 +6,9 @@
 import type { FastifyBaseLogger } from 'fastify';
 import type { Config } from '../config/index.js';
 import type { Database } from '../db/index.js';
-import { isNotImplemented, notImplemented } from '../errors/index.js';
+import type { Principal } from '../auth/index.js';
+import { isNotImplemented, moduleError, notImplemented } from '../errors/index.js';
+import { moduleInbox } from '../events/inbox.js';
 import { moduleEvents, type EventBus } from '../events/index.js';
 import type { ModuleResolvers } from '../graphql/index.js';
 import type { RouteSet } from '../http/index.js';
@@ -16,7 +18,7 @@ import type { Clock } from '../lib/clock.js';
 import type { RefGenerator } from '../lib/refs.js';
 import { schemaOf } from '../migrations/index.js';
 import type { ModuleSpecDef } from '../spec/define.js';
-import type { ModuleContext, ModuleDefinition } from './index.js';
+import type { ModuleContext, ModuleDefinition, ModuleName } from './index.js';
 import { specOf } from './loader.js';
 
 export interface KernelServices {
@@ -27,6 +29,8 @@ export interface KernelServices {
   events: EventBus;
   jobs: JobScheduler;
   refs: RefGenerator;
+  /** Permission check for an in-process principal (set by the app once the auth chain exists) */
+  can(principal: Principal | null | undefined, permission: string): Promise<boolean>;
 }
 
 export interface BootResult {
@@ -36,6 +40,8 @@ export interface BootResult {
   /** Public APIs provided by enabled modules */
   apis: Map<string, object>;
   warnings: string[];
+  /** Runs every module's afterBoot hooks; the app calls it once the APIs are final (tests install apiStubs first) */
+  runAfterBoot(): Promise<void>;
 }
 
 type AnyApi = Record<string, (...args: unknown[]) => unknown>;
@@ -84,9 +90,11 @@ function checkRoutes(spec: ModuleSpecDef, sets: readonly RouteSet[]) {
 
 export async function bootModules(defs: ModuleDefinition[], k: KernelServices): Promise<BootResult> {
   const enabled = new Set(defs.map((d) => d.spec.name));
-  const result: BootResult = { endpoints: [], resolvers: new Map(), webhookVerifiers: new Map(), apis: new Map(), warnings: [] };
+  const result: BootResult = { endpoints: [], resolvers: new Map(), webhookVerifiers: new Map(), apis: new Map(), warnings: [], runAfterBoot: async () => {} };
   const { apis, resolvers, webhookVerifiers, warnings } = result;
   const proxies = new Map<string, object>();
+  const afterBoot: { module: string; fn: () => unknown }[] = [];
+  const modules = defs.map((d) => d.spec.name) as ModuleName[];
   const proxyFor = (target: string, caller: string) => {
     const key = `${caller}>${target}`;
     if (!proxies.has(key)) proxies.set(key, apiProxy(target, caller, apis));
@@ -105,6 +113,7 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
     const ctx: ModuleContext<any> = {
       name,
       spec,
+      modules,
       config: k.config,
       log: k.log.child({ module: name }),
       db: k.database.kysely.withSchema(schemaOf(name)),
@@ -130,6 +139,9 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
         },
       },
       refs: k.refs,
+      inbox: moduleInbox(name),
+      can: (principal, permission) => k.can(principal, permission),
+      error: moduleError(name),
       provide(api: object) {
         if (provided) throw new Error(`${name} called provide() twice`);
         provided = true;
@@ -143,6 +155,7 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
         if (!spec.optionalDeps.includes(dep)) throw new Error(`${name} uses ${dep}, which is not in its spec optionalDeps`);
         return enabled.has(dep) ? (proxyFor(dep, name) as never) : undefined;
       },
+      afterBoot: (fn: () => unknown) => afterBoot.push({ module: name, fn }),
       http: {
         routes: (...s: RouteSet[]) => sets.push(...s),
         webhookVerifier: (v: WebhookVerifier) => webhookVerifiers.set(name, v),
@@ -162,6 +175,16 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
     }
   }
 
+  result.runAfterBoot = async () => {
+    for (const { module, fn } of afterBoot.splice(0)) {
+      try {
+        await fn();
+      } catch (err) {
+        if (!isNotImplemented(err)) throw new Error(`${module}: afterBoot failed: ${(err as Error).message}`, { cause: err });
+        warnings.push(`${module}: afterBoot skipped, a dependency is not built yet (${(err as Error).message})`);
+      }
+    }
+  };
   for (const job of k.jobs.list()) if (!job.handled) warnings.push(`job ${job.name} (${job.module}) has no handler`);
   return result;
 }

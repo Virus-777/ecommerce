@@ -978,6 +978,7 @@ export const endpoints = defineEndpoints({
     path: "/me",
     auth: "staff",
     permission: "workqueues.items.view",
+    scope: "staff",
     summary: "My work queues: stats, queues with lead, backup and escalation, routine, day-end review, saved filters",
     desc: "Queues where the caller's roles own the queue, or the caller is lead or backup. With all=true and workqueues.items.view-all every queue is listed.",
     query: () =>
@@ -995,6 +996,7 @@ export const endpoints = defineEndpoints({
     path: "/queues",
     auth: "staff",
     permission: "workqueues.items.view",
+    scope: "staff",
     summary: "Queue definitions with live counts",
     query: () =>
       z.object({
@@ -1012,6 +1014,7 @@ export const endpoints = defineEndpoints({
     path: "/queues/{key}",
     auth: "staff",
     permission: "workqueues.items.view",
+    scope: "staff",
     summary: "One queue definition with its intake rules",
     params: () =>
       z.object({
@@ -1038,6 +1041,7 @@ export const endpoints = defineEndpoints({
     path: "/queues",
     auth: "staff",
     permission: "workqueues.queues.manage",
+    scope: "staff",
     summary: "Create a queue (lead, backup and escalation route required)",
     body: () => QueueInput,
     response: () => QueueDefinition,
@@ -1053,6 +1057,7 @@ export const endpoints = defineEndpoints({
     path: "/queues/{key}",
     auth: "staff",
     permission: "workqueues.queues.manage",
+    scope: "staff",
     summary: "Change lead, backup, escalation route or deadline",
     desc: "Every queue must keep a named lead, a different backup and an escalation route (plan ch. 2). Open items take the new lead and backup immediately; existing deadlines are kept.",
     params: () =>
@@ -1074,6 +1079,7 @@ export const endpoints = defineEndpoints({
     path: "/intake-rules",
     auth: "staff",
     permission: "workqueues.queues.manage",
+    scope: "staff",
     summary: "Which events open and close items in which queue",
     response: () => z.array(IntakeRule),
     status: 200,
@@ -1086,6 +1092,7 @@ export const endpoints = defineEndpoints({
     path: "/coverage-gaps",
     auth: "staff",
     permission: "workqueues.queues.manage",
+    scope: "staff",
     summary: "Queues without a lead or backup, leads who are away without cover, one backup covering many queues",
     response: () => z.array(CoverageGap),
     status: 200,
@@ -1098,6 +1105,7 @@ export const endpoints = defineEndpoints({
     path: "/items",
     auth: "staff",
     permission: "workqueues.items.view",
+    scope: "staff",
     summary: "Work items with filters (also used by saved filters)",
     query: () =>
       z.object({
@@ -1126,6 +1134,7 @@ export const endpoints = defineEndpoints({
     path: "/items/{id}",
     auth: "staff",
     permission: "workqueues.items.view",
+    scope: "staff",
     summary: "One work item with notes and history",
     params: () =>
       z.object({
@@ -1142,6 +1151,7 @@ export const endpoints = defineEndpoints({
     path: "/items",
     auth: "staff",
     permission: "workqueues.items.work",
+    scope: "staff",
     summary: "Create a task by hand (managers assigning daily tasks)",
     body: () => ManualTaskInput,
     response: () => WorkItem,
@@ -1156,6 +1166,7 @@ export const endpoints = defineEndpoints({
     path: "/items/{id}/assign",
     auth: "staff",
     permission: "workqueues.items.work",
+    scope: "staff",
     summary: "Assign to a person (owner and next action)",
     desc: "Assigning someone else needs workqueues.items.assign-others; the assignee must hold the queue's owner role or be its lead or backup.",
     params: () =>
@@ -1180,6 +1191,7 @@ export const endpoints = defineEndpoints({
     path: "/items/{id}/claim",
     auth: "staff",
     permission: "workqueues.items.work",
+    scope: "staff",
     summary: "Assign to myself and start",
     params: () =>
       z.object({
@@ -1198,6 +1210,7 @@ export const endpoints = defineEndpoints({
     path: "/items/{id}/start",
     auth: "staff",
     permission: "workqueues.items.work",
+    scope: "staff",
     summary: "Mark in progress",
     params: () =>
       z.object({
@@ -1215,6 +1228,7 @@ export const endpoints = defineEndpoints({
     path: "/items/{id}/wait",
     auth: "staff",
     permission: "workqueues.items.work",
+    scope: "staff",
     summary: "Waiting on someone else",
     params: () =>
       z.object({
@@ -1237,6 +1251,7 @@ export const endpoints = defineEndpoints({
     path: "/items/{id}/resume",
     auth: "staff",
     permission: "workqueues.items.work",
+    scope: "staff",
     summary: "Back in progress",
     params: () =>
       z.object({
@@ -1254,6 +1269,7 @@ export const endpoints = defineEndpoints({
     path: "/items/{id}/resolve",
     auth: "staff",
     permission: "workqueues.items.work",
+    scope: "staff",
     summary: "Resolve by hand with a note",
     desc: "Use when the work is done outside a tracked event. Items whose source is still open (e.g. order still not dispatched) are re-raised by the next source event.",
     params: () =>
@@ -1277,6 +1293,7 @@ export const endpoints = defineEndpoints({
     path: "/items/{id}/dismiss",
     auth: "staff",
     permission: "workqueues.items.work",
+    scope: "staff",
     summary: "Dismiss with a reason (false alarm, duplicate)",
     params: () =>
       z.object({
@@ -1299,6 +1316,7 @@ export const endpoints = defineEndpoints({
     path: "/items/{id}/reopen",
     auth: "staff",
     permission: "workqueues.items.work",
+    scope: "staff",
     summary: "Reopen a resolved or dismissed item",
     params: () =>
       z.object({
@@ -1320,6 +1338,7 @@ export const endpoints = defineEndpoints({
     path: "/items/{id}/escalate",
     auth: "staff",
     permission: "workqueues.items.work",
+    scope: "staff",
     summary: "Escalate now to the next step of the route",
     params: () =>
       z.object({
@@ -1342,6 +1361,7 @@ export const endpoints = defineEndpoints({
     path: "/items/{id}/notes",
     auth: "staff",
     permission: "workqueues.items.work",
+    scope: "staff",
     summary: "Add a note",
     params: () =>
       z.object({
@@ -1361,6 +1381,7 @@ export const endpoints = defineEndpoints({
     path: "/items/bulk-assign",
     auth: "staff",
     permission: "workqueues.items.assign-others",
+    scope: "staff",
     summary: "Assign many items at once",
     body: () => z.object({
       itemIds: z.array(z.uuid()),
@@ -1383,6 +1404,7 @@ export const endpoints = defineEndpoints({
     path: "/items/exports",
     auth: "staff",
     permission: "workqueues.items.export",
+    scope: "staff",
     summary: "Export the filtered items (authorized export)",
     desc: "Limited to queues in the caller's areas. Creates an export job through reports.requestExport (dataset workqueues.admin.items).",
     body: () => z.object({
@@ -1401,6 +1423,7 @@ export const endpoints = defineEndpoints({
     path: "/summary",
     auth: "staff",
     permission: "workqueues.items.view",
+    scope: "staff",
     summary: "Dashboard: queues past or near target, overdue dispatch, team on shift",
     desc: "Counts only for queues the caller may see. Team on shift comes from access (role holders, backups, absences).",
     response: () => WorkSummary,
@@ -1414,6 +1437,7 @@ export const endpoints = defineEndpoints({
     path: "/day-end-reviews/current",
     auth: "staff",
     permission: "workqueues.items.view",
+    scope: "staff",
     summary: "Today's day-end review",
     desc: "Unresolved commitments and failed payouts come from open items; upcoming campaigns from advertising and promotions; next-day shipping from warehouse and shipping forecasts. Sources that are off are marked unavailable.",
     response: () => DayEndReview,
@@ -1427,6 +1451,7 @@ export const endpoints = defineEndpoints({
     path: "/day-end-reviews/{id}/items/{itemKey}/check",
     auth: "staff",
     permission: "workqueues.day-end.run",
+    scope: "staff",
     summary: "Mark one day-end item reviewed",
     params: () =>
       z.object({
@@ -1448,6 +1473,7 @@ export const endpoints = defineEndpoints({
     path: "/day-end-reviews/{id}/complete",
     auth: "staff",
     permission: "workqueues.day-end.run",
+    scope: "staff",
     summary: "Complete the review and send the summary to managers",
     params: () =>
       z.object({
@@ -1470,6 +1496,7 @@ export const endpoints = defineEndpoints({
     path: "/day-end-reviews",
     auth: "staff",
     permission: "workqueues.items.view",
+    scope: "staff",
     summary: "Past day-end reviews",
     query: () =>
       z.object({
@@ -1489,6 +1516,7 @@ export const endpoints = defineEndpoints({
     path: "/routines/today",
     auth: "staff",
     permission: "workqueues.items.view",
+    scope: "staff",
     summary: "Today's routine checks across areas",
     response: () => RoutineDay,
     status: 200,
@@ -1501,6 +1529,7 @@ export const endpoints = defineEndpoints({
     path: "/routine-checks/{id}/complete",
     auth: "staff",
     permission: "workqueues.items.work",
+    scope: "staff",
     summary: "Mark a routine check done (or check in for a shared one)",
     params: () =>
       z.object({
@@ -1521,6 +1550,7 @@ export const endpoints = defineEndpoints({
     path: "/routine-templates",
     auth: "staff",
     permission: "workqueues.routines.manage",
+    scope: "staff",
     summary: "Daily routine definitions",
     response: () => z.array(RoutineTemplate),
     status: 200,
@@ -1533,6 +1563,7 @@ export const endpoints = defineEndpoints({
     path: "/routine-templates",
     auth: "staff",
     permission: "workqueues.routines.manage",
+    scope: "staff",
     summary: "Replace the daily routine",
     body: () => z.object({
       get templates() {
@@ -1552,6 +1583,7 @@ export const endpoints = defineEndpoints({
     path: "/saved-filters",
     auth: "staff",
     permission: "workqueues.items.view",
+    scope: "staff",
     summary: "My saved filters plus filters shared with me",
     query: () =>
       z.object({
@@ -1568,6 +1600,7 @@ export const endpoints = defineEndpoints({
     path: "/saved-filters",
     auth: "staff",
     permission: "workqueues.items.view",
+    scope: "staff",
     summary: "Save the current filter",
     body: () => SavedFilterInput,
     response: () => SavedFilter,
@@ -1582,6 +1615,7 @@ export const endpoints = defineEndpoints({
     path: "/saved-filters/{id}",
     auth: "staff",
     permission: "workqueues.items.view",
+    scope: "staff",
     summary: "Rename, share or change a saved filter (owner only)",
     params: () =>
       z.object({
@@ -1600,6 +1634,7 @@ export const endpoints = defineEndpoints({
     path: "/saved-filters/{id}",
     auth: "staff",
     permission: "workqueues.items.view",
+    scope: "staff",
     summary: "Delete a saved filter (owner only)",
     params: () =>
       z.object({
@@ -1616,6 +1651,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/tasks",
     auth: "seller",
+    scope: "own-seller",
     summary: "Tasks Marketly is tracking for this seller (e.g. overdue dispatch, missing tracking, reply overdue)",
     desc: "Only items marked visibleToSeller for the caller's seller. Staff notes and escalation details are never returned.",
     query: () =>
@@ -2468,6 +2504,12 @@ export const spec = defineModuleSpec({
         "type": "int",
         "nullable": true
       }
+    }
+  },
+  tenantTables: {
+    "items": {
+      "seller": "seller_id",
+      "customer": "customer_id"
     }
   },
   endpoints,

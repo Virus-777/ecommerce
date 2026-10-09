@@ -1,3 +1,4 @@
+import { hmacWebhookVerifier } from '../../kernel/http/webhooks.js';
 import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/shipping.js';
 import { resolvers } from './graphql/resolvers.js';
@@ -6,6 +7,7 @@ import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { webhooksRoutes } from './http/webhooks.js';
+import { devCarrierAdapter } from './infra/carriers/dev.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresShippingRepository } from './infra/postgres/repository.js';
 import { ShippingService } from './service.js';
@@ -18,14 +20,19 @@ import { ShippingService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '0.1.0',
+  version: '1.0.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const service = new ShippingService({ repo: createPostgresShippingRepository(ctx.db), ctx });
+    // carriers sit behind a port; the deterministic dev adapter until real carrier accounts are connected
+    const service = new ShippingService({ repo: createPostgresShippingRepository(ctx.db), ctx, carriers: devCarrierAdapter() });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), webhooksRoutes(service));
+    // carrier webhooks: HMAC per carrier ({carrier} in the URL names the secret)
+    ctx.http.webhookVerifier(hmacWebhookVerifier(ctx.config, ctx.name));
     ctx.graphql.resolvers(resolvers(service));
+    // carriers, methods, zones and the Official Store profile; the shipping.admin.exceptions export dataset
+    ctx.afterBoot(() => service.boot());
 
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("orders.order.accepted", (e) => service.onOrderAcceptedFromOrders(e.payload));

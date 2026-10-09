@@ -10,6 +10,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { z } from 'zod';
 import type { Actor, Page } from '../../spec/common.js';
 import type { Principal, SellerMemberAccess } from '../auth/index.js';
+import type { Scope } from '../auth/scope.js';
 import { notImplemented as notImplementedError } from '../errors/index.js';
 import type { PageRequest } from '../lib/pagination.js';
 import type { Area, EndpointDef, EndpointTable } from '../spec/define.js';
@@ -31,11 +32,15 @@ export interface HandlerInput<E extends EndpointDef> {
   body: BodyOf<E>;
   /** Paging request for `paging: true` endpoints: cursor mode (app) or page mode (website) */
   page: E['paging'] extends true ? PageRequest : undefined;
-  /** Caller; null only on `anyone` endpoints without a session, and on webhooks */
-  principal: E['auth'] extends 'anyone' | 'provider' ? Principal | null : Principal;
+  /** The verified caller. Every endpoint requires a token; only refresh, webhook and bootstrap calls have no principal */
+  principal: E['auth'] extends 'provider' | 'refresh' | 'bootstrap' ? null : Principal;
   /** Seller-area calls: the seller the session acts for (seller-area paths never contain it) */
   sellerId: E['area'] extends 'seller' ? string : undefined;
   sellerAccess: E['area'] extends 'seller' ? SellerMemberAccess : undefined;
+  /** Which records the caller reaches; read tenant tables through scoped(ctx.db, scope, spec.tenantTables) */
+  scope: Scope;
+  /** Whether the caller holds a permission (field-level decisions; endpoint permissions are already checked) */
+  can(permission: string): Promise<boolean>;
   /** Who did it, for audit entries, timelines and events */
   actor: Actor;
   requestId: string;

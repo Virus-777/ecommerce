@@ -16,7 +16,7 @@ import { AuditService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '0.1.0',
+  version: '1.0.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
@@ -25,11 +25,11 @@ export default defineModule({
     ctx.http.routes(sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
 
-    // Events this module reacts to (spec events.consumes)
-    ctx.events.on("access.approval.requested", (e) => service.onApprovalRequestedFromAccess(e.payload));
-    ctx.events.on("access.approval.partially_approved", (e) => service.onApprovalPartiallyApprovedFromAccess(e.payload));
-    ctx.events.on("access.approval.returned", (e) => service.onApprovalReturnedFromAccess(e.payload));
-    ctx.events.on("access.approval.decided", (e) => service.onApprovalDecidedFromAccess(e.payload));
+    // Events this module reacts to (spec events.consumes); the envelope time dates the approval steps
+    ctx.events.on("access.approval.requested", (e) => service.onApprovalRequestedFromAccess(e.payload, { at: e.at }));
+    ctx.events.on("access.approval.partially_approved", (e) => service.onApprovalPartiallyApprovedFromAccess(e.payload, { at: e.at }));
+    ctx.events.on("access.approval.returned", (e) => service.onApprovalReturnedFromAccess(e.payload, { at: e.at }));
+    ctx.events.on("access.approval.decided", (e) => service.onApprovalDecidedFromAccess(e.payload, { at: e.at }));
 
     // Background jobs (spec jobs)
     ctx.jobs.handle("audit.verify-chain", () => service.verifyChain());

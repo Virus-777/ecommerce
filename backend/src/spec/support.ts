@@ -1064,6 +1064,8 @@ export interface SupportCaseOpenedEvent {
   category: string;
   priority: string;
   customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   sellerId?: string | null;
   orderId?: string | null;
   orderItemIds: string[];
@@ -1078,6 +1080,7 @@ export const SupportCaseOpenedEvent: z.ZodType<SupportCaseOpenedEvent> = z.objec
   category: z.string(),
   priority: z.string(),
   customerId: z.uuid().nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   sellerId: z.uuid().nullish(),
   orderId: z.uuid().nullish(),
   orderItemIds: z.array(z.uuid()),
@@ -1110,6 +1113,10 @@ export interface SupportCaseDecidedEvent {
   ref: string;
   outcome: string;
   orderId?: string | null;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   returnId?: string | null;
   sellerId?: string | null;
   remedies: Remedy[];
@@ -1122,6 +1129,8 @@ export const SupportCaseDecidedEvent: z.ZodType<SupportCaseDecidedEvent> = z.obj
   ref: z.string(),
   outcome: z.string(),
   orderId: z.uuid().nullish(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   returnId: z.uuid().nullish(),
   sellerId: z.uuid().nullish(),
   get remedies() {
@@ -1135,6 +1144,10 @@ export const SupportCaseDecidedEvent: z.ZodType<SupportCaseDecidedEvent> = z.obj
 export interface SupportCaseResolvedEvent {
   caseId: string;
   ref: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   sellerId?: string | null;
   resolvedAt: string;
 }
@@ -1142,6 +1155,8 @@ export interface SupportCaseResolvedEvent {
 export const SupportCaseResolvedEvent: z.ZodType<SupportCaseResolvedEvent> = z.object({
   caseId: z.uuid(),
   ref: z.string(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   sellerId: z.uuid().nullish(),
   resolvedAt: z.iso.datetime({ offset: true }),
 });
@@ -1202,6 +1217,12 @@ export const SupportCaseAssignedEvent: z.ZodType<SupportCaseAssignedEvent> = z.o
 export interface SupportCaseMessageAddedEvent {
   caseId: string;
   messageId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
+  /** Seller on the case (Official Store cases: null) */
+  sellerId?: string | null;
   audience: string;
   authorRole: string;
 }
@@ -1209,6 +1230,9 @@ export interface SupportCaseMessageAddedEvent {
 export const SupportCaseMessageAddedEvent: z.ZodType<SupportCaseMessageAddedEvent> = z.object({
   caseId: z.uuid(),
   messageId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
+  sellerId: z.uuid().describe("Seller on the case (Official Store cases: null)").nullish(),
   audience: z.string(),
   authorRole: z.string(),
 });
@@ -1410,7 +1434,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/contact-options",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Topics, channels, hours and expected reply times",
     response: () => ContactOptions,
     status: 200,
@@ -1422,6 +1447,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/orders/{orderId}/problem-context",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Order problem form context: packages and items, who handles first, when Marketly steps in, open cases",
     desc: "Opened from the order page with the affected item pre-selected.",
     params: () =>
@@ -1443,6 +1469,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/cases",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Contact support or report an order problem (missing, damaged, wrong item, not arrived)",
     desc: "Seller items go to the seller first with a reply deadline; Official Store and account topics go to Marketly support. If an item already has an open case, returns DUPLICATE_CASE with details.caseId so the app can add a message there instead.",
     body: () => CaseCreateInput,
@@ -1459,6 +1486,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/cases",
     auth: "shopper",
+    scope: "own-customer",
     summary: "My cases with who handles them, the next action and the expected reply",
     query: () =>
       z.object({
@@ -1475,6 +1503,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/cases/{id}",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Case detail: handler, next action and expected response, linked items, conversation, decision, remedy progress, appeal and reopen rules",
     params: () =>
       z.object({
@@ -1491,6 +1520,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/cases/{id}/messages",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Reply on a case (with photos)",
     params: () =>
       z.object({
@@ -1512,6 +1542,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/cases/{id}/escalate",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Ask Marketly to step in",
     params: () =>
       z.object({
@@ -1533,6 +1564,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/cases/{id}/offers/{offerId}/respond",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Accept or decline the seller's offer",
     params: () =>
       z.object({
@@ -1554,6 +1586,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/cases/{id}/appeal",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Appeal a decision before the appeal deadline",
     params: () =>
       z.object({
@@ -1575,6 +1608,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/cases/{id}/reopen",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Reopen a resolved case within the reopen window",
     params: () =>
       z.object({
@@ -1595,6 +1629,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/cases",
     auth: "seller",
+    scope: "own-seller",
     summary: "Customer cases and disputes about the seller's orders, and the seller's own support requests",
     query: () =>
       z.object({
@@ -1613,6 +1648,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/cases/{id}",
     auth: "seller",
+    scope: "own-seller",
     summary: "Case as the seller sees it (no internal notes)",
     params: () =>
       z.object({
@@ -1630,6 +1666,7 @@ export const endpoints = defineEndpoints({
     path: "/cases/{id}/messages",
     auth: "seller",
     permission: "support.cases.respond",
+    scope: "own-seller",
     summary: "Reply to the customer and Marketly support, optionally with an offer",
     params: () =>
       z.object({
@@ -1655,6 +1692,7 @@ export const endpoints = defineEndpoints({
     path: "/cases/{id}/evidence",
     auth: "seller",
     permission: "support.cases.respond",
+    scope: "own-seller",
     summary: "Add dispute evidence (photos, test videos, invoices, carrier records)",
     params: () =>
       z.object({
@@ -1673,6 +1711,7 @@ export const endpoints = defineEndpoints({
     path: "/cases/{id}/appeal",
     auth: "seller",
     permission: "support.cases.respond",
+    scope: "own-seller",
     summary: "Appeal a dispute decision before the deadline",
     params: () =>
       z.object({
@@ -1695,6 +1734,7 @@ export const endpoints = defineEndpoints({
     path: "/requests",
     auth: "seller",
     permission: "support.requests.create",
+    scope: "own-seller",
     summary: "Contact seller support (Seller Manager team)",
     body: () => SellerRequestInput,
     response: () => CaseView,
@@ -1709,6 +1749,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/categories",
     auth: "seller",
+    scope: "own-seller",
     summary: "Seller support topics with expected reply time",
     desc: "Topics with expected reply times, plus seller support hours and whether support is open now (settings business hours).",
     response: () => SellerSupportOptions,
@@ -1722,6 +1763,7 @@ export const endpoints = defineEndpoints({
     path: "/cases/stats",
     auth: "staff",
     permission: "support.cases.view",
+    scope: "staff",
     summary: "Queue KPIs: open, past target, unassigned, disputes, median first reply",
     response: () => CaseStats,
     status: 200,
@@ -1734,6 +1776,7 @@ export const endpoints = defineEndpoints({
     path: "/cases",
     auth: "staff",
     permission: "support.cases.view",
+    scope: "staff",
     summary: "Cases and disputes queue, overdue first",
     query: () =>
       z.object({
@@ -1759,6 +1802,7 @@ export const endpoints = defineEndpoints({
     path: "/cases/{id}",
     auth: "staff",
     permission: "support.cases.view",
+    scope: "staff",
     summary: "Dispute review: parties, purchase terms at order time, shipment evidence, photos, conversation with internal notes, deadlines, holds",
     params: () =>
       z.object({
@@ -1775,6 +1819,7 @@ export const endpoints = defineEndpoints({
     path: "/cases",
     auth: "staff",
     permission: "support.cases.handle",
+    scope: "staff",
     summary: "Open a case on behalf of a customer or seller",
     body: () => StaffCaseInput,
     response: () => AdminCaseDetail,
@@ -1790,6 +1835,7 @@ export const endpoints = defineEndpoints({
     path: "/cases/assign",
     auth: "staff",
     permission: "support.cases.assign",
+    scope: "staff",
     summary: "Assign several cases to one owner",
     body: () => z.object({
       caseIds: z.array(z.uuid()),
@@ -1812,6 +1858,7 @@ export const endpoints = defineEndpoints({
     path: "/cases/priority",
     auth: "staff",
     permission: "support.cases.handle",
+    scope: "staff",
     summary: "Change the priority of several cases with one reason",
     desc: "Each case gets the same reason in its history; deadlines are recalculated from the new priority.",
     body: () => z.object({
@@ -1834,6 +1881,7 @@ export const endpoints = defineEndpoints({
     path: "/assignees",
     auth: "staff",
     permission: "support.cases.assign",
+    scope: "staff",
     summary: "Staff who can own cases, with team and current open case count",
     desc: "Small bounded list (staff with support.cases.handle from access). Used by the assign pickers.",
     query: () =>
@@ -1852,6 +1900,7 @@ export const endpoints = defineEndpoints({
     path: "/cases/{id}/assign",
     auth: "staff",
     permission: "support.cases.assign",
+    scope: "staff",
     summary: "Assign or reassign the owner",
     params: () =>
       z.object({
@@ -1874,6 +1923,7 @@ export const endpoints = defineEndpoints({
     path: "/cases/{id}",
     auth: "staff",
     permission: "support.cases.handle",
+    scope: "staff",
     summary: "Change category or priority with a reason",
     params: () =>
       z.object({
@@ -1896,6 +1946,7 @@ export const endpoints = defineEndpoints({
     path: "/cases/{id}/messages",
     auth: "staff",
     permission: "support.cases.handle",
+    scope: "staff",
     summary: "Reply to both parties, one party, or add an internal note",
     params: () =>
       z.object({
@@ -1919,6 +1970,7 @@ export const endpoints = defineEndpoints({
     path: "/cases/{id}/request-info",
     auth: "staff",
     permission: "support.cases.handle",
+    scope: "staff",
     summary: "Ask the customer or the seller for information or evidence by a deadline",
     params: () =>
       z.object({
@@ -1942,6 +1994,7 @@ export const endpoints = defineEndpoints({
     path: "/cases/{id}/escalate",
     auth: "staff",
     permission: "support.cases.handle",
+    scope: "staff",
     summary: "Escalate to another team (Returns, Finance, Trust and Risk, Seller Manager, support lead)",
     params: () =>
       z.object({
@@ -1966,6 +2019,7 @@ export const endpoints = defineEndpoints({
     path: "/cases/{id}/evidence",
     auth: "staff",
     permission: "support.cases.handle",
+    scope: "staff",
     summary: "Attach evidence gathered by staff (carrier records, screenshots)",
     params: () =>
       z.object({
@@ -1984,6 +2038,7 @@ export const endpoints = defineEndpoints({
     path: "/cases/{id}/decide",
     auth: "staff",
     permission: "support.disputes.decide",
+    scope: "staff",
     summary: "Record the decision and remedy, publish the appeal deadline to both parties",
     desc: "Refund remedies create a refund request in returns (Finance approves within limits; approved is not sent). Goodwill above the decider's limit needs approval through access.",
     params: () =>
@@ -2007,6 +2062,7 @@ export const endpoints = defineEndpoints({
     path: "/cases/{id}/decision-draft",
     auth: "staff",
     permission: "support.disputes.decide",
+    scope: "staff",
     summary: "Save an unpublished decision draft (staff only)",
     desc: "Replaces the case's draft; nothing is published or sent to the parties. Deciding the case clears the draft.",
     params: () =>
@@ -2026,6 +2082,7 @@ export const endpoints = defineEndpoints({
     path: "/cases/{id}/decision-draft",
     auth: "staff",
     permission: "support.disputes.decide",
+    scope: "staff",
     summary: "Discard the decision draft",
     params: () =>
       z.object({
@@ -2042,6 +2099,7 @@ export const endpoints = defineEndpoints({
     path: "/cases/{id}/resolve",
     auth: "staff",
     permission: "support.cases.handle",
+    scope: "staff",
     summary: "Resolve a case",
     desc: "Refused while a promised refund or replacement is unresolved.",
     params: () =>
@@ -2065,6 +2123,7 @@ export const endpoints = defineEndpoints({
     path: "/cases/{id}/reopen",
     auth: "staff",
     permission: "support.cases.handle",
+    scope: "staff",
     summary: "Reopen a resolved or closed case",
     params: () =>
       z.object({
@@ -2087,6 +2146,7 @@ export const endpoints = defineEndpoints({
     path: "/cases/{id}/appeal/decide",
     auth: "staff",
     permission: "support.appeals.decide",
+    scope: "staff",
     summary: "Decide an appeal (reviewer must differ from the original decider)",
     params: () =>
       z.object({
@@ -2114,6 +2174,7 @@ export const endpoints = defineEndpoints({
     path: "/categories",
     auth: "staff",
     permission: "support.cases.view",
+    scope: "staff",
     summary: "Case categories with priority, team and SLA targets",
     response: () => z.array(CaseCategory),
     status: 200,
@@ -2126,6 +2187,7 @@ export const endpoints = defineEndpoints({
     path: "/categories/{key}",
     auth: "staff",
     permission: "support.sla.manage",
+    scope: "staff",
     summary: "Create or change a category and its targets",
     params: () =>
       z.object({
@@ -2451,6 +2513,7 @@ export const spec = defineModuleSpec({
       "returns.return.escalated": "Open or link a dispute case for the return and assign it to the Returns team",
       "returns.refund.approved": "Move the matching refund remedy to approved/in progress",
       "payments.refund.sent": "Complete the refund remedy; the case can now be resolved",
+      "wallet.goodwill.decided": "For a case's goodwill credit remedy waiting for approval: mark it granted (done) or rejected and put the case back in the owner's queue",
       "payments.refund.failed": "Mark the refund remedy failed and put the case back in the owner's queue",
       "returns.replacement.created": "Link the replacement to its remedy",
       "shipping.shipment.delivered": "Complete replacement remedies when their shipment is delivered",
@@ -3029,6 +3092,13 @@ export const spec = defineModuleSpec({
         "type": "timestamptz",
         "nullable": false
       }
+    }
+  },
+  tenantTables: {
+    "cases": {
+      "seller": "seller_id",
+      "customer": "customer_id",
+      "visitor": "guest_session_id"
     }
   },
   endpoints,

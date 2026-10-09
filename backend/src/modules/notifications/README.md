@@ -50,7 +50,7 @@ Who is told what, on which channel: notification topics for customers, sellers a
 | POST | `/api/seller/notifications/inbox/{id}/read` | Mark one notice as read (for me) | seller | `Notice` |
 | POST | `/api/seller/notifications/inbox/read-all` | Mark all as read (for me) | seller | `{ group: string? }` → `{ updated: int }` |
 | GET | `/api/seller/notifications/preferences` | Who hears about what (all members) | seller | `SellerPreferences` |
-| PUT | `/api/seller/notifications/preferences/members/{memberId}` | Set one member's topics and channel _(audited)_ | seller | `MemberPreferenceInput` → `MemberPreference` |
+| PUT | `/api/seller/notifications/preferences/members/{memberId}` | Set one member's topics and channel _(audited, also notifications.preferences.manage when not own)_ | seller | `MemberPreferenceInput` → `MemberPreference` |
 | POST | `/api/seller/notifications/push-devices` | Register the Android app for seller push notices _(phase 3)_ | seller | `PushDeviceInput` → `PushDevice` |
 | DELETE | `/api/seller/notifications/push-devices/{id}` | Stop seller push notices on a device _(phase 3)_ | seller | 204 No content |
 
@@ -940,6 +940,7 @@ Indexes: `(status, scheduled_at)`
 | `support.case.decided` | support | Customer and seller: decision and remedy, with the appeal deadline |
 | `support.case.resolved` | support | Customer: case resolved |
 | `messaging.message.sent` | messaging | Recipient (customer or seller members with customer permission): new message, reply-to token in email |
+| `sellers.invitation.sent` | sellers | Email the invited business its invitation code and how to apply (code never stored in the delivery log) |
 | `sellers.application.submitted` | sellers | Staff: new application to Seller Manager |
 | `sellers.application.information_requested` | sellers | Applicant: information required, with deadline |
 | `sellers.application.decided` | sellers | Applicant: application result (approved with next steps, or reasons) |

@@ -25,7 +25,8 @@ create table identity.accounts (
   created_at timestamptz not null,
   last_sign_in_at timestamptz,
   last_active_at timestamptz,
-  version int not null
+  version int not null,
+  tokens_valid_after timestamptz
 );
 comment on table identity.accounts is 'One row per account. Email is unique per realm (the same person can have a member account and a staff account).';
 comment on column identity.accounts.password_hash is 'argon2id';
@@ -175,8 +176,13 @@ create table identity.guest_sessions (
   last_seen_at timestamptz not null,
   expires_at timestamptz not null,
   claimed_by_account_id uuid,
-  claimed_at timestamptz
+  claimed_at timestamptz,
+  audience text not null check (audience in ('store', 'seller', 'admin')),
+  refresh_token_hash text not null unique,
+  previous_token_hash text,
+  rotated_at timestamptz
 );
+comment on table identity.guest_sessions is 'Visitor sessions (auth v3): one per app install before sign-in; in the store also the guest session';
 create index on identity.guest_sessions (expires_at);
 create table identity.guest_order_grants (
   guest_session_id uuid not null,

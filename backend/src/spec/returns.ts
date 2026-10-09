@@ -479,6 +479,30 @@ export const RefundDeduction: z.ZodType<RefundDeduction> = z.object({
   reason: z.string(),
 }).register(common.apiTypes, { id: "returns.RefundDeduction" });
 
+export interface ReturnedItem {
+  orderItemId: string;
+  quantity: number;
+  variantId: string;
+  stockItemId?: string | null;
+}
+
+export const ReturnedItem: z.ZodType<ReturnedItem> = z.object({
+  orderItemId: z.uuid(),
+  quantity: z.number().int(),
+  variantId: z.uuid(),
+  stockItemId: z.uuid().nullish(),
+}).register(common.apiTypes, { id: "returns.ReturnedItem" });
+
+export interface ReturnItemQuantity {
+  orderItemId: string;
+  quantity: number;
+}
+
+export const ReturnItemQuantity: z.ZodType<ReturnItemQuantity> = z.object({
+  orderItemId: z.uuid(),
+  quantity: z.number().int(),
+}).register(common.apiTypes, { id: "returns.ReturnItemQuantity" });
+
 export interface RefundBreakdown {
   itemAmount: common.Money;
   /** Coupon share allocated to the returned items (positive number, subtracted) */
@@ -1798,36 +1822,63 @@ export const ReturnsReturnRequestedEvent: z.ZodType<ReturnsReturnRequestedEvent>
 /** returns.return.info_requested: Seller or staff asks the customer a question */
 export interface ReturnsReturnInfoRequestedEvent {
   returnId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   replyDueAt: string;
 }
 
 export const ReturnsReturnInfoRequestedEvent: z.ZodType<ReturnsReturnInfoRequestedEvent> = z.object({
   returnId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   replyDueAt: z.iso.datetime({ offset: true }),
 });
 
 /** returns.return.approved: Seller, Official Store or platform approves (with or without return) */
 export interface ReturnsReturnApprovedEvent {
   returnId: string;
+  ref: string;
+  orderId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   ownerType: "official" | "seller";
   sellerId?: string | null;
+  items: ReturnItemQuantity[];
   withoutReturn: boolean;
   platformDecision: boolean;
   dropOffBy?: string | null;
+  /** Return label tracking number when a label is issued with the approval */
+  trackingNumber?: string | null;
 }
 
 export const ReturnsReturnApprovedEvent: z.ZodType<ReturnsReturnApprovedEvent> = z.object({
   returnId: z.uuid(),
+  ref: z.string(),
+  orderId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
+  get items() {
+    return z.array(ReturnItemQuantity);
+  },
   withoutReturn: z.boolean(),
   platformDecision: z.boolean(),
   dropOffBy: z.iso.datetime({ offset: true }).nullish(),
+  trackingNumber: z.string().describe("Return label tracking number when a label is issued with the approval").nullish(),
 });
 
 /** returns.return.rejected: A return is rejected with an explanation */
 export interface ReturnsReturnRejectedEvent {
   returnId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   ownerType: "official" | "seller";
   sellerId?: string | null;
   reasonCode: string;
@@ -1836,6 +1887,8 @@ export interface ReturnsReturnRejectedEvent {
 
 export const ReturnsReturnRejectedEvent: z.ZodType<ReturnsReturnRejectedEvent> = z.object({
   returnId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
   reasonCode: z.string(),
@@ -1877,21 +1930,35 @@ export const ReturnsReturnShippedEvent: z.ZodType<ReturnsReturnShippedEvent> = z
 /** returns.return.received: Return received at the warehouse or seller address */
 export interface ReturnsReturnReceivedEvent {
   returnId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   ownerType: "official" | "seller";
   sellerId?: string | null;
+  items: ReturnedItem[];
   receivedAt: string;
 }
 
 export const ReturnsReturnReceivedEvent: z.ZodType<ReturnsReturnReceivedEvent> = z.object({
   returnId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
+  get items() {
+    return z.array(ReturnedItem);
+  },
   receivedAt: z.iso.datetime({ offset: true }),
 });
 
 /** returns.return.inspected: Inspection recorded */
 export interface ReturnsReturnInspectedEvent {
   returnId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   ownerType: "official" | "seller";
   sellerId?: string | null;
   conditionOutcome: string;
@@ -1902,6 +1969,8 @@ export interface ReturnsReturnInspectedEvent {
 
 export const ReturnsReturnInspectedEvent: z.ZodType<ReturnsReturnInspectedEvent> = z.object({
   returnId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
   conditionOutcome: z.string(),
@@ -1939,6 +2008,10 @@ export const ReturnsReturnCancelledEvent: z.ZodType<ReturnsReturnCancelledEvent>
 /** returns.label.created: A prepaid return label is issued; finance charges the payer */
 export interface ReturnsLabelCreatedEvent {
   returnId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   ownerType: "official" | "seller";
   sellerId?: string | null;
   labelId: string;
@@ -1949,6 +2022,8 @@ export interface ReturnsLabelCreatedEvent {
 
 export const ReturnsLabelCreatedEvent: z.ZodType<ReturnsLabelCreatedEvent> = z.object({
   returnId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
   labelId: z.uuid(),
@@ -1982,6 +2057,10 @@ export interface ReturnsRefundApprovedEvent {
   returnId?: string | null;
   caseId?: string | null;
   orderId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   orderItemIds: string[];
   ownerType: "official" | "seller";
   sellerId?: string | null;
@@ -2000,6 +2079,8 @@ export const ReturnsRefundApprovedEvent: z.ZodType<ReturnsRefundApprovedEvent> =
   returnId: z.uuid().nullish(),
   caseId: z.uuid().nullish(),
   orderId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   orderItemIds: z.array(z.uuid()),
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
@@ -2065,6 +2146,10 @@ export interface ReturnsReplacementCreatedEvent {
   replacementId: string;
   returnId: string;
   orderId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   orderItemId: string;
   ownerType: "official" | "seller";
   sellerId?: string | null;
@@ -2078,6 +2163,8 @@ export const ReturnsReplacementCreatedEvent: z.ZodType<ReturnsReplacementCreated
   replacementId: z.uuid(),
   returnId: z.uuid(),
   orderId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   orderItemId: z.uuid(),
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
@@ -2172,6 +2259,10 @@ export interface ReturnsPublicApi {
   sellerReturnTermsFor(sellerIds: string[]): Promise<Record<string, EffectiveTerms>>;
   /** Export rows for reports datasets returns.admin.requests, returns.admin.inspections and returns.seller.requests (seller rows scoped to the principal's seller) Used by: reports. */
   exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[], nextCursor?: string }>;
+  /** Any return by id, staff view (same as getReturnAdmin by ref) Used by: warehouse. */
+  getReturn(returnId: string): Promise<ReturnCase | null>;
+  /** When an appeal overturns a case decision: cancel the case's refund requests still requested, under review or declined. Approved, processing or sent ones are returned in notCancellable (money already moving). Used by: support. */
+  cancelRefundsForCase(caseId: string, reason: string): Promise<{ cancelled: RefundRequest[], notCancellable: RefundRequest[] }>;
   /** Open return requests per product (not closed, refunded or rejected). Catalog publication-impact preview. Used by: catalog. */
   countOpenReturnsForProducts(productIds: string[]): Promise<Record<string, number>>;
 }
@@ -2409,7 +2500,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/policy",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Current returns baseline, category exceptions and who pays return shipping",
     desc: "Data behind the Returns policy page and the account return pages. Content owns the page text.",
     response: () => PublicPolicy,
@@ -2421,7 +2513,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/terms",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Effective return terms for a seller and category",
     desc: "Shown before purchase on the product page, offer comparison and checkout.",
     query: () =>
@@ -2440,6 +2533,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/orders/{orderId}/returnable-items",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Items of an order with per-item return eligibility",
     desc: "Step 1 of the return journey. Ineligible items explain why (not delivered, cancel instead, return already open, window closed). Guests need an order-access guest session.",
     params: () =>
@@ -2464,6 +2558,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/eligibility",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Eligibility, deadline, destination, shipping responsibility, remedies and refund estimate before submission",
     desc: "Step 2/3 of the return journey. Items from different sellers come back as separate groups (separate returns and labels).",
     body: () => EligibilityRequest,
@@ -2478,6 +2573,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/requests",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Request a return for selected items and quantities",
     desc: "Re-checks eligibility, splits by seller and returns one ReturnDetail per seller. Official Store returns inside the window may be approved automatically (setting).",
     body: () => ReturnCreateInput,
@@ -2498,6 +2594,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/requests/overview",
     auth: "customer",
+    scope: "own-customer",
     summary: "Return and refund totals for the account",
     response: () => CustomerReturnsOverview,
     status: 200,
@@ -2509,6 +2606,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/requests",
     auth: "shopper",
+    scope: "own-customer",
     summary: "My returns with return status and refund status side by side",
     query: () =>
       z.object({
@@ -2526,6 +2624,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/requests/{id}",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Return detail: status track, drop-off, return shipment, refund or replacement progress",
     params: () =>
       z.object({
@@ -2542,6 +2641,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/requests/{id}/info",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Answer the seller's or Marketly's question",
     desc: "Restarts the respond-by clock.",
     params: () =>
@@ -2563,6 +2663,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/requests/{id}/withdraw",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Cancel a return before the item is sent back",
     params: () =>
       z.object({
@@ -2583,6 +2684,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/requests/{id}/label",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Drop-off QR code, printable label, instructions and nearby drop-off points",
     params: () =>
       z.object({
@@ -2603,6 +2705,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/requests/{id}/label/email",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Email the drop-off code to the customer",
     params: () =>
       z.object({
@@ -2618,6 +2721,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/requests/{id}/shipment",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Add carrier and tracking for a customer-arranged return",
     params: () =>
       z.object({
@@ -2639,6 +2743,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/requests/{id}/escalate",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Ask Marketly to step in",
     desc: "Allowed when the seller missed a deadline, rejected the return, or the refund is late. Opens or links a support case.",
     params: () =>
@@ -2662,6 +2767,7 @@ export const endpoints = defineEndpoints({
     path: "/requests/exports",
     auth: "seller",
     permission: "returns.requests.export",
+    scope: "own-seller",
     summary: "Export own returns and cases (current tab and filters) as CSV",
     desc: "Creates an authorized export job through reports.requestExport (dataset returns.seller.requests, sellerId from the session). filters takes the same keys as GET /requests (tab, q, reason, period). Poll GET /requests/exports/{id} for the download link.",
     body: () => z.object({
@@ -2682,6 +2788,7 @@ export const endpoints = defineEndpoints({
     path: "/requests/exports/{id}",
     auth: "seller",
     permission: "returns.requests.export",
+    scope: "own-seller",
     summary: "Returns export status and download link (requesting member only)",
     params: () =>
       z.object({
@@ -2698,6 +2805,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/requests/counts",
     auth: "seller",
+    scope: "own-seller",
     summary: "Queue tiles and list tab totals (Return requests, Received to inspect, Disputes, Closed)",
     response: () => SellerReturnCounts,
     status: 200,
@@ -2709,6 +2817,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/requests",
     auth: "seller",
+    scope: "own-seller",
     summary: "Return requests, received returns to inspect, disputes and closed returns",
     query: () =>
       z.object({
@@ -2728,6 +2837,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/requests/{id}",
     auth: "seller",
+    scope: "own-seller",
     summary: "Return case: request, photos, policy applied, payment, deadlines, shipment, inspection and earnings impact",
     params: () =>
       z.object({
@@ -2745,6 +2855,7 @@ export const endpoints = defineEndpoints({
     path: "/requests/{id}/approve",
     auth: "seller",
     permission: "returns.requests.respond",
+    scope: "own-seller",
     summary: "Approve and issue the return label",
     desc: "Customer-pays is refused for defective, damaged or wrong items. A prepaid label paid by the seller is charged to seller earnings (finance).",
     params: () =>
@@ -2769,6 +2880,7 @@ export const endpoints = defineEndpoints({
     path: "/requests/{id}/request-info",
     auth: "seller",
     permission: "returns.requests.respond",
+    scope: "own-seller",
     summary: "Ask the customer a question (pauses the respond-by clock)",
     params: () =>
       z.object({
@@ -2790,6 +2902,7 @@ export const endpoints = defineEndpoints({
     path: "/requests/{id}/reject",
     auth: "seller",
     permission: "returns.requests.respond",
+    scope: "own-seller",
     summary: "Reject with a reason and an explanation shown to the customer",
     desc: "Only when the request breaks the published terms. The customer can ask Marketly to review.",
     params: () =>
@@ -2813,6 +2926,7 @@ export const endpoints = defineEndpoints({
     path: "/requests/{id}/approve-without-return",
     auth: "seller",
     permission: "returns.refunds.issue",
+    scope: "own-seller",
     summary: "Refund without asking for the item back (recorded reason)",
     params: () =>
       z.object({
@@ -2833,6 +2947,7 @@ export const endpoints = defineEndpoints({
     path: "/requests/{id}/receive",
     auth: "seller",
     permission: "returns.refunds.issue",
+    scope: "own-seller",
     summary: "Mark the return as received at the seller's return address",
     params: () =>
       z.object({
@@ -2855,6 +2970,7 @@ export const endpoints = defineEndpoints({
     path: "/requests/{id}/inspection",
     auth: "seller",
     permission: "returns.refunds.issue",
+    scope: "own-seller",
     summary: "Record the condition on arrival and the stock outcome",
     params: () =>
       z.object({
@@ -2874,6 +2990,7 @@ export const endpoints = defineEndpoints({
     path: "/requests/{id}/inspection-draft",
     auth: "seller",
     permission: "returns.refunds.issue",
+    scope: "own-seller",
     summary: "Save an unsent inspection and refund decision",
     desc: "Partial values are kept as entered (no validation beyond types) and shown again on ReturnCase.inspectionDraft. Recording the inspection or remedy clears the draft. The customer sees nothing.",
     params: () =>
@@ -2896,6 +3013,7 @@ export const endpoints = defineEndpoints({
     path: "/requests/{id}/evidence",
     auth: "seller",
     permission: "returns.requests.respond",
+    scope: "own-seller",
     summary: "Attach evidence to a return before any case exists",
     desc: "Upload files through media first. Evidence stays with the return ('on record') and is copied into the support case when the return is escalated (support reads returns.listEvidence). Not shown to the customer.",
     params: () =>
@@ -2920,6 +3038,7 @@ export const endpoints = defineEndpoints({
     path: "/requests/{id}/remedy",
     auth: "seller",
     permission: "returns.refunds.issue",
+    scope: "own-seller",
     summary: "Confirm the refund (full or partial) or ship a replacement or exchange",
     desc: "Partial refunds need deductions with reasons. Capped at the remaining refundable amount. The refund is approved by the seller and handed to payments; the customer sees Processing, then Sent.",
     params: () =>
@@ -2940,6 +3059,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/terms",
     auth: "seller",
+    scope: "own-seller",
     summary: "Own return terms, return address and the platform baseline",
     response: () => SellerReturnTerms,
     status: 200,
@@ -2952,6 +3072,7 @@ export const endpoints = defineEndpoints({
     path: "/terms",
     auth: "seller",
     permission: "returns.terms.manage",
+    scope: "own-seller",
     summary: "Change return terms or return address",
     desc: "Validated against the baseline (more generous only). Applies to new orders and new return requests; returns already on their way keep the address on their label.",
     body: () => SellerReturnTermsInput,
@@ -2969,6 +3090,7 @@ export const endpoints = defineEndpoints({
     path: "/requests/stats",
     auth: "staff",
     permission: "returns.requests.view",
+    scope: "staff",
     summary: "Returns queue KPIs and queue owner",
     response: () => ReturnStats,
     status: 200,
@@ -2981,6 +3103,7 @@ export const endpoints = defineEndpoints({
     path: "/requests",
     auth: "staff",
     permission: "returns.requests.view",
+    scope: "staff",
     summary: "Returns and refunds queue with reason, owner, deadline, amount and flags",
     query: () =>
       z.object({
@@ -3006,6 +3129,7 @@ export const endpoints = defineEndpoints({
     path: "/requests/{id}",
     auth: "staff",
     permission: "returns.requests.view",
+    scope: "staff",
     summary: "Full return case with exception record, refund request and action history",
     params: () =>
       z.object({
@@ -3022,6 +3146,7 @@ export const endpoints = defineEndpoints({
     path: "/requests/{id}/approve",
     auth: "staff",
     permission: "returns.requests.manage",
+    scope: "staff",
     summary: "Approve an Official Store return, or decide a seller return as the platform",
     params: () =>
       z.object({
@@ -3046,6 +3171,7 @@ export const endpoints = defineEndpoints({
     path: "/requests/{id}/request-info",
     auth: "staff",
     permission: "returns.requests.manage",
+    scope: "staff",
     summary: "Ask the customer for more information or photos",
     params: () =>
       z.object({
@@ -3068,6 +3194,7 @@ export const endpoints = defineEndpoints({
     path: "/requests/{id}/reject",
     auth: "staff",
     permission: "returns.requests.manage",
+    scope: "staff",
     summary: "Reject with an explanation",
     params: () =>
       z.object({
@@ -3091,6 +3218,7 @@ export const endpoints = defineEndpoints({
     path: "/requests/{id}/take-over",
     auth: "staff",
     permission: "returns.requests.manage",
+    scope: "staff",
     summary: "Platform intervention: Marketly takes over a seller return",
     desc: "Used when a seller misses a deadline or the customer challenges the outcome. The seller keeps read access and is told why.",
     params: () =>
@@ -3115,6 +3243,7 @@ export const endpoints = defineEndpoints({
     path: "/requests/{id}/overturn",
     auth: "staff",
     permission: "returns.requests.manage",
+    scope: "staff",
     summary: "Overturn a seller's rejection",
     params: () =>
       z.object({
@@ -3139,6 +3268,7 @@ export const endpoints = defineEndpoints({
     path: "/requests/{id}/assign",
     auth: "staff",
     permission: "returns.requests.manage",
+    scope: "staff",
     summary: "Set the owner of a return",
     params: () =>
       z.object({
@@ -3160,6 +3290,7 @@ export const endpoints = defineEndpoints({
     path: "/requests/{id}/approve-without-return",
     auth: "staff",
     permission: "returns.exceptions.propose",
+    scope: "staff",
     summary: "Propose refund-without-return (controlled exception)",
     desc: "Records the reason and details (visible to Finance and in the action history), sets the stock outcome to written off, and sends the refund request to Finance approval.",
     params: () =>
@@ -3182,6 +3313,7 @@ export const endpoints = defineEndpoints({
     path: "/requests/{id}/receive",
     auth: "staff",
     permission: "returns.inspections.record",
+    scope: "staff",
     summary: "Record receipt at a seller's address for a platform-handled return",
     desc: "For returns Marketly handles on a seller's behalf (e.g. the seller is suspended) when the seller confirms receipt outside Seller Center. Parcels arriving at the Marketly warehouse are scanned in by warehouse (receiveReturnParcel), which calls recordWarehouseReceipt; they are not recorded here.",
     params: () =>
@@ -3207,6 +3339,7 @@ export const endpoints = defineEndpoints({
     path: "/inspections",
     auth: "staff",
     permission: "returns.inspections.record",
+    scope: "staff",
     summary: "Official Store returns received, arriving and decided",
     query: () =>
       z.object({
@@ -3224,6 +3357,7 @@ export const endpoints = defineEndpoints({
     path: "/inspections/stats",
     auth: "staff",
     permission: "returns.inspections.record",
+    scope: "staff",
     summary: "Inspection queue KPIs",
     response: () => InspectionQueueStats,
     status: 200,
@@ -3236,6 +3370,7 @@ export const endpoints = defineEndpoints({
     path: "/requests/{id}/start-inspection",
     auth: "staff",
     permission: "returns.inspections.record",
+    scope: "staff",
     summary: "Start (or continue) inspecting a received return: sets the inspector and status Inspecting",
     desc: "Inspector defaults to the caller; another inspector needs returns.requests.manage. The return stays in status received; the queue and case show Inspecting with the inspector and start time. Calling it again by the same inspector is a no-op (Continue).",
     params: () =>
@@ -3258,6 +3393,7 @@ export const endpoints = defineEndpoints({
     path: "/requests/{id}/inspection-draft",
     auth: "staff",
     permission: "returns.inspections.record",
+    scope: "staff",
     summary: "Save an unsent inspection (checks ticked so far, notes, photos)",
     params: () =>
       z.object({
@@ -3278,6 +3414,7 @@ export const endpoints = defineEndpoints({
     path: "/requests/{id}/inspection",
     auth: "staff",
     permission: "returns.inspections.record",
+    scope: "staff",
     summary: "Record inspection: photos, condition grade, checks, missing parts and proposed stock outcome",
     desc: "The inspector proposes; the Returns Manager decides the remedy. The stock outcome is sent to inventory to record.",
     params: () =>
@@ -3299,6 +3436,7 @@ export const endpoints = defineEndpoints({
     path: "/requests/{id}/remedy",
     auth: "staff",
     permission: "returns.requests.manage",
+    scope: "staff",
     summary: "Decide the remedy for an Official Store or platform-handled return",
     desc: "Refunds go to Finance as an under-review refund request; replacements and exchanges reserve stock and create a replacement shipment.",
     params: () =>
@@ -3321,6 +3459,7 @@ export const endpoints = defineEndpoints({
     path: "/refunds",
     auth: "staff",
     permission: "returns.exceptions.propose",
+    scope: "staff",
     summary: "Issue a refund from the order page (exception refund request)",
     desc: "Admin 'Issue refund' dialog on admin/order. Items and amounts of one seller group, reason and funding; the dialog shows the cap from payments (GET /api/admin/payments/orders/{orderId}/refundable, in-process payments.remainingRefundable) and amounts above it return REFUND_EXCEEDS_REFUNDABLE. Creates a refund request with source exception that goes through Finance approval like any other; within the caller's limit it is approved in the same call and handed to payments. Optional trustReportId links it to a trust recommendation.",
     body: () => ExceptionRefundInput,
@@ -3340,6 +3479,7 @@ export const endpoints = defineEndpoints({
     path: "/refunds",
     auth: "staff",
     permission: "returns.requests.view",
+    scope: "staff",
     summary: "Refund approval queue for Finance",
     query: () =>
       z.object({
@@ -3360,6 +3500,7 @@ export const endpoints = defineEndpoints({
     path: "/refunds/{id}",
     auth: "staff",
     permission: "returns.requests.view",
+    scope: "staff",
     summary: "One refund request with breakdown, funding and earnings impact",
     params: () =>
       z.object({
@@ -3376,6 +3517,7 @@ export const endpoints = defineEndpoints({
     path: "/refunds/{id}/approve",
     auth: "staff",
     permission: "returns.refunds.approve",
+    scope: "staff",
     summary: "Finance approves the refund and hands it to payments",
     desc: "Approved is not sent: the customer sees Approved, then Processing, then Sent when payments confirms.",
     params: () =>
@@ -3384,10 +3526,11 @@ export const endpoints = defineEndpoints({
       }),
     body: () => z.object({
       note: z.string().nullish(),
+      stepUpCode: z.string().describe("Current 2-step code; required when the refund is above access stepUpAbove").nullish(),
     }),
     response: () => RefundRequest,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","APPROVAL_REQUIRED","REFUND_EXCEEDS_REFUNDABLE","DUPLICATE_REFUND"],
+    errors: ["ILLEGAL_TRANSITION","APPROVAL_REQUIRED","REFUND_EXCEEDS_REFUNDABLE","DUPLICATE_REFUND","STEP_UP_REQUIRED"],
     idempotent: true,
     audited: true,
     approval: "Approval action returns.refunds.approve. Above the approver's refund limit (e.g. $2,000) a second Finance reviewer or the Business Owner approves through access",
@@ -3401,6 +3544,7 @@ export const endpoints = defineEndpoints({
     path: "/refunds/{id}/decline",
     auth: "staff",
     permission: "returns.refunds.approve",
+    scope: "staff",
     summary: "Send a refund request back with a reason",
     params: () =>
       z.object({
@@ -3423,6 +3567,7 @@ export const endpoints = defineEndpoints({
     path: "/refunds/{id}/revise",
     auth: "staff",
     permission: "returns.requests.manage",
+    scope: "staff",
     summary: "Change a declined refund and resubmit",
     params: () =>
       z.object({
@@ -3443,6 +3588,7 @@ export const endpoints = defineEndpoints({
     path: "/policies",
     auth: "staff",
     permission: "returns.requests.view",
+    scope: "staff",
     summary: "Active baseline, scheduled changes and history",
     response: () => ReturnPolicyAdmin,
     status: 200,
@@ -3455,6 +3601,7 @@ export const endpoints = defineEndpoints({
     path: "/policies",
     auth: "staff",
     permission: "returns.policies.manage",
+    scope: "staff",
     summary: "Propose a new baseline version with an effective date",
     desc: "Response shows the impact on open orders. Goes to Business Owner approval; scheduled after approval.",
     body: () => PolicyVersionInput,
@@ -3472,6 +3619,7 @@ export const endpoints = defineEndpoints({
     path: "/policies/{id}/withdraw",
     auth: "staff",
     permission: "returns.policies.manage",
+    scope: "staff",
     summary: "Withdraw a draft or scheduled baseline",
     params: () =>
       z.object({
@@ -3493,6 +3641,7 @@ export const endpoints = defineEndpoints({
     path: "/category-exceptions",
     auth: "staff",
     permission: "returns.policies.manage",
+    scope: "staff",
     summary: "Add a category exception with an effective date",
     desc: "When it shortens a window the exception is saved as pending_approval with an access approval request ('Send for approval'); otherwise it is scheduled. applyScope picks new orders only or all undelivered orders.",
     body: () => CategoryExceptionInput,
@@ -3511,6 +3660,7 @@ export const endpoints = defineEndpoints({
     path: "/category-exceptions/preview",
     auth: "staff",
     permission: "returns.policies.manage",
+    scope: "staff",
     summary: "Impact of a category exception change before saving",
     desc: "Nothing is saved. Items: open orders in the category placed before the effective date (orders.countOpenOrdersInCategory) that keep their window (or move, with applyScope undelivered_orders), sellers with offers in the category who are notified, Help articles that reference the returns policy (content.countHelpArticlesForPolicy) and the Returns policy page to update and when product pages and checkout change. needsApproval and approvers come from access for returns.policies.shorten-window; blocking lists an effective date inside the notice period or undelivered_orders on a shortening change.",
     body: () => PolicyImpactInput,
@@ -3526,6 +3676,7 @@ export const endpoints = defineEndpoints({
     path: "/category-exceptions/{id}",
     auth: "staff",
     permission: "returns.policies.manage",
+    scope: "staff",
     summary: "Change or retire a category exception from a date",
     desc: "Same approval and applyScope rules as create: a shortening change goes to pending_approval and only applies after the Business Owner approves.",
     params: () =>
@@ -3554,7 +3705,7 @@ export const spec = defineModuleSpec({
   summary: "Return policies (platform baseline, seller terms, category exceptions, who pays return shipping), per-item eligibility, return requests and decisions, return shipments, receipt and inspection, remedies (refund, replacement, exchange) and the refund request that Finance approves before payments sends the money.",
   dependsOn: ["orders","shipping","payments","inventory"],
   optionalDeps: ["media","finance","support","messaging","access","wallet","workqueues","audit","content","identity","notifications","promotions","purchasing","reports","sellers","settings","customers"],
-  publicApi: ["resolveTerms","returnStateForItems","requestRefund","recordWarehouseReceipt","sellerReturnStats","listOpenForCustomer","getReturnForCustomer","listForCustomer","customerOverview","getReturnForSeller","getReturnAdmin","listForOrder","eligibilityForItems","sellerQueueCounts","listEvidence","listForSeller","listRefundRequests","getRefundRequest","listRefundRequestsForOrder","listRefundRequestsForCase","sellerReturnTermsFor","exportRows","countOpenReturnsForProducts"],
+  publicApi: ["resolveTerms","returnStateForItems","requestRefund","recordWarehouseReceipt","sellerReturnStats","listOpenForCustomer","getReturnForCustomer","listForCustomer","customerOverview","getReturnForSeller","getReturnAdmin","listForOrder","eligibilityForItems","sellerQueueCounts","listEvidence","listForSeller","listRefundRequests","getRefundRequest","listRefundRequestsForOrder","listRefundRequestsForCase","sellerReturnTermsFor","exportRows","getReturn","cancelRefundsForCase","countOpenReturnsForProducts"],
   permissions: [
     {
       "key": "returns.requests.view",
@@ -4858,6 +5009,19 @@ export const spec = defineModuleSpec({
         "type": "timestamptz",
         "nullable": false
       }
+    }
+  },
+  tenantTables: {
+    "seller_terms": {
+      "seller": "seller_id"
+    },
+    "returns": {
+      "seller": "seller_id",
+      "customer": "customer_id",
+      "visitor": "guest_session_id"
+    },
+    "refund_requests": {
+      "seller": "seller_id"
     }
   },
   endpoints,

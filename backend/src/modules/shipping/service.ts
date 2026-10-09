@@ -1,226 +1,279 @@
-import { notImplemented } from '../../kernel/errors/index.js';
 import type { EventPayload } from '../../kernel/events/index.js';
-import type { ModuleContext } from '../../kernel/module-system/index.js';
+import { isUuid } from '../../kernel/lib/ids.js';
 import type * as common from '../../spec/common.js';
 import type * as identity from '../../spec/identity.js';
-import type { ShippingPublicApi, Parcel, TransitRange, DispatchInput, Carrier, Coverage, Closure, CustomerNotice, DeliveryQuote, PackageQuoteInput, PackageQuote, CoverageCheck, OfferEstimate, Label, LabelQuote, LabelRequest, LabelResult, Shipment, ShipmentSummary, DeliveryException, ExceptionCounts, DispatchMetrics, SellerShippingSetup } from '../../spec/shipping.js';
-import type { ShippingRepository } from './ports.js';
+import type {
+  Closure,
+  Coverage,
+  CustomerNotice,
+  DeliveryException,
+  DeliveryQuote,
+  DispatchInput,
+  DispatchMetrics,
+  ExceptionCounts,
+  Label,
+  LabelQuote,
+  LabelRequest,
+  LabelResult,
+  OfferEstimate,
+  PackageQuote,
+  PackageQuoteInput,
+  Parcel,
+  SellerShippingSetup,
+  Shipment,
+  ShipmentSummary,
+  ShippingPublicApi,
+  TransitRange,
+  CoverageCheck,
+} from '../../spec/shipping.js';
+import { Core, type ShippingServiceDeps } from './service/core.js';
+import { Estimates } from './service/estimates.js';
+import { Exceptions } from './service/exceptions.js';
+import { Profiles } from './service/profiles.js';
+import { Setup } from './service/setup.js';
+import { Shipments } from './service/shipments.js';
+import { Views } from './service/views.js';
 
-export interface ShippingServiceDeps {
-  repo: ShippingRepository;
-  ctx: ModuleContext<'shipping'>;
-}
+export type { ShippingServiceDeps };
+
+const toPage = (p: common.PageInput | undefined) => {
+  const limit = Math.min(Math.max(p?.limit ?? 24, 1), 100);
+  return p?.page ? ({ mode: 'page', page: p.page, limit } as const) : ({ mode: 'cursor', cursor: p?.cursor ?? null, limit } as const);
+};
 
 /**
  * Shipping use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
- * Each method maps to a publicApi function, a consumed event or a job in docs/api/spec/modules/shipping.json.
+ * The work is split by area (service/*.ts); this class is the module's public API, its event consumers and jobs.
  */
 export class ShippingService implements ShippingPublicApi {
-  constructor(protected readonly deps: ShippingServiceDeps) {}
+  readonly core: Core;
+  readonly views: Views;
+  readonly estimates: Estimates;
+  readonly setup: Setup;
+  readonly profiles: Profiles;
+  readonly shipments: Shipments;
+  readonly exceptions: Exceptions;
 
-  /* ---------------- public API (in-process) */
-
-  /** Delivery options for one offer at a location: ships-to check, price per method, arrival range, dispatch label, cutoff countdown and service notices */
-  async quote(profileId: string, postalCode: string, parcel: Parcel, dispatch: DispatchInput): Promise<DeliveryQuote> {
-    throw notImplemented("shipping.quote");
+  constructor(deps: ShippingServiceDeps) {
+    this.core = new Core(deps);
+    this.views = new Views(this.core);
+    this.estimates = new Estimates(this.core);
+    this.setup = new Setup(this.core, this.views, this.estimates);
+    this.profiles = new Profiles(this.core, this.views, this.estimates);
+    this.shipments = new Shipments(this.core, this.views, this.estimates, this.profiles);
+    this.exceptions = new Exceptions(this.core, this.views, this.estimates);
+    this.shipments.exceptions = this.exceptions;
+    this.exceptions.shipments = this.shipments;
   }
 
-  /** Options for a package of several items from one seller and ship-from location: methods common to every item's profile, combined weight, free-shipping threshold on the package subtotal, arrival per option */
-  async quoteOptions(input: PackageQuoteInput): Promise<PackageQuote> {
-    throw notImplemented("shipping.quoteOptions");
+  /* ---------------------------------------------------------------- public API (in-process) */
+
+  quote(profileId: string, postalCode: string, parcel: Parcel, dispatch: DispatchInput): Promise<DeliveryQuote> {
+    return this.estimates.quote(profileId, postalCode, parcel, dispatch);
   }
 
-  /** Per profile: ships to this address or why not (excluded area, PO box, outside seller coverage) */
-  async checkCoverage(profileIds: string[], destination: common.Address): Promise<CoverageCheck[]> {
-    throw notImplemented("shipping.checkCoverage");
+  quoteOptions(input: PackageQuoteInput): Promise<PackageQuote> {
+    return this.estimates.quoteOptions(input);
   }
 
-  /** Seller has an active profile with coverage and a dispatch schedule (setup checklist) */
-  async hasCoverage(sellerId: string): Promise<boolean> {
-    throw notImplemented("shipping.hasCoverage");
+  checkCoverage(profileIds: string[], destination: common.Address): Promise<CoverageCheck[]> {
+    return this.estimates.checkCoverage(profileIds, destination);
   }
 
-  /** Dispatch deadline from acceptance time, handling days, same-day cutoff, business days and closures */
-  async dispatchDeadline(ownerType: 'official'|'seller', sellerId: string | null, from: string, dispatch: DispatchInput): Promise<string> {
-    throw notImplemented("shipping.dispatchDeadline");
+  hasCoverage(sellerId: string): Promise<boolean> {
+    return this.profiles.hasCoverage(sellerId);
   }
 
-  /** Live service notices for a location */
-  async activeNotices(postalCode?: string, carrierCodes?: string[], surface?: string): Promise<CustomerNotice[]> {
-    throw notImplemented("shipping.activeNotices");
+  dispatchDeadline(ownerType: 'official' | 'seller', sellerId: string | null, from: string, dispatch: DispatchInput): Promise<string> {
+    return this.estimates.dispatchDeadline(ownerType, sellerId, from, dispatch);
   }
 
-  /** Carrier services that can carry this parcel to the destination, with cost, estimated arrival and keepsPromise against the customer's promised range (same rule createLabel enforces with keepPromise) */
-  async quoteLabelOptions(input: LabelRequest): Promise<LabelQuote[]> {
-    throw notImplemented("shipping.quoteLabelOptions");
+  activeNotices(postalCode?: string, carrierCodes?: string[], surface?: string): Promise<CustomerNotice[]> {
+    return this.estimates.activeNotices(postalCode, carrierCodes, surface);
   }
 
-  /** Buy a carrier label and create the shipment (label_created). kind = return creates the return parcel for returns (labelMethod prepaid_qr adds a QR drop-off code; dropOffBy from the return); its tracking events carry kind = return and returnId. Same key returns the same label. */
-  async createLabel(input: LabelRequest, idempotencyKey: string): Promise<LabelResult> {
-    throw notImplemented("shipping.createLabel");
+  quoteLabelOptions(input: LabelRequest): Promise<LabelQuote[]> {
+    return this.shipments.quoteLabelOptions(input);
   }
 
-  /** Void an unused label (before the first carrier scan) */
-  async voidLabel(labelId: string, reason: string): Promise<Label> {
-    throw notImplemented("shipping.voidLabel");
+  createLabel(input: LabelRequest, idempotencyKey: string): Promise<LabelResult> {
+    return this.shipments.createLabel(input, idempotencyKey);
   }
 
-  /** Package handed to the carrier (label_created → shipped). Publishes shipping.shipment.dispatched. */
-  async handOver(shipmentId: string, at: string, actor: common.Actor): Promise<Shipment> {
-    throw notImplemented("shipping.handOver");
+  voidLabel(labelId: string, reason: string): Promise<Label> {
+    return this.shipments.voidLabel(labelId, reason);
   }
 
-  /** Shipments of an order with status and contents */
-  async getShipmentsForOrder(orderId: string): Promise<ShipmentSummary[]> {
-    throw notImplemented("shipping.getShipmentsForOrder");
+  handOver(shipmentId: string, at: string, actor: common.Actor): Promise<Shipment> {
+    return this.shipments.handOver(shipmentId, at, actor);
   }
 
-  /** On-time dispatch, valid tracking and late counts */
-  async dispatchMetrics(sellerId: string | null, range: common.DateRange): Promise<DispatchMetrics> {
-    throw notImplemented("shipping.dispatchMetrics");
+  getShipmentsForOrder(orderId: string): Promise<ShipmentSummary[]> {
+    return this.shipments.forOrder(orderId);
   }
 
-  /** Customer-arranged return: create a kind = return shipment for a tracking number the customer entered (format-checked) so carrier events for it are tracked and published like a prepaid return label. */
-  async registerReturnTracking(input: { returnId: string, orderId: string, groupId: string, carrierCode: string, trackingNumber: string, to: common.Address }): Promise<Shipment> {
-    throw notImplemented("shipping.registerReturnTracking");
+  dispatchMetrics(sellerId: string | null, range: common.DateRange): Promise<DispatchMetrics> {
+    return this.shipments.dispatchMetrics(sellerId, range);
   }
 
-  /** Carrier drop-off locations near a ZIP code for return labels. */
-  async findDropOffPoints(carrierServiceId: string, postalCode: string, limit?: number): Promise<{ name: string, address: common.Address, hours: string, distanceMiles: number, acceptsQr: boolean }[]> {
-    throw notImplemented("shipping.findDropOffPoints");
+  registerReturnTracking(input: { returnId: string; orderId: string; groupId: string; carrierCode: string; trackingNumber: string; to: common.Address }): Promise<Shipment> {
+    return this.shipments.registerReturnTracking(input);
   }
 
-  /** Shipments per seller group with contents, tracking events and failed-delivery options (batched per request). Default kinds: outbound and replacement. */
-  async listShipmentsForGroups(groupIds: string[], kinds?: ('outbound'|'replacement'|'return')[]): Promise<Map<string, Shipment[]>> {
-    throw notImplemented("shipping.listShipmentsForGroups");
+  findDropOffPoints(carrierServiceId: string, postalCode: string, limit?: number): Promise<{ name: string; address: common.Address; hours: string; distanceMiles: number; acceptsQr: boolean }[]> {
+    return this.shipments.findDropOffPoints(carrierServiceId, postalCode, limit);
   }
 
-  /** One package with tracking view fields (headline, steps, estimate note, notices). Store: the customer's or guest's own order; seller: own shipments; staff: any (shipping.shipments.view). Otherwise null. */
-  async getShipment(viewer: { customerId?: string, guestSessionId?: string, sellerId?: string, staff?: boolean }, shipmentId: string): Promise<Shipment | null> {
-    throw notImplemented("shipping.getShipment");
+  listShipmentsForGroups(groupIds: string[], kinds?: ('outbound' | 'replacement' | 'return')[]): Promise<Map<string, Shipment[]>> {
+    return this.shipments.forGroups(groupIds, kinds?.length ? kinds : undefined);
   }
 
-  /** Default delivery option per offer at a location (resolves offer → profile and dispatch through offers). Without a postal code uses the shopper's saved or cart location, else the market default; batched per request. */
-  async estimateOffers(offerIds: string[], postalCode?: string, viewer?: { customerId?: string, guestSessionId?: string }): Promise<OfferEstimate[]> {
-    throw notImplemented("shipping.estimateOffers");
+  getShipment(viewer: { customerId?: string; guestSessionId?: string; sellerId?: string; staff?: boolean }, shipmentId: string): Promise<Shipment | null> {
+    return this.shipments.getForViewer(viewer, shipmentId);
   }
 
-  /** Delivery exceptions on an order; with sellerId only that seller's groups */
-  async listExceptionsForOrder(orderId: string, sellerId?: string): Promise<DeliveryException[]> {
-    throw notImplemented("shipping.listExceptionsForOrder");
+  /** Default option per offer (resolved through offers); without a postal code the market default location */
+  async estimateOffers(offerIds: string[], postalCode?: string, _viewer?: { customerId?: string; guestSessionId?: string }): Promise<OfferEstimate[]> {
+    const ids = [...new Set(offerIds)].filter(isUuid).slice(0, 50);
+    if (!ids.length) return [];
+    const w = await this.estimates.world();
+    const zip = postalCode?.trim() || w.cfg.marketDefaultPostalCode;
+    const out: OfferEstimate[] = [];
+    for (const offerId of ids) {
+      const offer = await this.core.soft('offers', 'getOffer', (o) => o.getOffer(offerId));
+      if (!offer || offer.status === 'removed') {
+        out.push({ offerId, shipsToLocation: false, reason: 'This offer is not available', option: null, otherOptions: 0 });
+        continue;
+      }
+      try {
+        const q = await this.estimates.quote(offer.shippingProfileId, zip, { weightGrams: 1000 }, { businessDays: offer.dispatch.businessDays, sameDayCutoff: offer.dispatch.sameDayCutoff ?? null, shipsFrom: offer.dispatch.shipsFrom }, w);
+        out.push({ offerId, shipsToLocation: q.shipsToLocation, reason: q.reason ?? null, option: q.default ?? null, otherOptions: Math.max(0, q.options.length - 1) });
+      } catch {
+        out.push({ offerId, shipsToLocation: false, reason: 'Delivery options are not available for this offer', option: null, otherOptions: 0 });
+      }
+    }
+    return out;
   }
 
-  /** Dispatch and delivery exceptions for staff (same filters as admin GET /exceptions) */
-  async listExceptions(filter: { kind?: string, status?: string, sellerType?: string, ownerStaffId?: string, customerNotNotified?: boolean, q?: string }, page: common.PageInput): Promise<common.Page<DeliveryException>> {
-    throw notImplemented("shipping.listExceptions");
+  listExceptionsForOrder(orderId: string, sellerId?: string): Promise<DeliveryException[]> {
+    return this.exceptions.forOrder(orderId, sellerId);
   }
 
-  /** Open exceptions per kind and not-yet-notified customers (queue tiles) */
-  async countOpenExceptions(): Promise<ExceptionCounts> {
-    throw notImplemented("shipping.countOpenExceptions");
+  listExceptions(filter: { kind?: string; status?: string; sellerType?: string; ownerStaffId?: string; customerNotNotified?: boolean; q?: string }, page: common.PageInput): Promise<common.Page<DeliveryException>> {
+    return this.exceptions.listAdmin(filter, toPage(page));
   }
 
-  /** Storefront shipping section from the seller's active shipping settings and default profile (the REST storefront's shipping block): ships from, coverage and exclusions, dispatch time and same-day cutoff, carriers, methods with transit, free-shipping threshold, upcoming closures and live notices. Null when the seller has no active profile. */
-  async getSellerShippingSummaries(sellerIds: string[]): Promise<Record<string, { shipsFrom: string | null, coverage: Coverage, coverageLabel: string, excluded: string[], handlingDays: number, sameDayCutoff: string | null, dispatchLabel: string, businessDays: string[], closures: Closure[], carriers: string[], methods: { name: string, transit: TransitRange, priceLabel: string }[], freeShippingThreshold: common.Money | null, freeShippingLabel: string | null, notices: CustomerNotice[] } | null>> {
-    throw notImplemented("shipping.getSellerShippingSummaries");
+  countOpenExceptions(): Promise<ExceptionCounts> {
+    return this.exceptions.counts();
   }
 
-  /** The REPLACEMENT shipment sent for a return's replacement or exchange (shipments.kind = replacement, matched by return id) */
-  async shipmentsForReplacements(replacements: { replacementId: string, returnId: string }[]): Promise<Record<string, Shipment | null>> {
-    throw notImplemented("shipping.shipmentsForReplacements");
+  getSellerShippingSummaries(sellerIds: string[]): Promise<
+    Record<
+      string,
+      {
+        shipsFrom: string | null;
+        coverage: Coverage;
+        coverageLabel: string;
+        excluded: string[];
+        handlingDays: number;
+        sameDayCutoff: string | null;
+        dispatchLabel: string;
+        businessDays: string[];
+        closures: Closure[];
+        carriers: string[];
+        methods: { name: string; transit: TransitRange; priceLabel: string }[];
+        freeShippingThreshold: common.Money | null;
+        freeShippingLabel: string | null;
+        notices: CustomerNotice[];
+      } | null
+    >
+  > {
+    return this.profiles.summaries(sellerIds);
   }
 
-  /** Carriers and services the seller can use, whether labels can be bought and the default package, for the record-shipment form */
-  async getSellerShippingSetup(sellerId: string): Promise<SellerShippingSetup> {
-    throw notImplemented("shipping.getSellerShippingSetup");
+  shipmentsForReplacements(replacements: { replacementId: string; returnId: string }[]): Promise<Record<string, Shipment | null>> {
+    return this.shipments.forReplacements(replacements);
   }
 
-  /** Export rows for reports dataset shipping.admin.exceptions (delivery exceptions) */
-  async exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[], nextCursor?: string }> {
-    throw notImplemented("shipping.exportRows");
+  getSellerShippingSetup(sellerId: string): Promise<SellerShippingSetup> {
+    return this.profiles.setup(sellerId);
   }
 
-  /* ---------------- events consumed */
-
-  /** orders.order.accepted: Add each group to the dispatch watch; if acceptance came later than placement, recalculate the deadline and call orders.setDispatchDeadline */
-  async onOrderAcceptedFromOrders(event: EventPayload<"orders.order.accepted">): Promise<void> {
-    throw notImplemented("shipping consumer of orders.order.accepted");
+  exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[]; nextCursor?: string }> {
+    return this.exceptions.exportRows(dataset, filters, principal, cursor);
   }
 
-  /** orders.dispatch_deadline.changed: Move the watched deadline (the original stays on record for performance) */
-  async onDispatchDeadlineChangedFromOrders(event: EventPayload<"orders.dispatch_deadline.changed">): Promise<void> {
-    throw notImplemented("shipping consumer of orders.dispatch_deadline.changed");
+  /* ---------------------------------------------------------------- events consumed */
+
+  onOrderAcceptedFromOrders(event: EventPayload<'orders.order.accepted'>): Promise<void> {
+    return this.exceptions.onOrderAccepted(event);
   }
 
-  /** orders.item.cancelled: Remove items from the watch; open (or update) a seller_cannot_fulfill exception when the seller cancelled; close dispatch exceptions when nothing is left to ship; void unused labels */
-  async onItemCancelledFromOrders(event: EventPayload<"orders.item.cancelled">): Promise<void> {
-    throw notImplemented("shipping consumer of orders.item.cancelled");
+  onDispatchDeadlineChangedFromOrders(event: EventPayload<'orders.dispatch_deadline.changed'>): Promise<void> {
+    return this.exceptions.onDeadlineChanged(event);
   }
 
-  /** warehouse.package.packed: Official Store package handed to the carrier pickup (handOver) */
-  async onPackagePackedFromWarehouse(event: EventPayload<"warehouse.package.packed">): Promise<void> {
-    throw notImplemented("shipping consumer of warehouse.package.packed");
+  onItemCancelledFromOrders(event: EventPayload<'orders.item.cancelled'>): Promise<void> {
+    return this.exceptions.onItemCancelled(event);
   }
 
-  /** sellers.seller.restricted: Mark open exceptions of the seller for escalation to the Seller Manager */
-  async onSellerRestrictedFromSellers(event: EventPayload<"sellers.seller.restricted">): Promise<void> {
-    throw notImplemented("shipping consumer of sellers.seller.restricted");
+  onPackagePackedFromWarehouse(event: EventPayload<'warehouse.package.packed'>): Promise<void> {
+    return this.shipments.onPackagePacked(event);
   }
 
-  /** support.case.opened: Open a lost_or_damaged exception for missing or damaged package reports when none is open */
-  async onCaseOpenedFromSupport(event: EventPayload<"support.case.opened">): Promise<void> {
-    throw notImplemented("shipping consumer of support.case.opened");
+  onSellerRestrictedFromSellers(event: EventPayload<'sellers.seller.restricted'>): Promise<void> {
+    return this.exceptions.onSellerRestricted(event);
   }
 
-  /** returns.replacement.created: Watch the replacement's dispatch like an original shipment */
-  async onReplacementCreatedFromReturns(event: EventPayload<"returns.replacement.created">): Promise<void> {
-    throw notImplemented("shipping consumer of returns.replacement.created");
+  onCaseOpenedFromSupport(event: EventPayload<'support.case.opened'>): Promise<void> {
+    return this.exceptions.onCaseOpened(event);
   }
 
-  /** payments.refund.sent: Close seller_cannot_fulfill exceptions whose refund was sent */
-  async onRefundSentFromPayments(event: EventPayload<"payments.refund.sent">): Promise<void> {
-    throw notImplemented("shipping consumer of payments.refund.sent");
+  onReplacementCreatedFromReturns(event: EventPayload<'returns.replacement.created'>): Promise<void> {
+    return this.exceptions.onReplacementCreated(event);
   }
 
-  /* ---------------- jobs */
-
-  /** Job shipping.detect-late-dispatch (every 5 min): Groups past their dispatch deadline with unshipped items: open a late_dispatch exception, notify the seller and publish shipping.dispatch.overdue (once per group per deadline) */
-  async detectLateDispatch(): Promise<void> {
-    throw notImplemented("job shipping.detect-late-dispatch");
+  onRefundSentFromPayments(event: EventPayload<'payments.refund.sent'>): Promise<void> {
+    return this.exceptions.onRefundSent(event);
   }
 
-  /** Job shipping.detect-missing-tracking (every 15 min): Shipments without tracking, with an invalid number, or a label without a carrier scan after labelScanGraceHours: open missing_tracking */
-  async detectMissingTracking(): Promise<void> {
-    throw notImplemented("job shipping.detect-missing-tracking");
+  /* ---------------------------------------------------------------- jobs */
+
+  detectLateDispatch(): Promise<void> {
+    return this.exceptions.detectLateDispatch();
   }
 
-  /** Job shipping.detect-stalled (daily 07:00 PT): Shipments with no carrier scan for stalledNoScanDays: open lost_or_damaged for review */
-  async detectStalled(): Promise<void> {
-    throw notImplemented("job shipping.detect-stalled");
+  detectMissingTracking(): Promise<void> {
+    return this.exceptions.detectMissingTracking();
   }
 
-  /** Job shipping.poll-tracking (every 30 min): Poll carriers in polling mode and unknown webhook numbers */
-  async pollTracking(): Promise<void> {
-    throw notImplemented("job shipping.poll-tracking");
+  detectStalled(): Promise<void> {
+    return this.exceptions.detectStalled();
   }
 
-  /** Job shipping.failed-delivery-default (hourly): Failed deliveries past chooseBy without a choice follow the default (return to seller) and notify customer and seller */
-  async failedDeliveryDefault(): Promise<void> {
-    throw notImplemented("job shipping.failed-delivery-default");
+  pollTracking(): Promise<void> {
+    return this.shipments.pollTracking();
   }
 
-  /** Job shipping.activate-versions (every 5 min): Activate scheduled profile and settings versions; supersede the previous ones */
-  async activateVersions(): Promise<void> {
-    throw notImplemented("job shipping.activate-versions");
+  failedDeliveryDefault(): Promise<void> {
+    return this.shipments.failedDeliveryDefault();
   }
 
-  /** Job shipping.notice-schedule (every 5 min): Move notices scheduled → live at showFrom and live → ended after the to date */
-  async noticeSchedule(): Promise<void> {
-    throw notImplemented("job shipping.notice-schedule");
+  activateVersions(): Promise<void> {
+    return this.profiles.activateVersions();
   }
 
-  /** Job shipping.carrier-on-time (daily 04:00 PT): Compute 30-day on-time rates per carrier and the Official Store dispatch rate */
-  async carrierOnTime(): Promise<void> {
-    throw notImplemented("job shipping.carrier-on-time");
+  noticeSchedule(): Promise<void> {
+    return this.setup.noticeSchedule();
+  }
+
+  carrierOnTime(): Promise<void> {
+    return this.shipments.carrierOnTime();
+  }
+
+  /** Startup: reference data and the export dataset */
+  async boot(): Promise<void> {
+    await this.core.ensureSeeded().catch((err) => this.core.ctx.log.warn({ err }, 'shipping: reference data not seeded at boot'));
+    await this.exceptions.registerDataset();
   }
 }

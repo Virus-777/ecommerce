@@ -8,6 +8,8 @@ import { adminRoutes } from './http/admin.js';
 import { webhooksRoutes } from './http/webhooks.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresSellersRepository } from './infra/postgres/repository.js';
+import { hmacWebhookVerifier } from '../../kernel/http/webhooks.js';
+import { devProviders } from './infra/providers/dev.js';
 import { SellersService } from './service.js';
 
 /**
@@ -18,21 +20,23 @@ import { SellersService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '0.1.0',
+  version: '1.0.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const service = new SellersService({ repo: createPostgresSellersRepository(ctx.db), ctx });
+    // KYC/KYB, payout tokenisation and address checks: deterministic dev adapters until real providers are wired
+    const service = new SellersService({ repo: createPostgresSellersRepository(ctx.db), ctx, providers: devProviders });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), webhooksRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
+    ctx.http.webhookVerifier(hmacWebhookVerifier(ctx.config, ctx.name));
 
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("identity.invitation.accepted", (e) => service.onInvitationAcceptedFromIdentity(e.payload));
     ctx.events.on("identity.account.closed", (e) => service.onAccountClosedFromIdentity(e.payload));
-    ctx.events.on("access.approval.decided", (e) => service.onApprovalDecidedFromAccess(e.payload));
+    ctx.events.on("access.approval.decided", (e) => service.onApprovalDecidedFromAccess(e.payload, e));
     ctx.events.on("trust.assessment.completed", (e) => service.onAssessmentCompletedFromTrust(e.payload));
-    ctx.events.on("trust.enforcement.recorded", (e) => service.onEnforcementRecordedFromTrust(e.payload));
+    ctx.events.on("trust.enforcement.recorded", (e) => service.onEnforcementRecordedFromTrust(e.payload, e));
     ctx.events.on("finance.destination.verified", (e) => service.onDestinationVerifiedFromFinance(e.payload));
     ctx.events.on("finance.destination.rejected", (e) => service.onDestinationRejectedFromFinance(e.payload));
     ctx.events.on("catalog.product.submitted", (e) => service.onProductSubmittedFromCatalog(e.payload));

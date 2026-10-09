@@ -16,7 +16,7 @@ import { ContentService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '0.1.0',
+  version: '1.0.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
@@ -34,6 +34,15 @@ export default defineModule({
     ctx.events.on("inventory.stock.changed", (e) => service.onStockChangedFromInventory(e.payload));
     ctx.events.on("sellers.seller.suspended", (e) => service.onSellerSuspendedFromSellers(e.payload));
     ctx.events.on("access.approval.decided", (e) => service.onApprovalDecidedFromAccess(e.payload));
+
+    // ad positions from advertising (locked markers in the homepage layout), once every module is up
+    ctx.afterBoot(async () => {
+      try {
+        await service.ensureAdPositions();
+      } catch (err) {
+        ctx.log.warn({ err }, 'content: ad positions not seeded');
+      }
+    });
 
     // Background jobs (spec jobs)
     ctx.jobs.handle("content.run-schedules", () => service.runSchedules());

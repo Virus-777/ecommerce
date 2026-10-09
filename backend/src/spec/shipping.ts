@@ -1846,6 +1846,10 @@ export interface ShippingShipmentDispatchedEvent {
   shipmentId: string;
   kind: "outbound" | "replacement" | "return";
   orderId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   groupId: string;
   returnId?: string | null;
   ownerType: "official" | "seller";
@@ -1862,6 +1866,8 @@ export const ShippingShipmentDispatchedEvent: z.ZodType<ShippingShipmentDispatch
   shipmentId: z.uuid(),
   kind: z.enum(["outbound", "replacement", "return"]),
   orderId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   groupId: z.uuid(),
   returnId: z.uuid().nullish(),
   ownerType: z.enum(["official", "seller"]),
@@ -1912,6 +1918,10 @@ export interface ShippingShipmentDeliveredEvent {
   shipmentId: string;
   kind: "outbound" | "replacement" | "return";
   orderId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   groupId: string;
   returnId?: string | null;
   sellerId?: string | null;
@@ -1923,6 +1933,8 @@ export const ShippingShipmentDeliveredEvent: z.ZodType<ShippingShipmentDelivered
   shipmentId: z.uuid(),
   kind: z.enum(["outbound", "replacement", "return"]),
   orderId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   groupId: z.uuid(),
   returnId: z.uuid().nullish(),
   sellerId: z.uuid().nullish(),
@@ -1937,6 +1949,10 @@ export interface ShippingShipmentExceptionEvent {
   exceptionId: string;
   kind: "seller_cannot_fulfill" | "late_dispatch" | "missing_tracking" | "lost_or_damaged" | "failed_delivery";
   orderId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   groupId: string;
   shipmentId?: string | null;
   sellerId?: string | null;
@@ -1950,6 +1966,8 @@ export const ShippingShipmentExceptionEvent: z.ZodType<ShippingShipmentException
   exceptionId: z.uuid(),
   kind: z.enum(["seller_cannot_fulfill", "late_dispatch", "missing_tracking", "lost_or_damaged", "failed_delivery"]),
   orderId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   groupId: z.uuid(),
   shipmentId: z.uuid().nullish(),
   sellerId: z.uuid().nullish(),
@@ -2516,7 +2534,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/estimates",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Delivery estimate per offer for a location (product page, offers list)",
     desc: "Location: postalCode, else the customer's default address, else the market default. Needs the offers module to resolve profile and dispatch terms.",
     query: () =>
@@ -2533,7 +2552,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/notices",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Live holiday and service notices for a location",
     query: () =>
       z.object({
@@ -2550,6 +2570,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/orders/{orderId}/shipments",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Packages of an order with carrier, tracking and status",
     params: () =>
       z.object({
@@ -2566,6 +2587,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/shipments/{id}/tracking",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Track one package: carrier, tracking number, contents, estimate and events",
     desc: "Owners of the order (customer or guest session with order access). The failed-delivery state lists next steps with their costs and the choose-by date.",
     params: () =>
@@ -2583,6 +2605,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/shipments/{id}/delivery-choice",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Choose redelivery, pickup or return to seller after a failed delivery",
     desc: "Passed to the carrier (where supported) and the seller. return_to_seller leads to a refund when the package reaches the seller (orders and payments react to the return).",
     params: () =>
@@ -2606,6 +2629,7 @@ export const endpoints = defineEndpoints({
     path: "/settings",
     auth: "seller",
     permission: "shipping.seller-settings.view",
+    scope: "own-seller",
     summary: "Coverage, profiles with methods and rates, dispatch schedule, closures, labels and customer preview",
     response: () => SellerShippingSettings,
     status: 200,
@@ -2618,6 +2642,7 @@ export const endpoints = defineEndpoints({
     path: "/settings",
     auth: "seller",
     permission: "shipping.seller-settings.manage",
+    scope: "own-seller",
     summary: "Change coverage, dispatch schedule or label preference (now or from a date)",
     desc: "Handling time must be within the platform's allowed range. Existing orders keep their accepted delivery terms.",
     body: () => SellerShippingSettingsInput,
@@ -2635,6 +2660,7 @@ export const endpoints = defineEndpoints({
     path: "/closures",
     auth: "seller",
     permission: "shipping.seller-settings.manage",
+    scope: "own-seller",
     summary: "Add a holiday closure (estimates skip closed days)",
     body: () => z.object({
       name: z.string(),
@@ -2652,6 +2678,7 @@ export const endpoints = defineEndpoints({
     path: "/closures/{id}",
     auth: "seller",
     permission: "shipping.seller-settings.manage",
+    scope: "own-seller",
     summary: "Remove a closure",
     params: () =>
       z.object({
@@ -2668,6 +2695,7 @@ export const endpoints = defineEndpoints({
     path: "/profiles",
     auth: "seller",
     permission: "shipping.seller-settings.view",
+    scope: "own-seller",
     summary: "The seller's shipping profiles (chosen on each offer)",
     response: () => z.array(ShippingProfile),
     status: 200,
@@ -2680,6 +2708,7 @@ export const endpoints = defineEndpoints({
     path: "/profiles",
     auth: "seller",
     permission: "shipping.seller-settings.manage",
+    scope: "own-seller",
     summary: "Create a shipping profile (e.g. Large items)",
     body: () => ProfileInput,
     response: () => ShippingProfile,
@@ -2696,6 +2725,7 @@ export const endpoints = defineEndpoints({
     path: "/profiles/{id}",
     auth: "seller",
     permission: "shipping.seller-settings.manage",
+    scope: "own-seller",
     summary: "Change methods, rates or the free-shipping threshold (new version, now or from a date)",
     params: () =>
       z.object({
@@ -2716,6 +2746,7 @@ export const endpoints = defineEndpoints({
     path: "/profiles/{id}/archive",
     auth: "seller",
     permission: "shipping.seller-settings.manage",
+    scope: "own-seller",
     summary: "Archive a profile no offer uses",
     params: () =>
       z.object({
@@ -2734,6 +2765,7 @@ export const endpoints = defineEndpoints({
     path: "/preview",
     auth: "seller",
     permission: "shipping.seller-settings.view",
+    scope: "own-seller",
     summary: "What customers see for an offer or profile at a location",
     query: () =>
       z.object({
@@ -2753,6 +2785,7 @@ export const endpoints = defineEndpoints({
     path: "/methods",
     auth: "seller",
     permission: "shipping.seller-settings.view",
+    scope: "own-seller",
     summary: "Platform shipping methods a seller can add to a profile, with their carrier services and transit",
     desc: "Active methods only (same list as the admin GET /methods without positions or inactive entries). The id is ProfileMethodInput.methodId for 'Add method'.",
     response: () => z.array(ShippingMethod),
@@ -2765,6 +2798,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/carrier-services",
     auth: "seller",
+    scope: "own-seller",
     summary: "Carriers and services sellers can use, with label support and tracking formats",
     response: () => z.array(Carrier),
     status: 200,
@@ -2777,6 +2811,7 @@ export const endpoints = defineEndpoints({
     path: "/shipments",
     auth: "seller",
     permission: "shipping.seller-shipments.manage",
+    scope: "own-seller",
     summary: "Record a shipment for some or all items of one of the seller's orders",
     desc: "Checks that the items belong to the seller's group and are unshipped (orders.canShipItems) and the tracking format. Fewer than ordered makes a partial shipment; the rest keeps its deadline. The buyer gets the carrier, tracking and contents.",
     body: () => RecordShipmentInput,
@@ -2793,6 +2828,7 @@ export const endpoints = defineEndpoints({
     path: "/shipments",
     auth: "seller",
     permission: "shipping.seller-shipments.view",
+    scope: "own-seller",
     summary: "The seller's shipment records",
     query: () =>
       z.object({
@@ -2812,6 +2848,7 @@ export const endpoints = defineEndpoints({
     path: "/shipments/{id}",
     auth: "seller",
     permission: "shipping.seller-shipments.view",
+    scope: "own-seller",
     summary: "One shipment with tracking events and correction history",
     params: () =>
       z.object({
@@ -2828,6 +2865,7 @@ export const endpoints = defineEndpoints({
     path: "/shipments/{id}/correct-tracking",
     auth: "seller",
     permission: "shipping.seller-shipments.manage",
+    scope: "own-seller",
     summary: "Correct the carrier or tracking number with a reason",
     desc: "Keeps the old value in the history and sends the buyer the corrected number.",
     params: () =>
@@ -2852,6 +2890,7 @@ export const endpoints = defineEndpoints({
     path: "/labels/quotes",
     auth: "seller",
     permission: "shipping.seller-shipments.manage",
+    scope: "own-seller",
     summary: "Label prices for a package, marked when they keep the promised arrival",
     body: () => z.object({
       groupId: z.uuid(),
@@ -2874,6 +2913,7 @@ export const endpoints = defineEndpoints({
     path: "/labels",
     auth: "seller",
     permission: "shipping.seller-shipments.manage",
+    scope: "own-seller",
     summary: "Buy a carrier label (cost is deducted from earnings)",
     desc: "Creates the shipment in label_created; it becomes shipped at the first carrier scan or when the seller marks it handed over.",
     body: () => z.object({
@@ -2896,6 +2936,7 @@ export const endpoints = defineEndpoints({
     path: "/shipments/{id}/hand-over",
     auth: "seller",
     permission: "shipping.seller-shipments.manage",
+    scope: "own-seller",
     summary: "Mark a labelled package as handed to the carrier",
     params: () =>
       z.object({
@@ -2917,6 +2958,7 @@ export const endpoints = defineEndpoints({
     path: "/labels/{id}/void",
     auth: "seller",
     permission: "shipping.seller-shipments.manage",
+    scope: "own-seller",
     summary: "Void an unused label (refunded to earnings)",
     params: () =>
       z.object({
@@ -2939,6 +2981,7 @@ export const endpoints = defineEndpoints({
     path: "/exceptions",
     auth: "seller",
     permission: "shipping.seller-shipments.view",
+    scope: "own-seller",
     summary: "Delivery exceptions on the seller's orders that need the seller's response",
     query: () =>
       z.object({
@@ -2957,6 +3000,7 @@ export const endpoints = defineEndpoints({
     path: "/exceptions/{id}/respond",
     auth: "seller",
     permission: "shipping.seller-shipments.manage",
+    scope: "own-seller",
     summary: "Respond: provide tracking, promise a ship-by date, report you cannot fulfill, or confirm a replacement",
     params: () =>
       z.object({
@@ -2981,6 +3025,7 @@ export const endpoints = defineEndpoints({
     path: "/claims",
     auth: "seller",
     permission: "shipping.seller-shipments.view",
+    scope: "own-seller",
     summary: "Carrier claims on the seller's shipments",
     paging: true,
     response: () => CarrierClaim,
@@ -2994,6 +3039,7 @@ export const endpoints = defineEndpoints({
     path: "/claims",
     auth: "seller",
     permission: "shipping.seller-shipments.manage",
+    scope: "own-seller",
     summary: "Record a claim the seller filed with its own carrier account",
     body: () => ClaimInput,
     response: () => CarrierClaim,
@@ -3008,6 +3054,7 @@ export const endpoints = defineEndpoints({
     path: "/summary",
     auth: "staff",
     permission: "shipping.settings.view",
+    scope: "staff",
     summary: "Live notices, exception counts, overdue dispatch and Official Store on-time rate",
     response: () => ShippingSummary,
     status: 200,
@@ -3020,6 +3067,7 @@ export const endpoints = defineEndpoints({
     path: "/carriers",
     auth: "staff",
     permission: "shipping.settings.view",
+    scope: "staff",
     summary: "Carriers with services, tracking connection and on-time rate",
     response: () => z.array(Carrier),
     status: 200,
@@ -3032,6 +3080,7 @@ export const endpoints = defineEndpoints({
     path: "/carriers",
     auth: "staff",
     permission: "shipping.settings.manage",
+    scope: "staff",
     summary: "Add a carrier account",
     body: () => CarrierInput,
     response: () => Carrier,
@@ -3046,6 +3095,7 @@ export const endpoints = defineEndpoints({
     path: "/carriers/{id}",
     auth: "staff",
     permission: "shipping.settings.manage",
+    scope: "staff",
     summary: "Activate, deactivate or rename a carrier, or update its contacts",
     params: () =>
       z.object({
@@ -3073,6 +3123,7 @@ export const endpoints = defineEndpoints({
     path: "/carriers/{id}/services/{serviceId}",
     auth: "staff",
     permission: "shipping.settings.manage",
+    scope: "staff",
     summary: "Enable or disable a carrier service, set transit days",
     params: () =>
       z.object({
@@ -3092,6 +3143,7 @@ export const endpoints = defineEndpoints({
     path: "/methods",
     auth: "staff",
     permission: "shipping.settings.view",
+    scope: "staff",
     summary: "Platform shipping methods and their carrier services",
     response: () => z.array(ShippingMethod),
     status: 200,
@@ -3104,6 +3156,7 @@ export const endpoints = defineEndpoints({
     path: "/methods/{id}",
     auth: "staff",
     permission: "shipping.settings.manage",
+    scope: "staff",
     summary: "Change a method's name, customer label, transit or services",
     params: () =>
       z.object({
@@ -3122,6 +3175,7 @@ export const endpoints = defineEndpoints({
     path: "/zones",
     auth: "staff",
     permission: "shipping.settings.view",
+    scope: "staff",
     summary: "Served zones and excluded areas",
     response: () => z.array(Zone),
     status: 200,
@@ -3134,6 +3188,7 @@ export const endpoints = defineEndpoints({
     path: "/zones",
     auth: "staff",
     permission: "shipping.settings.manage",
+    scope: "staff",
     summary: "Add a zone or excluded area",
     body: () => ZoneInput,
     response: () => Zone,
@@ -3149,6 +3204,7 @@ export const endpoints = defineEndpoints({
     path: "/zones/{id}",
     auth: "staff",
     permission: "shipping.settings.manage",
+    scope: "staff",
     summary: "Change a zone, enable or disable it",
     desc: "Disabling a served zone stops new orders there; existing orders still ship.",
     params: () =>
@@ -3169,6 +3225,7 @@ export const endpoints = defineEndpoints({
     path: "/profiles",
     auth: "staff",
     permission: "shipping.settings.view",
+    scope: "staff",
     summary: "Official Store and seller shipping profiles",
     query: () =>
       z.object({
@@ -3188,6 +3245,7 @@ export const endpoints = defineEndpoints({
     path: "/profiles",
     auth: "staff",
     permission: "shipping.settings.manage",
+    scope: "staff",
     summary: "Create an Official Store shipping profile",
     body: () => ProfileInput,
     response: () => ShippingProfile,
@@ -3203,6 +3261,7 @@ export const endpoints = defineEndpoints({
     path: "/profiles/{id}",
     auth: "staff",
     permission: "shipping.settings.manage",
+    scope: "staff",
     summary: "Change Official Store rates (new version with an effective date)",
     params: () =>
       z.object({
@@ -3228,6 +3287,7 @@ export const endpoints = defineEndpoints({
     path: "/dispatch-targets",
     auth: "staff",
     permission: "shipping.settings.view",
+    scope: "staff",
     summary: "Official Store cutoff and default seller targets",
     response: () => DispatchTargets,
     status: 200,
@@ -3240,6 +3300,7 @@ export const endpoints = defineEndpoints({
     path: "/dispatch-targets",
     auth: "staff",
     permission: "shipping.settings.manage",
+    scope: "staff",
     summary: "Change dispatch targets from an effective date",
     body: () => DispatchTargetsInput,
     response: () => DispatchTargets,
@@ -3254,6 +3315,7 @@ export const endpoints = defineEndpoints({
     path: "/notices",
     auth: "staff",
     permission: "shipping.settings.view",
+    scope: "staff",
     summary: "Holiday calendar and service notices",
     query: () =>
       z.object({
@@ -3273,6 +3335,7 @@ export const endpoints = defineEndpoints({
     path: "/notices",
     auth: "staff",
     permission: "shipping.notices.manage",
+    scope: "staff",
     summary: "Draft a holiday or service-interruption notice",
     body: () => NoticeInput,
     response: () => ServiceNotice,
@@ -3287,6 +3350,7 @@ export const endpoints = defineEndpoints({
     path: "/notices/preview",
     auth: "staff",
     permission: "shipping.notices.manage",
+    scope: "staff",
     summary: "Preview a draft notice at checkout for a postal code: customer message and adjusted arrival estimates",
     desc: "Runs the estimate rules with and without the draft notice for the Official Store default profile (or profileId) at the given time; nothing is saved.",
     body: () => z.object({
@@ -3310,6 +3374,7 @@ export const endpoints = defineEndpoints({
     path: "/notices/{id}",
     auth: "staff",
     permission: "shipping.notices.manage",
+    scope: "staff",
     summary: "Edit a draft, scheduled or live notice",
     params: () =>
       z.object({
@@ -3329,6 +3394,7 @@ export const endpoints = defineEndpoints({
     path: "/notices/{id}/publish",
     auth: "staff",
     permission: "shipping.notices.manage",
+    scope: "staff",
     summary: "Publish now or schedule a notice",
     params: () =>
       z.object({
@@ -3351,6 +3417,7 @@ export const endpoints = defineEndpoints({
     path: "/notices/{id}/withdraw",
     auth: "staff",
     permission: "shipping.notices.manage",
+    scope: "staff",
     summary: "Withdraw a notice",
     params: () =>
       z.object({
@@ -3372,6 +3439,7 @@ export const endpoints = defineEndpoints({
     path: "/free-shipping-rules",
     auth: "staff",
     permission: "shipping.settings.view",
+    scope: "staff",
     summary: "Free-shipping rules with who funds them",
     response: () => z.array(FreeShippingRule),
     status: 200,
@@ -3384,6 +3452,7 @@ export const endpoints = defineEndpoints({
     path: "/free-shipping-rules",
     auth: "staff",
     permission: "shipping.settings.manage",
+    scope: "staff",
     summary: "Add a free-shipping rule",
     body: () => FreeShippingRuleInput,
     response: () => FreeShippingRule,
@@ -3398,6 +3467,7 @@ export const endpoints = defineEndpoints({
     path: "/free-shipping-rules/{id}",
     auth: "staff",
     permission: "shipping.settings.manage",
+    scope: "staff",
     summary: "Change or end a free-shipping rule",
     params: () =>
       z.object({
@@ -3416,6 +3486,7 @@ export const endpoints = defineEndpoints({
     path: "/shipments",
     auth: "staff",
     permission: "shipping.shipments.view",
+    scope: "staff",
     summary: "All shipments",
     query: () =>
       z.object({
@@ -3438,6 +3509,7 @@ export const endpoints = defineEndpoints({
     path: "/shipments/{id}",
     auth: "staff",
     permission: "shipping.shipments.view",
+    scope: "staff",
     summary: "Shipment history: events, corrections, label and exceptions",
     params: () =>
       z.object({
@@ -3454,6 +3526,7 @@ export const endpoints = defineEndpoints({
     path: "/shipments/{id}/correct-tracking",
     auth: "staff",
     permission: "shipping.shipments.correct",
+    scope: "staff",
     summary: "Correct carrier or tracking as staff",
     params: () =>
       z.object({
@@ -3479,6 +3552,7 @@ export const endpoints = defineEndpoints({
     path: "/shipments/{id}/events",
     auth: "staff",
     permission: "shipping.shipments.correct",
+    scope: "staff",
     summary: "Record a carrier status the integration missed (with evidence)",
     desc: "For carriers without tracking feeds, or confirmed by phone with the carrier. Delivery recorded this way needs evidence (proof of delivery) and a reason.",
     params: () =>
@@ -3506,6 +3580,7 @@ export const endpoints = defineEndpoints({
     path: "/exceptions",
     auth: "staff",
     permission: "shipping.exceptions.view",
+    scope: "staff",
     summary: "Dispatch and delivery exceptions by kind, with owner, deadline and whether the customer was notified",
     query: () =>
       z.object({
@@ -3528,6 +3603,7 @@ export const endpoints = defineEndpoints({
     path: "/exceptions/counts",
     auth: "staff",
     permission: "shipping.exceptions.view",
+    scope: "staff",
     summary: "Open exceptions per kind (queue tiles)",
     response: () => ExceptionCounts,
     status: 200,
@@ -3540,6 +3616,7 @@ export const endpoints = defineEndpoints({
     path: "/exceptions/{id}",
     auth: "staff",
     permission: "shipping.exceptions.view",
+    scope: "staff",
     summary: "One exception with history",
     params: () =>
       z.object({
@@ -3556,6 +3633,7 @@ export const endpoints = defineEndpoints({
     path: "/exceptions",
     auth: "staff",
     permission: "shipping.exceptions.manage",
+    scope: "staff",
     summary: "Open an exception manually (e.g. lost or damaged reported by phone)",
     body: () => OpenExceptionInput,
     response: () => DeliveryException,
@@ -3572,6 +3650,7 @@ export const endpoints = defineEndpoints({
     path: "/exceptions/{id}/assign",
     auth: "staff",
     permission: "shipping.exceptions.manage",
+    scope: "staff",
     summary: "Set the owner",
     params: () =>
       z.object({
@@ -3593,6 +3672,7 @@ export const endpoints = defineEndpoints({
     path: "/exceptions/{id}/notify-seller",
     auth: "staff",
     permission: "shipping.exceptions.manage",
+    scope: "staff",
     summary: "Remind the seller (late dispatch, missing tracking, failed delivery)",
     params: () =>
       z.object({
@@ -3614,6 +3694,7 @@ export const endpoints = defineEndpoints({
     path: "/exceptions/{id}/notify-customer",
     auth: "staff",
     permission: "shipping.exceptions.manage",
+    scope: "staff",
     summary: "Send the customer an update with the new estimate, options and escalation route",
     params: () =>
       z.object({
@@ -3634,6 +3715,7 @@ export const endpoints = defineEndpoints({
     path: "/exceptions/{id}/request-tracking",
     auth: "staff",
     permission: "shipping.exceptions.manage",
+    scope: "staff",
     summary: "Ask the seller for valid tracking details by a deadline",
     params: () =>
       z.object({
@@ -3654,6 +3736,7 @@ export const endpoints = defineEndpoints({
     path: "/exceptions/{id}/escalate",
     auth: "staff",
     permission: "shipping.exceptions.manage",
+    scope: "staff",
     summary: "Escalate to the Seller Manager, Support, Finance or Returns",
     params: () =>
       z.object({
@@ -3677,6 +3760,7 @@ export const endpoints = defineEndpoints({
     path: "/exceptions/{id}/resolve",
     auth: "staff",
     permission: "shipping.exceptions.manage",
+    scope: "staff",
     summary: "Record the resolution",
     desc: "Cancelling items and refunds go through orders (cancel items) and payments; this records the outcome on the exception.",
     params: () =>
@@ -3701,6 +3785,7 @@ export const endpoints = defineEndpoints({
     path: "/exceptions/bulk",
     auth: "staff",
     permission: "shipping.exceptions.manage",
+    scope: "staff",
     summary: "Remind sellers, assign an owner or escalate several exceptions",
     body: () => z.object({
       ids: z.array(z.uuid()),
@@ -3725,6 +3810,7 @@ export const endpoints = defineEndpoints({
     path: "/claims",
     auth: "staff",
     permission: "shipping.claims.manage",
+    scope: "staff",
     summary: "Carrier claims",
     query: () =>
       z.object({
@@ -3743,6 +3829,7 @@ export const endpoints = defineEndpoints({
     path: "/claims",
     auth: "staff",
     permission: "shipping.claims.manage",
+    scope: "staff",
     summary: "Open a carrier claim for a lost or damaged package",
     body: () => ClaimInput,
     response: () => CarrierClaim,
@@ -3760,6 +3847,7 @@ export const endpoints = defineEndpoints({
     path: "/claims/{id}/status",
     auth: "staff",
     permission: "shipping.claims.manage",
+    scope: "staff",
     summary: "Submit, record the carrier's decision or withdraw a claim",
     params: () =>
       z.object({
@@ -3786,6 +3874,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/carriers/{carrier}/events",
     auth: "provider",
+    scope: "public",
     summary: "Tracking events from a carrier or carrier aggregator",
     desc: "Signature checked per carrier; events are deduplicated by the carrier's event id, normalized to TrackingEvent codes and applied through the shipment state machine. Unknown tracking numbers are stored for matching later.",
     params: () =>
@@ -3807,6 +3896,7 @@ export const endpoints = defineEndpoints({
     path: "/shipping-setup",
     auth: "seller",
     permission: "shipping.seller-shipments.view",
+    scope: "own-seller",
     summary: "Carriers, services, label purchase and the default package for recording a shipment",
     response: () => SellerShippingSetup,
     status: 200,
@@ -5326,6 +5416,29 @@ export const spec = defineModuleSpec({
         "type": "text",
         "nullable": true
       }
+    }
+  },
+  tenantTables: {
+    "profiles": {
+      "seller": "seller_id"
+    },
+    "seller_settings": {
+      "seller": "seller_id"
+    },
+    "closures": {
+      "seller": "seller_id"
+    },
+    "shipments": {
+      "seller": "seller_id"
+    },
+    "dispatch_watch": {
+      "seller": "seller_id"
+    },
+    "exceptions": {
+      "seller": "seller_id"
+    },
+    "claims": {
+      "seller": "seller_id"
     }
   },
   endpoints,

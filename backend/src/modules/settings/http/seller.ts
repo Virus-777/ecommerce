@@ -1,4 +1,5 @@
-import { notImplemented, routes } from '../../../kernel/http/index.js';
+import { routes } from '../../../kernel/http/index.js';
+import { pageOf } from '../../../kernel/lib/pagination.js';
 import { endpoints } from '../../../spec/settings.js';
 import type { SettingsService } from '../service.js';
 
@@ -8,6 +9,6 @@ import type { SettingsService } from '../service.js';
  */
 export const sellerRoutes = (service: SettingsService) =>
   routes(endpoints, 'seller', {
-    /** GET /upcoming-changes: Scheduled platform changes that affect sellers */
-    listUpcomingChanges: notImplemented,
+    /** GET /upcoming-changes: Scheduled platform changes that affect sellers (a bounded list, paged in memory) */
+    listUpcomingChanges: async ({ principal, page }) => pageOf(await service.upcomingChangesForSellers(principal), page),
   });

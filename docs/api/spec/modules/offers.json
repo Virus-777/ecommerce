@@ -1440,7 +1440,7 @@
       "path": "/products/{productId}/offers",
       "summary": "All offers for a product variant with comparable totals to a delivery location",
       "desc": "Each offer shows total cost (item + shipping − automatic discount), condition with notes and missing items, arrival range, seller quality and after-sales terms. The featured offer is marked; ineligible offers are listed with the reason. Postal code comes from the query, then the customer's default address, then the market default. Bounded list (max 100 offers per variant).",
-      "auth": "anyone",
+      "auth": "visitor",
       "params": {
         "productId": "uuid"
       },
@@ -1466,7 +1466,7 @@
       "path": "/products/{productId}/purchase-box",
       "summary": "Purchase box for the selected variant: featured or chosen offer, delivery, quantity options, variant availability",
       "desc": "With offerId the customer's explicit choice is returned as selected and the featured offer alongside it. Unavailable variants return unavailable with the reason, an expected restock estimate and other sellers' offers.",
-      "auth": "anyone",
+      "auth": "visitor",
       "params": {
         "productId": "uuid"
       },
@@ -1491,7 +1491,7 @@
       "path": "/offers/{id}",
       "summary": "One offer as the customer sees it (used by cart and review-changes)",
       "desc": "Removed or ineligible offers still return with their status and alternatives are available through listProductOffers.",
-      "auth": "anyone",
+      "auth": "visitor",
       "params": {
         "id": "uuid"
       },
@@ -1514,7 +1514,7 @@
       "method": "GET",
       "path": "/featured-offer-rule",
       "summary": "Published featured-offer rule ('How we choose the featured offer')",
-      "auth": "anyone",
+      "auth": "visitor",
       "response": "FeaturedRule",
       "screens": [
         "store/offers",

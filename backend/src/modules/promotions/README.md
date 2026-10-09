@@ -36,12 +36,12 @@ Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
 | GET | `/api/store/promotions/deals` | Deals page: flash sales, coupons, clearance and upcoming events | shopper | `DealsPage` |
-| GET | `/api/store/promotions/deals/clearance` | More clearance products | anyone | Page<DealProduct> |
+| GET | `/api/store/promotions/deals/clearance` | More clearance products | visitor | Page<DealProduct> |
 | GET | `/api/store/promotions/deals/coupons` | More clippable coupons | shopper | Page<CouponCard> |
-| GET | `/api/store/promotions/flash-sales/{campaignId}` | One flash sale with live claimed meters _(phase 2)_ | anyone | `FlashSaleBlock` |
+| GET | `/api/store/promotions/flash-sales/{campaignId}` | One flash sale with live claimed meters _(phase 2)_ | visitor | `FlashSaleBlock` |
 | GET | `/api/store/promotions/products/{productId}` | Promotions for a product page: deal prices per offer, purchase limits, countdowns, seller promos and coupons | shopper | `ProductPromotions` |
 | GET | `/api/store/promotions/offer-prices` | Promotion prices for a set of offers (product cards, collections, wishlist) | shopper | `OfferPromotion[]` |
-| GET | `/api/store/promotions/campaigns/{id}/eligible-products` | Items a coupon or campaign applies to ('Eligible items') | anyone | Page<DealProduct> |
+| GET | `/api/store/promotions/campaigns/{id}/eligible-products` | Items a coupon or campaign applies to ('Eligible items') | visitor | Page<DealProduct> |
 | POST | `/api/store/promotions/codes/check` | Look up a coupon code's terms without applying it | shopper | `{ code: string }` → `CodeCheck` |
 | GET | `/api/store/promotions/coupons` | My coupons: available and clipped, used and expired | customer | `AccountCoupons` |
 | POST | `/api/store/promotions/coupons/{campaignId}/clip` | Clip a coupon so it applies automatically at checkout | customer | `CouponCard` |
@@ -1267,7 +1267,7 @@ Indexes: `unique (campaign_id, day)`
 | `promotions.participation.invited` | Sellers are invited to a platform campaign | `{ campaignId: uuid, sellerIds: uuid[], respondBy: datetime }` | notifications |
 | `promotions.participation.decided` | A seller accepts, declines or withdraws, or staff remove a participation | `{ participationId: uuid, campaignId: uuid, sellerId: uuid, state: string }` | - |
 | `promotions.coupon.redeemed` | A redemption is committed to a placed order | `{ redemptionId: uuid, campaignId: uuid, orderId: uuid, amount: Money, platformPart: Money, sellerPart: Money }` | finance, reports |
-| `promotions.redemption.reversed` | A redemption is fully or partly reversed after cancellation or refund | `{ redemptionId: uuid, orderItemId: uuid, amount: Money, platformPart: Money, sellerPart: Money }` | reports |
+| `promotions.redemption.reversed` | A redemption is fully or partly reversed after cancellation or refund | `{ redemptionId: uuid, orderItemId: uuid, amount: Money, platformPart: Money, sellerPart: Money }` | finance, reports |
 | `promotions.flash_item.sold_out` | Deal stock of a flash item is used up | `{ campaignId: uuid, offerId: uuid, at: datetime }` | - |
 | `promotions.budget.threshold_reached` | Budget use crosses 90% | `{ campaignId: uuid, budget: Money, used: Money }` | - |
 

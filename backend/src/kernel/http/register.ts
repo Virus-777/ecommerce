@@ -2,21 +2,24 @@
  * Turns spec endpoints + module handlers into Fastify routes:
  *   URL      the area prefix from common.json + the spec path: /api/<area>/<module><path>, /webhooks/<module><path>
  *   schema   params, query (+ cursor/page/limit), body and response from the spec (Zod), also for /docs
- *   hooks    launch-phase gate → auth guard → validation → webhook signature / Idempotency-Key → handler
+ *   hooks    the authorization chain (kernel/auth/chain.ts) → validation → Idempotency-Key → step-up → handler
  */
-import type { FastifyInstance, FastifyRequest, onRequestHookHandler, preHandlerHookHandler } from 'fastify';
+import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import * as common from '../../spec/common.js';
-import { actorOf, authorize, type Authenticator, type AuthResult } from '../auth/index.js';
+import type { AuthChain } from '../auth/chain.js';
+import { actorOf } from '../auth/index.js';
+import { maskResponse } from '../auth/masking.js';
+import { scopeFor } from '../auth/scope.js';
 import type { Config } from '../config/index.js';
-import { AppError, errorInfo } from '../errors/index.js';
+import { errorInfo } from '../errors/index.js';
 import { toPageRequest } from '../lib/pagination.js';
 import type { AuthKind, EndpointDef } from '../spec/define.js';
 import { hashRequest, type IdempotencyStore } from './idempotency.js';
 import type { Handler, RouteSet } from './index.js';
 
-export type WebhookVerifier = (request: FastifyRequest) => boolean | Promise<boolean>;
+export type { WebhookVerifier } from '../auth/chain.js';
 
 export interface EndpointRegistration {
   module: string;
@@ -28,17 +31,12 @@ export interface EndpointRegistration {
 
 export interface HttpKernel {
   config: Config;
-  authenticator: Authenticator;
+  auth: AuthChain;
   idempotency: IdempotencyStore;
-  webhookVerifiers: Map<string, WebhookVerifier>;
 }
 
 declare module 'fastify' {
-  interface FastifyContextConfig {
-    operationId?: string;
-  }
   interface FastifyRequest {
-    auth?: AuthResult;
     idempotency?: { scope: string; key: string };
     rawBody?: string;
   }
@@ -53,19 +51,32 @@ export const routeUrlOf = (module: string, def: Pick<EndpointDef, 'area' | 'path
 export const registrationsOf = (module: string, moduleTitle: string, sets: readonly RouteSet[]): EndpointRegistration[] =>
   sets.flatMap((s) => Object.entries(s.handlers).map(([id, handler]) => ({ module, moduleTitle, id, def: s.endpoints[id]!, handler })));
 
+/** OpenAPI security per auth kind, the same as docs/api/openapi.json (docs/api/tools/build.mjs) */
 const SECURITY: Record<AuthKind, Record<string, string[]>[]> = {
-  anyone: [],
-  shopper: [{ bearer: [] }, { guestSession: [] }],
+  visitor: [{ bearer: [] }],
+  shopper: [{ bearer: [] }],
   customer: [{ bearer: [] }],
+  account: [{ bearer: [] }],
   seller: [{ bearer: [] }],
   staff: [{ bearer: [] }],
+  refresh: [{ refreshCookie: [] }, {}],
   provider: [{ webhookSignature: [] }],
+  bootstrap: [{ appProof: [] }],
 };
+const BEARER = new Set<AuthKind>(['visitor', 'shopper', 'customer', 'account', 'seller', 'staff']);
 
-/** Error responses, same as docs/api/openapi.json (docs/api/tools/build.mjs), one schema per distinct description. */
+/** Error responses, same as the design build: one schema per distinct description. */
 const errorSchemas = new Map<string, z.ZodType>();
 function errorResponses(module: string, d: EndpointDef): Map<number, z.ZodType> {
-  const codes = new Set(['VALIDATION_FAILED', ...(d.auth === 'anyone' ? [] : ['UNAUTHORIZED']), ...(d.permission ? ['FORBIDDEN'] : []), ...(d.params ? ['NOT_FOUND'] : []), ...(d.errors ?? [])]);
+  const codes = new Set([
+    'VALIDATION_FAILED',
+    'UNAUTHORIZED',
+    ...(BEARER.has(d.auth) ? ['WRONG_AUDIENCE'] : []),
+    ...(d.permission || d.permissionWhen?.length || d.auth === 'seller' ? ['FORBIDDEN'] : []),
+    ...(d.stepUp ? ['STEP_UP_REQUIRED'] : []),
+    ...(d.params ? ['NOT_FOUND'] : []),
+    ...(d.errors ?? []),
+  ]);
   const lines = new Map<number, string[]>();
   for (const code of codes) {
     const info = errorInfo(code, module);
@@ -84,6 +95,12 @@ function description(d: EndpointDef) {
   const parts = [
     d.desc,
     d.permission && `**Permission:** \`${d.permission}\``,
+    d.permissionWhen?.length &&
+      `**Also needs:** ${d.permissionWhen
+        .map((r) => `\`${r.permission}\` when ${Object.entries(r.if).map(([k, v]) => `${k} ${v.startsWith('!') ? `is not the caller's own (${v.slice(1)})` : `= ${v}`}`).join(' and ')}`)
+        .join('; ')}`,
+    d.stepUp && `**Step-up:** ${d.stepUp.kind === 'reauth' ? 'single-use re-auth token in the body' : '2-step code in X-Step-Up-Code'} (purpose \`${d.stepUp.purpose}\`)`,
+    d.sellerContext === 'optional' && '**Seller context:** optional (works before a seller is chosen).',
     d.approval && `**Approval:** ${d.approval}`,
     d.idempotent && '**Idempotent:** send an Idempotency-Key.',
     d.audited && '**Audited:** recorded in the action history.',
@@ -107,7 +124,10 @@ export function buildRouteSchema(r: EndpointRegistration) {
   const query = d.query?.() as z.ZodObject | undefined;
   if (d.paging) schema.querystring = query ? query.extend(common.pageQuery) : z.object(common.pageQuery);
   else if (query) schema.querystring = query;
-  if (d.idempotent) schema.headers = z.looseObject({ 'idempotency-key': z.string().min(1).max(255).describe(common.headers['Idempotency-Key']) });
+  const headers: Record<string, z.ZodType> = {};
+  if (d.idempotent) headers['idempotency-key'] = z.string().min(1).max(255).describe(common.headers['Idempotency-Key']);
+  if (d.stepUp?.kind === 'code') headers['x-step-up-code'] = z.string().min(1).max(20).describe(common.headers['X-Step-Up-Code']);
+  if (Object.keys(headers).length) schema.headers = z.looseObject(headers);
   if (d.body) schema.body = d.body();
   // Named types keep their registry id (a $ref in /docs), so they are used as they are, without .describe()
   const item = d.response?.();
@@ -130,59 +150,59 @@ export function registerEndpoints(app: FastifyInstance, regs: EndpointRegistrati
 function registerEndpoint(app: FastifyInstance, r: EndpointRegistration, k: HttpKernel) {
   const { module, id, def: d, handler } = r;
   const operationId = `${module}.${id}`;
-  const verify = d.auth === 'provider' ? k.webhookVerifiers.get(module) : undefined;
-  const { authenticator, idempotency } = k;
+  const { idempotency, auth } = k;
+  const hooks = auth.endpointHooks(module, operationId, d);
 
-  const onRequest: onRequestHookHandler =
-    d.phase > k.config.launchPhase
-      ? async () => {
-          throw new AppError('NOT_IMPLEMENTED', `Planned for launch phase ${d.phase}.`, { operation: operationId, reason: 'later_phase', phase: d.phase });
-        }
-      : async (request) => {
-          request.auth = await authorize(request, d, authenticator);
-          if (d.auth === 'provider' && !verify) throw new AppError('UNAUTHORIZED', `No webhook signature verifier is configured for ${module}`);
-        };
-
-  const preHandler: preHandlerHookHandler | undefined = verify
-    ? async (request) => {
-        if (!(await verify(request))) throw new AppError('UNAUTHORIZED', 'Invalid webhook signature');
+  const idempotent: preHandlerHookHandler | undefined = d.idempotent
+    ? async (request, reply) => {
+        const key = String(request.headers['idempotency-key']);
+        const p = request.auth?.principal;
+        const scope = `${operationId}:${p ? `${p.kind}:${p.accountId ?? p.sessionId}:${p.sellerId ?? '-'}` : 'anon'}`;
+        const replay = await idempotency.begin(scope, key, hashRequest({ params: request.params, query: request.query, body: request.body }));
+        if (replay) return reply.header('idempotent-replayed', 'true').code(replay.status).send(replay.body ?? undefined);
+        request.idempotency = { scope, key };
       }
-    : d.idempotent
-      ? async (request, reply) => {
-          const key = String(request.headers['idempotency-key']);
-          const p = request.auth?.principal;
-          const scope = `${operationId}:${p ? `${p.kind}:${p.accountId ?? p.guestSessionId ?? '-'}:${p.sellerId ?? '-'}` : 'anon'}`;
-          const replay = await idempotency.begin(scope, key, hashRequest({ params: request.params, query: request.query, body: request.body }));
-          if (replay) return reply.header('idempotent-replayed', 'true').code(replay.status).send(replay.body ?? undefined);
-          request.idempotency = { scope, key };
-        }
-      : undefined;
+    : undefined;
 
   app.route({
     method: d.method,
     url: routeUrlOf(module, d),
     schema: buildRouteSchema(r),
-    config: { operationId },
-    onRequest,
-    ...(preHandler ? { preHandler } : {}),
+    config: { operationId, auth: d.auth },
+    onRequest: hooks.onRequest,
+    preValidation: hooks.preValidation,
+    // conditional permissions → Idempotency-Key replay → step-up (a replay never spends a re-auth token)
+    preHandler: [hooks.preHandlerBefore, ...(idempotent ? [idempotent] : []), hooks.preHandlerAfter],
+    onResponse: hooks.onResponse,
     async handler(request, reply) {
-      const { principal, sellerAccess } = request.auth ?? { principal: null };
+      if (request.webhookDuplicate) {
+        // the first delivery was processed: acknowledge without running the handler again (providers only need a 2xx);
+        // the body is not the endpoint's response type, so it bypasses response validation
+        reply.header('x-webhook-duplicate', 'true').code(d.status);
+        return d.response ? reply.type('application/json').serializer(JSON.stringify).send({ received: true, duplicate: true }) : reply.send();
+      }
+      const authState = request.auth;
+      const principal = authState?.principal ?? null;
       try {
-        const result = await handler({
+        const customerId = d.scope === 'own-customer' ? await auth.customerIdOf(principal) : null;
+        let result = await handler({
           params: request.params ?? {},
           query: request.query ?? {},
           body: request.body,
           page: d.paging ? toPageRequest(request.query as common.PageInput) : undefined,
           principal,
           sellerId: d.area === 'seller' ? (principal?.sellerId ?? undefined) : undefined,
-          sellerAccess,
-          actor: actorOf(principal),
+          sellerAccess: authState?.sellerAccess,
+          scope: scopeFor(d.scope, authState, customerId),
+          can: (permission: string) => auth.can(authState, permission),
+          actor: actorOf(authState),
           requestId: request.id,
           idempotencyKey: request.idempotency?.key,
           operationId,
           request,
           reply,
         } as never);
+        if (d.sensitive && (d.area === 'admin' || d.area === 'seller')) result = await maskResponse(result, d.sensitive, (perm) => auth.can(authState, perm));
         if (request.idempotency) await idempotency.complete(request.idempotency.scope, request.idempotency.key, d.status, result ?? null);
         if (reply.sent) return reply;
         return d.response ? reply.code(d.status).send(result) : reply.code(d.status).send();

@@ -17,42 +17,44 @@ import { ReportsService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '0.1.0',
+  version: '1.0.1',
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const service = new ReportsService({ repo: createPostgresReportsRepository(ctx.db), ctx });
+    const service = new ReportsService({ repo: createPostgresReportsRepository(ctx.db, ctx.inbox), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
+    // the report library, metric definitions and the export registry; owners register their columns at their own boot
+    ctx.afterBoot(() => service.seed());
 
     // Events this module reacts to (spec events.consumes)
-    ctx.events.on("orders.order.placed", (e) => service.onOrderPlacedFromOrders(e.payload));
-    ctx.events.on("orders.order.accepted", (e) => service.onOrderAcceptedFromOrders(e.payload));
-    ctx.events.on("payments.payment.captured", (e) => service.onPaymentCapturedFromPayments(e.payload));
-    ctx.events.on("shipping.shipment.dispatched", (e) => service.onShipmentDispatchedFromShipping(e.payload));
-    ctx.events.on("shipping.dispatch.overdue", (e) => service.onDispatchOverdueFromShipping(e.payload));
-    ctx.events.on("shipping.shipment.exception", (e) => service.onShipmentExceptionFromShipping(e.payload));
-    ctx.events.on("orders.item.delivered", (e) => service.onItemDeliveredFromOrders(e.payload));
-    ctx.events.on("orders.order.completed", (e) => service.onOrderCompletedFromOrders(e.payload));
-    ctx.events.on("orders.item.cancelled", (e) => service.onItemCancelledFromOrders(e.payload));
-    ctx.events.on("payments.refund.sent", (e) => service.onRefundSentFromPayments(e.payload));
-    ctx.events.on("returns.return.requested", (e) => service.onReturnRequestedFromReturns(e.payload));
-    ctx.events.on("returns.return.inspected", (e) => service.onReturnInspectedFromReturns(e.payload));
-    ctx.events.on("inventory.stock.changed", (e) => service.onStockChangedFromInventory(e.payload));
-    ctx.events.on("cart.item.added", (e) => service.onItemAddedFromCart(e.payload));
-    ctx.events.on("messaging.message.sent", (e) => service.onMessageSentFromMessaging(e.payload));
-    ctx.events.on("support.case.opened", (e) => service.onCaseOpenedFromSupport(e.payload));
-    ctx.events.on("support.case.resolved", (e) => service.onCaseResolvedFromSupport(e.payload));
-    ctx.events.on("finance.payout.paid", (e) => service.onPayoutPaidFromFinance(e.payload));
-    ctx.events.on("finance.payout.failed", (e) => service.onPayoutFailedFromFinance(e.payload));
-    ctx.events.on("finance.hold.placed", (e) => service.onHoldPlacedFromFinance(e.payload));
-    ctx.events.on("finance.hold.released", (e) => service.onHoldReleasedFromFinance(e.payload));
-    ctx.events.on("finance.amount_owed.created", (e) => service.onAmountOwedCreatedFromFinance(e.payload));
-    ctx.events.on("promotions.coupon.redeemed", (e) => service.onCouponRedeemedFromPromotions(e.payload));
-    ctx.events.on("promotions.redemption.reversed", (e) => service.onRedemptionReversedFromPromotions(e.payload));
-    ctx.events.on("advertising.charge.posted", (e) => service.onChargePostedFromAdvertising(e.payload));
-    ctx.events.on("advertising.charge.credited", (e) => service.onChargeCreditedFromAdvertising(e.payload));
+    ctx.events.on("orders.order.placed", (e) => service.onOrderPlacedFromOrders(e.payload, e));
+    ctx.events.on("orders.order.accepted", (e) => service.onOrderAcceptedFromOrders(e.payload, e));
+    ctx.events.on("payments.payment.captured", (e) => service.onPaymentCapturedFromPayments(e.payload, e));
+    ctx.events.on("shipping.shipment.dispatched", (e) => service.onShipmentDispatchedFromShipping(e.payload, e));
+    ctx.events.on("shipping.dispatch.overdue", (e) => service.onDispatchOverdueFromShipping(e.payload, e));
+    ctx.events.on("shipping.shipment.exception", (e) => service.onShipmentExceptionFromShipping(e.payload, e));
+    ctx.events.on("orders.item.delivered", (e) => service.onItemDeliveredFromOrders(e.payload, e));
+    ctx.events.on("orders.order.completed", (e) => service.onOrderCompletedFromOrders(e.payload, e));
+    ctx.events.on("orders.item.cancelled", (e) => service.onItemCancelledFromOrders(e.payload, e));
+    ctx.events.on("payments.refund.sent", (e) => service.onRefundSentFromPayments(e.payload, e));
+    ctx.events.on("returns.return.requested", (e) => service.onReturnRequestedFromReturns(e.payload, e));
+    ctx.events.on("returns.return.inspected", (e) => service.onReturnInspectedFromReturns(e.payload, e));
+    ctx.events.on("inventory.stock.changed", (e) => service.onStockChangedFromInventory(e.payload, e));
+    ctx.events.on("cart.item.added", (e) => service.onItemAddedFromCart(e.payload, e));
+    ctx.events.on("messaging.message.sent", (e) => service.onMessageSentFromMessaging(e.payload, e));
+    ctx.events.on("support.case.opened", (e) => service.onCaseOpenedFromSupport(e.payload, e));
+    ctx.events.on("support.case.resolved", (e) => service.onCaseResolvedFromSupport(e.payload, e));
+    ctx.events.on("finance.payout.paid", (e) => service.onPayoutPaidFromFinance(e.payload, e));
+    ctx.events.on("finance.payout.failed", (e) => service.onPayoutFailedFromFinance(e.payload, e));
+    ctx.events.on("finance.hold.placed", (e) => service.onHoldPlacedFromFinance(e.payload, e));
+    ctx.events.on("finance.hold.released", (e) => service.onHoldReleasedFromFinance(e.payload, e));
+    ctx.events.on("finance.amount_owed.created", (e) => service.onAmountOwedCreatedFromFinance(e.payload, e));
+    ctx.events.on("promotions.coupon.redeemed", (e) => service.onCouponRedeemedFromPromotions(e.payload, e));
+    ctx.events.on("promotions.redemption.reversed", (e) => service.onRedemptionReversedFromPromotions(e.payload, e));
+    ctx.events.on("advertising.charge.posted", (e) => service.onChargePostedFromAdvertising(e.payload, e));
+    ctx.events.on("advertising.charge.credited", (e) => service.onChargeCreditedFromAdvertising(e.payload, e));
 
     // Background jobs (spec jobs)
     ctx.jobs.handle("reports.run-exports", () => service.runExports());

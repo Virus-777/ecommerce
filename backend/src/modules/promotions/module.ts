@@ -17,14 +17,15 @@ import { PromotionsService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '0.1.0',
+  version: '1.0.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const service = new PromotionsService({ repo: createPostgresPromotionsRepository(ctx.db), ctx });
+    const service = new PromotionsService({ repo: createPostgresPromotionsRepository(ctx.db, ctx.inbox), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
+    ctx.afterBoot(() => service.campaigns.registerDataset());
 
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("orders.order.placed", (e) => service.onOrderPlacedFromOrders(e.payload));

@@ -49,10 +49,10 @@ The customer side of an account: profile, saved addresses, marketing consent, re
 | POST | `/api/store/customers/data-requests/exports` | Request a copy of my data | customer | `DataRequest` |
 | GET | `/api/store/customers/data-requests` | My export and closure requests | customer | `DataRequest[]` |
 | GET | `/api/store/customers/closure-eligibility` | Can I close my account now, and what blocks it | customer | `ClosureEligibility` |
-| POST | `/api/store/customers/data-requests/closure` | Request account closure | customer | `{ reauthToken: string, reason: text? }` → `DataRequest` |
+| POST | `/api/store/customers/data-requests/closure` | Request account closure _(step-up: reauth)_ | customer | `{ reauthToken: string, reason: text? }` → `DataRequest` |
 | POST | `/api/store/customers/data-requests/{id}/cancel` | Cancel a pending closure or export request | customer | `DataRequest` |
 | POST | `/api/store/customers/guest-orders/lookup` | Find a guest order by reference and checkout email | shopper | `{ orderRef: string, email: email }` → `GuestOrderAccess` |
-| POST | `/api/store/customers/guest-orders/links` | Email fresh links to every guest order placed with this email | anyone | `{ email: email }` → 204 No content |
+| POST | `/api/store/customers/guest-orders/links` | Email fresh links to every guest order placed with this email | visitor | `{ email: email }` → 204 No content |
 
 ## Admin API
 
@@ -73,7 +73,7 @@ The customer side of an account: profile, saved addresses, marketing consent, re
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| POST | `/api/public/customers/unsubscribe` | One-click stop of promotional messages from an email or SMS link | anyone | `{ token: string, channel: enum(email|sms|push|all)? }` → `MarketingPreferences` |
+| POST | `/api/public/customers/unsubscribe` | One-click stop of promotional messages from an email or SMS link | visitor | `{ token: string, channel: enum(email|sms|push|all)? }` → `MarketingPreferences` |
 
 ## Types
 
@@ -705,6 +705,7 @@ Indexes: `(email_hash, at desc)`, `(ip, at desc)`
 
 | Consumes | From | Does |
 |---|---|---|
+| `access.approval.decided` | access | Finish a staff account closure that needed approval (approved: close; rejected, cancelled or expired: revert the pending closure) |
 | `orders.order.placed` | orders | When guestEmail is set, add or update the guest buyer row (order count, spend, last order) |
 | `identity.user.registered` | identity | Create the customer profile, default marketing preferences (all promotional channels off unless opted in at registration) and the first consent log rows; remove the guest buyer row with the same email |
 | `identity.user.verified` | identity | Mark email or phone verified (orders attaches guest orders with that email itself) |

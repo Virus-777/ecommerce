@@ -2264,11 +2264,18 @@ export const SellersPerformanceBelowTargetEvent: z.ZodType<SellersPerformanceBel
 export interface SellersInvitationSentEvent {
   invitationId: string;
   email: string;
+  businessName: string;
+  /** SENSITIVE: the invitation code, delivered in-process to notifications only, never persisted to the outbox or logs */
+  code: string;
+  expiresAt: string;
 }
 
 export const SellersInvitationSentEvent: z.ZodType<SellersInvitationSentEvent> = z.object({
   invitationId: z.uuid(),
   email: z.email(),
+  businessName: z.string(),
+  code: z.string().describe("SENSITIVE: the invitation code, delivered in-process to notifications only, never persisted to the outbox or logs"),
+  expiresAt: z.iso.datetime({ offset: true }),
 });
 
 /* ------------------------------------------------------------------ public API (in-process) */
@@ -2283,6 +2290,10 @@ export interface SellersPublicApi {
   canSell(sellerId: string, check: { activity: 'new_offers' | 'new_listings' | 'product_submissions' | 'offer_reactivation' | 'sales' | 'advertising' | 'promotions', categoryId?: string, condition?: string, offerId?: string }): Promise<{ allowed: boolean, restrictionId?: string, reason?: string, appealRoute?: string }>;
   /** Seller-area permission check used by the kernel auth guard for every seller endpoint Used by: identity, access. */
   getMemberAccess(sellerId: string, accountId: string): Promise<{ memberId: string, role: string, permissions: string[], isOwner: boolean } | null>;
+  /** Active members of the seller with their identity account id, role and whether they are the owner Used by: notifications. */
+  listMembers(sellerId: string): Promise<{ memberId: string, accountId: string, role: string, isOwner: boolean }[]>;
+  /** The seller owner's identity account (null for an unknown seller) Used by: notifications. */
+  ownerOf(sellerId: string): Promise<{ accountId: string, memberId: string } | null>;
   /** Latest metrics vs targets; offers uses it for main-offer eligibility, reports for seller dashboards Used by: offers, reports, search. */
   getPerformance(sellerId: string): Promise<PerformanceSummary>;
   /** Name, logo, verified label, rating and slug for product pages and offer lists Used by: offers, search, content, orders, graphql. */
@@ -2645,7 +2656,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/program",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Sell with us: requirements, categories, example fees, payout timing, targets, steps",
     desc: "Fee examples come from finance fee rules when enabled (finance.calculateFee) and are always marked as examples; agreements from content.currentPolicyVersions.",
     response: () => SellerProgram,
@@ -2658,6 +2670,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/applications",
     auth: "customer",
+    scope: "own-customer",
     summary: "Start a seller application (step 1: seller account)",
     desc: "Uses the caller's member account (identity). One open application per account (APPLICATION_EXISTS). During invite-only launch an invitationCode is required unless applicationsOpen. Refused before canReapplyFrom after a rejection.",
     body: () => ApplicationAccountInput,
@@ -2672,6 +2685,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/applications/current",
     auth: "customer",
+    scope: "own-customer",
     summary: "My application with progress, information requests, decision and timeline",
     response: () => SellerApplication,
     status: 200,
@@ -2684,6 +2698,7 @@ export const endpoints = defineEndpoints({
     method: "PATCH",
     path: "/applications/{id}",
     auth: "customer",
+    scope: "own-customer",
     summary: "Save a step (draft saves at any time)",
     desc: "Send one or more step sections. Payout bank numbers are tokenised with the payout provider in this call and never stored; only the label and token are kept. While information is required only the sections named in the request can change.",
     params: () =>
@@ -2719,6 +2734,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/applications/{id}/documents",
     auth: "customer",
+    scope: "own-customer",
     summary: "Attach an uploaded document (ID, registration, W-9, bank letter, certificate)",
     desc: "Upload the file to media first (PDF, JPG or PNG up to 10 MB), then attach it with its kind.",
     params: () =>
@@ -2742,6 +2758,7 @@ export const endpoints = defineEndpoints({
     method: "DELETE",
     path: "/applications/{id}/documents/{documentId}",
     auth: "customer",
+    scope: "own-customer",
     summary: "Remove a document from a draft or an open information request",
     params: () =>
       z.object({
@@ -2759,6 +2776,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/applications/{id}/submit",
     auth: "customer",
+    scope: "own-customer",
     summary: "Accept the agreements and submit",
     desc: "Records each agreement version with the typed signature, creates the seller row (status applied), starts automated verification checks and sets the decision target. Fails with APPLICATION_INCOMPLETE (details.missing per step) or AGREEMENT_VERSION_OUTDATED if a newer version became effective while the applicant was reading.",
     params: () =>
@@ -2781,6 +2799,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/applications/{id}/respond",
     auth: "customer",
+    scope: "own-customer",
     summary: "Send the requested information for review",
     desc: "Each open item needs a document or an updated section (e.g. a street return address). Moves the application back to under review.",
     params: () =>
@@ -2802,6 +2821,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/applications/{id}/withdraw",
     auth: "customer",
+    scope: "own-customer",
     summary: "Withdraw an application",
     params: () =>
       z.object({
@@ -2822,6 +2842,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/applications/{id}/appeal",
     auth: "customer",
+    scope: "own-customer",
     summary: "Appeal a rejection before the deadline",
     desc: "A different reviewer decides within appealDecisionDays. Overturning reopens the application under review.",
     params: () =>
@@ -2840,7 +2861,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/stores/{slug}",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Public seller storefront",
     desc: "Header, verification explanation, approved claims, highlights, featured collections and category counts in one call. Shipping (shipping), returns (returns), rating (reviews), category counts (search) and promotion (promotions) are read in-process; missing sources go to `unavailable`. Products are listed through search with sellerId; seller feedback through reviews. Closed sellers return 404; suspended sellers return sellingNow=false and no collections.",
     params: () =>
@@ -2857,7 +2879,8 @@ export const endpoints = defineEndpoints({
     area: "store",
     method: "GET",
     path: "/stores/{slug}/collections/{collectionId}",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "One featured collection with its offer ids",
     params: () =>
       z.object({
@@ -2875,6 +2898,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/account",
     auth: "seller",
+    scope: "own-seller",
     summary: "Account status, verification, product approval, payout readiness and active restrictions",
     desc: "Three separate indicators as the plan requires. Product approval is aggregated from catalog and offers; payout readiness mirrors finance.",
     response: () => SellerAccount,
@@ -2887,6 +2911,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/setup",
     auth: "seller",
+    scope: "own-seller",
     summary: "Setup checklist and what will go live after the launch review",
     desc: "Store profile (sellers), shipping coverage (shipping.hasCoverage), return address (returns), payout verification (finance via payout readiness), first submission (catalog/offers), launch review (sellers).",
     response: () => SetupChecklist,
@@ -2900,6 +2925,7 @@ export const endpoints = defineEndpoints({
     path: "/setup/launch-review",
     auth: "seller",
     permission: "sellers.account.manage",
+    scope: "own-seller",
     summary: "Ask the Seller Manager for the launch readiness review",
     body: () => z.object({
       note: z.string().nullish(),
@@ -2917,6 +2943,7 @@ export const endpoints = defineEndpoints({
     path: "/business",
     auth: "seller",
     permission: "sellers.account.manage",
+    scope: "own-seller",
     summary: "Legal and contact details",
     response: () => BusinessDetails,
     status: 200,
@@ -2929,6 +2956,7 @@ export const endpoints = defineEndpoints({
     path: "/business/contact",
     auth: "seller",
     permission: "sellers.account.manage",
+    scope: "own-seller",
     summary: "Update contact person, email, phone and support hours",
     desc: "No review needed; recorded in the account timeline.",
     body: () => z.object({
@@ -2949,6 +2977,8 @@ export const endpoints = defineEndpoints({
     path: "/business/change-requests",
     auth: "seller",
     permission: "sellers.business.change",
+    stepUp: {"kind":"reauth","purpose":"business-change"},
+    scope: "own-seller",
     summary: "Request a change to legal name, ownership or business address",
     desc: "Material changes need review and may re-run verification. The seller is told the impact on selling or payouts. Requires reauthToken from POST /api/seller/identity/reauth (single use, checked with identity.verifyReauthToken); a missing, expired or used token returns STEP_UP_REQUIRED.",
     body: () => z.object({
@@ -2970,6 +3000,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/change-requests",
     auth: "seller",
+    scope: "own-seller",
     summary: "My pending and decided change requests (store name, claims, business)",
     query: () =>
       z.object({
@@ -2987,6 +3018,7 @@ export const endpoints = defineEndpoints({
     path: "/change-requests/{id}/withdraw",
     auth: "seller",
     permission: "sellers.store.manage",
+    scope: "own-seller",
     summary: "Withdraw a pending change request",
     params: () =>
       z.object({
@@ -3003,6 +3035,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/store-profile",
     auth: "seller",
+    scope: "own-seller",
     summary: "Storefront editor data with pending reviews and live preview data",
     response: () => StoreProfile,
     status: 200,
@@ -3015,6 +3048,7 @@ export const endpoints = defineEndpoints({
     path: "/store-profile",
     auth: "seller",
     permission: "sellers.store.manage",
+    scope: "own-seller",
     summary: "Save storefront changes",
     desc: "Logo, banner, introduction (max introMaxChars), location, contact options and warranty publish on save. A new store name becomes a change request and the current name stays live until approved.",
     body: () => StoreProfileInput,
@@ -3031,6 +3065,7 @@ export const endpoints = defineEndpoints({
     path: "/store-profile/claims",
     auth: "seller",
     permission: "sellers.store.manage",
+    scope: "own-seller",
     summary: "Submit a public claim or brand affiliation with evidence",
     desc: "Not shown until staff approve it (claimReviewDays target). Claims without evidence are refused.",
     body: () => z.object({
@@ -3052,6 +3087,7 @@ export const endpoints = defineEndpoints({
     path: "/brand-requests",
     auth: "seller",
     permission: "sellers.store.manage",
+    scope: "own-seller",
     summary: "Ask Marketly to add a brand that is not listed, with evidence",
     desc: "Creates a brand_request change request shown in the brand claims waiting list (admin/categories). On approval sellers publishes sellers.change_request.decided (kind brand_request) and catalog adds the brand. A brand needed for one product can still be requested with the product submission in catalog.",
     body: () => z.object({
@@ -3074,6 +3110,7 @@ export const endpoints = defineEndpoints({
     path: "/store-profile/claims/{id}/withdraw",
     auth: "seller",
     permission: "sellers.store.manage",
+    scope: "own-seller",
     summary: "Withdraw a pending or approved claim",
     params: () =>
       z.object({
@@ -3091,6 +3128,7 @@ export const endpoints = defineEndpoints({
     path: "/store-profile/collections",
     auth: "seller",
     permission: "sellers.store.manage",
+    scope: "own-seller",
     summary: "Add a featured collection",
     desc: "Only the seller's own offers; offers that are ineligible are kept but hidden from the storefront.",
     body: () => CollectionInput,
@@ -3107,6 +3145,7 @@ export const endpoints = defineEndpoints({
     path: "/store-profile/collections/{id}",
     auth: "seller",
     permission: "sellers.store.manage",
+    scope: "own-seller",
     summary: "Edit a featured collection",
     params: () =>
       z.object({
@@ -3125,6 +3164,7 @@ export const endpoints = defineEndpoints({
     path: "/store-profile/collections/{id}",
     auth: "seller",
     permission: "sellers.store.manage",
+    scope: "own-seller",
     summary: "Remove a featured collection",
     params: () =>
       z.object({
@@ -3142,6 +3182,7 @@ export const endpoints = defineEndpoints({
     path: "/store-profile/collections/order",
     auth: "seller",
     permission: "sellers.store.manage",
+    scope: "own-seller",
     summary: "Set collection order",
     body: () => z.object({
       collectionIds: z.array(z.uuid()),
@@ -3156,6 +3197,8 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/members",
     auth: "seller",
+    permission: "sellers.staff.manage",
+    scope: "own-seller",
     summary: "Owner and staff with roles, status and last activity",
     response: () => z.array(SellerMember),
     status: 200,
@@ -3167,6 +3210,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/roles",
     auth: "seller",
+    scope: "own-seller",
     summary: "Role templates and the seller permission catalogue (permission matrix)",
     response: () => z.object({
       get roles() {
@@ -3186,6 +3230,7 @@ export const endpoints = defineEndpoints({
     path: "/invitations",
     auth: "seller",
     permission: "sellers.staff.manage",
+    scope: "own-seller",
     summary: "Invite a staff member",
     desc: "Owner only. identity.inviteSellerMember sends a link valid for invitationValidDays. Owner-only and non-delegable permissions are refused (NOT_DELEGABLE).",
     body: () => InviteMemberInput,
@@ -3203,6 +3248,7 @@ export const endpoints = defineEndpoints({
     path: "/invitations/{id}/resend",
     auth: "seller",
     permission: "sellers.staff.manage",
+    scope: "own-seller",
     summary: "Resend an invitation (new expiry)",
     params: () =>
       z.object({
@@ -3220,6 +3266,7 @@ export const endpoints = defineEndpoints({
     path: "/invitations/{id}/revoke",
     auth: "seller",
     permission: "sellers.staff.manage",
+    scope: "own-seller",
     summary: "Cancel an invitation",
     params: () =>
       z.object({
@@ -3238,6 +3285,7 @@ export const endpoints = defineEndpoints({
     path: "/members/{id}",
     auth: "seller",
     permission: "sellers.staff.manage",
+    scope: "own-seller",
     summary: "Change a member's role or single permissions",
     desc: "Takes effect on the member's next request (identity session claims are refreshed). The owner's permissions cannot be changed.",
     params: () =>
@@ -3262,6 +3310,7 @@ export const endpoints = defineEndpoints({
     path: "/members/{id}/suspend",
     auth: "seller",
     permission: "sellers.staff.manage",
+    scope: "own-seller",
     summary: "Temporarily block a member",
     params: () =>
       z.object({
@@ -3284,6 +3333,7 @@ export const endpoints = defineEndpoints({
     path: "/members/{id}/remove",
     auth: "seller",
     permission: "sellers.staff.manage",
+    scope: "own-seller",
     summary: "Remove a member",
     desc: "Calls identity.revokeSellerContext so the member's seller sessions end immediately.",
     params: () =>
@@ -3306,6 +3356,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/performance",
     auth: "seller",
+    scope: "own-seller",
     summary: "Account health: metrics vs targets, warnings and actions",
     response: () => PerformanceSummary,
     status: 200,
@@ -3317,6 +3368,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/restrictions",
     auth: "seller",
+    scope: "own-seller",
     summary: "Active and past restrictions and suspensions",
     query: () =>
       z.object({
@@ -3333,6 +3385,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/restrictions/{id}",
     auth: "seller",
+    scope: "own-seller",
     summary: "One restriction: reason, affected activity, what still works, how to resolve, appeal route",
     params: () =>
       z.object({
@@ -3349,6 +3402,7 @@ export const endpoints = defineEndpoints({
     path: "/restrictions/{id}/evidence",
     auth: "seller",
     permission: "sellers.account-health.manage",
+    scope: "own-seller",
     summary: "Upload documents that resolve a restriction (e.g. brand authorisation)",
     desc: "Creates a work item for the Seller Manager to review; it is not an appeal.",
     params: () =>
@@ -3372,6 +3426,7 @@ export const endpoints = defineEndpoints({
     path: "/restrictions/{id}/appeals",
     auth: "seller",
     permission: "sellers.account-health.manage",
+    scope: "own-seller",
     summary: "Appeal a restriction or suspension before the deadline",
     desc: "For a suspension, pass the suspension id in place of a restriction id; both are listed under /restrictions. One open appeal per decision and level.",
     params: () =>
@@ -3391,6 +3446,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/appeals",
     auth: "seller",
+    scope: "own-seller",
     summary: "My appeals and their outcomes",
     paging: true,
     response: () => Appeal,
@@ -3404,6 +3460,7 @@ export const endpoints = defineEndpoints({
     path: "/appeals/{id}/withdraw",
     auth: "seller",
     permission: "sellers.account-health.manage",
+    scope: "own-seller",
     summary: "Withdraw an appeal",
     params: () =>
       z.object({
@@ -3420,6 +3477,8 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/payout-account",
     auth: "seller",
+    permission: "sellers.payout-account.manage",
+    scope: "own-seller",
     summary: "Payout destination label and readiness",
     response: () => z.object({
       get current() {
@@ -3442,6 +3501,8 @@ export const endpoints = defineEndpoints({
     path: "/payout-account/change",
     auth: "seller",
     permission: "sellers.payout-account.manage",
+    stepUp: {"kind":"reauth","purpose":"payout-account"},
+    scope: "own-seller",
     summary: "Change the payout bank account (owner only)",
     desc: "Owner only and never delegable. Requires reauthToken from POST /api/seller/identity/reauth (single use, checked with identity.verifyReauthToken); a missing, expired or used token returns STEP_UP_REQUIRED. Numbers are tokenised with the payout provider; finance then verifies the destination and records a review before any payout goes there. The current verified account keeps receiving payouts meanwhile. The seller is notified of the change and its effect.",
     body: () => z.object({
@@ -3471,6 +3532,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/agreements",
     auth: "seller",
+    scope: "own-seller",
     summary: "Accepted agreement versions and new versions waiting for acceptance",
     response: () => z.object({
       get accepted() {
@@ -3490,6 +3552,7 @@ export const endpoints = defineEndpoints({
     path: "/agreements/{key}/accept",
     auth: "seller",
     permission: "sellers.agreements.accept",
+    scope: "own-seller",
     summary: "Accept a new agreement version (owner)",
     params: () =>
       z.object({
@@ -3514,6 +3577,8 @@ export const endpoints = defineEndpoints({
     path: "/account/close",
     auth: "seller",
     permission: "sellers.account.close",
+    stepUp: {"kind":"reauth","purpose":"seller-closure"},
+    scope: "own-seller",
     summary: "Owner asks to close the seller account",
     desc: "New sales stop at once; the account closes after open orders, returns, cases and the final payout are settled.",
     body: () => z.object({
@@ -3534,6 +3599,7 @@ export const endpoints = defineEndpoints({
     path: "/sellers",
     auth: "staff",
     permission: "sellers.accounts.view",
+    scope: "staff",
     summary: "All sellers with status, verification, rating, on-time dispatch, cases, balance and restrictions",
     query: () =>
       z.object({
@@ -3557,6 +3623,7 @@ export const endpoints = defineEndpoints({
     path: "/sellers/stats",
     auth: "staff",
     permission: "sellers.accounts.view",
+    scope: "staff",
     summary: "Counts for the sellers header and status tabs",
     response: () => SellerStats,
     status: 200,
@@ -3569,6 +3636,7 @@ export const endpoints = defineEndpoints({
     path: "/sellers/{id}",
     auth: "staff",
     permission: "sellers.accounts.view",
+    scope: "staff",
     summary: "Seller detail: account, restrictions, performance, open obligations, appeals, payouts, notes, history",
     params: () =>
       z.object({
@@ -3585,6 +3653,7 @@ export const endpoints = defineEndpoints({
     path: "/sellers/{id}/notes",
     auth: "staff",
     permission: "sellers.notes.write",
+    scope: "staff",
     summary: "Add a staff-only note",
     params: () =>
       z.object({
@@ -3605,6 +3674,7 @@ export const endpoints = defineEndpoints({
     path: "/sellers/{id}/account-manager",
     auth: "staff",
     permission: "sellers.accounts.manage",
+    scope: "staff",
     summary: "Set the seller's account manager",
     params: () =>
       z.object({
@@ -3625,6 +3695,7 @@ export const endpoints = defineEndpoints({
     path: "/sellers/{id}/restrictions",
     auth: "staff",
     permission: "sellers.accounts.restrict",
+    scope: "staff",
     summary: "Restrict a seller (reason, affected activity, scope, appeal route, review date)",
     desc: "Above the caller's authority (access: Recommend only / Permitted with second review) the restriction is pending_approval and returns APPROVAL_REQUIRED with details.approvalRequestId. Active restrictions publish sellers.seller.restricted; offers, promotions and advertising stop only the affected activity. Existing orders, returns, cases and messages keep working.",
     params: () =>
@@ -3647,6 +3718,7 @@ export const endpoints = defineEndpoints({
     path: "/restrictions/{id}",
     auth: "staff",
     permission: "sellers.accounts.restrict",
+    scope: "staff",
     summary: "Edit an active restriction (scope, reason, resolution steps, review date)",
     params: () =>
       z.object({
@@ -3676,6 +3748,7 @@ export const endpoints = defineEndpoints({
     path: "/restrictions/{id}/lift",
     auth: "staff",
     permission: "sellers.accounts.restrict",
+    scope: "staff",
     summary: "Lift a restriction with a reason",
     params: () =>
       z.object({
@@ -3698,6 +3771,7 @@ export const endpoints = defineEndpoints({
     path: "/sellers/{id}/suspension-impact",
     auth: "staff",
     permission: "sellers.accounts.suspend",
+    scope: "staff",
     summary: "What a suspension would do to offers, open orders, returns, cases and payouts",
     params: () =>
       z.object({
@@ -3714,6 +3788,7 @@ export const endpoints = defineEndpoints({
     path: "/sellers/{id}/suspend",
     auth: "staff",
     permission: "sellers.accounts.suspend",
+    scope: "staff",
     summary: "Suspend all new sales (always needs a second reviewer)",
     desc: "Creates an access approval request for secondReviewerId and returns 202 with the pending suspension. On access.approval.decided (approved) the status moves to suspended and sellers.seller.suspended is published (offers removed from sale, finance moves balances to Held with the review date, cancel_unshipped_and_refund asks orders to cancel and refund, which itself needs Finance approval). Appeal route: within appealWindowDays, decided by someone else.",
     params: () =>
@@ -3745,6 +3820,7 @@ export const endpoints = defineEndpoints({
     path: "/sellers/{id}/reinstate",
     auth: "staff",
     permission: "sellers.accounts.suspend",
+    scope: "staff",
     summary: "End a suspension (optionally keeping restrictions)",
     params: () =>
       z.object({
@@ -3768,6 +3844,7 @@ export const endpoints = defineEndpoints({
     path: "/sellers/{id}/close",
     auth: "staff",
     permission: "sellers.accounts.close",
+    scope: "staff",
     summary: "Close a seller account",
     desc: "New sales stop; open obligations stay accessible until settled; finance issues the final statement.",
     params: () =>
@@ -3793,6 +3870,7 @@ export const endpoints = defineEndpoints({
     path: "/sellers/{id}/warnings",
     auth: "staff",
     permission: "sellers.accounts.restrict",
+    scope: "staff",
     summary: "Send a performance or policy warning",
     params: () =>
       z.object({
@@ -3816,6 +3894,7 @@ export const endpoints = defineEndpoints({
     path: "/warnings/{id}/resolve",
     auth: "staff",
     permission: "sellers.accounts.restrict",
+    scope: "staff",
     summary: "Mark a warning resolved",
     params: () =>
       z.object({
@@ -3836,6 +3915,7 @@ export const endpoints = defineEndpoints({
     path: "/sellers/{id}/verification",
     auth: "staff",
     permission: "sellers.verification.manage",
+    scope: "staff",
     summary: "Grant or revoke the Verified seller label",
     params: () =>
       z.object({
@@ -3859,6 +3939,7 @@ export const endpoints = defineEndpoints({
     path: "/sellers/{id}/launch-review/decide",
     auth: "staff",
     permission: "sellers.applications.decide",
+    scope: "staff",
     summary: "Pass the launch readiness review or ask for changes",
     params: () =>
       z.object({
@@ -3883,6 +3964,7 @@ export const endpoints = defineEndpoints({
     path: "/applications",
     auth: "staff",
     permission: "sellers.applications.review",
+    scope: "staff",
     summary: "Application queue, oldest decision target first",
     query: () =>
       z.object({
@@ -3904,6 +3986,7 @@ export const endpoints = defineEndpoints({
     path: "/applications/{id}",
     auth: "staff",
     permission: "sellers.applications.review",
+    scope: "staff",
     summary: "Application with checks, risk flags, documents, notes and timeline",
     params: () =>
       z.object({
@@ -3920,6 +4003,7 @@ export const endpoints = defineEndpoints({
     path: "/applications/{id}/assign",
     auth: "staff",
     permission: "sellers.applications.review",
+    scope: "staff",
     summary: "Assign a reviewer",
     params: () =>
       z.object({
@@ -3940,6 +4024,7 @@ export const endpoints = defineEndpoints({
     path: "/applications/{id}/start-review",
     auth: "staff",
     permission: "sellers.applications.review",
+    scope: "staff",
     summary: "Move a submitted application to Under review",
     params: () =>
       z.object({
@@ -3958,6 +4043,7 @@ export const endpoints = defineEndpoints({
     path: "/applications/{id}/checks/{checkId}/rerun",
     auth: "staff",
     permission: "sellers.applications.review",
+    scope: "staff",
     summary: "Run an automated check again (e.g. after a new document)",
     params: () =>
       z.object({
@@ -3975,6 +4061,7 @@ export const endpoints = defineEndpoints({
     path: "/applications/{id}/checks/{checkId}/result",
     auth: "staff",
     permission: "sellers.applications.review",
+    scope: "staff",
     summary: "Record a manual check result or accept a 'needs attention' result with a note",
     params: () =>
       z.object({
@@ -3998,6 +4085,7 @@ export const endpoints = defineEndpoints({
     path: "/applications/{id}/trust-review",
     auth: "staff",
     permission: "sellers.applications.review",
+    scope: "staff",
     summary: "Refer the application to Trust and Risk",
     desc: "Calls trust.requestAssessment; flags arrive with trust.assessment.completed. Some categories are referred automatically (riskReviewCategories).",
     params: () =>
@@ -4019,6 +4107,7 @@ export const endpoints = defineEndpoints({
     path: "/applications/{id}/request-information",
     auth: "staff",
     permission: "sellers.applications.review",
+    scope: "staff",
     summary: "Ask the applicant for specific items with a deadline",
     desc: "Status becomes Information required; the applicant gets an email and a task. The application closes (expired) if there is no reply by the deadline.",
     params: () =>
@@ -4045,6 +4134,7 @@ export const endpoints = defineEndpoints({
     path: "/applications/{id}/approve",
     auth: "staff",
     permission: "sellers.applications.decide",
+    scope: "staff",
     summary: "Approve the application",
     desc: "Blocked while checks are failed or need attention without an accepted note (CHECKS_UNRESOLVED). Optional conditions create restrictions at approval (e.g. a category excluded until certificates are checked). Publishes sellers.seller.approved (finance opens the ledger and applies the new-seller hold; returns stores the return address; identity grants the owner seller context). Approval does not publish products or enable payouts.",
     params: () =>
@@ -4072,6 +4162,7 @@ export const endpoints = defineEndpoints({
     path: "/applications/{id}/reject",
     auth: "staff",
     permission: "sellers.applications.decide",
+    scope: "staff",
     summary: "Reject with an explanation the applicant will read",
     params: () =>
       z.object({
@@ -4097,6 +4188,7 @@ export const endpoints = defineEndpoints({
     path: "/applications/{id}/notes",
     auth: "staff",
     permission: "sellers.applications.review",
+    scope: "staff",
     summary: "Add a staff-only note to an application",
     params: () =>
       z.object({
@@ -4116,6 +4208,7 @@ export const endpoints = defineEndpoints({
     path: "/appeals",
     auth: "staff",
     permission: "sellers.appeals.decide",
+    scope: "staff",
     summary: "Appeals waiting for a decision",
     query: () =>
       z.object({
@@ -4136,6 +4229,7 @@ export const endpoints = defineEndpoints({
     path: "/appeals/{id}/assign",
     auth: "staff",
     permission: "sellers.appeals.decide",
+    scope: "staff",
     summary: "Assign an appeal reviewer (not the original decider)",
     params: () =>
       z.object({
@@ -4157,6 +4251,7 @@ export const endpoints = defineEndpoints({
     path: "/appeals/{id}/decide",
     auth: "staff",
     permission: "sellers.appeals.decide",
+    scope: "staff",
     summary: "Uphold, overturn or partly overturn",
     desc: "Overturn lifts the restriction, ends the suspension or reopens the application. Partly overturn narrows the restriction (changes). The explanation is shown to the seller.",
     params: () =>
@@ -4182,6 +4277,7 @@ export const endpoints = defineEndpoints({
     path: "/change-requests",
     auth: "staff",
     permission: "sellers.storefronts.review",
+    scope: "staff",
     summary: "Store names, public claims, brand affiliation and business changes waiting for review",
     query: () =>
       z.object({
@@ -4200,6 +4296,7 @@ export const endpoints = defineEndpoints({
     path: "/change-requests/{id}/decide",
     auth: "staff",
     permission: "sellers.storefronts.review",
+    scope: "staff",
     summary: "Approve or reject a change request or public claim",
     params: () =>
       z.object({
@@ -4224,6 +4321,7 @@ export const endpoints = defineEndpoints({
     path: "/claims/{id}/revoke",
     auth: "staff",
     permission: "sellers.storefronts.review",
+    scope: "staff",
     summary: "Remove an approved claim found to be false",
     params: () =>
       z.object({
@@ -4247,6 +4345,7 @@ export const endpoints = defineEndpoints({
     path: "/performance-targets",
     auth: "staff",
     permission: "sellers.accounts.view",
+    scope: "staff",
     summary: "Current and scheduled performance targets",
     response: () => z.array(PerformanceTarget),
     status: 200,
@@ -4259,6 +4358,7 @@ export const endpoints = defineEndpoints({
     path: "/performance-targets",
     auth: "staff",
     permission: "sellers.performance.manage",
+    scope: "staff",
     summary: "Change targets with an effective date",
     desc: "Changes state their effective date; metrics already computed are not re-graded.",
     body: () => z.object({
@@ -4281,6 +4381,7 @@ export const endpoints = defineEndpoints({
     path: "/seller-invitations",
     auth: "staff",
     permission: "sellers.invitations.manage",
+    scope: "staff",
     summary: "Invite a business to apply (invite-only launch)",
     body: () => z.object({
       email: z.email(),
@@ -4300,6 +4401,7 @@ export const endpoints = defineEndpoints({
     path: "/seller-invitations",
     auth: "staff",
     permission: "sellers.invitations.manage",
+    scope: "staff",
     summary: "Invitations sent and whether they applied",
     query: () =>
       z.object({
@@ -4317,6 +4419,7 @@ export const endpoints = defineEndpoints({
     path: "/seller-invitations/{id}/revoke",
     auth: "staff",
     permission: "sellers.invitations.manage",
+    scope: "staff",
     summary: "Revoke an unused invitation",
     params: () =>
       z.object({
@@ -4335,6 +4438,7 @@ export const endpoints = defineEndpoints({
     path: "/sellers/exports",
     auth: "staff",
     permission: "sellers.accounts.export",
+    scope: "staff",
     summary: "Export the filtered seller list",
     desc: "Authorized export job through reports.requestExport (dataset sellers.admin.accounts); balance columns need finance permission.",
     body: () => z.object({
@@ -4352,6 +4456,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/verification-results",
     auth: "provider",
+    scope: "public",
     summary: "Identity and business verification results from the provider",
     desc: "Signature-verified. Updates the matching check by provider reference (idempotent on provider event id); a change on an approved seller can lapse the Verified label.",
     body: () => z.object({
@@ -4379,7 +4484,7 @@ export const spec = defineModuleSpec({
   summary: "Seller admission and the seller account: the Sell with us programme and multi-step application, verification checks and review decisions, seller statuses with account status, product approval and payout readiness kept separate, setup and launch readiness, storefront profile and public storefront, seller members and permissions, performance against targets, warnings, restrictions, suspensions and appeals.",
   dependsOn: ["identity","access","media"],
   optionalDeps: ["catalog","offers","orders","shipping","returns","support","finance","reviews","trust","content","promotions","search","messaging","workqueues","reports","notifications","audit","settings"],
-  publicApi: ["getSeller","getSellers","canSell","getMemberAccess","getPerformance","getStorefrontCard","requestRestriction","getStorefrontBySlug","searchSellers","exportRows"],
+  publicApi: ["getSeller","getSellers","canSell","getMemberAccess","listMembers","ownerOf","getPerformance","getStorefrontCard","requestRestriction","getStorefrontBySlug","searchSellers","exportRows"],
   permissions: [
     {
       "key": "sellers.accounts.view",
@@ -4469,27 +4574,33 @@ export const spec = defineModuleSpec({
     {
       "key": "sellers.staff.manage",
       "audience": "seller",
-      "desc": "Owner only: invite, change and remove staff"
+      "desc": "Owner only: invite, change and remove staff",
+      "ownerOnly": true
     },
     {
       "key": "sellers.payout-account.manage",
       "audience": "seller",
-      "desc": "Owner only, never delegable: change the payout destination"
+      "desc": "Owner only, never delegable: change the payout destination",
+      "ownerOnly": true,
+      "delegable": false
     },
     {
       "key": "sellers.business.change",
       "audience": "seller",
-      "desc": "Owner only: request legal name, ownership or address changes"
+      "desc": "Owner only: request legal name, ownership or address changes",
+      "ownerOnly": true
     },
     {
       "key": "sellers.agreements.accept",
       "audience": "seller",
-      "desc": "Owner only: accept agreement versions"
+      "desc": "Owner only: accept agreement versions",
+      "ownerOnly": true
     },
     {
       "key": "sellers.account.close",
       "audience": "seller",
-      "desc": "Owner only: request account closure"
+      "desc": "Owner only: request account closure",
+      "ownerOnly": true
     }
   ],
   approvalActions: [
@@ -5221,10 +5332,6 @@ export const spec = defineModuleSpec({
       "status": 409,
       "meaning": "The reviewer or second reviewer made the original decision or the request"
     },
-    "OWNER_ONLY": {
-      "status": 403,
-      "meaning": "Only the seller owner can do this"
-    },
     "NOT_DELEGABLE": {
       "status": 422,
       "meaning": "This permission can never be given to staff (payout changes) or is owner-only"
@@ -5236,10 +5343,6 @@ export const spec = defineModuleSpec({
     "LAST_OWNER": {
       "status": 409,
       "meaning": "The owner cannot be removed or suspended"
-    },
-    "STEP_UP_REQUIRED": {
-      "status": 401,
-      "meaning": "Re-authenticate with POST /api/seller/identity/reauth (password or 2-step code) and retry with the reauthToken"
     },
     "PAYOUT_DETAILS_INVALID": {
       "status": 422,
@@ -6426,6 +6529,59 @@ export const spec = defineModuleSpec({
         "type": "uuid",
         "nullable": true
       }
+    }
+  },
+  tenantTables: {
+    "applications": {
+      "seller": "seller_id"
+    },
+    "application_documents": {
+      "seller": "seller_id"
+    },
+    "verification_checks": {
+      "seller": "seller_id"
+    },
+    "agreement_acceptances": {
+      "seller": "seller_id"
+    },
+    "store_profiles": {
+      "seller": "seller_id"
+    },
+    "featured_collections": {
+      "seller": "seller_id"
+    },
+    "public_claims": {
+      "seller": "seller_id"
+    },
+    "change_requests": {
+      "seller": "seller_id"
+    },
+    "members": {
+      "seller": "seller_id"
+    },
+    "performance_events": {
+      "seller": "seller_id"
+    },
+    "performance_snapshots": {
+      "seller": "seller_id"
+    },
+    "warnings": {
+      "seller": "seller_id"
+    },
+    "restrictions": {
+      "seller": "seller_id"
+    },
+    "suspensions": {
+      "seller": "seller_id"
+    },
+    "appeals": {
+      "seller": "seller_id"
+    },
+    "seller_notes": {
+      "seller": "seller_id"
+    },
+    "account_events": {
+      "seller": "seller_id"
     }
   },
   endpoints,

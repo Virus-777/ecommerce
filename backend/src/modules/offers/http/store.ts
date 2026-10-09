@@ -1,4 +1,4 @@
-import { notImplemented, routes } from '../../../kernel/http/index.js';
+import { routes } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/offers.js';
 import type { OffersService } from '../service.js';
 
@@ -9,11 +9,22 @@ import type { OffersService } from '../service.js';
 export const storeRoutes = (service: OffersService) =>
   routes(endpoints, 'store', {
     /** GET /products/{productId}/offers: All offers for a product variant with comparable totals to a delivery location */
-    listProductOffers: notImplemented,
+    listProductOffers: async ({ params, query }) =>
+      service.compareOffers(params.productId, {
+        ...(query.variantId ? { variantId: query.variantId } : {}),
+        ...(query.condition ? { condition: query.condition } : {}),
+        ...(query.postalCode ? { postalCode: query.postalCode } : {}),
+        ...(query.sort ? { sort: query.sort } : {}),
+      }),
     /** GET /products/{productId}/purchase-box: Purchase box for the selected variant: featured or chosen offer, delivery, quantity options, variant availability */
-    getPurchaseBox: notImplemented,
+    getPurchaseBox: async ({ params, query }) =>
+      service.storefront.purchaseBox(params.productId, {
+        ...(query.variantId ? { variantId: query.variantId } : {}),
+        ...(query.offerId ? { offerId: query.offerId } : {}),
+        ...(query.postalCode ? { postalCode: query.postalCode } : {}),
+      }),
     /** GET /offers/{id}: One offer as the customer sees it (used by cart and review-changes) */
-    getOfferView: notImplemented,
+    getOfferView: async ({ params, query }) => service.storefront.offerView(params.id, { ...(query.postalCode ? { postalCode: query.postalCode } : {}), ...(query.quantity ? { quantity: query.quantity } : {}) }),
     /** GET /featured-offer-rule: Published featured-offer rule ('How we choose the featured offer') */
-    getFeaturedRule: notImplemented,
+    getFeaturedRule: async () => service.featured.currentRule(),
   });

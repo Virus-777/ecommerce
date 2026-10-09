@@ -36,7 +36,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| GET | `/api/store/sellers/program` | Sell with us: requirements, categories, example fees, payout timing, targets, steps | anyone | `SellerProgram` |
+| GET | `/api/store/sellers/program` | Sell with us: requirements, categories, example fees, payout timing, targets, steps | visitor | `SellerProgram` |
 | POST | `/api/store/sellers/applications` | Start a seller application (step 1: seller account) | customer | `ApplicationAccountInput` → `SellerApplication` |
 | GET | `/api/store/sellers/applications/current` | My application with progress, information requests, decision and timeline | customer | `SellerApplication` |
 | PATCH | `/api/store/sellers/applications/{id}` | Save a step (draft saves at any time) | customer | `{ step: enum(account|business|verification|payout|return_address), account: ApplicationAccountInput?, business: ApplicationBusinessInput?, verification: ApplicationVerificationInput?, payout: PayoutDetailsInput?, returnAddress: ReturnAddressInput? }` → `SellerApplication` |
@@ -46,8 +46,8 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | POST | `/api/store/sellers/applications/{id}/respond` | Send the requested information for review | customer | `{ items: json[] }` → `SellerApplication` |
 | POST | `/api/store/sellers/applications/{id}/withdraw` | Withdraw an application | customer | `{ reason: text? }` → `SellerApplication` |
 | POST | `/api/store/sellers/applications/{id}/appeal` | Appeal a rejection before the deadline | customer | `AppealInput` → `Appeal` |
-| GET | `/api/store/sellers/stores/{slug}` | Public seller storefront | anyone | `Storefront` |
-| GET | `/api/store/sellers/stores/{slug}/collections/{collectionId}` | One featured collection with its offer ids | anyone | `FeaturedCollection` |
+| GET | `/api/store/sellers/stores/{slug}` | Public seller storefront | visitor | `Storefront` |
+| GET | `/api/store/sellers/stores/{slug}/collections/{collectionId}` | One featured collection with its offer ids | visitor | `FeaturedCollection` |
 
 ## Seller API
 
@@ -58,7 +58,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | POST | `/api/seller/sellers/setup/launch-review` | Ask the Seller Manager for the launch readiness review | seller<br>`sellers.account.manage` | `{ note: text? }` → `LaunchReview` |
 | GET | `/api/seller/sellers/business` | Legal and contact details | seller<br>`sellers.account.manage` | `BusinessDetails` |
 | PATCH | `/api/seller/sellers/business/contact` | Update contact person, email, phone and support hours _(audited)_ | seller<br>`sellers.account.manage` | `{ name: string?, email: email?, phone: string?, supportHours: string? }` → `BusinessDetails` |
-| POST | `/api/seller/sellers/business/change-requests` | Request a change to legal name, ownership or business address _(audited)_ | seller<br>`sellers.business.change` | `{ kind: enum(legal_name|ownership|business_address), proposed: json, evidenceIds: uuid[], reauthToken: string }` → `ChangeRequest` |
+| POST | `/api/seller/sellers/business/change-requests` | Request a change to legal name, ownership or business address _(audited, step-up: reauth)_ | seller<br>`sellers.business.change` | `{ kind: enum(legal_name|ownership|business_address), proposed: json, evidenceIds: uuid[], reauthToken: string }` → `ChangeRequest` |
 | GET | `/api/seller/sellers/change-requests` | My pending and decided change requests (store name, claims, business) | seller | Page<ChangeRequest> |
 | POST | `/api/seller/sellers/change-requests/{id}/withdraw` | Withdraw a pending change request | seller<br>`sellers.store.manage` | `ChangeRequest` |
 | GET | `/api/seller/sellers/store-profile` | Storefront editor data with pending reviews and live preview data | seller | `StoreProfile` |
@@ -70,7 +70,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | PATCH | `/api/seller/sellers/store-profile/collections/{id}` | Edit a featured collection | seller<br>`sellers.store.manage` | `CollectionInput` → `FeaturedCollection` |
 | DELETE | `/api/seller/sellers/store-profile/collections/{id}` | Remove a featured collection | seller<br>`sellers.store.manage` | 204 No content |
 | PUT | `/api/seller/sellers/store-profile/collections/order` | Set collection order | seller<br>`sellers.store.manage` | `{ collectionIds: uuid[] }` → `FeaturedCollection[]` |
-| GET | `/api/seller/sellers/members` | Owner and staff with roles, status and last activity | seller | `SellerMember[]` |
+| GET | `/api/seller/sellers/members` | Owner and staff with roles, status and last activity | seller<br>`sellers.staff.manage` | `SellerMember[]` |
 | GET | `/api/seller/sellers/roles` | Role templates and the seller permission catalogue (permission matrix) | seller | `{ roles: SellerRoleTemplate[], permissions: PermissionEntry[] }` |
 | POST | `/api/seller/sellers/invitations` | Invite a staff member _(audited, phase 2)_ | seller<br>`sellers.staff.manage` | `InviteMemberInput` → `SellerMember` |
 | POST | `/api/seller/sellers/invitations/{id}/resend` | Resend an invitation (new expiry) _(phase 2)_ | seller<br>`sellers.staff.manage` | `SellerMember` |
@@ -85,11 +85,11 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | POST | `/api/seller/sellers/restrictions/{id}/appeals` | Appeal a restriction or suspension before the deadline | seller<br>`sellers.account-health.manage` | `AppealInput` → `Appeal` |
 | GET | `/api/seller/sellers/appeals` | My appeals and their outcomes | seller | Page<Appeal> |
 | POST | `/api/seller/sellers/appeals/{id}/withdraw` | Withdraw an appeal | seller<br>`sellers.account-health.manage` | `Appeal` |
-| GET | `/api/seller/sellers/payout-account` | Payout destination label and readiness | seller | `{ current: PayoutDetails?, pendingChange: PayoutDetails?, readiness: PayoutReadiness }` |
-| POST | `/api/seller/sellers/payout-account/change` | Change the payout bank account (owner only) _(idempotent, audited)_ | seller<br>`sellers.payout-account.manage` | `{ details: PayoutDetailsInput, reauthToken: string }` → `{ pendingChange: PayoutDetails, readiness: PayoutReadiness }` |
+| GET | `/api/seller/sellers/payout-account` | Payout destination label and readiness | seller<br>`sellers.payout-account.manage` | `{ current: PayoutDetails?, pendingChange: PayoutDetails?, readiness: PayoutReadiness }` |
+| POST | `/api/seller/sellers/payout-account/change` | Change the payout bank account (owner only) _(idempotent, audited, step-up: reauth)_ | seller<br>`sellers.payout-account.manage` | `{ details: PayoutDetailsInput, reauthToken: string }` → `{ pendingChange: PayoutDetails, readiness: PayoutReadiness }` |
 | GET | `/api/seller/sellers/agreements` | Accepted agreement versions and new versions waiting for acceptance | seller | `{ accepted: AgreementAcceptance[], pending: AgreementDocument[] }` |
 | POST | `/api/seller/sellers/agreements/{key}/accept` | Accept a new agreement version (owner) _(audited)_ | seller<br>`sellers.agreements.accept` | `{ versionLabel: string, policyVersionId: uuid?, signedName: string }` → `AgreementAcceptance` |
-| POST | `/api/seller/sellers/account/close` | Owner asks to close the seller account _(audited)_ | seller<br>`sellers.account.close` | `{ reason: text, reauthToken: string }` → `SellerAccount` |
+| POST | `/api/seller/sellers/account/close` | Owner asks to close the seller account _(audited, step-up: reauth)_ | seller<br>`sellers.account.close` | `{ reason: text, reauthToken: string }` → `SellerAccount` |
 
 ## Admin API
 
@@ -1665,7 +1665,7 @@ Indexes: `(email)`, `(state, expires_at)`
 | `sellers.agreement.accepted` | An agreement version is accepted | `{ sellerId: uuid?, applicationId: uuid?, key: string, versionLabel: string }` | - |
 | `sellers.verification.changed` | The Verified seller label is granted, lapses or is revoked | `{ sellerId: uuid, state: string }` | notifications |
 | `sellers.performance.below_target` | The daily computation finds a metric below target (workqueues and notifications pick it up) | `{ sellerId: uuid, metrics: string[], overall: string }` | workqueues |
-| `sellers.invitation.sent` | Staff invite a business to apply | `{ invitationId: uuid, email: email }` | - |
+| `sellers.invitation.sent` | Staff invite a business to apply | `{ invitationId: uuid, email: email, businessName: string, code: string, expiresAt: datetime }` | notifications |
 
 | Consumes | From | Does |
 |---|---|---|
@@ -1699,6 +1699,8 @@ Indexes: `(email)`, `(state, expires_at)`
 | getSellers | `(sellerIds: uuid[]) => SellerSnapshot[]`<br>Batch version for lists | offers, search, orders, reports, graphql |
 | canSell | `(sellerId: uuid, check: { activity: 'new_offers' | 'new_listings' | 'product_submissions' | 'offer_reactivation' | 'sales' | 'advertising' | 'promotions', categoryId?: uuid, condition?: string, offerId?: uuid }) => { allowed: bool, restrictionId?: uuid, reason?: string, appealRoute?: string }`<br>Single answer to 'does any active restriction or suspension block this?'. Offers, catalog, promotions and advertising call it before accepting new work. | offers, catalog, promotions, advertising |
 | getMemberAccess | `(sellerId: uuid, accountId: uuid) => { memberId: uuid, role: string, permissions: string[], isOwner: bool } | null`<br>Seller-area permission check used by the kernel auth guard for every seller endpoint | identity, access |
+| listMembers | `(sellerId: uuid) => { memberId: uuid, accountId: uuid, role: string, isOwner: bool }[]`<br>Active members of the seller with their identity account id, role and whether they are the owner | notifications |
+| ownerOf | `(sellerId: uuid) => { accountId: uuid, memberId: uuid } | null`<br>The seller owner's identity account (null for an unknown seller) | notifications |
 | getPerformance | `(sellerId: uuid) => PerformanceSummary`<br>Latest metrics vs targets; offers uses it for main-offer eligibility, reports for seller dashboards | offers, reports, search |
 | getStorefrontCard | `(sellerIds: uuid[]) => SellerSummary[]`<br>Name, logo, verified label, rating and slug for product pages and offer lists | offers, search, content, orders, graphql |
 | requestRestriction | `(input: RestrictionInput & { sellerId: uuid, requestedBy: Actor }) => Restriction`<br>Used by trust when a Seller Manager accepts a restriction recommendation in the trust screen; follows the same approval rules as the admin endpoint | trust |
@@ -1757,11 +1759,9 @@ Checked through the access module (limits per role, second reviewer).
 | `APPEAL_WINDOW_CLOSED` | 409 | The appeal deadline has passed |
 | `APPEAL_ALREADY_OPEN` | 409 | An appeal for this decision and level is already open |
 | `SAME_REVIEWER_NOT_ALLOWED` | 409 | The reviewer or second reviewer made the original decision or the request |
-| `OWNER_ONLY` | 403 | Only the seller owner can do this |
 | `NOT_DELEGABLE` | 422 | This permission can never be given to staff (payout changes) or is owner-only |
 | `MEMBER_EXISTS` | 409 | This email is already a member or invited |
 | `LAST_OWNER` | 409 | The owner cannot be removed or suspended |
-| `STEP_UP_REQUIRED` | 401 | Re-authenticate with POST /api/seller/identity/reauth (password or 2-step code) and retry with the reauthToken |
 | `PAYOUT_DETAILS_INVALID` | 422 | Routing number invalid, numbers do not match or the provider refused the account |
 | `STORE_NAME_TAKEN` | 409 | Another seller uses this store name |
 | `COLLECTION_LIMIT_REACHED` | 409 | maxCollections already exist |

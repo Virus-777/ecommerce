@@ -1793,6 +1793,7 @@ export interface AdvertisingDb {
     currency: string;
     state: string;
     posted_at: Date | null;
+    ledger_entry_id: string | null;
     statement_ref: string | null;
     reason: string | null;
   };
@@ -1806,6 +1807,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/decisions",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Decide which ads to show on this page view now",
     desc: "Returns nothing for blocked pages (checkout, payment results, tracking, returns) and at most one overlay per page view; skips overlays when one already showed this session where the placement says so. Applies audience (only data the visitor's privacy choices allow), schedule, frequency caps, dismissal suppression, priority and even rotation, availability of promoted offers and linked promotion status. Used by the website and the Android app.",
     body: () => ServeRequest,
@@ -1820,6 +1822,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/events",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Record displays, clicks and dismissals (batched)",
     desc: "Each event carries the signed impression token from the decision. A dismissal applies the campaign's suppression rule immediately for the visitor. Duplicate events for the same token and kind are ignored. Clicks start the attribution period.",
     body: () => z.object({
@@ -1842,6 +1845,7 @@ export const endpoints = defineEndpoints({
     path: "/dashboard",
     auth: "staff",
     permission: "advertising.campaigns.view",
+    scope: "staff",
     summary: "Live now, upcoming starts, ending soon, waiting approvals, spending and performance",
     query: () =>
       z.object({
@@ -1859,6 +1863,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns",
     auth: "staff",
     permission: "advertising.campaigns.view",
+    scope: "staff",
     summary: "Own promotions and paid ads in every lifecycle status",
     query: () =>
       z.object({
@@ -1880,6 +1885,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns",
     auth: "staff",
     permission: "advertising.campaigns.manage",
+    scope: "staff",
     summary: "Create an ad campaign draft",
     body: () => AdCampaignInput,
     response: () => AdCampaign,
@@ -1895,6 +1901,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}",
     auth: "staff",
     permission: "advertising.campaigns.view",
+    scope: "staff",
     summary: "Campaign with approvals, checks, conflicts, creatives and metrics",
     params: () =>
       z.object({
@@ -1911,6 +1918,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}",
     auth: "staff",
     permission: "advertising.campaigns.manage",
+    scope: "staff",
     summary: "Edit a draft (or an approved campaign, which returns it to draft)",
     desc: "Scheduled, live and paused campaigns accept only pause/resume/finish and end-date changes; other edits need a renewed copy.",
     params: () =>
@@ -1936,6 +1944,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/check",
     auth: "staff",
     permission: "advertising.campaigns.view",
+    scope: "staff",
     summary: "Run checks: blocked pages, overlaps, labels, claims vs promotion, availability, links, reach estimate",
     params: () =>
       z.object({
@@ -1952,6 +1961,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/preview",
     auth: "staff",
     permission: "advertising.campaigns.view",
+    scope: "staff",
     summary: "Desktop and phone preview exactly as visitors see it, with label and close control",
     params: () =>
       z.object({
@@ -1972,6 +1982,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/submit",
     auth: "staff",
     permission: "advertising.campaigns.manage",
+    scope: "staff",
     summary: "Submit for approval",
     params: () =>
       z.object({
@@ -1994,6 +2005,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/approve",
     auth: "staff",
     permission: "advertising.campaigns.review",
+    scope: "staff",
     summary: "Approve one review step (the campaign is approved when all steps are)",
     desc: "The step is chosen from the caller's role: Advertising (placement, schedule, limits) or Content/Marketing (creative, claims, links). The same person cannot approve two required steps.",
     params: () =>
@@ -2018,6 +2030,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/request-changes",
     auth: "staff",
     permission: "advertising.campaigns.review",
+    scope: "staff",
     summary: "Send back to the owner with a reason",
     params: () =>
       z.object({
@@ -2041,6 +2054,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/reject",
     auth: "staff",
     permission: "advertising.campaigns.review",
+    scope: "staff",
     summary: "Reject a request (e.g. promoted offer suspended)",
     params: () =>
       z.object({
@@ -2063,6 +2077,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/schedule",
     auth: "staff",
     permission: "advertising.campaigns.publish",
+    scope: "staff",
     summary: "Schedule an approved campaign for its start time",
     params: () =>
       z.object({
@@ -2082,6 +2097,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/activate",
     auth: "staff",
     permission: "advertising.campaigns.publish",
+    scope: "staff",
     summary: "Activate an approved campaign now",
     params: () =>
       z.object({
@@ -2101,6 +2117,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/pause",
     auth: "staff",
     permission: "advertising.campaigns.publish",
+    scope: "staff",
     summary: "Pause immediately (off the site within 1 minute)",
     params: () =>
       z.object({
@@ -2123,6 +2140,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/resume",
     auth: "staff",
     permission: "advertising.campaigns.publish",
+    scope: "staff",
     summary: "Resume a paused campaign",
     params: () =>
       z.object({
@@ -2145,6 +2163,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/finish",
     auth: "staff",
     permission: "advertising.campaigns.publish",
+    scope: "staff",
     summary: "Finish a scheduled, live or paused campaign early",
     desc: "Paid campaigns are charged only for delivery so far.",
     params: () =>
@@ -2168,6 +2187,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/archive",
     auth: "staff",
     permission: "advertising.campaigns.manage",
+    scope: "staff",
     summary: "Archive a finished or rejected campaign",
     params: () =>
       z.object({
@@ -2186,6 +2206,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/renew",
     auth: "staff",
     permission: "advertising.campaigns.manage",
+    scope: "staff",
     summary: "Create a new draft from a finished or ending campaign (renew deliberately)",
     params: () =>
       z.object({
@@ -2207,6 +2228,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/report",
     auth: "staff",
     permission: "advertising.reports.view",
+    scope: "staff",
     summary: "Displays, clicks, dismissals, spend and attributed purchases by day",
     params: () =>
       z.object({
@@ -2228,6 +2250,7 @@ export const endpoints = defineEndpoints({
     path: "/reports/performance",
     auth: "staff",
     permission: "advertising.reports.view",
+    scope: "staff",
     summary: "Performance across campaigns by placement, with the attribution period stated",
     query: () =>
       z.object({
@@ -2246,6 +2269,7 @@ export const endpoints = defineEndpoints({
     path: "/placements",
     auth: "staff",
     permission: "advertising.campaigns.view",
+    scope: "staff",
     summary: "Placements with pages, formats, caps, rotation and dismissal rules",
     response: () => z.array(Placement),
     status: 200,
@@ -2258,6 +2282,7 @@ export const endpoints = defineEndpoints({
     path: "/placements/{id}",
     auth: "staff",
     permission: "advertising.placements.manage",
+    scope: "staff",
     summary: "Edit a placement's rules or turn it on/off",
     desc: "Takes effect for new displays immediately. Blocked pages from the global rules can never be added. Turning on a 'later' placement requires its phase feature flag.",
     params: () =>
@@ -2279,6 +2304,7 @@ export const endpoints = defineEndpoints({
     path: "/rules",
     auth: "staff",
     permission: "advertising.campaigns.view",
+    scope: "staff",
     summary: "Global advertising rules",
     response: () => GlobalRules,
     status: 200,
@@ -2291,6 +2317,7 @@ export const endpoints = defineEndpoints({
     path: "/rules",
     auth: "staff",
     permission: "advertising.rules.manage",
+    scope: "staff",
     summary: "Change global rules (Business Owner approval)",
     desc: "Always becomes an approval request; the new version takes effect at effectiveAt after approval.",
     body: () => GlobalRulesInput,
@@ -2308,6 +2335,7 @@ export const endpoints = defineEndpoints({
     path: "/creatives",
     auth: "staff",
     permission: "advertising.campaigns.view",
+    scope: "staff",
     summary: "Creative library grouped by campaign",
     query: () =>
       z.object({
@@ -2330,6 +2358,7 @@ export const endpoints = defineEndpoints({
     path: "/creatives/summary",
     auth: "staff",
     permission: "advertising.campaigns.view",
+    scope: "staff",
     summary: "Creative counts by review status for the library tabs",
     desc: "Takes the same filters as the list (except status) so tab counts match the search.",
     query: () =>
@@ -2350,6 +2379,7 @@ export const endpoints = defineEndpoints({
     path: "/creatives",
     auth: "staff",
     permission: "advertising.campaigns.manage",
+    scope: "staff",
     summary: "Add a creative (image or video uploaded through media first, or ad text)",
     desc: "Validates size and format for the placement and runs link and automatic checks. Video is stored but not served until a video placement is on.",
     body: () => CreativeInput,
@@ -2365,6 +2395,7 @@ export const endpoints = defineEndpoints({
     path: "/creatives/{id}",
     auth: "staff",
     permission: "advertising.campaigns.view",
+    scope: "staff",
     summary: "Creative with checks, reviews and where it is used",
     params: () =>
       z.object({
@@ -2381,6 +2412,7 @@ export const endpoints = defineEndpoints({
     path: "/creatives/{id}",
     auth: "staff",
     permission: "advertising.campaigns.manage",
+    scope: "staff",
     summary: "Edit ad text or link (approved creatives return to draft)",
     params: () =>
       z.object({
@@ -2406,6 +2438,7 @@ export const endpoints = defineEndpoints({
     path: "/creatives/{id}/review",
     auth: "staff",
     permission: "advertising.campaigns.review",
+    scope: "staff",
     summary: "Approve, request changes or reject a creative with a reason",
     params: () =>
       z.object({
@@ -2431,6 +2464,7 @@ export const endpoints = defineEndpoints({
     path: "/creatives/{id}/check",
     auth: "staff",
     permission: "advertising.campaigns.view",
+    scope: "staff",
     summary: "Re-run the link, availability and label checks",
     params: () =>
       z.object({
@@ -2447,6 +2481,7 @@ export const endpoints = defineEndpoints({
     path: "/charges",
     auth: "staff",
     permission: "advertising.billing.manage",
+    scope: "staff",
     summary: "Seller ad charges (separate from commission)",
     query: () =>
       z.object({
@@ -2468,6 +2503,7 @@ export const endpoints = defineEndpoints({
     path: "/charges/{id}/void",
     auth: "staff",
     permission: "advertising.billing.manage",
+    scope: "staff",
     summary: "Void an accrued charge or credit a posted one (invalid traffic, cancelled delivery)",
     params: () =>
       z.object({
@@ -2491,6 +2527,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/summary",
     auth: "seller",
+    scope: "own-seller",
     summary: "Ad spend, clicks and attributed orders for a period",
     query: () =>
       z.object({
@@ -2507,6 +2544,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/campaigns",
     auth: "seller",
+    scope: "own-seller",
     summary: "Own sponsored campaigns with status and spend vs limit",
     query: () =>
       z.object({
@@ -2523,6 +2561,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/pricing",
     auth: "seller",
+    scope: "own-seller",
     summary: "Billing models and rates (example until confirmed in the advertising terms)",
     query: () =>
       z.object({
@@ -2538,6 +2577,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/promotable-offers",
     auth: "seller",
+    scope: "own-seller",
     summary: "Own active offers with stock that can be promoted",
     query: () =>
       z.object({
@@ -2566,6 +2606,7 @@ export const endpoints = defineEndpoints({
     path: "/creatives",
     auth: "seller",
     permission: "advertising.requests.manage",
+    scope: "own-seller",
     summary: "Add a desktop or mobile creative for a request",
     body: () => CreativeInput,
     response: () => Creative,
@@ -2580,6 +2621,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns",
     auth: "seller",
     permission: "advertising.requests.manage",
+    scope: "own-seller",
     summary: "Create a sponsored campaign request (draft)",
     desc: "Rejected with PAID_ADS_DISABLED until paid seller advertising is enabled in the global rules.",
     body: () => SellerAdRequestInput,
@@ -2594,6 +2636,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/campaigns/{id}",
     auth: "seller",
+    scope: "own-seller",
     summary: "Request with review checks, previews, activity and results",
     params: () =>
       z.object({
@@ -2610,6 +2653,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}",
     auth: "seller",
     permission: "advertising.requests.manage",
+    scope: "own-seller",
     summary: "Edit a request (sends a request in review back to the start of review)",
     params: () =>
       z.object({
@@ -2628,6 +2672,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/submit",
     auth: "seller",
     permission: "advertising.requests.manage",
+    scope: "own-seller",
     summary: "Submit for Marketly review",
     desc: "Nothing runs or is charged until approved and scheduled.",
     params: () =>
@@ -2647,6 +2692,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/withdraw",
     auth: "seller",
     permission: "advertising.requests.manage",
+    scope: "own-seller",
     summary: "Withdraw a request in review",
     params: () =>
       z.object({
@@ -2665,6 +2711,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/pause",
     auth: "seller",
     permission: "advertising.requests.manage",
+    scope: "own-seller",
     summary: "Pause an own live campaign",
     params: () =>
       z.object({
@@ -2683,6 +2730,7 @@ export const endpoints = defineEndpoints({
     path: "/campaigns/{id}/resume",
     auth: "seller",
     permission: "advertising.requests.manage",
+    scope: "own-seller",
     summary: "Resume an own campaign paused by the seller",
     desc: "Campaigns paused by Marketly can only be resumed by staff.",
     params: () =>
@@ -2702,6 +2750,7 @@ export const endpoints = defineEndpoints({
     path: "/charges",
     auth: "seller",
     permission: "advertising.billing.view",
+    scope: "own-seller",
     summary: "Own ad charges by day (they appear on statements as a separate line)",
     query: () =>
       z.object({
@@ -3782,6 +3831,10 @@ export const spec = defineModuleSpec({
         "type": "timestamptz",
         "nullable": true
       },
+      "ledger_entry_id": {
+        "type": "uuid",
+        "nullable": true
+      },
       "statement_ref": {
         "type": "text",
         "nullable": true
@@ -3790,6 +3843,20 @@ export const spec = defineModuleSpec({
         "type": "text",
         "nullable": true
       }
+    }
+  },
+  tenantTables: {
+    "campaigns": {
+      "seller": "seller_id"
+    },
+    "creatives": {
+      "seller": "seller_id"
+    },
+    "ad_events": {
+      "customer": "customer_id"
+    },
+    "ad_charges": {
+      "seller": "seller_id"
     }
   },
   endpoints,

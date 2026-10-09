@@ -158,6 +158,7 @@ The accepted purchase: one order per checkout, one seller group per seller packa
 | offer | `OfferTermsSnapshot` |
 | returnTerms | `ReturnTermsSnapshot` |
 | stockItemId | `uuid` |
+| categoryId | `uuid?` Product category at purchase (from the catalog snapshot); finance uses it for category fee rates |
 | title | `string` |
 | variantLabel | `string` |
 | image | `MediaRef?` |
@@ -772,6 +773,27 @@ The accepted purchase: one order per checkout, one seller group per seller packa
 | count | `int?` Current match count, refreshed every 5 minutes |
 | createdAt | `datetime` |
 
+### OrderItemInfo
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| orderId | `uuid` |
+| orderRef | `string` |
+| groupId | `uuid` |
+| ownerType | `enum(official|seller)` |
+| sellerId | `uuid?` |
+| customerId | `uuid?` |
+| offerId | `uuid` |
+| productId | `uuid` |
+| variantId | `uuid` |
+| stockItemId | `uuid` |
+| categoryId | `uuid?` |
+| quantity | `int` |
+| state | `enum(pending_payment|confirmed|preparing|delayed|shipped|delivered|cancellation_requested|cancelled|return_requested|returned|refunded)` |
+| deliveredAt | `datetime?` |
+| returnWindowEndsAt | `datetime?` |
+
 ### PlacedGroup
 
 | Field | Type |
@@ -808,6 +830,7 @@ The accepted purchase: one order per checkout, one seller group per seller packa
 | Field | Type |
 |---|---|
 | checkoutSessionId | `uuid` |
+| reservationId | `uuid?` Checkout's inventory stock hold for this order; carried on orders.order.accepted so inventory can allocate from it |
 | contact | `Contact` |
 | channel | `enum(web|android)` |
 | currency | `string` |
@@ -926,6 +949,7 @@ Customer requests start as requested; the seller confirms by respondBy (end of t
 | id | uuid pk |
 | ref | text unique (MK-YYMMDD-NNNNN) |
 | checkout_session_id | uuid unique |
+| reservation_id | uuid? |
 | customer_id | uuid? |
 | contact_email | text |
 | contact_phone | text? |
@@ -995,6 +1019,7 @@ Indexes: `(seller_id, status, dispatch_by)`, `(order_id)`, `(status, dispatch_by
 | product_id | uuid |
 | variant_id | uuid |
 | stock_item_id | uuid |
+| category_id | uuid? |
 | product_snapshot | jsonb (catalog.ProductSnapshot) |
 | offer_snapshot | jsonb (offers.OfferSnapshot) |
 | return_terms | jsonb |
@@ -1145,15 +1170,15 @@ Indexes: `(order_id, at desc)`
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
 | `orders.order.placed` | An order is created after an authorized or pending payment | `{ orderId: uuid, ref: string, checkoutSessionId: uuid, customerId: uuid?, guestEmail: email?, paymentIntentId: uuid, paymentState: enum(accepted|pending_check), total: Money, couponCodes: string[], groups: PlacedGroup[], placedAt: datetime }` | advertising, customers, fulfillment-service, payments, promotions, reports, search, trust, wallet |
-| `orders.order.accepted` | Payment accepted: fulfillment tasks start, confirmation is sent | `{ orderId: uuid, ref: string, customerId: uuid?, contactEmail: email, total: Money, groups: PlacedGroup[], acceptedAt: datetime }` | finance, inventory, notifications, payments, reports, sellers, shipping, warehouse |
+| `orders.order.accepted` | Payment accepted: fulfillment tasks start, confirmation is sent | `{ orderId: uuid, ref: string, customerId: uuid?, contactEmail: email, total: Money, groups: PlacedGroup[], reservationId: uuid?, acceptedAt: datetime }` | finance, inventory, notifications, payments, reports, sellers, shipping, warehouse |
 | `orders.order.cancelled` | A pending payment was declined, or every item was cancelled | `{ orderId: uuid, ref: string, reason: enum(payment_declined|all_items_cancelled), checkoutSessionId: uuid }` | checkout, payments |
 | `orders.order.completed` | Every item is final and no return, case or refund is open | `{ orderId: uuid, ref: string, completedAt: datetime }` | messaging, reports |
 | `orders.item.state_changed` | Any item state change (for timelines, notifications and reports) | `{ orderId: uuid, groupId: uuid, itemId: uuid, from: string, to: string, actor: Actor, at: datetime }` | - |
-| `orders.item.cancelled` | Items are cancelled (customer request accepted, seller cannot fulfill, staff) | `{ orderId: uuid, ref: string, groupId: uuid, ownerType: enum(official|seller), sellerId: uuid?, itemId: uuid, offerId: uuid, stockItemId: uuid, quantity: int, cancellationId: uuid, initiatedBy: enum(customer|seller|staff|system), reasonCode: string, beforeDispatch: bool, countsAgainstSeller: bool, refund: RefundBreakdownPayload, paymentIntentId: uuid, trustReportId: uuid? }` | advertising, finance, fulfillment-service, inventory, notifications, payments, promotions, reports, returns, reviews, sellers, shipping, support, trust, warehouse, workqueues |
-| `orders.item.delayed` | Items become Delayed (seller report or overdue dispatch) | `{ orderId: uuid, groupId: uuid, itemIds: uuid[], source: enum(seller|overdue), expectedDispatchBy: datetime?, reason: string }` | notifications |
+| `orders.item.cancelled` | Items are cancelled (customer request accepted, seller cannot fulfill, staff) | `{ orderId: uuid, ref: string, customerId: uuid?, contactEmail: email?, groupId: uuid, ownerType: enum(official|seller), sellerId: uuid?, itemId: uuid, offerId: uuid, stockItemId: uuid, quantity: int, cancellationId: uuid, initiatedBy: enum(customer|seller|staff|system), reasonCode: string, beforeDispatch: bool, countsAgainstSeller: bool, refund: RefundBreakdownPayload, paymentIntentId: uuid, trustReportId: uuid? }` | advertising, finance, fulfillment-service, inventory, notifications, payments, promotions, reports, returns, reviews, sellers, shipping, support, trust, warehouse, workqueues |
+| `orders.item.delayed` | Items become Delayed (seller report or overdue dispatch) | `{ orderId: uuid, customerId: uuid?, contactEmail: email?, groupId: uuid, itemIds: uuid[], source: enum(seller|overdue), expectedDispatchBy: datetime?, reason: string }` | notifications |
 | `orders.item.delivered` | Items in a delivered shipment become Delivered | `{ orderId: uuid, groupId: uuid, ownerType: enum(official|seller), sellerId: uuid?, itemId: uuid, quantity: int, deliveredAt: datetime, returnWindowEndsAt: datetime }` | finance, reports, returns, reviews |
 | `orders.cancellation.requested` | A customer asks to cancel items that need the seller's confirmation | `{ cancellationId: uuid, orderId: uuid, groupId: uuid, sellerId: uuid?, itemIds: uuid[], respondBy: datetime }` | - |
-| `orders.cancellation.decided` | A request is accepted, auto-accepted, declined or withdrawn | `{ cancellationId: uuid, orderId: uuid, outcome: enum(accepted|auto_accepted|declined|withdrawn), by: Actor }` | notifications |
+| `orders.cancellation.decided` | A request is accepted, auto-accepted, declined or withdrawn | `{ cancellationId: uuid, orderId: uuid, customerId: uuid?, contactEmail: email?, outcome: enum(accepted|auto_accepted|declined|withdrawn), by: Actor }` | notifications |
 | `orders.dispatch_deadline.changed` | A group's dispatch deadline is recalculated or extended by staff | `{ orderId: uuid, groupId: uuid, dueAt: datetime, previousDueAt: datetime, reason: string, by: Actor }` | shipping |
 | `orders.confirmation.requested` | Staff resend the order confirmation | `{ orderId: uuid, email: email }` | - |
 
@@ -1214,6 +1239,8 @@ Indexes: `(order_id, at desc)`
 | countOrdersForSellers | `(sellerIds: uuid[]) => map<{ open: int, overdueDispatch: int, dueToday: int, cancellationRequests: int, cancellations30d: int }>`<br>Seller 360 order tiles (staff): open orders (a group of the seller not yet delivered or cancelled), groups past their dispatch deadline, due today, pending customer cancellation requests and cancellations in the last 30 days. Recent orders use listOrdersAdmin with filter.sellerId. | graphql |
 | exportRows | `(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }`<br>Export rows for reports datasets orders.admin.orders and orders.seller.orders (seller rows are the seller's own groups; customer email and phone masked without orders.customers.view-contact) | reports |
 | countOrderItemsForProducts | `(productIds: uuid[]) => map<{ open: int, past: int }>`<br>Order items per product from the purchase snapshots: open (not yet delivered, cancelled or refunded) and past (everything else). Catalog publication-impact and merge previews. | catalog |
+| getOrderItem | `(orderItemId: uuid) => OrderItemInfo | null`<br>One order item with its order, seller group, owner, customer, state and delivery time (no access check) | reviews |
+| listDeliveredItems | `(customerId: uuid, since?: datetime) => OrderItemInfo[]`<br>Items delivered to the customer (optionally since a time), for review eligibility | reviews |
 | countOpenOrdersInCategory | `(categoryId: uuid, placedBefore: datetime) => { orders: int, items: int }`<br>Orders placed before the date with at least one item in the category (snapshot category, subcategories included) that is not yet delivered, cancelled or refunded. Returns category-exception preview. | returns |
 
 ## Permissions

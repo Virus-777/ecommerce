@@ -1,246 +1,226 @@
-import { notImplemented } from '../../kernel/errors/index.js';
-import type { EventPayload } from '../../kernel/events/index.js';
-import type { ModuleContext } from '../../kernel/module-system/index.js';
+import type { EventEnvelope, EventPayload } from '../../kernel/events/index.js';
 import type * as common from '../../spec/common.js';
 import type * as identity from '../../spec/identity.js';
-import type { OffersPublicApi, Offer, OfferView, OfferComparison, VariantAvailability, OfferSummary, FeaturedDecision, OfferChange, OfferSnapshot } from '../../spec/offers.js';
-import type { OffersRepository } from './ports.js';
+import type { FeaturedDecision, Offer, OfferChange, OfferComparison, OfferSnapshot, OfferSummary, OffersPublicApi, OfferView, VariantAvailability } from '../../spec/offers.js';
+import { BulkPart } from './service/bulk.js';
+import { Core, type OffersServiceDeps } from './service/core.js';
+import { EnforcementPart } from './service/enforcement.js';
+import { FeaturedPart } from './service/featured.js';
+import { ManagePart } from './service/manage.js';
+import { PricingPart } from './service/pricing.js';
+import { StorefrontPart } from './service/storefront.js';
+import { ViewsPart } from './service/views.js';
+import { isUuid } from '../../kernel/lib/ids.js';
 
-export interface OffersServiceDeps {
-  repo: OffersRepository;
-  ctx: ModuleContext<'offers'>;
-}
+export type { OffersServiceDeps };
 
 /**
  * Offers use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
- * Each method maps to a publicApi function, a consumed event or a job in docs/api/spec/modules/offers.json.
+ * The work is split by area (service/*.ts); this class is the module's public API, its event consumers and jobs.
  */
 export class OffersService implements OffersPublicApi {
-  constructor(protected readonly deps: OffersServiceDeps) {}
+  readonly core: Core;
+  readonly manage: ManagePart;
+  readonly pricing: PricingPart;
+  readonly storefront: StorefrontPart;
+  readonly featured: FeaturedPart;
+  readonly enforcement: EnforcementPart;
+  readonly views: ViewsPart;
+  readonly bulk: BulkPart;
+
+  constructor(deps: OffersServiceDeps) {
+    this.core = new Core(deps);
+    this.manage = new ManagePart(this.core);
+    this.pricing = new PricingPart(this.core);
+    this.storefront = new StorefrontPart(this.core);
+    this.featured = new FeaturedPart(this.core);
+    this.enforcement = new EnforcementPart(this.core);
+    this.views = new ViewsPart(this.core);
+    this.bulk = new BulkPart(this.core);
+    this.core.parts = { manage: this.manage, pricing: this.pricing, storefront: this.storefront, featured: this.featured, enforcement: this.enforcement, views: this.views, bulk: this.bulk };
+  }
 
   /* ---------------- public API (in-process) */
 
-  /** Current offer with terms and status */
   async getOffer(offerId: string): Promise<Offer | null> {
-    throw notImplemented("offers.getOffer");
+    const row = isUuid(offerId) ? await this.core.repo.get('offers', offerId) : undefined;
+    return row ? this.core.toOffer(row) : null;
   }
 
-  /** Price, availability, delivery estimate and comparable total for one offer at a location */
-  async quoteOffer(offerId: string, quantity: number, postalCode?: string): Promise<OfferView> {
-    throw notImplemented("offers.quoteOffer");
+  quoteOffer(offerId: string, quantity: number, postalCode?: string): Promise<OfferView> {
+    return this.storefront.quoteOffer(offerId, quantity, postalCode);
   }
 
-  /** Scenario 2: reports price, stock, delivery or terms changes since the cart line was added. Never substitutes another seller. */
-  async revalidate(lines: { offerId: string, quantity: number, termsVersion: number, price: common.Money }[], postalCode: string): Promise<{ ok: boolean, changes: OfferChange[] }> {
-    throw notImplemented("offers.revalidate");
+  revalidate(lines: { offerId: string; quantity: number; termsVersion: number; price: common.Money }[], postalCode: string): Promise<{ ok: boolean; changes: OfferChange[] }> {
+    return this.storefront.revalidate(lines, postalCode);
   }
 
-  /** Frozen seller, condition, notes, missing items, price, compare-at and terms stored on the order item (plan ch. 8) */
-  async snapshotForOrder(offerId: string): Promise<OfferSnapshot> {
-    throw notImplemented("offers.snapshotForOrder");
+  snapshotForOrder(offerId: string): Promise<OfferSnapshot> {
+    return this.storefront.snapshotForOrder(offerId);
   }
 
-  /** Featured offer under the published rule; null when no eligible offer */
-  async getFeaturedOffer(variantId: string, postalCode?: string): Promise<OfferView | null> {
-    throw notImplemented("offers.getFeaturedOffer");
+  getFeaturedOffer(variantId: string, postalCode?: string): Promise<OfferView | null> {
+    return this.storefront.getFeaturedOffer(variantId, postalCode);
   }
 
-  /** Active offers for indexing (from price, sellers, conditions, delivery flags) */
-  async listActiveOffersForProduct(productId: string): Promise<OfferSummary[]> {
-    throw notImplemented("offers.listActiveOffersForProduct");
+  listActiveOffersForProduct(productId: string): Promise<OfferSummary[]> {
+    return this.storefront.listActiveOffersForProduct(productId);
   }
 
-  /** Active, in stock and featured-eligible. Sponsored products may only promote such offers (plan ch. 16). */
-  async isPromotable(offerId: string): Promise<boolean> {
-    throw notImplemented("offers.isPromotable");
+  isPromotable(offerId: string): Promise<boolean> {
+    return this.storefront.isPromotable(offerId);
   }
 
-  /** Lowest offer price in force in the window, from offer_price_history. The single source for honest was-prices. */
-  async lowestPrice(offerId: string, sinceDays: number, before?: string): Promise<common.Money | null> {
-    throw notImplemented("offers.lowestPrice");
+  lowestPrice(offerId: string, sinceDays: number, before?: string): Promise<common.Money | null> {
+    return this.pricing.lowestPrice(offerId, sinceDays, before);
   }
 
-  /** Lowest, highest and current price in force in the window, from offer_price_history (wishlist price hints). */
-  async priceRange(offerId: string, sinceDays: number): Promise<{ lowest: common.Money, highest: common.Money, current: common.Money, unchanged: boolean } | null> {
-    throw notImplemented("offers.priceRange");
+  priceRange(offerId: string, sinceDays: number): Promise<{ lowest: common.Money; highest: common.Money; current: common.Money; unchanged: boolean } | null> {
+    return this.pricing.priceRange(offerId, sinceDays);
   }
 
-  /** All offers for a product variant with comparable totals to a delivery location (all-offers page). Same as GET /products/{productId}/offers; primes the quoteOffer loader. */
-  async compareOffers(productId: string, opts: { variantId?: string, condition?: 'all'|'new'|'used'|'refurbished', postalCode?: string, sort?: 'total_cost'|'fastest_delivery' }): Promise<OfferComparison> {
-    throw notImplemented("offers.compareOffers");
+  compareOffers(productId: string, opts: { variantId?: string; condition?: 'all' | 'new' | 'used' | 'refurbished'; postalCode?: string; sort?: 'total_cost' | 'fastest_delivery' }): Promise<OfferComparison> {
+    return this.storefront.compareOffers(productId, opts ?? {});
   }
 
-  /** Featured offer per product (default variant when variantId is omitted) under the published rule, batched for product cards and the purchase box */
-  async getFeaturedOfferForProduct(items: { productId: string, variantId?: string }[], postalCode?: string): Promise<Record<string, Offer | null>> {
-    throw notImplemented("offers.getFeaturedOfferForProduct");
+  getFeaturedOfferForProduct(items: { productId: string; variantId?: string }[], postalCode?: string): Promise<Record<string, Offer | null>> {
+    return this.storefront.getFeaturedOfferForProduct(items, postalCode);
   }
 
-  /** Active offer count and price range per product; the lowest price always names its eligible offer */
-  async getOfferStats(productIds: string[], opts?: { condition?: 'all'|'new'|'used'|'refurbished' }): Promise<Record<string, { count: number, lowest: common.Money, highest: common.Money, lowestOfferId: string, lowestSellerName: string } | null>> {
-    throw notImplemented("offers.getOfferStats");
+  getOfferStats(productIds: string[], opts?: { condition?: 'all' | 'new' | 'used' | 'refurbished' }) {
+    return this.storefront.getOfferStats(productIds, opts);
   }
 
-  /** Variant chooser cues: offer count, lowest price, in stock, summary label */
-  async getVariantOfferSummaries(variantIds: string[], postalCode?: string): Promise<Record<string, VariantAvailability>> {
-    throw notImplemented("offers.getVariantOfferSummaries");
+  getVariantOfferSummaries(variantIds: string[], postalCode?: string): Promise<Record<string, VariantAvailability>> {
+    return this.storefront.getVariantOfferSummaries(variantIds, postalCode);
   }
 
-  /** The seller's own offers on each product, any status (Seller Center product detail) */
-  async listOwnOffersForProduct(sellerId: string, productIds: string[]): Promise<Record<string, Offer[]>> {
-    throw notImplemented("offers.listOwnOffersForProduct");
+  listOwnOffersForProduct(sellerId: string, productIds: string[]): Promise<Record<string, Offer[]>> {
+    return this.views.listOwnForProducts(sellerId, productIds);
   }
 
-  /** One of the seller's own offers; null for another seller's offer */
   async getOwnOffer(sellerId: string, offerId: string): Promise<Offer | null> {
-    throw notImplemented("offers.getOwnOffer");
+    const row = isUuid(offerId) ? await this.core.repo.get('offers', offerId) : undefined;
+    return row && row.owner_type === 'seller' && row.seller_id === sellerId ? this.core.toOffer(row) : null;
   }
 
-  /** Own offers matching title, seller SKU or GTIN, for the Seller Center top-bar search */
-  async searchOwnOffers(sellerId: string, q: string, limit: number): Promise<{ items: OfferSummary[], more: boolean }> {
-    throw notImplemented("offers.searchOwnOffers");
+  searchOwnOffers(sellerId: string, q: string, limit: number): Promise<{ items: OfferSummary[]; more: boolean }> {
+    return this.views.searchOwn(sellerId, q, limit);
   }
 
-  /** Any offer with status reason, eligibility, price history, status log and price changes (staff) */
-  async getOfferAdmin(offerId: string): Promise<Offer | null> {
-    throw notImplemented("offers.getOfferAdmin");
+  getOfferAdmin(offerId: string): Promise<Offer | null> {
+    return this.getOffer(offerId);
   }
 
-  /** All offers with filters, including featured-ineligible offers by reason (staff) */
-  async listOffersAdmin(filter: { sellerId?: string, official?: boolean, productId?: string, status?: string[], featuredEligible?: boolean, ineligibilityCode?: string, q?: string }, page: common.PageInput): Promise<common.Page<Offer>> {
-    throw notImplemented("offers.listOffersAdmin");
+  listOffersAdmin(filter: { sellerId?: string; official?: boolean; productId?: string; status?: string[]; featuredEligible?: boolean; ineligibilityCode?: string; q?: string }, page: common.PageInput): Promise<common.Page<Offer>> {
+    return this.views.listAdmin(filter ?? {}, page ?? {});
   }
 
-  /** Why each offer is or is not featured for a variant and location (staff) */
-  async getFeaturedDecision(productId: string, variantId?: string, postalCode?: string): Promise<FeaturedDecision> {
-    throw notImplemented("offers.getFeaturedDecision");
+  getFeaturedDecision(productId: string, variantId?: string, postalCode?: string): Promise<FeaturedDecision> {
+    return this.featured.explain(productId, variantId, postalCode);
   }
 
-  /** The offer for the purchase box: the requested offer when it is active on the product, otherwise the featured offer for the variant and location (ProductPage with a nullable offer id) */
-  async getPurchaseBoxOffer(items: { productId: string, offerId?: string, variantId?: string }[], postalCode?: string): Promise<Record<string, Offer | null>> {
-    throw notImplemented("offers.getPurchaseBoxOffer");
+  getPurchaseBoxOffer(items: { productId: string; offerId?: string; variantId?: string }[], postalCode?: string): Promise<Record<string, Offer | null>> {
+    return this.storefront.getPurchaseBoxOffer(items, postalCode);
   }
 
-  /** Active offers for a list of ids in the given order, inactive ones left out (storefront featured collections) */
-  async listActiveOffersByIds(offerIds: string[], limit?: number): Promise<Offer[]> {
-    throw notImplemented("offers.listActiveOffersByIds");
+  listActiveOffersByIds(offerIds: string[], limit?: number): Promise<Offer[]> {
+    return this.storefront.listActiveOffersByIds(offerIds, limit);
   }
 
-  /** Export rows for reports datasets offers.admin.offers and offers.seller.offers (seller rows scoped to the principal's seller) */
-  async exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[], nextCursor?: string }> {
-    throw notImplemented("offers.exportRows");
+  exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[]; nextCursor?: string }> {
+    return this.views.exportRows(dataset, filters, principal, cursor);
   }
 
   /* ---------------- events consumed */
 
-  /** sellers.seller.restricted: Read affectedActivities and scope (categoryIds, conditions, offerIds, productIds; empty = whole account). sales: make the in-scope offers Ineligible (reason, affected activity and appeal route copied to statusReason; ineligible_source = restrictionId). new_listings / new_offers: refuse new in-scope offers and publishing drafts (SELLER_RESTRICTED). offer_reactivation: refuse resume and reactivation. Other sellers' offers are untouched (scenario 7). */
-  async onSellerRestrictedFromSellers(event: EventPayload<"sellers.seller.restricted">): Promise<void> {
-    throw notImplemented("offers consumer of sellers.seller.restricted");
+  onSellerRestrictedFromSellers(event: EventPayload<'sellers.seller.restricted'>, envelope?: Pick<EventEnvelope, 'actor'>) {
+    return this.enforcement.onSellerRestricted(event, envelope?.actor);
   }
 
-  /** sellers.restriction.updated: Re-apply the changed activities and scope: restore offers no longer covered, make newly covered offers Ineligible */
-  async onRestrictionUpdatedFromSellers(event: EventPayload<"sellers.restriction.updated">): Promise<void> {
-    throw notImplemented("offers consumer of sellers.restriction.updated");
+  onRestrictionUpdatedFromSellers(event: EventPayload<'sellers.restriction.updated'>) {
+    return this.enforcement.onRestrictionUpdated(event);
   }
 
-  /** sellers.restriction.lifted: restoreEligibility on offers whose ineligible_source is this restriction and that no remaining restriction covers */
-  async onRestrictionLiftedFromSellers(event: EventPayload<"sellers.restriction.lifted">): Promise<void> {
-    throw notImplemented("offers consumer of sellers.restriction.lifted");
+  onRestrictionLiftedFromSellers(event: EventPayload<'sellers.restriction.lifted'>) {
+    return this.enforcement.onRestrictionLifted(event);
   }
 
-  /** sellers.seller.suspended: Make all the seller's offers Ineligible (ineligible_source = suspensionId); new sales stop while open orders keep their snapshots */
-  async onSellerSuspendedFromSellers(event: EventPayload<"sellers.seller.suspended">): Promise<void> {
-    throw notImplemented("offers consumer of sellers.seller.suspended");
+  onSellerSuspendedFromSellers(event: EventPayload<'sellers.seller.suspended'>) {
+    return this.enforcement.onSellerSuspended(event);
   }
 
-  /** sellers.seller.reinstated: restoreEligibility on offers made ineligible by liftedRestrictionId or endedSuspensionId, except offers still covered by remainingRestrictionIds */
-  async onSellerReinstatedFromSellers(event: EventPayload<"sellers.seller.reinstated">): Promise<void> {
-    throw notImplemented("offers consumer of sellers.seller.reinstated");
+  onSellerReinstatedFromSellers(event: EventPayload<'sellers.seller.reinstated'>) {
+    return this.enforcement.onSellerReinstated(event);
   }
 
-  /** sellers.launch_review.decided: outcome passed: publish the seller's drafts waiting with publish_on_approval (approved product, complete offer; out_of_stock when available = 0) and clear statusReason awaiting_launch_review. changes_needed: keep them in draft */
-  async onLaunchReviewDecidedFromSellers(event: EventPayload<"sellers.launch_review.decided">): Promise<void> {
-    throw notImplemented("offers consumer of sellers.launch_review.decided");
+  onLaunchReviewDecidedFromSellers(event: EventPayload<'sellers.launch_review.decided'>) {
+    return this.enforcement.onLaunchReviewDecided(event);
   }
 
-  /** sellers.seller.closed: Remove all the seller's offers (reason seller_closed) */
-  async onSellerClosedFromSellers(event: EventPayload<"sellers.seller.closed">): Promise<void> {
-    throw notImplemented("offers consumer of sellers.seller.closed");
+  onSellerClosedFromSellers(event: EventPayload<'sellers.seller.closed'>) {
+    return this.enforcement.onSellerClosed(event);
   }
 
-  /** catalog.product.publication_changed: Hidden or Suspended → offers Ineligible (product_hidden / product_suspended); Active → restoreEligibility */
-  async onProductPublicationChangedFromCatalog(event: EventPayload<"catalog.product.publication_changed">): Promise<void> {
-    throw notImplemented("offers consumer of catalog.product.publication_changed");
+  onProductPublicationChangedFromCatalog(event: EventPayload<'catalog.product.publication_changed'>) {
+    return this.enforcement.onProductPublicationChanged(event);
   }
 
-  /** catalog.product.approved: Publish draft offers with publishOnApproval on that product; refresh content_gaps */
-  async onProductApprovedFromCatalog(event: EventPayload<"catalog.product.approved">): Promise<void> {
-    throw notImplemented("offers consumer of catalog.product.approved");
+  onProductApprovedFromCatalog(event: EventPayload<'catalog.product.approved'>) {
+    return this.enforcement.onProductApproved(event);
   }
 
-  /** catalog.product.merged: Move offers from the duplicate to the kept product, mapping variants by options; unmatched variants are paused and the seller told */
-  async onProductMergedFromCatalog(event: EventPayload<"catalog.product.merged">): Promise<void> {
-    throw notImplemented("offers consumer of catalog.product.merged");
+  onProductMergedFromCatalog(event: EventPayload<'catalog.product.merged'>) {
+    return this.enforcement.onProductMerged(event);
   }
 
-  /** catalog.product.updated: Flag offers whose missingItems name items no longer in the product's box; seller asked to review; refresh content_gaps on the product's offers from catalog.getProductAdmin (missing images / identifiers) */
-  async onProductUpdatedFromCatalog(event: EventPayload<"catalog.product.updated">): Promise<void> {
-    throw notImplemented("offers consumer of catalog.product.updated");
+  onProductUpdatedFromCatalog(event: EventPayload<'catalog.product.updated'>) {
+    return this.enforcement.onProductUpdated(event);
   }
 
-  /** inventory.stock.changed: available 0 → stockDepleted; available > 0 → stockRestored; mark featured decisions dirty */
-  async onStockChangedFromInventory(event: EventPayload<"inventory.stock.changed">): Promise<void> {
-    throw notImplemented("offers consumer of inventory.stock.changed");
+  onStockChangedFromInventory(event: EventPayload<'inventory.stock.changed'>) {
+    return this.enforcement.onStockChanged(event);
   }
 
-  /** access.approval.decided: Approve or reject pending price changes (and pending bulk rows) */
-  async onApprovalDecidedFromAccess(event: EventPayload<"access.approval.decided">): Promise<void> {
-    throw notImplemented("offers consumer of access.approval.decided");
+  onApprovalDecidedFromAccess(event: EventPayload<'access.approval.decided'>) {
+    return this.pricing.onApprovalDecided(event);
   }
 
-  /** trust.enforcement.recorded: Remove or hold offers named in an enforcement (counterfeit, abuse) */
-  async onEnforcementRecordedFromTrust(event: EventPayload<"trust.enforcement.recorded">): Promise<void> {
-    throw notImplemented("offers consumer of trust.enforcement.recorded");
+  onEnforcementRecordedFromTrust(event: EventPayload<'trust.enforcement.recorded'>, envelope?: Pick<EventEnvelope, 'actor'>) {
+    return this.enforcement.onEnforcementRecorded(event, envelope?.actor);
   }
 
-  /** promotions.campaign.started: Mark featured decisions dirty for offers whose automatic discount changes the comparable total */
-  async onCampaignStartedFromPromotions(event: EventPayload<"promotions.campaign.started">): Promise<void> {
-    throw notImplemented("offers consumer of promotions.campaign.started");
+  onCampaignStartedFromPromotions(event: EventPayload<'promotions.campaign.started'>) {
+    return this.enforcement.onCampaignStarted(event);
   }
 
-  /** promotions.campaign.ended: Same as started */
-  async onCampaignEndedFromPromotions(event: EventPayload<"promotions.campaign.ended">): Promise<void> {
-    throw notImplemented("offers consumer of promotions.campaign.ended");
+  onCampaignEndedFromPromotions(event: EventPayload<'promotions.campaign.ended'>) {
+    return this.enforcement.onCampaignEnded(event);
   }
 
   /* ---------------- jobs */
 
-  /** Job offers.apply-price-schedule (every 1 min): Start scheduled price changes whose startsAt has passed; revert applied changes whose endsAt has passed; publish offers.offer.price_changed */
-  async applyPriceSchedule(): Promise<void> {
-    throw notImplemented("job offers.apply-price-schedule");
+  applyPriceSchedule() {
+    return this.pricing.applySchedule();
   }
 
-  /** Job offers.recompute-featured (every 2 min (dirty rows) + nightly full): Recompute featured_offers rows marked dirty for each delivery zone; publish offers.featured.changed when the winner changes */
-  async recomputeFeatured(): Promise<void> {
-    throw notImplemented("job offers.recompute-featured");
+  recomputeFeatured() {
+    return this.featured.recompute();
   }
 
-  /** Job offers.reevaluate-eligibility (hourly): Read seller performance (on-time dispatch over the window, delivery reviews, open restrictions) from sellers and update offer_eligibility; publish offers.offer.eligibility_changed */
-  async reevaluateEligibility(): Promise<void> {
-    throw notImplemented("job offers.reevaluate-eligibility");
+  reevaluateEligibility() {
+    return this.featured.reevaluate();
   }
 
-  /** Job offers.verify-compare-at (daily 02:00 market time): Drop compare-at prices whose basis no longer holds (e.g. no longer the 30-day low before the sale) and tell the owner */
-  async verifyCompareAt(): Promise<void> {
-    throw notImplemented("job offers.verify-compare-at");
+  verifyCompareAt() {
+    return this.pricing.verifyCompareAtJob();
   }
 
-  /** Job offers.expire-bulk-previews (hourly): Expire preview_ready jobs past expiresAt */
-  async expireBulkPreviews(): Promise<void> {
-    throw notImplemented("job offers.expire-bulk-previews");
+  expireBulkPreviews() {
+    return this.bulk.expire();
   }
 
-  /** Job offers.parse-bulk-file (on demand (queue)): Parse uploaded CSV, resolve seller SKUs, validate rows, build preview */
-  async parseBulkFile(): Promise<void> {
-    throw notImplemented("job offers.parse-bulk-file");
+  parseBulkFile() {
+    return this.bulk.parsePending();
   }
 }

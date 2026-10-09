@@ -8,18 +8,29 @@ import { hasZodFastifySchemaValidationErrors, isResponseSerializationError } fro
 import type { Config } from '../config/index.js';
 import { AppError, codeForStatus, isNotImplemented } from '../errors/index.js';
 import { newId } from '../lib/ids.js';
+import { installSecurity } from './security.js';
+
+/** Trust the nearest n proxies (TRUST_PROXY=<n>) */
+const hops = (n: number) => (_address: string, hop: number) => hop < n;
 
 export function createServer(config: Config): FastifyInstance {
   const app = Fastify({
     logger:
       config.logLevel === 'silent'
         ? false
-        : { level: config.logLevel, ...(config.env === 'development' ? { transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss', ignore: 'pid,hostname' } } } : {}) },
+        : {
+            level: config.logLevel,
+            // tokens, proofs and cookies never reach the logs
+            redact: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-app-proof"]', 'req.headers["x-step-up-code"]'],
+            ...(config.env === 'development' ? { transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss', ignore: 'pid,hostname' } } } : {}),
+          },
     genReqId: (req) => {
       const h = req.headers['x-request-id'];
       return typeof h === 'string' && /^[\w-]{1,100}$/.test(h) ? h : newId();
     },
     routerOptions: { ignoreTrailingSlash: true },
+    // the client IP for rate limits comes through the proxies named in TRUST_PROXY, never from a spoofable header otherwise
+    trustProxy: typeof config.trustProxy === 'number' ? hops(config.trustProxy) : config.trustProxy,
     bodyLimit: 2 * 1024 * 1024,
   });
 
@@ -27,6 +38,7 @@ export function createServer(config: Config): FastifyInstance {
     reply.header('x-request-id', request.id);
     done();
   });
+  installSecurity(app, config);
 
   // Fastify's JSON parser (with its prototype-poisoning protection), keeping the raw text for webhook signatures
   const parseJson = app.getDefaultJsonParser('error', 'error');

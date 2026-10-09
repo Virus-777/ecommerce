@@ -1,3 +1,4 @@
+import { hmacWebhookVerifier } from '../../kernel/http/webhooks.js';
 import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/payments.js';
 import { resolvers } from './graphql/resolvers.js';
@@ -5,6 +6,7 @@ import { typeDefs } from './graphql/schema.js';
 import { storeRoutes } from './http/store.js';
 import { adminRoutes } from './http/admin.js';
 import { webhooksRoutes } from './http/webhooks.js';
+import { createDevCardProcessor } from './infra/card-processor/dev.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresPaymentsRepository } from './infra/postgres/repository.js';
 import { PaymentsService } from './service.js';
@@ -14,16 +16,18 @@ import { PaymentsService } from './service.js';
  *
  * Name, launch phase, dependencies, permissions, events, jobs, settings and endpoints come from
  * docs/api/spec/modules/payments.json through `spec`; the server refuses to start if they drift.
+ * The card processor is the deterministic dev adapter until a real one is wired behind the same port.
  */
 export default defineModule({
   spec,
-  version: '0.1.0',
+  version: '1.0.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const service = new PaymentsService({ repo: createPostgresPaymentsRepository(ctx.db), ctx });
+    const service = new PaymentsService({ repo: createPostgresPaymentsRepository(ctx.db), ctx, provider: createDevCardProcessor() });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), adminRoutes(service), webhooksRoutes(service));
+    ctx.http.webhookVerifier(hmacWebhookVerifier(ctx.config, ctx.name));
     ctx.graphql.resolvers(resolvers(service));
 
     // Events this module reacts to (spec events.consumes)

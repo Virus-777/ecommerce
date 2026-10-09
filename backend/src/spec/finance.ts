@@ -12,14 +12,14 @@ import * as reports from './reports.js';
 /* ------------------------------------------------------------------ types */
 
 export interface Reference {
-  kind: "order" | "order_item" | "return" | "refund" | "case" | "chargeback" | "payout" | "adjustment" | "ad_campaign" | "statement" | "seller" | "reconciliation";
+  kind: "order" | "order_item" | "return" | "refund" | "case" | "chargeback" | "payout" | "adjustment" | "ad_campaign" | "fulfillment_service" | "statement" | "seller" | "reconciliation";
   id: string;
   /** Human reference, e.g. MK-261005-17730, RT-…, PO-… */
   ref?: string | null;
 }
 
 export const Reference: z.ZodType<Reference> = z.object({
-  kind: z.enum(["order", "order_item", "return", "refund", "case", "chargeback", "payout", "adjustment", "ad_campaign", "statement", "seller", "reconciliation"]),
+  kind: z.enum(["order", "order_item", "return", "refund", "case", "chargeback", "payout", "adjustment", "ad_campaign", "fulfillment_service", "statement", "seller", "reconciliation"]),
   id: z.string(),
   ref: z.string().describe("Human reference, e.g. MK-261005-17730, RT-…, PO-…").nullish(),
 }).register(common.apiTypes, { id: "finance.Reference" });
@@ -241,7 +241,7 @@ export const SellerBalances: z.ZodType<SellerBalances> = z.object({
 export interface LedgerEntry {
   id: string;
   at: string;
-  type: "sale" | "shipping_charge" | "seller_discount" | "marketplace_fee" | "fee_refund" | "refund" | "refund_after_payout" | "hold" | "hold_release" | "adjustment" | "ad_charge" | "label_charge" | "chargeback" | "payout" | "payout_returned" | "owed_offset" | "cancellation";
+  type: "sale" | "shipping_charge" | "seller_discount" | "marketplace_fee" | "fee_refund" | "refund" | "refund_after_payout" | "hold" | "hold_release" | "adjustment" | "ad_charge" | "service_fee" | "charge_credit" | "label_charge" | "chargeback" | "payout" | "payout_returned" | "owed_offset" | "cancellation";
   typeLabel: string;
   reference: Reference;
   /** e.g. 10% of $184.00 item price (shipping excluded) */
@@ -259,7 +259,7 @@ export interface LedgerEntry {
 export const LedgerEntry: z.ZodType<LedgerEntry> = z.object({
   id: z.uuid(),
   at: z.iso.datetime({ offset: true }),
-  type: z.enum(["sale", "shipping_charge", "seller_discount", "marketplace_fee", "fee_refund", "refund", "refund_after_payout", "hold", "hold_release", "adjustment", "ad_charge", "label_charge", "chargeback", "payout", "payout_returned", "owed_offset", "cancellation"]),
+  type: z.enum(["sale", "shipping_charge", "seller_discount", "marketplace_fee", "fee_refund", "refund", "refund_after_payout", "hold", "hold_release", "adjustment", "ad_charge", "service_fee", "charge_credit", "label_charge", "chargeback", "payout", "payout_returned", "owed_offset", "cancellation"]),
   typeLabel: z.string(),
   get reference() {
     return Reference;
@@ -1972,6 +1972,10 @@ export interface FinancePublicApi {
   getSellerBalances(sellerId: string): Promise<SellerBalances>;
   /** Posts a seller ad charge, kept separate from commission Used by: advertising. */
   recordAdCharge(input: { sellerId: string, campaignId: string, campaignRef: string, period: common.DateRange, amount: common.Money, description: string }): Promise<LedgerEntry>;
+  /** Posts a fulfillment-service fee (storage, handling, receiving, returns processing, removal; kind = the FeeCharge type) to the seller ledger as service_fee, kept separate from commission and ad charges. Same idempotencyKey returns the first entry. Used by: fulfillment-service. */
+  recordServiceFee(input: { sellerId: string, amount: common.Money, kind: string, reference: Reference, description: string, idempotencyKey: string }): Promise<LedgerEntry>;
+  /** Credits back all or part of an ad charge or service fee (originalEntryId = the LedgerEntry returned by recordAdCharge or recordServiceFee) as charge_credit; never more than the original minus earlier credits. Same idempotencyKey returns the first entry. Used by: advertising, fulfillment-service. */
+  creditSellerCharge(input: { sellerId: string, amount: common.Money, originalEntryId: string, reason: string, idempotencyKey: string }): Promise<LedgerEntry>;
   /** Company trading costs for the Official Store margin Used by: purchasing, inventory, shipping, warehouse. */
   recordCompanyCost(input: { kind: 'buying_cost' | 'shipping_expense' | 'return_loss' | 'write_off' | 'supplier_credit', amount: common.Money, reference: Reference, at: string }): Promise<void>;
   /** Whether a seller can be paid (verified destination, no full hold) Used by: sellers. */
@@ -2290,7 +2294,8 @@ export const endpoints = defineEndpoints({
     area: "public",
     method: "GET",
     path: "/fee-schedule",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Published fee rules and an example calculation",
     desc: "For the Sell with us page and the fee explanation before applying.",
     response: () => FeeSchedule,
@@ -2304,6 +2309,7 @@ export const endpoints = defineEndpoints({
     path: "/balances",
     auth: "seller",
     permission: "finance.balances.view",
+    scope: "own-seller",
     summary: "Sales proceeds, pending, available, held (with reasons and review dates), negative balance and next payout",
     response: () => SellerBalances,
     status: 200,
@@ -2316,6 +2322,7 @@ export const endpoints = defineEndpoints({
     path: "/ledger",
     auth: "seller",
     permission: "finance.balances.view",
+    scope: "own-seller",
     summary: "Transactions with running balance",
     query: () =>
       z.object({
@@ -2337,6 +2344,7 @@ export const endpoints = defineEndpoints({
     path: "/ledger/exports",
     auth: "seller",
     permission: "finance.balances.view",
+    scope: "own-seller",
     summary: "Export the ledger for a date range",
     desc: "Creates an authorized export job through reports.requestExport (dataset finance.seller.ledger, sellerId from the session). Poll GET /ledger/exports/{id} for the download link.",
     body: () => z.object({
@@ -2357,6 +2365,7 @@ export const endpoints = defineEndpoints({
     path: "/ledger/exports/{id}",
     auth: "seller",
     permission: "finance.balances.view",
+    scope: "own-seller",
     summary: "Ledger export status and download link (requesting member only)",
     params: () =>
       z.object({
@@ -2374,6 +2383,7 @@ export const endpoints = defineEndpoints({
     path: "/payouts",
     auth: "seller",
     permission: "finance.balances.view",
+    scope: "own-seller",
     summary: "Payouts with status and result (failed payouts explain the reason)",
     query: () =>
       z.object({
@@ -2391,6 +2401,7 @@ export const endpoints = defineEndpoints({
     path: "/payouts/{id}",
     auth: "seller",
     permission: "finance.balances.view",
+    scope: "own-seller",
     summary: "One payout",
     params: () =>
       z.object({
@@ -2407,6 +2418,7 @@ export const endpoints = defineEndpoints({
     path: "/statements",
     auth: "seller",
     permission: "finance.balances.view",
+    scope: "own-seller",
     summary: "Statements by period",
     paging: true,
     response: () => StatementSummary,
@@ -2420,6 +2432,7 @@ export const endpoints = defineEndpoints({
     path: "/statements/{id}",
     auth: "seller",
     permission: "finance.balances.view",
+    scope: "own-seller",
     summary: "Itemised statement: sales, fees with basis, refunds (incl. after payout), holds, adjustments with reasons, ad charges, reconciliation to the payout",
     params: () =>
       z.object({
@@ -2436,6 +2449,7 @@ export const endpoints = defineEndpoints({
     path: "/statements/{id}/download",
     auth: "seller",
     permission: "finance.balances.view",
+    scope: "own-seller",
     summary: "PDF or CSV of a statement",
     params: () =>
       z.object({
@@ -2459,6 +2473,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/fee-schedule",
     auth: "seller",
+    scope: "own-seller",
     summary: "Fee rules for the seller's categories with example calculations",
     response: () => FeeSchedule,
     status: 200,
@@ -2471,6 +2486,7 @@ export const endpoints = defineEndpoints({
     path: "/payout-destination/confirm-deposits",
     auth: "seller",
     permission: "finance.destinations.confirm",
+    scope: "own-seller",
     summary: "Confirm the two test-deposit amounts to verify the payout account (owner only)",
     desc: "Completes the micro-deposit check. A first payout account becomes verified; for an account change it marks the micro-deposit check passed on the destination review, which still needs the recorded Finance review. Wrong amounts use up an attempt (depositConfirmAttempts); after the last one new deposits must be sent.",
     body: () => z.object({
@@ -2499,6 +2515,7 @@ export const endpoints = defineEndpoints({
     path: "/payout-destination",
     auth: "seller",
     permission: "finance.balances.view",
+    scope: "own-seller",
     summary: "Verification status of the payout account and any change under review",
     desc: "Changing the account is done in sellers (owner only); this shows the review progress.",
     response: () => z.object({
@@ -2519,6 +2536,7 @@ export const endpoints = defineEndpoints({
     path: "/overview",
     auth: "staff",
     permission: "finance.ledger.view",
+    scope: "staff",
     summary: "Collected payments, company sales, fee income, owed to sellers, refunds, holds and discount funding",
     query: () =>
       z.object({
@@ -2537,6 +2555,7 @@ export const endpoints = defineEndpoints({
     path: "/marketplace-income",
     auth: "staff",
     permission: "finance.ledger.view",
+    scope: "staff",
     summary: "Marketplace fee income, ad income and amounts owed to sellers (separate from company trading)",
     query: () =>
       z.object({
@@ -2554,6 +2573,7 @@ export const endpoints = defineEndpoints({
     path: "/trading-targets",
     auth: "staff",
     permission: "finance.trading.view",
+    scope: "staff",
     summary: "Official Store sales and margin targets by month (plan ch. 2)",
     query: () =>
       z.object({
@@ -2573,6 +2593,7 @@ export const endpoints = defineEndpoints({
     path: "/trading-targets/{period}",
     auth: "staff",
     permission: "finance.trading.targets",
+    scope: "staff",
     summary: "Set the sales and margin target for a month (whole store or one category)",
     desc: "Owned by the Official Store Manager (plan ch. 2). Replaces the target for (period, categoryId). getTrading reports attainment against it.",
     params: () =>
@@ -2592,6 +2613,7 @@ export const endpoints = defineEndpoints({
     path: "/trading",
     auth: "staff",
     permission: "finance.trading.view",
+    scope: "staff",
     summary: "Company trading: product sales, buying cost, discounts, shipping, returns and margin",
     query: () =>
       z.object({
@@ -2609,6 +2631,7 @@ export const endpoints = defineEndpoints({
     path: "/fee-rules",
     auth: "staff",
     permission: "finance.ledger.view",
+    scope: "staff",
     summary: "Active fee rules, scheduled changes and history",
     response: () => FeeRulesAdmin,
     status: 200,
@@ -2621,6 +2644,7 @@ export const endpoints = defineEndpoints({
     path: "/fee-rules",
     auth: "staff",
     permission: "finance.fees.manage",
+    scope: "staff",
     summary: "Propose a new fee rule version with an effective date",
     body: () => FeeRuleSetInput,
     response: () => FeeRuleSet,
@@ -2637,6 +2661,7 @@ export const endpoints = defineEndpoints({
     path: "/fee-rules/{id}/withdraw",
     auth: "staff",
     permission: "finance.fees.manage",
+    scope: "staff",
     summary: "Withdraw a draft or scheduled fee rule version",
     params: () =>
       z.object({
@@ -2657,6 +2682,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/fee-rules/calculate",
     auth: "staff",
+    scope: "staff",
     summary: "Example fee and seller earnings for a price",
     body: () => z.object({
       get input() {
@@ -2675,6 +2701,7 @@ export const endpoints = defineEndpoints({
     path: "/sellers",
     auth: "staff",
     permission: "finance.ledger.view",
+    scope: "staff",
     summary: "Seller balances",
     query: () =>
       z.object({
@@ -2693,6 +2720,7 @@ export const endpoints = defineEndpoints({
     path: "/sellers/{sellerId}",
     auth: "staff",
     permission: "finance.ledger.view",
+    scope: "staff",
     summary: "One seller's balances, holds, payouts, amounts owed and adjustments",
     params: () =>
       z.object({
@@ -2709,6 +2737,7 @@ export const endpoints = defineEndpoints({
     path: "/sellers/{sellerId}/ledger",
     auth: "staff",
     permission: "finance.ledger.view",
+    scope: "staff",
     summary: "A seller's ledger",
     params: () =>
       z.object({
@@ -2732,6 +2761,7 @@ export const endpoints = defineEndpoints({
     path: "/sellers/{sellerId}/statements",
     auth: "staff",
     permission: "finance.ledger.view",
+    scope: "staff",
     summary: "A seller's statements",
     params: () =>
       z.object({
@@ -2749,6 +2779,7 @@ export const endpoints = defineEndpoints({
     path: "/statements/{id}",
     auth: "staff",
     permission: "finance.ledger.view",
+    scope: "staff",
     summary: "A statement as the seller sees it",
     params: () =>
       z.object({
@@ -2765,6 +2796,7 @@ export const endpoints = defineEndpoints({
     path: "/holds",
     auth: "staff",
     permission: "finance.ledger.view",
+    scope: "staff",
     summary: "Holds with reason and review date",
     query: () =>
       z.object({
@@ -2784,6 +2816,7 @@ export const endpoints = defineEndpoints({
     path: "/holds",
     auth: "staff",
     permission: "finance.holds.manage",
+    scope: "staff",
     summary: "Hold part of a seller's earnings with a reason and review date",
     body: () => HoldInput,
     response: () => Hold,
@@ -2802,6 +2835,7 @@ export const endpoints = defineEndpoints({
     path: "/holds/{id}/release",
     auth: "staff",
     permission: "finance.holds.manage",
+    scope: "staff",
     summary: "Release all or part of a hold",
     params: () =>
       z.object({
@@ -2829,6 +2863,7 @@ export const endpoints = defineEndpoints({
     path: "/holds/{id}/extend",
     auth: "staff",
     permission: "finance.holds.manage",
+    scope: "staff",
     summary: "Move the review date with a reason",
     params: () =>
       z.object({
@@ -2851,6 +2886,7 @@ export const endpoints = defineEndpoints({
     path: "/holds/{id}/apply",
     auth: "staff",
     permission: "finance.holds.manage",
+    scope: "staff",
     summary: "Turn a held amount into a deduction (e.g. chargeback lost)",
     params: () =>
       z.object({
@@ -2877,6 +2913,7 @@ export const endpoints = defineEndpoints({
     path: "/adjustments",
     auth: "staff",
     permission: "finance.ledger.view",
+    scope: "staff",
     summary: "Adjustments with reasons and approvals",
     query: () =>
       z.object({
@@ -2895,6 +2932,7 @@ export const endpoints = defineEndpoints({
     path: "/adjustments",
     auth: "staff",
     permission: "finance.adjustments.record",
+    scope: "staff",
     summary: "Credit or debit a seller with a recorded reason",
     body: () => AdjustmentInput,
     response: () => Adjustment,
@@ -2913,6 +2951,7 @@ export const endpoints = defineEndpoints({
     path: "/amounts-owed",
     auth: "staff",
     permission: "finance.ledger.view",
+    scope: "staff",
     summary: "Negative balances that became amounts owed",
     query: () =>
       z.object({
@@ -2931,6 +2970,7 @@ export const endpoints = defineEndpoints({
     path: "/amounts-owed/{id}/settle",
     auth: "staff",
     permission: "finance.adjustments.record",
+    scope: "staff",
     summary: "Record payment received or write off an amount owed",
     params: () =>
       z.object({
@@ -2958,6 +2998,7 @@ export const endpoints = defineEndpoints({
     path: "/payout-runs",
     auth: "staff",
     permission: "finance.ledger.view",
+    scope: "staff",
     summary: "Payout runs",
     query: () =>
       z.object({
@@ -2975,6 +3016,7 @@ export const endpoints = defineEndpoints({
     path: "/payout-runs",
     auth: "staff",
     permission: "finance.payouts.prepare",
+    scope: "staff",
     summary: "Calculate a payout run for a cutoff (normally created by the schedule)",
     body: () => z.object({
       cutoffAt: z.iso.datetime({ offset: true }),
@@ -2994,6 +3036,7 @@ export const endpoints = defineEndpoints({
     path: "/payout-runs/{id}",
     auth: "staff",
     permission: "finance.ledger.view",
+    scope: "staff",
     summary: "Run totals, approvals and pre-release checks",
     params: () =>
       z.object({
@@ -3010,6 +3053,7 @@ export const endpoints = defineEndpoints({
     path: "/payout-runs/{id}/statements",
     auth: "staff",
     permission: "finance.ledger.view",
+    scope: "staff",
     summary: "Seller statements settled by this payout run",
     params: () =>
       z.object({
@@ -3031,6 +3075,7 @@ export const endpoints = defineEndpoints({
     path: "/payout-runs/{id}/payouts",
     auth: "staff",
     permission: "finance.ledger.view",
+    scope: "staff",
     summary: "Sellers in a run (held and changed-destination rows first)",
     params: () =>
       z.object({
@@ -3053,6 +3098,7 @@ export const endpoints = defineEndpoints({
     path: "/payout-runs/{id}/recalculate",
     auth: "staff",
     permission: "finance.payouts.prepare",
+    scope: "staff",
     summary: "Refresh a draft run after holds, retries or destination changes",
     params: () =>
       z.object({
@@ -3071,6 +3117,7 @@ export const endpoints = defineEndpoints({
     path: "/payout-runs/{id}/submit",
     auth: "staff",
     permission: "finance.payouts.prepare",
+    scope: "staff",
     summary: "Submit the run for approval",
     params: () =>
       z.object({
@@ -3089,6 +3136,7 @@ export const endpoints = defineEndpoints({
     path: "/payout-runs/{id}/approve",
     auth: "staff",
     permission: "finance.payouts.approve",
+    scope: "staff",
     summary: "Approve a payout run (first or second Finance reviewer)",
     desc: "The caller confirms they reviewed held, failed and changed-destination payouts. The first approver of a run above the threshold cannot be the second.",
     params: () =>
@@ -3098,10 +3146,11 @@ export const endpoints = defineEndpoints({
     body: () => z.object({
       confirmedReview: z.boolean(),
       note: z.string().nullish(),
+      stepUpCode: z.string().describe("Current 2-step code; required when the run is above access stepUpAbove").nullish(),
     }),
     response: () => PayoutRun,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","SAME_APPROVER","APPROVAL_REQUIRED"],
+    errors: ["ILLEGAL_TRANSITION","SAME_APPROVER","APPROVAL_REQUIRED","STEP_UP_REQUIRED"],
     idempotent: true,
     audited: true,
     approval: "Approval action finance.payouts.release. Runs over runSecondReviewerThreshold (e.g. $50,000) need a second Finance reviewer through access; platform administrators without payout authority cannot approve",
@@ -3115,6 +3164,7 @@ export const endpoints = defineEndpoints({
     path: "/payout-runs/{id}/send-back",
     auth: "staff",
     permission: "finance.payouts.approve",
+    scope: "staff",
     summary: "Return the run to draft with a comment",
     params: () =>
       z.object({
@@ -3136,6 +3186,7 @@ export const endpoints = defineEndpoints({
     path: "/payout-runs/{id}/release",
     auth: "staff",
     permission: "finance.payouts.approve",
+    scope: "staff",
     summary: "Release an approved run now (otherwise released at the scheduled time)",
     params: () =>
       z.object({
@@ -3156,6 +3207,7 @@ export const endpoints = defineEndpoints({
     path: "/payouts",
     auth: "staff",
     permission: "finance.ledger.view",
+    scope: "staff",
     summary: "All payouts, e.g. failed payouts to follow up",
     query: () =>
       z.object({
@@ -3175,6 +3227,7 @@ export const endpoints = defineEndpoints({
     path: "/payouts/{id}/retry",
     auth: "staff",
     permission: "finance.payouts.approve",
+    scope: "staff",
     summary: "Recover a failed payout to a verified destination",
     desc: "Creates a new payout (retryOf) in the next run, or immediately with now=true. Fails while the destination is not verified.",
     params: () =>
@@ -3200,6 +3253,7 @@ export const endpoints = defineEndpoints({
     path: "/destination-reviews",
     auth: "staff",
     permission: "finance.destinations.review",
+    scope: "staff",
     summary: "Payout destination changes waiting for verification and review",
     query: () =>
       z.object({
@@ -3217,6 +3271,8 @@ export const endpoints = defineEndpoints({
     path: "/destination-reviews/{id}/approve",
     auth: "staff",
     permission: "finance.destinations.review",
+    stepUp: {"kind":"code","purpose":"payout-destination"},
+    scope: "staff",
     summary: "Verify a new payout destination",
     params: () =>
       z.object({
@@ -3227,7 +3283,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => DestinationReview,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","SAME_APPROVER","CHECKS_INCOMPLETE"],
+    errors: ["ILLEGAL_TRANSITION","SAME_APPROVER","CHECKS_INCOMPLETE","STEP_UP_REQUIRED"],
     audited: true,
     approval: "Approval action finance.destinations.approve. The reviewer cannot be the person who requested the change; always a recorded review",
     events: ["finance.destination.verified"],
@@ -3240,6 +3296,8 @@ export const endpoints = defineEndpoints({
     path: "/destination-reviews/{id}/reject",
     auth: "staff",
     permission: "finance.destinations.review",
+    stepUp: {"kind":"code","purpose":"payout-destination"},
+    scope: "staff",
     summary: "Reject a payout destination change",
     params: () =>
       z.object({
@@ -3250,7 +3308,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => DestinationReview,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION"],
+    errors: ["ILLEGAL_TRANSITION","STEP_UP_REQUIRED"],
     audited: true,
     events: ["finance.destination.rejected"],
     screens: ["admin/payouts"],
@@ -3262,6 +3320,7 @@ export const endpoints = defineEndpoints({
     path: "/reconciliation/days/{date}",
     auth: "staff",
     permission: "finance.reconciliation.work",
+    scope: "staff",
     summary: "Daily finance check: checklist, totals and failed payouts",
     params: () =>
       z.object({
@@ -3278,6 +3337,7 @@ export const endpoints = defineEndpoints({
     path: "/reconciliation/items",
     auth: "staff",
     permission: "finance.reconciliation.work",
+    scope: "staff",
     summary: "Mismatched payments, seller amounts, deposits and unexplained amounts",
     query: () =>
       z.object({
@@ -3297,6 +3357,7 @@ export const endpoints = defineEndpoints({
     path: "/reconciliation/items/{id}/assign",
     auth: "staff",
     permission: "finance.reconciliation.work",
+    scope: "staff",
     summary: "Set the owner of a mismatch",
     params: () =>
       z.object({
@@ -3317,6 +3378,7 @@ export const endpoints = defineEndpoints({
     path: "/reconciliation/items/{id}/explain",
     auth: "staff",
     permission: "finance.reconciliation.work",
+    scope: "staff",
     summary: "Close a difference with a recorded reason (no money moves)",
     params: () =>
       z.object({
@@ -3339,6 +3401,7 @@ export const endpoints = defineEndpoints({
     path: "/reconciliation/items/{id}/correct",
     auth: "staff",
     permission: "finance.reconciliation.work",
+    scope: "staff",
     summary: "Record a correction with a reason",
     params: () =>
       z.object({
@@ -3361,6 +3424,7 @@ export const endpoints = defineEndpoints({
     path: "/reconciliation/days/{date}/complete",
     auth: "staff",
     permission: "finance.reconciliation.work",
+    scope: "staff",
     summary: "Sign off the day's checks",
     params: () =>
       z.object({
@@ -3381,6 +3445,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/payouts",
     auth: "provider",
+    scope: "public",
     summary: "Payout provider status (paid, failed, returned)",
     desc: "Signature verified; duplicate deliveries are ignored by providerPayoutId + event.",
     body: () => PayoutWebhook,
@@ -3402,7 +3467,7 @@ export const spec = defineModuleSpec({
   summary: "Seller money and company money kept apart: the seller ledger (proceeds, pending, available, held, negative and amounts owed), fee rules, holds, adjustments, payout runs and payouts, statements, payout-destination verification, daily reconciliation checks, and company trading margins separate from marketplace fee income.",
   dependsOn: ["orders","payments","sellers","access"],
   optionalDeps: ["returns","advertising","promotions","purchasing","inventory","shipping","support","wallet","workqueues","notifications","audit","identity","media","reports","settings","offers"],
-  publicApi: ["previewRefundImpact","calculateFee","getSellerBalances","recordAdCharge","recordCompanyCost","hasPayoutBlock","marketplaceIncomeByDay","getSellerAccount","getStatementForSeller","getStatement","getPayoutRun","listPayoutRuns","holdsForReference","previewOfferEarnings","getNextPayoutRun","previewRefundImpactForOrder","exportRows"],
+  publicApi: ["previewRefundImpact","calculateFee","getSellerBalances","recordAdCharge","recordServiceFee","creditSellerCharge","recordCompanyCost","hasPayoutBlock","marketplaceIncomeByDay","getSellerAccount","getStatementForSeller","getStatement","getPayoutRun","listPayoutRuns","holdsForReference","previewOfferEarnings","getNextPayoutRun","previewRefundImpactForOrder","exportRows"],
   permissions: [
     {
       "key": "finance.ledger.view",
@@ -3462,7 +3527,8 @@ export const spec = defineModuleSpec({
     {
       "key": "finance.balances.view",
       "audience": "seller",
-      "desc": "View the seller's balances, ledger, payouts and statements (owner and finance staff)"
+      "desc": "View the seller's balances, ledger, payouts and statements (owner and finance staff)",
+      "ownerOnly": true
     }
   ],
   approvalActions: [
@@ -3858,13 +3924,15 @@ export const spec = defineModuleSpec({
       "shipping.label.voided": "Reverse the charge or expense booked for that labelId (any kind)",
       "shipping.claim.status_changed": "paid: credit paidAmount to whoever bore the loss (seller ledger or company trading); other statuses are kept for reconciliation",
       "promotions.coupon.redeemed": "Record discount funding (platform vs seller) for fee basis and discount reports",
+      "promotions.redemption.reversed": "Reverse the recorded discount funding (platform and seller parts) for the order item, so fee basis and discount reports match after a cancellation or refund",
+      "payments.refund.failed": "Mark the refund's stored funding split failed (nothing is posted until payments.refund.sent); on the final attempt list it in the daily reconciliation",
       "sellers.seller.approved": "Open the seller account and apply the new-seller hold rule",
       "sellers.seller.suspended": "Put the seller's pending payouts on hold with reason restriction (review date from the restriction)",
       "sellers.seller.closed": "Issue a final statement and schedule the last payout after open obligations",
       "sellers.payout_account.changed": "Open a destination review; keep paying the current verified destination",
       "access.approval.decided": "Finish approval-required holds, adjustments, corrections, payout runs and fee rule changes",
       "support.case.decided": "Release or apply dispute holds linked to the case",
-      "wallet.credit.granted": "Phase 3: record the store-credit liability (refund to credit, goodwill, gift cards)",
+      "wallet.credit.granted": "Phase 3: record the store-credit liability (refund to credit, goodwill, gift cards). Only kind goodwill with chargedTo platform is booked as a platform cost; chargedTo seller is posted to the seller's earnings",
       "wallet.credit.used": "Phase 3: reduce the store-credit liability when credit pays for an order"
     },
   },
@@ -4964,6 +5032,44 @@ export const spec = defineModuleSpec({
         "type": "uuid",
         "nullable": true
       }
+    }
+  },
+  tenantTables: {
+    "seller_accounts": {
+      "seller": "seller_id"
+    },
+    "ledger_entries": {
+      "seller": "seller_id"
+    },
+    "earnings_lots": {
+      "seller": "seller_id"
+    },
+    "fee_charges": {
+      "seller": "seller_id"
+    },
+    "refund_allocations": {
+      "seller": "seller_id"
+    },
+    "holds": {
+      "seller": "seller_id"
+    },
+    "adjustments": {
+      "seller": "seller_id"
+    },
+    "amounts_owed": {
+      "seller": "seller_id"
+    },
+    "payout_destinations": {
+      "seller": "seller_id"
+    },
+    "destination_reviews": {
+      "seller": "seller_id"
+    },
+    "payouts": {
+      "seller": "seller_id"
+    },
+    "statements": {
+      "seller": "seller_id"
     }
   },
   endpoints,

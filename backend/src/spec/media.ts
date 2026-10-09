@@ -565,6 +565,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/uploads",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Start an upload (return photos, case evidence, review photos, message attachments, seller application documents)",
     desc: "Allowed purposes here: return_evidence, case_evidence, review_photo, message_attachment, verification_document (seller applicants). Guests (shopper with X-Guest-Session) may upload return and case evidence for their guest order. Upload the bytes to the returned URL, then call complete.",
     body: () => UploadRequest,
@@ -579,6 +580,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/uploads/{id}/complete",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Confirm the bytes are uploaded; processing starts",
     params: () =>
       z.object({
@@ -595,6 +597,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/assets/{id}",
     auth: "shopper",
+    scope: "own-customer",
     summary: "My upload (poll until ready)",
     params: () =>
       z.object({
@@ -610,6 +613,7 @@ export const endpoints = defineEndpoints({
     method: "PATCH",
     path: "/assets/{id}",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Describe my photo (alt text)",
     params: () =>
       z.object({
@@ -626,6 +630,7 @@ export const endpoints = defineEndpoints({
     method: "DELETE",
     path: "/assets/{id}",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Remove my upload before submitting",
     desc: "Refused once attached to a submitted return, case or published review (evidence is retained).",
     params: () =>
@@ -643,6 +648,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/assets/{id}/download",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Signed link to one of my private files",
     params: () =>
       z.object({
@@ -659,6 +665,7 @@ export const endpoints = defineEndpoints({
     path: "/uploads",
     auth: "seller",
     permission: "media.assets.upload",
+    scope: "own-seller",
     summary: "Start an upload (product images and video, store logo and banner, ad creatives, documents, inspection photos, case evidence, bulk files)",
     body: () => UploadRequest,
     response: () => UploadTicket,
@@ -673,6 +680,7 @@ export const endpoints = defineEndpoints({
     path: "/uploads/{id}/complete",
     auth: "seller",
     permission: "media.assets.upload",
+    scope: "own-seller",
     summary: "Confirm the upload; processing starts",
     params: () =>
       z.object({
@@ -689,6 +697,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/assets",
     auth: "seller",
+    scope: "own-seller",
     summary: "Seller media library",
     query: () =>
       z.object({
@@ -709,6 +718,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/assets/{id}",
     auth: "seller",
+    scope: "own-seller",
     summary: "One file with where it is used and whether it can be deleted",
     params: () =>
       z.object({
@@ -725,6 +735,7 @@ export const endpoints = defineEndpoints({
     path: "/assets/{id}",
     auth: "seller",
     permission: "media.assets.upload",
+    scope: "own-seller",
     summary: "Edit alt text or title",
     params: () =>
       z.object({
@@ -742,6 +753,7 @@ export const endpoints = defineEndpoints({
     path: "/assets/{id}",
     auth: "seller",
     permission: "media.assets.upload",
+    scope: "own-seller",
     summary: "Delete an unused file",
     params: () =>
       z.object({
@@ -758,6 +770,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/assets/{id}/checks",
     auth: "seller",
+    scope: "own-seller",
     summary: "Check an image against category or placement rules before submitting",
     desc: "Pass the rules from GET /api/seller/catalog/categories/{id}/attributes (imageRules) or the ad placement format. Platform baseline checks always run.",
     params: () =>
@@ -781,6 +794,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/assets/{id}/download",
     auth: "seller",
+    scope: "own-seller",
     summary: "Signed link to one of the seller's private files",
     params: () =>
       z.object({
@@ -797,6 +811,7 @@ export const endpoints = defineEndpoints({
     path: "/uploads",
     auth: "staff",
     permission: "media.assets.manage",
+    scope: "staff",
     summary: "Start a staff upload (Official Store products, content, ad creatives, inspection photos, evidence)",
     desc: "Staff uploads for content, ads and Official Store are owned by the platform; evidence uploads are owned by the staff member.",
     body: () => z.object({
@@ -817,6 +832,7 @@ export const endpoints = defineEndpoints({
     path: "/uploads/{id}/complete",
     auth: "staff",
     permission: "media.assets.manage",
+    scope: "staff",
     summary: "Confirm a staff upload",
     params: () =>
       z.object({
@@ -834,6 +850,7 @@ export const endpoints = defineEndpoints({
     path: "/assets",
     auth: "staff",
     permission: "media.assets.view",
+    scope: "staff",
     summary: "All files with filters",
     query: () =>
       z.object({
@@ -858,6 +875,7 @@ export const endpoints = defineEndpoints({
     path: "/assets/{id}",
     auth: "staff",
     permission: "media.assets.view",
+    scope: "staff",
     summary: "File detail with usages, checks and history",
     params: () =>
       z.object({
@@ -874,6 +892,7 @@ export const endpoints = defineEndpoints({
     path: "/assets/{id}",
     auth: "staff",
     permission: "media.assets.manage",
+    scope: "staff",
     summary: "Edit alt text or title of a platform file",
     params: () =>
       z.object({
@@ -891,6 +910,7 @@ export const endpoints = defineEndpoints({
     path: "/assets/{id}/checks",
     auth: "staff",
     permission: "media.assets.view",
+    scope: "staff",
     summary: "Check an image against rules",
     params: () =>
       z.object({
@@ -913,6 +933,7 @@ export const endpoints = defineEndpoints({
     path: "/assets/{id}/remove",
     auth: "staff",
     permission: "media.assets.moderate",
+    scope: "staff",
     summary: "Take a file down (policy, rights, privacy) with a reason",
     desc: "Works even when in use. Using modules receive media.asset.removed and flag the record (e.g. product needs a new image).",
     params: () =>
@@ -934,6 +955,7 @@ export const endpoints = defineEndpoints({
     path: "/assets/{id}/restore",
     auth: "staff",
     permission: "media.assets.moderate",
+    scope: "staff",
     summary: "Restore a removed file",
     params: () =>
       z.object({
@@ -956,6 +978,7 @@ export const endpoints = defineEndpoints({
     path: "/assets/{id}",
     auth: "staff",
     permission: "media.assets.manage",
+    scope: "staff",
     summary: "Delete an unused platform file",
     params: () =>
       z.object({
@@ -975,6 +998,7 @@ export const endpoints = defineEndpoints({
     path: "/assets/{id}/download",
     auth: "staff",
     permission: "media.assets.view-private",
+    scope: "staff",
     summary: "Signed link to a private file (verification documents, evidence)",
     desc: "Files owned by sellers or customers need media.assets.view-private; every link is recorded with the reason.",
     params: () =>
@@ -996,6 +1020,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/storage-events",
     auth: "provider",
+    scope: "public",
     summary: "Object-created notifications from storage",
     desc: "Completes uploads whose client never called complete (app killed mid-flow). Idempotent per object key and version.",
     body: () => z.object({
@@ -1012,6 +1037,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/processing-results",
     auth: "provider",
+    scope: "public",
     summary: "Video transcoding results",
     desc: "Signature-verified; matched by provider job reference. Idempotent.",
     body: () => z.object({
@@ -1611,6 +1637,7 @@ export const spec = defineModuleSpec({
       }
     }
   },
+  tenantTables: {},
   endpoints,
 });
 

@@ -1,6 +1,7 @@
-import { notImplemented, routes } from '../../../kernel/http/index.js';
+import { routes } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/finance.js';
 import type { FinanceService } from '../service.js';
+import { byOf } from './by.js';
 
 /**
  * Admin API: /api/admin/finance/…  (docs/api/modules/finance.md)
@@ -8,92 +9,54 @@ import type { FinanceService } from '../service.js';
  */
 export const adminRoutes = (service: FinanceService) =>
   routes(endpoints, 'admin', {
-    /** GET /overview: Collected payments, company sales, fee income, owed to sellers, refunds, holds and discount funding */
-    getOverview: notImplemented,
-    /** GET /marketplace-income: Marketplace fee income, ad income and amounts owed to sellers (separate from company trading) */
-    getMarketplaceIncome: notImplemented,
-    /** GET /trading-targets: Official Store sales and margin targets by month (plan ch. 2) */
-    listTradingTargets: notImplemented,
-    /** PUT /trading-targets/{period}: Set the sales and margin target for a month (whole store or one category) */
-    setTradingTarget: notImplemented,
-    /** GET /trading: Company trading: product sales, buying cost, discounts, shipping, returns and margin */
-    getTrading: notImplemented,
-    /** GET /fee-rules: Active fee rules, scheduled changes and history */
-    getFeeRules: notImplemented,
-    /** POST /fee-rules: Propose a new fee rule version with an effective date */
-    proposeFeeRules: notImplemented,
-    /** POST /fee-rules/{id}/withdraw: Withdraw a draft or scheduled fee rule version */
-    withdrawFeeRules: notImplemented,
-    /** POST /fee-rules/calculate: Example fee and seller earnings for a price */
-    calculateFee: notImplemented,
-    /** GET /sellers: Seller balances */
-    listSellerFinance: notImplemented,
-    /** GET /sellers/{sellerId}: One seller's balances, holds, payouts, amounts owed and adjustments */
-    getSellerFinance: notImplemented,
-    /** GET /sellers/{sellerId}/ledger: A seller's ledger */
-    listSellerLedgerAdmin: notImplemented,
-    /** GET /sellers/{sellerId}/statements: A seller's statements */
-    listSellerStatementsAdmin: notImplemented,
-    /** GET /statements/{id}: A statement as the seller sees it */
-    getStatementAdmin: notImplemented,
-    /** GET /holds: Holds with reason and review date */
-    listHolds: notImplemented,
-    /** POST /holds: Hold part of a seller's earnings with a reason and review date */
-    placeHold: notImplemented,
-    /** POST /holds/{id}/release: Release all or part of a hold */
-    releaseHold: notImplemented,
-    /** POST /holds/{id}/extend: Move the review date with a reason */
-    extendHold: notImplemented,
-    /** POST /holds/{id}/apply: Turn a held amount into a deduction (e.g. chargeback lost) */
-    applyHold: notImplemented,
-    /** GET /adjustments: Adjustments with reasons and approvals */
-    listAdjustments: notImplemented,
-    /** POST /adjustments: Credit or debit a seller with a recorded reason */
-    recordAdjustment: notImplemented,
-    /** GET /amounts-owed: Negative balances that became amounts owed */
-    listAmountsOwed: notImplemented,
-    /** POST /amounts-owed/{id}/settle: Record payment received or write off an amount owed */
-    settleAmountOwed: notImplemented,
-    /** GET /payout-runs: Payout runs */
-    listPayoutRuns: notImplemented,
-    /** POST /payout-runs: Calculate a payout run for a cutoff (normally created by the schedule) */
-    createPayoutRun: notImplemented,
-    /** GET /payout-runs/{id}: Run totals, approvals and pre-release checks */
-    getPayoutRun: notImplemented,
-    /** GET /payout-runs/{id}/statements: Seller statements settled by this payout run */
-    listRunStatements: notImplemented,
-    /** GET /payout-runs/{id}/payouts: Sellers in a run (held and changed-destination rows first) */
-    listRunPayouts: notImplemented,
-    /** POST /payout-runs/{id}/recalculate: Refresh a draft run after holds, retries or destination changes */
-    recalculatePayoutRun: notImplemented,
-    /** POST /payout-runs/{id}/submit: Submit the run for approval */
-    submitPayoutRun: notImplemented,
-    /** POST /payout-runs/{id}/approve: Approve a payout run (first or second Finance reviewer) */
-    approvePayoutRun: notImplemented,
-    /** POST /payout-runs/{id}/send-back: Return the run to draft with a comment */
-    sendBackPayoutRun: notImplemented,
-    /** POST /payout-runs/{id}/release: Release an approved run now (otherwise released at the scheduled time) */
-    releasePayoutRun: notImplemented,
-    /** GET /payouts: All payouts, e.g. failed payouts to follow up */
-    listPayouts: notImplemented,
-    /** POST /payouts/{id}/retry: Recover a failed payout to a verified destination */
-    retryPayout: notImplemented,
-    /** GET /destination-reviews: Payout destination changes waiting for verification and review */
-    listDestinationReviews: notImplemented,
-    /** POST /destination-reviews/{id}/approve: Verify a new payout destination */
-    approveDestination: notImplemented,
-    /** POST /destination-reviews/{id}/reject: Reject a payout destination change */
-    rejectDestination: notImplemented,
-    /** GET /reconciliation/days/{date}: Daily finance check: checklist, totals and failed payouts */
-    getReconDay: notImplemented,
-    /** GET /reconciliation/items: Mismatched payments, seller amounts, deposits and unexplained amounts */
-    listReconItems: notImplemented,
-    /** POST /reconciliation/items/{id}/assign: Set the owner of a mismatch */
-    assignReconItem: notImplemented,
-    /** POST /reconciliation/items/{id}/explain: Close a difference with a recorded reason (no money moves) */
-    explainReconItem: notImplemented,
-    /** POST /reconciliation/items/{id}/correct: Record a correction with a reason */
-    correctReconItem: notImplemented,
-    /** POST /reconciliation/days/{date}/complete: Sign off the day's checks */
-    completeReconDay: notImplemented,
+    getOverview: async ({ query }) => service.reports.overview(query),
+    getMarketplaceIncome: async ({ query }) => service.reports.marketplaceIncome(query),
+    listTradingTargets: async ({ query, page }) => service.reports.listTargets(query, page),
+    setTradingTarget: async (i) => service.reports.setTarget(i.params.period, i.body, byOf(i)),
+    getTrading: async ({ query }) => service.reports.trading(query),
+    getFeeRules: async () => service.fees.admin(),
+    proposeFeeRules: async (i) => service.fees.propose(i.body, byOf(i)),
+    withdrawFeeRules: async (i) => service.fees.withdraw(i.params.id, i.body.reason, byOf(i)),
+    calculateFee: async ({ body }) => service.fees.calculate(body.input, body.ruleSetId),
+    listSellerFinance: async ({ query, page }) => service.reports.sellerRows(query, page),
+    getSellerFinance: async ({ params }) => service.getSellerAccount(params.sellerId),
+    listSellerLedgerAdmin: async ({ params, query, page }) => {
+      service.ledger.requireSeller(params.sellerId);
+      return service.ledger.listLedger(params.sellerId, query, page);
+    },
+    listSellerStatementsAdmin: async ({ params, page }) => {
+      service.ledger.requireSeller(params.sellerId);
+      return service.statements.list(params.sellerId, page);
+    },
+    getStatementAdmin: async ({ params }) => service.statements.get(params.id),
+    listHolds: async ({ query, page }) => service.holds.listHolds(query, page),
+    placeHold: async (i) => service.holds.place(i.body, byOf(i)),
+    releaseHold: async (i) => service.holds.decide(i.params.id, 'release', i.body, byOf(i)),
+    extendHold: async (i) => service.holds.extend(i.params.id, i.body, byOf(i)),
+    applyHold: async (i) => service.holds.decide(i.params.id, 'apply', i.body, byOf(i)),
+    listAdjustments: async ({ query, page }) => service.holds.listAdjustments(query, page),
+    recordAdjustment: async (i) => service.holds.record(i.body, byOf(i), i.idempotencyKey),
+    listAmountsOwed: async ({ query, page }) => service.holds.listOwed(query, page),
+    settleAmountOwed: async (i) => service.holds.settle(i.params.id, i.body, byOf(i)),
+    listPayoutRuns: async (i) => service.payouts.listRuns(i.query, i.page, byOf(i)),
+    createPayoutRun: async (i) => service.payouts.createRun(i.body, byOf(i)),
+    getPayoutRun: async (i) => service.payouts.runView(await service.payouts.run(i.params.id), byOf(i)),
+    listRunStatements: async ({ params, query, page }) => service.payouts.listRunStatements(params.id, query, page),
+    listRunPayouts: async ({ params, query, page }) => service.payouts.listRunPayouts(params.id, query, page),
+    recalculatePayoutRun: async (i) => service.payouts.recalculate(i.params.id, byOf(i)),
+    submitPayoutRun: async (i) => service.payouts.submit(i.params.id, byOf(i)),
+    approvePayoutRun: async (i) => service.payouts.approve(i.params.id, i.body, byOf(i)),
+    sendBackPayoutRun: async (i) => service.payouts.sendBack(i.params.id, i.body.reason, byOf(i)),
+    releasePayoutRun: async (i) => service.payouts.release(i.params.id, byOf(i)),
+    listPayouts: async ({ query, page }) => service.payouts.listPayouts(query, page),
+    retryPayout: async (i) => service.payouts.retry(i.params.id, i.body, byOf(i)),
+    listDestinationReviews: async ({ query, page }) => service.destinations.list(query, page),
+    approveDestination: async (i) => service.destinations.approve(i.params.id, i.body.reason, byOf(i)),
+    rejectDestination: async (i) => service.destinations.reject(i.params.id, i.body.reason, byOf(i)),
+    getReconDay: async ({ params }) => service.recon.day(params.date),
+    listReconItems: async ({ query, page }) => service.recon.list(query, page),
+    assignReconItem: async (i) => service.recon.assign(i.params.id, i.body.ownerId, byOf(i)),
+    explainReconItem: async (i) => service.recon.explain(i.params.id, i.body, byOf(i)),
+    correctReconItem: async (i) => service.recon.correct(i.params.id, i.body, byOf(i)),
+    completeReconDay: async (i) => service.recon.complete(i.params.date, i.body.note, byOf(i)),
   });

@@ -1,3 +1,4 @@
+import { hmacWebhookVerifier } from '../../kernel/http/webhooks.js';
 import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/finance.js';
 import { resolvers } from './graphql/resolvers.js';
@@ -8,6 +9,7 @@ import { publicRoutes } from './http/public.js';
 import { webhooksRoutes } from './http/webhooks.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresFinanceRepository } from './infra/postgres/repository.js';
+import { createDevPayoutProvider } from './infra/provider/dev.js';
 import { FinanceService } from './service.js';
 
 /**
@@ -18,14 +20,21 @@ import { FinanceService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '0.1.0',
+  version: '1.0.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const service = new FinanceService({ repo: createPostgresFinanceRepository(ctx.db), ctx });
+    // payout provider: the deterministic development adapter until a real one is wired behind the same port
+    const provider = createDevPayoutProvider(ctx.clock);
+    const service = new FinanceService({ repo: createPostgresFinanceRepository(ctx.db, ctx.inbox), ctx, provider });
     ctx.provide(service);
     ctx.http.routes(sellerRoutes(service), adminRoutes(service), publicRoutes(service), webhooksRoutes(service));
+    ctx.http.webhookVerifier(hmacWebhookVerifier(ctx.config, ctx.name));
     ctx.graphql.resolvers(resolvers(service));
+    ctx.afterBoot(async () => {
+      await service.core.ensureRules();
+      await service.reports.registerDatasets();
+    });
 
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("orders.order.accepted", (e) => service.onOrderAcceptedFromOrders(e.payload));
@@ -34,6 +43,7 @@ export default defineModule({
     ctx.events.on("payments.payment.captured", (e) => service.onPaymentCapturedFromPayments(e.payload));
     ctx.events.on("returns.refund.approved", (e) => service.onRefundApprovedFromReturns(e.payload));
     ctx.events.on("payments.refund.sent", (e) => service.onRefundSentFromPayments(e.payload));
+    ctx.events.on("payments.refund.failed", (e) => service.onRefundFailedFromPayments(e.payload, e.id));
     ctx.events.on("payments.chargeback.opened", (e) => service.onChargebackOpenedFromPayments(e.payload));
     ctx.events.on("payments.chargeback.decided", (e) => service.onChargebackDecidedFromPayments(e.payload));
     ctx.events.on("returns.label.created", (e) => service.onLabelCreatedFromReturns(e.payload));
@@ -41,6 +51,7 @@ export default defineModule({
     ctx.events.on("shipping.label.voided", (e) => service.onLabelVoidedFromShipping(e.payload));
     ctx.events.on("shipping.claim.status_changed", (e) => service.onClaimStatusChangedFromShipping(e.payload));
     ctx.events.on("promotions.coupon.redeemed", (e) => service.onCouponRedeemedFromPromotions(e.payload));
+    ctx.events.on("promotions.redemption.reversed", (e) => service.onRedemptionReversedFromPromotions(e.payload, e.id));
     ctx.events.on("sellers.seller.approved", (e) => service.onSellerApprovedFromSellers(e.payload));
     ctx.events.on("sellers.seller.suspended", (e) => service.onSellerSuspendedFromSellers(e.payload));
     ctx.events.on("sellers.seller.closed", (e) => service.onSellerClosedFromSellers(e.payload));

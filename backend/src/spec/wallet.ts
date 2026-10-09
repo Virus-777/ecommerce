@@ -330,8 +330,10 @@ export const LoyaltyAccount: z.ZodType<LoyaltyAccount> = z.object({
 export interface WalletCreditGrantedEvent {
   customerId: string;
   entryId: string;
-  kind: string;
+  /** What the credit is; finance books only platform-funded goodwill as a platform cost */
+  kind: "refund_to_credit" | "order_refund_returned" | "goodwill" | "price_adjustment" | "gift_card_redeemed";
   amount: common.Money;
+  /** Who funds it: goodwill and price adjustments only; null for refunds and gift cards */
   chargedTo?: "platform" | "seller" | null;
   sellerId?: string | null;
   caseId?: string | null;
@@ -341,11 +343,11 @@ export interface WalletCreditGrantedEvent {
 export const WalletCreditGrantedEvent: z.ZodType<WalletCreditGrantedEvent> = z.object({
   customerId: z.uuid(),
   entryId: z.uuid(),
-  kind: z.string(),
+  kind: z.enum(["refund_to_credit", "order_refund_returned", "goodwill", "price_adjustment", "gift_card_redeemed"]).describe("What the credit is; finance books only platform-funded goodwill as a platform cost"),
   get amount() {
     return common.Money;
   },
-  chargedTo: z.enum(["platform", "seller"]).nullish(),
+  chargedTo: z.enum(["platform", "seller"]).describe("Who funds it: goodwill and price adjustments only; null for refunds and gift cards").nullish(),
   sellerId: z.uuid().nullish(),
   caseId: z.uuid().nullish(),
   orderId: z.uuid().nullish(),
@@ -413,6 +415,25 @@ export const WalletCreditCorrectedEvent: z.ZodType<WalletCreditCorrectedEvent> =
     return common.Money;
   },
   reason: z.string(),
+});
+
+/** wallet.goodwill.decided: A goodwill grant waiting for approval is granted or rejected */
+export interface WalletGoodwillDecidedEvent {
+  grantId: string;
+  customerId: string;
+  status: "granted" | "rejected";
+  amount: common.Money;
+  caseId?: string | null;
+}
+
+export const WalletGoodwillDecidedEvent: z.ZodType<WalletGoodwillDecidedEvent> = z.object({
+  grantId: z.uuid(),
+  customerId: z.uuid(),
+  status: z.enum(["granted", "rejected"]),
+  get amount() {
+    return common.Money;
+  },
+  caseId: z.uuid().nullish(),
 });
 
 /** wallet.gift_card.issued: A gift card batch is issued */
@@ -573,6 +594,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/credit",
     auth: "customer",
+    scope: "own-customer",
     summary: "Store credit balance, lots with expiry and recent history",
     response: () => WalletOverview,
     status: 200,
@@ -584,6 +606,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/credit/entries",
     auth: "customer",
+    scope: "own-customer",
     summary: "Credit history",
     paging: true,
     response: () => LedgerEntry,
@@ -596,6 +619,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/gift-cards/redeem",
     auth: "customer",
+    scope: "own-customer",
     summary: "Add a gift card to store credit",
     body: () => z.object({
       code: z.string(),
@@ -613,6 +637,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/gift-cards/check",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Check a gift card balance",
     body: () => z.object({
       code: z.string(),
@@ -634,6 +659,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/loyalty",
     auth: "customer",
+    scope: "own-customer",
     summary: "Loyalty points (experiment; NOT_IMPLEMENTED until a program is defined)",
     response: () => LoyaltyAccount,
     status: 200,
@@ -647,6 +673,7 @@ export const endpoints = defineEndpoints({
     path: "/customers/{customerId}",
     auth: "staff",
     permission: "wallet.credit.view",
+    scope: "staff",
     summary: "A customer's credit balance, lots, goodwill in the last 30 days and pending grants",
     params: () =>
       z.object({
@@ -663,6 +690,7 @@ export const endpoints = defineEndpoints({
     path: "/customers/{customerId}/entries",
     auth: "staff",
     permission: "wallet.credit.view",
+    scope: "staff",
     summary: "A customer's credit ledger",
     params: () =>
       z.object({
@@ -684,6 +712,7 @@ export const endpoints = defineEndpoints({
     path: "/goodwill",
     auth: "staff",
     permission: "wallet.goodwill.grant",
+    scope: "staff",
     summary: "Grant goodwill credit with a reason",
     desc: "Within the staff member's goodwill limit (from access) it is granted now; above it, the grant waits for approval and the response is 202 with the approval request. Per-customer 30-day limit applies.",
     body: () => GoodwillInput,
@@ -703,6 +732,7 @@ export const endpoints = defineEndpoints({
     path: "/goodwill",
     auth: "staff",
     permission: "wallet.credit.view",
+    scope: "staff",
     summary: "Goodwill grants for review",
     query: () =>
       z.object({
@@ -723,6 +753,7 @@ export const endpoints = defineEndpoints({
     path: "/goodwill/{id}/reverse",
     auth: "staff",
     permission: "wallet.credit.correct",
+    scope: "staff",
     summary: "Reverse an unused goodwill grant",
     params: () =>
       z.object({
@@ -746,6 +777,7 @@ export const endpoints = defineEndpoints({
     path: "/customers/{customerId}/corrections",
     auth: "staff",
     permission: "wallet.credit.correct",
+    scope: "staff",
     summary: "Correct a balance (positive or negative) with a reason",
     params: () =>
       z.object({
@@ -774,6 +806,7 @@ export const endpoints = defineEndpoints({
     path: "/gift-cards",
     auth: "staff",
     permission: "wallet.gift_cards.manage",
+    scope: "staff",
     summary: "Issue a batch of gift cards",
     desc: "Codes are returned once in the response file reference and stored only as hashes.",
     body: () => GiftCardBatchInput,
@@ -800,6 +833,7 @@ export const endpoints = defineEndpoints({
     path: "/gift-cards",
     auth: "staff",
     permission: "wallet.gift_cards.manage",
+    scope: "staff",
     summary: "Gift cards",
     query: () =>
       z.object({
@@ -819,6 +853,7 @@ export const endpoints = defineEndpoints({
     path: "/gift-cards/{id}/void",
     auth: "staff",
     permission: "wallet.gift_cards.manage",
+    scope: "staff",
     summary: "Void a gift card (lost, fraud)",
     params: () =>
       z.object({
@@ -976,6 +1011,7 @@ export const spec = defineModuleSpec({
       "wallet.credit.expired": { when: "A lot expires unused", payload: () => WalletCreditExpiredEvent },
       "wallet.credit.reversed": { when: "A goodwill grant is reversed", payload: () => WalletCreditReversedEvent },
       "wallet.credit.corrected": { when: "Staff correct a balance", payload: () => WalletCreditCorrectedEvent },
+      "wallet.goodwill.decided": { when: "A goodwill grant waiting for approval is granted or rejected", payload: () => WalletGoodwillDecidedEvent },
       "wallet.gift_card.issued": { when: "A gift card batch is issued", payload: () => WalletGiftCardIssuedEvent },
       "wallet.gift_card.redeemed": { when: "A gift card is added to store credit", payload: () => WalletGiftCardRedeemedEvent },
     },
@@ -1359,6 +1395,27 @@ export const spec = defineModuleSpec({
       }
     }
   },
+  tenantTables: {
+    "accounts": {
+      "customer": "customer_id"
+    },
+    "lots": {
+      "customer": "customer_id"
+    },
+    "ledger": {
+      "customer": "customer_id"
+    },
+    "holds": {
+      "customer": "customer_id"
+    },
+    "goodwill_grants": {
+      "seller": "seller_id",
+      "customer": "customer_id"
+    },
+    "loyalty_entries": {
+      "customer": "customer_id"
+    }
+  },
   endpoints,
 });
 
@@ -1369,6 +1426,7 @@ declare module '../kernel/events/event-map.js' {
     "wallet.credit.expired": WalletCreditExpiredEvent;
     "wallet.credit.reversed": WalletCreditReversedEvent;
     "wallet.credit.corrected": WalletCreditCorrectedEvent;
+    "wallet.goodwill.decided": WalletGoodwillDecidedEvent;
     "wallet.gift_card.issued": WalletGiftCardIssuedEvent;
     "wallet.gift_card.redeemed": WalletGiftCardRedeemedEvent;
   }

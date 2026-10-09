@@ -29,7 +29,7 @@ Help cases and disputes: customer help and order-problem cases opened from the o
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| GET | `/api/store/support/contact-options` | Topics, channels, hours and expected reply times | anyone | `ContactOptions` |
+| GET | `/api/store/support/contact-options` | Topics, channels, hours and expected reply times | visitor | `ContactOptions` |
 | GET | `/api/store/support/orders/{orderId}/problem-context` | Order problem form context: packages and items, who handles first, when Marketly steps in, open cases | shopper | `ProblemContext` |
 | POST | `/api/store/support/cases` | Contact support or report an order problem (missing, damaged, wrong item, not arrived) _(idempotent)_ | shopper | `CaseCreateInput` → `CaseView` |
 | GET | `/api/store/support/cases` | My cases with who handles them, the next action and the expected reply | shopper | Page<CaseSummary> |
@@ -858,15 +858,15 @@ Indexes: `(case_id, at)`
 
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
-| `support.case.opened` | A case is opened by a customer, seller, staff or another module | `{ caseId: uuid, ref: string, kind: string, category: string, priority: string, customerId: uuid?, sellerId: uuid?, orderId: uuid?, orderItemIds: uuid[], handler: string, nextResponseDueAt: datetime? }` | messaging, notifications, orders, reports, sellers, shipping, trust |
+| `support.case.opened` | A case is opened by a customer, seller, staff or another module | `{ caseId: uuid, ref: string, kind: string, category: string, priority: string, customerId: uuid?, contactEmail: email?, sellerId: uuid?, orderId: uuid?, orderItemIds: uuid[], handler: string, nextResponseDueAt: datetime? }` | messaging, notifications, orders, reports, sellers, shipping, trust |
 | `support.case.escalated` | Marketly steps in, a case becomes a dispute, or it moves to another team | `{ caseId: uuid, ref: string, to: string, reason: string, sellerId: uuid?, orderId: uuid? }` | notifications, workqueues |
-| `support.case.decided` | A decision (or appeal decision) is recorded | `{ caseId: uuid, ref: string, outcome: string, orderId: uuid?, returnId: uuid?, sellerId: uuid?, remedies: Remedy[], appealDeadline: datetime?, final: bool }` | finance, notifications, returns |
-| `support.case.resolved` | A case is resolved | `{ caseId: uuid, ref: string, sellerId: uuid?, resolvedAt: datetime }` | notifications, reports, sellers, workqueues |
+| `support.case.decided` | A decision (or appeal decision) is recorded | `{ caseId: uuid, ref: string, outcome: string, orderId: uuid?, customerId: uuid?, contactEmail: email?, returnId: uuid?, sellerId: uuid?, remedies: Remedy[], appealDeadline: datetime?, final: bool }` | finance, notifications, returns |
+| `support.case.resolved` | A case is resolved | `{ caseId: uuid, ref: string, customerId: uuid?, contactEmail: email?, sellerId: uuid?, resolvedAt: datetime }` | notifications, reports, sellers, workqueues |
 | `support.case.reopened` | A case is reopened | `{ caseId: uuid, by: Actor, reason: text }` | - |
 | `support.case.appealed` | A party appeals a decision | `{ caseId: uuid, by: Actor }` | - |
 | `support.case.appeal_decided` | An appeal is decided | `{ caseId: uuid, overturned: bool }` | - |
 | `support.case.assigned` | Owner changes | `{ caseId: uuid, ownerId: uuid, team: string }` | - |
-| `support.case.message_added` | A visible message is added (drives notifications) | `{ caseId: uuid, messageId: uuid, audience: string, authorRole: string }` | notifications |
+| `support.case.message_added` | A visible message is added (drives notifications) | `{ caseId: uuid, messageId: uuid, customerId: uuid?, contactEmail: email?, sellerId: uuid?, audience: string, authorRole: string }` | notifications |
 | `support.case.overdue` | A response deadline passes (party or staff) | `{ caseId: uuid, whoMustAct: string, dueAt: datetime }` | notifications, workqueues |
 
 | Consumes | From | Does |
@@ -874,6 +874,7 @@ Indexes: `(case_id, at)`
 | `returns.return.escalated` | returns | Open or link a dispute case for the return and assign it to the Returns team |
 | `returns.refund.approved` | returns | Move the matching refund remedy to approved/in progress |
 | `payments.refund.sent` | payments | Complete the refund remedy; the case can now be resolved |
+| `wallet.goodwill.decided` | wallet | For a case's goodwill credit remedy waiting for approval: mark it granted (done) or rejected and put the case back in the owner's queue |
 | `payments.refund.failed` | payments | Mark the refund remedy failed and put the case back in the owner's queue |
 | `returns.replacement.created` | returns | Link the replacement to its remedy |
 | `shipping.shipment.delivered` | shipping | Complete replacement remedies when their shipment is delivered |

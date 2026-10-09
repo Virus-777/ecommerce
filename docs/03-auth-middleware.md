@@ -1,6 +1,6 @@
 # Authentication and authorization middleware per role
 
-Status: **design v3, for review.** Nothing in this document is built yet.
+Status: **v3, implemented in the kernel** (2026-10-09). The open decisions in §18 were taken with the recommended option; see "Decisions taken".
 
 v3 adds your rule: **every API endpoint requires a token, and tokens are verified in middleware** (§0). v2 still let 78 endpoints run without a token.
 
@@ -9,18 +9,7 @@ v1 was reviewed twice: a fact-check against every spec, and a security review. v
 - 2 critical gaps: record scope had no enforcement; development tokens were on everywhere;
 - 9 high-risk gaps: revocation across servers, token format, web token storage, guest sessions, step-up binding, field-level data, anonymous callers recorded as "system", secrets in URLs, role grants that carry authority.
 
-§16 lists every change.
-
-**Built today** in `backend/src/kernel/auth` and `kernel/http/register.ts`:
-- audience check;
-- optional tokens on `anyone` endpoints;
-- guest-session check;
-- seller context with member access and the owner rule;
-- staff permission check;
-- launch-phase gate;
-- Idempotency-Key.
-
-v2 changes several of these; see the "today" column in §3.
+§16 lists every change. §17 lists what is built and what still waits for the identity, access, sellers and customers modules.
 
 ## 0. Rule: every endpoint requires a token, verified in middleware
 
@@ -250,12 +239,12 @@ v1 left scope to a helper that each handler would have to remember to call. Acro
 | Proof | Used for | Binding | Lifetime |
 |---|---|---|---|
 | Staff 2-step at sign-in | every admin session | session | until idle or absolute limit |
-| Re-auth token (password or 2-step code) | customer account closure, email change, 2-step removal, recovery-code regeneration; seller payout account change, business change, seller closure | account + session + audience + seller + **purpose** (one per action) | single use, 5 minutes, consumed after success |
+| Re-auth token (password or 2-step code) | customer account closure, email change, 2-step removal, recovery-code regeneration; seller payout account change, business change, seller closure; staff actions that need a re-auth | account + session + audience + seller + **purpose** (one per action: the request names the purpose and `verifyReauthToken` refuses a token issued for another) | single use, 5 minutes, consumed after success |
 | Approval 2-step code | money approvals above `stepUpAbove` ($10,000): `access.approveRequest`, **and** the finance payout-run approval and refund approval that call `access.decide` | request + amount | single use |
 | *(decision 5)* Fresh 2-step for sensitive staff actions | role grants (`access.*`), staff account actions (`identity.staff-accounts.*`), finance destination changes, identity exports | action | single use |
 
 - **Shared failure counter.** Re-auth, every inline current-password check and approval codes count against one identity counter that shares lockout with sign-in: 5 wrong answers lock step-up for 15 minutes and write a security event. Otherwise a stolen session becomes a password or 2-step guessing oracle.
-- **Seller re-auth.** `POST /api/seller/identity/reauth` issues tokens bound to the seller. The store `/reauth` is **not** an `account` endpoint, so a seller session can't use a store re-auth token on seller actions.
+- **Seller and staff re-auth.** `POST /api/seller/identity/reauth` issues tokens bound to the seller (it also works before a seller is chosen); `POST /api/admin/identity/reauth` issues them to staff. The store `/reauth` is **not** an `account` endpoint, so a seller session can't use a store re-auth token on seller actions.
 
 ## 11. Rate limits
 
@@ -316,21 +305,21 @@ Staff roles get **staff-audience keys only.** The seed's wildcards are expanded 
 | Purchasing Manager | `purchasing.*` | `purchasing.orders.send` (to $25,000) |
 | Inventory Manager | `inventory.*` (staff keys) | `inventory.adjustments.apply` (50 units) |
 | Warehouse Manager | `warehouse.*`, `inventory.stock.view`, `inventory.discrepancies.resolve` | `fulfillment-service.reimbursements.approve` (phase 4) |
-| Order Manager | `orders.orders.*`, `orders.cancellations.decide`, `cart.carts.view`, `checkout.sessions.view` | – |
+| Order Manager | `orders.orders.*`, `orders.cancellations.decide`, `cart.carts.view`, `checkout.sessions.view`, `trust.recommendations.decide` | – |
 | Shipping Manager | `shipping.*` (staff keys) | `shipping.claims.open` (to $1,000) |
-| Returns Manager | `returns.requests.*`, `returns.inspections.record`, `returns.exceptions.propose`, `returns.policies.manage`, `inventory.returns.record` | none: **refund approval belongs to Finance** |
-| Catalog Manager | `catalog.*` (staff keys), `media.assets.*` (staff keys), `search.synonyms.manage`, `reviews.answers.staff` | `catalog.products.publication-override` (with Trust and Risk Manager) |
-| Seller Manager | `sellers.*` (staff keys), `offers.offers.view`, `offers.offers.remove` | `sellers.sellers.restrict`, `.suspend`, `.close` (second reviewer), `sellers.performance.targets` |
-| Customer Support Manager | `support.*`, `customers.*` except `accounts.export`, `messaging.*`, `orders.orders.view`, `orders.customers.view-contact`, `returns.requests.view` | `support.remedies.approve`, `wallet.goodwill.grant` (to $50), `customers.accounts.close-with-obligations` |
-| Finance Manager | `finance.*` (staff keys), `payments.*`, `returns.refunds.approve`, `reports.marketplace-finance.view`, `reports.trading.view` | `finance.payouts.release`, `finance.holds.*`, `finance.adjustments.record`, `finance.writeoffs.approve`, `finance.destinations.approve`, `finance.reconciliation.correct`, `payments.disputes.accept`, `returns.refunds.approve`, and the "above it" side of `advertising.charges.void`, `shipping.claims.open`, `wallet.gift-cards.issue` |
-| Marketing Manager | `promotions.*`, `content.homepage.manage`, `reports.customers-marketing.view`, `notifications.broadcasts.manage` | `promotions.budgets.approve` (Marketing limit) |
+| Returns Manager | `returns.requests.*`, `returns.inspections.record`, `returns.exceptions.propose`, `returns.policies.manage`, `inventory.returns.record`, `trust.recommendations.decide` | none: **refund approval belongs to Finance** |
+| Catalog Manager | `catalog.*` (staff keys), `media.assets.*` (staff keys), `search.synonyms.manage`, `reviews.answers.staff`, `trust.recommendations.decide` | `catalog.products.publication-override` (with Trust and Risk Manager) |
+| Seller Manager | `sellers.*` (staff keys), `offers.offers.view`, `offers.offers.remove`, `trust.recommendations.decide` | `sellers.sellers.restrict`, `.suspend`, `.close` (second reviewer), `sellers.performance.targets` |
+| Customer Support Manager | `support.*`, `customers.*` except `accounts.export`, `messaging.*`, `orders.orders.view`, `orders.customers.view-contact`, `returns.requests.view`, `wallet.credit.view`, `wallet.goodwill.grant`, `trust.recommendations.decide` | `support.remedies.approve`, `wallet.goodwill.grant` (to $50), `customers.accounts.close-with-obligations` |
+| Finance Manager | `finance.*` (staff keys), `payments.*`, `returns.refunds.approve`, `reports.marketplace-finance.view`, `reports.trading.view`, `wallet.*`, `trust.recommendations.decide` | `finance.payouts.release`, `finance.holds.*`, `finance.adjustments.record`, `finance.writeoffs.approve`, `finance.destinations.approve`, `finance.reconciliation.correct`, `payments.disputes.accept`, `returns.refunds.approve`, and the "above it" side of `advertising.charges.void`, `shipping.claims.open`, `wallet.gift-cards.issue` |
+| Marketing Manager | `promotions.*`, `content.homepage.manage`, `reports.customers-marketing.view`, `notifications.broadcasts.manage`, `advertising.campaigns.review` | `promotions.budgets.approve` (Marketing limit) |
 | Advertising Manager | `advertising.*` (staff keys) | `advertising.charges.void` (within limit) |
-| Content Manager | `content.*`, `media.assets.manage` | – (policies approved by Business Owner) |
+| Content Manager | `content.*`, `media.assets.manage`, `advertising.campaigns.review` | – (policies approved by Business Owner) |
 | Trust and Risk Manager | `trust.*` except `reports.export-identities`, `reviews.moderation.*`, `reviews.appeals.decide` | `trust.enforcements.reverse`, co-approver of publication override |
 | Reports Analyst | `reports.*` (staff keys) except `readmodels.manage`, `search.analytics.view` | – |
 | Warehouse worker (task) | `warehouse.view`, `warehouse.picking/packing/putaway.perform`, `warehouse.returns.receive` | – |
 | Finance staff (task) | `finance.ledger.view`, `finance.reconciliation.work`, `finance.payouts.prepare`, `finance.holds.manage`, `finance.adjustments.record`, `payments.refunds.view`, `returns.refunds.approve` | within their limits: `finance.holds.place/release`, `finance.adjustments.record` (to $500), `finance.reconciliation.correct` (to $200), `payments.disputes.accept`, `returns.refunds.approve` (to $2,000) |
-| Support agent (task) | `support.cases.view/handle`, `customers.accounts.view`, `customers.notes.write`, `messaging.conversations.read/participate`, `orders.orders.view` | `support.remedies.approve` (to $50) |
+| Support agent (task) | `support.cases.view/handle`, `customers.accounts.view`, `customers.notes.write`, `messaging.conversations.read/participate`, `orders.orders.view`, `wallet.credit.view`, `wallet.goodwill.grant` | `support.remedies.approve` (to $50) |
 
 Every staff role also gets `workqueues.items.view` and `workqueues.items.work` for its own queues. Limits are the spec's example values and must be confirmed by the Business Owner.
 
@@ -368,6 +357,7 @@ Every staff role also gets `workqueues.items.view` and `workqueues.items.work` f
 | 18 | Identity: new `POST /api/public/identity/app-sessions` (bootstrap: app proof → visitor token + refresh token) replaces `POST /guest-sessions`; sign-in and registration claim the visitor session; token claim `kind` | identity |
 | 19 | Headers: remove `X-Guest-Session`; add the app-proof header for bootstrap (`X-App-Proof`) | common.json `headers` |
 | 20 | *(decision 9)* Auth kind `service` for our own server-side clients (website rendering), with client credentials held only on the server | common.json, identity |
+| 21 | Re-auth purpose: `purpose` in `ReauthRequest` and on `reauth_tokens`, checked by `verifyReauthToken`; staff re-auth `POST /api/admin/identity/reauth`; seller re-auth works before a seller is chosen; identity publicApi drops `authenticate` and `verifyGuestSession` (the kernel verifies tokens) | identity |
 
 ## 16. Changes from v1 and v2
 
@@ -405,7 +395,26 @@ Every staff role also gets `workqueues.items.view` and `workqueues.items.work` f
 | Errors | 401 for everything | 401 only for token problems; 403 for audience, step-up, owner-only |
 | Facts | 6 errors | refund approval → Finance; `advertising.rules.change` → Business Owner; publication override is declared; Finance staff limits; seller closure needs re-auth; store `/reauth` is not exempt |
 
-## 17. What will be built (after approval)
+## 17. What is built
+
+**Built** (`backend/src/kernel/auth`, `kernel/http`), checked by `npm run check`:
+- `chain.ts`: app-level onRequest authenticates **every** URL (unknown URLs and GraphQL included: 401 before 404); per-endpoint hooks for phase gate, caller rate limit, audience, caller kind, seller context + member access, permission / OWNER_ONLY, staff 2-step, refresh token, webhook signature + replay record, rate-limit classes, `permissionWhen`, step-up;
+- `tokens.ts`: EdDSA JWT verify/sign, `AUTH_JWKS`, per-machine dev key (`kid dev-…`, `dev` claims honoured only on dev keys);
+- `revocation.ts`, `rate-limit.ts`, `app-proof.ts` (dev, Turnstile; Play Integrity pluggable), `scope.ts` (`input.scope`, `scoped()`), `masking.ts`, `authorities.ts` (answers from identity/access/sellers/customers public APIs, fail closed), `setup.ts`;
+- `http/security.ts`: CORS per area, preflight before auth, no-store, WWW-Authenticate only for token problems; health check moved to an internal port (`HEALTH_PORT`);
+- spec: the `auth`, `scope`, `stepUp`, `permissionWhen`, `sellerContext`, `rateLimit`, sensitive-field and tenant metadata, generated into `src/spec`.
+
+**Over real HTTP** (`npm run test:http`, part of `npm run check`): every endpoint is called on a listening server with spec-generated input, about 6,300 requests: no token → 401, invalid token / refresh token / signature / app proof → 401, another app's token → 403, wrong caller → 401, missing permission → 403, missing step-up proof → 403, right token → reaches the handler; plus unknown URLs, CORS preflight, GraphQL per area, /docs and the internal health port.
+
+**Tests built:** for every one of the 1,269 endpoints: no token → 401 (bootstrap → APP_PROOF_INVALID), another app's token → 403 WRONG_AUDIENCE, missing permission → 403 FORBIDDEN or OWNER_ONLY, right token → reaches the handler. Kernel tests: expired / foreign-key / tampered / malformed tokens, visitor vs customer, 2-step, `permissionWhen`, seller context, owner-only + re-auth, guest scope, app proof, refresh from cookie and body, webhooks without a verifier.
+
+**Waits for the modules** (the middleware already calls these public APIs; until they exist it fails closed):
+- identity: issue tokens and visitor tokens, `verifyRefreshToken`, `verifyReauthToken`/`consumeReauthToken`, `verifyStepUp`, `revocationsSince`;
+- access: `hasPermission` with the seed role sets (§14); sellers: `getMemberAccess`; customers: `getCustomerByUserId`;
+- each module: webhook verifiers, `scoped()` in repositories, and cross-tenant 404 tests once handlers exist;
+- deployment: Play Integrity verifier, a shared rate-limit store for more than one server.
+
+### Planned layout (v3 design, for reference)
 
 ```
 backend/src/kernel/auth/
@@ -439,7 +448,12 @@ backend/src/kernel/http/
 - webhook replay;
 - GraphQL admin fields without `@auth` fail the build.
 
-## 18. Decisions for you
+## 18. Decisions
+
+**Decisions taken** (recommended options): 1 all spec changes accepted; 2 seed sets kept as proposals until access is built; 3 "any active member" for seller reads; 4 rate limits as proposed; 5 fresh 2-step for sensitive staff actions; 6 deputy owner not built yet; 7 HttpOnly refresh cookie on the website; 8 provider signature as the webhook token; 9 no service token (pure browser app); 10 Play Integrity + Turnstile; 11 unsubscribe through the link in the message.
+
+The questions as asked:
+
 
 1. **Spec changes (§15).** Accept them all, or name the ones to drop. Items 1–5 and 9 are small. Items 6, 10 and 11 (scope, field masking, viewer) touch every module spec.
 2. **Seed role permissions (§14).** Confirm, or mark rows to change. Refund approval now sits with Finance, not Returns.

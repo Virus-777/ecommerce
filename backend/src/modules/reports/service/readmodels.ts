@@ -1,0 +1,682 @@
+/**
+ * Read models fed by other modules' events (never their tables), the daily pull of figures that have no
+ * event, discovery signals, read model health and rebuilds.
+ *
+ * Consumers are idempotent and order-tolerant: facts are keyed by natural ids (order item, refund,
+ * return), counters record the natural key of what they counted (shipment, case, payout, hold…) before
+ * adding, and an event about an order reports has not seen yet first loads the order from orders.
+ */
+import { AppError } from '../../../kernel/errors/index.js';
+import type { EventPayload } from '../../../kernel/events/index.js';
+import type * as identity from '../../../spec/identity.js';
+import type * as orders from '../../../spec/orders.js';
+import type { ReadModelStatus } from '../../../spec/reports.js';
+import { isOfficialSeller, OFFICIAL_KEY, READ_MODELS, readModelDef } from '../domain/catalogue.js';
+import { addDays, customerKey, marketDay } from '../domain/rules.js';
+import type { OrderItemFact } from '../ports.js';
+import { invalid, notFound, type Caller, type ReportsCore } from './core.js';
+
+/** The envelope fields a consumer uses: the event id and when it happened */
+export interface Env {
+  id: string;
+  at: string;
+}
+
+const MINUTE = 60_000;
+const DAY = 86_400_000;
+
+export class ReadModels {
+  /** Store signals per session: [window start, count] */
+  readonly #signalWindows = new Map<string, { start: number; count: number }>();
+
+  constructor(private readonly core: ReportsCore) {}
+
+  private get repo() {
+    return this.core.repo;
+  }
+
+  private async tz() {
+    return (await this.core.cfg()).timeZone;
+  }
+
+  private async day(at: string | Date | undefined) {
+    const d = at ? new Date(at) : this.core.now();
+    return marketDay(Number.isNaN(d.getTime()) ? this.core.now() : d, await this.tz());
+  }
+
+  /** Checkpoint of the models an event fed: last event, and stale when it arrived later than the lag allowance */
+  private async touch(models: string[], env: Env) {
+    const cfg = await this.core.cfg();
+    const delay = this.core.now().getTime() - new Date(env.at).getTime();
+    for (const key of models) {
+      const cp = await this.repo.getCheckpoint(key);
+      const state = cp?.state === 'rebuilding' ? 'rebuilding' : delay > cfg.readModelMaxLagMinutes * MINUTE ? 'stale' : 'live';
+      await this.repo.upsertCheckpoint(key, { last_event_id: env.id, last_event_at: new Date(env.at), state });
+    }
+  }
+
+  /* ---------------------------------------------------------------- order item facts */
+
+  /**
+   * Rows of an accepted order, loading the order from orders the first time (placement event, or any later
+   * event that arrives first). Orders waiting for payment are not counted until accepted.
+   */
+  async ensureOrder(orderId: string, hint: { customerId?: string | null; email?: string | null; accepted?: boolean } = {}): Promise<OrderItemFact[]> {
+    const existing = await this.repo.getOrderItems(orderId);
+    if (existing.length) return existing;
+    const api = this.core.api('orders');
+    if (!api) return [];
+    const order = await this.core.soft('orders.getOrder', () => api.getOrder(orderId));
+    if (!order) return [];
+    if (!hint.accepted && !order.acceptedAt && order.lifecycle === 'payment_pending') return [];
+    const rows = await this.factsOf(order, hint);
+    if (!rows.length) return [];
+    const tz = await this.tz();
+    const placedDay = marketDay(new Date(order.placedAt), tz);
+    const key = rows[0]!.customer_key;
+    const spend = rows.reduce((n, r) => n + r.item_minor + r.shipping_minor + r.tax_minor, 0);
+    await this.repo.transaction(async (tx) => {
+      if (!(await tx.claim(`order_items:${orderId}`))) return;
+      await tx.insertOrderItems(rows);
+      await tx.upsertCustomer(key, new Date(order.placedAt), spend);
+      const units = new Map<string, number>();
+      for (const r of rows) units.set(r.product_id, (units.get(r.product_id) ?? 0) + r.quantity);
+      for (const [productId, n] of units) await tx.bumpDaily('fact_discovery_daily', { product_id: productId, day: placedDay }, { purchases: n });
+    });
+    return this.repo.getOrderItems(orderId);
+  }
+
+  private async factsOf(order: orders.OrderDetail, hint: { customerId?: string | null; email?: string | null }): Promise<OrderItemFact[]> {
+    const catalog = this.core.api('catalog');
+    const inventory = this.core.api('inventory');
+    const categories = new Map<string, string | null>();
+    const key = customerKey(hint.customerId ?? order.contact?.customerId ?? null, hint.email ?? order.contact?.email ?? null);
+    const rows: OrderItemFact[] = [];
+    for (const g of order.groups) {
+      const ownerType = g.seller.ownerType;
+      for (const i of g.items) {
+        const productId = i.product.productId;
+        // the category at purchase (order item snapshot); orders placed before it was recorded fall back to the catalog
+        if (!i.categoryId && !categories.has(productId)) categories.set(productId, (catalog ? await this.core.soft('catalog.getProduct', () => catalog.getProduct(productId)) : undefined)?.categoryId ?? null);
+        const discount = i.discounts.reduce((n, d) => n + d.amount.amount, 0);
+        const funded = (who: 'platform' | 'seller') => i.discounts.reduce((n, d) => n + (d.fundedBy === who ? d.amount.amount : d.fundedBy === 'shared' ? (who === 'platform' ? Math.ceil(d.amount.amount / 2) : Math.floor(d.amount.amount / 2)) : 0), 0);
+        let cost: number | null = null;
+        if (ownerType === 'official' && inventory) {
+          const unit = await this.core.soft('inventory.getUnitCost', () => inventory.getUnitCost(i.stockItemId));
+          if (unit) cost = unit.amount * i.quantity;
+        }
+        rows.push({
+          order_item_id: i.id,
+          order_id: order.id,
+          owner_type: ownerType,
+          seller_id: ownerType === 'seller' ? (g.seller.id ?? null) : null,
+          customer_key: key,
+          category_id: i.categoryId ?? categories.get(productId) ?? null,
+          product_id: productId,
+          offer_id: i.offer.offerId,
+          quantity: i.quantity,
+          item_minor: i.lineSubtotal.amount - discount,
+          shipping_minor: i.shippingShare.amount,
+          discount_platform_minor: funded('platform'),
+          discount_seller_minor: funded('seller'),
+          tax_minor: i.taxShare.amount,
+          currency: i.lineSubtotal.currency,
+          placed_at: new Date(order.placedAt),
+          paid_at: null,
+          shipped_at: null,
+          delivered_at: i.deliveredAt ? new Date(i.deliveredAt) : null,
+          completed_at: null,
+          cancelled_at: null,
+          cancelled_by: null,
+          cancelled_minor: 0,
+          refunded_minor: 0,
+          last_refund_at: null,
+          buying_cost_minor: cost,
+        });
+      }
+    }
+    return rows;
+  }
+
+  async onOrderPlaced(p: EventPayload<'orders.order.placed'>, env: Env) {
+    if (p.paymentState === 'accepted') await this.ensureOrder(p.orderId, { customerId: p.customerId, email: p.guestEmail, accepted: true });
+    await this.touch(['order_items', 'customers'], env);
+  }
+
+  async onOrderAccepted(p: EventPayload<'orders.order.accepted'>, env: Env) {
+    await this.ensureOrder(p.orderId, { customerId: p.customerId, email: p.contactEmail, accepted: true });
+    await this.touch(['order_items', 'customers', 'discovery'], env);
+  }
+
+  async onPaymentCaptured(p: EventPayload<'payments.payment.captured'>, env: Env) {
+    await this.ensureOrder(p.orderId, { accepted: true });
+    const at = new Date(p.capturedAt);
+    if (!p.allocations.length) await this.repo.updateOrderItems({ orderId: p.orderId, nullColumn: 'paid_at' }, { paid_at: at });
+    for (const a of p.allocations) await this.repo.updateOrderItems({ orderId: p.orderId, ownerType: a.ownerType, sellerId: a.ownerType === 'seller' ? (a.sellerId ?? null) : null, nullColumn: 'paid_at' }, { paid_at: at });
+    await this.touch(['order_items'], env);
+  }
+
+  async onShipmentDispatched(p: EventPayload<'shipping.shipment.dispatched'>, env: Env) {
+    if (p.kind === 'return') return this.touch(['service'], env);
+    await this.ensureOrder(p.orderId, { accepted: true });
+    await this.repo.updateOrderItems({ itemIds: p.lines.map((l) => l.orderItemId), nullColumn: 'shipped_at' }, { shipped_at: new Date(p.shippedAt) });
+    if (p.kind === 'outbound') {
+      const day = await this.day(p.shippedAt);
+      await this.repo.transaction(async (tx) => {
+        if (!(await tx.claim(`service:dispatched:${p.shipmentId}`))) return;
+        await tx.bumpService(p.sellerId ?? OFFICIAL_KEY, day, { dispatched: 1, dispatched_on_time: p.onTime === false ? 0 : 1, valid_tracking: p.trackingValid ? 1 : 0 });
+      });
+    }
+    await this.touch(['order_items', 'service'], env);
+  }
+
+  async onDispatchOverdue(p: EventPayload<'shipping.dispatch.overdue'>, env: Env) {
+    const day = await this.day(env.at);
+    await this.repo.transaction(async (tx) => {
+      if (await tx.claim(`service:overdue:${p.exceptionId}`)) await tx.bumpService(p.sellerId ?? OFFICIAL_KEY, day, { overdue: 1 });
+    });
+    await this.touch(['service'], env);
+  }
+
+  async onShipmentException(p: EventPayload<'shipping.shipment.exception'>, env: Env) {
+    const day = await this.day(env.at);
+    await this.repo.transaction(async (tx) => {
+      if (await tx.claim(`service:exception:${p.exceptionId}`)) await tx.bumpService(p.sellerId ?? OFFICIAL_KEY, day, { delivery_exceptions: 1 });
+    });
+    await this.touch(['service'], env);
+  }
+
+  async onItemDelivered(p: EventPayload<'orders.item.delivered'>, env: Env) {
+    await this.ensureOrder(p.orderId, { accepted: true });
+    await this.repo.updateOrderItems({ itemIds: [p.itemId], nullColumn: 'delivered_at' }, { delivered_at: new Date(p.deliveredAt) });
+    await this.touch(['order_items'], env);
+  }
+
+  async onOrderCompleted(p: EventPayload<'orders.order.completed'>, env: Env) {
+    await this.ensureOrder(p.orderId, { accepted: true });
+    await this.repo.updateOrderItems({ orderId: p.orderId, nullColumn: 'completed_at' }, { completed_at: new Date(p.completedAt) });
+    await this.touch(['order_items'], env);
+  }
+
+  async onItemCancelled(p: EventPayload<'orders.item.cancelled'>, env: Env) {
+    const rows = await this.ensureOrder(p.orderId, { accepted: true });
+    // a partial cancellation splits the line: the cancelled part counts against the original line of the same offer
+    const target = rows.find((r) => r.order_item_id === p.itemId) ?? rows.find((r) => r.offer_id === p.offerId);
+    const day = await this.day(env.at);
+    await this.repo.transaction(async (tx) => {
+      if (!(await tx.claim(`cancellation:${p.cancellationId}:${p.itemId}`))) return;
+      if (target) {
+        const amount = Math.max(0, p.refund.itemAmount.amount - p.refund.discountShare.amount);
+        await tx.addToOrderItem(target.order_item_id, { cancelled_minor: amount }, { cancelled_at: new Date(env.at), cancelled_by: p.initiatedBy });
+        await tx.adjustCustomerSpend(target.customer_key, -p.refund.total.amount);
+      }
+      if (p.countsAgainstSeller || p.initiatedBy === 'seller') await tx.bumpService(p.sellerId ?? OFFICIAL_KEY, day, { seller_cancellations: 1 });
+    });
+    await this.touch(['order_items', 'service', 'customers'], env);
+  }
+
+  async onRefundSent(p: EventPayload<'payments.refund.sent'>, env: Env) {
+    const rows = await this.ensureOrder(p.orderId, { accepted: true });
+    const sellers = [...new Set(p.items.map((i) => i.sellerId ?? null))];
+    const named = (sellers.length === 1 ? sellers[0] : p.items[0]?.sellerId) ?? null;
+    const sellerId = isOfficialSeller(named) ? null : named;
+    const sentAt = new Date(p.sentAt);
+    await this.repo.transaction(async (tx) => {
+      const inserted = await tx.insertRefund({
+        refund_id: p.refundId,
+        order_id: p.orderId,
+        owner_type: sellerId ? 'seller' : 'official',
+        seller_id: sellerId,
+        amount_minor: p.amount.amount,
+        currency: p.amount.currency,
+        reason: p.origin || null,
+        after_payout: false,
+        sent_at: sentAt,
+      });
+      if (!inserted) return;
+      for (const i of p.items) {
+        const row = rows.find((r) => r.order_item_id === i.orderItemId);
+        if (row) await tx.addToOrderItem(row.order_item_id, { refunded_minor: i.amount.amount }, { last_refund_at: sentAt });
+      }
+      if (rows[0]) await tx.adjustCustomerSpend(rows[0].customer_key, -p.amount.amount);
+    });
+    await this.touch(['refunds', 'order_items', 'customers'], env);
+  }
+
+  async onReturnRequested(p: EventPayload<'returns.return.requested'>, env: Env) {
+    const rows = (await this.ensureOrder(p.orderId, { accepted: true })).filter((r) => p.orderItemIds.includes(r.order_item_id));
+    const first = rows[0];
+    if (!first) {
+      this.core.ctx.log.debug({ returnId: p.returnId }, 'reports: return for items without facts');
+      return this.touch(['returns'], env);
+    }
+    await this.repo.insertReturn({
+      return_id: p.returnId,
+      seller_id: p.sellerId ?? OFFICIAL_KEY,
+      product_id: first.product_id,
+      category_id: first.category_id,
+      units: rows.reduce((n, r) => n + r.quantity, 0),
+      reason: p.reason,
+      requested_at: new Date(env.at),
+      outcome: null,
+      stock_outcome: null,
+    });
+    await this.touch(['returns'], env);
+  }
+
+  async onReturnInspected(p: EventPayload<'returns.return.inspected'>, env: Env) {
+    await this.repo.updateReturn(p.returnId, { outcome: p.conditionOutcome, stock_outcome: p.proposedStockOutcome });
+    await this.touch(['returns'], env);
+  }
+
+  /* ---------------------------------------------------------------- discovery */
+
+  async onStockChanged(p: EventPayload<'inventory.stock.changed'>, env: Env) {
+    const productId = await this.productOf(p.offerId ?? null);
+    if (!productId) return this.touch(['discovery'], env);
+    const key = `stockout:${p.stockItemId}`;
+    if (p.state === 'out_of_stock') {
+      // the first out-of-stock time of an open interval stays; a redelivered event changes nothing
+      await this.repo.transaction(async (tx) => {
+        if (await tx.claim(`stock:${env.id}`)) await tx.remember(key, `${productId}|${env.at}`);
+      });
+    } else {
+      const open = await this.repo.recall(key);
+      if (open) {
+        const [pid, since] = open.split('|') as [string, string];
+        const days = await this.minutesByDay(new Date(since), new Date(env.at));
+        await this.repo.transaction(async (tx) => {
+          if (!(await tx.claim(`stock:${env.id}`))) return;
+          if ((await tx.recall(key)) !== open) return; // closed meanwhile
+          await tx.forget(key);
+          for (const [day, minutes] of days) await tx.bumpDaily('fact_discovery_daily', { product_id: pid, day }, { stockout_minutes: minutes });
+        });
+      }
+    }
+    await this.touch(['discovery'], env);
+  }
+
+  /** Minutes of an interval per market day */
+  private async minutesByDay(from: Date, to: Date): Promise<[string, number][]> {
+    const tz = await this.tz();
+    const out = new Map<string, number>();
+    let t = from.getTime();
+    const end = Math.max(t, to.getTime());
+    while (t < end) {
+      const step = Math.min(end, t + 15 * MINUTE);
+      const day = marketDay(new Date(t), tz);
+      out.set(day, (out.get(day) ?? 0) + (step - t) / MINUTE);
+      t = step;
+    }
+    return [...out].map(([d, m]) => [d, Math.round(m)] as [string, number]).filter(([, m]) => m > 0);
+  }
+
+  private async productOf(offerId: string | null): Promise<string | null> {
+    if (!offerId) return null;
+    const offers = this.core.api('offers');
+    if (!offers) return null;
+    return (await this.core.soft('offers.getOffer', () => offers.getOffer(offerId)))?.productId ?? null;
+  }
+
+  async onCartItemAdded(p: EventPayload<'cart.item.added'>, env: Env) {
+    const day = await this.day(env.at);
+    await this.repo.transaction(async (tx) => {
+      if (await tx.claim(`cart_add:${env.id}`)) await tx.bumpDaily('fact_discovery_daily', { product_id: p.productId, day }, { cart_adds: 1 });
+    });
+    await this.touch(['discovery'], env);
+  }
+
+  /** Discovery signals that are not events (anonymous counts only) */
+  async recordSignal(s: { kind: 'product_view' | 'search_no_result' | 'cart_add'; productId?: string; offerId?: string; query?: string; sessionKey?: string; at: string }) {
+    const now = this.core.now();
+    let at = new Date(s.at);
+    if (Number.isNaN(at.getTime()) || at > now || now.getTime() - at.getTime() > DAY) at = now;
+    const day = await this.day(at);
+    if (s.kind === 'search_no_result') {
+      const q = (s.query ?? '').trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 200);
+      if (q) await this.repo.bumpDaily('fact_search_misses_daily', { day, query_norm: q }, { count: 1 });
+      return;
+    }
+    const productId = s.productId ?? (await this.productOf(s.offerId ?? null));
+    if (!productId || !/^[0-9a-f-]{36}$/i.test(productId)) return;
+    await this.repo.bumpDaily('fact_discovery_daily', { product_id: productId, day }, s.kind === 'cart_add' ? { cart_adds: 1 } : { views: 1 });
+  }
+
+  /** POST /api/store/reports/signals: product views from the website and the app */
+  async recordStoreSignals(signals: unknown[], principal: identity.Principal & { sessionId?: string | null }, customerId: string | null) {
+    if (signals.length > 50) throw invalid([{ path: 'signals', message: 'Send at most 50 signals per call' }]);
+    const session = principal.sessionId ?? principal.guestSessionId ?? principal.accountId ?? 'anonymous';
+    const now = this.core.now().getTime();
+    const w = this.#signalWindows.get(session);
+    const window = w && now - w.start < 10 * MINUTE ? w : { start: now, count: 0 };
+    if (window.count + signals.length > 500) throw new AppError('RATE_LIMITED', 'Too many signals from this session; try again in a few minutes');
+    window.count += signals.length;
+    this.#signalWindows.set(session, window);
+    if (this.#signalWindows.size > 10_000) for (const [k, v] of this.#signalWindows) if (now - v.start >= 10 * MINUTE) this.#signalWindows.delete(k);
+
+    // shoppers who turned off personalisation are not counted
+    if (customerId) {
+      const customers = this.core.api('customers');
+      const prefs = customers ? await this.core.soft('customers.getMarketingConsent', () => customers.getMarketingConsent(customerId)) : undefined;
+      if (prefs && prefs.personalizedRecommendations === false) return;
+    }
+    for (const raw of signals) {
+      if (!raw || typeof raw !== 'object') continue;
+      const s = raw as { kind?: unknown; productId?: unknown; at?: unknown };
+      if (s.kind !== 'product_view' || typeof s.productId !== 'string') continue;
+      await this.recordSignal({ kind: 'product_view', productId: s.productId, at: typeof s.at === 'string' ? s.at : new Date(now).toISOString() });
+    }
+  }
+
+  /* ---------------------------------------------------------------- service */
+
+  async onMessageSent(p: EventPayload<'messaging.message.sent'>, env: Env) {
+    if (p.authorKind === 'customer' && p.sellerId) {
+      const day = await this.day(env.at);
+      await this.repo.transaction(async (tx) => {
+        if (await tx.claim(`message:${p.messageId}`)) await tx.bumpService(p.sellerId!, day, { messages_received: 1 });
+      });
+    }
+    await this.touch(['service'], env);
+  }
+
+  async onCaseOpened(p: EventPayload<'support.case.opened'>, env: Env) {
+    const day = await this.day(env.at);
+    await this.repo.transaction(async (tx) => {
+      if (await tx.claim(`case:opened:${p.caseId}`)) await tx.bumpService(p.sellerId ?? OFFICIAL_KEY, day, { cases_opened: 1, cases_open_eod: 1 }, p.category || 'other');
+    });
+    await this.touch(['service'], env);
+  }
+
+  async onCaseResolved(p: EventPayload<'support.case.resolved'>, env: Env) {
+    const day = await this.day(p.resolvedAt);
+    await this.repo.transaction(async (tx) => {
+      if (await tx.claim(`case:resolved:${p.caseId}`)) await tx.bumpService(p.sellerId ?? OFFICIAL_KEY, day, { cases_open_eod: -1 });
+    });
+    await this.touch(['service'], env);
+  }
+
+  /* ---------------------------------------------------------------- marketplace finance */
+
+  private async financeBump(seen: string, sellerId: string, day: string, add: Record<string, number>) {
+    await this.repo.transaction(async (tx) => {
+      if (await tx.claim(seen)) await tx.bumpDaily('fact_marketplace_finance_daily', { seller_id: sellerId, day }, add);
+    });
+  }
+
+  async onPayoutPaid(p: EventPayload<'finance.payout.paid'>, env: Env) {
+    await this.financeBump(`payout:paid:${p.payoutId}`, p.sellerId, await this.day(p.paidAt), { payouts_paid_minor: p.amount.amount });
+    await this.touch(['marketplace_finance'], env);
+  }
+
+  async onPayoutFailed(p: EventPayload<'finance.payout.failed'>, env: Env) {
+    await this.financeBump(`payout:failed:${p.payoutId}`, p.sellerId, await this.day(env.at), { payouts_failed: 1 });
+    await this.touch(['marketplace_finance'], env);
+  }
+
+  async onHoldPlaced(p: EventPayload<'finance.hold.placed'>, env: Env) {
+    await this.financeBump(`hold:placed:${p.holdId}`, p.sellerId, await this.day(env.at), { held_minor: p.amount.amount });
+    await this.touch(['marketplace_finance'], env);
+  }
+
+  async onHoldReleased(p: EventPayload<'finance.hold.released'>, env: Env) {
+    await this.financeBump(`hold:released:${p.holdId}`, p.sellerId, await this.day(env.at), { held_minor: -p.amount.amount });
+    await this.touch(['marketplace_finance'], env);
+  }
+
+  async onAmountOwedCreated(p: EventPayload<'finance.amount_owed.created'>, env: Env) {
+    await this.financeBump(`owed:${p.amountOwedId}`, p.sellerId, await this.day(env.at), { owed_minor: p.amount.amount });
+    await this.touch(['marketplace_finance'], env);
+  }
+
+  /* ---------------------------------------------------------------- campaigns */
+
+  async onCouponRedeemed(p: EventPayload<'promotions.coupon.redeemed'>, env: Env) {
+    const day = await this.day(env.at);
+    const sales = (await this.repo.getOrderItems(p.orderId)).reduce((n, r) => n + r.item_minor, 0);
+    await this.repo.transaction(async (tx) => {
+      if (!(await tx.claim(`redemption:${p.redemptionId}`))) return;
+      await tx.remember(`redemption:${p.redemptionId}`, p.campaignId);
+      await tx.bumpDaily('fact_campaigns_daily', { campaign_kind: 'promotion', campaign_id: p.campaignId, day }, { discount_cost_minor: p.amount.amount, redemptions: 1, sales_minor: sales }, {}, { column: 'funded_by', add: { platform: p.platformPart.amount, seller: p.sellerPart.amount } });
+    });
+    await this.touch(['campaigns'], env);
+  }
+
+  async onRedemptionReversed(p: EventPayload<'promotions.redemption.reversed'>, env: Env) {
+    const campaignId = await this.repo.recall(`redemption:${p.redemptionId}`);
+    if (campaignId) {
+      const day = await this.day(env.at);
+      await this.repo.transaction(async (tx) => {
+        if (!(await tx.claim(`reversal:${p.redemptionId}:${p.orderItemId}`))) return;
+        await tx.bumpDaily('fact_campaigns_daily', { campaign_kind: 'promotion', campaign_id: campaignId, day }, { discount_cost_minor: -p.amount.amount }, {}, { column: 'funded_by', add: { platform: -p.platformPart.amount, seller: -p.sellerPart.amount } });
+      });
+    } else this.core.ctx.log.debug({ redemptionId: p.redemptionId }, 'reports: reversal of a redemption not seen');
+    await this.touch(['campaigns'], env);
+  }
+
+  async onChargePosted(p: EventPayload<'advertising.charge.posted'>, env: Env) {
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(p.day) ? p.day : await this.day(env.at);
+    await this.repo.transaction(async (tx) => {
+      if (!(await tx.claim(`charge:${p.chargeId}`))) return;
+      await tx.remember(`charge:${p.chargeId}`, p.campaignId);
+      await tx.bumpDaily('fact_campaigns_daily', { campaign_kind: 'ad', campaign_id: p.campaignId, day }, { spend_minor: p.amount.amount });
+      await tx.bumpDaily('fact_marketplace_finance_daily', { seller_id: p.sellerId, day }, { ad_charges_minor: p.amount.amount });
+    });
+    await this.touch(['campaigns', 'marketplace_finance'], env);
+  }
+
+  async onChargeCredited(p: EventPayload<'advertising.charge.credited'>, env: Env) {
+    const day = await this.day(env.at);
+    const campaignId = await this.repo.recall(`charge:${p.chargeId}`);
+    await this.repo.transaction(async (tx) => {
+      if (!(await tx.claim(`credit:${p.chargeId}`))) return;
+      if (campaignId) await tx.bumpDaily('fact_campaigns_daily', { campaign_kind: 'ad', campaign_id: campaignId, day }, { spend_minor: -p.amount.amount });
+      await tx.bumpDaily('fact_marketplace_finance_daily', { seller_id: p.sellerId, day }, { ad_charges_minor: -p.amount.amount });
+    });
+    await this.touch(['campaigns', 'marketplace_finance'], env);
+  }
+
+  /* ---------------------------------------------------------------- daily pull (02:30 market time) */
+
+  /** Figures without events: fee income, seller sales and discount funding, unavailable searches, ad performance, buying costs, reply times */
+  async pullDaily(days = 3) {
+    const tz = await this.tz();
+    const today = marketDay(this.core.now(), tz);
+    const to = addDays(today, -1);
+    const from = addDays(to, -(days - 1));
+    await this.pullFinance(from, to);
+    await this.pullSearches(to);
+    await this.pullAds(from, to);
+    await this.pullCosts();
+    await this.pullReplyTimes(to);
+  }
+
+  private async markPulled(model: string, through: string) {
+    await this.repo.upsertCheckpoint(`pull:${model}`, { last_event_id: through, last_event_at: this.core.now(), state: 'live' });
+    const cp = await this.repo.getCheckpoint(model);
+    if (cp?.state === 'stale') await this.repo.upsertCheckpoint(model, { state: 'live' });
+  }
+
+  async pullFinance(from: string, to: string) {
+    const tz = await this.tz();
+    for (const s of await this.repo.sellerSalesByDay(from, to, tz)) {
+      await this.repo.bumpDaily('fact_marketplace_finance_daily', { seller_id: s.sellerId, day: s.day }, {}, { seller_sales_minor: s.sales, platform_discount_minor: s.platformDiscount, seller_discount_minor: s.sellerDiscount });
+    }
+    const finance = this.core.api('finance');
+    if (!finance) return;
+    const income = await this.core.soft('finance.marketplaceIncomeByDay', () => finance.marketplaceIncomeByDay({ from, to }));
+    if (!income) return;
+    for (const r of income) await this.repo.bumpDaily('fact_marketplace_finance_daily', { seller_id: r.sellerId, day: r.date }, {}, { fee_income_minor: r.netFeeIncome.amount });
+    await this.markPulled('marketplace_finance', to);
+  }
+
+  async pullSearches(day: string) {
+    const search = this.core.api('search');
+    if (!search) return;
+    const stats = await this.core.soft('search.zeroResultStats', () => search.zeroResultStats(day, day));
+    if (!stats) return;
+    for (const q of stats) {
+      const norm = (q.normalized || q.query).trim().toLowerCase().slice(0, 200);
+      if (norm) await this.repo.bumpDaily('fact_search_misses_daily', { day, query_norm: norm }, {}, { count: q.count });
+    }
+    await this.markPulled('search_misses', day);
+  }
+
+  async pullAds(from: string, to: string) {
+    const ads = this.core.api('advertising');
+    if (!ads) return;
+    const perf = await this.core.soft('advertising.dailyPerformance', () => ads.dailyPerformance({ from, to }));
+    if (!perf) return;
+    for (const r of perf) await this.repo.bumpDaily('fact_campaigns_daily', { campaign_kind: 'ad', campaign_id: r.campaignId, day: r.date }, {}, { displays: r.displays, clicks: r.clicks, dismissals: r.dismissals, attributed_purchases: r.attributedOrders });
+    await this.markPulled('campaigns', to);
+  }
+
+  /** Buying costs of Official Store items sold in the last 30 days whose cost was unknown when they were sold */
+  async pullCosts() {
+    const inventory = this.core.api('inventory');
+    const ordersApi = this.core.api('orders');
+    if (!inventory || !ordersApi) return;
+    const items = await this.repo.officialItemsWithoutCost(new Date(this.core.now().getTime() - 30 * DAY), 200);
+    const byOrder = new Map<string, OrderItemFact[]>();
+    for (const i of items) byOrder.set(i.order_id, [...(byOrder.get(i.order_id) ?? []), i]);
+    for (const [orderId, rows] of byOrder) {
+      const order = await this.core.soft('orders.getOrder', () => ordersApi.getOrder(orderId));
+      if (!order) continue;
+      for (const r of rows) {
+        const item = order.groups.flatMap((g) => g.items).find((i) => i.id === r.order_item_id);
+        if (!item) continue;
+        const unit = await this.core.soft('inventory.getUnitCost', () => inventory.getUnitCost(item.stockItemId));
+        if (unit) await this.repo.updateOrderItems({ itemIds: [r.order_item_id], nullColumn: 'buying_cost_minor' }, { buying_cost_minor: unit.amount * r.quantity });
+      }
+    }
+  }
+
+  async pullReplyTimes(day: string) {
+    const messaging = this.core.api('messaging');
+    if (!messaging) return;
+    for (const sellerId of await this.repo.sellersWithMessages(day)) {
+      if (sellerId === OFFICIAL_KEY) continue;
+      const stats = await this.core.soft('messaging.sellerResponseStats', () => messaging.sellerResponseStats(sellerId, { from: day, to: day }));
+      if (stats?.averageReplyMinutes != null) await this.repo.bumpDaily('fact_service_daily', { seller_id: sellerId, day }, {}, { first_reply_minutes_p50: Math.round(stats.averageReplyMinutes) });
+    }
+  }
+
+  /* ---------------------------------------------------------------- health and rebuilds */
+
+  async status(): Promise<ReadModelStatus[]> {
+    const now = this.core.now().getTime();
+    const cps = await this.repo.listCheckpoints(READ_MODELS.flatMap((m) => [m.key, `pull:${m.key}`]));
+    const out: ReadModelStatus[] = [];
+    for (const m of READ_MODELS) {
+      const cp = cps.find((c) => c.key === m.key);
+      const pull = cps.find((c) => c.key === `pull:${m.key}`);
+      const last = [cp?.last_event_at, pull?.last_event_at].filter((d): d is Date => Boolean(d)).sort((a, b) => b.getTime() - a.getTime())[0];
+      const state = (cp?.state ?? 'live') as ReadModelStatus['state'];
+      out.push({
+        key: m.key,
+        description: m.description,
+        sourceEvents: m.sourceEvents,
+        lastEventAt: last?.toISOString() ?? null,
+        lagSeconds: state === 'stale' && last ? Math.max(0, Math.round((now - last.getTime()) / 1000)) : 0,
+        rows: await this.repo.countRows(m.table as never),
+        state,
+        rebuildProgressPct: state === 'rebuilding' ? (cp?.rebuild_progress ?? 0) : null,
+      });
+    }
+    return out;
+  }
+
+  async requestRebuild(key: string, reason: string, by: Caller): Promise<ReadModelStatus> {
+    const def = readModelDef(key);
+    if (!def) throw notFound('Read model');
+    if (!reason.trim()) throw invalid([{ path: 'reason', message: 'Say why the read model is rebuilt' }]);
+    const cp = await this.repo.getCheckpoint(key);
+    if (cp?.state === 'rebuilding') throw new AppError('CONFLICT', `${key} is already being rebuilt`, { startedAt: cp.rebuild_started_at?.toISOString() ?? null });
+    await this.repo.upsertCheckpoint(key, { state: 'rebuilding', rebuild_started_at: this.core.now(), rebuild_progress: 0 });
+    await this.core.audit({ action: 'reports.read_model.rebuild', actionLabel: 'Started a read model rebuild', category: 'settings', target: { type: 'read_model', id: key, label: def.description, screen: 'admin/reports' }, before: { state: cp?.state ?? 'live' }, after: { state: 'rebuilding' }, reason: reason.trim() }, by);
+    return (await this.status()).find((s) => s.key === key)!;
+  }
+
+  /** Job reports.check-lag: resumes rebuilds, marks daily-pulled models stale when the pull is late */
+  async checkLag() {
+    const cfg = await this.core.cfg();
+    const now = this.core.now().getTime();
+    for (const m of READ_MODELS) {
+      const cp = await this.repo.getCheckpoint(m.key);
+      if (cp?.state === 'rebuilding') {
+        await this.rebuild(m.key);
+        continue;
+      }
+      if (m.pulled) {
+        const pull = await this.repo.getCheckpoint(`pull:${m.key}`);
+        const late = pull?.last_event_at ? now - pull.last_event_at.getTime() > DAY + cfg.readModelMaxLagMinutes * MINUTE : false;
+        if (late && cp?.state !== 'stale') await this.repo.upsertCheckpoint(m.key, { state: 'stale' });
+      }
+    }
+  }
+
+  /** Rebuild from source snapshots: order facts are refreshed from orders, buyers recomputed, daily pulls repeated */
+  async rebuild(key: string) {
+    const progress = (pct: number) => this.repo.upsertCheckpoint(key, { rebuild_progress: pct });
+    try {
+      const tz = await this.tz();
+      const today = marketDay(this.core.now(), tz);
+      switch (key) {
+        case 'order_items': {
+          const ordersApi = this.core.api('orders');
+          if (!ordersApi) throw new AppError('SERVICE_UNAVAILABLE', 'orders is switched off');
+          const total = Math.max(1, await this.repo.countRows('fact_order_items'));
+          let after: string | null = null;
+          let done = 0;
+          for (;;) {
+            const ids = await this.repo.orderIdsWithFacts(after, 100);
+            if (!ids.length) break;
+            for (const id of ids) await this.refreshOrder(id);
+            done += ids.length;
+            after = ids.at(-1)!;
+            await progress(Math.min(99, Math.round((done / total) * 100)));
+          }
+          break;
+        }
+        case 'customers':
+          await this.repo.rebuildCustomers();
+          break;
+        case 'discovery':
+          for (const r of await this.repo.purchasesByDay(addDays(today, -400), today, tz)) await this.repo.bumpDaily('fact_discovery_daily', { product_id: r.productId, day: r.day }, {}, { purchases: r.units });
+          break;
+        case 'marketplace_finance':
+          await this.pullFinance(addDays(today, -90), today);
+          break;
+        case 'search_misses':
+          await this.pullSearches(addDays(today, -1));
+          break;
+        case 'campaigns':
+          await this.pullAds(addDays(today, -90), today);
+          break;
+        default:
+          // refunds, returns and service are kept from events only; the in-process bus keeps no event log to replay
+          break;
+      }
+      await this.repo.upsertCheckpoint(key, { state: 'live', rebuild_progress: 100 });
+    } catch (err) {
+      this.core.ctx.log.error({ err, readModel: key }, 'reports: rebuild failed');
+      await this.repo.upsertCheckpoint(key, { state: 'failed' });
+    }
+  }
+
+  /** Dates and amounts of an order's facts from the order itself (delivery dates, categories, items added later) */
+  private async refreshOrder(orderId: string) {
+    const api = this.core.api('orders');
+    const order = api ? await this.core.soft('orders.getOrder', () => api.getOrder(orderId)) : undefined;
+    if (!order) return;
+    const existing = await this.repo.getOrderItems(orderId);
+    const fresh = await this.factsOf(order, {});
+    const missing = fresh.filter((f) => !existing.some((e) => e.order_item_id === f.order_item_id)).map((f) => ({ ...f, customer_key: existing[0]?.customer_key ?? f.customer_key }));
+    if (missing.length) await this.repo.insertOrderItems(missing);
+    for (const f of fresh) {
+      const e = existing.find((x) => x.order_item_id === f.order_item_id);
+      if (!e) continue;
+      await this.repo.updateOrderItems({ itemIds: [f.order_item_id] }, { category_id: f.category_id ?? e.category_id, delivered_at: e.delivered_at ?? f.delivered_at, buying_cost_minor: e.buying_cost_minor ?? f.buying_cost_minor });
+    }
+  }
+}

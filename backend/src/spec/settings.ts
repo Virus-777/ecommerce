@@ -886,7 +886,8 @@ export const endpoints = defineEndpoints({
     area: "public",
     method: "GET",
     path: "/app-config",
-    auth: "anyone",
+    auth: "visitor",
+    scope: "public",
     summary: "Configuration for the website and Android app",
     desc: "Market, support hours (open now?), guest checkout, public feature flags, Android minimum/latest version and maintenance notice in one cacheable response (ETag = configVersion, Cache-Control max-age appConfigCacheSeconds). The app calls it at start and when resumed.",
     query: () =>
@@ -904,6 +905,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/upcoming-changes",
     auth: "seller",
+    scope: "own-seller",
     summary: "Scheduled platform changes that affect sellers",
     desc: "Seller-visible scheduled setting changes plus scheduled changes reported by owning modules' sections (e.g. returns baseline, fee rules).",
     paging: true,
@@ -918,6 +920,7 @@ export const endpoints = defineEndpoints({
     path: "/overview",
     auth: "staff",
     permission: "settings.view",
+    scope: "staff",
     summary: "Settings page: market, every section and all scheduled changes",
     response: () => SettingsOverview,
     status: 200,
@@ -930,6 +933,7 @@ export const endpoints = defineEndpoints({
     path: "/definitions",
     auth: "staff",
     permission: "settings.view",
+    scope: "staff",
     summary: "Runtime setting definitions",
     query: () =>
       z.object({
@@ -947,6 +951,7 @@ export const endpoints = defineEndpoints({
     path: "/values/{key}",
     auth: "staff",
     permission: "settings.view",
+    scope: "staff",
     summary: "One setting: value in force, scheduled versions, recent history",
     params: () =>
       z.object({
@@ -963,6 +968,7 @@ export const endpoints = defineEndpoints({
     path: "/values/{key}/history",
     auth: "staff",
     permission: "settings.view",
+    scope: "staff",
     summary: "All versions of a setting",
     params: () =>
       z.object({
@@ -980,6 +986,7 @@ export const endpoints = defineEndpoints({
     path: "/business-calendar",
     auth: "staff",
     permission: "settings.view",
+    scope: "staff",
     summary: "Open hours per day for a date range (business hours minus closures)",
     query: () =>
       z.object({
@@ -997,6 +1004,7 @@ export const endpoints = defineEndpoints({
     path: "/changes",
     auth: "staff",
     permission: "settings.changes.propose",
+    scope: "staff",
     summary: "Draft a change and see its impact before saving",
     desc: "Validates each value against its definition and returns the draft with an impact preview from the owning modules' estimators (open orders keeping their terms, sellers notified, content to update).",
     body: () => ChangeInput,
@@ -1012,6 +1020,7 @@ export const endpoints = defineEndpoints({
     path: "/changes/{id}",
     auth: "staff",
     permission: "settings.changes.propose",
+    scope: "staff",
     summary: "Edit a draft (values, effective date, scope, reason)",
     params: () =>
       z.object({
@@ -1030,6 +1039,7 @@ export const endpoints = defineEndpoints({
     path: "/changes/{id}/preview",
     auth: "staff",
     permission: "settings.view",
+    scope: "staff",
     summary: "Recalculate the impact preview",
     params: () =>
       z.object({
@@ -1046,6 +1056,7 @@ export const endpoints = defineEndpoints({
     path: "/changes/{id}/submit",
     auth: "staff",
     permission: "settings.changes.propose",
+    scope: "staff",
     summary: "Save: schedule, or send for approval",
     desc: "Settings that need approval go to access (Business Owner or second reviewer) and are scheduled only after approval. Sellers are notified of seller-visible changes when scheduled.",
     params: () =>
@@ -1067,6 +1078,7 @@ export const endpoints = defineEndpoints({
     path: "/changes/{id}/cancel",
     auth: "staff",
     permission: "settings.changes.propose",
+    scope: "staff",
     summary: "Cancel a draft, pending or scheduled change",
     params: () =>
       z.object({
@@ -1089,6 +1101,7 @@ export const endpoints = defineEndpoints({
     path: "/changes",
     auth: "staff",
     permission: "settings.view",
+    scope: "staff",
     summary: "Setting changes (scheduled by default)",
     query: () =>
       z.object({
@@ -1108,6 +1121,7 @@ export const endpoints = defineEndpoints({
     path: "/changes/{id}",
     auth: "staff",
     permission: "settings.view",
+    scope: "staff",
     summary: "One change with impact, approval and timeline",
     params: () =>
       z.object({
@@ -1124,6 +1138,7 @@ export const endpoints = defineEndpoints({
     path: "/feature-flags",
     auth: "staff",
     permission: "settings.view",
+    scope: "staff",
     summary: "Feature flags",
     response: () => z.array(FeatureFlag),
     status: 200,
@@ -1136,6 +1151,7 @@ export const endpoints = defineEndpoints({
     path: "/feature-flags/{key}",
     auth: "staff",
     permission: "settings.flags.manage",
+    scope: "staff",
     summary: "Turn a feature flag on or off",
     desc: "Immediate. Flags that change money or customer commitments are declared as settings with approval instead.",
     params: () =>
@@ -1572,6 +1588,7 @@ export const spec = defineModuleSpec({
       }
     }
   },
+  tenantTables: {},
   endpoints,
 });
 

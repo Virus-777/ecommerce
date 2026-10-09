@@ -18,16 +18,19 @@ import { TrustService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '0.1.0',
+  version: '1.0.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const service = new TrustService({ repo: createPostgresTrustRepository(ctx.db), ctx });
+    const service = new TrustService({ repo: createPostgresTrustRepository(ctx.db, ctx.inbox), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), publicRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
+    // export dataset trust.admin.reports (reports reads rows through exportRows)
+    ctx.afterBoot(() => service.reports.registerDataset());
 
     // Events this module reacts to (spec events.consumes)
+    ctx.events.on("access.approval.decided", (e) => service.onApprovalDecidedFromAccess(e.payload, e.id));
     ctx.events.on("reviews.content.referred", (e) => service.onContentReferredFromReviews(e.payload));
     ctx.events.on("messaging.message.reported", (e) => service.onMessageReportedFromMessaging(e.payload));
     ctx.events.on("orders.order.placed", (e) => service.onOrderPlacedFromOrders(e.payload));

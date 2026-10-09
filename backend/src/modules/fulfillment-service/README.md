@@ -607,6 +607,7 @@ Indexes: `(seller_id, at)`, `(sku_enrollment_id, at)`
 | currency | text |
 | state | text |
 | posted_at | timestamptz? |
+| ledger_entry_id | uuid? |
 | reason | text? |
 | idempotency_key | text unique |
 

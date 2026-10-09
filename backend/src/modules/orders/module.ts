@@ -17,7 +17,7 @@ import { OrdersService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '0.1.0',
+  version: '1.1.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
@@ -25,6 +25,8 @@ export default defineModule({
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
+    // export datasets orders.admin.orders and orders.seller.orders (reports reads rows through exportRows)
+    ctx.afterBoot(() => service.admin.registerDatasets());
 
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("payments.payment.authorized", (e) => service.onPaymentAuthorizedFromPayments(e.payload));

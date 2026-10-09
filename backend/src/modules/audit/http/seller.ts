@@ -1,4 +1,4 @@
-import { notImplemented, routes } from '../../../kernel/http/index.js';
+import { routes } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/audit.js';
 import type { AuditService } from '../service.js';
 
@@ -8,6 +8,6 @@ import type { AuditService } from '../service.js';
  */
 export const sellerRoutes = (service: AuditService) =>
   routes(endpoints, 'seller', {
-    /** GET /entries: Changes made on this seller account */
-    listOwnSellerEntries: notImplemented,
+    /** GET /entries: Changes made on this seller account (always the session's own seller) */
+    listOwnSellerEntries: async ({ sellerId, query, page }) => service.sellerHistory(sellerId, query, page),
   });

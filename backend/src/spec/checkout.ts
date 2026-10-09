@@ -1234,6 +1234,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/sessions",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Start checkout from the cart or Buy now",
     desc: "Cart: eligible lines only (or the chosen cartItemIds); unavailable lines stay in the cart and are listed in excludedLines. Buy now: one offer and quantity, the cart is not touched, and the customer still sees totals and must press Place order. Account step is pre-filled for signed-in customers; customers.canPlaceOrders is checked.",
     body: () => z.object({
@@ -1254,6 +1255,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/sessions/{id}",
     auth: "shopper",
+    scope: "own-customer",
     summary: "The whole checkout: steps, contact, address, packages with options, coupons, payment, review and totals",
     params: () =>
       z.object({
@@ -1270,6 +1272,7 @@ export const endpoints = defineEndpoints({
     method: "PUT",
     path: "/sessions/{id}/contact",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Guest contact details (email, optional phone) and the account-after-checkout choice",
     params: () =>
       z.object({
@@ -1287,6 +1290,7 @@ export const endpoints = defineEndpoints({
     method: "PUT",
     path: "/sessions/{id}/address",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Choose a saved address or enter one; checks every item can ship there",
     desc: "Validates with customers.validateAddress and shipping.checkCoverage per line; re-quotes delivery options and tax. Changing the address here never changes the address book unless saveToAddressBook is set.",
     params: () =>
@@ -1305,6 +1309,7 @@ export const endpoints = defineEndpoints({
     method: "PUT",
     path: "/sessions/{id}/delivery",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Pick a delivery option for each package",
     params: () =>
       z.object({
@@ -1326,6 +1331,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/sessions/{id}/coupons",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Apply a coupon code",
     desc: "Always 200 with the result: applied (amount, funding, covered and not covered items) or rejected with the reason; other discounts are unchanged. Account coupons for guests return needs_sign_in.",
     params: () =>
@@ -1353,6 +1359,7 @@ export const endpoints = defineEndpoints({
     method: "DELETE",
     path: "/sessions/{id}/coupons/{code}",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Remove a coupon",
     params: () =>
       z.object({
@@ -1370,6 +1377,7 @@ export const endpoints = defineEndpoints({
     method: "PUT",
     path: "/sessions/{id}/credit",
     auth: "customer",
+    scope: "own-customer",
     summary: "Use store credit for part or all of the total",
     params: () =>
       z.object({
@@ -1392,6 +1400,7 @@ export const endpoints = defineEndpoints({
     method: "PUT",
     path: "/sessions/{id}/payment-method",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Choose a saved card, a new card (provider token) or a digital wallet",
     params: () =>
       z.object({
@@ -1409,6 +1418,7 @@ export const endpoints = defineEndpoints({
     method: "PUT",
     path: "/sessions/{id}/preferences",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Gift note and hide prices on packing slips",
     params: () =>
       z.object({
@@ -1428,6 +1438,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/sessions/{id}/revalidate",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Check price, stock, delivery, coupons and shippability again",
     desc: "Also run automatically when the review step opens and inside Place order. Changes produce a change set; nothing is charged.",
     params: () =>
@@ -1446,6 +1457,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/sessions/{id}/changes/{changeSetId}",
     auth: "shopper",
+    scope: "own-customer",
     summary: "The changes found, with choices, alternatives and the revised total",
     params: () =>
       z.object({
@@ -1463,6 +1475,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/sessions/{id}/changes/{changeSetId}/accept",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Apply the customer's choice for every change and continue",
     desc: "Every change needs a decision. choose_offer must name a listed alternative (the only way the seller changes). When items are removed or unavailable, acceptPartialOrder must be true. Returns the revised checkout with a new quote version to review before Place order.",
     params: () =>
@@ -1488,6 +1501,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/sessions/{id}/place",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Place the order and pay",
     desc: "Requires an Idempotency-Key; the same key returns the first result, and while a session is placing, pending or completed any further call returns the current result without a new charge. Steps: lock; check quoteVersion and expectedTotal; revalidate (changes → changes_required, nothing charged); hold stock (inventory.hold); reserve promotions; read content.currentPolicyVersions(['returns', 'shipping', 'purchase_terms']) (the versions accepted with this order); authorize (payments.authorize); then accepted → order created and accepted (confirmation); pending → order created with payment checking (payment-result page, no second payment); failed → no order, cart and choices kept, holds kept until retryUntil; requires_action → bank challenge.",
     params: () =>
@@ -1508,6 +1522,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/sessions/{id}/complete-action",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Finish Place order after a bank challenge or wallet confirmation",
     params: () =>
       z.object({
@@ -1529,6 +1544,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/sessions/{id}/retry-payment",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Pay again with the same or another method after a decline",
     desc: "Only from payment_failed within the retry window. Revalidates first (changes are shown before paying). Creates a new payment attempt; never reuses a declined authorization.",
     params: () =>
@@ -1549,6 +1565,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/sessions/{id}/confirmation",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Order confirmation (only after the payment is accepted)",
     desc: "Order reference, charged total and method, delivery address, packages with their own estimates, next steps and receipt link. Returns ILLEGAL_TRANSITION while the payment is pending or failed.",
     params: () =>
@@ -1566,6 +1583,7 @@ export const endpoints = defineEndpoints({
     method: "DELETE",
     path: "/sessions/{id}",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Leave checkout (releases holds, voids any authorization)",
     params: () =>
       z.object({
@@ -1584,6 +1602,7 @@ export const endpoints = defineEndpoints({
     path: "/sessions",
     auth: "staff",
     permission: "checkout.sessions.view",
+    scope: "staff",
     summary: "Checkouts with payment problems or open changes (support view)",
     query: () =>
       z.object({
@@ -1604,6 +1623,7 @@ export const endpoints = defineEndpoints({
     path: "/sessions/{id}",
     auth: "staff",
     permission: "checkout.sessions.view",
+    scope: "staff",
     summary: "One checkout with place attempts, idempotency keys, change sets and history",
     params: () =>
       z.object({
@@ -2219,6 +2239,18 @@ export const spec = defineModuleSpec({
         "type": "timestamptz",
         "nullable": false
       }
+    }
+  },
+  tenantTables: {
+    "sessions": {
+      "customer": "customer_id",
+      "visitor": "guest_session_id"
+    },
+    "session_lines": {
+      "seller": "seller_id"
+    },
+    "session_packages": {
+      "seller": "seller_id"
     }
   },
   endpoints,

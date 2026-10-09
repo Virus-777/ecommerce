@@ -55,7 +55,7 @@ Market-level platform settings: country and service region, currency, time zone,
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| GET | `/api/public/settings/app-config` | Configuration for the website and Android app | anyone | `AppConfig` |
+| GET | `/api/public/settings/app-config` | Configuration for the website and Android app | visitor | `AppConfig` |
 
 ## Types
 

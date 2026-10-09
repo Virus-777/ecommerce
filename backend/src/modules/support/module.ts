@@ -17,14 +17,17 @@ import { SupportService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '0.1.0',
+  version: '1.0.0',
   migrations,
   graphql: typeDefs,
-  register(ctx) {
-    const service = new SupportService({ repo: createPostgresSupportRepository(ctx.db), ctx });
+  async register(ctx) {
+    const service = new SupportService({ repo: createPostgresSupportRepository(ctx.db, ctx.inbox), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
+    // default case categories (staff changes are kept) and the support.admin.cases export dataset
+    await service.core.seedCategories().catch((err) => ctx.log.warn({ err }, 'support: seeding categories failed; retrying on first use'));
+    ctx.afterBoot(() => service.reads.registerDatasets());
 
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("returns.return.escalated", (e) => service.onReturnEscalatedFromReturns(e.payload));
@@ -38,6 +41,7 @@ export default defineModule({
     ctx.events.on("orders.item.cancelled", (e) => service.onItemCancelledFromOrders(e.payload));
     ctx.events.on("sellers.seller.restricted", (e) => service.onSellerRestrictedFromSellers(e.payload));
     ctx.events.on("access.approval.decided", (e) => service.onApprovalDecidedFromAccess(e.payload));
+    ctx.events.on("wallet.goodwill.decided", (e) => service.onGoodwillDecidedFromWallet(e.payload));
 
     // Background jobs (spec jobs)
     ctx.jobs.handle("support.sla-timers", () => service.slaTimers());

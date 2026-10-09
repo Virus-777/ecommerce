@@ -1542,7 +1542,7 @@
     "requirement": "Checkout step 1: simple guest purchase option if the business enables it",
     "status": "covered",
     "api": [
-      "POST /api/public/identity/guest-sessions",
+      "POST /api/public/identity/app-sessions",
       "PUT /api/store/checkout/sessions/{id}/contact"
     ],
     "note": "Setting checkout.guestCheckoutEnabled (settings, Business Owner approval)"
@@ -1554,7 +1554,7 @@
     "api": [
       "POST /api/store/customers/guest-orders/lookup",
       "POST /api/store/customers/guest-orders/links",
-      "POST /api/public/identity/order-links/{token}/redeem",
+      "POST /api/public/identity/order-links/redeem",
       "POST /api/store/support/cases"
     ],
     "note": "Support endpoints accept shopper (guest order grant)"
@@ -1794,7 +1794,7 @@
     "status": "covered",
     "api": [
       "POST /api/public/identity/password-resets",
-      "POST /api/public/identity/password-resets/{token}/complete"
+      "POST /api/public/identity/password-resets/complete"
     ]
   },
   {

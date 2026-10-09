@@ -141,6 +141,8 @@ export interface OrderItem {
   offer: OfferTermsSnapshot;
   returnTerms: ReturnTermsSnapshot;
   stockItemId: string;
+  /** Product category at purchase (from the catalog snapshot); finance uses it for category fee rates */
+  categoryId?: string | null;
   title: string;
   variantLabel: string;
   image?: common.MediaRef | null;
@@ -180,6 +182,7 @@ export const OrderItem: z.ZodType<OrderItem> = z.object({
     return ReturnTermsSnapshot;
   },
   stockItemId: z.uuid(),
+  categoryId: z.uuid().describe("Product category at purchase (from the catalog snapshot); finance uses it for category fee rates").nullish(),
   title: z.string(),
   variantLabel: z.string(),
   get image() {
@@ -1493,6 +1496,44 @@ export const SavedFilter: z.ZodType<SavedFilter> = z.object({
   createdAt: z.iso.datetime({ offset: true }),
 }).register(common.apiTypes, { id: "orders.SavedFilter" });
 
+export interface OrderItemInfo {
+  id: string;
+  orderId: string;
+  orderRef: string;
+  groupId: string;
+  ownerType: "official" | "seller";
+  sellerId?: string | null;
+  customerId?: string | null;
+  offerId: string;
+  productId: string;
+  variantId: string;
+  stockItemId: string;
+  categoryId?: string | null;
+  quantity: number;
+  state: "pending_payment" | "confirmed" | "preparing" | "delayed" | "shipped" | "delivered" | "cancellation_requested" | "cancelled" | "return_requested" | "returned" | "refunded";
+  deliveredAt?: string | null;
+  returnWindowEndsAt?: string | null;
+}
+
+export const OrderItemInfo: z.ZodType<OrderItemInfo> = z.object({
+  id: z.uuid(),
+  orderId: z.uuid(),
+  orderRef: z.string(),
+  groupId: z.uuid(),
+  ownerType: z.enum(["official", "seller"]),
+  sellerId: z.uuid().nullish(),
+  customerId: z.uuid().nullish(),
+  offerId: z.uuid(),
+  productId: z.uuid(),
+  variantId: z.uuid(),
+  stockItemId: z.uuid(),
+  categoryId: z.uuid().nullish(),
+  quantity: z.number().int(),
+  state: z.enum(["pending_payment", "confirmed", "preparing", "delayed", "shipped", "delivered", "cancellation_requested", "cancelled", "return_requested", "returned", "refunded"]),
+  deliveredAt: z.iso.datetime({ offset: true }).nullish(),
+  returnWindowEndsAt: z.iso.datetime({ offset: true }).nullish(),
+}).register(common.apiTypes, { id: "orders.OrderItemInfo" });
+
 export interface PlacedGroup {
   groupId: string;
   ownerType: "official" | "seller";
@@ -1557,6 +1598,8 @@ export const AcceptedPolicyVersion: z.ZodType<AcceptedPolicyVersion> = z.object(
 
 export interface OrderCreateInput {
   checkoutSessionId: string;
+  /** Checkout's inventory stock hold for this order; carried on orders.order.accepted so inventory can allocate from it */
+  reservationId?: string | null;
   contact: Contact;
   channel: "web" | "android";
   currency: string;
@@ -1575,6 +1618,7 @@ export interface OrderCreateInput {
 
 export const OrderCreateInput: z.ZodType<OrderCreateInput> = z.object({
   checkoutSessionId: z.uuid(),
+  reservationId: z.uuid().describe("Checkout's inventory stock hold for this order; carried on orders.order.accepted so inventory can allocate from it").nullish(),
   get contact() {
     return Contact;
   },
@@ -1710,6 +1754,8 @@ export interface OrdersOrderAcceptedEvent {
   contactEmail: string;
   total: common.Money;
   groups: PlacedGroup[];
+  /** Checkout's stock hold, so inventory can allocate from it before checkout attaches the order */
+  reservationId?: string | null;
   acceptedAt: string;
 }
 
@@ -1724,6 +1770,7 @@ export const OrdersOrderAcceptedEvent: z.ZodType<OrdersOrderAcceptedEvent> = z.o
   get groups() {
     return z.array(PlacedGroup);
   },
+  reservationId: z.uuid().describe("Checkout's stock hold, so inventory can allocate from it before checkout attaches the order").nullish(),
   acceptedAt: z.iso.datetime({ offset: true }),
 });
 
@@ -1782,6 +1829,10 @@ export const OrdersItemStateChangedEvent: z.ZodType<OrdersItemStateChangedEvent>
 export interface OrdersItemCancelledEvent {
   orderId: string;
   ref: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   groupId: string;
   ownerType: "official" | "seller";
   sellerId?: string | null;
@@ -1802,6 +1853,8 @@ export interface OrdersItemCancelledEvent {
 export const OrdersItemCancelledEvent: z.ZodType<OrdersItemCancelledEvent> = z.object({
   orderId: z.uuid(),
   ref: z.string(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   groupId: z.uuid(),
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
@@ -1824,6 +1877,10 @@ export const OrdersItemCancelledEvent: z.ZodType<OrdersItemCancelledEvent> = z.o
 /** orders.item.delayed: Items become Delayed (seller report or overdue dispatch) */
 export interface OrdersItemDelayedEvent {
   orderId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   groupId: string;
   itemIds: string[];
   source: "seller" | "overdue";
@@ -1833,6 +1890,8 @@ export interface OrdersItemDelayedEvent {
 
 export const OrdersItemDelayedEvent: z.ZodType<OrdersItemDelayedEvent> = z.object({
   orderId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   groupId: z.uuid(),
   itemIds: z.array(z.uuid()),
   source: z.enum(["seller", "overdue"]),
@@ -1886,6 +1945,10 @@ export const OrdersCancellationRequestedEvent: z.ZodType<OrdersCancellationReque
 export interface OrdersCancellationDecidedEvent {
   cancellationId: string;
   orderId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   outcome: "accepted" | "auto_accepted" | "declined" | "withdrawn";
   by: common.Actor;
 }
@@ -1893,6 +1956,8 @@ export interface OrdersCancellationDecidedEvent {
 export const OrdersCancellationDecidedEvent: z.ZodType<OrdersCancellationDecidedEvent> = z.object({
   cancellationId: z.uuid(),
   orderId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   outcome: z.enum(["accepted", "auto_accepted", "declined", "withdrawn"]),
   get by() {
     return common.Actor;
@@ -1989,6 +2054,10 @@ export interface OrdersPublicApi {
   exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[], nextCursor?: string }>;
   /** Order items per product from the purchase snapshots: open (not yet delivered, cancelled or refunded) and past (everything else). Catalog publication-impact and merge previews. Used by: catalog. */
   countOrderItemsForProducts(productIds: string[]): Promise<Record<string, { open: number, past: number }>>;
+  /** One order item with its order, seller group, owner, customer, state and delivery time (no access check) Used by: reviews. */
+  getOrderItem(orderItemId: string): Promise<OrderItemInfo | null>;
+  /** Items delivered to the customer (optionally since a time), for review eligibility Used by: reviews. */
+  listDeliveredItems(customerId: string, since?: string): Promise<OrderItemInfo[]>;
   /** Orders placed before the date with at least one item in the category (snapshot category, subcategories included) that is not yet delivered, cancelled or refunded. Returns category-exception preview. Used by: returns. */
   countOpenOrdersInCategory(categoryId: string, placedBefore: string): Promise<{ orders: number, items: number }>;
 }
@@ -2003,6 +2072,7 @@ export interface OrdersDb {
     /** MK-YYMMDD-NNNNN */
     ref: string;
     checkout_session_id: string;
+    reservation_id: string | null;
     customer_id: string | null;
     contact_email: string;
     contact_phone: string | null;
@@ -2067,6 +2137,7 @@ export interface OrdersDb {
     product_id: string;
     variant_id: string;
     stock_item_id: string;
+    category_id: string | null;
     /** catalog.ProductSnapshot */
     product_snapshot: Json;
     /** offers.OfferSnapshot */
@@ -2197,6 +2268,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/orders",
     auth: "customer",
+    scope: "own-customer",
     summary: "Order history with search, date range and status tab",
     desc: "q matches the order reference or a product title. Each order shows a status per package so a mixed order reads as partly delivered.",
     query: () =>
@@ -2218,6 +2290,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/orders/counts",
     auth: "customer",
+    scope: "own-customer",
     summary: "Counts per status tab",
     query: () =>
       z.object({
@@ -2239,6 +2312,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/orders/{id}",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Order detail by seller group, with item states and separate payment, delivery and returns progress",
     desc: "Customers see their own orders. Guest sessions see an order when identity.hasGuestOrderAccess is true (granted to the session that placed it and by the guest lookup in customers). Others get NOT_FOUND. Payment-pending orders show the checking state.",
     params: () =>
@@ -2256,6 +2330,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/orders/{id}/cancellation-options",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Which items can be cancelled now and why others cannot",
     params: () =>
       z.object({
@@ -2272,6 +2347,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/orders/{id}/cancellation-preview",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Refund estimate for the selected items and quantities",
     params: () =>
       z.object({
@@ -2293,6 +2369,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/orders/{id}/cancellations",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Request cancellation of selected items",
     desc: "One request per seller group is created (items from several sellers produce several requests). Official Store items not yet picked are accepted at once; seller items wait for the seller until respondBy, then are auto-accepted if unshipped. Other items continue as normal.",
     params: () =>
@@ -2323,6 +2400,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/orders/{id}/cancellations/{cancellationId}",
     auth: "shopper",
+    scope: "own-customer",
     summary: "A cancellation request with seller deadline and refund status",
     params: () =>
       z.object({
@@ -2340,6 +2418,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/orders/{id}/cancellations/{cancellationId}/withdraw",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Withdraw a pending cancellation request",
     params: () =>
       z.object({
@@ -2358,6 +2437,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/orders/{id}/documents",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Receipt and per-seller invoices",
     params: () =>
       z.object({
@@ -2373,6 +2453,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/orders/{id}/documents/{documentId}",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Short-lived download link for a receipt or invoice PDF",
     desc: "Rendered from the frozen order: later product, price or policy changes never alter it. Removing a saved card does not change receipts (they show the method label stored on the order).",
     params: () =>
@@ -2392,6 +2473,7 @@ export const endpoints = defineEndpoints({
     path: "/orders",
     auth: "seller",
     permission: "orders.fulfillment.view",
+    scope: "own-seller",
     summary: "The seller's fulfillment tasks by stage, with dispatch deadlines and next action",
     desc: "Only this seller's groups and items; buyers appear as first name and last initial. Default sort: dispatch deadline, soonest first.",
     query: () =>
@@ -2416,6 +2498,7 @@ export const endpoints = defineEndpoints({
     path: "/orders/counts",
     auth: "seller",
     permission: "orders.fulfillment.view",
+    scope: "own-seller",
     summary: "Tab counts plus overdue and due today",
     response: () => SellerOrderCounts,
     status: 200,
@@ -2428,6 +2511,7 @@ export const endpoints = defineEndpoints({
     path: "/orders/{id}",
     auth: "seller",
     permission: "orders.fulfillment.view",
+    scope: "own-seller",
     summary: "One fulfillment task: own items, dispatch countdown, ship-to, money, shipments, cancellation requests and timeline",
     params: () =>
       z.object({
@@ -2445,6 +2529,7 @@ export const endpoints = defineEndpoints({
     path: "/orders/{id}/start-preparing",
     auth: "seller",
     permission: "orders.fulfillment.manage",
+    scope: "own-seller",
     summary: "Mark the task as preparing (tells the buyer it is being packed)",
     params: () =>
       z.object({
@@ -2463,6 +2548,7 @@ export const endpoints = defineEndpoints({
     path: "/orders/bulk-start-preparing",
     auth: "seller",
     permission: "orders.fulfillment.manage",
+    scope: "own-seller",
     summary: "Mark several new tasks as preparing",
     body: () => z.object({
       orderIds: z.array(z.uuid()),
@@ -2479,6 +2565,7 @@ export const endpoints = defineEndpoints({
     path: "/orders/{id}/report-delay",
     auth: "seller",
     permission: "orders.fulfillment.manage",
+    scope: "own-seller",
     summary: "Report that items will ship late, with a new dispatch date",
     desc: "Items become Delayed and the customer is notified with the new estimate, the option to cancel and a support route. Does not move the dispatch deadline used for performance; only staff can extend it.",
     params: () =>
@@ -2504,6 +2591,7 @@ export const endpoints = defineEndpoints({
     path: "/orders/{id}/cancel-items",
     auth: "seller",
     permission: "orders.fulfillment.cancel",
+    scope: "own-seller",
     summary: "Cancel items the seller cannot fulfill",
     desc: "Only unshipped items. The buyer is notified and refunded for the cancelled items under the cancellation policy; seller cancellations count toward the cancellation rate.",
     params: () =>
@@ -2531,6 +2619,7 @@ export const endpoints = defineEndpoints({
     path: "/orders/{id}/cancellation-requests/{requestId}/accept",
     auth: "seller",
     permission: "orders.fulfillment.cancel",
+    scope: "own-seller",
     summary: "Accept the buyer's cancellation and refund",
     desc: "Does not count against the seller's cancellation rate.",
     params: () =>
@@ -2552,6 +2641,7 @@ export const endpoints = defineEndpoints({
     path: "/orders/{id}/cancellation-requests/{requestId}/decline",
     auth: "seller",
     permission: "orders.fulfillment.cancel",
+    scope: "own-seller",
     summary: "Decline because the items already shipped",
     desc: "The buyer is told they can refuse delivery or return the item after it arrives.",
     params: () =>
@@ -2576,6 +2666,7 @@ export const endpoints = defineEndpoints({
     path: "/orders/{id}/packing-slip",
     auth: "seller",
     permission: "orders.fulfillment.view",
+    scope: "own-seller",
     summary: "Packing slip for this task (only this seller's items)",
     params: () =>
       z.object({
@@ -2596,6 +2687,7 @@ export const endpoints = defineEndpoints({
     path: "/packing-slips",
     auth: "seller",
     permission: "orders.fulfillment.view",
+    scope: "own-seller",
     summary: "One PDF with packing slips for several tasks",
     body: () => z.object({
       orderIds: z.array(z.uuid()),
@@ -2612,6 +2704,7 @@ export const endpoints = defineEndpoints({
     path: "/exports",
     auth: "seller",
     permission: "orders.fulfillment.export",
+    scope: "own-seller",
     summary: "Export the seller's orders (own items only)",
     desc: "Creates an authorized export job through reports.requestExport (dataset orders.seller.orders, sellerId from the session; only the seller's own groups). Poll GET /exports/{id} for the download link.",
     body: () => z.object({
@@ -2631,6 +2724,7 @@ export const endpoints = defineEndpoints({
     path: "/exports/{id}",
     auth: "seller",
     permission: "orders.fulfillment.export",
+    scope: "own-seller",
     summary: "Export status and download link",
     desc: "Proxies reports.getExport (requesting member only).",
     params: () =>
@@ -2649,6 +2743,7 @@ export const endpoints = defineEndpoints({
     path: "/orders",
     auth: "staff",
     permission: "orders.orders.view",
+    scope: "staff",
     summary: "Company and seller orders with payment and fulfillment columns and flags",
     desc: "q matches order reference, customer name or email, and tracking number. Flags are refreshed every 5 minutes.",
     query: () =>
@@ -2675,6 +2770,8 @@ export const endpoints = defineEndpoints({
     path: "/orders/{id}",
     auth: "staff",
     permission: "orders.orders.view",
+    scope: "staff",
+    sensitive: [{"path":["customer","email"],"permission":"orders.customers.view-contact","mask":"email"}],
     summary: "Order with item states per seller group, money by seller, after-sales per item, payment, notes and history",
     params: () =>
       z.object({
@@ -2691,6 +2788,7 @@ export const endpoints = defineEndpoints({
     path: "/orders/{id}/history",
     auth: "staff",
     permission: "orders.orders.view",
+    scope: "staff",
     summary: "Full action history and timeline (customer, seller and staff entries)",
     params: () =>
       z.object({
@@ -2712,6 +2810,7 @@ export const endpoints = defineEndpoints({
     path: "/orders/{id}/notes",
     auth: "staff",
     permission: "orders.orders.manage",
+    scope: "staff",
     summary: "Add an internal note (never shown to customers or sellers)",
     params: () =>
       z.object({
@@ -2732,6 +2831,7 @@ export const endpoints = defineEndpoints({
     path: "/orders/{id}/cancel-items",
     auth: "staff",
     permission: "orders.orders.cancel",
+    scope: "staff",
     summary: "Cancel unshipped items as staff, with a reason",
     desc: "For sellers that cannot fulfill, long-overdue dispatch, risk or address problems. The response shows the effect on open shipments, cases and the refund. Shipped items cannot be cancelled; use returns or a case.",
     params: () =>
@@ -2766,6 +2866,7 @@ export const endpoints = defineEndpoints({
     path: "/orders/{id}/cancellation-requests/{requestId}/decide",
     auth: "staff",
     permission: "orders.cancellations.decide",
+    scope: "staff",
     summary: "Decide a customer's cancellation request for the seller (or override a decline)",
     params: () =>
       z.object({
@@ -2791,6 +2892,8 @@ export const endpoints = defineEndpoints({
     path: "/orders/{id}/groups/{groupId}/dispatch-deadline",
     auth: "staff",
     permission: "orders.orders.manage",
+    scope: "staff",
+    sensitive: [{"path":["customer","email"],"permission":"orders.customers.view-contact","mask":"email"}],
     summary: "Set a final dispatch date for an overdue group",
     desc: "The customer sees the new estimate and the escalation route. The original deadline stays on record for seller performance.",
     params: () =>
@@ -2816,6 +2919,7 @@ export const endpoints = defineEndpoints({
     path: "/orders/{id}/resend-confirmation",
     auth: "staff",
     permission: "orders.orders.manage",
+    scope: "staff",
     summary: "Send the order confirmation again",
     params: () =>
       z.object({
@@ -2837,6 +2941,7 @@ export const endpoints = defineEndpoints({
     path: "/saved-filters",
     auth: "staff",
     permission: "orders.orders.view",
+    scope: "staff",
     summary: "My and shared saved filters with current counts",
     response: () => z.array(SavedFilter),
     status: 200,
@@ -2849,6 +2954,7 @@ export const endpoints = defineEndpoints({
     path: "/saved-filters",
     auth: "staff",
     permission: "orders.orders.view",
+    scope: "staff",
     summary: "Save the current filters",
     body: () => z.object({
       name: z.string(),
@@ -2866,6 +2972,7 @@ export const endpoints = defineEndpoints({
     path: "/saved-filters/{id}",
     auth: "staff",
     permission: "orders.orders.view",
+    scope: "staff",
     summary: "Delete a saved filter (own, or shared with orders.orders.manage)",
     params: () =>
       z.object({
@@ -2883,6 +2990,7 @@ export const endpoints = defineEndpoints({
     path: "/exports",
     auth: "staff",
     permission: "orders.orders.export",
+    scope: "staff",
     summary: "Export the filtered order list",
     desc: "Creates an authorized export job through reports.requestExport (dataset orders.admin.orders), logged in the action history with the requester. Customer phone numbers and emails are masked unless the role has orders.customers.view-contact.",
     body: () => z.object({
@@ -2903,6 +3011,7 @@ export const endpoints = defineEndpoints({
     path: "/exports/{id}",
     auth: "staff",
     permission: "orders.orders.export",
+    scope: "staff",
     summary: "Export status and download link (download is logged)",
     desc: "Proxies reports.getExport (requester only; each download link is logged).",
     params: () =>
@@ -2928,7 +3037,7 @@ export const spec = defineModuleSpec({
   summary: "The accepted purchase: one order per checkout, one seller group per seller package, and items with their own state (Confirmed, Preparing, Delayed, Shipped, Delivered, cancellation, return, refund). Keeps frozen purchase snapshots, derives the overall status from the items, tracks payment, delivery and returns progress separately, and runs item-level cancellations, seller fulfillment tasks with dispatch deadlines, timelines and purchase documents.",
   dependsOn: ["catalog","offers"],
   optionalDeps: ["identity","finance","support","returns","promotions","messaging","content","audit","customers","fulfillment-service","inventory","media","notifications","payments","reports","sellers","settings","trust","warehouse","workqueues"],
-  publicApi: ["createOrder","acceptOrder","cancelForDeclinedPayment","getOrder","getFulfillmentTask","canShipItems","setDispatchDeadline","getPaidAmounts","findGuestOrder","listGuestOrdersByEmail","countInProgress","listRecentForCustomer","listDelayedItemsForCustomer","countPurchased","isVerifiedPurchase","getOrderForViewer","listOrdersForCustomer","countOrdersByTab","getOrderForSeller","listOrdersForSeller","countSellerOrders","getOrderAdmin","listOrdersAdmin","getOrdersByIds","countOrdersForSellers","exportRows","countOrderItemsForProducts","countOpenOrdersInCategory"],
+  publicApi: ["createOrder","acceptOrder","cancelForDeclinedPayment","getOrder","getFulfillmentTask","canShipItems","setDispatchDeadline","getPaidAmounts","findGuestOrder","listGuestOrdersByEmail","countInProgress","listRecentForCustomer","listDelayedItemsForCustomer","countPurchased","isVerifiedPurchase","getOrderForViewer","listOrdersForCustomer","countOrdersByTab","getOrderForSeller","listOrdersForSeller","countSellerOrders","getOrderAdmin","listOrdersAdmin","getOrdersByIds","countOrdersForSellers","exportRows","countOrderItemsForProducts","getOrderItem","listDeliveredItems","countOpenOrdersInCategory"],
   permissions: [
     {
       "key": "orders.orders.view",
@@ -3300,6 +3409,10 @@ export const spec = defineModuleSpec({
         "type": "uuid",
         "nullable": false
       },
+      "reservation_id": {
+        "type": "uuid",
+        "nullable": true
+      },
       "customer_id": {
         "type": "uuid",
         "nullable": true
@@ -3523,6 +3636,10 @@ export const spec = defineModuleSpec({
       "stock_item_id": {
         "type": "uuid",
         "nullable": false
+      },
+      "category_id": {
+        "type": "uuid",
+        "nullable": true
       },
       "product_snapshot": {
         "type": "jsonb",
@@ -3916,6 +4033,14 @@ export const spec = defineModuleSpec({
         "type": "int",
         "nullable": false
       }
+    }
+  },
+  tenantTables: {
+    "orders": {
+      "customer": "customer_id"
+    },
+    "seller_groups": {
+      "seller": "seller_id"
     }
   },
   endpoints,

@@ -29,18 +29,18 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
 | GET | `/api/store/content/home` | Homepage sections in order, resolved for display | shopper | `Homepage` |
-| GET | `/api/store/content/pages/{slug}` | Campaign page, collection, About or landing page | anyone | `StorePage` |
-| GET | `/api/store/content/collections` | Published collections of a brand (or of one collection kind) as cards | anyone | Page<CollectionCard> |
-| GET | `/api/store/content/pages/{slug}/products` | More products for rule-based collections (New arrivals, Best sellers) | anyone | Page<ProductTile> |
-| GET | `/api/store/content/navigation` | Header and footer links, service strip, contact details and company line | anyone | `SiteNavigation` |
-| GET | `/api/store/content/help` | Help Center: topics, popular articles, popular searches, featured guide and contact channels | anyone | `HelpHome` |
-| GET | `/api/store/content/help/articles` | Search or browse help articles | anyone | Page<HelpArticleSummary> |
-| GET | `/api/store/content/help/articles/{slug}` | A help article with effective and updated dates and related articles | anyone | `HelpArticle` |
+| GET | `/api/store/content/pages/{slug}` | Campaign page, collection, About or landing page | visitor | `StorePage` |
+| GET | `/api/store/content/collections` | Published collections of a brand (or of one collection kind) as cards | visitor | Page<CollectionCard> |
+| GET | `/api/store/content/pages/{slug}/products` | More products for rule-based collections (New arrivals, Best sellers) | visitor | Page<ProductTile> |
+| GET | `/api/store/content/navigation` | Header and footer links, service strip, contact details and company line | visitor | `SiteNavigation` |
+| GET | `/api/store/content/help` | Help Center: topics, popular articles, popular searches, featured guide and contact channels | visitor | `HelpHome` |
+| GET | `/api/store/content/help/articles` | Search or browse help articles | visitor | Page<HelpArticleSummary> |
+| GET | `/api/store/content/help/articles/{slug}` | A help article with effective and updated dates and related articles | visitor | `HelpArticle` |
 | POST | `/api/store/content/help/articles/{id}/feedback` | Was this helpful? | shopper | `{ helpful: bool, comment: text? }` → 204 No content |
-| GET | `/api/store/content/policies` | Policies with effective date and version | anyone | `PolicySummary[]` |
-| GET | `/api/store/content/policies/{key}` | Current policy (or the version in effect at a date) | anyone | `StorePolicy` |
-| GET | `/api/store/content/policies/{key}/versions` | Previous versions of a policy | anyone | `PolicyVersionRef[]` |
-| GET | `/api/store/content/policy-versions/{id}` | One past or current policy version (linked from order details) | anyone | `StorePolicy` |
+| GET | `/api/store/content/policies` | Policies with effective date and version | visitor | `PolicySummary[]` |
+| GET | `/api/store/content/policies/{key}` | Current policy (or the version in effect at a date) | visitor | `StorePolicy` |
+| GET | `/api/store/content/policies/{key}/versions` | Previous versions of a policy | visitor | `PolicyVersionRef[]` |
+| GET | `/api/store/content/policy-versions/{id}` | One past or current policy version (linked from order details) | visitor | `StorePolicy` |
 
 ## Admin API
 

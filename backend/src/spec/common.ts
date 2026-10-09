@@ -101,13 +101,13 @@ export const Address: z.ZodType<Address> = z.object({
 }).register(apiTypes, { id: "Address" });
 
 export interface Actor {
-  kind: "customer" | "guest" | "seller" | "staff" | "system";
+  kind: "customer" | "visitor" | "seller" | "staff" | "provider" | "anonymous" | "system";
   id?: string | null;
   name?: string | null;
 }
 
 export const Actor: z.ZodType<Actor> = z.object({
-  kind: z.enum(["customer", "guest", "seller", "staff", "system"]),
+  kind: z.enum(["customer", "visitor", "seller", "staff", "provider", "anonymous", "system"]),
   id: z.string().nullish(),
   name: z.string().nullish(),
 }).register(apiTypes, { id: "Actor" });
@@ -189,7 +189,7 @@ export const commonErrors = {
   },
   "UNAUTHORIZED": {
     "status": 401,
-    "meaning": "No session, or the wrong kind of session for this API area."
+    "meaning": "No token, or the token is invalid, expired or revoked. Only this error should trigger a token refresh (WWW-Authenticate: Bearer error=\"invalid_token\")."
   },
   "FORBIDDEN": {
     "status": 403,
@@ -222,6 +222,30 @@ export const commonErrors = {
   "NOT_IMPLEMENTED": {
     "status": 501,
     "meaning": "Planned for a later launch phase."
+  },
+  "WRONG_AUDIENCE": {
+    "status": 403,
+    "meaning": "The token is for another app (store, Seller Center or Admin Center)."
+  },
+  "STEP_UP_REQUIRED": {
+    "status": 403,
+    "meaning": "A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose."
+  },
+  "OWNER_ONLY": {
+    "status": 403,
+    "meaning": "Only the seller owner can do this."
+  },
+  "NO_SELLER_ACCESS": {
+    "status": 403,
+    "meaning": "This account cannot act for that seller (or for any seller)."
+  },
+  "UPGRADE_REQUIRED": {
+    "status": 426,
+    "meaning": "This app version is no longer supported; update the app."
+  },
+  "SERVICE_UNAVAILABLE": {
+    "status": 503,
+    "meaning": "A service needed to authorize the request is unavailable; retry later."
   }
 } as const;
 
@@ -249,7 +273,7 @@ export const areas = {
     "prefix": "/api/store/{module}",
     "title": "Store API",
     "audience": "Customers and guests on the website and the Android app",
-    "auth": "Optional customer session (Bearer access token). Guests get a guest session for cart, checkout and guest order lookup."
+    "auth": "Every request carries a token: a visitor token (guests, issued when the app opens) or a customer access token."
   },
   "seller": {
     "prefix": "/api/seller/{module}",
@@ -267,7 +291,7 @@ export const areas = {
     "prefix": "/api/public/{module}",
     "title": "Public API",
     "audience": "Anyone (sign-in, registration, public settings)",
-    "auth": "None"
+    "auth": "Visitor token of any app. Refresh and sign-out take the refresh token; the bootstrap endpoint takes an app proof."
   },
   "webhooks": {
     "prefix": "/webhooks/{module}",
@@ -278,9 +302,14 @@ export const areas = {
 } as const;
 
 export const headers = {
-  "Authorization": "Bearer <access token> (customer, seller member or staff session)",
-  "X-Guest-Session": "Guest session id for carts and guest checkout",
+  "Authorization": "Bearer <token> on every request: visitor token before sign-in, access token after (customer, seller member or staff)",
   "Idempotency-Key": "Required on endpoints marked idempotent (orders, payments, refunds, payouts). Same key + same body returns the first result.",
   "Accept-Language": "en-US (only locale at launch)",
-  "X-Request-Id": "Echoed back; include it when reporting problems"
+  "X-Request-Id": "Echoed back; include it when reporting problems",
+  "X-App-Proof": "Bootstrap only: Play Integrity token (Android) or bot-challenge token (website)",
+  "X-Step-Up-Code": "Current 2-step code for endpoints with stepUp kind \"code\"",
+  "X-Client": "web|android/<version>: analytics and minimum-version checks only, never trusted for authorization"
 } as const;
+
+/** Seller id of the Official Store, used wherever a seller id is required (feedback, reviews, returns terms, conversations, report facts, promotion lines). The sellers module never issues it. */
+export const OFFICIAL_STORE_ID = '00000000-0000-7000-8000-000000000001' as const;

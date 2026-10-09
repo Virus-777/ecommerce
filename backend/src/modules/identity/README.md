@@ -37,31 +37,32 @@ Who someone is and how they prove it: accounts for customers, seller members and
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| GET | `/api/store/identity/security` | Sign-in and security page in one call | customer | `SecurityOverview` |
-| PUT | `/api/store/identity/password` | Change password | customer | `ChangePasswordRequest` → 204 No content |
-| POST | `/api/store/identity/email-changes` | Change sign-in email (sends a code to the new address) | customer | `{ newEmail: email, currentPassword: string }` → `VerificationChallenge` |
+| GET | `/api/store/identity/security` | Sign-in and security page in one call | account | `SecurityOverview` |
+| PUT | `/api/store/identity/password` | Change password | account | `ChangePasswordRequest` → 204 No content |
+| POST | `/api/store/identity/email-changes` | Change sign-in email (sends a code to the new address) _(step-up: reauth)_ | account | `{ newEmail: email, reauthToken: string }` → `VerificationChallenge` |
 | POST | `/api/store/identity/reauth` | Confirm it's you before a sensitive action | customer | `ReauthRequest` → `ReauthToken` |
-| POST | `/api/store/identity/two-step/setups` | Start turning on 2-step verification | customer | `TwoStepSetupRequest` → `TwoStepSetup` |
-| POST | `/api/store/identity/two-step/setups/{id}/confirm` | Confirm the first code; returns recovery codes once | customer | `{ code: string }` → `RecoveryCodes` |
-| POST | `/api/store/identity/two-step/methods/{id}/remove` | Turn off a 2-step method | customer | `{ currentPassword: string, code: string }` → `TwoStepStatus` |
-| POST | `/api/store/identity/two-step/recovery-codes` | Replace recovery codes | customer | `{ currentPassword: string }` → `RecoveryCodes` |
-| GET | `/api/store/identity/devices` | Where you're signed in | customer | `Device[]` |
-| POST | `/api/store/identity/devices/{id}/sign-out` | Sign out one device | customer | 204 No content |
-| POST | `/api/store/identity/devices/sign-out-all` | Sign out everywhere | customer | `{ keepThisDevice: bool }` → `{ sessionsRevoked: int }` |
-| GET | `/api/store/identity/security-activity` | Recent security activity | customer | Page<SecurityEvent> |
+| POST | `/api/store/identity/two-step/setups` | Start turning on 2-step verification | account | `TwoStepSetupRequest` → `TwoStepSetup` |
+| POST | `/api/store/identity/two-step/setups/{id}/confirm` | Confirm the first code; returns recovery codes once | account | `{ code: string }` → `RecoveryCodes` |
+| POST | `/api/store/identity/two-step/methods/{id}/remove` | Turn off a 2-step method _(step-up: reauth)_ | account | `{ reauthToken: string, code: string }` → `TwoStepStatus` |
+| POST | `/api/store/identity/two-step/recovery-codes` | Replace recovery codes _(step-up: reauth)_ | account | `{ reauthToken: string }` → `RecoveryCodes` |
+| GET | `/api/store/identity/devices` | Where you're signed in | account | `Device[]` |
+| POST | `/api/store/identity/devices/{id}/sign-out` | Sign out one device | account | 204 No content |
+| POST | `/api/store/identity/devices/sign-out-all` | Sign out everywhere | account | `{ keepThisDevice: bool }` → `{ sessionsRevoked: int }` |
+| GET | `/api/store/identity/security-activity` | Recent security activity | account | Page<SecurityEvent> |
 
 ## Seller API
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| POST | `/api/seller/identity/reauth` | Confirm it is you before a sensitive Seller Center action _(audited)_ | seller | `ReauthRequest` → `ReauthToken` |
-| GET | `/api/seller/identity/session/sellers` | Sellers this member can act for (seller switcher) | seller | `SellerContext[]` |
-| POST | `/api/seller/identity/session/seller-context` | Choose or switch the seller this session acts for | seller | `{ sellerId: uuid }` → `SessionTokens` |
+| POST | `/api/seller/identity/reauth` | Confirm it is you before a sensitive Seller Center action _(audited, before seller is chosen)_ | seller | `ReauthRequest` → `ReauthToken` |
+| GET | `/api/seller/identity/session/sellers` | Sellers this member can act for (seller switcher) _(before seller is chosen)_ | seller | `SellerContext[]` |
+| POST | `/api/seller/identity/session/seller-context` | Choose or switch the seller this session acts for _(before seller is chosen)_ | seller | `{ sellerId: uuid }` → `SessionTokens` |
 
 ## Admin API
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
+| POST | `/api/admin/identity/reauth` | Confirm it is you before a sensitive Admin Center action _(audited)_ | staff | `ReauthRequest` → `ReauthToken` |
 | GET | `/api/admin/identity/accounts` | Find accounts (staff or members) | staff<br>`identity.accounts.view` | Page<AccountListItem> |
 | GET | `/api/admin/identity/accounts/{id}` | Account security detail (devices, lockout, recent activity) | staff<br>`identity.accounts.view` | `AccountAdmin` |
 | POST | `/api/admin/identity/accounts/{id}/lock` | Lock an account (suspected compromise, offboarding) _(audited)_ | staff<br>`identity.accounts.manage` | `LockRequest` → `AccountAdmin` |
@@ -69,35 +70,35 @@ Who someone is and how they prove it: accounts for customers, seller members and
 | POST | `/api/admin/identity/accounts/{id}/force-password-reset` | Require a new password at next sign-in _(audited)_ | staff<br>`identity.accounts.manage` | `{ reason: text, sendLink: bool }` → `AccountAdmin` |
 | POST | `/api/admin/identity/accounts/{id}/reset-two-step` | Remove 2-step methods after an identity check (lost phone) _(audited)_ | staff<br>`identity.accounts.manage` | `{ reason: text, identityCheck: text }` → `AccountAdmin` |
 | POST | `/api/admin/identity/accounts/{id}/sign-out-all` | Sign an account out everywhere _(audited)_ | staff<br>`identity.accounts.manage` | `{ reason: text }` → `{ sessionsRevoked: int }` |
-| POST | `/api/admin/identity/accounts/{id}/disable` | Disable a staff account (offboarding) _(audited)_ | staff<br>`identity.staff-accounts.manage` | `{ reason: text }` → `AccountAdmin` |
-| POST | `/api/admin/identity/accounts/{id}/enable` | Re-enable a disabled staff account _(audited)_ | staff<br>`identity.staff-accounts.manage` | `{ reason: text }` → `AccountAdmin` |
+| POST | `/api/admin/identity/accounts/{id}/disable` | Disable a staff account (offboarding) _(audited, step-up: code)_ | staff<br>`identity.staff-accounts.manage` | `{ reason: text }` → `AccountAdmin` |
+| POST | `/api/admin/identity/accounts/{id}/enable` | Re-enable a disabled staff account _(audited, step-up: code)_ | staff<br>`identity.staff-accounts.manage` | `{ reason: text }` → `AccountAdmin` |
 | GET | `/api/admin/identity/accounts/{id}/security-activity` | Security activity of one account | staff<br>`identity.accounts.view` | Page<SecurityEvent> |
 | GET | `/api/admin/identity/invitations` | Staff invitations | staff<br>`identity.staff-accounts.manage` | Page<Invitation> |
-| POST | `/api/admin/identity/invitations/{id}/resend` | Resend a staff invitation (new 7-day link) _(audited)_ | staff<br>`identity.staff-accounts.manage` | `Invitation` |
-| POST | `/api/admin/identity/invitations/{id}/revoke` | Cancel a staff invitation _(audited)_ | staff<br>`identity.staff-accounts.manage` | `{ reason: text }` → `Invitation` |
+| POST | `/api/admin/identity/invitations/{id}/resend` | Resend a staff invitation (new 7-day link) _(audited, step-up: code)_ | staff<br>`identity.staff-accounts.manage` | `Invitation` |
+| POST | `/api/admin/identity/invitations/{id}/revoke` | Cancel a staff invitation _(audited, step-up: code)_ | staff<br>`identity.staff-accounts.manage` | `{ reason: text }` → `Invitation` |
 
 ## Public API
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| POST | `/api/public/identity/registrations` | Create a customer account and send an email code | anyone | `RegistrationRequest` → `VerificationChallenge` |
-| POST | `/api/public/identity/verifications/{id}/confirm` | Confirm an email or phone code (registration, email change, phone change) | anyone | `VerifyCodeRequest` → `VerifyResult` |
-| POST | `/api/public/identity/verifications/{id}/resend` | Send a new code | anyone | `VerificationChallenge` |
-| POST | `/api/public/identity/sessions` | Sign in with email and password | anyone | `SignInRequest` → `SignInResult` |
-| POST | `/api/public/identity/sign-in-challenges/{id}/verify` | Complete sign-in with a 2-step code or recovery code | anyone | `SecondFactorRequest` → `SignInResult` |
-| POST | `/api/public/identity/sign-in-challenges/{id}/send-sms` | Text the 2-step code to the saved phone _(phase 2)_ | anyone | `SignInChallenge` |
-| POST | `/api/public/identity/sessions/refresh` | Exchange a refresh token for new tokens | anyone | `{ refreshToken: string }` → `SessionTokens` |
-| POST | `/api/public/identity/sessions/sign-out` | Sign out this device | anyone | `{ refreshToken: string }` → 204 No content |
-| POST | `/api/public/identity/password-resets` | Email a password reset link | anyone | `{ email: email }` → `{ emailMasked: string, expiresInMinutes: int, resendAvailableAt: datetime }` |
-| GET | `/api/public/identity/password-resets/{token}` | Check a reset link before showing the new-password form | anyone | `PasswordResetStatus` |
-| POST | `/api/public/identity/password-resets/{token}/complete` | Set a new password from a reset link | anyone | `CompleteResetRequest` → 204 No content |
-| GET | `/api/public/identity/password-policy` | Password rules for the live checklist | anyone | `PasswordPolicy` |
-| POST | `/api/public/identity/guest-sessions` | Start a guest session (cart, guest checkout) | anyone | `{ device: DeviceInfo }` → `GuestSession` |
-| POST | `/api/public/identity/order-links/{token}/redeem` | Open an order from an emailed link | anyone | `{ guestSessionId: uuid? }` → `OrderLinkRedemption` |
-| GET | `/api/public/identity/invitations/{token}` | Show an invitation (staff or seller member) | anyone | `InvitationView` |
-| POST | `/api/public/identity/invitations/{token}/accept` | Accept an invitation and set a password | anyone | `AcceptInvitationRequest` → `AcceptInvitationResult` |
-| POST | `/api/public/identity/invitations/{token}/two-step` | Staff: confirm the authenticator code and start the first session | anyone | `{ setupId: uuid, code: string, device: DeviceInfo }` → `{ tokens: SessionTokens, recoveryCodes: RecoveryCodes }` |
-| POST | `/api/public/identity/external-sign-ins` | Continue with Google or Apple _(phase 2)_ | anyone | `{ provider: enum(google|apple), idToken: string, audience: enum(store|seller), device: DeviceInfo, guestSessionId: uuid?, marketingOptIn: bool? }` → `SignInResult` |
+| POST | `/api/public/identity/registrations` | Create a customer account and send an email code | visitor | `RegistrationRequest` → `VerificationChallenge` |
+| POST | `/api/public/identity/verifications/{id}/confirm` | Confirm an email or phone code (registration, email change, phone change) | visitor | `VerifyCodeRequest` → `VerifyResult` |
+| POST | `/api/public/identity/verifications/{id}/resend` | Send a new code | visitor | `VerificationChallenge` |
+| POST | `/api/public/identity/sessions` | Sign in with email and password | visitor | `SignInRequest` → `SignInResult` |
+| POST | `/api/public/identity/sign-in-challenges/{id}/verify` | Complete sign-in with a 2-step code or recovery code | visitor | `SecondFactorRequest` → `SignInResult` |
+| POST | `/api/public/identity/sign-in-challenges/{id}/send-sms` | Text the 2-step code to the saved phone _(phase 2)_ | visitor | `SignInChallenge` |
+| POST | `/api/public/identity/sessions/refresh` | Exchange a refresh token for new tokens | refresh | `{ refreshToken: string? }` → `SessionTokens` |
+| POST | `/api/public/identity/sessions/sign-out` | Sign out this device | refresh | `{ refreshToken: string? }` → 204 No content |
+| POST | `/api/public/identity/password-resets` | Email a password reset link | visitor | `{ email: email }` → `{ emailMasked: string, expiresInMinutes: int, resendAvailableAt: datetime }` |
+| POST | `/api/public/identity/password-resets/lookups` | Check a reset link before showing the new-password form | visitor | `{ token: string }` → `PasswordResetStatus` |
+| POST | `/api/public/identity/password-resets/complete` | Set a new password from a reset link | visitor | `CompleteResetRequest` → 204 No content |
+| GET | `/api/public/identity/password-policy` | Password rules for the live checklist | visitor | `PasswordPolicy` |
+| POST | `/api/public/identity/app-sessions` | Start an app session: the visitor token every request needs | bootstrap | `{ audience: enum(store|seller|admin), device: DeviceInfo }` → `SessionTokens` |
+| POST | `/api/public/identity/order-links/redeem` | Open an order from an emailed link | visitor | `{ token: string }` → `OrderLinkRedemption` |
+| POST | `/api/public/identity/invitations/lookups` | Show an invitation (staff or seller member) | visitor | `{ token: string }` → `InvitationView` |
+| POST | `/api/public/identity/invitations/accept` | Accept an invitation and set a password | visitor | `AcceptInvitationRequest` → `AcceptInvitationResult` |
+| POST | `/api/public/identity/invitations/two-step` | Staff: confirm the authenticator code and start the first session | visitor | `{ token: string, setupId: uuid, code: string, device: DeviceInfo }` → `{ tokens: SessionTokens, recoveryCodes: RecoveryCodes }` |
+| POST | `/api/public/identity/external-sign-ins` | Continue with Google or Apple _(phase 2)_ | visitor | `{ provider: enum(google|apple), idToken: string, audience: enum(store|seller), device: DeviceInfo, guestSessionId: uuid?, marketingOptIn: bool? }` → `SignInResult` |
 
 ## Types
 
@@ -105,12 +106,12 @@ Who someone is and how they prove it: accounts for customers, seller members and
 
 | Field | Type |
 |---|---|
-| kind | `enum(customer|seller|staff|guest)` |
+| kind | `enum(customer|seller|staff|visitor)` |
 | accountId | `uuid?` |
 | sessionId | `uuid?` |
 | sellerId | `uuid?` Seller the session acts for (seller audience only) |
 | sellerMemberId | `uuid?` |
-| guestSessionId | `uuid?` |
+| guestSessionId | `uuid?` Visitor session id (also the guest session in the store) |
 | authenticatedAt | `datetime?` |
 | twoStepVerifiedAt | `datetime?` Set when this session passed 2-step verification; used for step-up checks |
 
@@ -266,6 +267,7 @@ Who someone is and how they prove it: accounts for customers, seller members and
 |---|---|
 | newPassword | `string` |
 | signOutOtherDevices | `bool` Default true on the screen |
+| token | `string` From the reset link (sent in the body, never in the URL path) |
 
 ### ChangePasswordRequest
 
@@ -425,6 +427,7 @@ Who someone is and how they prove it: accounts for customers, seller members and
 | currentPassword | `string?` Existing member accounts |
 | name | `string?` |
 | device | `DeviceInfo` |
+| token | `string` From the invitation link (sent in the body, never in the URL path) |
 
 ### AcceptInvitationResult
 
@@ -475,6 +478,7 @@ Who someone is and how they prove it: accounts for customers, seller members and
 
 | Field | Type |
 |---|---|
+| purpose | `string` Step-up purpose of the endpoint that will consume the token, e.g. payout-account |
 | password | `string?` |
 | code | `string?` 2-step code instead of the password |
 
@@ -588,6 +592,7 @@ Links are valid 7 days. Resend issues a new token and invalidates the old one.
 | last_sign_in_at | timestamptz? |
 | last_active_at | timestamptz? |
 | version | int |
+| tokens_valid_after | timestamptz? |
 
 Indexes: `unique (realm, email_normalized)`, `(status, id)`, `(realm, created_at)`
 
@@ -750,7 +755,7 @@ Indexes: `pk (account_id, seller_id)`, `(seller_id)`
 
 Indexes: `(status, expires_at)`, `(email)`
 
-**guest_sessions**
+**guest_sessions**: Visitor sessions (auth v3): one per app install before sign-in; in the store also the guest session
 
 | Column | Type |
 |---|---|
@@ -761,6 +766,10 @@ Indexes: `(status, expires_at)`, `(email)`
 | expires_at | timestamptz |
 | claimed_by_account_id | uuid? |
 | claimed_at | timestamptz? |
+| audience | text (store|seller|admin) |
+| refresh_token_hash | text unique |
+| previous_token_hash | text? |
+| rotated_at | timestamptz? |
 
 Indexes: `(expires_at)`
 
@@ -831,6 +840,7 @@ Indexes: `(email_normalized, at)`, `(ip, at)`
 | token_hash | text pk |
 | account_id | uuid → accounts |
 | session_id | uuid → sessions |
+| purpose | text |
 | expires_at | timestamptz |
 | used_at | timestamptz? |
 
@@ -866,8 +876,6 @@ Indexes: `(expires_at)`
 
 | Function | Signature | Used by |
 |---|---|---|
-| authenticate | `(accessToken: string) => Principal | null`<br>Verify an access token and return who is calling. Used by the kernel HTTP layer for every area; seller principals carry the chosen sellerId and memberId. | kernel |
-| verifyGuestSession | `(guestSessionId: uuid) => GuestSession | null`<br>Validate the X-Guest-Session header and touch its expiry | kernel, cart, checkout, customers |
 | getAccount | `(accountId: uuid) => AccountSummary | null`<br>Email, display name, status, 2-step state | customers, sellers, access, notifications, audit, support |
 | getAccounts | `(accountIds: uuid[]) => AccountSummary[]`<br>Batch lookup for lists (staff directory, seller members, audit names) | access, sellers, audit, notifications |
 | findAccountByEmail | `(email: string, realm: 'member' | 'staff') => AccountSummary | null`<br>Used when inviting someone who may already have an account | sellers, access |
@@ -883,8 +891,11 @@ Indexes: `(expires_at)`
 | closeAccount | `(accountId: uuid, reason: string) => void`<br>Close the member credential after customers completes a closure. Revokes all sessions; keeps Seller Center access if the account still belongs to a seller. | customers |
 | sendPasswordReset | `(accountId: uuid, input: { reason: string, by: Actor, revokeSessions: bool }) => void`<br>Staff-initiated reset from another module's screen (customers account actions) | customers |
 | startPhoneVerification | `(accountId: uuid, phone: string) => VerificationChallenge`<br>Text a 6-digit code to a new mobile number (needs SMS, phase 2; until then the number stays unverified). Confirmed at POST /api/public/identity/verifications/{id}/confirm; publishes identity.user.verified with channel phone. | customers |
-| verifyReauthToken | `(accountId: uuid, token: string) => bool`<br>Check and consume a re-auth token from POST /api/store/identity/reauth or POST /api/seller/identity/reauth (valid 5 minutes, single use) | customers, sellers, finance |
+| verifyReauthToken | `(principal: Principal, token: string, purpose: string) => bool`<br>True only when the re-auth token was issued for this purpose (the endpoint's step-up purpose) to this account, session, audience and seller, and is unused and unexpired. A token issued for another purpose is refused. Does not consume it. | customers, sellers, finance |
 | accountSecurityOf | `(accountIds: uuid[], opts?: { activityLimit?: int }) => Map<uuid, AccountSecurity>`<br>Batched staff view of sign-in security for customer 360 views: AccountAdmin (lock, forced reset, 2-step, devices, recent security activity) plus email status, warnings and a one-line sign-in summary. Callers pass identity account ids (Customer.userId). | graphql |
+| consumeReauthToken | `(token: string) => void`<br>Marks a verified re-auth token used; called by the kernel after the request succeeded. | kernel |
+| revocationsSince | `(cursor?: string) => { sessions: { sessionId: uuid, at: datetime }[], accounts: { accountId: uuid, validAfter: datetime }[], cursor: string }`<br>Revoked sessions and account-wide revocations (tokens issued before validAfter) since a cursor; every server polls this every few seconds and loads the last access-token lifetime on startup. | kernel |
+| verifyRefreshToken | `(refreshToken: string) => { sessionId: uuid, accountId?: uuid, audience: string, kind: string } | null`<br>Middleware check for refresh and sign-out: the session the refresh token belongs to (also during the reuse grace window), or null when it is unknown, expired, revoked or reused. | kernel |
 
 ## Permissions
 
@@ -902,7 +913,6 @@ Indexes: `(expires_at)`
 | `ACCOUNT_LOCKED` | 423 | Sign-in is paused. details.lockedUntil (null = until staff unlock) and details.cause. |
 | `ACCOUNT_DISABLED` | 403 | The account is disabled or closed. |
 | `EMAIL_NOT_VERIFIED` | 403 | Confirm the email first. details.challenge is a fresh VerificationChallenge. |
-| `NO_SELLER_ACCESS` | 403 | This account cannot act for that seller (or for any seller). |
 | `CODE_INVALID` | 400 | The code is wrong. details.attemptsLeft. |
 | `CODE_EXPIRED` | 410 | The code or challenge has expired; request a new one. |
 | `CHALLENGE_LOCKED` | 429 | Too many wrong codes; start again. |
@@ -918,6 +928,7 @@ Indexes: `(expires_at)`
 | `INVITATION_INVALID` | 410 | The invitation was accepted, revoked or has expired. |
 | `SELF_ACTION_NOT_ALLOWED` | 403 | Staff cannot lock, disable or reset their own account. |
 | `ORDER_LINK_INVALID` | 410 | The order link has expired; use Guest order lookup. |
+| `APP_PROOF_INVALID` | 401 | The app proof (Play Integrity or bot challenge) is missing or failed. |
 
 ## Background jobs
 
@@ -954,6 +965,10 @@ Indexes: `(expires_at)`
 | reauthTokenMinutes | `5` | Re-auth token lifetime |
 | guestOrderAccessDays | `90` | How long a guest order grant on a session lasts |
 | orderLinkTtlDays | `180` | Emailed order link lifetime |
+| staffIdleMinutes | `30` | Staff sessions end after this long without activity |
+| maxStaffSessions | `3` | Concurrent staff sessions per account; the oldest is signed out |
+| refreshReuseGraceSeconds | `20` | A just-rotated refresh token presented again within this window returns the same new tokens (parallel refresh) |
+| visitorRefreshDays | `30` | Visitor refresh token lifetime after last activity |
 
 ## Integrations
 - **Password hashing**: argon2id with per-account salt; parameters upgraded on next sign-in
@@ -972,6 +987,8 @@ Indexes: `(expires_at)`
 - Every security-relevant change writes a security_events row (shown to the account owner). Staff actions on accounts are also recorded in audit via audit.record (optional dependency: if audit is disabled they are still in security_events).
 - Rate limits: sign-in 10/min per IP and 5/15 min per email; registration and password reset 5/hour per email and 20/hour per IP; guest sessions 30/hour per IP.
 - Business values (lockout length, password rules, token lifetimes) are defaults to confirm; screen copy differs (register says 10 characters, the security page says 12): proposal is 10 for members and 12 for staff.
+- Every request carries a token (auth design v3, docs/03-auth-middleware.md). Visitor tokens come from POST /api/public/identity/app-sessions (bootstrap, app proof) and have the same JWT format as access tokens with kind visitor. The store visitor session is the guest session (guest_sessions table); X-Guest-Session is retired. Sign-in and registration called with a visitor token claim that session.
+- Access and visitor tokens are EdDSA JWTs: typ at+jwt, iss marketly-identity, aud store|seller|admin, kind, sub, sid, sellerId, memberId, authAt, twoStepAt, iat, exp, jti; public keys published by kid (AUTH_JWKS). Re-auth, reset, invitation and order-link tokens are opaque and travel in request bodies, never in URL paths.
 
 ## GraphQL (read layer)
 

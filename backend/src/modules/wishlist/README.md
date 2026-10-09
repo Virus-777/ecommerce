@@ -38,7 +38,7 @@ Saved shopping for customers: saved items in one or more lists, price-drop and b
 | PATCH | `/api/store/wishlist/lists/{id}` | Rename a list | customer | `{ name: string }` → `WishlistList` |
 | DELETE | `/api/store/wishlist/lists/{id}` | Delete a list (not the default list) | customer | 204 No content |
 | POST | `/api/store/wishlist/lists/{id}/share` | Create or revoke a share link | customer | `{ enabled: bool }` → `WishlistList` |
-| GET | `/api/store/wishlist/shared/{token}` | View a shared list (read-only, no prices history or alerts) | anyone | `SharedList` |
+| GET | `/api/store/wishlist/shared/{token}` | View a shared list (read-only, no prices history or alerts) | visitor | `SharedList` |
 | GET | `/api/store/wishlist/alerts` | My alerts | customer | Page<Alert> |
 | POST | `/api/store/wishlist/alerts` | Create an alert (also for a product not saved, e.g. from an out-of-stock product page) | customer | `AlertInput` → `Alert` |
 | POST | `/api/store/wishlist/alerts/{id}/transition` | Pause, resume or rearm an alert | customer | `{ action: enum(pause|resume|rearm) }` → `Alert` |

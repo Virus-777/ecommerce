@@ -867,6 +867,10 @@ export interface PaymentsPaymentCapturedEvent {
   intentId: string;
   captureId: string;
   orderId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   groupId?: string | null;
   amount: common.Money;
   allocations: Allocation[];
@@ -878,6 +882,8 @@ export const PaymentsPaymentCapturedEvent: z.ZodType<PaymentsPaymentCapturedEven
   intentId: z.uuid(),
   captureId: z.uuid(),
   orderId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   groupId: z.uuid().nullish(),
   get amount() {
     return common.Money;
@@ -894,6 +900,10 @@ export interface PaymentsPaymentFailedEvent {
   intentId: string;
   checkoutSessionId: string;
   orderId?: string | null;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   declineCategory: string;
   afterPendingCheck: boolean;
   at: string;
@@ -903,6 +913,8 @@ export const PaymentsPaymentFailedEvent: z.ZodType<PaymentsPaymentFailedEvent> =
   intentId: z.uuid(),
   checkoutSessionId: z.uuid(),
   orderId: z.uuid().nullish(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   declineCategory: z.string(),
   afterPendingCheck: z.boolean(),
   at: z.iso.datetime({ offset: true }),
@@ -913,6 +925,10 @@ export interface PaymentsPaymentPendingCheckEvent {
   intentId: string;
   checkoutSessionId: string;
   orderId?: string | null;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   amount: common.Money;
   since: string;
 }
@@ -921,6 +937,8 @@ export const PaymentsPaymentPendingCheckEvent: z.ZodType<PaymentsPaymentPendingC
   intentId: z.uuid(),
   checkoutSessionId: z.uuid(),
   orderId: z.uuid().nullish(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   get amount() {
     return common.Money;
   },
@@ -995,6 +1013,10 @@ export interface PaymentsRefundSentEvent {
   refundId: string;
   ref: string;
   orderId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   origin: string;
   originId?: string | null;
   amount: common.Money;
@@ -1007,6 +1029,8 @@ export const PaymentsRefundSentEvent: z.ZodType<PaymentsRefundSentEvent> = z.obj
   refundId: z.uuid(),
   ref: z.string(),
   orderId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   origin: z.string(),
   originId: z.uuid().nullish(),
   get amount() {
@@ -1024,6 +1048,10 @@ export interface PaymentsRefundFailedEvent {
   refundId: string;
   ref: string;
   orderId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   origin: string;
   originId?: string | null;
   amount: common.Money;
@@ -1036,6 +1064,8 @@ export const PaymentsRefundFailedEvent: z.ZodType<PaymentsRefundFailedEvent> = z
   refundId: z.uuid(),
   ref: z.string(),
   orderId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   origin: z.string(),
   originId: z.uuid().nullish(),
   get amount() {
@@ -1067,6 +1097,10 @@ export interface PaymentsChargebackOpenedEvent {
   ref: string;
   kind: string;
   orderId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   groupId?: string | null;
   sellerId?: string | null;
   amount: common.Money;
@@ -1078,6 +1112,8 @@ export const PaymentsChargebackOpenedEvent: z.ZodType<PaymentsChargebackOpenedEv
   ref: z.string(),
   kind: z.string(),
   orderId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   groupId: z.uuid().nullish(),
   sellerId: z.uuid().nullish(),
   get amount() {
@@ -1349,6 +1385,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/options",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Accepted methods, saved cards, wallet availability and new-card setup",
     query: () =>
       z.object({
@@ -1365,6 +1402,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/intents/{id}",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Payment result for the payment-result page (accepted, pending check, failed)",
     desc: "Only the checkout owner (customer or guest session). Pending results tell the customer not to pay again and show when the next check runs.",
     params: () =>
@@ -1382,6 +1420,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/intents/{id}/check",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Ask the provider for the result now ('Check now')",
     params: () =>
       z.object({
@@ -1398,6 +1437,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/methods",
     auth: "customer",
+    scope: "own-customer",
     summary: "Saved cards and wallets",
     response: () => z.array(SavedPaymentMethod),
     status: 200,
@@ -1409,6 +1449,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/methods/setup",
     auth: "customer",
+    scope: "own-customer",
     summary: "Start adding a card (provider fields receive the card number)",
     response: () => SetupSession,
     status: 201,
@@ -1420,6 +1461,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/methods",
     auth: "customer",
+    scope: "own-customer",
     summary: "Save a card after the provider confirmed the setup",
     desc: "Stores only the provider token, brand, last 4, expiry, label and billing address.",
     body: () => z.object({
@@ -1443,6 +1485,7 @@ export const endpoints = defineEndpoints({
     method: "PATCH",
     path: "/methods/{id}",
     auth: "customer",
+    scope: "own-customer",
     summary: "Change the label, billing address or expiry date",
     params: () =>
       z.object({
@@ -1468,6 +1511,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/methods/{id}/make-default",
     auth: "customer",
+    scope: "own-customer",
     summary: "Use this card by default at checkout",
     params: () =>
       z.object({
@@ -1484,6 +1528,7 @@ export const endpoints = defineEndpoints({
     method: "DELETE",
     path: "/methods/{id}",
     auth: "customer",
+    scope: "own-customer",
     summary: "Remove a saved card",
     desc: "Detaches the token at the provider. Receipts and past payments keep their method label; refunds for earlier orders still go back to the card used.",
     params: () =>
@@ -1501,6 +1546,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/refunds",
     auth: "customer",
+    scope: "own-customer",
     summary: "My refunds with status (Requested, Processing, Sent, Failed)",
     query: () =>
       z.object({
@@ -1517,6 +1563,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/refunds/{id}",
     auth: "shopper",
+    scope: "own-customer",
     summary: "One refund with destination and timing",
     params: () =>
       z.object({
@@ -1533,6 +1580,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/refunds/{id}/destination",
     auth: "shopper",
+    scope: "own-customer",
     summary: "Choose where a failed refund should go instead",
     desc: "Offered after a refund fails (e.g. the card was closed). Store credit needs the wallet module (phase 3).",
     params: () =>
@@ -1558,6 +1606,7 @@ export const endpoints = defineEndpoints({
     path: "/payments",
     auth: "staff",
     permission: "payments.payments.view",
+    scope: "staff",
     summary: "Payments with status and flags (pending check, orphan, capture failed, chargeback)",
     query: () =>
       z.object({
@@ -1579,6 +1628,7 @@ export const endpoints = defineEndpoints({
     path: "/payments/{id}",
     auth: "staff",
     permission: "payments.payments.view",
+    scope: "staff",
     summary: "Payment with tenders, allocations, captures, refunds, disputes, provider calls and webhooks",
     params: () =>
       z.object({
@@ -1595,6 +1645,7 @@ export const endpoints = defineEndpoints({
     path: "/orders/{orderId}/summary",
     auth: "staff",
     permission: "payments.payments.view",
+    scope: "staff",
     summary: "Payment panel of an order (method, authorized, captured, processor ref, refunded, attempts)",
     params: () =>
       z.object({
@@ -1611,6 +1662,7 @@ export const endpoints = defineEndpoints({
     path: "/orders/{orderId}/refundable",
     auth: "staff",
     permission: "payments.payments.view",
+    scope: "staff",
     summary: "Remaining refundable amount per item (the cap shown in refund dialogs)",
     params: () =>
       z.object({
@@ -1627,6 +1679,7 @@ export const endpoints = defineEndpoints({
     path: "/payments/{id}/check",
     auth: "staff",
     permission: "payments.payments.manage",
+    scope: "staff",
     summary: "Ask the provider for the current result",
     params: () =>
       z.object({
@@ -1644,6 +1697,7 @@ export const endpoints = defineEndpoints({
     path: "/payments/{id}/capture",
     auth: "staff",
     permission: "payments.payments.manage",
+    scope: "staff",
     summary: "Capture an authorization manually (e.g. after a capture failure)",
     params: () =>
       z.object({
@@ -1671,6 +1725,7 @@ export const endpoints = defineEndpoints({
     path: "/payments/{id}/void",
     auth: "staff",
     permission: "payments.payments.manage",
+    scope: "staff",
     summary: "Void an authorization that should not be captured",
     params: () =>
       z.object({
@@ -1694,6 +1749,7 @@ export const endpoints = defineEndpoints({
     path: "/payments/{id}/resolve-orphan",
     auth: "staff",
     permission: "payments.payments.manage",
+    scope: "staff",
     summary: "Refund or link a payment that has no order",
     desc: "link_to_order only when the checkout session did create the order; otherwise the money is returned.",
     params: () =>
@@ -1720,6 +1776,7 @@ export const endpoints = defineEndpoints({
     path: "/refunds",
     auth: "staff",
     permission: "payments.refunds.view",
+    scope: "staff",
     summary: "Refund executions, e.g. failing refunds",
     query: () =>
       z.object({
@@ -1741,6 +1798,7 @@ export const endpoints = defineEndpoints({
     path: "/refunds/{id}",
     auth: "staff",
     permission: "payments.refunds.view",
+    scope: "staff",
     summary: "One refund with items, attempts and history",
     params: () =>
       z.object({
@@ -1757,6 +1815,7 @@ export const endpoints = defineEndpoints({
     path: "/refunds/{id}/check",
     auth: "staff",
     permission: "payments.refunds.manage",
+    scope: "staff",
     summary: "Ask the provider for the refund's outcome",
     params: () =>
       z.object({
@@ -1774,6 +1833,7 @@ export const endpoints = defineEndpoints({
     path: "/refunds/{id}/retry",
     auth: "staff",
     permission: "payments.refunds.manage",
+    scope: "staff",
     summary: "Retry a failed refund (checks the provider first)",
     params: () =>
       z.object({
@@ -1797,6 +1857,7 @@ export const endpoints = defineEndpoints({
     path: "/refunds/{id}/request-destination",
     auth: "staff",
     permission: "payments.refunds.manage",
+    scope: "staff",
     summary: "Ask the customer for a new payment method for a failed refund",
     params: () =>
       z.object({
@@ -1819,6 +1880,7 @@ export const endpoints = defineEndpoints({
     path: "/refunds/{id}/cancel",
     auth: "staff",
     permission: "payments.refunds.manage",
+    scope: "staff",
     summary: "Cancel a requested or failed refund with a reason",
     desc: "Releases the in-flight amount; returns or support must record how the customer is made whole.",
     params: () =>
@@ -1842,6 +1904,7 @@ export const endpoints = defineEndpoints({
     path: "/disputes",
     auth: "staff",
     permission: "payments.disputes.manage",
+    scope: "staff",
     summary: "Chargebacks and payment disputes, evidence due first",
     query: () =>
       z.object({
@@ -1861,6 +1924,7 @@ export const endpoints = defineEndpoints({
     path: "/disputes/{id}",
     auth: "staff",
     permission: "payments.disputes.manage",
+    scope: "staff",
     summary: "One dispute with order, evidence and seller balance effect",
     params: () =>
       z.object({
@@ -1877,6 +1941,7 @@ export const endpoints = defineEndpoints({
     path: "/disputes/{id}/assign",
     auth: "staff",
     permission: "payments.disputes.manage",
+    scope: "staff",
     summary: "Set the owner",
     params: () =>
       z.object({
@@ -1897,6 +1962,7 @@ export const endpoints = defineEndpoints({
     path: "/disputes/{id}/evidence",
     auth: "staff",
     permission: "payments.disputes.manage",
+    scope: "staff",
     summary: "Save or submit evidence (tracking, delivery proof, messages, receipts)",
     params: () =>
       z.object({
@@ -1921,6 +1987,7 @@ export const endpoints = defineEndpoints({
     path: "/disputes/{id}/accept",
     auth: "staff",
     permission: "payments.disputes.manage",
+    scope: "staff",
     summary: "Concede the dispute (the provider keeps the money)",
     params: () =>
       z.object({
@@ -1943,6 +2010,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/providers/{provider}/events",
     auth: "provider",
+    scope: "public",
     summary: "Payment provider events (authorization, capture, refund, dispute, card updates)",
     desc: "Signature verified per provider; deduplicated by provider event id; applied through the state machines. Out-of-order events are reconciled by retrieving the object from the provider.",
     params: () =>
@@ -2856,6 +2924,23 @@ export const spec = defineModuleSpec({
         "type": "int",
         "nullable": false
       }
+    }
+  },
+  tenantTables: {
+    "intents": {
+      "customer": "customer_id"
+    },
+    "allocations": {
+      "seller": "seller_id"
+    },
+    "refund_items": {
+      "seller": "seller_id"
+    },
+    "disputes": {
+      "seller": "seller_id"
+    },
+    "saved_methods": {
+      "customer": "customer_id"
     }
   },
   endpoints,

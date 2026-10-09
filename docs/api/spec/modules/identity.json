@@ -43,25 +43,6 @@
   ],
   "publicApi": [
     {
-      "name": "authenticate",
-      "signature": "(accessToken: string) => Principal | null",
-      "desc": "Verify an access token and return who is calling. Used by the kernel HTTP layer for every area; seller principals carry the chosen sellerId and memberId.",
-      "usedBy": [
-        "kernel"
-      ]
-    },
-    {
-      "name": "verifyGuestSession",
-      "signature": "(guestSessionId: uuid) => GuestSession | null",
-      "desc": "Validate the X-Guest-Session header and touch its expiry",
-      "usedBy": [
-        "kernel",
-        "cart",
-        "checkout",
-        "customers"
-      ]
-    },
-    {
       "name": "getAccount",
       "signature": "(accountId: uuid) => AccountSummary | null",
       "desc": "Email, display name, status, 2-step state",
@@ -203,8 +184,8 @@
     },
     {
       "name": "verifyReauthToken",
-      "signature": "(accountId: uuid, token: string) => bool",
-      "desc": "Check and consume a re-auth token from POST /api/store/identity/reauth or POST /api/seller/identity/reauth (valid 5 minutes, single use)",
+      "signature": "(principal: Principal, token: string, purpose: string) => bool",
+      "desc": "True only when the re-auth token was issued for this purpose (the endpoint's step-up purpose) to this account, session, audience and seller, and is unused and unexpired. A token issued for another purpose is refused. Does not consume it.",
       "usedBy": [
         "customers",
         "sellers",
@@ -218,11 +199,35 @@
       "usedBy": [
         "graphql"
       ]
+    },
+    {
+      "name": "consumeReauthToken",
+      "signature": "(token: string) => void",
+      "desc": "Marks a verified re-auth token used; called by the kernel after the request succeeded.",
+      "usedBy": [
+        "kernel"
+      ]
+    },
+    {
+      "name": "revocationsSince",
+      "signature": "(cursor?: string) => { sessions: { sessionId: uuid, at: datetime }[], accounts: { accountId: uuid, validAfter: datetime }[], cursor: string }",
+      "desc": "Revoked sessions and account-wide revocations (tokens issued before validAfter) since a cursor; every server polls this every few seconds and loads the last access-token lifetime on startup.",
+      "usedBy": [
+        "kernel"
+      ]
+    },
+    {
+      "name": "verifyRefreshToken",
+      "signature": "(refreshToken: string) => { sessionId: uuid, accountId?: uuid, audience: string, kind: string } | null",
+      "desc": "Middleware check for refresh and sign-out: the session the refresh token belongs to (also during the reuse grace window), or null when it is unknown, expired, revoked or reused.",
+      "usedBy": [
+        "kernel"
+      ]
     }
   ],
   "types": {
     "Principal": {
-      "kind": "enum(customer|seller|staff|guest)",
+      "kind": "enum(customer|seller|staff|visitor)",
       "accountId": "uuid?",
       "sessionId": "uuid?",
       "sellerId": {
@@ -230,7 +235,7 @@
         "desc": "Seller the session acts for (seller audience only)"
       },
       "sellerMemberId": "uuid?",
-      "guestSessionId": "uuid?",
+      "guestSessionId": { "type": "uuid?", "desc": "Visitor session id (also the guest session in the store)" },
       "authenticatedAt": "datetime?",
       "twoStepVerifiedAt": {
         "type": "datetime?",
@@ -409,6 +414,10 @@
       "signOutOtherDevices": {
         "type": "bool",
         "desc": "Default true on the screen"
+      },
+      "token": {
+        "type": "string",
+        "desc": "From the reset link (sent in the body, never in the URL path)"
       }
     },
     "ChangePasswordRequest": {
@@ -585,7 +594,8 @@
         "desc": "Existing member accounts"
       },
       "name": "string?",
-      "device": "DeviceInfo"
+      "device": "DeviceInfo",
+      "token": { "type": "string", "desc": "From the invitation link (sent in the body, never in the URL path)" }
     },
     "AcceptInvitationResult": {
       "status": "enum(signed_in|two_step_setup_required)",
@@ -630,6 +640,10 @@
       }
     },
     "ReauthRequest": {
+      "purpose": {
+        "type": "string",
+        "desc": "Step-up purpose of the endpoint that will consume the token, e.g. payout-account"
+      },
       "password": "string?",
       "code": {
         "type": "string?",
@@ -671,7 +685,8 @@
         "created_at": "timestamptz",
         "last_sign_in_at": "timestamptz?",
         "last_active_at": "timestamptz?",
-        "version": "int"
+        "version": "int",
+        "tokens_valid_after": "timestamptz?"
       },
       "indexes": [
         "unique (realm, email_normalized)",
@@ -867,11 +882,16 @@
         "last_seen_at": "timestamptz",
         "expires_at": "timestamptz",
         "claimed_by_account_id": "uuid?",
-        "claimed_at": "timestamptz?"
+        "claimed_at": "timestamptz?",
+        "audience": "text (store|seller|admin)",
+        "refresh_token_hash": "text unique",
+        "previous_token_hash": "text?",
+        "rotated_at": "timestamptz?"
       },
       "indexes": [
         "(expires_at)"
-      ]
+      ],
+      "desc": "Visitor sessions (auth v3): one per app install before sign-in; in the store also the guest session"
     },
     {
       "name": "guest_order_grants",
@@ -951,6 +971,7 @@
         "token_hash": "text pk",
         "account_id": "uuid → accounts",
         "session_id": "uuid → sessions",
+        "purpose": "text",
         "expires_at": "timestamptz",
         "used_at": "timestamptz?"
       },
@@ -1151,7 +1172,7 @@
       "path": "/registrations",
       "summary": "Create a customer account and send an email code",
       "desc": "Always answers 202 with a challenge so the form cannot be used to discover accounts: if the email already has an account, the email says so and offers sign-in and password reset, and the code will not verify. Password rules are checked live with GET /password-policy and again here.",
-      "auth": "anyone",
+      "auth": "visitor",
       "body": "RegistrationRequest",
       "response": "VerificationChallenge",
       "status": 202,
@@ -1168,7 +1189,8 @@
         "auth/register",
         "auth/guest-orders",
         "store/confirmation"
-      ]
+      ],
+      "rateLimit": "registration"
     },
     {
       "id": "confirmVerification",
@@ -1177,7 +1199,7 @@
       "path": "/verifications/{id}/confirm",
       "summary": "Confirm an email or phone code (registration, email change, phone change)",
       "desc": "Registration: activates the account and signs the customer in; guest orders placed with this email can then be attached (identity.user.verified, consumed by customers). Email change: switches the sign-in email and alerts the old address. Phone: marks the number verified (identity.user.verified with channel phone).",
-      "auth": "anyone",
+      "auth": "visitor",
       "params": {
         "id": "uuid"
       },
@@ -1196,7 +1218,8 @@
       "screens": [
         "auth/register",
         "account/profile"
-      ]
+      ],
+      "rateLimit": "code"
     },
     {
       "id": "resendVerification",
@@ -1204,7 +1227,7 @@
       "method": "POST",
       "path": "/verifications/{id}/resend",
       "summary": "Send a new code",
-      "auth": "anyone",
+      "auth": "visitor",
       "params": {
         "id": "uuid"
       },
@@ -1218,7 +1241,8 @@
       ],
       "screens": [
         "auth/register"
-      ]
+      ],
+      "rateLimit": "code"
     },
     {
       "id": "signIn",
@@ -1227,7 +1251,7 @@
       "path": "/sessions",
       "summary": "Sign in with email and password",
       "desc": "Returns tokens, or a 2-step challenge, or (seller audience with several sellers) the list of sellers to choose from. Wrong passwords return INVALID_CREDENTIALS with details.attemptsLeft; at the limit the account locks for lockoutMinutes and ACCOUNT_LOCKED carries details.lockedUntil. Unknown emails get the same answer and timing. A guest session passed in is claimed (cart and recently viewed merge). A sign-in from a device not seen before publishes identity.session.new_device for the security alert.",
-      "auth": "anyone",
+      "auth": "visitor",
       "body": "SignInRequest",
       "response": "SignInResult",
       "errors": [
@@ -1246,7 +1270,8 @@
       "screens": [
         "auth/sign-in",
         "store/checkout"
-      ]
+      ],
+      "rateLimit": "sign-in"
     },
     {
       "id": "verifySecondFactor",
@@ -1254,7 +1279,7 @@
       "method": "POST",
       "path": "/sign-in-challenges/{id}/verify",
       "summary": "Complete sign-in with a 2-step code or recovery code",
-      "auth": "anyone",
+      "auth": "visitor",
       "params": {
         "id": "uuid"
       },
@@ -1271,7 +1296,8 @@
       ],
       "screens": [
         "auth/sign-in"
-      ]
+      ],
+      "rateLimit": "sign-in"
     },
     {
       "id": "sendSignInSms",
@@ -1279,7 +1305,7 @@
       "method": "POST",
       "path": "/sign-in-challenges/{id}/send-sms",
       "summary": "Text the 2-step code to the saved phone",
-      "auth": "anyone",
+      "auth": "visitor",
       "params": {
         "id": "uuid"
       },
@@ -1294,7 +1320,8 @@
       "screens": [
         "auth/sign-in"
       ],
-      "phase": 2
+      "phase": 2,
+      "rateLimit": "code"
     },
     {
       "id": "refreshSession",
@@ -1303,9 +1330,12 @@
       "path": "/sessions/refresh",
       "summary": "Exchange a refresh token for new tokens",
       "desc": "Rotates the refresh token. Presenting an already-rotated token revokes the session (theft signal) and returns REFRESH_TOKEN_INVALID. The Android app calls this when an access token expires.",
-      "auth": "anyone",
+      "auth": "refresh",
       "body": {
-        "refreshToken": "string"
+        "refreshToken": {
+          "type": "string?",
+          "desc": "Android; the website sends the __Host-mk_refresh cookie instead"
+        }
       },
       "response": "SessionTokens",
       "errors": [
@@ -1321,9 +1351,12 @@
       "path": "/sessions/sign-out",
       "summary": "Sign out this device",
       "desc": "Works for every audience; the refresh token identifies the session. Idempotent.",
-      "auth": "anyone",
+      "auth": "refresh",
       "body": {
-        "refreshToken": "string"
+        "refreshToken": {
+          "type": "string?",
+          "desc": "Android; the website sends the __Host-mk_refresh cookie instead"
+        }
       },
       "response": null
     },
@@ -1334,7 +1367,7 @@
       "path": "/password-resets",
       "summary": "Email a password reset link",
       "desc": "Always 202 with the masked email, whether or not an account exists. The link works once and expires in 30 minutes; a new request invalidates the previous link.",
-      "auth": "anyone",
+      "auth": "visitor",
       "body": {
         "email": "email"
       },
@@ -1352,34 +1385,32 @@
       ],
       "screens": [
         "auth/recover"
-      ]
+      ],
+      "rateLimit": "password-reset"
     },
     {
       "id": "getPasswordReset",
       "area": "public",
-      "method": "GET",
-      "path": "/password-resets/{token}",
+      "method": "POST",
+      "path": "/password-resets/lookups",
       "summary": "Check a reset link before showing the new-password form",
-      "auth": "anyone",
-      "params": {
-        "token": "string"
-      },
+      "auth": "visitor",
       "response": "PasswordResetStatus",
       "screens": [
         "auth/recover"
-      ]
+      ],
+      "body": {
+        "token": "string"
+      }
     },
     {
       "id": "completePasswordReset",
       "area": "public",
       "method": "POST",
-      "path": "/password-resets/{token}/complete",
+      "path": "/password-resets/complete",
       "summary": "Set a new password from a reset link",
       "desc": "Clears lockouts. Signs out other devices when chosen (always for forced resets). The account owner gets a confirmation email.",
-      "auth": "anyone",
-      "params": {
-        "token": "string"
-      },
+      "auth": "visitor",
       "body": "CompleteResetRequest",
       "response": null,
       "errors": [
@@ -1400,7 +1431,7 @@
       "method": "GET",
       "path": "/password-policy",
       "summary": "Password rules for the live checklist",
-      "auth": "anyone",
+      "auth": "visitor",
       "query": {
         "realm": "enum(member|staff)?"
       },
@@ -1412,39 +1443,38 @@
       ]
     },
     {
-      "id": "createGuestSession",
+      "id": "startAppSession",
       "area": "public",
       "method": "POST",
-      "path": "/guest-sessions",
-      "summary": "Start a guest session (cart, guest checkout)",
-      "desc": "Created lazily on the first add to cart or product view. The id is sent as X-Guest-Session. Expires after guestSessionTtlDays without activity; order grants on it last guestOrderAccessDays.",
-      "auth": "anyone",
+      "path": "/app-sessions",
+      "summary": "Start an app session: the visitor token every request needs",
+      "desc": "The only endpoint without a token. Requires an app proof in X-App-Proof (Play Integrity on Android, bot challenge on the website). Returns a visitor access token and refresh token for the app named in audience. In the store the visitor session is also the guest session (cart, recently viewed, guest checkout, guest order grants). Signing in or registering with the visitor token claims the session into the account.",
+      "auth": "bootstrap",
       "body": {
+        "audience": "enum(store|seller|admin)",
         "device": "DeviceInfo"
       },
-      "response": "GuestSession",
+      "response": "SessionTokens",
       "status": 201,
       "errors": [
+        "APP_PROOF_INVALID",
         "RATE_LIMITED"
       ],
+      "rateLimit": "bootstrap",
       "screens": [
-        "store/cart",
-        "store/checkout"
+        "store/home"
       ]
     },
     {
       "id": "redeemOrderLink",
       "area": "public",
       "method": "POST",
-      "path": "/order-links/{token}/redeem",
+      "path": "/order-links/redeem",
       "summary": "Open an order from an emailed link",
       "desc": "Grants the (new or given) guest session access to that order. Signed-in customers whose verified email matches see it in their account instead.",
-      "auth": "anyone",
-      "params": {
-        "token": "string"
-      },
+      "auth": "visitor",
       "body": {
-        "guestSessionId": "uuid?"
+        "token": "string"
       },
       "response": "OrderLinkRedemption",
       "errors": [
@@ -1458,29 +1488,26 @@
     {
       "id": "getInvitation",
       "area": "public",
-      "method": "GET",
-      "path": "/invitations/{token}",
+      "method": "POST",
+      "path": "/invitations/lookups",
       "summary": "Show an invitation (staff or seller member)",
-      "auth": "anyone",
-      "params": {
-        "token": "string"
-      },
+      "auth": "visitor",
       "response": "InvitationView",
       "errors": [
         "INVITATION_INVALID"
-      ]
+      ],
+      "body": {
+        "token": "string"
+      }
     },
     {
       "id": "acceptInvitation",
       "area": "public",
       "method": "POST",
-      "path": "/invitations/{token}/accept",
+      "path": "/invitations/accept",
       "summary": "Accept an invitation and set a password",
       "desc": "Seller members: signs in to Seller Center for the inviting seller. Staff: returns a 2-step set-up that must be confirmed before the first session.",
-      "auth": "anyone",
-      "params": {
-        "token": "string"
-      },
+      "auth": "visitor",
       "body": "AcceptInvitationRequest",
       "response": "AcceptInvitationResult",
       "errors": [
@@ -1496,13 +1523,11 @@
       "id": "confirmInvitationTwoStep",
       "area": "public",
       "method": "POST",
-      "path": "/invitations/{token}/two-step",
+      "path": "/invitations/two-step",
       "summary": "Staff: confirm the authenticator code and start the first session",
-      "auth": "anyone",
-      "params": {
-        "token": "string"
-      },
+      "auth": "visitor",
       "body": {
+        "token": "string",
         "setupId": "uuid",
         "code": "string",
         "device": "DeviceInfo"
@@ -1527,7 +1552,7 @@
       "path": "/external-sign-ins",
       "summary": "Continue with Google or Apple",
       "desc": "Members only. Links to an existing account only when the provider confirms the same verified email.",
-      "auth": "anyone",
+      "auth": "visitor",
       "body": {
         "provider": "enum(google|apple)",
         "idToken": "string",
@@ -1550,7 +1575,8 @@
         "auth/sign-in",
         "auth/register"
       ],
-      "phase": 2
+      "phase": 2,
+      "rateLimit": "sign-in"
     },
     {
       "id": "getSecurity",
@@ -1559,7 +1585,7 @@
       "path": "/security",
       "summary": "Sign-in and security page in one call",
       "desc": "Also used by seller members from Seller Center (same member account; the store-area security endpoints accept a member session of either audience).",
-      "auth": "customer",
+      "auth": "account",
       "response": "SecurityOverview",
       "screens": [
         "account/security",
@@ -1572,7 +1598,7 @@
       "method": "PUT",
       "path": "/password",
       "summary": "Change password",
-      "auth": "customer",
+      "auth": "account",
       "body": "ChangePasswordRequest",
       "response": null,
       "errors": [
@@ -1595,23 +1621,28 @@
       "path": "/email-changes",
       "summary": "Change sign-in email (sends a code to the new address)",
       "desc": "Confirmed with POST /api/public/identity/verifications/{id}/confirm. The old address stays active until then.",
-      "auth": "customer",
+      "auth": "account",
       "body": {
         "newEmail": "email",
-        "currentPassword": "string"
+        "reauthToken": "string"
       },
       "response": "VerificationChallenge",
       "status": 202,
       "errors": [
         "EMAIL_IN_USE",
-        "CURRENT_PASSWORD_WRONG"
+        "CURRENT_PASSWORD_WRONG",
+        "STEP_UP_REQUIRED"
       ],
       "events": [
         "identity.verification.code_issued"
       ],
       "screens": [
         "account/profile"
-      ]
+      ],
+      "stepUp": {
+        "kind": "reauth",
+        "purpose": "email-change"
+      }
     },
     {
       "id": "reauthenticate",
@@ -1619,7 +1650,7 @@
       "method": "POST",
       "path": "/reauth",
       "summary": "Confirm it's you before a sensitive action",
-      "desc": "Returns a single-use re-auth token valid 5 minutes, required by account closure (customers). Seller Center uses POST /api/seller/identity/reauth for payout account and business changes.",
+      "desc": "Returns a single-use re-auth token valid 5 minutes for the requested purpose, required by account closure (customers). Seller Center uses POST /api/seller/identity/reauth for payout account and business changes.",
       "auth": "customer",
       "body": "ReauthRequest",
       "response": "ReauthToken",
@@ -1639,8 +1670,9 @@
       "method": "POST",
       "path": "/reauth",
       "summary": "Confirm it is you before a sensitive Seller Center action",
-      "desc": "Same check as the store re-auth (password or 2-step code) on the seller session. Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account and the current seller context; required by payout account changes, business change requests and account close (sellers).",
+      "desc": "Same check as the store re-auth (password or 2-step code) on the seller session. Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account, the purpose and the current seller context (if one is chosen); required by payout account changes, business change requests and account close (sellers).",
       "auth": "seller",
+      "sellerContext": "optional",
       "body": "ReauthRequest",
       "response": "ReauthToken",
       "errors": [
@@ -1655,12 +1687,29 @@
       ]
     },
     {
+      "id": "reauthenticateStaff",
+      "area": "admin",
+      "method": "POST",
+      "path": "/reauth",
+      "summary": "Confirm it is you before a sensitive Admin Center action",
+      "desc": "Same check as the store re-auth (password or 2-step code) on the staff session. Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account, session and purpose.",
+      "auth": "staff",
+      "body": "ReauthRequest",
+      "response": "ReauthToken",
+      "errors": [
+        "CURRENT_PASSWORD_WRONG",
+        "CODE_INVALID",
+        "RATE_LIMITED"
+      ],
+      "audited": true
+    },
+    {
       "id": "startTwoStepSetup",
       "area": "store",
       "method": "POST",
       "path": "/two-step/setups",
       "summary": "Start turning on 2-step verification",
-      "auth": "customer",
+      "auth": "account",
       "body": "TwoStepSetupRequest",
       "response": "TwoStepSetup",
       "status": 201,
@@ -1678,7 +1727,7 @@
       "method": "POST",
       "path": "/two-step/setups/{id}/confirm",
       "summary": "Confirm the first code; returns recovery codes once",
-      "auth": "customer",
+      "auth": "account",
       "params": {
         "id": "uuid"
       },
@@ -1704,26 +1753,31 @@
       "path": "/two-step/methods/{id}/remove",
       "summary": "Turn off a 2-step method",
       "desc": "Staff accounts cannot remove their last method (TWO_STEP_REQUIRED).",
-      "auth": "customer",
+      "auth": "account",
       "params": {
         "id": "uuid"
       },
       "body": {
-        "currentPassword": "string",
+        "reauthToken": "string",
         "code": "string"
       },
       "response": "TwoStepStatus",
       "errors": [
         "CURRENT_PASSWORD_WRONG",
         "CODE_INVALID",
-        "TWO_STEP_REQUIRED"
+        "TWO_STEP_REQUIRED",
+        "STEP_UP_REQUIRED"
       ],
       "events": [
         "identity.two_step.changed"
       ],
       "screens": [
         "account/security"
-      ]
+      ],
+      "stepUp": {
+        "kind": "reauth",
+        "purpose": "two-step-removal"
+      }
     },
     {
       "id": "regenerateRecoveryCodes",
@@ -1731,17 +1785,22 @@
       "method": "POST",
       "path": "/two-step/recovery-codes",
       "summary": "Replace recovery codes",
-      "auth": "customer",
+      "auth": "account",
       "body": {
-        "currentPassword": "string"
+        "reauthToken": "string"
       },
       "response": "RecoveryCodes",
       "errors": [
-        "CURRENT_PASSWORD_WRONG"
+        "CURRENT_PASSWORD_WRONG",
+        "STEP_UP_REQUIRED"
       ],
       "screens": [
         "account/security"
-      ]
+      ],
+      "stepUp": {
+        "kind": "reauth",
+        "purpose": "recovery-codes"
+      }
     },
     {
       "id": "listDevices",
@@ -1750,7 +1809,7 @@
       "path": "/devices",
       "summary": "Where you're signed in",
       "desc": "Small and bounded (maxDevicesPerAccount), so not paged.",
-      "auth": "customer",
+      "auth": "account",
       "response": "Device[]",
       "screens": [
         "account/security"
@@ -1762,7 +1821,7 @@
       "method": "POST",
       "path": "/devices/{id}/sign-out",
       "summary": "Sign out one device",
-      "auth": "customer",
+      "auth": "account",
       "params": {
         "id": "uuid"
       },
@@ -1780,7 +1839,7 @@
       "method": "POST",
       "path": "/devices/sign-out-all",
       "summary": "Sign out everywhere",
-      "auth": "customer",
+      "auth": "account",
       "body": {
         "keepThisDevice": "bool"
       },
@@ -1797,7 +1856,7 @@
       "method": "GET",
       "path": "/security-activity",
       "summary": "Recent security activity",
-      "auth": "customer",
+      "auth": "account",
       "paging": true,
       "query": {
         "days": {
@@ -1823,7 +1882,8 @@
       "screens": [
         "seller/dashboard",
         "seller/setup"
-      ]
+      ],
+      "sellerContext": "optional"
     },
     {
       "id": "switchSellerContext",
@@ -1842,7 +1902,8 @@
       ],
       "screens": [
         "seller/dashboard"
-      ]
+      ],
+      "sellerContext": "optional"
     },
     {
       "id": "listAccounts",
@@ -2042,7 +2103,8 @@
       "response": "AccountAdmin",
       "errors": [
         "ILLEGAL_TRANSITION",
-        "SELF_ACTION_NOT_ALLOWED"
+        "SELF_ACTION_NOT_ALLOWED",
+        "STEP_UP_REQUIRED"
       ],
       "audited": true,
       "events": [
@@ -2050,7 +2112,11 @@
       ],
       "screens": [
         "admin/staff"
-      ]
+      ],
+      "stepUp": {
+        "kind": "code",
+        "purpose": "staff-account"
+      }
     },
     {
       "id": "enableAccount",
@@ -2069,7 +2135,8 @@
       },
       "response": "AccountAdmin",
       "errors": [
-        "ILLEGAL_TRANSITION"
+        "ILLEGAL_TRANSITION",
+        "STEP_UP_REQUIRED"
       ],
       "audited": true,
       "events": [
@@ -2077,7 +2144,11 @@
       ],
       "screens": [
         "admin/staff"
-      ]
+      ],
+      "stepUp": {
+        "kind": "code",
+        "purpose": "staff-account"
+      }
     },
     {
       "id": "listAccountActivity",
@@ -2133,7 +2204,8 @@
       },
       "response": "Invitation",
       "errors": [
-        "ILLEGAL_TRANSITION"
+        "ILLEGAL_TRANSITION",
+        "STEP_UP_REQUIRED"
       ],
       "audited": true,
       "events": [
@@ -2141,7 +2213,11 @@
       ],
       "screens": [
         "admin/staff"
-      ]
+      ],
+      "stepUp": {
+        "kind": "code",
+        "purpose": "staff-account"
+      }
     },
     {
       "id": "revokeInvitation",
@@ -2159,7 +2235,8 @@
       },
       "response": "Invitation",
       "errors": [
-        "ILLEGAL_TRANSITION"
+        "ILLEGAL_TRANSITION",
+        "STEP_UP_REQUIRED"
       ],
       "audited": true,
       "events": [
@@ -2167,7 +2244,11 @@
       ],
       "screens": [
         "admin/staff"
-      ]
+      ],
+      "stepUp": {
+        "kind": "code",
+        "purpose": "staff-account"
+      }
     }
   ],
   "events": {
@@ -2524,6 +2605,26 @@
       "key": "orderLinkTtlDays",
       "default": 180,
       "desc": "Emailed order link lifetime"
+    },
+    {
+      "key": "staffIdleMinutes",
+      "default": 30,
+      "desc": "Staff sessions end after this long without activity"
+    },
+    {
+      "key": "maxStaffSessions",
+      "default": 3,
+      "desc": "Concurrent staff sessions per account; the oldest is signed out"
+    },
+    {
+      "key": "refreshReuseGraceSeconds",
+      "default": 20,
+      "desc": "A just-rotated refresh token presented again within this window returns the same new tokens (parallel refresh)"
+    },
+    {
+      "key": "visitorRefreshDays",
+      "default": 30,
+      "desc": "Visitor refresh token lifetime after last activity"
     }
   ],
   "integrations": [
@@ -2560,10 +2661,6 @@
     "EMAIL_NOT_VERIFIED": {
       "status": 403,
       "meaning": "Confirm the email first. details.challenge is a fresh VerificationChallenge."
-    },
-    "NO_SELLER_ACCESS": {
-      "status": 403,
-      "meaning": "This account cannot act for that seller (or for any seller)."
     },
     "CODE_INVALID": {
       "status": 400,
@@ -2624,6 +2721,10 @@
     "ORDER_LINK_INVALID": {
       "status": 410,
       "meaning": "The order link has expired; use Guest order lookup."
+    },
+    "APP_PROOF_INVALID": {
+      "status": 401,
+      "meaning": "The app proof (Play Integrity or bot challenge) is missing or failed."
     }
   },
   "notes": [
@@ -2636,6 +2737,8 @@
     "Staff 'invite with roles' is one action in access (POST /api/admin/access/staff-invitations) which calls inviteStaff here; identity's admin endpoints cover resend, revoke and account security only.",
     "Every security-relevant change writes a security_events row (shown to the account owner). Staff actions on accounts are also recorded in audit via audit.record (optional dependency: if audit is disabled they are still in security_events).",
     "Rate limits: sign-in 10/min per IP and 5/15 min per email; registration and password reset 5/hour per email and 20/hour per IP; guest sessions 30/hour per IP.",
-    "Business values (lockout length, password rules, token lifetimes) are defaults to confirm; screen copy differs (register says 10 characters, the security page says 12): proposal is 10 for members and 12 for staff."
+    "Business values (lockout length, password rules, token lifetimes) are defaults to confirm; screen copy differs (register says 10 characters, the security page says 12): proposal is 10 for members and 12 for staff.",
+    "Every request carries a token (auth design v3, docs/03-auth-middleware.md). Visitor tokens come from POST /api/public/identity/app-sessions (bootstrap, app proof) and have the same JWT format as access tokens with kind visitor. The store visitor session is the guest session (guest_sessions table); X-Guest-Session is retired. Sign-in and registration called with a visitor token claim that session.",
+    "Access and visitor tokens are EdDSA JWTs: typ at+jwt, iss marketly-identity, aud store|seller|admin, kind, sub, sid, sellerId, memberId, authAt, twoStepAt, iat, exp, jti; public keys published by kid (AUTH_JWKS). Re-auth, reset, invitation and order-link tokens are opaque and travel in request bodies, never in URL paths."
   ]
 }

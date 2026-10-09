@@ -80,14 +80,14 @@ Seller money and company money kept apart: the seller ledger (proceeds, pending,
 | GET | `/api/admin/finance/payout-runs/{id}/payouts` | Sellers in a run (held and changed-destination rows first) | staff<br>`finance.ledger.view` | Page<RunPayoutRow> |
 | POST | `/api/admin/finance/payout-runs/{id}/recalculate` | Refresh a draft run after holds, retries or destination changes _(audited)_ | staff<br>`finance.payouts.prepare` | `PayoutRun` |
 | POST | `/api/admin/finance/payout-runs/{id}/submit` | Submit the run for approval _(audited)_ | staff<br>`finance.payouts.prepare` | `PayoutRun` |
-| POST | `/api/admin/finance/payout-runs/{id}/approve` | Approve a payout run (first or second Finance reviewer) _(idempotent, audited)_ | staff<br>`finance.payouts.approve` | `{ confirmedReview: bool, note: text? }` → `PayoutRun` |
+| POST | `/api/admin/finance/payout-runs/{id}/approve` | Approve a payout run (first or second Finance reviewer) _(idempotent, audited)_ | staff<br>`finance.payouts.approve` | `{ confirmedReview: bool, note: text?, stepUpCode: string? }` → `PayoutRun` |
 | POST | `/api/admin/finance/payout-runs/{id}/send-back` | Return the run to draft with a comment _(audited)_ | staff<br>`finance.payouts.approve` | `{ reason: text }` → `PayoutRun` |
 | POST | `/api/admin/finance/payout-runs/{id}/release` | Release an approved run now (otherwise released at the scheduled time) _(idempotent, audited)_ | staff<br>`finance.payouts.approve` | `PayoutRun` |
 | GET | `/api/admin/finance/payouts` | All payouts, e.g. failed payouts to follow up | staff<br>`finance.ledger.view` | Page<Payout> |
 | POST | `/api/admin/finance/payouts/{id}/retry` | Recover a failed payout to a verified destination _(idempotent, audited)_ | staff<br>`finance.payouts.approve` | `{ now: bool, reason: text }` → `Payout` |
 | GET | `/api/admin/finance/destination-reviews` | Payout destination changes waiting for verification and review | staff<br>`finance.destinations.review` | Page<DestinationReview> |
-| POST | `/api/admin/finance/destination-reviews/{id}/approve` | Verify a new payout destination _(audited)_ | staff<br>`finance.destinations.review` | `{ reason: text }` → `DestinationReview` |
-| POST | `/api/admin/finance/destination-reviews/{id}/reject` | Reject a payout destination change _(audited)_ | staff<br>`finance.destinations.review` | `{ reason: text }` → `DestinationReview` |
+| POST | `/api/admin/finance/destination-reviews/{id}/approve` | Verify a new payout destination _(audited, step-up: code)_ | staff<br>`finance.destinations.review` | `{ reason: text }` → `DestinationReview` |
+| POST | `/api/admin/finance/destination-reviews/{id}/reject` | Reject a payout destination change _(audited, step-up: code)_ | staff<br>`finance.destinations.review` | `{ reason: text }` → `DestinationReview` |
 | GET | `/api/admin/finance/reconciliation/days/{date}` | Daily finance check: checklist, totals and failed payouts | staff<br>`finance.reconciliation.work` | `ReconDay` |
 | GET | `/api/admin/finance/reconciliation/items` | Mismatched payments, seller amounts, deposits and unexplained amounts | staff<br>`finance.reconciliation.work` | Page<ReconItem> |
 | POST | `/api/admin/finance/reconciliation/items/{id}/assign` | Set the owner of a mismatch _(audited)_ | staff<br>`finance.reconciliation.work` | `{ ownerId: uuid }` → `ReconItem` |
@@ -99,7 +99,7 @@ Seller money and company money kept apart: the seller ledger (proceeds, pending,
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| GET | `/api/public/finance/fee-schedule` | Published fee rules and an example calculation | anyone | `FeeSchedule` |
+| GET | `/api/public/finance/fee-schedule` | Published fee rules and an example calculation | visitor | `FeeSchedule` |
 
 ## Webhooks
 
@@ -113,7 +113,7 @@ Seller money and company money kept apart: the seller ledger (proceeds, pending,
 
 | Field | Type |
 |---|---|
-| kind | `enum(order|order_item|return|refund|case|chargeback|payout|adjustment|ad_campaign|statement|seller|reconciliation)` |
+| kind | `enum(order|order_item|return|refund|case|chargeback|payout|adjustment|ad_campaign|fulfillment_service|statement|seller|reconciliation)` |
 | id | `string` |
 | ref | `string?` Human reference, e.g. MK-261005-17730, RT-…, PO-… |
 
@@ -217,7 +217,7 @@ Seller money and company money kept apart: the seller ledger (proceeds, pending,
 |---|---|
 | id | `uuid` |
 | at | `datetime` |
-| type | `enum(sale|shipping_charge|seller_discount|marketplace_fee|fee_refund|refund|refund_after_payout|hold|hold_release|adjustment|ad_charge|label_charge|chargeback|payout|payout_returned|owed_offset|cancellation)` |
+| type | `enum(sale|shipping_charge|seller_discount|marketplace_fee|fee_refund|refund|refund_after_payout|hold|hold_release|adjustment|ad_charge|service_fee|charge_credit|label_charge|chargeback|payout|payout_returned|owed_offset|cancellation)` |
 | typeLabel | `string` |
 | reference | `Reference` |
 | description | `string` e.g. 10% of $184.00 item price (shipping excluded) |
@@ -1360,13 +1360,15 @@ Indexes: `(date, check)`, `(status, detected_at)`
 | `shipping.label.voided` | shipping | Reverse the charge or expense booked for that labelId (any kind) |
 | `shipping.claim.status_changed` | shipping | paid: credit paidAmount to whoever bore the loss (seller ledger or company trading); other statuses are kept for reconciliation |
 | `promotions.coupon.redeemed` | promotions | Record discount funding (platform vs seller) for fee basis and discount reports |
+| `promotions.redemption.reversed` | promotions | Reverse the recorded discount funding (platform and seller parts) for the order item, so fee basis and discount reports match after a cancellation or refund |
+| `payments.refund.failed` | payments | Mark the refund's stored funding split failed (nothing is posted until payments.refund.sent); on the final attempt list it in the daily reconciliation |
 | `sellers.seller.approved` | sellers | Open the seller account and apply the new-seller hold rule |
 | `sellers.seller.suspended` | sellers | Put the seller's pending payouts on hold with reason restriction (review date from the restriction) |
 | `sellers.seller.closed` | sellers | Issue a final statement and schedule the last payout after open obligations |
 | `sellers.payout_account.changed` | sellers | Open a destination review; keep paying the current verified destination |
 | `access.approval.decided` | access | Finish approval-required holds, adjustments, corrections, payout runs and fee rule changes |
 | `support.case.decided` | support | Release or apply dispute holds linked to the case |
-| `wallet.credit.granted` | wallet | Phase 3: record the store-credit liability (refund to credit, goodwill, gift cards) |
+| `wallet.credit.granted` | wallet | Phase 3: record the store-credit liability (refund to credit, goodwill, gift cards). Only kind goodwill with chargedTo platform is booked as a platform cost; chargedTo seller is posted to the seller's earnings |
 | `wallet.credit.used` | wallet | Phase 3: reduce the store-credit liability when credit pays for an order |
 
 ## In-process API (for other modules)
@@ -1377,6 +1379,8 @@ Indexes: `(date, check)`, `(status, detected_at)`
 | calculateFee | `(input: FeeCalcInput) => FeeCalculation`<br>Fee and seller earnings for a price under the active fee rules | offers, promotions, sellers |
 | getSellerBalances | `(sellerId: uuid) => SellerBalances`<br>Balances for dashboards and seller detail | sellers, reports, graphql |
 | recordAdCharge | `(input: { sellerId: uuid, campaignId: uuid, campaignRef: string, period: DateRange, amount: Money, description: string }) => LedgerEntry`<br>Posts a seller ad charge, kept separate from commission | advertising |
+| recordServiceFee | `(input: { sellerId: uuid, amount: Money, kind: string, reference: Reference, description: string, idempotencyKey: string }) => LedgerEntry`<br>Posts a fulfillment-service fee (storage, handling, receiving, returns processing, removal; kind = the FeeCharge type) to the seller ledger as service_fee, kept separate from commission and ad charges. Same idempotencyKey returns the first entry. | fulfillment-service |
+| creditSellerCharge | `(input: { sellerId: uuid, amount: Money, originalEntryId: uuid, reason: string, idempotencyKey: string }) => LedgerEntry`<br>Credits back all or part of an ad charge or service fee (originalEntryId = the LedgerEntry returned by recordAdCharge or recordServiceFee) as charge_credit; never more than the original minus earlier credits. Same idempotencyKey returns the first entry. | advertising, fulfillment-service |
 | recordCompanyCost | `(input: { kind: 'buying_cost' | 'shipping_expense' | 'return_loss' | 'write_off' | 'supplier_credit', amount: Money, reference: Reference, at: datetime }) => void`<br>Company trading costs for the Official Store margin | purchasing, inventory, shipping, warehouse |
 | hasPayoutBlock | `(sellerId: uuid) => { blocked: bool, reasons: string[] }`<br>Whether a seller can be paid (verified destination, no full hold) | sellers |
 | marketplaceIncomeByDay | `(range: DateRange, sellerId?: uuid) => DailySellerIncome[]`<br>Fee income per seller per market day (commission and fees charged, fee refunds, net, ad income), from fee_charges and ledger_entries. Company revenue only; seller sales are not income. | reports |
@@ -1544,6 +1548,7 @@ enum FinanceReferenceKind @areas(in: [SELLER, ADMIN]) {
   PAYOUT
   ADJUSTMENT
   AD_CAMPAIGN
+  FULFILLMENT_SERVICE
   STATEMENT
   SELLER
   RECONCILIATION
@@ -1671,6 +1676,8 @@ enum LedgerEntryType @areas(in: [SELLER, ADMIN]) {
   HOLD_RELEASE
   ADJUSTMENT
   AD_CHARGE
+  SERVICE_FEE
+  CHARGE_CREDIT
   LABEL_CHARGE
   CHARGEBACK
   PAYOUT

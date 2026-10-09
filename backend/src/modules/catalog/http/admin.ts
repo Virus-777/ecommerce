@@ -1,6 +1,11 @@
-import { notImplemented, routes } from '../../../kernel/http/index.js';
+import type { Principal } from '../../../kernel/auth/index.js';
+import { routes } from '../../../kernel/http/index.js';
+import type { Actor } from '../../../spec/common.js';
 import { endpoints } from '../../../spec/catalog.js';
 import type { CatalogService } from '../service.js';
+
+const by = (i: { actor: Actor; requestId: string; principal: Principal }) => ({ actor: i.actor, requestId: i.requestId, principal: i.principal });
+const staff = (i: { principal: Principal }) => ({ kind: 'staff' as const, staffId: i.principal.accountId ?? null });
 
 /**
  * Admin API: /api/admin/catalog/…  (docs/api/modules/catalog.md)
@@ -9,61 +14,61 @@ import type { CatalogService } from '../service.js';
 export const adminRoutes = (service: CatalogService) =>
   routes(endpoints, 'admin', {
     /** GET /review-queue: Submissions waiting for review, oldest first */
-    reviewQueue: notImplemented,
+    reviewQueue: async (i) => service.reviewQueue(i.query, i.page, staff(i)),
     /** GET /products: All products with filters */
-    listProductsAdmin: notImplemented,
+    listProductsAdmin: async (i) => service.listProductsAdmin(i.query, i.page, staff(i)),
     /** GET /products/stats: Counts for the catalog product tabs and page header */
-    productStats: notImplemented,
+    productStats: async () => service.productStats(),
     /** POST /products/exports: Export the filtered product list */
-    exportProducts: notImplemented,
+    exportProducts: async (i) => service.exportProducts(i.body, by(i)),
     /** GET /products/{id}: Product with review history and duplicate candidates */
-    getProductAdmin: notImplemented,
+    getProductAdmin: async (i) => service.productAdminFor(i.params.id, staff(i)),
     /** POST /products/{id}/checks/{kind}/dismiss: Mark an automated check finding as not applicable (e.g. Not a duplicate) */
-    dismissCheck: notImplemented,
+    dismissCheck: async (i) => service.dismissCheck(i.params.id, i.params.kind, i.body, by(i)),
     /** PUT /products/{id}/review-draft: Save the reviewer's unsent decision */
-    saveReviewDraft: notImplemented,
+    saveReviewDraft: async (i) => service.saveReviewDraft(i.params.id, i.body, by(i)),
     /** POST /products: Create an Official Store product draft */
-    createOfficialDraft: notImplemented,
+    createOfficialDraft: async (i) => service.createOfficialDraft(i.body, by(i)),
     /** PATCH /products/{id}: Edit an Official Store draft */
-    updateOfficialDraft: notImplemented,
+    updateOfficialDraft: async (i) => service.updateOfficialDraft(i.params.id, i.body, by(i)),
     /** POST /products/{id}/submit: Submit an Official Store product (same standard as sellers) */
-    submitOfficial: notImplemented,
+    submitOfficial: async (i) => service.submitOfficial(i.params.id, by(i)),
     /** POST /products/{id}/approve: Approve a submission */
-    approveProduct: notImplemented,
+    approveProduct: async (i) => service.approve(i.params.id, i.body?.note, by(i)),
     /** POST /products/{id}/request-changes: Ask the submitter to fix specific fields */
-    requestChanges: notImplemented,
+    requestChanges: async (i) => service.requestChanges(i.params.id, i.body, by(i)),
     /** POST /products/{id}/reject: Reject with a reason */
-    rejectProduct: notImplemented,
+    rejectProduct: async (i) => service.reject(i.params.id, i.body.reason, by(i)),
     /** POST /products/{id}/publication: Set Active, Hidden or Suspended */
-    setPublication: notImplemented,
+    setPublication: async (i) => service.setPublication(i.params.id, i.body, by(i)),
     /** GET /products/{id}/publication-impact: What hiding or suspending the product would do */
-    publicationImpact: notImplemented,
+    publicationImpact: async (i) => service.publicationImpact(i.params.id, i.query.publication),
     /** POST /products/merge: Merge duplicates and submissions into the product to keep */
-    mergeDuplicate: notImplemented,
+    mergeDuplicate: async (i) => service.mergeDuplicate(i.body, by(i)),
     /** POST /products/merge/preview: Preview what a merge moves before confirming */
-    previewMerge: notImplemented,
+    previewMerge: async (i) => service.previewMerge(i.body),
     /** POST /products/bulk: Bulk edit products (category, brand, publication) with preview */
-    bulkUpdate: notImplemented,
+    bulkUpdate: async (i) => service.bulkUpdate(i.body, by(i)),
     /** GET /corrections: Open correction suggestions */
-    listCorrections: notImplemented,
+    listCorrections: async (i) => service.listCorrections(i.query.state, i.page),
     /** POST /corrections/{id}/decide: Accept or decline a correction */
-    decideCorrection: notImplemented,
+    decideCorrection: async (i) => service.decideCorrection(i.params.id, i.body, by(i)),
     /** GET /categories: Full category tree including hidden, with product and offer counts */
-    categoriesAdmin: notImplemented,
+    categoriesAdmin: async () => service.listCategories({ includeHidden: true }),
     /** POST /categories: Create a category */
-    createCategory: notImplemented,
+    createCategory: async (i) => service.createCategory(i.body, by(i)),
     /** PATCH /categories/{id}: Rename, move, hide or mark coming soon */
-    updateCategory: notImplemented,
+    updateCategory: async (i) => service.updateCategory(i.params.id, i.body, by(i)),
     /** GET /categories/{id}/attributes: Category attributes with fill rates, inheritance and image standards */
-    getCategoryAttributesAdmin: notImplemented,
+    getCategoryAttributesAdmin: async (i) => service.categoryAttributesAdmin(i.params.id),
     /** PUT /categories/{id}/attributes: Replace a category's attributes and image standards */
-    putAttributes: notImplemented,
+    putAttributes: async (i) => service.putAttributes(i.params.id, i.body, by(i)),
     /** GET /brands: All brands with counts, seller authorization and status */
-    listBrandsAdmin: notImplemented,
+    listBrandsAdmin: async (i) => service.listBrandsAdmin(i.query, i.page),
     /** POST /brands: Create a brand */
-    createBrand: notImplemented,
+    createBrand: async (i) => service.createBrand(i.body, by(i)),
     /** PATCH /brands/{id}: Edit a brand, including who can sell */
-    updateBrand: notImplemented,
+    updateBrand: async (i) => service.updateBrand(i.params.id, i.body, by(i)),
     /** POST /brands/{id}/status: Activate, flag for review or block a brand (decides seller brand requests) */
-    setBrandStatus: notImplemented,
+    setBrandStatus: async (i) => service.setBrandStatus(i.params.id, i.body, by(i)),
   });

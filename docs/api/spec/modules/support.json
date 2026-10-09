@@ -460,7 +460,7 @@
     }
   ],
   "endpoints": [
-    { "id": "getContactOptions", "area": "store", "method": "GET", "path": "/contact-options", "summary": "Topics, channels, hours and expected reply times", "auth": "anyone", "response": "ContactOptions", "screens": ["help/contact", "help/center"] },
+    { "id": "getContactOptions", "area": "store", "method": "GET", "path": "/contact-options", "summary": "Topics, channels, hours and expected reply times", "auth": "visitor", "response": "ContactOptions", "screens": ["help/contact", "help/center"] },
     { "id": "getProblemContext", "area": "store", "method": "GET", "path": "/orders/{orderId}/problem-context", "summary": "Order problem form context: packages and items, who handles first, when Marketly steps in, open cases", "desc": "Opened from the order page with the affected item pre-selected.", "auth": "shopper", "params": { "orderId": "uuid" }, "query": { "orderItemId": "uuid?" }, "response": "ProblemContext", "errors": ["NOT_FOUND"], "screens": ["help/order-problem", "help/contact"] },
     { "id": "createCase", "area": "store", "method": "POST", "path": "/cases", "summary": "Contact support or report an order problem (missing, damaged, wrong item, not arrived)", "desc": "Seller items go to the seller first with a reply deadline; Official Store and account topics go to Marketly support. If an item already has an open case, returns DUPLICATE_CASE with details.caseId so the app can add a message there instead.", "auth": "shopper", "body": "CaseCreateInput", "response": "CaseView", "status": 201, "idempotent": true, "errors": ["DUPLICATE_CASE", "NOT_FOUND"], "events": ["support.case.opened"], "screens": ["help/contact", "help/order-problem"] },
     { "id": "listCustomerCases", "area": "store", "method": "GET", "path": "/cases", "summary": "My cases with who handles them, the next action and the expected reply", "auth": "shopper", "paging": true, "query": { "state": "enum(open|closed|all)?" }, "response": "CaseSummary", "screens": ["help/cases", "account/overview", "account/order"] },
@@ -503,21 +503,22 @@
   ],
   "events": {
     "publishes": [
-      { "name": "support.case.opened", "when": "A case is opened by a customer, seller, staff or another module", "payload": { "caseId": "uuid", "ref": "string", "kind": "string", "category": "string", "priority": "string", "customerId": "uuid?", "sellerId": "uuid?", "orderId": "uuid?", "orderItemIds": "uuid[]", "handler": "string", "nextResponseDueAt": "datetime?" } },
+      { "name": "support.case.opened", "when": "A case is opened by a customer, seller, staff or another module", "payload": { "caseId": "uuid", "ref": "string", "kind": "string", "category": "string", "priority": "string", "customerId": "uuid?", "contactEmail": { "type": "email?", "desc": "Order contact email, for guests" }, "sellerId": "uuid?", "orderId": "uuid?", "orderItemIds": "uuid[]", "handler": "string", "nextResponseDueAt": "datetime?" } },
       { "name": "support.case.escalated", "when": "Marketly steps in, a case becomes a dispute, or it moves to another team", "payload": { "caseId": "uuid", "ref": "string", "to": "string", "reason": "string", "sellerId": "uuid?", "orderId": "uuid?" } },
-      { "name": "support.case.decided", "when": "A decision (or appeal decision) is recorded", "payload": { "caseId": "uuid", "ref": "string", "outcome": "string", "orderId": "uuid?", "returnId": "uuid?", "sellerId": "uuid?", "remedies": "Remedy[]", "appealDeadline": "datetime?", "final": "bool" } },
-      { "name": "support.case.resolved", "when": "A case is resolved", "payload": { "caseId": "uuid", "ref": "string", "sellerId": "uuid?", "resolvedAt": "datetime" } },
+      { "name": "support.case.decided", "when": "A decision (or appeal decision) is recorded", "payload": { "caseId": "uuid", "ref": "string", "outcome": "string", "orderId": "uuid?", "customerId": { "type": "uuid?", "desc": "Customers-module id; null for guests" }, "contactEmail": { "type": "email?", "desc": "Order contact email, for guests" }, "returnId": "uuid?", "sellerId": "uuid?", "remedies": "Remedy[]", "appealDeadline": "datetime?", "final": "bool" } },
+      { "name": "support.case.resolved", "when": "A case is resolved", "payload": { "caseId": "uuid", "ref": "string", "customerId": { "type": "uuid?", "desc": "Customers-module id; null for guests" }, "contactEmail": { "type": "email?", "desc": "Order contact email, for guests" }, "sellerId": "uuid?", "resolvedAt": "datetime" } },
       { "name": "support.case.reopened", "when": "A case is reopened", "payload": { "caseId": "uuid", "by": "Actor", "reason": "text" } },
       { "name": "support.case.appealed", "when": "A party appeals a decision", "payload": { "caseId": "uuid", "by": "Actor" } },
       { "name": "support.case.appeal_decided", "when": "An appeal is decided", "payload": { "caseId": "uuid", "overturned": "bool" } },
       { "name": "support.case.assigned", "when": "Owner changes", "payload": { "caseId": "uuid", "ownerId": "uuid", "team": "string" } },
-      { "name": "support.case.message_added", "when": "A visible message is added (drives notifications)", "payload": { "caseId": "uuid", "messageId": "uuid", "audience": "string", "authorRole": "string" } },
+      { "name": "support.case.message_added", "when": "A visible message is added (drives notifications)", "payload": { "caseId": "uuid", "messageId": "uuid", "customerId": { "type": "uuid?", "desc": "Customers-module id; null for guests" }, "contactEmail": { "type": "email?", "desc": "Order contact email, for guests" }, "sellerId": { "type": "uuid?", "desc": "Seller on the case (Official Store cases: null)" }, "audience": "string", "authorRole": "string" } },
       { "name": "support.case.overdue", "when": "A response deadline passes (party or staff)", "payload": { "caseId": "uuid", "whoMustAct": "string", "dueAt": "datetime" } }
     ],
     "consumes": [
       { "name": "returns.return.escalated", "does": "Open or link a dispute case for the return and assign it to the Returns team" },
       { "name": "returns.refund.approved", "does": "Move the matching refund remedy to approved/in progress" },
       { "name": "payments.refund.sent", "does": "Complete the refund remedy; the case can now be resolved" },
+      { "name": "wallet.goodwill.decided", "does": "For a case's goodwill credit remedy waiting for approval: mark it granted (done) or rejected and put the case back in the owner's queue" },
       { "name": "payments.refund.failed", "does": "Mark the refund remedy failed and put the case back in the owner's queue" },
       { "name": "returns.replacement.created", "does": "Link the replacement to its remedy" },
       { "name": "shipping.shipment.delivered", "does": "Complete replacement remedies when their shipment is delivered" },

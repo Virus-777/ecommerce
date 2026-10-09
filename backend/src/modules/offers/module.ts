@@ -6,6 +6,7 @@ import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { migrations } from './infra/postgres/migrations/index.js';
+import { mediaBulkFileReader } from './infra/files/media.js';
 import { createPostgresOffersRepository } from './infra/postgres/repository.js';
 import { OffersService } from './service.js';
 
@@ -17,17 +18,18 @@ import { OffersService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '0.1.0',
+  version: '1.0.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const service = new OffersService({ repo: createPostgresOffersRepository(ctx.db), ctx });
+    const service = new OffersService({ repo: createPostgresOffersRepository(ctx.db), ctx, files: mediaBulkFileReader(ctx) });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
+    ctx.afterBoot(() => service.views.registerDatasets().catch((err) => ctx.log.warn({ err }, 'offers: export datasets not registered; retried on first export')));
 
     // Events this module reacts to (spec events.consumes)
-    ctx.events.on("sellers.seller.restricted", (e) => service.onSellerRestrictedFromSellers(e.payload));
+    ctx.events.on("sellers.seller.restricted", (e) => service.onSellerRestrictedFromSellers(e.payload, e));
     ctx.events.on("sellers.restriction.updated", (e) => service.onRestrictionUpdatedFromSellers(e.payload));
     ctx.events.on("sellers.restriction.lifted", (e) => service.onRestrictionLiftedFromSellers(e.payload));
     ctx.events.on("sellers.seller.suspended", (e) => service.onSellerSuspendedFromSellers(e.payload));
@@ -40,7 +42,7 @@ export default defineModule({
     ctx.events.on("catalog.product.updated", (e) => service.onProductUpdatedFromCatalog(e.payload));
     ctx.events.on("inventory.stock.changed", (e) => service.onStockChangedFromInventory(e.payload));
     ctx.events.on("access.approval.decided", (e) => service.onApprovalDecidedFromAccess(e.payload));
-    ctx.events.on("trust.enforcement.recorded", (e) => service.onEnforcementRecordedFromTrust(e.payload));
+    ctx.events.on("trust.enforcement.recorded", (e) => service.onEnforcementRecordedFromTrust(e.payload, e));
     ctx.events.on("promotions.campaign.started", (e) => service.onCampaignStartedFromPromotions(e.payload));
     ctx.events.on("promotions.campaign.ended", (e) => service.onCampaignEndedFromPromotions(e.payload));
 

@@ -823,6 +823,7 @@ export interface FulfillmentServiceDb {
     currency: string;
     state: string;
     posted_at: Date | null;
+    ledger_entry_id: string | null;
     reason: string | null;
     idempotency_key: string;
   };
@@ -845,6 +846,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/overview",
     auth: "seller",
+    scope: "own-seller",
     summary: "Enrollment, stock held by Marketly, open inbound shipments and fees",
     response: () => SellerServiceOverview,
     status: 200,
@@ -857,6 +859,7 @@ export const endpoints = defineEndpoints({
     path: "/enrollment",
     auth: "seller",
     permission: "fulfillment-service.enrollment.manage",
+    scope: "own-seller",
     summary: "Apply for storage and shipping by Marketly and accept the service terms",
     body: () => EnrollmentInput,
     response: () => Enrollment,
@@ -872,6 +875,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/enrollment",
     auth: "seller",
+    scope: "own-seller",
     summary: "Own enrollment status, terms, capacity",
     response: () => Enrollment,
     status: 200,
@@ -885,6 +889,7 @@ export const endpoints = defineEndpoints({
     path: "/enrollment/offboard",
     auth: "seller",
     permission: "fulfillment-service.enrollment.manage",
+    scope: "own-seller",
     summary: "Stop using the service (stock must be removed)",
     body: () => z.object({
       reason: z.string(),
@@ -902,6 +907,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/fee-schedule",
     auth: "seller",
+    scope: "own-seller",
     summary: "Current and upcoming fee schedule",
     response: () => z.object({
       get current() {
@@ -920,6 +926,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/skus",
     auth: "seller",
+    scope: "own-seller",
     summary: "Enrolled SKUs with stock held by Marketly by group",
     query: () =>
       z.object({
@@ -938,6 +945,7 @@ export const endpoints = defineEndpoints({
     path: "/skus",
     auth: "seller",
     permission: "fulfillment-service.inbound.manage",
+    scope: "own-seller",
     summary: "Enroll an offer for fulfillment by Marketly",
     body: () => SkuEnrollmentInput,
     response: () => SkuEnrollment,
@@ -952,6 +960,7 @@ export const endpoints = defineEndpoints({
     path: "/skus/{id}/deactivate",
     auth: "seller",
     permission: "fulfillment-service.inbound.manage",
+    scope: "own-seller",
     summary: "Stop using the service for a SKU",
     params: () =>
       z.object({
@@ -968,6 +977,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/inbound",
     auth: "seller",
+    scope: "own-seller",
     summary: "Own inbound shipments",
     query: () =>
       z.object({
@@ -985,6 +995,7 @@ export const endpoints = defineEndpoints({
     path: "/inbound",
     auth: "seller",
     permission: "fulfillment-service.inbound.manage",
+    scope: "own-seller",
     summary: "Plan an inbound shipment to our warehouse",
     body: () => InboundInput,
     response: () => InboundShipment,
@@ -998,6 +1009,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/inbound/{id}",
     auth: "seller",
+    scope: "own-seller",
     summary: "Inbound shipment with labels, receiving results and discrepancies",
     params: () =>
       z.object({
@@ -1014,6 +1026,7 @@ export const endpoints = defineEndpoints({
     path: "/inbound/{id}",
     auth: "seller",
     permission: "fulfillment-service.inbound.manage",
+    scope: "own-seller",
     summary: "Edit a draft or add carrier and tracking",
     params: () =>
       z.object({
@@ -1032,6 +1045,7 @@ export const endpoints = defineEndpoints({
     path: "/inbound/{id}/submit",
     auth: "seller",
     permission: "fulfillment-service.inbound.manage",
+    scope: "own-seller",
     summary: "Submit and get box and unit labels",
     params: () =>
       z.object({
@@ -1050,6 +1064,7 @@ export const endpoints = defineEndpoints({
     path: "/inbound/{id}/ship",
     auth: "seller",
     permission: "fulfillment-service.inbound.manage",
+    scope: "own-seller",
     summary: "Mark as shipped with carrier and tracking",
     params: () =>
       z.object({
@@ -1072,6 +1087,7 @@ export const endpoints = defineEndpoints({
     path: "/inbound/{id}/cancel",
     auth: "seller",
     permission: "fulfillment-service.inbound.manage",
+    scope: "own-seller",
     summary: "Cancel before it ships",
     params: () =>
       z.object({
@@ -1092,6 +1108,7 @@ export const endpoints = defineEndpoints({
     path: "/inbound/{id}/discrepancy-response",
     auth: "seller",
     permission: "fulfillment-service.inbound.manage",
+    scope: "own-seller",
     summary: "Accept a receiving discrepancy or claim it with evidence",
     params: () =>
       z.object({
@@ -1113,6 +1130,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/returns",
     auth: "seller",
+    scope: "own-seller",
     summary: "Returns of service offers received at our warehouse with inspection outcome",
     query: () =>
       z.object({
@@ -1129,6 +1147,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/removals",
     auth: "seller",
+    scope: "own-seller",
     summary: "Removal and disposal orders",
     paging: true,
     response: () => RemovalOrder,
@@ -1142,6 +1161,7 @@ export const endpoints = defineEndpoints({
     path: "/removals",
     auth: "seller",
     permission: "fulfillment-service.inbound.manage",
+    scope: "own-seller",
     summary: "Ask for stock back or to dispose of it",
     body: () => RemovalInput,
     response: () => RemovalOrder,
@@ -1158,6 +1178,7 @@ export const endpoints = defineEndpoints({
     path: "/removals/{id}/cancel",
     auth: "seller",
     permission: "fulfillment-service.inbound.manage",
+    scope: "own-seller",
     summary: "Cancel a removal that has not been approved",
     params: () =>
       z.object({
@@ -1175,6 +1196,7 @@ export const endpoints = defineEndpoints({
     path: "/fees",
     auth: "seller",
     permission: "fulfillment-service.fees.view",
+    scope: "own-seller",
     summary: "Fees charged (storage, handling, receiving, returns, removal)",
     query: () =>
       z.object({
@@ -1193,6 +1215,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/skus/{id}/movements",
     auth: "seller",
+    scope: "own-seller",
     summary: "Ownership ledger for one SKU (every unit movement with reason)",
     params: () =>
       z.object({
@@ -1218,6 +1241,7 @@ export const endpoints = defineEndpoints({
     path: "/enrollments",
     auth: "staff",
     permission: "fulfillment-service.enrollment.review",
+    scope: "staff",
     summary: "Seller enrollments",
     query: () =>
       z.object({
@@ -1236,6 +1260,7 @@ export const endpoints = defineEndpoints({
     path: "/enrollments/{id}/decide",
     auth: "staff",
     permission: "fulfillment-service.enrollment.review",
+    scope: "staff",
     summary: "Approve with capacity, reject or request information",
     params: () =>
       z.object({
@@ -1262,6 +1287,7 @@ export const endpoints = defineEndpoints({
     path: "/enrollments/{id}/status",
     auth: "staff",
     permission: "fulfillment-service.enrollment.review",
+    scope: "staff",
     summary: "Suspend, reinstate, offboard or close an enrollment",
     params: () =>
       z.object({
@@ -1287,6 +1313,7 @@ export const endpoints = defineEndpoints({
     path: "/skus/{id}/review",
     auth: "staff",
     permission: "fulfillment-service.enrollment.review",
+    scope: "staff",
     summary: "Approve or reject a SKU for the service",
     params: () =>
       z.object({
@@ -1310,6 +1337,7 @@ export const endpoints = defineEndpoints({
     path: "/inbound",
     auth: "staff",
     permission: "fulfillment-service.inbound.receive",
+    scope: "staff",
     summary: "Inbound shipments expected and arriving (receiving queue)",
     query: () =>
       z.object({
@@ -1330,6 +1358,7 @@ export const endpoints = defineEndpoints({
     path: "/inbound/{id}/arrive",
     auth: "staff",
     permission: "fulfillment-service.inbound.receive",
+    scope: "staff",
     summary: "Record arrival at the dock",
     params: () =>
       z.object({
@@ -1352,6 +1381,7 @@ export const endpoints = defineEndpoints({
     path: "/inbound/{id}/receive",
     auth: "staff",
     permission: "fulfillment-service.inbound.receive",
+    scope: "staff",
     summary: "Record received and damaged units (partial or complete)",
     desc: "Counts go to inventory as seller-owned stock (incoming → available after inspection, damaged → held). Completing with differences opens a discrepancy for the seller.",
     params: () =>
@@ -1374,6 +1404,7 @@ export const endpoints = defineEndpoints({
     path: "/inbound/{id}/discrepancy-decision",
     auth: "staff",
     permission: "fulfillment-service.inbound.receive",
+    scope: "staff",
     summary: "Decide a claimed discrepancy (reimburse, adjust or reject)",
     params: () =>
       z.object({
@@ -1402,6 +1433,7 @@ export const endpoints = defineEndpoints({
     path: "/fulfillment-requests",
     auth: "staff",
     permission: "fulfillment-service.operations.view",
+    scope: "staff",
     summary: "Orders for service offers and their warehouse progress",
     query: () =>
       z.object({
@@ -1421,6 +1453,7 @@ export const endpoints = defineEndpoints({
     path: "/returns/{id}/outcome",
     auth: "staff",
     permission: "fulfillment-service.inbound.receive",
+    scope: "staff",
     summary: "Record the inspection outcome of a returned service unit",
     params: () =>
       z.object({
@@ -1445,6 +1478,7 @@ export const endpoints = defineEndpoints({
     path: "/removals",
     auth: "staff",
     permission: "fulfillment-service.operations.view",
+    scope: "staff",
     summary: "Removal and disposal orders",
     query: () =>
       z.object({
@@ -1463,6 +1497,7 @@ export const endpoints = defineEndpoints({
     path: "/removals/{id}/transition",
     auth: "staff",
     permission: "fulfillment-service.inbound.receive",
+    scope: "staff",
     summary: "Approve, process, ship or complete a removal order",
     params: () =>
       z.object({
@@ -1487,6 +1522,7 @@ export const endpoints = defineEndpoints({
     path: "/sellers/{sellerId}/stock",
     auth: "staff",
     permission: "fulfillment-service.operations.view",
+    scope: "staff",
     summary: "Seller-owned stock held by the company, by SKU and group",
     params: () =>
       z.object({
@@ -1504,6 +1540,7 @@ export const endpoints = defineEndpoints({
     path: "/fee-schedules",
     auth: "staff",
     permission: "fulfillment-service.fees.manage",
+    scope: "staff",
     summary: "Fee schedule versions",
     response: () => z.array(FeeSchedule),
     status: 200,
@@ -1516,6 +1553,7 @@ export const endpoints = defineEndpoints({
     path: "/fee-schedules",
     auth: "staff",
     permission: "fulfillment-service.fees.manage",
+    scope: "staff",
     summary: "Propose a new fee schedule with an effective date",
     desc: "Needs Business Owner approval and sellerNoticeDays notice; enrolled sellers are notified.",
     body: () => z.object({
@@ -1540,6 +1578,7 @@ export const endpoints = defineEndpoints({
     path: "/fees",
     auth: "staff",
     permission: "fulfillment-service.fees.manage",
+    scope: "staff",
     summary: "Fee charges across sellers",
     query: () =>
       z.object({
@@ -1560,6 +1599,7 @@ export const endpoints = defineEndpoints({
     path: "/fees/{id}/reverse",
     auth: "staff",
     permission: "fulfillment-service.fees.manage",
+    scope: "staff",
     summary: "Reverse a fee charge with a reason",
     params: () =>
       z.object({
@@ -2411,6 +2451,10 @@ export const spec = defineModuleSpec({
         "type": "timestamptz",
         "nullable": true
       },
+      "ledger_entry_id": {
+        "type": "uuid",
+        "nullable": true
+      },
       "reason": {
         "type": "text",
         "nullable": true
@@ -2445,6 +2489,35 @@ export const spec = defineModuleSpec({
         "type": "jsonb",
         "nullable": false
       }
+    }
+  },
+  tenantTables: {
+    "enrollments": {
+      "seller": "seller_id"
+    },
+    "sku_enrollments": {
+      "seller": "seller_id"
+    },
+    "inbound_shipments": {
+      "seller": "seller_id"
+    },
+    "ownership_ledger": {
+      "seller": "seller_id"
+    },
+    "fulfillment_requests": {
+      "seller": "seller_id"
+    },
+    "service_returns": {
+      "seller": "seller_id"
+    },
+    "removal_orders": {
+      "seller": "seller_id"
+    },
+    "fee_charges": {
+      "seller": "seller_id"
+    },
+    "storage_snapshots": {
+      "seller": "seller_id"
     }
   },
   endpoints,

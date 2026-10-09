@@ -1,0 +1,219 @@
+/**
+ * Shared plumbing of the sellers use cases: time, settings, events, audit, the seller timeline,
+ * optional modules, media references and small lookups. The use cases live in the part classes
+ * (applications, accounts, storefront, members, enforcement, performance), which all get one Core.
+ */
+import type { Principal } from '../../../kernel/auth/index.js';
+import { AppError, isNotImplemented } from '../../../kernel/errors/index.js';
+import type { EventMap } from '../../../kernel/events/index.js';
+import { dateInZone } from '../../../kernel/lib/clock.js';
+import { isUuid, newId } from '../../../kernel/lib/ids.js';
+import { secretFor } from '../../../kernel/lib/secrets.js';
+import type { StateMachine } from '../../../kernel/lib/state-machine.js';
+import type { ModuleContext, PublicApiMap } from '../../../kernel/module-system/index.js';
+import type * as workqueues from '../../../spec/workqueues.js';
+import type * as audit from '../../../spec/audit.js';
+import type * as common from '../../../spec/common.js';
+import type { AgreementDocument } from '../../../spec/sellers.js';
+import { AGREEMENT_KEYS, agreementDocument, DEFAULT_AGREEMENT_VERSION, type AgreementKey } from '../domain/catalogue.js';
+import type { StoredPayout } from '../domain/rules.js';
+import { taxIdCipher, type TaxIdCipher } from '../infra/crypto.js';
+import { actorText, type Refs } from '../mappers.js';
+import type { AccountEventRec, ApplicationRec, SellerRec, SellersProviders, SellersRepository } from '../ports.js';
+import type { AccountsPart } from './accounts.js';
+import type { ApplicationsPart } from './applications.js';
+import type { EnforcementPart } from './enforcement.js';
+import type { MembersPart } from './members.js';
+import type { PerformancePart } from './performance.js';
+import type { StorefrontPart } from './storefront.js';
+
+export interface SellersServiceDeps {
+  repo: SellersRepository;
+  ctx: ModuleContext<'sellers'>;
+  providers: SellersProviders;
+}
+
+/** Who acts, as the HTTP layer (or an event) knows it */
+export interface By {
+  actor: common.Actor;
+  requestId?: string;
+  principal?: Principal | null;
+}
+
+export interface Parts {
+  applications: ApplicationsPart;
+  accounts: AccountsPart;
+  storefront: StorefrontPart;
+  members: MembersPart;
+  enforcement: EnforcementPart;
+  performance: PerformancePart;
+}
+
+type OwnEvent = keyof EventMap & `sellers.${string}`;
+type Optional = Parameters<ModuleContext<'sellers'>['tryUse']>[0];
+
+export const SYSTEM: common.Actor = { kind: 'system', id: null };
+export const TRUST_TEAM: common.Actor = { kind: 'system', id: null, name: 'Trust and Risk' };
+
+export const invalid = (issues: { path: string; message: string }[], message = 'Some details need fixing') => new AppError('VALIDATION_FAILED', message, { issues });
+export const notFound = (what: string) => new AppError('NOT_FOUND', `${what} not found`);
+
+export class Core {
+  readonly repo: SellersRepository;
+  readonly ctx: ModuleContext<'sellers'>;
+  readonly providers: SellersProviders;
+  parts!: Parts;
+  #cipher?: TaxIdCipher;
+
+  constructor(deps: SellersServiceDeps) {
+    this.repo = deps.repo;
+    this.ctx = deps.ctx;
+    this.providers = deps.providers;
+  }
+
+  get cipher(): TaxIdCipher {
+    return (this.#cipher ??= taxIdCipher(secretFor(this.ctx.config, 'sellers.tax-id')));
+  }
+
+  now = () => this.ctx.clock.now();
+  /** Market date YYYY-MM-DD */
+  today = (at: Date = this.now()) => dateInZone(at, this.ctx.config.market.timeZone);
+  setting = <K extends Parameters<ModuleContext<'sellers'>['settings']['get']>[0]>(key: K) => this.ctx.settings.get(key);
+
+  publish<N extends OwnEvent>(name: N, payload: EventMap[N], by: { actor?: common.Actor; requestId?: string } = {}) {
+    this.ctx.events.publish(name as never, payload as never, { actor: by.actor ?? SYSTEM, ...(by.requestId ? { requestId: by.requestId } : {}) });
+  }
+
+  async audit(entry: Omit<audit.RecordInput, 'actor' | 'module' | 'requestId'>, by: By) {
+    await this.ctx.tryUse('audit')?.record({ ...entry, actor: by.actor, module: this.ctx.name, requestId: by.requestId ?? null });
+  }
+
+  /** One row of the seller timeline (seller-visible unless staff-only) */
+  async timeline(
+    repo: SellersRepository,
+    sellerId: string,
+    e: { kind: string; title: string; detail?: string | null; visibility?: 'seller' | 'staff'; actor?: common.Actor | null; ref?: string | null },
+  ): Promise<AccountEventRec> {
+    const actor = e.actor ?? SYSTEM;
+    return repo.insert('account_events', {
+      id: newId(),
+      seller_id: sellerId,
+      kind: e.kind,
+      title: e.title,
+      detail: e.detail ?? null,
+      visibility: e.visibility ?? 'seller',
+      actor_kind: actor.kind,
+      actor_id: actor.id ?? null,
+      ref: e.ref ?? null,
+      at: this.now(),
+    });
+  }
+
+  /**
+   * Calls an optional module for a read section. Off, not built yet or failing → `unavailable` gets the
+   * section name and the result is undefined (the response still answers).
+   */
+  async optional<M extends Optional, R>(module: M, section: string, unavailable: string[] | null, fn: (api: PublicApiMap[M & keyof PublicApiMap]) => Promise<R>): Promise<R | undefined> {
+    const api = this.ctx.tryUse(module) as PublicApiMap[M & keyof PublicApiMap] | undefined;
+    if (!api) {
+      if (unavailable && !unavailable.includes(section)) unavailable.push(section);
+      return undefined;
+    }
+    try {
+      return await fn(api);
+    } catch (err) {
+      if (!isNotImplemented(err)) this.ctx.log.warn({ err, module, section }, `sellers: ${module} could not answer for ${section}`);
+      if (unavailable && !unavailable.includes(section)) unavailable.push(section);
+      return undefined;
+    }
+  }
+
+  fallbackUrl = (id: string) => `${this.ctx.config.publicUrls.store.replace(/\/$/, '')}/media/unavailable/${id}`;
+
+  /** MediaRefs for files, looked up in one call; unknown files get a placeholder */
+  async mediaRefs(ids: readonly (string | null | undefined)[]): Promise<Refs> {
+    const wanted = [...new Set(ids.filter((i): i is string => isUuid(i)))];
+    const map = new Map<string, common.MediaRef>();
+    if (wanted.length) {
+      try {
+        for (const r of await this.ctx.use('media').refs(wanted)) map.set(r.id, r);
+      } catch (err) {
+        if (!isNotImplemented(err)) this.ctx.log.warn({ err }, 'sellers: media refs failed');
+      }
+    }
+    return (id) => (id ? (map.get(id) ?? (isUuid(id) ? { id, url: this.fallbackUrl(id) } : null)) : null);
+  }
+
+  /** Staff display name (access), or null */
+  async staffName(id: string | null | undefined): Promise<string | null> {
+    if (!id || !isUuid(id)) return null;
+    try {
+      return (await this.ctx.use('access').getStaffRef(id))?.name ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async seller(id: string, o: { repo?: SellersRepository; forUpdate?: boolean } = {}): Promise<SellerRec> {
+    const s = isUuid(id) ? await (o.repo ?? this.repo).get('sellers', id, { forUpdate: o.forUpdate }) : undefined;
+    if (!s) throw notFound('Seller');
+    return s;
+  }
+
+  async applicationOf(s: SellerRec, repo: SellersRepository = this.repo): Promise<ApplicationRec | undefined> {
+    return s.application_id ? repo.get('applications', s.application_id) : undefined;
+  }
+
+  payoutOf(app: ApplicationRec | undefined): StoredPayout {
+    return ((app?.payout ?? {}) as StoredPayout) || {};
+  }
+
+  /** The state after `event` (ILLEGAL_TRANSITION otherwise) */
+  step<S extends string = string>(machine: StateMachine<string, string>, from: string, event: string): S {
+    return machine.next(from as never, event as never) as S;
+  }
+
+  actorText = actorText;
+
+  /** A staff principal for in-process callers that pass an Actor (trust → requestRestriction) */
+  principalOf(by: By): Principal {
+    if (by.principal) return by.principal;
+    return { kind: 'staff', audience: 'admin', accountId: by.actor.id ?? null, sessionId: `sellers:${by.actor.kind}`, name: by.actor.name ?? null };
+  }
+
+  /** Agreement versions in force: content policies when content is on, else the built-in versions */
+  async currentAgreements(): Promise<AgreementDocument[]> {
+    const base = this.ctx.config.publicUrls.store;
+    const fromContent = await this.optional('content', 'agreements', null, (c) => c.currentPolicyVersions([...AGREEMENT_KEYS]));
+    return AGREEMENT_KEYS.map((key: AgreementKey) => {
+      const v = fromContent?.find((p) => p.policyKey === key);
+      return agreementDocument(key, v ? { versionLabel: v.version, policyVersionId: v.versionId, effectiveFrom: v.effectiveAt.slice(0, 10) } : DEFAULT_AGREEMENT_VERSION, base);
+    });
+  }
+
+  /** Raise a work item when workqueues is on (never fails the caller) */
+  async raise(input: workqueues.RaiseInput) {
+    await this.optional('workqueues', 'workqueues', null, (w) => w.raise(input));
+  }
+
+  async resolveWork(dedupeKey: string, note: string, by: common.Actor) {
+    await this.optional('workqueues', 'workqueues', null, (w) => w.resolveBySource(dedupeKey, { note, by }));
+  }
+}
+
+/** Base class of the use-case parts */
+export abstract class Part {
+  constructor(protected readonly core: Core) {}
+  protected get repo() {
+    return this.core.repo;
+  }
+  protected get ctx() {
+    return this.core.ctx;
+  }
+  protected get parts() {
+    return this.core.parts;
+  }
+  protected now() {
+    return this.core.now();
+  }
+}

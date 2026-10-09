@@ -84,7 +84,7 @@ Trust and Risk's case file: reports of counterfeit goods, suspicious orders, fak
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| POST | `/api/public/trust/reports` | Brand or rights owner reports counterfeit listings _(phase 2)_ | anyone | `{ brandName: string, contactName: string, contactEmail: email, offerOrProductIds: uuid[], details: text, proofMediaIds: uuid[] }` → `{ ref: string, confirmationSent: bool }` |
+| POST | `/api/public/trust/reports` | Brand or rights owner reports counterfeit listings _(phase 2)_ | visitor | `{ brandName: string, contactName: string, contactEmail: email, offerOrProductIds: uuid[], details: text, proofMediaIds: uuid[] }` → `{ ref: string, confirmationSent: bool }` |
 
 ## Types
 
@@ -674,6 +674,7 @@ Indexes: `(kind, at)`, `(subject_type, subject_id, at)`
 
 | Consumes | From | Does |
 |---|---|---|
+| `access.approval.decided` | access | Finish an accepted or reversed recommendation that needed approval (approved: apply; otherwise return it to its previous state) |
 | `reviews.content.referred` | reviews | Open or extend a fake_reviews report with the referred reviews as subjects |
 | `messaging.message.reported` | messaging | Open an abuse report for the conversation |
 | `orders.order.placed` | orders | Feed the linked-new-accounts detection rule (accounts, cards, shipping address) |

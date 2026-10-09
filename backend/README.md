@@ -1,12 +1,12 @@
 # Marketly backend
 
-The backend structure from [docs/02-backend-architecture.md](../docs/02-backend-architecture.md), generated from the API design in [docs/api/spec](../docs/api/spec). The kernel works end to end: routing, validation, auth guard, paging, idempotency, events, jobs, migrations, OpenAPI and GraphQL. The 33 modules are wired to their specs, but their business logic is not built yet: every endpoint answers `501 NOT_IMPLEMENTED` until its handler is written.
+The backend structure from [docs/02-backend-architecture.md](../docs/02-backend-architecture.md), generated from the API design in [docs/api/spec](../docs/api/spec). The kernel works end to end: routing, token verification and authorization middleware on every request, validation, paging, idempotency, events, jobs, migrations, OpenAPI and GraphQL. The 33 modules are wired to their specs, but their business logic is not built yet: every endpoint answers `501 NOT_IMPLEMENTED` until its handler is written.
 
 ```bash
 npm install
 npm run dev            # http://localhost:4000 · API reference at /docs · in-memory PostgreSQL (PGlite)
-npm run token -- staff # a development token (customer | seller | staff) to call any area before identity is built
-npm run check          # spec freshness, types, module boundaries, API conformance, tests
+npm run token -- staff # a development token (visitor | customer | seller | staff); every request needs one
+npm run check          # spec freshness, types, module boundaries, API conformance, tests, every endpoint over HTTP
 ```
 
 Node 22+ (tested on 26). With no `DATABASE_URL`, the server runs PGlite in-process. Set `PGLITE_DIR` to keep data between restarts, or `DATABASE_URL` for a PostgreSQL server. See [.env.example](.env.example).
@@ -37,7 +37,7 @@ src/
   modules.config.ts        which modules run (phase 3–4 modules are off at launch)
   spec/                    GENERATED from docs/api/spec: types, endpoints, events, tables, public APIs
   kernel/                  shared plumbing, no business rules
-    auth/                  guard: identity.authenticate, access.hasPermission, sellers.getMemberAccess; dev tokens
+    auth/                  middleware (docs/03-auth-middleware.md): EdDSA tokens, revocations, caller checks, scope, masking, rate limits, dev tokens
     http/                  route registration, typed handlers, idempotency, OpenAPI, error format
     graphql/               per-area schema composition, @source/@auth/@phase, Mercurius
     module-system/         defineModule, typed ctx, loader (dependency rules), boot (wiring checks)
@@ -75,7 +75,7 @@ domain/              state machines and pure rules
    ```
 5. Add behaviour tests next to the module's contract test. `npm run modules` shows how many endpoints each module has built.
 
-Build in dependency order: identity → access → audit → settings → … (`npm run modules` prints the order). Until identity, access and sellers are built, use `npm run token` to call guarded endpoints.
+Build in dependency order: identity → access → audit → settings → … (`npm run modules` prints the order). Until identity, access and sellers are built, use `npm run token` to call endpoints: every endpoint needs a token (`curl -H "Authorization: Bearer $(npm run -s token -- visitor)" …`).
 
 ## Commands
 
@@ -86,10 +86,12 @@ Build in dependency order: identity → access → audit → settings → … (`
 | `npm run gen` | Spec → code (`--check` in CI) |
 | `npm run check:api` | Boots all 33 modules and compares the server's OpenAPI with `docs/api/openapi.json`, field by field |
 | `npm run check:boundaries` | Modules import only kernel, spec and other modules' `contract.ts` |
+| `npm run bootstrap-owner -- --email … --name "…"` | Invites the first Business Owner (also Platform Administrator) on a fresh database (DATABASE_URL or PGLITE_DIR) and prints the accept link. Refuses once a Business Owner exists |
+| `npm run test:http` | Boots all 33 modules on a real port and calls every endpoint over HTTP with input generated from the spec: no token, invalid token, another app's token, wrong caller, missing permission, missing step-up, right token. `-- --url http://localhost:4000` tests a running dev server (`RATE_LIMITS=false`); report in `.data/test-http-report.json` |
 | `npm run modules` | Phase, on/off, endpoints built, dependencies; `--graph` (Mermaid), `--without <m>` |
 | `npm run module:new <name>` | Scaffold a module from a new spec file |
 | `npm run migrate` | Apply migrations to `DATABASE_URL` or `PGLITE_DIR` |
-| `npm run token -- <customer\|seller\|staff>` | Development token (`--permissions a,b`, `--seller <id>`) |
+| `npm run token -- <visitor\|customer\|seller\|staff>` | Development token, valid 12 h (`--permissions a,b`, `--seller <id>`, `--audience store\|seller\|admin`) |
 
 ## Open points in the design
 

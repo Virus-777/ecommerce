@@ -1,4 +1,4 @@
-import { notImplemented, routes } from '../../../kernel/http/index.js';
+import { routes } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/reports.js';
 import type { ReportsService } from '../service.js';
 
@@ -9,5 +9,8 @@ import type { ReportsService } from '../service.js';
 export const storeRoutes = (service: ReportsService) =>
   routes(endpoints, 'store', {
     /** POST /signals: Batched anonymous discovery signals from the website and app (product views) */
-    recordStoreSignals: notImplemented,
+    recordStoreSignals: async (i) => {
+      const customerId = i.scope.kind === 'customer' ? i.scope.customerId : null;
+      await service.readModels.recordStoreSignals(i.body.signals, i.principal, customerId);
+    },
   });

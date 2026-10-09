@@ -1,4 +1,5 @@
-import { notImplemented, routes } from '../../../kernel/http/index.js';
+import { AppError } from '../../../kernel/errors/index.js';
+import { routes } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/catalog.js';
 import type { CatalogService } from '../service.js';
 
@@ -9,13 +10,21 @@ import type { CatalogService } from '../service.js';
 export const storeRoutes = (service: CatalogService) =>
   routes(endpoints, 'store', {
     /** GET /categories: Visible category tree with in-stock counts and images */
-    listCategories: notImplemented,
+    listCategories: async () => service.listCategories({ includeHidden: false }),
     /** GET /categories/{slug}: Category with breadcrumb, subcategories and filterable attributes */
-    getCategory: notImplemented,
+    getCategory: async ({ params }) => {
+      const c = await service.getCategoryBySlug(params.slug);
+      if (!c) throw new AppError('NOT_FOUND', 'Category not found');
+      return c;
+    },
     /** GET /brands: Active brands, optionally the popular brands of one category */
-    listBrands: notImplemented,
+    listBrands: async ({ query, page }) => service.listBrandsStore(query, page),
     /** GET /brands/{slug}: Brand page header (logo, banner, description, product count) */
-    getBrand: notImplemented,
+    getBrand: async ({ params }) => {
+      const b = await service.getBrandBySlug(params.slug);
+      if (!b) throw new AppError('NOT_FOUND', 'Brand not found');
+      return b;
+    },
     /** GET /products/{id}: Product detail (shared content only) */
-    getProduct: notImplemented,
+    getProduct: async ({ params }) => service.storeProduct(params.id),
   });

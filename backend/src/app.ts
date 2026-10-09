@@ -4,8 +4,11 @@
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import type { FastifyInstance } from 'fastify';
-import { devAuthenticator, moduleAuthenticator } from './kernel/auth/authenticators.js';
-import type { Authenticator } from './kernel/auth/index.js';
+import { moduleAuthorities, type Authorities } from './kernel/auth/authorities.js';
+import type { AuthChain, WebhookVerifier } from './kernel/auth/chain.js';
+import { createAuthChain } from './kernel/auth/setup.js';
+import type { Principal } from './kernel/auth/index.js';
+import type { KeyRing } from './kernel/auth/tokens.js';
 import { loadConfig, type Config } from './kernel/config/index.js';
 import { createDatabase, type Database } from './kernel/db/index.js';
 import { registerErrorCodes } from './kernel/errors/index.js';
@@ -15,6 +18,7 @@ import { postgresIdempotencyStore } from './kernel/http/idempotency.js';
 import { createOpenApiObjectTransform, createOpenApiTransform } from './kernel/http/openapi.js';
 import { registerEndpoints } from './kernel/http/register.js';
 import { createServer } from './kernel/http/server.js';
+import type { PublicApiMap } from './kernel/module-system/public-apis.js';
 import { JobScheduler } from './kernel/jobs/index.js';
 import { systemClock, type Clock } from './kernel/lib/clock.js';
 import { createRefGenerator } from './kernel/lib/refs.js';
@@ -35,8 +39,15 @@ export interface BuildOptions {
   /** Bring your own database (tests share one); otherwise created from the config and closed with the app */
   database?: Database;
   clock?: Clock;
-  /** Wrap the authenticator (tests) */
-  authenticator?: (base: Authenticator) => Authenticator;
+  /** Wrap the authorities (tests) */
+  authorities?: (base: Authorities) => Authorities;
+  /** Verifiers for modules that don't register their own yet (tests) */
+  webhookVerifiers?: Record<string, WebhookVerifier>;
+  /**
+   * Tests: replace public API functions of enabled modules, e.g. a dependency built in a later
+   * tranche: { identity: { getAccount: async () => ({ … }) } }. Functions not listed keep the module's own.
+   */
+  apiStubs?: { [M in keyof PublicApiMap]?: Partial<PublicApiMap[M]> };
 }
 
 export interface Kernel {
@@ -46,15 +57,28 @@ export interface Kernel {
   jobs: JobScheduler;
   modules: string[];
   boot: BootResult;
+  auth: AuthChain;
+  /** Development and tests: the key that signs dev tokens */
+  devSigner?: KeyRing['dev'];
   graphql: Awaited<ReturnType<typeof registerGraphQL>>;
   /** Persisted screen queries that select fields of a disabled module */
   unusableQueries: ReturnType<typeof unusablePersistedQueries>;
+  /** Served on the internal health port (main.ts), not on the public API */
+  health(): { status: 'ok'; modules: number; launchPhase: number };
 }
 
 declare module 'fastify' {
   interface FastifyInstance {
     kernel: Kernel;
   }
+}
+
+/** A module's API with some functions replaced (the module's own methods keep their `this`). */
+function withStubs(api: object | undefined, stub: object): object {
+  return new Proxy(api ?? {}, {
+    get: (target, key) => (key in stub ? (stub as Record<PropertyKey, unknown>)[key] : Reflect.get(target, key, target)),
+    has: (target, key) => key in stub || key in target,
+  });
 }
 
 export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance> {
@@ -67,7 +91,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
     loadDefinitions(opts.modules ?? config.modules ?? enabledModules, moduleLoaders),
   ]);
 
-  /* ---------------------------------------------------------------- OpenAPI at /docs (generated from the same Zod schemas) */
+  /* ---------------------------------------------------------------- OpenAPI (generated from the same Zod schemas); Swagger UI in development */
   await app.register(swagger, {
     openapi: {
       openapi: '3.1.0',
@@ -76,15 +100,16 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
       components: {
         securitySchemes: {
           bearer: { type: 'http', scheme: 'bearer', description: common.headers.Authorization },
-          guestSession: { type: 'apiKey', in: 'header', name: 'X-Guest-Session' },
+          refreshCookie: { type: 'apiKey', in: 'cookie', name: '__Host-mk_refresh', description: 'Website refresh token (HttpOnly). Android sends refreshToken in the body instead.' },
+          appProof: { type: 'apiKey', in: 'header', name: 'X-App-Proof', description: common.headers['X-App-Proof'] },
           webhookSignature: { type: 'apiKey', in: 'header', name: 'X-Signature', description: 'Provider signature, verified per provider' },
         },
       },
     },
-    transform: createOpenApiTransform(common.apiTypes, ['/docs', '/health']),
+    transform: createOpenApiTransform(common.apiTypes, ['/docs']),
     transformObject: createOpenApiObjectTransform(common.apiTypes),
   });
-  await app.register(swaggerUi, { routePrefix: '/docs' });
+  if (config.docsEnabled) await app.register(swaggerUi, { routePrefix: '/docs' });
 
   /* ---------------------------------------------------------------- kernel services */
   const clock = opts.clock ?? systemClock;
@@ -96,31 +121,62 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
 
   /* ---------------------------------------------------------------- modules */
   if (config.migrateOnStart) await migrate(database, migrationUnits(defs), (m) => app.log.info(m));
-  const boot = await bootModules(defs, { config, log: app.log, database, clock, events, jobs, refs });
+  // modules get permission checks before the auth chain exists (it needs their APIs): bind it late
+  let authChain: AuthChain | undefined;
+  const can = async (principal: Principal | null | undefined, permission: string) => (authChain ? authChain.canPrincipal(principal, permission) : false);
+  const boot = await bootModules(defs, { config, log: app.log, database, clock, events, jobs, refs, can });
   for (const w of boot.warnings) app.log.debug(w);
+  for (const [m, v] of Object.entries(opts.webhookVerifiers ?? {})) if (!boot.webhookVerifiers.has(m)) boot.webhookVerifiers.set(m, v);
+  for (const [m, stub] of Object.entries(opts.apiStubs ?? {})) boot.apis.set(m, withStubs(boot.apis.get(m), stub as object));
+  await boot.runAfterBoot();
 
-  let authenticator: Authenticator = moduleAuthenticator((m) => boot.apis.get(m) as never);
-  if (config.devTokens) authenticator = devAuthenticator(config.devTokenSecret, authenticator);
-  if (opts.authenticator) authenticator = opts.authenticator(authenticator);
+  /* ---------------------------------------------------------------- authorization: a token on every request, verified here */
+  const { auth, revocations } = await createAuthChain({
+    config,
+    clock,
+    log: app.log,
+    db: database.kysely,
+    authorities: moduleAuthorities((m) => boot.apis.get(m) as never),
+    wrap: opts.authorities,
+    webhookVerifiers: boot.webhookVerifiers,
+    ownerOnly: new Set(Object.values(allSpecs).flatMap((s) => s.permissions.filter((p) => p.ownerOnly).map((p) => p.key))),
+  });
+  authChain = auth;
+  auth.install(app);
+  // answers cached by the chain are dropped when their owners announce a change
+  for (const name of ['access.role.changed', 'access.coverage.changed', 'access.away.started', 'access.away.ended']) events.subscribe('kernel', name, () => auth.invalidate('permissions'));
+  for (const name of ['sellers.member.permissions_changed', 'sellers.member.removed', 'sellers.seller.closed']) events.subscribe('kernel', name, () => auth.invalidate('members'));
 
-  registerEndpoints(app, boot.endpoints, { config, authenticator, idempotency: postgresIdempotencyStore(database.kysely, clock), webhookVerifiers: boot.webhookVerifiers });
+  registerEndpoints(app, boot.endpoints, { config, auth, idempotency: postgresIdempotencyStore(database.kysely, clock) });
   const graphql = await registerGraphQL(app, {
     config,
     baseTypeDefs,
     fragments: defs.flatMap((d) => (d.graphql ? [{ module: d.spec.name, typeDefs: d.graphql }] : [])),
     resolvers: boot.resolvers,
-    authenticator,
+    auth,
   });
   const unusableQueries = unusablePersistedQueries(graphql);
   for (const q of unusableQueries) app.log.warn(`persisted GraphQL query ${q.area}/${q.name} cannot run with the enabled modules: ${q.errors[0]}`);
 
-  app.get('/health', { schema: { hide: true } }, async () => ({ status: 'ok', modules: defs.length, launchPhase: config.launchPhase }));
-
-  app.decorate('kernel', { config, database, events, jobs, modules: defs.map((d) => d.spec.name), boot, graphql, unusableQueries });
+  app.decorate('kernel', {
+    config,
+    database,
+    events,
+    jobs,
+    modules: defs.map((d) => d.spec.name),
+    boot,
+    auth,
+    devSigner: auth.k.keys.dev,
+    graphql,
+    unusableQueries,
+    health: () => ({ status: 'ok' as const, modules: defs.length, launchPhase: config.launchPhase }),
+  });
   app.addHook('onReady', async () => {
+    revocations.start();
     if (config.jobsEnabled) jobs.start();
   });
   app.addHook('onClose', async () => {
+    revocations.stop();
     jobs.stop();
     await events.drain();
     if (!opts.database) await database.close();

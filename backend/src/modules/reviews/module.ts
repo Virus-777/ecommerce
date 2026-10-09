@@ -17,7 +17,7 @@ import { ReviewsService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '0.1.0',
+  version: '1.0.1',
   migrations,
   graphql: typeDefs,
   register(ctx) {
@@ -35,7 +35,7 @@ export default defineModule({
 
     // Background jobs (spec jobs)
     ctx.jobs.handle("reviews.invites", () => service.invites());
-    ctx.jobs.handle("reviews.summaries", () => service.summaries());
+    ctx.jobs.handle("reviews.summaries", () => service.summariesJob());
     ctx.jobs.handle("reviews.moderation-sla", () => service.moderationSla());
   },
 });
