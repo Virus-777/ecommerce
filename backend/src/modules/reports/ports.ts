@@ -152,9 +152,11 @@ export interface ReportsRepository {
   getCheckpoint(key: string): Promise<CheckpointRow | undefined>;
   listCheckpoints(keys: string[]): Promise<CheckpointRow[]>;
   upsertCheckpoint(key: string, patch: Partial<CheckpointRow>): Promise<void>;
-  /** Records a natural key once (idempotent consumers); false when it was already seen */
-  markSeen(key: string, value?: string | null): Promise<boolean>;
-  seenValue(key: string): Promise<string | null | undefined>;
+  /** Claims a natural key in the inbox (ctx.inbox) within this repository's transaction; false when it was already handled */
+  claim(key: string): Promise<boolean>;
+  /** Keeps a value for a later event (open stock-out since, campaign of a redemption or charge); the first value stays */
+  remember(key: string, value: string): Promise<boolean>;
+  recall(key: string): Promise<string | null>;
   forget(key: string): Promise<void>;
   countRows(table: Table): Promise<number>;
 }

@@ -4,26 +4,37 @@
  */
 import { isUuid } from '../../../kernel/lib/ids.js';
 import type { RatingSummary } from '../../../spec/reviews.js';
-import { addDays, distribution, round1 } from '../domain/rules.js';
+import { addDays, distribution, OFFICIAL_STORE_ID, round1, sellerKey } from '../domain/rules.js';
 import type { ProductSummaryRec } from '../ports.js';
 import { type Core, Effects, SYSTEM } from './core.js';
 
 const BATCH = 200;
-
-interface DeliveredItem {
-  orderId: string;
-  itemId: string;
-  deliveredAt: Date;
-}
+/** Deliveries older than inviteDelayDays + this get no invitation (a late reminder is noise) */
+const INVITE_GRACE_DAYS = 7;
+/** Customers checked per job run (recent deliveries first, then the catch-up sweep) */
+const INVITE_CUSTOMERS_PER_RUN = 1000;
 
 export class SummariesPart {
   /**
-   * Items delivered and waiting for their invitation. The spec has no table for delivered items, so the
-   * queue lives in memory (a restart loses the invitations not yet due; see the module report).
+   * Invitations are computed from orders (listDeliveredItems) in the job, and each is claimed once in the
+   * inbox (`invite:<orderItemId>`), so they survive restarts and are never sent twice. The spec has no table
+   * of delivered items, so which customers to look at comes from orders.item.delivered (customer id → latest
+   * delivery, kept until every delivery is past its invitation time) and, after a restart, from a sweep of
+   * all customers (customers.searchCustomers) in bounded batches.
    */
-  readonly invitations = new Map<string, DeliveredItem>();
+  readonly inviteCustomers = new Map<string, Date>();
+  /** Cursor of the catch-up sweep; null once it has gone through every customer */
+  private sweep: { cursor?: string } | null = {};
 
   constructor(private readonly core: Core) {}
+
+  /** orders.item.delivered: remember the customer (the event has no customer id; orders.getOrderItem does) */
+  async noteDelivery(itemId: string, deliveredAt: Date): Promise<void> {
+    const info = await this.core.soft('orders.getOrderItem', () => this.core.ctx.use('orders').getOrderItem(itemId));
+    if (!info?.customerId) return; // guests get no invitation
+    const prev = this.inviteCustomers.get(info.customerId);
+    if (!prev || prev < deliveredAt) this.inviteCustomers.set(info.customerId, deliveredAt);
+  }
 
   summaryOut(productId: string, r: ProductSummaryRec | undefined): RatingSummary {
     const count = r?.rating_count ?? 0;
@@ -113,23 +124,34 @@ export class SummariesPart {
   async sendInvitations(): Promise<number> {
     const delay = await this.core.num('inviteDelayDays');
     const now = this.core.now();
-    const due = [...this.invitations.values()].filter((i) => addDays(i.deliveredAt, delay) <= now).slice(0, 500);
-    if (!due.length) return 0;
-    const orders = await this.core.orders(due.map((d) => d.orderId));
+    const dueBy = addDays(now, -delay);
+    const horizon = addDays(now, -(delay + INVITE_GRACE_DAYS));
+    // customers with a recent delivery first; then the next batch of the catch-up sweep
+    const customers = new Set([...this.inviteCustomers.keys()].slice(0, INVITE_CUSTOMERS_PER_RUN));
+    if (this.sweep && customers.size < INVITE_CUSTOMERS_PER_RUN) {
+      const page = await this.core.optional('customers', (c) => c.searchCustomers({}, { limit: INVITE_CUSTOMERS_PER_RUN - customers.size, ...(this.sweep?.cursor ? { cursor: this.sweep.cursor } : {}) }));
+      for (const c of page?.items ?? []) customers.add(c.id);
+      this.sweep = page?.nextCursor ? { cursor: page.nextCursor } : null;
+    }
     let sent = 0;
-    for (const d of due) {
-      const order = orders.get(d.orderId);
-      const item = order ? this.core.purchasesOf(order).find((p) => p.orderItemId === d.itemId) : undefined;
-      const customerId = order?.contact.customerId;
-      if (item && customerId && item.delivered) {
+    for (const customerId of customers) {
+      const items = await this.core.soft('orders.listDeliveredItems', () => this.core.deliveredItems(customerId, horizon));
+      if (!items) continue; // orders could not answer: try again next run
+      for (const item of items) {
+        if (!this.core.isDelivered(item)) continue;
+        const at = new Date(item.deliveredAt!);
+        if (at > dueBy || at < horizon) continue;
+        if (await this.core.ctx.inbox.seen(this.core.ctx.db, `invite:${item.id}`)) continue;
         const reviewed = await this.core.repo.findOne('product_reviews', { customer_id: customerId, product_id: item.productId, status: { op: '<>', value: 'deleted' } });
-        if (!reviewed) {
-          this.core.publish('reviews.invite.due', { customerId, orderItemId: item.orderItemId, productId: item.productId, sellerId: item.sellerId });
-          sent++;
-        }
+        if (reviewed) continue;
+        if (!(await this.core.ctx.inbox.claim(this.core.ctx.db, `invite:${item.id}`))) continue;
+        const sellerId = item.ownerType === 'official' ? OFFICIAL_STORE_ID : sellerKey(item.sellerId);
+        this.core.publish('reviews.invite.due', { customerId, orderItemId: item.id, productId: item.productId, sellerId });
+        sent++;
       }
-      // done either way (unknown orders and guests get no invitation)
-      if (order || addDays(d.deliveredAt, delay + 7) <= now) this.invitations.delete(d.itemId);
+      // every delivery of the customer is past its invitation time: nothing more to wait for
+      const latest = this.inviteCustomers.get(customerId);
+      if (latest && addDays(latest, delay) <= now) this.inviteCustomers.delete(customerId);
     }
     return sent;
   }

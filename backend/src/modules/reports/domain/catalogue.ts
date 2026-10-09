@@ -3,13 +3,16 @@
  * definitions every figure links to, and the reports built from them. Seeded at boot (idempotent);
  * metric definitions are then managed through the admin endpoints (versions, owners, suggestions).
  */
+import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
 import type { FilterSpec, MetricDefinition, ReportDefinition } from '../../../spec/reports.js';
 
 /** Staff id used while a group or seeded metric is owned by its role and no person is named yet */
 export const UNASSIGNED_OWNER = '00000000-0000-0000-0000-000000000000';
 
-/** Read-model key for Official Store / platform-level rows in per-seller tables (seller_id is not null there) */
-export const OFFICIAL_KEY = '00000000-0000-0000-0000-000000000000';
+/** Read-model key for Official Store / platform-level rows in per-seller tables (seller_id is not null there): the spec's Official Store seller id */
+export const OFFICIAL_KEY: string = OFFICIAL_STORE_ID;
+/** No seller id, or the Official Store's */
+export const isOfficialSeller = (sellerId: string | null | undefined) => !sellerId || sellerId === OFFICIAL_KEY;
 
 export type GroupKey = MetricDefinition['group'];
 export const GROUP_KEYS: GroupKey[] = ['commerce', 'company_trading', 'marketplace_finance', 'products_discovery', 'service_sellers', 'customers_marketing_ads'];

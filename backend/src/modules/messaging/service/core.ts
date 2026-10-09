@@ -16,6 +16,9 @@ import type * as orders from '../../../spec/orders.js';
 import type * as sellers from '../../../spec/sellers.js';
 import {
   deadline,
+  groupSellerId,
+  isOfficialConversation,
+  marketplaceSellerId,
   HIDDEN_NOTE,
   HOUR,
   maskContent,
@@ -246,7 +249,7 @@ export class Core {
 
   /** Storefront cards (name, logo, verified, location) of the sellers in these conversations */
   async cards(rows: readonly ConversationRec[]): Promise<Map<string, sellers.SellerSummary>> {
-    const ids = [...new Set(rows.map((r) => r.seller_id).filter((x): x is string => !!x))];
+    const ids = [...new Set(rows.map((r) => marketplaceSellerId(r.seller_id)).filter((x): x is string => !!x))];
     if (!ids.length) return new Map();
     const list = await this.soft('sellers', 'seller cards', (s) => s.getStorefrontCard(ids));
     return new Map((list ?? []).map((c) => [c.id, c]));
@@ -258,14 +261,15 @@ export class Core {
 
   private sellerName(b: Bundle, cards?: Map<string, sellers.SellerSummary>) {
     const c = b.conv;
-    return (c.seller_id && cards?.get(c.seller_id)?.storeName) || b.participants.find((p) => p.kind === 'seller')?.name || 'Seller';
+    return (marketplaceSellerId(c.seller_id) && cards?.get(c.seller_id!)?.storeName) || b.participants.find((p) => p.kind === 'seller')?.name || 'Seller';
   }
 
   counterpartyOf(v: Viewer, b: Bundle, cards?: Map<string, sellers.SellerSummary>): Counterparty {
     const c = b.conv;
     const support: Counterparty = { kind: 'marketplace_support', name: SUPPORT_LABEL, verified: true };
     const seller = (): Counterparty => {
-      if (!c.seller_id) return c.kind === 'order' ? { kind: 'official_store', name: OFFICIAL_STORE_NAME, verified: true } : support;
+      if (isOfficialConversation(c)) return { kind: 'official_store', name: OFFICIAL_STORE_NAME, verified: true };
+      if (!c.seller_id) return support;
       const card = cards?.get(c.seller_id);
       const stats = this.replyCache.get(c.seller_id);
       return {
@@ -389,7 +393,7 @@ export class Core {
     let dispatchWarning: string | null = null;
     if (order) {
       const item = c.order_item_id ? order.groups.flatMap((g) => g.items).find((i) => i.id === c.order_item_id) : undefined;
-      const group = item ? order.groups.find((g) => g.id === item.groupId) : order.groups.find((g) => (c.seller_id ? g.seller.id === c.seller_id : g.seller.ownerType === 'official'));
+      const group = item ? order.groups.find((g) => g.id === item.groupId) : order.groups.find((g) => (c.seller_id ? groupSellerId(g) === c.seller_id : g.seller.ownerType === 'official'));
       subject.statusLabel = item?.stateLabel ?? group?.statusLabel ?? order.statusLabel;
       if (v.kind === 'seller' && group && group.dispatchDeadline.state === 'overdue' && ['new', 'preparing', 'delayed', 'partly_shipped'].includes(group.status)) {
         dispatchWarning = `Dispatch deadline was ${shortDateTime(new Date(group.dispatchDeadline.dueAt), this.tz)}. It is now overdue.`;
@@ -470,7 +474,7 @@ export class Core {
       const first = firstName(v.name);
       return { kind: 'seller', id: v.sellerId, label: first ? `${first}, ${store}` : store, mediaOwner: { kind: 'seller', id: v.sellerId }, participantName: store, participantLabel: 'Seller' };
     }
-    const team = c.kind === 'order' && !c.seller_id ? OFFICIAL_STORE_NAME : SUPPORT_LABEL;
+    const team = isOfficialConversation(c) ? OFFICIAL_STORE_NAME : SUPPORT_LABEL;
     const first = firstName(v.name);
     return {
       kind: 'staff',
@@ -573,7 +577,7 @@ export class Core {
           at: now,
         });
         const patch: Partial<ConversationRec> = { last_message_at: now };
-        if (c.kind === 'order' && c.seller_id) {
+        if (c.kind === 'order' && marketplaceSellerId(c.seller_id)) {
           const state = c.reply_state as 'none' | 'awaiting_seller' | 'replied' | 'overdue';
           if (author.kind === 'customer' && sellerReplyMachine.can(state, 'customerWrites')) {
             patch.reply_state = sellerReplyMachine.next(state, 'customerWrites');
@@ -613,7 +617,7 @@ export class Core {
     if (!recipientKinds.length) recipientKinds.push(author.kind === 'customer' ? 'staff' : 'customer');
     this.publish(
       'messaging.message.sent',
-      { messageId: out.message.id, conversationId, authorKind: author.kind, recipientKinds, customerId: out.conv.customer_id, sellerId: out.conv.seller_id, orderId: out.conv.order_id },
+      { messageId: out.message.id, conversationId, authorKind: author.kind, recipientKinds, customerId: out.conv.customer_id, sellerId: marketplaceSellerId(out.conv.seller_id), orderId: out.conv.order_id },
       by,
     );
     if (joined && author.kind === 'staff') this.ctx.log.info({ conversationId, staffId: author.id }, 'messaging: staff joined a conversation');

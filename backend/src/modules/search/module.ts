@@ -23,7 +23,7 @@ export default defineModule({
   graphql: typeDefs,
   register(ctx) {
     // PostgreSQL full-text + trigram engine; an external engine (setting searchEngine = external) plugs in behind the same port later
-    const service = new SearchService({ repo: createPostgresSearchRepository(ctx.db), engine: createPostgresSearchEngine(ctx.db), ctx });
+    const service = new SearchService({ repo: createPostgresSearchRepository(ctx.db, ctx.inbox), engine: createPostgresSearchEngine(ctx.db), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

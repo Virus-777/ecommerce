@@ -30,6 +30,7 @@ export interface ItemSpec {
   shipping?: number;
   tax?: number;
   stockItemId?: string;
+  categoryId?: string | null;
 }
 
 export interface OrderSpec {
@@ -154,6 +155,7 @@ export async function harness() {
         product: { productId: i.productId ?? newId(), variantId: newId(), productVersion: 1, title: 'Lamp', options: {}, takenAt: clock.now().toISOString() },
         offer: { offerId: i.offerId ?? newId() },
         stockItemId: i.stockItemId ?? newId(),
+        categoryId: i.categoryId ?? null,
         title: 'Lamp',
         quantity,
         unitPrice: usd(unit),

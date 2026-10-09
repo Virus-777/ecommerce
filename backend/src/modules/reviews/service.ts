@@ -110,14 +110,14 @@ export class ReviewsService implements ReviewsPublicApi {
 
   /** orders.item.delivered: Make the item eligible for a Verified Purchase review and its seller package for feedback; schedule the invitation */
   async onItemDeliveredFromOrders(event: EventPayload<'orders.item.delivered'>): Promise<void> {
-    // eligibility is read from orders when the customer writes; the invitation is queued here
-    this.summaries.invitations.set(event.itemId, { orderId: event.orderId, itemId: event.itemId, deliveredAt: new Date(event.deliveredAt) });
+    // eligibility is read from orders (getOrderItem) when the customer writes; the invitations job looks at this customer
+    await this.summaries.noteDelivery(event.itemId, new Date(event.deliveredAt));
   }
 
   /** orders.item.cancelled: Remove eligibility for cancelled items */
   async onItemCancelledFromOrders(event: EventPayload<'orders.item.cancelled'>): Promise<void> {
-    // a cancelled item is never delivered, so orders no longer reports it as eligible; drop any queued invitation
-    this.summaries.invitations.delete(event.itemId);
+    // a cancelled item is never delivered: orders no longer reports it (getOrderItem state, listDeliveredItems), so it gets no review or invitation
+    this.core.ctx.log.debug({ itemId: event.itemId }, 'reviews: item cancelled, no review eligibility');
   }
 
   /** catalog.product.merged: Move reviews, questions and the rating summary to the kept product */

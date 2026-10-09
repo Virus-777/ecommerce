@@ -2,7 +2,18 @@
  * Pure messaging rules: the content filter (contact details and outside links masked, promotional content refused),
  * reply deadlines and the labels the inbox shows. No I/O.
  */
+import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
 import type * as common from '../../../spec/common.js';
+
+/** Seller id of the Official Store (spec constant): conversations with the Official Store store it as seller_id */
+export { OFFICIAL_STORE_ID };
+export const isOfficialStore = (sellerId: string | null | undefined): boolean => sellerId === OFFICIAL_STORE_ID;
+/** The seller id a conversation keeps for an order package: the seller's, or OFFICIAL_STORE_ID for the Official Store */
+export const groupSellerId = (g: { seller: { ownerType: string; id?: string | null } }): string | null => (g.seller.ownerType === 'official' ? OFFICIAL_STORE_ID : (g.seller.id ?? null));
+/** A marketplace seller's id: null for the Official Store and for conversations without a seller */
+export const marketplaceSellerId = (sellerId: string | null | undefined): string | null => (sellerId && sellerId !== OFFICIAL_STORE_ID ? sellerId : null);
+/** An order conversation with the Official Store (null seller ids are rows written before the Official Store had an id) */
+export const isOfficialConversation = (c: { kind: string; seller_id: string | null }): boolean => c.kind === 'order' && (!c.seller_id || c.seller_id === OFFICIAL_STORE_ID);
 
 export const MINUTE = 60_000;
 export const HOUR = 60 * MINUTE;

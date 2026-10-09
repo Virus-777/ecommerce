@@ -3,7 +3,7 @@
  * recorded events, audit entries and calls.
  *
  * Built modules run for real except where a test needs to control the answer:
- *   orders.listOrdersForCustomer / getOrder → h.orders (delivered items need shipping, which is not built)
+ *   orders.getOrder / getOrderItem / listDeliveredItems → h.orders (controlled delivery times and states)
  *   catalog.getProduct → h.products (approved products need the whole submission flow)
  *   customers.getCustomerByUserId / getCustomer → customer id = account id, names from h.names
  *   sellers.getSeller / getSellers → h.sellers (store names, closed status)
@@ -69,6 +69,30 @@ export async function boot(): Promise<Kit> {
     foreignAssets: new Set<string>(),
   };
   const rec = (fn: string, ...args: unknown[]) => void h.calls.push({ fn, args });
+  /** orders.OrderItemInfo of every item of h.orders (what getOrderItem / listDeliveredItems answer) */
+  const itemInfos = (): orders.OrderItemInfo[] =>
+    [...h.orders.values()].flatMap((o) =>
+      o.groups.flatMap((g) =>
+        g.items.map((i) => ({
+          id: i.id,
+          orderId: o.id,
+          orderRef: o.ref,
+          groupId: g.id,
+          ownerType: g.seller.ownerType,
+          sellerId: g.seller.ownerType === 'official' ? null : (g.seller.id ?? null),
+          customerId: o.contact.customerId ?? null,
+          offerId: i.offer?.offerId ?? newId(),
+          productId: i.product.productId,
+          variantId: i.product.variantId,
+          stockItemId: newId(),
+          categoryId: null,
+          quantity: 1,
+          state: i.state,
+          deliveredAt: i.deliveredAt ?? null,
+          returnWindowEndsAt: null,
+        })),
+      ),
+    );
   const customer = (id: string) => ({ id, userId: id, ref: 'CU-000001', displayName: h.names.get(id) ?? 'Sam Rivera', email: 'sam@example.com', accountStatus: 'active' as const, canOrder: true, canMessage: true });
   const live = (o: offers.Offer) => ['active', 'paused', 'out_of_stock'].includes(o.status);
   const app = await buildTestApp({
@@ -78,15 +102,24 @@ export async function boot(): Promise<Kit> {
     apiStubs: {
       orders: {
         getOrder: async (id) => structuredClone(h.orders.get(id) ?? null),
-        listOrdersForCustomer: async (customerId, _f, page) => {
-          const all = [...h.orders.values()].filter((o) => o.contact.customerId === customerId);
-          const start = page.cursor ? Number(page.cursor) : 0;
-          const limit = page.limit ?? 24;
-          return { items: structuredClone(all.slice(start, start + limit)), nextCursor: start + limit < all.length ? String(start + limit) : null };
+        getOrderItem: async (id) => itemInfos().find((i) => i.id === id) ?? null,
+        listDeliveredItems: async (customerId, since) => {
+          rec('orders.listDeliveredItems', customerId, since);
+          return itemInfos().filter((i) => i.customerId === customerId && i.deliveredAt && (!since || i.deliveredAt >= since));
         },
       },
       catalog: { getProduct: async (id) => structuredClone(h.products.get(id) ?? null) },
-      customers: { getCustomerByUserId: async (id) => customer(id), getCustomer: async (id) => customer(id) },
+      customers: {
+        getCustomerByUserId: async (id) => customer(id),
+        getCustomer: async (id) => customer(id),
+        // the invitations catch-up sweep: every customer with an order
+        searchCustomers: async (_f, page) => {
+          const ids = [...new Set([...h.orders.values()].map((o) => o.contact.customerId).filter((id): id is string => Boolean(id)))];
+          const start = page.cursor ? Number(page.cursor) : 0;
+          const limit = page.limit ?? 24;
+          return { items: ids.slice(start, start + limit).map((id) => customer(id) as never), nextCursor: start + limit < ids.length ? String(start + limit) : null };
+        },
+      },
       sellers: {
         getSeller: async (id) => h.sellers.get(id) ?? null,
         getSellers: async (ids) => ids.flatMap((id) => (h.sellers.has(id) ? [h.sellers.get(id)!] : [])),

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
+import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
 import { flows } from '../../../testing/flows.js';
 import { harness, placeOrder, STORE, SELLER, ADMIN, tokens, type Harness } from './helpers.js';
 
@@ -92,6 +93,24 @@ describe('store: starting conversations', () => {
     expect(res.status).toBe(201);
     expect(res.body.conversation).toMatchObject({ counterparty: { kind: 'official_store', name: 'Marketly Official Store' }, replyState: 'none' });
     expect(h.named('messaging.message.sent').at(-1)).toMatchObject({ authorKind: 'customer', recipientKinds: ['staff'], sellerId: null });
+  });
+
+  it('reaches the Official Store by its seller id (OFFICIAL_STORE_ID), one conversation per subject, also from other modules', async () => {
+    const o = await placeOrder(h);
+    const me = tokens.customer(o.customerId!);
+    const first = await h.call('POST', `${STORE}/conversations`, me, { with: 'seller', orderId: o.order.id, sellerId: OFFICIAL_STORE_ID, body: 'Is the skillet oven safe?' });
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    expect(first.body.conversation).toMatchObject({ kind: 'order', counterparty: { kind: 'official_store', name: 'Marketly Official Store' }, replyState: 'none' });
+    const again = await h.call('POST', `${STORE}/conversations`, me, { with: 'seller', orderId: o.order.id, sellerId: OFFICIAL_STORE_ID, body: 'And dishwasher safe?' });
+    expect(again.body.conversation.id).toBe(first.body.conversation.id);
+    // returns and orders open the same conversation through the public API
+    const viaApi = await h.service.findOrStartForOrder({ orderId: o.order.id, sellerId: OFFICIAL_STORE_ID });
+    expect(viaApi.id).toBe(first.body.conversation.id);
+    // a seller id that is not in the order is refused
+    const other = await h.call('POST', `${STORE}/conversations`, me, { with: 'seller', orderId: o.order.id, sellerId: newId(), body: 'Hi' });
+    expect(other.body.error.code).toBe('ORDER_NOT_ELIGIBLE');
+    const summary = await h.service.customerConversationSummaries([o.customerId!]);
+    expect(summary[o.customerId!]!.counterparties).toContainEqual(expect.objectContaining({ kind: 'official_store', sellerId: null, name: 'Marketly Official Store' }));
   });
 
   it('starts a Marketly support conversation about a case, and about a return with the seller', async () => {

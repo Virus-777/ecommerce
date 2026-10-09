@@ -86,6 +86,21 @@ describe('export jobs', () => {
     expect(list.body.items[0].downloadUrl).toBeNull();
   });
 
+  it('in-process requests check column permissions of the handed-over principal (ctx.can), not the calling module', async () => {
+    const cols = (await h.call('GET', '/api/admin/reports/export-datasets?all=true', h.tokens.staff())).body.find((d: any) => d.key === DATASET).columns;
+    await h.service.registerDataset({ key: DATASET, owner: 'workqueues', title: 'Work items', permission: 'workqueues.items.export', columns: [...cols, { key: 'title', label: 'Title', permission: 'workqueues.items.view-all' }], audience: 'staff', screens: ['ops/queues'], available: true, phase: 1 });
+    try {
+      const limited = newId();
+      h.denied.add(`${limited}:workqueues.items.view-all`);
+      const without = await h.service.requestExport({ dataset: DATASET, filters: {}, format: 'csv', principal: { kind: 'staff', accountId: limited } });
+      expect(without.columnsExcluded).toEqual(['title']);
+      const full = await h.service.requestExport({ dataset: DATASET, filters: {}, format: 'csv', principal: { kind: 'staff', accountId: newId() } });
+      expect(full.columnsExcluded).toEqual([]);
+    } finally {
+      await h.service.registerDataset({ key: DATASET, owner: 'workqueues', title: 'Work items', permission: 'workqueues.items.export', columns: cols, audience: 'staff', screens: ['ops/queues'], available: true, phase: 1 });
+    }
+  });
+
   it('columns guarded by a permission the caller lacks are removed and listed', async () => {
     const cols = (await h.call('GET', '/api/admin/reports/export-datasets?all=true', h.tokens.staff())).body.find((d: any) => d.key === DATASET).columns;
     await h.service.registerDataset({ key: DATASET, owner: 'workqueues', title: 'Work items', permission: 'workqueues.items.export', columns: [...cols, { key: 'ref', label: 'Reference' }, { key: 'title', label: 'Title', permission: 'workqueues.items.view-all' }], audience: 'staff', screens: ['ops/queues'], available: true, phase: 1 });

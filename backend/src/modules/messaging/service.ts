@@ -21,7 +21,7 @@ import type {
   Subject,
 } from '../../spec/messaging.js';
 import type * as orders from '../../spec/orders.js';
-import { buyerName, DAY, HOUR, MINUTE, OFFICIAL_STORE_NAME, promotionalPhrase, replyRounds, responseTimeLabel, SUPPORT_LABEL, SUPPORT_TEAM_ID } from './domain/rules.js';
+import { buyerName, DAY, groupSellerId, HOUR, isOfficialConversation, marketplaceSellerId, MINUTE, OFFICIAL_STORE_NAME, promotionalPhrase, replyRounds, responseTimeLabel, SUPPORT_LABEL, SUPPORT_TEAM_ID } from './domain/rules.js';
 import { conversationMachine, messageReportMachine, sellerReplyMachine } from './domain/state-machines.js';
 import type { ConversationKey, ConversationRec, MessageRec, ParticipantRec, ReportRec, TemplateRec } from './ports.js';
 import { Core, invalid, meOf, notFound, SYSTEM, type Author, type By, type Cfg, type MessagingServiceDeps, type Prepared, type Viewer } from './service/core.js';
@@ -80,7 +80,7 @@ export class MessagingService implements MessagingPublicApi {
   }
 
   private async one(v: Viewer, c: ConversationRec, live = true): Promise<Conversation> {
-    if (live && c.seller_id && !this.core.replyCache.has(c.seller_id)) await this.cacheStats(c.seller_id);
+    if (live && marketplaceSellerId(c.seller_id) && !this.core.replyCache.has(c.seller_id!)) await this.cacheStats(c.seller_id!);
     return (await this.views(v, [c], { live }))[0]!.conversation;
   }
 
@@ -131,7 +131,7 @@ export class MessagingService implements MessagingPublicApi {
     if (!isUuid(id)) return null;
     const c = await this.repo.get('conversations', id);
     if (!c || !(await this.core.visible(v, c))) return null;
-    if (c.seller_id && !this.core.replyCache.has(c.seller_id)) await this.cacheStats(c.seller_id);
+    if (marketplaceSellerId(c.seller_id) && !this.core.replyCache.has(c.seller_id!)) await this.cacheStats(c.seller_id!);
     return (await this.views(v, [c], { live: true }))[0]!;
   }
 
@@ -156,20 +156,21 @@ export class MessagingService implements MessagingPublicApi {
     }
     if (body.with === 'seller') {
       if (body.sellerId) {
-        const g = order.groups.find((x) => x.seller.id === body.sellerId);
+        // a marketplace seller's id, or OFFICIAL_STORE_ID for the Official Store's package
+        const g = order.groups.find((x) => groupSellerId(x) === body.sellerId);
         if (!g) throw notEligible('This seller is not part of the order');
         if (group && group.id !== g.id) throw notEligible('This item is sold by another seller');
         group = g;
       } else if (!group) {
-        // the Official Store has no seller id: it is reached through one of its items, or when it is the only package
-        if (order.groups.length !== 1) throw invalid([{ path: 'sellerId', message: 'Choose the seller to message (for the Official Store, choose one of its items)' }]);
+        // no seller named: the item's seller, or the only package of the order
+        if (order.groups.length !== 1) throw invalid([{ path: 'sellerId', message: 'Choose the seller to message' }]);
         group = order.groups[0];
       }
     }
     const ret = body.returnId ? await this.verifyReturn(order, body.returnId) : null;
     const kase = body.caseId ? await this.verifyCase(order.id, body.caseId) : null;
     const kind = body.with === 'seller' ? 'order' : 'support';
-    const sellerId = kind === 'order' ? (group?.seller.id ?? null) : null;
+    const sellerId = kind === 'order' && group ? groupSellerId(group) : null;
     const may = await this.core.customerMayWrite(v, { case_id: kase?.id ?? null });
     if (!may.allowed) throw new AppError('FORBIDDEN', may.reason);
 
@@ -198,7 +199,8 @@ export class MessagingService implements MessagingPublicApi {
     const participants: Omit<ParticipantRec, 'conversation_id' | 'joined_at'>[] = [
       { kind: 'customer', participant_id: author.id, name, label: 'Buyer', joined_from_case_id: null, last_read_message_id: null, unread_count: 0 },
     ];
-    if (sellerId && group) participants.push({ kind: 'seller', participant_id: sellerId, name: group.seller.name, label: 'Seller', joined_from_case_id: null, last_read_message_id: null, unread_count: 0 });
+    // the Official Store is answered by Marketly staff, who join when they reply: no seller participant
+    if (marketplaceSellerId(sellerId) && group) participants.push({ kind: 'seller', participant_id: sellerId!, name: group.seller.name, label: 'Seller', joined_from_case_id: null, last_read_message_id: null, unread_count: 0 });
     const conv = await this.findOrCreate(key, { guest_session_id: v.customerId ? null : v.guestSessionId, subject, case_id: kase?.id ?? null }, participants, by);
     return this.finishStart(v, conv.id, author, prepared, cfg, by);
   }
@@ -684,15 +686,16 @@ export class MessagingService implements MessagingPublicApi {
   async findOrStartForOrder(input: { orderId: string; sellerId: string; orderItemId?: string; returnId?: string }): Promise<Conversation> {
     const order = await this.ctx.use('orders').getOrder(input.orderId);
     if (!order) throw notFound('Order');
-    const group = order.groups.find((g) => g.seller.id === input.sellerId);
+    // sellerId is a marketplace seller's, or OFFICIAL_STORE_ID for the Official Store's package
+    const group = order.groups.find((g) => groupSellerId(g) === input.sellerId);
     if (!group) throw this.core.error('ORDER_NOT_ELIGIBLE', 'This seller is not part of the order');
     const item = input.orderItemId ? group.items.find((i) => i.id === input.orderItemId) : undefined;
     if (input.orderItemId && !item) throw notFound('Order item');
     const ret = input.returnId ? ((await this.returnOf(order, input.returnId)) ?? { id: input.returnId, ref: null, status: null }) : null;
     const customerId = order.contact.customerId ?? null;
-    const participants: Omit<ParticipantRec, 'conversation_id' | 'joined_at'>[] = [
-      { kind: 'seller', participant_id: input.sellerId, name: group.seller.name, label: 'Seller', joined_from_case_id: null, last_read_message_id: null, unread_count: 0 },
-    ];
+    const participants: Omit<ParticipantRec, 'conversation_id' | 'joined_at'>[] = marketplaceSellerId(input.sellerId)
+      ? [{ kind: 'seller', participant_id: input.sellerId, name: group.seller.name, label: 'Seller', joined_from_case_id: null, last_read_message_id: null, unread_count: 0 }]
+      : [];
     if (customerId) participants.unshift({ kind: 'customer', participant_id: customerId, name: buyerName(order.contact.name), label: 'Buyer', joined_from_case_id: null, last_read_message_id: null, unread_count: 0 });
     const key: ConversationKey = { kind: 'order', customer_id: customerId, seller_id: input.sellerId, application_id: null, order_id: order.id, order_item_id: item?.id ?? null, return_id: ret?.id ?? null };
     const c = await this.findOrCreate(key, { guest_session_id: null, subject: this.subjectFrom(order, group, item ?? null, ret, null, null), case_id: null }, participants, { actor: SYSTEM });
@@ -826,14 +829,15 @@ export class MessagingService implements MessagingPublicApi {
       const counterparties = new Map<string, { kind: 'seller' | 'official_store'; sellerId: string | null; name: string; conversationCount: number; lastMessageAt: string }>();
       for (const c of mine) {
         if (c.kind !== 'order') continue;
-        const k = c.seller_id ?? 'official';
+        const sellerId = marketplaceSellerId(c.seller_id);
+        const k = sellerId ?? 'official';
         const cur = counterparties.get(k);
         if (cur) {
           cur.conversationCount += 1;
           continue;
         }
-        const name = c.seller_id ? (parts.find((p) => p.conversation_id === c.id && p.kind === 'seller')?.name ?? 'Seller') : OFFICIAL_STORE_NAME;
-        counterparties.set(k, { kind: c.seller_id ? 'seller' : 'official_store', sellerId: c.seller_id, name, conversationCount: 1, lastMessageAt: c.last_message_at.toISOString() });
+        const name = sellerId ? (parts.find((p) => p.conversation_id === c.id && p.kind === 'seller')?.name ?? 'Seller') : OFFICIAL_STORE_NAME;
+        counterparties.set(k, { kind: sellerId ? 'seller' : 'official_store', sellerId, name, conversationCount: 1, lastMessageAt: c.last_message_at.toISOString() });
       }
       out[id] = {
         conversationCount: mine.length,
@@ -876,7 +880,7 @@ export class MessagingService implements MessagingPublicApi {
         kind: 'staff',
         participant_id: staff.id,
         name: staff.name,
-        label: c.kind === 'order' && !c.seller_id ? OFFICIAL_STORE_NAME : SUPPORT_LABEL,
+        label: isOfficialConversation(c) ? OFFICIAL_STORE_NAME : SUPPORT_LABEL,
         joined_at: this.now(),
         joined_from_case_id: caseId,
         last_read_message_id: null,
@@ -1045,7 +1049,7 @@ export class MessagingService implements MessagingPublicApi {
       for (const p of participants) await tx.insertIgnore('participants', { ...p, conversation_id: row.id, joined_at: now });
       return row;
     });
-    this.core.publish('messaging.conversation.started', { conversationId: c.id, kind: c.kind, orderId: c.order_id, sellerId: c.seller_id }, by);
+    this.core.publish('messaging.conversation.started', { conversationId: c.id, kind: c.kind, orderId: c.order_id, sellerId: marketplaceSellerId(c.seller_id) }, by);
     return c;
   }
 

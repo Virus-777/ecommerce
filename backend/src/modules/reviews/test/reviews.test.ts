@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { resolvers } from '../graphql/resolvers.js';
-import { boot, DAY, type Kit, LONG, order, product, reviewInput, seller, STORE, tokens } from './helpers.js';
+import { boot, DAY, type Kit, LONG, OFFICIAL_STORE_ID, order, product, reviewInput, seller, STORE, tokens } from './helpers.js';
 
 let k: Kit;
 beforeAll(async () => {
@@ -167,7 +167,7 @@ describe('public list and helpful votes', () => {
     }
     const all = await k.call('GET', `${STORE}/products/${p.productId}/reviews?sort=highest`, tokens.visitor());
     expect(all.body.items.map((r: any) => r.rating)).toEqual([5, 4, 2]);
-    expect(all.body.items[0].soldBy).toEqual({ sellerId: '00000000-0000-0000-0000-000000000000', name: 'Marketly Official Store' });
+    expect(all.body.items[0].soldBy).toEqual({ sellerId: OFFICIAL_STORE_ID, name: 'Marketly Official Store' });
     const critical = await k.call('GET', `${STORE}/products/${p.productId}/reviews?critical=true`, tokens.visitor());
     expect(critical.body.items.map((r: any) => r.rating)).toEqual([2]);
 
@@ -228,36 +228,64 @@ describe('pending reviews, context and item status', () => {
 });
 
 describe('invitations', () => {
-  it('publishes reviews.invite.due inviteDelayDays after delivery for items not yet reviewed', async () => {
-    const b = buyer({ deliveredDaysAgo: 0 });
-    await k.emit('orders', 'orders.item.delivered', { orderId: b.orderId, groupId: b.groups[0]!.groupId, ownerType: 'seller', sellerId: newId(), itemId: b.itemId, quantity: 1, deliveredAt: k.clock.now().toISOString(), returnWindowEndsAt: new Date(k.clock.now().getTime() + 30 * DAY).toISOString() });
-    await k.app.kernel.jobs.runNow('reviews.invites');
-    expect(k.of('reviews.invite.due')).toEqual([]);
-    k.clock.advance(6 * DAY);
+  const deliveredEvent = (b: ReturnType<typeof buyer>) => ({ orderId: b.orderId, groupId: b.groups[0]!.groupId, ownerType: 'seller', sellerId: newId(), itemId: b.itemId, quantity: 1, deliveredAt: k.clock.now().toISOString(), returnWindowEndsAt: new Date(k.clock.now().getTime() + 30 * DAY).toISOString() });
+  const invitesOf = (customerId: string) => k.of('reviews.invite.due').filter((e) => e.customerId === customerId);
+  const runInvites = async () => {
     await k.app.kernel.jobs.runNow('reviews.invites');
     await k.app.kernel.events.drain();
-    expect(k.of('reviews.invite.due')).toEqual([{ customerId: b.customerId, orderItemId: b.itemId, productId: b.productId, sellerId: expect.any(String) }]);
-    await k.app.kernel.jobs.runNow('reviews.invites');
-    expect(k.of('reviews.invite.due')).toHaveLength(1);
+  };
+
+  it('publishes reviews.invite.due inviteDelayDays after delivery (from orders.listDeliveredItems), once', async () => {
+    const b = buyer({ deliveredDaysAgo: 0 });
+    await k.emit('orders', 'orders.item.delivered', deliveredEvent(b));
+    expect(k.svc.summaries.inviteCustomers.has(b.customerId)).toBe(true);
+    await runInvites();
+    expect(invitesOf(b.customerId)).toEqual([]);
+    k.clock.advance(6 * DAY);
+    await runInvites();
+    expect(invitesOf(b.customerId)).toEqual([{ customerId: b.customerId, orderItemId: b.itemId, productId: b.productId, sellerId: expect.any(String) }]);
+    expect(k.callsOf('orders.listDeliveredItems')).toContainEqual([b.customerId, expect.any(String)]);
+    // every delivery is past its invitation time: the customer is no longer watched
+    expect(k.svc.summaries.inviteCustomers.has(b.customerId)).toBe(false);
+    await k.emit('orders', 'orders.item.delivered', { ...deliveredEvent(b), deliveredAt: new Date(k.clock.now().getTime() - 6 * DAY).toISOString() });
+    await runInvites();
+    expect(invitesOf(b.customerId)).toHaveLength(1);
     k.clock.advance(-6 * DAY);
   });
 
-  it('drops the invitation of a cancelled item and of a reviewed one', async () => {
-    const b = buyer({ deliveredDaysAgo: 0 });
-    const delivered = { orderId: b.orderId, groupId: b.groups[0]!.groupId, ownerType: 'seller', sellerId: newId(), itemId: b.itemId, quantity: 1, deliveredAt: k.clock.now().toISOString(), returnWindowEndsAt: k.clock.now().toISOString() };
-    await k.emit('orders', 'orders.item.delivered', delivered);
-    await k.call('POST', `${STORE}/me/reviews`, b.token, reviewInput(b.itemId));
+  it('survives a restart: the catch-up sweep finds due deliveries and the inbox keeps sent ones from repeating', async () => {
+    const sent = buyer({ deliveredDaysAgo: 0 });
+    const waiting = buyer({ deliveredDaysAgo: 0 });
+    await k.emit('orders', 'orders.item.delivered', deliveredEvent(sent));
     k.clock.advance(6 * DAY);
-    await k.app.kernel.jobs.runNow('reviews.invites');
-    expect(k.of('reviews.invite.due')).toEqual([]);
+    await runInvites();
+    expect(invitesOf(sent.customerId)).toHaveLength(1);
+    // a restart loses the customers heard of from events; the sweep goes through every customer again
+    const summaries = k.svc.summaries as unknown as { inviteCustomers: Map<string, Date>; sweep: unknown };
+    summaries.inviteCustomers.clear();
+    summaries.sweep = {};
+    await runInvites();
+    expect(invitesOf(sent.customerId)).toHaveLength(1);
+    expect(invitesOf(waiting.customerId)).toEqual([{ customerId: waiting.customerId, orderItemId: waiting.itemId, productId: waiting.productId, sellerId: expect.any(String) }]);
     k.clock.advance(-6 * DAY);
-    expect(k.svc.summaries.invitations.has(b.itemId)).toBe(false);
-    const cancelled = newId();
-    await k.emit('orders', 'orders.item.delivered', { ...delivered, itemId: cancelled });
-    expect(k.svc.summaries.invitations.has(cancelled)).toBe(true);
-    // consumer called directly: the cancellation payload carries a full refund breakdown
-    await k.svc.onItemCancelledFromOrders({ ...delivered, itemId: cancelled } as never);
-    expect(k.svc.summaries.invitations.has(cancelled)).toBe(false);
+  });
+
+  it('sends no invitation for a reviewed product, a cancelled item or a guest', async () => {
+    const b = buyer({ deliveredDaysAgo: 0 });
+    await k.emit('orders', 'orders.item.delivered', deliveredEvent(b));
+    await k.call('POST', `${STORE}/me/reviews`, b.token, reviewInput(b.itemId));
+    const c = buyer({ deliveredDaysAgo: 0 });
+    await k.emit('orders', 'orders.item.delivered', deliveredEvent(c));
+    // cancelled after all: orders no longer lists it as delivered
+    const item = k.orders.get(c.orderId)!.groups[0]!.items[0]!;
+    Object.assign(item, { state: 'cancelled', deliveredAt: null });
+    await k.svc.onItemCancelledFromOrders({ ...deliveredEvent(c) } as never);
+    await k.emit('orders', 'orders.item.delivered', { ...deliveredEvent(c), itemId: newId() });
+    k.clock.advance(6 * DAY);
+    await runInvites();
+    expect(invitesOf(b.customerId)).toEqual([]);
+    expect(invitesOf(c.customerId)).toEqual([]);
+    k.clock.advance(-6 * DAY);
   });
 });
 

@@ -33,6 +33,8 @@ export type DocWrite = Omit<DocRow, 'tsv' | 'version' | 'indexed_at'> & { texts:
 
 export interface SearchRepository {
   transaction<T>(fn: (tx: SearchRepository) => Promise<T>): Promise<T>;
+  /** Claims a key in the inbox (ctx.inbox) within this repository's transaction; false when it was already handled */
+  claim(key: string): Promise<boolean>;
 
   /* documents and offer rows */
   getDocument(productId: string): Promise<DocRow | undefined>;

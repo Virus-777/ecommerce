@@ -1,4 +1,5 @@
 import { sql, type Kysely, type RawBuilder } from 'kysely';
+import type { Inbox } from '../../../../kernel/events/inbox.js';
 import { paginate } from '../../../../kernel/lib/pagination.js';
 import type { ReportsDb } from '../../../../spec/reports.js';
 import type { DailyTable, ReportsRepository, SalesFilter, SalesGroup, Table } from '../../ports.js';
@@ -56,13 +57,19 @@ function jsonAddExpr(table: string, column: string, add: Record<string, number>)
   return expr;
 }
 
-/** Postgres adapter for ReportsRepository. `db` is scoped to the `reports` schema. */
-export function createPostgresReportsRepository(db: Kysely<ReportsDb>): ReportsRepository {
+/** Lookups kept between events (open stock-out intervals, redemption and charge campaigns) */
+const LOOKUP = 'lookup:';
+
+/**
+ * Postgres adapter for ReportsRepository. `db` is scoped to the `reports` schema; `inbox` (ctx.inbox) records
+ * the natural keys idempotent consumers handled, in the same transaction as their effects.
+ */
+export function createPostgresReportsRepository(db: Kysely<ReportsDb>, inbox: Inbox): ReportsRepository {
   const d = db as Kysely<any>;
   const repo: ReportsRepository = {
     async transaction(fn) {
       if (db.isTransaction) return fn(repo);
-      return db.transaction().execute((trx) => fn(createPostgresReportsRepository(trx)));
+      return db.transaction().execute((trx) => fn(createPostgresReportsRepository(trx, inbox)));
     },
 
     /* ---------------------------------------------------------------- catalogue and definitions */
@@ -500,16 +507,19 @@ export function createPostgresReportsRepository(db: Kysely<ReportsDb>): ReportsR
         .onConflict((oc) => oc.column('key').doUpdateSet(patch))
         .execute();
     },
-    async markSeen(key, value = null) {
-      const r = await db.insertInto('read_model_checkpoints').values({ key: `seen:${key}`, state: 'seen', last_event_id: value, last_event_at: null, rebuild_started_at: null, rebuild_progress: null }).onConflict((oc) => oc.column('key').doNothing()).returning('key').execute();
+    async claim(key) {
+      return inbox.claim(db, key);
+    },
+    async remember(key, value) {
+      const r = await db.insertInto('read_model_checkpoints').values({ key: `${LOOKUP}${key}`, state: 'lookup', last_event_id: value, last_event_at: null, rebuild_started_at: null, rebuild_progress: null }).onConflict((oc) => oc.column('key').doNothing()).returning('key').execute();
       return r.length > 0;
     },
-    async seenValue(key) {
-      const r = await db.selectFrom('read_model_checkpoints').select('last_event_id').where('key', '=', `seen:${key}`).executeTakeFirst();
-      return r ? r.last_event_id : undefined;
+    async recall(key) {
+      const r = await db.selectFrom('read_model_checkpoints').select('last_event_id').where('key', '=', `${LOOKUP}${key}`).executeTakeFirst();
+      return r?.last_event_id ?? null;
     },
     async forget(key) {
-      await db.deleteFrom('read_model_checkpoints').where('key', '=', `seen:${key}`).execute();
+      await db.deleteFrom('read_model_checkpoints').where('key', '=', `${LOOKUP}${key}`).execute();
     },
     async countRows(table) {
       const r = await d.selectFrom(table).select(sql<number>`count(*)::int`.as('n')).executeTakeFirst();

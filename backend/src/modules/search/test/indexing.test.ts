@@ -246,9 +246,13 @@ describe('jobs', () => {
     const placed = async (productId: string, quantity: number) => {
       const orderId = newId();
       k.world.orders.set(orderId, [{ productId, quantity }]);
-      await k.emit('orders', 'orders.order.placed', { orderId, ref: 'MK-261009-00001', checkoutSessionId: newId(), customerId: null, guestEmail: 'g@example.com', paymentIntentId: newId(), paymentState: 'accepted', total: { amount: 1000, currency: 'USD' }, couponCodes: [], groups: [], placedAt: new Date().toISOString() });
+      const event = { orderId, ref: 'MK-261009-00001', checkoutSessionId: newId(), customerId: null, guestEmail: 'g@example.com', paymentIntentId: newId(), paymentState: 'accepted', total: { amount: 1000, currency: 'USD' }, couponCodes: [], groups: [], placedAt: new Date().toISOString() };
+      await k.emit('orders', 'orders.order.placed', event);
+      return event;
     };
-    await placed(a.p.id, 200);
+    const first = await placed(a.p.id, 200);
+    // a redelivered order counts once (inbox): a stays behind b below
+    await k.emit('orders', 'orders.order.placed', first);
     await placed(b.p.id, 250);
     await k.job('search.sales-counts');
     expect((await k.call('GET', `${STORE}/products?category=${cat.slug}&sort=best_selling`)).status).toBe(409);

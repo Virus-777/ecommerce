@@ -39,6 +39,20 @@ describe('order facts from events (idempotent, order-tolerant)', () => {
     expect(kpi((await sellerReport(sellerId, 'seller.order_trend')).body, 'commerce.orders').value).toBe(2);
   });
 
+  it('consumers claim their keys in the inbox (not read_model_checkpoints); the category comes from the order item', async () => {
+    const categoryId = newId();
+    const o = h.order({ items: [{ categoryId }] });
+    h.placed(o);
+    h.placed(o);
+    await h.drain();
+    const core = h.service.core;
+    expect(await core.ctx.inbox.seen(core.ctx.db, `order_items:${o.id}`)).toBe(true);
+    const facts = await core.repo.getOrderItems(o.id);
+    expect(facts.map((f) => f.category_id)).toEqual([categoryId]);
+    const seenRows = await (core.ctx.db as any).selectFrom('read_model_checkpoints').select('key').where('key', 'like', 'seen:%').execute();
+    expect(seenRows).toEqual([]);
+  });
+
   it('a later event that arrives first loads the order; payment, shipment, delivery and completion dates fill the date bases', async () => {
     const sellerId = newId();
     const o = h.order({ sellerId, items: [{ quantity: 1, unit: 12000 }] });

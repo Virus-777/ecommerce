@@ -1,4 +1,5 @@
 import { sql, type Kysely } from 'kysely';
+import type { Inbox } from '../../../../kernel/events/inbox.js';
 import { newId } from '../../../../kernel/lib/ids.js';
 import type { SearchDb } from '../../../../spec/search.js';
 import type { DocRow, DocWrite, OfferRow, SearchRepository, TermKind } from '../../ports.js';
@@ -34,10 +35,14 @@ const tsvOf = (t: DocWrite['texts']) => sql`
   setweight(to_tsvector('english', ${t.attributes}), 'C') ||
   setweight(to_tsvector('english', ${t.description}), 'D')`;
 
-/** Postgres adapter for SearchRepository. `db` is scoped to the `search` schema. */
-export function createPostgresSearchRepository(db: Db): SearchRepository {
+/**
+ * Postgres adapter for SearchRepository. `db` is scoped to the `search` schema; `inbox` (ctx.inbox) records what
+ * idempotent consumers handled, in the same transaction as their effects.
+ */
+export function createPostgresSearchRepository(db: Db, inbox: Inbox): SearchRepository {
   const repo = (d: Db): SearchRepository => ({
-    transaction: (fn) => d.transaction().execute((trx) => fn(repo(trx))),
+    transaction: (fn) => (d.isTransaction ? fn(repo(d)) : d.transaction().execute((trx) => fn(repo(trx)))),
+    claim: (key) => inbox.claim(d, key),
 
     /* ---------------------------------------------------------------- documents */
 

@@ -11,7 +11,7 @@ import type { EventPayload } from '../../../kernel/events/index.js';
 import type * as identity from '../../../spec/identity.js';
 import type * as orders from '../../../spec/orders.js';
 import type { ReadModelStatus } from '../../../spec/reports.js';
-import { OFFICIAL_KEY, READ_MODELS, readModelDef } from '../domain/catalogue.js';
+import { isOfficialSeller, OFFICIAL_KEY, READ_MODELS, readModelDef } from '../domain/catalogue.js';
 import { addDays, customerKey, marketDay } from '../domain/rules.js';
 import type { OrderItemFact } from '../ports.js';
 import { invalid, notFound, type Caller, type ReportsCore } from './core.js';
@@ -76,7 +76,7 @@ export class ReadModels {
     const key = rows[0]!.customer_key;
     const spend = rows.reduce((n, r) => n + r.item_minor + r.shipping_minor + r.tax_minor, 0);
     await this.repo.transaction(async (tx) => {
-      if (!(await tx.markSeen(`order_items:${orderId}`))) return;
+      if (!(await tx.claim(`order_items:${orderId}`))) return;
       await tx.insertOrderItems(rows);
       await tx.upsertCustomer(key, new Date(order.placedAt), spend);
       const units = new Map<string, number>();
@@ -96,7 +96,8 @@ export class ReadModels {
       const ownerType = g.seller.ownerType;
       for (const i of g.items) {
         const productId = i.product.productId;
-        if (!categories.has(productId)) categories.set(productId, (catalog ? await this.core.soft('catalog.getProduct', () => catalog.getProduct(productId)) : undefined)?.categoryId ?? null);
+        // the category at purchase (order item snapshot); orders placed before it was recorded fall back to the catalog
+        if (!i.categoryId && !categories.has(productId)) categories.set(productId, (catalog ? await this.core.soft('catalog.getProduct', () => catalog.getProduct(productId)) : undefined)?.categoryId ?? null);
         const discount = i.discounts.reduce((n, d) => n + d.amount.amount, 0);
         const funded = (who: 'platform' | 'seller') => i.discounts.reduce((n, d) => n + (d.fundedBy === who ? d.amount.amount : d.fundedBy === 'shared' ? (who === 'platform' ? Math.ceil(d.amount.amount / 2) : Math.floor(d.amount.amount / 2)) : 0), 0);
         let cost: number | null = null;
@@ -110,7 +111,7 @@ export class ReadModels {
           owner_type: ownerType,
           seller_id: ownerType === 'seller' ? (g.seller.id ?? null) : null,
           customer_key: key,
-          category_id: categories.get(productId) ?? null,
+          category_id: i.categoryId ?? categories.get(productId) ?? null,
           product_id: productId,
           offer_id: i.offer.offerId,
           quantity: i.quantity,
@@ -162,7 +163,7 @@ export class ReadModels {
     if (p.kind === 'outbound') {
       const day = await this.day(p.shippedAt);
       await this.repo.transaction(async (tx) => {
-        if (!(await tx.markSeen(`service:dispatched:${p.shipmentId}`))) return;
+        if (!(await tx.claim(`service:dispatched:${p.shipmentId}`))) return;
         await tx.bumpService(p.sellerId ?? OFFICIAL_KEY, day, { dispatched: 1, dispatched_on_time: p.onTime === false ? 0 : 1, valid_tracking: p.trackingValid ? 1 : 0 });
       });
     }
@@ -172,7 +173,7 @@ export class ReadModels {
   async onDispatchOverdue(p: EventPayload<'shipping.dispatch.overdue'>, env: Env) {
     const day = await this.day(env.at);
     await this.repo.transaction(async (tx) => {
-      if (await tx.markSeen(`service:overdue:${p.exceptionId}`)) await tx.bumpService(p.sellerId ?? OFFICIAL_KEY, day, { overdue: 1 });
+      if (await tx.claim(`service:overdue:${p.exceptionId}`)) await tx.bumpService(p.sellerId ?? OFFICIAL_KEY, day, { overdue: 1 });
     });
     await this.touch(['service'], env);
   }
@@ -180,7 +181,7 @@ export class ReadModels {
   async onShipmentException(p: EventPayload<'shipping.shipment.exception'>, env: Env) {
     const day = await this.day(env.at);
     await this.repo.transaction(async (tx) => {
-      if (await tx.markSeen(`service:exception:${p.exceptionId}`)) await tx.bumpService(p.sellerId ?? OFFICIAL_KEY, day, { delivery_exceptions: 1 });
+      if (await tx.claim(`service:exception:${p.exceptionId}`)) await tx.bumpService(p.sellerId ?? OFFICIAL_KEY, day, { delivery_exceptions: 1 });
     });
     await this.touch(['service'], env);
   }
@@ -203,7 +204,7 @@ export class ReadModels {
     const target = rows.find((r) => r.order_item_id === p.itemId) ?? rows.find((r) => r.offer_id === p.offerId);
     const day = await this.day(env.at);
     await this.repo.transaction(async (tx) => {
-      if (!(await tx.markSeen(`cancellation:${p.cancellationId}:${p.itemId}`))) return;
+      if (!(await tx.claim(`cancellation:${p.cancellationId}:${p.itemId}`))) return;
       if (target) {
         const amount = Math.max(0, p.refund.itemAmount.amount - p.refund.discountShare.amount);
         await tx.addToOrderItem(target.order_item_id, { cancelled_minor: amount }, { cancelled_at: new Date(env.at), cancelled_by: p.initiatedBy });
@@ -217,7 +218,8 @@ export class ReadModels {
   async onRefundSent(p: EventPayload<'payments.refund.sent'>, env: Env) {
     const rows = await this.ensureOrder(p.orderId, { accepted: true });
     const sellers = [...new Set(p.items.map((i) => i.sellerId ?? null))];
-    const sellerId = (sellers.length === 1 ? sellers[0] : p.items[0]?.sellerId) ?? null;
+    const named = (sellers.length === 1 ? sellers[0] : p.items[0]?.sellerId) ?? null;
+    const sellerId = isOfficialSeller(named) ? null : named;
     const sentAt = new Date(p.sentAt);
     await this.repo.transaction(async (tx) => {
       const inserted = await tx.insertRefund({
@@ -274,14 +276,20 @@ export class ReadModels {
     if (!productId) return this.touch(['discovery'], env);
     const key = `stockout:${p.stockItemId}`;
     if (p.state === 'out_of_stock') {
-      await this.repo.markSeen(key, `${productId}|${env.at}`);
+      // the first out-of-stock time of an open interval stays; a redelivered event changes nothing
+      await this.repo.transaction(async (tx) => {
+        if (await tx.claim(`stock:${env.id}`)) await tx.remember(key, `${productId}|${env.at}`);
+      });
     } else {
-      const open = await this.repo.seenValue(key);
+      const open = await this.repo.recall(key);
       if (open) {
         const [pid, since] = open.split('|') as [string, string];
+        const days = await this.minutesByDay(new Date(since), new Date(env.at));
         await this.repo.transaction(async (tx) => {
+          if (!(await tx.claim(`stock:${env.id}`))) return;
+          if ((await tx.recall(key)) !== open) return; // closed meanwhile
           await tx.forget(key);
-          for (const [day, minutes] of await this.minutesByDay(new Date(since), new Date(env.at))) await tx.bumpDaily('fact_discovery_daily', { product_id: pid, day }, { stockout_minutes: minutes });
+          for (const [day, minutes] of days) await tx.bumpDaily('fact_discovery_daily', { product_id: pid, day }, { stockout_minutes: minutes });
         });
       }
     }
@@ -313,7 +321,7 @@ export class ReadModels {
   async onCartItemAdded(p: EventPayload<'cart.item.added'>, env: Env) {
     const day = await this.day(env.at);
     await this.repo.transaction(async (tx) => {
-      if (await tx.markSeen(`cart_add:${env.id}`)) await tx.bumpDaily('fact_discovery_daily', { product_id: p.productId, day }, { cart_adds: 1 });
+      if (await tx.claim(`cart_add:${env.id}`)) await tx.bumpDaily('fact_discovery_daily', { product_id: p.productId, day }, { cart_adds: 1 });
     });
     await this.touch(['discovery'], env);
   }
@@ -366,7 +374,7 @@ export class ReadModels {
     if (p.authorKind === 'customer' && p.sellerId) {
       const day = await this.day(env.at);
       await this.repo.transaction(async (tx) => {
-        if (await tx.markSeen(`message:${p.messageId}`)) await tx.bumpService(p.sellerId!, day, { messages_received: 1 });
+        if (await tx.claim(`message:${p.messageId}`)) await tx.bumpService(p.sellerId!, day, { messages_received: 1 });
       });
     }
     await this.touch(['service'], env);
@@ -375,7 +383,7 @@ export class ReadModels {
   async onCaseOpened(p: EventPayload<'support.case.opened'>, env: Env) {
     const day = await this.day(env.at);
     await this.repo.transaction(async (tx) => {
-      if (await tx.markSeen(`case:opened:${p.caseId}`)) await tx.bumpService(p.sellerId ?? OFFICIAL_KEY, day, { cases_opened: 1, cases_open_eod: 1 }, p.category || 'other');
+      if (await tx.claim(`case:opened:${p.caseId}`)) await tx.bumpService(p.sellerId ?? OFFICIAL_KEY, day, { cases_opened: 1, cases_open_eod: 1 }, p.category || 'other');
     });
     await this.touch(['service'], env);
   }
@@ -383,7 +391,7 @@ export class ReadModels {
   async onCaseResolved(p: EventPayload<'support.case.resolved'>, env: Env) {
     const day = await this.day(p.resolvedAt);
     await this.repo.transaction(async (tx) => {
-      if (await tx.markSeen(`case:resolved:${p.caseId}`)) await tx.bumpService(p.sellerId ?? OFFICIAL_KEY, day, { cases_open_eod: -1 });
+      if (await tx.claim(`case:resolved:${p.caseId}`)) await tx.bumpService(p.sellerId ?? OFFICIAL_KEY, day, { cases_open_eod: -1 });
     });
     await this.touch(['service'], env);
   }
@@ -392,7 +400,7 @@ export class ReadModels {
 
   private async financeBump(seen: string, sellerId: string, day: string, add: Record<string, number>) {
     await this.repo.transaction(async (tx) => {
-      if (await tx.markSeen(seen)) await tx.bumpDaily('fact_marketplace_finance_daily', { seller_id: sellerId, day }, add);
+      if (await tx.claim(seen)) await tx.bumpDaily('fact_marketplace_finance_daily', { seller_id: sellerId, day }, add);
     });
   }
 
@@ -427,18 +435,19 @@ export class ReadModels {
     const day = await this.day(env.at);
     const sales = (await this.repo.getOrderItems(p.orderId)).reduce((n, r) => n + r.item_minor, 0);
     await this.repo.transaction(async (tx) => {
-      if (!(await tx.markSeen(`redemption:${p.redemptionId}`, p.campaignId))) return;
+      if (!(await tx.claim(`redemption:${p.redemptionId}`))) return;
+      await tx.remember(`redemption:${p.redemptionId}`, p.campaignId);
       await tx.bumpDaily('fact_campaigns_daily', { campaign_kind: 'promotion', campaign_id: p.campaignId, day }, { discount_cost_minor: p.amount.amount, redemptions: 1, sales_minor: sales }, {}, { column: 'funded_by', add: { platform: p.platformPart.amount, seller: p.sellerPart.amount } });
     });
     await this.touch(['campaigns'], env);
   }
 
   async onRedemptionReversed(p: EventPayload<'promotions.redemption.reversed'>, env: Env) {
-    const campaignId = await this.repo.seenValue(`redemption:${p.redemptionId}`);
+    const campaignId = await this.repo.recall(`redemption:${p.redemptionId}`);
     if (campaignId) {
       const day = await this.day(env.at);
       await this.repo.transaction(async (tx) => {
-        if (!(await tx.markSeen(`reversal:${p.redemptionId}:${p.orderItemId}`))) return;
+        if (!(await tx.claim(`reversal:${p.redemptionId}:${p.orderItemId}`))) return;
         await tx.bumpDaily('fact_campaigns_daily', { campaign_kind: 'promotion', campaign_id: campaignId, day }, { discount_cost_minor: -p.amount.amount }, {}, { column: 'funded_by', add: { platform: -p.platformPart.amount, seller: -p.sellerPart.amount } });
       });
     } else this.core.ctx.log.debug({ redemptionId: p.redemptionId }, 'reports: reversal of a redemption not seen');
@@ -448,7 +457,8 @@ export class ReadModels {
   async onChargePosted(p: EventPayload<'advertising.charge.posted'>, env: Env) {
     const day = /^\d{4}-\d{2}-\d{2}$/.test(p.day) ? p.day : await this.day(env.at);
     await this.repo.transaction(async (tx) => {
-      if (!(await tx.markSeen(`charge:${p.chargeId}`, p.campaignId))) return;
+      if (!(await tx.claim(`charge:${p.chargeId}`))) return;
+      await tx.remember(`charge:${p.chargeId}`, p.campaignId);
       await tx.bumpDaily('fact_campaigns_daily', { campaign_kind: 'ad', campaign_id: p.campaignId, day }, { spend_minor: p.amount.amount });
       await tx.bumpDaily('fact_marketplace_finance_daily', { seller_id: p.sellerId, day }, { ad_charges_minor: p.amount.amount });
     });
@@ -457,9 +467,9 @@ export class ReadModels {
 
   async onChargeCredited(p: EventPayload<'advertising.charge.credited'>, env: Env) {
     const day = await this.day(env.at);
-    const campaignId = await this.repo.seenValue(`charge:${p.chargeId}`);
+    const campaignId = await this.repo.recall(`charge:${p.chargeId}`);
     await this.repo.transaction(async (tx) => {
-      if (!(await tx.markSeen(`credit:${p.chargeId}`))) return;
+      if (!(await tx.claim(`credit:${p.chargeId}`))) return;
       if (campaignId) await tx.bumpDaily('fact_campaigns_daily', { campaign_kind: 'ad', campaign_id: campaignId, day }, { spend_minor: -p.amount.amount });
       await tx.bumpDaily('fact_marketplace_finance_daily', { seller_id: p.sellerId, day }, { ad_charges_minor: -p.amount.amount });
     });

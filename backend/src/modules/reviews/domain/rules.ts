@@ -2,13 +2,14 @@
  * Pure rules of the reviews module (no I/O): automatic content checks, the seller response rule check,
  * feedback scoring, display names, labels, rating distributions and the moderation reason catalogue.
  */
+import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
 import type { ModerationReason, RatingBucket } from '../../../spec/reviews.js';
 
-/** Stands for the Official Store where a column needs a seller id (product_reviews.seller_id, seller_feedback.seller_id …) */
-export const OFFICIAL_STORE_ID = '00000000-0000-0000-0000-000000000000';
+/** The Official Store's seller id (spec constant) where a column needs a seller id (product_reviews.seller_id, seller_feedback.seller_id …) */
+export { OFFICIAL_STORE_ID };
 export const OFFICIAL_STORE_NAME = 'Marketly Official Store';
 /** Moderator id of decisions taken by the system or Trust and Risk (moderation_decisions.moderator_id is required) */
-export const SYSTEM_MODERATOR_ID = OFFICIAL_STORE_ID;
+export const SYSTEM_MODERATOR_ID = '00000000-0000-0000-0000-000000000000';
 
 export const isSellerId = (s: unknown): s is string => s === OFFICIAL_STORE_ID || (typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s));
 export const isOfficial = (sellerId: string | null | undefined) => !sellerId || sellerId === OFFICIAL_STORE_ID;

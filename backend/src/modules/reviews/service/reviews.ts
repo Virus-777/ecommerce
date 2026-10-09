@@ -6,6 +6,7 @@ import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import { pageOf, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
+import type * as orders from '../../../spec/orders.js';
 import type { AdminReviewRow, MyReview, PendingReviews, ProductReview, ReviewContext, ReviewInput, ReviewUpdateInput } from '../../../spec/reviews.js';
 import { addDays, REVIEW_GUIDELINES, REVIEW_STATUS_LABEL, reviewChecks } from '../domain/rules.js';
 import { productReviewMachine } from '../domain/state-machines.js';
@@ -74,21 +75,19 @@ export class ReviewsPart {
 
   /* ================================================================ purchases */
 
-  async purchases(customerId: string): Promise<Purchase[]> {
-    return (await this.core.customerOrders(customerId)).flatMap((o) => this.core.purchasesOf(o));
-  }
-
   private requireCustomer(who: CustomerWho): string {
     if (!who.customerId) throw this.core.ctx.error('REVIEW_NOT_ELIGIBLE', 'Only customers with a delivered purchase can review it.');
     return who.customerId;
   }
 
-  private async eligibleItem(customerId: string, orderItemId: string, purchases?: Purchase[]): Promise<{ item: Purchase; reviewBy: Date; open: boolean }> {
-    const list = purchases ?? (isUuid(orderItemId) ? await this.purchases(customerId) : []);
-    const item = list.find((p) => p.orderItemId === orderItemId);
-    if (!item || !item.delivered || !item.deliveredAt) throw this.core.ctx.error('REVIEW_NOT_ELIGIBLE', 'You can review an item once it has been delivered to you.');
-    const reviewBy = addDays(item.deliveredAt, await this.core.num('reviewWindowDays'));
-    return { item, reviewBy, open: this.core.now() <= reviewBy };
+  /** The customer's delivered order item (orders.getOrderItem), with its order for titles and the package */
+  private async eligibleItem(customerId: string, orderItemId: string): Promise<{ item: Purchase; order: orders.OrderDetail | null; reviewBy: Date; open: boolean }> {
+    const info = await this.core.orderItem(customerId, orderItemId);
+    if (!info || !this.core.isDelivered(info)) throw this.core.ctx.error('REVIEW_NOT_ELIGIBLE', 'You can review an item once it has been delivered to you.');
+    const order = (await this.core.orders([info.orderId])).get(info.orderId) ?? null;
+    const item = this.core.purchaseOf(info, order);
+    const reviewBy = addDays(item.deliveredAt!, await this.core.num('reviewWindowDays'));
+    return { item, order, reviewBy, open: this.core.now() <= reviewBy };
   }
 
   /* ================================================================ write */
@@ -345,14 +344,16 @@ export class ReviewsPart {
 
   async pending(customerId: string | null): Promise<PendingReviews> {
     if (!customerId) return { products: [], sellerFeedback: [] };
-    const orders = await this.core.customerOrders(customerId);
-    const window = await this.core.num('reviewWindowDays');
+    const [window, feedbackWindow] = await Promise.all([this.core.num('reviewWindowDays'), this.core.num('sellerFeedbackWindowDays')]);
     const now = this.core.now();
+    // deliveries still inside the review or the feedback window; their orders give titles and packages
+    const delivered = (await this.core.deliveredItems(customerId, addDays(now, -Math.max(window, feedbackWindow)))).filter((i) => this.core.isDelivered(i));
+    const orders = await this.core.orders(delivered.map((i) => i.orderId));
     const reviewed = new Set(
       (await this.core.repo.find('product_reviews', { customer_id: customerId, status: { op: '<>', value: 'deleted' } })).map((r) => r.product_id),
     );
     const latest = new Map<string, Purchase>();
-    for (const p of orders.flatMap((o) => this.core.purchasesOf(o))) {
+    for (const p of delivered.map((i) => this.core.purchaseOf(i, orders.get(i.orderId)))) {
       if (!p.delivered || !p.deliveredAt || reviewed.has(p.productId)) continue;
       if (addDays(p.deliveredAt, window) < now) continue;
       const prev = latest.get(p.productId);
@@ -372,20 +373,17 @@ export class ReviewsPart {
         sellerName: p.sellerName,
         reviewBy: addDays(p.deliveredAt!, window).toISOString(),
       }));
-    return { products, sellerFeedback: await this.feedback.pendingFor(customerId, orders) };
+    return { products, sellerFeedback: await this.feedback.pendingFor(customerId, [...orders.values()]) };
   }
 
   async context(who: CustomerWho, orderItemId: string): Promise<ReviewContext> {
     const customerId = this.requireCustomer(who);
-    const orders = isUuid(orderItemId) ? await this.core.customerOrders(customerId) : [];
-    const purchases = orders.flatMap((o) => this.core.purchasesOf(o));
-    const { item, open } = await this.eligibleItem(customerId, orderItemId, purchases);
+    const { item, order, open } = await this.eligibleItem(customerId, orderItemId);
     const repo = this.core.repo;
     const existing = await repo.findOne('product_reviews', { customer_id: customerId, product_id: item.productId, status: { op: '<>', value: 'deleted' } });
     if (!existing && !open) throw this.core.ctx.error('REVIEW_NOT_ELIGIBLE', 'The time to review this purchase has ended.');
-    const order = orders.find((o) => o.id === item.orderId)!;
-    const pkg = this.core.packagesOf(order).find((p) => p.groupId === item.groupId)!;
-    const fb = await this.feedback.packageState(customerId, pkg);
+    const pkg = order ? this.core.packagesOf(order).find((p) => p.groupId === item.groupId) : undefined;
+    const fb = pkg ? await this.feedback.packageState(customerId, pkg) : { eligible: false, feedback: null };
     const product = await this.core.product(item.productId);
     const [minTextLength, maxPhotos] = await Promise.all([this.core.num('minReviewLength'), this.core.num('maxReviewPhotos')]);
     return {
@@ -414,9 +412,10 @@ export class ReviewsPart {
   async statusForItems(customerId: string, orderItemIds: readonly string[]): Promise<ItemReviewStatus[]> {
     const empty = (orderItemId: string): ItemReviewStatus => ({ orderItemId, canReview: false, reviewBy: null, reviewId: null, status: null, statusLabel: null, rating: null, feedbackEligible: false, feedbackGiven: false });
     if (!isUuid(customerId) || !orderItemIds.length) return orderItemIds.map(empty);
-    const orders = await this.core.customerOrders(customerId);
-    const purchases = new Map(orders.flatMap((o) => this.core.purchasesOf(o)).map((p) => [p.orderItemId, p]));
-    const packages = new Map(orders.flatMap((o) => this.core.packagesOf(o)).map((p) => [p.groupId, p]));
+    const items = await this.core.orderItems(customerId, orderItemIds);
+    const orders = await this.core.orders([...items.values()].map((i) => i.orderId));
+    const purchases = new Map([...items.values()].map((i) => [i.id, this.core.purchaseOf(i, orders.get(i.orderId))]));
+    const packages = new Map([...orders.values()].flatMap((o) => this.core.packagesOf(o)).map((p) => [p.groupId, p]));
     const window = await this.core.num('reviewWindowDays');
     const reviews = await this.core.repo.find('product_reviews', { customer_id: customerId, status: { op: '<>', value: 'deleted' } });
     const byProduct = new Map(reviews.map((r) => [r.product_id, r]));
@@ -430,7 +429,8 @@ export class ReviewsPart {
       }
       const review = byProduct.get(p.productId);
       const reviewBy = p.delivered && p.deliveredAt ? addDays(p.deliveredAt, window) : null;
-      const fb = await this.feedback.packageState(customerId, packages.get(p.groupId)!);
+      const pkg = packages.get(p.groupId);
+      const fb = pkg ? await this.feedback.packageState(customerId, pkg) : { eligible: false, feedback: null };
       out.push({
         orderItemId: id,
         canReview: Boolean(reviewBy && reviewBy >= now && !review),

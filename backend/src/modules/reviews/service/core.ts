@@ -87,9 +87,6 @@ export interface Package {
   itemIds: string[];
 }
 
-/** Purchases are read through orders' public API, paging the customer's orders (newest first) */
-const ORDER_PAGES = 20;
-const ORDER_PAGE_SIZE = 50;
 
 export class Core {
   readonly repo: ReviewsRepository;
@@ -228,18 +225,63 @@ export class Core {
     return out;
   }
 
-  /** The customer's orders, newest first (bounded) */
-  async customerOrders(customerId: string): Promise<orders.OrderDetail[]> {
+  /* ---------------------------------------------------------------- purchases (Verified Purchase eligibility) */
+
+  /** One order item of the customer (orders.getOrderItem); null when unknown or another customer's */
+  async orderItem(customerId: string, orderItemId: string): Promise<orders.OrderItemInfo | null> {
+    if (!isUuid(orderItemId)) return null;
+    const info = await this.ctx.use('orders').getOrderItem(orderItemId);
+    return info && info.customerId === customerId ? info : null;
+  }
+
+  /** The customer's order items, batched lookups; unknown and other customers' items are missing */
+  async orderItems(customerId: string, orderItemIds: readonly string[]): Promise<Map<string, orders.OrderItemInfo>> {
+    const unique = [...new Set(orderItemIds.filter(isUuid))];
+    const out = new Map<string, orders.OrderItemInfo>();
     const api = this.ctx.use('orders');
-    const out: orders.OrderDetail[] = [];
-    let cursor: string | undefined;
-    for (let i = 0; i < ORDER_PAGES; i++) {
-      const page = await api.listOrdersForCustomer(customerId, {}, { limit: ORDER_PAGE_SIZE, ...(cursor ? { cursor } : {}) });
-      out.push(...page.items);
-      if (!page.nextCursor || !page.items.length) break;
-      cursor = page.nextCursor;
-    }
+    await Promise.all(
+      unique.map(async (id) => {
+        const info = await api.getOrderItem(id);
+        if (info && info.customerId === customerId) out.set(id, info);
+      }),
+    );
     return out;
+  }
+
+  /** Items delivered to the customer since a time (orders.listDeliveredItems) */
+  async deliveredItems(customerId: string, since: Date): Promise<orders.OrderItemInfo[]> {
+    return (await this.ctx.use('orders').listDeliveredItems(customerId, since.toISOString())).filter((i) => i.customerId == null || i.customerId === customerId);
+  }
+
+  /** Delivered (and not since cancelled): returned and refunded items were delivered too */
+  isDelivered = (info: Pick<orders.OrderItemInfo, 'state' | 'deliveredAt'>) => Boolean(info.deliveredAt) && DELIVERED_LIKE.has(info.state);
+
+  /**
+   * A purchase from orders' item facts (owner, state, delivery: these decide eligibility), with titles and
+   * images from the purchase snapshot of its order when the order is given.
+   */
+  purchaseOf(info: orders.OrderItemInfo, order?: orders.OrderDetail | null): Purchase {
+    const official = info.ownerType === 'official';
+    const shown = order ? this.purchasesOf(order).find((p) => p.orderItemId === info.id) : undefined;
+    return {
+      title: shown?.title ?? 'Item',
+      imageUrl: shown?.imageUrl ?? null,
+      variantLabel: shown?.variantLabel ?? null,
+      condition: shown?.condition ?? null,
+      packageLabel: shown?.packageLabel ?? '',
+      sellerName: shown?.sellerName ?? (official ? OFFICIAL_STORE_NAME : 'Marketplace seller'),
+      orderItemId: info.id,
+      orderId: info.orderId,
+      orderRef: info.orderRef,
+      groupId: info.groupId,
+      productId: info.productId,
+      variantId: info.variantId,
+      ownerType: info.ownerType,
+      sellerId: official ? OFFICIAL_STORE_ID : sellerKey(info.sellerId),
+      state: info.state,
+      deliveredAt: info.deliveredAt ? new Date(info.deliveredAt) : null,
+      delivered: this.isDelivered(info),
+    };
   }
 
   purchasesOf(order: orders.OrderDetail): Purchase[] {

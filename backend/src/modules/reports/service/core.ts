@@ -109,21 +109,20 @@ export class ReportsCore {
     }
   }
 
-  /** A permission of a caller outside a request: the request check when given, else access (staff) or member access (sellers). Fails closed. */
+  /**
+   * A permission of a caller: this request's own check when reports serves the request, else ctx.can for a
+   * principal handed over in-process (another module's export endpoint): the same answer that caller's
+   * request got. Fails closed.
+   */
   async principalCan(principal: identity.Principal, permission: string, can?: (p: string) => Promise<boolean>): Promise<boolean> {
     if (can) return can(permission);
-    if (principal.kind === 'staff') {
-      const access = this.api('access');
-      if (!access) return false;
-      return (await this.soft('access.hasPermission', () => access.hasPermission(principal, permission))) ?? false;
+    try {
+      // spec Principal and the kernel's differ only in the audience the kernel adds
+      return await this.ctx.can(principal as Parameters<ModuleContext<'reports'>['can']>[0], permission);
+    } catch (err) {
+      this.ctx.log.warn({ err, permission }, 'reports: permission check failed');
+      return false;
     }
-    if (principal.kind === 'seller' && principal.sellerId && principal.accountId) {
-      const sellers = this.api('sellers');
-      if (!sellers) return false;
-      const m = await this.soft('sellers.getMemberAccess', () => sellers.getMemberAccess(principal.sellerId!, principal.accountId!));
-      return Boolean(m && (m.isOwner || m.permissions.includes(permission)));
-    }
-    return false;
   }
 
   /** Staff names and role labels for owner, suggester and decider columns (access.getStaffRef), batched per call */

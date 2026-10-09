@@ -352,7 +352,11 @@ export class SearchIndexer extends SearchBase {
     if (!order) return;
     const units = new Map<string, number>();
     for (const g of order.groups ?? []) for (const it of g.items ?? []) units.set(it.product.productId, (units.get(it.product.productId) ?? 0) + it.quantity);
-    await this.repo.addSales([...units].map(([productId, n]) => ({ productId, units: n })), this.now());
+    // an order counts once: a redelivered event finds its key claimed and adds nothing
+    await this.repo.transaction(async (tx) => {
+      if (!(await tx.claim(`order-placed:${e.orderId}`))) return;
+      await tx.addSales([...units].map(([productId, n]) => ({ productId, units: n })), this.now());
+    });
   }
 
   /* ---------------------------------------------------------------- consumers: identity, customers */
