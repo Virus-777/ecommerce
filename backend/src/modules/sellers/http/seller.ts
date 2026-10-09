@@ -1,85 +1,53 @@
-import { notImplemented, routes } from '../../../kernel/http/index.js';
+import { routes } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/sellers.js';
 import type { SellersService } from '../service.js';
 
 /**
  * Seller API: /api/seller/sellers/…  (docs/api/modules/sellers.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
+ * Every call acts for input.sellerId (the session's seller); another seller's record ids answer 404.
  */
-export const sellerRoutes = (service: SellersService) =>
-  routes(endpoints, 'seller', {
-    /** GET /account: Account status, verification, product approval, payout readiness and active restrictions */
-    getAccount: notImplemented,
-    /** GET /setup: Setup checklist and what will go live after the launch review */
-    getSetup: notImplemented,
-    /** POST /setup/launch-review: Ask the Seller Manager for the launch readiness review */
-    requestLaunchReview: notImplemented,
-    /** GET /business: Legal and contact details */
-    getBusinessDetails: notImplemented,
-    /** PATCH /business/contact: Update contact person, email, phone and support hours */
-    updateBusinessContact: notImplemented,
-    /** POST /business/change-requests: Request a change to legal name, ownership or business address */
-    requestBusinessChange: notImplemented,
-    /** GET /change-requests: My pending and decided change requests (store name, claims, business) */
-    listOwnChangeRequests: notImplemented,
-    /** POST /change-requests/{id}/withdraw: Withdraw a pending change request */
-    withdrawChangeRequest: notImplemented,
-    /** GET /store-profile: Storefront editor data with pending reviews and live preview data */
-    getStoreProfile: notImplemented,
-    /** PATCH /store-profile: Save storefront changes */
-    updateStoreProfile: notImplemented,
-    /** POST /store-profile/claims: Submit a public claim or brand affiliation with evidence */
-    submitPublicClaim: notImplemented,
-    /** POST /brand-requests: Ask Marketly to add a brand that is not listed, with evidence */
-    requestBrand: notImplemented,
-    /** POST /store-profile/claims/{id}/withdraw: Withdraw a pending or approved claim */
-    withdrawPublicClaim: notImplemented,
-    /** POST /store-profile/collections: Add a featured collection */
-    createCollection: notImplemented,
-    /** PATCH /store-profile/collections/{id}: Edit a featured collection */
-    updateCollection: notImplemented,
-    /** DELETE /store-profile/collections/{id}: Remove a featured collection */
-    deleteCollection: notImplemented,
-    /** PUT /store-profile/collections/order: Set collection order */
-    reorderCollections: notImplemented,
-    /** GET /members: Owner and staff with roles, status and last activity */
-    listMembers: notImplemented,
-    /** GET /roles: Role templates and the seller permission catalogue (permission matrix) */
-    listRoleTemplates: notImplemented,
-    /** POST /invitations: Invite a staff member */
-    inviteMember: notImplemented,
-    /** POST /invitations/{id}/resend: Resend an invitation (new expiry) */
-    resendInvitation: notImplemented,
-    /** POST /invitations/{id}/revoke: Cancel an invitation */
-    revokeInvitation: notImplemented,
-    /** PATCH /members/{id}: Change a member's role or single permissions */
-    updateMember: notImplemented,
-    /** POST /members/{id}/suspend: Temporarily block a member */
-    suspendMember: notImplemented,
-    /** POST /members/{id}/remove: Remove a member */
-    removeMember: notImplemented,
-    /** GET /performance: Account health: metrics vs targets, warnings and actions */
-    getPerformance: notImplemented,
-    /** GET /restrictions: Active and past restrictions and suspensions */
-    listOwnRestrictions: notImplemented,
-    /** GET /restrictions/{id}: One restriction: reason, affected activity, what still works, how to resolve, appeal route */
-    getOwnRestriction: notImplemented,
-    /** POST /restrictions/{id}/evidence: Upload documents that resolve a restriction (e.g. brand authorisation) */
-    submitResolutionEvidence: notImplemented,
-    /** POST /restrictions/{id}/appeals: Appeal a restriction or suspension before the deadline */
-    appealRestriction: notImplemented,
-    /** GET /appeals: My appeals and their outcomes */
-    listOwnAppeals: notImplemented,
-    /** POST /appeals/{id}/withdraw: Withdraw an appeal */
-    withdrawOwnAppeal: notImplemented,
-    /** GET /payout-account: Payout destination label and readiness */
-    getPayoutAccount: notImplemented,
-    /** POST /payout-account/change: Change the payout bank account (owner only) */
-    changePayoutAccount: notImplemented,
-    /** GET /agreements: Accepted agreement versions and new versions waiting for acceptance */
-    listAgreements: notImplemented,
-    /** POST /agreements/{key}/accept: Accept a new agreement version (owner) */
-    acceptAgreement: notImplemented,
-    /** POST /account/close: Owner asks to close the seller account */
-    requestSellerClosure: notImplemented,
+export const sellerRoutes = (service: SellersService) => {
+  const { accounts, storefront, members, enforcement, performance } = service;
+  return routes(endpoints, 'seller', {
+    getAccount: async ({ sellerId, sellerAccess }) => accounts.getAccount(sellerId, sellerAccess ?? null),
+    getSetup: async ({ sellerId }) => accounts.getSetup(sellerId),
+    requestLaunchReview: async ({ sellerId, body, actor, requestId }) => accounts.requestLaunchReview(sellerId, body?.note, { actor, requestId }),
+    getBusinessDetails: async ({ sellerId }) => accounts.getBusinessDetails(sellerId),
+    updateBusinessContact: async ({ sellerId, body, actor, requestId }) => accounts.updateBusinessContact(sellerId, body, { actor, requestId }),
+    requestBusinessChange: async ({ sellerId, body, actor, requestId }) => storefront.requestBusinessChange(sellerId, body, { actor, requestId }),
+    listOwnChangeRequests: async ({ sellerId, query, page }) => storefront.listOwnChangeRequests(sellerId, query.state, page),
+    withdrawChangeRequest: async ({ sellerId, params, actor, requestId }) => storefront.withdrawChangeRequest(sellerId, params.id, { actor, requestId }),
+    getStoreProfile: async ({ sellerId }) => storefront.getStoreProfile(sellerId),
+    updateStoreProfile: async ({ sellerId, body, actor, requestId }) => storefront.updateStoreProfile(sellerId, body, { actor, requestId }),
+    submitPublicClaim: async ({ sellerId, body, actor, requestId }) => storefront.submitPublicClaim(sellerId, body, { actor, requestId }),
+    requestBrand: async ({ sellerId, body, actor, requestId }) => storefront.requestBrand(sellerId, body, { actor, requestId }),
+    withdrawPublicClaim: async ({ sellerId, params, actor, requestId }) => storefront.withdrawPublicClaim(sellerId, params.id, { actor, requestId }),
+    createCollection: async ({ sellerId, body, actor, requestId }) => storefront.createCollection(sellerId, body, { actor, requestId }),
+    updateCollection: async ({ sellerId, params, body, actor, requestId }) => storefront.updateCollection(sellerId, params.id, body, { actor, requestId }),
+    deleteCollection: async ({ sellerId, params, actor, requestId }) => {
+      await storefront.deleteCollection(sellerId, params.id, { actor, requestId });
+    },
+    reorderCollections: async ({ sellerId, body, actor, requestId }) => storefront.reorderCollections(sellerId, body.collectionIds, { actor, requestId }),
+    listMembers: async ({ sellerId }) => members.listMembers(sellerId),
+    listRoleTemplates: async () => members.listRoleTemplates(),
+    inviteMember: async ({ sellerId, body, actor, requestId }) => members.inviteMember(sellerId, body, { actor, requestId }),
+    resendInvitation: async ({ sellerId, params, actor, requestId }) => members.resendInvitation(sellerId, params.id, { actor, requestId }),
+    revokeInvitation: async ({ sellerId, params, actor, requestId }) => members.revokeInvitation(sellerId, params.id, { actor, requestId }),
+    updateMember: async ({ sellerId, params, body, actor, requestId }) => members.updateMember(sellerId, params.id, body, { actor, requestId }),
+    suspendMember: async ({ sellerId, params, body, actor, requestId }) => members.suspendMember(sellerId, params.id, body?.reason, { actor, requestId }),
+    removeMember: async ({ sellerId, params, body, actor, requestId }) => members.removeMember(sellerId, params.id, body?.reason, { actor, requestId }),
+    getPerformance: async ({ sellerId }) => performance.getPerformance(sellerId),
+    listOwnRestrictions: async ({ sellerId, query, page }) => enforcement.listOwnRestrictions(sellerId, query.state, page),
+    getOwnRestriction: async ({ sellerId, params }) => enforcement.getOwnRestriction(sellerId, params.id),
+    submitResolutionEvidence: async ({ sellerId, params, body, actor, requestId }) => enforcement.submitResolutionEvidence(sellerId, params.id, body, { actor, requestId }),
+    appealRestriction: async ({ sellerId, params, body, actor, requestId }) => enforcement.appealRestriction(sellerId, params.id, body, { actor, requestId }),
+    listOwnAppeals: async ({ sellerId, page }) => enforcement.listOwnAppeals(sellerId, page),
+    withdrawOwnAppeal: async ({ sellerId, params, actor, requestId }) => enforcement.withdrawOwnAppeal(sellerId, params.id, { actor, requestId }),
+    getPayoutAccount: async ({ sellerId }) => accounts.getPayoutAccount(sellerId),
+    changePayoutAccount: async ({ sellerId, body, actor, requestId }) => accounts.changePayoutAccount(sellerId, body, { actor, requestId }),
+    listAgreements: async ({ sellerId }) => accounts.listAgreements(sellerId),
+    acceptAgreement: async ({ sellerId, params, body, actor, requestId }) => accounts.acceptAgreement(sellerId, params.key, body, { actor, requestId }),
+    requestSellerClosure: async ({ sellerId, body, actor, requestId }) => accounts.requestSellerClosure(sellerId, body.reason, { actor, requestId }),
   });
+};

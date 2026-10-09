@@ -1,35 +1,28 @@
-import { notImplemented, routes } from '../../../kernel/http/index.js';
+import { routes } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/sellers.js';
 import type { SellersService } from '../service.js';
 
 /**
  * Store API: /api/store/sellers/…  (docs/api/modules/sellers.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
+ * Applicants act for their own member account (principal.accountId), never an id from the body.
  */
-export const storeRoutes = (service: SellersService) =>
-  routes(endpoints, 'store', {
-    /** GET /program: Sell with us: requirements, categories, example fees, payout timing, targets, steps */
-    getSellerProgram: notImplemented,
-    /** POST /applications: Start a seller application (step 1: seller account) */
-    startApplication: notImplemented,
-    /** GET /applications/current: My application with progress, information requests, decision and timeline */
-    getMyApplication: notImplemented,
-    /** PATCH /applications/{id}: Save a step (draft saves at any time) */
-    updateApplication: notImplemented,
-    /** POST /applications/{id}/documents: Attach an uploaded document (ID, registration, W-9, bank letter, certificate) */
-    addApplicationDocument: notImplemented,
-    /** DELETE /applications/{id}/documents/{documentId}: Remove a document from a draft or an open information request */
-    removeApplicationDocument: notImplemented,
-    /** POST /applications/{id}/submit: Accept the agreements and submit */
-    submitApplication: notImplemented,
-    /** POST /applications/{id}/respond: Send the requested information for review */
-    respondToInformationRequest: notImplemented,
-    /** POST /applications/{id}/withdraw: Withdraw an application */
-    withdrawApplication: notImplemented,
-    /** POST /applications/{id}/appeal: Appeal a rejection before the deadline */
-    appealApplicationDecision: notImplemented,
-    /** GET /stores/{slug}: Public seller storefront */
-    getStorefront: notImplemented,
-    /** GET /stores/{slug}/collections/{collectionId}: One featured collection with its offer ids */
-    getStorefrontCollection: notImplemented,
+export const storeRoutes = (service: SellersService) => {
+  const apps = service.applications;
+  return routes(endpoints, 'store', {
+    getSellerProgram: async ({ principal }) => apps.getSellerProgram(principal),
+    startApplication: async ({ principal, body, actor, requestId }) => apps.startApplication(principal.accountId!, body, { actor, requestId, principal }),
+    getMyApplication: async ({ principal }) => apps.getMyApplication(principal.accountId!),
+    updateApplication: async ({ principal, params, body, actor, requestId }) => apps.updateApplication(principal.accountId!, params.id, body, { actor, requestId, principal }),
+    addApplicationDocument: async ({ principal, params, body, actor, requestId }) => apps.addApplicationDocument(principal.accountId!, params.id, body, { actor, requestId, principal }),
+    removeApplicationDocument: async ({ principal, params, actor, requestId }) => {
+      await apps.removeApplicationDocument(principal.accountId!, params.id, params.documentId, { actor, requestId, principal });
+    },
+    submitApplication: async ({ principal, params, body, actor, requestId }) => apps.submitApplication(principal.accountId!, params.id, body, { actor, requestId, principal }),
+    respondToInformationRequest: async ({ principal, params, body, actor, requestId }) => apps.respondToInformationRequest(principal.accountId!, params.id, body, { actor, requestId, principal }),
+    withdrawApplication: async ({ principal, params, body, actor, requestId }) => apps.withdrawApplication(principal.accountId!, params.id, body?.reason, { actor, requestId, principal }),
+    appealApplicationDecision: async ({ principal, params, body, actor, requestId }) => apps.appealApplicationDecision(principal.accountId!, params.id, body, { actor, requestId, principal }),
+    getStorefront: async ({ params }) => service.storefront.getStorefront(params.slug),
+    getStorefrontCollection: async ({ params }) => service.storefront.getStorefrontCollection(params.slug, params.collectionId),
   });
+};
