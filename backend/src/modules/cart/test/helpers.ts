@@ -34,6 +34,8 @@ export interface World {
   purchasable: Map<string, boolean>;
   /** stock item → seller that owns it (inventory) */
   stockSeller: Map<string, string>;
+  /** postal codes offers.revalidate was called with */
+  revalidatedFor: string[];
 }
 
 export interface Kit {
@@ -91,7 +93,7 @@ const viewOf = (o: offers.Offer, world: World): offers.OfferView => ({
 
 export async function boot(opts: BuildOptions & { only?: string[] } = {}): Promise<Kit> {
   const clock = movingClock();
-  const world: World = { offers: new Map(), products: new Map(), restricted: new Set(), notShippable: new Set(), purchasable: new Map(), stockSeller: new Map() };
+  const world: World = { offers: new Map(), products: new Map(), restricted: new Set(), notShippable: new Set(), purchasable: new Map(), stockSeller: new Map(), revalidatedFor: [] };
   const alternatives = (o: offers.Offer) => [...world.offers.values()].filter((x) => x.id !== o.id && x.variantId === o.variantId && x.status === 'active').map((x) => viewOf(x, world));
   const app = await buildTestApp({
     clock,
@@ -107,7 +109,8 @@ export async function boot(opts: BuildOptions & { only?: string[] } = {}): Promi
           if (!o) throw new Error('unknown offer');
           return viewOf(o, world);
         },
-        revalidate: async (lines) => {
+        revalidate: async (lines, postalCode) => {
+          world.revalidatedFor.push(postalCode);
           const changes: offers.OfferChange[] = [];
           for (const l of lines) {
             const o = world.offers.get(l.offerId);

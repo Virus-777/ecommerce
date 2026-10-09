@@ -2,8 +2,7 @@
  * Shared set-up for the purchasing behaviour tests.
  *
  * Stubbed APIs:
- *   inventory (built in parallel): a small in-memory company/seller stock list behind exportRows
- *     ('inventory.admin.stock' rows { stockItemId, sku, label, ownerType }) and getAvailability
+ *   inventory: a small in-memory company/seller stock list behind getStockItems (StockItemRef) and getAvailability
  *     ({ available, lowStockThreshold }); expectIncoming / cancelIncoming / submitInbound are recorded.
  *   access: check → allowed up to $25,000, approval_required above, denied for a token named "Intern";
  *     requestApproval → a new request; approvalInfo → "Over $25,000: needs Morgan Hale".
@@ -15,10 +14,14 @@ import { fixedClock } from '../../../kernel/lib/clock.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { devClaims } from '../../../kernel/auth/dev.js';
 import { devSigner, signAccessToken } from '../../../kernel/auth/tokens.js';
+import type { StockItemRef } from '../../../spec/inventory.js';
 import { auth, buildTestApp, ISSUER, TEST_JWK } from '../../../testing/app.js';
 
 export const NOW = '2026-10-09T17:00:00.000Z'; // 10:00 in Los Angeles
 export const LOCATION = newId();
+const SELLER = newId();
+const PRODUCT = newId();
+const VARIANT = newId();
 
 export interface StockFixture {
   sku: string;
@@ -36,9 +39,14 @@ export function makeStubs() {
     return id;
   };
   const inventory = {
-    exportRows: vi.fn(async (_dataset: string, filters: { stockItemIds?: string[] }) => ({
-      rows: [...stock.entries()].filter(([id]) => !filters?.stockItemIds || filters.stockItemIds.includes(id)).map(([id, s]) => ({ stockItemId: id, sku: s.sku, label: s.label, ownerType: s.ownerType })),
-    })),
+    getStockItems: vi.fn(async (ids: string[]): Promise<StockItemRef[]> =>
+      ids
+        .filter((id) => stock.has(id))
+        .map((id) => {
+          const s = stock.get(id)!;
+          return { id, sku: s.sku, label: s.label, ownerType: s.ownerType, sellerId: s.ownerType === 'seller' ? SELLER : null, offerId: null, productId: PRODUCT, variantId: VARIANT, condition: 'new', locationId: LOCATION, locationCode: 'WH1', binCode: null };
+        }),
+    ),
     getAvailability: vi.fn(async (ids: string[]) =>
       Object.fromEntries(ids.filter((id) => stock.has(id)).map((id) => [id, { available: stock.get(id)!.available, state: 'in_stock', lowStockThreshold: stock.get(id)!.threshold, nextIncoming: null }])),
     ),

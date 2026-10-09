@@ -39,6 +39,18 @@ describe('merging the guest cart on sign-in', () => {
     await add(c.token, customerOffer.id);
     k.change(doomed.id, { status: 'removed' });
 
+    // ownership proof: knowing a guest session id is not enough, the account must have claimed it at sign-in
+    const intruder = k.customer();
+    expect((await k.call('POST', `${STORE}/cart/merge`, { token: intruder.token, body: { guestSessionId: guest.sid } })).status).toBe(404);
+    expect((await k.call('POST', `${STORE}/cart/merge`, { token: c.token, body: { guestSessionId: guest.sid } })).status).toBe(404);
+    expect((await k.call('GET', `${STORE}/cart`, { token: guest.token })).body.itemCount).toBe(6);
+    expect(k.of('cart.cart.merged').filter((e) => e.customerId === c.accountId)).toHaveLength(0);
+    // a claim by another account proves nothing for c
+    await k.publish('identity', 'identity.guest_session.claimed', { guestSessionId: newId(), accountId: c.accountId });
+    expect((await k.call('POST', `${STORE}/cart/merge`, { token: c.token, body: { guestSessionId: guest.sid } })).status).toBe(404);
+
+    // sign-in claims the session: the consumer merges, and POST /cart/merge answers the same report
+    await k.publish('identity', 'identity.guest_session.claimed', { guestSessionId: guest.sid, accountId: c.accountId });
     const res = await k.call('POST', `${STORE}/cart/merge`, { token: c.token, body: { guestSessionId: guest.sid } });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     const byOffer = Object.fromEntries(res.body.report.lines.map((l: any) => [l.offerId, l]));
@@ -60,7 +72,8 @@ describe('merging the guest cart on sign-in', () => {
     const again = await k.call('POST', `${STORE}/cart/merge`, { token: c.token, body: { guestSessionId: guest.sid } });
     expect(again.body.report).toEqual(res.body.report);
     expect(linesOf(again.body.cart)).toHaveLength(4);
-    expect((await k.call('POST', `${STORE}/cart/merge`, { token: k.customer().token, body: { guestSessionId: guest.sid } })).status).toBe(404);
+    expect((await k.call('POST', `${STORE}/cart/merge`, { token: intruder.token, body: { guestSessionId: guest.sid } })).status).toBe(404);
+    expect(k.of('cart.cart.merged').filter((e) => e.customerId === c.accountId)).toHaveLength(1);
     expect((await k.call('POST', `${STORE}/cart/merge`, { token: c.token, body: { guestSessionId: newId() } })).status).toBe(404);
     // the guest session now has no active cart
     expect((await k.call('GET', `${STORE}/cart`, { token: guest.token })).body.itemCount).toBe(0);

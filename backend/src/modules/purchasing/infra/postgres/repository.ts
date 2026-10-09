@@ -590,20 +590,6 @@ export function createPostgresPurchasingRepository(db: Db, inTransaction = false
       return rows.map((r) => ({ ...toLine(r), ref: r.po_ref, status: r.po_status as PoStatus, poExpectedDate: r.po_expected_date }));
     },
 
-    async knownStock(stockItemIds) {
-      const out = new Map<string, { sku: string; label: string }>();
-      if (!stockItemIds.length) return out;
-      const rows = await db
-        .selectFrom('purchase_order_lines as l')
-        .innerJoin('purchase_orders as po', 'po.id', 'l.purchase_order_id')
-        .select(['l.stock_item_id', 'l.sku', 'l.label'])
-        .where('l.stock_item_id', 'in', [...new Set(stockItemIds)])
-        .orderBy('po.created_at', 'asc')
-        .execute();
-      for (const r of rows) out.set(r.stock_item_id, { sku: r.sku, label: r.label }); // latest wins
-      return out;
-    },
-
     async addEvent(row) {
       await db
         .insertInto('purchase_order_events')

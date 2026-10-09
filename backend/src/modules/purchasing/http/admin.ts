@@ -17,7 +17,7 @@ export const adminRoutes = (service: PurchasingService) =>
     /** POST /suppliers: Add a supplier */
     createSupplier: async (i) => service.createSupplier(i.body, by(i)),
     /** GET /suppliers/{id}: Supplier with price list, performance, recent POs and open claims */
-    getSupplier: async ({ params, principal }) => service.getSupplier(params.id, principal),
+    getSupplier: async ({ params }) => service.getSupplier(params.id),
     /** PATCH /suppliers/{id}: Edit or deactivate a supplier */
     updateSupplier: async (i) => service.updateSupplier(i.params.id, i.body, by(i)),
     /** PUT /suppliers/{id}/items: Replace a supplier's price list (buying costs per SKU) */
@@ -37,7 +37,7 @@ export const adminRoutes = (service: PurchasingService) =>
     /** POST /purchase-orders/{id}/close: Close a partly received PO short (remaining units will not arrive) */
     closePurchaseOrder: async (i) => service.closePurchaseOrder(i.params.id, i.body, by(i)),
     /** GET /reorder-suggestions: SKUs at or below reorder point after incoming stock, with suggested quantity and preferred supplier */
-    listReorderSuggestions: async ({ query, page, principal }) => service.listReorderSuggestions(query, page, principal),
+    listReorderSuggestions: async ({ query, page }) => service.listReorderSuggestions(query, page),
     /** POST /purchase-orders/from-suggestions: Create draft POs (one per preferred supplier) from selected suggestions */
     createFromSuggestions: async (i) => service.createFromSuggestions(i.body, by(i)),
     /** GET /deliveries: Expected and arrived purchase deliveries for receiving */

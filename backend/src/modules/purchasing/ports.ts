@@ -4,7 +4,6 @@
  */
 import type { Page, PageRequest } from '../../kernel/lib/pagination.js';
 import type * as common from '../../spec/common.js';
-import type * as identity from '../../spec/identity.js';
 import type { ClaimLine } from '../../spec/purchasing.js';
 import type { ClaimKind, ClaimStatus, DeliveryStatus, PoStatus, ReceiptStatus } from './domain/rules.js';
 
@@ -242,8 +241,6 @@ export interface PurchasingRepository {
   updateLine(id: string, patch: Partial<Pick<PoLineRow, 'qtyReceived' | 'qtyDamaged' | 'qtyClosed' | 'expectedDate'>>): Promise<void>;
   /** Lines on purchase orders in these statuses for one stock item */
   linesForStock(stockItemIds: readonly string[], statuses: readonly PoStatus[]): Promise<(PoLineRow & { ref: string; status: PoStatus; poExpectedDate: string | null })[]>;
-  /** Latest sku and label recorded on any PO line for these stock items */
-  knownStock(stockItemIds: readonly string[]): Promise<Map<string, { sku: string; label: string }>>;
   addEvent(row: PoEventRow): Promise<void>;
   eventsOf(purchaseOrderId: string): Promise<PoEventRow[]>;
 
@@ -281,17 +278,11 @@ export interface StockInfo {
   stockItemId: string;
   sku: string;
   label: string;
-  /** null when the source does not say (treated as company stock) */
-  ownerType: 'official' | 'seller' | null;
+  ownerType: 'official' | 'seller';
 }
 
-/**
- * SKU, label and owner of inventory stock items. Inventory's public API has no lookup by id
- * (spec gap), so the adapter combines what purchasing already knows with inventory's own export.
- */
+/** SKU, label and owner of inventory stock items (inventory.getStockItems) */
 export interface StockDirectory {
   /** Known items only; missing ids are not in the map */
-  describe(stockItemIds: readonly string[], viewer?: identity.Principal | null): Promise<Map<string, StockInfo>>;
-  /** Items seen in inventory events (inventory.stock.low) */
-  remember(info: StockInfo): void;
+  describe(stockItemIds: readonly string[]): Promise<Map<string, StockInfo>>;
 }

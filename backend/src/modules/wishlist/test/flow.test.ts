@@ -306,15 +306,23 @@ describe('alerts', () => {
 });
 
 describe('move to cart', () => {
-  it('adds the saved offer to the cart and keeps or removes the item', async () => {
-    const first = await f.call('POST', '/api/store/cart/cart/items', { token: carl.accessToken, body: { offerId: listing.offerId, quantity: 1 } });
-    expect(first.status, JSON.stringify(first.body)).toBeLessThan(300);
+  it('adds the saved offer to the cart (created when the customer has none) and keeps or removes the item', async () => {
+    const added: any[] = [];
+    app.kernel.events.subscribe('test', 'cart.item.added', (e) => void added.push(e.payload));
+    expect((await f.call('GET', '/api/store/cart/cart', { token: carl.accessToken })).body.itemCount).toBe(0);
     const moved = await f.call('POST', `${S}/items/${carlItemId}/move-to-cart`, { token: carl.accessToken, body: { quantity: 2 } });
     expect(moved.status, JSON.stringify(moved.body)).toBe(200);
     expect(moved.body).toMatchObject({ cartLineId: expect.any(String), cartItemCount: 2, item: { id: carlItemId } });
+    const cart = (await f.call('GET', '/api/store/cart/cart', { token: carl.accessToken })).body;
+    const line = cart.packages.flatMap((p: any) => p.items).find((i: any) => i.offerId === listing.offerId);
+    expect(line).toMatchObject({ id: moved.body.cartLineId, quantity: 2 });
+    expect(added.at(-1)).toMatchObject({ itemId: moved.body.cartLineId, offerId: listing.offerId, quantity: 2, ownerKind: 'customer' });
+
+    // the same offer again: the cart line grows, as with Add to cart
     events.length = 0;
-    const removed = await f.call('POST', `${S}/items/${carlItemId}/move-to-cart`, { token: carl.accessToken, body: { quantity: 2, removeFromList: true } });
-    expect(removed.body.item).toBeNull();
+    const removed = await f.call('POST', `${S}/items/${carlItemId}/move-to-cart`, { token: carl.accessToken, body: { quantity: 1, removeFromList: true } });
+    expect(removed.status, JSON.stringify(removed.body)).toBe(200);
+    expect(removed.body).toMatchObject({ cartLineId: moved.body.cartLineId, cartItemCount: 3, item: null });
     expect(named('wishlist.item.removed')).toHaveLength(1);
     expect((await f.call('GET', `${S}/wishlist`, { token: carl.accessToken })).body.items).toHaveLength(0);
   });

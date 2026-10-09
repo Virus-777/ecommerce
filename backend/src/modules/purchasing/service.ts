@@ -136,7 +136,7 @@ export class PurchasingService implements PurchasingPublicApi {
   constructor(protected readonly deps: PurchasingServiceDeps) {
     this.directory =
       deps.directory ??
-      createInventoryStockDirectory({ inventory: () => deps.ctx.use('inventory'), knownStock: (ids) => deps.repo.knownStock(ids), clock: deps.ctx.clock });
+      createInventoryStockDirectory({ inventory: () => deps.ctx.use('inventory') });
     this.views = new PurchasingViews({ repo: deps.repo, ctx: deps.ctx, directory: this.directory });
   }
 
@@ -316,7 +316,7 @@ export class PurchasingService implements PurchasingPublicApi {
     return { ...p, items: await this.views.suppliers(p.items) };
   }
 
-  async getSupplier(id: string, viewer?: identity.Principal): Promise<SupplierDetail> {
+  async getSupplier(id: string): Promise<SupplierDetail> {
     const s = await this.repo.getSupplier(id);
     if (!s) throw notFound('Supplier');
     const [items, perf, open, pos, claims, windowDays] = await Promise.all([
@@ -330,7 +330,7 @@ export class PurchasingService implements PurchasingPublicApi {
     const p = perf.get(id);
     return {
       supplier: this.views.supplier(s, open.get(id) ?? 0, p),
-      items: await this.views.supplierItems(items, viewer),
+      items: await this.views.supplierItems(items),
       performance: {
         windowDays: p?.windowDays ?? windowDays,
         onTimePct: p?.onTimePct ?? null,
@@ -415,7 +415,7 @@ export class PurchasingService implements PurchasingPublicApi {
       if (it.leadTimeDays != null && it.leadTimeDays < 0) issues.push({ path: `items.${i}.leadTimeDays`, message: 'Lead time cannot be negative' });
     });
     if (issues.length) throw invalidMany('Some price list rows are invalid', issues);
-    if (items.length) await this.requireCompanyStock(items.map((i) => i.stockItemId), by.principal);
+    if (items.length) await this.requireCompanyStock(items.map((i) => i.stockItemId));
     const now = this.now();
     const rows: SupplierItemRow[] = items.map((it) => ({
       supplierId: id,
@@ -449,7 +449,7 @@ export class PurchasingService implements PurchasingPublicApi {
       },
       by,
     );
-    return this.views.supplierItems(await this.repo.supplierItems(id), by.principal);
+    return this.views.supplierItems(await this.repo.supplierItems(id));
   }
 
   /* ================================================================ purchase orders */
@@ -472,7 +472,7 @@ export class PurchasingService implements PurchasingPublicApi {
     const supplier = await this.repo.getSupplier(input.supplierId);
     if (!supplier) throw invalid('supplierId', 'Choose an existing supplier');
     if (!supplier.active) throw new AppError('SUPPLIER_INACTIVE', `${supplier.name} is deactivated.`, { supplierId: supplier.id });
-    const lines = await this.prepareLines(input.lines, by.principal);
+    const lines = await this.prepareLines(input.lines);
     const freight = input.freight ? this.amountOf(input.freight, 'freight') : 0;
     const attachmentIds = [...new Set(input.attachmentIds ?? [])];
     await this.checkAttachments(attachmentIds);
@@ -510,7 +510,7 @@ export class PurchasingService implements PurchasingPublicApi {
     }
 
     const oldLines = await this.repo.linesOf([id]);
-    const newLines = newLinesInput ? await this.prepareLines(newLinesInput, by.principal) : null;
+    const newLines = newLinesInput ? await this.prepareLines(newLinesInput) : null;
     const lineDates = body.lineExpectedDates ?? {};
     const unknownLines = Object.keys(lineDates).filter((lid) => !oldLines.some((l) => l.id === lid));
     if (unknownLines.length) throw invalidMany('Some lines are not on this purchase order', unknownLines.map((lid) => ({ path: `lineExpectedDates.${lid}`, message: 'Not a line of this purchase order' })));
@@ -726,8 +726,8 @@ export class PurchasingService implements PurchasingPublicApi {
 
   /* ================================================================ reorder suggestions */
 
-  async listReorderSuggestions(query: { supplierId?: string }, page: PageRequest, viewer?: identity.Principal): Promise<Page<ReorderSuggestion>> {
-    return pageOf(await this.suggestions({ supplierId: query.supplierId }, viewer), page);
+  async listReorderSuggestions(query: { supplierId?: string }, page: PageRequest): Promise<Page<ReorderSuggestion>> {
+    return pageOf(await this.suggestions({ supplierId: query.supplierId }), page);
   }
 
   async createFromSuggestions(body: { stockItemIds: string[]; quantities?: Record<string, number> | null }, by: Caller): Promise<PurchaseOrder[]> {
@@ -738,10 +738,10 @@ export class PurchasingService implements PurchasingPublicApi {
       !ids.includes(k) ? [{ path: `quantities.${k}`, message: 'Not one of the chosen items' }] : !Number.isInteger(v) || v < 1 ? [{ path: `quantities.${k}`, message: 'Order at least 1 unit' }] : [],
     );
     if (qIssues.length) throw invalidMany('Some quantities are invalid', qIssues);
-    const suggestions = new Map((await this.suggestions({ stockItemIds: ids, includeAll: true }, by.principal)).map((s) => [s.stockItemId, s]));
+    const suggestions = new Map((await this.suggestions({ stockItemIds: ids, includeAll: true })).map((s) => [s.stockItemId, s]));
     const noSupplier = ids.filter((i) => !suggestions.get(i)?.supplier);
     if (noSupplier.length) throw invalidMany('Some items have no supplier on a price list', noSupplier.map((i) => ({ path: `stockItemIds.${ids.indexOf(i)}`, message: 'No active supplier sells this item; add it to a price list first' })));
-    const info = await this.requireCompanyStock(ids, by.principal);
+    const info = await this.requireCompanyStock(ids);
     const shipTo = (await this.repo.purchaseOrdersBy({ limit: 1 }))[0]?.shipToLocationId;
     if (!shipTo) throw invalid('stockItemIds', 'Create the first purchase order by hand so the receiving warehouse is known');
     const items = await this.repo.itemsForStock({ stockItemIds: ids });
@@ -782,7 +782,7 @@ export class PurchasingService implements PurchasingPublicApi {
    * Company stock at or below its reorder point after incoming and drafted units, with the preferred
    * (else cheapest) supplier. Candidates: SKUs on a preferred price list row and SKUs inventory reported low.
    */
-  async suggestions(filter: { supplierId?: string; stockItemIds?: string[]; includeAll?: boolean }, viewer?: identity.Principal | null): Promise<ReorderSuggestion[]> {
+  async suggestions(filter: { supplierId?: string; stockItemIds?: string[]; includeAll?: boolean }): Promise<ReorderSuggestion[]> {
     const candidates = new Set<string>(filter.stockItemIds ?? []);
     if (!filter.stockItemIds) {
       for (const i of await this.repo.itemsForStock({ preferredOnly: true, supplierId: filter.supplierId })) candidates.add(i.stockItemId);
@@ -832,7 +832,7 @@ export class PurchasingService implements PurchasingPublicApi {
         gap: a.available + incoming - (reorderPoint ?? 0),
       });
     }
-    const info = await this.views.describe(pending, viewer);
+    const info = await this.views.describe(pending);
     for (const s of out) {
       const i = info.get(s.stockItemId) ?? this.#lowStock.get(s.stockItemId);
       s.sku = i?.sku ?? '';
@@ -1375,7 +1375,6 @@ export class PurchasingService implements PurchasingPublicApi {
     if (event.ownerType !== 'official') return; // sellers buy their own stock
     const info: StockInfo = { stockItemId: event.stockItemId, sku: event.sku, label: event.label, ownerType: 'official' };
     this.#lowStock.set(event.stockItemId, info);
-    this.directory.remember(info);
   }
 
   /** access.approval.decided: Send an approved PO; record a rejection on the PO timeline */
@@ -1529,7 +1528,7 @@ export class PurchasingService implements PurchasingPublicApi {
   }
 
   /** Validated lines with SKU and label from inventory (company stock only). */
-  private async prepareLines(lines: PurchaseOrderLineInput[] | undefined, viewer: identity.Principal): Promise<NewLine[]> {
+  private async prepareLines(lines: PurchaseOrderLineInput[] | undefined): Promise<NewLine[]> {
     if (!lines?.length) throw invalid('lines', 'Add at least one line');
     const issues: { path: string; message: string }[] = [];
     const seen = new Set<string>();
@@ -1541,7 +1540,7 @@ export class PurchasingService implements PurchasingPublicApi {
       seen.add(l.stockItemId);
     });
     if (issues.length) throw invalidMany('Some lines are invalid', issues);
-    const info = await this.requireCompanyStock(lines.map((l) => l.stockItemId), viewer);
+    const info = await this.requireCompanyStock(lines.map((l) => l.stockItemId));
     return lines.map((l) => ({
       stockItemId: l.stockItemId,
       sku: info.get(l.stockItemId)!.sku,
@@ -1552,9 +1551,9 @@ export class PurchasingService implements PurchasingPublicApi {
     }));
   }
 
-  private async requireCompanyStock(ids: readonly string[], viewer?: identity.Principal | null): Promise<Map<string, StockInfo>> {
+  private async requireCompanyStock(ids: readonly string[]): Promise<Map<string, StockInfo>> {
     const unique = [...new Set(ids)];
-    const info = await this.directory.describe(unique, viewer);
+    const info = await this.directory.describe(unique);
     const bad = unique.filter((id) => {
       const i = info.get(id);
       return !i || i.ownerType === 'seller';

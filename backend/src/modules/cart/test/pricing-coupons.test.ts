@@ -175,6 +175,7 @@ describe('coupon preview', () => {
 
     // signing in carries the account coupon over, now valid
     const c = k.customer();
+    await k.publish('identity', 'identity.guest_session.claimed', { guestSessionId: v.sid, accountId: c.accountId });
     const merged = await k.call('POST', `${STORE}/cart/merge`, { token: c.token, body: { guestSessionId: v.sid } });
     expect(merged.status, JSON.stringify(merged.body)).toBe(200);
     const view = (await k.call('GET', `${STORE}/cart`, { token: c.token })).body;

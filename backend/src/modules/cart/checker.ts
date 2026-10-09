@@ -156,7 +156,7 @@ export class CartChecker {
       live.length
         ? offersApi.revalidate(
             items.filter((i) => byId.get(i.offer_id)).map((i) => ({ offerId: i.offer_id, quantity: i.quantity, termsVersion: i.accepted_terms_version, price: money(i.accepted_price, i.currency) })),
-            postalCode ?? '',
+            postalCode || this.ctx.config.market.defaultLocation.postalCode,
           )
         : Promise.resolve({ ok: true, changes: [] as offers.OfferChange[] }),
       Promise.all(

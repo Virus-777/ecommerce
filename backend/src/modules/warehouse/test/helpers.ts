@@ -121,7 +121,11 @@ export async function harness(): Promise<Harness> {
         canShipItems: async () => ({ ok: true, problems: [] }),
       },
       inventory: {
-        exportRows: async (_dataset, filters) => ({ rows: ((filters as { stockItemIds?: string[] }).stockItemIds ?? []).flatMap((id) => (h.stock.has(id) ? [{ sku: h.stock.get(id)!.sku }] : [])) }),
+        getStockItems: async (ids) =>
+          ids.flatMap((id) => {
+            const s = h.stock.get(id);
+            return s ? [{ id: s.id, sku: s.sku, label: s.label, ownerType: 'official' as const, sellerId: null, offerId: null, productId: newId(), variantId: newId(), condition: 'new', locationId: null, locationCode: null, binCode: null }] : [];
+          }),
         findBySku: async (_owner, skus) =>
           [...h.stock.values()].filter((s) => skus.some((k) => k.trim().toUpperCase() === s.sku.toUpperCase())).map((s) => ({ id: s.id, ownerType: 'official', sku: s.sku, productId: newId(), variantId: newId(), condition: 'new', label: s.label, image: null, quantities: {}, state: 'in_stock', archived: false, updatedAt: clock.now().toISOString() }) as never),
         reportDiscrepancy: async (input) => {
@@ -162,6 +166,10 @@ export async function harness(): Promise<Harness> {
         listShipmentsForGroups: async (groupIds) => new Map(groupIds.map((g) => [g, h.labels.filter((l) => l.input.groupId === g).map(shipmentOf)])),
       },
       returns: {
+        getReturn: async (returnId) => {
+          const d = h.returns.get(returnId);
+          return d ? ({ detail: d } as unknown as returns.ReturnCase) : null;
+        },
         getReturnAdmin: async (ref) => {
           const d = [...h.returns.values()].find((r) => r.ref === ref);
           return d ? ({ detail: d } as unknown as returns.ReturnCase) : null;

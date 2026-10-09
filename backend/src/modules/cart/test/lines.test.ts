@@ -191,3 +191,38 @@ describe('cart lines', () => {
     expect(await k.service.countOfferInCarts(offer.id)).toBe(3);
   });
 });
+
+describe('addLine (public API, used by wishlist)', () => {
+  it('creates the cart when needed, follows the POST /cart/items rules and publishes cart.item.added', async () => {
+    const { productId, variantIds } = await k.product();
+    const offer = await k.offer({ productId, variantId: variantIds[0]!, price: 2500, purchaseLimit: 2 });
+    const c = k.customer();
+    const item = await k.service.addLine({ customerId: c.accountId }, { offerId: offer.id, quantity: 1 });
+    expect(item).toMatchObject({ offerId: offer.id, quantity: 1, unitPrice: { amount: 2500 }, state: 'ok' });
+    await k.drain();
+    expect(k.of('cart.item.added').at(-1)).toMatchObject({ itemId: item.id, offerId: offer.id, quantity: 1, ownerKind: 'customer' });
+    const capped = await k.service.addLine({ customerId: c.accountId }, { offerId: offer.id, quantity: 5 });
+    expect(capped).toMatchObject({ id: item.id, quantity: 2 });
+    await expect(k.service.addLine({ customerId: c.accountId }, { offerId: offer.id, quantity: 1 })).rejects.toMatchObject({ code: 'QUANTITY_LIMIT_EXCEEDED' });
+    const view = (await k.call('GET', `${STORE}/cart`, { token: c.token })).body;
+    expect(lineOf(view, offer.id).quantity).toBe(2);
+
+    const v = k.visitor();
+    const guestItem = await k.service.addLine({ guestSessionId: v.sid }, { offerId: offer.id, quantity: 1 });
+    expect(lineOf((await k.call('GET', `${STORE}/cart`, { token: v.token })).body, offer.id).id).toBe(guestItem.id);
+    await expect(k.service.addLine({ guestSessionId: v.sid }, { offerId: newId(), quantity: 1 })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(k.service.addLine({}, { offerId: offer.id, quantity: 1 })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+  });
+
+  it('re-checks a cart without a deliver-to location against the market default location', async () => {
+    const { productId, variantIds } = await k.product();
+    const offer = await k.offer({ productId, variantId: variantIds[0]!, price: 1000 });
+    const v = k.visitor();
+    await k.call('POST', `${STORE}/cart/items`, { token: v.token, body: { offerId: offer.id, quantity: 1 } });
+    k.world.revalidatedFor.length = 0;
+    await k.call('GET', `${STORE}/cart`, { token: v.token });
+    const expected = (k.service as any).deps.ctx.config.market.defaultLocation.postalCode;
+    expect(expected).toBeTruthy();
+    expect(k.world.revalidatedFor).toEqual([expected]);
+  });
+});

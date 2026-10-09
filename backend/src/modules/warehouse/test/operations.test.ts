@@ -136,14 +136,31 @@ describe('return parcels', () => {
       shipment: { trackingNumber: '9400100000000000000001' },
     }) as unknown as returns.ReturnDetail;
 
+  const approved = (returnId: string, ref: string, o: { ownerType?: 'official' | 'seller'; dropOffBy?: string | null; trackingNumber?: string | null; orderId?: string } = {}) => ({
+    returnId,
+    ref,
+    orderId: o.orderId ?? newId(),
+    customerId: newId(),
+    ownerType: o.ownerType ?? 'official',
+    sellerId: o.ownerType === 'seller' ? newId() : null,
+    items: [{ orderItemId: newId(), quantity: 1 }],
+    withoutReturn: false,
+    platformDecision: false,
+    dropOffBy: o.dropOffBy ?? null,
+    trackingNumber: o.trackingNumber ?? null,
+  });
+
   it('expects approved Official Store returns, receives by reference through returns and hands over to inspection', async () => {
     const returnId = newId();
     h.returns.set(returnId, detail(returnId, 'RT-261005-0212'));
-    await h.publish('returns', 'returns.return.approved', { returnId, ownerType: 'official', sellerId: null, withoutReturn: false, platformDecision: false, dropOffBy: new Date(h.clock.now().getTime() + 7 * 86_400_000).toISOString() });
-    await h.publish('returns', 'returns.return.approved', { returnId, ownerType: 'official', sellerId: null, withoutReturn: false, platformDecision: false, dropOffBy: null });
-    await h.publish('returns', 'returns.return.approved', { returnId: newId(), ownerType: 'seller', sellerId: newId(), withoutReturn: false, platformDecision: false, dropOffBy: null });
+    await h.publish('returns', 'returns.return.approved', approved(returnId, 'RT-261005-0212', { dropOffBy: new Date(h.clock.now().getTime() + 7 * 86_400_000).toISOString() }));
+    await h.publish('returns', 'returns.return.approved', approved(returnId, 'RT-261005-0212'));
+    await h.publish('returns', 'returns.return.approved', approved(newId(), 'RT-261005-0213', { ownerType: 'seller' }));
     const expected = (await h.call('GET', '/return-parcels?status=expected')).body.items;
-    expect(expected).toEqual([expect.objectContaining({ returnId, status: 'expected', unexpected: false, expectedBy: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) })]);
+    // known at the dock before it arrives: reference, order, items and the return label's tracking number
+    expect(expected).toEqual([
+      expect.objectContaining({ returnId, status: 'expected', unexpected: false, returnRef: 'RT-261005-0212', orderRef: 'MK-261001-11111', trackingNumber: '9400100000000000000001', expectedItems: ['Halden Aurora ANC Headphones, Black × 1'], expectedBy: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) }),
+    ]);
     expect((await h.call('GET', '/summary')).body.returnParcelsExpected).toBe(1);
     const scan = await h.call('GET', '/scan?code=rt-261005-0212&context=returns');
     expect(scan.body).toMatchObject({ kind: 'return_label' });
@@ -151,7 +168,7 @@ describe('return parcels', () => {
     const r = await h.call('POST', '/return-parcels', { code: 'rt-261005-0212', parcelCondition: 'intact', photoIds: [photo], note: 'Box dented' });
     expect(r.status, JSON.stringify(r.body)).toBe(201);
     expect(r.body).toMatchObject({ id: expected[0].id, returnId, returnRef: 'RT-261005-0212', orderRef: 'MK-261001-11111', trackingNumber: '9400100000000000000001', status: 'received', unexpected: false, parcelCondition: 'intact', expectedItems: ['Halden Aurora ANC Headphones, Black × 1'], photos: [{ id: photo, url: `https://media.test/${photo}.jpg` }], note: 'Box dented', receivedBy: expect.objectContaining({ kind: 'staff' }) });
-    expect(h.receipts).toEqual([{ returnId, trackingNumber: null }]);
+    expect(h.receipts).toEqual([{ returnId, trackingNumber: '9400100000000000000001' }]);
     expect(h.named('warehouse.return_parcel.received').at(-1)).toEqual({ parcelId: r.body.id, returnId, unexpected: false, parcelCondition: 'intact', receivedAt: r.body.receivedAt });
     const twice = await h.call('POST', '/return-parcels', { code: '9400100000000000000001', parcelCondition: 'intact' });
     expect(twice.status).toBe(409);
@@ -162,6 +179,19 @@ describe('return parcels', () => {
     expect(h.named('warehouse.return_parcel.handed_over').at(-1)).toEqual({ parcelId: r.body.id, returnId, inspectorId: inspector });
     expect((await h.call('POST', `/return-parcels/${r.body.id}/hand-over`, {})).body.error.code).toBe('ILLEGAL_TRANSITION');
     expect((await h.call('GET', '/return-parcels?q=261005')).body.items.map((p: any) => p.id)).toEqual([r.body.id]);
+  });
+
+  it('expects a parcel from the event alone when returns does not answer, and receives it by its label', async () => {
+    const returnId = newId();
+    const { orderId, ref: orderRef } = await h.order([{ item: h.item('RET-1', 'Lamp, Brass'), quantity: 1 }]);
+    await h.publish('returns', 'returns.return.approved', approved(returnId, 'RT-261005-0300', { orderId, trackingNumber: '9400100000000000000300' }));
+    const parcel = (await h.call('GET', '/return-parcels?q=RT-261005-0300')).body.items;
+    expect(parcel).toEqual([expect.objectContaining({ returnId, status: 'expected', returnRef: 'RT-261005-0300', orderRef, trackingNumber: '9400100000000000000300', expectedItems: ['Item × 1'] })]);
+    h.returns.set(returnId, detail(returnId, 'RT-261005-0300'));
+    const r = await h.call('POST', '/return-parcels', { code: '9400100000000000000300', parcelCondition: 'intact' });
+    expect(r.status, JSON.stringify(r.body)).toBe(201);
+    expect(r.body).toMatchObject({ id: parcel[0].id, returnId, status: 'received', unexpected: false });
+    expect(h.receipts.at(-1)).toEqual({ returnId, trackingNumber: '9400100000000000000300' });
   });
 
   it('records a parcel with no approved return as unexpected and tells support', async () => {
@@ -175,7 +205,7 @@ describe('return parcels', () => {
 
   it('flags expected parcels past their date for follow-up', async () => {
     const returnId = newId();
-    await h.publish('returns', 'returns.return.approved', { returnId, ownerType: 'official', sellerId: null, withoutReturn: false, platformDecision: false, dropOffBy: null });
+    await h.publish('returns', 'returns.return.approved', approved(returnId, 'RT-261005-0400'));
     h.clock.advance(30 * 86_400_000);
     try {
       await h.app.kernel.jobs.runNow('warehouse.overdue-return-parcels');

@@ -463,17 +463,13 @@ export class WishlistService implements WishlistPublicApi {
 
     const cart = this.ctx.tryUse('cart');
     if (!cart) throw new AppError('CONFLICT', 'The cart is not available right now. Try again later.', { reason: 'cart_unavailable' });
-    const owner = { kind: 'customer' as const, customerId };
-    const before = await cart.getCartView(owner);
-    if (!before) throw new AppError('CONFLICT', 'Your cart could not be found. Open your cart and try again.', { reason: 'no_active_cart' });
-    await cart.restoreItems(before.id, [{ offerId, quantity: body.quantity, acceptedUnitPrice: quote.price }]);
-    const after = await cart.getCartView(owner);
-    const line = after?.packages.flatMap((p) => p.items).find((l) => l.offerId === offerId);
-    if (!line) throw new AppError('CONFLICT', 'The item could not be added to your cart. Try again.', { reason: 'line_not_added' });
+    // the cart's own add rules (created when missing, same offer increases, capped at the limit); publishes cart.item.added
+    const line = await cart.addLine({ customerId }, { offerId, quantity: body.quantity });
+    const after = await cart.getCartView({ kind: 'customer', customerId });
     let saved: SavedItem | null = null;
     if (body.removeFromList) await this.removeItem(customerId, item.id, by);
     else saved = await this.itemView(customerId, item, lk);
-    return { cartLineId: line.id, cartItemCount: after!.itemCount, item: saved };
+    return { cartLineId: line.id, cartItemCount: after?.itemCount ?? line.quantity, item: saved };
   }
 
   /* ================================================================ alerts */

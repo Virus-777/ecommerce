@@ -11,6 +11,7 @@ import type {
   AddItemResult,
   CartAdminSummary,
   CartBadge,
+  CartItem,
   CartDestination,
   CartLineInput,
   CartOwner,
@@ -537,10 +538,17 @@ export class CartService implements CartPublicApi {
 
   /* ================================================================ merge */
 
+  /** Inbox key recording that an account claimed a visitor session (identity.guest_session.claimed) */
+  private claimKey(guestSessionId: string, accountId: string) {
+    return `guest-session-claimed:${guestSessionId}:${accountId}`;
+  }
+
   async mergeGuestCart(scope: Scope, guestSessionId: string, by: By): Promise<MergeResult> {
     const s = await this.shopperOf(scope);
-    if (s.kind !== 'customer') throw new AppError('UNAUTHORIZED', 'Sign in to merge your cart');
-    const report = await this.merge(s, guestSessionId, true, by);
+    if (s.kind !== 'customer' || !s.accountId) throw new AppError('UNAUTHORIZED', 'Sign in to merge your cart');
+    // ownership proof: only a visitor session this account claimed at sign-in or registration; knowing its id is not enough
+    if (!isUuid(guestSessionId) || !(await this.ctx.inbox.seen(this.ctx.db, this.claimKey(guestSessionId, s.accountId)))) throw notFound('Guest cart');
+    const report = await this.merge(s, guestSessionId, by);
     if (!report) throw notFound('Guest cart');
     return { cart: await this.viewFor(s), report };
   }
@@ -549,19 +557,14 @@ export class CartService implements CartPublicApi {
    * Folds a guest cart into the customer's cart: same offer combines up to the limit, another offer for
    * the same variant is kept as its own line, unavailable lines are dropped and listed. Idempotent by
    * guest cart: a merged cart answers its stored report. null = nothing to merge for this customer.
+   * Callers must have proved that the customer claimed the guest session (identity.guest_session.claimed).
    */
-  async merge(s: Shopper, guestSessionId: string, refuseLiveSession: boolean, by: By): Promise<MergeReport | null> {
+  async merge(s: Shopper, guestSessionId: string, by: By): Promise<MergeReport | null> {
     if (!isUuid(guestSessionId) || s.kind !== 'customer' || !s.customerId) return null;
     const guest = await this.repo.getGuestCart(guestSessionId);
     if (!guest) return null;
     if (guest.status === 'merged') return this.storedReport(guest, s);
     if (guest.status !== 'active') return null;
-    if (refuseLiveSession) {
-      // a visitor session still in use (not claimed by a sign-in) belongs to someone browsing now
-      const identity = this.ctx.tryUse('identity');
-      const live = await this.checker.optional('identity.verifyGuestSession', identity && (() => identity.verifyGuestSession(guestSessionId)));
-      if (live) return null;
-    }
 
     const guestItems = await this.repo.listItems(guest.id);
     const target = await this.ensureCart(s);
@@ -888,6 +891,16 @@ export class CartService implements CartPublicApi {
     });
   }
 
+  /** Add an offer to the shopper's cart, creating the cart if needed; same rules as POST /cart/items (an offer already in the cart increases its quantity, capped at the limit). Publishes cart.item.added. */
+  async addLine(owner: { customerId?: string; guestSessionId?: string }, line: { offerId: string; quantity: number }): Promise<CartItem> {
+    const s = owner.customerId ? this.shopperOfOwner({ kind: 'customer', customerId: owner.customerId }) : this.shopperOfOwner({ kind: 'guest', guestSessionId: owner.guestSessionId ?? null });
+    const actor: common.Actor = s.kind === 'customer' ? { kind: 'customer', id: s.customerId } : { kind: 'visitor', id: s.guestSessionId };
+    const r = await this.add(s, { offerId: line.offerId, quantity: line.quantity }, { actor });
+    const item = r.cart.packages.flatMap((p) => p.items).find((i) => i.id === r.itemId);
+    if (!item) throw notFound();
+    return item;
+  }
+
   /** How many active carts hold an offer (used to warn a seller before ending an offer). */
   async countOfferInCarts(offerId: string): Promise<number> {
     return isUuid(offerId) ? this.repo.countActiveCartsWithOffer(offerId) : 0;
@@ -991,9 +1004,12 @@ export class CartService implements CartPublicApi {
 
   /** identity.guest_session.claimed: Merge the claimed guest session's cart into the account's customer cart (same rules and report as POST /cart/merge; idempotent). This is how sign-in merges carts on every client; identity only publishes the event and calls nothing in cart */
   async onGuestSessionClaimedFromIdentity(event: EventPayload<'identity.guest_session.claimed'>): Promise<void> {
+    if (!isUuid(event.guestSessionId) || !isUuid(event.accountId)) return;
+    // the claim is the proof POST /cart/merge asks for: recorded once, and kept even if the merge below has to be retried
+    await this.ctx.inbox.claim(this.ctx.db, this.claimKey(event.guestSessionId, event.accountId));
     const customerId = await this.customerKey(event.accountId);
     const s: Shopper = { owner: { kind: 'customer', customerId }, kind: 'customer', customerId, guestSessionId: null, accountId: event.accountId };
-    await this.merge(s, event.guestSessionId, false, { actor: { kind: 'customer', id: event.accountId } });
+    await this.merge(s, event.guestSessionId, { actor: { kind: 'customer', id: event.accountId } });
   }
 
   /* ================================================================ jobs */

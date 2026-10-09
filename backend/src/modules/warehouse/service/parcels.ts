@@ -41,16 +41,28 @@ export class Parcels {
     if ((await this.repo.count('return_parcels', { return_id: e.returnId })) > 0) return;
     const today = this.core.today();
     const expectedBy = e.dropOffBy ? addDays(this.core.today(new Date(e.dropOffBy)), TRANSIT_DAYS) : addDays(today, NO_DEADLINE_DAYS);
+    // the return's items by name and the order reference, for the dock; the event's own fields when returns does not answer
+    const detail = (await this.core.soft('returns', 'approved return', (r) => r.getReturn(e.returnId)))?.detail ?? null;
+    const orderRef =
+      detail?.orderRef ??
+      (await this.core.ctx
+        .use('orders')
+        .getOrder(e.orderId)
+        .then((o) => o?.ref ?? null)
+        .catch((err) => {
+          this.core.ctx.log.info({ err, orderId: e.orderId }, 'warehouse: order of an approved return not found');
+          return null;
+        }));
     await this.repo.insert('return_parcels', {
       id: newId(),
       location_id: (await this.core.defaultLocation()) ?? NIL_UUID,
       return_id: e.returnId,
-      return_ref: null,
-      order_ref: null,
-      tracking_number: null,
+      return_ref: e.ref,
+      order_ref: orderRef,
+      tracking_number: e.trackingNumber ?? detail?.shipment?.trackingNumber ?? null,
       status: returnParcelMachine.initial,
       expected_by: expectedBy,
-      expected_items: [],
+      expected_items: detail ? itemsOf(detail) : e.items.map((i) => `Item × ${i.quantity}`),
       unexpected: false,
       parcel_condition: null,
       photo_media_ids: [],

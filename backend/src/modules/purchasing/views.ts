@@ -7,7 +7,6 @@ import { dateInZone } from '../../kernel/lib/clock.js';
 import { money, sum, type Money } from '../../kernel/lib/money.js';
 import type { ModuleContext } from '../../kernel/module-system/index.js';
 import type * as common from '../../spec/common.js';
-import type * as identity from '../../spec/identity.js';
 import type {
   Delivery,
   PurchaseOrder,
@@ -93,8 +92,8 @@ export class PurchasingViews {
     };
   }
 
-  async supplierItems(rows: readonly SupplierItemRow[], viewer?: identity.Principal | null): Promise<SupplierItem[]> {
-    const info = await this.describe(rows.map((r) => r.stockItemId), viewer);
+  async supplierItems(rows: readonly SupplierItemRow[]): Promise<SupplierItem[]> {
+    const info = await this.describe(rows.map((r) => r.stockItemId));
     return rows.map((r) => ({
       stockItemId: r.stockItemId,
       sku: info.get(r.stockItemId)?.sku ?? '',
@@ -108,9 +107,9 @@ export class PurchasingViews {
   }
 
   /** SKU and label for display; a lookup failure shows the item without them rather than failing the page. */
-  async describe(ids: readonly string[], viewer?: identity.Principal | null) {
+  async describe(ids: readonly string[]) {
     try {
-      return await this.deps.directory.describe(ids, viewer);
+      return await this.deps.directory.describe(ids);
     } catch (err) {
       if (!isNotImplemented(err)) this.ctx.log.warn({ err }, 'purchasing: stock item lookup failed; showing items without SKU and label');
       return new Map();

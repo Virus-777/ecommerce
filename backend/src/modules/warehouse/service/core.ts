@@ -40,7 +40,6 @@ export interface Cfg {
 export interface StockInfo {
   sku: string;
   label: string;
-  image: common.MediaRef | null;
 }
 
 type OwnEvent = keyof EventMap & `warehouse.${string}`;
@@ -146,35 +145,18 @@ export class Core {
   }
 
   /**
-   * SKU, label and image of stock items. Inventory's public API has no lookup by stock item id, so the ids go
-   * through its staff export (ids → SKUs) and findBySku (SKUs → items); what warehouse copied onto pick lines
-   * fills the gaps when inventory does not answer.
+   * SKU and label of stock items (inventory.getStockItems); for an id inventory no longer knows, what warehouse
+   * copied onto pick lines.
    */
   async stockInfo(ids: readonly string[]): Promise<Map<string, StockInfo>> {
     const unique = [...new Set(ids.filter(Boolean))];
     const out = new Map<string, StockInfo>();
     if (!unique.length) return out;
-    const inventory = this.ctx.use('inventory');
-    try {
-      const skus = new Set<string>();
-      let cursor: string | undefined;
-      do {
-        const page = await inventory.exportRows('inventory.admin.stock', { stockItemIds: unique }, STAFF_PRINCIPAL, cursor);
-        for (const r of page.rows as { sku?: string }[]) if (r.sku) skus.add(r.sku);
-        cursor = page.nextCursor;
-      } while (cursor);
-      if (skus.size) {
-        const wanted = new Set(unique);
-        // Official Store stock only at launch (seller-owned stock comes with the fulfillment service)
-        for (const i of await inventory.findBySku('official', [...skus])) if (wanted.has(i.id)) out.set(i.id, { sku: i.sku, label: i.label, image: i.image ?? null });
-      }
-    } catch (err) {
-      this.ctx.log.warn({ err }, 'warehouse: stock item lookup failed');
-    }
+    for (const i of await this.ctx.use('inventory').getStockItems(unique)) out.set(i.id, { sku: i.sku, label: i.label });
     const missing = unique.filter((id) => !out.has(id));
     if (missing.length) {
       const lines = await this.repo.find('fulfillment_lines', { stock_item_id: missing }, { limit: 500 });
-      for (const l of lines) if (!out.has(l.stock_item_id)) out.set(l.stock_item_id, { sku: l.sku, label: l.label, image: null });
+      for (const l of lines) if (!out.has(l.stock_item_id)) out.set(l.stock_item_id, { sku: l.sku, label: l.label });
     }
     return out;
   }
