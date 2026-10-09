@@ -39,8 +39,15 @@ export async function buildTestApp(opts: BuildOptions & { only?: string[] } = {}
   return app;
 }
 
-/** Signs claims with the test dev key (ttl in seconds, default 15 minutes; `now` for apps on a fixed clock) */
-export const token = (claims: DevClaims, ttlSeconds = 900, now?: Date): string => signAccessToken(signer, claims, { issuer: ISSUER, ttlSeconds, now });
+/**
+ * How test tokens are signed. Apps on a fixed clock set `tokenClock.now = () => clock.now()` (and a longer
+ * `ttlSeconds` when the test moves the clock far ahead) so every `callers.*` token is valid at the app's time.
+ */
+export const tokenClock: { now?: () => Date; ttlSeconds: number } = { ttlSeconds: 900 };
+
+/** Signs claims with the test dev key (ttl in seconds, default tokenClock.ttlSeconds; `now` overrides tokenClock.now) */
+export const token = (claims: DevClaims, ttlSeconds = tokenClock.ttlSeconds, now?: Date): string =>
+  signAccessToken(signer, claims, { issuer: ISSUER, ttlSeconds, now: now ?? tokenClock.now?.() });
 
 /** A signed-in caller of each kind; `over` replaces claims (e.g. a seller member without permissions). */
 export const callers = {

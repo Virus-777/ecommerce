@@ -11,6 +11,7 @@ import type { Kysely } from 'kysely';
 import type { specs } from '../../spec/index.js';
 import type { Config } from '../config/index.js';
 import type { Database } from '../db/index.js';
+import type { AppError } from '../errors/index.js';
 import type { ModuleEvents } from '../events/index.js';
 import type { ModuleResolvers } from '../graphql/index.js';
 import type { RouteSet } from '../http/index.js';
@@ -59,6 +60,8 @@ export interface ModuleContext<N extends ModuleName> {
   readonly settings: {
     get<K extends keyof SettingsOf<N> & string>(key: K): Promise<Widen<SettingsOf<N>[K] extends { default: infer D } ? D : unknown>>;
   };
+  /** An AppError with this module's status for the code (module codes are scoped; use it instead of new AppError for module codes) */
+  error(code: keyof SpecOf<N>['errorCodes'] | (string & {}), message?: string, details?: unknown): AppError;
   /** Human references (MK-YYMMDD-NNNNN …) */
   readonly refs: RefGenerator;
   /** Offer this module's public API to other modules (in-process) */

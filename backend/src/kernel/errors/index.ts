@@ -59,6 +59,16 @@ export class AppError extends Error {
 }
 
 /**
+ * An AppError with this module's status for the code: module codes are scoped (INSUFFICIENT_STOCK is 409
+ * in one module and 422 in another), and an error thrown to another module in-process must keep the
+ * thrower's status. Modules get it bound as `ctx.error`.
+ */
+export const moduleError =
+  (module: string) =>
+  (code: string, message?: string, details?: unknown): AppError =>
+    new AppError(code, message ?? errorInfo(code, module)?.meaning, details, errorInfo(code, module)?.status);
+
+/**
  * Designed in the spec but not built yet. Uses the spec's NOT_IMPLEMENTED (501) code;
  * `details.reason` tells a not-yet-built endpoint apart from a later launch phase.
  */

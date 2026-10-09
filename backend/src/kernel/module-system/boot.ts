@@ -6,7 +6,7 @@
 import type { FastifyBaseLogger } from 'fastify';
 import type { Config } from '../config/index.js';
 import type { Database } from '../db/index.js';
-import { isNotImplemented, notImplemented } from '../errors/index.js';
+import { isNotImplemented, moduleError, notImplemented } from '../errors/index.js';
 import { moduleEvents, type EventBus } from '../events/index.js';
 import type { ModuleResolvers } from '../graphql/index.js';
 import type { RouteSet } from '../http/index.js';
@@ -133,6 +133,7 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
         },
       },
       refs: k.refs,
+      error: moduleError(name),
       provide(api: object) {
         if (provided) throw new Error(`${name} called provide() twice`);
         provided = true;

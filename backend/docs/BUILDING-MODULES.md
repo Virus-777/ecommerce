@@ -52,7 +52,9 @@ and Idempotency-Key replay are all checked (`docs/03-auth-middleware.md`). The s
 
 ## 4. Errors
 
-Throw `new AppError(code, message?, details?)` (`kernel/errors`). Use the codes in the endpoint's
+Throw `ctx.error(code, message?, details?)` for your module's codes: module codes are scoped (the same
+code can have another status in another module) and an error thrown to another module in-process must keep
+your status. `new AppError(code, …)` (`kernel/errors`) is fine for common codes. Use the codes in the endpoint's
 `errors` list and the module's `errorCodes`; generic ones: `NOT_FOUND`, `VALIDATION_FAILED` (business
 validation, with `details.issues: [{ path, message }]`), `CONFLICT`, `ILLEGAL_TRANSITION` (state machines
 throw it for you), `APPROVAL_REQUIRED`. Status comes from the code's definition. Messages are for people:
@@ -167,6 +169,8 @@ await app.kernel.events.drain();   // wait for event consumers
   business validation, every state transition the spec lists (and an illegal one → 409), approvals
   where relevant, events published (subscribe with `app.kernel.events.subscribe('test', name, fn)`),
   audit entries written (stub `audit.record` and assert the calls), jobs (`app.kernel.jobs.runNow`), consumers.
+- Apps on a fixed clock: set `tokenClock.now = () => clock.now()` (from `testing/app.ts`), and a larger
+  `tokenClock.ttlSeconds` if the test moves the clock far ahead, so `callers.*` tokens stay valid at the app's time.
 - Callers: `callers.visitor()`, `callers.customer({ accountId })`, `callers.seller({ sellerId, permissions })`,
   `callers.staff(['perm'])` (default all permissions). These are dev tokens; their permissions stand in for access/sellers.
 - Run: `npx vitest run src/modules/<module>` while working; before finishing: `npx tsc --noEmit`,
