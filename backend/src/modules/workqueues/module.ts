@@ -22,7 +22,7 @@ export default defineModule({
   graphql: typeDefs,
   register(ctx) {
     // cold storage for archived items: deterministic development adapter; a real store plugs in behind the same port
-    const service = new WorkqueuesService({ repo: createPostgresWorkqueuesRepository(ctx.db), ctx, archive: createDevArchiveStore() });
+    const service = new WorkqueuesService({ repo: createPostgresWorkqueuesRepository(ctx.db, ctx.inbox), ctx, archive: createDevArchiveStore() });
     ctx.provide(service);
     ctx.http.routes(sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
@@ -77,6 +77,12 @@ export default defineModule({
     ctx.events.on("messaging.message.sent", (e) => service.onMessageSentFromMessaging(e.payload));
     ctx.events.on("customers.data_export.requested", (e) => service.onDataExportRequestedFromCustomers(e.payload));
     ctx.events.on("customers.data_export.ready", (e) => service.onDataExportReadyFromCustomers(e.payload));
+    ctx.events.on("finance.reconciliation.item_closed", (e) => service.onReconciliationItemClosedFromFinance(e.payload));
+    ctx.events.on("payments.payment.authorized", (e) => service.onPaymentAuthorizedFromPayments(e.payload));
+    ctx.events.on("payments.chargeback.decided", (e) => service.onChargebackDecidedFromPayments(e.payload));
+    ctx.events.on("sellers.restriction.lifted", (e) => service.onRestrictionLiftedFromSellers(e.payload));
+    ctx.events.on("sellers.restriction.updated", (e) => service.onRestrictionUpdatedFromSellers(e.payload));
+    ctx.events.on("warehouse.return_parcel.received", (e) => service.onReturnParcelReceivedFromWarehouse(e.payload));
 
     // Background jobs (spec jobs)
     ctx.jobs.handle("workqueues.deadline-sweep", () => service.deadlineSweep());

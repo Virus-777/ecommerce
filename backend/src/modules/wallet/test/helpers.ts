@@ -25,7 +25,7 @@ export const USD = (amount: number) => ({ amount, currency: 'USD' });
 export const DAY = 86_400_000;
 export const idem = () => ({ 'idempotency-key': newId() });
 
-export const WALLET_EVENTS = ['wallet.credit.granted', 'wallet.credit.used', 'wallet.credit.expired', 'wallet.credit.reversed', 'wallet.credit.corrected', 'wallet.goodwill.decided', 'wallet.gift_card.issued', 'wallet.gift_card.redeemed'];
+export const WALLET_EVENTS = ['wallet.credit.granted', 'wallet.credit.used', 'wallet.credit.expired', 'wallet.credit.expiring', 'wallet.credit.reversed', 'wallet.credit.corrected', 'wallet.goodwill.decided', 'wallet.gift_card.issued', 'wallet.gift_card.redeemed'];
 
 export interface Harness {
   app: FastifyInstance;

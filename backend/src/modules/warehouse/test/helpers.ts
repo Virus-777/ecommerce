@@ -273,7 +273,8 @@ export async function harness(): Promise<Harness> {
         orderGroups.push({ id: sg, name: 'Pixel & Port', itemIds: [] });
       }
       h.orders.set(orderId, { id: orderId, ref, groups: orderGroups });
-      await publish('orders', 'orders.order.accepted', { orderId, ref, customerId: null, contactEmail: 'ana@example.com', total: USD(5600), groups, acceptedAt: now.toISOString() });
+      const items = lines.map((l, i) => ({ orderItemId: itemIds[i]!, offerId: h.tasks.get(groupId)!.openLines[i]!.offerId, stockItemId: l.item.id, quantity: l.quantity }));
+      await publish('orders', 'orders.order.accepted', { orderId, ref, customerId: null, contactEmail: 'ana@example.com', total: USD(5600), groups, items, acceptedAt: now.toISOString() });
       const fulfillment = (await service.getFulfillmentForOrder(orderId))!;
       return { orderId, ref, groupId, itemIds, fulfillment };
     },

@@ -258,9 +258,30 @@ describe('expiry and checks', () => {
     await h.give(c.id, 500);
     expect((await h.service.getBalance(c.id)).nextExpiry).toMatchObject({ amount: USD(1500) });
 
-    h.clock.advance(10.5 * DAY); // 29.5 days left
+    const expiring = () => h.named('wallet.credit.expiring').filter((e) => e.customerId === c.id);
+    h.clock.advance(5 * DAY); // 35 days left: no reminder yet
     await h.app.kernel.jobs.runNow('wallet.expire-lots');
-    expect(h.notices.filter((n) => n.topic === 'credit.expiring' && n.recipients[0]!.accountId === c.id).map((n) => (n.context as any).credit.days)).toEqual([30]);
+    await h.app.kernel.events.drain();
+    expect(expiring()).toEqual([]);
+    h.clock.advance(5.5 * DAY); // 29.5 days left
+    await h.app.kernel.jobs.runNow('wallet.expire-lots');
+    await h.app.kernel.jobs.runNow('wallet.expire-lots'); // a second run the same day changes nothing
+    await h.app.kernel.events.drain();
+    const lotId = expiring()[0]?.lotId;
+    expect(expiring()).toEqual([{ customerId: c.id, lotId: expect.any(String), amount: USD(1500), expiresAt: expect.any(String), daysLeft: 30 }]);
+    // notifications tells the customer from the event; wallet no longer calls notify itself
+    expect(h.notices.filter((n) => n.topic === 'credit.expiring')).toEqual([]);
+    h.clock.advance(10 * DAY); // 19.5 days left: between reminders
+    await h.app.kernel.jobs.runNow('wallet.expire-lots');
+    h.clock.advance(13 * DAY); // 6.5 days left: the 7-day reminder, once
+    await h.app.kernel.jobs.runNow('wallet.expire-lots');
+    await h.app.kernel.jobs.runNow('wallet.expire-lots');
+    await h.app.kernel.events.drain();
+    expect(expiring().map((e) => [e.lotId, e.daysLeft])).toEqual([
+      [lotId, 30],
+      [lotId, 7],
+    ]);
+    h.clock.advance(-23 * DAY); // back to 29.5 days left
 
     const hold = await h.service.holdCredit(c.id, newId(), USD(1000), newId()); // 1000 from the goodwill lot
     h.clock.advance(30 * DAY); // past the expiry

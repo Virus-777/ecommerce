@@ -47,6 +47,8 @@ export interface GiftCardFilter {
 export interface WalletRepository {
   /** Runs fn in one transaction (reuses the current one when already inside) */
   transaction<R>(fn: (tx: WalletRepository) => Promise<R>): Promise<R>;
+  /** Inbox (ctx.inbox): true the first time this key is claimed; commits with the transaction it runs in */
+  claim(key: string): Promise<boolean>;
 
   /* accounts: every change to a customer's credit locks the account row first */
   getAccount(customerId: string): Promise<AccountRow | undefined>;

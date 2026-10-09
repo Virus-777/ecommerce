@@ -198,7 +198,7 @@ describe('return parcels', () => {
     const r = await h.call('POST', '/return-parcels', { code: '1Z999AA10123456784', parcelCondition: 'opened' });
     expect(r.status).toBe(201);
     expect(r.body).toMatchObject({ status: 'received', unexpected: true, returnId: null, trackingNumber: '1Z999AA10123456784', parcelCondition: 'opened' });
-    expect(h.raised.at(-1)).toMatchObject({ queueKey: 'returns.decisions', kind: 'unexpected_return_parcel', priority: 'high', dedupeKey: `return_parcel:${r.body.id}` });
+    expect(h.raised.at(-1)).toMatchObject({ queueKey: 'warehouse.return_parcels', kind: 'unexpected_return_parcel', priority: 'high', dedupeKey: `return_parcel:${r.body.id}` });
     expect(h.named('warehouse.return_parcel.received').at(-1)).toMatchObject({ parcelId: r.body.id, returnId: null, unexpected: true });
     expect((await h.call('POST', '/return-parcels', { code: ' ', parcelCondition: 'intact' })).status).toBe(400);
   });
@@ -207,12 +207,19 @@ describe('return parcels', () => {
     const returnId = newId();
     await h.publish('returns', 'returns.return.approved', approved(returnId, 'RT-261005-0400'));
     h.clock.advance(30 * 86_400_000);
+    let raised: (typeof h.raised)[number];
     try {
       await h.app.kernel.jobs.runNow('warehouse.overdue-return-parcels');
-      expect(h.raised.at(-1)).toMatchObject({ queueKey: 'returns.decisions', kind: 'return_parcel_overdue', subject: { type: 'return', id: returnId } });
+      raised = h.raised.at(-1)!;
+      expect(raised).toMatchObject({ queueKey: 'warehouse.return_parcels', kind: 'return_parcel_overdue', subject: { type: 'other', label: 'Return parcel' }, relatedSubjects: [{ type: 'return', id: returnId }] });
     } finally {
       h.clock.advance(-30 * 86_400_000);
     }
+    // receiving the parcel publishes the event workqueues closes the item on (the parcel is the subject)
+    const r = await h.call('POST', '/return-parcels', { code: 'RT-261005-0400', parcelCondition: 'intact' });
+    expect(r.status, JSON.stringify(r.body)).toBe(201);
+    expect(r.body.id).toBe(raised.subject.id);
+    expect(h.named('warehouse.return_parcel.received').at(-1)).toMatchObject({ parcelId: raised.subject.id, returnId, unexpected: false });
   });
 });
 

@@ -1,4 +1,5 @@
 import { sql, type Kysely } from 'kysely';
+import type { Inbox } from '../../../../kernel/events/inbox.js';
 import { paginate } from '../../../../kernel/lib/pagination.js';
 import type { WalletDb } from '../../../../spec/wallet.js';
 import type { BalanceSnapshot, WalletRepository } from '../../ports.js';
@@ -6,11 +7,14 @@ import type { BalanceSnapshot, WalletRepository } from '../../ports.js';
 const n = (v: unknown) => Number(v ?? 0);
 
 /** Postgres adapter for WalletRepository. `db` is scoped to the `wallet` schema. */
-export function createPostgresWalletRepository(db: Kysely<WalletDb>): WalletRepository {
+export function createPostgresWalletRepository(db: Kysely<WalletDb>, inbox: Inbox): WalletRepository {
   const repo: WalletRepository = {
     async transaction(fn) {
       if (db.isTransaction) return fn(repo);
-      return db.transaction().execute((trx) => fn(createPostgresWalletRepository(trx)));
+      return db.transaction().execute((trx) => fn(createPostgresWalletRepository(trx, inbox)));
+    },
+    claim(key) {
+      return inbox.claim(db, key);
     },
 
     /* ---------------------------------------------------------------- accounts */

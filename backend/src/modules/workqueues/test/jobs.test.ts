@@ -118,6 +118,16 @@ describe('day-end review', () => {
     expect(review.items.find((i: { key: string }) => i.key === 'upcoming_campaigns').source).toBe('unavailable');
     expect((await call('GET', '/day-end-reviews/current', lead, WORKER)).json().id).toBe(review.id);
 
+    // the prepare job announces the review built on first read: workqueues.day_end.prepared once per date
+    const prepared = capture(t.app, 'workqueues.day_end.prepared');
+    await t.app.kernel.jobs.runNow('workqueues.day-end-prepare');
+    await t.app.kernel.jobs.runNow('workqueues.day-end-prepare');
+    await t.app.kernel.events.drain();
+    expect(prepared.map((e) => e.payload)).toEqual([{ reviewId: review.id, date: review.date, dueAt: review.dueAt, openItems: expect.any(Number), overdueItems: expect.any(Number), roleKeys: review.sharedWithRoles }]);
+    expect(prepared[0]!.payload.openItems).toBeGreaterThanOrEqual(1);
+    expect(prepared[0]!.payload.overdueItems).toBeGreaterThanOrEqual(1);
+    expect((await call('GET', '/day-end-reviews/current', lead, WORKER)).json()).toMatchObject({ id: review.id, summarySentTo: review.sharedWithRoles });
+
     const early = await call('POST', `/day-end-reviews/${review.id}/complete`, lead, RUNNER, {});
     expect(early.statusCode).toBe(409);
     expect(early.json().error).toMatchObject({ code: 'DAY_END_INCOMPLETE', details: { items: expect.arrayContaining(['unresolved_commitments']) } });
@@ -140,7 +150,8 @@ describe('day-end review', () => {
     await t.app.kernel.events.drain();
     expect(seen[0]!.payload).toMatchObject({ reviewId: review.id, date: review.date });
     expect(seen[0]!.payload.openItems).toBeGreaterThanOrEqual(1);
-    expect(t.world.notices.at(-1)).toMatchObject({ topic: 'staff.mention', recipients: expect.arrayContaining([{ kind: 'staff_role', roleKey: 'shipping_manager' }]) });
+    // notifications sends the summary from workqueues.day_end.prepared; completing sends nothing itself
+    expect(t.world.notices.filter((n) => n.topic === 'staff.mention')).toEqual([]);
     expect(t.world.audits.some((a) => a.action === 'workqueues.day_end.complete')).toBe(true);
     expect((await call('POST', `/day-end-reviews/${review.id}/items/failed_payouts/check`, lead, RUNNER, {})).statusCode).toBe(409);
     expect((await call('POST', `/day-end-reviews/${review.id}/complete`, lead, RUNNER, {})).statusCode).toBe(409);

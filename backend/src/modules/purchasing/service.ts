@@ -1659,11 +1659,23 @@ export class PurchasingService implements PurchasingPublicApi {
     const total = money(after.totalAmount, after.currency);
     this.ctx.events.publish(
       'purchasing.purchase_order.sent',
-      { purchaseOrderId: id, ref: after.ref, supplierId: supplier.id, locationId: after.shipToLocationId, total, lines: lines.map((l) => this.views.poLine(l, after.currency, after.expectedDate)) },
+      {
+        purchaseOrderId: id,
+        ref: after.ref,
+        supplierId: supplier.id,
+        supplierName: supplier.name,
+        supplierEmail: supplier.email ?? null,
+        // notifications emails the purchase order to the supplier when the buyer asked for it
+        emailSupplier: o.emailSupplier,
+        message: o.message,
+        locationId: after.shipToLocationId,
+        total,
+        lines: lines.map((l) => this.views.poLine(l, after.currency, after.expectedDate)),
+      },
       { actor: o.actor, requestId: o.requestId },
     );
     this.statusChanged(after, po.status, null, o);
-    if (o.emailSupplier) await this.emailSupplier(after, supplier, o.message, o.actor);
+    if (o.emailSupplier) await this.noteSupplierEmail(after, supplier, o.actor);
     await this.audit(
       {
         action: 'purchasing.purchase_order.send',
@@ -1681,30 +1693,15 @@ export class PurchasingService implements PurchasingPublicApi {
     return after;
   }
 
-  /** Supplier email through notifications. A failure never undoes the send; the timeline says what happened. */
-  private async emailSupplier(po: PoRow, supplier: SupplierRow, message: string | null, actor: common.Actor) {
-    const notifications = this.ctx.tryUse('notifications');
-    let label = `Emailed to ${supplier.email}`;
-    let detail: string | null = null;
-    if (!notifications || !supplier.email) {
-      label = 'Supplier email not sent';
-      detail = notifications ? 'The supplier has no email address' : 'Notifications are off';
-    } else {
-      try {
-        await notifications.notify({
-          topic: 'purchasing.purchase_order.sent',
-          recipients: [{ kind: 'guest_email', email: supplier.email }],
-          context: { purchaseOrder: { ref: po.ref, total: formatMoney(money(po.totalAmount, po.currency)), expectedDate: po.expectedDate }, supplier: { name: supplier.name, contactName: supplier.contactName }, message },
-          link: { kind: 'purchase_order', id: po.id, ref: po.ref, label: 'Purchase order', screen: 'admin/purchasing' },
-          dedupeKey: `purchasing.po.sent:${po.id}`,
-        });
-      } catch (err) {
-        this.ctx.log.warn({ err, purchaseOrderId: po.id }, 'purchasing: supplier email failed');
-        label = 'Supplier email not sent';
-        detail = isAppError(err) ? err.message : 'The email could not be sent';
-      }
-    }
-    await this.repo.addEvent(this.event(po.id, label, detail, actor));
+  /**
+   * The supplier email goes out through notifications, which consumes purchasing.purchase_order.sent
+   * (emailSupplier, supplierEmail, message). The timeline says where it was sent, or why it was not.
+   */
+  private async noteSupplierEmail(po: PoRow, supplier: SupplierRow, actor: common.Actor) {
+    const notifying = (this.ctx.modules as readonly string[]).includes('notifications');
+    const sent = notifying && Boolean(supplier.email);
+    const detail = sent ? null : notifying ? 'The supplier has no email address' : 'Notifications are off';
+    await this.repo.addEvent(this.event(po.id, sent ? `Emailed to ${supplier.email}` : 'Supplier email not sent', detail, actor));
   }
 
   private async cancelApprovalQuietly(requestId: string, actor: common.Actor, reason: string) {

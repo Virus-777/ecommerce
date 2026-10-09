@@ -8,6 +8,7 @@ import { validSample } from '../../../testing/samples.js';
 import { spec } from '../../../spec/workqueues.js';
 import { INTAKE, intakeRuleDocs, resolvesOnByKind } from '../domain/intake.js';
 import { QUEUE_SEEDS } from '../domain/catalog.js';
+import { Core } from '../app/core.js';
 import { as, boot, capture, money, newId, publish } from './harness.js';
 
 type Booted = Awaited<ReturnType<typeof boot>>;
@@ -33,7 +34,7 @@ const anyByDedupe = async (dedupeKey: string) => (await t.service.core.repo.acti
 describe('intake table', () => {
   it('covers every event the spec consumes, and nothing else', () => {
     expect(Object.keys(INTAKE).sort()).toEqual(Object.keys(spec.events.consumes).sort());
-    expect(Object.keys(INTAKE)).toHaveLength(47);
+    expect(Object.keys(INTAKE)).toHaveLength(53);
   });
 
   it('every entry opens, closes or routes something', () => {
@@ -43,7 +44,9 @@ describe('intake table', () => {
   it('opens items only in installable queues, and every closing kind is a kind some event opens or raise() is documented for', () => {
     const opened = new Set(intakeRuleDocs().map((r) => r.kind));
     for (const r of intakeRuleDocs()) expect(QUEUE_SEEDS[r.queueKey], r.queueKey).toBeDefined();
-    for (const [kind] of resolvesOnByKind()) expect(opened.has(kind), kind).toBe(true);
+    // kinds other modules raise through raise() and an event closes (spec notes)
+    const raised = new Set(['restriction_review', 'return_parcel_overdue']);
+    for (const [kind] of resolvesOnByKind()) expect(opened.has(kind) || raised.has(kind), kind).toBe(true);
   });
 
   it('derives resolvesOn from the closing events', () => {
@@ -170,19 +173,23 @@ function scenarios(): Scenario[] {
   }
   {
     const i = id();
-    out.push({ name: 'reconciliation mismatch', open: ['finance.reconciliation.mismatch_found', ev('finance.reconciliation.mismatch_found', { itemId: i, difference: money(-4_200) })], kind: 'payment_mismatch', queue: 'finance.daily_checks', dedupe: `payment_mismatch:${i}`, close: { resolveBySource: true } });
+    out.push({ name: 'reconciliation mismatch', open: ['finance.reconciliation.mismatch_found', ev('finance.reconciliation.mismatch_found', { itemId: i, difference: money(-4_200) })], kind: 'payment_mismatch', queue: 'finance.payment_checks', dedupe: `payment_mismatch:${i}`, close: ['finance.reconciliation.item_closed', ev('finance.reconciliation.item_closed', { itemId: i, outcome: 'explained' })] });
   }
   {
     const i = id();
-    out.push({ name: 'payment check (captured)', open: ['payments.payment.pending_check', ev('payments.payment.pending_check', { intentId: i })], kind: 'payment_check', queue: 'finance.daily_checks', dedupe: `payment_check:${i}`, close: ['payments.payment.captured', ev('payments.payment.captured', { intentId: i })] });
+    out.push({ name: 'payment check (captured)', open: ['payments.payment.pending_check', ev('payments.payment.pending_check', { intentId: i })], kind: 'payment_check', queue: 'finance.payment_checks', dedupe: `payment_check:${i}`, close: ['payments.payment.captured', ev('payments.payment.captured', { intentId: i })] });
   }
   {
     const i = id();
-    out.push({ name: 'payment check (failed)', open: ['payments.payment.pending_check', ev('payments.payment.pending_check', { intentId: i })], kind: 'payment_check', queue: 'finance.daily_checks', dedupe: `payment_check:${i}`, close: ['payments.payment.failed', ev('payments.payment.failed', { intentId: i })] });
+    out.push({ name: 'payment check (failed)', open: ['payments.payment.pending_check', ev('payments.payment.pending_check', { intentId: i })], kind: 'payment_check', queue: 'finance.payment_checks', dedupe: `payment_check:${i}`, close: ['payments.payment.failed', ev('payments.payment.failed', { intentId: i })] });
+  }
+  {
+    const i = id();
+    out.push({ name: 'payment check (authorized)', open: ['payments.payment.pending_check', ev('payments.payment.pending_check', { intentId: i })], kind: 'payment_check', queue: 'finance.payment_checks', dedupe: `payment_check:${i}`, close: ['payments.payment.authorized', ev('payments.payment.authorized', { intentId: i })] });
   }
   {
     const d = id();
-    out.push({ name: 'chargeback', open: ['payments.chargeback.opened', ev('payments.chargeback.opened', { disputeId: d, evidenceDueAt: new Date(Date.now() + 5 * 86_400_000).toISOString() })], kind: 'chargeback', queue: 'finance.daily_checks', dedupe: `chargeback:${d}`, close: { resolveBySource: true } });
+    out.push({ name: 'chargeback', open: ['payments.chargeback.opened', ev('payments.chargeback.opened', { disputeId: d, evidenceDueAt: new Date(Date.now() + 5 * 86_400_000).toISOString() })], kind: 'chargeback', queue: 'finance.chargebacks', dedupe: `chargeback:${d}`, close: ['payments.chargeback.decided', ev('payments.chargeback.decided', { disputeId: d, outcome: 'won' })] });
   }
   for (const closing of ['catalog.product.approved', 'catalog.product.changes_requested', 'catalog.product.rejected']) {
     const p = id();
@@ -194,7 +201,7 @@ function scenarios(): Scenario[] {
   }
   {
     const s = id();
-    out.push({ name: 'launch review', open: ['sellers.launch_review.requested', ev('sellers.launch_review.requested', { sellerId: s })], kind: 'launch_review', queue: 'sellers.applications', dedupe: `launch_review:${s}`, close: ['sellers.launch_review.decided', ev('sellers.launch_review.decided', { sellerId: s })] });
+    out.push({ name: 'launch review', open: ['sellers.launch_review.requested', ev('sellers.launch_review.requested', { sellerId: s })], kind: 'launch_review', queue: 'sellers.launch_reviews', dedupe: `launch_review:${s}`, close: ['sellers.launch_review.decided', ev('sellers.launch_review.decided', { sellerId: s })] });
   }
   {
     const a = id();
@@ -202,7 +209,11 @@ function scenarios(): Scenario[] {
   }
   {
     const r = id();
-    out.push({ name: 'restriction evidence', open: ['sellers.restriction.evidence_submitted', ev('sellers.restriction.evidence_submitted', { restrictionId: r })], kind: 'restriction_evidence', queue: 'sellers.appeals', dedupe: `restriction_evidence:${r}`, close: { resolveBySource: true } });
+    out.push({ name: 'restriction evidence', open: ['sellers.restriction.evidence_submitted', ev('sellers.restriction.evidence_submitted', { restrictionId: r })], kind: 'restriction_evidence', queue: 'sellers.restrictions', dedupe: `restriction_evidence:${r}`, close: ['sellers.restriction.lifted', ev('sellers.restriction.lifted', { restrictionId: r })] });
+  }
+  {
+    const r = id();
+    out.push({ name: 'restriction evidence (restriction changed)', open: ['sellers.restriction.evidence_submitted', ev('sellers.restriction.evidence_submitted', { restrictionId: r })], kind: 'restriction_evidence', queue: 'sellers.restrictions', dedupe: `restriction_evidence:${r}`, close: ['sellers.restriction.updated', ev('sellers.restriction.updated', { restrictionId: r })] });
   }
   {
     const s = id();
@@ -210,7 +221,7 @@ function scenarios(): Scenario[] {
   }
   {
     const c = id();
-    out.push({ name: 'store change', open: ['sellers.change_request.submitted', ev('sellers.change_request.submitted', { changeRequestId: c, kind: 'store_name' })], kind: 'storefront_review', queue: 'sellers.applications', dedupe: `change_request:${c}`, close: ['sellers.change_request.decided', ev('sellers.change_request.decided', { changeRequestId: c, approved: true })] });
+    out.push({ name: 'store change', open: ['sellers.change_request.submitted', ev('sellers.change_request.submitted', { changeRequestId: c, kind: 'store_name' })], kind: 'storefront_review', queue: 'sellers.launch_reviews', dedupe: `change_request:${c}`, close: ['sellers.change_request.decided', ev('sellers.change_request.decided', { changeRequestId: c, approved: true })] });
   }
   {
     const r = id();
@@ -237,6 +248,7 @@ describe('every opening event raises its item and its resolving event closes it'
   it('the scenarios exercise every consumed event except the access routing events', () => {
     const used = new Set(list.flatMap((s) => [s.open[0], ...(Array.isArray(s.close) ? [s.close[0]] : [])]));
     used.add('shipping.dispatch.overdue'); // tested above
+    used.add('warehouse.return_parcel.received'); // closes items raised through raise(): tested below
     const routing = ['access.away.started', 'access.away.ended', 'access.coverage.changed', 'sellers.application.information_provided'];
     expect(Object.keys(spec.events.consumes).filter((e) => !used.has(e) && !routing.includes(e))).toEqual([]);
   });
@@ -247,8 +259,13 @@ describe('every opening event raises its item and its resolving event closes it'
     const item = await active(s.dedupe);
     expect(item, `${s.open[0]} raised ${s.dedupe}`).toMatchObject({ kind: s.kind, queue_key: s.queue, state: 'open', source_event: s.open[0] });
     expect(await t.service.core.repo.countItems({ queueKeys: [s.queue], kinds: [s.kind], states: ['open'], search: item!.ref })).toBe(1);
-    if (Array.isArray(s.close)) await publish(t.app, s.close[0], s.close[1]);
-    else expect(await t.service.resolveBySource(s.dedupe, { note: 'fixed by the owner', by: { kind: 'system', name: 'test' } })).toBe(1);
+    if (Array.isArray(s.close)) {
+      const resolved = capture(t.app, 'workqueues.item.resolved');
+      await publish(t.app, s.close[0], s.close[1]);
+      await publish(t.app, s.close[0], s.close[1]); // delivered twice: closed once
+      expect(resolved.filter((e) => e.payload.itemId === item!.id)).toHaveLength(1);
+      expect((await t.service.core.repo.eventsOf(item!.id)).filter((e) => e.kind === 'fixed_at_source')).toHaveLength(1);
+    } else expect(await t.service.resolveBySource(s.dedupe, { note: 'fixed by the owner', by: { kind: 'system', name: 'test' } })).toBe(1);
     const after = await anyByDedupe(s.dedupe);
     expect(after).toMatchObject({ id: item!.id, state: 'resolved', resolution: { outcome: 'fixed_at_source' } });
   });
@@ -335,6 +352,82 @@ describe('special intake rules', () => {
     // unknown subjects close nothing and do not throw
     await publish(t.app, 'finance.payout.paid', ev('finance.payout.paid', { payoutId: newId() }));
     await publish(t.app, 'access.approval.decided', ev('access.approval.decided', { requestId: newId() }));
+  });
+});
+
+describe('kinds raised by other modules and the queue of each kind', () => {
+  const by = { kind: 'system' as const, name: 'test' };
+
+  it('restriction reviews raised by sellers land in sellers.restrictions and close when the restriction is lifted (not when it changes)', async () => {
+    const restrictionId = newId();
+    const sellerId = newId();
+    // sellers names its old queue: the kind's own queue wins
+    const review = await t.service.raise({ queueKey: 'sellers.performance', kind: 'restriction_review', title: 'Review restriction RS-1', subject: { type: 'restriction', id: restrictionId, ref: 'RS-1' }, sellerId, dedupeKey: `restriction_review:${restrictionId}:2026-10-10` });
+    expect(review.queueKey).toBe('sellers.restrictions');
+    await publish(t.app, 'sellers.restriction.evidence_submitted', ev('sellers.restriction.evidence_submitted', { restrictionId, sellerId }));
+    await publish(t.app, 'sellers.restriction.updated', ev('sellers.restriction.updated', { restrictionId, sellerId }));
+    expect(await active(`restriction_evidence:${restrictionId}`)).toBeNull();
+    expect(await active(`restriction_review:${restrictionId}:2026-10-10`)).toMatchObject({ id: review.id, state: 'open' });
+    const lifted = ev('sellers.restriction.lifted', { restrictionId, sellerId, reason: 'Documents verified' });
+    await publish(t.app, 'sellers.restriction.lifted', lifted);
+    await publish(t.app, 'sellers.restriction.lifted', lifted);
+    expect(await t.service.core.repo.getItem(review.id)).toMatchObject({ state: 'resolved', resolution: { outcome: 'fixed_at_source', note: 'Restriction lifted: Documents verified' } });
+  });
+
+  it('return parcels: overdue items close when the parcel is received, unexpected parcels stay for a person', async () => {
+    const parcelId = newId();
+    const returnId = newId();
+    const overdue = await t.service.raise({ queueKey: 'returns.decisions', kind: 'return_parcel_overdue', title: 'Return parcel not received: RT-1', subject: { type: 'other', id: parcelId, label: 'Return parcel' }, relatedSubjects: [{ type: 'return', id: returnId }], dedupeKey: `return_parcel_overdue:${parcelId}` });
+    expect(overdue).toMatchObject({ queueKey: 'warehouse.return_parcels', kind: 'return_parcel_overdue' });
+    const strayId = newId();
+    const stray = await t.service.raise({ queueKey: 'warehouse.return_parcels', kind: 'unexpected_return_parcel', title: 'Unexpected return parcel 1Z', subject: { type: 'other', id: strayId, label: 'Return parcel' }, dedupeKey: `return_parcel:${strayId}` });
+    const received = (id: string, unexpected: boolean) => ev('warehouse.return_parcel.received', { parcelId: id, returnId: unexpected ? null : returnId, unexpected, parcelCondition: 'intact', receivedAt: new Date().toISOString() });
+    await publish(t.app, 'warehouse.return_parcel.received', received(parcelId, false));
+    await publish(t.app, 'warehouse.return_parcel.received', received(parcelId, false));
+    await publish(t.app, 'warehouse.return_parcel.received', received(strayId, true));
+    expect(await t.service.core.repo.getItem(overdue.id)).toMatchObject({ state: 'resolved', resolution: { outcome: 'fixed_at_source' } });
+    expect(await t.service.core.repo.getItem(stray.id)).toMatchObject({ state: 'open' });
+    // an overdue item raised before parcels were the subject (the return was) closes too
+    const oldStyle = newId();
+    const before = await t.service.raise({ queueKey: 'warehouse.return_parcels', kind: 'return_parcel_overdue', title: 'Return parcel not received', subject: { type: 'return', id: oldStyle }, dedupeKey: `return_parcel_overdue:${newId()}` });
+    await publish(t.app, 'warehouse.return_parcel.received', ev('warehouse.return_parcel.received', { parcelId: newId(), returnId: oldStyle, unexpected: false }));
+    expect(await t.service.core.repo.getItem(before.id)).toMatchObject({ state: 'resolved' });
+  });
+
+  it('seller performance items are closed by hand; a payment authorized without a check closes nothing', async () => {
+    const sellerId = newId();
+    await publish(t.app, 'sellers.performance.below_target', ev('sellers.performance.below_target', { sellerId, metrics: ['late_dispatch_rate'], overall: 'at_risk' }));
+    expect(await active(`seller_performance:${sellerId}`)).toMatchObject({ queue_key: 'sellers.performance', state: 'open' });
+    const resolved = capture(t.app, 'workqueues.item.resolved');
+    await publish(t.app, 'payments.payment.authorized', ev('payments.payment.authorized', { intentId: newId() }));
+    expect(resolved).toEqual([]);
+    expect(await t.service.raise({ queueKey: 'finance.daily_checks', kind: 'chargeback', title: 'Chargeback DP-1', subject: { type: 'other', id: newId() }, dedupeKey: `chargeback:${newId()}`, amount: money(5_000) })).toMatchObject({ queueKey: 'finance.chargebacks' });
+  });
+});
+
+describe('seeding an existing install', () => {
+  it('adds the new queues, keeps edited queues, retires re-routed rules and changes nothing the second time', async () => {
+    const repo = t.service.core.repo;
+    // an install from before: a staff-edited queue and the old rule sending chargebacks to Daily finance checks
+    const editor = newId();
+    await repo.updateQueue('sellers.applications', { name: 'Applications (Ana)', updated_by: editor });
+    const oldRule = (await repo.listIntakeRules({ queueKey: 'finance.chargebacks' })).find((r) => r.event === 'payments.chargeback.opened')!;
+    const oldId = newId();
+    await repo.upsertIntakeRules([{ ...oldRule, id: oldId, queue_key: 'finance.daily_checks', active: true }]);
+
+    const restart = () => new Core({ repo, ctx: t.service.core.ctx, archive: t.service.core.archive }).ensureSeeded();
+    await restart();
+    const queues = await repo.listQueues();
+    for (const key of ['warehouse.return_parcels', 'inventory.low_stock', 'finance.payment_checks', 'finance.chargebacks', 'sellers.launch_reviews', 'sellers.restrictions']) expect(queues.map((q) => q.key)).toContain(key);
+    expect(queues.find((q) => q.key === 'sellers.applications')).toMatchObject({ name: 'Applications (Ana)', updated_by: editor });
+    const rules = await repo.listIntakeRules();
+    expect(rules.find((r) => r.id === oldId)).toMatchObject({ active: false });
+    expect(rules.filter((r) => r.event === 'payments.chargeback.opened' && r.active).map((r) => r.queue_key)).toEqual(['finance.chargebacks']);
+
+    await restart();
+    expect((await repo.listQueues()).length).toBe(queues.length);
+    const byId = (a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id);
+    expect((await repo.listIntakeRules()).sort(byId)).toEqual(rules.sort(byId));
   });
 });
 

@@ -66,6 +66,8 @@ export interface Match {
 /** Persistence for this module's own tables: workqueues.queues, workqueues.intake_rules, workqueues.items, workqueues.item_events, workqueues.item_notes, workqueues.saved_filters, workqueues.day_end_reviews, workqueues.routine_templates, workqueues.routine_checks, workqueues.daily_counts. */
 export interface WorkqueuesRepository {
   transaction<T>(fn: (repo: WorkqueuesRepository) => Promise<T>): Promise<T>;
+  /** Inbox (ctx.inbox): true the first time this key is claimed; commits with the transaction it runs in */
+  claim(key: string): Promise<boolean>;
 
   /* queues */
   listQueues(): Promise<QueueRow[]>;
@@ -76,6 +78,8 @@ export interface WorkqueuesRepository {
 
   /* intake rules */
   upsertIntakeRules(rows: IntakeRuleRow[]): Promise<void>;
+  /** Rules the intake table no longer produces (an event re-routed to another queue) stop being active; returns how many */
+  deactivateIntakeRulesExcept(ids: string[]): Promise<number>;
   listIntakeRules(filter?: { queueKey?: string }): Promise<IntakeRuleRow[]>;
 
   /* items */

@@ -34,7 +34,7 @@ describe('fulfillments from accepted orders', () => {
     const detail = await h.call('GET', `/fulfillments/${f.id}`);
     expect(detail.body.mixedOrderNote).toBe('This order also has 1 other package from Pixel & Port. They ship it separately.');
     // the same event twice changes nothing
-    await h.publish('orders', 'orders.order.accepted', { orderId: o.orderId, ref: o.ref, customerId: null, contactEmail: 'ana@example.com', total: { amount: 100, currency: 'USD' }, groups: [{ groupId: o.groupId, ownerType: 'official', sellerId: null, fulfilledBy: 'official_warehouse', dispatchBy: f.shipBy, itemIds: o.itemIds, total: { amount: 100, currency: 'USD' } }], acceptedAt: f.createdAt });
+    await h.publish('orders', 'orders.order.accepted', { orderId: o.orderId, ref: o.ref, customerId: null, contactEmail: 'ana@example.com', total: { amount: 100, currency: 'USD' }, groups: [{ groupId: o.groupId, ownerType: 'official', sellerId: null, fulfilledBy: 'official_warehouse', dispatchBy: f.shipBy, itemIds: o.itemIds, total: { amount: 100, currency: 'USD' } }], items: [], acceptedAt: f.createdAt });
     expect((await h.call('GET', `/fulfillments?q=${o.ref}`)).body.items).toHaveLength(1);
   });
 

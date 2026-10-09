@@ -159,7 +159,7 @@ export class Parcels {
     if (unexpected) {
       await this.core.soft('workqueues', 'unexpected parcel', (w) =>
         w.raise({
-          queueKey: 'returns.decisions',
+          queueKey: 'warehouse.return_parcels',
           kind: 'unexpected_return_parcel',
           title: `Unexpected return parcel ${row.tracking_number ?? row.return_ref ?? code}`,
           summary: 'A parcel arrived at the warehouse with no approved Official Store return. Find the customer and the order.',
@@ -187,18 +187,20 @@ export class Parcels {
     return (await this.views.parcels([row]))[0]!;
   }
 
-  /** Job: expected parcels past their date go to returns follow-up */
+  /** Job: expected parcels past their date get a return_parcel_overdue item (warehouse.return_parcels; closed by workqueues when the parcel is received) */
   async overdue(): Promise<number> {
     const today = this.core.today();
     const late = await this.repo.find('return_parcels', { status: 'expected', expected_by: { op: '<', value: today } }, { orderBy: [['expected_by', 'asc']], limit: 500 });
     for (const p of late) {
       await this.core.soft('workqueues', 'overdue return parcel', (w) =>
         w.raise({
-          queueKey: 'returns.decisions',
+          queueKey: 'warehouse.return_parcels',
           kind: 'return_parcel_overdue',
           title: `Return parcel not received${p.return_ref ? `: ${p.return_ref}` : ''}`,
           summary: `Expected at the warehouse by ${p.expected_by}. Check the return shipment's tracking with the customer.`,
-          subject: p.return_id ? { type: 'return', id: p.return_id, ref: p.return_ref } : { type: 'other', id: p.id, label: 'Return parcel' },
+          // the parcel is the subject: workqueues closes the item on warehouse.return_parcel.received for this parcel
+          subject: { type: 'other', id: p.id, ref: p.return_ref ?? p.tracking_number ?? null, label: 'Return parcel' },
+          relatedSubjects: p.return_id ? [{ type: 'return', id: p.return_id, ref: p.return_ref }] : null,
           dedupeKey: `return_parcel_overdue:${p.id}`,
         }),
       );
