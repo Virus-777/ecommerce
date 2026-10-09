@@ -130,6 +130,19 @@ Granting a permission never grants financial authority: `check` is the only sour
   and marks replays; handlers process `body` idempotently by provider event id.
 - **GraphQL:** implement every field listed in `graphql/resolvers.ts` by calling service read methods.
   The resolver context has `principal`, `auth` and `scope`-relevant data; apply the same record scope as REST.
+- **Kernel helpers added during tranche 1:**
+  - `ctx.modules`: the modules running in this process (don't read `modules.config.ts`).
+  - `ctx.afterBoot(fn)`: runs once every module has registered: call other modules at startup there (register a dataset, warm a cache), never in `register`.
+  - `secretFor(ctx.config, '<module>.<purpose>')` (`kernel/lib/secrets.ts`): the key for links and tokens your module signs (download links, unsubscribe tokens). Never invent secrets or borrow webhook secrets.
+  - `ctx.config.publicUrls.store | seller | admin`: base addresses for links in emails and documents. Never hardcode a domain.
+
+## 9b. Modules already built
+
+Tranche 1 is built and merged: **identity, access, settings, audit, media, notifications**. Call their
+public APIs for real; in tests boot them (`only: [...]` pulls dependencies) rather than stubbing, unless
+you need to control an answer. Notifications already consumes the events your spec publishes and turns
+them into notices, so publish exactly the spec's events and payloads. Stub only modules that are not
+built yet.
 
 ## 10. Tests
 
