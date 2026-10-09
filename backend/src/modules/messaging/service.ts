@@ -1007,6 +1007,7 @@ export class MessagingService implements MessagingPublicApi {
     extra: { guest_session_id: string | null; subject: Subject; case_id: string | null; started_by_staff_id?: string | null },
     participants: Omit<ParticipantRec, 'conversation_id' | 'joined_at'>[],
     by: By,
+    retried = false,
   ): Promise<ConversationRec> {
     const existing = await this.repo.findByKey(key);
     if (existing) {
@@ -1023,7 +1024,25 @@ export class MessagingService implements MessagingPublicApi {
       return existing;
     }
     const now = this.now();
-    const c = await this.repo.transaction(async (tx) => {
+    let c: ConversationRec;
+    try {
+      c = await this.createConversation(key, extra, participants, now);
+    } catch (err) {
+      // the conversation key is unique (nulls not distinct): a concurrent request created it first, so use that one
+      if (!retried && (err as { code?: string })?.code === '23505') return this.findOrCreate(key, extra, participants, by, true);
+      throw err;
+    }
+    this.core.publish('messaging.conversation.started', { conversationId: c.id, kind: c.kind, orderId: c.order_id, sellerId: marketplaceSellerId(c.seller_id) }, by);
+    return c;
+  }
+
+  private createConversation(
+    key: ConversationKey,
+    extra: { guest_session_id: string | null; subject: Subject; case_id: string | null; started_by_staff_id?: string | null },
+    participants: Omit<ParticipantRec, 'conversation_id' | 'joined_at'>[],
+    now: Date,
+  ): Promise<ConversationRec> {
+    return this.repo.transaction(async (tx) => {
       const row = await tx.insert('conversations', {
         id: newId(),
         kind: key.kind,
@@ -1049,8 +1068,6 @@ export class MessagingService implements MessagingPublicApi {
       for (const p of participants) await tx.insertIgnore('participants', { ...p, conversation_id: row.id, joined_at: now });
       return row;
     });
-    this.core.publish('messaging.conversation.started', { conversationId: c.id, kind: c.kind, orderId: c.order_id, sellerId: marketplaceSellerId(c.seller_id) }, by);
-    return c;
   }
 
   private async finishStart(v: Viewer, conversationId: string, author: Author, prepared: Prepared, cfg: Cfg, by: By): Promise<{ conversation: Conversation; message: Message }> {

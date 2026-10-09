@@ -19,8 +19,26 @@ describe('catalogue', () => {
     expect(humanize('maxImagesPerProduct')).toBe('Max images per product');
     expect(inferUnit('firstResponseBusinessHours')).toBe('business hours');
     expect(inferUnit('stockHoldMinutes')).toBe('minutes');
-    expect(def('returns.changeOfMindReturnFee')).toMatchObject({ valueType: 'money', approval: 'second_reviewer', sellerVisible: true, minLeadDays: 14 });
     expect(def('wallet.goodwillMaxPerCustomer30Days').available).toBe(false);
+  });
+
+  it('uses what a module declares for a setting over inference', () => {
+    expect(def('returns.changeOfMindReturnFee')).toMatchObject({ valueType: 'money', min: 0, approval: 'business_owner', sellerVisible: true, minLeadDays: 14 });
+    expect(def('finance.payoutSchedule')).toMatchObject({ valueType: 'string', approval: 'business_owner', sellerVisible: true, minLeadDays: 30, editable: true });
+    expect(def('finance.statementPeriod')).toMatchObject({ valueType: 'enum', enumValues: ['weekly', 'monthly'], approval: 'second_reviewer' });
+    expect(def('support.maxAttachments')).toMatchObject({ valueType: 'int', min: 0, max: 20 });
+    expect(def('support.appealWindowDays')).toMatchObject({ valueType: 'duration', unit: 'days', min: 1, approval: 'business_owner' });
+    expect(def('messaging.maxAttachmentMb')).toMatchObject({ unit: 'MB', min: 1 });
+    // a seller-visible setting with a declared lead shorter than the seller notice gets the seller notice
+    expect(def('fulfillment-service.discrepancyResponseDays')).toMatchObject({ sellerVisible: true, minLeadDays: 14 });
+    // declared not seller-visible in a seller-facing module
+    expect(def('orders.orderRefPrefix')).toMatchObject({ editable: false, sellerVisible: false, minLeadDays: 0 });
+    expect(def('settings.defaultMinLeadDays')).toMatchObject({ approval: 'business_owner', unit: 'days' });
+  });
+
+  it('every declared default is a valid value for its own definition', () => {
+    const bad = [...catalogue.values()].filter((d) => !d.builtIn).map((d) => ({ key: d.key, issues: validateValue(d, d.default) })).filter((x) => x.issues.length);
+    expect(bad).toEqual([]);
   });
 
   it('keeps settings-owned rules over the module declaration of the same key', () => {

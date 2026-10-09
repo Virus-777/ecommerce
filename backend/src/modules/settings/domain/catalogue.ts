@@ -4,10 +4,11 @@
  * Two sources:
  *   - settings-owned market-level keys (market.*, support.*, checkout.*, apps.*), declared here with
  *     their full rules (spec notes "Settings-owned keys and their defaults");
- *   - every enabled module's spec `settings` (`<module>.<key>`), which only declare a default and a
- *     description: type, unit, bounds, approval and seller visibility are inferred (see inferDefinition).
+ *   - every enabled module's spec `settings` (`<module>.<key>`). They declare a default and a description,
+ *     and usually type, bounds, choices, unit, approval, seller visibility, lead days and editability
+ *     (docs/api/spec/FORMAT.md "Settings"); only what a setting leaves out is inferred (see inferDefinition).
  */
-import type { ModuleSpecDef } from '../../../kernel/spec/define.js';
+import type { ModuleSpecDef, SettingDecl } from '../../../kernel/spec/define.js';
 import type { SettingDefinition } from '../../../spec/settings.js';
 
 export type ValueType = SettingDefinition['valueType'];
@@ -190,10 +191,11 @@ export interface CatalogueOptions {
 const leadDays = (explicit: number | undefined, sellerVisible: boolean, o: CatalogueOptions) =>
   Math.max(explicit ?? o.defaultMinLeadDays, sellerVisible ? o.sellerVisibleMinLeadDays : 0);
 
-/** A module's spec setting as a definition: the spec only gives a default and a description. */
-export function inferDefinition(module: string, name: string, declared: { default: unknown; desc: string }, available: boolean, o: CatalogueOptions): Definition {
-  const valueType = inferValueType(declared.default);
-  const sellerVisible = SELLER_FACING_MODULES.has(module);
+/** A module's spec setting as a definition: what the spec declares wins; only the rest is inferred. */
+export function inferDefinition(module: string, name: string, declared: SettingDecl, available: boolean, o: CatalogueOptions): Definition {
+  const valueType: ValueType = declared.type ?? inferValueType(declared.default);
+  const numeric = valueType === 'int' || valueType === 'number' || valueType === 'duration';
+  const sellerVisible = declared.sellerVisible ?? SELLER_FACING_MODULES.has(module);
   return {
     key: `${module}.${name}`,
     module,
@@ -201,14 +203,14 @@ export function inferDefinition(module: string, name: string, declared: { defaul
     label: humanize(name),
     description: declared.desc,
     valueType,
-    enumValues: [],
-    unit: valueType === 'int' || valueType === 'number' ? inferUnit(name) : null,
+    enumValues: valueType === 'enum' ? [...(declared.choices ?? [])] : [],
+    unit: declared.unit ?? (numeric ? inferUnit(name) : null),
     default: declared.default,
-    min: valueType === 'int' || valueType === 'number' ? 0 : null,
-    max: null,
-    editable: true,
-    approval: SENSITIVE_MODULES.has(module) || valueType === 'money' ? 'second_reviewer' : 'none',
-    minLeadDays: leadDays(undefined, sellerVisible, o),
+    min: declared.min ?? (numeric ? 0 : null),
+    max: declared.max ?? null,
+    editable: declared.editable ?? true,
+    approval: declared.approval ?? (SENSITIVE_MODULES.has(module) || valueType === 'money' ? 'second_reviewer' : 'none'),
+    minLeadDays: leadDays(declared.minLeadDays, sellerVisible, o),
     applyScopes: ['new_only', 'open_commitments'],
     sellerVisible,
     public: false,

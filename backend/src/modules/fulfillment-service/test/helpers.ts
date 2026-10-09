@@ -17,7 +17,7 @@ export type Decision = 'allowed' | 'approval_required' | 'denied';
 
 export interface FinanceEntry {
   id: string;
-  type: 'service_fee' | 'charge_credit';
+  type: 'service_fee' | 'charge_credit' | 'seller_credit';
   sellerId: string;
   amount: { amount: number; currency: string };
   idempotencyKey: string;
@@ -28,8 +28,26 @@ export interface FinanceEntry {
   reason?: string;
 }
 
-/** finance.recordServiceFee / creditSellerCharge as src/spec/finance.ts describes them, over an in-memory ledger */
-export function financeStubs(ledger: FinanceEntry[]) {
+/** A seller credit made through the finance.creditSeller stub */
+export interface FinanceCredit {
+  id: string;
+  sellerId: string;
+  amount: { amount: number; currency: string };
+  reason: string;
+  reference: { kind: string; id: string; ref?: string | null };
+  idempotencyKey: string;
+  status: 'posted' | 'pending_approval' | 'rejected';
+  entryId: string | null;
+}
+
+/** finance.creditSeller posts at once up to this (creditSecondReviewerThreshold default, $500) */
+export const CREDIT_THRESHOLD = 50_000;
+
+/**
+ * finance.recordServiceFee / creditSellerCharge / creditSeller as src/spec/finance.ts describes them, over an
+ * in-memory ledger. creditSeller above CREDIT_THRESHOLD waits as pending_approval; decideCredit plays Finance's decision.
+ */
+export function financeStubs(ledger: FinanceEntry[], credits: FinanceCredit[] = []) {
   const entry = (e: FinanceEntry) => ({ id: e.id, at: new Date().toISOString(), type: e.type, typeLabel: e.type, reference: e.reference ?? { kind: 'seller', id: e.sellerId }, description: e.description ?? e.reason ?? '', amount: e.type === 'service_fee' ? { ...e.amount, amount: -e.amount.amount } : e.amount }) as any;
   return {
     recordServiceFee: async (input: { sellerId: string; amount: { amount: number; currency: string }; kind: string; reference: { kind: string; id: string; ref?: string | null }; description: string; idempotencyKey: string }) => {
@@ -50,7 +68,45 @@ export function financeStubs(ledger: FinanceEntry[]) {
       ledger.push(e);
       return entry(e);
     },
+    creditSeller: async (input: { sellerId: string; amount: { amount: number; currency: string }; reason: string; reference: { kind: string; id: string; ref?: string | null }; idempotencyKey: string }) => {
+      let credit = credits.find((c) => c.idempotencyKey === input.idempotencyKey);
+      if (!credit) {
+        credit = { id: newId(), ...input, status: 'pending_approval', entryId: null };
+        credits.push(credit);
+        if (input.amount.amount <= CREDIT_THRESHOLD) postCredit(credit);
+      }
+      const posted = credit.entryId ? ledger.find((e) => e.id === credit.entryId) : undefined;
+      return {
+        id: credit.id,
+        sellerId: credit.sellerId,
+        amount: credit.amount,
+        reason: credit.reason,
+        reference: credit.reference,
+        status: credit.status,
+        ledgerEntry: posted ? entry(posted) : null,
+        approvalRequestId: credit.status === 'posted' && credit.amount.amount <= CREDIT_THRESHOLD ? null : credit.id,
+        requestedBy: { kind: 'system', id: null, name: 'fulfillment-service' },
+        createdAt: new Date().toISOString(),
+        decidedAt: credit.status === 'pending_approval' ? null : new Date().toISOString(),
+      } as any;
+    },
   };
+  function postCredit(c: FinanceCredit) {
+    decideCredit(ledger, c, 'posted');
+  }
+}
+
+/** Finance's decision on a seller credit that waits for approval (what finance does on access.approval.decided) */
+export function decideCredit(ledger: FinanceEntry[], credit: FinanceCredit, outcome: 'posted' | 'rejected') {
+  if (credit.status !== 'pending_approval') return;
+  if (outcome === 'rejected') {
+    credit.status = 'rejected';
+    return;
+  }
+  const e: FinanceEntry = { id: newId(), type: 'seller_credit', sellerId: credit.sellerId, amount: credit.amount, idempotencyKey: credit.idempotencyKey, reference: credit.reference, reason: credit.reason };
+  ledger.push(e);
+  credit.status = 'posted';
+  credit.entryId = e.id;
 }
 
 export interface SellerKit {
@@ -79,11 +135,13 @@ export interface Kit {
   /** orders.getFulfillmentTask answers per seller group (others: NOT_FOUND) */
   tasks: Map<string, { orderRef: string; dueAt: string; lines: { orderItemId: string; offerId: string; stockItemId: string; quantity: number }[] }>;
   /**
-   * Seller ledger entries made through finance.recordServiceFee and creditSellerCharge, stubbed per
-   * src/spec/finance.ts (same idempotencyKey → the first entry; a credit never more than the original minus
+   * Seller ledger entries made through finance.recordServiceFee, creditSellerCharge and creditSeller, stubbed per
+   * src/spec/finance.ts (same idempotencyKey → the first entry; a charge credit never more than the original minus
    * earlier credits) while finance builds them
    */
   financeLedger: FinanceEntry[];
+  /** Seller credits made through finance.creditSeller (above CREDIT_THRESHOLD they wait: decideCredit) */
+  financeCredits: FinanceCredit[];
   /** Enrolled, approved seller with one approved SKU */
   enrolledSeller(o?: { capacity?: { maxCubicFeet: number; maxSkus: number } }): Promise<SellerKit & { skuId: string; offerId: string; stockItemId: string; sku: string }>;
 }
@@ -113,12 +171,13 @@ export async function boot(): Promise<Kit> {
   const returns = new Map<string, { ref: string; sellerId: string; items: Map<string, number> }>();
   const tasks: Kit['tasks'] = new Map();
   const financeLedger: FinanceEntry[] = [];
+  const financeCredits: FinanceCredit[] = [];
   const app = await buildTestApp({
     modules: withDependencies(['fulfillment-service', 'media', 'returns']),
     clock,
     config: { rateLimits: false, launchPhase: 4 },
     apiStubs: {
-      finance: financeStubs(financeLedger),
+      finance: financeStubs(financeLedger, financeCredits),
       access: {
         check: async (_p: unknown, action: string) => ({ decision: authority.get(action) ?? 'allowed', action, reason: authority.get(action) === 'approval_required' ? 'Above your limit' : '', requiresSecondReviewer: false, approvalsNeeded: 0, eligibleApproverRoles: [], eligibleApprovers: [] }) as any,
         requestApproval: async (input: access.RequestApprovalInput) => {
@@ -189,6 +248,7 @@ export async function boot(): Promise<Kit> {
     returns,
     tasks,
     financeLedger,
+    financeCredits,
     async enrolledSeller(o = {}) {
       const s = await seller();
       const schedule = await call('GET', S('/fee-schedule'), { token: s.token });

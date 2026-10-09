@@ -40,7 +40,7 @@ describe('definitions and values', () => {
   it('shows one setting with the declared default as version 0, and 404 for an unknown key', async () => {
     const res = await get('/values/catalog.minDescriptionLength');
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ definition: { key: 'catalog.minDescriptionLength' }, current: { version: 0, value: 40, valueText: '40' }, scheduled: [] });
+    expect(res.json()).toMatchObject({ definition: { key: 'catalog.minDescriptionLength' }, current: { version: 0, value: 40, valueText: '40 characters' }, scheduled: [] });
     expect((await get('/values/nope.nothing')).statusCode).toBe(404);
     const history = (await get('/values/catalog.minDescriptionLength/history')).json();
     expect(history.items).toHaveLength(1);
@@ -130,7 +130,7 @@ describe('drafts', () => {
     expect(c.impact.items).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'content', count: 3, message: '3 Help articles mention 14 days' })]));
     const res = await h.app.inject({ method: 'POST', url: `/api/admin/settings/changes/${c.id}/preview`, headers: staff() });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ blocking: [], approvalRule: 'none' });
+    expect(res.json()).toMatchObject({ blocking: [], approvalRule: 'business_owner', approvers: ['Business Owner'] }); // declared approval of support.appealWindowDays
   });
 
   it('a blocking estimator item blocks submit', async () => {
@@ -314,6 +314,45 @@ describe('approval', () => {
     const res = await submit(h, c.id);
     expect(res.statusCode).toBe(403);
     expect((await get(`/changes/${c.id}`)).json().status).toBe('draft');
+  });
+});
+
+describe('rules a module declares for its settings', () => {
+  it('a declared Business Owner setting (finance.payoutSchedule) needs 30 days notice and Business Owner approval', async () => {
+    const def = (await get('/values/finance.payoutSchedule')).json().definition;
+    expect(def).toMatchObject({ valueType: 'string', approval: 'business_owner', sellerVisible: true, minLeadDays: 30 });
+
+    const early = (await draft(h, { items: [{ key: 'finance.payoutSchedule', value: 'weekly:THU' }], effectiveAt: inDays(h, 20) })).json();
+    expect(early.impact.blocking[0]).toMatch(/30 days' notice/);
+    const refused = await submit(h, early.id);
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().error).toMatchObject({ code: 'LEAD_TIME_TOO_SHORT', details: { key: 'finance.payoutSchedule' } });
+    await h.app.inject({ method: 'POST', url: `/api/admin/settings/changes/${early.id}/cancel`, headers: staff(), payload: { reason: 'Too early' } });
+
+    const c = (await draft(h, { items: [{ key: 'finance.payoutSchedule', value: 'weekly:THU' }], effectiveAt: inDays(h, 31) })).json();
+    expect(c.impact).toMatchObject({ blocking: [], needsApproval: true, approvalRule: 'business_owner', approvers: ['Business Owner'] });
+    const res = await submit(h, c.id);
+    expect(res.json()).toMatchObject({ status: 'pending_approval', approval: { required: true } });
+    expect(h.access.requests.at(-1)).toMatchObject({ action: 'settings.changes.apply', details: { approvalRule: 'business_owner' } });
+    await h.app.inject({ method: 'POST', url: `/api/admin/settings/changes/${c.id}/cancel`, headers: staff(), payload: { reason: 'Test done' } });
+  });
+
+  it('a read-only setting cannot be changed', async () => {
+    expect((await get('/values/orders.orderRefPrefix')).json().definition).toMatchObject({ editable: false, sellerVisible: false });
+    const res = await draft(h, { items: [{ key: 'orders.orderRefPrefix', value: 'MX' }], effectiveAt: inDays(h, 1) });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toMatchObject({ code: 'SETTING_NOT_EDITABLE', details: { key: 'orders.orderRefPrefix' } });
+  });
+
+  it('refuses a value outside the declared bounds or choices', async () => {
+    const over = await draft(h, { items: [{ key: 'support.maxAttachments', value: 21 }], effectiveAt: inDays(h, 1) });
+    expect(over.json().error).toMatchObject({ code: 'VALIDATION_FAILED', details: { issues: [{ path: 'items.0.value', message: 'Must be at most 20' }] } });
+    const under = await draft(h, { items: [{ key: 'support.appealWindowDays', value: 0 }], effectiveAt: inDays(h, 1) });
+    expect(under.json().error).toMatchObject({ code: 'VALIDATION_FAILED', details: { issues: [{ message: 'Must be at least 1' }] } });
+    const choice = await draft(h, { items: [{ key: 'finance.statementPeriod', value: 'daily' }], effectiveAt: inDays(h, 30) });
+    expect(choice.json().error).toMatchObject({ code: 'VALIDATION_FAILED', details: { issues: [{ message: 'Must be one of weekly, monthly' }] } });
+    const ok = await draft(h, { items: [{ key: 'support.maxAttachments', value: 20 }], effectiveAt: inDays(h, 1) });
+    expect(ok.statusCode, ok.body).toBe(201);
   });
 });
 
