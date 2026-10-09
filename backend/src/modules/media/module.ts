@@ -27,7 +27,8 @@ export default defineModule({
     // Providers: deterministic dev adapters (no network). S3-compatible storage, ClamAV and an image /
     // transcoding service replace them behind the same ports (ports.ts).
     const providers = {
-      storage: createDevStorage({ secret: secretFor(ctx.config, 'media.storage'), clock: ctx.clock }),
+      // upload tickets point at PUT /uploads/{id}/content; acceptSignedPut follows them to the signed storage URL
+      storage: createDevStorage({ secret: secretFor(ctx.config, 'media.storage'), clock: ctx.clock, resolveUploadUrl: (url) => service.signedStorageUrlFor(url) }),
       scanner: createDevScanner(),
       processor: createDevProcessor(),
     };

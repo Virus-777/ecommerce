@@ -1,7 +1,7 @@
 import { routes } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/media.js';
 import type { MediaService } from '../service.js';
-import { sellerCaller } from './callers.js';
+import { sellerCaller, uploadTarget } from './callers.js';
 
 /**
  * Seller API: /api/seller/media/…  (docs/api/modules/media.md)
@@ -13,12 +13,12 @@ export const sellerRoutes = (service: MediaService) =>
     /** POST /uploads: Start an upload (product images and video, store logo and banner, ad creatives, documents, inspection photos, case evidence, bulk files) */
     createSellerUpload: async ({ body, sellerId, principal, actor, requestId, request }) => {
       const c = sellerCaller(sellerId, principal);
-      return service.createUpload({ uploader: c.uploader, owner: c.owner, request: body, createdBy: c.createdBy, clientIp: request.ip, by: { actor, requestId } });
+      return service.createUpload({ uploader: c.uploader, owner: c.owner, request: body, createdBy: c.createdBy, clientIp: request.ip, target: uploadTarget('seller', request), by: { actor, requestId } });
     },
-    /** POST /uploads/{id}/complete: Confirm the upload; processing starts */
     /** PUT /uploads/{id}/content: Development storage only: the file bytes for an upload ticket */
-    uploadSellerContent: async ({ params, body, sellerId, principal, request }) =>
-      service.receiveUploadContent(params.id, body, request.headers['content-type'], { owner: sellerCaller(sellerId, principal).filter }),
+    uploadSellerContent: async ({ params, body, sellerId, principal }) =>
+      service.receiveUploadContent(params.id, body, { area: 'seller', owner: sellerCaller(sellerId, principal).filter }),
+    /** POST /uploads/{id}/complete: Confirm the upload; processing starts */
     completeSellerUpload: async ({ params, sellerId, principal, actor, requestId }) =>
       service.completeUpload(params.id, { owner: sellerCaller(sellerId, principal).filter, by: { actor, requestId } }),
     /** GET /assets: Seller media library */

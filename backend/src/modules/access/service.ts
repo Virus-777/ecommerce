@@ -1347,11 +1347,26 @@ export class AccessService implements AccessPublicApi {
 
   /* ================================================================ events consumed */
 
-  /** identity.invitation.accepted: Activate pending_acceptance role assignments of a newly accepted staff member */
+  /**
+   * identity.invitation.accepted: Activate pending_acceptance role assignments of a newly accepted staff member
+   * (including sensitive grants already approved); assignments still pending_approval wait for their approval
+   * and then become active.
+   */
   async onInvitationAcceptedFromIdentity(event: EventPayload<'identity.invitation.accepted'>): Promise<void> {
     if (event.purpose !== 'staff') return;
     await this.ready();
-    const waiting = await this.repo.listAssignments({ accountId: event.accountId, statuses: ['pending_acceptance'] });
+    await this.activateAcceptedAssignments(event.accountId);
+  }
+
+  /** Whether the staff member has accepted their invitation (an unknown account counts as accepted: nothing to wait for) */
+  private async hasAcceptedInvitation(accountId: string): Promise<boolean> {
+    const account = await this.ctx.use('identity').getAccount(accountId);
+    return !account || (account.status !== 'invited' && account.status !== 'pending_verification');
+  }
+
+  /** pending_acceptance → active for every assignment of someone who accepted their invitation (idempotent) */
+  private async activateAcceptedAssignments(accountId: string): Promise<void> {
+    const waiting = await this.repo.listAssignments({ accountId, statuses: ['pending_acceptance'] });
     for (const a of waiting) {
       const after = await this.repo.transaction(async (tx) => {
         const locked = await tx.getAssignment(a.id, { forUpdate: true });
@@ -1733,9 +1748,21 @@ export class AccessService implements AccessPublicApi {
       const a = await this.repo.getAssignment(row.target_id);
       if (a?.status !== 'pending_approval') return;
       if (approved) {
-        const after = await this.repo.updateAssignment(a.id, { status: roleAssignmentMachine.next('pending_approval', 'approve') });
-        const role = await this.repo.getRole(after.role_id);
-        if (role) this.publishRoleChanged(role, 'assigned', after.account_id, actor);
+        // guarded: a person who hasn't accepted their invitation yet waits in pending_acceptance (identity.invitation.accepted activates it)
+        const target = (await this.hasAcceptedInvitation(a.account_id)) ? 'active' : 'pending_acceptance';
+        const after = await this.repo.transaction(async (tx) => {
+          const locked = await tx.getAssignment(a.id, { forUpdate: true });
+          if (locked?.status !== 'pending_approval') return null;
+          return tx.updateAssignment(a.id, { status: roleAssignmentMachine.next('pending_approval', 'approve', target) });
+        });
+        if (!after) return;
+        if (after.status === 'active') {
+          const role = await this.repo.getRole(after.role_id);
+          if (role) this.publishRoleChanged(role, 'assigned', after.account_id, actor);
+        } else if (await this.hasAcceptedInvitation(after.account_id)) {
+          // accepted while the approval was being recorded: its event found nothing to activate
+          await this.activateAcceptedAssignments(after.account_id);
+        }
       } else {
         await this.repo.updateAssignment(a.id, { status: roleAssignmentMachine.next('pending_approval', 'reject'), revoked_at: this.now(), revoked_by: by(actor), revoke_reason: row.outcome_reason ?? `Approval ${outcome}` });
       }

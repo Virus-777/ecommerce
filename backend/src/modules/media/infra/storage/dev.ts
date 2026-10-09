@@ -1,8 +1,10 @@
 /**
  * Development storage: objects in memory, presigned URLs signed with HMAC-SHA256 and an expiry, the
- * way S3 presigned URLs work. No network: the URLs point at storage.marketly.test, and tests (or a
- * dev tool) "upload" through acceptSignedPut(), which checks the signature, expiry, size and type
- * exactly as the real store would. An S3-compatible adapter replaces it behind StorageProvider.
+ * way S3 presigned URLs work. No network: the URLs point at storage.marketly.test, so upload tickets
+ * point clients at the API's PUT /uploads/{id}/content instead (MediaService.receiveUploadContent).
+ * Tests and dev tools may also "upload" through acceptSignedPut(), which checks the signature, expiry,
+ * size and type exactly as the real store would; given a ticket's API URL, it follows resolveUploadUrl
+ * to the signed storage URL behind it. An S3-compatible adapter replaces it behind StorageProvider.
  */
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import type { Clock } from '../../../../kernel/lib/clock.js';
@@ -16,7 +18,7 @@ interface Entry extends StoredObject {
 }
 
 export interface DevStorage extends StorageProvider {
-  /** What a client's PUT to a presigned upload URL does: verifies the URL and stores the bytes */
+  /** What a client's PUT to a presigned upload URL (or an upload ticket's API URL) does: verifies the URL and stores the bytes */
   acceptSignedPut(url: string, body: Uint8Array, contentType?: string): Promise<{ bucket: string; key: string; object: StoredObject }>;
   /** Follows a presigned download URL (or a public CDN URL): the bytes, or null when the link is invalid or expired */
   fetch(url: string): Promise<{ body: Uint8Array; contentType: string | null; disposition: string | null } | null>;
@@ -27,7 +29,13 @@ export interface DevStorage extends StorageProvider {
 const encodeKey = (key: string) => key.split('/').map(encodeURIComponent).join('/');
 const decodeKey = (path: string) => path.split('/').map(decodeURIComponent).join('/');
 
-export function createDevStorage(opts: { secret: string; clock: Clock; buckets?: { public: string; private: string } }): DevStorage {
+export function createDevStorage(opts: {
+  secret: string;
+  clock: Clock;
+  buckets?: { public: string; private: string };
+  /** The signed storage URL behind an upload ticket's API URL (PUT /api/{area}/media/uploads/{id}/content), or null */
+  resolveUploadUrl?: (url: string) => Promise<string | null>;
+}): DevStorage {
   const buckets = opts.buckets ?? { public: 'marketly-public', private: 'marketly-private' };
   const store = new Map<string, Map<string, Entry>>();
   let version = 0;
@@ -118,7 +126,11 @@ export function createDevStorage(opts: { secret: string; clock: Clock; buckets?:
     },
 
     async acceptSignedPut(url, body, contentType) {
-      const p = parse(url);
+      let p = parse(url);
+      if (!p && opts.resolveUploadUrl) {
+        const signed = await opts.resolveUploadUrl(url);
+        if (signed) p = parse(signed);
+      }
       if (!p) throw new Error('Not a storage URL');
       const exp = p.q.get('X-Expires') ?? '';
       const max = p.q.get('X-Max-Bytes') ?? '';

@@ -2,6 +2,7 @@ import { routes } from '../../../kernel/http/index.js';
 import { endpoints, type MediaOwner } from '../../../spec/media.js';
 import { defaultStaffOwnerKind } from '../domain/rules.js';
 import type { MediaService } from '../service.js';
+import { uploadTarget } from './callers.js';
 
 /**
  * Admin API: /api/admin/media/…  (docs/api/modules/media.md)
@@ -14,11 +15,19 @@ export const adminRoutes = (service: MediaService) =>
       // content, ads and Official Store files belong to the platform; evidence to the staff member
       const kind = body.ownerKind ?? defaultStaffOwnerKind(body.upload.purpose);
       const owner: MediaOwner = kind === 'platform' ? { kind: 'platform', id: null } : { kind: 'staff', id: principal.accountId ?? null, label: principal.name ?? null };
-      return service.createUpload({ uploader: 'staff', owner, request: body.upload, createdBy: { kind: 'staff', id: principal.accountId ?? null }, clientIp: request.ip, by: { actor, requestId } });
+      return service.createUpload({
+        uploader: 'staff',
+        owner,
+        request: body.upload,
+        createdBy: { kind: 'staff', id: principal.accountId ?? null },
+        clientIp: request.ip,
+        target: uploadTarget('admin', request),
+        by: { actor, requestId },
+      });
     },
+    /** PUT /uploads/{id}/content: Development storage only: the file bytes for an upload ticket (uploads staff started) */
+    uploadAdminContent: async ({ params, body }) => service.receiveUploadContent(params.id, body, { area: 'admin' }),
     /** POST /uploads/{id}/complete: Confirm a staff upload */
-    /** PUT /uploads/{id}/content: Development storage only: the file bytes for an upload ticket */
-    uploadAdminContent: async ({ params, body, request }) => service.receiveUploadContent(params.id, body, request.headers['content-type'], {}),
     completeAdminUpload: async ({ params, actor, requestId }) => service.completeUpload(params.id, { by: { actor, requestId } }),
     /** GET /assets: All files with filters */
     listAssetsAdmin: async ({ query, page, can }) =>

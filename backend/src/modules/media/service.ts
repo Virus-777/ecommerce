@@ -5,7 +5,7 @@ import { SYSTEM_ACTOR } from '../../kernel/auth/index.js';
 import { AppError, isAppError, isNotImplemented } from '../../kernel/errors/index.js';
 import type { EventPayload } from '../../kernel/events/index.js';
 import { dateInZone } from '../../kernel/lib/clock.js';
-import { newId } from '../../kernel/lib/ids.js';
+import { isUuid, newId } from '../../kernel/lib/ids.js';
 import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type { ModuleContext } from '../../kernel/module-system/index.js';
 import type * as audit from '../../spec/audit.js';
@@ -68,6 +68,18 @@ export interface By {
   requestId?: string;
 }
 
+/** The API area an upload was started in, and the address the caller reached the API at (development upload URL) */
+export type UploadArea = 'store' | 'seller' | 'admin';
+export interface UploadTarget {
+  area: UploadArea;
+  /** e.g. https://api.marketly.test (no trailing slash) */
+  origin: string;
+}
+
+/** Development upload target: PUT /api/{area}/media/uploads/{id}/content */
+const CONTENT_PATH = /^\/api\/(store|seller|admin)\/media\/uploads\/([^/]+)\/content$/;
+const contentUrl = (target: UploadTarget, uploadId: string) => `${target.origin}/api/${target.area}/media/uploads/${uploadId}/content`;
+
 type Status = (typeof assetMachine.states)[number];
 type AssetEvent = (typeof assetMachine.events)[number];
 type ProcessingOutcome = { result: 'ready'; patch: AssetPatch; renditions: RenditionRow[] } | { result: 'rejected'; reason: string; eraseOriginal?: boolean } | { result: 'waiting' };
@@ -115,6 +127,10 @@ export class MediaService implements MediaPublicApi {
   }
   private get storage() {
     return this.deps.providers.storage;
+  }
+  /** Development storage (infra/storage/dev.ts) takes the bytes through this API; a real adapter at its own signed URL */
+  private get devStorage(): boolean {
+    return typeof (this.storage as { acceptSignedPut?: unknown }).acceptSignedPut === 'function';
   }
   private now() {
     return this.ctx.clock.now();
@@ -299,13 +315,17 @@ export class MediaService implements MediaPublicApi {
 
   /* ================================================================ uploads */
 
-  /** POST /uploads (store, seller, admin): checks purpose, type, size and quotas, then issues a signed storage URL */
+  /**
+   * POST /uploads (store, seller, admin): checks purpose, type, size and quotas, then issues a signed storage URL.
+   * With development storage the ticket URL is this API's PUT /uploads/{id}/content in the area of `target`.
+   */
   async createUpload(input: {
     uploader: Uploader;
     owner: MediaOwner;
     request: UploadRequest;
     createdBy: { kind: string; id: string | null };
     clientIp?: string | null;
+    target?: UploadTarget;
     by: By;
   }): Promise<UploadTicket> {
     const req = input.request;
@@ -403,29 +423,62 @@ export class MediaService implements MediaPublicApi {
       await tx.bumpUploadCounter(owner, day, req.sizeBytes);
     });
     const signed = await this.storage.presignUpload({ bucket: this.storage.buckets.private, key, contentType: req.contentType, maxBytes: req.sizeBytes, expiresAt });
-    return { uploadId, assetId, ...signed, maxBytes: req.sizeBytes, expiresAt: expiresAt.toISOString() };
+    // development storage has no address a client can reach: the bytes come through this API instead
+    const url = this.devStorage && input.target ? contentUrl(input.target, uploadId) : signed.url;
+    return { uploadId, assetId, ...signed, url, maxBytes: req.sizeBytes, expiresAt: expiresAt.toISOString() };
+  }
+
+  /**
+   * PUT /uploads/{id}/content: development storage only. Receives the bytes of a pending upload the caller
+   * reaches (real storage takes them directly at the signed ticket URL), with the checks the signed URL makes:
+   * not expired, at most the ticket's maxBytes. Stored under the declared content type, as storage does. The
+   * client then completes the upload. Store and Seller Center reach their own uploads (owner); Admin Center the
+   * uploads staff started.
+   */
+  async receiveUploadContent(uploadId: string, bytes: Uint8Array | undefined, opts: { area: UploadArea; owner?: OwnerFilter }): Promise<void> {
+    if (!this.devStorage) throw this.ctx.error('DEV_STORAGE_ONLY', 'Upload the file to the storage URL in the upload ticket.');
+    const upload = await this.repo.getUpload(uploadId);
+    const inArea = upload && (opts.area !== 'admin' || upload.created_by_kind === 'staff');
+    const asset = inArea ? await this.repo.getAsset(upload.asset_id, { owner: opts.owner }) : null;
+    if (!upload || !asset) throw new AppError('NOT_FOUND', 'Upload not found');
+    if (asset.status === 'expired' || this.now() > upload.url_expires_at) throw new AppError('UPLOAD_EXPIRED', 'The upload link expired; start a new upload.');
+    if (asset.status !== 'pending_upload' || upload.completed_at) throw new AppError('ILLEGAL_TRANSITION', 'This upload is already complete.', { status: asset.status });
+    const body = bytes ?? new Uint8Array(0);
+    const maxBytes = Number(upload.expected_bytes);
+    if (body.byteLength > maxBytes) {
+      throw new AppError('FILE_TOO_LARGE', `The file is ${mb(body.byteLength)}; this upload was started for at most ${mb(maxBytes)}.`, { maxBytes, receivedBytes: body.byteLength });
+    }
+    await this.storage.put(asset.storage_bucket, asset.storage_key, body, asset.content_type);
+  }
+
+  /**
+   * Development storage: the signed storage URL behind an upload ticket's API URL (…/uploads/{id}/content), so
+   * tools and tests that "upload" through DevStorage.acceptSignedPut keep working with the ticket URL. Null when
+   * the URL isn't one, or the upload is unknown. No record scope: it only re-signs what the ticket already granted.
+   */
+  async signedStorageUrlFor(url: string): Promise<string | null> {
+    let path: string;
+    try {
+      path = new URL(url, 'http://localhost').pathname;
+    } catch {
+      return null;
+    }
+    const id = CONTENT_PATH.exec(path)?.[2];
+    if (!isUuid(id)) return null;
+    const upload = await this.repo.getUpload(id);
+    const asset = upload && (await this.repo.getAsset(upload.asset_id));
+    if (!upload || !asset) return null;
+    const signed = await this.storage.presignUpload({
+      bucket: asset.storage_bucket,
+      key: asset.storage_key,
+      contentType: asset.content_type,
+      maxBytes: Number(upload.expected_bytes),
+      expiresAt: upload.url_expires_at,
+    });
+    return signed.url;
   }
 
   /** POST /uploads/{id}/complete: verifies the stored object (size, sha256) and queues processing (202) */
-  /**
-   * PUT /uploads/{id}/content: development storage only. Receives the bytes of a pending upload the caller
-   * owns (real storage takes them directly at the signed ticket URL). The client then completes the upload.
-   */
-  async receiveUploadContent(uploadId: string, bytes: Uint8Array, contentType: string | undefined, opts: { owner?: OwnerFilter }): Promise<void> {
-    if (typeof (this.storage as { acceptSignedPut?: unknown }).acceptSignedPut !== 'function') {
-      throw this.ctx.error('DEV_STORAGE_ONLY', 'Upload the file to the storage URL in the upload ticket.');
-    }
-    const upload = await this.repo.getUpload(uploadId);
-    const asset = upload ? await this.repo.getAsset(upload.asset_id, { owner: opts.owner }) : null;
-    if (!upload || !asset) throw new AppError('NOT_FOUND', 'Upload not found');
-    if (asset.status === 'expired' || this.now() > upload.url_expires_at) throw new AppError('UPLOAD_EXPIRED', 'The upload link expired; start a new upload.');
-    if (asset.status !== 'pending_upload') throw new AppError('ILLEGAL_TRANSITION', 'This upload is already complete.', { status: asset.status });
-    if (bytes.byteLength > Number(upload.expected_bytes)) {
-      throw new AppError('FILE_TOO_LARGE', 'The file is larger than declared when the upload started.', { expectedBytes: Number(upload.expected_bytes), receivedBytes: bytes.byteLength });
-    }
-    await this.storage.put(asset.storage_bucket, asset.storage_key, bytes, contentType ?? asset.content_type);
-  }
-
   async completeUpload(uploadId: string, opts: { owner?: OwnerFilter; by: By }): Promise<MediaAsset> {
     const upload = await this.repo.getUpload(uploadId);
     if (!upload) throw new AppError('NOT_FOUND', 'Upload not found');

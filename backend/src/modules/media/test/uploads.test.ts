@@ -20,12 +20,14 @@ const webhook = (path: string, body: unknown) => {
 };
 
 describe('starting an upload', () => {
-  it('issues a signed, expiring storage URL (201)', async () => {
+  it('issues an expiring upload URL (201): with development storage, this API in the same area', async () => {
     const res = await startUpload(t, 'seller', callers.seller(), { purpose: 'product_image', fileName: 'shoe.png', contentType: 'image/png', sizeBytes: 2048 });
     expect(res.statusCode, res.body).toBe(201);
     const ticket = res.json();
     expect(ticket).toMatchObject({ method: 'PUT', maxBytes: 2048, headers: { 'content-type': 'image/png' }, fields: {} });
-    expect(ticket.url).toMatch(/^https:\/\/storage\.marketly\.test\/.+X-Signature=/);
+    expect(new URL(ticket.url).pathname).toBe(`/api/seller/media/uploads/${ticket.uploadId}/content`);
+    // the signed storage URL behind it (what a real storage adapter hands out)
+    expect(await t.media.signedStorageUrlFor(ticket.url)).toMatch(/^https:\/\/storage\.marketly\.test\/.+X-Signature=/);
     expect(new Date(ticket.expiresAt).getTime() - t.clock.now().getTime()).toBe(15 * 60_000);
     const asset = await t.media.getAsset(ticket.assetId);
     expect(asset).toMatchObject({ status: 'pending_upload', kind: 'image', visibility: 'public', owner: { kind: 'seller' } });
