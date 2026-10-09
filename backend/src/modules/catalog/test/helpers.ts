@@ -1,7 +1,7 @@
 /**
  * Test helpers for catalog: an app with catalog and real media (uploads through media's HTTP API), with the
  * modules built in other tranches stubbed:
- *   audit.record → recorded; access.check / requestApproval / approvalForTargets → controlled per test;
+ *   audit.record → recorded; access.check / requestApproval / approvalForTargets / getApproval → controlled per test;
  *   sellers.canSell → allowed unless a test says otherwise, getSellers → store names;
  *   offers.listActiveOffersForProduct / listOwnOffersForProduct → [] / {} unless a test says otherwise;
  *   reports.registerDataset / requestExport → recorded calls and an ExportJob;
@@ -25,6 +25,7 @@ export const stubs = () => ({
     check: vi.fn(async (_p: unknown, action: string) => ({ decision: 'approval_required' as 'approval_required' | 'allowed' | 'denied', action, reason: 'Second reviewer needed', requiresSecondReviewer: true, approvalsNeeded: 1, eligibleApproverRoles: [], eligibleApprovers: [] })),
     requestApproval: vi.fn(async (_input: unknown) => ({ id: newId(), status: 'pending' }) as never),
     approvalForTargets: vi.fn(async (_p: unknown, _t: string, ids: string[]) => new Map(ids.map((id) => [id, null])) as never),
+    getApproval: vi.fn(async (_id: string) => null as never),
     getStaffRef: vi.fn(async () => null),
     rolesOf: vi.fn(async () => []),
   },

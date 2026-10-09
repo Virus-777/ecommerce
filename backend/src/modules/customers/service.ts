@@ -1533,60 +1533,87 @@ export class CustomersService implements CustomersPublicApi {
 
   /**
    * Close by staff: same obligation check as a customer request unless the reason is suspected fraud
-   * (payment_fraud_review). Open obligations need a second reviewer (access approval request); once that
-   * request is approved, submitting the close again goes through (closed is final, so it is used once).
+   * (payment_fraud_review). Open obligations need a second reviewer (access approval request): the account stays
+   * as it is (APPROVAL_REQUIRED with details.approvalRequestId) and closes when the request is approved
+   * (onApprovalDecidedFromAccess). Nothing is stored here while it waits; the request carries the reason.
    */
   private async closeByStaff(c: CustomerRow, input: AccountActionInput, details: string, by: StaffBy): Promise<AccountActionResult> {
     customerAccountStatusMachine.next(map.status(c), 'close'); // ILLEGAL_TRANSITION before asking anyone
-    let approvalRequestId: string | null = null;
     if (input.reasonCode !== 'payment_fraud_review') {
       const blockers = await this.obligations(c.id);
       if (blockers.length) {
         const access = this.ctx.tryUse('access');
         if (!access) throw new AppError('APPROVAL_REQUIRED', 'Closing an account with open obligations needs a second reviewer, and approvals are unavailable right now', { blockers });
         const principal = by.principal as identity.Principal;
-        const latest = (await access.approvalForTargets(principal, 'customer', [c.id])).get(c.id);
-        if (latest && latest.status === 'approved' && latest.action.key === CLOSE_WITH_OBLIGATIONS) {
-          approvalRequestId = latest.id;
-        } else {
-          const check = await access.check(principal, CLOSE_WITH_OBLIGATIONS);
-          if (check.decision === 'denied') throw new AppError('FORBIDDEN', check.reason, { action: CLOSE_WITH_OBLIGATIONS });
-          if (check.decision === 'approval_required') {
-            const req =
-              latest && ['pending', 'partially_approved'].includes(latest.status) && latest.action.key === CLOSE_WITH_OBLIGATIONS
-                ? latest
-                : await access.requestApproval({
-                    action: CLOSE_WITH_OBLIGATIONS,
-                    target: { type: 'customer', id: c.id, ref: c.ref, label: displayName(c.first_name, c.last_name), screen: 'admin/customers' },
-                    summary: `Close customer account ${c.ref} with ${blockers.map((b) => b.detail).join(', ')}`,
-                    details: { blockers, reasonCode: input.reasonCode, details },
-                    reason: details,
-                    requestedBy: principal,
-                  });
-            throw new AppError('APPROVAL_REQUIRED', 'Closing an account with open orders, returns or cases needs a second reviewer', {
-              approvalRequestId: req.id,
-              approvers: req.eligibleApprovers.map((a) => a.name),
-              blockers,
-            });
-          }
+        const check = await access.check(principal, CLOSE_WITH_OBLIGATIONS);
+        if (check.decision === 'denied') throw new AppError('FORBIDDEN', check.reason, { action: CLOSE_WITH_OBLIGATIONS });
+        if (check.decision === 'approval_required') {
+          const latest = (await access.approvalForTargets(principal, 'customer', [c.id])).get(c.id);
+          const req =
+            latest && ['pending', 'partially_approved'].includes(latest.status) && latest.action.key === CLOSE_WITH_OBLIGATIONS
+              ? latest
+              : await access.requestApproval({
+                  action: CLOSE_WITH_OBLIGATIONS,
+                  target: { type: 'customer', id: c.id, ref: c.ref, label: displayName(c.first_name, c.last_name), screen: 'admin/customers' },
+                  summary: `Close customer account ${c.ref} with ${blockers.map((b) => b.detail).join(', ')}`,
+                  details: { blockers, reasonCode: input.reasonCode, details },
+                  reason: details,
+                  requestedBy: principal,
+                });
+          throw new AppError('APPROVAL_REQUIRED', 'Closing an account with open orders, returns or cases needs a second reviewer. It closes once approved.', {
+            approvalRequestId: req.id,
+            approvers: req.eligibleApprovers.map((a) => a.name),
+            blockers,
+          });
         }
       }
     }
     const done = await this.closeAccountTx(c.id, { source: 'staff', actor: by.actor, reasonCode: input.reasonCode, details, anonymise: false });
-    await this.afterClosure(c, done, input.reasonCode, by, `${input.reasonCode}: ${details}`, approvalRequestId);
+    await this.afterClosure(c, done, input.reasonCode, by, `${input.reasonCode}: ${details}`);
     return { accountStatus: 'closed', record: map.action(done.action!), restriction: null, effects: effectsOf('close') };
+  }
+
+  /**
+   * access.approval.decided for customers.accounts.close-with-obligations: approved closes the account as the
+   * requester, with the reason they gave; rejected, cancelled or expired leaves it as it is (the pending closure
+   * lived only in the approval request). A status the close no longer applies to is logged and ignored.
+   */
+  async onApprovalDecidedFromAccess(event: EventPayload<'access.approval.decided'>, eventId?: string): Promise<void> {
+    if (event.actionKey !== CLOSE_WITH_OBLIGATIONS || event.target?.type !== 'customer') return;
+    const key = `approval-decided:${event.requestId}`;
+    const c = await this.repo.getCustomer(event.target.id);
+    if (!c) {
+      this.ctx.log.info({ customerId: event.target.id, approvalRequestId: event.requestId, eventId }, 'customers: approval decided for an unknown customer; ignored');
+      return;
+    }
+    if (event.outcome !== 'approved' || !customerAccountStatusMachine.can(map.status(c), 'close')) {
+      if (event.outcome === 'approved') this.ctx.log.info({ customerId: c.id, status: c.account_status, approvalRequestId: event.requestId }, 'customers: approved closure no longer applies');
+      await this.repo.transaction((repo) => repo.claim(key));
+      return;
+    }
+    const request = await this.ctx
+      .tryUse('access')
+      ?.getApproval(event.requestId)
+      .catch(() => null);
+    const asked = (request?.details ?? {}) as { reasonCode?: string; details?: string };
+    const reasonCode = asked.reasonCode && REASON_CODES.includes(asked.reasonCode as never) ? asked.reasonCode : 'other';
+    const details = asked.details?.trim() || request?.reason?.trim() || 'Closure approved by a second reviewer';
+    const actor: common.Actor = request?.requestedBy ?? { kind: 'staff', id: event.requestedById };
+    const done = await this.closeAccountTx(c.id, { source: 'staff', actor, reasonCode, details, anonymise: false, claim: key });
+    await this.afterClosure(c, done, reasonCode, { actor }, `${reasonCode}: ${details}`, event.requestId);
   }
 
   /** Moves a customer to closed in one transaction: promotional consent off, an open closure request completed, optional anonymisation */
   private async closeAccountTx(
     customerId: string,
-    o: { source: string; actor: common.Actor; reasonCode: string; details: string; anonymise: boolean; force?: boolean; requestId?: string },
+    o: { source: string; actor: common.Actor; reasonCode: string; details: string; anonymise: boolean; force?: boolean; requestId?: string; claim?: string },
   ): Promise<{ from: AccountStatus; action?: ActionRow; changed: boolean }> {
     const now = this.now();
     return this.repo.transaction(async (repo) => {
       const c = await repo.getCustomer(customerId, { forUpdate: true });
       if (!c) throw notFound('Customer');
       const from = map.status(c);
+      if (o.claim && !(await repo.claim(o.claim))) return { from, changed: false }; // event already handled
       if (from === 'closed') return { from, changed: false };
       const to = o.force ? 'closed' : customerAccountStatusMachine.next(from, 'close');
       const patch: Partial<CustomerRow> = { account_status: to, closed_at: now, updated_at: now };
@@ -1721,61 +1748,63 @@ export class CustomersService implements CustomersPublicApi {
   /* ================================================================ events consumed */
 
   /** orders.order.placed: guest buyer row for guest checkouts; order count, spend and the used address's lastUsedAt for customers */
-  async onOrderPlacedFromOrders(event: EventPayload<'orders.order.placed'>): Promise<void> {
+  async onOrderPlacedFromOrders(event: EventPayload<'orders.order.placed'>, eventId?: string): Promise<void> {
     const orders = this.ctx.tryUse('orders');
-    const order = await this.soft('order detail', orders && (() => orders.getOrder(event.orderId)));
     const placedAt = new Date(event.placedAt);
-    if (event.customerId) {
-      const c = await this.repo.getCustomer(event.customerId);
-      if (!c) {
-        this.ctx.log.warn({ customerId: event.customerId, orderId: event.orderId }, 'customers: order for an unknown customer; ignored');
-      } else {
-        const used = order?.deliveryAddress ? (await this.repo.listAddresses(c.id)).find((a) => sameAddress(map.addressOf(a), order.deliveryAddress)) : undefined;
-        await this.repo.transaction(async (repo) => {
-          const cur = (await repo.getCustomer(c.id, { forUpdate: true }))!;
-          const same = cur.order_count === 0 || cur.currency === event.total.currency;
-          await repo.updateCustomer(cur.id, {
-            order_count: cur.order_count + 1,
-            total_spend_minor: same ? Number(cur.total_spend_minor) + event.total.amount : Number(cur.total_spend_minor),
-            currency: cur.order_count === 0 ? event.total.currency : cur.currency,
-            updated_at: this.now(),
-          });
-          if (used && (!used.last_used_at || used.last_used_at < placedAt)) await repo.updateAddress(used.id, { last_used_at: placedAt });
+    const c = event.customerId ? await this.repo.getCustomer(event.customerId) : undefined;
+    if (event.customerId && !c) this.ctx.log.warn({ customerId: event.customerId, orderId: event.orderId, eventId }, 'customers: order for an unknown customer; ignored');
+    const email = event.guestEmail ? normalizeEmail(event.guestEmail) : null;
+    // a member with the guest email: orders attaches the order on verification, no guest buyer row
+    const guest = email && !(await this.repo.findCustomerByEmail(email)) ? email : null;
+    if (!c && !guest) return;
+    const order = await this.soft('order detail', orders && (() => orders.getOrder(event.orderId)));
+    const used = c && order?.deliveryAddress ? (await this.repo.listAddresses(c.id)).find((a) => sameAddress(map.addressOf(a), order.deliveryAddress)) : undefined;
+    await this.repo.transaction(async (repo) => {
+      // the claim commits with the counts: a second delivery of the same order changes nothing
+      if (!(await repo.claim(`order-placed:${event.orderId}`))) return;
+      if (c) {
+        const cur = (await repo.getCustomer(c.id, { forUpdate: true }))!;
+        const same = cur.order_count === 0 || cur.currency === event.total.currency;
+        await repo.updateCustomer(cur.id, {
+          order_count: cur.order_count + 1,
+          total_spend_minor: same ? Number(cur.total_spend_minor) + event.total.amount : Number(cur.total_spend_minor),
+          currency: cur.order_count === 0 ? event.total.currency : cur.currency,
+          updated_at: this.now(),
         });
+        if (used && (!used.last_used_at || used.last_used_at < placedAt)) await repo.updateAddress(used.id, { last_used_at: placedAt });
       }
-    }
-    if (event.guestEmail) {
-      const email = normalizeEmail(event.guestEmail);
-      if (await this.repo.findCustomerByEmail(email)) return; // a member with this email: orders attaches the order on verification
-      const name = order?.contact?.name || order?.deliveryAddress?.name || email.split('@')[0]!;
-      await this.repo.transaction(async (repo) => {
-        const g = await repo.getGuestBuyer(email, { forUpdate: true });
-        if (!g) {
-          await repo.insertGuestBuyer({
-            id: newId(),
-            email_normalized: email,
-            email: event.guestEmail!,
-            name,
-            order_count: 1,
-            total_spend: event.total.amount,
-            currency: event.total.currency,
-            first_order_at: placedAt,
-            last_order_at: placedAt,
-            last_order_id: event.orderId,
-            last_order_ref: event.ref,
-          });
-          return;
-        }
-        if (g.last_order_id === event.orderId) return; // delivered twice
-        const later = placedAt >= g.last_order_at;
-        await repo.updateGuestBuyer(g.id, {
-          order_count: g.order_count + 1,
-          total_spend: Number(g.total_spend) + (g.currency === event.total.currency ? event.total.amount : 0),
-          first_order_at: placedAt < g.first_order_at ? placedAt : g.first_order_at,
-          ...(later ? { last_order_at: placedAt, last_order_id: event.orderId, last_order_ref: event.ref, name, email: event.guestEmail! } : {}),
-        });
+      if (guest) await this.recordGuestOrder(repo, event, guest, order?.contact?.name || order?.deliveryAddress?.name || guest.split('@')[0]!);
+    });
+  }
+
+  /** Guest buyer row for a guest checkout (inside the consumer's transaction) */
+  private async recordGuestOrder(repo: CustomersRepository, event: EventPayload<'orders.order.placed'>, email: string, name: string) {
+    const placedAt = new Date(event.placedAt);
+    const g = await repo.getGuestBuyer(email, { forUpdate: true });
+    if (!g) {
+      await repo.insertGuestBuyer({
+        id: newId(),
+        email_normalized: email,
+        email: event.guestEmail!,
+        name,
+        order_count: 1,
+        total_spend: event.total.amount,
+        currency: event.total.currency,
+        first_order_at: placedAt,
+        last_order_at: placedAt,
+        last_order_id: event.orderId,
+        last_order_ref: event.ref,
       });
+      return;
     }
+    if (g.last_order_id === event.orderId) return; // recorded before the inbox existed
+    const later = placedAt >= g.last_order_at;
+    await repo.updateGuestBuyer(g.id, {
+      order_count: g.order_count + 1,
+      total_spend: Number(g.total_spend) + (g.currency === event.total.currency ? event.total.amount : 0),
+      first_order_at: placedAt < g.first_order_at ? placedAt : g.first_order_at,
+      ...(later ? { last_order_at: placedAt, last_order_id: event.orderId, last_order_ref: event.ref, name, email: event.guestEmail! } : {}),
+    });
   }
 
   /** identity.user.registered: profile, default preferences and the first consent rows; the guest buyer row goes */

@@ -82,7 +82,7 @@ describe('publication', () => {
     expect(res.json().effects).toEqual(expect.arrayContaining(['2 offers stop showing', '3 open orders continue with their purchase snapshots']));
   });
 
-  it('trust enforcement suspends; reactivating needs a second reviewer (APPROVAL_REQUIRED, then allowed once approved)', async () => {
+  it('trust enforcement suspends; reactivating needs a second reviewer (APPROVAL_REQUIRED, reactivated when approved)', async () => {
     const { id } = await sellerProduct(t, newId(), { brandId, categoryId: cat.id, approve: true });
     const reportId = newId();
     const enforcement = { enforcementId: newId(), reportId, action: 'suspend_product', ownerTeam: 'catalog', targets: [{ type: 'product', id, label: 'x' }, { type: 'product', id: newId(), label: 'unknown' }], reason: 'Counterfeit confirmed', params: {}, alreadyApplied: false };
@@ -106,12 +106,35 @@ describe('publication', () => {
     t.stubs.access.check.mockResolvedValueOnce({ decision: 'denied', action: 'x', reason: 'Your role can recommend only', requiresSecondReviewer: true, approvalsNeeded: 1, eligibleApproverRoles: [], eligibleApprovers: [] });
     expect((await a.admin('POST', `/products/${id}/publication`, { publication: 'active', reason: 'try' })).statusCode).toBe(403);
 
-    // approved by the second reviewer: the same call goes through
+    // rejected: the pending override is dropped, the product stays suspended
+    const requesterId = newId();
+    const decided = (requestId: string, outcome: 'approved' | 'rejected') => ({
+      requestId,
+      ref: 'AP-261009-0001',
+      actionKey: 'catalog.products.publication-override',
+      module: 'catalog',
+      target: { type: 'product', id, label: 'x' },
+      outcome,
+      decidedBy: { kind: 'staff' as const, id: newId(), name: 'Mara Ellis' },
+      approverIds: [],
+      requestedById: requesterId,
+    });
+    t.app.kernel.events.publish('access', 'access.approval.decided', decided(first.json().error.details.approvalRequestId, 'rejected'));
+    await t.app.kernel.events.drain();
+    expect((await a.admin('GET', `/products/${id}`)).json().publication).toBe('suspended');
+
+    // approved by the second reviewer: catalog reactivates it, once (the event delivered twice)
     const approvalId = newId();
-    t.stubs.access.approvalForTargets.mockResolvedValueOnce(new Map([[id, { id: approvalId, status: 'approved', decidedAt: new Date(Date.now() + 60_000).toISOString() }]]) as never);
-    const ok = await a.admin('POST', `/products/${id}/publication`, { publication: 'active', reason: 'Seller proved authenticity' });
-    expect(ok.statusCode, ok.body).toBe(200);
-    expect(ok.json().publication).toBe('active');
-    expect(t.stubs.audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'catalog.product.activate', approvalRequestId: approvalId }));
+    t.stubs.access.getApproval.mockResolvedValueOnce({ id: approvalId, reason: 'Seller proved authenticity', requestedBy: { kind: 'staff', id: requesterId, name: 'Riley Chen' } } as never);
+    t.stubs.audit.record.mockClear();
+    t.app.kernel.events.publish('access', 'access.approval.decided', decided(approvalId, 'approved'));
+    t.app.kernel.events.publish('access', 'access.approval.decided', decided(approvalId, 'approved'));
+    await t.app.kernel.events.drain();
+    expect((await a.admin('GET', `/products/${id}`)).json().publication).toBe('active');
+    const reactivated = t.eventsNamed('catalog.product.publication_changed').filter((e) => (e.payload as { to: string }).to === 'active');
+    expect(reactivated.map((e) => e.payload)).toEqual([{ productId: id, from: 'suspended', to: 'active', reason: 'Seller proved authenticity', trustReportId: null }]);
+    expect(reactivated[0]!.actor).toEqual({ kind: 'staff', id: requesterId, name: 'Riley Chen' });
+    const audits = t.stubs.audit.record.mock.calls.map((c) => c[0]).filter((e) => e.action === 'catalog.product.activate');
+    expect(audits).toEqual([expect.objectContaining({ approvalRequestId: approvalId, approvalNote: 'Second reviewer approved the reactivation' })]);
   });
 });

@@ -1,4 +1,5 @@
 import { sql, type Kysely } from 'kysely';
+import type { Inbox } from '../../../../kernel/events/inbox.js';
 import { paginate, type PageRequest } from '../../../../kernel/lib/pagination.js';
 import type * as common from '../../../../spec/common.js';
 import type { CatalogDb } from '../../../../spec/catalog.js';
@@ -65,16 +66,23 @@ const DUPLICATE_SUSPECTED = sql<boolean>`exists (
     and (c.dismissed_at is null or c.dismissed_matched_product_id is not null))`;
 
 /** Postgres adapter for CatalogRepository. `db` is scoped to the `catalog` schema. */
-export function createPostgresCatalogRepository(db: Db): CatalogRepository {
-  return new PgCatalogRepository(db);
+export function createPostgresCatalogRepository(db: Db, inbox: Inbox): CatalogRepository {
+  return new PgCatalogRepository(db, inbox);
 }
 
 class PgCatalogRepository implements CatalogRepository {
-  constructor(private readonly db: Db) {}
+  constructor(
+    private readonly db: Db,
+    private readonly inbox: Inbox,
+  ) {}
 
   async transaction<T>(fn: (tx: CatalogRepository) => Promise<T>): Promise<T> {
     if (this.db.isTransaction) return fn(this);
-    return this.db.transaction().execute((trx) => fn(new PgCatalogRepository(trx)));
+    return this.db.transaction().execute((trx) => fn(new PgCatalogRepository(trx, this.inbox)));
+  }
+
+  claim(key: string) {
+    return this.inbox.claim(this.db, key);
   }
 
   /* ================================================================ categories */

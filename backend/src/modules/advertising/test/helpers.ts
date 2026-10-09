@@ -68,7 +68,10 @@ export interface Kit {
   approvals: Map<string, access.RequestApprovalInput>;
   authority: Map<string, Decision>;
   restricted: Map<string, string>;
-  adCharges: { sellerId: string; campaignId: string; amount: { amount: number; currency: string }; period: { from: string; to: string } }[];
+  /** finance.recordAdCharge calls, with the ledger entry id returned */
+  adCharges: { sellerId: string; campaignId: string; amount: { amount: number; currency: string }; period: { from: string; to: string }; entryId: string }[];
+  /** finance.creditSellerCharge calls (stubbed per src/spec/finance.ts: the same idempotencyKey returns the first entry) */
+  chargeCredits: { sellerId: string; amount: { amount: number; currency: string }; originalEntryId: string; reason: string; idempotencyKey: string }[];
   staff: string;
   of(name: string): any[];
   call(method: string, url: string, token: string, body?: unknown, headers?: Record<string, string>): Promise<{ status: number; body: any }>;
@@ -122,6 +125,8 @@ export async function boot(): Promise<Kit> {
   const authority = new Map<string, Decision>();
   const restricted = new Map<string, string>();
   const adCharges: Kit['adCharges'] = [];
+  const chargeCredits: Kit['chargeCredits'] = [];
+  const creditEntries = new Map<string, string>();
   const byProduct = () => new Map([...offers.values()].map((o) => [o.productId, o]));
   const app = await buildTestApp({
     modules: withDependencies(['advertising', 'audit', 'offers', 'catalog', 'inventory', 'sellers', 'promotions', 'finance']),
@@ -191,8 +196,16 @@ export async function boot(): Promise<Kit> {
       },
       finance: {
         recordAdCharge: async (input: any) => {
-          adCharges.push(input);
-          return { id: newId(), statementRef: 'ST-2610-0001' } as any;
+          const entryId = newId();
+          adCharges.push({ ...input, entryId });
+          return { id: entryId, type: 'ad_charge', statementRef: 'ST-2610-0001' } as any;
+        },
+        creditSellerCharge: async (input: any) => {
+          if (!creditEntries.has(input.idempotencyKey)) {
+            chargeCredits.push(input);
+            creditEntries.set(input.idempotencyKey, newId());
+          }
+          return { id: creditEntries.get(input.idempotencyKey)!, type: 'charge_credit' } as any;
         },
       },
       audit: {
@@ -219,6 +232,7 @@ export async function boot(): Promise<Kit> {
     authority,
     restricted,
     adCharges,
+    chargeCredits,
     staff: callers.staff(),
     of: (name) => events.filter((e) => e.name === name).map((e) => e.payload),
     async call(method, url, token, body, headers = {}) {

@@ -1,4 +1,5 @@
 import { sql, type ExpressionBuilder, type Kysely } from 'kysely';
+import type { Inbox } from '../../../../kernel/events/inbox.js';
 import { paginate } from '../../../../kernel/lib/pagination.js';
 import type { CustomersDb } from '../../../../spec/customers.js';
 import type { CustomerRow, CustomersRepository, CustomerStanding, ViewOwner } from '../../ports.js';
@@ -9,7 +10,7 @@ const count = (r: { numDeletedRows?: bigint; numUpdatedRows?: bigint } | undefin
 type StandingRow = CustomerRow & { order_block: boolean; message_block: boolean; message_until: Date | null };
 
 /** Postgres adapter for CustomersRepository. `db` is scoped to the `customers` schema. */
-export function createPostgresCustomersRepository(db: Kysely<CustomersDb>): CustomersRepository {
+export function createPostgresCustomersRepository(db: Kysely<CustomersDb>, inbox: Inbox): CustomersRepository {
   /** Customer row plus its active blocks, in one statement (the kernel resolves customers on every own-customer request) */
   const standingQuery = (now: Date) => {
     const active = (eb: ExpressionBuilder<CustomersDb & { c: CustomersDb['customers'] }, 'c'>, scopes: string[]) =>
@@ -40,7 +41,10 @@ export function createPostgresCustomersRepository(db: Kysely<CustomersDb>): Cust
   const repo: CustomersRepository = {
     async transaction(fn) {
       if (db.isTransaction) return fn(repo);
-      return db.transaction().execute((trx) => fn(createPostgresCustomersRepository(trx)));
+      return db.transaction().execute((trx) => fn(createPostgresCustomersRepository(trx, inbox)));
+    },
+    claim(key) {
+      return inbox.claim(db, key);
     },
 
     /* ---------------------------------------------------------------- customers */

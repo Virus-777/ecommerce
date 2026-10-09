@@ -57,6 +57,8 @@ export interface DataRequestSearch {
 export interface CustomersRepository {
   /** Runs fn in one transaction with a repository bound to it (nested calls reuse the outer one) */
   transaction<T>(fn: (repo: CustomersRepository) => Promise<T>): Promise<T>;
+  /** Inbox (ctx.inbox): true the first time this key is claimed; commits with the transaction it runs in */
+  claim(key: string): Promise<boolean>;
 
   /* customers */
   getCustomer(id: string, o?: { forUpdate?: boolean }): Promise<CustomerRow | undefined>;

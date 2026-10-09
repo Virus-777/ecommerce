@@ -10,6 +10,7 @@ import { stringMap, strings } from './mappers.js';
 import type { OfferIndexRow } from './ports.js';
 import { CatalogAdmin } from './service/admin.js';
 import type { By } from './service/base.js';
+import { OVERRIDE_ACTION } from './service/review.js';
 
 export type { CatalogServiceDeps } from './service/base.js';
 
@@ -46,6 +47,7 @@ export class CatalogService extends CatalogAdmin implements CatalogPublicApi {
     return {
       productId: product.id,
       variantId,
+      categoryId: product.category_id ?? null,
       productVersion: product.version,
       title: product.title,
       brandName: brand?.name ?? null,
@@ -186,6 +188,38 @@ export class CatalogService extends CatalogAdmin implements CatalogPublicApi {
     for (const s of await this.repo.openSubmissionsOfSeller(sellerId, { categoryIds, paused: false })) {
       await this.repo.updateSubmission(s.id, { review_due_at: null });
     }
+  }
+
+  /**
+   * access.approval.decided: finish a publication override that needed approval. Approved: reactivate the product
+   * (as the requester, with the approval on the audit entry). Rejected, cancelled or expired: the pending override is
+   * dropped (it lives only in the approval request), so the product stays suspended.
+   */
+  async onApprovalDecidedFromAccess(event: EventPayload<'access.approval.decided'>, eventId?: string): Promise<void> {
+    if (event.actionKey !== OVERRIDE_ACTION || event.target?.type !== 'product') return;
+    const key = `approval-decided:${event.requestId}`;
+    const p = await this.repo.getProduct(event.target.id);
+    if (!p) {
+      this.ctx.log.info({ productId: event.target.id, approvalRequestId: event.requestId, eventId }, 'catalog: approval decided for an unknown product');
+      return;
+    }
+    if (event.outcome !== 'approved' || p.publication !== 'suspended') {
+      if (event.outcome === 'approved') this.ctx.log.info({ productId: p.id, publication: p.publication, approvalRequestId: event.requestId }, 'catalog: approved override no longer applies');
+      await this.repo.transaction((tx) => tx.claim(key));
+      return;
+    }
+    const request = await this.ctx
+      .tryUse('access')
+      ?.getApproval(event.requestId)
+      .catch(() => null);
+    const actor: common.Actor = request?.requestedBy ?? { kind: 'staff', id: event.requestedById };
+    const reason = request?.reason?.trim() || event.reason?.trim() || 'Second reviewer approved the reactivation';
+    await this.changePublication(p.id, { to: 'active', reason, trustReportId: null }, { actor }, {
+      system: true,
+      claim: key,
+      approvalRequestId: event.requestId,
+      approvalNote: 'Second reviewer approved the reactivation',
+    });
   }
 
   /** trust.enforcement.recorded: suspend products named in a suspend_product enforcement */

@@ -71,6 +71,11 @@ export class TrustService implements TrustPublicApi {
 
   /* ---------------- events consumed */
 
+  /** access.approval.decided: finish an accept or reversal that needed approval (approved: apply; otherwise it stays as it was) */
+  onApprovalDecidedFromAccess(event: EventPayload<'access.approval.decided'>, eventId?: string): Promise<void> {
+    return this.actions.onApprovalDecided(event, eventId);
+  }
+
   onContentReferredFromReviews(event: EventPayload<'reviews.content.referred'>): Promise<void> {
     return this.detection.onContentReferred(event);
   }

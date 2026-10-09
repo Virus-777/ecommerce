@@ -385,9 +385,10 @@ export class InboundPart extends Part {
     return this.parts.views.inbound(await this.applyDecision(id, body.decision, { units: body.units ?? null, amount: body.amount ?? null, reason }, by));
   }
 
-  private async applyDecision(id: string, decision: 'adjust_stock' | 'reimburse' | 'reject', o: { units: number | null; amount: common.Money | null; reason: string }, by: By): Promise<InboundRec> {
+  private async applyDecision(id: string, decision: 'adjust_stock' | 'reimburse' | 'reject', o: { units: number | null; amount: common.Money | null; reason: string; claim?: string }, by: By): Promise<InboundRec> {
     const found = new Map<string, number>();
     const result = await this.repo.transaction(async (tx) => {
+      if (o.claim && !(await tx.claim(o.claim))) return null; // the decision was already applied
       const locked = (await tx.get('inbound_shipments', id, { forUpdate: true }))!;
       const disc = await tx.findOne('discrepancies', { inbound_id: id }, { forUpdate: true });
       if (locked.state !== 'received' || !disc || disc.decision) return null;
@@ -420,6 +421,7 @@ export class InboundPart extends Part {
           currency: amount.currency,
           state: 'accrued',
           posted_at: null,
+          ledger_entry_id: null,
           reason: o.reason,
           idempotency_key: `reimbursement:${id}`,
         });
@@ -438,7 +440,7 @@ export class InboundPart extends Part {
     return row;
   }
 
-  /** access.approval.decided for fulfillment-service.reimbursements.approve */
+  /** access.approval.decided for fulfillment-service.reimbursements.approve (claimed once per request; posted by the post-fees job) */
   async onReimbursementDecided(e: EventPayload<'access.approval.decided'>): Promise<void> {
     if (e.outcome !== 'approved' || !isUuid(e.target.id) || !e.amount) return;
     const row = await this.repo.get('inbound_shipments', e.target.id);
@@ -449,7 +451,7 @@ export class InboundPart extends Part {
     } catch {
       /* keep the decision note */
     }
-    await this.applyDecision(row.id, 'reimburse', { units: null, amount: e.amount, reason: reason || 'Approved reimbursement' }, { actor: e.decidedBy ?? SYSTEM });
+    await this.applyDecision(row.id, 'reimburse', { units: null, amount: e.amount, reason: reason || 'Approved reimbursement', claim: `approval-decided:${e.requestId}` }, { actor: e.decidedBy ?? SYSTEM });
   }
 
   /* ---------------------------------------------------------------- job */

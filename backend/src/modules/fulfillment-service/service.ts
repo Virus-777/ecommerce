@@ -101,9 +101,9 @@ export class FulfillmentServiceService implements FulfillmentServicePublicApi {
   }
 
   /** access.approval.decided: Apply approved fee schedules, reimbursements and fee reversals */
-  async onApprovalDecidedFromAccess(event: EventPayload<'access.approval.decided'>): Promise<void> {
+  async onApprovalDecidedFromAccess(event: EventPayload<'access.approval.decided'>, eventId?: string): Promise<void> {
     if (event.actionKey === FEES_ACTION && event.target?.type === SCHEDULE_TARGET) await this.parts.fees.onScheduleDecided(event);
-    else if (event.actionKey === REVERSE_ACTION && event.target?.type === CHARGE_TARGET) await this.parts.fees.onReverseDecided(event);
+    else if (event.actionKey === REVERSE_ACTION && event.target?.type === CHARGE_TARGET) await this.parts.fees.onReverseDecided(event, eventId);
     else if (event.actionKey === REIMBURSE_ACTION && event.target?.type === DISCREPANCY_TARGET) await this.parts.inbound.onReimbursementDecided(event);
   }
 

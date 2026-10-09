@@ -108,6 +108,8 @@ export type Balances = Map<string, Partial<Record<StockGroup, number>>>;
 export interface FulfillmentServiceRepository {
   /** Runs fn in one transaction (nested calls join the outer one) */
   transaction<T>(fn: (tx: FulfillmentServiceRepository) => Promise<T>): Promise<T>;
+  /** Inbox (ctx.inbox): true the first time this key is claimed; commits with the transaction it runs in */
+  claim(key: string): Promise<boolean>;
 
   get<T extends IdTable>(table: T, id: string, o?: { forUpdate?: boolean }): Promise<Recs[T] | undefined>;
   find<T extends Table>(table: T, where: Where<Recs[T]>, o?: FindOptions<Recs[T]>): Promise<Recs[T][]>;

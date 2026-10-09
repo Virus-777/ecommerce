@@ -1,4 +1,5 @@
 import { sql, type Kysely } from 'kysely';
+import type { Inbox } from '../../../../kernel/events/inbox.js';
 import type { TrustDb } from '../../../../spec/trust.js';
 import type { ReportFilter, Table, TrustRepository } from '../../ports.js';
 
@@ -80,14 +81,17 @@ function reportQuery(d: any, f: ReportFilter): any {
 }
 
 /** Postgres adapter for TrustRepository. `db` is scoped to the `trust` schema. */
-export function createPostgresTrustRepository(db: Kysely<TrustDb>): TrustRepository {
+export function createPostgresTrustRepository(db: Kysely<TrustDb>, inbox: Inbox): TrustRepository {
   // generic table access: the row types are checked at the TrustRepository boundary
   const d: any = db;
 
   const repo: TrustRepository = {
     async transaction(fn) {
       if (db.isTransaction) return fn(repo);
-      return db.transaction().execute((trx) => fn(createPostgresTrustRepository(trx)));
+      return db.transaction().execute((trx) => fn(createPostgresTrustRepository(trx, inbox)));
+    },
+    claim(key) {
+      return inbox.claim(db, key);
     },
 
     async get(table, id, o) {

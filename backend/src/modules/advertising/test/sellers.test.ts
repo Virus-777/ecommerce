@@ -204,10 +204,15 @@ describe('seller sponsored campaigns', () => {
     expect(res.body.error.code).toBe('APPROVAL_REQUIRED');
     const [requestId, req] = [...k.approvals.entries()].find(([, v]) => v.action === 'advertising.charges.void')!;
     expect(req.amount).toEqual(USD(70));
-    await k.emit('access.approval.decided', { requestId, ref: 'AP-2', actionKey: 'advertising.charges.void', module: 'advertising', target: req.target, outcome: 'approved', decidedBy: { kind: 'staff', id: newId() }, amount: USD(70), approverIds: [], requestedById: newId() });
+    const decided = { requestId, ref: 'AP-2', actionKey: 'advertising.charges.void', module: 'advertising', target: req.target, outcome: 'approved', decidedBy: { kind: 'staff', id: newId() }, amount: USD(70), approverIds: [], requestedById: newId() };
+    await k.emit('access.approval.decided', decided);
+    await k.emit('access.approval.decided', decided); // delivered twice: credited once
     charges = await k.call('GET', `${ADMIN}/charges?campaignId=${id}`, k.staff);
     expect(charges.body.items[0]).toMatchObject({ state: 'credited', reason: 'Invalid traffic' });
     expect(k.of('advertising.charge.credited')).toEqual([{ chargeId: posted.id, sellerId: SELLER_A, amount: USD(70), reason: 'Invalid traffic' }]);
+    // the seller ledger is credited against the posted entry
+    const entryId = k.adCharges.find((c) => c.campaignId === id)!.entryId;
+    expect(k.chargeCredits).toEqual([{ sellerId: SELLER_A, amount: USD(70), originalEntryId: entryId, reason: 'Invalid traffic', idempotencyKey: `advertising:charge-credit:${posted.id}` }]);
     k.authority.delete('advertising.charges.void');
     res = await k.call('POST', `${ADMIN}/charges/${posted.id}/void`, k.staff, { reason: 'again' }, { 'idempotency-key': newId() });
     expect(res.status).toBe(409);

@@ -147,10 +147,11 @@ describe('inbound shipments', () => {
     const b = await short();
     await k.call('POST', S(`/inbound/${b}/discrepancy-response`), { token: s.token, body: { response: 'claimed', note: 'Missing unit' } });
     expect((await k.call('POST', A(`/inbound/${b}/discrepancy-decision`), { body: { decision: 'reimburse', reason: 'Lost at the dock' }, headers: key() })).status).toBe(400);
-    const paid = await k.call('POST', A(`/inbound/${b}/discrepancy-decision`), { body: { decision: 'reimburse', amount: { amount: 1800, currency: 'USD' }, reason: 'Lost at the dock' }, headers: key() });
+    const paid = await k.call('POST', A(`/inbound/${b}/discrepancy-decision`), { body: { decision: 'reimburse', amount: { amount: 80, currency: 'USD' }, reason: 'Lost at the dock' }, headers: key() });
     expect(paid.status, JSON.stringify(paid.body)).toBe(200);
     expect(paid.body.state).toBe('closed');
-    expect(paid.body.fees.find((f: any) => f.type === 'reimbursement')).toMatchObject({ amount: { amount: -1800 }, state: 'accrued', reason: 'Lost at the dock' });
+    const reimbursement = paid.body.fees.find((f: any) => f.type === 'reimbursement');
+    expect(reimbursement).toMatchObject({ amount: { amount: -80 }, state: 'accrued', reason: 'Lost at the dock' });
 
     // above the limit: approval, then access.approval.decided applies it
     const c = await short();
@@ -167,6 +168,22 @@ describe('inbound shipments', () => {
     const decided = await k.call('GET', S(`/inbound/${c}`), { token: s.token });
     expect(decided.body.state).toBe('closed');
     expect(decided.body.discrepancy.decision).toContain('Reimbursed 900.00 USD');
+    // delivered twice: one reimbursement
+    await k.publish('access', 'access.approval.decided', { requestId: pending.body.error.details.approvalRequestId, ref: 'AP-1', actionKey: req.action, module: 'fulfillment-service', target: req.target, outcome: 'approved', decidedBy: { kind: 'staff', id: newId(), name: 'Finance' }, reason: null, amount: { amount: 90_000, currency: 'USD' }, approverIds: [], requestedById: newId() });
+    expect((await k.call('GET', S(`/inbound/${c}`), { token: s.token })).body.fees.filter((f: any) => f.type === 'reimbursement')).toHaveLength(1);
+
+    // posting: fees go to the ledger as service_fee; a reimbursement is credited against the largest fee posted for
+    // its inbound (finance.creditSellerCharge); one larger than that fee stays accrued
+    await k.app.kernel.jobs.runNow('fulfillment-service.post-fees');
+    const bFees = (await k.call('GET', S(`/inbound/${b}`), { token: s.token })).body.fees as any[];
+    expect(bFees.find((f) => f.id === reimbursement.id)).toMatchObject({ state: 'posted' });
+    const largest = bFees.filter((f) => f.amount.amount > 0).sort((x, y) => y.amount.amount - x.amount.amount)[0];
+    const feeEntry = k.financeLedger.find((e) => e.type === 'service_fee' && e.reference?.id === largest.id)!;
+    expect(k.financeLedger.filter((e) => e.type === 'charge_credit' && e.sellerId === s.sellerId)).toEqual([
+      expect.objectContaining({ amount: { amount: 80, currency: 'USD' }, originalEntryId: feeEntry.id, reason: 'Lost at the dock', idempotencyKey: `fulfillment-service:reimbursement:${reimbursement.id}` }),
+    ]);
+    const cFees = (await k.call('GET', S(`/inbound/${c}`), { token: s.token })).body.fees as any[];
+    expect(cFees.find((f) => f.type === 'reimbursement')).toMatchObject({ amount: { amount: -90_000 }, state: 'accrued' });
 
     // nobody answers: closed by the daily job after 14 days
     const d = await short();

@@ -17,11 +17,11 @@ import { AdvertisingService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.0.0',
+  version: '1.1.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const service = new AdvertisingService({ repo: createPostgresAdvertisingRepository(ctx.db), ctx });
+    const service = new AdvertisingService({ repo: createPostgresAdvertisingRepository(ctx.db, ctx.inbox), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
@@ -40,7 +40,7 @@ export default defineModule({
     ctx.events.on("orders.order.placed", (e) => service.onOrderPlacedFromOrders(e.payload));
     ctx.events.on("orders.item.cancelled", (e) => service.onItemCancelledFromOrders(e.payload));
     ctx.events.on("content.page.published", (e) => service.onPagePublishedFromContent(e.payload));
-    ctx.events.on("access.approval.decided", (e) => service.onApprovalDecidedFromAccess(e.payload));
+    ctx.events.on("access.approval.decided", (e) => service.onApprovalDecidedFromAccess(e.payload, e.id));
     ctx.events.on("catalog.product.merged", (e) => service.onProductMergedFromCatalog(e.payload));
 
     // Background jobs (spec jobs)

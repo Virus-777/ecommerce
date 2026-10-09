@@ -14,10 +14,10 @@ import { FulfillmentServiceService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.0.0',
+  version: '1.1.0',
   migrations,
   register(ctx) {
-    const service = new FulfillmentServiceService({ repo: createPostgresFulfillmentServiceRepository(ctx.db), ctx });
+    const service = new FulfillmentServiceService({ repo: createPostgresFulfillmentServiceRepository(ctx.db, ctx.inbox), ctx });
     ctx.provide(service);
     ctx.http.routes(sellerRoutes(service), adminRoutes(service));
 
@@ -29,7 +29,7 @@ export default defineModule({
     ctx.events.on("inventory.stock.low", (e) => service.onStockLowFromInventory(e.payload));
     ctx.events.on("sellers.seller.suspended", (e) => service.onSellerSuspendedFromSellers(e.payload));
     ctx.events.on("sellers.seller.closed", (e) => service.onSellerClosedFromSellers(e.payload));
-    ctx.events.on("access.approval.decided", (e) => service.onApprovalDecidedFromAccess(e.payload));
+    ctx.events.on("access.approval.decided", (e) => service.onApprovalDecidedFromAccess(e.payload, e.id));
 
     // Background jobs (spec jobs)
     ctx.jobs.handle("fulfillment-service.storage-snapshot", () => service.storageSnapshot());

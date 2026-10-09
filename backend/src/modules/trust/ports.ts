@@ -122,6 +122,8 @@ export interface ReportFilter {
 export interface TrustRepository {
   /** Runs fn in one transaction (nested calls join the outer one) */
   transaction<T>(fn: (tx: TrustRepository) => Promise<T>): Promise<T>;
+  /** Inbox (ctx.inbox): true the first time this key is claimed; commits with the transaction it runs in */
+  claim(key: string): Promise<boolean>;
 
   /* generic table access (jsonb columns are mapped at this boundary) */
   get<T extends Table>(table: T, id: string, o?: { forUpdate?: boolean }): Promise<Recs[T] | undefined>;

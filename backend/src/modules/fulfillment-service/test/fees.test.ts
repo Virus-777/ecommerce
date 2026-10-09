@@ -37,7 +37,9 @@ describe('fee schedules', () => {
     expect(req).toMatchObject({ action: 'fulfillment-service.fees.change', target: { type: 'fulfillment_fee_schedule', id: proposed.body.id } });
     expect((await k.call('GET', S('/fee-schedule'), { token: s.token })).body.upcoming).toBeNull();
 
-    await k.publish('access', 'access.approval.decided', decided(req, newId()));
+    const scheduleRequestId = newId();
+    await k.publish('access', 'access.approval.decided', decided(req, scheduleRequestId));
+    await k.publish('access', 'access.approval.decided', decided(req, scheduleRequestId)); // delivered twice: applied once
     const list = await k.call('GET', A('/fee-schedules'));
     expect(list.body.map((x: any) => [x.version, x.state])).toEqual([
       ['FS-2027-1', 'scheduled'],
@@ -85,11 +87,13 @@ describe('fee charges', () => {
     const charged = k.events('fulfillment-service.fee.charged').filter((e) => e.sellerId === s.sellerId);
     expect(charged.map((e) => [e.type, e.amount.amount, e.reference])).toEqual(expect.arrayContaining([['receiving', posted.find((f: any) => f.type === 'receiving').amount.amount, posted[0].reference]]));
     expect(charged).toHaveLength(2);
-    // the seller's ledger in finance: one entry per charge
-    const ledger = await k.call('GET', '/api/seller/finance/ledger', { token: s.token });
-    expect(ledger.status, JSON.stringify(ledger.body)).toBe(200);
-    const total = posted.reduce((n: number, f: any) => n + f.amount.amount, 0);
-    expect(ledger.body.items.filter((e: any) => e.description.startsWith('Fulfillment service')).reduce((n: number, e: any) => n + e.amount.amount, 0)).toBe(-total);
+    // the seller's ledger in finance: one service_fee entry per charge (finance.recordServiceFee, keyed per charge)
+    const fees = k.financeLedger.filter((e) => e.sellerId === s.sellerId && e.type === 'service_fee');
+    expect(fees).toHaveLength(2);
+    for (const f of posted) {
+      expect(fees.find((e) => e.reference?.id === f.id)).toMatchObject({ kind: f.type, amount: f.amount, reference: { kind: 'fulfillment_service', id: f.id, ref: f.reference }, idempotencyKey: `fulfillment-service:fee:${f.id}`, description: expect.stringMatching(/^Fulfillment service/) });
+    }
+    const entryOf = (chargeId: string) => fees.find((e) => e.reference?.id === chargeId)!.id;
 
     // reverse within the limit
     const receiving = posted.find((f: any) => f.type === 'receiving');
@@ -98,6 +102,9 @@ describe('fee charges', () => {
     expect(reversed.status, JSON.stringify(reversed.body)).toBe(200);
     expect(reversed.body).toMatchObject({ state: 'reversed', reason: 'Receiving waived for the launch' });
     expect(k.events('fulfillment-service.fee.reversed').at(-1)).toEqual({ chargeId: receiving.id, sellerId: s.sellerId, amount: receiving.amount, reason: 'Receiving waived for the launch' });
+    // the posted fee is credited back on the seller ledger against its entry
+    const credits = () => k.financeLedger.filter((e) => e.sellerId === s.sellerId && e.type === 'charge_credit');
+    expect(credits()).toEqual([expect.objectContaining({ amount: receiving.amount, originalEntryId: entryOf(receiving.id), reason: 'Receiving waived for the launch', idempotencyKey: `fulfillment-service:fee-reversal:${receiving.id}` })]);
     expect((await k.call('POST', A(`/fees/${receiving.id}/reverse`), { body: { reason: 'again' }, headers: key() })).status).toBe(409);
 
     // above the limit: approval first
@@ -110,6 +117,9 @@ describe('fee charges', () => {
     const req = k.approvals.at(-1)!;
     expect(req).toMatchObject({ action: 'fulfillment-service.charges.reverse', target: { type: 'fulfillment_fee_charge', id: labelling.id, sellerId: s.sellerId } });
     await k.publish('access', 'access.approval.decided', decided(req, pending.body.error.details.approvalRequestId));
+    await k.publish('access', 'access.approval.decided', decided(req, pending.body.error.details.approvalRequestId)); // twice: one reversal
+    expect(k.events('fulfillment-service.fee.reversed').filter((e) => e.chargeId === labelling.id)).toHaveLength(1);
+    expect(credits().filter((e) => e.originalEntryId === entryOf(labelling.id))).toEqual([expect.objectContaining({ amount: labelling.amount, reason: 'Approved by Finance' })]);
     const after = (await k.call('GET', A(`/fees?sellerId=${s.sellerId}&state=reversed`))).body.items;
     expect(after.map((f: any) => [f.id, f.reason])).toEqual(
       expect.arrayContaining([

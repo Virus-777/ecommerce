@@ -27,6 +27,7 @@ beforeAll(async () => {
         check: async (_p, action) => ({ decision: world.decision, action, reason: 'Always needs a second person', requiresSecondReviewer: true, approvalsNeeded: 1, eligibleApproverRoles: [], eligibleApprovers: [] }),
         requestApproval,
         approvalForTargets: async (_p, _t, ids) => new Map(ids.map((id) => [id, world.approval])),
+        getApproval: async (id) => (world.approval?.id === id ? world.approval : null),
       },
       orders: {
         countInProgress: async () => ({ inProgress: world.inProgress, delayedPackages: 0 }),
@@ -167,7 +168,7 @@ describe('account actions', () => {
     expect(ok.body).toMatchObject({ accountStatus: 'active', record: { action: 'send_password_reset' } });
   });
 
-  it('closing with open obligations needs a second reviewer; once approved the close goes through', async () => {
+  it('closing with open obligations needs a second reviewer; the account closes when the request is approved', async () => {
     const c = await kit.customer();
     world.inProgress = 1;
     const first = await act(c.customerId, { action: 'close' });
@@ -179,13 +180,43 @@ describe('account actions', () => {
     expect((await act(c.customerId, { action: 'close' })).body.error.details.approvalRequestId).toBe(world.approval!.id);
     expect(requestApproval.mock.calls.length).toBe(calls);
 
-    world.approval = { ...world.approval!, status: 'approved' };
-    const done = await act(c.customerId, { action: 'close' });
-    expect(done.status, JSON.stringify(done.body)).toBe(200);
-    expect(done.body).toMatchObject({ accountStatus: 'closed', record: { action: 'close', toStatus: 'closed' } });
-    expect(identityCalls.close).toHaveBeenCalledWith(c.accountId, expect.any(String));
-    expect(kit.of('customers.account.closed')).toContainEqual({ customerId: c.customerId, userId: c.accountId });
-    expect(audits.at(-1)).toMatchObject({ action: 'customers.account.close', approvalRequestId: world.approval!.id });
+    const requesterId = newId();
+    const decided = (requestId: string, outcome: 'approved' | 'rejected' | 'expired') => ({
+      requestId,
+      ref: 'AP-261009-0002',
+      actionKey: 'customers.accounts.close-with-obligations',
+      module: 'customers',
+      target: { type: 'customer', id: c.customerId },
+      outcome,
+      approverIds: [],
+      requestedById: requesterId,
+    });
+    // rejected: the pending closure is dropped, the account stays open
+    await kit.publish('access', 'access.approval.decided', decided(world.approval!.id, 'rejected'));
+    expect((await kit.service.getCustomer(c.customerId))!.accountStatus).toBe('active');
+    expect(identityCalls.close).not.toHaveBeenCalled();
+
+    // a new request, approved (the decision delivered twice): closed once, as the requester, with their reason
+    const approved = {
+      id: newId(),
+      status: 'approved',
+      action: { key: 'customers.accounts.close-with-obligations' },
+      reason: 'Fraud ring confirmed by the payments team',
+      details: { reasonCode: 'policy_violation', details: 'Fraud ring confirmed by the payments team' },
+      requestedBy: { kind: 'staff', id: requesterId, name: 'Sam Agent' },
+    } as unknown as access.ApprovalRequest;
+    world.approval = approved;
+    audits.length = 0;
+    await kit.publish('access', 'access.approval.decided', decided(approved.id, 'approved'));
+    await kit.publish('access', 'access.approval.decided', decided(approved.id, 'approved'));
+    expect((await kit.service.getCustomer(c.customerId))!.accountStatus).toBe('closed');
+    expect(identityCalls.close).toHaveBeenCalledTimes(1);
+    expect(identityCalls.close).toHaveBeenCalledWith(c.accountId, 'policy_violation: Fraud ring confirmed by the payments team');
+    expect(kit.of('customers.account.closed').filter((e) => e.customerId === c.customerId)).toEqual([{ customerId: c.customerId, userId: c.accountId }]);
+    const closes = audits.filter((a) => a.action === 'customers.account.close');
+    expect(closes).toEqual([expect.objectContaining({ approvalRequestId: approved.id, actor: { kind: 'staff', id: requesterId, name: 'Sam Agent' } })]);
+    const history = await kit.call('GET', `${ADMIN}/customers/${c.customerId}/actions`, { token: kit.staff() });
+    expect(history.body.items[0]).toMatchObject({ action: 'close', reasonCode: 'policy_violation', toStatus: 'closed' });
   });
 
   it('closing for suspected fraud skips the obligation check; a denied authority is FORBIDDEN', async () => {
@@ -254,7 +285,9 @@ describe('events from other modules', () => {
     // the email registers: the guest moves to the customer list
     const c = await kit.customer({ email });
     expect((await kit.call('GET', `${ADMIN}/guest-buyers?q=${encodeURIComponent(email)}`, { token: kit.staff() })).body.items).toEqual([]);
-    await kit.publish('orders', 'orders.order.placed', placed({ customerId: c.customerId, guestEmail: null, total: { amount: 4200, currency: 'USD' } }));
+    const member = placed({ customerId: c.customerId, guestEmail: null, total: { amount: 4200, currency: 'USD' } });
+    await kit.publish('orders', 'orders.order.placed', member);
+    await kit.publish('orders', 'orders.order.placed', member); // delivered twice: counted once
     const row = (await kit.call('GET', `${ADMIN}/customers?q=${encodeURIComponent(email)}`, { token: kit.staff() })).body.items[0];
     expect(row).toMatchObject({ orderCount: 1, totalSpend: { amount: 4200, currency: 'USD' } });
   });

@@ -195,13 +195,13 @@ describe('bulk edits, exports, snapshots and seller counts', () => {
     await expect(t.catalog.exportRows('other.dataset', {}, { kind: 'staff' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
   });
 
-  it('snapshotForOrder freezes title, brand, options and version; countProductsForSellers counts by state', async () => {
+  it('snapshotForOrder freezes title, category, brand, options and version; countProductsForSellers counts by state', async () => {
     const sellerId = newId();
     const { id } = await sellerProduct(t, sellerId, { brandId: brandRow.id, categoryId: cat.id, approve: true });
     await a.seller(sellerId, 'POST', '/products', { title: 'A draft' });
     const p = (await t.catalog.getProduct(id))!;
     const snap = await t.catalog.snapshotForOrder(p.variants[0]!.id);
-    expect(snap).toMatchObject({ productId: id, variantId: p.variants[0]!.id, title: p.title, brandName: 'Kestrel Keys', options: { Color: 'Black' }, imageUrl: expect.any(String) });
+    expect(snap).toMatchObject({ productId: id, variantId: p.variants[0]!.id, categoryId: cat.id, title: p.title, brandName: 'Kestrel Keys', options: { Color: 'Black' }, imageUrl: expect.any(String) });
     await expect(t.catalog.snapshotForOrder(newId())).rejects.toMatchObject({ code: 'NOT_FOUND' });
     t.stubs.sellers.canSell.mockResolvedValueOnce({ allowed: false, reason: 'Product submissions blocked in Keyboards until Oct 30' });
     expect((await t.catalog.countProductsForSellers([sellerId]))[sellerId]).toEqual({

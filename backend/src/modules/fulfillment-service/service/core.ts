@@ -251,6 +251,7 @@ export class Core {
       currency: rate.currency,
       state: 'accrued',
       posted_at: null,
+      ledger_entry_id: null,
       reason: null,
       idempotency_key: a.key,
     };

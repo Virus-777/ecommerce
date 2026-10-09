@@ -15,6 +15,44 @@ import { auth, buildTestApp, callers, movingClock, tokenClock } from '../../../t
 
 export type Decision = 'allowed' | 'approval_required' | 'denied';
 
+export interface FinanceEntry {
+  id: string;
+  type: 'service_fee' | 'charge_credit';
+  sellerId: string;
+  amount: { amount: number; currency: string };
+  idempotencyKey: string;
+  kind?: string;
+  reference?: { kind: string; id: string; ref?: string | null };
+  description?: string;
+  originalEntryId?: string;
+  reason?: string;
+}
+
+/** finance.recordServiceFee / creditSellerCharge as src/spec/finance.ts describes them, over an in-memory ledger */
+export function financeStubs(ledger: FinanceEntry[]) {
+  const entry = (e: FinanceEntry) => ({ id: e.id, at: new Date().toISOString(), type: e.type, typeLabel: e.type, reference: e.reference ?? { kind: 'seller', id: e.sellerId }, description: e.description ?? e.reason ?? '', amount: e.type === 'service_fee' ? { ...e.amount, amount: -e.amount.amount } : e.amount }) as any;
+  return {
+    recordServiceFee: async (input: { sellerId: string; amount: { amount: number; currency: string }; kind: string; reference: { kind: string; id: string; ref?: string | null }; description: string; idempotencyKey: string }) => {
+      const first = ledger.find((e) => e.idempotencyKey === input.idempotencyKey);
+      if (first) return entry(first);
+      const e: FinanceEntry = { id: newId(), type: 'service_fee', ...input };
+      ledger.push(e);
+      return entry(e);
+    },
+    creditSellerCharge: async (input: { sellerId: string; amount: { amount: number; currency: string }; originalEntryId: string; reason: string; idempotencyKey: string }) => {
+      const first = ledger.find((e) => e.idempotencyKey === input.idempotencyKey);
+      if (first) return entry(first);
+      const original = ledger.find((e) => e.id === input.originalEntryId && e.type === 'service_fee' && e.sellerId === input.sellerId);
+      if (!original) throw new AppError('NOT_FOUND', 'Ledger entry not found');
+      const credited = ledger.filter((e) => e.originalEntryId === original.id).reduce((n, e) => n + e.amount.amount, 0);
+      if (credited + input.amount.amount > original.amount.amount) throw new AppError('VALIDATION_FAILED', 'More than the charge minus earlier credits', { issues: [{ path: 'amount', message: 'More than the charge minus earlier credits' }] });
+      const e: FinanceEntry = { id: newId(), type: 'charge_credit', ...input };
+      ledger.push(e);
+      return entry(e);
+    },
+  };
+}
+
 export interface SellerKit {
   sellerId: string;
   token: string;
@@ -40,6 +78,12 @@ export interface Kit {
   returns: Map<string, { ref: string; sellerId: string; items: Map<string, number> }>;
   /** orders.getFulfillmentTask answers per seller group (others: NOT_FOUND) */
   tasks: Map<string, { orderRef: string; dueAt: string; lines: { orderItemId: string; offerId: string; stockItemId: string; quantity: number }[] }>;
+  /**
+   * Seller ledger entries made through finance.recordServiceFee and creditSellerCharge, stubbed per
+   * src/spec/finance.ts (same idempotencyKey → the first entry; a credit never more than the original minus
+   * earlier credits) while finance builds them
+   */
+  financeLedger: FinanceEntry[];
   /** Enrolled, approved seller with one approved SKU */
   enrolledSeller(o?: { capacity?: { maxCubicFeet: number; maxSkus: number } }): Promise<SellerKit & { skuId: string; offerId: string; stockItemId: string; sku: string }>;
 }
@@ -68,11 +112,13 @@ export async function boot(): Promise<Kit> {
   const approvals: access.RequestApprovalInput[] = [];
   const returns = new Map<string, { ref: string; sellerId: string; items: Map<string, number> }>();
   const tasks: Kit['tasks'] = new Map();
+  const financeLedger: FinanceEntry[] = [];
   const app = await buildTestApp({
     modules: withDependencies(['fulfillment-service', 'media', 'returns']),
     clock,
     config: { rateLimits: false, launchPhase: 4 },
     apiStubs: {
+      finance: financeStubs(financeLedger),
       access: {
         check: async (_p: unknown, action: string) => ({ decision: authority.get(action) ?? 'allowed', action, reason: authority.get(action) === 'approval_required' ? 'Above your limit' : '', requiresSecondReviewer: false, approvalsNeeded: 0, eligibleApproverRoles: [], eligibleApprovers: [] }) as any,
         requestApproval: async (input: access.RequestApprovalInput) => {
@@ -142,6 +188,7 @@ export async function boot(): Promise<Kit> {
     approvals,
     returns,
     tasks,
+    financeLedger,
     async enrolledSeller(o = {}) {
       const s = await seller();
       const schedule = await call('GET', S('/fee-schedule'), { token: s.token });

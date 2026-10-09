@@ -1,4 +1,5 @@
 import { sql, type Kysely } from 'kysely';
+import type { Inbox } from '../../../../kernel/events/inbox.js';
 import { paginate } from '../../../../kernel/lib/pagination.js';
 import type { AdvertisingDb } from '../../../../spec/advertising.js';
 import type { AdvertisingRepository, CampaignListFilter, CreativeListFilter, StatTotals } from '../../ports.js';
@@ -39,7 +40,7 @@ const uniq = <T>(xs: readonly T[]) => [...new Set(xs)];
 const none = sql<boolean>`false`;
 
 /** Postgres adapter for AdvertisingRepository. `db` is scoped to the `advertising` schema. */
-export function createPostgresAdvertisingRepository(db: Kysely<AdvertisingDb>): AdvertisingRepository {
+export function createPostgresAdvertisingRepository(db: Kysely<AdvertisingDb>, inbox: Inbox): AdvertisingRepository {
   // generic table access: the row types are checked at the AdvertisingRepository boundary
   const d: any = db;
 
@@ -70,7 +71,10 @@ export function createPostgresAdvertisingRepository(db: Kysely<AdvertisingDb>): 
   const repo: AdvertisingRepository = {
     async transaction(fn) {
       if (db.isTransaction) return fn(repo);
-      return db.transaction().execute((trx) => fn(createPostgresAdvertisingRepository(trx)));
+      return db.transaction().execute((trx) => fn(createPostgresAdvertisingRepository(trx, inbox)));
+    },
+    claim(key) {
+      return inbox.claim(db, key);
     },
 
     /* ---------------------------------------------------------------- generic */
@@ -237,7 +241,7 @@ export function createPostgresAdvertisingRepository(db: Kysely<AdvertisingDb>): 
 
     /* ---------------------------------------------------------------- spend */
     async chargeClick(eventId, campaignId, day) {
-      if (!db.isTransaction) return db.transaction().execute((trx) => createPostgresAdvertisingRepository(trx).chargeClick(eventId, campaignId, day));
+      if (!db.isTransaction) return db.transaction().execute((trx) => createPostgresAdvertisingRepository(trx, inbox).chargeClick(eventId, campaignId, day));
       // total limit first (campaign row), then the day (daily_stats row): one lock order, no deadlocks
       const total = await sql<{ spent: number; rate: number; total_limit: number | null; daily_limit: number | null }>`
         update advertising.campaigns set spent = spent + coalesce(rate, 0)

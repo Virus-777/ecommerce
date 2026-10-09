@@ -133,7 +133,7 @@ describe('service returns', () => {
     await k.publish('shipping', 'shipping.shipment.dispatched', dispatched(orderId, groupId, s.sellerId, [{ orderItemId: a, quantity: 1 }, { orderItemId: b, quantity: 2 }]));
     const returnId = newId();
     k.returns.set(returnId, { ref: 'RT-261010-0001', sellerId: s.sellerId, items: new Map([[b, 2]]) });
-    const received = { returnId, ownerType: 'seller', sellerId: s.sellerId, receivedAt: new Date().toISOString() };
+    const received = { returnId, ownerType: 'seller', sellerId: s.sellerId, items: [{ orderItemId: b, quantity: 2, variantId: newId() }], receivedAt: new Date().toISOString() };
     await k.publish('returns', 'returns.return.received', received);
     await k.publish('returns', 'returns.return.received', received);
     const list = await k.call('GET', S('/returns'), { token: s.token });
@@ -144,7 +144,7 @@ describe('service returns', () => {
     expect((await k.call('GET', S('/fees?type=returns_processing'), { token: s.token })).body.items.map((f: any) => [f.units, f.amount.amount, f.reference])).toEqual([[2, 500, 'RT-261010-0001']]);
     // another seller's view and an Official Store return are ignored
     expect((await k.call('GET', S('/returns'), { token: (await k.seller()).token })).body.items).toHaveLength(0);
-    await k.publish('returns', 'returns.return.received', { returnId: newId(), ownerType: 'official', sellerId: null, receivedAt: new Date().toISOString() });
+    await k.publish('returns', 'returns.return.received', { returnId: newId(), ownerType: 'official', sellerId: null, items: [], receivedAt: new Date().toISOString() });
 
     const before = (await k.inventory.getAvailability([s.stockItemId]))[s.stockItemId]!.available;
     expect((await k.call('POST', A(`/returns/${ret.id}/outcome`), { body: { outcome: 'restocked', note: '' } })).status).toBe(400);

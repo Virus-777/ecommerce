@@ -17,8 +17,10 @@ import type { InventoryPublicApi } from '../../../spec/inventory.js';
 import type { OrderCreateInput, OrdersPublicApi } from '../../../spec/orders.js';
 import { auth, buildTestApp, callers, movingClock } from '../../../testing/app.js';
 import { flows, type Flows, type Listing } from '../../../testing/flows.js';
+import { financeStubs, type FinanceEntry } from './helpers.js';
 
 const clock = movingClock();
+const financeLedger: FinanceEntry[] = [];
 let app: FastifyInstance;
 let f: Flows;
 let listing: Listing;
@@ -31,6 +33,8 @@ beforeAll(async () => {
     only: withDependencies(['identity', 'access', 'audit', 'media', 'notifications', 'settings', 'customers', 'sellers', 'catalog', 'inventory', 'offers', 'orders', 'finance', 'warehouse', 'fulfillment-service']),
     clock,
     config: { rateLimits: false, launchPhase: 4 },
+    // finance.recordServiceFee / creditSellerCharge are being built in finance: stubbed per src/spec/finance.ts
+    apiStubs: { finance: financeStubs(financeLedger) as never },
   });
   f = flows(app, clock);
   listing = await f.liveListing({ quantity: 2 });
@@ -151,11 +155,10 @@ describe('a seller stores and ships with Marketly (real modules)', () => {
       ['receiving', 'posted'],
     ]);
     const total = fees.body.items.reduce((n: number, x: any) => n + x.amount.amount, 0);
-    const ledger = await call('GET', '/api/seller/finance/ledger', { token: seller });
-    expect(ledger.status, JSON.stringify(ledger.body)).toBe(200);
-    const lines = ledger.body.items.filter((e: any) => e.description.startsWith('Fulfillment service'));
+    const lines = financeLedger.filter((e) => e.type === 'service_fee' && e.sellerId === listing.sellerId);
     expect(lines).toHaveLength(4);
-    expect(lines.reduce((n: number, e: any) => n + e.amount.amount, 0)).toBe(-total);
+    expect(lines.every((e) => e.description?.startsWith('Fulfillment service') && e.reference?.kind === 'fulfillment_service')).toBe(true);
+    expect(lines.reduce((n, e) => n + e.amount.amount, 0)).toBe(total);
     const movements = await call('GET', S(`/skus/${sku.body.id}/movements`), { token: seller });
     expect(movements.body.items.map((m: any) => m.movement)).toEqual(['shipped', 'reserved', 'received', 'arrived', 'inbound_expected']);
     // reconciled with inventory (the order's reservation is in both)

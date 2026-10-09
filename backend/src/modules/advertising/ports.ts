@@ -76,6 +76,8 @@ export type ClickCharge = { charged: true; amount: number; exhausted: 'daily' | 
 
 export interface AdvertisingRepository {
   transaction<R>(fn: (tx: AdvertisingRepository) => Promise<R>): Promise<R>;
+  /** Inbox (ctx.inbox): true the first time this key is claimed; commits with the transaction it runs in */
+  claim(key: string): Promise<boolean>;
 
   /* generic table access */
   get<T extends IdTable>(table: T, id: string, o?: { forUpdate?: boolean }): Promise<Db[T] | undefined>;

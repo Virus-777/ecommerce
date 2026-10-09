@@ -180,19 +180,27 @@ export class CatalogReview extends CatalogProducts {
 
   /**
    * Active / hidden / suspended with a reason. Reactivating a product suspended after a trust report needs a
-   * second reviewer (approval action catalog.products.publication-override): the first call asks for approval
-   * (APPROVAL_REQUIRED with details.approvalRequestId); once approved, the same call goes through.
+   * second reviewer (approval action catalog.products.publication-override): the call asks for approval
+   * (APPROVAL_REQUIRED with details.approvalRequestId) and the product is reactivated when the request is
+   * approved (onApprovalDecidedFromAccess).
+   * `opts.claim`: inbox key of the event being handled, claimed with the change (a second delivery changes nothing).
    */
-  protected async changePublication(id: string, input: { to: Publication; reason: string; trustReportId: string | null }, by: By, opts: { system?: boolean } = {}): Promise<ProductRow> {
+  protected async changePublication(
+    id: string,
+    input: { to: Publication; reason: string; trustReportId: string | null },
+    by: By,
+    opts: { system?: boolean; claim?: string; approvalRequestId?: string; approvalNote?: string } = {},
+  ): Promise<ProductRow> {
     const before = await this.product(id);
     publicationMachine.next(before.publication as Publication, PUBLICATION_EVENT[input.to]);
-    let approvalRequestId: string | null = null;
-    let approvalNote: string | null = null;
+    let approvalRequestId: string | null = opts.approvalRequestId ?? null;
+    let approvalNote: string | null = opts.approvalNote ?? null;
     const report = input.to === 'active' ? await this.suspensionReport(before) : null;
     if (report && !opts.system) ({ approvalRequestId, approvalNote } = await this.overrideApproval(before, report, input.reason, by));
 
     const now = this.now();
     const after = await this.repo.transaction(async (tx) => {
+      if (opts.claim && !(await tx.claim(opts.claim))) return null; // already handled
       const locked = await tx.getProduct(id, { forUpdate: true });
       if (!locked) throw notFound();
       const to = publicationMachine.next(locked.publication as Publication, PUBLICATION_EVENT[input.to]);
@@ -203,6 +211,7 @@ export class CatalogReview extends CatalogProducts {
       await tx.insertLog({ id: newId(), product_id: id, action: 'publication_changed', reason: input.reason, fields: fields as never, actor_kind: by.actor.kind, actor_id: by.actor.id ?? null, at: now });
       return row;
     });
+    if (!after) return before;
     this.ctx.events.publish(
       'catalog.product.publication_changed',
       { productId: id, from: before.publication, to: after.publication, reason: input.reason, trustReportId: input.trustReportId },
@@ -232,10 +241,8 @@ export class CatalogReview extends CatalogProducts {
     const check = await access.check(by.principal, OVERRIDE_ACTION);
     if (check.decision === 'denied') throw new AppError('FORBIDDEN', check.reason || 'You cannot reactivate this product', { action: OVERRIDE_ACTION });
     if (check.decision === 'allowed') return { approvalRequestId: null, approvalNote: check.reason || null };
+    // an open request for this product is reused; the product is reactivated when it is approved
     const current = (await access.approvalForTargets(by.principal, 'product', [p.id])).get(p.id);
-    if (current && current.status === 'approved' && current.decidedAt && new Date(current.decidedAt) >= report.at) {
-      return { approvalRequestId: current.id, approvalNote: 'Second reviewer approved the reactivation' };
-    }
     const request =
       current && ['pending', 'partially_approved'].includes(current.status)
         ? current
@@ -247,7 +254,7 @@ export class CatalogReview extends CatalogProducts {
             reason,
             requestedBy: by.principal,
           });
-    throw new AppError('APPROVAL_REQUIRED', 'Reactivating a product suspended after a trust report needs a second reviewer. Send it again once approved.', {
+    throw new AppError('APPROVAL_REQUIRED', 'Reactivating a product suspended after a trust report needs a second reviewer. It is reactivated once approved.', {
       approvalRequestId: request.id,
       action: OVERRIDE_ACTION,
     });

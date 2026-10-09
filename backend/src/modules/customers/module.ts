@@ -24,7 +24,7 @@ export default defineModule({
   register(ctx) {
     // Address validation provider: the deterministic dev adapter in development and tests; none is wired for production yet (format rules only)
     const addressProvider = ctx.config.devTokens ? devAddressProvider : undefined;
-    const service = new CustomersService({ repo: createPostgresCustomersRepository(ctx.db), ctx, addressProvider });
+    const service = new CustomersService({ repo: createPostgresCustomersRepository(ctx.db, ctx.inbox), ctx, addressProvider });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), adminRoutes(service), publicRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
@@ -32,7 +32,8 @@ export default defineModule({
     ctx.afterBoot(() => service.registerDataset());
 
     // Events this module reacts to (spec events.consumes)
-    ctx.events.on("orders.order.placed", (e) => service.onOrderPlacedFromOrders(e.payload));
+    ctx.events.on("access.approval.decided", (e) => service.onApprovalDecidedFromAccess(e.payload, e.id));
+    ctx.events.on("orders.order.placed", (e) => service.onOrderPlacedFromOrders(e.payload, e.id));
     ctx.events.on("identity.user.registered", (e) => service.onUserRegisteredFromIdentity(e.payload));
     ctx.events.on("identity.user.verified", (e) => service.onUserVerifiedFromIdentity(e.payload));
     ctx.events.on("identity.guest_session.claimed", (e) => service.onGuestSessionClaimedFromIdentity(e.payload));

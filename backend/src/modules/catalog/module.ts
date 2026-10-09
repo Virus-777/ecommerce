@@ -21,12 +21,13 @@ export default defineModule({
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const service = new CatalogService({ repo: createPostgresCatalogRepository(ctx.db), ctx });
+    const service = new CatalogService({ repo: createPostgresCatalogRepository(ctx.db, ctx.inbox), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
 
     // Events this module reacts to (spec events.consumes)
+    ctx.events.on("access.approval.decided", (e) => service.onApprovalDecidedFromAccess(e.payload, e.id));
     ctx.events.on("sellers.seller.restricted", (e) => service.onSellerRestrictedFromSellers(e.payload));
     ctx.events.on("sellers.seller.suspended", (e) => service.onSellerSuspendedFromSellers(e.payload));
     ctx.events.on("sellers.seller.reinstated", (e) => service.onSellerReinstatedFromSellers(e.payload));

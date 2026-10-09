@@ -134,8 +134,8 @@ export class AdvertisingService implements AdvertisingPublicApi {
     return this.ops.onPagePublished(event);
   }
 
-  onApprovalDecidedFromAccess(event: EventPayload<'access.approval.decided'>) {
-    return this.ops.onApprovalDecided(event);
+  onApprovalDecidedFromAccess(event: EventPayload<'access.approval.decided'>, eventId?: string) {
+    return this.ops.onApprovalDecided(event, eventId);
   }
 
   onProductMergedFromCatalog(event: EventPayload<'catalog.product.merged'>) {

@@ -1,4 +1,5 @@
 import { sql, type Kysely } from 'kysely';
+import type { Inbox } from '../../../../kernel/events/inbox.js';
 import { paginate } from '../../../../kernel/lib/pagination.js';
 import type { FulfillmentServiceDb } from '../../../../spec/fulfillment-service.js';
 import type { Balances, FulfillmentServiceRepository, LedgerRec, StockGroup, Table } from '../../ports.js';
@@ -51,14 +52,17 @@ function applyWhere(q: any, where: Record<string, unknown>): any {
 const like = (s: string) => `%${s.trim().toLowerCase().replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 
 /** Postgres adapter for FulfillmentServiceRepository. `db` is scoped to the `fulfillment_service` schema. */
-export function createPostgresFulfillmentServiceRepository(db: Kysely<FulfillmentServiceDb>): FulfillmentServiceRepository {
+export function createPostgresFulfillmentServiceRepository(db: Kysely<FulfillmentServiceDb>, inbox: Inbox): FulfillmentServiceRepository {
   // generic table access: the row types are checked at the FulfillmentServiceRepository boundary
   const d: any = db;
 
   const repo: FulfillmentServiceRepository = {
     async transaction(fn) {
       if (db.isTransaction) return fn(repo);
-      return db.transaction().execute((trx) => fn(createPostgresFulfillmentServiceRepository(trx)));
+      return db.transaction().execute((trx) => fn(createPostgresFulfillmentServiceRepository(trx, inbox)));
+    },
+    claim(key) {
+      return inbox.claim(db, key);
     },
 
     async get(table, id, o) {

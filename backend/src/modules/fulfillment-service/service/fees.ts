@@ -3,8 +3,8 @@
  * storage and long-term storage from the daily snapshots, posting of accrued charges to the seller ledger
  * through finance (fee.charged), the seller's own fee list, and reversals within the caller's limit.
  *
- * Finance has no public function for fulfillment-service charges yet; posting goes through recordAdCharge,
- * the one seller-charge entry point (see FINANCE_POSTING below and the module's spec gaps).
+ * Fees post as service_fee (finance.recordServiceFee); reversals of posted fees and reimbursements are credits
+ * against a posted fee's ledger entry (finance.creditSellerCharge), kept on the charge as ledger_entry_id.
  */
 import { AppError } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
@@ -73,12 +73,18 @@ export class FeesPart extends Part {
   }
 
   /** Approved: scheduled for its date, and every enrolled seller is told */
-  private async publishSchedule(id: string, by: By) {
+  private async publishSchedule(id: string, by: By, claim?: string) {
+    let handled = false;
     const row = await this.repo.transaction(async (tx) => {
+      if (claim && !(await tx.claim(claim))) {
+        handled = true; // the decision was already applied
+        return null;
+      }
       const s = await tx.get('fee_schedules', id, { forUpdate: true });
       if (!s || s.state !== 'draft') return s ?? null;
       return tx.update('fee_schedules', id, { state: 'scheduled' });
     });
+    if (handled) return (await this.repo.get('fee_schedules', id))!;
     if (!row) throw notFound('Fee schedule');
     await this.core.syncSchedules();
     const sellers = await this.repo.find('enrollments', { state: ['approved', 'active', 'suspended', 'offboarding'] }, { limit: 50_000 });
@@ -96,11 +102,12 @@ export class FeesPart extends Part {
     return (await this.repo.get('fee_schedules', id))!;
   }
 
+  /** access.approval.decided for fulfillment-service.fees.change (claimed once per request) */
   async onScheduleDecided(e: EventPayload<'access.approval.decided'>): Promise<void> {
     if (!isUuid(e.target.id)) return;
     const row = await this.repo.get('fee_schedules', e.target.id);
     if (!row || row.state !== 'draft') return;
-    if (e.outcome === 'approved') await this.publishSchedule(row.id, { actor: e.decidedBy ?? SYSTEM });
+    if (e.outcome === 'approved') await this.publishSchedule(row.id, { actor: e.decidedBy ?? SYSTEM }, `approval-decided:${e.requestId}`);
     else this.ctx.log.info({ scheduleId: row.id, outcome: e.outcome }, 'fulfillment-service: fee schedule not approved');
   }
 
@@ -139,6 +146,7 @@ export class FeesPart extends Part {
     const row = isUuid(id) ? await this.repo.get('fee_charges', id) : undefined;
     if (!row) throw notFound('Fee charge');
     serviceFeeChargeMachine.next(row.state as FeeCharge['state'], 'reverse');
+    if (row.state === 'posted') this.creditable(row);
     const access = this.ctx.tryUse('access');
     if (access) {
       const principal = this.core.principalOf(by);
@@ -158,58 +166,123 @@ export class FeesPart extends Part {
         throw new AppError('APPROVAL_REQUIRED', `${check.reason || 'Above your adjustment limit'}; sent for approval.`, { approvalRequestId: req.id, approval: { required: true, approvalRequestId: req.id, approvers: (check.eligibleApproverRoles ?? []).map((r) => r.name) } });
       }
     }
-    return this.parts.views.charge(await this.applyReversal(row.id, text, by));
+    return this.parts.views.charge((await this.applyReversal(row.id, text, by))!);
   }
 
-  private async applyReversal(id: string, reason: string, by: By): Promise<ChargeRec> {
-    const { after, changed } = await this.repo.transaction(async (tx) => {
+  /**
+   * A posted fee is reversed by crediting its ledger entry (finance.creditSellerCharge). A posted reimbursement was
+   * itself a credit to the seller: taking it back is a finance adjustment, not a reversal here.
+   */
+  private creditable(row: ChargeRec): string {
+    if (row.amount < 0) throw new AppError('ILLEGAL_TRANSITION', 'This reimbursement is already paid to the seller; take it back with a finance adjustment.', { from: row.state, event: 'reverse', chargeId: row.id });
+    if (!row.ledger_entry_id) throw new AppError('ILLEGAL_TRANSITION', 'This fee was posted without its ledger entry; credit the seller with a finance adjustment instead.', { from: row.state, event: 'reverse', chargeId: row.id });
+    return row.ledger_entry_id;
+  }
+
+  /**
+   * accrued → reversed (never reached the ledger), or posted → reversed after crediting the seller ledger for the
+   * whole fee (idempotent per charge). `claim`: inbox key of the event being handled; null when already handled.
+   */
+  private async applyReversal(id: string, reason: string, by: By, claim?: string): Promise<ChargeRec | null> {
+    const pre = (await this.repo.get('fee_charges', id))!;
+    if (pre.state === 'posted') {
+      await this.ctx.use('finance').creditSellerCharge({
+        sellerId: pre.seller_id,
+        amount: this.core.money(pre.amount, pre.currency),
+        originalEntryId: this.creditable(pre),
+        reason,
+        idempotencyKey: `fulfillment-service:fee-reversal:${id}`,
+      });
+    }
+    const res = await this.repo.transaction(async (tx) => {
+      if (claim && !(await tx.claim(claim))) return null; // already handled
       const before = (await tx.get('fee_charges', id, { forUpdate: true }))!;
       if (before.state === 'reversed') return { after: before, changed: false };
+      // posted by the job since we looked: the ledger has not been credited yet
+      if (before.state !== pre.state) throw new AppError('CONFLICT', 'The fee was posted meanwhile; reverse it again.');
       const state = serviceFeeChargeMachine.next(before.state as FeeCharge['state'], 'reverse');
       return { after: await tx.update('fee_charges', id, { state, reason }), changed: true };
     });
+    if (!res) return null;
+    const { after, changed } = res;
     if (changed) this.core.publish('fulfillment-service.fee.reversed', { chargeId: id, sellerId: after.seller_id, amount: this.core.money(after.amount, after.currency), reason }, by);
     return after;
   }
 
-  async onReverseDecided(e: EventPayload<'access.approval.decided'>): Promise<void> {
+  /** access.approval.decided for fulfillment-service.charges.reverse (claimed once per request) */
+  async onReverseDecided(e: EventPayload<'access.approval.decided'>, eventId?: string): Promise<void> {
     if (e.outcome !== 'approved' || !isUuid(e.target.id)) return;
     const row = await this.repo.get('fee_charges', e.target.id);
     if (!row || row.state === 'reversed') return;
+    if (row.state === 'posted' && (row.amount < 0 || !row.ledger_entry_id)) {
+      this.ctx.log.warn({ chargeId: row.id, approvalRequestId: e.requestId, eventId }, 'fulfillment-service: approved reversal cannot be credited through finance; needs a finance adjustment');
+      return;
+    }
     let reason = e.reason ?? null;
     try {
       reason = (await this.ctx.tryUse('access')?.getApproval(e.requestId))?.reason ?? reason;
     } catch {
       /* keep the decision note */
     }
-    await this.applyReversal(row.id, reason || 'Approved reversal', { actor: e.decidedBy ?? SYSTEM });
+    await this.applyReversal(row.id, reason || 'Approved reversal', { actor: e.decidedBy ?? SYSTEM }, `approval-decided:${e.requestId}`);
   }
 
   /* ---------------------------------------------------------------- posting to finance */
 
   /**
-   * Job fulfillment-service.post-fees: accrued charges go to the seller ledger (idempotent per charge) and
-   * fee.charged is published. Credits (reimbursements) wait: finance has no public function to credit a seller.
+   * The posted fee a reimbursement is credited against (finance.creditSellerCharge needs an original entry): the
+   * largest posted fee charged for the same reference (the inbound shipment). Finance refuses more than that fee
+   * minus earlier credits.
+   */
+  private async reimbursementOriginal(c: ChargeRec): Promise<string | null> {
+    if (!c.reference) return null;
+    const fees = await this.repo.find('fee_charges', { seller_id: c.seller_id, reference: c.reference, state: 'posted', amount: { op: '>', value: 0 } }, { orderBy: [['amount', 'desc']] });
+    return fees.find((f) => f.ledger_entry_id)?.ledger_entry_id ?? null;
+  }
+
+  /**
+   * Job fulfillment-service.post-fees: accrued fees go to the seller ledger as service_fee
+   * (finance.recordServiceFee), accrued reimbursements as a credit (finance.creditSellerCharge against the fee
+   * charged for the same inbound); both idempotent per charge. The entry is kept on the charge
+   * (ledger_entry_id) and fee.charged is published.
    */
   async postAll(): Promise<{ posted: number }> {
     const finance = this.ctx.use('finance');
-    const due = await this.repo.find('fee_charges', { state: 'accrued', amount: { op: '>', value: 0 } }, { orderBy: [['id', 'asc']], limit: 2000 });
+    // fees first: a reimbursement is credited against a fee posted for the same inbound
+    const due = (await this.repo.find('fee_charges', { state: 'accrued' }, { orderBy: [['id', 'asc']], limit: 2000 })).filter((c) => c.amount !== 0).sort((a, b) => Number(b.amount > 0) - Number(a.amount > 0));
     let posted = 0;
     for (const c of due) {
       try {
-        // FINANCE_POSTING: recordAdCharge is the only seller-charge entry point of finance's public API; keyed per charge id
-        await finance.recordAdCharge({
-          sellerId: c.seller_id,
-          campaignId: c.id,
-          campaignRef: c.reference ?? `FS-${c.period ?? ''}`,
-          period: periodRange(c.period ?? this.core.month()),
-          amount: this.core.money(c.amount, c.currency),
-          description: `Fulfillment service: ${CHARGE_LABEL[c.type] ?? c.type} · ${Number(c.units)} × ${fmt(c.rate, c.currency)}${c.reference ? ` · ${c.reference}` : ''}`,
-        });
+        let entryId: string;
+        if (c.amount > 0) {
+          const entry = await finance.recordServiceFee({
+            sellerId: c.seller_id,
+            amount: this.core.money(c.amount, c.currency),
+            kind: c.type,
+            reference: { kind: 'fulfillment_service', id: c.id, ref: c.reference ?? `FS-${c.period ?? ''}` },
+            description: `Fulfillment service: ${CHARGE_LABEL[c.type] ?? c.type} · ${Number(c.units)} × ${fmt(c.rate, c.currency)}${c.reference ? ` · ${c.reference}` : ''}`,
+            idempotencyKey: `fulfillment-service:fee:${c.id}`,
+          });
+          entryId = entry.id;
+        } else {
+          const originalEntryId = await this.reimbursementOriginal(c);
+          if (!originalEntryId) {
+            this.ctx.log.warn({ chargeId: c.id, reference: c.reference }, 'fulfillment-service: reimbursement waits: no posted fee for its inbound to credit against');
+            continue;
+          }
+          const entry = await finance.creditSellerCharge({
+            sellerId: c.seller_id,
+            amount: this.core.money(-c.amount, c.currency),
+            originalEntryId,
+            reason: c.reason ?? `Reimbursement${c.reference ? ` for ${c.reference}` : ''}`,
+            idempotencyKey: `fulfillment-service:reimbursement:${c.id}`,
+          });
+          entryId = entry.id;
+        }
         const done = await this.repo.transaction(async (tx) => {
           const locked = await tx.get('fee_charges', c.id, { forUpdate: true });
           if (!locked || locked.state !== 'accrued') return null;
-          return tx.update('fee_charges', c.id, { state: serviceFeeChargeMachine.next('accrued', 'post'), posted_at: this.now() });
+          return tx.update('fee_charges', c.id, { state: serviceFeeChargeMachine.next('accrued', 'post'), posted_at: this.now(), ledger_entry_id: entryId });
         });
         if (done) {
           posted += 1;
@@ -261,11 +334,6 @@ export class FeesPart extends Part {
     }
     return { charges };
   }
-}
-
-function periodRange(month: string): { from: string; to: string } {
-  const from = `${month}-01`;
-  return { from, to: addDays(from, daysInMonth(month) - 1) };
 }
 
 /** Months from..to inclusive (YYYY-MM), at most five years */

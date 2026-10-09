@@ -91,10 +91,24 @@ describe('recommendations', () => {
     expect(held.body.error.code).toBe('APPROVAL_REQUIRED');
     const requestId = held.body.error.details.approvalRequestId;
     expect(kit.callsOf('access.requestApproval').at(-1)?.[0]).toMatchObject({ action: 'sellers.sellers.restrict', target: { type: 'trust_recommendation', id: rec.id, sellerId } });
-    kit.approvalStatus.set(requestId, 'approved');
-    const ok = await kit.call('POST', `${ADMIN}/recommendations/${rec.id}/decide`, sellerManager(sm), { accept: true, reason: 'Counterfeit units sold' });
-    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
     kit.authority.delete('sellers.sellers.restrict');
+    expect((await kit.call('GET', `${ADMIN}/reports/${r.id}`, staff())).body.recommendations.find((x: any) => x.id === rec.id)).toMatchObject({ state: 'sent_to_owner' });
+
+    // approved: trust accepts it as the requester (the decision delivered twice records one enforcement)
+    const decided = { requestId, ref: 'AP-1', actionKey: 'sellers.sellers.restrict', module: 'sellers', target: { type: 'trust_recommendation', id: rec.id, sellerId }, outcome: 'approved', approverIds: [], requestedById: sm };
+    await kit.emit('access', 'access.approval.decided', decided);
+    await kit.emit('access', 'access.approval.decided', decided);
+    const recordedEvents = kit.events.filter((x) => x.name === 'trust.enforcement.recorded' && (x.payload as any).reportId === r.id);
+    expect(recordedEvents).toHaveLength(1);
+    // authority already granted: sellers must not ask again, so the actor is Trust and Risk with the request
+    expect(recordedEvents[0]!.actor).toEqual({ kind: 'system', id: null, name: `Trust and Risk (approval ${requestId})` });
+    const enforcementId = (recordedEvents[0]!.payload as any).enforcementId as string;
+    const decidedRec = (await kit.call('GET', `${ADMIN}/reports/${r.id}`, staff())).body.recommendations.find((x: any) => x.id === rec.id);
+    expect(decidedRec).toMatchObject({ state: 'completed', enforcementId, decidedBy: { staffId: sm }, decisionReason: 'Counterfeit units sold' });
+    expect(kit.audits.filter((a) => a.action === 'trust.recommendation.accept' && a.target?.id === rec.id)).toEqual([
+      expect.objectContaining({ approvalRequestId: requestId, actor: { kind: 'staff', id: sm } }),
+    ]);
+    const ok = { body: { enforcement: { id: enforcementId } } };
     const p = kit.last('trust.enforcement.recorded');
     expect(p.params).toMatchObject({ title: 'Selling restricted after a Trust and Risk review', reasonCode: 'policy_violation', reason: 'Counterfeit units sold', affectedActivities: ['new_offers'], toResolve: expect.any(String), appealDays: 14, reviewDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) });
     expect(p.appealDeadline).toEqual(expect.any(String));
@@ -195,15 +209,27 @@ describe('recommendations', () => {
     kit.authority.set('trust.enforcements.reverse', { decision: 'denied' });
     expect((await kit.call('POST', `${ADMIN}/enforcements/${id}/reverse`, staff(), { reason: 'Error' })).status).toBe(403);
     kit.authority.set('trust.enforcements.reverse', { decision: 'approval_required' });
-    const held = await kit.call('POST', `${ADMIN}/enforcements/${id}/reverse`, staff(), { reason: 'Reviews were genuine' });
+    const reverser = newId();
+    const decided = (requestId: string, outcome: string) => ({ requestId, ref: 'AP-1', actionKey: 'trust.enforcements.reverse', module: 'trust', target: { type: 'trust_enforcement', id }, outcome, decidedBy: { kind: 'staff', id: newId(), name: 'Owner' }, reason: outcome === 'rejected' ? 'Not convinced' : null, approverIds: [], requestedById: reverser });
+    const rejected = await kit.call('POST', `${ADMIN}/enforcements/${id}/reverse`, staff(reverser), { reason: 'Error' });
+    expect(rejected.body.error.code).toBe('APPROVAL_REQUIRED');
+    // rejected: the enforcement stays applied, with a timeline entry
+    await kit.emit('access', 'access.approval.decided', decided(rejected.body.error.details.approvalRequestId, 'rejected'));
+    const afterReject = (await kit.call('GET', `${ADMIN}/reports/${r.id}`, staff())).body;
+    expect(afterReject.enforcements.find((x: any) => x.id === id).executionState).toBe('applied');
+    expect(afterReject.timeline.map((t: any) => t.label)).toContain(`Approval rejected to reverse ${ok.body.enforcement.ref}; the enforcement stays in place`);
+
+    const held = await kit.call('POST', `${ADMIN}/enforcements/${id}/reverse`, staff(reverser), { reason: 'Reviews were genuine' });
     expect(held.body.error.code).toBe('APPROVAL_REQUIRED');
-    kit.approvalStatus.set(held.body.error.details.approvalRequestId, 'approved');
-    const rev = await kit.call('POST', `${ADMIN}/enforcements/${id}/reverse`, staff(), { reason: 'Reviews were genuine' });
-    expect(rev.status, JSON.stringify(rev.body)).toBe(200);
+    const requestId = held.body.error.details.approvalRequestId;
     kit.authority.delete('trust.enforcements.reverse');
+    // approved (delivered twice): reversed once, as the requester, with their reason
+    await kit.emit('access', 'access.approval.decided', decided(requestId, 'approved'));
+    await kit.emit('access', 'access.approval.decided', decided(requestId, 'approved'));
+    const rev = { body: (await kit.call('GET', `${ADMIN}/enforcements?targetType=review&targetId=${r.subjects[0].id}`, staff())).body.items.find((x: any) => x.id === id) };
     expect(rev.body).toMatchObject({ executionState: 'reversed', reversalReason: 'Reviews were genuine', reversedAt: expect.any(String) });
-    expect(kit.last('trust.enforcement.reversed')).toEqual({ enforcementId: id, action: 'remove_reviews', targets: [expect.objectContaining({ type: 'review' })], reason: 'Reviews were genuine' });
-    expect(kit.audits.at(-1)).toMatchObject({ action: 'trust.enforcement.reverse', approvalRequestId: held.body.error.details.approvalRequestId });
+    expect(kit.of('trust.enforcement.reversed').filter((x) => x.enforcementId === id)).toEqual([{ enforcementId: id, action: 'remove_reviews', targets: [expect.objectContaining({ type: 'review' })], reason: 'Reviews were genuine' }]);
+    expect(kit.audits.filter((a) => a.action === 'trust.enforcement.reverse' && a.target?.id === id)).toEqual([expect.objectContaining({ approvalRequestId: requestId, actor: { kind: 'staff', id: reverser } })]);
     expect((await kit.call('POST', `${ADMIN}/enforcements/${id}/reverse`, staff(), { reason: 'again' })).status).toBe(409);
     expect((await kit.call('POST', `${ADMIN}/enforcements/${newId()}/reverse`, staff(), { reason: 'x' })).status).toBe(404);
   });

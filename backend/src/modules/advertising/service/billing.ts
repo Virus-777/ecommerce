@@ -123,7 +123,7 @@ export class BillingPart extends Part {
       const values = { basis: BASIS[c.billing] ?? 'clicks', units, rate: c.rate!, amount, currency: c.currency };
       const charge = existing
         ? await tx.update('ad_charges', existing.id, values)
-        : await tx.insert('ad_charges', { id: newId(), campaign_id: c.id, seller_id: c.seller_id!, day, ...values, state: adChargeMachine.initial, posted_at: null, statement_ref: null, reason: null });
+        : await tx.insert('ad_charges', { id: newId(), campaign_id: c.id, seller_id: c.seller_id!, day, ...values, state: adChargeMachine.initial, posted_at: null, ledger_entry_id: null, statement_ref: null, reason: null });
       return { charge, exhausted: exhausted && prior < amount ? exhausted : null, c };
     });
     if (res?.exhausted) await this.limitReached(res.c, res.exhausted);
@@ -172,7 +172,7 @@ export class BillingPart extends Part {
         const posted = await this.repo.transaction(async (tx) => {
           const locked = await tx.get('ad_charges', ch.id, { forUpdate: true });
           if (!locked || locked.state !== 'accrued') return null;
-          return tx.update('ad_charges', ch.id, { state: adChargeMachine.next('accrued', 'post'), posted_at: this.now(), statement_ref: entry?.statementRef ?? null });
+          return tx.update('ad_charges', ch.id, { state: adChargeMachine.next('accrued', 'post'), posted_at: this.now(), ledger_entry_id: entry?.id ?? null, statement_ref: entry?.statementRef ?? null });
         });
         if (posted) this.core.publish('advertising.charge.posted', { chargeId: ch.id, sellerId: ch.seller_id, campaignId: ch.campaign_id, day: ch.day, amount: this.core.money(ch.amount, ch.currency) });
       } catch (err) {
@@ -192,6 +192,7 @@ export class BillingPart extends Part {
     if (!row) throw notFound('Charge');
     const event = row.state === 'posted' ? 'credit' : 'void';
     adChargeMachine.next(row.state as AdCharge['state'], event);
+    if (event === 'credit') this.creditable(row);
     const access = this.ctx.use('access');
     const principal = this.core.principalOf(by);
     const amount = this.core.money(row.amount, row.currency);
@@ -210,11 +211,31 @@ export class BillingPart extends Part {
       });
       throw new AppError('APPROVAL_REQUIRED', `${check.reason || 'Above your adjustment limit'}; sent for approval.`, { approvalRequestId: req.id, approval: { required: true, approvalRequestId: req.id, approvers: (check.eligibleApproverRoles ?? []).map((r) => r.name) } });
     }
-    return (await this.views([await this.apply(row.id, text, by, null)]))[0]!;
+    return (await this.views([(await this.apply(row.id, text, by, null))!]))[0]!;
   }
 
-  private async apply(id: string, reason: string, by: By, approvalRequestId: string | null): Promise<ChargeRec> {
-    const { before, after } = await this.repo.transaction(async (tx) => {
+  /** A posted charge is credited against its finance ledger entry; charges posted before entries were kept cannot be */
+  private creditable(row: ChargeRec): string {
+    if (!row.ledger_entry_id) throw new AppError('ILLEGAL_TRANSITION', 'This charge was posted without its ledger entry; credit the seller with a finance adjustment instead.', { from: row.state, event: 'credit', chargeId: row.id });
+    return row.ledger_entry_id;
+  }
+
+  /**
+   * Void (accrued) or credit (posted). A credit goes to the seller ledger first (finance.creditSellerCharge against
+   * the charge's ledger entry, idempotent per charge), then the charge moves to credited. `claim`: inbox key of the
+   * event being handled; null when it was already handled.
+   */
+  private async apply(id: string, reason: string, by: By, approvalRequestId: string | null, claim?: string): Promise<ChargeRec | null> {
+    const pre = await this.repo.get('ad_charges', id);
+    if (!pre) throw notFound('Charge');
+    if (pre.state === 'posted') {
+      const originalEntryId = this.creditable(pre);
+      const finance = this.ctx.tryUse('finance');
+      if (!finance) throw new AppError('CONFLICT', 'Finance is unavailable; the credit was not recorded. Try again later.');
+      await finance.creditSellerCharge({ sellerId: pre.seller_id, amount: this.core.money(pre.amount, pre.currency), originalEntryId, reason, idempotencyKey: `advertising:charge-credit:${id}` });
+    }
+    const done = await this.repo.transaction(async (tx) => {
+      if (claim && !(await tx.claim(claim))) return null; // already handled
       const before = await tx.get('ad_charges', id, { forUpdate: true });
       if (!before) throw notFound('Charge');
       const event = before.state === 'posted' ? 'credit' : 'void';
@@ -224,6 +245,8 @@ export class BillingPart extends Part {
       await tx.addSpend(before.campaign_id, before.day, -before.amount);
       return { before, after };
     });
+    if (!done) return null;
+    const { before, after } = done;
     this.core.publish('advertising.charge.credited', { chargeId: id, sellerId: after.seller_id, amount: this.core.money(after.amount, after.currency), reason }, by);
     await this.core.audit(
       {
@@ -242,17 +265,21 @@ export class BillingPart extends Part {
     return after;
   }
 
-  /** access.approval.decided for advertising.charges.void */
-  async onVoidDecided(e: EventPayload<'access.approval.decided'>) {
+  /** access.approval.decided for advertising.charges.void (claimed once per request: a redelivery changes nothing) */
+  async onVoidDecided(e: EventPayload<'access.approval.decided'>, eventId?: string) {
     if (e.outcome !== 'approved' || !isUuid(e.target.id)) return;
     const row = await this.repo.get('ad_charges', e.target.id);
     if (!row || (row.state !== 'accrued' && row.state !== 'posted')) return;
+    if (row.state === 'posted' && !row.ledger_entry_id) {
+      this.ctx.log.warn({ chargeId: row.id, approvalRequestId: e.requestId, eventId }, 'advertising: approved credit for a charge posted without its ledger entry; credit it in finance');
+      return;
+    }
     let reason = e.reason ?? null;
     try {
       reason = (await this.ctx.use('access').getApproval(e.requestId))?.reason ?? reason;
     } catch {
       /* keep the decision note */
     }
-    await this.apply(row.id, reason || 'Approved adjustment', { actor: e.decidedBy ?? SYSTEM }, e.requestId);
+    await this.apply(row.id, reason || 'Approved adjustment', { actor: e.decidedBy ?? SYSTEM }, e.requestId, `approval-decided:${e.requestId}`);
   }
 }

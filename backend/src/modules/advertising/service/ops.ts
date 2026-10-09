@@ -199,9 +199,9 @@ export class OpsPart extends Part {
     for (const r of rows) await this.parts.creatives.refreshChecks(r);
   }
 
-  async onApprovalDecided(e: EventPayload<'access.approval.decided'>) {
+  async onApprovalDecided(e: EventPayload<'access.approval.decided'>, eventId?: string) {
     if (e.actionKey === RULES_ACTION && e.target?.type === RULES_TARGET) await this.parts.setup.onRulesDecided(e);
-    else if (e.actionKey === VOID_ACTION && e.target?.type === CHARGE_TARGET) await this.parts.billing.onVoidDecided(e);
+    else if (e.actionKey === VOID_ACTION && e.target?.type === CHARGE_TARGET) await this.parts.billing.onVoidDecided(e, eventId);
   }
 
   /** Repoint ads, requests and creatives from the duplicate product to the kept one; history stays on the ad */

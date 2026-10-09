@@ -55,6 +55,7 @@ export async function boot(): Promise<Kit> {
   const calls: Kit['calls'] = [];
   const authority: Kit['authority'] = new Map();
   const approvalStatus = new Map<string, string>();
+  const requested = new Map<string, access.RequestApprovalInput>();
   const offers: Kit['offers'] = new Map();
   const products: Kit['products'] = new Map();
   const sellers: Kit['sellers'] = new Map();
@@ -83,9 +84,13 @@ export async function boot(): Promise<Kit> {
         requestApproval: async (input: access.RequestApprovalInput) => {
           const id = newId();
           rec('access.requestApproval', input);
+          requested.set(id, input);
           return { id, ref: 'AP-1', status: 'pending', target: input.target } as any;
         },
-        getApproval: async (id: string) => ({ id, status: approvalStatus.get(id) ?? 'pending' }) as any,
+        getApproval: async (id: string) => {
+          const input = requested.get(id);
+          return { id, status: approvalStatus.get(id) ?? 'pending', reason: input?.reason ?? '', details: input?.details ?? null, requestedBy: { kind: 'staff', id: input?.requestedBy.accountId ?? null } } as any;
+        },
         getStaffRef: async (id: string) => ({ accountId: id, name: `Staff ${id.slice(-4)}`, away: false, roleLabel: 'Trust and Risk Manager' }),
         hasPermission: async () => true,
         membersOfRole: async () => [],
