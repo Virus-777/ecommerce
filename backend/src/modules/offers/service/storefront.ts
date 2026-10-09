@@ -25,7 +25,7 @@ import { CONDITION_LABEL, conditionGroup, discountPct, dispatchLabel, formatMone
 import { compareAtOf, dispatchOf, isoReq, money, OFFICIAL_NAME, returnTermsOf, strings, variantLabel, warrantyOf } from '../mappers.js';
 import type { EligibilityRec, OfferRec } from '../ports.js';
 import { notFound, Part } from './core.js';
-import { DEFAULT_PARCEL, MARKET_DEFAULT_POSTAL } from './manage.js';
+import { DEFAULT_PARCEL } from './manage.js';
 
 /** Location-dependent numbers for one offer */
 export interface Facts {
@@ -49,7 +49,8 @@ export class StorefrontPart extends Part {
   deliverTo(postalCode: string | null | undefined): DeliverTo {
     const p = postalCode?.trim();
     if (p && /^[A-Za-z0-9][A-Za-z0-9 -]{2,9}$/.test(p)) return { postalCode: p.toUpperCase(), label: p.toUpperCase(), source: 'entered' };
-    return { postalCode: MARKET_DEFAULT_POSTAL, label: `Portland ${MARKET_DEFAULT_POSTAL}`, source: 'market_default' };
+    const market = this.ctx.config.market.defaultLocation;
+    return { postalCode: market.postalCode, label: `${market.label} ${market.postalCode}`, source: 'market_default' };
   }
 
   /* ================================================================ facts and views */

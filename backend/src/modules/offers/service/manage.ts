@@ -15,7 +15,6 @@ import { invalidField, notFound, Part, SYSTEM, type By } from './core.js';
 /** Parcel used for profile checks and quotes: catalog variants carry no dimensions yet (spec gap) */
 export const DEFAULT_PARCEL = { weightGrams: 1000 };
 /** Market default delivery location (spec: "market default (settings)"; no such setting exists yet) */
-export const MARKET_DEFAULT_POSTAL = '97205';
 const OFFICIAL_SHIPS_FROM = 'Official Store warehouse';
 const DEFAULT_RETURN_DAYS = 30;
 
@@ -164,7 +163,7 @@ export class ManagePart extends Part {
     const shipping = this.ctx.tryUse('shipping');
     if (!shipping) return;
     try {
-      await shipping.quote(profileId, MARKET_DEFAULT_POSTAL, DEFAULT_PARCEL, dispatch);
+      await shipping.quote(profileId, this.ctx.config.market.defaultLocation.postalCode, DEFAULT_PARCEL, dispatch);
     } catch (err) {
       if (isAppError(err) && err.code === 'NOT_IMPLEMENTED') return;
       if (isAppError(err) && err.status < 500) throw this.core.error('SHIPPING_PROFILE_INVALID', 'Choose one of your shipping profiles', { shippingProfileId: profileId, reason: err.message });

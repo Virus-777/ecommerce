@@ -27,6 +27,9 @@ const schema = z.object({
   LAUNCH_PHASE: z.coerce.number().int().min(1).max(4).default(2),
   MARKET_TIME_ZONE: z.string().default('America/Los_Angeles'),
   MARKET_CURRENCY: z.string().default('USD'),
+  /** Delivery location used before the shopper gives one (prices with shipping, delivery estimates) */
+  MARKET_DEFAULT_POSTAL_CODE: z.string().default('97205'),
+  MARKET_DEFAULT_LOCATION_LABEL: z.string().default('Portland'),
   /** Validate every response against its spec schema (on by default outside production) */
   RESPONSE_VALIDATION: flag,
   /** Run scheduled jobs in this process */
@@ -77,7 +80,7 @@ export interface Config {
   pgliteDir: string | undefined;
   migrateOnStart: boolean;
   launchPhase: number;
-  market: { timeZone: string; currency: string };
+  market: { timeZone: string; currency: string; defaultLocation: { postalCode: string; label: string } };
   responseValidation: boolean;
   jobsEnabled: boolean;
   graphqlPersistedOnly: boolean;
@@ -121,7 +124,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     pgliteDir: e.PGLITE_DIR || undefined,
     migrateOnStart: e.MIGRATE_ON_START ?? !prod,
     launchPhase: e.LAUNCH_PHASE,
-    market: { timeZone: e.MARKET_TIME_ZONE, currency: e.MARKET_CURRENCY },
+    market: {
+      timeZone: e.MARKET_TIME_ZONE,
+      currency: e.MARKET_CURRENCY,
+      defaultLocation: { postalCode: e.MARKET_DEFAULT_POSTAL_CODE, label: e.MARKET_DEFAULT_LOCATION_LABEL },
+    },
     responseValidation: e.RESPONSE_VALIDATION ?? !prod,
     jobsEnabled: e.JOBS_ENABLED ?? false,
     graphqlPersistedOnly: e.GRAPHQL_PERSISTED_ONLY ?? prod,
