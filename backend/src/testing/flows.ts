@@ -56,6 +56,8 @@ export interface Flows {
 
 export interface Listing {
   owner: Staff;
+  /** The deputy Business Owner (bootstrapped with the owner; approves the owner's sensitive grants) */
+  deputy: Staff;
   sellerManager: Staff;
   catalogManager: Staff;
   sellerId: string;
@@ -270,7 +272,7 @@ export function flows(app: FastifyInstance, clock: { now(): Date; advance(ms: nu
       return { sellerId, sellerToken: signedIn.body.tokens.accessToken as string };
     },
     async liveListing({ price = 18900, quantity = 5 } = {}) {
-      const owner = await self.bootstrapOwner();
+      const { owner, deputy } = await self.bootstrapOwners();
       const sellerManager = await self.staffWithRoles(owner, 'sam@marketly.test', 'Sam Sellers', ['seller_manager']);
       const catalogManager = await self.staffWithRoles(owner, 'cat@marketly.test', 'Cara Catalog', ['catalog_manager']);
       const category = await call('POST', '/api/admin/catalog/categories', { token: catalogManager.accessToken, body: { name: 'Headphones', parentId: null } });
@@ -324,6 +326,7 @@ export function flows(app: FastifyInstance, clock: { now(): Date; advance(ms: nu
       await app.kernel.events.drain();
       return {
         owner,
+        deputy,
         sellerManager,
         catalogManager,
         sellerId: seller.sellerId,

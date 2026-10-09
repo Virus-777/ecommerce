@@ -66,7 +66,7 @@ afterAll(async () => {
 });
 
 describe('after the order', () => {
-  it('turns a problem report into a seller offer, and an accepted offer into a refund request Finance must approve', async () => {
+  it('turns a problem report into a seller offer, and the accepted offer into a refund Finance approves and payments sends', async () => {
     const opened = await f.call('POST', '/api/store/support/cases', {
       token: buyer.accessToken,
       body: { kind: 'order_problem', category: 'item_damaged', orderId, orderItemIds: [itemId], message: 'The headband arrived cracked' },
@@ -86,6 +86,21 @@ describe('after the order', () => {
     expect(accepted.status, JSON.stringify(accepted.body)).toBe(200);
     expect(accepted.body.remedies[0]).toMatchObject({ kind: 'partial_refund', chargedTo: 'seller', status: 'pending_approval' });
     expect(accepted.body.remedies[0].refundRequestId).toBeTruthy();
+
+    // a fresh install can staff Finance: the owner invites a Finance Manager, the deputy approves the grant
+    const finance = await f.staffWithSensitiveRoles(listing.owner, listing.deputy, 'fay@marketly.test', 'Fay Finance', ['finance_manager']);
+    const approved = await f.call('POST', `/api/admin/returns/refunds/${accepted.body.remedies[0].refundRequestId}/approve`, {
+      token: finance.accessToken,
+      body: { note: 'Seller offered it', stepUpCode: f.code(finance) },
+      headers: { 'idempotency-key': key() },
+    });
+    expect(approved.status, JSON.stringify(approved.body)).toBe(200);
+    await app.kernel.jobs.runNow('payments.process-refunds');
+    await app.kernel.events.drain();
+    const ledger = await f.call('GET', '/api/seller/finance/ledger', { token: listing.sellerToken });
+    expect(JSON.stringify(ledger.body), 'the seller-funded refund reaches the seller ledger').toMatch(/"type":"[a-z_]*refund[a-z_]*"/);
+    const after = await f.call('GET', `/api/store/support/cases/${caseId}`, { token: buyer.accessToken });
+    expect(after.body.remedies[0].status, JSON.stringify(after.body.remedies[0])).not.toBe('pending_approval');
     // another customer can't see the case
     const other = await f.customer('nosy@example.com');
     expect((await f.call('GET', `/api/store/support/cases/${caseId}`, { token: other.accessToken })).status).toBe(404);

@@ -11,7 +11,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { withDependencies } from '../../../kernel/module-system/loader.js';
-import type { InventoryPublicApi, StockItemRef } from '../../../spec/inventory.js';
+import type { InventoryPublicApi } from '../../../spec/inventory.js';
 import type { OrderCreateInput, OrdersPublicApi } from '../../../spec/orders.js';
 import { auth, buildTestApp, callers, movingClock } from '../../../testing/app.js';
 import { flows, type Flows, type Listing } from '../../../testing/flows.js';
@@ -29,17 +29,6 @@ beforeAll(async () => {
     only: withDependencies(['identity', 'access', 'audit', 'media', 'notifications', 'settings', 'customers', 'sellers', 'catalog', 'inventory', 'offers', 'orders', 'shipping', 'warehouse']),
     clock,
     config: { rateLimits: false },
-    apiStubs: {
-      inventory: {
-        // inventory.getStockItems (built in parallel), answered from inventory's own records of the company SKU this test uses
-        getStockItems: async (ids: string[]): Promise<StockItemRef[]> => {
-          const items = await api<InventoryPublicApi>('inventory').findBySku('official', ['HAL-AU-100-BK']);
-          return items
-            .filter((i) => ids.includes(i.id))
-            .map((i) => ({ id: i.id, sku: i.sku, label: i.label, ownerType: i.ownerType, sellerId: i.sellerId ?? null, offerId: i.offerId ?? null, productId: i.productId, variantId: i.variantId, condition: i.condition, locationId: null, locationCode: null, binCode: i.binCode ?? null }));
-        },
-      },
-    },
   });
   f = flows(app, clock);
   listing = await f.liveListing({ quantity: 5 });
