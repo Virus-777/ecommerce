@@ -1,155 +1,277 @@
-import { notImplemented } from '../../kernel/errors/index.js';
+import type { Scope } from '../../kernel/auth/scope.js';
 import type { EventPayload } from '../../kernel/events/index.js';
-import type { ModuleContext } from '../../kernel/module-system/index.js';
+import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type * as common from '../../spec/common.js';
-import type { PaymentsPublicApi, Allocation, AuthorizeInput, AuthorizeResult, PaymentStatusView, SavedPaymentMethod, PaymentOptions, PaymentDetail, RefundableSummary, Refund, StartRefundInput, Dispute } from '../../spec/payments.js';
-import type { PaymentsRepository } from './ports.js';
+import type {
+  Allocation,
+  AuthorizeInput,
+  AuthorizeResult,
+  Dispute,
+  OrderPaymentSummary,
+  PaymentDetail,
+  PaymentOptions,
+  PaymentRow,
+  PaymentsPublicApi,
+  PaymentStatusView,
+  Refund,
+  RefundableSummary,
+  RefundView,
+  SavedPaymentMethod,
+  StartRefundInput,
+} from '../../spec/payments.js';
+import { ACCEPTED, customerState, is } from './domain/rules.js';
+import type { IntentRec } from './ports.js';
+import { Core, SYSTEM, notFound, type By, type PaymentsServiceDeps } from './service/core.js';
+import { Disputes } from './service/disputes.js';
+import { Intents } from './service/intents.js';
+import { Methods } from './service/methods.js';
+import { Refunds } from './service/refunds.js';
+import { Views } from './service/views.js';
+import { Webhooks } from './service/webhooks.js';
 
-export interface PaymentsServiceDeps {
-  repo: PaymentsRepository;
-  ctx: ModuleContext<'payments'>;
-}
+export type { PaymentsServiceDeps };
 
 /**
  * Payments use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
- * Each method maps to a publicApi function, a consumed event or a job in docs/api/spec/modules/payments.json.
+ * The work is split by area (service/*.ts); this class is the module's public API, its event consumers, jobs
+ * and the entry points of the HTTP handlers.
  */
 export class PaymentsService implements PaymentsPublicApi {
-  constructor(protected readonly deps: PaymentsServiceDeps) {}
+  readonly core: Core;
+  readonly views: Views;
+  readonly intents: Intents;
+  readonly refunds: Refunds;
+  readonly disputes: Disputes;
+  readonly methods: Methods;
+  readonly webhooks: Webhooks;
 
-  /* ---------------- public API (in-process) */
-
-  /** Accepted brands, saved methods, wallet availability and a setup session for a new card */
-  async listOptions(owner: { customerId?: string, guestSessionId?: string }, amount: common.Money): Promise<PaymentOptions> {
-    throw notImplemented("payments.listOptions");
+  constructor(deps: PaymentsServiceDeps) {
+    this.core = new Core(deps);
+    this.views = new Views(this.core);
+    this.intents = new Intents(this.core, this.views);
+    this.refunds = new Refunds(this.core, this.views, this.intents);
+    this.disputes = new Disputes(this.core, this.views);
+    this.methods = new Methods(this.core, this.views);
+    this.webhooks = new Webhooks(this.core, this.intents, this.refunds, this.disputes, this.methods);
+    this.intents.startOrphanRefund = (i, by, reason) => this.refunds.startOrphanRefund(i, by, reason);
+    this.intents.saveForLater = (customerId, token, label, billing) => this.methods.saveForLater(customerId, token, label, billing);
   }
 
-  /** Create an intent for a checkout attempt and authorize it. Returns accepted, failed (with decline), pending_check (uncertain) or requires_action. Only one non-failed intent per checkout session at a time; the same key returns the first result. */
-  async authorize(input: AuthorizeInput, idempotencyKey: string): Promise<AuthorizeResult> {
-    throw notImplemented("payments.authorize");
+  /* ---------------------------------------------------------------- public API (in-process) */
+
+  listOptions(owner: { customerId?: string; guestSessionId?: string }, amount: common.Money): Promise<PaymentOptions> {
+    return this.methods.listOptions(owner, amount);
   }
 
-  /** Attach the created order and its seller-group allocations. Also done on orders.order.placed. */
-  async linkOrder(intentId: string, orderId: string, allocations: Allocation[]): Promise<void> {
-    throw notImplemented("payments.linkOrder");
+  authorize(input: AuthorizeInput, idempotencyKey: string): Promise<AuthorizeResult> {
+    return this.intents.authorize(input, idempotencyKey);
   }
 
-  /** Finish an authorization after a bank challenge or wallet confirmation (checkout calls it from POST /sessions/{id}/complete-action) */
-  async completeAction(intentId: string, resultToken: string, idempotencyKey: string): Promise<AuthorizeResult> {
-    throw notImplemented("payments.completeAction");
+  linkOrder(intentId: string, orderId: string, allocations: Allocation[]): Promise<void> {
+    return this.intents.linkOrder(intentId, orderId, allocations);
   }
 
-  /** Current customer-facing state; refresh asks the provider first */
-  async getIntentStatus(intentId: string, refresh?: boolean): Promise<PaymentStatusView> {
-    throw notImplemented("payments.getIntentStatus");
+  completeAction(intentId: string, resultToken: string, idempotencyKey: string): Promise<AuthorizeResult> {
+    return this.intents.completeAction(intentId, resultToken, idempotencyKey);
   }
 
-  /** Release an authorization (abandoned checkout, order cancelled before capture) */
+  getIntentStatus(intentId: string, refresh?: boolean): Promise<PaymentStatusView> {
+    return this.intents.getIntentStatus(intentId, refresh ?? false);
+  }
+
   async voidIntent(intentId: string, reason: string): Promise<void> {
-    throw notImplemented("payments.voidIntent");
+    await this.intents.void(intentId, reason, { actor: SYSTEM });
   }
 
-  /** Per item: paid, refunded, in flight and remaining. The cap for every refund. */
-  async remainingRefundable(orderId: string, orderItemIds?: string[]): Promise<RefundableSummary> {
-    throw notImplemented("payments.remainingRefundable");
+  remainingRefundable(orderId: string, orderItemIds?: string[]): Promise<RefundableSummary> {
+    return this.refunds.remainingRefundable(orderId, orderItemIds);
   }
 
-  /** Hand over an approved refund for execution. Fails with REFUND_EXCEEDS_REFUNDABLE or DUPLICATE_REFUND. Returns the existing refund for the same key or origin. */
-  async startRefund(input: StartRefundInput, idempotencyKey: string): Promise<Refund> {
-    throw notImplemented("payments.startRefund");
+  startRefund(input: StartRefundInput, idempotencyKey: string): Promise<Refund> {
+    return this.refunds.startRefund(input, idempotencyKey);
   }
 
-  /** Execution status for mirrors in returns, support and orders */
-  async getRefund(refundId: string): Promise<Refund | null> {
-    throw notImplemented("payments.getRefund");
+  getRefund(refundId: string): Promise<Refund | null> {
+    return this.refunds.getRefund(refundId);
   }
 
-  /** e.g. 'Visa •••• 4417', from the snapshot (stays after the saved card is removed) */
   async methodLabel(intentId: string): Promise<string> {
-    throw notImplemented("payments.methodLabel");
+    return (await this.intents.get(intentId)).method.label;
   }
 
-  /** The order's accepted payment intent. Callers show the customer view (customerState, method label, amounts) to customers and the full detail to staff. */
   async getPaymentForOrder(orderId: string): Promise<PaymentDetail | null> {
-    throw notImplemented("payments.getPaymentForOrder");
+    const i = await this.intents.intentOfOrder(orderId);
+    return i ? this.intents.detail(i) : null;
   }
 
-  /** Refund executions of an order, newest first, with items and status (Requested, Processing, Sent, Failed, Cancelled) */
-  async listRefundsForOrder(orderId: string): Promise<Refund[]> {
-    throw notImplemented("payments.listRefundsForOrder");
+  listRefundsForOrder(orderId: string): Promise<Refund[]> {
+    return this.refunds.listForOrder(orderId);
   }
 
-  /** Chargebacks and payment disputes on an order (order 360, dispute case) */
-  async listDisputesForOrder(orderId: string): Promise<Dispute[]> {
-    throw notImplemented("payments.listDisputesForOrder");
+  listDisputesForOrder(orderId: string): Promise<Dispute[]> {
+    return this.disputes.listForOrder(orderId);
   }
 
-  /** The customer's saved cards and wallets, default first */
-  async listSavedMethods(customerId: string): Promise<SavedPaymentMethod[]> {
-    throw notImplemented("payments.listSavedMethods");
+  listSavedMethods(customerId: string): Promise<SavedPaymentMethod[]> {
+    return this.methods.listSavedMethods(customerId);
   }
 
-  /* ---------------- events consumed */
+  /* ---------------------------------------------------------------- store */
+
+  /** The intent if the shopper owns its checkout: the customer, or the guest session (checkout or order access) */
+  async ownIntent(intentId: string, scope: Scope, customerId: string | null): Promise<IntentRec> {
+    const i = await this.core.repo.get('intents', intentId);
+    if (!i) throw notFound();
+    if (scope.kind === 'customer' && customerId && i.customer_id === customerId) return i;
+    if (scope.kind === 'visitor' && !i.customer_id) {
+      const guestSessionId = scope.visitorSessionId;
+      const session = await this.core.soft('checkout', 'getSessionView', (c) => c.getSessionView({ guestSessionId }, i.checkout_session_id));
+      if (session) return i;
+      const order = await this.core.lookup().order(i.order_id);
+      const visible = order ? await this.core.ctx.use('orders').getOrderForViewer({ guestSessionId }, order.ref).catch(() => null) : null;
+      if (visible) return i;
+    }
+    throw notFound();
+  }
+
+  async storeStatus(intentId: string, scope: Scope, customerId: string | null, check: boolean): Promise<PaymentStatusView> {
+    await this.ownIntent(intentId, scope, customerId);
+    return this.intents.getIntentStatus(intentId, check, check);
+  }
+
+  /* ---------------------------------------------------------------- admin payments */
+
+  async listPayments(q: { q?: string; status?: string; flag?: string; from?: string; to?: string }, page: PageRequest): Promise<common.Page<PaymentRow>> {
+    let orderIds: string[] = [];
+    const term = q.q?.trim();
+    if (term && /^[A-Z]{2,4}-\d{6}-\d+$/i.test(term)) {
+      const order = await this.core.ctx
+        .use('orders')
+        .getOrderAdmin(term.toUpperCase())
+        .catch(() => null);
+      if (order) orderIds = [order.order.id];
+    }
+    const res = await this.core.repo.listIntents({ ...q, q: term, orderIds }, page);
+    return { ...res, items: await this.views.paymentRows(res.items, this.core.lookup()) };
+  }
+
+  async paymentAdmin(intentId: string): Promise<PaymentDetail> {
+    return this.intents.detail(await this.intents.get(intentId));
+  }
+
+  async checkPayment(intentId: string, by: By): Promise<PaymentDetail> {
+    const i = await this.intents.get(intentId);
+    const after = is(ACCEPTED, i.status) || i.status === 'pending_check' || i.status === 'requires_action' || i.status === 'authorizing' ? await this.intents.reconcile(i.id, by) : i;
+    return this.intents.detail(after);
+  }
+
+  async orderSummary(orderId: string): Promise<OrderPaymentSummary> {
+    const lookup = this.core.lookup();
+    const main = await this.intents.intentOfOrder(orderId, (await lookup.order(orderId))?.paymentIntentId);
+    if (!main) throw notFound('Payment for this order');
+    const sessionAttempts = await this.core.repo.find('intents', { checkout_session_id: main.checkout_session_id }, { orderBy: [['created_at', 'asc']] });
+    const linked = await this.core.repo.find('intents', { order_id: orderId });
+    const attempts = [...sessionAttempts, ...linked.filter((x) => !sessionAttempts.some((s) => s.id === x.id))];
+    const [rows, totals, refundable] = await Promise.all([
+      this.views.paymentRows(attempts, lookup),
+      this.core.repo.intentRefundTotals(main.id),
+      this.refunds.remainingRefundable(orderId).catch(() => null),
+    ]);
+    const m = (amount: number) => ({ amount, currency: main.currency });
+    return {
+      orderId,
+      state: customerState(main),
+      methodLabel: main.method.label,
+      authorizedAt: main.authorized_at?.toISOString() ?? null,
+      capturedAt: main.captured_at?.toISOString() ?? null,
+      processorRef: main.provider_ref,
+      captured: m(main.captured_amount),
+      refunded: m(main.refunded_amount),
+      inFlight: m(totals.inFlight),
+      remainingRefundable: refundable?.remaining ?? m(Math.max(0, main.captured_amount - totals.sent - totals.inFlight)),
+      attempts: rows,
+    };
+  }
+
+  /* ---------------------------------------------------------------- GraphQL helpers */
+
+  /** Refund executions of an order with the customer view next to each (GraphQL Refund has both) */
+  async refundsWithViews(orderId: string): Promise<{ refund: Refund; view: RefundView }[]> {
+    const rows = await this.core.repo.find('refunds', { order_id: orderId }, { orderBy: [['created_at', 'desc']] });
+    const lookup = this.core.lookup();
+    const cfg = await this.core.cfg();
+    const [refunds, views] = await Promise.all([this.views.refunds(rows, lookup, cfg), this.views.refundViews(rows, lookup, cfg)]);
+    return refunds.map((refund, n) => ({ refund, view: views[n]! }));
+  }
+
+  /** Every attempt of the checkout session of an intent, oldest first */
+  async attemptsOf(intentId: string): Promise<IntentRec[]> {
+    const i = await this.core.repo.get('intents', intentId);
+    if (!i) return [];
+    return this.core.repo.find('intents', { checkout_session_id: i.checkout_session_id }, { orderBy: [['created_at', 'asc']] });
+  }
+
+  /* ---------------------------------------------------------------- events consumed */
 
   /** orders.order.placed: Link the intent to the order and store seller-group allocations (fallback when linkOrder was not called) */
-  async onOrderPlacedFromOrders(event: EventPayload<"orders.order.placed">): Promise<void> {
-    throw notImplemented("payments consumer of orders.order.placed");
+  onOrderPlacedFromOrders(event: EventPayload<'orders.order.placed'>): Promise<void> {
+    return this.intents.onOrderPlaced(event);
   }
 
   /** orders.order.accepted: Capture the authorization when captureMode is on_acceptance */
-  async onOrderAcceptedFromOrders(event: EventPayload<"orders.order.accepted">): Promise<void> {
-    throw notImplemented("payments consumer of orders.order.accepted");
+  onOrderAcceptedFromOrders(event: EventPayload<'orders.order.accepted'>): Promise<void> {
+    return this.intents.onOrderAccepted(event.orderId);
   }
 
   /** shipping.shipment.dispatched: Capture the group's allocation when captureMode is per_group_on_dispatch */
-  async onShipmentDispatchedFromShipping(event: EventPayload<"shipping.shipment.dispatched">): Promise<void> {
-    throw notImplemented("payments consumer of shipping.shipment.dispatched");
+  onShipmentDispatchedFromShipping(event: EventPayload<'shipping.shipment.dispatched'>): Promise<void> {
+    return this.intents.onShipmentDispatched(event);
   }
 
   /** orders.order.cancelled: Void the authorization if nothing was captured */
-  async onOrderCancelledFromOrders(event: EventPayload<"orders.order.cancelled">): Promise<void> {
-    throw notImplemented("payments consumer of orders.order.cancelled");
+  onOrderCancelledFromOrders(event: EventPayload<'orders.order.cancelled'>): Promise<void> {
+    return this.intents.onOrderCancelled(event);
   }
 
   /** orders.item.cancelled: Start a cancellation refund for the item's refund breakdown (origin cancellation, no Finance approval) or reduce the uncaptured authorization */
-  async onItemCancelledFromOrders(event: EventPayload<"orders.item.cancelled">): Promise<void> {
-    throw notImplemented("payments consumer of orders.item.cancelled");
+  onItemCancelledFromOrders(event: EventPayload<'orders.item.cancelled'>): Promise<void> {
+    return this.refunds.onItemCancelled(event);
   }
 
   /** access.approval.decided: Complete or drop a dispute concession waiting for approval */
-  async onApprovalDecidedFromAccess(event: EventPayload<"access.approval.decided">): Promise<void> {
-    throw notImplemented("payments consumer of access.approval.decided");
+  onApprovalDecidedFromAccess(event: EventPayload<'access.approval.decided'>): Promise<void> {
+    return this.disputes.onApprovalDecided(event);
   }
 
-  /* ---------------- jobs */
+  /* ---------------------------------------------------------------- jobs */
 
-  /** Job payments.check-uncertain (every 30 s): Retrieve pending_check intents from the provider with backoff (30 s, 1 min, 2 min, 5 min…); after uncertainMaxHours raise it to Finance (payments.payment.orphaned with needs_review if money moved) */
-  async checkUncertain(): Promise<void> {
-    throw notImplemented("job payments.check-uncertain");
+  /** Job payments.check-uncertain (every 30 s) */
+  checkUncertain(): Promise<void> {
+    return this.intents.checkUncertain();
   }
 
-  /** Job payments.process-refunds (every 1 min): Submit requested refunds; retrieve processing refunds with unknown outcome; retry failed refunds with retryable reasons up to refundMaxAttempts after confirming with the provider that nothing was sent */
-  async processRefunds(): Promise<void> {
-    throw notImplemented("job payments.process-refunds");
+  /** Job payments.process-refunds (every 1 min) */
+  processRefunds(): Promise<void> {
+    return this.refunds.processRefunds();
   }
 
-  /** Job payments.detect-orphans (every 10 min): Intents authorized or captured with no order after orphanGraceMinutes and a completed or expired checkout session: void authorizations, start refunds for captures, publish payments.payment.orphaned */
-  async detectOrphans(): Promise<void> {
-    throw notImplemented("job payments.detect-orphans");
+  /** Job payments.detect-orphans (every 10 min) */
+  detectOrphans(): Promise<void> {
+    return this.intents.detectOrphans();
   }
 
-  /** Job payments.expire-authorizations (hourly): Authorizations near expiry: capture if the order is accepted, otherwise void */
-  async expireAuthorizations(): Promise<void> {
-    throw notImplemented("job payments.expire-authorizations");
+  /** Job payments.expire-authorizations (hourly) */
+  expireAuthorizations(): Promise<void> {
+    return this.intents.expireAuthorizations();
   }
 
-  /** Job payments.dispute-deadlines (hourly): Flag disputes with evidence due within 48 h; mark lost when the deadline passed without evidence */
-  async disputeDeadlines(): Promise<void> {
-    throw notImplemented("job payments.dispute-deadlines");
+  /** Job payments.dispute-deadlines (hourly) */
+  disputeDeadlines(): Promise<void> {
+    return this.disputes.deadlines();
   }
 
-  /** Job payments.card-expiry (daily 05:00 PT): Mark saved cards expired; apply provider card-updater results */
-  async cardExpiry(): Promise<void> {
-    throw notImplemented("job payments.card-expiry");
+  /** Job payments.card-expiry (daily 05:00 PT) */
+  cardExpiry(): Promise<void> {
+    return this.methods.cardExpiry();
   }
 }
