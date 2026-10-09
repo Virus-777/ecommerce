@@ -37,7 +37,11 @@ export const stubs = () => ({
     listOwnOffersForProduct: vi.fn(async (_s: string, ids: string[]) => Object.fromEntries(ids.map((id) => [id, []])) as never),
   },
   reports: {
-    registerDataset: vi.fn(async () => {}),
+    /** keeps every registration: boot-time calls happen before Vitest clears mock calls for each test */
+    registered: [] as { key: string; owner: string }[],
+    registerDataset: vi.fn(async (d: { key: string; owner: string }) => {
+      registeredDatasets.push(d);
+    }),
     requestExport: vi.fn(async (input: { dataset: string; format: string; filters: unknown }) => ({
       id: newId(),
       ref: 'EX-261009-0001',
@@ -57,6 +61,9 @@ export const stubs = () => ({
     listProductQuestions: vi.fn(async () => ({ items: [], nextCursor: null, total: 2 }) as never),
   },
 });
+
+/** Report datasets registered by the modules (at boot, through afterBoot; Vitest clears mock calls before each test) */
+export const registeredDatasets: { key: string; owner: string }[] = [];
 
 export type Stubs = ReturnType<typeof stubs>;
 

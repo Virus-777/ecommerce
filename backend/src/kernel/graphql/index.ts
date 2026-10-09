@@ -28,6 +28,8 @@ export interface GraphQLContext {
   request: FastifyRequest;
   /** Staff permission answers for this request (a permissioned field in a list is checked once) */
   permissions: Map<string, Promise<boolean>>;
+  /** Whether the caller holds a permission, as `can` in REST handlers (dev-token permissions included), memoized per request */
+  can(permission: string): Promise<boolean>;
 }
 
 /** Type name → field name → resolver, for fields whose @source names this module. */
@@ -49,13 +51,12 @@ const KIND_OK: Record<string, (p: Principal | null) => boolean> = {
 
 const gqlError = (code: string, message: string) => new GraphQLError(message, { extensions: { code } });
 
-async function checkAuth(requires: string, permission: string | undefined, ctx: GraphQLContext, auth: AuthChain) {
+async function checkAuth(requires: string, permission: string | undefined, ctx: GraphQLContext) {
   const p = ctx.principal;
   if (!KIND_OK[requires]?.(p)) throw gqlError('UNAUTHORIZED', 'Not available to this session');
   if (!permission || !p) return;
   if (p.kind !== 'staff' && p.kind !== 'seller') return;
-  if (!ctx.permissions.has(permission)) ctx.permissions.set(permission, auth.can(ctx.auth, permission));
-  if (!(await ctx.permissions.get(permission))) throw gqlError('FORBIDDEN', `Needs permission ${permission}`);
+  if (!(await ctx.can(permission))) throw gqlError('FORBIDDEN', `Needs permission ${permission}`);
 }
 
 /** Admin-only root fields must say who may read them (@auth), so nothing in the admin schema is open by accident. */
@@ -70,7 +71,7 @@ function assertAdminRootAuth(schema: GraphQLSchema) {
   if (missing.length) throw new Error(`Admin GraphQL root fields without @auth: ${missing.join(', ')}`);
 }
 
-export function wireResolvers(schema: GraphQLSchema, resolvers: Map<string, ModuleResolvers>, launchPhase: number, auth: AuthChain) {
+export function wireResolvers(schema: GraphQLSchema, resolvers: Map<string, ModuleResolvers>, launchPhase: number) {
   const unresolved: string[] = [];
   for (const type of Object.values(schema.getTypeMap())) {
     if (!isObjectType(type) || type.name.startsWith('__')) continue;
@@ -99,7 +100,7 @@ export function wireResolvers(schema: GraphQLSchema, resolvers: Map<string, Modu
         const permission = (directiveArg(node, 'auth', 'permission') ?? directiveArg(type.astNode, 'auth', 'permission')) as string | undefined;
         const inner: GraphQLFieldResolver<any, GraphQLContext> = field.resolve ?? defaultFieldResolver;
         field.resolve = async (root, args, ctx, info) => {
-          await checkAuth(requires, permission, ctx, auth);
+          await checkAuth(requires, permission, ctx);
           return inner(root, args, ctx, info);
         };
       }
@@ -124,7 +125,7 @@ export async function registerGraphQL(app: FastifyInstance, o: GraphQLKernelOpti
     const problems = validateSchema(schema);
     if (problems.length) throw new Error(`GraphQL ${area} schema is invalid with the enabled modules:\n${problems.map((p) => `  - ${p.message}`).join('\n')}`);
     if (area === 'admin') assertAdminRootAuth(schema);
-    const { unresolved } = wireResolvers(schema, o.resolvers, o.config.launchPhase, o.auth);
+    const { unresolved } = wireResolvers(schema, o.resolvers, o.config.launchPhase);
     out[area] = { schema, dropped, unresolved };
 
     const persisted = Object.fromEntries(Object.entries(persistedQueries[area]).map(([id, q]) => [id, q.query]));
@@ -143,14 +144,21 @@ export async function registerGraphQL(app: FastifyInstance, o: GraphQLKernelOpti
         // the schema is not discoverable in production; apps use persisted screen queries
         ...(o.config.env === 'production' ? { validationRules: [NoSchemaIntrospectionCustomRule] } : {}),
         persistedQueryProvider: provider(persisted),
-        context: (request: FastifyRequest): GraphQLContext => ({
-          area,
-          principal: request.auth?.principal ?? null,
-          auth: request.auth,
-          requestId: request.id,
-          request,
-          permissions: new Map(),
-        }),
+        context: (request: FastifyRequest): GraphQLContext => {
+          const permissions = new Map<string, Promise<boolean>>();
+          return {
+            area,
+            principal: request.auth?.principal ?? null,
+            auth: request.auth,
+            requestId: request.id,
+            request,
+            permissions,
+            can: (permission: string) => {
+              if (!permissions.has(permission)) permissions.set(permission, o.auth.can(request.auth, permission));
+              return permissions.get(permission)!;
+            },
+          };
+        },
       });
     });
   }

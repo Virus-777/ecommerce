@@ -1,6 +1,6 @@
 /** Listing read model (offer events, counts job), matching, corrections, merges, bulk edits, exports, snapshots and GraphQL. */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { api, auth, brand, callers, catalogApp, category, newId, sellerProduct, uploadImage, type CatalogTestApp } from './helpers.js';
+import { api, auth, brand, callers, catalogApp, category, newId, registeredDatasets, sellerProduct, uploadImage, type CatalogTestApp } from './helpers.js';
 
 let t: CatalogTestApp;
 let a: ReturnType<typeof api>;
@@ -186,7 +186,7 @@ describe('bulk edits, exports, snapshots and seller counts', () => {
     const res = await a.admin('POST', '/products/exports', { filters: { reviewState: 'approved' }, format: 'xlsx' });
     expect(res.statusCode, res.body).toBe(202);
     expect(t.stubs.reports.requestExport).toHaveBeenCalledWith(expect.objectContaining({ dataset: 'catalog.admin.products', format: 'xlsx', filters: expect.objectContaining({ reviewState: 'approved' }) }));
-    expect(t.stubs.reports.registerDataset).toHaveBeenCalledWith(expect.objectContaining({ key: 'catalog.admin.products', owner: 'catalog' }));
+    expect(registeredDatasets).toContainEqual(expect.objectContaining({ key: 'catalog.admin.products', owner: 'catalog' })); // registered at boot
     expect(t.stubs.audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'catalog.products.export' }));
     const rows = await t.catalog.exportRows('catalog.admin.products', { reviewState: 'approved' }, { kind: 'staff', accountId: t.staffId });
     expect(rows.rows.length).toBeGreaterThan(0);

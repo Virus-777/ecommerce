@@ -124,6 +124,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
   for (const w of boot.warnings) app.log.debug(w);
   for (const [m, v] of Object.entries(opts.webhookVerifiers ?? {})) if (!boot.webhookVerifiers.has(m)) boot.webhookVerifiers.set(m, v);
   for (const [m, stub] of Object.entries(opts.apiStubs ?? {})) boot.apis.set(m, withStubs(boot.apis.get(m), stub as object));
+  await boot.runAfterBoot();
 
   /* ---------------------------------------------------------------- authorization: a token on every request, verified here */
   const { auth, revocations } = await createAuthChain({

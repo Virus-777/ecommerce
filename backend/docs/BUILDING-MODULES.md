@@ -172,6 +172,7 @@ await app.kernel.events.drain();   // wait for event consumers
   business validation, every state transition the spec lists (and an illegal one → 409), approvals
   where relevant, events published (subscribe with `app.kernel.events.subscribe('test', name, fn)`),
   audit entries written (stub `audit.record` and assert the calls), jobs (`app.kernel.jobs.runNow`), consumers.
+- Vitest 5 clears mock **calls** before every test (`clearMocks` default): calls made at boot or in `beforeAll` (`afterBoot` hooks) are gone by the time a test runs; record them in the stub implementation if a test needs them.
 - Clocks: `movingClock()` (real time you can move ahead; dev tokens stay valid) is the easy default.
   Apps on a fixed clock: set `tokenClock.now = () => clock.now()` (from `testing/app.ts`), and a larger
   `tokenClock.ttlSeconds` if the test moves the clock far ahead, so `callers.*` tokens stay valid at the app's time.

@@ -36,6 +36,8 @@ export interface BootResult {
   /** Public APIs provided by enabled modules */
   apis: Map<string, object>;
   warnings: string[];
+  /** Runs every module's afterBoot hooks; the app calls it once the APIs are final (tests install apiStubs first) */
+  runAfterBoot(): Promise<void>;
 }
 
 type AnyApi = Record<string, (...args: unknown[]) => unknown>;
@@ -84,7 +86,7 @@ function checkRoutes(spec: ModuleSpecDef, sets: readonly RouteSet[]) {
 
 export async function bootModules(defs: ModuleDefinition[], k: KernelServices): Promise<BootResult> {
   const enabled = new Set(defs.map((d) => d.spec.name));
-  const result: BootResult = { endpoints: [], resolvers: new Map(), webhookVerifiers: new Map(), apis: new Map(), warnings: [] };
+  const result: BootResult = { endpoints: [], resolvers: new Map(), webhookVerifiers: new Map(), apis: new Map(), warnings: [], runAfterBoot: async () => {} };
   const { apis, resolvers, webhookVerifiers, warnings } = result;
   const proxies = new Map<string, object>();
   const afterBoot: { module: string; fn: () => unknown }[] = [];
@@ -167,14 +169,16 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
     }
   }
 
-  for (const { module, fn } of afterBoot) {
-    try {
-      await fn();
-    } catch (err) {
-      if (!isNotImplemented(err)) throw new Error(`${module}: afterBoot failed: ${(err as Error).message}`, { cause: err });
-      warnings.push(`${module}: afterBoot skipped, a dependency is not built yet (${(err as Error).message})`);
+  result.runAfterBoot = async () => {
+    for (const { module, fn } of afterBoot.splice(0)) {
+      try {
+        await fn();
+      } catch (err) {
+        if (!isNotImplemented(err)) throw new Error(`${module}: afterBoot failed: ${(err as Error).message}`, { cause: err });
+        warnings.push(`${module}: afterBoot skipped, a dependency is not built yet (${(err as Error).message})`);
+      }
     }
-  }
+  };
   for (const job of k.jobs.list()) if (!job.handled) warnings.push(`job ${job.name} (${job.module}) has no handler`);
   return result;
 }
