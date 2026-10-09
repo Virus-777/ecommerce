@@ -726,12 +726,15 @@ export const LockRequest: z.ZodType<LockRequest> = z.object({
 }).register(common.apiTypes, { id: "identity.LockRequest" });
 
 export interface ReauthRequest {
+  /** Step-up purpose of the endpoint that will consume the token, e.g. payout-account */
+  purpose: string;
   password?: string | null;
   /** 2-step code instead of the password */
   code?: string | null;
 }
 
 export const ReauthRequest: z.ZodType<ReauthRequest> = z.object({
+  purpose: z.string().describe("Step-up purpose of the endpoint that will consume the token, e.g. payout-account"),
   password: z.string().nullish(),
   code: z.string().describe("2-step code instead of the password").nullish(),
 }).register(common.apiTypes, { id: "identity.ReauthRequest" });
@@ -1060,10 +1063,6 @@ export const IdentityGuestSessionClaimedEvent: z.ZodType<IdentityGuestSessionCla
 
 /** What other modules may call in-process: `ctx.use('identity')` (or `ctx.tryUse` for an optional dependency). */
 export interface IdentityPublicApi {
-  /** Verify an access token and return who is calling. Used by the kernel HTTP layer for every area; seller principals carry the chosen sellerId and memberId. Used by: kernel. */
-  authenticate(accessToken: string): Promise<Principal | null>;
-  /** Validate the X-Guest-Session header and touch its expiry Used by: kernel, cart, checkout, customers. */
-  verifyGuestSession(guestSessionId: string): Promise<GuestSession | null>;
   /** Email, display name, status, 2-step state Used by: customers, sellers, access, notifications, audit, support. */
   getAccount(accountId: string): Promise<AccountSummary | null>;
   /** Batch lookup for lists (staff directory, seller members, audit names) Used by: access, sellers, audit, notifications. */
@@ -1094,7 +1093,7 @@ export interface IdentityPublicApi {
   sendPasswordReset(accountId: string, input: { reason: string, by: common.Actor, revokeSessions: boolean }): Promise<void>;
   /** Text a 6-digit code to a new mobile number (needs SMS, phase 2; until then the number stays unverified). Confirmed at POST /api/public/identity/verifications/{id}/confirm; publishes identity.user.verified with channel phone. Used by: customers. */
   startPhoneVerification(accountId: string, phone: string): Promise<VerificationChallenge>;
-  /** True when the re-auth token was issued to this account, session, audience and seller for this purpose, is unused and unexpired. Does not consume it. Used by: customers, sellers, finance. */
+  /** True only when the re-auth token was issued for this purpose (the endpoint's step-up purpose) to this account, session, audience and seller, and is unused and unexpired. A token issued for another purpose is refused. Does not consume it. Used by: customers, sellers, finance. */
   verifyReauthToken(principal: Principal, token: string, purpose: string): Promise<boolean>;
   /** Batched staff view of sign-in security for customer 360 views: AccountAdmin (lock, forced reset, 2-step, devices, recent security activity) plus email status, warnings and a one-line sign-in summary. Callers pass identity account ids (Customer.userId). Used by: graphql. */
   accountSecurityOf(accountIds: string[], opts?: { activityLimit?: number }): Promise<Map<string, unknown>>;
@@ -1320,6 +1319,7 @@ export interface IdentityDb {
     token_hash: string;
     account_id: string;
     session_id: string;
+    purpose: string;
     expires_at: Date;
     used_at: Date | null;
   };
@@ -1719,7 +1719,7 @@ export const endpoints = defineEndpoints({
     auth: "customer",
     scope: "own-customer",
     summary: "Confirm it's you before a sensitive action",
-    desc: "Returns a single-use re-auth token valid 5 minutes, required by account closure (customers). Seller Center uses POST /api/seller/identity/reauth for payout account and business changes.",
+    desc: "Returns a single-use re-auth token valid 5 minutes for the requested purpose, required by account closure (customers). Seller Center uses POST /api/seller/identity/reauth for payout account and business changes.",
     body: () => ReauthRequest,
     response: () => ReauthToken,
     status: 200,
@@ -1732,15 +1732,31 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/reauth",
     auth: "seller",
+    sellerContext: "optional",
     scope: "own-seller",
     summary: "Confirm it is you before a sensitive Seller Center action",
-    desc: "Same check as the store re-auth (password or 2-step code) on the seller session. Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account and the current seller context; required by payout account changes, business change requests and account close (sellers).",
+    desc: "Same check as the store re-auth (password or 2-step code) on the seller session. Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account, the purpose and the current seller context (if one is chosen); required by payout account changes, business change requests and account close (sellers).",
     body: () => ReauthRequest,
     response: () => ReauthToken,
     status: 200,
     errors: ["CURRENT_PASSWORD_WRONG","CODE_INVALID","RATE_LIMITED"],
     audited: true,
     screens: ["seller/finance","seller/store"],
+    phase: 1,
+  },
+  reauthenticateStaff: {
+    area: "admin",
+    method: "POST",
+    path: "/reauth",
+    auth: "staff",
+    scope: "staff",
+    summary: "Confirm it is you before a sensitive Admin Center action",
+    desc: "Same check as the store re-auth (password or 2-step code) on the staff session. Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account, session and purpose.",
+    body: () => ReauthRequest,
+    response: () => ReauthToken,
+    status: 200,
+    errors: ["CURRENT_PASSWORD_WRONG","CODE_INVALID","RATE_LIMITED"],
+    audited: true,
     phase: 1,
   },
   startTwoStepSetup: {
@@ -2224,7 +2240,7 @@ export const spec = defineModuleSpec({
   summary: "Who someone is and how they prove it: accounts for customers, seller members and staff, credentials, email verification, sessions and refresh tokens for the website and the Android app, password recovery, 2-step verification, signed-in devices, guest sessions and the security activity log.",
   dependsOn: [],
   optionalDeps: ["audit","sellers","customers"],
-  publicApi: ["authenticate","verifyGuestSession","getAccount","getAccounts","findAccountByEmail","inviteStaff","inviteSellerMember","grantSellerContext","revokeSellerContext","revokeSessions","verifyStepUp","grantGuestOrderAccess","hasGuestOrderAccess","issueOrderLink","closeAccount","sendPasswordReset","startPhoneVerification","verifyReauthToken","accountSecurityOf","consumeReauthToken","revocationsSince","verifyRefreshToken"],
+  publicApi: ["getAccount","getAccounts","findAccountByEmail","inviteStaff","inviteSellerMember","grantSellerContext","revokeSellerContext","revokeSessions","verifyStepUp","grantGuestOrderAccess","hasGuestOrderAccess","issueOrderLink","closeAccount","sendPasswordReset","startPhoneVerification","verifyReauthToken","accountSecurityOf","consumeReauthToken","revocationsSince","verifyRefreshToken"],
   permissions: [
     {
       "key": "identity.accounts.view",
@@ -3335,6 +3351,10 @@ export const spec = defineModuleSpec({
       },
       "session_id": {
         "type": "uuid",
+        "nullable": false
+      },
+      "purpose": {
+        "type": "text",
         "nullable": false
       },
       "expires_at": {

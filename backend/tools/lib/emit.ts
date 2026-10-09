@@ -81,6 +81,11 @@ export const areas = ${json(common.areas, '')} as const;
 
 export const headers = ${json(common.headers, '')} as const;
 `);
+  for (const [name, c] of Object.entries(common.constants ?? {})) {
+    if (!/^[A-Z][A-Z0-9_]*$/.test(name)) ctx.problems.push(`common.constants.${name}: name must be UPPER_SNAKE`);
+    const value = typeof c.value === 'string' ? `'${c.value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'` : JSON.stringify(c.value);
+    parts.push(`${doc(c.desc)}export const ${name} = ${value} as const;\n`);
+  }
   return { code: parts.join('\n'), problems: ctx.problems };
 }
 

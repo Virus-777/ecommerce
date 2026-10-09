@@ -705,6 +705,7 @@ Indexes: `(email_hash, at desc)`, `(ip, at desc)`
 
 | Consumes | From | Does |
 |---|---|---|
+| `access.approval.decided` | access | Finish a staff account closure that needed approval (approved: close; rejected, cancelled or expired: revert the pending closure) |
 | `orders.order.placed` | orders | When guestEmail is set, add or update the guest buyer row (order count, spend, last order) |
 | `identity.user.registered` | identity | Create the customer profile, default marketing preferences (all promotional channels off unless opted in at registration) and the first consent log rows; remove the guest buyer row with the same email |
 | `identity.user.verified` | identity | Mark email or phone verified (orders attaches guest orders with that email itself) |

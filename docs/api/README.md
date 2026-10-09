@@ -1,6 +1,6 @@
 # Marketly API design
 
-Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 33 modules, 1269 endpoints.
+Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 33 modules, 1270 endpoints.
 
 - **GraphQL read layer:** [graphql/README.md](graphql/README.md), composed schemas `graphql/schema.{store,seller,admin}.graphql`, screen queries in `graphql/operations/`
 - **OpenAPI 3.1:** [openapi.json](openapi.json) (open in Swagger UI, Redoc or Postman)
@@ -23,7 +23,7 @@ Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 33 modules, 
 |---|---|---|---|---|
 | [access](modules/access.md) | 1 | What staff may do and how much they may approve: staff roles, the permission registry, role assignments, leads and backups per work area, approval limits per role, approval requests with a second reviewer, and cover while someone is away. Granting access never grants financial authority. | identity | 33 |
 | [audit](modules/audit.md) | 1 | The tamper-evident action history: who did what, in which role, to which record, why, what changed (before and after), which approvals applied and the request id. Every module writes to it through record(); staff read it with filters and authorized exports; retention is a governed setting. | - | 11 |
-| [identity](modules/identity.md) | 1 | Who someone is and how they prove it: accounts for customers, seller members and staff, credentials, email verification, sessions and refresh tokens for the website and the Android app, password recovery, 2-step verification, signed-in devices, guest sessions and the security activity log. | - | 46 |
+| [identity](modules/identity.md) | 1 | Who someone is and how they prove it: accounts for customers, seller members and staff, credentials, email verification, sessions and refresh tokens for the website and the Android app, password recovery, 2-step verification, signed-in devices, guest sessions and the security activity log. | - | 47 |
 | [media](modules/media.md) | 1 | Every uploaded or generated file: images, video and documents. Signed direct uploads, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted). | - | 26 |
 | [notifications](modules/notifications.md) | 1 | Who is told what, on which channel: notification topics for customers, sellers and staff, routing from platform events to recipients (staff by role, with backups), templates with versions and preview, in-app inboxes for the store, Seller Center and Admin Center, email delivery with retries and suppression, seller and staff channel preferences, promotional broadcasts under consent, and Android push devices (phase 3). | identity | 45 |
 | [reports](modules/reports.md) | 1 | Business reporting with stated meanings: metric definitions with a named owner and versions, a report catalogue grouped by business area, report queries with an explicit date basis, currency and time zone, the admin and seller dashboards, and authorized export jobs. All figures come from read models fed by other modules' events, never from their tables. | - | 31 |
@@ -132,3 +132,11 @@ Each module needs only modules in earlier layers (required dependencies; optiona
 | `X-App-Proof` | Bootstrap only: Play Integrity token (Android) or bot-challenge token (website) |
 | `X-Step-Up-Code` | Current 2-step code for endpoints with stepUp kind "code" |
 | `X-Client` | web|android/<version>: analytics and minimum-version checks only, never trusted for authorization |
+
+## Constants
+
+Reserved values every module may use (exported from `backend/src/spec/common.ts`).
+
+| Name | Value | Meaning |
+|---|---|---|
+| `OFFICIAL_STORE_ID` | `"00000000-0000-7000-8000-000000000001"` | Seller id of the Official Store, used wherever a seller id is required (feedback, reviews, returns terms, conversations, report facts, promotion lines). The sellers module never issues it. |

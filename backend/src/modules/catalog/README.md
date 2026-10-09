@@ -289,6 +289,7 @@ What a product is: categories, attributes, brands, products, variants, and the r
 |---|---|
 | productId | `uuid` |
 | variantId | `uuid` |
+| categoryId | `uuid?` The product's category at purchase (finance category fee rates) |
 | productVersion | `int` |
 | title | `string` |
 | brandName | `string?` |
@@ -839,6 +840,7 @@ Indexes: `pk (brand_id, category_id)`, `(category_id, product_count desc)`
 
 | Consumes | From | Does |
 |---|---|---|
+| `access.approval.decided` | access | Finish a publication override that needed approval (approved: apply it; otherwise drop the pending override) |
 | `sellers.seller.restricted` | sellers | When the restriction covers product submissions (optionally scoped to categories), block new drafts and submissions from that seller in scope and pause its open submissions in the review queue |
 | `sellers.seller.suspended` | sellers | Pause the seller's open submissions in the review queue |
 | `sellers.seller.reinstated` | sellers | Return paused submissions to the review queue |

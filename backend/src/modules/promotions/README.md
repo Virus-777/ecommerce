@@ -1267,7 +1267,7 @@ Indexes: `unique (campaign_id, day)`
 | `promotions.participation.invited` | Sellers are invited to a platform campaign | `{ campaignId: uuid, sellerIds: uuid[], respondBy: datetime }` | notifications |
 | `promotions.participation.decided` | A seller accepts, declines or withdraws, or staff remove a participation | `{ participationId: uuid, campaignId: uuid, sellerId: uuid, state: string }` | - |
 | `promotions.coupon.redeemed` | A redemption is committed to a placed order | `{ redemptionId: uuid, campaignId: uuid, orderId: uuid, amount: Money, platformPart: Money, sellerPart: Money }` | finance, reports |
-| `promotions.redemption.reversed` | A redemption is fully or partly reversed after cancellation or refund | `{ redemptionId: uuid, orderItemId: uuid, amount: Money, platformPart: Money, sellerPart: Money }` | reports |
+| `promotions.redemption.reversed` | A redemption is fully or partly reversed after cancellation or refund | `{ redemptionId: uuid, orderItemId: uuid, amount: Money, platformPart: Money, sellerPart: Money }` | finance, reports |
 | `promotions.flash_item.sold_out` | Deal stock of a flash item is used up | `{ campaignId: uuid, offerId: uuid, at: datetime }` | - |
 | `promotions.budget.threshold_reached` | Budget use crosses 90% | `{ campaignId: uuid, budget: Money, used: Money }` | - |
 

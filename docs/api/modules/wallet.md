@@ -360,11 +360,12 @@ Indexes: `(state, created_at)`, `(customer_id, created_at)`
 
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
-| `wallet.credit.granted` | Credit is added (refund to credit, goodwill, price adjustment, gift card) | `{ customerId: uuid, entryId: uuid, kind: string, amount: Money, chargedTo: enum(platform|seller)?, sellerId: uuid?, caseId: uuid?, orderId: uuid? }` | finance |
+| `wallet.credit.granted` | Credit is added (refund to credit, goodwill, price adjustment, gift card) | `{ customerId: uuid, entryId: uuid, kind: enum(refund_to_credit|order_refund_returned|goodwill|price_adjustment|gift_card_redeemed), amount: Money, chargedTo: enum(platform|seller)?, sellerId: uuid?, caseId: uuid?, orderId: uuid? }` | finance |
 | `wallet.credit.used` | A hold is captured on an accepted order | `{ customerId: uuid, orderId: uuid, amount: Money }` | finance |
 | `wallet.credit.expired` | A lot expires unused | `{ customerId: uuid, lotId: uuid, amount: Money }` | - |
 | `wallet.credit.reversed` | A goodwill grant is reversed | `{ customerId: uuid, grantId: uuid, amount: Money, reason: text }` | - |
 | `wallet.credit.corrected` | Staff correct a balance | `{ customerId: uuid, entryId: uuid, amount: Money, reason: text }` | - |
+| `wallet.goodwill.decided` | A goodwill grant waiting for approval is granted or rejected | `{ grantId: uuid, customerId: uuid, status: enum(granted|rejected), amount: Money, caseId: uuid? }` | support |
 | `wallet.gift_card.issued` | A gift card batch is issued | `{ batchId: uuid, count: int, total: Money, purpose: string }` | - |
 | `wallet.gift_card.redeemed` | A gift card is added to store credit | `{ giftCardId: uuid, customerId: uuid, amount: Money }` | - |
 

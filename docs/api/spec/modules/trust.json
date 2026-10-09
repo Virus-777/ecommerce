@@ -300,6 +300,7 @@
       { "name": "trust.assessment.completed", "when": "A seller application or account assessment is recorded", "payload": { "reportId": "uuid", "subjectType": "string", "subjectId": "uuid", "level": "string", "flags": "json[]", "recommendation": "text", "recommendedHoldDays": "int?" } }
     ],
     "consumes": [
+      { "name": "access.approval.decided", "does": "Finish an accepted or reversed recommendation that needed approval (approved: apply; otherwise return it to its previous state)" },
       { "name": "reviews.content.referred", "does": "Open or extend a fake_reviews report with the referred reviews as subjects" },
       { "name": "messaging.message.reported", "does": "Open an abuse report for the conversation" },
       { "name": "orders.order.placed", "does": "Feed the linked-new-accounts detection rule (accounts, cards, shipping address)" },

@@ -339,6 +339,22 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | amount | `Money` |
 | reason | `text` |
 
+### ReturnedItem
+
+| Field | Type |
+|---|---|
+| orderItemId | `uuid` |
+| quantity | `int` |
+| variantId | `uuid` |
+| stockItemId | `uuid?` |
+
+### ReturnItemQuantity
+
+| Field | Type |
+|---|---|
+| orderItemId | `uuid` |
+| quantity | `int` |
+
 ### RefundBreakdown
 
 | Field | Type |
@@ -1275,22 +1291,22 @@ Indexes: `(return_id, at)`
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
 | `returns.return.requested` | A customer submits a return (one event per seller return) | `{ returnId: uuid, ref: string, orderId: uuid, ownerType: enum(official|seller), sellerId: uuid?, orderItemIds: uuid[], reason: string, responseDueAt: datetime }` | notifications, orders, reports, sellers |
-| `returns.return.info_requested` | Seller or staff asks the customer a question | `{ returnId: uuid, replyDueAt: datetime }` | notifications |
-| `returns.return.approved` | Seller, Official Store or platform approves (with or without return) | `{ returnId: uuid, ownerType: enum(official|seller), sellerId: uuid?, withoutReturn: bool, platformDecision: bool, dropOffBy: datetime? }` | notifications, warehouse |
-| `returns.return.rejected` | A return is rejected with an explanation | `{ returnId: uuid, ownerType: enum(official|seller), sellerId: uuid?, reasonCode: string, platformDecision: bool }` | notifications, orders |
+| `returns.return.info_requested` | Seller or staff asks the customer a question | `{ returnId: uuid, customerId: uuid?, contactEmail: email?, replyDueAt: datetime }` | notifications |
+| `returns.return.approved` | Seller, Official Store or platform approves (with or without return) | `{ returnId: uuid, ref: string, orderId: uuid, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, items: ReturnItemQuantity[], withoutReturn: bool, platformDecision: bool, dropOffBy: datetime?, trackingNumber: string? }` | notifications, warehouse |
+| `returns.return.rejected` | A return is rejected with an explanation | `{ returnId: uuid, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, reasonCode: string, platformDecision: bool }` | notifications, orders |
 | `returns.return.escalated` | Customer asks Marketly to step in, a seller misses a deadline, or staff take over | `{ returnId: uuid, ownerType: enum(official|seller), sellerId: uuid?, orderId: uuid, reason: string, by: Actor }` | notifications, support, workqueues |
 | `returns.return.shipped` | Return parcel dropped off (first carrier scan or customer tracking) | `{ returnId: uuid, trackingNumber: string? }` | - |
-| `returns.return.received` | Return received at the warehouse or seller address | `{ returnId: uuid, ownerType: enum(official|seller), sellerId: uuid?, receivedAt: datetime }` | fulfillment-service, inventory, notifications, orders |
-| `returns.return.inspected` | Inspection recorded | `{ returnId: uuid, ownerType: enum(official|seller), sellerId: uuid?, conditionOutcome: string, proposedStockOutcome: string, variantId: uuid, quantity: int }` | inventory, notifications, reports |
+| `returns.return.received` | Return received at the warehouse or seller address | `{ returnId: uuid, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, items: ReturnedItem[], receivedAt: datetime }` | fulfillment-service, inventory, notifications, orders |
+| `returns.return.inspected` | Inspection recorded | `{ returnId: uuid, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, conditionOutcome: string, proposedStockOutcome: string, variantId: uuid, quantity: int }` | inventory, notifications, reports |
 | `returns.return.completed` | The remedy finished (refund sent, replacement shipped, credit issued) | `{ returnId: uuid, outcome: enum(refunded|partly_refunded|replaced|exchanged|credited) }` | - |
 | `returns.return.cancelled` | Customer withdraws, information or drop-off deadline expires | `{ returnId: uuid, by: Actor, reason: string? }` | orders |
-| `returns.label.created` | A prepaid return label is issued; finance charges the payer | `{ returnId: uuid, ownerType: enum(official|seller), sellerId: uuid?, labelId: uuid, orderId: uuid, cost: Money, paidBy: enum(seller|customer|platform) }` | finance, notifications |
+| `returns.label.created` | A prepaid return label is issued; finance charges the payer | `{ returnId: uuid, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, labelId: uuid, orderId: uuid, cost: Money, paidBy: enum(seller|customer|platform) }` | finance, notifications |
 | `returns.refund.requested` | A refund request enters Finance review | `{ refundRequestId: uuid, orderId: uuid, total: Money, source: string }` | - |
-| `returns.refund.approved` | A refund is approved and handed to payments (not yet sent) | `{ refundRequestId: uuid, returnId: uuid?, caseId: uuid?, orderId: uuid, orderItemIds: uuid[], ownerType: enum(official|seller), sellerId: uuid?, source: enum(return|case|exception|seller), trustReportId: uuid?, total: Money, breakdown: RefundBreakdown, fundedBy: string, sellerShare: Money?, platformShare: Money?, approvedBy: Actor }` | finance, notifications, orders, promotions, support, trust, workqueues |
+| `returns.refund.approved` | A refund is approved and handed to payments (not yet sent) | `{ refundRequestId: uuid, returnId: uuid?, caseId: uuid?, orderId: uuid, customerId: uuid?, contactEmail: email?, orderItemIds: uuid[], ownerType: enum(official|seller), sellerId: uuid?, source: enum(return|case|exception|seller), trustReportId: uuid?, total: Money, breakdown: RefundBreakdown, fundedBy: string, sellerShare: Money?, platformShare: Money?, approvedBy: Actor }` | finance, notifications, orders, promotions, support, trust, workqueues |
 | `returns.refund.declined` | Finance sends a refund request back | `{ refundRequestId: uuid, reason: text }` | - |
 | `returns.exception.proposed` | Refund-without-return proposed by staff | `{ returnId: uuid, reasonCode: string }` | - |
 | `returns.exception.approved` | Refund-without-return approved (seller or Finance) | `{ returnId: uuid, reasonCode: string, approvedBy: Actor }` | - |
-| `returns.replacement.created` | A replacement or exchange is created and stock reserved | `{ replacementId: uuid, returnId: uuid, orderId: uuid, orderItemId: uuid, ownerType: enum(official|seller), sellerId: uuid?, variantId: uuid, offerId: uuid, quantity: int, kind: string }` | notifications, orders, shipping, support |
+| `returns.replacement.created` | A replacement or exchange is created and stock reserved | `{ replacementId: uuid, returnId: uuid, orderId: uuid, customerId: uuid?, contactEmail: email?, orderItemId: uuid, ownerType: enum(official|seller), sellerId: uuid?, variantId: uuid, offerId: uuid, quantity: int, kind: string }` | notifications, orders, shipping, support |
 | `returns.seller_terms.changed` | A seller changes return terms or return address | `{ sellerId: uuid, version: int }` | - |
 | `returns.policy.proposed` | Baseline or category exception change proposed | `{ policyVersionId: uuid?, categoryExceptionId: uuid?, effectiveFrom: datetime }` | - |
 | `returns.policy.changed` | A baseline or category exception becomes active | `{ policyVersionId: uuid?, categoryId: uuid?, effectiveFrom: datetime }` | - |
@@ -1336,6 +1352,8 @@ Indexes: `(return_id, at)`
 | listRefundRequestsForCase | `(caseId: uuid) => RefundRequest[]`<br>Refund requests created by a case decision, with Finance approval state (admin dispute view) | graphql |
 | sellerReturnTermsFor | `(sellerIds: uuid[]) => map<EffectiveTerms>`<br>Storefront returns section: the seller's standard terms for new items (resolveTerms with no category or condition). Category exceptions and per-offer terms show on the product page and are frozen on the order item. | sellers, graphql |
 | exportRows | `(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }`<br>Export rows for reports datasets returns.admin.requests, returns.admin.inspections and returns.seller.requests (seller rows scoped to the principal's seller) | reports |
+| getReturn | `(returnId: uuid) => ReturnCase | null`<br>Any return by id, staff view (same as getReturnAdmin by ref) | warehouse |
+| cancelRefundsForCase | `(caseId: uuid, reason: string) => { cancelled: RefundRequest[], notCancellable: RefundRequest[] }`<br>When an appeal overturns a case decision: cancel the case's refund requests still requested, under review or declined. Approved, processing or sent ones are returned in notCancellable (money already moving). | support |
 | countOpenReturnsForProducts | `(productIds: uuid[]) => map<int>`<br>Open return requests per product (not closed, refunded or rejected). Catalog publication-impact preview. | catalog |
 
 ## Permissions

@@ -1876,6 +1876,7 @@ export const spec = defineModuleSpec({
       "customers.account.closed": { when: "Closure completes; identity disables sign-in, notifications stops promotional sends", payload: () => CustomersAccountClosedEvent },
     },
     consumes: {
+      "access.approval.decided": "Finish a staff account closure that needed approval (approved: close; rejected, cancelled or expired: revert the pending closure)",
       "orders.order.placed": "When guestEmail is set, add or update the guest buyer row (order count, spend, last order) Also: Update order count, spend and the used address's lastUsedAt",
       "identity.user.registered": "Create the customer profile, default marketing preferences (all promotional channels off unless opted in at registration) and the first consent log rows; remove the guest buyer row with the same email",
       "identity.user.verified": "Mark email or phone verified (orders attaches guest orders with that email itself)",

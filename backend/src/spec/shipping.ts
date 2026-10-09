@@ -1846,6 +1846,10 @@ export interface ShippingShipmentDispatchedEvent {
   shipmentId: string;
   kind: "outbound" | "replacement" | "return";
   orderId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   groupId: string;
   returnId?: string | null;
   ownerType: "official" | "seller";
@@ -1862,6 +1866,8 @@ export const ShippingShipmentDispatchedEvent: z.ZodType<ShippingShipmentDispatch
   shipmentId: z.uuid(),
   kind: z.enum(["outbound", "replacement", "return"]),
   orderId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   groupId: z.uuid(),
   returnId: z.uuid().nullish(),
   ownerType: z.enum(["official", "seller"]),
@@ -1912,6 +1918,10 @@ export interface ShippingShipmentDeliveredEvent {
   shipmentId: string;
   kind: "outbound" | "replacement" | "return";
   orderId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   groupId: string;
   returnId?: string | null;
   sellerId?: string | null;
@@ -1923,6 +1933,8 @@ export const ShippingShipmentDeliveredEvent: z.ZodType<ShippingShipmentDelivered
   shipmentId: z.uuid(),
   kind: z.enum(["outbound", "replacement", "return"]),
   orderId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   groupId: z.uuid(),
   returnId: z.uuid().nullish(),
   sellerId: z.uuid().nullish(),
@@ -1937,6 +1949,10 @@ export interface ShippingShipmentExceptionEvent {
   exceptionId: string;
   kind: "seller_cannot_fulfill" | "late_dispatch" | "missing_tracking" | "lost_or_damaged" | "failed_delivery";
   orderId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   groupId: string;
   shipmentId?: string | null;
   sellerId?: string | null;
@@ -1950,6 +1966,8 @@ export const ShippingShipmentExceptionEvent: z.ZodType<ShippingShipmentException
   exceptionId: z.uuid(),
   kind: z.enum(["seller_cannot_fulfill", "late_dispatch", "missing_tracking", "lost_or_damaged", "failed_delivery"]),
   orderId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   groupId: z.uuid(),
   shipmentId: z.uuid().nullish(),
   sellerId: z.uuid().nullish(),

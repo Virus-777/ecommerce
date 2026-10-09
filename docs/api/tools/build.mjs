@@ -150,6 +150,11 @@ for (const m of modules) {
 }
 const fullPath = (m, ep) => common.areas[ep.area].prefix.replace('{module}', m.name) + ep.path;
 const seenRoutes = new Map();
+for (const [name, c] of Object.entries(common.constants ?? {})) {
+  if (!/^[A-Z][A-Z0-9_]*$/.test(name)) err('common.json', `constant "${name}" must be UPPER_SNAKE`);
+  if (!['string', 'number', 'boolean'].includes(typeof c?.value)) err('common.json', `constant "${name}" needs a string, number or boolean "value"`);
+  if (typeof c?.desc !== 'string' || !c.desc) err('common.json', `constant "${name}" needs a "desc"`);
+}
 
 for (const m of modules) {
   const W = m.file;
@@ -394,6 +399,7 @@ for (const m of modules) (layers[level[m.name]] ??= []).push(m.name);
 idx.push('', '## Dependency layers', '', 'Each module needs only modules in earlier layers (required dependencies; optional ones are listed on each module page).', '', '| Layer | Modules |', '|---|---|', ...layers.map((ms, i) => `| ${i} | ${ms.sort().map((n) => `[${n}](modules/${n}.md)`).join(', ')} |`));
 idx.push('', '## Errors', '', '| Code | Status | Meaning |', '|---|---|---|', ...Object.entries(common.errors).map(([c, d]) => `| \`${c}\` | ${d.status} | ${d.meaning} |`));
 idx.push('', '## Headers', '', '| Header | Use |', '|---|---|', ...Object.entries(common.headers).map(([h, d]) => `| \`${h}\` | ${d} |`));
+if (Object.keys(common.constants ?? {}).length) idx.push('', '## Constants', '', 'Reserved values every module may use (exported from `backend/src/spec/common.ts`).', '', '| Name | Value | Meaning |', '|---|---|---|', ...Object.entries(common.constants).map(([n, c]) => `| \`${n}\` | \`${JSON.stringify(c.value)}\` | ${c.desc} |`));
 writeFileSync(join(apiDir, 'README.md'), `${idx.join('\n')}\n`);
 
 /* ------------------------------------------------------------------ Viewer data */

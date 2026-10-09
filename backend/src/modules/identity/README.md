@@ -54,7 +54,7 @@ Who someone is and how they prove it: accounts for customers, seller members and
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| POST | `/api/seller/identity/reauth` | Confirm it is you before a sensitive Seller Center action _(audited)_ | seller | `ReauthRequest` → `ReauthToken` |
+| POST | `/api/seller/identity/reauth` | Confirm it is you before a sensitive Seller Center action _(audited, before seller is chosen)_ | seller | `ReauthRequest` → `ReauthToken` |
 | GET | `/api/seller/identity/session/sellers` | Sellers this member can act for (seller switcher) _(before seller is chosen)_ | seller | `SellerContext[]` |
 | POST | `/api/seller/identity/session/seller-context` | Choose or switch the seller this session acts for _(before seller is chosen)_ | seller | `{ sellerId: uuid }` → `SessionTokens` |
 
@@ -62,6 +62,7 @@ Who someone is and how they prove it: accounts for customers, seller members and
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
+| POST | `/api/admin/identity/reauth` | Confirm it is you before a sensitive Admin Center action _(audited)_ | staff | `ReauthRequest` → `ReauthToken` |
 | GET | `/api/admin/identity/accounts` | Find accounts (staff or members) | staff<br>`identity.accounts.view` | Page<AccountListItem> |
 | GET | `/api/admin/identity/accounts/{id}` | Account security detail (devices, lockout, recent activity) | staff<br>`identity.accounts.view` | `AccountAdmin` |
 | POST | `/api/admin/identity/accounts/{id}/lock` | Lock an account (suspected compromise, offboarding) _(audited)_ | staff<br>`identity.accounts.manage` | `LockRequest` → `AccountAdmin` |
@@ -477,6 +478,7 @@ Who someone is and how they prove it: accounts for customers, seller members and
 
 | Field | Type |
 |---|---|
+| purpose | `string` Step-up purpose of the endpoint that will consume the token, e.g. payout-account |
 | password | `string?` |
 | code | `string?` 2-step code instead of the password |
 
@@ -838,6 +840,7 @@ Indexes: `(email_normalized, at)`, `(ip, at)`
 | token_hash | text pk |
 | account_id | uuid → accounts |
 | session_id | uuid → sessions |
+| purpose | text |
 | expires_at | timestamptz |
 | used_at | timestamptz? |
 
@@ -873,8 +876,6 @@ Indexes: `(expires_at)`
 
 | Function | Signature | Used by |
 |---|---|---|
-| authenticate | `(accessToken: string) => Principal | null`<br>Verify an access token and return who is calling. Used by the kernel HTTP layer for every area; seller principals carry the chosen sellerId and memberId. | kernel |
-| verifyGuestSession | `(guestSessionId: uuid) => GuestSession | null`<br>Validate the X-Guest-Session header and touch its expiry | kernel, cart, checkout, customers |
 | getAccount | `(accountId: uuid) => AccountSummary | null`<br>Email, display name, status, 2-step state | customers, sellers, access, notifications, audit, support |
 | getAccounts | `(accountIds: uuid[]) => AccountSummary[]`<br>Batch lookup for lists (staff directory, seller members, audit names) | access, sellers, audit, notifications |
 | findAccountByEmail | `(email: string, realm: 'member' | 'staff') => AccountSummary | null`<br>Used when inviting someone who may already have an account | sellers, access |
@@ -890,7 +891,7 @@ Indexes: `(expires_at)`
 | closeAccount | `(accountId: uuid, reason: string) => void`<br>Close the member credential after customers completes a closure. Revokes all sessions; keeps Seller Center access if the account still belongs to a seller. | customers |
 | sendPasswordReset | `(accountId: uuid, input: { reason: string, by: Actor, revokeSessions: bool }) => void`<br>Staff-initiated reset from another module's screen (customers account actions) | customers |
 | startPhoneVerification | `(accountId: uuid, phone: string) => VerificationChallenge`<br>Text a 6-digit code to a new mobile number (needs SMS, phase 2; until then the number stays unverified). Confirmed at POST /api/public/identity/verifications/{id}/confirm; publishes identity.user.verified with channel phone. | customers |
-| verifyReauthToken | `(principal: Principal, token: string, purpose: string) => bool`<br>True when the re-auth token was issued to this account, session, audience and seller for this purpose, is unused and unexpired. Does not consume it. | customers, sellers, finance |
+| verifyReauthToken | `(principal: Principal, token: string, purpose: string) => bool`<br>True only when the re-auth token was issued for this purpose (the endpoint's step-up purpose) to this account, session, audience and seller, and is unused and unexpired. A token issued for another purpose is refused. Does not consume it. | customers, sellers, finance |
 | accountSecurityOf | `(accountIds: uuid[], opts?: { activityLimit?: int }) => Map<uuid, AccountSecurity>`<br>Batched staff view of sign-in security for customer 360 views: AccountAdmin (lock, forced reset, 2-step, devices, recent security activity) plus email status, warnings and a one-line sign-in summary. Callers pass identity account ids (Customer.userId). | graphql |
 | consumeReauthToken | `(token: string) => void`<br>Marks a verified re-auth token used; called by the kernel after the request succeeded. | kernel |
 | revocationsSince | `(cursor?: string) => { sessions: { sessionId: uuid, at: datetime }[], accounts: { accountId: uuid, validAfter: datetime }[], cursor: string }`<br>Revoked sessions and account-wide revocations (tokens issued before validAfter) since a cursor; every server polls this every few seconds and loads the last access-token lifetime on startup. | kernel |

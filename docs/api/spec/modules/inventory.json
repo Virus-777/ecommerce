@@ -43,6 +43,7 @@
     { "name": "submitInbound", "signature": "(receipt: { receiptId: uuid, receiptRef: string, purchaseOrderId: uuid, purchaseOrderRef: string, supplierName: string, locationId: uuid, receivedBy: Actor, receivedAt: datetime, lines: { stockItemId: uuid, expected: int, received: int, damaged: int, binCode?: string, unitCost: Money }[] }) => InboundReceipt", "desc": "Counted receipt waiting for the Inventory Manager to confirm what can be sold", "usedBy": ["purchasing"] },
     { "name": "reportDiscrepancy", "signature": "(input: { kind: 'pick_shortage'|'damage_found', stockItemId: uuid, locationId: uuid, binCode?: string, quantity: int, orderId?: uuid, orderRef?: string, note?: string, photoIds?: uuid[], reportedBy: Actor }) => Discrepancy", "desc": "Called from pick and pack. Damaged reserved units move to Damaged or held at once.", "usedBy": ["warehouse"] },
     { "name": "findBySku", "signature": "(ownerType: 'official'|'seller', skus: string[], sellerId?: uuid) => StockItem[]", "desc": "Resolve SKUs from scans and files", "usedBy": ["warehouse", "purchasing", "offers"] },
+    { "name": "getStockItems", "signature": "(stockItemIds: uuid[]) => StockItemRef[]", "desc": "Stock items by id with SKU, label, owner and main location; unknown ids are left out", "usedBy": ["purchasing", "warehouse"] },
     { "name": "getOfferAvailability", "signature": "(offers: { offerId: uuid, stockItemId: uuid, purchaseLimit?: int }[]) => map<{ state: string, quantity: int|null, maxPerOrder: int, purchaseLimit: int|null, label: string, expectedRestockDate: date|null }>", "desc": "Customer view of offer stock: state, low-stock count, quantity selector limit and restock estimate", "usedBy": ["graphql"] },
     { "name": "getStockForOffers", "signature": "(offerIds: uuid[], viewer: { sellerId?: uuid }) => map<StockItem | null>", "desc": "Stock item per offer; with sellerId only that seller's items resolve", "usedBy": ["graphql"] },
     { "name": "listStockForVariants", "signature": "(variantIds: uuid[], viewer: { sellerId?: uuid }) => map<StockItem[]>", "desc": "Stock items per variant: the seller's own items, or (staff) company and seller items, never summed", "usedBy": ["graphql"] },
@@ -80,6 +81,20 @@
       "nextIncoming": "IncomingCue?",
       "archived": "bool",
       "updatedAt": "datetime"
+    },
+    "StockItemRef": {
+      "id": "uuid",
+      "sku": "string",
+      "label": "string",
+      "ownerType": "enum(official|seller)",
+      "sellerId": "uuid?",
+      "offerId": "uuid?",
+      "productId": "uuid",
+      "variantId": "uuid",
+      "condition": "string",
+      "locationId": { "type": "uuid?", "desc": "Main location: the seller's virtual location, or the company location holding the item's stock (the default location when it has none)" },
+      "locationCode": "string?",
+      "binCode": { "type": "string?", "desc": "Primary bin" }
     },
     "StockItemInput": {
       "sku": "string",

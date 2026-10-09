@@ -446,6 +446,8 @@ export const CatalogMatch: z.ZodType<CatalogMatch> = z.object({
 export interface ProductSnapshot {
   productId: string;
   variantId: string;
+  /** The product's category at purchase (finance category fee rates) */
+  categoryId?: string | null;
   productVersion: number;
   title: string;
   brandName?: string | null;
@@ -458,6 +460,7 @@ export interface ProductSnapshot {
 export const ProductSnapshot: z.ZodType<ProductSnapshot> = z.object({
   productId: z.uuid(),
   variantId: z.uuid(),
+  categoryId: z.uuid().describe("The product's category at purchase (finance category fee rates)").nullish(),
   productVersion: z.number().int(),
   title: z.string(),
   brandName: z.string().nullish(),
@@ -2382,6 +2385,7 @@ export const spec = defineModuleSpec({
       "catalog.brand.changed": { when: "A brand is created, edited, or its status or selling policy changes", payload: () => CatalogBrandChangedEvent },
     },
     consumes: {
+      "access.approval.decided": "Finish a publication override that needed approval (approved: apply it; otherwise drop the pending override)",
       "sellers.seller.restricted": "When the restriction covers product submissions (optionally scoped to categories), block new drafts and submissions from that seller in scope and pause its open submissions in the review queue",
       "sellers.seller.suspended": "Pause the seller's open submissions in the review queue",
       "sellers.seller.reinstated": "Return paused submissions to the review queue",

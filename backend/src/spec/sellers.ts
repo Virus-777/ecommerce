@@ -2264,11 +2264,18 @@ export const SellersPerformanceBelowTargetEvent: z.ZodType<SellersPerformanceBel
 export interface SellersInvitationSentEvent {
   invitationId: string;
   email: string;
+  businessName: string;
+  /** SENSITIVE: the invitation code, delivered in-process to notifications only, never persisted to the outbox or logs */
+  code: string;
+  expiresAt: string;
 }
 
 export const SellersInvitationSentEvent: z.ZodType<SellersInvitationSentEvent> = z.object({
   invitationId: z.uuid(),
   email: z.email(),
+  businessName: z.string(),
+  code: z.string().describe("SENSITIVE: the invitation code, delivered in-process to notifications only, never persisted to the outbox or logs"),
+  expiresAt: z.iso.datetime({ offset: true }),
 });
 
 /* ------------------------------------------------------------------ public API (in-process) */
@@ -2283,6 +2290,10 @@ export interface SellersPublicApi {
   canSell(sellerId: string, check: { activity: 'new_offers' | 'new_listings' | 'product_submissions' | 'offer_reactivation' | 'sales' | 'advertising' | 'promotions', categoryId?: string, condition?: string, offerId?: string }): Promise<{ allowed: boolean, restrictionId?: string, reason?: string, appealRoute?: string }>;
   /** Seller-area permission check used by the kernel auth guard for every seller endpoint Used by: identity, access. */
   getMemberAccess(sellerId: string, accountId: string): Promise<{ memberId: string, role: string, permissions: string[], isOwner: boolean } | null>;
+  /** Active members of the seller with their identity account id, role and whether they are the owner Used by: notifications. */
+  listMembers(sellerId: string): Promise<{ memberId: string, accountId: string, role: string, isOwner: boolean }[]>;
+  /** The seller owner's identity account (null for an unknown seller) Used by: notifications. */
+  ownerOf(sellerId: string): Promise<{ accountId: string, memberId: string } | null>;
   /** Latest metrics vs targets; offers uses it for main-offer eligibility, reports for seller dashboards Used by: offers, reports, search. */
   getPerformance(sellerId: string): Promise<PerformanceSummary>;
   /** Name, logo, verified label, rating and slug for product pages and offer lists Used by: offers, search, content, orders, graphql. */
@@ -4473,7 +4484,7 @@ export const spec = defineModuleSpec({
   summary: "Seller admission and the seller account: the Sell with us programme and multi-step application, verification checks and review decisions, seller statuses with account status, product approval and payout readiness kept separate, setup and launch readiness, storefront profile and public storefront, seller members and permissions, performance against targets, warnings, restrictions, suspensions and appeals.",
   dependsOn: ["identity","access","media"],
   optionalDeps: ["catalog","offers","orders","shipping","returns","support","finance","reviews","trust","content","promotions","search","messaging","workqueues","reports","notifications","audit","settings"],
-  publicApi: ["getSeller","getSellers","canSell","getMemberAccess","getPerformance","getStorefrontCard","requestRestriction","getStorefrontBySlug","searchSellers","exportRows"],
+  publicApi: ["getSeller","getSellers","canSell","getMemberAccess","listMembers","ownerOf","getPerformance","getStorefrontCard","requestRestriction","getStorefrontBySlug","searchSellers","exportRows"],
   permissions: [
     {
       "key": "sellers.accounts.view",

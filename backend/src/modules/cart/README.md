@@ -531,6 +531,7 @@ Indexes: `unique (customer_id, offer_id)`, `(guest_session_id)`
 | getCartForCheckout | `(owner: CartOwner, itemIds?: uuid[]) => CheckoutCartSnapshot`<br>Eligible lines (offer, seller, variant, quantity, accepted unit price, package key) and coupon codes, after a fresh change check. Unavailable lines are returned separately so checkout can explain them. | checkout |
 | removePurchasedItems | `(cartId: uuid, itemIds: uuid[], orderId: uuid) => void`<br>Remove lines that became an accepted order; other lines stay. Marks the cart converted when it becomes empty. | checkout |
 | restoreItems | `(cartId: uuid, lines: CartLineInput[]) => void`<br>Put lines back after a declined payment on an order that was pending, so the customer can pay another way without rebuilding the cart. | checkout |
+| addLine | `(owner: { customerId?: uuid, guestSessionId?: uuid }, line: { offerId: uuid, quantity: int }) => CartItem`<br>Add an offer to the shopper's cart, creating the cart if needed; same rules as POST /cart/items (an offer already in the cart increases its quantity, capped at the limit). Publishes cart.item.added. | wishlist |
 | countOfferInCarts | `(offerId: uuid) => int`<br>How many active carts hold an offer (used to warn a seller before ending an offer). | offers, reports |
 | getCartView | `(owner: CartOwner) => CartView | null`<br>The shopper's cart grouped by package, after a fresh price, stock and eligibility check (same as GET /cart) | graphql |
 

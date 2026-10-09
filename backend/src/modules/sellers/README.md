@@ -1667,7 +1667,7 @@ Indexes: `(email)`, `(state, expires_at)`
 | `sellers.agreement.accepted` | An agreement version is accepted | `{ sellerId: uuid?, applicationId: uuid?, key: string, versionLabel: string }` | - |
 | `sellers.verification.changed` | The Verified seller label is granted, lapses or is revoked | `{ sellerId: uuid, state: string }` | notifications |
 | `sellers.performance.below_target` | The daily computation finds a metric below target (workqueues and notifications pick it up) | `{ sellerId: uuid, metrics: string[], overall: string }` | workqueues |
-| `sellers.invitation.sent` | Staff invite a business to apply | `{ invitationId: uuid, email: email }` | - |
+| `sellers.invitation.sent` | Staff invite a business to apply | `{ invitationId: uuid, email: email, businessName: string, code: string, expiresAt: datetime }` | notifications |
 
 | Consumes | From | Does |
 |---|---|---|
@@ -1701,6 +1701,8 @@ Indexes: `(email)`, `(state, expires_at)`
 | getSellers | `(sellerIds: uuid[]) => SellerSnapshot[]`<br>Batch version for lists | offers, search, orders, reports, graphql |
 | canSell | `(sellerId: uuid, check: { activity: 'new_offers' | 'new_listings' | 'product_submissions' | 'offer_reactivation' | 'sales' | 'advertising' | 'promotions', categoryId?: uuid, condition?: string, offerId?: uuid }) => { allowed: bool, restrictionId?: uuid, reason?: string, appealRoute?: string }`<br>Single answer to 'does any active restriction or suspension block this?'. Offers, catalog, promotions and advertising call it before accepting new work. | offers, catalog, promotions, advertising |
 | getMemberAccess | `(sellerId: uuid, accountId: uuid) => { memberId: uuid, role: string, permissions: string[], isOwner: bool } | null`<br>Seller-area permission check used by the kernel auth guard for every seller endpoint | identity, access |
+| listMembers | `(sellerId: uuid) => { memberId: uuid, accountId: uuid, role: string, isOwner: bool }[]`<br>Active members of the seller with their identity account id, role and whether they are the owner | notifications |
+| ownerOf | `(sellerId: uuid) => { accountId: uuid, memberId: uuid } | null`<br>The seller owner's identity account (null for an unknown seller) | notifications |
 | getPerformance | `(sellerId: uuid) => PerformanceSummary`<br>Latest metrics vs targets; offers uses it for main-offer eligibility, reports for seller dashboards | offers, reports, search |
 | getStorefrontCard | `(sellerIds: uuid[]) => SellerSummary[]`<br>Name, logo, verified label, rating and slug for product pages and offer lists | offers, search, content, orders, graphql |
 | requestRestriction | `(input: RestrictionInput & { sellerId: uuid, requestedBy: Actor }) => Restriction`<br>Used by trust when a Seller Manager accepts a restriction recommendation in the trust screen; follows the same approval rules as the admin endpoint | trust |

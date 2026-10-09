@@ -1064,6 +1064,8 @@ export interface SupportCaseOpenedEvent {
   category: string;
   priority: string;
   customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   sellerId?: string | null;
   orderId?: string | null;
   orderItemIds: string[];
@@ -1078,6 +1080,7 @@ export const SupportCaseOpenedEvent: z.ZodType<SupportCaseOpenedEvent> = z.objec
   category: z.string(),
   priority: z.string(),
   customerId: z.uuid().nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   sellerId: z.uuid().nullish(),
   orderId: z.uuid().nullish(),
   orderItemIds: z.array(z.uuid()),
@@ -1110,6 +1113,10 @@ export interface SupportCaseDecidedEvent {
   ref: string;
   outcome: string;
   orderId?: string | null;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   returnId?: string | null;
   sellerId?: string | null;
   remedies: Remedy[];
@@ -1122,6 +1129,8 @@ export const SupportCaseDecidedEvent: z.ZodType<SupportCaseDecidedEvent> = z.obj
   ref: z.string(),
   outcome: z.string(),
   orderId: z.uuid().nullish(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   returnId: z.uuid().nullish(),
   sellerId: z.uuid().nullish(),
   get remedies() {
@@ -1135,6 +1144,10 @@ export const SupportCaseDecidedEvent: z.ZodType<SupportCaseDecidedEvent> = z.obj
 export interface SupportCaseResolvedEvent {
   caseId: string;
   ref: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   sellerId?: string | null;
   resolvedAt: string;
 }
@@ -1142,6 +1155,8 @@ export interface SupportCaseResolvedEvent {
 export const SupportCaseResolvedEvent: z.ZodType<SupportCaseResolvedEvent> = z.object({
   caseId: z.uuid(),
   ref: z.string(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   sellerId: z.uuid().nullish(),
   resolvedAt: z.iso.datetime({ offset: true }),
 });
@@ -1202,6 +1217,12 @@ export const SupportCaseAssignedEvent: z.ZodType<SupportCaseAssignedEvent> = z.o
 export interface SupportCaseMessageAddedEvent {
   caseId: string;
   messageId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
+  /** Seller on the case (Official Store cases: null) */
+  sellerId?: string | null;
   audience: string;
   authorRole: string;
 }
@@ -1209,6 +1230,9 @@ export interface SupportCaseMessageAddedEvent {
 export const SupportCaseMessageAddedEvent: z.ZodType<SupportCaseMessageAddedEvent> = z.object({
   caseId: z.uuid(),
   messageId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
+  sellerId: z.uuid().describe("Seller on the case (Official Store cases: null)").nullish(),
   audience: z.string(),
   authorRole: z.string(),
 });
@@ -2489,6 +2513,7 @@ export const spec = defineModuleSpec({
       "returns.return.escalated": "Open or link a dispute case for the return and assign it to the Returns team",
       "returns.refund.approved": "Move the matching refund remedy to approved/in progress",
       "payments.refund.sent": "Complete the refund remedy; the case can now be resolved",
+      "wallet.goodwill.decided": "For a case's goodwill credit remedy waiting for approval: mark it granted (done) or rejected and put the case back in the owner's queue",
       "payments.refund.failed": "Mark the refund remedy failed and put the case back in the owner's queue",
       "returns.replacement.created": "Link the replacement to its remedy",
       "shipping.shipment.delivered": "Complete replacement remedies when their shipment is delivered",

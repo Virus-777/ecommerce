@@ -123,11 +123,12 @@
   ],
   "events": {
     "publishes": [
-      { "name": "wallet.credit.granted", "when": "Credit is added (refund to credit, goodwill, price adjustment, gift card)", "payload": { "customerId": "uuid", "entryId": "uuid", "kind": "string", "amount": "Money", "chargedTo": "enum(platform|seller)?", "sellerId": "uuid?", "caseId": "uuid?", "orderId": "uuid?" } },
+      { "name": "wallet.credit.granted", "when": "Credit is added (refund to credit, goodwill, price adjustment, gift card)", "payload": { "customerId": "uuid", "entryId": "uuid", "kind": { "type": "enum(refund_to_credit|order_refund_returned|goodwill|price_adjustment|gift_card_redeemed)", "desc": "What the credit is; finance books only platform-funded goodwill as a platform cost" }, "amount": "Money", "chargedTo": { "type": "enum(platform|seller)?", "desc": "Who funds it: goodwill and price adjustments only; null for refunds and gift cards" }, "sellerId": "uuid?", "caseId": "uuid?", "orderId": "uuid?" } },
       { "name": "wallet.credit.used", "when": "A hold is captured on an accepted order", "payload": { "customerId": "uuid", "orderId": "uuid", "amount": "Money" } },
       { "name": "wallet.credit.expired", "when": "A lot expires unused", "payload": { "customerId": "uuid", "lotId": "uuid", "amount": "Money" } },
       { "name": "wallet.credit.reversed", "when": "A goodwill grant is reversed", "payload": { "customerId": "uuid", "grantId": "uuid", "amount": "Money", "reason": "text" } },
       { "name": "wallet.credit.corrected", "when": "Staff correct a balance", "payload": { "customerId": "uuid", "entryId": "uuid", "amount": "Money", "reason": "text" } },
+      { "name": "wallet.goodwill.decided", "when": "A goodwill grant waiting for approval is granted or rejected", "payload": { "grantId": "uuid", "customerId": "uuid", "status": "enum(granted|rejected)", "amount": "Money", "caseId": "uuid?" } },
       { "name": "wallet.gift_card.issued", "when": "A gift card batch is issued", "payload": { "batchId": "uuid", "count": "int", "total": "Money", "purpose": "string" } },
       { "name": "wallet.gift_card.redeemed", "when": "A gift card is added to store credit", "payload": { "giftCardId": "uuid", "customerId": "uuid", "amount": "Money" } }
     ],

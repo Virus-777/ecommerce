@@ -12,14 +12,14 @@ import * as reports from './reports.js';
 /* ------------------------------------------------------------------ types */
 
 export interface Reference {
-  kind: "order" | "order_item" | "return" | "refund" | "case" | "chargeback" | "payout" | "adjustment" | "ad_campaign" | "statement" | "seller" | "reconciliation";
+  kind: "order" | "order_item" | "return" | "refund" | "case" | "chargeback" | "payout" | "adjustment" | "ad_campaign" | "fulfillment_service" | "statement" | "seller" | "reconciliation";
   id: string;
   /** Human reference, e.g. MK-261005-17730, RT-…, PO-… */
   ref?: string | null;
 }
 
 export const Reference: z.ZodType<Reference> = z.object({
-  kind: z.enum(["order", "order_item", "return", "refund", "case", "chargeback", "payout", "adjustment", "ad_campaign", "statement", "seller", "reconciliation"]),
+  kind: z.enum(["order", "order_item", "return", "refund", "case", "chargeback", "payout", "adjustment", "ad_campaign", "fulfillment_service", "statement", "seller", "reconciliation"]),
   id: z.string(),
   ref: z.string().describe("Human reference, e.g. MK-261005-17730, RT-…, PO-…").nullish(),
 }).register(common.apiTypes, { id: "finance.Reference" });
@@ -241,7 +241,7 @@ export const SellerBalances: z.ZodType<SellerBalances> = z.object({
 export interface LedgerEntry {
   id: string;
   at: string;
-  type: "sale" | "shipping_charge" | "seller_discount" | "marketplace_fee" | "fee_refund" | "refund" | "refund_after_payout" | "hold" | "hold_release" | "adjustment" | "ad_charge" | "label_charge" | "chargeback" | "payout" | "payout_returned" | "owed_offset" | "cancellation";
+  type: "sale" | "shipping_charge" | "seller_discount" | "marketplace_fee" | "fee_refund" | "refund" | "refund_after_payout" | "hold" | "hold_release" | "adjustment" | "ad_charge" | "service_fee" | "charge_credit" | "label_charge" | "chargeback" | "payout" | "payout_returned" | "owed_offset" | "cancellation";
   typeLabel: string;
   reference: Reference;
   /** e.g. 10% of $184.00 item price (shipping excluded) */
@@ -259,7 +259,7 @@ export interface LedgerEntry {
 export const LedgerEntry: z.ZodType<LedgerEntry> = z.object({
   id: z.uuid(),
   at: z.iso.datetime({ offset: true }),
-  type: z.enum(["sale", "shipping_charge", "seller_discount", "marketplace_fee", "fee_refund", "refund", "refund_after_payout", "hold", "hold_release", "adjustment", "ad_charge", "label_charge", "chargeback", "payout", "payout_returned", "owed_offset", "cancellation"]),
+  type: z.enum(["sale", "shipping_charge", "seller_discount", "marketplace_fee", "fee_refund", "refund", "refund_after_payout", "hold", "hold_release", "adjustment", "ad_charge", "service_fee", "charge_credit", "label_charge", "chargeback", "payout", "payout_returned", "owed_offset", "cancellation"]),
   typeLabel: z.string(),
   get reference() {
     return Reference;
@@ -1972,6 +1972,10 @@ export interface FinancePublicApi {
   getSellerBalances(sellerId: string): Promise<SellerBalances>;
   /** Posts a seller ad charge, kept separate from commission Used by: advertising. */
   recordAdCharge(input: { sellerId: string, campaignId: string, campaignRef: string, period: common.DateRange, amount: common.Money, description: string }): Promise<LedgerEntry>;
+  /** Posts a fulfillment-service fee (storage, handling, receiving, returns processing, removal; kind = the FeeCharge type) to the seller ledger as service_fee, kept separate from commission and ad charges. Same idempotencyKey returns the first entry. Used by: fulfillment-service. */
+  recordServiceFee(input: { sellerId: string, amount: common.Money, kind: string, reference: Reference, description: string, idempotencyKey: string }): Promise<LedgerEntry>;
+  /** Credits back all or part of an ad charge or service fee (originalEntryId = the LedgerEntry returned by recordAdCharge or recordServiceFee) as charge_credit; never more than the original minus earlier credits. Same idempotencyKey returns the first entry. Used by: advertising, fulfillment-service. */
+  creditSellerCharge(input: { sellerId: string, amount: common.Money, originalEntryId: string, reason: string, idempotencyKey: string }): Promise<LedgerEntry>;
   /** Company trading costs for the Official Store margin Used by: purchasing, inventory, shipping, warehouse. */
   recordCompanyCost(input: { kind: 'buying_cost' | 'shipping_expense' | 'return_loss' | 'write_off' | 'supplier_credit', amount: common.Money, reference: Reference, at: string }): Promise<void>;
   /** Whether a seller can be paid (verified destination, no full hold) Used by: sellers. */
@@ -3463,7 +3467,7 @@ export const spec = defineModuleSpec({
   summary: "Seller money and company money kept apart: the seller ledger (proceeds, pending, available, held, negative and amounts owed), fee rules, holds, adjustments, payout runs and payouts, statements, payout-destination verification, daily reconciliation checks, and company trading margins separate from marketplace fee income.",
   dependsOn: ["orders","payments","sellers","access"],
   optionalDeps: ["returns","advertising","promotions","purchasing","inventory","shipping","support","wallet","workqueues","notifications","audit","identity","media","reports","settings","offers"],
-  publicApi: ["previewRefundImpact","calculateFee","getSellerBalances","recordAdCharge","recordCompanyCost","hasPayoutBlock","marketplaceIncomeByDay","getSellerAccount","getStatementForSeller","getStatement","getPayoutRun","listPayoutRuns","holdsForReference","previewOfferEarnings","getNextPayoutRun","previewRefundImpactForOrder","exportRows"],
+  publicApi: ["previewRefundImpact","calculateFee","getSellerBalances","recordAdCharge","recordServiceFee","creditSellerCharge","recordCompanyCost","hasPayoutBlock","marketplaceIncomeByDay","getSellerAccount","getStatementForSeller","getStatement","getPayoutRun","listPayoutRuns","holdsForReference","previewOfferEarnings","getNextPayoutRun","previewRefundImpactForOrder","exportRows"],
   permissions: [
     {
       "key": "finance.ledger.view",
@@ -3920,13 +3924,15 @@ export const spec = defineModuleSpec({
       "shipping.label.voided": "Reverse the charge or expense booked for that labelId (any kind)",
       "shipping.claim.status_changed": "paid: credit paidAmount to whoever bore the loss (seller ledger or company trading); other statuses are kept for reconciliation",
       "promotions.coupon.redeemed": "Record discount funding (platform vs seller) for fee basis and discount reports",
+      "promotions.redemption.reversed": "Reverse the recorded discount funding (platform and seller parts) for the order item, so fee basis and discount reports match after a cancellation or refund",
+      "payments.refund.failed": "Mark the refund's stored funding split failed (nothing is posted until payments.refund.sent); on the final attempt list it in the daily reconciliation",
       "sellers.seller.approved": "Open the seller account and apply the new-seller hold rule",
       "sellers.seller.suspended": "Put the seller's pending payouts on hold with reason restriction (review date from the restriction)",
       "sellers.seller.closed": "Issue a final statement and schedule the last payout after open obligations",
       "sellers.payout_account.changed": "Open a destination review; keep paying the current verified destination",
       "access.approval.decided": "Finish approval-required holds, adjustments, corrections, payout runs and fee rule changes",
       "support.case.decided": "Release or apply dispute holds linked to the case",
-      "wallet.credit.granted": "Phase 3: record the store-credit liability (refund to credit, goodwill, gift cards)",
+      "wallet.credit.granted": "Phase 3: record the store-credit liability (refund to credit, goodwill, gift cards). Only kind goodwill with chargedTo platform is booked as a platform cost; chargedTo seller is posted to the seller's earnings",
       "wallet.credit.used": "Phase 3: reduce the store-credit liability when credit pays for an order"
     },
   },

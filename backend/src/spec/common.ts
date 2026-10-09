@@ -310,3 +310,6 @@ export const headers = {
   "X-Step-Up-Code": "Current 2-step code for endpoints with stepUp kind \"code\"",
   "X-Client": "web|android/<version>: analytics and minimum-version checks only, never trusted for authorization"
 } as const;
+
+/** Seller id of the Official Store, used wherever a seller id is required (feedback, reviews, returns terms, conversations, report facts, promotion lines). The sellers module never issues it. */
+export const OFFICIAL_STORE_ID = '00000000-0000-7000-8000-000000000001' as const;

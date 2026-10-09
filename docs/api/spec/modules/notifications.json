@@ -491,6 +491,7 @@
       { "name": "support.case.decided", "does": "Customer and seller: decision and remedy, with the appeal deadline" },
       { "name": "support.case.resolved", "does": "Customer: case resolved" },
       { "name": "messaging.message.sent", "does": "Recipient (customer or seller members with customer permission): new message, reply-to token in email" },
+      { "name": "sellers.invitation.sent", "does": "Email the invited business its invitation code and how to apply (code never stored in the delivery log)" },
       { "name": "sellers.application.submitted", "does": "Staff: new application to Seller Manager" },
       { "name": "sellers.application.information_requested", "does": "Applicant: information required, with deadline" },
       { "name": "sellers.application.decided", "does": "Applicant: application result (approved with next steps, or reasons)" },

@@ -111,6 +111,18 @@ Used in `types`, `body`, `query`, event `payload` and inline objects.
 
 Module-specific error codes go in `"errorCodes": { "OFFER_CHANGED": { "status": 409, "meaning": "…" } }` at the top level of the module file.
 
+## Constants
+
+Reserved values every module may use go in `common.json` under `constants`. `npm run gen` exports each from `backend/src/spec/common.ts` (`export const OFFICIAL_STORE_ID = '…' as const;`).
+
+```jsonc
+"constants": {
+  "OFFICIAL_STORE_ID": { "value": "00000000-0000-7000-8000-000000000001", "desc": "…" }   // UPPER_SNAKE name; string, number or boolean value
+}
+```
+
+`OFFICIAL_STORE_ID` is the seller id of the Official Store wherever a seller id is required (feedback, reviews, returns terms, conversations, report facts, promotion lines). The sellers module never issues it.
+
 ## Rules
 1. Paths are nouns, plural, kebab-case; actions on a record are `POST /{things}/{id}/{verb}` (e.g. `/payouts/{id}/approve`).
 2. Every list endpoint is `paging: true` unless it is small and bounded (e.g. categories).

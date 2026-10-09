@@ -33,6 +33,8 @@
     { "name": "calculateFee", "signature": "(input: FeeCalcInput) => FeeCalculation", "desc": "Fee and seller earnings for a price under the active fee rules", "usedBy": ["offers", "promotions", "sellers"] },
     { "name": "getSellerBalances", "signature": "(sellerId: uuid) => SellerBalances", "desc": "Balances for dashboards and seller detail", "usedBy": ["sellers", "reports", "graphql"] },
     { "name": "recordAdCharge", "signature": "(input: { sellerId: uuid, campaignId: uuid, campaignRef: string, period: DateRange, amount: Money, description: string }) => LedgerEntry", "desc": "Posts a seller ad charge, kept separate from commission", "usedBy": ["advertising"] },
+    { "name": "recordServiceFee", "signature": "(input: { sellerId: uuid, amount: Money, kind: string, reference: Reference, description: string, idempotencyKey: string }) => LedgerEntry", "desc": "Posts a fulfillment-service fee (storage, handling, receiving, returns processing, removal; kind = the FeeCharge type) to the seller ledger as service_fee, kept separate from commission and ad charges. Same idempotencyKey returns the first entry.", "usedBy": ["fulfillment-service"] },
+    { "name": "creditSellerCharge", "signature": "(input: { sellerId: uuid, amount: Money, originalEntryId: uuid, reason: string, idempotencyKey: string }) => LedgerEntry", "desc": "Credits back all or part of an ad charge or service fee (originalEntryId = the LedgerEntry returned by recordAdCharge or recordServiceFee) as charge_credit; never more than the original minus earlier credits. Same idempotencyKey returns the first entry.", "usedBy": ["advertising", "fulfillment-service"] },
     { "name": "recordCompanyCost", "signature": "(input: { kind: 'buying_cost' | 'shipping_expense' | 'return_loss' | 'write_off' | 'supplier_credit', amount: Money, reference: Reference, at: datetime }) => void", "desc": "Company trading costs for the Official Store margin", "usedBy": ["purchasing", "inventory", "shipping", "warehouse"] },
     { "name": "hasPayoutBlock", "signature": "(sellerId: uuid) => { blocked: bool, reasons: string[] }", "desc": "Whether a seller can be paid (verified destination, no full hold)", "usedBy": ["sellers"] },
     { "name": "marketplaceIncomeByDay", "signature": "(range: DateRange, sellerId?: uuid) => DailySellerIncome[]", "desc": "Fee income per seller per market day (commission and fees charged, fee refunds, net, ad income), from fee_charges and ledger_entries. Company revenue only; seller sales are not income.", "usedBy": ["reports"] },
@@ -49,7 +51,7 @@
   ],
   "types": {
     "Reference": {
-      "kind": "enum(order|order_item|return|refund|case|chargeback|payout|adjustment|ad_campaign|statement|seller|reconciliation)",
+      "kind": "enum(order|order_item|return|refund|case|chargeback|payout|adjustment|ad_campaign|fulfillment_service|statement|seller|reconciliation)",
       "id": "string",
       "ref": { "type": "string?", "desc": "Human reference, e.g. MK-261005-17730, RT-…, PO-…" }
     },
@@ -124,7 +126,7 @@
     "LedgerEntry": {
       "id": "uuid",
       "at": "datetime",
-      "type": "enum(sale|shipping_charge|seller_discount|marketplace_fee|fee_refund|refund|refund_after_payout|hold|hold_release|adjustment|ad_charge|label_charge|chargeback|payout|payout_returned|owed_offset|cancellation)",
+      "type": "enum(sale|shipping_charge|seller_discount|marketplace_fee|fee_refund|refund|refund_after_payout|hold|hold_release|adjustment|ad_charge|service_fee|charge_credit|label_charge|chargeback|payout|payout_returned|owed_offset|cancellation)",
       "typeLabel": "string",
       "reference": "Reference",
       "description": { "type": "string", "desc": "e.g. 10% of $184.00 item price (shipping excluded)" },
@@ -703,13 +705,15 @@
       { "name": "shipping.label.voided", "does": "Reverse the charge or expense booked for that labelId (any kind)" },
       { "name": "shipping.claim.status_changed", "does": "paid: credit paidAmount to whoever bore the loss (seller ledger or company trading); other statuses are kept for reconciliation" },
       { "name": "promotions.coupon.redeemed", "does": "Record discount funding (platform vs seller) for fee basis and discount reports" },
+      { "name": "promotions.redemption.reversed", "does": "Reverse the recorded discount funding (platform and seller parts) for the order item, so fee basis and discount reports match after a cancellation or refund" },
+      { "name": "payments.refund.failed", "does": "Mark the refund's stored funding split failed (nothing is posted until payments.refund.sent); on the final attempt list it in the daily reconciliation" },
       { "name": "sellers.seller.approved", "does": "Open the seller account and apply the new-seller hold rule" },
       { "name": "sellers.seller.suspended", "does": "Put the seller's pending payouts on hold with reason restriction (review date from the restriction)" },
       { "name": "sellers.seller.closed", "does": "Issue a final statement and schedule the last payout after open obligations" },
       { "name": "sellers.payout_account.changed", "does": "Open a destination review; keep paying the current verified destination" },
       { "name": "access.approval.decided", "does": "Finish approval-required holds, adjustments, corrections, payout runs and fee rule changes" },
       { "name": "support.case.decided", "does": "Release or apply dispute holds linked to the case" },
-      { "name": "wallet.credit.granted", "does": "Phase 3: record the store-credit liability (refund to credit, goodwill, gift cards)" },
+      { "name": "wallet.credit.granted", "does": "Phase 3: record the store-credit liability (refund to credit, goodwill, gift cards). Only kind goodwill with chargedTo platform is booked as a platform cost; chargedTo seller is posted to the seller's earnings" },
       { "name": "wallet.credit.used", "does": "Phase 3: reduce the store-credit liability when credit pays for an order" }
     ]
   },

@@ -479,6 +479,30 @@ export const RefundDeduction: z.ZodType<RefundDeduction> = z.object({
   reason: z.string(),
 }).register(common.apiTypes, { id: "returns.RefundDeduction" });
 
+export interface ReturnedItem {
+  orderItemId: string;
+  quantity: number;
+  variantId: string;
+  stockItemId?: string | null;
+}
+
+export const ReturnedItem: z.ZodType<ReturnedItem> = z.object({
+  orderItemId: z.uuid(),
+  quantity: z.number().int(),
+  variantId: z.uuid(),
+  stockItemId: z.uuid().nullish(),
+}).register(common.apiTypes, { id: "returns.ReturnedItem" });
+
+export interface ReturnItemQuantity {
+  orderItemId: string;
+  quantity: number;
+}
+
+export const ReturnItemQuantity: z.ZodType<ReturnItemQuantity> = z.object({
+  orderItemId: z.uuid(),
+  quantity: z.number().int(),
+}).register(common.apiTypes, { id: "returns.ReturnItemQuantity" });
+
 export interface RefundBreakdown {
   itemAmount: common.Money;
   /** Coupon share allocated to the returned items (positive number, subtracted) */
@@ -1798,36 +1822,63 @@ export const ReturnsReturnRequestedEvent: z.ZodType<ReturnsReturnRequestedEvent>
 /** returns.return.info_requested: Seller or staff asks the customer a question */
 export interface ReturnsReturnInfoRequestedEvent {
   returnId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   replyDueAt: string;
 }
 
 export const ReturnsReturnInfoRequestedEvent: z.ZodType<ReturnsReturnInfoRequestedEvent> = z.object({
   returnId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   replyDueAt: z.iso.datetime({ offset: true }),
 });
 
 /** returns.return.approved: Seller, Official Store or platform approves (with or without return) */
 export interface ReturnsReturnApprovedEvent {
   returnId: string;
+  ref: string;
+  orderId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   ownerType: "official" | "seller";
   sellerId?: string | null;
+  items: ReturnItemQuantity[];
   withoutReturn: boolean;
   platformDecision: boolean;
   dropOffBy?: string | null;
+  /** Return label tracking number when a label is issued with the approval */
+  trackingNumber?: string | null;
 }
 
 export const ReturnsReturnApprovedEvent: z.ZodType<ReturnsReturnApprovedEvent> = z.object({
   returnId: z.uuid(),
+  ref: z.string(),
+  orderId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
+  get items() {
+    return z.array(ReturnItemQuantity);
+  },
   withoutReturn: z.boolean(),
   platformDecision: z.boolean(),
   dropOffBy: z.iso.datetime({ offset: true }).nullish(),
+  trackingNumber: z.string().describe("Return label tracking number when a label is issued with the approval").nullish(),
 });
 
 /** returns.return.rejected: A return is rejected with an explanation */
 export interface ReturnsReturnRejectedEvent {
   returnId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   ownerType: "official" | "seller";
   sellerId?: string | null;
   reasonCode: string;
@@ -1836,6 +1887,8 @@ export interface ReturnsReturnRejectedEvent {
 
 export const ReturnsReturnRejectedEvent: z.ZodType<ReturnsReturnRejectedEvent> = z.object({
   returnId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
   reasonCode: z.string(),
@@ -1877,21 +1930,35 @@ export const ReturnsReturnShippedEvent: z.ZodType<ReturnsReturnShippedEvent> = z
 /** returns.return.received: Return received at the warehouse or seller address */
 export interface ReturnsReturnReceivedEvent {
   returnId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   ownerType: "official" | "seller";
   sellerId?: string | null;
+  items: ReturnedItem[];
   receivedAt: string;
 }
 
 export const ReturnsReturnReceivedEvent: z.ZodType<ReturnsReturnReceivedEvent> = z.object({
   returnId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
+  get items() {
+    return z.array(ReturnedItem);
+  },
   receivedAt: z.iso.datetime({ offset: true }),
 });
 
 /** returns.return.inspected: Inspection recorded */
 export interface ReturnsReturnInspectedEvent {
   returnId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   ownerType: "official" | "seller";
   sellerId?: string | null;
   conditionOutcome: string;
@@ -1902,6 +1969,8 @@ export interface ReturnsReturnInspectedEvent {
 
 export const ReturnsReturnInspectedEvent: z.ZodType<ReturnsReturnInspectedEvent> = z.object({
   returnId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
   conditionOutcome: z.string(),
@@ -1939,6 +2008,10 @@ export const ReturnsReturnCancelledEvent: z.ZodType<ReturnsReturnCancelledEvent>
 /** returns.label.created: A prepaid return label is issued; finance charges the payer */
 export interface ReturnsLabelCreatedEvent {
   returnId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   ownerType: "official" | "seller";
   sellerId?: string | null;
   labelId: string;
@@ -1949,6 +2022,8 @@ export interface ReturnsLabelCreatedEvent {
 
 export const ReturnsLabelCreatedEvent: z.ZodType<ReturnsLabelCreatedEvent> = z.object({
   returnId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
   labelId: z.uuid(),
@@ -1982,6 +2057,10 @@ export interface ReturnsRefundApprovedEvent {
   returnId?: string | null;
   caseId?: string | null;
   orderId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   orderItemIds: string[];
   ownerType: "official" | "seller";
   sellerId?: string | null;
@@ -2000,6 +2079,8 @@ export const ReturnsRefundApprovedEvent: z.ZodType<ReturnsRefundApprovedEvent> =
   returnId: z.uuid().nullish(),
   caseId: z.uuid().nullish(),
   orderId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   orderItemIds: z.array(z.uuid()),
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
@@ -2065,6 +2146,10 @@ export interface ReturnsReplacementCreatedEvent {
   replacementId: string;
   returnId: string;
   orderId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   orderItemId: string;
   ownerType: "official" | "seller";
   sellerId?: string | null;
@@ -2078,6 +2163,8 @@ export const ReturnsReplacementCreatedEvent: z.ZodType<ReturnsReplacementCreated
   replacementId: z.uuid(),
   returnId: z.uuid(),
   orderId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   orderItemId: z.uuid(),
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
@@ -2172,6 +2259,10 @@ export interface ReturnsPublicApi {
   sellerReturnTermsFor(sellerIds: string[]): Promise<Record<string, EffectiveTerms>>;
   /** Export rows for reports datasets returns.admin.requests, returns.admin.inspections and returns.seller.requests (seller rows scoped to the principal's seller) Used by: reports. */
   exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[], nextCursor?: string }>;
+  /** Any return by id, staff view (same as getReturnAdmin by ref) Used by: warehouse. */
+  getReturn(returnId: string): Promise<ReturnCase | null>;
+  /** When an appeal overturns a case decision: cancel the case's refund requests still requested, under review or declined. Approved, processing or sent ones are returned in notCancellable (money already moving). Used by: support. */
+  cancelRefundsForCase(caseId: string, reason: string): Promise<{ cancelled: RefundRequest[], notCancellable: RefundRequest[] }>;
   /** Open return requests per product (not closed, refunded or rejected). Catalog publication-impact preview. Used by: catalog. */
   countOpenReturnsForProducts(productIds: string[]): Promise<Record<string, number>>;
 }
@@ -3614,7 +3705,7 @@ export const spec = defineModuleSpec({
   summary: "Return policies (platform baseline, seller terms, category exceptions, who pays return shipping), per-item eligibility, return requests and decisions, return shipments, receipt and inspection, remedies (refund, replacement, exchange) and the refund request that Finance approves before payments sends the money.",
   dependsOn: ["orders","shipping","payments","inventory"],
   optionalDeps: ["media","finance","support","messaging","access","wallet","workqueues","audit","content","identity","notifications","promotions","purchasing","reports","sellers","settings","customers"],
-  publicApi: ["resolveTerms","returnStateForItems","requestRefund","recordWarehouseReceipt","sellerReturnStats","listOpenForCustomer","getReturnForCustomer","listForCustomer","customerOverview","getReturnForSeller","getReturnAdmin","listForOrder","eligibilityForItems","sellerQueueCounts","listEvidence","listForSeller","listRefundRequests","getRefundRequest","listRefundRequestsForOrder","listRefundRequestsForCase","sellerReturnTermsFor","exportRows","countOpenReturnsForProducts"],
+  publicApi: ["resolveTerms","returnStateForItems","requestRefund","recordWarehouseReceipt","sellerReturnStats","listOpenForCustomer","getReturnForCustomer","listForCustomer","customerOverview","getReturnForSeller","getReturnAdmin","listForOrder","eligibilityForItems","sellerQueueCounts","listEvidence","listForSeller","listRefundRequests","getRefundRequest","listRefundRequestsForOrder","listRefundRequestsForCase","sellerReturnTermsFor","exportRows","getReturn","cancelRefundsForCase","countOpenReturnsForProducts"],
   permissions: [
     {
       "key": "returns.requests.view",

@@ -43912,7 +43912,7 @@
           "Store API · Identity"
         ],
         "summary": "Confirm it's you before a sensitive action",
-        "description": "Returns a single-use re-auth token valid 5 minutes, required by account closure (customers). Seller Center uses POST /api/seller/identity/reauth for payout account and business changes.\n\n**Screens:** account/profile, account/security",
+        "description": "Returns a single-use re-auth token valid 5 minutes for the requested purpose, required by account closure (customers). Seller Center uses POST /api/seller/identity/reauth for payout account and business changes.\n\n**Screens:** account/profile, account/security",
         "security": [
           {
             "bearer": []
@@ -43997,7 +43997,7 @@
           "Seller API · Identity"
         ],
         "summary": "Confirm it is you before a sensitive Seller Center action",
-        "description": "Same check as the store re-auth (password or 2-step code) on the seller session. Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account and the current seller context; required by payout account changes, business change requests and account close (sellers).\n\n**Audited:** recorded in the action history.\n\n**Screens:** seller/finance, seller/store",
+        "description": "Same check as the store re-auth (password or 2-step code) on the seller session. Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account, the purpose and the current seller context (if one is chosen); required by payout account changes, business change requests and account close (sellers).\n\n**Seller context:** optional (works before a seller is chosen).\n\n**Audited:** recorded in the action history.\n\n**Screens:** seller/finance, seller/store",
         "security": [
           {
             "bearer": []
@@ -44072,6 +44072,89 @@
           "seller/finance",
           "seller/store"
         ],
+        "x-audited": true,
+        "x-phase": 1,
+        "x-seller-context": "optional"
+      }
+    },
+    "/api/admin/identity/reauth": {
+      "post": {
+        "operationId": "identity.reauthenticateStaff",
+        "tags": [
+          "Admin API · Identity"
+        ],
+        "summary": "Confirm it is you before a sensitive Admin Center action",
+        "description": "Same check as the store re-auth (password or 2-step code) on the staff session. Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account, session and purpose.\n\n**Audited:** recorded in the action history.",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/identity.ReauthRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/identity.ReauthToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.\nCURRENT_PASSWORD_WRONG: The current password is incorrect.\nCODE_INVALID: The code is wrong. details.attemptsLeft.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked. Only this error should trigger a token refresh (WWW-Authenticate: Bearer error=\"invalid_token\").",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: Too many requests; retry after the Retry-After header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "identity",
+        "x-area": "admin",
+        "x-auth": "staff",
         "x-audited": true,
         "x-phase": 1
       }
@@ -151321,6 +151404,14 @@
             "type": "string",
             "format": "uuid"
           },
+          "categoryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The product's category at purchase (finance category fee rates)"
+          },
           "productVersion": {
             "type": "integer"
           },
@@ -158539,6 +158630,7 @@
               "payout",
               "adjustment",
               "ad_campaign",
+              "fulfillment_service",
               "statement",
               "seller",
               "reconciliation"
@@ -158991,6 +159083,8 @@
               "hold_release",
               "adjustment",
               "ad_charge",
+              "service_fee",
+              "charge_credit",
               "label_charge",
               "chargeback",
               "payout",
@@ -164246,6 +164340,10 @@
       "identity.ReauthRequest": {
         "type": "object",
         "properties": {
+          "purpose": {
+            "type": "string",
+            "description": "Step-up purpose of the endpoint that will consume the token, e.g. payout-account"
+          },
           "password": {
             "type": [
               "string",
@@ -164259,7 +164357,10 @@
             ],
             "description": "2-step code instead of the password"
           }
-        }
+        },
+        "required": [
+          "purpose"
+        ]
       },
       "identity.ReauthToken": {
         "type": "object",
@@ -164493,6 +164594,83 @@
           "state",
           "archived",
           "updatedAt"
+        ]
+      },
+      "inventory.StockItemRef": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sku": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "ownerType": {
+            "type": "string",
+            "enum": [
+              "official",
+              "seller"
+            ]
+          },
+          "sellerId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "offerId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "productId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "variantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "condition": {
+            "type": "string"
+          },
+          "locationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Main location: the seller's virtual location, or the company location holding the item's stock (the default location when it has none)"
+          },
+          "locationCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "binCode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Primary bin"
+          }
+        },
+        "required": [
+          "id",
+          "sku",
+          "label",
+          "ownerType",
+          "productId",
+          "variantId",
+          "condition"
         ]
       },
       "inventory.StockItemInput": {
@@ -173165,6 +173343,14 @@
             "type": "string",
             "format": "uuid"
           },
+          "categoryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Product category at purchase (from the catalog snapshot); finance uses it for category fee rates"
+          },
           "title": {
             "type": "string"
           },
@@ -175690,6 +175876,116 @@
           "createdAt"
         ]
       },
+      "orders.OrderItemInfo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderRef": {
+            "type": "string"
+          },
+          "groupId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ownerType": {
+            "type": "string",
+            "enum": [
+              "official",
+              "seller"
+            ]
+          },
+          "sellerId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "customerId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "offerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "productId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "variantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stockItemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "categoryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending_payment",
+              "confirmed",
+              "preparing",
+              "delayed",
+              "shipped",
+              "delivered",
+              "cancellation_requested",
+              "cancelled",
+              "return_requested",
+              "returned",
+              "refunded"
+            ]
+          },
+          "deliveredAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "returnWindowEndsAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "orderId",
+          "orderRef",
+          "groupId",
+          "ownerType",
+          "offerId",
+          "productId",
+          "variantId",
+          "stockItemId",
+          "quantity",
+          "state"
+        ]
+      },
       "orders.PlacedGroup": {
         "type": "object",
         "properties": {
@@ -175806,6 +176102,14 @@
           "checkoutSessionId": {
             "type": "string",
             "format": "uuid"
+          },
+          "reservationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Checkout's inventory stock hold for this order; carried on orders.order.accepted so inventory can allocate from it"
           },
           "contact": {
             "$ref": "#/components/schemas/orders.Contact"
@@ -185132,6 +185436,50 @@
           "label",
           "amount",
           "reason"
+        ]
+      },
+      "returns.ReturnedItem": {
+        "type": "object",
+        "properties": {
+          "orderItemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "variantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stockItemId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "orderItemId",
+          "quantity",
+          "variantId"
+        ]
+      },
+      "returns.ReturnItemQuantity": {
+        "type": "object",
+        "properties": {
+          "orderItemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "orderItemId",
+          "quantity"
         ]
       },
       "returns.RefundBreakdown": {

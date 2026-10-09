@@ -106,6 +106,38 @@ export const StockItem: z.ZodType<StockItem> = z.object({
   updatedAt: z.iso.datetime({ offset: true }),
 }).register(common.apiTypes, { id: "inventory.StockItem" });
 
+export interface StockItemRef {
+  id: string;
+  sku: string;
+  label: string;
+  ownerType: "official" | "seller";
+  sellerId?: string | null;
+  offerId?: string | null;
+  productId: string;
+  variantId: string;
+  condition: string;
+  /** Main location: the seller's virtual location, or the company location holding the item's stock (the default location when it has none) */
+  locationId?: string | null;
+  locationCode?: string | null;
+  /** Primary bin */
+  binCode?: string | null;
+}
+
+export const StockItemRef: z.ZodType<StockItemRef> = z.object({
+  id: z.uuid(),
+  sku: z.string(),
+  label: z.string(),
+  ownerType: z.enum(["official", "seller"]),
+  sellerId: z.uuid().nullish(),
+  offerId: z.uuid().nullish(),
+  productId: z.uuid(),
+  variantId: z.uuid(),
+  condition: z.string(),
+  locationId: z.uuid().describe("Main location: the seller's virtual location, or the company location holding the item's stock (the default location when it has none)").nullish(),
+  locationCode: z.string().nullish(),
+  binCode: z.string().describe("Primary bin").nullish(),
+}).register(common.apiTypes, { id: "inventory.StockItemRef" });
+
 export interface StockItemInput {
   sku: string;
   productId: string;
@@ -1153,6 +1185,8 @@ export interface InventoryPublicApi {
   reportDiscrepancy(input: { kind: 'pick_shortage'|'damage_found', stockItemId: string, locationId: string, binCode?: string, quantity: number, orderId?: string, orderRef?: string, note?: string, photoIds?: string[], reportedBy: common.Actor }): Promise<Discrepancy>;
   /** Resolve SKUs from scans and files Used by: warehouse, purchasing, offers. */
   findBySku(ownerType: 'official'|'seller', skus: string[], sellerId?: string): Promise<StockItem[]>;
+  /** Stock items by id with SKU, label, owner and main location; unknown ids are left out Used by: purchasing, warehouse. */
+  getStockItems(stockItemIds: string[]): Promise<StockItemRef[]>;
   /** Customer view of offer stock: state, low-stock count, quantity selector limit and restock estimate Used by: graphql. */
   getOfferAvailability(offers: { offerId: string, stockItemId: string, purchaseLimit?: number }[]): Promise<Record<string, { state: string, quantity: number|null, maxPerOrder: number, purchaseLimit: number|null, label: string, expectedRestockDate: string|null }>>;
   /** Stock item per offer; with sellerId only that seller's items resolve Used by: graphql. */
@@ -2188,7 +2222,7 @@ export const spec = defineModuleSpec({
   summary: "How many units exist and in which stock group: stock items per offer/SKU with Available, Reserved, Incoming, Damaged or held and Returned quantities per location, checkout holds and order allocations, an append-only movement ledger, reasoned adjustments with second review, low-stock alerts, receipt confirmation and return stock outcomes.",
   dependsOn: [],
   optionalDeps: ["access","audit","catalog","finance","fulfillment-service","media","purchasing","reports","workqueues","offers"],
-  publicApi: ["createStockItem","getAvailability","hold","extendHold","attachOrder","releaseHold","applyBulkQuantities","getUnitCost","expectIncoming","cancelIncoming","submitInbound","reportDiscrepancy","findBySku","getOfferAvailability","getStockForOffers","listStockForVariants","getSellerStockSummary","getStockSummary","exportRows"],
+  publicApi: ["createStockItem","getAvailability","hold","extendHold","attachOrder","releaseHold","applyBulkQuantities","getUnitCost","expectIncoming","cancelIncoming","submitInbound","reportDiscrepancy","findBySku","getStockItems","getOfferAvailability","getStockForOffers","listStockForVariants","getSellerStockSummary","getStockSummary","exportRows"],
   permissions: [
     {
       "key": "inventory.stock.adjust",

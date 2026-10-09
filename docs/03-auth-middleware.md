@@ -239,12 +239,12 @@ v1 left scope to a helper that each handler would have to remember to call. Acro
 | Proof | Used for | Binding | Lifetime |
 |---|---|---|---|
 | Staff 2-step at sign-in | every admin session | session | until idle or absolute limit |
-| Re-auth token (password or 2-step code) | customer account closure, email change, 2-step removal, recovery-code regeneration; seller payout account change, business change, seller closure | account + session + audience + seller + **purpose** (one per action) | single use, 5 minutes, consumed after success |
+| Re-auth token (password or 2-step code) | customer account closure, email change, 2-step removal, recovery-code regeneration; seller payout account change, business change, seller closure; staff actions that need a re-auth | account + session + audience + seller + **purpose** (one per action: the request names the purpose and `verifyReauthToken` refuses a token issued for another) | single use, 5 minutes, consumed after success |
 | Approval 2-step code | money approvals above `stepUpAbove` ($10,000): `access.approveRequest`, **and** the finance payout-run approval and refund approval that call `access.decide` | request + amount | single use |
 | *(decision 5)* Fresh 2-step for sensitive staff actions | role grants (`access.*`), staff account actions (`identity.staff-accounts.*`), finance destination changes, identity exports | action | single use |
 
 - **Shared failure counter.** Re-auth, every inline current-password check and approval codes count against one identity counter that shares lockout with sign-in: 5 wrong answers lock step-up for 15 minutes and write a security event. Otherwise a stolen session becomes a password or 2-step guessing oracle.
-- **Seller re-auth.** `POST /api/seller/identity/reauth` issues tokens bound to the seller. The store `/reauth` is **not** an `account` endpoint, so a seller session can't use a store re-auth token on seller actions.
+- **Seller and staff re-auth.** `POST /api/seller/identity/reauth` issues tokens bound to the seller (it also works before a seller is chosen); `POST /api/admin/identity/reauth` issues them to staff. The store `/reauth` is **not** an `account` endpoint, so a seller session can't use a store re-auth token on seller actions.
 
 ## 11. Rate limits
 
@@ -305,21 +305,21 @@ Staff roles get **staff-audience keys only.** The seed's wildcards are expanded 
 | Purchasing Manager | `purchasing.*` | `purchasing.orders.send` (to $25,000) |
 | Inventory Manager | `inventory.*` (staff keys) | `inventory.adjustments.apply` (50 units) |
 | Warehouse Manager | `warehouse.*`, `inventory.stock.view`, `inventory.discrepancies.resolve` | `fulfillment-service.reimbursements.approve` (phase 4) |
-| Order Manager | `orders.orders.*`, `orders.cancellations.decide`, `cart.carts.view`, `checkout.sessions.view` | – |
+| Order Manager | `orders.orders.*`, `orders.cancellations.decide`, `cart.carts.view`, `checkout.sessions.view`, `trust.recommendations.decide` | – |
 | Shipping Manager | `shipping.*` (staff keys) | `shipping.claims.open` (to $1,000) |
-| Returns Manager | `returns.requests.*`, `returns.inspections.record`, `returns.exceptions.propose`, `returns.policies.manage`, `inventory.returns.record` | none: **refund approval belongs to Finance** |
-| Catalog Manager | `catalog.*` (staff keys), `media.assets.*` (staff keys), `search.synonyms.manage`, `reviews.answers.staff` | `catalog.products.publication-override` (with Trust and Risk Manager) |
-| Seller Manager | `sellers.*` (staff keys), `offers.offers.view`, `offers.offers.remove` | `sellers.sellers.restrict`, `.suspend`, `.close` (second reviewer), `sellers.performance.targets` |
-| Customer Support Manager | `support.*`, `customers.*` except `accounts.export`, `messaging.*`, `orders.orders.view`, `orders.customers.view-contact`, `returns.requests.view` | `support.remedies.approve`, `wallet.goodwill.grant` (to $50), `customers.accounts.close-with-obligations` |
-| Finance Manager | `finance.*` (staff keys), `payments.*`, `returns.refunds.approve`, `reports.marketplace-finance.view`, `reports.trading.view` | `finance.payouts.release`, `finance.holds.*`, `finance.adjustments.record`, `finance.writeoffs.approve`, `finance.destinations.approve`, `finance.reconciliation.correct`, `payments.disputes.accept`, `returns.refunds.approve`, and the "above it" side of `advertising.charges.void`, `shipping.claims.open`, `wallet.gift-cards.issue` |
-| Marketing Manager | `promotions.*`, `content.homepage.manage`, `reports.customers-marketing.view`, `notifications.broadcasts.manage` | `promotions.budgets.approve` (Marketing limit) |
+| Returns Manager | `returns.requests.*`, `returns.inspections.record`, `returns.exceptions.propose`, `returns.policies.manage`, `inventory.returns.record`, `trust.recommendations.decide` | none: **refund approval belongs to Finance** |
+| Catalog Manager | `catalog.*` (staff keys), `media.assets.*` (staff keys), `search.synonyms.manage`, `reviews.answers.staff`, `trust.recommendations.decide` | `catalog.products.publication-override` (with Trust and Risk Manager) |
+| Seller Manager | `sellers.*` (staff keys), `offers.offers.view`, `offers.offers.remove`, `trust.recommendations.decide` | `sellers.sellers.restrict`, `.suspend`, `.close` (second reviewer), `sellers.performance.targets` |
+| Customer Support Manager | `support.*`, `customers.*` except `accounts.export`, `messaging.*`, `orders.orders.view`, `orders.customers.view-contact`, `returns.requests.view`, `wallet.credit.view`, `wallet.goodwill.grant`, `trust.recommendations.decide` | `support.remedies.approve`, `wallet.goodwill.grant` (to $50), `customers.accounts.close-with-obligations` |
+| Finance Manager | `finance.*` (staff keys), `payments.*`, `returns.refunds.approve`, `reports.marketplace-finance.view`, `reports.trading.view`, `wallet.*`, `trust.recommendations.decide` | `finance.payouts.release`, `finance.holds.*`, `finance.adjustments.record`, `finance.writeoffs.approve`, `finance.destinations.approve`, `finance.reconciliation.correct`, `payments.disputes.accept`, `returns.refunds.approve`, and the "above it" side of `advertising.charges.void`, `shipping.claims.open`, `wallet.gift-cards.issue` |
+| Marketing Manager | `promotions.*`, `content.homepage.manage`, `reports.customers-marketing.view`, `notifications.broadcasts.manage`, `advertising.campaigns.review` | `promotions.budgets.approve` (Marketing limit) |
 | Advertising Manager | `advertising.*` (staff keys) | `advertising.charges.void` (within limit) |
-| Content Manager | `content.*`, `media.assets.manage` | – (policies approved by Business Owner) |
+| Content Manager | `content.*`, `media.assets.manage`, `advertising.campaigns.review` | – (policies approved by Business Owner) |
 | Trust and Risk Manager | `trust.*` except `reports.export-identities`, `reviews.moderation.*`, `reviews.appeals.decide` | `trust.enforcements.reverse`, co-approver of publication override |
 | Reports Analyst | `reports.*` (staff keys) except `readmodels.manage`, `search.analytics.view` | – |
 | Warehouse worker (task) | `warehouse.view`, `warehouse.picking/packing/putaway.perform`, `warehouse.returns.receive` | – |
 | Finance staff (task) | `finance.ledger.view`, `finance.reconciliation.work`, `finance.payouts.prepare`, `finance.holds.manage`, `finance.adjustments.record`, `payments.refunds.view`, `returns.refunds.approve` | within their limits: `finance.holds.place/release`, `finance.adjustments.record` (to $500), `finance.reconciliation.correct` (to $200), `payments.disputes.accept`, `returns.refunds.approve` (to $2,000) |
-| Support agent (task) | `support.cases.view/handle`, `customers.accounts.view`, `customers.notes.write`, `messaging.conversations.read/participate`, `orders.orders.view` | `support.remedies.approve` (to $50) |
+| Support agent (task) | `support.cases.view/handle`, `customers.accounts.view`, `customers.notes.write`, `messaging.conversations.read/participate`, `orders.orders.view`, `wallet.credit.view`, `wallet.goodwill.grant` | `support.remedies.approve` (to $50) |
 
 Every staff role also gets `workqueues.items.view` and `workqueues.items.work` for its own queues. Limits are the spec's example values and must be confirmed by the Business Owner.
 
@@ -357,6 +357,7 @@ Every staff role also gets `workqueues.items.view` and `workqueues.items.work` f
 | 18 | Identity: new `POST /api/public/identity/app-sessions` (bootstrap: app proof → visitor token + refresh token) replaces `POST /guest-sessions`; sign-in and registration claim the visitor session; token claim `kind` | identity |
 | 19 | Headers: remove `X-Guest-Session`; add the app-proof header for bootstrap (`X-App-Proof`) | common.json `headers` |
 | 20 | *(decision 9)* Auth kind `service` for our own server-side clients (website rendering), with client credentials held only on the server | common.json, identity |
+| 21 | Re-auth purpose: `purpose` in `ReauthRequest` and on `reauth_tokens`, checked by `verifyReauthToken`; staff re-auth `POST /api/admin/identity/reauth`; seller re-auth works before a seller is chosen; identity publicApi drops `authenticate` and `verifyGuestSession` (the kernel verifies tokens) | identity |
 
 ## 16. Changes from v1 and v2
 

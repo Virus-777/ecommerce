@@ -867,6 +867,10 @@ export interface PaymentsPaymentCapturedEvent {
   intentId: string;
   captureId: string;
   orderId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   groupId?: string | null;
   amount: common.Money;
   allocations: Allocation[];
@@ -878,6 +882,8 @@ export const PaymentsPaymentCapturedEvent: z.ZodType<PaymentsPaymentCapturedEven
   intentId: z.uuid(),
   captureId: z.uuid(),
   orderId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   groupId: z.uuid().nullish(),
   get amount() {
     return common.Money;
@@ -894,6 +900,10 @@ export interface PaymentsPaymentFailedEvent {
   intentId: string;
   checkoutSessionId: string;
   orderId?: string | null;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   declineCategory: string;
   afterPendingCheck: boolean;
   at: string;
@@ -903,6 +913,8 @@ export const PaymentsPaymentFailedEvent: z.ZodType<PaymentsPaymentFailedEvent> =
   intentId: z.uuid(),
   checkoutSessionId: z.uuid(),
   orderId: z.uuid().nullish(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   declineCategory: z.string(),
   afterPendingCheck: z.boolean(),
   at: z.iso.datetime({ offset: true }),
@@ -913,6 +925,10 @@ export interface PaymentsPaymentPendingCheckEvent {
   intentId: string;
   checkoutSessionId: string;
   orderId?: string | null;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   amount: common.Money;
   since: string;
 }
@@ -921,6 +937,8 @@ export const PaymentsPaymentPendingCheckEvent: z.ZodType<PaymentsPaymentPendingC
   intentId: z.uuid(),
   checkoutSessionId: z.uuid(),
   orderId: z.uuid().nullish(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   get amount() {
     return common.Money;
   },
@@ -995,6 +1013,10 @@ export interface PaymentsRefundSentEvent {
   refundId: string;
   ref: string;
   orderId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   origin: string;
   originId?: string | null;
   amount: common.Money;
@@ -1007,6 +1029,8 @@ export const PaymentsRefundSentEvent: z.ZodType<PaymentsRefundSentEvent> = z.obj
   refundId: z.uuid(),
   ref: z.string(),
   orderId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   origin: z.string(),
   originId: z.uuid().nullish(),
   get amount() {
@@ -1024,6 +1048,10 @@ export interface PaymentsRefundFailedEvent {
   refundId: string;
   ref: string;
   orderId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   origin: string;
   originId?: string | null;
   amount: common.Money;
@@ -1036,6 +1064,8 @@ export const PaymentsRefundFailedEvent: z.ZodType<PaymentsRefundFailedEvent> = z
   refundId: z.uuid(),
   ref: z.string(),
   orderId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   origin: z.string(),
   originId: z.uuid().nullish(),
   get amount() {
@@ -1067,6 +1097,10 @@ export interface PaymentsChargebackOpenedEvent {
   ref: string;
   kind: string;
   orderId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   groupId?: string | null;
   sellerId?: string | null;
   amount: common.Money;
@@ -1078,6 +1112,8 @@ export const PaymentsChargebackOpenedEvent: z.ZodType<PaymentsChargebackOpenedEv
   ref: z.string(),
   kind: z.string(),
   orderId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   groupId: z.uuid().nullish(),
   sellerId: z.uuid().nullish(),
   get amount() {

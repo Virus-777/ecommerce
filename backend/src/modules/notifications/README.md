@@ -940,6 +940,7 @@ Indexes: `(status, scheduled_at)`
 | `support.case.decided` | support | Customer and seller: decision and remedy, with the appeal deadline |
 | `support.case.resolved` | support | Customer: case resolved |
 | `messaging.message.sent` | messaging | Recipient (customer or seller members with customer permission): new message, reply-to token in email |
+| `sellers.invitation.sent` | sellers | Email the invited business its invitation code and how to apply (code never stored in the delivery log) |
 | `sellers.application.submitted` | sellers | Staff: new application to Seller Manager |
 | `sellers.application.information_requested` | sellers | Applicant: information required, with deadline |
 | `sellers.application.decided` | sellers | Applicant: application result (approved with next steps, or reasons) |

@@ -43,25 +43,6 @@
   ],
   "publicApi": [
     {
-      "name": "authenticate",
-      "signature": "(accessToken: string) => Principal | null",
-      "desc": "Verify an access token and return who is calling. Used by the kernel HTTP layer for every area; seller principals carry the chosen sellerId and memberId.",
-      "usedBy": [
-        "kernel"
-      ]
-    },
-    {
-      "name": "verifyGuestSession",
-      "signature": "(guestSessionId: uuid) => GuestSession | null",
-      "desc": "Validate the X-Guest-Session header and touch its expiry",
-      "usedBy": [
-        "kernel",
-        "cart",
-        "checkout",
-        "customers"
-      ]
-    },
-    {
       "name": "getAccount",
       "signature": "(accountId: uuid) => AccountSummary | null",
       "desc": "Email, display name, status, 2-step state",
@@ -204,7 +185,7 @@
     {
       "name": "verifyReauthToken",
       "signature": "(principal: Principal, token: string, purpose: string) => bool",
-      "desc": "True when the re-auth token was issued to this account, session, audience and seller for this purpose, is unused and unexpired. Does not consume it.",
+      "desc": "True only when the re-auth token was issued for this purpose (the endpoint's step-up purpose) to this account, session, audience and seller, and is unused and unexpired. A token issued for another purpose is refused. Does not consume it.",
       "usedBy": [
         "customers",
         "sellers",
@@ -659,6 +640,10 @@
       }
     },
     "ReauthRequest": {
+      "purpose": {
+        "type": "string",
+        "desc": "Step-up purpose of the endpoint that will consume the token, e.g. payout-account"
+      },
       "password": "string?",
       "code": {
         "type": "string?",
@@ -986,6 +971,7 @@
         "token_hash": "text pk",
         "account_id": "uuid → accounts",
         "session_id": "uuid → sessions",
+        "purpose": "text",
         "expires_at": "timestamptz",
         "used_at": "timestamptz?"
       },
@@ -1664,7 +1650,7 @@
       "method": "POST",
       "path": "/reauth",
       "summary": "Confirm it's you before a sensitive action",
-      "desc": "Returns a single-use re-auth token valid 5 minutes, required by account closure (customers). Seller Center uses POST /api/seller/identity/reauth for payout account and business changes.",
+      "desc": "Returns a single-use re-auth token valid 5 minutes for the requested purpose, required by account closure (customers). Seller Center uses POST /api/seller/identity/reauth for payout account and business changes.",
       "auth": "customer",
       "body": "ReauthRequest",
       "response": "ReauthToken",
@@ -1684,8 +1670,9 @@
       "method": "POST",
       "path": "/reauth",
       "summary": "Confirm it is you before a sensitive Seller Center action",
-      "desc": "Same check as the store re-auth (password or 2-step code) on the seller session. Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account and the current seller context; required by payout account changes, business change requests and account close (sellers).",
+      "desc": "Same check as the store re-auth (password or 2-step code) on the seller session. Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account, the purpose and the current seller context (if one is chosen); required by payout account changes, business change requests and account close (sellers).",
       "auth": "seller",
+      "sellerContext": "optional",
       "body": "ReauthRequest",
       "response": "ReauthToken",
       "errors": [
@@ -1698,6 +1685,23 @@
         "seller/finance",
         "seller/store"
       ]
+    },
+    {
+      "id": "reauthenticateStaff",
+      "area": "admin",
+      "method": "POST",
+      "path": "/reauth",
+      "summary": "Confirm it is you before a sensitive Admin Center action",
+      "desc": "Same check as the store re-auth (password or 2-step code) on the staff session. Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account, session and purpose.",
+      "auth": "staff",
+      "body": "ReauthRequest",
+      "response": "ReauthToken",
+      "errors": [
+        "CURRENT_PASSWORD_WRONG",
+        "CODE_INVALID",
+        "RATE_LIMITED"
+      ],
+      "audited": true
     },
     {
       "id": "startTwoStepSetup",

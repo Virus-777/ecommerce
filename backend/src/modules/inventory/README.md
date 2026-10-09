@@ -124,6 +124,23 @@ How many units exist and in which stock group: stock items per offer/SKU with Av
 | archived | `bool` |
 | updatedAt | `datetime` |
 
+### StockItemRef
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| sku | `string` |
+| label | `string` |
+| ownerType | `enum(official|seller)` |
+| sellerId | `uuid?` |
+| offerId | `uuid?` |
+| productId | `uuid` |
+| variantId | `uuid` |
+| condition | `string` |
+| locationId | `uuid?` Main location: the seller's virtual location, or the company location holding the item's stock (the default location when it has none) |
+| locationCode | `string?` |
+| binCode | `string?` Primary bin |
+
 ### StockItemInput
 
 | Field | Type |
@@ -956,6 +973,7 @@ Indexes: `pk (count_id, stock_item_id)`
 | submitInbound | `(receipt: { receiptId: uuid, receiptRef: string, purchaseOrderId: uuid, purchaseOrderRef: string, supplierName: string, locationId: uuid, receivedBy: Actor, receivedAt: datetime, lines: { stockItemId: uuid, expected: int, received: int, damaged: int, binCode?: string, unitCost: Money }[] }) => InboundReceipt`<br>Counted receipt waiting for the Inventory Manager to confirm what can be sold | purchasing |
 | reportDiscrepancy | `(input: { kind: 'pick_shortage'|'damage_found', stockItemId: uuid, locationId: uuid, binCode?: string, quantity: int, orderId?: uuid, orderRef?: string, note?: string, photoIds?: uuid[], reportedBy: Actor }) => Discrepancy`<br>Called from pick and pack. Damaged reserved units move to Damaged or held at once. | warehouse |
 | findBySku | `(ownerType: 'official'|'seller', skus: string[], sellerId?: uuid) => StockItem[]`<br>Resolve SKUs from scans and files | warehouse, purchasing, offers |
+| getStockItems | `(stockItemIds: uuid[]) => StockItemRef[]`<br>Stock items by id with SKU, label, owner and main location; unknown ids are left out | purchasing, warehouse |
 | getOfferAvailability | `(offers: { offerId: uuid, stockItemId: uuid, purchaseLimit?: int }[]) => map<{ state: string, quantity: int|null, maxPerOrder: int, purchaseLimit: int|null, label: string, expectedRestockDate: date|null }>`<br>Customer view of offer stock: state, low-stock count, quantity selector limit and restock estimate | graphql |
 | getStockForOffers | `(offerIds: uuid[], viewer: { sellerId?: uuid }) => map<StockItem | null>`<br>Stock item per offer; with sellerId only that seller's items resolve | graphql |
 | listStockForVariants | `(variantIds: uuid[], viewer: { sellerId?: uuid }) => map<StockItem[]>`<br>Stock items per variant: the seller's own items, or (staff) company and seller items, never summed | graphql |

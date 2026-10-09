@@ -95,6 +95,8 @@ export interface CommonSpec {
   pagination: { query: ObjectExpr };
   errors: Record<string, { status: number; meaning: string }>;
   headers: Record<string, string>;
+  /** Reserved values every module may use (e.g. OFFICIAL_STORE_ID) */
+  constants?: Record<string, { value: string | number | boolean; desc: string }>;
 }
 
 export function loadCommon(): CommonSpec {

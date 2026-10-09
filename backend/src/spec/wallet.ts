@@ -330,8 +330,10 @@ export const LoyaltyAccount: z.ZodType<LoyaltyAccount> = z.object({
 export interface WalletCreditGrantedEvent {
   customerId: string;
   entryId: string;
-  kind: string;
+  /** What the credit is; finance books only platform-funded goodwill as a platform cost */
+  kind: "refund_to_credit" | "order_refund_returned" | "goodwill" | "price_adjustment" | "gift_card_redeemed";
   amount: common.Money;
+  /** Who funds it: goodwill and price adjustments only; null for refunds and gift cards */
   chargedTo?: "platform" | "seller" | null;
   sellerId?: string | null;
   caseId?: string | null;
@@ -341,11 +343,11 @@ export interface WalletCreditGrantedEvent {
 export const WalletCreditGrantedEvent: z.ZodType<WalletCreditGrantedEvent> = z.object({
   customerId: z.uuid(),
   entryId: z.uuid(),
-  kind: z.string(),
+  kind: z.enum(["refund_to_credit", "order_refund_returned", "goodwill", "price_adjustment", "gift_card_redeemed"]).describe("What the credit is; finance books only platform-funded goodwill as a platform cost"),
   get amount() {
     return common.Money;
   },
-  chargedTo: z.enum(["platform", "seller"]).nullish(),
+  chargedTo: z.enum(["platform", "seller"]).describe("Who funds it: goodwill and price adjustments only; null for refunds and gift cards").nullish(),
   sellerId: z.uuid().nullish(),
   caseId: z.uuid().nullish(),
   orderId: z.uuid().nullish(),
@@ -413,6 +415,25 @@ export const WalletCreditCorrectedEvent: z.ZodType<WalletCreditCorrectedEvent> =
     return common.Money;
   },
   reason: z.string(),
+});
+
+/** wallet.goodwill.decided: A goodwill grant waiting for approval is granted or rejected */
+export interface WalletGoodwillDecidedEvent {
+  grantId: string;
+  customerId: string;
+  status: "granted" | "rejected";
+  amount: common.Money;
+  caseId?: string | null;
+}
+
+export const WalletGoodwillDecidedEvent: z.ZodType<WalletGoodwillDecidedEvent> = z.object({
+  grantId: z.uuid(),
+  customerId: z.uuid(),
+  status: z.enum(["granted", "rejected"]),
+  get amount() {
+    return common.Money;
+  },
+  caseId: z.uuid().nullish(),
 });
 
 /** wallet.gift_card.issued: A gift card batch is issued */
@@ -990,6 +1011,7 @@ export const spec = defineModuleSpec({
       "wallet.credit.expired": { when: "A lot expires unused", payload: () => WalletCreditExpiredEvent },
       "wallet.credit.reversed": { when: "A goodwill grant is reversed", payload: () => WalletCreditReversedEvent },
       "wallet.credit.corrected": { when: "Staff correct a balance", payload: () => WalletCreditCorrectedEvent },
+      "wallet.goodwill.decided": { when: "A goodwill grant waiting for approval is granted or rejected", payload: () => WalletGoodwillDecidedEvent },
       "wallet.gift_card.issued": { when: "A gift card batch is issued", payload: () => WalletGiftCardIssuedEvent },
       "wallet.gift_card.redeemed": { when: "A gift card is added to store credit", payload: () => WalletGiftCardRedeemedEvent },
     },
@@ -1404,6 +1426,7 @@ declare module '../kernel/events/event-map.js' {
     "wallet.credit.expired": WalletCreditExpiredEvent;
     "wallet.credit.reversed": WalletCreditReversedEvent;
     "wallet.credit.corrected": WalletCreditCorrectedEvent;
+    "wallet.goodwill.decided": WalletGoodwillDecidedEvent;
     "wallet.gift_card.issued": WalletGiftCardIssuedEvent;
     "wallet.gift_card.redeemed": WalletGiftCardRedeemedEvent;
   }

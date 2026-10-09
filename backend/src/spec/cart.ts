@@ -783,6 +783,8 @@ export interface CartPublicApi {
   removePurchasedItems(cartId: string, itemIds: string[], orderId: string): Promise<void>;
   /** Put lines back after a declined payment on an order that was pending, so the customer can pay another way without rebuilding the cart. Used by: checkout. */
   restoreItems(cartId: string, lines: CartLineInput[]): Promise<void>;
+  /** Add an offer to the shopper's cart, creating the cart if needed; same rules as POST /cart/items (an offer already in the cart increases its quantity, capped at the limit). Publishes cart.item.added. Used by: wishlist. */
+  addLine(owner: { customerId?: string, guestSessionId?: string }, line: { offerId: string, quantity: number }): Promise<CartItem>;
   /** How many active carts hold an offer (used to warn a seller before ending an offer). Used by: offers, reports. */
   countOfferInCarts(offerId: string): Promise<number>;
   /** The shopper's cart grouped by package, after a fresh price, stock and eligibility check (same as GET /cart) Used by: graphql. */
@@ -1218,7 +1220,7 @@ export const spec = defineModuleSpec({
   summary: "One cart across the Official Store and marketplace sellers for customers and guests. Every line is bound to the exact offer the customer chose, lines are grouped into seller packages with delivery estimates and shipping, and every read re-checks price, stock and eligibility so changes are explained per item instead of discarding the cart.",
   dependsOn: ["offers","inventory"],
   optionalDeps: ["catalog","shipping","promotions","customers","identity","media"],
-  publicApi: ["getCartForCheckout","removePurchasedItems","restoreItems","countOfferInCarts","getCartView"],
+  publicApi: ["getCartForCheckout","removePurchasedItems","restoreItems","addLine","countOfferInCarts","getCartView"],
   permissions: [
     {
       "key": "cart.carts.view",

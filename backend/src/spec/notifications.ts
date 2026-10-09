@@ -2382,6 +2382,7 @@ export const spec = defineModuleSpec({
       "support.case.decided": "Customer and seller: decision and remedy, with the appeal deadline",
       "support.case.resolved": "Customer: case resolved",
       "messaging.message.sent": "Recipient (customer or seller members with customer permission): new message, reply-to token in email",
+      "sellers.invitation.sent": "Email the invited business its invitation code and how to apply (code never stored in the delivery log)",
       "sellers.application.submitted": "Staff: new application to Seller Manager",
       "sellers.application.information_requested": "Applicant: information required, with deadline",
       "sellers.application.decided": "Applicant: application result (approved with next steps, or reasons)",

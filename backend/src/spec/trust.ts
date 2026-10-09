@@ -2146,6 +2146,7 @@ export const spec = defineModuleSpec({
       "trust.assessment.completed": { when: "A seller application or account assessment is recorded", payload: () => TrustAssessmentCompletedEvent },
     },
     consumes: {
+      "access.approval.decided": "Finish an accepted or reversed recommendation that needed approval (approved: apply; otherwise return it to its previous state)",
       "reviews.content.referred": "Open or extend a fake_reviews report with the referred reviews as subjects",
       "messaging.message.reported": "Open an abuse report for the conversation",
       "orders.order.placed": "Feed the linked-new-accounts detection rule (accounts, cards, shipping address)",

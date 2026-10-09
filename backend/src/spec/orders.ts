@@ -141,6 +141,8 @@ export interface OrderItem {
   offer: OfferTermsSnapshot;
   returnTerms: ReturnTermsSnapshot;
   stockItemId: string;
+  /** Product category at purchase (from the catalog snapshot); finance uses it for category fee rates */
+  categoryId?: string | null;
   title: string;
   variantLabel: string;
   image?: common.MediaRef | null;
@@ -180,6 +182,7 @@ export const OrderItem: z.ZodType<OrderItem> = z.object({
     return ReturnTermsSnapshot;
   },
   stockItemId: z.uuid(),
+  categoryId: z.uuid().describe("Product category at purchase (from the catalog snapshot); finance uses it for category fee rates").nullish(),
   title: z.string(),
   variantLabel: z.string(),
   get image() {
@@ -1493,6 +1496,44 @@ export const SavedFilter: z.ZodType<SavedFilter> = z.object({
   createdAt: z.iso.datetime({ offset: true }),
 }).register(common.apiTypes, { id: "orders.SavedFilter" });
 
+export interface OrderItemInfo {
+  id: string;
+  orderId: string;
+  orderRef: string;
+  groupId: string;
+  ownerType: "official" | "seller";
+  sellerId?: string | null;
+  customerId?: string | null;
+  offerId: string;
+  productId: string;
+  variantId: string;
+  stockItemId: string;
+  categoryId?: string | null;
+  quantity: number;
+  state: "pending_payment" | "confirmed" | "preparing" | "delayed" | "shipped" | "delivered" | "cancellation_requested" | "cancelled" | "return_requested" | "returned" | "refunded";
+  deliveredAt?: string | null;
+  returnWindowEndsAt?: string | null;
+}
+
+export const OrderItemInfo: z.ZodType<OrderItemInfo> = z.object({
+  id: z.uuid(),
+  orderId: z.uuid(),
+  orderRef: z.string(),
+  groupId: z.uuid(),
+  ownerType: z.enum(["official", "seller"]),
+  sellerId: z.uuid().nullish(),
+  customerId: z.uuid().nullish(),
+  offerId: z.uuid(),
+  productId: z.uuid(),
+  variantId: z.uuid(),
+  stockItemId: z.uuid(),
+  categoryId: z.uuid().nullish(),
+  quantity: z.number().int(),
+  state: z.enum(["pending_payment", "confirmed", "preparing", "delayed", "shipped", "delivered", "cancellation_requested", "cancelled", "return_requested", "returned", "refunded"]),
+  deliveredAt: z.iso.datetime({ offset: true }).nullish(),
+  returnWindowEndsAt: z.iso.datetime({ offset: true }).nullish(),
+}).register(common.apiTypes, { id: "orders.OrderItemInfo" });
+
 export interface PlacedGroup {
   groupId: string;
   ownerType: "official" | "seller";
@@ -1557,6 +1598,8 @@ export const AcceptedPolicyVersion: z.ZodType<AcceptedPolicyVersion> = z.object(
 
 export interface OrderCreateInput {
   checkoutSessionId: string;
+  /** Checkout's inventory stock hold for this order; carried on orders.order.accepted so inventory can allocate from it */
+  reservationId?: string | null;
   contact: Contact;
   channel: "web" | "android";
   currency: string;
@@ -1575,6 +1618,7 @@ export interface OrderCreateInput {
 
 export const OrderCreateInput: z.ZodType<OrderCreateInput> = z.object({
   checkoutSessionId: z.uuid(),
+  reservationId: z.uuid().describe("Checkout's inventory stock hold for this order; carried on orders.order.accepted so inventory can allocate from it").nullish(),
   get contact() {
     return Contact;
   },
@@ -1710,6 +1754,8 @@ export interface OrdersOrderAcceptedEvent {
   contactEmail: string;
   total: common.Money;
   groups: PlacedGroup[];
+  /** Checkout's stock hold, so inventory can allocate from it before checkout attaches the order */
+  reservationId?: string | null;
   acceptedAt: string;
 }
 
@@ -1724,6 +1770,7 @@ export const OrdersOrderAcceptedEvent: z.ZodType<OrdersOrderAcceptedEvent> = z.o
   get groups() {
     return z.array(PlacedGroup);
   },
+  reservationId: z.uuid().describe("Checkout's stock hold, so inventory can allocate from it before checkout attaches the order").nullish(),
   acceptedAt: z.iso.datetime({ offset: true }),
 });
 
@@ -1782,6 +1829,10 @@ export const OrdersItemStateChangedEvent: z.ZodType<OrdersItemStateChangedEvent>
 export interface OrdersItemCancelledEvent {
   orderId: string;
   ref: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   groupId: string;
   ownerType: "official" | "seller";
   sellerId?: string | null;
@@ -1802,6 +1853,8 @@ export interface OrdersItemCancelledEvent {
 export const OrdersItemCancelledEvent: z.ZodType<OrdersItemCancelledEvent> = z.object({
   orderId: z.uuid(),
   ref: z.string(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   groupId: z.uuid(),
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
@@ -1824,6 +1877,10 @@ export const OrdersItemCancelledEvent: z.ZodType<OrdersItemCancelledEvent> = z.o
 /** orders.item.delayed: Items become Delayed (seller report or overdue dispatch) */
 export interface OrdersItemDelayedEvent {
   orderId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   groupId: string;
   itemIds: string[];
   source: "seller" | "overdue";
@@ -1833,6 +1890,8 @@ export interface OrdersItemDelayedEvent {
 
 export const OrdersItemDelayedEvent: z.ZodType<OrdersItemDelayedEvent> = z.object({
   orderId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   groupId: z.uuid(),
   itemIds: z.array(z.uuid()),
   source: z.enum(["seller", "overdue"]),
@@ -1886,6 +1945,10 @@ export const OrdersCancellationRequestedEvent: z.ZodType<OrdersCancellationReque
 export interface OrdersCancellationDecidedEvent {
   cancellationId: string;
   orderId: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   outcome: "accepted" | "auto_accepted" | "declined" | "withdrawn";
   by: common.Actor;
 }
@@ -1893,6 +1956,8 @@ export interface OrdersCancellationDecidedEvent {
 export const OrdersCancellationDecidedEvent: z.ZodType<OrdersCancellationDecidedEvent> = z.object({
   cancellationId: z.uuid(),
   orderId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   outcome: z.enum(["accepted", "auto_accepted", "declined", "withdrawn"]),
   get by() {
     return common.Actor;
@@ -1989,6 +2054,10 @@ export interface OrdersPublicApi {
   exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[], nextCursor?: string }>;
   /** Order items per product from the purchase snapshots: open (not yet delivered, cancelled or refunded) and past (everything else). Catalog publication-impact and merge previews. Used by: catalog. */
   countOrderItemsForProducts(productIds: string[]): Promise<Record<string, { open: number, past: number }>>;
+  /** One order item with its order, seller group, owner, customer, state and delivery time (no access check) Used by: reviews. */
+  getOrderItem(orderItemId: string): Promise<OrderItemInfo | null>;
+  /** Items delivered to the customer (optionally since a time), for review eligibility Used by: reviews. */
+  listDeliveredItems(customerId: string, since?: string): Promise<OrderItemInfo[]>;
   /** Orders placed before the date with at least one item in the category (snapshot category, subcategories included) that is not yet delivered, cancelled or refunded. Returns category-exception preview. Used by: returns. */
   countOpenOrdersInCategory(categoryId: string, placedBefore: string): Promise<{ orders: number, items: number }>;
 }
@@ -2003,6 +2072,7 @@ export interface OrdersDb {
     /** MK-YYMMDD-NNNNN */
     ref: string;
     checkout_session_id: string;
+    reservation_id: string | null;
     customer_id: string | null;
     contact_email: string;
     contact_phone: string | null;
@@ -2067,6 +2137,7 @@ export interface OrdersDb {
     product_id: string;
     variant_id: string;
     stock_item_id: string;
+    category_id: string | null;
     /** catalog.ProductSnapshot */
     product_snapshot: Json;
     /** offers.OfferSnapshot */
@@ -2966,7 +3037,7 @@ export const spec = defineModuleSpec({
   summary: "The accepted purchase: one order per checkout, one seller group per seller package, and items with their own state (Confirmed, Preparing, Delayed, Shipped, Delivered, cancellation, return, refund). Keeps frozen purchase snapshots, derives the overall status from the items, tracks payment, delivery and returns progress separately, and runs item-level cancellations, seller fulfillment tasks with dispatch deadlines, timelines and purchase documents.",
   dependsOn: ["catalog","offers"],
   optionalDeps: ["identity","finance","support","returns","promotions","messaging","content","audit","customers","fulfillment-service","inventory","media","notifications","payments","reports","sellers","settings","trust","warehouse","workqueues"],
-  publicApi: ["createOrder","acceptOrder","cancelForDeclinedPayment","getOrder","getFulfillmentTask","canShipItems","setDispatchDeadline","getPaidAmounts","findGuestOrder","listGuestOrdersByEmail","countInProgress","listRecentForCustomer","listDelayedItemsForCustomer","countPurchased","isVerifiedPurchase","getOrderForViewer","listOrdersForCustomer","countOrdersByTab","getOrderForSeller","listOrdersForSeller","countSellerOrders","getOrderAdmin","listOrdersAdmin","getOrdersByIds","countOrdersForSellers","exportRows","countOrderItemsForProducts","countOpenOrdersInCategory"],
+  publicApi: ["createOrder","acceptOrder","cancelForDeclinedPayment","getOrder","getFulfillmentTask","canShipItems","setDispatchDeadline","getPaidAmounts","findGuestOrder","listGuestOrdersByEmail","countInProgress","listRecentForCustomer","listDelayedItemsForCustomer","countPurchased","isVerifiedPurchase","getOrderForViewer","listOrdersForCustomer","countOrdersByTab","getOrderForSeller","listOrdersForSeller","countSellerOrders","getOrderAdmin","listOrdersAdmin","getOrdersByIds","countOrdersForSellers","exportRows","countOrderItemsForProducts","getOrderItem","listDeliveredItems","countOpenOrdersInCategory"],
   permissions: [
     {
       "key": "orders.orders.view",
@@ -3338,6 +3409,10 @@ export const spec = defineModuleSpec({
         "type": "uuid",
         "nullable": false
       },
+      "reservation_id": {
+        "type": "uuid",
+        "nullable": true
+      },
       "customer_id": {
         "type": "uuid",
         "nullable": true
@@ -3561,6 +3636,10 @@ export const spec = defineModuleSpec({
       "stock_item_id": {
         "type": "uuid",
         "nullable": false
+      },
+      "category_id": {
+        "type": "uuid",
+        "nullable": true
       },
       "product_snapshot": {
         "type": "jsonb",
