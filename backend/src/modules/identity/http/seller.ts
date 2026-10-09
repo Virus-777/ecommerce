@@ -9,7 +9,7 @@ import { caller, send } from './client.js';
  */
 export const sellerRoutes = (service: IdentityService) =>
   routes(endpoints, 'seller', {
-    /** POST /reauth: Confirm it is you before a sensitive Seller Center action */
+    /** POST /reauth: Confirm it is you before a sensitive Seller Center action (also before a seller is chosen) */
     reauthenticateSeller: async (input) => service.reauthenticate(input.body, caller(input)),
     /** GET /session/sellers: Sellers this member can act for (seller switcher) */
     listSellerContexts: async ({ principal }) => service.listSellerContexts(principal),

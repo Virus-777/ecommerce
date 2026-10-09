@@ -376,7 +376,14 @@ describe('email change and re-auth', () => {
     expect(noProof.status).toBe(403);
     expect(noProof.body.error.code).toBe('STEP_UP_REQUIRED');
 
-    const reauth = await kit.call('POST', `${STORE}/reauth`, { token: c.tokens.accessToken, body: { password: c.password } });
+    // a token issued for another purpose is refused
+    const other = await kit.call('POST', `${STORE}/reauth`, { token: c.tokens.accessToken, body: { purpose: 'account-closure', password: c.password } });
+    expect(other.status, JSON.stringify(other.body)).toBe(200);
+    const wrongPurpose = await kit.call('POST', `${STORE}/email-changes`, { token: c.tokens.accessToken, body: { newEmail, reauthToken: other.body.reauthToken } });
+    expect(wrongPurpose.status).toBe(403);
+    expect(wrongPurpose.body.error).toMatchObject({ code: 'STEP_UP_REQUIRED', details: { kind: 'reauth', purpose: 'email-change' } });
+
+    const reauth = await kit.call('POST', `${STORE}/reauth`, { token: c.tokens.accessToken, body: { purpose: 'email-change', password: c.password } });
     expect(reauth.status, JSON.stringify(reauth.body)).toBe(200);
     const change = await kit.call('POST', `${STORE}/email-changes`, { token: c.tokens.accessToken, body: { newEmail, reauthToken: reauth.body.reauthToken } });
     expect(change.status, JSON.stringify(change.body)).toBe(202);
@@ -399,7 +406,7 @@ describe('email change and re-auth', () => {
   it('refuses an email another account uses', async () => {
     const a = await customer(kit);
     const b = await customer(kit);
-    const reauth = await kit.call('POST', `${STORE}/reauth`, { token: a.tokens.accessToken, body: { password: a.password } });
+    const reauth = await kit.call('POST', `${STORE}/reauth`, { token: a.tokens.accessToken, body: { purpose: 'email-change', password: a.password } });
     const res = await kit.call('POST', `${STORE}/email-changes`, { token: a.tokens.accessToken, body: { newEmail: b.email, reauthToken: reauth.body.reauthToken } });
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('EMAIL_IN_USE');
@@ -408,7 +415,7 @@ describe('email change and re-auth', () => {
   it('binds re-auth tokens to the session that asked for them', async () => {
     const c = await customer(kit);
     const other = await signIn(kit, { email: c.email, password: c.password });
-    const reauth = await kit.call('POST', `${STORE}/reauth`, { token: c.tokens.accessToken, body: { password: c.password } });
+    const reauth = await kit.call('POST', `${STORE}/reauth`, { token: c.tokens.accessToken, body: { purpose: 'email-change', password: c.password } });
     const res = await kit.call('POST', `${STORE}/email-changes`, { token: other.body.tokens.accessToken, body: { newEmail: uniqueEmail(), reauthToken: reauth.body.reauthToken } });
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('STEP_UP_REQUIRED');
@@ -416,11 +423,11 @@ describe('email change and re-auth', () => {
 
   it('counts wrong re-auth answers on the shared counter', async () => {
     const c = await customer(kit);
-    const bad = await kit.call('POST', `${STORE}/reauth`, { token: c.tokens.accessToken, body: { password: 'Wrong-Pass-1' } });
+    const bad = await kit.call('POST', `${STORE}/reauth`, { token: c.tokens.accessToken, body: { purpose: 'email-change', password: 'Wrong-Pass-1' } });
     expect(bad.status).toBe(400);
     expect(bad.body.error).toMatchObject({ code: 'CURRENT_PASSWORD_WRONG', details: { attemptsLeft: 4 } });
-    for (let i = 0; i < 4; i++) await kit.call('POST', `${STORE}/reauth`, { token: c.tokens.accessToken, body: { password: 'Wrong-Pass-1' } });
-    const locked = await kit.call('POST', `${STORE}/reauth`, { token: c.tokens.accessToken, body: { password: c.password } });
+    for (let i = 0; i < 4; i++) await kit.call('POST', `${STORE}/reauth`, { token: c.tokens.accessToken, body: { purpose: 'email-change', password: 'Wrong-Pass-1' } });
+    const locked = await kit.call('POST', `${STORE}/reauth`, { token: c.tokens.accessToken, body: { purpose: 'email-change', password: c.password } });
     expect(locked.status).toBe(429);
     expect((await signIn(kit, { email: c.email, password: c.password })).status).toBe(423);
   });

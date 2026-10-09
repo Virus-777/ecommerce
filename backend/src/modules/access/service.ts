@@ -97,6 +97,20 @@ export interface Caller {
   can?: (permission: string) => Promise<boolean>;
 }
 
+/** The operator's bootstrap: the first Business Owner and, optionally, a deputy (a second Business Owner) */
+export interface BootstrapOwnerInput {
+  email: string;
+  name: string;
+  deputy?: { email: string; name: string } | null;
+}
+
+/** The staff accounts and identity invitations created; `deputy` is null without one */
+export interface BootstrapOwnerResult {
+  accountId: string;
+  invitationId: string;
+  deputy: { accountId: string; invitationId: string } | null;
+}
+
 type Accounts = Map<string, identity.AccountSummary>;
 
 const SENSITIVE_GRANT = 'access.roles.sensitive-grant';
@@ -717,9 +731,25 @@ export class AccessService implements AccessPublicApi {
    * they can invite the rest of the staff (the Business Owner role itself doesn't manage staff); they can
    * hand that role to someone else later. Invites the person through identity; the roles become active
    * when they accept (onInvitationAcceptedFromIdentity).
+   *
+   * With a deputy, both people are invited and both get Business Owner and Platform Administrator, so
+   * the two-person rules work from day one: either can approve the sensitive grants the other requests
+   * (a Finance Manager, another Business Owner), and neither can approve their own.
    */
-  async bootstrapBusinessOwner(input: { email: string; name: string }): Promise<{ accountId: string; invitationId: string }> {
+  async bootstrapBusinessOwner(input: BootstrapOwnerInput): Promise<BootstrapOwnerResult> {
     await this.ready();
+    const issues: Issue[] = [];
+    const people: { email: string; name: string; path: string }[] = [{ ...input, path: '' }];
+    if (input.deputy) people.push({ ...input.deputy, path: 'deputy.' });
+    for (const p of people) {
+      if (!p.email?.trim()) issues.push({ path: `${p.path}email`, message: 'Required' });
+      if (!p.name?.trim()) issues.push({ path: `${p.path}name`, message: 'Required' });
+    }
+    if (input.deputy && input.deputy.email?.trim().toLowerCase() === input.email?.trim().toLowerCase()) {
+      issues.push({ path: 'deputy.email', message: 'The deputy must be a different person from the owner' });
+    }
+    if (issues.length) throw validation('The Business Owner cannot be created', issues);
+
     const dir = await loadDirectory(this.repo, this.now());
     const role = dir.roleByKey.get(BUSINESS_OWNER);
     const admin = dir.roleByKey.get(PLATFORM_ADMINISTRATOR);
@@ -729,38 +759,58 @@ export class AccessService implements AccessPublicApi {
     }
     const system: common.Actor = { kind: 'system', name: 'bootstrap' };
     const idp = this.ctx.use('identity');
-    const invitation = await idp.inviteStaff({ email: input.email, name: input.name, invitedBy: system });
-    const accountId = invitation.accountId ?? (await idp.findAccountByEmail(input.email, 'staff'))?.id;
-    if (!accountId) throw new AppError('CONFLICT', 'The staff account could not be created; try again');
-    for (const r of [role, admin]) {
-      const row = await this.repo.insertAssignment({
-        id: newId(),
-        account_id: accountId,
-        role_id: r.id,
-        status: roleAssignmentMachine.initial,
-        granted_by_kind: 'system',
-        granted_by_id: '',
-        reason: 'First Business Owner',
-        granted_at: this.now(),
-        expires_at: null,
-        revoked_at: null,
-        revoked_by: null,
-        revoke_reason: null,
-        approval_request_id: null,
-      });
+    // invite everyone first (identity's own writes), then seat them in one transaction
+    const invited: { email: string; name: string; accountId: string; invitationId: string; deputy: boolean }[] = [];
+    for (const p of people) {
+      const invitation = await idp.inviteStaff({ email: p.email.trim(), name: p.name.trim(), invitedBy: system });
+      const accountId = invitation.accountId ?? (await idp.findAccountByEmail(p.email.trim(), 'staff'))?.id;
+      if (!accountId) throw new AppError('CONFLICT', 'The staff account could not be created; try again');
+      invited.push({ email: p.email.trim(), name: p.name.trim(), accountId, invitationId: invitation.id, deputy: p.path !== '' });
+    }
+    const now = this.now();
+    const seated = await this.repo.transaction(async (tx) => {
+      // checked again under the transaction: two bootstraps at once must not both win
+      if ((await tx.listAssignments({ roleId: role.id, statuses: OPEN_ASSIGNMENT })).length) {
+        throw new AppError('CONFLICT', 'A Business Owner already exists or is invited; invite other staff from the Admin Center');
+      }
+      const rows: { person: (typeof invited)[number]; role: RoleRow; row: AssignmentRow }[] = [];
+      for (const person of invited) {
+        for (const r of [role, admin]) {
+          const row = await tx.insertAssignment({
+            id: newId(),
+            account_id: person.accountId,
+            role_id: r.id,
+            status: roleAssignmentMachine.initial,
+            granted_by_kind: 'system',
+            granted_by_id: '',
+            reason: person.deputy ? 'Deputy Business Owner' : 'First Business Owner',
+            granted_at: now,
+            expires_at: null,
+            revoked_at: null,
+            revoked_by: null,
+            revoke_reason: null,
+            approval_request_id: null,
+          });
+          rows.push({ person, role: r, row });
+        }
+      }
+      return rows;
+    });
+    for (const { person, role: r, row } of seated) {
       await this.audit(
         {
           action: 'access.role.assign',
-          actionLabel: `Gave ${r.name} to the first Business Owner`,
-          target: { type: 'staff', id: accountId, label: input.name },
+          actionLabel: `Gave ${r.name} to the ${person.deputy ? 'deputy' : 'first'} Business Owner`,
+          target: { type: 'staff', id: person.accountId, label: person.name },
           relatedTargets: [this.roleTarget(r)],
-          after: { roleKey: r.key, status: row.status, email: input.email },
-          reason: 'First Business Owner (bootstrap)',
+          after: { roleKey: r.key, status: row.status, email: person.email },
+          reason: person.deputy ? 'Deputy Business Owner (bootstrap)' : 'First Business Owner (bootstrap)',
         },
         { actor: system },
       );
     }
-    return { accountId, invitationId: invitation.id };
+    const [owner, deputy] = invited;
+    return { accountId: owner!.accountId, invitationId: owner!.invitationId, deputy: deputy ? { accountId: deputy.accountId, invitationId: deputy.invitationId } : null };
   }
 
   async assignRole(caller: Caller, input: { accountId: string; roleId: string; reason: string; expiresAt?: string | null }): Promise<RoleAssignment> {

@@ -65,6 +65,13 @@ describe('seller context', () => {
     const t = res.body.tokens.accessToken;
     expect((await kit.call('GET', `${SELLER}/session/sellers`, { token: t })).body).toHaveLength(2);
 
+    // seller re-auth works before a seller is chosen; the token is bound to "no seller"
+    const early = await kit.call('POST', `${SELLER}/reauth`, { token: t, body: { purpose: 'seller-closure', password: c.password } });
+    expect(early.status, JSON.stringify(early.body)).toBe(200);
+    const unchosen = { kind: 'seller' as const, accountId: c.accountId, sessionId: res.body.tokens.sessionId, sellerId: null };
+    expect(await identity.verifyReauthToken(unchosen, early.body.reauthToken, 'seller-closure')).toBe(true);
+    expect(await identity.verifyReauthToken({ ...unchosen, sellerId: a.sellerId }, early.body.reauthToken, 'seller-closure')).toBe(false);
+
     const nope = await kit.call('POST', `${SELLER}/session/seller-context`, { token: t, body: { sellerId: newId() } });
     expect(nope.status).toBe(403);
     expect(nope.body.error.code).toBe('NO_SELLER_ACCESS');
@@ -77,18 +84,25 @@ describe('seller context', () => {
     const pref = await signIn(kit, { email: c.email, password: c.password, audience: 'seller', sellerId: a.sellerId });
     expect(pref.body).toMatchObject({ status: 'signed_in', tokens: { sellerId: a.sellerId } });
 
-    // seller re-auth tokens are bound to the session and the seller
-    const reauth = await kit.call('POST', `${SELLER}/reauth`, { token: pick.body.accessToken, body: { password: c.password } });
+    // seller re-auth tokens are bound to the session, the seller and the purpose
+    const reauth = await kit.call('POST', `${SELLER}/reauth`, { token: pick.body.accessToken, body: { purpose: 'payout-account', password: c.password } });
     expect(reauth.status, JSON.stringify(reauth.body)).toBe(200);
     const principal = { kind: 'seller' as const, accountId: c.accountId, sessionId: res.body.tokens.sessionId, sellerId: b.sellerId };
     expect(await identity.verifyReauthToken(principal, reauth.body.reauthToken, 'payout-account')).toBe(true);
+    expect(await identity.verifyReauthToken(principal, reauth.body.reauthToken, 'business-change')).toBe(false);
     expect(await identity.verifyReauthToken({ ...principal, sellerId: a.sellerId }, reauth.body.reauthToken, 'payout-account')).toBe(false);
     expect(await identity.verifyReauthToken({ ...principal, sessionId: newId() }, reauth.body.reauthToken, 'payout-account')).toBe(false);
+    // the token from before the seller was chosen does not follow the session into a seller
+    expect(await identity.verifyReauthToken(principal, early.body.reauthToken, 'seller-closure')).toBe(false);
     await identity.consumeReauthToken(reauth.body.reauthToken);
     expect(await identity.verifyReauthToken(principal, reauth.body.reauthToken, 'payout-account')).toBe(false);
+    const noPurpose = await kit.call('POST', `${SELLER}/reauth`, { token: pick.body.accessToken, body: { purpose: '  ', password: c.password } });
+    expect(noPurpose.status).toBe(400);
+    expect(noPurpose.body.error.details.issues[0].path).toBe('body.purpose');
 
     // a store re-auth token never works for a seller session
-    const store = await kit.call('POST', `${STORE}/reauth`, { token: c.tokens.accessToken, body: { password: c.password } });
+    const store = await kit.call('POST', `${STORE}/reauth`, { token: c.tokens.accessToken, body: { purpose: 'payout-account', password: c.password } });
+    expect(store.status, JSON.stringify(store.body)).toBe(200);
     expect(await identity.verifyReauthToken(principal, store.body.reauthToken, 'payout-account')).toBe(false);
 
     // revoking access ends the sessions bound to that seller
@@ -144,7 +158,6 @@ describe('guest sessions and order links', () => {
     expect(g).toMatchObject({ id: v.sessionId, orderIds: [orderId] });
     expect(await identity.hasGuestOrderAccess(v.sessionId, orderId)).toBe(true);
     expect(await identity.hasGuestOrderAccess(v.sessionId, newId())).toBe(false);
-    expect((await identity.verifyGuestSession(v.sessionId))!.orderIds).toEqual([orderId]);
     await expect(identity.grantGuestOrderAccess(newId(), orderId, 'x@example.com', 'lookup')).rejects.toMatchObject({ code: 'NOT_FOUND' });
 
     const link = await identity.issueOrderLink(orderId, 'guest@example.com');
@@ -173,7 +186,23 @@ describe('guest sessions and order links', () => {
     expect(s.body.status).toBe('signed_in');
     expect(kit.last('identity.guest_session.claimed')).toEqual({ guestSessionId: v.sessionId, accountId: c.accountId });
     expect(await identity.hasGuestOrderAccess(v.sessionId, orderId)).toBe(false);
-    expect(await identity.verifyGuestSession(v.sessionId)).toBeNull();
+    await expect(identity.grantGuestOrderAccess(v.sessionId, newId(), 'buyer@example.com', 'checkout')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('identity.guest_session.claimed always names the visitor session (registration claims it too)', async () => {
+    const v = await visitor(kit);
+    const email = uniqueEmail('claim');
+    const reg = await kit.call('POST', `${PUBLIC}/registrations`, {
+      token: v.accessToken,
+      body: { email, password: STRONG, firstName: 'Cleo', lastName: 'Claim', marketingOptIn: false, acceptedTermsVersion: '2026-01', device: android() },
+    });
+    expect(reg.status, JSON.stringify(reg.body)).toBe(202);
+    const code = kit.of('identity.verification.code_issued').filter((e) => e.challengeId === reg.body.id).at(-1).code as string;
+    const conf = await kit.call('POST', `${PUBLIC}/verifications/${reg.body.id}/confirm`, { token: v.accessToken, body: { code, device: android() } });
+    expect(conf.status, JSON.stringify(conf.body)).toBe(200);
+    const claimed = kit.of('identity.guest_session.claimed').filter((e) => e.accountId === conf.body.account.id);
+    expect(claimed).toEqual([{ guestSessionId: v.sessionId, accountId: conf.body.account.id }]);
+    for (const e of kit.of('identity.guest_session.claimed')) expect(e.guestSessionId).toEqual(expect.any(String));
   });
 });
 
@@ -188,13 +217,12 @@ describe('in-process API', () => {
     expect(await identity.findAccountByEmail(c.email, 'staff')).toBeNull();
   });
 
-  it('authenticates its own tokens and refuses revoked ones', async () => {
+  it('revokes sessions in-process; the middleware then refuses their tokens', async () => {
     const c = await customer(kit);
-    const p = await identity.authenticate(c.tokens.accessToken);
-    expect(p).toMatchObject({ kind: 'customer', accountId: c.accountId, sessionId: c.tokens.sessionId });
-    expect(await identity.authenticate('garbage')).toBeNull();
+    expect((await kit.call('GET', `${STORE}/security`, { token: c.tokens.accessToken })).status).toBe(200);
     expect(await identity.revokeSessions(c.accountId, 'Trust action', 'store')).toBe(1);
-    expect(await identity.authenticate(c.tokens.accessToken)).toBeNull();
+    await kit.syncRevocations();
+    expect((await kit.call('GET', `${STORE}/security`, { token: c.tokens.accessToken })).status).toBe(401);
   });
 
   it('publishes revocations for the middleware, with a cursor', async () => {

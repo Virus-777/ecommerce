@@ -9,6 +9,8 @@ import { caller } from './client.js';
  */
 export const adminRoutes = (service: IdentityService) =>
   routes(endpoints, 'admin', {
+    /** POST /reauth: Confirm it is you before a sensitive Admin Center action (single-use token for one purpose) */
+    reauthenticateStaff: async (input) => service.reauthenticate(input.body, caller(input)),
     /** GET /accounts: Find accounts (staff or members) */
     listAccounts: async ({ query, page, can }) => service.listAccounts(query, page, can),
     /** GET /accounts/{id}: Account security detail (devices, lockout, recent activity) */

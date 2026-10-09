@@ -168,7 +168,7 @@ describe('re-auth, recovery codes and removal', () => {
     const { key, recoveryCodes } = await enableTotp(kit, c.tokens.accessToken, c.password);
     const noProof = await kit.call('POST', `${STORE}/two-step/recovery-codes`, { token: c.tokens.accessToken, body: { reauthToken: 'x' } });
     expect(noProof.body.error.code).toBe('STEP_UP_REQUIRED');
-    const r1 = await kit.call('POST', `${STORE}/reauth`, { token: c.tokens.accessToken, body: { code: totp(key, kit.clock.now()) } });
+    const r1 = await kit.call('POST', `${STORE}/reauth`, { token: c.tokens.accessToken, body: { purpose: 'recovery-codes', code: totp(key, kit.clock.now()) } });
     expect(r1.status, JSON.stringify(r1.body)).toBe(200);
     const regen = await kit.call('POST', `${STORE}/two-step/recovery-codes`, { token: c.tokens.accessToken, body: { reauthToken: r1.body.reauthToken } });
     expect(regen.status, JSON.stringify(regen.body)).toBe(200);
@@ -178,7 +178,7 @@ describe('re-auth, recovery codes and removal', () => {
 
     const sec = await kit.call('GET', `${STORE}/security`, { token: c.tokens.accessToken });
     const methodId = sec.body.twoStep.methods[0].id;
-    const r2 = await kit.call('POST', `${STORE}/reauth`, { token: c.tokens.accessToken, body: { password: c.password } });
+    const r2 = await kit.call('POST', `${STORE}/reauth`, { token: c.tokens.accessToken, body: { purpose: 'two-step-removal', password: c.password } });
     const bad = await kit.call('POST', `${STORE}/two-step/methods/${methodId}/remove`, { token: c.tokens.accessToken, body: { reauthToken: r2.body.reauthToken, code: '000000' === totp(key, kit.clock.now()) ? '111111' : '000000' } });
     expect(bad.status).toBe(400);
     expect(bad.body.error.code).toBe('CODE_INVALID');

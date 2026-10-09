@@ -131,13 +131,46 @@ describe('staff invitations', () => {
     expect((await kit.call('GET', `${ADMIN}/accounts?realm=member`, { token: refreshed.body.accessToken })).status).toBe(200);
     // staff can't remove their last method
     const methods = (await kit.call('GET', `${STORE}/security`, { token: refreshed.body.accessToken })).body.twoStep.methods;
-    const reauth = await kit.call('POST', `${STORE}/reauth`, { token: refreshed.body.accessToken, body: { password: s.password } });
-    expect(reauth.status).toBe(403); // store /reauth is for customers only (spec gap: staff have no re-auth endpoint)
-    expect(reauth.body.error.code).toBe('WRONG_AUDIENCE');
-    const last = await kit.call('POST', `${STORE}/two-step/methods/${methods[0].id}/remove`, { token: refreshed.body.accessToken, body: { reauthToken: 'dev-reauth.two-step-removal', code: '123456' } });
-    // the development re-auth proof only works for dev tokens; staff have no re-auth endpoint yet (spec gap)
-    expect(last.status).toBe(403);
-    expect(last.body.error.code).toBe('STEP_UP_REQUIRED');
+    const storeReauth = await kit.call('POST', `${STORE}/reauth`, { token: refreshed.body.accessToken, body: { purpose: 'two-step-removal', password: s.password } });
+    expect(storeReauth.status).toBe(403); // store /reauth is for customers; staff use POST /api/admin/identity/reauth
+    expect(storeReauth.body.error.code).toBe('WRONG_AUDIENCE');
+    // the development re-auth proof only works for dev tokens
+    const dev = await kit.call('POST', `${STORE}/two-step/methods/${methods[0].id}/remove`, { token: refreshed.body.accessToken, body: { reauthToken: 'dev-reauth.two-step-removal', code: '123456' } });
+    expect(dev.status).toBe(403);
+    expect(dev.body.error.code).toBe('STEP_UP_REQUIRED');
+    // a real staff re-auth token passes the step-up; the business rule then keeps the last method
+    const reauth = await kit.call('POST', `${ADMIN}/reauth`, { token: refreshed.body.accessToken, body: { purpose: 'two-step-removal', password: s.password } });
+    expect(reauth.status, JSON.stringify(reauth.body)).toBe(200);
+    const last = await kit.call('POST', `${STORE}/two-step/methods/${methods[0].id}/remove`, { token: refreshed.body.accessToken, body: { reauthToken: reauth.body.reauthToken, code: totp(setup.body.manualEntryKey, kit.clock.now()) } });
+    expect(last.body.error.code).toBe('TWO_STEP_REQUIRED');
+    kit.clock.advance(30_000);
+  });
+
+  it('staff re-auth: a single-use token for one purpose, bound to the staff session (audited)', async () => {
+    const s = await staffMember('Rae Reauth');
+    const t = s.tokens.accessToken;
+    const wrong = await kit.call('POST', `${ADMIN}/reauth`, { token: t, body: { purpose: 'recovery-codes', password: 'Not-The-Password-1' } });
+    expect(wrong.status).toBe(400);
+    expect(wrong.body.error.code).toBe('CURRENT_PASSWORD_WRONG');
+    const res = await kit.call('POST', `${ADMIN}/reauth`, { token: t, body: { purpose: 'recovery-codes', code: totp(s.key, kit.clock.now()) } });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(Date.parse(res.body.expiresAt) - kit.clock.now().getTime()).toBe(5 * 60_000);
+    expect(lastAudit()).toMatchObject({ action: 'identity.reauth.staff', module: 'identity', target: { type: 'account', id: s.accountId }, afterText: 'For: recovery-codes', actor: { kind: 'staff', id: s.accountId } });
+    const principal = { kind: 'staff' as const, accountId: s.accountId, sessionId: s.tokens.sessionId, sellerId: null };
+    expect(await identity.verifyReauthToken(principal, res.body.reauthToken, 'recovery-codes')).toBe(true);
+    expect(await identity.verifyReauthToken(principal, res.body.reauthToken, 'two-step-removal')).toBe(false);
+
+    // used on a step-up endpoint of another purpose: refused and not spent
+    const methods = (await kit.call('GET', `${STORE}/security`, { token: t })).body.twoStep.methods;
+    const other = await kit.call('POST', `${STORE}/two-step/methods/${methods[0].id}/remove`, { token: t, body: { reauthToken: res.body.reauthToken, code: s.recoveryCodes[0] } });
+    expect(other.status).toBe(403);
+    expect(other.body.error).toMatchObject({ code: 'STEP_UP_REQUIRED', details: { purpose: 'two-step-removal' } });
+    // on its own purpose: works once
+    const regen = await kit.call('POST', `${STORE}/two-step/recovery-codes`, { token: t, body: { reauthToken: res.body.reauthToken } });
+    expect(regen.status, JSON.stringify(regen.body)).toBe(200);
+    expect(regen.body.codes).toHaveLength(10);
+    const again = await kit.call('POST', `${STORE}/two-step/recovery-codes`, { token: t, body: { reauthToken: res.body.reauthToken } });
+    expect(again.body.error.code).toBe('STEP_UP_REQUIRED');
     kit.clock.advance(30_000);
   });
 

@@ -1,9 +1,9 @@
 import type { KeyObject } from 'node:crypto';
 import { isIP } from 'node:net';
 import type { Principal as KernelPrincipal } from '../../kernel/auth/index.js';
-import { keyRing, tokenSigner } from '../../kernel/auth/setup.js';
+import { tokenSigner } from '../../kernel/auth/setup.js';
 import { secretFor } from '../../kernel/lib/secrets.js';
-import { signAccessToken, verifyAccessToken, type AccessClaims, type KeyRing, type TokenKind } from '../../kernel/auth/tokens.js';
+import { signAccessToken, type AccessClaims, type TokenKind } from '../../kernel/auth/tokens.js';
 import { AppError } from '../../kernel/errors/index.js';
 import type { EventPayload } from '../../kernel/events/index.js';
 import { zonedTimeToUtc } from '../../kernel/lib/clock.js';
@@ -149,6 +149,8 @@ const BATCH = 500;
 const REVOCATION_OVERLAP_MS = 10_000;
 const UNVERIFIED_ACCOUNT_DAYS = 7;
 const RECOVERY_CODES = 10;
+/** Step-up purposes are endpoint keys such as payout-account or two-step-removal */
+const REAUTH_PURPOSE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
 const seconds = (d: Date) => Math.floor(d.getTime() / 1000);
 const truncSecond = (d: Date) => new Date(seconds(d) * 1000);
@@ -163,7 +165,6 @@ const issue = (path: string, message: string) => ({ issues: [{ path, message }] 
 export class IdentityService implements IdentityPublicApi {
   #signer?: { kid: string; key: KeyObject };
   #keys?: IdentityKeys;
-  #ring?: KeyRing;
   #dummyHash?: Promise<string>;
 
   constructor(protected readonly deps: IdentityServiceDeps) {}
@@ -1833,19 +1834,6 @@ export class IdentityService implements IdentityPublicApi {
     return g && !g.claimed_by_account_id && g.expires_at > now ? g : undefined;
   }
 
-  /** Public API (legacy X-Guest-Session check): the visitor session, with its expiry extended */
-  async verifyGuestSession(guestSessionId: string): Promise<GuestSession | null> {
-    if (!isUuid(guestSessionId)) return null;
-    const s = await this.cfg();
-    const now = this.now();
-    const g = this.liveGuest(await this.repo.getGuestSession(guestSessionId), now);
-    if (!g) return null;
-    const expires = new Date(now.getTime() + s.guestSessionTtlDays * DAY);
-    const patch = { last_seen_at: now, expires_at: expires > g.expires_at ? expires : g.expires_at };
-    await this.repo.updateGuestSession(g.id, patch);
-    return this.guestSession({ ...g, ...patch });
-  }
-
   /** Public API: let a guest session open one order */
   async grantGuestOrderAccess(guestSessionId: string, orderId: string, email: string, via: 'checkout' | 'lookup' | 'link'): Promise<GuestSession> {
     const s = await this.cfg();
@@ -2042,10 +2030,16 @@ export class IdentityService implements IdentityPublicApi {
     return `ra.${p.sellerId ?? '-'}.`;
   }
 
-  /** POST /reauth (store) and POST /api/seller/identity/reauth: a single-use proof bound to the session and seller */
+  /**
+   * POST /reauth (store), POST /api/seller/identity/reauth and POST /api/admin/identity/reauth:
+   * a single-use proof bound to the account, the session (and so the audience), the seller context
+   * (none before a seller is chosen) and the step-up purpose of the endpoint that will consume it.
+   */
   async reauthenticate(body: ReauthRequest, caller: Caller): Promise<ReauthToken> {
     const p = caller.principal;
     const a = await this.accountOf(p);
+    const purpose = typeof body.purpose === 'string' ? body.purpose.trim() : '';
+    if (!REAUTH_PURPOSE.test(purpose)) throw new AppError('VALIDATION_FAILED', 'Say which action this confirmation is for', issue('body.purpose', 'a step-up purpose such as payout-account'));
     if (!body.password && !body.code) throw new AppError('VALIDATION_FAILED', 'Enter your password or a 2-step code', issue('body.password', 'password or code required'));
     const s = await this.cfg();
     await this.requireStepUp(a.id, { password: body.password ?? null, code: body.password ? null : body.code }, { client: caller.client, audience: p?.audience });
@@ -2054,20 +2048,23 @@ export class IdentityService implements IdentityPublicApi {
     const now = this.now();
     const token = randomToken(this.reauthPrefix(p!));
     const expiresAt = new Date(now.getTime() + s.reauthTokenMinutes * MIN);
-    await this.repo.insertReauthToken({ token_hash: tokenHash(token), account_id: a.id, session_id: session.id, expires_at: expiresAt, used_at: null });
+    await this.repo.insertReauthToken({ token_hash: tokenHash(token), account_id: a.id, session_id: session.id, purpose, expires_at: expiresAt, used_at: null });
     if (p?.kind === 'seller') {
-      await this.audit({ action: 'identity.reauth.seller', actionLabel: 'Confirmed identity for a sensitive Seller Center action', target: { type: 'account', id: a.id, label: a.display_name, sellerId: p.sellerId ?? null }, visibleToSeller: true }, caller);
+      await this.audit({ action: 'identity.reauth.seller', actionLabel: 'Confirmed identity for a sensitive Seller Center action', target: { type: 'account', id: a.id, label: a.display_name, sellerId: p.sellerId ?? null }, afterText: `For: ${purpose}`, visibleToSeller: Boolean(p.sellerId) }, caller);
+    } else if (p?.kind === 'staff') {
+      await this.audit({ action: 'identity.reauth.staff', actionLabel: 'Confirmed identity for a sensitive Admin Center action', target: { type: 'account', id: a.id, label: a.display_name }, afterText: `For: ${purpose}` }, caller);
     }
     return { reauthToken: token, expiresAt: map.iso(expiresAt) };
   }
 
-  /** Public API (middleware): is this re-auth token valid for this principal? Does not consume it. */
+  /** Public API (middleware): is this re-auth token valid for this principal and this purpose? Does not consume it. */
   async verifyReauthToken(principal: Principal, token: string, purpose: string): Promise<boolean> {
-    void purpose; // ReauthRequest names no purpose, so a token is bound to one action by being single-use
-    if (typeof token !== 'string' || !principal.accountId || !principal.sessionId) return false;
+    if (typeof token !== 'string' || typeof purpose !== 'string' || !principal.accountId || !principal.sessionId) return false;
     if (!token.startsWith(this.reauthPrefix(principal))) return false;
     const r = await this.repo.getReauthToken(tokenHash(token));
-    return Boolean(r && !r.used_at && r.expires_at > this.now() && r.account_id === principal.accountId && r.session_id === principal.sessionId);
+    return Boolean(
+      r && !r.used_at && r.purpose === purpose && r.expires_at > this.now() && r.account_id === principal.accountId && r.session_id === principal.sessionId,
+    );
   }
 
   /** Public API (kernel, after the request succeeded) */
@@ -2554,36 +2551,6 @@ export class IdentityService implements IdentityPublicApi {
   }
 
   /* ================================================================ public API (in-process) */
-
-  /** Verify an access token and return who is calling (the kernel verifies tokens itself; kept for other callers). */
-  async authenticate(accessToken: string): Promise<Principal | null> {
-    this.#ring ??= keyRing(this.ctx.config, this.ctx.log);
-    let claims: AccessClaims;
-    try {
-      claims = verifyAccessToken(this.#ring, accessToken, { issuer: this.ctx.config.auth.issuer, leewaySeconds: 60, now: () => this.now() });
-    } catch {
-      return null;
-    }
-    const now = this.now();
-    if (claims.kind === 'visitor') {
-      const g = isUuid(claims.sid) ? await this.repo.getGuestSession(claims.sid) : undefined;
-      if (!g || !this.liveGuest(g, now)) return null;
-    } else {
-      const [session, account] = await Promise.all([isUuid(claims.sid) ? this.repo.getSession(claims.sid) : undefined, claims.sub && isUuid(claims.sub) ? this.repo.getAccount(claims.sub) : undefined]);
-      if (!session || session.revoked_at || session.account_id !== claims.sub || !account) return null;
-      if (account.tokens_valid_after && claims.iat * 1000 < account.tokens_valid_after.getTime()) return null;
-    }
-    return {
-      kind: claims.kind,
-      accountId: claims.sub ?? null,
-      sessionId: claims.sid,
-      sellerId: claims.sellerId ?? null,
-      sellerMemberId: claims.memberId ?? null,
-      guestSessionId: claims.kind === 'visitor' && claims.aud === 'store' ? claims.sid : null,
-      authenticatedAt: claims.authAt ? new Date(claims.authAt * 1000).toISOString() : null,
-      twoStepVerifiedAt: claims.twoStepAt ? new Date(claims.twoStepAt * 1000).toISOString() : null,
-    };
-  }
 
   async getAccount(accountId: string): Promise<AccountSummary | null> {
     if (!isUuid(accountId)) return null;
