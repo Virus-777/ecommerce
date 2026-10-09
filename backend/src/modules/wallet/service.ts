@@ -1,9 +1,15 @@
-import { notImplemented } from '../../kernel/errors/index.js';
+import { AppError } from '../../kernel/errors/index.js';
 import type { EventPayload } from '../../kernel/events/index.js';
 import type { ModuleContext } from '../../kernel/module-system/index.js';
 import type * as common from '../../spec/common.js';
-import type { WalletPublicApi, CreditBalance, LedgerEntry, CreditHold, GoodwillInput, GoodwillGrant, CustomerWalletAdmin } from '../../spec/wallet.js';
+import type { CreditBalance, CreditHold, CustomerWalletAdmin, GoodwillGrant, GoodwillInput, LedgerEntry, LoyaltyAccount, WalletPublicApi } from '../../spec/wallet.js';
 import type { WalletRepository } from './ports.js';
+import { WalletCore } from './service/core.js';
+import { GiftCards } from './service/gift-cards.js';
+import { Ledger } from './service/ledger.js';
+import { StaffCredit } from './service/staff-credit.js';
+
+export type { By } from './service/core.js';
 
 export interface WalletServiceDeps {
   repo: WalletRepository;
@@ -13,83 +19,110 @@ export interface WalletServiceDeps {
 /**
  * Wallet use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
  * Each method maps to a publicApi function, a consumed event or a job in docs/api/spec/modules/wallet.json.
+ *
+ *   ledger      accounts, lots, the append-only ledger, holds, refunds to credit, corrections applied, expiry, checks
+ *   staff       goodwill grants and reversals, corrections (approval limits), approvals decided
+ *   giftCards   batches, codes (hashed), check, redemption, void, expiry
  */
 export class WalletService implements WalletPublicApi {
-  constructor(protected readonly deps: WalletServiceDeps) {}
+  readonly core: WalletCore;
+  readonly ledger: Ledger;
+  readonly staff: StaffCredit;
+  readonly giftCards: GiftCards;
+
+  constructor(protected readonly deps: WalletServiceDeps) {
+    this.core = new WalletCore(deps.repo, deps.ctx);
+    this.ledger = new Ledger(this.core);
+    this.staff = new StaffCredit(this.core, this.ledger);
+    this.giftCards = new GiftCards(this.core, this.ledger);
+  }
 
   /* ---------------- public API (in-process) */
 
   /** Available balance and soonest expiry, for checkout step 4 'Use my Marketly credit'. */
   async getBalance(customerId: string): Promise<CreditBalance> {
-    throw notImplemented("wallet.getBalance");
+    return this.ledger.balance(customerId);
   }
 
   /** Reserve credit for a quote; earliest-expiring lots first. Fails with INSUFFICIENT_CREDIT. */
   async holdCredit(customerId: string, quoteId: string, amount: common.Money, idempotencyKey: string): Promise<CreditHold> {
-    throw notImplemented("wallet.holdCredit");
+    return this.ledger.holdCredit(customerId, quoteId, amount, idempotencyKey);
   }
 
   /** Turn a hold into a use when the order is accepted. */
   async captureHold(holdId: string, orderId: string): Promise<CreditHold> {
-    throw notImplemented("wallet.captureHold");
+    return this.ledger.captureHold(holdId, orderId);
   }
 
   /** Release a hold on payment failure or quote expiry. */
   async releaseHold(holdId: string): Promise<CreditHold> {
-    throw notImplemented("wallet.releaseHold");
+    return this.ledger.releaseHold(holdId);
   }
 
-  /** Refund to store credit (customer's choice) or return the credit part of a refunded order. Called by returns for return refunds to store credit and by payments for the refunds it executes (other origins with destination store_credit, and the credit part of a mixed tender). Idempotent per refundId; the payment tender split decides how much goes back to credit. */
-  async creditRefund(input: { customerId: string, refundId: string, orderId: string, amount: common.Money, reason: string }, idempotencyKey: string): Promise<LedgerEntry> {
-    throw notImplemented("wallet.creditRefund");
+  /** Refund to store credit (customer's choice) or return the credit part of a refunded order. Idempotent per refundId. */
+  async creditRefund(input: { customerId: string; refundId: string; orderId: string; amount: common.Money; reason: string }, idempotencyKey: string): Promise<LedgerEntry> {
+    return this.ledger.creditRefund(input, idempotencyKey);
   }
 
   /** Goodwill credit from a support case or order; above the actor's limit it becomes pending approval. */
   async grantGoodwill(input: GoodwillInput, actor: common.Actor, idempotencyKey: string): Promise<GoodwillGrant> {
-    throw notImplemented("wallet.grantGoodwill");
+    return this.staff.grant(input, { actor }, idempotencyKey);
   }
 
-  /** Staff view of a customer's credit: balance, lots, goodwill in the last 30 days against the per-customer limit, and pending grants (GET /admin/wallet/customers/{customerId}). */
+  /** Staff view of a customer's credit: balance, lots, goodwill in the last 30 days against the per-customer limit, and pending grants. */
   async getCustomerWallet(customerId: string): Promise<CustomerWalletAdmin> {
-    throw notImplemented("wallet.getCustomerWallet");
+    return this.staff.customerWallet(customerId);
+  }
+
+  /* ---------------- loyalty (phase 4 experiment) */
+
+  /** Points from the loyalty ledger; NOT_IMPLEMENTED until a program is defined (loyaltyEnabled) */
+  async loyalty(customerId: string): Promise<LoyaltyAccount> {
+    if (!(await this.deps.ctx.settings.get('loyaltyEnabled'))) {
+      throw new AppError('NOT_IMPLEMENTED', 'Loyalty points are not available yet.', { operation: 'wallet.getMyLoyalty', reason: 'no_program' });
+    }
+    return { customerId, points: await this.deps.repo.loyaltyPoints(customerId), tier: null, pendingPoints: 0, programTerms: null };
   }
 
   /* ---------------- events consumed */
 
   /** orders.order.placed: Capture the quote's credit hold if payments has not already */
-  async onOrderPlacedFromOrders(event: EventPayload<"orders.order.placed">): Promise<void> {
-    throw notImplemented("wallet consumer of orders.order.placed");
+  async onOrderPlacedFromOrders(event: EventPayload<'orders.order.placed'>): Promise<void> {
+    await this.ledger.onOrderPlaced(event);
   }
 
   /** payments.payment.failed: Release the quote's credit hold */
-  async onPaymentFailedFromPayments(event: EventPayload<"payments.payment.failed">): Promise<void> {
-    throw notImplemented("wallet consumer of payments.payment.failed");
+  async onPaymentFailedFromPayments(event: EventPayload<'payments.payment.failed'>): Promise<void> {
+    await this.ledger.onPaymentFailed(event);
   }
 
   /** access.approval.decided: Grant or reject pending goodwill, corrections and gift card batches */
-  async onApprovalDecidedFromAccess(event: EventPayload<"access.approval.decided">): Promise<void> {
-    throw notImplemented("wallet consumer of access.approval.decided");
+  async onApprovalDecidedFromAccess(event: EventPayload<'access.approval.decided'>): Promise<void> {
+    await this.staff.onApprovalDecided(event, this.giftCards);
   }
 
   /** identity.user.registered: Create an empty wallet account lazily on first credit (no-op otherwise) */
-  async onUserRegisteredFromIdentity(event: EventPayload<"identity.user.registered">): Promise<void> {
-    throw notImplemented("wallet consumer of identity.user.registered");
+  async onUserRegisteredFromIdentity(_event: EventPayload<'identity.user.registered'>): Promise<void> {
+    // accounts are created on the first credit (lockOrCreateAccount); a new customer simply has none yet
   }
 
   /* ---------------- jobs */
 
   /** Job wallet.expire-lots (daily 00:30 market time): Expire lots past expiresAt; notify customers 30 and 7 days before expiry */
   async expireLots(): Promise<void> {
-    throw notImplemented("job wallet.expire-lots");
+    const r = await this.ledger.expireLots();
+    const cards = await this.giftCards.expireDue();
+    this.deps.ctx.log.info({ ...r, giftCardsExpired: cards }, 'wallet: expiry run');
   }
 
   /** Job wallet.release-stale-holds (every 1 min): Release holds past expiresAt */
   async releaseStaleHolds(): Promise<void> {
-    throw notImplemented("job wallet.release-stale-holds");
+    await this.ledger.releaseStaleHolds();
   }
 
   /** Job wallet.balance-check (daily): Verify every account balance equals the ledger sum; flag differences to Finance checks */
   async balanceCheck(): Promise<void> {
-    throw notImplemented("job wallet.balance-check");
+    await this.ledger.balanceCheck();
   }
 }
+
