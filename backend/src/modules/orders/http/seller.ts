@@ -54,7 +54,7 @@ export const sellerRoutes = (service: OrdersService) =>
     printPackingSlips: async ({ body, sellerId, principal }) => service.admin.packingSlips(sellerId, body.orderIds, body.hidePrices, p(principal), await service.fulfillment.resolveTasks(sellerId, body.orderIds)),
     /** POST /exports: Export the seller's orders (own items only) */
     createSellerExport: async ({ body, sellerId, principal, actor, requestId }) =>
-      service.admin.requestExport(SELLER_DATASET, body, p(principal), { actor, requestId, principal }, { sellerId, contactVisible: false }),
+      service.admin.requestExport(SELLER_DATASET, body, p(principal), { actor, requestId, principal }, { sellerId }),
     /** GET /exports/{id}: Export status and download link */
     getSellerExport: async ({ params, sellerId, principal }) => service.admin.getExport(params.id, p(principal), SELLER_DATASET, sellerId),
   });

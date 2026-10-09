@@ -71,7 +71,9 @@ export class Placement {
     for (const offerId of new Set(lines.map((l) => l.offerId))) offerSnaps.set(offerId, await ctx.use('offers').snapshotForOrder(offerId));
     const productSnaps = new Map<string, StoredProduct>();
     for (const variantId of new Set(lines.map((l) => l.variantId))) productSnaps.set(variantId, await ctx.use('catalog').snapshotForOrder(variantId));
+    // the category at purchase comes with the snapshot; older catalog snapshots without it fall back to the product
     for (const p of productSnaps.values()) {
+      if (p.categoryId) continue;
       const product = await ctx
         .use('catalog')
         .getProduct(p.productId)
@@ -142,6 +144,7 @@ export class Placement {
           product_id: p.productId,
           variant_id: i.variantId,
           stock_item_id: i.stockItemId,
+          category_id: p.categoryId ?? null,
           product_snapshot: p,
           offer_snapshot: { ...o, conditionLabel: CONDITION_LABEL[o.condition] ?? o.condition, sellerSku: skus?.[i.offerId]?.sku ?? null },
           return_terms: i.returnTerms,
@@ -167,7 +170,8 @@ export class Placement {
       id: orderId,
       ref,
       checkout_session_id: input.checkoutSessionId,
-      customer_id: input.contact.kind === 'customer' ? (input.contact.customerId ?? null) : null,
+      reservation_id: input.reservationId ?? null,
+      customer_id:input.contact.kind === 'customer' ? (input.contact.customerId ?? null) : null,
       contact_email: input.contact.email,
       contact_phone: input.contact.phone ?? null,
       contact_name: input.contact.name,
@@ -247,7 +251,7 @@ export class Placement {
     });
     if (accepted) {
       for (const i of items) batch.push('orders.item.state_changed', { orderId, groupId: i.group_id, itemId: i.id, from: 'pending_payment', to: itemState, actor: SYSTEM, at: now.toISOString() });
-      batch.push('orders.order.accepted', { orderId, ref, customerId: order.customer_id, contactEmail: order.contact_email, total: this.views.m(order.total, agg), groups: placed, acceptedAt: now.toISOString() });
+      batch.push('orders.order.accepted', { orderId, ref, customerId: order.customer_id, contactEmail: order.contact_email, total: this.views.m(order.total, agg), groups: placed, reservationId: order.reservation_id, acceptedAt: now.toISOString() });
     }
     this.core.flush(batch);
     return this.views.detail(agg, await this.core.timelineOf(orderId, ['customer']), 'internal', cfg);
@@ -286,6 +290,7 @@ export class Placement {
         contactEmail: fresh.order.contact_email,
         total: this.views.m(fresh.order.total, fresh),
         groups: this.placedGroups(fresh),
+        reservationId: fresh.order.reservation_id,
         acceptedAt: now.toISOString(),
       });
     });

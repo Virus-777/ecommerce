@@ -127,16 +127,34 @@ describe('admin orders', () => {
     expect(res.status).toBe(202);
     const req = h.exports.requested.at(-1);
     expect(req).toMatchObject({ dataset: 'orders.admin.orders', format: 'csv' });
-    expect(req.filters.__ordersContactVisible).toBe(false);
+    // a flag in the filters is never trusted (and not stored)
+    expect(req.filters).not.toHaveProperty('__ordersContactVisible');
     expect(h.audits.at(-1)).toMatchObject({ action: 'orders.export' });
     expect(h.exports.registered).toEqual(expect.arrayContaining(['orders.admin.orders', 'orders.seller.orders']));
     const got = await h.call('GET', `/api/admin/orders/exports/${res.body.id}`, staff);
     expect(got.body.downloadUrl).toMatch(/^https:/);
-    const principal = { kind: 'staff', sessionId: newId(), accountId: newId() } as never;
-    const rows = await h.service.exportRows('orders.admin.orders', req.filters, principal);
+    // rows are masked unless the requester holds orders.customers.view-contact (the answer their request got)
+    const rows = await h.service.exportRows('orders.admin.orders', { ...req.filters, __ordersContactVisible: true }, req.principal);
     expect(rows.rows).toEqual([expect.objectContaining({ ref: o.ref, customerEmail: 's***@example.com', customerPhone: '***42' })]);
-    const open = await h.service.exportRows('orders.admin.orders', { ...req.filters, __ordersContactVisible: true }, principal);
-    expect(open.rows[0]).toMatchObject({ customerEmail: 'sam@example.com' });
+    const stranger = { kind: 'staff', sessionId: newId(), accountId: newId() } as never;
+    expect((await h.service.exportRows('orders.admin.orders', req.filters, stranger)).rows[0]).toMatchObject({ customerEmail: 's***@example.com' });
+
+    const contactStaff = tokens.staff(['orders.orders.view', 'orders.orders.export', 'orders.customers.view-contact']);
+    expect((await h.call('POST', '/api/admin/orders/exports', contactStaff, { filters: { q: o.ref }, format: 'csv' })).status).toBe(202);
+    const req2 = h.exports.requested.at(-1);
+    const open = await h.service.exportRows('orders.admin.orders', req2.filters, req2.principal);
+    expect(open.rows[0]).toMatchObject({ customerEmail: 'sam@example.com', customerPhone: '+15035550142' });
+  });
+
+  it('unmasks the in-process admin read only for a principal allowed to see contact details', async () => {
+    const { o } = await order();
+    expect((await h.service.getOrderAdmin(o.ref))!.customer.email).toBe('s***@example.com');
+    const contactStaff = tokens.staff(['orders.orders.view', 'orders.orders.export', 'orders.customers.view-contact']);
+    expect((await h.call('POST', '/api/admin/orders/exports', contactStaff, { filters: {}, format: 'csv' })).status).toBe(202);
+    expect((await h.service.getOrderAdmin(o.ref, h.exports.requested.at(-1).principal))!.customer.email).toBe('sam@example.com');
+    const plainStaff = tokens.staff(['orders.orders.view', 'orders.orders.export']);
+    expect((await h.call('POST', '/api/admin/orders/exports', plainStaff, { filters: {}, format: 'csv' })).status).toBe(202);
+    expect((await h.service.getOrderAdmin(o.ref, h.exports.requested.at(-1).principal))!.customer.email).toBe('s***@example.com');
   });
 });
 

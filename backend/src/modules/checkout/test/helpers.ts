@@ -59,6 +59,8 @@ export function fakePayments(clock: { now(): Date }) {
   const intents = new Map<string, FakeIntent>();
   const byKey = new Map<string, string>();
   const calls = { authorize: [] as { input: payments.AuthorizeInput; key: string }[], linkOrder: [] as { intentId: string; orderId: string; allocations: payments.Allocation[] }[], voidIntent: [] as string[], completeAction: [] as string[] };
+  /** What real payments does with a declined intent's store-credit tender (wallet.releaseHold), when wallet runs */
+  const hooks: { releaseCredit?: (holdId: string) => Promise<unknown> } = {};
   const decline: payments.Decline = { code: '05', category: 'card_declined', message: 'Your bank declined Visa •••• 4242. Nothing was charged.', advice: 'Try another card or a digital wallet.', retryable: true };
   const label = (m: payments.MethodSelection) => (m.kind === 'saved_card' ? 'Visa •••• 4242' : m.kind === 'digital_wallet' ? 'Apple Pay' : 'Mastercard •••• 4444');
   const result = (i: FakeIntent): payments.AuthorizeResult => ({ intentId: i.id, state: i.state, decline: i.decline, nextAction: i.state === 'requires_action' ? { kind: 'three_ds_challenge', url: 'https://bank.example.com/3ds', clientSecret: 'cs_1' } : null, methodLabel: i.methodLabel });
@@ -83,6 +85,7 @@ export function fakePayments(clock: { now(): Date }) {
       const i: FakeIntent = { id: newId(), key, input, state, methodLabel: label(input.method), decline: state === 'failed' ? decline : null, orderId: null };
       intents.set(i.id, i);
       byKey.set(key, i.id);
+      if (state === 'failed' && input.creditHoldId && hooks.releaseCredit) await hooks.releaseCredit(input.creditHoldId);
       return result(i);
     },
     completeAction: async (intentId, resultToken) => {
@@ -126,7 +129,7 @@ export function fakePayments(clock: { now(): Date }) {
       };
     },
   };
-  return { api, intents, calls };
+  return { api, intents, calls, hooks };
 }
 
 /* ================================================================ shipping stub */
@@ -197,16 +200,18 @@ export interface World {
   sid(token: string): string;
 }
 
-export async function world(): Promise<World> {
+/** o.wallet: also run the real wallet (phase 3, off at launch) with the launch phase that opens the credit step */
+export async function world(o: { wallet?: boolean } = {}): Promise<World> {
   const clock = movingClock();
   const pay = fakePayments(clock);
   const ship = fakeShipping(clock);
   const app = await buildTestApp({
-    only: withDependencies(['identity', 'access', 'audit', 'media', 'notifications', 'settings', 'customers', 'sellers', 'catalog', 'inventory', 'offers', 'cart', 'orders', 'promotions', 'content', 'checkout']),
+    only: withDependencies(['identity', 'access', 'audit', 'media', 'notifications', 'settings', 'customers', 'sellers', 'catalog', 'inventory', 'offers', 'cart', 'orders', 'promotions', 'content', 'checkout', ...(o.wallet ? ['wallet'] : [])]),
     clock,
-    config: { rateLimits: false },
+    config: { rateLimits: false, ...(o.wallet ? { launchPhase: 3 } : {}) },
     apiStubs: { payments: pay.api, shipping: ship.api },
   });
+  if (o.wallet) pay.hooks.releaseCredit = (holdId) => (app.kernel.boot.apis.get('wallet') as { releaseHold(id: string): Promise<unknown> }).releaseHold(holdId);
   const f = flows(app, clock);
   const events: EventEnvelope[] = [];
   for (const name of ['checkout.session.started', 'checkout.changes.detected', 'checkout.changes.accepted', 'checkout.payment.retried', 'checkout.session.completed', 'checkout.session.abandoned', 'orders.order.placed', 'orders.order.accepted', 'orders.order.cancelled', 'inventory.reservation.allocated']) {

@@ -543,7 +543,9 @@ export class Placement {
     const sum = (f: (g: orders.OrderGroupInput) => number) => m(groups.reduce((s, g) => s + f(g), 0), cur);
     return {
       checkoutSessionId: orderKey,
-      contact: { kind: account.kind, customerId: session.customer_id, name: account.name ?? address.name, email: account.email!, phone: account.phone ?? address.phone ?? null },
+      // inventory allocates from this hold on orders.order.accepted even before attachOrder runs
+      reservationId: session.stock_reservation_id,
+      contact:{ kind: account.kind, customerId: session.customer_id, name: account.name ?? address.name, email: account.email!, phone: account.phone ?? address.phone ?? null },
       channel: (session.channel as 'web' | 'android' | null) ?? 'web',
       currency: cur,
       deliveryAddress: address,
@@ -627,12 +629,19 @@ export class Placement {
     return t.session;
   }
 
-  /** Declined: no order; lines, choices, coupons and holds are kept until holdUntil */
+  /**
+   * Declined: no order; lines, choices, coupons and the stock hold are kept until holdUntil. The store credit
+   * hold is not: payments releases it with the declined intent, so checkout forgets it (releasing it again is
+   * a no-op) and a retry reserves the credit afresh.
+   */
   async failPayment(session: SessionRow, decline: payments.Decline | null, by: By): Promise<SessionRow> {
     const minutes = Number(await this.ctx.settings.get('retryWindowMinutes')) || 30;
     const holdUntil = new Date(this.now().getTime() + minutes * 60_000);
-    const t = await this.transition(session.id, ['placing', 'awaiting_action', 'payment_pending'], 'payment_declined', { hold_until: holdUntil });
+    const t = await this.transition(session.id, ['placing', 'awaiting_action', 'payment_pending'], 'payment_declined', { hold_until: holdUntil, credit_hold_id: null });
     if (!t.won) return t.session;
+    const creditHold = session.credit_hold_id;
+    const wallet = this.ctx.tryUse('wallet');
+    if (wallet && creditHold) await this.core.optional('wallet.releaseHold', () => wallet.releaseHold(creditHold));
     await this.savePayment(session.id, { intentState: 'failed', decline });
     if (t.session.stock_reservation_id) {
       await this.core.optional('inventory.extendHold', () => this.ctx.use('inventory').extendHold(t.session.stock_reservation_id!, holdUntil.toISOString()));

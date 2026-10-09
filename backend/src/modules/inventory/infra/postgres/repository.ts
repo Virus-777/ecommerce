@@ -1,11 +1,12 @@
 import { sql, type Kysely } from 'kysely';
 import { paginate, type PageRequest } from '../../../../kernel/lib/pagination.js';
+import type { Inbox } from '../../../../kernel/events/inbox.js';
 import type { InventoryDb } from '../../../../spec/inventory.js';
 import type { IdTable, InventoryRepository, ItemFilter, ItemListFilter, Lock, NewRow, Patch, Row } from '../../ports.js';
 
 
 /** Postgres adapter for InventoryRepository. `db` is scoped to the `inventory` schema. */
-export function createPostgresInventoryRepository(db: Kysely<InventoryDb>): InventoryRepository {
+export function createPostgresInventoryRepository(db: Kysely<InventoryDb>, inbox?: Inbox): InventoryRepository {
   // dynamic table names: the generic helpers below are typed by the interface
   const anyDb = db as unknown as Kysely<any>;
 
@@ -54,7 +55,11 @@ export function createPostgresInventoryRepository(db: Kysely<InventoryDb>): Inve
   };
 
   const repo: InventoryRepository = {
-    transaction: (fn) => db.transaction().execute((trx) => fn(createPostgresInventoryRepository(trx))),
+    transaction: (fn) => db.transaction().execute((trx) => fn(createPostgresInventoryRepository(trx, inbox))),
+    async claimEvent(key) {
+      if (!inbox) throw new Error('inventory: the repository was created without the kernel inbox');
+      return inbox.claim(anyDb, key);
+    },
 
     /* ---------------------------------------------------------------- generic */
     async get<T extends IdTable>(table: T, id: string, lock?: Lock) {

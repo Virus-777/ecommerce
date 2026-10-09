@@ -161,7 +161,7 @@ export const locationNote = (a: common.Address) => `Delivery dates below are for
 
 /**
  * State base sales-tax rates applied to items after discounts (shipping is not taxed at launch).
- * Spec integration "Sales tax rates": a rate table at launch, a tax service adapter later.
+ * Spec integration "Sales tax rates": a rate table at launch (infra/tax/dev.ts behind the TaxProvider port), a tax service adapter later.
  */
 export const STATE_TAX_RATES: Readonly<Record<string, number>> = {
   AL: 0.04, AK: 0, AZ: 0.056, AR: 0.065, CA: 0.0725, CO: 0.029, CT: 0.0635, DE: 0, DC: 0.06, FL: 0.06, GA: 0.04, HI: 0.04,

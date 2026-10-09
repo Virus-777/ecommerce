@@ -249,7 +249,7 @@ export class Cancellations {
       return id;
     }
     for (const item of acted) await this.core.move(tx, batch, item, 'cancel', { reason: o.reasonCode, patch: { refund_status: refund.total.amount > 0 ? 'requested' : item.refund_status } });
-    if (o.initiatedBy === 'customer') batch.push('orders.cancellation.decided', { cancellationId: id, orderId: agg.order.id, outcome: 'accepted', by: batch.by.actor });
+    if (o.initiatedBy === 'customer') batch.push('orders.cancellation.decided', { cancellationId: id, orderId: agg.order.id, ...this.core.recipient(agg.order), outcome: 'accepted', by: batch.by.actor });
     await this.afterAccepted(tx, batch, agg, group, id, stored, refund, {
       initiatedBy: o.initiatedBy,
       reasonCode: o.reasonCode,
@@ -280,6 +280,7 @@ export class Cancellations {
       batch.push('orders.item.cancelled', {
         orderId: agg.order.id,
         ref: agg.order.ref,
+        ...this.core.recipient(agg.order),
         groupId: group.id,
         ownerType: group.owner_type as 'official' | 'seller',
         sellerId: group.seller_id,
@@ -332,7 +333,7 @@ export class Cancellations {
         else await this.core.move(tx, batch, item, 'cancel', { reason: o.reason ?? c.reason_code, patch: { refund_status: refund.total.amount > 0 ? 'requested' : item.refund_status } });
       }
       await tx.update('cancellations', c.id, { status, decided_by: by.actor, decided_at: this.core.now(), refund_preview: refund, refund_status: refund.total.amount > 0 ? 'requested' : 'none' });
-      batch.push('orders.cancellation.decided', { cancellationId: c.id, orderId, outcome: o.outcome, by: by.actor });
+      batch.push('orders.cancellation.decided', { cancellationId: c.id, orderId, ...this.core.recipient(agg.order), outcome: o.outcome, by: by.actor });
       await this.afterAccepted(tx, batch, agg, group, c.id, c.items, refund, {
         initiatedBy: c.initiated_by as Initiator,
         reasonCode: c.reason_code,
@@ -362,7 +363,7 @@ export class Cancellations {
       await this.restore(tx, batch, agg, c, 'decline_cancellation');
       const reasonText = o.reason === 'already_shipped' ? 'Already shipped' : (o.note ?? o.reason);
       await tx.update('cancellations', c.id, { status, decided_by: by.actor, decided_at: this.core.now(), decline_reason: [reasonText, o.note && o.reason === 'already_shipped' ? o.note : null].filter(Boolean).join(': ') });
-      batch.push('orders.cancellation.decided', { cancellationId: c.id, orderId, outcome: 'declined', by: by.actor });
+      batch.push('orders.cancellation.decided', { cancellationId: c.id, orderId, ...this.core.recipient(agg.order), outcome: 'declined', by: by.actor });
       await this.core.timeline(tx, orderId, [
         {
           group_id: c.group_id,
@@ -385,7 +386,7 @@ export class Cancellations {
       const status = cancellationRequestMachine.next(c.status as 'requested', 'withdraw');
       await this.restore(tx, batch, agg, c, 'decline_cancellation');
       await tx.update('cancellations', c.id, { status, decided_by: by.actor, decided_at: this.core.now() });
-      batch.push('orders.cancellation.decided', { cancellationId: c.id, orderId, outcome: 'withdrawn', by: by.actor });
+      batch.push('orders.cancellation.decided', { cancellationId: c.id, orderId, ...this.core.recipient(agg.order), outcome: 'withdrawn', by: by.actor });
       await this.core.timeline(tx, orderId, [
         { group_id: c.group_id, visibility: 'customer', label: 'Cancellation request withdrawn', detail: 'The items continue as normal.', actor: by.actor },
         { group_id: c.group_id, visibility: 'seller', label: 'Buyer withdrew the cancellation request', actor: by.actor },

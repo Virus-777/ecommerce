@@ -2,7 +2,7 @@ import { AppError, isAppError, isNotImplemented } from '../../kernel/errors/inde
 import { inventoryError } from './errors.js';
 import type { EventEnvelope, EventPayload, PublishMeta } from '../../kernel/events/index.js';
 import { dateInZone } from '../../kernel/lib/clock.js';
-import { newId } from '../../kernel/lib/ids.js';
+import { isUuid, newId } from '../../kernel/lib/ids.js';
 import { money } from '../../kernel/lib/money.js';
 import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type { ModuleContext } from '../../kernel/module-system/index.js';
@@ -36,6 +36,7 @@ import type {
   StockItem,
   StockItemDetail,
   StockItemInput,
+  StockItemRef,
   StockQuantities,
   StockSummary,
   Transfer,
@@ -844,6 +845,59 @@ export class InventoryService implements InventoryPublicApi {
   async findBySku(ownerType: 'official' | 'seller', skus: string[], sellerId?: string): Promise<StockItem[]> {
     if (!skus?.length) return [];
     return this.#itemsApi(await this.repo.items({ ownerType, skus: [...new Set(skus.map((s) => s.trim()))], ...(sellerId ? { sellerId } : {}) }));
+  }
+
+  /**
+   * Stock items by id with SKU, label, owner and main location (unknown ids are left out, input order kept).
+   * Main location: the seller's virtual location; for company stock the location holding most of the item's
+   * units (sellable first), or the default company location when it has none.
+   */
+  async getStockItems(stockItemIds: string[]): Promise<StockItemRef[]> {
+    const ids = [...new Set((stockItemIds ?? []).filter((id) => isUuid(id)))];
+    if (!ids.length) return [];
+    const rows = await this.repo.items({ ids, includeArchived: true });
+    if (!rows.length) return [];
+    const levels = await this.repo.levels(rows.map((r) => r.id));
+    const sellerIds = [...new Set(rows.map((r) => (r.owner_type === 'seller' ? r.seller_id : null)).filter((x): x is string => Boolean(x)))];
+    const locations = new Map((await this.repo.locations({ ids: [...new Set(levels.map((l) => l.location_id))] })).map((l) => [l.id, l]));
+    const sellerLocation = new Map<string, Row<'locations'>>();
+    for (const sellerId of sellerIds) {
+      const own = (await this.repo.locations({ ownerType: 'seller', sellerId }))[0];
+      if (own) sellerLocation.set(sellerId, own);
+    }
+    const fallback = rows.some((r) => r.owner_type === 'official') ? await this.#officialDefault() : undefined;
+    const units = (l: Row<'stock_levels'>) => l.available + l.reserved + l.incoming + l.damaged_held + l.returned;
+    const mainOf = (r: Row<'stock_items'>): Row<'locations'> | undefined => {
+      if (r.owner_type === 'seller') {
+        const held = levels.filter((l) => l.stock_item_id === r.id).map((l) => locations.get(l.location_id)).find((l) => l?.kind === 'seller_virtual');
+        return (r.seller_id ? sellerLocation.get(r.seller_id) : undefined) ?? held;
+      }
+      const best = levels
+        .filter((l) => l.stock_item_id === r.id && units(l) > 0 && locations.get(l.location_id)?.owner_type === 'official')
+        .sort((a, b) => Number(locations.get(b.location_id)!.sellable) - Number(locations.get(a.location_id)!.sellable) || units(b) - units(a) || (a.location_id < b.location_id ? -1 : 1))[0];
+      return best ? locations.get(best.location_id) : fallback;
+    };
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    return ids
+      .filter((id) => byId.has(id))
+      .map((id) => {
+        const r = byId.get(id)!;
+        const loc = mainOf(r);
+        return {
+          id: r.id,
+          sku: r.sku,
+          label: r.label,
+          ownerType: r.owner_type,
+          sellerId: r.seller_id,
+          offerId: r.offer_id,
+          productId: r.product_id,
+          variantId: r.variant_id,
+          condition: r.condition,
+          locationId: loc?.id ?? null,
+          locationCode: loc?.code ?? null,
+          binCode: r.primary_bin_code,
+        };
+      });
   }
 
   /** Customer view of offer stock: state, low-stock count, quantity selector limit and restock estimate */
@@ -1978,9 +2032,26 @@ export class InventoryService implements InventoryPublicApi {
 
   /* ================================================================ events consumed */
 
-  /** orders.order.accepted: Allocate the order's held reservation lines to order items */
+  /**
+   * orders.order.accepted: Allocate the order's held reservation lines to order items. The order's hold is the
+   * one checkout attached (attachOrder), or, when the event arrives first, the payload's reservationId; the
+   * hold is then linked to the order here and attachOrder later only maps its lines to order items. Each
+   * allocation claims `order-accepted:<orderId>:<reservationId>` in its own transaction (kernel inbox).
+   */
   async onOrderAcceptedFromOrders(event: EventPayload<'orders.order.accepted'>): Promise<void> {
-    const reservations = await this.repo.reservationsByOrder(event.orderId);
+    let reservations = await this.repo.reservationsByOrder(event.orderId);
+    if (!reservations.length && event.reservationId) {
+      const r = isUuid(event.reservationId) ? await this.repo.get('reservations', event.reservationId) : undefined;
+      if (!r) {
+        this.ctx.log.info({ orderId: event.orderId, reservationId: event.reservationId }, 'inventory: accepted order names an unknown stock hold, nothing to allocate');
+        return;
+      }
+      if (r.order_id && r.order_id !== event.orderId) {
+        this.ctx.log.warn({ orderId: event.orderId, reservationId: r.id, holdOrderId: r.order_id }, 'inventory: the stock hold of an accepted order belongs to another order');
+        return;
+      }
+      reservations = [r];
+    }
     if (!reservations.length) {
       this.ctx.log.info({ orderId: event.orderId }, 'inventory: accepted order has no stock hold, nothing to allocate');
       return;
@@ -1989,11 +2060,12 @@ export class InventoryService implements InventoryPublicApi {
       if (r.state === 'held') {
         const done = await this.repo.transaction(async (tx) => {
           const locked = (await tx.get('reservations', r.id, { forUpdate: true }))!;
-          if (locked.state !== 'held') return null;
+          if (locked.state !== 'held' || (locked.order_id && locked.order_id !== event.orderId)) return null;
+          if (!(await tx.claimEvent(`order-accepted:${event.orderId}:${r.id}`))) return null;
           const lines = await tx.lines([r.id], { forUpdate: true });
           const allocated: Row<'reservation_lines'>[] = [];
           for (const l of lines) if (l.state === 'held') allocated.push(await tx.update('reservation_lines', l.id, { state: 'allocated' }));
-          await tx.update('reservations', r.id, { state: reservationMachine.next('held', 'allocate'), order_ref: event.ref, expires_at: null, updated_at: this.now() });
+          await tx.update('reservations', r.id, { state: reservationMachine.next('held', 'allocate'), order_id: event.orderId, order_ref: event.ref, expires_at: null, updated_at: this.now() });
           return allocated;
         });
         if (done?.length) await this.#publishAllocated(r.id, event.orderId, done);
@@ -2016,6 +2088,7 @@ export class InventoryService implements InventoryPublicApi {
     const id = newId();
     try {
       const lines = await this.#stock('order_allocated', async (st) => {
+        if (!(await st.tx.claimEvent(`order-accepted:${event.orderId}:${r.id}`))) return null;
         await st.tx.insert('reservations', { id, key, order_id: event.orderId, order_ref: event.ref, state: 'allocated', expires_at: null, released_reason: null, created_at: st.now, updated_at: st.now });
         await st.lock(old.map((l) => l.stock_item_id));
         const out: Row<'reservation_lines'>[] = [];
@@ -2032,7 +2105,7 @@ export class InventoryService implements InventoryPublicApi {
         }
         return out;
       });
-      await this.#publishAllocated(id, event.orderId, lines);
+      if (lines) await this.#publishAllocated(id, event.orderId, lines);
     } catch (err) {
       if (!isAppError(err) || err.code !== 'INSUFFICIENT_STOCK') throw err;
       this.ctx.log.warn({ orderId: event.orderId, details: err.details }, 'inventory: accepted order could not be allocated after its hold expired');

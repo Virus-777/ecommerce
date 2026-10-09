@@ -1,17 +1,38 @@
 import type { EventPayload } from '../../kernel/events/index.js';
 import type * as common from '../../spec/common.js';
 import type * as identity from '../../spec/identity.js';
-import type { AdminOrderDetail, DelayedItemAlert, FulfillmentTask, ItemPaidAmount, OrderCreateInput, OrderDetail, OrdersPublicApi, OrderSummary, SellerOrderCounts, SellerOrderDetail } from '../../spec/orders.js';
-import { Admin } from './service/admin.js';
+import { isUuid } from '../../kernel/lib/ids.js';
+import type { AdminOrderDetail, DelayedItemAlert, FulfillmentTask, ItemPaidAmount, OrderCreateInput, OrderDetail, OrderItemInfo, OrdersPublicApi, OrderSummary, SellerOrderCounts, SellerOrderDetail } from '../../spec/orders.js';
+import type { ItemInfoRow } from './ports.js';
+import { Admin, CONTACT_PERMISSION } from './service/admin.js';
 import { AfterSales } from './service/aftersales.js';
 import { Cancellations } from './service/cancellations.js';
-import { Core, notFound, type OrdersServiceDeps } from './service/core.js';
+import { Core, invalid, notFound, type OrdersServiceDeps } from './service/core.js';
 import { Fulfillment } from './service/fulfillment.js';
 import { Placement } from './service/placement.js';
 import { Reads, type StoreViewer } from './service/reads.js';
 import { Views } from './service/views.js';
 
 export type { OrdersServiceDeps };
+
+const itemInfo = (r: ItemInfoRow): OrderItemInfo => ({
+  id: r.id,
+  orderId: r.order_id,
+  orderRef: r.order_ref,
+  groupId: r.group_id,
+  ownerType: r.owner_type as OrderItemInfo['ownerType'],
+  sellerId: r.seller_id,
+  customerId: r.customer_id,
+  offerId: r.offer_id,
+  productId: r.product_id,
+  variantId: r.variant_id,
+  stockItemId: r.stock_item_id,
+  categoryId: r.category_id,
+  quantity: r.quantity,
+  state: r.state as OrderItemInfo['state'],
+  deliveredAt: r.delivered_at ? r.delivered_at.toISOString() : null,
+  returnWindowEndsAt: r.return_window_ends_at ? r.return_window_ends_at.toISOString() : null,
+});
 
 /**
  * Orders use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
@@ -134,8 +155,10 @@ export class OrdersService implements OrdersPublicApi {
     return this.reads.sellerCounts(sellerId);
   }
 
-  getOrderAdmin(ref: string): Promise<AdminOrderDetail | null> {
-    return this.reads.getOrderAdmin(ref);
+  /** Contact details masked unless the principal (when given) holds orders.customers.view-contact */
+  async getOrderAdmin(ref: string, principal?: identity.Principal | null): Promise<AdminOrderDetail | null> {
+    const canViewContact = principal ? await this.core.can(principal, CONTACT_PERMISSION) : false;
+    return this.reads.getOrderAdmin(ref, canViewContact);
   }
 
   listOrdersAdmin(
@@ -166,6 +189,24 @@ export class OrdersService implements OrdersPublicApi {
     for (const id of productIds) out[id] = { open: 0, past: 0 };
     for (const r of rows) out[r.product_id] = { open: r.open, past: r.past };
     return out;
+  }
+
+  /** One order item with its order, group owner, customer, state and delivery time (no access check) */
+  async getOrderItem(orderItemId: string): Promise<OrderItemInfo | null> {
+    if (!isUuid(orderItemId)) return null;
+    const row = await this.core.repo.itemInfo(orderItemId);
+    return row ? itemInfo(row) : null;
+  }
+
+  /** Items delivered to the customer (optionally since a time), newest delivery first: review eligibility */
+  async listDeliveredItems(customerId: string, since?: string): Promise<OrderItemInfo[]> {
+    if (!isUuid(customerId)) return [];
+    let from: Date | null = null;
+    if (since) {
+      from = new Date(since);
+      if (Number.isNaN(from.getTime())) throw invalid([{ path: 'since', message: 'Use an ISO date and time' }]);
+    }
+    return (await this.core.repo.deliveredItemsOf(customerId, from)).map(itemInfo);
   }
 
   /** Snapshot category of the items, with its subcategories (catalog's tree) */

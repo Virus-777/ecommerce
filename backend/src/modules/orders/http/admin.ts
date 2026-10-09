@@ -99,7 +99,7 @@ export const adminRoutes = (service: OrdersService) => {
     /** DELETE /saved-filters/{id}: Delete a saved filter (own, or shared with orders.orders.manage) */
     deleteSavedFilter: async ({ params, principal, can }) => service.admin.deleteSavedFilter(principal.accountId!, params.id, await can('orders.orders.manage')),
     /** POST /exports: Export the filtered order list */
-    createOrdersExport: async ({ body, principal, actor, requestId, can }) => service.admin.requestExport(ADMIN_DATASET, body, p(principal), { actor, requestId, principal }, { contactVisible: await can(CONTACT) }),
+    createOrdersExport: async ({ body, principal, actor, requestId }) => service.admin.requestExport(ADMIN_DATASET, body, p(principal), { actor, requestId, principal }),
     /** GET /exports/{id}: Export status and download link (download is logged) */
     getOrdersExport: async ({ params, principal }) => service.admin.getExport(params.id, p(principal), ADMIN_DATASET),
   });

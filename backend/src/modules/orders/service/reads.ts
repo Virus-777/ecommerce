@@ -144,7 +144,7 @@ export class Reads {
       const c = agg.order.currency;
       const calc = await this.core.soft('finance', 'fee estimate', (fin) =>
         fin.calculateFee({
-          categoryId: items[0]?.product_snapshot.categoryId ?? null,
+          categoryId: items[0]?.category_id ?? items[0]?.product_snapshot.categoryId ?? null,
           itemPrice: money(g.items_total, c),
           sellerDiscount: money(f.seller, c),
           platformDiscount: money(f.platform, c),

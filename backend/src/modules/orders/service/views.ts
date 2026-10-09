@@ -211,6 +211,7 @@ export class Views {
       offer: this.offerTerms(i, viewer !== 'store'),
       returnTerms: i.return_terms,
       stockItemId: i.stock_item_id,
+      categoryId: i.category_id ?? p.categoryId ?? null,
       title: this.title(i),
       variantLabel: this.variantLabel(i),
       image: this.image(i),

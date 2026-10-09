@@ -102,6 +102,16 @@ export class Core {
     this.ctx.events.publish(name as never, payload as never, { actor: by.actor ?? SYSTEM, ...(by.requestId ? { requestId: by.requestId } : {}) });
   }
 
+  /** Whether a principal handed over in-process (export, admin read) holds a permission: the answer their request got */
+  can(principal: { kind: string; accountId?: string | null } | null | undefined, permission: string): Promise<boolean> {
+    return this.ctx.can(principal as Principal | null | undefined, permission);
+  }
+
+  /** Who a customer-facing event is for: the customers-module id (null for guests) and the order contact email */
+  recipient(order: Pick<OrderRec, 'customer_id' | 'contact_email'>): { customerId: string | null; contactEmail: string } {
+    return { customerId: order.customer_id, contactEmail: order.contact_email };
+  }
+
   /** Publishes what a transaction collected (after the commit) */
   flush(batch: Batch) {
     for (const e of batch.events) this.publish(e.name, e.payload as never, batch.by);

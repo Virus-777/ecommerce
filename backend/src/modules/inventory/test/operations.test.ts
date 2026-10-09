@@ -151,7 +151,7 @@ describe('returns', () => {
     await inspected(returnId, a.variantId, 2);
     await inspected(returnId, a.variantId, 2); // replay
     h.app.kernel.events.publish('returns', 'returns.return.inspected', { returnId: newId(), ownerType: 'seller', sellerId: newId(), conditionOutcome: 'x', proposedStockOutcome: 'restock', variantId: a.variantId, quantity: 1 });
-    h.app.kernel.events.publish('returns', 'returns.return.received', { returnId, ownerType: 'official', sellerId: null, receivedAt: new Date().toISOString() });
+    h.app.kernel.events.publish('returns', 'returns.return.received', { returnId, ownerType: 'official', sellerId: null, items: [{ orderItemId: newId(), quantity: 2, variantId: a.variantId, stockItemId: a.id }], receivedAt: new Date().toISOString() });
     await h.app.kernel.events.drain();
     expect(await quantities(h, a.id)).toMatchObject({ returned: 2, available: 0 });
     const pending = (await admin(h, 'GET', '/return-outcomes?state=pending')).json().items.filter((o: { returnId: string }) => o.returnId === returnId);

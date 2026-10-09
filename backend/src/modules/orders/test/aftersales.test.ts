@@ -116,7 +116,7 @@ describe('returns, refunds, cases and completion', () => {
     expect(o.progress.returns).toMatchObject({ state: 'requested', openReturns: 1 });
     expect(o.status.flags).toContain('return_open');
 
-    await h.publish('returns', 'returns.return.received', { returnId, ownerType: 'seller', sellerId: m.sellerB, receivedAt: now() });
+    await h.publish('returns', 'returns.return.received', { returnId, customerId: m.customerId, contactEmail: 'sam@example.com', ownerType: 'seller', sellerId: m.sellerB, items: [{ orderItemId: itemB.id, quantity: 1, variantId: itemB.product.variantId, stockItemId: itemB.stockItemId }], receivedAt: now() });
     const breakdown = { itemAmount: { amount: 3000, currency: 'USD' }, discountShare: { amount: 0, currency: 'USD' }, shippingRefund: { amount: 0, currency: 'USD' }, returnShippingDeduction: { amount: 0, currency: 'USD' }, deductions: [], total: { amount: 3200, currency: 'USD' }, maxRefundable: { amount: 3200, currency: 'USD' }, destination: 'Visa •••• 4417', isEstimate: false };
     const refundRequestId = newId();
     await h.publish('returns', 'returns.refund.approved', { refundRequestId, returnId, caseId: null, orderId: m.order.id, orderItemIds: [itemB.id], ownerType: 'seller', sellerId: m.sellerB, source: 'return', trustReportId: null, total: { amount: 3200, currency: 'USD' }, breakdown, fundedBy: 'seller', sellerShare: null, platformShare: null, approvedBy: { kind: 'staff', id: newId() } });

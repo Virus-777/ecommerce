@@ -138,6 +138,26 @@ export interface SellerCounts {
   dueToday: number;
 }
 
+/** An item with its order, group owner and customer (OrderItemInfo) */
+export interface ItemInfoRow {
+  id: string;
+  order_id: string;
+  order_ref: string;
+  group_id: string;
+  owner_type: string;
+  seller_id: string | null;
+  customer_id: string | null;
+  offer_id: string;
+  product_id: string;
+  variant_id: string;
+  stock_item_id: string;
+  category_id: string | null;
+  quantity: number;
+  state: string;
+  delivered_at: Date | null;
+  return_window_ends_at: Date | null;
+}
+
 /** Persistence for this module's own tables: orders.orders, orders.seller_groups, orders.order_items, orders.item_state_log, orders.cancellations, orders.shipment_refs, orders.timeline, orders.notes, orders.documents, orders.saved_filters, orders.ref_sequences. */
 export interface OrdersRepository {
   /** Runs fn in one transaction (nested calls join the outer one) */
@@ -172,6 +192,10 @@ export interface OrdersRepository {
   ordersWithOpenGroupsOfSeller(sellerId: string): Promise<GroupRec[]>;
   countPurchased(customerId: string, offerId: string, since: Date): Promise<number>;
   verifiedPurchase(customerId: string, productId: string): Promise<ItemRec | undefined>;
+  /** One item with its order, group and customer */
+  itemInfo(itemId: string): Promise<ItemInfoRow | undefined>;
+  /** Items delivered to the customer (delivered_at set), optionally since a time, newest delivery first */
+  deliveredItemsOf(customerId: string, since: Date | null): Promise<ItemInfoRow[]>;
   itemCountsForProducts(productIds: string[]): Promise<{ product_id: string; open: number; past: number }[]>;
   openInCategories(categoryIds: string[], placedBefore: Date): Promise<{ orders: number; items: number }>;
   timelinePage(orderId: string, visibility: string | undefined, page: PageRequest): Promise<common.Page<TimelineRec>>;

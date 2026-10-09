@@ -145,7 +145,7 @@ export class AfterSales {
         .use('catalog')
         .snapshotForOrder(e.variantId)
         .catch(() => null);
-      if (snap) product = { ...snap, categoryId: original.product_snapshot.categoryId ?? null };
+      if (snap) product = { ...snap, categoryId: snap.categoryId ?? original.category_id ?? original.product_snapshot.categoryId ?? null };
     }
     if (e.offerId !== original.offer_id) offer = await this.core.ctx.use('offers').snapshotForOrder(e.offerId).then((o) => ({ ...o, sellerSku: null }), () => original.offer_snapshot);
     await this.core.write(e.orderId, { actor: SYSTEM }, async (tx, agg) => {
@@ -157,6 +157,7 @@ export class AfterSales {
         offer_id: e.offerId,
         variant_id: e.variantId,
         product_id: product.productId,
+        category_id: product.categoryId ?? original.category_id ?? null,
         product_snapshot: product,
         offer_snapshot: offer,
         quantity: e.quantity,

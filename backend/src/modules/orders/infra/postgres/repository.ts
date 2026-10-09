@@ -289,6 +289,14 @@ export function createPostgresOrdersRepository(db: Kysely<OrdersDb>): OrdersRepo
         .limit(1)
         .executeTakeFirst();
     },
+    async itemInfo(itemId) {
+      return itemInfoQuery(d).where('i.id', '=', itemId).executeTakeFirst();
+    },
+    async deliveredItemsOf(customerId, since) {
+      let q = itemInfoQuery(d).where('o.customer_id', '=', customerId).where('i.delivered_at', 'is not', null);
+      if (since) q = q.where('i.delivered_at', '>=', since);
+      return q.orderBy('i.delivered_at', 'desc').orderBy('i.id').limit(1000).execute();
+    },
     async itemCountsForProducts(productIds) {
       if (!productIds.length) return [];
       return d
@@ -308,7 +316,7 @@ export function createPostgresOrdersRepository(db: Kysely<OrdersDb>): OrdersRepo
         .selectFrom('order_items as i')
         .innerJoin('orders as o', 'o.id', 'i.order_id')
         .select([sql<number>`count(distinct i.order_id)::int`.as('orders'), sql<number>`count(*)::int`.as('items')])
-        .where(sql<boolean>`i.product_snapshot->>'categoryId' in (${list(categoryIds)})`)
+        .where(sql<boolean>`coalesce(i.category_id::text, i.product_snapshot->>'categoryId') in (${list(categoryIds)})`)
         .where('i.state', 'not in', ['delivered', 'return_requested', 'returned', 'cancelled', 'refunded'])
         .where('o.placed_at', '<', placedBefore)
         .where('o.lifecycle', 'in', ['payment_pending', 'open'])
@@ -341,6 +349,31 @@ const TABS: Record<string, string[]> = {
   shipped: ['shipped', 'partly_delivered'],
   completed: ['delivered', 'partly_cancelled', 'cancelled'],
 };
+
+function itemInfoQuery(d: any): any {
+  return d
+    .selectFrom('order_items as i')
+    .innerJoin('orders as o', 'o.id', 'i.order_id')
+    .innerJoin('seller_groups as g', 'g.id', 'i.group_id')
+    .select([
+      'i.id',
+      'i.order_id',
+      'o.ref as order_ref',
+      'i.group_id',
+      'g.owner_type',
+      'g.seller_id',
+      'o.customer_id',
+      'i.offer_id',
+      'i.product_id',
+      'i.variant_id',
+      'i.stock_item_id',
+      'i.category_id',
+      'i.quantity',
+      'i.state',
+      'i.delivered_at',
+      'i.return_window_ends_at',
+    ]);
+}
 
 function adminQuery(d: any, f: AdminOrderFilter, now: Date): any {
   let q = d.selectFrom('orders');

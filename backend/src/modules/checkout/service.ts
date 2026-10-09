@@ -28,7 +28,7 @@ import type {
 } from '../../spec/checkout.js';
 import { CONDITION_LABEL, emptyTotals, m, plural, type StoredAccount, type StoredQuote } from './domain/rules.js';
 import { checkoutSessionMachine } from './domain/state-machines.js';
-import type { CheckoutRepository, LineRow, Owner, SessionRow } from './ports.js';
+import type { CheckoutRepository, LineRow, Owner, SessionRow, TaxProvider } from './ports.js';
 import { Core, SYSTEM, invalid, type By } from './service/core.js';
 import { Placement } from './service/placement.js';
 import { Quoter, included, type Draft } from './service/quote.js';
@@ -38,6 +38,8 @@ import { Views } from './service/views.js';
 export interface CheckoutServiceDeps {
   repo: CheckoutRepository;
   ctx: ModuleContext<'checkout'>;
+  /** Sales tax per line for a destination (dev adapter: the state base-rate table) */
+  tax: TaxProvider;
 }
 
 type Status = Parameters<typeof checkoutSessionMachine.next>[0];
@@ -57,7 +59,7 @@ export class CheckoutService implements CheckoutPublicApi {
 
   constructor(protected readonly deps: CheckoutServiceDeps) {
     this.core = new Core(deps.ctx, deps.repo);
-    this.quoter = new Quoter(this.core);
+    this.quoter = new Quoter(this.core, deps.tax);
     this.views = new Views(this.core);
     this.reval = new Revalidator(this.core, this.quoter, this.views);
     this.placement = new Placement(this.core, this.views, this.reval, (s) => this.views.checkout(s));

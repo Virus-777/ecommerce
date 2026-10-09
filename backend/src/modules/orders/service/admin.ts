@@ -17,8 +17,10 @@ import type { Views } from './views.js';
 
 export const ADMIN_DATASET = 'orders.admin.orders';
 export const SELLER_DATASET = 'orders.seller.orders';
-/** Set by orders on the filters it hands to reports: whether the requester may see customer contact details */
-const CONTACT_KEY = '__ordersContactVisible';
+/** Customer email and phone are masked in admin reads and exports without it */
+export const CONTACT_PERMISSION = 'orders.customers.view-contact';
+/** Formerly set on export filters; never trusted, dropped when a request carries it */
+const LEGACY_CONTACT_KEY = '__ordersContactVisible';
 
 export class Admin {
   #registered?: Promise<void>;
@@ -169,12 +171,12 @@ export class Admin {
     return api;
   }
 
-  async requestExport(dataset: string, body: { filters: unknown; columns?: string[] | null; format: 'csv' }, principal: identity.Principal, by: By, o: { sellerId?: string; contactVisible: boolean }): Promise<reports.ExportJob> {
+  async requestExport(dataset: string, body: { filters: unknown; columns?: string[] | null; format: 'csv' }, principal: identity.Principal, by: By, o: { sellerId?: string } = {}): Promise<reports.ExportJob> {
     const api = this.reportsApi();
     await this.registerDatasets();
     const raw = body.filters && typeof body.filters === 'object' && !Array.isArray(body.filters) ? { ...(body.filters as Record<string, unknown>) } : {};
-    delete raw[CONTACT_KEY];
-    const filters = { ...raw, ...(body.columns?.length ? { columns: body.columns } : {}), [CONTACT_KEY]: o.contactVisible };
+    delete raw[LEGACY_CONTACT_KEY];
+    const filters = { ...raw, ...(body.columns?.length ? { columns: body.columns } : {}) };
     const job = await api.requestExport({ dataset, filters, format: body.format, principal, ...(o.sellerId ? { sellerId: o.sellerId } : {}) });
     const label = dataset === ADMIN_DATASET ? 'Exported the order list' : 'Exported own orders';
     await this.core.audit({ action: 'orders.export', actionLabel: label, category: 'orders', target: { type: 'export', id: job.id, ref: job.ref, label, screen: dataset === ADMIN_DATASET ? 'admin/orders' : 'seller/orders' }, after: { dataset, filters: raw, format: body.format, sellerId: o.sellerId ?? null } }, by);
@@ -193,7 +195,8 @@ export class Admin {
     const page = { mode: 'cursor' as const, cursor: cursor ?? null, limit: 100 };
     if (dataset === ADMIN_DATASET) {
       if (principal.kind !== 'staff') throw new AppError('FORBIDDEN', 'Staff only');
-      const contact = f[CONTACT_KEY] === true;
+      // the requester's own answer (the kernel resolves it as their request did), never a flag in the filters
+      const contact = await this.core.can(principal, CONTACT_PERMISSION);
       const rows = await this.core.repo.adminOrders(await this.reads.adminFilter(f as AdminListQuery, principal.accountId ?? null), page, this.core.now());
       const aggs = await this.core.loadMany(rows.items.map((r) => r.id));
       return {

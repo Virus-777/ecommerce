@@ -62,6 +62,11 @@ export interface MovementFilter {
 export interface InventoryRepository {
   /** Runs fn in one database transaction with a repository bound to it */
   transaction<T>(fn: (tx: InventoryRepository) => Promise<T>): Promise<T>;
+  /**
+   * Claims an event consumer's key (kernel inbox) on this repository's connection: inside a transaction the
+   * claim commits with the effects. false when the key was already handled.
+   */
+  claimEvent(key: string): Promise<boolean>;
 
   /* ---------------------------------------------------------------- rows by id (tables with an id column) */
   get<T extends IdTable>(table: T, id: string, lock?: Lock): Promise<Row<T> | undefined>;

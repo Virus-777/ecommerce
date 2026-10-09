@@ -6,6 +6,7 @@ import { storeRoutes } from './http/store.js';
 import { adminRoutes } from './http/admin.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresCheckoutRepository } from './infra/postgres/repository.js';
+import { createDevTaxProvider } from './infra/tax/dev.js';
 import { CheckoutService } from './service.js';
 
 /**
@@ -20,7 +21,8 @@ export default defineModule({
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const service = new CheckoutService({ repo: createPostgresCheckoutRepository(ctx.db), ctx });
+    // sales tax: the launch rate table behind the TaxProvider port; a tax service adapter plugs in here later
+    const service = new CheckoutService({ repo: createPostgresCheckoutRepository(ctx.db), ctx, tax: createDevTaxProvider() });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

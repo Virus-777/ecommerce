@@ -4,6 +4,45 @@
  */
 import type { Page, PageRequest } from '../../kernel/lib/pagination.js';
 import type { CheckoutDb } from '../../spec/checkout.js';
+import type * as common from '../../spec/common.js';
+
+/* ================================================================ sales tax provider */
+
+/** One taxable line: the item amount after discounts, in minor units */
+export interface TaxLineInput {
+  lineId: string;
+  /** Item amount after discounts (shipping is not taxed at launch) */
+  amount: number;
+  quantity: number;
+  offerId: string;
+  /** Product category, for providers with category rules */
+  categoryId?: string | null;
+}
+
+/** Tax of one line with the rate and jurisdiction that produced it */
+export interface TaxLineAmount {
+  lineId: string;
+  amount: number;
+  rate: number;
+  jurisdiction: string;
+}
+
+/** The tax shown at checkout for a destination: one summary line plus the amount per line */
+export interface TaxCalculation {
+  jurisdiction: string;
+  label: string;
+  rate: number;
+  lines: TaxLineAmount[];
+}
+
+/**
+ * Sales tax per line for a destination (spec integration "Sales tax rates": a rate table at launch, a tax
+ * service later). null when there is no destination yet (the quote then shows "calculated once you enter a
+ * delivery address"). Deterministic dev adapter: infra/tax/dev.ts.
+ */
+export interface TaxProvider {
+  calculate(input: { destination: common.Address | null; currency: string; lines: TaxLineInput[] }): Promise<TaxCalculation | null>;
+}
 
 export type SessionRow = CheckoutDb['sessions'];
 export type LineRow = CheckoutDb['session_lines'];

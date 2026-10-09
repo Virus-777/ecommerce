@@ -17,14 +17,12 @@ import {
   m,
   packageKey,
   stableHash,
-  taxFor,
-  taxOf,
   type LineInfo,
   type Shippability,
   type StoredCredit,
   type StoredQuote,
 } from '../domain/rules.js';
-import type { LineRow, PackageRow, SessionRow } from '../ports.js';
+import type { LineRow, PackageRow, SessionRow, TaxProvider } from '../ports.js';
 import type { Core } from './core.js';
 
 /** Parcel weight per unit until catalog dimensions reach checkout */
@@ -60,7 +58,10 @@ export const included = (l: LineRow) => l.status === 'included';
 export const byLineOrder = (a: LineRow, b: LineRow) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 export class Quoter {
-  constructor(private readonly core: Core) {}
+  constructor(
+    private readonly core: Core,
+    private readonly tax: TaxProvider,
+  ) {}
 
   private get ctx() {
     return this.core.ctx;
@@ -366,8 +367,14 @@ export class Quoter {
     for (const a of appliedCodes) if (a.source === 'clipped' && !d.couponCodes.some((c) => c.toUpperCase() === a.code!.toUpperCase())) coupons.push(resultFor(a));
 
     // tax on items after discounts, by destination state
-    const tax = taxFor(d.address);
-    for (const l of lines) l.tax = tax ? taxOf(l.unit_price * l.quantity - (lineDiscount.get(l.id) ?? 0), tax.rate) : 0;
+    const calc = await this.tax.calculate({
+      destination: d.address,
+      currency: cur,
+      lines: lines.map((l) => ({ lineId: l.id, amount: Math.max(0, l.unit_price * l.quantity - (lineDiscount.get(l.id) ?? 0)), quantity: l.quantity, offerId: l.offer_id, categoryId: quote.lineInfo[l.id]?.categoryId ?? null })),
+    });
+    const taxByLine = new Map((calc?.lines ?? []).map((t) => [t.lineId, t.amount]));
+    for (const l of lines) l.tax = Math.max(0, taxByLine.get(l.id) ?? 0);
+    const tax = calc ? { jurisdiction: calc.jurisdiction, label: calc.label, rate: calc.rate } : null;
 
     // totals per package and for the order
     const perPackage: PackageTotals[] = [];

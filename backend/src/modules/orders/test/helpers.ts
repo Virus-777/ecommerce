@@ -33,6 +33,8 @@ export interface Harness {
   offers: Map<string, offers.OfferSnapshot>;
   products: Map<string, catalog.ProductSnapshot & { categoryId?: string | null }>;
   guestGrants: Set<string>;
+  /** catalog.getProduct category by product id (overrides the snapshot's, for snapshots without one) */
+  productCategories: Map<string, string>;
   exports: { requested: any[]; registered: string[] };
   call(method: string, url: string, token: string, body?: unknown, headers?: Record<string, string>): Promise<{ status: number; body: any }>;
   publish(source: string, name: string, payload: unknown): Promise<void>;
@@ -50,6 +52,7 @@ export async function harness(): Promise<Harness> {
     offers: new Map<string, offers.OfferSnapshot>(),
     products: new Map<string, catalog.ProductSnapshot & { categoryId?: string | null }>(),
     guestGrants: new Set<string>(),
+    productCategories: new Map<string, string>(),
     exports: { requested: [] as any[], registered: [] as string[] },
   };
   const job = (over: Partial<reports.ExportJob> = {}): reports.ExportJob => ({
@@ -81,7 +84,7 @@ export async function harness(): Promise<Harness> {
         snapshotForOrder: async (variantId) => ({ ...structuredClone(h.products.get(variantId)!), takenAt: clock.now().toISOString() }),
         getProduct: async (productId) => {
           const p = [...h.products.values()].find((x) => x.productId === productId);
-          return p ? ({ id: productId, categoryId: p.categoryId ?? null } as unknown as catalog.Product) : null;
+          return p ? ({ id: productId, categoryId: h.productCategories.get(productId) ?? p.categoryId ?? null } as unknown as catalog.Product) : null;
         },
         listCategories: async () =>
           [
@@ -173,7 +176,7 @@ export function product(h: Harness, o: { title: string; price: number; ownerType
     modelNumber: 'H-100',
     imageUrl: 'https://cdn.example/p.jpg',
     takenAt: new Date().toISOString(),
-    categoryId: o.categoryId ?? CATEGORY.child,
+    categoryId: o.categoryId === undefined ? CATEGORY.child : o.categoryId,
   });
   h.offers.set(offerId, {
     offerId,

@@ -117,7 +117,7 @@ export class Fulfillment {
         },
         { group_id: groupId, visibility: 'seller', label: 'Delay reported', detail: `New dispatch estimate ${expected.toISOString()}`, reason: body.note ?? body.reason, actor: by.actor },
       ]);
-      batch.push('orders.item.delayed', { orderId: agg.order.id, groupId, itemIds: items.map((i) => i.id), source: 'seller', expectedDispatchBy: expected.toISOString(), reason: body.reason });
+      batch.push('orders.item.delayed', { orderId: agg.order.id, ...this.core.recipient(agg.order), groupId, itemIds: items.map((i) => i.id), source: 'seller', expectedDispatchBy: expected.toISOString(), reason: body.reason });
     });
   }
 
@@ -340,7 +340,7 @@ export class Fulfillment {
         { group_id: e.groupId, visibility: 'customer', label: 'Package delayed', detail: `Package ${g.position} has not shipped on time. We have asked ${g.seller_name} to ship it; you can cancel the items or contact support.` },
         { group_id: e.groupId, visibility: 'seller', label: 'Dispatch overdue', detail: 'Ship now or cancel what you cannot fulfill.' },
       ]);
-      batch.push('orders.item.delayed', { orderId: e.orderId, groupId: e.groupId, itemIds: items.map((i) => i.id), source: 'overdue', expectedDispatchBy: null, reason: 'Dispatch deadline passed' });
+      batch.push('orders.item.delayed', { orderId: e.orderId, ...this.core.recipient(agg.order), groupId: e.groupId, itemIds: items.map((i) => i.id), source: 'overdue', expectedDispatchBy: null, reason: 'Dispatch deadline passed' });
     });
   }
 
