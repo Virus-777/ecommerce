@@ -28,6 +28,15 @@ export interface Flows {
   customer(email: string): Promise<{ accountId: string; accessToken: string; email: string; password: string }>;
   /** Password sign-in to an app (seller: optionally for a seller) */
   signIn(body: { email: string; password: string; audience: 'store' | 'seller' | 'admin'; sellerId?: string }): Promise<{ status: number; body: any }>;
+  /** The client's side of an upload: start, PUT the bytes to the signed storage URL, complete, process. Returns the asset id. */
+  upload(area: 'store' | 'seller', token: string, file: { purpose: string; fileName: string; contentType: string; body: Buffer }): Promise<string>;
+  /**
+   * A customer applies to sell (invited by the Seller Manager), is approved and signs in to Seller
+   * Center. Returns the seller id and the real seller session.
+   */
+  approvedSeller(o: { applicant: { email: string; password: string; accessToken: string }; sellerManager: Staff; categoryId: string; storeName: string }): Promise<{ sellerId: string; sellerToken: string }>;
+  /** The seller passes the launch review (after its first product submission), so it may sell */
+  passLaunchReview(o: { sellerId: string; sellerToken: string; sellerManager: Staff }): Promise<void>;
 }
 
 export interface Staff {
@@ -37,6 +46,10 @@ export interface Staff {
 }
 
 const PASSWORD = 'Blue-Orchid-2026-Key';
+
+/** A one-page PDF (verification documents) */
+export const onePagePdf = () =>
+  Buffer.from('%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R >> endobj\n%%EOF\n', 'latin1');
 
 export function flows(app: FastifyInstance, clock: { now(): Date; advance(ms: number): void }): Flows {
   const seen: EventEnvelope[] = [];
@@ -113,6 +126,88 @@ export function flows(app: FastifyInstance, clock: { now(): Date; advance(ms: nu
     async signIn(body) {
       const v = await visitor(body.audience);
       return call('POST', '/api/public/identity/sessions', { token: v, body: { keepSignedIn: false, device: device(), ...body } });
+    },
+    async upload(area, token, file) {
+      const start = await call('POST', `/api/${area}/media/uploads`, { token, body: { purpose: file.purpose, fileName: file.fileName, contentType: file.contentType, sizeBytes: file.body.length } });
+      expect(start.status, JSON.stringify(start.body)).toBe(201);
+      // stands in for the browser's PUT to object storage (the dev storage adapter checks the signature)
+      const storage = (app.kernel.boot.apis.get('media') as any).providers.storage;
+      await storage.acceptSignedPut(start.body.url, file.body, start.body.headers['content-type']);
+      const done = await call('POST', `/api/${area}/media/uploads/${start.body.uploadId}/complete`, { token });
+      expect(done.status, JSON.stringify(done.body)).toBe(202);
+      await app.kernel.jobs.runNow('media.process');
+      await app.kernel.events.drain();
+      return start.body.assetId as string;
+    },
+    async approvedSeller({ applicant, sellerManager, categoryId, storeName }) {
+      const STORE = '/api/store/sellers';
+      const ADMIN = '/api/admin/sellers';
+      const workEmail = `owner@${storeName.toLowerCase().replace(/[^a-z]+/g, '')}.example.com`;
+      const invited = await call('POST', `${ADMIN}/seller-invitations`, { token: sellerManager.accessToken, body: { email: workEmail, businessName: `${storeName} LLC` } });
+      expect(invited.status, JSON.stringify(invited.body)).toBe(201);
+      // the emailed code (spec gap: the code is in no event or response yet, so read it as the email would carry it)
+      const invitationCode = (app.kernel.boot.apis.get('sellers') as any).applications.invitationCode(invited.body.id) as string;
+      const t = applicant.accessToken;
+      const start = await call('POST', `${STORE}/applications`, {
+        token: t,
+        body: { accountMode: 'existing_member', contactName: 'Ana Lopez', contactPhone: '+15035550101', workEmail, storeName, sellerType: 'business', market: 'US', invitationCode },
+      });
+      expect(start.status, JSON.stringify(start.body)).toBe(201);
+      const id = start.body.id as string;
+      const patch = async (body: object) => {
+        const r = await call('PATCH', `${STORE}/applications/${id}`, { token: t, body });
+        expect(r.status, JSON.stringify(r.body)).toBe(200);
+        return r.body;
+      };
+      const businessAddress = { name: `${storeName} LLC`, line1: '410 Pine St', city: 'Portland', region: 'OR', postalCode: '97204', country: 'US' };
+      await patch({
+        step: 'business',
+        business: {
+          kind: 'registered_business',
+          legalName: `${storeName} LLC`,
+          storeName,
+          businessType: 'llc',
+          stateOfRegistration: 'OR',
+          registryNumber: 'OR-123456',
+          address: businessAddress,
+          phone: '+15035550100',
+          website: 'https://shop.example.com',
+          categoryIds: [categoryId],
+          plannedProductCount: '21_100',
+          plannedProducts: 'headphones, speakers',
+          supportHours: 'Mon-Fri 9-5',
+        },
+      });
+      const v = await patch({ step: 'verification', verification: { owners: [{ name: 'Ana Lopez', ownershipPct: 100, isPrimary: true, idDocumentIds: [] }], taxIdType: 'ein', taxId: '12-3456789', w9Method: 'online' } });
+      const ownerId = v.verification.owners[0].id;
+      for (const [kind, extra] of [['owner_id', { ownerId }], ['business_registration', {}]] as const) {
+        const mediaId = await self.upload('store', t, { purpose: 'verification_document', fileName: `${kind}.pdf`, contentType: 'application/pdf', body: onePagePdf() });
+        const d = await call('POST', `${STORE}/applications/${id}/documents`, { token: t, body: { mediaId, kind, ...extra } });
+        expect(d.status, JSON.stringify(d.body)).toBe(201);
+      }
+      const account = '000123457731';
+      await patch({ step: 'payout', payout: { accountHolderName: `${storeName} LLC`, accountType: 'business_checking', routingNumber: '011000015', accountNumber: account, confirmAccountNumber: account } });
+      await patch({ step: 'return_address', returnAddress: { sameAsBusiness: true, contactName: 'Ana Lopez', phone: '+15035550101' } });
+      const draft = (await call('GET', `${STORE}/applications/current`, { token: t })).body;
+      const acceptances = draft.agreementsRequired.map((a: { key: string; versionLabel: string }) => ({ key: a.key, versionLabel: a.versionLabel }));
+      const submitted = await call('POST', `${STORE}/applications/${id}/submit`, { token: t, body: { acceptances, signedName: 'Ana Lopez' } });
+      expect(submitted.status, JSON.stringify(submitted.body)).toBe(200);
+      const sellerId = submitted.body.sellerId as string;
+      expect((await call('POST', `${ADMIN}/applications/${id}/start-review`, { token: sellerManager.accessToken })).status).toBe(200);
+      const approved = await call('POST', `${ADMIN}/applications/${id}/approve`, { token: sellerManager.accessToken, body: { note: 'Welcome' } });
+      expect(approved.status, JSON.stringify(approved.body)).toBe(200);
+      const signedIn = await self.signIn({ email: applicant.email, password: applicant.password, audience: 'seller', sellerId });
+      expect(signedIn.status, JSON.stringify(signedIn.body)).toBe(200);
+      return { sellerId, sellerToken: signedIn.body.tokens.accessToken as string };
+    },
+    async passLaunchReview({ sellerId, sellerToken, sellerManager }) {
+      // finance is not built yet: its payout-destination verification arrives as the event it will publish
+      app.kernel.events.publish('finance', 'finance.destination.verified' as never, { sellerId, reviewId: crypto.randomUUID() } as never);
+      await app.kernel.events.drain();
+      const requested = await call('POST', '/api/seller/sellers/setup/launch-review', { token: sellerToken, body: {} });
+      expect(requested.status, JSON.stringify(requested.body)).toBe(200);
+      const passed = await call('POST', `/api/admin/sellers/sellers/${sellerId}/launch-review/decide`, { token: sellerManager.accessToken, body: { outcome: 'pass' } });
+      expect(passed.status, JSON.stringify(passed.body)).toBe(200);
     },
   };
   return self;
