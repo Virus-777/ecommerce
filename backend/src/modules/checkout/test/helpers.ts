@@ -135,6 +135,8 @@ export function fakeShipping(clock: { now(): Date }) {
   const knobs = { shiftDays: 0, standardPrice: 599, calls: { quoteOptions: 0, checkCoverage: 0 } };
   const day = (n: number) => new Date(clock.now().getTime() + (n + knobs.shiftDays) * 86_400_000).toISOString().slice(0, 10);
   const api: Partial<shipping.ShippingPublicApi> = {
+    // offers validates a seller's shipping profile through quote(); every profile id quotes in these tests
+    quote: async () => ({ shipsToLocation: true, reason: null, options: [], default: null }),
     checkCoverage: async (profileIds, destination) => {
       knobs.calls.checkCoverage++;
       return profileIds.map((profileId) =>

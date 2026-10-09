@@ -37,6 +37,28 @@ export interface Flows {
   approvedSeller(o: { applicant: { email: string; password: string; accessToken: string }; sellerManager: Staff; categoryId: string; storeName: string }): Promise<{ sellerId: string; sellerToken: string }>;
   /** The seller passes the launch review (after its first product submission), so it may sell */
   passLaunchReview(o: { sellerId: string; sellerToken: string; sellerManager: Staff }): Promise<void>;
+  /**
+   * The whole way to a live listing: staff with roles (Business Owner → Seller Manager, Catalog Manager),
+   * a category and brand, a customer approved as a seller, a product the Catalog Manager approves, the
+   * launch review, and an active offer with stock. For tests that start where shopping starts.
+   */
+  liveListing(o?: { price?: number; quantity?: number }): Promise<Listing>;
+  /** The seller's shipping settings and a default profile (standard by weight, expedited flat); returns the profile id */
+  shippingProfile(sellerToken: string): Promise<string>;
+}
+
+export interface Listing {
+  owner: Staff;
+  sellerManager: Staff;
+  catalogManager: Staff;
+  sellerId: string;
+  sellerToken: string;
+  /** The seller's owner account (a customer who applied to sell) */
+  sellerOwner: { email: string; password: string; accessToken: string; accountId: string };
+  categoryId: string;
+  productId: string;
+  variantId: string;
+  offerId: string;
 }
 
 export interface Staff {
@@ -46,6 +68,18 @@ export interface Staff {
 }
 
 const PASSWORD = 'Blue-Orchid-2026-Key';
+
+/** A PNG header of the given size (what the dev media processor reads), for product images */
+export function pngHeader(width: number, height: number): Buffer {
+  const u32 = (n: number) => {
+    const b = Buffer.alloc(4);
+    b.writeUInt32BE(n);
+    return b;
+  };
+  const ihdr = Buffer.concat([u32(width), u32(height), Buffer.from([8, 2, 0, 0, 0])]);
+  const chunk = (type: string, data: Buffer) => Buffer.concat([u32(data.length), Buffer.from(type, 'latin1'), data, Buffer.alloc(4)]);
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', Buffer.alloc(64, 7)), chunk('IEND', Buffer.alloc(0))]);
+}
 
 /** A one-page PDF (verification documents) */
 export const onePagePdf = () =>
@@ -199,6 +233,103 @@ export function flows(app: FastifyInstance, clock: { now(): Date; advance(ms: nu
       const signedIn = await self.signIn({ email: applicant.email, password: applicant.password, audience: 'seller', sellerId });
       expect(signedIn.status, JSON.stringify(signedIn.body)).toBe(200);
       return { sellerId, sellerToken: signedIn.body.tokens.accessToken as string };
+    },
+    async liveListing({ price = 18900, quantity = 5 } = {}) {
+      const owner = await self.bootstrapOwner();
+      const sellerManager = await self.staffWithRoles(owner, 'sam@marketly.test', 'Sam Sellers', ['seller_manager']);
+      const catalogManager = await self.staffWithRoles(owner, 'cat@marketly.test', 'Cara Catalog', ['catalog_manager']);
+      const category = await call('POST', '/api/admin/catalog/categories', { token: catalogManager.accessToken, body: { name: 'Headphones', parentId: null } });
+      expect(category.status, JSON.stringify(category.body)).toBe(201);
+      const brand = await call('POST', '/api/admin/catalog/brands', { token: catalogManager.accessToken, body: { name: 'Aurora Sound' } });
+      expect(brand.status, JSON.stringify(brand.body)).toBe(201);
+      const sellerOwner = await self.customer('ana@example.com');
+      const seller = await self.approvedSeller({ applicant: sellerOwner, sellerManager, categoryId: category.body.id, storeName: 'Northwind Audio' });
+      const { sellerToken } = seller;
+      const imageId = await self.upload('seller', sellerToken, { purpose: 'product_image', fileName: 'front.png', contentType: 'image/png', body: pngHeader(1600, 1600) });
+      const draft = await call('POST', '/api/seller/catalog/products', {
+        token: sellerToken,
+        body: {
+          title: 'Aurora wireless headphones',
+          brandId: brand.body.brand.id,
+          categoryId: category.body.id,
+          description: 'Over-ear headphones with active noise cancelling and a 40 hour battery that charges over USB-C.',
+          keyFeatures: ['Active noise cancelling', '40 h battery', 'USB-C charging'],
+          specs: { 'Battery life': '40 h' },
+          includedItems: ['Headphones', 'USB-C cable'],
+          imageIds: [imageId],
+          modelNumber: 'AU-100',
+          variants: [{ options: { Color: 'Black' }, gtin: '4006381333931' }],
+        },
+      });
+      expect(draft.status, JSON.stringify(draft.body)).toBe(201);
+      const productId = draft.body.product.id as string;
+      const variantId = draft.body.product.variants[0].id as string;
+      expect((await call('POST', `/api/seller/catalog/products/${productId}/submit`, { token: sellerToken, body: { note: 'First submission' } })).status).toBe(200);
+      await self.passLaunchReview({ ...seller, sellerManager });
+      const approved = await call('POST', `/api/admin/catalog/products/${productId}/approve`, { token: catalogManager.accessToken, body: {} });
+      expect(approved.status, JSON.stringify(approved.body)).toBe(200);
+      const shippingProfileId = await self.shippingProfile(sellerToken);
+      const offer = await call('POST', '/api/seller/offers/offers', {
+        token: sellerToken,
+        body: {
+          productId,
+          variantId,
+          condition: 'new',
+          price: { amount: price, currency: 'USD' },
+          sellerSku: 'NW-AU-100',
+          quantity,
+          dispatchBusinessDays: 1,
+          shippingProfileId,
+          returnTerms: { kind: 'baseline' },
+          warranty: { kind: 'manufacturer', months: 24 },
+          publish: true,
+        },
+      });
+      expect(offer.status, JSON.stringify(offer.body)).toBe(201);
+      await app.kernel.events.drain();
+      return {
+        owner,
+        sellerManager,
+        catalogManager,
+        sellerId: seller.sellerId,
+        sellerToken,
+        sellerOwner,
+        categoryId: category.body.id,
+        productId,
+        variantId,
+        offerId: offer.body.offer.id,
+      };
+    },
+    async shippingProfile(sellerToken) {
+      if (!app.kernel.modules.includes('shipping')) return crypto.randomUUID(); // shipping off: offers accept the id as given
+      const settings = await call('PUT', '/api/seller/shipping/settings', {
+        token: sellerToken,
+        body: {
+          coverage: { area: 'contiguous_48_dc', zoneIds: [], excluded: ['po_box'] },
+          dispatch: { handlingDays: 1, sameDayCutoff: '12:00', businessDays: ['mon', 'tue', 'wed', 'thu', 'fri'] },
+          buyLabelsInSellerCenter: true,
+          effectiveFrom: null,
+        },
+      });
+      expect(settings.status, JSON.stringify(settings.body)).toBe(200);
+      const methods = (await call('GET', '/api/seller/shipping/methods', { token: sellerToken })).body as { id: string; code: string }[];
+      const id = (code: string) => methods.find((m) => m.code === code)!.id;
+      const usd = (amount: number) => ({ amount, currency: 'USD' });
+      const profile = await call('POST', '/api/seller/shipping/profiles', {
+        token: sellerToken,
+        body: {
+          name: 'Default',
+          methods: [
+            { methodId: id('standard'), enabled: true, rateType: 'by_weight', tiers: [{ upToGrams: 2000, price: usd(599) }, { upToGrams: 20000, price: usd(1299) }], maxWeightGrams: 20000 },
+            { methodId: id('expedited'), enabled: true, rateType: 'flat_per_package', tiers: [{ price: usd(1499) }] },
+          ],
+          freeShippingThreshold: usd(4900),
+          freeShippingMethodCode: 'standard',
+          effectiveFrom: null,
+        },
+      });
+      expect(profile.status, JSON.stringify(profile.body)).toBe(201);
+      return (profile.body.id ?? profile.body.profile?.id) as string;
     },
     async passLaunchReview({ sellerId, sellerToken, sellerManager }) {
       // finance is not built yet: its payout-destination verification arrives as the event it will publish
