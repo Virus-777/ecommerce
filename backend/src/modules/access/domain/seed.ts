@@ -169,7 +169,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Customers and support',
     description: 'Support cases, customer accounts and messaging.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['support.*', 'customers.*', '!customers.accounts.export', 'messaging.*', 'orders.orders.view', 'orders.customers.view-contact', 'returns.requests.view', OWNER_DECIDES, ...QUEUES],
+    permissions: ['support.*', 'customers.*', '!customers.accounts.export', 'messaging.*', 'orders.orders.view', 'orders.customers.view-contact', 'returns.requests.view', 'wallet.credit.view', 'wallet.goodwill.grant', OWNER_DECIDES, ...QUEUES],
     limits: {
       'support.remedies.approve': upTo(500),
       'wallet.goodwill.grant': upTo(50),
@@ -183,7 +183,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Finance',
     description: 'Ledger, payouts, holds, adjustments, payments and refunds.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['finance.*', 'payments.*', 'returns.refunds.approve', 'reports.marketplace-finance.view', 'reports.trading.view', OWNER_DECIDES, ...QUEUES],
+    permissions: ['finance.*', 'payments.*', 'returns.refunds.approve', 'reports.marketplace-finance.view', 'reports.trading.view', 'wallet.*', OWNER_DECIDES, ...QUEUES],
     limits: {
       'finance.payouts.release': upTo(250_000, { secondReviewerAboveMoney: usd(50_000), secondReviewerRoleKeys: ['finance_manager', BUSINESS_OWNER] }),
       'finance.holds.place': upTo(50_000),
@@ -301,7 +301,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Customers and support',
     description: 'Support cases, customer notes and conversations.',
     escalationRoleKey: 'customer_support_manager',
-    permissions: ['support.cases.view', 'support.cases.handle', 'customers.accounts.view', 'customers.notes.write', 'messaging.conversations.read', 'messaging.conversations.participate', 'orders.orders.view', ...QUEUES],
+    permissions: ['support.cases.view', 'support.cases.handle', 'customers.accounts.view', 'customers.notes.write', 'messaging.conversations.read', 'messaging.conversations.participate', 'orders.orders.view', 'wallet.credit.view', 'wallet.goodwill.grant', ...QUEUES],
     limits: { 'support.remedies.approve': upTo(50), 'wallet.goodwill.grant': upTo(50) },
   },
 ];

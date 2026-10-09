@@ -325,7 +325,9 @@ export class Placement {
             attemptNo,
             customerId: session.customer_id,
             guestEmail: session.customer_id ? null : account.email,
-            amount: quote.totals.total,
+            // the intent's amount is the whole order: payments charges the card amount − creditAmount
+            // (totals.total is already net of credit, so add the credit back)
+            amount: { amount: quote.totals.total.amount + credit, currency: quote.totals.total.currency },
             method: o.method,
             creditHoldId: session.credit_hold_id,
             creditAmount: credit > 0 ? quote.totals.creditApplied : null,

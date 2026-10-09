@@ -137,9 +137,9 @@ describe('store credit with the modules that use it', () => {
     charged = { card: card.amount.amount, leftToPay: withCredit.body.totals.total.amount };
   });
 
-  // Cross-module bug (reported, not wallet's code): checkout's totals.total is already net of the credit, and
-  // payments.authorize subtracts creditAmount from it again, so the card is charged total - 2 x credit.
-  it.fails('charges the card exactly what is left to pay after the credit (checkout/payments deduct the credit twice)', () => {
+  // checkout sends the whole order as the intent amount and payments charges the card amount - credit
+  // (this once deducted the credit twice: totals.total is already net of it)
+  it('charges the card exactly what is left to pay after the credit', () => {
     expect(charged.card).toBe(charged.leftToPay);
   });
 
