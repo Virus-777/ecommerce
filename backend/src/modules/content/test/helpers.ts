@@ -45,7 +45,7 @@ export interface Harness {
   card(over?: Partial<search.ProductCard>): search.ProductCard;
 }
 
-const PUBLISHED = ['content.page.published', 'content.page.unpublished', 'content.page.removed', 'content.article.published', 'content.policy.submitted', 'content.policy.scheduled', 'content.policy.effective'];
+const PUBLISHED = ['content.page.published', 'content.page.unpublished', 'content.page.removed', 'content.article.published', 'content.policy.submitted', 'content.policy.scheduled', 'content.policy.effective', 'content.article.review_due'];
 
 export async function harness(): Promise<Harness> {
   const clock = movingClock();

@@ -10,6 +10,7 @@ import type { Page } from '../../../spec/common.js';
 import type * as identity from '../../../spec/identity.js';
 import type { ExportDataset, ExportJob, ReportQuery } from '../../../spec/reports.js';
 import { CONTENT_TYPES, columnsFromRows, columnsOf, renderFile, type ExportColumn, type ExportFormat } from '../domain/files.js';
+import { periodLabel } from '../domain/rules.js';
 import { exportJobMachine } from '../domain/state-machines.js';
 import type { DatasetRow, JobRow } from '../ports.js';
 import { SYSTEM, invalid, notFound, type Caller, type ReportsCore } from './core.js';
@@ -24,6 +25,17 @@ const MAX_ACTIVE_PER_REQUESTER = 5;
 const MAX_PAGES = 100_000;
 
 type ExportRowsApi = { exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[]; nextCursor?: string | null }> };
+
+/** The scheduled run an export serves (kept in the job's filters, so it survives restarts) */
+interface ScheduledRun {
+  id: string;
+  periodLabel: string;
+}
+
+const scheduledRunOf = (filters: unknown): ScheduledRun | null => {
+  const s = (filters as { schedule?: Partial<ScheduledRun> } | null)?.schedule;
+  return s && typeof s.id === 'string' && typeof s.periodLabel === 'string' ? { id: s.id, periodLabel: s.periodLabel } : null;
+};
 
 export interface ExportRequest {
   dataset?: string | null;
@@ -156,7 +168,7 @@ export class Exports {
 
   /* ---------------------------------------------------------------- requesting */
 
-  async request(input: ExportRequest, by: Caller, via: Via): Promise<ExportJob> {
+  async request(input: ExportRequest, by: Caller, via: Via, o: { scheduleId?: string } = {}): Promise<ExportJob> {
     const p = by.principal;
     const dataset = input.dataset ?? (input.reportKey ? REPORT_DATASET : null);
     if (!dataset) throw invalid([{ path: 'dataset', message: 'Choose a dataset or a report to export' }]);
@@ -181,9 +193,10 @@ export class Exports {
     if (dataset === REPORT_DATASET) {
       if (!input.reportKey) throw invalid([{ path: 'reportKey', message: 'Choose the report to export' }]);
       const report = p.kind === 'seller' ? await this.defs.sellerReport(input.reportKey) : await this.defs.staffReport(input.reportKey, by);
-      await this.queries.resolve(input.query, { seller: p.kind === 'seller' });
+      const resolved = await this.queries.resolve(input.query, { seller: p.kind === 'seller' });
       reportKey = report.key;
-      filters = { reportKey: report.key, query: input.query ?? {} };
+      const schedule: ScheduledRun | null = o.scheduleId ? { id: o.scheduleId, periodLabel: periodLabel(resolved.range) } : null;
+      filters = { reportKey: report.key, query: input.query ?? {}, ...(schedule ? { schedule } : {}) };
     } else if (via !== 'api' && !(await this.core.principalCan(p, e.permission, by.can))) {
       // module export endpoints carry the dataset permission themselves; here the dataset is chosen in the body
       throw new AppError('FORBIDDEN', `Exporting ${e.title} needs ${e.permission}`, { permission: e.permission, dataset });
@@ -346,6 +359,9 @@ export class Exports {
       if (!done) return;
       const view = this.view(done);
       this.core.ctx.events.publish('reports.export.ready', { exportId: id, requestedBy: view.requestedBy, expiresAt: expiresAt.toISOString() });
+      // a scheduled run: notifications emails the schedule's recipients (once: only the run that finished the job gets here)
+      const run = scheduledRunOf(done.filters);
+      if (run) await this.scheduledReady(done, run, expiresAt);
       await this.core.audit(
         {
           action: 'reports.export.ready',
@@ -365,6 +381,26 @@ export class Exports {
         if (row?.state === 'running') await tx.updateJob(id, { state: exportJobMachine.next(row.state as never, 'fail'), error: message, finished_at: this.core.now() });
       });
     }
+  }
+
+  /** reports.scheduled_report.ready for a scheduled run's file (a schedule stopped meanwhile sends nothing) */
+  private async scheduledReady(job: JobRow, run: ScheduledRun, expiresAt: Date) {
+    const schedule = await this.core.repo.getSchedule(run.id);
+    if (!schedule?.active) return;
+    const recipients = strings(schedule.recipients);
+    if (!recipients.length) return;
+    const report = await this.core.repo.getReport(schedule.report_key);
+    this.core.ctx.events.publish('reports.scheduled_report.ready', {
+      scheduleId: schedule.id,
+      reportKey: schedule.report_key,
+      reportTitle: report?.title ?? schedule.report_key,
+      exportId: job.id,
+      // the file's own format: scheduled runs are produced as CSV (exports have no PDF renderer)
+      format: 'csv',
+      periodLabel: run.periodLabel,
+      recipients,
+      expiresAt: expiresAt.toISOString(),
+    });
   }
 
   /** Rows and columns of a job: the report itself, or the owner module page by page */

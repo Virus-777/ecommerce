@@ -34,7 +34,7 @@ describe('order facts from events (idempotent, order-tolerant)', () => {
     expect(kpi((await sellerReport(sellerId, 'seller.order_trend')).body, 'commerce.orders').value).toBe(1);
     (pending as any).acceptedAt = h.clock.now().toISOString();
     (pending as any).lifecycle = 'open';
-    h.publish('orders', 'orders.order.accepted', { orderId: pending.id, ref: pending.ref, customerId: null, contactEmail: 'ben@example.com', total: usd(1), groups: [], acceptedAt: h.clock.now().toISOString() });
+    h.publish('orders', 'orders.order.accepted', { orderId: pending.id, ref: pending.ref, customerId: null, contactEmail: 'ben@example.com', total: usd(1), groups: [], items: [], acceptedAt: h.clock.now().toISOString() });
     await h.drain();
     expect(kpi((await sellerReport(sellerId, 'seller.order_trend')).body, 'commerce.orders').value).toBe(2);
   });
@@ -119,7 +119,7 @@ describe('order facts from events (idempotent, order-tolerant)', () => {
     const returnId = newId();
     h.publish('returns', 'returns.return.requested', { returnId, ref: 'RT-1', orderId: o.id, ownerType: 'seller', sellerId, orderItemIds: [o.groups[0]!.items[0]!.id], reason: 'damaged', responseDueAt: h.clock.now().toISOString() });
     await h.drain();
-    h.publish('returns', 'returns.return.inspected', { returnId, ownerType: 'seller', sellerId, conditionOutcome: 'damaged_in_transit', proposedStockOutcome: 'damaged', variantId: newId(), quantity: 1 });
+    h.publish('returns', 'returns.return.inspected', { returnId, ownerType: 'seller', sellerId, conditionOutcome: 'damaged_in_transit', proposedStockOutcome: 'damaged', orderItemId: o.groups[0]!.items[0]!.id, variantId: newId(), stockItemId: null, quantity: 1 });
     await h.drain();
     const mine = await sellerReport(sellerId, 'seller.returns_by_reason', { preset: 'today' });
     expect(kpi(mine.body, 'service.return_requests').value).toBe(1);

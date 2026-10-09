@@ -16,11 +16,11 @@ import { ContentService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.0.0',
+  version: '1.0.1',
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const service = new ContentService({ repo: createPostgresContentRepository(ctx.db), ctx });
+    const service = new ContentService({ repo: createPostgresContentRepository(ctx.db, ctx.inbox), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

@@ -17,7 +17,7 @@ import { ReportsService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.0.1',
+  version: '1.0.2',
   migrations,
   graphql: typeDefs,
   register(ctx) {

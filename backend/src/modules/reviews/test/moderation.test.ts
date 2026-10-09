@@ -96,7 +96,20 @@ describe('decisions', () => {
     const staffId = newId();
     const res = await k.call('POST', `${ADMIN}/moderation-items/${item.id}/decide`, tokens.staff(staffId), { decision: 'remove', reasonCode: 'personal_information', messageToAuthor: 'It shows a home address.' });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
-    expect(k.of('reviews.moderation.decided')).toEqual([{ moderationItemId: item.id, contentType: 'product_review', contentId: r.reviewId, decision: 'remove', reasonCode: 'personal_information' }]);
+    expect(k.of('reviews.moderation.decided')).toEqual([
+      {
+        moderationItemId: item.id,
+        contentType: 'product_review',
+        contentId: r.reviewId,
+        decision: 'remove',
+        reasonCode: 'personal_information',
+        author: { kind: 'customer', id: r.customerId },
+        reporters: [{ kind: 'customer', id: reporter }],
+        reporterOutcome: expect.stringContaining('We removed this review'),
+        appealUntil: expect.any(String),
+      },
+    ]);
+    expect(Date.parse(k.of('reviews.moderation.decided')[0]!.appealUntil!)).toBeGreaterThan(k.clock.now().getTime());
     expect(k.of('reviews.review.removed')).toEqual([{ reviewId: r.reviewId, productId: r.productId, byModeration: true, reasonCode: 'personal_information' }]);
     expect(k.callsOf('media.remove')).toEqual([[photo, { reason: expect.any(String), by: expect.objectContaining({ kind: 'staff', id: staffId }) }]]);
     expect(k.audits).toEqual([expect.objectContaining({ action: 'reviews.moderation.decide', category: 'content', reason: expect.any(String), actor: expect.objectContaining({ id: staffId }) })]);
@@ -272,9 +285,29 @@ describe('admin review search and consumers', () => {
   it('removes content named in a trust enforcement and lets the author see why', async () => {
     const photo = newId();
     const r = await published({ photos: [photo] });
+    const reporter = newId();
+    await report(tokens.customer(reporter), r.reviewId, 'fake_or_paid');
+    const sellerReporter = seller(k, 'Rival Store');
+    await k.call('POST', `${SELLER}/reports`, tokens.seller(sellerReporter), { targetType: 'product_review', targetId: r.reviewId, reason: 'fake_or_paid' });
     k.reset();
     await k.emit('trust', 'trust.enforcement.recorded', { enforcementId: newId(), reportId: newId(), action: 'remove_reviews', ownerTeam: 'reviews', targets: [{ type: 'review', id: r.reviewId, label: 'review' }], reason: 'Paid review ring', params: {}, alreadyApplied: false });
     expect(k.of('reviews.review.removed')).toEqual([{ reviewId: r.reviewId, productId: r.productId, byModeration: true, reasonCode: 'proven_fake' }]);
+    expect(k.of('reviews.moderation.decided')).toEqual([
+      {
+        moderationItemId: expect.any(String),
+        contentType: 'product_review',
+        contentId: r.reviewId,
+        decision: 'remove',
+        reasonCode: 'proven_fake',
+        author: { kind: 'customer', id: r.customerId },
+        reporters: [
+          { kind: 'customer', id: reporter },
+          { kind: 'seller', id: sellerReporter },
+        ],
+        reporterOutcome: 'We removed this review after a Trust and Risk investigation.',
+        appealUntil: null,
+      },
+    ]);
     expect(k.callsOf('media.remove').map((c) => c[0])).toEqual([photo]);
     const mine = await k.call('GET', `${STORE}/me/reviews`, r.author);
     expect(mine.body.items[0]).toMatchObject({ status: 'removed', canEdit: false, canAppeal: false, moderation: { decision: 'removed', reasonCode: 'proven_fake' } });

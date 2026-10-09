@@ -133,6 +133,10 @@ export async function boot(): Promise<Kit> {
       },
       customers: {
         getCustomer: async (id: string) => (customers.has(id) ? ({ id, userId: customers.get(id)!.userId ?? newId(), ref: `CU-${id.slice(-6)}`, displayName: customers.get(id)!.displayName, email: 'c@example.com', accountStatus: 'active', canOrder: true, canMessage: true } as any) : null),
+        getCustomerByUserId: async (userId: string) => {
+          const [id, c] = [...customers].find(([, x]) => x.userId === userId) ?? [];
+          return id && c ? ({ id, userId, ref: `CU-${id.slice(-6)}`, displayName: c.displayName, email: 'c@example.com', accountStatus: 'active', canOrder: true, canMessage: true } as any) : null;
+        },
       },
       reports: {
         registerDataset: async (d: any) => rec('reports.registerDataset', d),

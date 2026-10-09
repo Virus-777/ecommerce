@@ -111,7 +111,8 @@ describe('investigation workflow', () => {
     expect(reopened.body).toMatchObject({ status: 'under_review', resolution: null });
     const dismissed = await kit.call('POST', `${ADMIN}/reports/${r.id}/dismiss`, staff(), { reason: 'Photos were of another product', reporterOutcome: 'We found no violation' });
     expect(dismissed.body.status).toBe('dismissed');
-    expect(kit.last('trust.report.resolved')).toEqual({ reportId: r.id, outcome: 'dismissed', reporterOutcome: 'We found no violation' });
+    // a staff report has no one outside to tell
+    expect(kit.last('trust.report.resolved')).toEqual({ reportId: r.id, ref: r.ref, outcome: 'dismissed', reporterOutcome: 'We found no violation', reporters: [] });
     expect((await kit.call('POST', `${ADMIN}/reports/${r.id}/dismiss`, staff(), { reason: 'x', reporterOutcome: 'y' })).status).toBe(409);
     expect(kit.audits.filter((a) => a.target.id === r.id).map((a) => a.action)).toEqual(expect.arrayContaining(['trust.report.resolve', 'trust.report.reopen', 'trust.report.dismiss']));
   });

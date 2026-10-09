@@ -18,9 +18,9 @@ export class SummariesPart {
   /**
    * Invitations are computed from orders (listDeliveredItems) in the job, and each is claimed once in the
    * inbox (`invite:<orderItemId>`), so they survive restarts and are never sent twice. The spec has no table
-   * of delivered items, so which customers to look at comes from orders.item.delivered (customer id → latest
-   * delivery, kept until every delivery is past its invitation time) and, after a restart, from a sweep of
-   * all customers (customers.searchCustomers) in bounded batches.
+   * of delivered items, so which customers to look at comes from orders.item.delivered (its customerId → latest
+   * delivery, kept in memory until every delivery is past its invitation time) and, after a restart (the
+   * memory is gone), from a sweep of all customers (customers.searchCustomers) in bounded batches.
    */
   readonly inviteCustomers = new Map<string, Date>();
   /** Cursor of the catch-up sweep; null once it has gone through every customer */
@@ -28,12 +28,11 @@ export class SummariesPart {
 
   constructor(private readonly core: Core) {}
 
-  /** orders.item.delivered: remember the customer (the event has no customer id; orders.getOrderItem does) */
-  async noteDelivery(itemId: string, deliveredAt: Date): Promise<void> {
-    const info = await this.core.soft('orders.getOrderItem', () => this.core.ctx.use('orders').getOrderItem(itemId));
-    if (!info?.customerId) return; // guests get no invitation
-    const prev = this.inviteCustomers.get(info.customerId);
-    if (!prev || prev < deliveredAt) this.inviteCustomers.set(info.customerId, deliveredAt);
+  /** orders.item.delivered: remember the customer the event names */
+  noteDelivery(customerId: string | null | undefined, deliveredAt: Date): void {
+    if (!customerId || !isUuid(customerId)) return; // guests get no invitation
+    const prev = this.inviteCustomers.get(customerId);
+    if (!prev || prev < deliveredAt) this.inviteCustomers.set(customerId, deliveredAt);
   }
 
   summaryOut(productId: string, r: ProductSummaryRec | undefined): RatingSummary {

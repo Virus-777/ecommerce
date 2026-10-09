@@ -49,6 +49,8 @@ export interface FeedbackStat {
 export interface ContentRepository {
   /** Runs fn in one transaction; fn receives a repository bound to it (nested calls reuse it) */
   transaction<T>(fn: (tx: ContentRepository) => Promise<T>): Promise<T>;
+  /** Inbox (ctx.inbox): true the first time this key is claimed; commits with the transaction it runs in */
+  claim(key: string): Promise<boolean>;
 
   /* homepage sections (the draft layout) */
   listSections(): Promise<SectionRow[]>;

@@ -17,7 +17,7 @@ import { AdvertisingService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.1.0',
+  version: '1.1.1',
   migrations,
   graphql: typeDefs,
   register(ctx) {
