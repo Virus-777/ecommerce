@@ -1,4 +1,4 @@
-import { notImplemented, routes } from '../../../kernel/http/index.js';
+import { routes } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/search.js';
 import type { SearchService } from '../service.js';
 
@@ -9,5 +9,5 @@ import type { SearchService } from '../service.js';
 export const sellerRoutes = (service: SearchService) =>
   routes(endpoints, 'seller', {
     /** GET /quick: Seller Center top-bar search across own orders, offers/SKUs and returns */
-    sellerQuickSearch: notImplemented,
+    sellerQuickSearch: async ({ query, sellerId, sellerAccess }) => service.sellerQuick(sellerId, sellerAccess, query),
   });

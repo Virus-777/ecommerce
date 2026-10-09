@@ -1,4 +1,5 @@
-import { notImplemented, routes } from '../../../kernel/http/index.js';
+import { routes } from '../../../kernel/http/index.js';
+import { pageOf } from '../../../kernel/lib/pagination.js';
 import { endpoints } from '../../../spec/search.js';
 import type { SearchService } from '../service.js';
 
@@ -9,25 +10,25 @@ import type { SearchService } from '../service.js';
 export const adminRoutes = (service: SearchService) =>
   routes(endpoints, 'admin', {
     /** GET /lookup: Back-office top-bar quick search across orders, sellers, products and customers */
-    adminLookup: notImplemented,
+    adminLookup: async ({ query, can }) => service.adminLookup(query, can),
     /** GET /synonyms: Search synonyms */
-    listSynonyms: notImplemented,
+    listSynonyms: async ({ query, page }) => service.listSynonyms(query, page),
     /** POST /synonyms: Add a synonym set (takes effect on the next query; no reindex needed) */
-    createSynonym: notImplemented,
+    createSynonym: async ({ body, actor, requestId }) => service.createSynonym(body, { actor, requestId }),
     /** PATCH /synonyms/{id}: Edit or deactivate a synonym set */
-    updateSynonym: notImplemented,
+    updateSynonym: async ({ params, body, actor, requestId }) => service.updateSynonym(params.id, body, { actor, requestId }),
     /** DELETE /synonyms/{id}: Delete a synonym set */
-    deleteSynonym: notImplemented,
+    deleteSynonym: async ({ params, actor, requestId }) => service.deleteSynonym(params.id, { actor, requestId }),
     /** GET /index: Index size, staleness and lag behind events */
-    getIndexStatus: notImplemented,
+    getIndexStatus: async () => service.indexStatus(),
     /** POST /reindex-jobs: Reindex everything or a scope (products, category, brand, seller) */
-    startReindex: notImplemented,
+    startReindex: async ({ body, actor, requestId }) => service.startReindex(body, { actor, requestId }),
     /** GET /reindex-jobs/{id}: Reindex progress */
-    getReindexJob: notImplemented,
+    getReindexJob: async ({ params }) => service.getReindexJob(params.id),
     /** GET /zero-result-queries: Searches that found nothing (unavailable searches), most frequent first */
-    listZeroResultQueries: notImplemented,
+    listZeroResultQueries: async ({ query, page }) => pageOf(await service.zeroResultQueries(query.from, query.to), page),
     /** GET /explain: Why results rank as they do for a query (scores, factors, synonyms, correction) */
-    explainSearch: notImplemented,
+    explainSearch: async ({ query }) => service.explain(query),
     /** POST /ranking-policies: Publish a new ranking policy version (wording and recommended-sort weights) */
-    publishRankingPolicy: notImplemented,
+    publishRankingPolicy: async ({ body, actor, requestId }) => service.publishRankingPolicy(body, { actor, requestId }),
   });
