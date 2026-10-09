@@ -10,7 +10,9 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { Kysely } from 'kysely';
 import type { specs } from '../../spec/index.js';
 import type { Config } from '../config/index.js';
+import type { Principal } from '../auth/index.js';
 import type { Database } from '../db/index.js';
+import type { Inbox } from '../events/inbox.js';
 import type { AppError } from '../errors/index.js';
 import type { ModuleEvents } from '../events/index.js';
 import type { ModuleResolvers } from '../graphql/index.js';
@@ -62,6 +64,14 @@ export interface ModuleContext<N extends ModuleName> {
   };
   /** An AppError with this module's status for the code (module codes are scoped; use it instead of new AppError for module codes) */
   error(code: keyof SpecOf<N>['errorCodes'] | (string & {}), message?: string, details?: unknown): AppError;
+  /** Idempotent event handling: claim a key in the same transaction as the effects (kernel/events/inbox.ts) */
+  readonly inbox: Inbox;
+  /**
+   * Whether a caller holds a permission, with the same answer their request got (staff through access,
+   * seller members through their member access, development tokens through their dev claims). For public
+   * API functions that receive the caller's principal from another module (exports, admin reads).
+   */
+  can(principal: Principal | null | undefined, permission: string): Promise<boolean>;
   /** Human references (MK-YYMMDD-NNNNN …) */
   readonly refs: RefGenerator;
   /** Offer this module's public API to other modules (in-process) */

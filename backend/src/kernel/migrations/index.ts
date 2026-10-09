@@ -68,6 +68,19 @@ comment on table kernel.webhook_events is 'Provider events already processed: a 
 create index on kernel.webhook_events (received_at);
 `,
     },
+    {
+      id: '0003_processed_events',
+      sql: /* sql */ `
+create table kernel.processed_events (
+  module text not null,
+  key text not null,
+  processed_at timestamptz not null default now(),
+  primary key (module, key)
+);
+comment on table kernel.processed_events is 'Inbox: what each module already handled (event id or natural key), so redelivery never applies twice (ctx.inbox)';
+create index on kernel.processed_events (processed_at);
+`,
+    },
   ],
 };
 

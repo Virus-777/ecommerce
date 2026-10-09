@@ -215,6 +215,18 @@ export class AuthChain {
     return false;
   }
 
+  /**
+   * The same answer as `can` for a principal handed over in-process (no request): dev claims come from the
+   * principal object the middleware created, seller members from their member access.
+   */
+  async canPrincipal(p: Principal | null | undefined, permission: string): Promise<boolean> {
+    if (!p) return false;
+    const claims = this.k.claimsOf.get(p);
+    const auth: RequestAuth = { via: 'token', principal: p, claims };
+    if (p.kind === 'seller' && p.sellerId && p.accountId) auth.sellerAccess = (await this.memberAccess(claims, p)) ?? undefined;
+    return this.can(auth, permission);
+  }
+
   /** Customer id of the signed-in account (customers module), for own-customer scope. */
   async customerIdOf(p: Principal | null | undefined): Promise<string | null> {
     if (p?.kind !== 'customer' || !p.accountId) return null;

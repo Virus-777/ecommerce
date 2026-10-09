@@ -91,6 +91,8 @@ async approveThing(id: string, input: { actor: Actor; reason?: string; requestId
   ```
   (If `audit` is not in the module's `optionalDeps`, skip auditing and note it as a spec gap.)
 - **Idempotency:** the kernel stores and replays responses for `idempotent` endpoints. Still make money and stock operations safe to retry at the data level (unique keys, `on conflict do nothing`).
+- **Event consumers** claim a key with `ctx.inbox.claim(trx, key)` (the envelope id, or a natural key such as `order-placed:<orderId>`) inside the transaction that applies their effects: the claim and the effects commit together, so a redelivered event changes nothing (kernel/events/inbox.ts). Wire the envelope id through: `ctx.events.on(name, (e) => service.onX(e.payload, e.id))`.
+- **Permissions of a caller handed to you in-process** (a principal in an export or admin read): `ctx.can(principal, permission)` gives the same answer their request got, development tokens included.
 - **Event consumers** (`onXFromY`) must be idempotent (same event twice = same result) and must not throw for records they don't know (log and ignore).
 
 ## 6. Approvals and limits (money and enforcement actions)

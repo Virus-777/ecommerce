@@ -6,7 +6,9 @@
 import type { FastifyBaseLogger } from 'fastify';
 import type { Config } from '../config/index.js';
 import type { Database } from '../db/index.js';
+import type { Principal } from '../auth/index.js';
 import { isNotImplemented, moduleError, notImplemented } from '../errors/index.js';
+import { moduleInbox } from '../events/inbox.js';
 import { moduleEvents, type EventBus } from '../events/index.js';
 import type { ModuleResolvers } from '../graphql/index.js';
 import type { RouteSet } from '../http/index.js';
@@ -27,6 +29,8 @@ export interface KernelServices {
   events: EventBus;
   jobs: JobScheduler;
   refs: RefGenerator;
+  /** Permission check for an in-process principal (set by the app once the auth chain exists) */
+  can(principal: Principal | null | undefined, permission: string): Promise<boolean>;
 }
 
 export interface BootResult {
@@ -135,6 +139,8 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
         },
       },
       refs: k.refs,
+      inbox: moduleInbox(name),
+      can: (principal, permission) => k.can(principal, permission),
       error: moduleError(name),
       provide(api: object) {
         if (provided) throw new Error(`${name} called provide() twice`);

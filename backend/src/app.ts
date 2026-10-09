@@ -7,6 +7,7 @@ import type { FastifyInstance } from 'fastify';
 import { moduleAuthorities, type Authorities } from './kernel/auth/authorities.js';
 import type { AuthChain, WebhookVerifier } from './kernel/auth/chain.js';
 import { createAuthChain } from './kernel/auth/setup.js';
+import type { Principal } from './kernel/auth/index.js';
 import type { KeyRing } from './kernel/auth/tokens.js';
 import { loadConfig, type Config } from './kernel/config/index.js';
 import { createDatabase, type Database } from './kernel/db/index.js';
@@ -120,7 +121,10 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
 
   /* ---------------------------------------------------------------- modules */
   if (config.migrateOnStart) await migrate(database, migrationUnits(defs), (m) => app.log.info(m));
-  const boot = await bootModules(defs, { config, log: app.log, database, clock, events, jobs, refs });
+  // modules get permission checks before the auth chain exists (it needs their APIs): bind it late
+  let authChain: AuthChain | undefined;
+  const can = async (principal: Principal | null | undefined, permission: string) => (authChain ? authChain.canPrincipal(principal, permission) : false);
+  const boot = await bootModules(defs, { config, log: app.log, database, clock, events, jobs, refs, can });
   for (const w of boot.warnings) app.log.debug(w);
   for (const [m, v] of Object.entries(opts.webhookVerifiers ?? {})) if (!boot.webhookVerifiers.has(m)) boot.webhookVerifiers.set(m, v);
   for (const [m, stub] of Object.entries(opts.apiStubs ?? {})) boot.apis.set(m, withStubs(boot.apis.get(m), stub as object));
@@ -137,6 +141,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
     webhookVerifiers: boot.webhookVerifiers,
     ownerOnly: new Set(Object.values(allSpecs).flatMap((s) => s.permissions.filter((p) => p.ownerOnly).map((p) => p.key))),
   });
+  authChain = auth;
   auth.install(app);
   // answers cached by the chain are dropped when their owners announce a change
   for (const name of ['access.role.changed', 'access.coverage.changed', 'access.away.started', 'access.away.ended']) events.subscribe('kernel', name, () => auth.invalidate('permissions'));
