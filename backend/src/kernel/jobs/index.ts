@@ -47,7 +47,8 @@ export interface JobDefinition {
 interface Registered extends JobDefinition {
   parsed: Schedule;
   run?: () => Promise<unknown>;
-  running: boolean;
+  /** The run in progress, if any */
+  current?: Promise<void>;
   lastRunAt?: Date;
   lastError?: string;
 }
@@ -67,7 +68,7 @@ export class JobScheduler {
   }
 
   declare(def: JobDefinition) {
-    this.#jobs.set(def.name, { ...def, parsed: parseSchedule(def.schedule), running: false });
+    this.#jobs.set(def.name, { ...def, parsed: parseSchedule(def.schedule) });
   }
 
   handle(module: string, name: string, run: () => Promise<unknown>) {
@@ -77,24 +78,34 @@ export class JobScheduler {
   }
 
   list() {
-    return [...this.#jobs.values()].map(({ run, running: _running, ...job }) => ({ ...job, handled: Boolean(run) }));
+    return [...this.#jobs.values()].map(({ run, current: _current, ...job }) => ({ ...job, handled: Boolean(run) }));
   }
 
-  async runNow(name: string) {
+  /**
+   * Runs the job and resolves when that run is done. A job never overlaps itself: when a run is in
+   * progress, this waits for it and then runs again, so the caller always gets a run that started after it asked.
+   */
+  async runNow(name: string): Promise<void> {
     const job = this.#jobs.get(name);
     if (!job?.run) throw new Error(`Job ${name} has no handler`);
-    if (job.running) return; // never overlap a job with itself
-    job.running = true;
+    while (job.current) await job.current.catch(() => {});
+    const run = job.run;
+    job.current = (async () => {
+      try {
+        await run();
+        job.lastError = undefined;
+      } catch (err) {
+        job.lastError = (err as Error).message;
+        const level = isNotImplemented(err) ? 'debug' : 'error';
+        this.#log[level]({ err, job: name }, `job ${name} failed`);
+      } finally {
+        job.lastRunAt = this.#clock.now();
+      }
+    })();
     try {
-      await job.run();
-      job.lastError = undefined;
-    } catch (err) {
-      job.lastError = (err as Error).message;
-      const level = isNotImplemented(err) ? 'debug' : 'error';
-      this.#log[level]({ err, job: name }, `job ${name} failed`);
+      await job.current;
     } finally {
-      job.running = false;
-      job.lastRunAt = this.#clock.now();
+      job.current = undefined;
     }
   }
 

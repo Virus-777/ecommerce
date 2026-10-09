@@ -30,6 +30,8 @@ export interface GraphQLContext {
   permissions: Map<string, Promise<boolean>>;
   /** Whether the caller holds a permission, as `can` in REST handlers (dev-token permissions included), memoized per request */
   can(permission: string): Promise<boolean>;
+  /** The signed-in customer's customer id (own-customer record scope), null for anyone else */
+  customerId(): Promise<string | null>;
 }
 
 /** Type name → field name → resolver, for fields whose @source names this module. */
@@ -157,6 +159,7 @@ export async function registerGraphQL(app: FastifyInstance, o: GraphQLKernelOpti
               if (!permissions.has(permission)) permissions.set(permission, o.auth.can(request.auth, permission));
               return permissions.get(permission)!;
             },
+            customerId: () => o.auth.customerIdOf(request.auth?.principal),
           };
         },
       });
