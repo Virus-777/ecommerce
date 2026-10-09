@@ -1,31 +1,38 @@
-import { notImplemented, routes } from '../../../kernel/http/index.js';
+import { routes } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/customers.js';
-import type { CustomersService } from '../service.js';
+import type { CustomersService, StaffBy } from '../service.js';
+
+/** The staff caller of a request, with permission answers for rules beyond the endpoint permission */
+const staff = (i: { principal: StaffBy['principal']; actor: StaffBy['actor']; requestId: string; can: StaffBy['can'] }): StaffBy => ({
+  principal: i.principal,
+  actor: i.actor,
+  requestId: i.requestId,
+  can: i.can,
+});
 
 /**
  * Admin API: /api/admin/customers/…  (docs/api/modules/customers.md)
- * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
 export const adminRoutes = (service: CustomersService) =>
   routes(endpoints, 'admin', {
     /** GET /guest-buyers: Guest buyers (orders without an account) with order count and spend */
-    listGuestBuyers: notImplemented,
+    listGuestBuyers: async ({ query, page }) => service.listGuestBuyers(query, page),
     /** GET /customers: Customer accounts with orders, spend, open cases, status and verification */
-    listCustomers: notImplemented,
+    listCustomers: async ({ query, page }) => service.listCustomersAdmin(query, page),
     /** GET /customers/{id}: Customer detail: profile, orders, cases, messages, notes, abuse reports, restrictions */
-    getCustomerAdmin: notImplemented,
+    getCustomerAdmin: async (i) => service.getCustomerAdmin(i.params.id, staff(i)),
     /** POST /customers/{id}/notes: Add an internal note */
-    addCustomerNote: notImplemented,
+    addCustomerNote: async (i) => service.addNote(i.params.id, i.body, staff(i)),
     /** POST /customers/{id}/actions: Apply an account action with a recorded reason */
-    applyAccountAction: notImplemented,
+    applyAccountAction: async (i) => service.applyAccountAction(i.params.id, i.body, staff(i)),
     /** POST /customers/{id}/restrictions/{restrictionId}/lift: Lift a restriction early */
-    liftRestriction: notImplemented,
+    liftRestriction: async (i) => service.liftRestriction(i.params.id, i.params.restrictionId, i.body, staff(i)),
     /** GET /customers/{id}/actions: Account action history for one customer */
-    listAccountActions: notImplemented,
+    listAccountActions: async ({ params, page }) => service.listAccountActions(params.id, page),
     /** POST /customers/exports: Export the filtered customer list */
-    exportCustomers: notImplemented,
+    exportCustomers: async (i) => service.exportCustomers(i.body, staff(i)),
     /** GET /data-requests: Export and closure requests across customers (privacy queue) */
-    listDataRequestsAdmin: notImplemented,
+    listDataRequestsAdmin: async ({ query, page }) => service.listDataRequestsAdmin(query, page),
     /** POST /data-requests/{id}/retry: Retry a failed export */
-    retryDataRequest: notImplemented,
+    retryDataRequest: async (i) => service.retryDataRequest(i.params.id, staff(i)),
   });

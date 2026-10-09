@@ -1,55 +1,55 @@
-import { notImplemented, routes } from '../../../kernel/http/index.js';
+import { routes } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/customers.js';
 import type { CustomersService } from '../service.js';
 
 /**
  * Store API: /api/store/customers/…  (docs/api/modules/customers.md)
- * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
+ * Every handler acts for the caller only: the signed-in customer (scope) or the visitor session.
  */
 export const storeRoutes = (service: CustomersService) =>
   routes(endpoints, 'store', {
     /** GET /overview: Account tab home: tiles, alerts, recent orders, open cases and returns */
-    getAccountOverview: notImplemented,
+    getAccountOverview: async ({ scope }) => service.getAccountOverview(scope),
     /** GET /profile: Profile, verification state and active restrictions */
-    getProfile: notImplemented,
+    getProfile: async ({ scope }) => service.getProfile(scope),
     /** PATCH /profile: Change name or mobile phone */
-    updateProfile: notImplemented,
+    updateProfile: async ({ scope, body, actor, requestId }) => service.updateProfile(scope, body, { actor, requestId }),
     /** GET /addresses: Saved addresses (bounded by maxAddresses, not paged) */
-    listAddresses: notImplemented,
+    listAddresses: async ({ scope }) => service.listAddresses(scope),
     /** POST /addresses: Add an address */
-    createAddress: notImplemented,
+    createAddress: async ({ scope, body, actor, requestId }) => service.createAddress(scope, body, { actor, requestId }),
     /** PATCH /addresses/{id}: Edit an address */
-    updateAddress: notImplemented,
+    updateAddress: async ({ scope, params, body, actor, requestId }) => service.updateAddress(scope, params.id, body, { actor, requestId }),
     /** DELETE /addresses/{id}: Remove an address */
-    deleteAddress: notImplemented,
+    deleteAddress: async ({ scope, params }) => service.deleteAddress(scope, params.id),
     /** POST /addresses/{id}/make-default: Set the default delivery address */
-    makeDefaultAddress: notImplemented,
+    makeDefaultAddress: async ({ scope, params }) => service.makeDefaultAddress(scope, params.id),
     /** POST /addresses/validate: Check an address before saving or at guest checkout */
-    validateAddress: notImplemented,
+    validateAddress: async ({ body }) => service.validateAddress(body),
     /** GET /marketing-preferences: Promotional consent per channel */
-    getMarketingPreferences: notImplemented,
+    getMarketingPreferences: async ({ scope }) => service.getMarketingPreferences(scope),
     /** PUT /marketing-preferences: Turn promotional channels on or off */
-    updateMarketingPreferences: notImplemented,
+    updateMarketingPreferences: async ({ scope, body, actor, requestId, request }) => service.updateMarketingPreferences(scope, body, { actor, requestId, ip: request.ip }),
     /** GET /recently-viewed: Recently viewed products for the home page */
-    listRecentlyViewed: notImplemented,
+    listRecentlyViewed: async ({ scope, query }) => service.listRecentlyViewedFor(scope, query.limit),
     /** POST /recently-viewed: Record a product view */
-    recordRecentlyViewed: notImplemented,
+    recordRecentlyViewed: async ({ scope, body }) => service.recordView(scope, body),
     /** DELETE /recently-viewed: Clear the whole list */
-    clearRecentlyViewed: notImplemented,
+    clearRecentlyViewed: async ({ scope }) => service.clearViews(scope),
     /** DELETE /recently-viewed/{productId}: Remove one product from the list */
-    removeRecentlyViewed: notImplemented,
+    removeRecentlyViewed: async ({ scope, params }) => service.removeView(scope, params.productId),
     /** POST /data-requests/exports: Request a copy of my data */
-    requestDataExport: notImplemented,
+    requestDataExport: async ({ scope, actor, requestId }) => service.requestDataExport(scope, { actor, requestId }),
     /** GET /data-requests: My export and closure requests */
-    listDataRequests: notImplemented,
+    listDataRequests: async ({ scope, principal }) => service.listDataRequests(scope, principal),
     /** GET /closure-eligibility: Can I close my account now, and what blocks it */
-    getClosureEligibility: notImplemented,
-    /** POST /data-requests/closure: Request account closure */
-    requestClosure: notImplemented,
+    getClosureEligibility: async ({ scope }) => service.getClosureEligibility(scope),
+    /** POST /data-requests/closure: Request account closure (the re-auth token is verified by the middleware) */
+    requestClosure: async ({ scope, body, actor, requestId }) => service.requestClosure(scope, body, { actor, requestId }),
     /** POST /data-requests/{id}/cancel: Cancel a pending closure or export request */
-    cancelDataRequest: notImplemented,
+    cancelDataRequest: async ({ scope, params, actor, requestId }) => service.cancelDataRequest(scope, params.id, { actor, requestId }),
     /** POST /guest-orders/lookup: Find a guest order by reference and checkout email */
-    lookupGuestOrder: notImplemented,
+    lookupGuestOrder: async ({ principal, body, request }) => service.lookupGuestOrder(principal, body, request.ip),
     /** POST /guest-orders/links: Email fresh links to every guest order placed with this email */
-    sendGuestOrderLinks: notImplemented,
+    sendGuestOrderLinks: async ({ body, request }) => service.sendGuestOrderLinks(body, request.ip),
   });

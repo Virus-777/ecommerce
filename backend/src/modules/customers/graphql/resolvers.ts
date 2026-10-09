@@ -1,15 +1,95 @@
-import type { ModuleResolvers } from '../../../kernel/graphql/index.js';
+import type { GraphQLContext, ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { dateInZone } from '../../../kernel/lib/clock.js';
+import { format as formatMoney } from '../../../kernel/lib/money.js';
+import type * as common from '../../../spec/common.js';
+import type { AccountActionRecord, AccountRestriction, DataRequest, RecentlyViewedItem, SavedAddress } from '../../../spec/customers.js';
+import { displayName, verificationOf } from '../domain/rules.js';
+import * as map from '../mappers.js';
+import type { CustomerStanding } from '../ports.js';
 import type { CustomersService } from '../service.js';
 
 /**
  * Resolvers for the GraphQL fields this module owns (`@source(module: "customers", …)` in graphql/schema.ts).
- * A field without a resolver answers NOT_IMPLEMENTED; fields of this module's own types without
- * @source resolve from the parent object.
- *
- * Fields to resolve:
- *   Query.me → service.getCustomerByUserId
- *   Query.recentlyViewed → service.listRecentlyViewedItems
- *   Query.customer → service.getCustomer
- *   Query.customers → service.searchCustomers
+ *   Query.me → service.getCustomerByUserId (the signed-in customer)
+ *   Query.recentlyViewed → service.listRecentlyViewedItems (customer or visitor session)
+ *   Query.customer → service.getCustomer (admin)
+ *   Query.customers → service.searchCustomers (admin)
+ * Customer's own fields without @source resolve from the object built here (functions for the lazy ones).
+ * GraphQL enums are upper case; REST values are lower case.
  */
-export const resolvers = (service: CustomersService): ModuleResolvers => ({});
+const upper = <T extends string | null | undefined>(s: T) => (s ? s.toUpperCase() : s);
+const ACTOR_KIND: Record<string, string> = { customer: 'CUSTOMER', visitor: 'GUEST', seller: 'SELLER', staff: 'STAFF' };
+const gqlActor = (a: common.Actor) => ({ kind: ACTOR_KIND[a.kind] ?? 'SYSTEM', id: a.id ?? null, name: a.name ?? null });
+const gqlMoney = (m: common.Money) => ({ ...m, formatted: formatMoney(m) });
+
+const gqlRestriction = (r: AccountRestriction) => ({ ...r, scope: upper(r.scope), reasonCode: upper(r.reasonCode), state: upper(r.state), setBy: gqlActor(r.setBy) });
+const gqlRequest = (r: DataRequest) => ({ ...r, kind: upper(r.kind), state: upper(r.state) });
+const gqlAction = (a: AccountActionRecord) => ({ ...a, action: upper(a.action), fromStatus: upper(a.fromStatus), toStatus: upper(a.toStatus), actor: gqlActor(a.actor) });
+const gqlAddress = (a: SavedAddress) => a;
+
+export const resolvers = (service: CustomersService): ModuleResolvers => {
+  /** The Customer object for one standing; `location` is preloaded for lists */
+  const customerView = (s: CustomerStanding, ctx: GraphQLContext, location?: string | null) => {
+    const r = s.row;
+    const snap = map.snapshot(s);
+    return {
+      ...snap,
+      userId: r.user_id,
+      accountStatus: upper(snap.accountStatus),
+      firstName: r.first_name,
+      lastName: r.last_name,
+      displayName: displayName(r.first_name, r.last_name),
+      emailVerified: r.email_verified_at !== null,
+      phoneVerified: r.phone !== null && r.phone_verified_at !== null,
+      memberSince: dateInZone(r.created_at, service.marketTimeZone),
+      restrictions: async (args: { includeEnded?: boolean }) => (await service.restrictionsOf(r.id, Boolean(args?.includeEnded))).map(gqlRestriction),
+      defaultAddress: async () => (await service.addressesOf(r.id)).map(gqlAddress).find((a) => a.isDefault) ?? null,
+      addresses: async () => (await service.addressesOf(r.id)).map(gqlAddress),
+      marketingPreferences: () => service.preferencesOf(r),
+      // download links only for the customer, in the store
+      dataRequests: async () => (await service.dataRequestsOf(r.id, ctx.area === 'store' ? ctx.principal : null)).map(gqlRequest),
+      location: location !== undefined ? location : async () => map.location((await service.defaultAddressesOf([r.id])).get(r.id)),
+      orderCount: r.order_count,
+      totalSpend: gqlMoney({ amount: Number(r.total_spend_minor), currency: r.currency }),
+      verification: upper(verificationOf(r.email_verified_at, r.phone_verified_at)),
+      notes: async () => (await service.notesOf(r.id)).map((n) => ({ ...n, author: gqlActor(n.author) })),
+      accountActions: async (args: { limit?: number }) => (await service.actionsOf(r.id, args?.limit ?? 20)).map(gqlAction),
+    };
+  };
+
+  const viewItem = (i: RecentlyViewedItem) => ({
+    ...i,
+    price: i.price ? gqlMoney(i.price) : null,
+    wasPrice: i.wasPrice ? gqlMoney(i.wasPrice) : null,
+    product: () => (i.available ? service.productOf(i.productId) : null),
+  });
+
+  return {
+    Query: {
+      me: async (_root, _args, ctx: GraphQLContext) => {
+        const accountId = ctx.principal?.kind === 'customer' ? ctx.principal.accountId : null;
+        const s = accountId ? await service.standingOfUser(accountId) : undefined;
+        return s ? customerView(s, ctx) : null;
+      },
+      recentlyViewed: async (_root, args: { limit?: number }, ctx: GraphQLContext) => {
+        const p = ctx.principal;
+        let owner: { customerId?: string; guestSessionId?: string } | null = null;
+        if (p?.kind === 'customer' && p.accountId) {
+          const id = await service.customerIdOfAccount(p.accountId);
+          owner = id ? { customerId: id } : null;
+        } else if (p?.kind === 'visitor') owner = { guestSessionId: p.sessionId };
+        if (!owner) return [];
+        return (await service.listRecentlyViewedItems(owner, Math.min(args?.limit ?? 12, 50))).map(viewItem);
+      },
+      customer: async (_root, args: { id: string }, ctx: GraphQLContext) => {
+        const s = await service.standing(args.id);
+        return s ? customerView(s, ctx) : null;
+      },
+      customers: async (_root, args: { filter?: { search?: string; statuses?: string[]; verification?: string; joinedFrom?: string; joinedTo?: string } | null; paging?: common.PageInput | null }, ctx: GraphQLContext) => {
+        const page = await service.searchStandings(args.filter, args.paging);
+        const defaults = await service.defaultAddressesOf(page.items.map((s) => s.row.id));
+        return { ...page, items: page.items.map((s) => customerView(s, ctx, map.location(defaults.get(s.row.id)))) };
+      },
+    },
+  };
+};
