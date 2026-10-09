@@ -17,7 +17,7 @@ import { CatalogService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '0.1.0',
+  version: '1.0.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
@@ -36,6 +36,9 @@ export default defineModule({
     ctx.events.on("offers.offer.price_changed", (e) => service.onOfferPriceChangedFromOffers(e.payload));
     ctx.events.on("inventory.stock.changed", (e) => service.onStockChangedFromInventory(e.payload));
     ctx.events.on("sellers.change_request.decided", (e) => service.onChangeRequestDecidedFromSellers(e.payload));
+
+    // reports lists catalog.admin.products once every module is up
+    ctx.afterBoot(() => service.registerExportDataset());
 
     // Background jobs (spec jobs)
     ctx.jobs.handle("catalog.refresh-counts", () => service.refreshCounts());
