@@ -1,4 +1,4 @@
-import { notImplemented, routes } from '../../../kernel/http/index.js';
+import { routes } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/workqueues.js';
 import type { WorkqueuesService } from '../service.js';
 
@@ -8,6 +8,6 @@ import type { WorkqueuesService } from '../service.js';
  */
 export const sellerRoutes = (service: WorkqueuesService) =>
   routes(endpoints, 'seller', {
-    /** GET /tasks: Tasks Marketly is tracking for this seller (e.g. overdue dispatch, missing tracking, reply overdue) */
-    listSellerTasks: notImplemented,
+    /** GET /tasks: Tasks Marketly is tracking for this seller (e.g. overdue dispatch, missing tracking, reply overdue). Only the session's seller; staff notes and escalation details are never returned. */
+    listSellerTasks: async ({ sellerId, query, page }) => service.items.sellerTasks(sellerId, query.state, page),
   });

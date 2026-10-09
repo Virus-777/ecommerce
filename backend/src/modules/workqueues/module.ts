@@ -7,6 +7,7 @@ import { adminRoutes } from './http/admin.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresWorkqueuesRepository } from './infra/postgres/repository.js';
 import { WorkqueuesService } from './service.js';
+import { createDevArchiveStore } from './infra/archive/dev.js';
 
 /**
  * Work queues: The Operations Center's shared to-do system: queue definitions with an owner role, a named lead, a backup and an escalation route, and work items raised from other modules' events (overdue dispatch, low stock, waiting approvals, cases past target, failed payouts, mismatches) with deadlines, assignment and automatic escalation. Also the My work queues view, the dashboard's needs-attention tiles, the day-end review, the daily routine and saved filters.
@@ -16,14 +17,17 @@ import { WorkqueuesService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '0.1.0',
+  version: '1.0.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const service = new WorkqueuesService({ repo: createPostgresWorkqueuesRepository(ctx.db), ctx });
+    // cold storage for archived items: deterministic development adapter; a real store plugs in behind the same port
+    const service = new WorkqueuesService({ repo: createPostgresWorkqueuesRepository(ctx.db), ctx, archive: createDevArchiveStore() });
     ctx.provide(service);
     ctx.http.routes(sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
+    // install seed (queues, intake rules, daily routine) and the reports export dataset, once every module is up
+    ctx.afterBoot(() => service.boot());
 
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("shipping.dispatch.overdue", (e) => service.onDispatchOverdueFromShipping(e.payload));
