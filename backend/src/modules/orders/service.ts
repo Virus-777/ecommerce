@@ -1,296 +1,298 @@
-import { notImplemented } from '../../kernel/errors/index.js';
 import type { EventPayload } from '../../kernel/events/index.js';
-import type { ModuleContext } from '../../kernel/module-system/index.js';
 import type * as common from '../../spec/common.js';
 import type * as identity from '../../spec/identity.js';
-import type { OrdersPublicApi, Contact, OrderSummary, OrderDetail, DelayedItemAlert, FulfillmentTask, ItemPaidAmount, SellerOrderCounts, SellerOrderDetail, AdminOrderDetail, OrderCreateInput } from '../../spec/orders.js';
-import type { OrdersRepository } from './ports.js';
+import type { AdminOrderDetail, DelayedItemAlert, FulfillmentTask, ItemPaidAmount, OrderCreateInput, OrderDetail, OrdersPublicApi, OrderSummary, SellerOrderCounts, SellerOrderDetail } from '../../spec/orders.js';
+import { Admin } from './service/admin.js';
+import { AfterSales } from './service/aftersales.js';
+import { Cancellations } from './service/cancellations.js';
+import { Core, notFound, type OrdersServiceDeps } from './service/core.js';
+import { Fulfillment } from './service/fulfillment.js';
+import { Placement } from './service/placement.js';
+import { Reads, type StoreViewer } from './service/reads.js';
+import { Views } from './service/views.js';
 
-export interface OrdersServiceDeps {
-  repo: OrdersRepository;
-  ctx: ModuleContext<'orders'>;
-}
+export type { OrdersServiceDeps };
 
 /**
  * Orders use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
- * Each method maps to a publicApi function, a consumed event or a job in docs/api/spec/modules/orders.json.
+ * The work is split by area (service/*.ts); this class is the module's public API, its event consumers and jobs.
  */
 export class OrdersService implements OrdersPublicApi {
-  constructor(protected readonly deps: OrdersServiceDeps) {}
+  readonly core: Core;
+  readonly views: Views;
+  readonly reads: Reads;
+  readonly placement: Placement;
+  readonly cancellations: Cancellations;
+  readonly fulfillment: Fulfillment;
+  readonly afterSales: AfterSales;
+  readonly admin: Admin;
+
+  constructor(deps: OrdersServiceDeps) {
+    this.core = new Core(deps);
+    this.views = new Views(this.core);
+    this.reads = new Reads(this.core, this.views);
+    this.placement = new Placement(this.core, this.views);
+    this.cancellations = new Cancellations(this.core, this.views);
+    this.fulfillment = new Fulfillment(this.core, this.views);
+    this.afterSales = new AfterSales(this.core);
+    this.admin = new Admin(this.core, this.views, this.reads);
+  }
 
   /* ---------------- public API (in-process) */
 
-  /** Create the order from an authorized or pending payment. Freezes catalog.snapshotForOrder and offers.snapshotForOrder per item. Status open when paymentState=accepted (publishes orders.order.placed and orders.order.accepted in one transaction), payment_pending otherwise (publishes orders.order.placed only). Idempotent per checkoutSessionId: a second call returns the existing order. */
-  async createOrder(input: OrderCreateInput): Promise<OrderDetail> {
-    throw notImplemented("orders.createOrder");
+  createOrder(input: OrderCreateInput): Promise<OrderDetail> {
+    return this.placement.createOrder(input);
   }
 
-  /** payment_pending → open when the payment result arrives (also done on payments.payment.authorized). Idempotent. */
-  async acceptOrder(orderId: string, paymentIntentId: string): Promise<OrderDetail> {
-    throw notImplemented("orders.acceptOrder");
+  acceptOrder(orderId: string, paymentIntentId: string): Promise<OrderDetail> {
+    return this.placement.acceptOrder(orderId, paymentIntentId);
   }
 
-  /** payment_pending → cancelled when a pending payment is finally declined (also done on payments.payment.failed). */
-  async cancelForDeclinedPayment(orderId: string): Promise<void> {
-    throw notImplemented("orders.cancelForDeclinedPayment");
+  cancelForDeclinedPayment(orderId: string): Promise<void> {
+    return this.placement.cancelForDeclinedPayment(orderId);
   }
 
-  /** Full order for other modules (no access check) */
   async getOrder(orderId: string): Promise<OrderDetail | null> {
-    throw notImplemented("orders.getOrder");
+    const agg = await this.core.load(orderId).catch(() => undefined);
+    if (!agg) return null;
+    return this.views.detail(agg, await this.core.timelineOf(orderId, ['customer']), 'internal', await this.core.cfg());
   }
 
-  /** Seller group with ship-to address, delivery promise, dispatch deadline and items still to ship */
-  async getFulfillmentTask(groupId: string): Promise<FulfillmentTask> {
-    throw notImplemented("orders.getFulfillmentTask");
+  getFulfillmentTask(groupId: string): Promise<FulfillmentTask> {
+    return this.fulfillment.getFulfillmentTask(groupId);
   }
 
-  /** Items belong to the group, are not cancelled or already shipped, and quantities fit */
-  async canShipItems(groupId: string, lines: { orderItemId: string, quantity: number }[]): Promise<{ ok: boolean, problems: string[] }> {
-    throw notImplemented("orders.canShipItems");
+  canShipItems(groupId: string, lines: { orderItemId: string; quantity: number }[]): Promise<{ ok: boolean; problems: string[] }> {
+    return this.fulfillment.canShipItems(groupId, lines);
   }
 
-  /** Recalculated deadline (e.g. a payment accepted late) or a staff extension; publishes orders.dispatch_deadline.changed */
-  async setDispatchDeadline(groupId: string, dueAt: string, reason: string, actor: common.Actor): Promise<void> {
-    throw notImplemented("orders.setDispatchDeadline");
+  setDispatchDeadline(groupId: string, dueAt: string, reason: string, actor: common.Actor): Promise<void> {
+    return this.fulfillment.setDispatchDeadline(groupId, dueAt, reason, actor);
   }
 
-  /** Per item: paid amount split into item, discount share, shipping share and tax share, for refund caps */
-  async getPaidAmounts(orderId: string): Promise<ItemPaidAmount[]> {
-    throw notImplemented("orders.getPaidAmounts");
+  getPaidAmounts(orderId: string): Promise<ItemPaidAmount[]> {
+    return this.reads.paidAmounts(orderId);
   }
 
-  /** Match a guest order by reference and checkout email (case-insensitive); used by the guest lookup */
   async findGuestOrder(orderRef: string, email: string): Promise<{ orderId: string } | null> {
-    throw notImplemented("orders.findGuestOrder");
+    const o = (await this.core.repo.find('orders', { ref: orderRef.trim().toUpperCase() }))[0];
+    if (!o || o.contact_email.trim().toLowerCase() !== email.trim().toLowerCase()) return null;
+    return { orderId: o.id };
   }
 
-  /** Guest orders for emailed order links */
-  async listGuestOrdersByEmail(email: string): Promise<{ orderId: string, ref: string, placedAt: string }[]> {
-    throw notImplemented("orders.listGuestOrdersByEmail");
+  async listGuestOrdersByEmail(email: string): Promise<{ orderId: string; ref: string; placedAt: string }[]> {
+    return (await this.core.repo.guestOrdersByEmail(email)).map((o) => ({ orderId: o.id, ref: o.ref, placedAt: o.placed_at.toISOString() }));
   }
 
-  /** Account overview tile */
-  async countInProgress(customerId: string): Promise<{ inProgress: number, delayedPackages: number }> {
-    throw notImplemented("orders.countInProgress");
+  async countInProgress(customerId: string): Promise<{ inProgress: number; delayedPackages: number }> {
+    const c = await this.reads.countByTab(customerId);
+    return { inProgress: c.inProgress, delayedPackages: c.delayedPackages };
   }
 
-  /** Account overview recent orders */
-  async listRecentForCustomer(customerId: string, limit: number): Promise<OrderSummary[]> {
-    throw notImplemented("orders.listRecentForCustomer");
+  listRecentForCustomer(customerId: string, limit: number): Promise<OrderSummary[]> {
+    return this.reads.recent(customerId, limit);
   }
 
-  /** Account overview delay alerts with new estimate and options */
-  async listDelayedItemsForCustomer(customerId: string): Promise<DelayedItemAlert[]> {
-    throw notImplemented("orders.listDelayedItemsForCustomer");
+  listDelayedItemsForCustomer(customerId: string): Promise<DelayedItemAlert[]> {
+    return this.reads.delayedItems(customerId);
   }
 
-  /** Units bought recently, for per-customer purchase limits */
-  async countPurchased(customerId: string, offerId: string, sinceDays: number): Promise<number> {
-    throw notImplemented("orders.countPurchased");
+  countPurchased(customerId: string, offerId: string, sinceDays: number): Promise<number> {
+    return this.core.repo.countPurchased(customerId, offerId, new Date(this.core.now().getTime() - Math.max(0, sinceDays) * 86_400_000));
   }
 
-  /** Delivered purchase of the product for Verified Purchase labels */
-  async isVerifiedPurchase(customerId: string, productId: string): Promise<{ orderItemId: string, deliveredAt: string } | null> {
-    throw notImplemented("orders.isVerifiedPurchase");
+  async isVerifiedPurchase(customerId: string, productId: string): Promise<{ orderItemId: string; deliveredAt: string } | null> {
+    const i = await this.core.repo.verifiedPurchase(customerId, productId);
+    return i?.delivered_at ? { orderItemId: i.id, deliveredAt: i.delivered_at.toISOString() } : null;
   }
 
-  /** Store order detail by reference. Returns the order only when it belongs to the signed-in customer or the guest session has access (identity.hasGuestOrderAccess); otherwise null (NOT_FOUND). */
-  async getOrderForViewer(viewer: { customerId?: string, guestSessionId?: string }, ref: string): Promise<OrderDetail | null> {
-    throw notImplemented("orders.getOrderForViewer");
+  getOrderForViewer(viewer: StoreViewer & { customerId?: string; guestSessionId?: string }, ref: string): Promise<OrderDetail | null> {
+    return this.reads.getOrderForViewer(viewer, ref);
   }
 
-  /** Order history with search, date range and status tab (same filters as GET /orders); fields are resolved lazily so list cards stay cheap */
-  async listOrdersForCustomer(customerId: string, filter: { q?: string, range?: string, from?: string, to?: string, tab?: string }, page: common.PageInput): Promise<common.Page<OrderDetail>> {
-    throw notImplemented("orders.listOrdersForCustomer");
+  listOrdersForCustomer(customerId: string, filter: { q?: string; range?: string; from?: string; to?: string; tab?: string }, page: common.PageInput): Promise<common.Page<OrderDetail>> {
+    return this.reads.listOrdersForCustomer(customerId, filter, page);
   }
 
-  /** Counts per status tab plus delayed packages (account overview tiles, order list tabs, customer 360) */
-  async countOrdersByTab(customerId: string, range?: string): Promise<{ all: number, inProgress: number, delivered: number, returns: number, cancelled: number, delayedPackages: number }> {
-    throw notImplemented("orders.countOrdersByTab");
+  countOrdersByTab(customerId: string, range?: string) {
+    return this.reads.countByTab(customerId, range);
   }
 
-  /** One order as a seller sees it: only the seller's own groups (items, money, ship-to while needed, cancellations, timeline) and seller-safe order fields. Null (NOT_FOUND) when the order has no group of this seller. */
-  async getOrderForSeller(sellerId: string, ref: string): Promise<{ order: OrderDetail, groups: SellerOrderDetail[] } | null> {
-    throw notImplemented("orders.getOrderForSeller");
+  getOrderForSeller(sellerId: string, ref: string): Promise<{ order: OrderDetail; groups: SellerOrderDetail[] } | null> {
+    return this.reads.getOrderForSeller(sellerId, ref);
   }
 
-  /** The seller's orders by stage with dispatch deadlines (same filters as seller GET /orders); own groups only */
-  async listOrdersForSeller(sellerId: string, filter: { tab?: string, tabs?: string[], q?: string, placedFrom?: string, placedTo?: string, overdueOnly?: boolean, sort?: string }, page: common.PageInput): Promise<common.Page<{ order: OrderDetail, groups: SellerOrderDetail[] }>> {
-    throw notImplemented("orders.listOrdersForSeller");
+  listOrdersForSeller(
+    sellerId: string,
+    filter: { tab?: string; tabs?: string[]; q?: string; placedFrom?: string; placedTo?: string; overdueOnly?: boolean; sort?: string },
+    page: common.PageInput,
+  ): Promise<common.Page<{ order: OrderDetail; groups: SellerOrderDetail[] }>> {
+    return this.reads.listOrdersForSeller(sellerId, filter, page);
   }
 
-  /** Seller tab counts plus overdue and due today */
-  async countSellerOrders(sellerId: string): Promise<SellerOrderCounts> {
-    throw notImplemented("orders.countSellerOrders");
+  countSellerOrders(sellerId: string): Promise<SellerOrderCounts> {
+    return this.reads.sellerCounts(sellerId);
   }
 
-  /** Order 360 across sellers for staff: groups, items, money by seller, after-sales, flags, notes and staff history. Contact details masked unless orders.customers.view-contact. */
-  async getOrderAdmin(ref: string): Promise<AdminOrderDetail | null> {
-    throw notImplemented("orders.getOrderAdmin");
+  getOrderAdmin(ref: string): Promise<AdminOrderDetail | null> {
+    return this.reads.getOrderAdmin(ref);
   }
 
-  /** Staff order list (same filters as admin GET /orders plus customerId) for the customer and seller 360 views */
-  async listOrdersAdmin(filter: { q?: string, sellerType?: string, sellerId?: string, customerId?: string, fulfillmentStatus?: string, paymentState?: string, placedFrom?: string, placedTo?: string, flag?: string, savedFilterId?: string }, page: common.PageInput): Promise<common.Page<AdminOrderDetail>> {
-    throw notImplemented("orders.listOrdersAdmin");
+  listOrdersAdmin(
+    filter: { q?: string; sellerType?: string; sellerId?: string; customerId?: string; fulfillmentStatus?: string; paymentState?: string; placedFrom?: string; placedTo?: string; flag?: string; savedFilterId?: string },
+    page: common.PageInput,
+  ): Promise<common.Page<AdminOrderDetail>> {
+    return this.reads.listOrdersAdmin(filter as never, page);
   }
 
-  /** Batched order lookup for order fields on other modules' records (Case.order, Return.order, RefundRequest.order). Same visibility as order / sellerOrder / orderAdmin: store → only orders of the signed-in customer or a guest session with access; seller → only the caller's own groups and seller-safe fields (null when the order has no group of this seller); admin → order 360 (contact masked unless orders.customers.view-contact). Not visible → null (never an error that reveals the order exists). */
-  async getOrdersByIds(viewer: { area: 'store'|'seller'|'admin', customerId?: string, guestSessionId?: string, sellerId?: string }, orderIds: string[]): Promise<Record<string, OrderDetail | { order: OrderDetail, groups: SellerOrderDetail[] } | AdminOrderDetail | null>> {
-    throw notImplemented("orders.getOrdersByIds");
+  getOrdersByIds(
+    viewer: { area: 'store' | 'seller' | 'admin'; customerId?: string; guestSessionId?: string; sellerId?: string },
+    orderIds: string[],
+  ): Promise<Record<string, OrderDetail | { order: OrderDetail; groups: SellerOrderDetail[] } | AdminOrderDetail | null>> {
+    return this.reads.getOrdersByIds(viewer, orderIds);
   }
 
-  /** Seller 360 order tiles (staff): open orders (a group of the seller not yet delivered or cancelled), groups past their dispatch deadline, due today, pending customer cancellation requests and cancellations in the last 30 days. Recent orders use listOrdersAdmin with filter.sellerId. */
-  async countOrdersForSellers(sellerIds: string[]): Promise<Record<string, { open: number, overdueDispatch: number, dueToday: number, cancellationRequests: number, cancellations30d: number }>> {
-    throw notImplemented("orders.countOrdersForSellers");
+  countOrdersForSellers(sellerIds: string[]) {
+    return this.reads.countOrdersForSellers(sellerIds);
   }
 
-  /** Export rows for reports datasets orders.admin.orders and orders.seller.orders (seller rows are the seller's own groups; customer email and phone masked without orders.customers.view-contact) */
-  async exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[], nextCursor?: string }> {
-    throw notImplemented("orders.exportRows");
+  exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[]; nextCursor?: string }> {
+    return this.admin.exportRows(dataset, filters, principal, cursor);
   }
 
-  /** Order items per product from the purchase snapshots: open (not yet delivered, cancelled or refunded) and past (everything else). Catalog publication-impact and merge previews. */
-  async countOrderItemsForProducts(productIds: string[]): Promise<Record<string, { open: number, past: number }>> {
-    throw notImplemented("orders.countOrderItemsForProducts");
+  async countOrderItemsForProducts(productIds: string[]): Promise<Record<string, { open: number; past: number }>> {
+    const rows = await this.core.repo.itemCountsForProducts([...new Set(productIds)]);
+    const out: Record<string, { open: number; past: number }> = {};
+    for (const id of productIds) out[id] = { open: 0, past: 0 };
+    for (const r of rows) out[r.product_id] = { open: r.open, past: r.past };
+    return out;
   }
 
-  /** Orders placed before the date with at least one item in the category (snapshot category, subcategories included) that is not yet delivered, cancelled or refunded. Returns category-exception preview. */
-  async countOpenOrdersInCategory(categoryId: string, placedBefore: string): Promise<{ orders: number, items: number }> {
-    throw notImplemented("orders.countOpenOrdersInCategory");
+  /** Snapshot category of the items, with its subcategories (catalog's tree) */
+  async countOpenOrdersInCategory(categoryId: string, placedBefore: string): Promise<{ orders: number; items: number }> {
+    const ids = new Set([categoryId]);
+    const tree = await this.core.ctx
+      .use('catalog')
+      .listCategories({ includeHidden: true })
+      .catch(() => []);
+    const walk = (list: typeof tree, inside: boolean) => {
+      for (const c of list) {
+        const here = inside || c.id === categoryId;
+        if (here) ids.add(c.id);
+        walk(c.children ?? [], here);
+      }
+    };
+    walk(tree, false);
+    const before = new Date(placedBefore);
+    if (Number.isNaN(before.getTime())) throw notFound('Date');
+    return this.core.repo.openInCategories([...ids], before);
   }
 
   /* ---------------- events consumed */
 
-  /** payments.payment.authorized: Accept a payment_pending order when its uncertain payment is confirmed (acceptOrder) */
-  async onPaymentAuthorizedFromPayments(event: EventPayload<"payments.payment.authorized">): Promise<void> {
-    throw notImplemented("orders consumer of payments.payment.authorized");
+  onPaymentAuthorizedFromPayments(event: EventPayload<'payments.payment.authorized'>) {
+    return this.placement.onPaymentAuthorized(event);
   }
 
-  /** payments.payment.failed: Cancel a payment_pending order whose payment was finally declined (no refund needed) */
-  async onPaymentFailedFromPayments(event: EventPayload<"payments.payment.failed">): Promise<void> {
-    throw notImplemented("orders consumer of payments.payment.failed");
+  onPaymentFailedFromPayments(event: EventPayload<'payments.payment.failed'>) {
+    return this.placement.onPaymentFailed(event);
   }
 
-  /** payments.payment.captured: Update payment progress (charged amount and date) */
-  async onPaymentCapturedFromPayments(event: EventPayload<"payments.payment.captured">): Promise<void> {
-    throw notImplemented("orders consumer of payments.payment.captured");
+  onPaymentCapturedFromPayments(event: EventPayload<'payments.payment.captured'>) {
+    return this.placement.onPaymentCaptured(event);
   }
 
-  /** payments.refund.status_changed: Mirror refund progress on the items (processing, sent, failed) and the order's refunded total */
-  async onRefundStatusChangedFromPayments(event: EventPayload<"payments.refund.status_changed">): Promise<void> {
-    throw notImplemented("orders consumer of payments.refund.status_changed");
+  onRefundStatusChangedFromPayments(event: EventPayload<'payments.refund.status_changed'>) {
+    return this.afterSales.onRefundStatusChanged(event);
   }
 
-  /** payments.refund.sent: Add to refundedAmount; move a line to refunded when its whole refundable amount is sent */
-  async onRefundSentFromPayments(event: EventPayload<"payments.refund.sent">): Promise<void> {
-    throw notImplemented("orders consumer of payments.refund.sent");
+  onRefundSentFromPayments(event: EventPayload<'payments.refund.sent'>) {
+    return this.afterSales.onRefundSent(event);
   }
 
-  /** payments.chargeback.opened: Flag the order (chargeback) */
-  async onChargebackOpenedFromPayments(event: EventPayload<"payments.chargeback.opened">): Promise<void> {
-    throw notImplemented("orders consumer of payments.chargeback.opened");
+  onChargebackOpenedFromPayments(event: EventPayload<'payments.chargeback.opened'>) {
+    return this.afterSales.onChargebackOpened(event);
   }
 
-  /** shipping.shipment.created: Add the shipment to the group projection (carrier, tracking, contents) for display and tracking-number search */
-  async onShipmentCreatedFromShipping(event: EventPayload<"shipping.shipment.created">): Promise<void> {
-    throw notImplemented("orders consumer of shipping.shipment.created");
+  onShipmentCreatedFromShipping(event: EventPayload<'shipping.shipment.created'>) {
+    return this.fulfillment.onShipmentCreated(event);
   }
 
-  /** shipping.shipment.dispatched: Items in the shipment become Shipped (splitting lines for partial quantities) */
-  async onShipmentDispatchedFromShipping(event: EventPayload<"shipping.shipment.dispatched">): Promise<void> {
-    throw notImplemented("orders consumer of shipping.shipment.dispatched");
+  onShipmentDispatchedFromShipping(event: EventPayload<'shipping.shipment.dispatched'>) {
+    return this.fulfillment.onShipmentDispatched(event);
   }
 
-  /** shipping.shipment.status_changed: Update the shipment projection and the delivery progress */
-  async onShipmentStatusChangedFromShipping(event: EventPayload<"shipping.shipment.status_changed">): Promise<void> {
-    throw notImplemented("orders consumer of shipping.shipment.status_changed");
+  onShipmentStatusChangedFromShipping(event: EventPayload<'shipping.shipment.status_changed'>) {
+    return this.fulfillment.onShipmentStatusChanged(event);
   }
 
-  /** shipping.shipment.delivered: Items become Delivered; publish orders.item.delivered with the return window end */
-  async onShipmentDeliveredFromShipping(event: EventPayload<"shipping.shipment.delivered">): Promise<void> {
-    throw notImplemented("orders consumer of shipping.shipment.delivered");
+  onShipmentDeliveredFromShipping(event: EventPayload<'shipping.shipment.delivered'>) {
+    return this.fulfillment.onShipmentDelivered(event);
   }
 
-  /** shipping.shipment.exception: Flag delivery issues on the group (failed delivery, lost or damaged, missing tracking) */
-  async onShipmentExceptionFromShipping(event: EventPayload<"shipping.shipment.exception">): Promise<void> {
-    throw notImplemented("orders consumer of shipping.shipment.exception");
+  onShipmentExceptionFromShipping(event: EventPayload<'shipping.shipment.exception'>) {
+    return this.fulfillment.onShipmentException(event);
   }
 
-  /** shipping.dispatch.overdue: Unshipped items of the group become Delayed; publish orders.item.delayed (customer is told and offered support) */
-  async onDispatchOverdueFromShipping(event: EventPayload<"shipping.dispatch.overdue">): Promise<void> {
-    throw notImplemented("orders consumer of shipping.dispatch.overdue");
+  onDispatchOverdueFromShipping(event: EventPayload<'shipping.dispatch.overdue'>) {
+    return this.fulfillment.onDispatchOverdue(event);
   }
 
-  /** shipping.tracking.corrected: Update the projection and add a timeline entry */
-  async onTrackingCorrectedFromShipping(event: EventPayload<"shipping.tracking.corrected">): Promise<void> {
-    throw notImplemented("orders consumer of shipping.tracking.corrected");
+  onTrackingCorrectedFromShipping(event: EventPayload<'shipping.tracking.corrected'>) {
+    return this.fulfillment.onTrackingCorrected(event);
   }
 
-  /** warehouse.fulfillment.status_changed: Official Store items become Preparing when picking starts (and close the window for instant cancellation) */
-  async onFulfillmentStatusChangedFromWarehouse(event: EventPayload<"warehouse.fulfillment.status_changed">): Promise<void> {
-    throw notImplemented("orders consumer of warehouse.fulfillment.status_changed");
+  onFulfillmentStatusChangedFromWarehouse(event: EventPayload<'warehouse.fulfillment.status_changed'>) {
+    return this.fulfillment.onWarehouseStatusChanged(event);
   }
 
-  /** returns.return.requested: Items become Return requested */
-  async onReturnRequestedFromReturns(event: EventPayload<"returns.return.requested">): Promise<void> {
-    throw notImplemented("orders consumer of returns.return.requested");
+  onReturnRequestedFromReturns(event: EventPayload<'returns.return.requested'>) {
+    return this.afterSales.onReturnRequested(event);
   }
 
-  /** returns.return.received: Items become Returned */
-  async onReturnReceivedFromReturns(event: EventPayload<"returns.return.received">): Promise<void> {
-    throw notImplemented("orders consumer of returns.return.received");
+  onReturnReceivedFromReturns(event: EventPayload<'returns.return.received'>) {
+    return this.afterSales.onReturnReceived(event);
   }
 
-  /** returns.return.cancelled: Items go back to Delivered */
-  async onReturnCancelledFromReturns(event: EventPayload<"returns.return.cancelled">): Promise<void> {
-    throw notImplemented("orders consumer of returns.return.cancelled");
+  onReturnCancelledFromReturns(event: EventPayload<'returns.return.cancelled'>) {
+    return this.afterSales.onReturnCancelled(event);
   }
 
-  /** returns.return.rejected: Items go back to Delivered */
-  async onReturnRejectedFromReturns(event: EventPayload<"returns.return.rejected">): Promise<void> {
-    throw notImplemented("orders consumer of returns.return.rejected");
+  onReturnRejectedFromReturns(event: EventPayload<'returns.return.rejected'>) {
+    return this.afterSales.onReturnRejected(event);
   }
 
-  /** returns.refund.approved: Item refund status Approved (shown as not yet sent) */
-  async onRefundApprovedFromReturns(event: EventPayload<"returns.refund.approved">): Promise<void> {
-    throw notImplemented("orders consumer of returns.refund.approved");
+  onRefundApprovedFromReturns(event: EventPayload<'returns.refund.approved'>) {
+    return this.afterSales.onRefundApproved(event);
   }
 
-  /** returns.replacement.created: Add a replacement line (confirmed) linked to the original item; the original keeps its history */
-  async onReplacementCreatedFromReturns(event: EventPayload<"returns.replacement.created">): Promise<void> {
-    throw notImplemented("orders consumer of returns.replacement.created");
+  onReplacementCreatedFromReturns(event: EventPayload<'returns.replacement.created'>) {
+    return this.afterSales.onReplacementCreated(event);
   }
 
-  /** support.case.opened: Flag the order and link the case to its items */
-  async onCaseOpenedFromSupport(event: EventPayload<"support.case.opened">): Promise<void> {
-    throw notImplemented("orders consumer of support.case.opened");
+  onCaseOpenedFromSupport(event: EventPayload<'support.case.opened'>) {
+    return this.afterSales.onCaseOpened(event);
   }
 
-  /** sellers.seller.restricted: Flag open groups of the seller (seller_restricted); orders stay accessible and fulfillable */
-  async onSellerRestrictedFromSellers(event: EventPayload<"sellers.seller.restricted">): Promise<void> {
-    throw notImplemented("orders consumer of sellers.seller.restricted");
+  onSellerRestrictedFromSellers(event: EventPayload<'sellers.seller.restricted'>) {
+    return this.afterSales.onSellerRestricted(event);
   }
 
-  /** identity.user.verified: Attach guest orders placed with the verified email to the new customer account */
-  async onUserVerifiedFromIdentity(event: EventPayload<"identity.user.verified">): Promise<void> {
-    throw notImplemented("orders consumer of identity.user.verified");
+  onUserVerifiedFromIdentity(event: EventPayload<'identity.user.verified'>) {
+    return this.afterSales.onUserVerified(event);
   }
 
   /* ---------------- jobs */
 
-  /** Job orders.auto-accept-cancellations (every 5 min): Accept customer cancellation requests past respondBy when nothing has shipped; publishes orders.cancellation.decided (auto_accepted) and orders.item.cancelled */
-  async autoAcceptCancellations(): Promise<void> {
-    throw notImplemented("job orders.auto-accept-cancellations");
+  autoAcceptCancellations() {
+    return this.cancellations.autoAccept();
   }
 
-  /** Job orders.refresh-flags (every 5 min): Recompute order flags (due soon, overdue, payment checking) and saved filter counts */
-  async refreshFlags(): Promise<void> {
-    throw notImplemented("job orders.refresh-flags");
+  refreshFlags() {
+    return this.afterSales.refreshFlags(() => this.admin.countSavedFilters());
   }
 
-  /** Job orders.complete-orders (daily 02:00 PT): Move open orders to completed when every item is final, return windows have closed and nothing is open; publishes orders.order.completed */
-  async completeOrders(): Promise<void> {
-    throw notImplemented("job orders.complete-orders");
+  completeOrders() {
+    return this.afterSales.completeOrders();
   }
 }
