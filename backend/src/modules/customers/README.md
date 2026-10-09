@@ -775,17 +775,17 @@ Checked through the access module (limits per role, second reviewer).
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| maxAddresses | `20` | Saved addresses per customer |
-| recentlyViewedShown | `12` | Items returned to the home page by default |
-| recentlyViewedRetained | `50` | Items kept per owner |
-| recentlyViewedRetentionDays | `90` | Days a view is kept |
-| dataExportSlaHours | `48` | Promised time to deliver a data export |
-| exportLinkValidDays | `7` | Download link lifetime |
-| closureCoolingOffDays | `14` | Days before a requested closure completes; the customer can cancel until then |
-| guestLookupAttemptsPerHour | `10` | Lookups per IP and per email |
-| overviewSourceTimeoutMs | `300` | Per-module budget for the account overview aggregate |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| maxAddresses | `20` | int, 1–… | Saved addresses per customer |
+| recentlyViewedShown | `12` | int, 1–… | Items returned to the home page by default |
+| recentlyViewedRetained | `50` | int, 1–… | Items kept per owner |
+| recentlyViewedRetentionDays | `90` | duration, days, 1–… | Days a view is kept |
+| dataExportSlaHours | `48` | duration, hours, 1–720, approval: second reviewer | Promised time to deliver a data export |
+| exportLinkValidDays | `7` | duration, days, 1–… | Download link lifetime |
+| closureCoolingOffDays | `14` | duration, days, 0–…, approval: second reviewer | Days before a requested closure completes; the customer can cancel until then |
+| guestLookupAttemptsPerHour | `10` | int, 1–… | Lookups per IP and per email |
+| overviewSourceTimeoutMs | `300` | duration, milliseconds, 50–… | Per-module budget for the account overview aggregate |
 
 ## Integrations
 - **Address validation provider (optional)**: Normalise US addresses and detect PO boxes; format rules only when not configured

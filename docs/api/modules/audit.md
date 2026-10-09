@@ -381,11 +381,11 @@ Checked through the access module (limits per role, second reviewer).
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| retainYears | `7` | Years entries are kept (example value on the prototype) |
-| minimumRetentionYears | `7` | Legal floor; changed only by configuration, not the API |
-| redactKeys | `["password","token","secret","accountNumber","cardNumber"]` | Keys masked in before/after JSON at record time |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| retainYears | `7` | duration, years, 7–…, approval: business owner | Years entries are kept (example value on the prototype) |
+| minimumRetentionYears | `7` | duration, years, 1–…, read-only | Legal floor; changed only by configuration, not the API |
+| redactKeys | `["password","token","secret","accountNumber","cardNumber"]` | json, approval: second reviewer | Keys masked in before/after JSON at record time |
 
 ## Notes
 - Material actions: every endpoint marked audited in any module calls audit.record (the kernel provides a helper that fills actor, roles, requestId and IP from the request). Modules pass before/after as structured JSON plus short human text ('Held $1,240.00' → 'Available $1,240.00') for the list.

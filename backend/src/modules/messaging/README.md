@@ -344,7 +344,7 @@ Actioning hides the message or locks the conversation; serious cases are referre
 | last_message_at | timestamptz |
 | archive_after | timestamptz? |
 
-Indexes: `(customer_id, last_message_at desc)`, `(seller_id, reply_state, reply_due_at)`, `(order_id)`, `(case_id)`, `(customer_id, seller_id, order_id, order_item_id, return_id) unique`
+Indexes: `(customer_id, last_message_at desc)`, `(seller_id, reply_state, reply_due_at)`, `(order_id)`, `(case_id)`, `unique nulls not distinct (kind, customer_id, seller_id, application_id, order_id, order_item_id, return_id, case_id)`
 
 **participants**
 
@@ -486,14 +486,14 @@ Indexes: `(conversation_id, at)`
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| sellerReplyTargetHours | `24` | Seller reply target shown to sellers (example) |
-| maskContactDetails | `true` | Mask phone numbers, emails and outside links in messages |
-| maxAttachments | `5` | Files per message |
-| maxAttachmentMb | `10` | Size per file |
-| messageMaxLength | `4000` | Characters per message |
-| archiveAfterDays | `180` | Days after order completion |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| sellerReplyTargetHours | `24` | duration, hours, 1–…, seller-visible | Seller reply target shown to sellers (example) |
+| maskContactDetails | `true` | bool, approval: second reviewer | Mask phone numbers, emails and outside links in messages |
+| maxAttachments | `5` | int, 0–20 | Files per message |
+| maxAttachmentMb | `10` | int, MB, 1–… | Size per file |
+| messageMaxLength | `4000` | int, characters, 1–… | Characters per message |
+| archiveAfterDays | `180` | duration, days, 30–… | Days after order completion |
 
 ## Notes
 - Conversations are private to the customer, the seller and Marketly support. Sellers never see other sellers' conversations; staff reads are logged with a reason.

@@ -196,8 +196,8 @@ export interface WorkItem {
   queueKey: string;
   queueName: string;
   area: string;
-  /** What kind of work */
-  kind: "overdue_dispatch" | "missing_tracking" | "delivery_exception" | "seller_cannot_fulfill" | "low_stock" | "receiving" | "pick_pack" | "return_inspection" | "return_decision" | "approval_waiting" | "case_past_target" | "case_escalated" | "payout_failed" | "payment_check" | "payment_mismatch" | "chargeback" | "hold_review" | "product_review" | "application_waiting" | "launch_review" | "appeal_due" | "restriction_review" | "restriction_evidence" | "seller_performance" | "storefront_review" | "trust_report" | "trust_recommendation" | "data_request" | "seller_reply_overdue" | "manual_task";
+  /** What kind of work; how each kind closes is in the notes */
+  kind: "overdue_dispatch" | "missing_tracking" | "delivery_exception" | "seller_cannot_fulfill" | "low_stock" | "receiving" | "pick_pack" | "return_inspection" | "return_decision" | "approval_waiting" | "case_past_target" | "case_escalated" | "payout_failed" | "payment_check" | "payment_mismatch" | "chargeback" | "hold_review" | "product_review" | "application_waiting" | "launch_review" | "appeal_due" | "restriction_review" | "restriction_evidence" | "seller_performance" | "storefront_review" | "trust_report" | "trust_recommendation" | "data_request" | "seller_reply_overdue" | "unexpected_return_parcel" | "return_parcel_overdue" | "manual_task";
   title: string;
   summary?: string | null;
   subject: WorkSubject;
@@ -238,7 +238,7 @@ export const WorkItem: z.ZodType<WorkItem> = z.object({
   queueKey: z.string(),
   queueName: z.string(),
   area: z.string(),
-  kind: z.enum(["overdue_dispatch", "missing_tracking", "delivery_exception", "seller_cannot_fulfill", "low_stock", "receiving", "pick_pack", "return_inspection", "return_decision", "approval_waiting", "case_past_target", "case_escalated", "payout_failed", "payment_check", "payment_mismatch", "chargeback", "hold_review", "product_review", "application_waiting", "launch_review", "appeal_due", "restriction_review", "restriction_evidence", "seller_performance", "storefront_review", "trust_report", "trust_recommendation", "data_request", "seller_reply_overdue", "manual_task"]).describe("What kind of work"),
+  kind: z.enum(["overdue_dispatch", "missing_tracking", "delivery_exception", "seller_cannot_fulfill", "low_stock", "receiving", "pick_pack", "return_inspection", "return_decision", "approval_waiting", "case_past_target", "case_escalated", "payout_failed", "payment_check", "payment_mismatch", "chargeback", "hold_review", "product_review", "application_waiting", "launch_review", "appeal_due", "restriction_review", "restriction_evidence", "seller_performance", "storefront_review", "trust_report", "trust_recommendation", "data_request", "seller_reply_overdue", "unexpected_return_parcel", "return_parcel_overdue", "manual_task"]).describe("What kind of work; how each kind closes is in the notes"),
   title: z.string(),
   summary: z.string().nullish(),
   get subject() {
@@ -796,6 +796,26 @@ export const WorkqueuesDayEndCompletedEvent: z.ZodType<WorkqueuesDayEndCompleted
   reviewId: z.uuid(),
   date: z.iso.date(),
   openItems: z.number().int(),
+});
+
+/** workqueues.day_end.prepared: Today's day-end review is built (the day-end summary for dayEndSharedRoles) */
+export interface WorkqueuesDayEndPreparedEvent {
+  reviewId: string;
+  date: string;
+  dueAt: string;
+  openItems: number;
+  overdueItems: number;
+  /** dayEndSharedRoles: who receives the summary */
+  roleKeys: string[];
+}
+
+export const WorkqueuesDayEndPreparedEvent: z.ZodType<WorkqueuesDayEndPreparedEvent> = z.object({
+  reviewId: z.uuid(),
+  date: z.iso.date(),
+  dueAt: z.iso.datetime({ offset: true }),
+  openItems: z.number().int(),
+  overdueItems: z.number().int(),
+  roleKeys: z.array(z.string()).describe("dayEndSharedRoles: who receives the summary"),
 });
 
 /* ------------------------------------------------------------------ public API (in-process) */
@@ -1875,6 +1895,7 @@ export const spec = defineModuleSpec({
       "workqueues.item.resolved": { when: "An item is resolved or dismissed", payload: () => WorkqueuesItemResolvedEvent },
       "workqueues.queue.changed": { when: "Lead, backup or escalation route changes", payload: () => WorkqueuesQueueChangedEvent },
       "workqueues.day_end.completed": { when: "The day-end review is completed", payload: () => WorkqueuesDayEndCompletedEvent },
+      "workqueues.day_end.prepared": { when: "Today's day-end review is built (the day-end summary for dayEndSharedRoles)", payload: () => WorkqueuesDayEndPreparedEvent },
     },
     consumes: {
       "shipping.dispatch.overdue": "Open an overdue_dispatch item about the order (seller-visible for marketplace sellers) with the payload exceptionId as a related delivery_exception subject, so Remind seller can call shipping; resolves on shipping.shipment.dispatched or orders.item.cancelled",
@@ -1896,11 +1917,14 @@ export const spec = defineModuleSpec({
       "returns.refund.approved": "Resolve return decision items for that return",
       "finance.payout.failed": "Open a payout_failed item (also listed in the day-end review)",
       "finance.payout.paid": "Resolve payout_failed items for that payout",
-      "finance.reconciliation.mismatch_found": "Open a payment_mismatch item in Daily finance checks",
-      "payments.payment.pending_check": "Open a payment_check item",
+      "finance.reconciliation.mismatch_found": "Open a payment_mismatch item in finance.payment_checks",
+      "finance.reconciliation.item_closed": "Resolve the payment_mismatch item for that reconciliation item (matched, explained or corrected)",
+      "payments.payment.pending_check": "Open a payment_check item in finance.payment_checks",
       "payments.payment.captured": "Resolve payment_check items",
       "payments.payment.failed": "Resolve payment_check items (the customer is told by payments)",
-      "payments.chargeback.opened": "Open a chargeback item for Finance",
+      "payments.payment.authorized": "Resolve the payment_check item when the pending check ends authorized (capture may come later)",
+      "payments.chargeback.opened": "Open a chargeback item in finance.chargebacks",
+      "payments.chargeback.decided": "Resolve the chargeback item (won, lost or conceded; inquiries that close without a chargeback end as won)",
       "catalog.product.submitted": "Open a product_review item",
       "catalog.product.approved": "Resolve product review items",
       "catalog.product.changes_requested": "Resolve product review items",
@@ -1908,13 +1932,15 @@ export const spec = defineModuleSpec({
       "sellers.application.submitted": "Open an application_waiting item with the decision target as deadline",
       "sellers.application.information_provided": "Reopen the application item for review",
       "sellers.application.decided": "Resolve application items",
-      "sellers.launch_review.requested": "Open a launch_review item",
+      "sellers.launch_review.requested": "Open a launch_review item in sellers.launch_reviews",
       "sellers.launch_review.decided": "Resolve the launch review item",
       "sellers.appeal.submitted": "Open an appeal_due item with decideBy as deadline",
       "sellers.appeal.decided": "Resolve appeal items",
-      "sellers.restriction.evidence_submitted": "Open a restriction_evidence item for the Seller Manager",
-      "sellers.performance.below_target": "Open a seller_performance item",
-      "sellers.change_request.submitted": "Open a storefront_review item",
+      "sellers.restriction.evidence_submitted": "Open a restriction_evidence item in sellers.restrictions for the Seller Manager",
+      "sellers.restriction.lifted": "Resolve restriction_evidence and restriction_review items for that restriction (lifted, expired or overturned)",
+      "sellers.restriction.updated": "Resolve the restriction_evidence item: staff reviewed the evidence and changed the restriction instead of lifting it",
+      "sellers.performance.below_target": "Open or refresh a seller_performance item in sellers.performance (closed by hand once the follow-up is done; sellers publishes no back-on-target event)",
+      "sellers.change_request.submitted": "Open a storefront_review item in sellers.launch_reviews",
       "sellers.change_request.decided": "Resolve storefront review items",
       "trust.report.created": "Open a trust_report item (priority from risk score)",
       "trust.report.resolved": "Resolve trust report items",
@@ -1923,7 +1949,8 @@ export const spec = defineModuleSpec({
       "messaging.reply.overdue": "Open a seller-visible seller_reply_overdue task",
       "messaging.message.sent": "Resolve seller_reply_overdue when the seller replies",
       "customers.data_export.requested": "Open a data_request item with the promised delivery time",
-      "customers.data_export.ready": "Resolve the data request item"
+      "customers.data_export.ready": "Resolve the data request item",
+      "warehouse.return_parcel.received": "Resolve the return_parcel_overdue item for that parcel"
     },
   },
   jobs: {
@@ -1941,7 +1968,7 @@ export const spec = defineModuleSpec({
     },
     "workqueues.day-end-prepare": {
       "schedule": "daily 15:00 market time",
-      "does": "Build today's day-end review from open items and other modules' forecasts"
+      "does": "Build today's day-end review from open items and other modules' forecasts; publish workqueues.day_end.prepared (the summary notifications sends)"
     },
     "workqueues.day-end-close": {
       "schedule": "daily 23:59 market time",
@@ -1955,11 +1982,15 @@ export const spec = defineModuleSpec({
   settings: {
     "dueSoonMinutes": {
       "default": 60,
-      "desc": "When an item turns due soon"
+      "desc": "When an item turns due soon",
+      "type": "duration",
+      "min": 0,
+      "unit": "minutes"
     },
     "dayEndReviewTime": {
       "default": "17:30",
-      "desc": "Day-end review due time, market time"
+      "desc": "Day-end review due time, market time",
+      "type": "time"
     },
     "dayEndSharedRoles": {
       "default": [
@@ -1972,11 +2003,15 @@ export const spec = defineModuleSpec({
         "seller_manager",
         "advertising_manager"
       ],
-      "desc": "Who sees and receives the day-end review"
+      "desc": "Who sees and receives the day-end review",
+      "type": "json"
     },
     "itemRetentionDays": {
       "default": 400,
-      "desc": "Resolved items kept online"
+      "desc": "Resolved items kept online",
+      "type": "duration",
+      "min": 30,
+      "unit": "days"
     },
     "seedQueues": {
       "default": [
@@ -1985,21 +2020,29 @@ export const spec = defineModuleSpec({
         "shipping.delivery_exceptions",
         "orders.seller_cannot_fulfill",
         "warehouse.pick_pack",
+        "warehouse.return_parcels",
         "purchasing.receiving",
+        "inventory.low_stock",
         "returns.inspection",
         "returns.decisions",
         "finance.daily_checks",
+        "finance.payment_checks",
+        "finance.chargebacks",
         "finance.payout_failures",
         "support.cases_waiting",
         "catalog.product_review",
         "sellers.applications",
+        "sellers.launch_reviews",
+        "sellers.restrictions",
         "sellers.appeals",
         "sellers.performance",
         "trust.reports",
         "access.approvals",
         "customers.data_requests"
       ],
-      "desc": "Queues created at install with placeholder leads that must be set before launch"
+      "desc": "Queues created at install with placeholder leads that must be set before launch",
+      "type": "json",
+      "editable": false
     }
   },
   errorCodes: {
@@ -2524,6 +2567,7 @@ declare module '../kernel/events/event-map.js' {
     "workqueues.item.resolved": WorkqueuesItemResolvedEvent;
     "workqueues.queue.changed": WorkqueuesQueueChangedEvent;
     "workqueues.day_end.completed": WorkqueuesDayEndCompletedEvent;
+    "workqueues.day_end.prepared": WorkqueuesDayEndPreparedEvent;
   }
 }
 

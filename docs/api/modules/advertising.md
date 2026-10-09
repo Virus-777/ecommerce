@@ -1107,6 +1107,7 @@ Indexes: `unique (campaign_id, day)`, `(seller_id, state)`
 | `advertising.charge.posted` | Daily seller ad charges are posted for seller statements | `{ chargeId: uuid, sellerId: uuid, campaignId: uuid, day: date, amount: Money }` | reports |
 | `advertising.charge.credited` | A posted charge is credited or an accrued one voided | `{ chargeId: uuid, sellerId: uuid, amount: Money, reason: text }` | reports |
 | `advertising.budget.reached` | A paid campaign reaches its daily or total spending limit | `{ campaignId: uuid, sellerId: uuid?, limit: enum(daily|total) }` | - |
+| `advertising.campaign.ending_soon` | A live or scheduled campaign ends within endingSoonDays (daily, once per campaign) | `{ campaignId: uuid, ref: string, name: string, advertiserKind: string, sellerId: uuid?, ownerStaffId: uuid?, endsAt: datetime, daysLeft: int }` | notifications |
 
 | Consumes | From | Does |
 |---|---|---|
@@ -1188,19 +1189,19 @@ Checked through the access module (limits per role, second reviewer).
 | `advertising.accrue-charges` | every 15 min | Accrue billable clicks/displays and fixed daily fees, capped at daily and total limits; stop delivery at the limit |
 | `advertising.post-charges` | daily 02:00 market time | Post the previous day's charges to finance (advertising.charge.posted) |
 | `advertising.expire-frequency-state` | hourly | Delete frequency and suppression rows past their window |
-| `advertising.ending-soon-notice` | daily 08:00 market time | Notify owners of campaigns ending within 3 days to finish or renew deliberately |
+| `advertising.ending-soon-notice` | daily 08:00 market time | Publish advertising.campaign.ending_soon for campaigns ending within endingSoonDays (once per campaign), so owners finish or renew deliberately |
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| decisionTtlSeconds | `60` | How long clients may reuse a serve decision; pausing takes effect within this time |
-| attributionDays | `7` | Default attribution period after a click (also in global rules) |
-| minPromotedStock | `10` | Sponsored ads pause when the promoted offer's available stock falls below this |
-| endingSoonDays | `3` | Window for the Ending soon list |
-| maxImageBytes | `1048576` | Upload limit for own-campaign images (seller uploads 5 MB) |
-| eventRetentionMonths | `13` | Raw ad event retention |
-| headlineMaxChars | `60` | Overlay headline limit (seller card headline 40) |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| decisionTtlSeconds | `60` | duration, seconds, 0–3600 | How long clients may reuse a serve decision; pausing takes effect within this time |
+| attributionDays | `7` | duration, days, 1–30, seller-visible | Default attribution period after a click (also in global rules) |
+| minPromotedStock | `10` | int, 0–…, seller-visible | Sponsored ads pause when the promoted offer's available stock falls below this |
+| endingSoonDays | `3` | duration, days, 1–30 | Window for the Ending soon list |
+| maxImageBytes | `1048576` | int, bytes, 1–… | Upload limit for own-campaign images (seller uploads 5 MB) |
+| eventRetentionMonths | `13` | duration, months, 1–… | Raw ad event retention |
+| headlineMaxChars | `60` | int, characters, 1–… | Overlay headline limit (seller card headline 40) |
 
 ## Notes
 - Promotions change the offer; ads bring attention to it (plan ch. 16). An ad may link a promotion; claims in creatives are checked against it.

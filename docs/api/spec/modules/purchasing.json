@@ -365,7 +365,7 @@
   ],
   "events": {
     "publishes": [
-      { "name": "purchasing.purchase_order.sent", "when": "A PO is sent to the supplier", "payload": { "purchaseOrderId": "uuid", "ref": "string", "supplierId": "uuid", "locationId": "uuid", "total": "Money", "lines": "PurchaseOrderLine[]" } },
+      { "name": "purchasing.purchase_order.sent", "when": "A PO is sent to the supplier", "payload": { "purchaseOrderId": "uuid", "ref": "string", "supplierId": "uuid", "supplierName": "string", "supplierEmail": { "type": "email?", "desc": "Supplier contact email; null when the supplier has none" }, "emailSupplier": { "type": "bool", "desc": "The buyer asked to email the purchase order to the supplier" }, "message": { "type": "text?", "desc": "The buyer's message to the supplier" }, "locationId": "uuid", "total": "Money", "lines": "PurchaseOrderLine[]" } },
       { "name": "purchasing.purchase_order.status_changed", "when": "Any PO status transition", "payload": { "purchaseOrderId": "uuid", "ref": "string", "from": "string", "to": "string", "reason": "text?" } },
       { "name": "purchasing.delivery.rescheduled", "when": "An expected arrival window changes or a delivery is marked delayed", "payload": { "deliveryId": "uuid?", "purchaseOrderId": "uuid", "ref": "string", "windowFrom": "datetime?", "windowTo": "datetime?", "reason": "text" } },
       { "name": "purchasing.delivery.late", "when": "A delivery window passed without arrival", "payload": { "deliveryId": "uuid", "purchaseOrderId": "uuid", "ref": "string", "supplierName": "string" } },
@@ -395,13 +395,13 @@
     { "name": "purchasing.reorder-suggestions", "schedule": "hourly", "does": "Rebuild suggestions from inventory low stock, incoming quantities and 30-day sales velocity" }
   ],
   "settings": [
-    { "key": "purchaseOrderRefFormat", "default": "PUR-YYMM-NNNN", "desc": "Human reference for purchase orders" },
-    { "key": "receiptRefFormat", "default": "REC-YYMMDD-NN", "desc": "Human reference for receiving records" },
-    { "key": "damagePhotosRequired", "default": true, "desc": "Damaged lines need at least one photo" },
-    { "key": "overReceiptAllowedPct", "default": 0, "desc": "Received above ordered allowed without a new PO line" },
-    { "key": "deliveryLateGraceMinutes", "default": 60, "desc": "Grace after the arrival window before a delivery counts as late" },
-    { "key": "reorderCoverDays", "default": 30, "desc": "Days of sales a suggested reorder should cover" },
-    { "key": "performanceWindowDays", "default": 90, "desc": "Window for supplier performance figures" }
+    { "key": "purchaseOrderRefFormat", "type": "string", "default": "PUR-YYMM-NNNN", "desc": "Human reference for purchase orders", "editable": false },
+    { "key": "receiptRefFormat", "type": "string", "default": "REC-YYMMDD-NN", "desc": "Human reference for receiving records", "editable": false },
+    { "key": "damagePhotosRequired", "type": "bool", "default": true, "desc": "Damaged lines need at least one photo" },
+    { "key": "overReceiptAllowedPct", "type": "number", "default": 0, "desc": "Received above ordered allowed without a new PO line", "min": 0, "max": 100, "unit": "%", "approval": "second_reviewer" },
+    { "key": "deliveryLateGraceMinutes", "type": "duration", "default": 60, "desc": "Grace after the arrival window before a delivery counts as late", "unit": "minutes", "min": 0 },
+    { "key": "reorderCoverDays", "type": "duration", "default": 30, "desc": "Days of sales a suggested reorder should cover", "unit": "days", "min": 1 },
+    { "key": "performanceWindowDays", "type": "duration", "default": 90, "desc": "Window for supplier performance figures", "unit": "days", "min": 7 }
   ],
   "integrations": [
     { "name": "Email (through notifications)", "purpose": "Send purchase orders and claims to supplier contacts" }

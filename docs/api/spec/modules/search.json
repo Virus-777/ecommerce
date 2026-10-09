@@ -419,15 +419,15 @@
     { "name": "search.prune-logs", "schedule": "daily 04:00 market time", "does": "Delete recent searches older than the retention period and query/click logs older than 13 months" }
   ],
   "settings": [
-    { "key": "pageSize", "default": 24, "desc": "Default results per page" },
-    { "key": "typoSimilarityThreshold", "default": 0.35, "desc": "Trigram similarity for misspelling tolerance" },
-    { "key": "autoCorrectBelowResults", "default": 3, "desc": "Apply a confident correction when the original query has fewer results" },
-    { "key": "recentSearchesMax", "default": 10, "desc": "Recent searches kept per customer or guest" },
-    { "key": "recentSearchRetentionDays", "default": 90, "desc": "Recent searches older than this are deleted" },
-    { "key": "newArrivalsWindowDays", "default": 30, "desc": "'New arrivals' = first listed within this window" },
-    { "key": "bestSellingMinOrders", "default": 500, "desc": "Platform orders in 30 days before best-selling sort is offered" },
-    { "key": "excludeOutOfStockByDefault", "default": true, "desc": "Out-of-stock products appear only with 'Include out of stock'" },
-    { "key": "searchEngine", "default": "postgres", "desc": "postgres | external (adapter added later)" }
+    { "key": "pageSize", "type": "int", "default": 24, "desc": "Default results per page", "min": 1, "max": 100 },
+    { "key": "typoSimilarityThreshold", "type": "number", "default": 0.35, "desc": "Trigram similarity for misspelling tolerance", "min": 0, "max": 1 },
+    { "key": "autoCorrectBelowResults", "type": "int", "default": 3, "desc": "Apply a confident correction when the original query has fewer results", "min": 0 },
+    { "key": "recentSearchesMax", "type": "int", "default": 10, "desc": "Recent searches kept per customer or guest", "min": 0 },
+    { "key": "recentSearchRetentionDays", "type": "duration", "default": 90, "desc": "Recent searches older than this are deleted", "unit": "days", "min": 1 },
+    { "key": "newArrivalsWindowDays", "type": "duration", "default": 30, "desc": "'New arrivals' = first listed within this window", "unit": "days", "min": 1 },
+    { "key": "bestSellingMinOrders", "type": "int", "default": 500, "desc": "Platform orders in 30 days before best-selling sort is offered", "min": 0 },
+    { "key": "excludeOutOfStockByDefault", "type": "bool", "default": true, "desc": "Out-of-stock products appear only with 'Include out of stock'" },
+    { "key": "searchEngine", "type": "enum", "default": "postgres", "desc": "postgres | external (adapter added later)", "choices": ["postgres", "external"], "approval": "second_reviewer" }
   ],
   "integrations": [
     { "name": "PostgreSQL full-text search and pg_trgm", "purpose": "Ranking, misspelling tolerance and suggestions at launch" },

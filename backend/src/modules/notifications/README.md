@@ -99,9 +99,9 @@ Who is told what, on which channel: notification topics for customers, sellers a
 
 | Field | Type |
 |---|---|
-| kind | `enum(customer|guest_email|seller|seller_member|staff_role|staff_member)` |
+| kind | `enum(customer|guest_email|seller|seller_member|staff_role|staff_member|external_email)` external_email: a contact outside Marketly (supplier, rights owner, scheduled-report address); email only, essential topics only |
 | accountId | `uuid?` Identity account (customer, seller member, staff member) |
-| email | `email?` Guests (checkout email) |
+| email | `email?` Guests (checkout email) and external_email recipients |
 | sellerId | `uuid?` seller: all members who should get this topic; seller_member: one member |
 | memberId | `uuid?` |
 | roleKey | `string?` staff_role: resolved through access (lead, or covering backup) |
@@ -224,7 +224,7 @@ Who is told what, on which channel: notification topics for customers, sellers a
 | Field | Type |
 |---|---|
 | key | `string` customer.shipment.dispatched, seller.dispatch.reminder, staff.approval.waiting… |
-| audience | `enum(customer|seller|staff)` |
+| audience | `enum(customer|seller|staff|external)` external: suppliers and rights owners, by email only |
 | category | `enum(essential|optional|promotional)` |
 | group | `string` |
 | label | `string` |
@@ -985,6 +985,15 @@ Indexes: `(status, scheduled_at)`
 | `settings.change.scheduled` | settings | Sellers (seller-visible changes): upcoming platform change with its effective date |
 | `audit.integrity.failed` | audit | Staff: urgent notice to Platform Administrator and Business Owner |
 | `reports.export.ready` | reports | Export ready to the requester (staff or seller member), including audit, orders and module list exports |
+| `reports.scheduled_report.ready` | reports | Phase 2: each recipient address (external_email, topic staff.report.scheduled, email only): the scheduled report with its download link and expiry |
+| `purchasing.purchase_order.sent` | purchasing | Supplier (external_email, topic supplier.purchase_order.sent, email only) when emailSupplier is true and supplierEmail is set: the purchase order with its lines, delivery location and the buyer's message; in-app copy to the Purchasing Manager role |
+| `wallet.credit.expiring` | wallet | Customer (account group, topic customer.credit.expiring): unused store credit amount and expiry date, with a link to shop |
+| `workqueues.day_end.prepared` | workqueues | Staff (topic staff.day_end.summary, to roleKeys): today's day-end review is ready with open and overdue counts and the due time; action required |
+| `advertising.campaign.ending_soon` | advertising | Seller (members with advertising permission, topic seller.campaign.ending_soon) for seller campaigns; staff (ownerStaffId, else the Advertising Manager role; topic staff.campaign.ending_soon) for own and brand campaigns: ends on endsAt, renew or let it finish |
+| `content.article.review_due` | content | Staff (ownerStaffId, else the Content Manager role; topic staff.article.review_due): help article due for review, action required |
+| `reviews.moderation.decided` | reviews | Reporters (topic customer.review_report.decided, seller variant for sellers): reporterOutcome; author (topic customer.review.moderated, seller.content.moderated for responses and answers): kept, edited or removed with the reason and appealUntil |
+| `trust.report.resolved` | trust | Each reporter (customers and sellers in-app and email, rights owners by external_email; topic trust.report.resolved): the reporterOutcome text, never the reported party's details |
+| `trust.rights_report.received` | trust | Rights owner (external_email, topic rights_owner.report.received): confirmation with the TR reference and what happens next |
 
 ## In-process API (for other modules)
 
@@ -1041,18 +1050,18 @@ Indexes: `(status, scheduled_at)`
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| noticeRetentionMonths | `12` | Notices are kept for 12 months (seller inbox copy) |
-| deliveryLogRetentionDays | `180` | Delivery log retention |
-| maxDeliveryAttempts | `6` | Attempts before a delivery fails |
-| retryBackoffMinutes | `[1,5,15,60,240]` | Delay before each retry |
-| dedupeWindowMinutes | `30` | Same dedupeKey and recipient is sent once in this window |
-| senders | `{"orders":"Marketly Orders <orders@marketly.example>","account":"Marketly <no-reply@marketly.example>","sellers":"Marketly Seller Center <sellers@marketly.example>","promotions":"Marketly Deals <deals@marketly.example>"}` | From addresses per topic family |
-| replyDomain | `"reply.marketly.example"` | Domain for reply-to tokens on case and message emails |
-| testSendDomains | `["marketly.example"]` | Test sends only to these domains |
-| sellerDispatchReminderHours | `4` | Hours before the dispatch deadline for the seller reminder (scheduled when shipping or orders call schedule) |
-| promotionalQuietHours | `{"from":"21:00","to":"08:00"}` | No promotional SMS or push in this local window |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| noticeRetentionMonths | `12` | duration, months, 1–… | Notices are kept for 12 months (seller inbox copy) |
+| deliveryLogRetentionDays | `180` | duration, days, 30–… | Delivery log retention |
+| maxDeliveryAttempts | `6` | int, 1–20 | Attempts before a delivery fails |
+| retryBackoffMinutes | `[1,5,15,60,240]` | json | Delay before each retry |
+| dedupeWindowMinutes | `30` | duration, minutes, 0–… | Same dedupeKey and recipient is sent once in this window |
+| senders | `{"orders":"Marketly Orders <orders@marketly.example>","account":"Marketly <no-reply@marketly.example>","sellers":"Marketly Seller Center <sellers@marketly.example>","promotions":"Marketly Deals <deals@marketly.example>"}` | json, approval: second reviewer | From addresses per topic family |
+| replyDomain | `"reply.marketly.example"` | string, approval: second reviewer | Domain for reply-to tokens on case and message emails |
+| testSendDomains | `["marketly.example"]` | json, approval: second reviewer | Test sends only to these domains |
+| sellerDispatchReminderHours | `4` | duration, hours, 1–…, seller-visible | Hours before the dispatch deadline for the seller reminder (scheduled when shipping or orders call schedule) |
+| promotionalQuietHours | `{"from":"21:00","to":"08:00"}` | json, approval: second reviewer | No promotional SMS or push in this local window |
 
 ## Integrations
 - **Transactional email provider (e.g. Amazon SES, Postmark)**: Send email, delivery/bounce/complaint webhooks, inbound parse for replies; DKIM/SPF/DMARC on the sending domains; List-Unsubscribe headers on promotional mail

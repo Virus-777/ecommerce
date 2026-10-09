@@ -743,18 +743,18 @@ Indexes: `unique (session_id, idempotency_key)`
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| guestCheckoutEnabled | `true` | Allow guest purchases. Market-level value owned by the settings module (checkout.guestCheckoutEnabled, changed in admin/settings with business-owner approval); read here |
-| offerAccountAfterGuestPurchase | `true` | Offer to create an account after a guest purchase (owned by settings, checkout.offerAccountAfterGuestPurchase) |
-| sessionTtlMinutes | `60` | Idle time before an open checkout expires |
-| stockHoldMinutes | `15` | Stock hold created at Place order |
-| retryWindowMinutes | `30` | After a decline, prices, stock and coupons are held this long ('held until 3:15 PM PT') |
-| pendingHoldHours | `24` | Stock stays reserved while a payment result is being checked |
-| maxPaymentAttempts | `5` | Payment attempts per checkout |
-| couponAttemptsPerHour | `20` | Coupon codes tried per session per hour |
-| purchaseLimitWindowDays | `30` | Window for per-customer purchase limits that count earlier orders |
-| idempotencyRetentionDays | `7` | How long Place order keys are kept |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| guestCheckoutEnabled | `true` | bool, approval: business owner | Allow guest purchases. Market-level value owned by the settings module (checkout.guestCheckoutEnabled, changed in admin/settings with business-owner approval); read here |
+| offerAccountAfterGuestPurchase | `true` | bool | Offer to create an account after a guest purchase (owned by settings, checkout.offerAccountAfterGuestPurchase) |
+| sessionTtlMinutes | `60` | duration, minutes, 5–… | Idle time before an open checkout expires |
+| stockHoldMinutes | `15` | duration, minutes, 1–60 | Stock hold created at Place order |
+| retryWindowMinutes | `30` | duration, minutes, 1–… | After a decline, prices, stock and coupons are held this long ('held until 3:15 PM PT') |
+| pendingHoldHours | `24` | duration, hours, 1–… | Stock stays reserved while a payment result is being checked |
+| maxPaymentAttempts | `5` | int, 1–20 | Payment attempts per checkout |
+| couponAttemptsPerHour | `20` | int, 1–… | Coupon codes tried per session per hour |
+| purchaseLimitWindowDays | `30` | duration, days, 1–…, seller-visible | Window for per-customer purchase limits that count earlier orders |
+| idempotencyRetentionDays | `7` | duration, days, 1–… | How long Place order keys are kept |
 
 ## Integrations
 - **Sales tax rates**: Tax per item and shipping by destination state; a rate table in settings at launch, a tax service adapter later

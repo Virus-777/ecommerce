@@ -182,7 +182,7 @@ Two things stay out of middleware on purpose:
 
 | Client | Where the refresh token lives | Protection |
 |---|---|---|
-| Website (store, Seller Center, Admin Center) | `__Host-` cookie: `HttpOnly; Secure; SameSite=Strict; Path=/api/public/identity/sessions`. The access token stays in memory only | Refresh and sign-out require an allowed `Origin` and a custom header (`X-Requested-With`); CORS allowlist per area with credentials only on the refresh path; Content-Security-Policy on Admin Center and Seller Center |
+| Website (store, Seller Center, Admin Center) | `__Secure-mk_refresh` cookie: `HttpOnly; Secure; SameSite=Strict; Path=/api/public/identity/sessions` (sent only to refresh and sign-out; a `__Host-` cookie would have to use `Path=/`). The access token stays in memory only | Refresh and sign-out require an allowed `Origin` and a custom header (`X-Requested-With`); CORS allowlist per area with credentials only on the refresh path; Content-Security-Policy on Admin Center and Seller Center |
 | Android app | Response body, as today; stored with Android Keystore / EncryptedSharedPreferences | Verified App Links for order and reset links |
 
 - **Rotation:** a reused previous token within **20 s** returns the same new pair. This handles two tabs, or parallel app requests, refreshing at once. Reuse outside the window revokes the session and writes a security event, but **does not lock the account**. Clients refresh one request at a time.

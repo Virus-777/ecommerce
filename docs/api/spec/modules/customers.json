@@ -348,15 +348,15 @@
     { "name": "customers.prune-recently-viewed", "schedule": "daily", "does": "Delete rows older than recentlyViewedRetentionDays and guest rows whose session expired" }
   ],
   "settings": [
-    { "key": "maxAddresses", "default": 20, "desc": "Saved addresses per customer" },
-    { "key": "recentlyViewedShown", "default": 12, "desc": "Items returned to the home page by default" },
-    { "key": "recentlyViewedRetained", "default": 50, "desc": "Items kept per owner" },
-    { "key": "recentlyViewedRetentionDays", "default": 90, "desc": "Days a view is kept" },
-    { "key": "dataExportSlaHours", "default": 48, "desc": "Promised time to deliver a data export" },
-    { "key": "exportLinkValidDays", "default": 7, "desc": "Download link lifetime" },
-    { "key": "closureCoolingOffDays", "default": 14, "desc": "Days before a requested closure completes; the customer can cancel until then" },
-    { "key": "guestLookupAttemptsPerHour", "default": 10, "desc": "Lookups per IP and per email" },
-    { "key": "overviewSourceTimeoutMs", "default": 300, "desc": "Per-module budget for the account overview aggregate" }
+    { "key": "maxAddresses", "type": "int", "default": 20, "desc": "Saved addresses per customer", "min": 1 },
+    { "key": "recentlyViewedShown", "type": "int", "default": 12, "desc": "Items returned to the home page by default", "min": 1 },
+    { "key": "recentlyViewedRetained", "type": "int", "default": 50, "desc": "Items kept per owner", "min": 1 },
+    { "key": "recentlyViewedRetentionDays", "type": "duration", "default": 90, "desc": "Days a view is kept", "unit": "days", "min": 1 },
+    { "key": "dataExportSlaHours", "type": "duration", "default": 48, "desc": "Promised time to deliver a data export", "unit": "hours", "min": 1, "max": 720, "approval": "second_reviewer" },
+    { "key": "exportLinkValidDays", "type": "duration", "default": 7, "desc": "Download link lifetime", "unit": "days", "min": 1 },
+    { "key": "closureCoolingOffDays", "type": "duration", "default": 14, "desc": "Days before a requested closure completes; the customer can cancel until then", "unit": "days", "min": 0, "approval": "second_reviewer" },
+    { "key": "guestLookupAttemptsPerHour", "type": "int", "default": 10, "desc": "Lookups per IP and per email", "min": 1 },
+    { "key": "overviewSourceTimeoutMs", "type": "duration", "default": 300, "desc": "Per-module budget for the account overview aggregate", "unit": "milliseconds", "min": 50 }
   ],
   "integrations": [
     { "name": "Address validation provider (optional)", "purpose": "Normalise US addresses and detect PO boxes; format rules only when not configured" }

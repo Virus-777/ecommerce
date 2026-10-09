@@ -148,6 +148,11 @@ for (const m of modules) {
   for (const p of m.permissions ?? []) allPermissions.set(p.key, m.name);
   for (const e of m.events?.publishes ?? []) allPublished.set(e.name, m.name);
 }
+const SETTING_FIELDS = new Set(['key', 'default', 'desc', 'type', 'min', 'max', 'choices', 'unit', 'approval', 'sellerVisible', 'minLeadDays', 'editable']);
+const SETTING_TYPES = ['int', 'number', 'bool', 'string', 'money', 'duration', 'time', 'enum', 'json'];
+const SETTING_APPROVALS = ['none', 'second_reviewer', 'business_owner'];
+/** A request body of raw bytes (any content type) instead of JSON */
+const BINARY_BODY = 'binary';
 const fullPath = (m, ep) => common.areas[ep.area].prefix.replace('{module}', m.name) + ep.path;
 const seenRoutes = new Map();
 for (const [name, c] of Object.entries(common.constants ?? {})) {
@@ -174,6 +179,28 @@ for (const m of modules) {
     if (!a.key?.startsWith(`${m.name}.`)) err(W, `approval action "${a.key}" must start with "${m.name}."`);
     if (!['money', 'units', 'percent', 'none'].includes(a.limit)) err(W, `approval action "${a.key}" limit must be money, units, percent or none`);
     if (!['always', 'above-limit', 'never'].includes(a.secondReviewer)) err(W, `approval action "${a.key}" secondReviewer must be always, above-limit or never`);
+  }
+  for (const s of m.settings ?? []) {
+    const S = `${W} setting ${s.key}`;
+    if (!/^[a-z][A-Za-z0-9]*$/.test(s.key ?? '')) err(S, 'key must be camelCase');
+    if (s.default === undefined) err(S, 'missing "default"');
+    if (!s.desc) err(S, 'missing "desc"');
+    for (const k of Object.keys(s)) if (!SETTING_FIELDS.has(k)) err(S, `unknown field "${k}"`);
+    if (s.type !== undefined && !SETTING_TYPES.includes(s.type)) err(S, `type must be one of ${SETTING_TYPES.join(', ')}`);
+    if (s.approval !== undefined && !SETTING_APPROVALS.includes(s.approval)) err(S, `approval must be one of ${SETTING_APPROVALS.join(', ')}`);
+    for (const k of ['min', 'max']) if (s[k] !== undefined && typeof s[k] !== 'number') err(S, `${k} must be a number`);
+    if (s.min !== undefined && s.max !== undefined && s.min > s.max) err(S, 'min is above max');
+    if (s.minLeadDays !== undefined && !(Number.isInteger(s.minLeadDays) && s.minLeadDays >= 0)) err(S, 'minLeadDays must be a whole number of days');
+    for (const k of ['sellerVisible', 'editable']) if (s[k] !== undefined && typeof s[k] !== 'boolean') err(S, `${k} must be true or false`);
+    if (s.unit !== undefined && typeof s.unit !== 'string') err(S, 'unit must be a string');
+    if (s.choices !== undefined && !(Array.isArray(s.choices) && s.choices.length && s.choices.every((c) => typeof c === 'string'))) err(S, 'choices must be a list of strings');
+    if (s.type === 'enum' && !s.choices) err(S, 'type enum needs choices');
+    if (s.choices && s.type !== 'enum') err(S, 'choices only go with type enum');
+    if (s.type === 'enum' && s.choices && s.default !== null && !s.choices.includes(s.default)) err(S, 'default is not one of the choices');
+    const isMoney = (v) => !!v && typeof v === 'object' && Number.isInteger(v.amount) && typeof v.currency === 'string';
+    const fits = { int: (v) => Number.isInteger(v), number: (v) => typeof v === 'number', bool: (v) => typeof v === 'boolean', string: (v) => typeof v === 'string', duration: (v) => Number.isInteger(v), time: (v) => typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v), money: isMoney, enum: () => true, json: () => true }[s.type];
+    if (fits && s.default !== null && !fits(s.default)) err(S, `default does not match type ${s.type}`);
+    if (typeof s.default === 'number' && ((s.min !== undefined && s.default < s.min) || (s.max !== undefined && s.default > s.max))) err(S, 'default is outside min/max');
   }
   const published = new Set((m.events?.publishes ?? []).map((e) => e.name));
   for (const e of m.events?.publishes ?? []) {
@@ -220,7 +247,10 @@ for (const m of modules) {
     for (const ev of ep.events ?? []) if (!published.has(ev)) err(E, `event "${ev}" is not in this module's events.publishes`);
     for (const s of ep.screens ?? []) if (SCREENS.size && !SCREENS.has(s)) err(E, `screen "${s}" is not a prototype screen id`);
     for (const k of ['params', 'query']) if (ep[k]) objectSchema(ep[k], m, `${E} ${k}`);
-    if (ep.body !== undefined) typeToSchema(ep.body, m, `${E} body`);
+    if (ep.body === BINARY_BODY) {
+      if (!['PUT', 'POST'].includes(ep.method)) err(E, 'a binary body needs PUT or POST');
+      if (ep.idempotent) err(E, 'a binary body cannot be idempotent (the request hash covers JSON bodies)');
+    } else if (ep.body !== undefined) typeToSchema(ep.body, m, `${E} body`);
     if (ep.response !== undefined && ep.response !== null) typeToSchema(ep.response, m, `${E} response`);
     const key = `${ep.method} ${fullPath(m, ep).replace(/\{\w+\}/g, '{}')}`;
     if (seenRoutes.has(key)) err(E, `route ${key} is also defined by ${seenRoutes.get(key)}`);
@@ -288,7 +318,9 @@ for (const m of modules) {
       description: [ep.desc, ep.permission && `**Permission:** \`${ep.permission}\``, ep.permissionWhen?.length && `**Also needs:** ${ep.permissionWhen.map((r) => `\`${r.permission}\` when ${Object.entries(r.if).map(([k, v]) => `${k} ${String(v).startsWith('!') ? `is not the caller's own (${v.slice(1)})` : `= ${v}`}`).join(' and ')}`).join('; ')}`, ep.stepUp && `**Step-up:** ${ep.stepUp.kind === 'reauth' ? 'single-use re-auth token in the body' : '2-step code in X-Step-Up-Code'} (purpose \`${ep.stepUp.purpose}\`)`, ep.sellerContext === 'optional' && '**Seller context:** optional (works before a seller is chosen).', ep.approval && `**Approval:** ${ep.approval}`, ep.idempotent && '**Idempotent:** send an Idempotency-Key.', ep.audited && '**Audited:** recorded in the action history.', ep.events?.length && `**Publishes:** ${ep.events.map((e) => `\`${e}\``).join(', ')}`, ep.screens?.length && `**Screens:** ${ep.screens.join(', ')}`, (ep.phase ?? m.phase) > 1 && `**Launch phase:** ${ep.phase ?? m.phase}`].filter(Boolean).join('\n\n') || undefined,
       security: securityFor(ep.auth),
       parameters: parameters.length ? parameters : undefined,
-      requestBody: ep.body !== undefined ? { required: true, content: { 'application/json': { schema: typeToSchema(ep.body, m, '').schema } } } : undefined,
+      requestBody: ep.body === BINARY_BODY
+        ? { required: true, description: 'The raw bytes (any content type)', content: { 'application/octet-stream': { schema: { type: 'string', format: 'binary' } } } }
+        : ep.body !== undefined ? { required: true, content: { 'application/json': { schema: typeToSchema(ep.body, m, '').schema } } } : undefined,
       responses,
       'x-module': m.name, 'x-area': ep.area, 'x-auth': ep.auth, 'x-permission': ep.permission, 'x-screens': ep.screens, 'x-events': ep.events,
       'x-idempotent': ep.idempotent || undefined, 'x-audited': ep.audited || undefined, 'x-phase': ep.phase ?? m.phase,
@@ -310,7 +342,7 @@ const openapi = {
     schemas,
     securitySchemes: {
       bearer: { type: 'http', scheme: 'bearer', description: common.headers.Authorization },
-      refreshCookie: { type: 'apiKey', in: 'cookie', name: '__Host-mk_refresh', description: 'Website refresh token (HttpOnly). Android sends refreshToken in the body instead.' },
+      refreshCookie: { type: 'apiKey', in: 'cookie', name: '__Secure-mk_refresh', description: 'Website refresh token (HttpOnly; Secure; SameSite=Strict; Path=/api/public/identity/sessions, sent only to refresh and sign-out). Android sends refreshToken in the body instead.' },
       appProof: { type: 'apiKey', in: 'header', name: 'X-App-Proof', description: common.headers['X-App-Proof'] },
       webhookSignature: { type: 'apiKey', in: 'header', name: 'X-Signature', description: 'Provider signature, verified per provider' },
     },
@@ -321,7 +353,7 @@ writeFileSync(join(apiDir, 'openapi.json'), JSON.stringify(clean(openapi), null,
 
 /* ------------------------------------------------------------------ Markdown */
 const fmtType = (t) => (typeof t === 'string' ? `\`${t}\`` : isDescriptor(t) ?`\`${t.type}\`${t.desc ? ` ${t.desc}` : ''}` : `\`${JSON.stringify(t)}\``);
-const fmtShape = (t) => (t === undefined ? '' : t === null ? '204 No content' : typeof t === 'string' ? `\`${t}\`` : `\`{ ${Object.entries(t).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : v.type ?? 'object'}`).join(', ')} }\``);
+const fmtShape = (t) => (t === undefined ? '' : t === null ? '204 No content' : t === BINARY_BODY ? 'raw bytes' : typeof t === 'string' ? `\`${t}\`` : `\`{ ${Object.entries(t).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : v.type ?? 'object'}`).join(', ')} }\``);
 mkdirSync(join(apiDir, 'modules'), { recursive: true });
 const consumersOf = (event) => modules.filter((x) => x.events?.consumes?.some((c) => c.name === event)).map((x) => x.name);
 
@@ -373,7 +405,16 @@ for (const m of modules) {
   if (m.approvalActions?.length) lines.push('', '## Approval actions', '', 'Checked through the access module (limits per role, second reviewer).', '', '| Action | Limit | Second reviewer | Approvers | Meaning |', '|---|---|---|---|---|', ...m.approvalActions.map((a) => `| \`${a.key}\` | ${a.limit} | ${a.secondReviewer} | ${a.approvers ?? ''} | ${a.desc} |`));
   if (m.errorCodes && Object.keys(m.errorCodes).length) lines.push('', '## Error codes', '', '| Code | Status | Meaning |', '|---|---|---|', ...Object.entries(m.errorCodes).map(([c, d]) => `| \`${c}\` | ${d.status} | ${d.meaning} |`));
   if (m.jobs?.length) lines.push('', '## Background jobs', '', '| Job | Schedule | Does |', '|---|---|---|', ...m.jobs.map((j) => `| \`${j.name}\` | ${j.schedule} | ${j.does} |`));
-  if (m.settings?.length) lines.push('', '## Settings', '', '| Key | Default | Meaning |', '|---|---|---|', ...m.settings.map((s) => `| ${s.key} | \`${JSON.stringify(s.default)}\` | ${s.desc} |`));
+  const settingRules = (s) => [
+    s.type && `${s.type}${s.type === 'enum' ? ` (${s.choices.join(' \\| ')})` : ''}`,
+    s.unit,
+    (s.min !== undefined || s.max !== undefined) && `${s.min ?? '…'}–${s.max ?? '…'}`,
+    s.approval && s.approval !== 'none' && `approval: ${s.approval.replace('_', ' ')}`,
+    s.sellerVisible && 'seller-visible',
+    s.minLeadDays && `${s.minLeadDays} d notice`,
+    s.editable === false && 'read-only',
+  ].filter(Boolean).join(', ');
+  if (m.settings?.length) lines.push('', '## Settings', '', '| Key | Default | Rules | Meaning |', '|---|---|---|---|', ...m.settings.map((s) => `| ${s.key} | \`${JSON.stringify(s.default)}\` | ${settingRules(s)} | ${s.desc} |`));
   if (m.integrations?.length) lines.push('', '## Integrations', ...m.integrations.map((i) => `- **${i.name}**: ${i.purpose}`));
   if (m.notes?.length) lines.push('', '## Notes', ...m.notes.map((n) => `- ${n}`));
   const gqlFile = join(apiDir, 'graphql', 'modules', `${m.name}.graphql`);

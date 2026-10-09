@@ -630,6 +630,30 @@ export const ReportsExportReadyEvent: z.ZodType<ReportsExportReadyEvent> = z.obj
   expiresAt: z.iso.datetime({ offset: true }),
 });
 
+/** reports.scheduled_report.ready: Phase 2: a scheduled report file is ready (notifications emails the schedule's recipients) */
+export interface ReportsScheduledReportReadyEvent {
+  scheduleId: string;
+  reportKey: string;
+  reportTitle: string;
+  exportId: string;
+  format: "pdf" | "csv";
+  /** e.g. Week of Oct 5, 2026 */
+  periodLabel: string;
+  recipients: string[];
+  expiresAt: string;
+}
+
+export const ReportsScheduledReportReadyEvent: z.ZodType<ReportsScheduledReportReadyEvent> = z.object({
+  scheduleId: z.uuid(),
+  reportKey: z.string(),
+  reportTitle: z.string(),
+  exportId: z.uuid(),
+  format: z.enum(["pdf", "csv"]),
+  periodLabel: z.string().describe("e.g. Week of Oct 5, 2026"),
+  recipients: z.array(z.email()),
+  expiresAt: z.iso.datetime({ offset: true }),
+});
+
 /* ------------------------------------------------------------------ public API (in-process) */
 
 /** What other modules may call in-process: `ctx.use('reports')` (or `ctx.tryUse` for an optional dependency). */
@@ -1656,6 +1680,7 @@ export const spec = defineModuleSpec({
       "reports.metric.published": { when: "A metric definition version is published", payload: () => ReportsMetricPublishedEvent },
       "reports.export.requested": { when: "An export job is created (audit and abuse monitoring)", payload: () => ReportsExportRequestedEvent },
       "reports.export.ready": { when: "An export file is ready (notifications tells the requester)", payload: () => ReportsExportReadyEvent },
+      "reports.scheduled_report.ready": { when: "Phase 2: a scheduled report file is ready (notifications emails the schedule's recipients)", payload: () => ReportsScheduledReportReadyEvent },
     },
     consumes: {
       "orders.order.placed": "fact_order_items rows with placement date; fact_customers",
@@ -1701,7 +1726,7 @@ export const spec = defineModuleSpec({
     },
     "reports.run-schedules": {
       "schedule": "every 15 min",
-      "does": "Phase 2: send scheduled report emails"
+      "does": "Phase 2: run due schedules into export files and publish reports.scheduled_report.ready (notifications sends the emails)"
     },
     "reports.check-lag": {
       "schedule": "every 5 min",
@@ -1711,31 +1736,52 @@ export const spec = defineModuleSpec({
   settings: {
     "reportingCurrency": {
       "default": "USD",
-      "desc": "One currency at launch"
+      "desc": "One currency at launch",
+      "type": "string",
+      "editable": false
     },
     "reportingTimeZone": {
       "default": "America/Los_Angeles",
-      "desc": "Market time zone; days run 00:00–23:59"
+      "desc": "Market time zone; days run 00:00–23:59",
+      "type": "string",
+      "editable": false
     },
     "defaultDateBasis": {
       "default": "placement",
-      "desc": "Default basis for sales reports"
+      "desc": "Default basis for sales reports",
+      "type": "enum",
+      "choices": [
+        "placement",
+        "payment",
+        "shipment",
+        "completion"
+      ]
     },
     "taxIncluded": {
       "default": false,
-      "desc": "Sales figures exclude tax"
+      "desc": "Sales figures exclude tax",
+      "type": "bool",
+      "approval": "second_reviewer"
     },
     "maxRangeDays": {
       "default": 400,
-      "desc": "Longest range one query may cover"
+      "desc": "Longest range one query may cover",
+      "type": "duration",
+      "min": 1,
+      "unit": "days"
     },
     "exportLinkHours": {
       "default": 24,
-      "desc": "Download link lifetime"
+      "desc": "Download link lifetime",
+      "type": "duration",
+      "min": 1,
+      "unit": "hours"
     },
     "maxExportRows": {
       "default": 500000,
-      "desc": "Above this the export is refused; narrow the filters"
+      "desc": "Above this the export is refused; narrow the filters",
+      "type": "int",
+      "min": 1
     },
     "exportDatasets": {
       "default": [
@@ -1982,11 +2028,16 @@ export const spec = defineModuleSpec({
           "phase": 1
         }
       ],
-      "desc": "Export dataset registry (seed of export_datasets). Adding a dataset needs a new ExportDatasetKey value and an exportRows provider in the owner module."
+      "desc": "Export dataset registry (seed of export_datasets). Adding a dataset needs a new ExportDatasetKey value and an exportRows provider in the owner module.",
+      "type": "json",
+      "editable": false
     },
     "readModelMaxLagMinutes": {
       "default": 15,
-      "desc": "Lag before a read model shows as stale"
+      "desc": "Lag before a read model shows as stale",
+      "type": "duration",
+      "min": 1,
+      "unit": "minutes"
     },
     "launchMetrics": {
       "default": [
@@ -2001,7 +2052,9 @@ export const spec = defineModuleSpec({
         "service.case_backlog",
         "discovery.unavailable_searches"
       ],
-      "desc": "The small launch set; others become available once they have an owner and a reliable meaning"
+      "desc": "The small launch set; others become available once they have an owner and a reliable meaning",
+      "type": "json",
+      "approval": "second_reviewer"
     }
   },
   errorCodes: {
@@ -2894,6 +2947,7 @@ declare module '../kernel/events/event-map.js' {
     "reports.metric.published": ReportsMetricPublishedEvent;
     "reports.export.requested": ReportsExportRequestedEvent;
     "reports.export.ready": ReportsExportReadyEvent;
+    "reports.scheduled_report.ready": ReportsScheduledReportReadyEvent;
   }
 }
 

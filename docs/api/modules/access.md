@@ -528,12 +528,13 @@ stateDiagram-v2
   pending_acceptance --> active: accept
   pending_acceptance --> revoked: revoke
   pending_approval --> active: approve
+  pending_approval --> pending_acceptance: approve
   pending_approval --> revoked: reject
   active --> revoked: revoke
   active --> expired: expire
 ```
 
-Assignments to invited staff wait for identity.invitation.accepted. Assigning a role that carries sensitive permissions, or assigning any role to yourself, creates pending_approval with a second reviewer (action access.roles.sensitive-grant). Disabling the account (identity.account.disabled) revokes all assignments.
+Assignments to invited staff wait for identity.invitation.accepted. Assigning a role that carries sensitive permissions, or assigning any role to yourself, creates pending_approval with a second reviewer (action access.roles.sensitive-grant). approve is guarded: it leads to active when the person has already accepted their invitation (an existing staff account), otherwise to pending_acceptance until identity.invitation.accepted. Disabling the account (identity.account.disabled) revokes all assignments.
 
 ### Away period (`AwayPeriod.status`)
 
@@ -778,7 +779,7 @@ Indexes: `pk (away_period_id, role_id)`, `(covered_by_account_id)`
 
 | Consumes | From | Does |
 |---|---|---|
-| `identity.invitation.accepted` | identity | Activate pending_acceptance role assignments of a newly accepted staff member |
+| `identity.invitation.accepted` | identity | Activate pending_acceptance role assignments of a newly accepted staff member (including sensitive grants already approved); assignments still pending_approval wait for their approval and then become active |
 | `identity.account.disabled` | identity | Revoke all role assignments, remove the person as lead/backup, drop them from eligible approvers of open requests, and publish access.coverage.changed with the gap |
 | `identity.account.locked` | identity | Treat a locked staff member as unavailable for routing (backup receives) until unlocked |
 | `identity.account.unlocked` | identity | Restore routing to the unlocked staff member |
@@ -857,14 +858,14 @@ Checked through the access module (limits per role, second reviewer).
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| approvalRequestTtlHours | `72` | Open requests without a due date expire after this |
-| reminderHoursBeforeDue | `4` | Remind reviewers this long before dueAt |
-| reminderAfterHours | `24` | Remind reviewers of undated requests waiting this long |
-| reminderMinIntervalMinutes | `60` | Manual reminders per request |
-| stepUpAbove | `{"amount":1000000,"currency":"USD"}` | Money approvals above this need a fresh 2-step code |
-| sensitivePermissionPrefixes | `["access.","identity.staff-accounts.","finance.","audit.entries.export","settings.changes."]` | Granting these needs a second reviewer |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| approvalRequestTtlHours | `72` | duration, hours, 1–…, approval: second reviewer | Open requests without a due date expire after this |
+| reminderHoursBeforeDue | `4` | duration, hours, 0–… | Remind reviewers this long before dueAt |
+| reminderAfterHours | `24` | duration, hours, 1–… | Remind reviewers of undated requests waiting this long |
+| reminderMinIntervalMinutes | `60` | duration, minutes, 1–… | Manual reminders per request |
+| stepUpAbove | `{"amount":1000000,"currency":"USD"}` | money, 0–…, approval: business owner | Money approvals above this need a fresh 2-step code |
+| sensitivePermissionPrefixes | `["access.","identity.staff-accounts.","finance.","audit.entries.export","settings.changes."]` | json, approval: business owner | Granting these needs a second reviewer |
 
 ## Notes
 - Granting access is not financial authority. Permissions decide which screens and actions a person can open; approval limits decide how much they may approve. A permission such as finance.payouts.approve is necessary but never sufficient: check() also needs a limit covering the amount. Platform Administrators (access.roles.manage) can grant permissions but cannot set or approve limits, and cannot approve their own requests.

@@ -268,9 +268,9 @@
     { "name": "settings.refresh-impact", "schedule": "daily", "does": "Recompute the impact preview of scheduled changes so counts on the page stay current" }
   ],
   "settings": [
-    { "key": "appConfigCacheSeconds", "default": 300, "desc": "Cache lifetime of GET /app-config" },
-    { "key": "defaultMinLeadDays", "default": 0, "desc": "Minimum notice for definitions that do not set one" },
-    { "key": "sellerVisibleMinLeadDays", "default": 14, "desc": "Minimum notice for changes announced to sellers" }
+    { "key": "appConfigCacheSeconds", "type": "duration", "default": 300, "desc": "Cache lifetime of GET /app-config", "unit": "seconds", "min": 0 },
+    { "key": "defaultMinLeadDays", "type": "duration", "default": 0, "desc": "Minimum notice for definitions that do not set one", "unit": "days", "min": 0, "approval": "business_owner" },
+    { "key": "sellerVisibleMinLeadDays", "type": "duration", "default": 14, "desc": "Minimum notice for changes announced to sellers", "unit": "days", "min": 0, "approval": "business_owner" }
   ],
   "errorCodes": {
     "UNKNOWN_SETTING": { "status": 400, "meaning": "No enabled module declares details.key." },

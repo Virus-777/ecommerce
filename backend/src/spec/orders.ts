@@ -1534,6 +1534,20 @@ export const OrderItemInfo: z.ZodType<OrderItemInfo> = z.object({
   returnWindowEndsAt: z.iso.datetime({ offset: true }).nullish(),
 }).register(common.apiTypes, { id: "orders.OrderItemInfo" });
 
+export interface AcceptedItem {
+  orderItemId: string;
+  offerId: string;
+  stockItemId: string;
+  quantity: number;
+}
+
+export const AcceptedItem: z.ZodType<AcceptedItem> = z.object({
+  orderItemId: z.uuid(),
+  offerId: z.uuid(),
+  stockItemId: z.uuid(),
+  quantity: z.number().int(),
+}).register(common.apiTypes, { id: "orders.AcceptedItem" });
+
 export interface PlacedGroup {
   groupId: string;
   ownerType: "official" | "seller";
@@ -1754,6 +1768,8 @@ export interface OrdersOrderAcceptedEvent {
   contactEmail: string;
   total: common.Money;
   groups: PlacedGroup[];
+  /** Every item line with its stock item, so inventory maps reservation lines to order items without checkout's attachOrder */
+  items: AcceptedItem[];
   /** Checkout's stock hold, so inventory can allocate from it before checkout attaches the order */
   reservationId?: string | null;
   acceptedAt: string;
@@ -1769,6 +1785,9 @@ export const OrdersOrderAcceptedEvent: z.ZodType<OrdersOrderAcceptedEvent> = z.o
   },
   get groups() {
     return z.array(PlacedGroup);
+  },
+  get items() {
+    return z.array(AcceptedItem);
   },
   reservationId: z.uuid().describe("Checkout's stock hold, so inventory can allocate from it before checkout attaches the order").nullish(),
   acceptedAt: z.iso.datetime({ offset: true }),
@@ -1909,6 +1928,10 @@ export interface OrdersItemDeliveredEvent {
   quantity: number;
   deliveredAt: string;
   returnWindowEndsAt: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
 }
 
 export const OrdersItemDeliveredEvent: z.ZodType<OrdersItemDeliveredEvent> = z.object({
@@ -1920,6 +1943,8 @@ export const OrdersItemDeliveredEvent: z.ZodType<OrdersItemDeliveredEvent> = z.o
   quantity: z.number().int(),
   deliveredAt: z.iso.datetime({ offset: true }),
   returnWindowEndsAt: z.iso.datetime({ offset: true }),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
 });
 
 /** orders.cancellation.requested: A customer asks to cancel items that need the seller's confirmation */
@@ -3354,23 +3379,40 @@ export const spec = defineModuleSpec({
   settings: {
     "orderRefPrefix": {
       "default": "MK",
-      "desc": "Prefix of MK-YYMMDD-NNNNN (date in market time zone)"
+      "desc": "Prefix of MK-YYMMDD-NNNNN (date in market time zone)",
+      "type": "string",
+      "sellerVisible": false,
+      "editable": false
     },
     "sellerCancellationResponse": {
       "default": "next_business_day_17:00",
-      "desc": "When a seller must answer a customer cancellation request before it is auto-accepted"
+      "desc": "When a seller must answer a customer cancellation request before it is auto-accepted",
+      "type": "string",
+      "approval": "second_reviewer",
+      "sellerVisible": true
     },
     "officialCancelUntil": {
       "default": "picking_started",
-      "desc": "Official Store items are cancelled instantly until warehouse picking starts"
+      "desc": "Official Store items are cancelled instantly until warehouse picking starts",
+      "type": "string",
+      "sellerVisible": false
     },
     "dueSoonMinutes": {
       "default": 120,
-      "desc": "Flag 'Due soon' this long before a dispatch deadline"
+      "desc": "Flag 'Due soon' this long before a dispatch deadline",
+      "type": "duration",
+      "min": 0,
+      "unit": "minutes",
+      "sellerVisible": true
     },
     "sellerAddressVisibleDays": {
       "default": 30,
-      "desc": "Days after delivery the seller still sees the full ship-to address"
+      "desc": "Days after delivery the seller still sees the full ship-to address",
+      "type": "duration",
+      "min": 0,
+      "unit": "days",
+      "approval": "second_reviewer",
+      "sellerVisible": true
     }
   },
   errorCodes: {

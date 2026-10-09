@@ -1324,27 +1324,40 @@ export const spec = defineModuleSpec({
   settings: {
     "guestCartRetentionDays": {
       "default": 30,
-      "desc": "Idle days before a guest cart expires ('Items stay in your cart for 30 days')"
+      "desc": "Idle days before a guest cart expires ('Items stay in your cart for 30 days')",
+      "type": "duration",
+      "min": 1,
+      "unit": "days"
     },
     "customerCartRetentionDays": {
       "default": 90,
-      "desc": "Idle days before a customer cart expires"
+      "desc": "Idle days before a customer cart expires",
+      "type": "duration",
+      "min": 1,
+      "unit": "days"
     },
     "maxLines": {
       "default": 50,
-      "desc": "Distinct lines per cart (CART_FULL above)"
+      "desc": "Distinct lines per cart (CART_FULL above)",
+      "type": "int",
+      "min": 1
     },
     "maxQuantityPerLine": {
       "default": 10,
-      "desc": "Upper bound when an offer has no purchase limit"
+      "desc": "Upper bound when an offer has no purchase limit",
+      "type": "int",
+      "min": 1
     },
     "showPriceDecreaseNotices": {
       "default": true,
-      "desc": "Show an info notice when a price drops (accepted automatically)"
+      "desc": "Show an info notice when a price drops (accepted automatically)",
+      "type": "bool"
     },
     "couponPreviewRateLimitPerHour": {
       "default": 30,
-      "desc": "Coupon attempts per owner per hour"
+      "desc": "Coupon attempts per owner per hour",
+      "type": "int",
+      "min": 1
     }
   },
   errorCodes: {

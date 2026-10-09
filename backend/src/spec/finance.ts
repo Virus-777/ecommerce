@@ -241,7 +241,7 @@ export const SellerBalances: z.ZodType<SellerBalances> = z.object({
 export interface LedgerEntry {
   id: string;
   at: string;
-  type: "sale" | "shipping_charge" | "seller_discount" | "marketplace_fee" | "fee_refund" | "refund" | "refund_after_payout" | "hold" | "hold_release" | "adjustment" | "ad_charge" | "service_fee" | "charge_credit" | "label_charge" | "chargeback" | "payout" | "payout_returned" | "owed_offset" | "cancellation";
+  type: "sale" | "shipping_charge" | "seller_discount" | "marketplace_fee" | "fee_refund" | "refund" | "refund_after_payout" | "hold" | "hold_release" | "adjustment" | "ad_charge" | "service_fee" | "charge_credit" | "seller_credit" | "label_charge" | "chargeback" | "payout" | "payout_returned" | "owed_offset" | "cancellation";
   typeLabel: string;
   reference: Reference;
   /** e.g. 10% of $184.00 item price (shipping excluded) */
@@ -259,7 +259,7 @@ export interface LedgerEntry {
 export const LedgerEntry: z.ZodType<LedgerEntry> = z.object({
   id: z.uuid(),
   at: z.iso.datetime({ offset: true }),
-  type: z.enum(["sale", "shipping_charge", "seller_discount", "marketplace_fee", "fee_refund", "refund", "refund_after_payout", "hold", "hold_release", "adjustment", "ad_charge", "service_fee", "charge_credit", "label_charge", "chargeback", "payout", "payout_returned", "owed_offset", "cancellation"]),
+  type: z.enum(["sale", "shipping_charge", "seller_discount", "marketplace_fee", "fee_refund", "refund", "refund_after_payout", "hold", "hold_release", "adjustment", "ad_charge", "service_fee", "charge_credit", "seller_credit", "label_charge", "chargeback", "payout", "payout_returned", "owed_offset", "cancellation"]),
   typeLabel: z.string(),
   get reference() {
     return Reference;
@@ -278,6 +278,44 @@ export const LedgerEntry: z.ZodType<LedgerEntry> = z.object({
   },
   statementRef: z.string().describe("ST-… reference of the statement the entry is on").nullish(),
 }).register(common.apiTypes, { id: "finance.LedgerEntry" });
+
+export interface SellerCredit {
+  id: string;
+  sellerId: string;
+  amount: common.Money;
+  reason: string;
+  /** What the credit is for, e.g. the fulfillment-service lost-unit claim */
+  reference: Reference;
+  status: "posted" | "pending_approval" | "rejected";
+  /** The seller_credit entry once posted */
+  ledgerEntry?: LedgerEntry | null;
+  approvalRequestId?: string | null;
+  requestedBy: common.Actor;
+  createdAt: string;
+  decidedAt?: string | null;
+}
+
+export const SellerCredit: z.ZodType<SellerCredit> = z.object({
+  id: z.uuid(),
+  sellerId: z.uuid(),
+  get amount() {
+    return common.Money;
+  },
+  reason: z.string(),
+  get reference() {
+    return Reference;
+  },
+  status: z.enum(["posted", "pending_approval", "rejected"]),
+  get ledgerEntry() {
+    return LedgerEntry.nullish();
+  },
+  approvalRequestId: z.uuid().nullish(),
+  get requestedBy() {
+    return common.Actor;
+  },
+  createdAt: z.iso.datetime({ offset: true }),
+  decidedAt: z.iso.datetime({ offset: true }).nullish(),
+}).register(common.apiTypes, { id: "finance.SellerCredit" });
 
 export interface EarningsLot {
   id: string;
@@ -1850,6 +1888,31 @@ export const FinanceAdjustmentRecordedEvent: z.ZodType<FinanceAdjustmentRecorded
   reasonCode: z.string(),
 });
 
+/** finance.seller_credit.decided: A seller credit that waited for approval is posted or rejected */
+export interface FinanceSellerCreditDecidedEvent {
+  creditId: string;
+  sellerId: string;
+  reference: Reference;
+  idempotencyKey: string;
+  amount: common.Money;
+  outcome: "posted" | "rejected";
+  ledgerEntryId?: string | null;
+}
+
+export const FinanceSellerCreditDecidedEvent: z.ZodType<FinanceSellerCreditDecidedEvent> = z.object({
+  creditId: z.uuid(),
+  sellerId: z.uuid(),
+  get reference() {
+    return Reference;
+  },
+  idempotencyKey: z.string(),
+  get amount() {
+    return common.Money;
+  },
+  outcome: z.enum(["posted", "rejected"]),
+  ledgerEntryId: z.uuid().nullish(),
+});
+
 /** finance.payout_run.approved: A run has all required approvals */
 export interface FinancePayoutRunApprovedEvent {
   runId: string;
@@ -1960,6 +2023,21 @@ export const FinanceReconciliationMismatchFoundEvent: z.ZodType<FinanceReconcili
   },
 });
 
+/** finance.reconciliation.item_closed: A reconciliation item is matched (automatically or by a later event), explained or corrected */
+export interface FinanceReconciliationItemClosedEvent {
+  itemId: string;
+  check: string;
+  date: string;
+  outcome: "matched" | "explained" | "corrected";
+}
+
+export const FinanceReconciliationItemClosedEvent: z.ZodType<FinanceReconciliationItemClosedEvent> = z.object({
+  itemId: z.uuid(),
+  check: z.string(),
+  date: z.iso.date(),
+  outcome: z.enum(["matched", "explained", "corrected"]),
+});
+
 /* ------------------------------------------------------------------ public API (in-process) */
 
 /** What other modules may call in-process: `ctx.use('finance')` (or `ctx.tryUse` for an optional dependency). */
@@ -1976,6 +2054,8 @@ export interface FinancePublicApi {
   recordServiceFee(input: { sellerId: string, amount: common.Money, kind: string, reference: Reference, description: string, idempotencyKey: string }): Promise<LedgerEntry>;
   /** Credits back all or part of an ad charge or service fee (originalEntryId = the LedgerEntry returned by recordAdCharge or recordServiceFee) as charge_credit; never more than the original minus earlier credits. Same idempotencyKey returns the first entry. Used by: advertising, fulfillment-service. */
   creditSellerCharge(input: { sellerId: string, amount: common.Money, originalEntryId: string, reason: string, idempotencyKey: string }): Promise<LedgerEntry>;
+  /** Credits a seller without an original charge (fulfillment-service reimbursements for lost or damaged units, goodwill to a seller) as ledger type seller_credit. Up to creditSecondReviewerThreshold it is posted at once (status posted, ledgerEntry set). Above it the credit waits as pending_approval with an approval request (finance.credits.issue) and is posted or rejected on access.approval.decided, publishing finance.seller_credit.decided. Same idempotencyKey returns the first credit. Used by: fulfillment-service. */
+  creditSeller(input: { sellerId: string, amount: common.Money, reason: string, reference: Reference, idempotencyKey: string }): Promise<SellerCredit>;
   /** Company trading costs for the Official Store margin Used by: purchasing, inventory, shipping, warehouse. */
   recordCompanyCost(input: { kind: 'buying_cost' | 'shipping_expense' | 'return_loss' | 'write_off' | 'supplier_credit', amount: common.Money, reference: Reference, at: string }): Promise<void>;
   /** Whether a seller can be paid (verified destination, no full hold) Used by: sellers. */
@@ -2134,6 +2214,24 @@ export interface FinanceDb {
     approval_request_id: string | null;
     idempotency_key: string | null;
     created_at: Date;
+  };
+  /** Credits to sellers without an original charge (creditSeller); pending ones wait for finance.credits.issue */
+  seller_credits: {
+    id: string;
+    seller_id: string;
+    amount: number;
+    currency: string;
+    reason: string;
+    ref_kind: string;
+    ref_id: string;
+    ref_label: string | null;
+    status: 'posted' | 'pending_approval' | 'rejected';
+    idempotency_key: string;
+    requested_by: string;
+    approval_request_id: string | null;
+    ledger_entry_id: string | null;
+    created_at: Date;
+    decided_at: Date | null;
   };
   amounts_owed: {
     id: string;
@@ -3392,6 +3490,7 @@ export const endpoints = defineEndpoints({
     status: 200,
     errors: ["ILLEGAL_TRANSITION"],
     audited: true,
+    events: ["finance.reconciliation.item_closed"],
     screens: ["ops/finance-checks"],
     phase: 1,
   },
@@ -3414,7 +3513,7 @@ export const endpoints = defineEndpoints({
     idempotent: true,
     audited: true,
     approval: "Approval action finance.reconciliation.correct. Corrections above correctionSecondReviewerThreshold need a second Finance reviewer (access)",
-    events: ["finance.adjustment.recorded"],
+    events: ["finance.adjustment.recorded","finance.reconciliation.item_closed"],
     screens: ["ops/finance-checks","admin/finance"],
     phase: 1,
   },
@@ -3467,7 +3566,7 @@ export const spec = defineModuleSpec({
   summary: "Seller money and company money kept apart: the seller ledger (proceeds, pending, available, held, negative and amounts owed), fee rules, holds, adjustments, payout runs and payouts, statements, payout-destination verification, daily reconciliation checks, and company trading margins separate from marketplace fee income.",
   dependsOn: ["orders","payments","sellers","access"],
   optionalDeps: ["returns","advertising","promotions","purchasing","inventory","shipping","support","wallet","workqueues","notifications","audit","identity","media","reports","settings","offers"],
-  publicApi: ["previewRefundImpact","calculateFee","getSellerBalances","recordAdCharge","recordServiceFee","creditSellerCharge","recordCompanyCost","hasPayoutBlock","marketplaceIncomeByDay","getSellerAccount","getStatementForSeller","getStatement","getPayoutRun","listPayoutRuns","holdsForReference","previewOfferEarnings","getNextPayoutRun","previewRefundImpactForOrder","exportRows"],
+  publicApi: ["previewRefundImpact","calculateFee","getSellerBalances","recordAdCharge","recordServiceFee","creditSellerCharge","creditSeller","recordCompanyCost","hasPayoutBlock","marketplaceIncomeByDay","getSellerAccount","getStatementForSeller","getStatement","getPayoutRun","listPayoutRuns","holdsForReference","previewOfferEarnings","getNextPayoutRun","previewRefundImpactForOrder","exportRows"],
   permissions: [
     {
       "key": "finance.ledger.view",
@@ -3559,6 +3658,13 @@ export const spec = defineModuleSpec({
       "limit": "money",
       "secondReviewer": "above-limit",
       "approvers": "Finance staff up to adjustmentSecondReviewerThreshold (e.g. $500); a second Finance reviewer above it"
+    },
+    {
+      "key": "finance.credits.issue",
+      "desc": "Post a seller credit without an original charge (creditSeller, e.g. a fulfillment-service reimbursement) above creditSecondReviewerThreshold",
+      "limit": "money",
+      "secondReviewer": "above-limit",
+      "approvers": "A Finance reviewer above creditSecondReviewerThreshold (e.g. $500); Finance Manager above their limit (example values)"
     },
     {
       "key": "finance.writeoffs.approve",
@@ -3827,6 +3933,22 @@ export const spec = defineModuleSpec({
         ]
       ]
     },
+    "Seller credit": {
+      "field": "SellerCredit.status",
+      "initial": "pending_approval",
+      "transitions": [
+        [
+          "pending_approval",
+          "approve",
+          "posted"
+        ],
+        [
+          "pending_approval",
+          "reject",
+          "rejected"
+        ]
+      ]
+    },
     "Reconciliation item": {
       "field": "ReconItem.status",
       "initial": "open",
@@ -3901,6 +4023,7 @@ export const spec = defineModuleSpec({
       "finance.balance.negative": { when: "A seller's available balance drops below zero", payload: () => FinanceBalanceNegativeEvent },
       "finance.amount_owed.created": { when: "A negative balance is not covered within the agreed period", payload: () => FinanceAmountOwedCreatedEvent },
       "finance.adjustment.recorded": { when: "An adjustment or correction is posted", payload: () => FinanceAdjustmentRecordedEvent },
+      "finance.seller_credit.decided": { when: "A seller credit that waited for approval is posted or rejected", payload: () => FinanceSellerCreditDecidedEvent },
       "finance.payout_run.approved": { when: "A run has all required approvals", payload: () => FinancePayoutRunApprovedEvent },
       "finance.payout_run.released": { when: "A run's payouts are sent", payload: () => FinancePayoutRunReleasedEvent },
       "finance.statement.issued": { when: "A statement is issued at the payout cutoff", payload: () => FinanceStatementIssuedEvent },
@@ -3909,12 +4032,13 @@ export const spec = defineModuleSpec({
       "finance.fee_rules.proposed": { when: "A fee rule version is proposed", payload: () => FinanceFeeRulesProposedEvent },
       "finance.fee_rules.changed": { when: "A fee rule version becomes active", payload: () => FinanceFeeRulesChangedEvent },
       "finance.reconciliation.mismatch_found": { when: "The daily check finds a difference", payload: () => FinanceReconciliationMismatchFoundEvent },
+      "finance.reconciliation.item_closed": { when: "A reconciliation item is matched (automatically or by a later event), explained or corrected", payload: () => FinanceReconciliationItemClosedEvent },
     },
     consumes: {
       "orders.order.accepted": "Create pending earnings lots and fee charges per seller item (sale, shipping charged, seller-funded discount, fee); Official Store items go to trading_entries",
       "orders.item.cancelled": "Reverse the lot; apply the cancellation fee treatment",
       "orders.item.delivered": "Start the availability clock for the item's lot",
-      "payments.payment.captured": "Record collected money for reconciliation (payments vs orders)",
+      "payments.payment.captured": "Record collected money for reconciliation (payments vs orders): card amount plus creditAmount (store credit) per capture; the daily check compares card captures plus credit with the order total less cancelled items, so a mixed card and credit payment is not a mismatch",
       "returns.refund.approved": "Store the funding split (seller, platform, shared) for the refund",
       "payments.refund.sent": "Post the refund and proportional fee refund to the seller ledger (refund_after_payout when the lot was paid out) or to company trading",
       "payments.chargeback.opened": "Place a chargeback hold on the seller (fee kept while open per fee treatment)",
@@ -3930,7 +4054,7 @@ export const spec = defineModuleSpec({
       "sellers.seller.suspended": "Put the seller's pending payouts on hold with reason restriction (review date from the restriction)",
       "sellers.seller.closed": "Issue a final statement and schedule the last payout after open obligations",
       "sellers.payout_account.changed": "Open a destination review; keep paying the current verified destination",
-      "access.approval.decided": "Finish approval-required holds, adjustments, corrections, payout runs and fee rule changes",
+      "access.approval.decided": "Finish approval-required holds, adjustments, corrections, payout runs, fee rule changes and seller credits (finance.credits.issue: post or reject, publish finance.seller_credit.decided)",
       "support.case.decided": "Release or apply dispute holds linked to the case",
       "wallet.credit.granted": "Phase 3: record the store-credit liability (refund to credit, goodwill, gift cards). Only kind goodwill with chargedTo platform is booked as a platform cost; chargedTo seller is posted to the seller's earnings",
       "wallet.credit.used": "Phase 3: reduce the store-credit liability when credit pays for an order"
@@ -3955,7 +4079,7 @@ export const spec = defineModuleSpec({
     },
     "finance.reconcile.daily": {
       "schedule": "daily 06:00 PT",
-      "does": "Build the day check: payments vs orders, seller amounts vs statements, provider deposit, unexplained amounts, failed payouts; publish mismatches"
+      "does": "Build the day check: payments vs orders (card captures plus store credit used against the order total less cancelled items), seller amounts vs statements, provider deposit, unexplained amounts, failed payouts; publish mismatches, and finance.reconciliation.item_closed for items that now match"
     },
     "finance.holds.review-due": {
       "schedule": "daily 07:00 PT",
@@ -3973,67 +4097,139 @@ export const spec = defineModuleSpec({
   settings: {
     "payoutSchedule": {
       "default": "weekly:FRI",
-      "desc": "Payout cadence (example: weekly, Friday)"
+      "desc": "Payout cadence (example: weekly, Friday)",
+      "type": "string",
+      "approval": "business_owner",
+      "sellerVisible": true,
+      "minLeadDays": 30
     },
     "payoutReleaseTime": {
       "default": "10:00",
-      "desc": "Release time in market time zone"
+      "desc": "Release time in market time zone",
+      "type": "time",
+      "approval": "second_reviewer",
+      "sellerVisible": true
     },
     "availableAfterDeliveryDays": {
       "default": 7,
-      "desc": "Hold window after delivery before earnings become available (example)"
+      "desc": "Hold window after delivery before earnings become available (example)",
+      "type": "duration",
+      "min": 0,
+      "unit": "days",
+      "approval": "business_owner",
+      "sellerVisible": true,
+      "minLeadDays": 30
     },
     "minimumPayout": {
       "default": {
         "amount": 2500,
         "currency": "USD"
       },
-      "desc": "Smaller balances roll to the next run"
+      "desc": "Smaller balances roll to the next run",
+      "type": "money",
+      "min": 0,
+      "approval": "second_reviewer",
+      "sellerVisible": true
     },
     "newSellerHoldDays": {
       "default": 14,
-      "desc": "Extra hold during the first newSellerPeriodDays of selling"
+      "desc": "Extra hold during the first newSellerPeriodDays of selling",
+      "type": "duration",
+      "min": 0,
+      "unit": "days",
+      "approval": "second_reviewer",
+      "sellerVisible": true
     },
     "newSellerPeriodDays": {
       "default": 30,
-      "desc": "Length of the new-seller period"
+      "desc": "Length of the new-seller period",
+      "type": "duration",
+      "min": 0,
+      "unit": "days",
+      "approval": "second_reviewer",
+      "sellerVisible": true
     },
     "runSecondReviewerThreshold": {
       "default": {
         "amount": 5000000,
         "currency": "USD"
       },
-      "desc": "Runs above this need a second Finance reviewer ($50,000 example)"
+      "desc": "Runs above this need a second Finance reviewer ($50,000 example)",
+      "type": "money",
+      "min": 0,
+      "approval": "business_owner",
+      "sellerVisible": false
     },
     "adjustmentSecondReviewerThreshold": {
       "default": {
         "amount": 50000,
         "currency": "USD"
       },
-      "desc": "Adjustments above this need a second reviewer ($500 example)"
+      "desc": "Adjustments above this need a second reviewer ($500 example)",
+      "type": "money",
+      "min": 0,
+      "approval": "business_owner",
+      "sellerVisible": false
     },
     "correctionSecondReviewerThreshold": {
       "default": {
         "amount": 20000,
         "currency": "USD"
       },
-      "desc": "Reconciliation corrections above this need a second reviewer ($200 example)"
+      "desc": "Reconciliation corrections above this need a second reviewer ($200 example)",
+      "type": "money",
+      "min": 0,
+      "approval": "business_owner",
+      "sellerVisible": false
+    },
+    "creditSecondReviewerThreshold": {
+      "default": {
+        "amount": 50000,
+        "currency": "USD"
+      },
+      "desc": "Seller credits from other modules (creditSeller) above this wait for a Finance reviewer ($500 example)",
+      "type": "money",
+      "min": 0,
+      "approval": "business_owner",
+      "sellerVisible": false
     },
     "negativeBalanceOwedAfterDays": {
       "default": 30,
-      "desc": "Uncovered negative balance becomes an amount owed"
+      "desc": "Uncovered negative balance becomes an amount owed",
+      "type": "duration",
+      "min": 1,
+      "unit": "days",
+      "approval": "second_reviewer",
+      "sellerVisible": true
     },
     "destinationChangePauseHours": {
       "default": 72,
-      "desc": "Minimum wait before paying a newly verified destination"
+      "desc": "Minimum wait before paying a newly verified destination",
+      "type": "duration",
+      "min": 0,
+      "unit": "hours",
+      "approval": "business_owner",
+      "sellerVisible": true
     },
     "statementPeriod": {
       "default": "weekly",
-      "desc": "Statement period, aligned with the payout schedule"
+      "desc": "Statement period, aligned with the payout schedule",
+      "type": "enum",
+      "choices": [
+        "weekly",
+        "monthly"
+      ],
+      "approval": "second_reviewer",
+      "sellerVisible": true
     },
     "depositConfirmAttempts": {
       "default": 3,
-      "desc": "Tries to enter the two test-deposit amounts before new deposits are sent"
+      "desc": "Tries to enter the two test-deposit amounts before new deposits are sent",
+      "type": "int",
+      "min": 1,
+      "max": 10,
+      "approval": "second_reviewer",
+      "sellerVisible": false
     }
   },
   errorCodes: {
@@ -4507,6 +4703,68 @@ export const spec = defineModuleSpec({
       "created_at": {
         "type": "timestamptz",
         "nullable": false
+      }
+    },
+    "seller_credits": {
+      "id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "seller_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "amount": {
+        "type": "bigint",
+        "nullable": false
+      },
+      "currency": {
+        "type": "text",
+        "nullable": false
+      },
+      "reason": {
+        "type": "text",
+        "nullable": false
+      },
+      "ref_kind": {
+        "type": "text",
+        "nullable": false
+      },
+      "ref_id": {
+        "type": "text",
+        "nullable": false
+      },
+      "ref_label": {
+        "type": "text",
+        "nullable": true
+      },
+      "status": {
+        "type": "text",
+        "nullable": false
+      },
+      "idempotency_key": {
+        "type": "text",
+        "nullable": false
+      },
+      "requested_by": {
+        "type": "text",
+        "nullable": false
+      },
+      "approval_request_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "ledger_entry_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "created_at": {
+        "type": "timestamptz",
+        "nullable": false
+      },
+      "decided_at": {
+        "type": "timestamptz",
+        "nullable": true
       }
     },
     "amounts_owed": {
@@ -5056,6 +5314,9 @@ export const spec = defineModuleSpec({
     "adjustments": {
       "seller": "seller_id"
     },
+    "seller_credits": {
+      "seller": "seller_id"
+    },
     "amounts_owed": {
       "seller": "seller_id"
     },
@@ -5085,6 +5346,7 @@ declare module '../kernel/events/event-map.js' {
     "finance.balance.negative": FinanceBalanceNegativeEvent;
     "finance.amount_owed.created": FinanceAmountOwedCreatedEvent;
     "finance.adjustment.recorded": FinanceAdjustmentRecordedEvent;
+    "finance.seller_credit.decided": FinanceSellerCreditDecidedEvent;
     "finance.payout_run.approved": FinancePayoutRunApprovedEvent;
     "finance.payout_run.released": FinancePayoutRunReleasedEvent;
     "finance.statement.issued": FinanceStatementIssuedEvent;
@@ -5093,6 +5355,7 @@ declare module '../kernel/events/event-map.js' {
     "finance.fee_rules.proposed": FinanceFeeRulesProposedEvent;
     "finance.fee_rules.changed": FinanceFeeRulesChangedEvent;
     "finance.reconciliation.mismatch_found": FinanceReconciliationMismatchFoundEvent;
+    "finance.reconciliation.item_closed": FinanceReconciliationItemClosedEvent;
   }
 }
 

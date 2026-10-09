@@ -2225,14 +2225,14 @@
   ],
   "settings": [
     {
-      "key": "maxImagesPerProduct",
+      "key": "maxImagesPerProduct", "type": "int",
       "default": 12,
-      "desc": "Images per product"
+      "desc": "Images per product", "min": 1, "max": 30, "sellerVisible": true
     },
     {
-      "key": "minDescriptionLength",
+      "key": "minDescriptionLength", "type": "int",
       "default": 40,
-      "desc": "Characters required before submission"
+      "desc": "Characters required before submission", "min": 0, "unit": "characters", "sellerVisible": true
     }
   ],
   "notes": [

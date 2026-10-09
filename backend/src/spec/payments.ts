@@ -872,7 +872,10 @@ export interface PaymentsPaymentCapturedEvent {
   /** Order contact email, for guests */
   contactEmail?: string | null;
   groupId?: string | null;
+  /** Card amount captured */
   amount: common.Money;
+  /** Store credit applied to the captured order or group (its wallet hold share); null when no credit was used. Finance compares card plus credit with the order total */
+  creditAmount?: common.Money | null;
   allocations: Allocation[];
   providerRef?: string | null;
   capturedAt: string;
@@ -887,6 +890,9 @@ export const PaymentsPaymentCapturedEvent: z.ZodType<PaymentsPaymentCapturedEven
   groupId: z.uuid().nullish(),
   get amount() {
     return common.Money;
+  },
+  get creditAmount() {
+    return common.Money.nullish();
   },
   get allocations() {
     return z.array(Allocation);
@@ -2256,10 +2262,10 @@ export const spec = defineModuleSpec({
     },
     consumes: {
       "orders.order.placed": "Link the intent to the order and store seller-group allocations (fallback when linkOrder was not called)",
-      "orders.order.accepted": "Capture the authorization when captureMode is on_acceptance",
-      "shipping.shipment.dispatched": "Capture the group's allocation when captureMode is per_group_on_dispatch",
-      "orders.order.cancelled": "Void the authorization if nothing was captured",
-      "orders.item.cancelled": "Start a cancellation refund for the item's refund breakdown (origin cancellation, no Finance approval) or reduce the uncaptured authorization",
+      "orders.order.accepted": "Capture the authorization when captureMode is on_acceptance: the card is charged only the card share; the store-credit share is taken from the wallet hold and reported as creditAmount",
+      "shipping.shipment.dispatched": "Capture the group's allocation when captureMode is per_group_on_dispatch: the card is charged only the group's card share (allocation minus its store-credit share, reported as creditAmount)",
+      "orders.order.cancelled": "Void the authorization if nothing was captured, and return the uncaptured store-credit share to the wallet",
+      "orders.item.cancelled": "Start a cancellation refund for the item's refund breakdown (origin cancellation, no Finance approval) or reduce the uncaptured authorization. Before capture, the item's store-credit share goes back to the wallet (wallet.creditRefund, keyed by the item) and only its card share is taken off the authorization; an authorization whose remaining card amount drops to 0 is voided (payments.payment.voided) instead of being left to lapse",
       "access.approval.decided": "Complete or drop a dispute concession waiting for approval"
     },
   },
@@ -2278,7 +2284,7 @@ export const spec = defineModuleSpec({
     },
     "payments.expire-authorizations": {
       "schedule": "hourly",
-      "does": "Authorizations near expiry: capture if the order is accepted, otherwise void"
+      "does": "Authorizations near expiry: capture if the order is accepted, otherwise void; an authorization with no card amount left is voided at once"
     },
     "payments.dispute-deadlines": {
       "schedule": "hourly",
@@ -2292,31 +2298,59 @@ export const spec = defineModuleSpec({
   settings: {
     "captureMode": {
       "default": "on_acceptance",
-      "desc": "on_acceptance (one capture when the order is accepted) or per_group_on_dispatch (capture each seller group when it ships)"
+      "desc": "on_acceptance (one capture when the order is accepted) or per_group_on_dispatch (capture each seller group when it ships)",
+      "type": "enum",
+      "choices": [
+        "on_acceptance",
+        "per_group_on_dispatch"
+      ],
+      "approval": "business_owner",
+      "minLeadDays": 14
     },
     "authorizationValidDays": {
       "default": 7,
-      "desc": "Authorization lifetime assumed for expiry handling"
+      "desc": "Authorization lifetime assumed for expiry handling",
+      "type": "duration",
+      "min": 1,
+      "max": 30,
+      "unit": "days",
+      "approval": "second_reviewer"
     },
     "uncertainMaxHours": {
       "default": 24,
-      "desc": "Pending checks older than this go to Finance review"
+      "desc": "Pending checks older than this go to Finance review",
+      "type": "duration",
+      "min": 1,
+      "unit": "hours",
+      "approval": "second_reviewer"
     },
     "storeCheckRateLimitSeconds": {
       "default": 15,
-      "desc": "Minimum time between customer 'Check now' calls"
+      "desc": "Minimum time between customer 'Check now' calls",
+      "type": "duration",
+      "min": 1,
+      "unit": "seconds"
     },
     "refundMaxAttempts": {
       "default": 3,
-      "desc": "Attempts before asking for a new destination"
+      "desc": "Attempts before asking for a new destination",
+      "type": "int",
+      "min": 1,
+      "max": 10,
+      "approval": "second_reviewer"
     },
     "refundArrivalNote": {
       "default": "Card refunds usually arrive 3–5 business days after we send them.",
-      "desc": "Timing text shown with refunds"
+      "desc": "Timing text shown with refunds",
+      "type": "string"
     },
     "orphanGraceMinutes": {
       "default": 15,
-      "desc": "Wait before treating a payment without an order as orphaned"
+      "desc": "Wait before treating a payment without an order as orphaned",
+      "type": "duration",
+      "min": 1,
+      "unit": "minutes",
+      "approval": "second_reviewer"
     },
     "acceptedCardBrands": {
       "default": [
@@ -2325,15 +2359,21 @@ export const spec = defineModuleSpec({
         "amex",
         "discover"
       ],
-      "desc": "Brands shown at checkout"
+      "desc": "Brands shown at checkout",
+      "type": "json",
+      "approval": "business_owner"
     },
     "walletsEnabled": {
       "default": true,
-      "desc": "Offer digital wallets where the device supports them"
+      "desc": "Offer digital wallets where the device supports them",
+      "type": "bool",
+      "approval": "second_reviewer"
     },
     "statementDescriptor": {
       "default": "MARKETLY",
-      "desc": "Text on the customer's bank statement"
+      "desc": "Text on the customer's bank statement",
+      "type": "string",
+      "approval": "business_owner"
     }
   },
   errorCodes: {

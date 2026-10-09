@@ -36,6 +36,7 @@
     { "name": "getOfferSellerRatings", "signature": "(offers: { offerId: uuid, ownerType: 'official' | 'seller', sellerId: uuid | null }[]) => map<SellerFeedbackSummary>", "desc": "Feedback summary of whoever sells each offer, the Official Store included, with on-time dispatch from shipping when enabled", "usedBy": ["graphql"] }
   ],
   "types": {
+    "ContentParty": { "kind": "enum(customer|seller)", "id": { "type": "uuid", "desc": "Customers-module id or seller id" } },
     "Author": { "kind": "enum(customer|seller|staff)", "displayName": "string", "sellerId": "uuid?", "verifiedPurchase": "bool" },
     "SellerResponse": {
       "id": "uuid",
@@ -426,7 +427,7 @@
       { "name": "reviews.question.asked", "when": "A question is published (sellers with an offer are told)", "payload": { "questionId": "uuid", "productId": "uuid" } },
       { "name": "reviews.answer.published", "when": "An answer is published", "payload": { "answerId": "uuid", "questionId": "uuid", "productId": "uuid", "label": "string" } },
       { "name": "reviews.response.published", "when": "A seller response is published or held", "payload": { "responseId": "uuid", "sellerId": "uuid", "targetType": "string", "status": "string" } },
-      { "name": "reviews.moderation.decided", "when": "A moderation decision is recorded (reporter and author are notified)", "payload": { "moderationItemId": "uuid", "contentType": "string", "contentId": "uuid", "decision": "string", "reasonCode": "string" } },
+      { "name": "reviews.moderation.decided", "when": "A moderation decision is recorded (reporter and author are notified)", "payload": { "moderationItemId": "uuid", "contentType": "string", "contentId": "uuid", "decision": "string", "reasonCode": "string", "author": { "type": "ContentParty?", "desc": "Who wrote the content; null when it is gone" }, "reporters": { "type": "ContentParty[]", "desc": "Everyone whose report was decided" }, "reporterOutcome": { "type": "text?", "desc": "What reporters are told" }, "appealUntil": { "type": "datetime?", "desc": "The author may appeal until then (removals)" } } },
       { "name": "reviews.appeal.submitted", "when": "An author appeals", "payload": { "appealId": "uuid", "contentType": "string", "contentId": "uuid" } },
       { "name": "reviews.appeal.decided", "when": "An appeal is decided", "payload": { "appealId": "uuid", "overturned": "bool" } },
       { "name": "reviews.content.referred", "when": "Content is referred to Trust and Risk", "payload": { "moderationItemId": "uuid", "contentType": "string", "contentId": "uuid", "authorId": "string", "note": "text" } },
@@ -454,19 +455,19 @@
     { "name": "reviews.moderation-sla", "schedule": "every 30 min", "does": "Flag moderation items older than moderationTargetHours (workqueues)" }
   ],
   "settings": [
-    { "key": "minReviewLength", "default": 50, "desc": "Characters for a written review" },
-    { "key": "maxReviewPhotos", "default": 6, "desc": "Photos per review" },
-    { "key": "reviewWindowDays", "default": 365, "desc": "Days after delivery to write a review" },
-    { "key": "sellerFeedbackWindowDays", "default": 90, "desc": "Days after delivery to leave seller feedback" },
-    { "key": "responseEditDays", "default": 7, "desc": "Seller can edit a public response for this long" },
-    { "key": "appealWindowDays", "default": 30, "desc": "Days to appeal a moderation decision" },
-    { "key": "hideOnReportReasons", "default": ["personal_information", "hate_or_harassment"], "desc": "Report reasons that hide content while it is reviewed" },
-    { "key": "inviteDelayDays", "default": 5, "desc": "Ask for a review this long after delivery" },
-    { "key": "sellerRatingPeriodMonths", "default": 12, "desc": "Period for the seller positive percentage" },
-    { "key": "positiveThreshold", "default": 4, "desc": "Overall rating counted as positive (4–5); 3 is neutral" },
-    { "key": "moderationTargetHours", "default": 48, "desc": "Decision target for reported content (example)" },
-    { "key": "reportCooldownDays", "default": 30, "desc": "Repeat reports on decided content attach without reopening" },
-    { "key": "questionAnswerTargetBusinessDays", "default": 1, "desc": "Expected answer time shown under unanswered questions (Question.answerExpectation), example" }
+    { "key": "minReviewLength", "type": "int", "default": 50, "desc": "Characters for a written review", "min": 0, "unit": "characters" },
+    { "key": "maxReviewPhotos", "type": "int", "default": 6, "desc": "Photos per review", "min": 0, "max": 20 },
+    { "key": "reviewWindowDays", "type": "duration", "default": 365, "desc": "Days after delivery to write a review", "unit": "days", "min": 30 },
+    { "key": "sellerFeedbackWindowDays", "type": "duration", "default": 90, "desc": "Days after delivery to leave seller feedback", "unit": "days", "min": 1, "sellerVisible": true },
+    { "key": "responseEditDays", "type": "duration", "default": 7, "desc": "Seller can edit a public response for this long", "unit": "days", "min": 0, "sellerVisible": true },
+    { "key": "appealWindowDays", "type": "duration", "default": 30, "desc": "Days to appeal a moderation decision", "unit": "days", "min": 1 },
+    { "key": "hideOnReportReasons", "type": "json", "default": ["personal_information", "hate_or_harassment"], "desc": "Report reasons that hide content while it is reviewed", "approval": "second_reviewer" },
+    { "key": "inviteDelayDays", "type": "duration", "default": 5, "desc": "Ask for a review this long after delivery", "unit": "days", "min": 0 },
+    { "key": "sellerRatingPeriodMonths", "type": "duration", "default": 12, "desc": "Period for the seller positive percentage", "unit": "months", "min": 1, "approval": "second_reviewer", "sellerVisible": true },
+    { "key": "positiveThreshold", "type": "int", "default": 4, "desc": "Overall rating counted as positive (4–5); 3 is neutral", "min": 1, "max": 5, "approval": "second_reviewer", "sellerVisible": true },
+    { "key": "moderationTargetHours", "type": "duration", "default": 48, "desc": "Decision target for reported content (example)", "unit": "hours", "min": 1 },
+    { "key": "reportCooldownDays", "type": "duration", "default": 30, "desc": "Repeat reports on decided content attach without reopening", "unit": "days", "min": 0 },
+    { "key": "questionAnswerTargetBusinessDays", "type": "duration", "default": 1, "desc": "Expected answer time shown under unanswered questions (Question.answerExpectation), example", "unit": "business days", "min": 1, "sellerVisible": true }
   ],
   "integrations": [],
   "errorCodes": {

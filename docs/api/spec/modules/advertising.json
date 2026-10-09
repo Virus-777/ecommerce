@@ -440,7 +440,8 @@
       { "name": "advertising.placement.updated", "when": "A placement's rules or on/off change", "payload": { "placementKey": "string", "enabled": "bool", "version": "int" } },
       { "name": "advertising.charge.posted", "when": "Daily seller ad charges are posted for seller statements", "payload": { "chargeId": "uuid", "sellerId": "uuid", "campaignId": "uuid", "day": "date", "amount": "Money" } },
       { "name": "advertising.charge.credited", "when": "A posted charge is credited or an accrued one voided", "payload": { "chargeId": "uuid", "sellerId": "uuid", "amount": "Money", "reason": "text" } },
-      { "name": "advertising.budget.reached", "when": "A paid campaign reaches its daily or total spending limit", "payload": { "campaignId": "uuid", "sellerId": "uuid?", "limit": "enum(daily|total)" } }
+      { "name": "advertising.budget.reached", "when": "A paid campaign reaches its daily or total spending limit", "payload": { "campaignId": "uuid", "sellerId": "uuid?", "limit": "enum(daily|total)" } },
+      { "name": "advertising.campaign.ending_soon", "when": "A live or scheduled campaign ends within endingSoonDays (daily, once per campaign)", "payload": { "campaignId": "uuid", "ref": "string", "name": "string", "advertiserKind": "string", "sellerId": { "type": "uuid?", "desc": "Seller campaigns: the seller told" }, "ownerStaffId": { "type": "uuid?", "desc": "Own and brand campaigns: the staff owner" }, "endsAt": "datetime", "daysLeft": "int" } }
     ],
     "consumes": [
       { "name": "promotions.campaign.ended", "does": "Finish linked ads with stopWithPromotion (reason promotion_ended)" },
@@ -485,16 +486,16 @@
     { "name": "advertising.accrue-charges", "schedule": "every 15 min", "does": "Accrue billable clicks/displays and fixed daily fees, capped at daily and total limits; stop delivery at the limit" },
     { "name": "advertising.post-charges", "schedule": "daily 02:00 market time", "does": "Post the previous day's charges to finance (advertising.charge.posted)" },
     { "name": "advertising.expire-frequency-state", "schedule": "hourly", "does": "Delete frequency and suppression rows past their window" },
-    { "name": "advertising.ending-soon-notice", "schedule": "daily 08:00 market time", "does": "Notify owners of campaigns ending within 3 days to finish or renew deliberately" }
+    { "name": "advertising.ending-soon-notice", "schedule": "daily 08:00 market time", "does": "Publish advertising.campaign.ending_soon for campaigns ending within endingSoonDays (once per campaign), so owners finish or renew deliberately" }
   ],
   "settings": [
-    { "key": "decisionTtlSeconds", "default": 60, "desc": "How long clients may reuse a serve decision; pausing takes effect within this time" },
-    { "key": "attributionDays", "default": 7, "desc": "Default attribution period after a click (also in global rules)" },
-    { "key": "minPromotedStock", "default": 10, "desc": "Sponsored ads pause when the promoted offer's available stock falls below this" },
-    { "key": "endingSoonDays", "default": 3, "desc": "Window for the Ending soon list" },
-    { "key": "maxImageBytes", "default": 1048576, "desc": "Upload limit for own-campaign images (seller uploads 5 MB)" },
-    { "key": "eventRetentionMonths", "default": 13, "desc": "Raw ad event retention" },
-    { "key": "headlineMaxChars", "default": 60, "desc": "Overlay headline limit (seller card headline 40)" }
+    { "key": "decisionTtlSeconds", "type": "duration", "default": 60, "desc": "How long clients may reuse a serve decision; pausing takes effect within this time", "unit": "seconds", "min": 0, "max": 3600, "sellerVisible": false },
+    { "key": "attributionDays", "type": "duration", "default": 7, "desc": "Default attribution period after a click (also in global rules)", "unit": "days", "min": 1, "max": 30, "sellerVisible": true },
+    { "key": "minPromotedStock", "type": "int", "default": 10, "desc": "Sponsored ads pause when the promoted offer's available stock falls below this", "min": 0, "sellerVisible": true },
+    { "key": "endingSoonDays", "type": "duration", "default": 3, "desc": "Window for the Ending soon list", "unit": "days", "min": 1, "max": 30, "sellerVisible": false },
+    { "key": "maxImageBytes", "type": "int", "default": 1048576, "desc": "Upload limit for own-campaign images (seller uploads 5 MB)", "min": 1, "unit": "bytes", "sellerVisible": false },
+    { "key": "eventRetentionMonths", "type": "duration", "default": 13, "desc": "Raw ad event retention", "unit": "months", "min": 1, "sellerVisible": false },
+    { "key": "headlineMaxChars", "type": "int", "default": 60, "desc": "Overlay headline limit (seller card headline 40)", "min": 1, "unit": "characters", "sellerVisible": false }
   ],
   "integrations": [],
   "errorCodes": {

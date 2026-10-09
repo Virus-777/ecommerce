@@ -803,27 +803,43 @@ export const spec = defineModuleSpec({
   settings: {
     "maxLists": {
       "default": 10,
-      "desc": "Lists per customer"
+      "desc": "Lists per customer",
+      "type": "int",
+      "min": 1
     },
     "maxItemsPerList": {
       "default": 500,
-      "desc": "Items per list"
+      "desc": "Items per list",
+      "type": "int",
+      "min": 1
     },
     "maxActiveAlerts": {
       "default": 100,
-      "desc": "Active alerts per customer"
+      "desc": "Active alerts per customer",
+      "type": "int",
+      "min": 0
     },
     "alertCooldownHours": {
       "default": 24,
-      "desc": "Minimum time between notices for the same alert"
+      "desc": "Minimum time between notices for the same alert",
+      "type": "duration",
+      "min": 1,
+      "unit": "hours"
     },
     "priceHintDays": {
       "default": 30,
-      "desc": "Window for Lowest in N days"
+      "desc": "Window for Lowest in N days",
+      "type": "duration",
+      "min": 1,
+      "unit": "days"
     },
     "minDropPct": {
       "default": 1,
-      "desc": "Smallest drop that counts for 'any drop'"
+      "desc": "Smallest drop that counts for 'any drop'",
+      "type": "number",
+      "min": 0,
+      "max": 100,
+      "unit": "%"
     }
   },
   errorCodes: {

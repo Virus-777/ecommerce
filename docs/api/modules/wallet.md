@@ -363,6 +363,7 @@ Indexes: `(state, created_at)`, `(customer_id, created_at)`
 | `wallet.credit.granted` | Credit is added (refund to credit, goodwill, price adjustment, gift card) | `{ customerId: uuid, entryId: uuid, kind: enum(refund_to_credit|order_refund_returned|goodwill|price_adjustment|gift_card_redeemed), amount: Money, chargedTo: enum(platform|seller)?, sellerId: uuid?, caseId: uuid?, orderId: uuid? }` | finance |
 | `wallet.credit.used` | A hold is captured on an accepted order | `{ customerId: uuid, orderId: uuid, amount: Money }` | finance |
 | `wallet.credit.expired` | A lot expires unused | `{ customerId: uuid, lotId: uuid, amount: Money }` | - |
+| `wallet.credit.expiring` | A lot with an unused balance reaches one of expiryReminderDays before it expires | `{ customerId: uuid, lotId: uuid, amount: Money, expiresAt: datetime, daysLeft: int }` | notifications |
 | `wallet.credit.reversed` | A goodwill grant is reversed | `{ customerId: uuid, grantId: uuid, amount: Money, reason: text }` | - |
 | `wallet.credit.corrected` | Staff correct a balance | `{ customerId: uuid, entryId: uuid, amount: Money, reason: text }` | - |
 | `wallet.goodwill.decided` | A goodwill grant waiting for approval is granted or rejected | `{ grantId: uuid, customerId: uuid, status: enum(granted|rejected), amount: Money, caseId: uuid? }` | support |
@@ -420,19 +421,20 @@ Checked through the access module (limits per role, second reviewer).
 
 | Job | Schedule | Does |
 |---|---|---|
-| `wallet.expire-lots` | daily 00:30 market time | Expire lots past expiresAt; notify customers 30 and 7 days before expiry |
+| `wallet.expire-lots` | daily 00:30 market time | Expire lots past expiresAt (wallet.credit.expired); publish wallet.credit.expiring for lots expiryReminderDays (30 and 7) days before expiry, once per lot and reminder |
 | `wallet.release-stale-holds` | every 1 min | Release holds past expiresAt |
 | `wallet.balance-check` | daily | Verify every account balance equals the ledger sum; flag differences to Finance checks |
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| creditExpiryMonths | `12` | Default expiry of goodwill and price-adjustment credit (refund credit follows local rules; default none) |
-| goodwillMaxPerCustomer30Days | `{"amount":10000,"currency":"USD"}` | Goodwill a customer can receive in 30 days before Finance approval is always needed |
-| holdTtlMinutes | `30` | Checkout hold lifetime |
-| giftCardsEnabled | `false` | Gift cards are a later service |
-| loyaltyEnabled | `false` | Loyalty experiment (phase 4) |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| creditExpiryMonths | `12` | duration, months, 1–…, approval: business owner | Default expiry of goodwill and price-adjustment credit (refund credit follows local rules; default none) |
+| expiryReminderDays | `[30,7]` | json | Days before a lot expires when the customer is reminded (wallet.credit.expiring) |
+| goodwillMaxPerCustomer30Days | `{"amount":10000,"currency":"USD"}` | money, 0–…, approval: business owner | Goodwill a customer can receive in 30 days before Finance approval is always needed |
+| holdTtlMinutes | `30` | duration, minutes, 1–… | Checkout hold lifetime |
+| giftCardsEnabled | `false` | bool, approval: business owner | Gift cards are a later service |
+| loyaltyEnabled | `false` | bool, approval: business owner | Loyalty experiment (phase 4) |
 
 ## Notes
 - Phase 3 (plan ch. 15 'later services'; ch. 7 'Coupons, Credits when supported'). The store-credit part of account/coupons and the 'Use my Marketly credit' checkbox in checkout use this module when enabled.

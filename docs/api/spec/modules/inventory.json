@@ -421,7 +421,7 @@
     {
       "name": "Return stock outcome", "field": "ReturnOutcome.state", "initial": "pending",
       "transitions": [["pending", "record", "recorded"]],
-      "notes": "Created on returns.return.inspected. restock: Returned → Available. different_condition: Returned → outside on this item and outside → Available on the target item, at the original unit cost. damaged_stock: Returned → Damaged or held (kept, not for sale) with a review date. repair / return_to_supplier: Returned → Damaged or held with a review date. write_off: Returned → outside; value at cost reported to finance."
+      "notes": "Created on returns.return.inspected; the units entered Returned on returns.return.received. restock: Returned → Available. different_condition: Returned → outside on this item and outside → Available on the target item, at the original unit cost. damaged_stock: Returned → Damaged or held (kept, not for sale) with a review date. repair / return_to_supplier: Returned → Damaged or held with a review date. write_off: Returned → outside; value at cost reported to finance."
     },
     {
       "name": "Discrepancy", "field": "Discrepancy.state", "initial": "open",
@@ -497,11 +497,11 @@
       { "name": "inventory.transfer.received", "when": "Phase 4: a transfer is received", "payload": { "transferId": "uuid", "toLocationId": "uuid" } }
     ],
     "consumes": [
-      { "name": "orders.order.accepted", "does": "Allocate the order's held reservation lines to order items" },
+      { "name": "orders.order.accepted", "does": "Allocate the order's held reservation (reservationId) to its order items: each reservation line is matched to an entry of items by stockItemId and quantity, so allocation never depends on checkout's attachOrder (lines it already attached keep their orderItemId)" },
       { "name": "orders.item.cancelled", "does": "Release that item's held or allocated units back to Available" },
       { "name": "shipping.shipment.dispatched", "does": "Fulfil the allocated lines in the shipment (Reserved → leaves stock)" },
-      { "name": "returns.return.received", "does": "Official Store items: add the units to Returned at the receiving warehouse. Seller returns are recorded by sellers through adjustments." },
-      { "name": "returns.return.inspected", "does": "Create a pending return stock outcome with the inspector's proposed outcome" },
+      { "name": "returns.return.received", "does": "Official Store items: add each listed item's units (items[].stockItemId, quantity) to Returned at the receiving warehouse, once per return item. Seller returns are recorded by sellers through adjustments." },
+      { "name": "returns.return.inspected", "does": "Create a pending return stock outcome with the inspector's proposed outcome. The units stay in Returned until the outcome is recorded (restock → Available; damaged_stock, repair, return_to_supplier → Damaged or held; write_off → outside). Units that never arrived through returns.return.received are added to Returned first, so a missed event loses no stock" },
       { "name": "warehouse.bin.assigned", "does": "Update the stock item's primary bin code shown in stock lists" },
       { "name": "offers.offer.status_changed", "does": "Archive a seller stock item when its offer is removed (reserved units stay with their orders)" },
       { "name": "sellers.seller.closed", "does": "Archive the seller's stock items" },
@@ -533,12 +533,12 @@
     { "name": "inventory.valuation-snapshot", "schedule": "daily 23:59 market time", "does": "Snapshot units and value at cost per group for company trading reports" }
   ],
   "settings": [
-    { "key": "holdMinutes", "default": 15, "desc": "Checkout hold lifetime" },
-    { "key": "pendingPaymentHoldMinutes", "default": 60, "desc": "Maximum hold extension while a payment result is being checked" },
-    { "key": "defaultLowStockThreshold", "default": 3, "desc": "Seller items without their own threshold" },
-    { "key": "lowStockAlertCooldownHours", "default": 24, "desc": "Minimum time between inventory.stock.low events for one item" },
-    { "key": "costingMethod", "default": "weighted_average", "desc": "Company stock valuation" },
-    { "key": "allowSellerNegativeAvailable", "default": false, "desc": "Never sell beyond available quantity (plan ch. 9)" }
+    { "key": "holdMinutes", "type": "duration", "default": 15, "desc": "Checkout hold lifetime", "unit": "minutes", "min": 1, "max": 60, "sellerVisible": false },
+    { "key": "pendingPaymentHoldMinutes", "type": "duration", "default": 60, "desc": "Maximum hold extension while a payment result is being checked", "unit": "minutes", "min": 1, "sellerVisible": false },
+    { "key": "defaultLowStockThreshold", "type": "int", "default": 3, "desc": "Seller items without their own threshold", "min": 0, "sellerVisible": true },
+    { "key": "lowStockAlertCooldownHours", "type": "duration", "default": 24, "desc": "Minimum time between inventory.stock.low events for one item", "unit": "hours", "min": 1, "sellerVisible": false },
+    { "key": "costingMethod", "type": "enum", "default": "weighted_average", "desc": "Company stock valuation", "choices": ["weighted_average", "fifo"], "approval": "business_owner", "sellerVisible": false },
+    { "key": "allowSellerNegativeAvailable", "type": "bool", "default": false, "desc": "Never sell beyond available quantity (plan ch. 9)", "editable": false, "sellerVisible": false }
   ],
   "errorCodes": {
     "INSUFFICIENT_STOCK": { "status": 409, "meaning": "Not enough Available units. details.lines[{ stockItemId, requested, available }]" },

@@ -1358,17 +1358,17 @@ Checked through the access module (limits per role, second reviewer).
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| marketTimeZone | `"America/Los_Angeles"` | Default time zone for new campaigns |
-| reservationTtlMinutes | `30` | How long a checkout reservation holds budget, usage and deal stock |
-| couponsPerSellerPackage | `1` | Coupons per seller package (plan default: one coupon per seller per order) |
-| referencePriceDays | `30` | Look-back window passed to offers.lowestPrice for the was price (keep equal to offers' compare-at window) |
-| budgetWarningPct | `90` | Notify Marketing and Finance when budget use crosses this |
-| restoreUsageOnCancel | `true` | Give the use back to the customer when an item is cancelled before dispatch |
-| refundRestoresBudget | `false` | Whether refunds after delivery free budget |
-| sellerLeaveCutoff | `"campaign start"` | Until when a seller can leave without approval |
-| codeCheckRateLimit | `"10 per minute per session"` | Brute-force protection for code lookups |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| marketTimeZone | `"America/Los_Angeles"` | string | Default time zone for new campaigns |
+| reservationTtlMinutes | `30` | duration, minutes, 1–… | How long a checkout reservation holds budget, usage and deal stock |
+| couponsPerSellerPackage | `1` | int, 1–…, approval: second reviewer, seller-visible | Coupons per seller package (plan default: one coupon per seller per order) |
+| referencePriceDays | `30` | duration, days, 1–…, approval: business owner, seller-visible | Look-back window passed to offers.lowestPrice for the was price (keep equal to offers' compare-at window) |
+| budgetWarningPct | `90` | number, %, 1–100 | Notify Marketing and Finance when budget use crosses this |
+| restoreUsageOnCancel | `true` | bool | Give the use back to the customer when an item is cancelled before dispatch |
+| refundRestoresBudget | `false` | bool, approval: second reviewer | Whether refunds after delivery free budget |
+| sellerLeaveCutoff | `"campaign start"` | string, seller-visible | Until when a seller can leave without approval |
+| codeCheckRateLimit | `"10 per minute per session"` | string | Brute-force protection for code lookups |
 
 ## Notes
 - Funding rule (plan ch. 14–15): every discount allocation is split into platformPart and sellerPart. Finance charges commission on the item price after the seller-funded part only, and the platform-funded part is credited to seller proceeds, so a platform-funded coupon never reduces seller proceeds. Official Store items: the whole discount is a company cost and appears in company trading margin.

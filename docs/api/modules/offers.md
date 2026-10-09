@@ -1150,16 +1150,16 @@ Checked through the access module (limits per role, second reviewer).
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| featuredZoneGranularity | `"postal3"` | Delivery zone key used to cache featured decisions (first 3 digits of the postal code) |
-| wasPriceLookbackDays | `30` | Window for the lowest_30_days compare-at basis |
-| largeSellerPriceChangePct | `50` | Seller price changes above this need explicit confirmation |
-| minimumPriceByCategory | `{}` | Category id → minimum price in minor units (e.g. Cables and adapters 500) |
-| maxPurchaseLimit | `null` | Platform cap on per-customer purchase limits, if any |
-| bulkMaxRows | `5000` | Rows per bulk file |
-| bulkPreviewHours | `24` | How long a preview can be applied |
-| maxSelectedPriceChanges | `100` | Items per changeOwnPrices call |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| featuredZoneGranularity | `"postal3"` | enum (postal3 \| postal5) | Delivery zone key used to cache featured decisions (first 3 digits of the postal code) |
+| wasPriceLookbackDays | `30` | duration, days, 1–…, approval: business owner, seller-visible | Window for the lowest_30_days compare-at basis |
+| largeSellerPriceChangePct | `50` | number, %, 1–…, seller-visible | Seller price changes above this need explicit confirmation |
+| minimumPriceByCategory | `{}` | json, approval: second reviewer, seller-visible | Category id → minimum price in minor units (e.g. Cables and adapters 500) |
+| maxPurchaseLimit | `null` | int, 1–…, seller-visible | Platform cap on per-customer purchase limits, if any |
+| bulkMaxRows | `5000` | int, 1–…, seller-visible | Rows per bulk file |
+| bulkPreviewHours | `24` | duration, hours, 1–… | How long a preview can be applied |
+| maxSelectedPriceChanges | `100` | int, 1–…, seller-visible | Items per changeOwnPrices call |
 
 ## Integrations
 - **Media storage**: Bulk CSV uploads, generated templates and correction reports (through media)

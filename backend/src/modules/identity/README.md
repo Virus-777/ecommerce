@@ -941,34 +941,34 @@ Indexes: `(expires_at)`
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| accessTokenTtlMinutes | `15` | Access token lifetime |
-| refreshTtlHours | `24` | Refresh lifetime without 'keep me signed in' |
-| keepSignedInDays | `30` | Refresh lifetime with 'keep me signed in' (members) |
-| staffSessionMaxHours | `12` | Absolute limit for staff sessions |
-| maxFailedSignIns | `5` | Wrong passwords before a temporary lock |
-| lockoutMinutes | `15` | Length of the automatic lock |
-| verificationCodeTtlMinutes | `10` | Email and SMS code lifetime |
-| codeResendSeconds | `60` | Wait before a code or reset link can be resent |
-| maxCodeAttempts | `5` | Wrong codes before a challenge locks |
-| passwordResetTtlMinutes | `30` | Reset link lifetime |
-| memberMinPasswordLength | `10` | Members (register screen: at least 10 characters, one number, one uppercase) |
-| staffMinPasswordLength | `12` | Staff accounts |
-| passwordHistoryCount | `5` | Recent passwords that cannot be reused |
-| staffTwoStepRequired | `true` | Staff must use 2-step verification |
-| trustedDeviceDays | `30` | Members can skip 2-step on a remembered device |
-| invitationTtlDays | `7` | Invitation link lifetime |
-| guestSessionTtlDays | `30` | Guest session lifetime after last activity |
-| maxDevicesPerAccount | `20` | Oldest sessions are revoked beyond this |
-| securityEventRetentionDays | `400` | Security activity kept per account (screen shows 30 days) |
-| reauthTokenMinutes | `5` | Re-auth token lifetime |
-| guestOrderAccessDays | `90` | How long a guest order grant on a session lasts |
-| orderLinkTtlDays | `180` | Emailed order link lifetime |
-| staffIdleMinutes | `30` | Staff sessions end after this long without activity |
-| maxStaffSessions | `3` | Concurrent staff sessions per account; the oldest is signed out |
-| refreshReuseGraceSeconds | `20` | A just-rotated refresh token presented again within this window returns the same new tokens (parallel refresh) |
-| visitorRefreshDays | `30` | Visitor refresh token lifetime after last activity |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| accessTokenTtlMinutes | `15` | duration, minutes, 5–60, approval: second reviewer | Access token lifetime |
+| refreshTtlHours | `24` | duration, hours, 1–…, approval: second reviewer | Refresh lifetime without 'keep me signed in' |
+| keepSignedInDays | `30` | duration, days, 1–90, approval: second reviewer | Refresh lifetime with 'keep me signed in' (members) |
+| staffSessionMaxHours | `12` | duration, hours, 1–24, approval: second reviewer | Absolute limit for staff sessions |
+| maxFailedSignIns | `5` | int, 3–20, approval: second reviewer | Wrong passwords before a temporary lock |
+| lockoutMinutes | `15` | duration, minutes, 1–…, approval: second reviewer | Length of the automatic lock |
+| verificationCodeTtlMinutes | `10` | duration, minutes, 1–60, approval: second reviewer | Email and SMS code lifetime |
+| codeResendSeconds | `60` | duration, seconds, 10–…, approval: second reviewer | Wait before a code or reset link can be resent |
+| maxCodeAttempts | `5` | int, 1–10, approval: second reviewer | Wrong codes before a challenge locks |
+| passwordResetTtlMinutes | `30` | duration, minutes, 5–120, approval: second reviewer | Reset link lifetime |
+| memberMinPasswordLength | `10` | int, characters, 8–64, approval: second reviewer | Members (register screen: at least 10 characters, one number, one uppercase) |
+| staffMinPasswordLength | `12` | int, characters, 12–64, approval: second reviewer | Staff accounts |
+| passwordHistoryCount | `5` | int, 0–24, approval: second reviewer | Recent passwords that cannot be reused |
+| staffTwoStepRequired | `true` | bool, approval: business owner | Staff must use 2-step verification |
+| trustedDeviceDays | `30` | duration, days, 0–90, approval: second reviewer | Members can skip 2-step on a remembered device |
+| invitationTtlDays | `7` | duration, days, 1–30, approval: second reviewer | Invitation link lifetime |
+| guestSessionTtlDays | `30` | duration, days, 1–…, approval: second reviewer | Guest session lifetime after last activity |
+| maxDevicesPerAccount | `20` | int, 1–…, approval: second reviewer | Oldest sessions are revoked beyond this |
+| securityEventRetentionDays | `400` | duration, days, 30–…, approval: second reviewer | Security activity kept per account (screen shows 30 days) |
+| reauthTokenMinutes | `5` | duration, minutes, 1–15, approval: second reviewer | Re-auth token lifetime |
+| guestOrderAccessDays | `90` | duration, days, 1–…, approval: second reviewer | How long a guest order grant on a session lasts |
+| orderLinkTtlDays | `180` | duration, days, 1–…, approval: second reviewer | Emailed order link lifetime |
+| staffIdleMinutes | `30` | duration, minutes, 5–240, approval: second reviewer | Staff sessions end after this long without activity |
+| maxStaffSessions | `3` | int, 1–10, approval: second reviewer | Concurrent staff sessions per account; the oldest is signed out |
+| refreshReuseGraceSeconds | `20` | duration, seconds, 0–120, approval: second reviewer | A just-rotated refresh token presented again within this window returns the same new tokens (parallel refresh) |
+| visitorRefreshDays | `30` | duration, days, 1–…, approval: second reviewer | Visitor refresh token lifetime after last activity |
 
 ## Integrations
 - **Password hashing**: argon2id with per-account salt; parameters upgraded on next sign-in

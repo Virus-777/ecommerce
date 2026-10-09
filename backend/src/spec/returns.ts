@@ -1963,7 +1963,9 @@ export interface ReturnsReturnInspectedEvent {
   sellerId?: string | null;
   conditionOutcome: string;
   proposedStockOutcome: string;
+  orderItemId: string;
   variantId: string;
+  stockItemId?: string | null;
   quantity: number;
 }
 
@@ -1975,7 +1977,9 @@ export const ReturnsReturnInspectedEvent: z.ZodType<ReturnsReturnInspectedEvent>
   sellerId: z.uuid().nullish(),
   conditionOutcome: z.string(),
   proposedStockOutcome: z.string(),
+  orderItemId: z.uuid(),
   variantId: z.uuid(),
+  stockItemId: z.uuid().nullish(),
   quantity: z.number().int(),
 });
 
@@ -4157,42 +4161,78 @@ export const spec = defineModuleSpec({
   settings: {
     "baselineWindowDays": {
       "default": 30,
-      "desc": "Fallback when no policy version is active (example)"
+      "desc": "Fallback when no policy version is active (example)",
+      "type": "duration",
+      "min": 1,
+      "unit": "days",
+      "approval": "business_owner",
+      "sellerVisible": true,
+      "minLeadDays": 14
     },
     "changeOfMindReturnFee": {
       "default": {
         "amount": 799,
         "currency": "USD"
       },
-      "desc": "Deducted when the customer pays return shipping (example)"
+      "desc": "Deducted when the customer pays return shipping (example)",
+      "type": "money",
+      "min": 0,
+      "approval": "business_owner",
+      "sellerVisible": true,
+      "minLeadDays": 14
     },
     "sellerResponseBusinessDays": {
       "default": 2,
-      "desc": "Respond-by target for sellers (example)"
+      "desc": "Respond-by target for sellers (example)",
+      "type": "duration",
+      "min": 1,
+      "unit": "business days",
+      "approval": "second_reviewer",
+      "sellerVisible": true
     },
     "platformInterventionGraceHours": {
       "default": 0,
-      "desc": "Hours after a missed seller deadline before Marketly takes over"
+      "desc": "Hours after a missed seller deadline before Marketly takes over",
+      "type": "duration",
+      "min": 0,
+      "unit": "hours",
+      "sellerVisible": true
     },
     "autoApproveOfficialWithinWindow": {
       "default": true,
-      "desc": "Official Store returns inside the window are approved automatically"
+      "desc": "Official Store returns inside the window are approved automatically",
+      "type": "bool",
+      "approval": "second_reviewer",
+      "sellerVisible": false
     },
     "maxPhotosPerReturn": {
       "default": 6,
-      "desc": "Photos or short videos per return request"
+      "desc": "Photos or short videos per return request",
+      "type": "int",
+      "min": 1,
+      "max": 20,
+      "sellerVisible": false
     },
     "maxMediaMb": {
       "default": 10,
-      "desc": "Upload size per file"
+      "desc": "Upload size per file",
+      "type": "int",
+      "min": 1,
+      "unit": "MB",
+      "sellerVisible": false
     },
     "inspectionChecksByCategory": {
       "default": {},
-      "desc": "Category id → functional and hygiene checks added to the inspection checklist (e.g. Headphones: powers on and pairs, ear cushions clean)"
+      "desc": "Category id → functional and hygiene checks added to the inspection checklist (e.g. Headphones: powers on and pairs, ear cushions clean)",
+      "type": "json",
+      "sellerVisible": false
     },
     "refundRefPrefix": {
       "default": "RF-",
-      "desc": "Human reference prefix for refund requests"
+      "desc": "Human reference prefix for refund requests",
+      "type": "string",
+      "sellerVisible": false,
+      "editable": false
     }
   },
   errorCodes: {

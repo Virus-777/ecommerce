@@ -76,7 +76,7 @@
   },
   "tables": [
     { "name": "lists", "columns": { "id": "uuid pk", "customer_id": "uuid", "name": "text", "is_default": "bool", "share_token": "text? unique", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(customer_id)", "unique (customer_id) where is_default"] },
-    { "name": "items", "columns": { "id": "uuid pk", "list_id": "uuid → lists", "customer_id": "uuid", "product_id": "uuid", "variant_id": "uuid?", "offer_id": "uuid?", "price_when_saved": "bigint?", "currency": "text", "note": "text?", "added_at": "timestamptz" }, "indexes": ["unique (list_id, product_id, variant_id)", "(customer_id, product_id)", "(product_id)"] },
+    { "name": "items", "columns": { "id": "uuid pk", "list_id": "uuid → lists", "customer_id": "uuid", "product_id": "uuid", "variant_id": "uuid?", "offer_id": "uuid?", "price_when_saved": "bigint?", "currency": "text", "note": "text?", "added_at": "timestamptz" }, "indexes": ["unique nulls not distinct (list_id, product_id, variant_id)", "(customer_id, product_id)", "(product_id)"] },
     { "name": "alerts", "columns": { "id": "uuid pk", "customer_id": "uuid", "item_id": "uuid? → items", "product_id": "uuid", "variant_id": "uuid?", "seller_id": "uuid?", "kind": "text", "target_price": "bigint?", "reference_price": "bigint?", "state": "text", "triggered_at": "timestamptz?", "triggered_price": "bigint?", "paused_reason": "text?", "last_notified_at": "timestamptz?", "created_at": "timestamptz" }, "indexes": ["(product_id, kind, state)", "(customer_id, state)"] }
   ],
   "stateMachines": [
@@ -136,12 +136,12 @@
     { "name": "wishlist.evaluate-alerts", "schedule": "every 10 min", "does": "Batch-evaluate alert conditions changed by recent events, apply cooldown, publish wishlist.alert.triggered" }
   ],
   "settings": [
-    { "key": "maxLists", "default": 10, "desc": "Lists per customer" },
-    { "key": "maxItemsPerList", "default": 500, "desc": "Items per list" },
-    { "key": "maxActiveAlerts", "default": 100, "desc": "Active alerts per customer" },
-    { "key": "alertCooldownHours", "default": 24, "desc": "Minimum time between notices for the same alert" },
-    { "key": "priceHintDays", "default": 30, "desc": "Window for Lowest in N days" },
-    { "key": "minDropPct", "default": 1, "desc": "Smallest drop that counts for 'any drop'" }
+    { "key": "maxLists", "type": "int", "default": 10, "desc": "Lists per customer", "min": 1 },
+    { "key": "maxItemsPerList", "type": "int", "default": 500, "desc": "Items per list", "min": 1 },
+    { "key": "maxActiveAlerts", "type": "int", "default": 100, "desc": "Active alerts per customer", "min": 0 },
+    { "key": "alertCooldownHours", "type": "duration", "default": 24, "desc": "Minimum time between notices for the same alert", "unit": "hours", "min": 1 },
+    { "key": "priceHintDays", "type": "duration", "default": 30, "desc": "Window for Lowest in N days", "unit": "days", "min": 1 },
+    { "key": "minDropPct", "type": "number", "default": 1, "desc": "Smallest drop that counts for 'any drop'", "min": 0, "max": 100, "unit": "%" }
   ],
   "integrations": [],
   "errorCodes": {

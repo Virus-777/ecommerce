@@ -1645,8 +1645,8 @@ Indexes: `(email)`, `(state, expires_at)`
 | `sellers.application.decided` | Approved or rejected | `{ applicationId: uuid, sellerId: uuid, outcome: enum(approved|rejected), reasonCode: string?, decidedBy: string }` | notifications, workqueues |
 | `sellers.seller.approved` | The seller account is approved | `{ sellerId: uuid, applicationId: uuid, storeName: string, ownerAccountId: uuid, categoryIds: uuid[], returnAddress: Address, returnContact: string, recommendedHoldDays: int? }` | finance, returns, search |
 | `sellers.seller.restricted` | A restriction becomes active (also at approval with conditions) | `{ sellerId: uuid, restrictionId: uuid, reasonCode: string, reason: text, affectedActivities: enum(new_listings|product_submissions|new_offers|offer_reactivation|sales|advertising|promotions|payout_schedule)[], scope: RestrictionScope, categoryIds: uuid[], appealRoute: text, appealDeadline: datetime, reviewDate: date, trustReportId: uuid?, trustEnforcementId: uuid? }` | advertising, cart, catalog, notifications, offers, orders, promotions, search, shipping, support, trust |
-| `sellers.restriction.updated` | An active restriction's scope, activities or dates change | `{ sellerId: uuid, restrictionId: uuid, affectedActivities: enum(new_listings|product_submissions|new_offers|offer_reactivation|sales|advertising|promotions|payout_schedule)[], scope: RestrictionScope, reviewDate: date }` | offers |
-| `sellers.restriction.lifted` | A restriction is lifted, expires or is overturned | `{ sellerId: uuid, restrictionId: uuid, reason: text, trustEnforcementId: uuid? }` | offers |
+| `sellers.restriction.updated` | An active restriction's scope, activities or dates change | `{ sellerId: uuid, restrictionId: uuid, affectedActivities: enum(new_listings|product_submissions|new_offers|offer_reactivation|sales|advertising|promotions|payout_schedule)[], scope: RestrictionScope, reviewDate: date }` | offers, workqueues |
+| `sellers.restriction.lifted` | A restriction is lifted, expires or is overturned | `{ sellerId: uuid, restrictionId: uuid, reason: text, trustEnforcementId: uuid? }` | offers, workqueues |
 | `sellers.restriction.evidence_submitted` | A seller uploads documents to resolve a restriction | `{ sellerId: uuid, restrictionId: uuid }` | workqueues |
 | `sellers.seller.suspended` | A suspension takes effect after second review | `{ sellerId: uuid, suspensionId: uuid, reasonCode: string, reason: text, reviewDate: date, openOrders: enum(seller_keeps_fulfilling|cancel_unshipped_and_refund), appealDeadline: datetime, trustReportId: uuid? }` | advertising, cart, catalog, content, finance, fulfillment-service, notifications, offers, promotions, returns, search, trust |
 | `sellers.seller.reinstated` | A suspension ends or the last restriction is lifted, so the account is back to approved (or restricted with remaining restrictions) | `{ sellerId: uuid, from: enum(restricted|suspended), to: enum(approved|restricted), liftedRestrictionId: uuid?, endedSuspensionId: uuid?, remainingRestrictionIds: uuid[] }` | catalog, notifications, offers, search |
@@ -1785,25 +1785,25 @@ Checked through the access module (limits per role, second reviewer).
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| applicationsOpen | `false` | Invite-only at launch; true opens applications to everyone |
-| decisionTargetBusinessDays | `5` | Target from submission to decision |
-| infoRequestDefaultDays | `14` | Default reply window for information requests |
-| infoReminderDaysBefore | `3` | Reminder before the information deadline |
-| appealWindowDays | `14` | Days a seller has to appeal |
-| appealDecisionBusinessDays | `5` | Target to decide an appeal |
-| documentRetentionDays | `90` | ID documents and rejected application documents are deleted after this |
-| invitationValidDays | `7` | Seller member invitation lifetime |
-| sellerInvitationValidDays | `30` | Invitation to apply lifetime |
-| performanceWindowDays | `30` | Window for performance metrics |
-| violationWindowDays | `90` | Window for policy violations |
-| defaultTargets | `{"dispatch_reliability":95,"cancellation_rate":2.5,"valid_tracking":95,"return_rate":8,"response_time_hours":24,"unresolved_cases_past_deadline":0,"policy_violations":0}` | Example targets until the business confirms them |
-| riskReviewCategories | `["e-bike batteries","high-value electronics"]` | Product plans that are referred to Trust and Risk automatically |
-| introMaxChars | `400` | Storefront introduction length |
-| maxCollections | `6` | Featured collections per storefront |
-| claimReviewBusinessDays | `2` | Target to review store name changes and public claims |
-| launchReviewBusinessDays | `1` | Target for the launch readiness review |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| applicationsOpen | `false` | bool, approval: business owner | Invite-only at launch; true opens applications to everyone |
+| decisionTargetBusinessDays | `5` | duration, business days, 1–… | Target from submission to decision |
+| infoRequestDefaultDays | `14` | duration, days, 1–…, seller-visible | Default reply window for information requests |
+| infoReminderDaysBefore | `3` | duration, days, 0–… | Reminder before the information deadline |
+| appealWindowDays | `14` | duration, days, 7–…, approval: second reviewer, seller-visible | Days a seller has to appeal |
+| appealDecisionBusinessDays | `5` | duration, business days, 1–…, seller-visible | Target to decide an appeal |
+| documentRetentionDays | `90` | duration, days, 30–…, approval: second reviewer | ID documents and rejected application documents are deleted after this |
+| invitationValidDays | `7` | duration, days, 1–30 | Seller member invitation lifetime |
+| sellerInvitationValidDays | `30` | duration, days, 1–… | Invitation to apply lifetime |
+| performanceWindowDays | `30` | duration, days, 7–…, approval: second reviewer, seller-visible | Window for performance metrics |
+| violationWindowDays | `90` | duration, days, 30–…, approval: second reviewer, seller-visible | Window for policy violations |
+| defaultTargets | `{"dispatch_reliability":95,"cancellation_rate":2.5,"valid_tracking":95,"return_rate":8,"response_time_hours":24,"unresolved_cases_past_deadline":0,"policy_violations":0}` | json, approval: second reviewer, seller-visible | Example targets until the business confirms them |
+| riskReviewCategories | `["e-bike batteries","high-value electronics"]` | json | Product plans that are referred to Trust and Risk automatically |
+| introMaxChars | `400` | int, characters, 1–…, seller-visible | Storefront introduction length |
+| maxCollections | `6` | int, 0–…, seller-visible | Featured collections per storefront |
+| claimReviewBusinessDays | `2` | duration, business days, 1–…, seller-visible | Target to review store name changes and public claims |
+| launchReviewBusinessDays | `1` | duration, business days, 1–…, seller-visible | Target for the launch readiness review |
 
 ## Integrations
 - **Identity and business verification provider (KYC/KYB)**: Photo ID match, business registry lookup, tax id match and sanctions screening; results arrive by webhook

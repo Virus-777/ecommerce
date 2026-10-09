@@ -41,9 +41,9 @@
   ],
   "types": {
     "Recipient": {
-      "kind": "enum(customer|guest_email|seller|seller_member|staff_role|staff_member)",
+      "kind": { "type": "enum(customer|guest_email|seller|seller_member|staff_role|staff_member|external_email)", "desc": "external_email: a contact outside Marketly (supplier, rights owner, scheduled-report address); email only, essential topics only" },
       "accountId": { "type": "uuid?", "desc": "Identity account (customer, seller member, staff member)" },
-      "email": { "type": "email?", "desc": "Guests (checkout email)" },
+      "email": { "type": "email?", "desc": "Guests (checkout email) and external_email recipients" },
       "sellerId": { "type": "uuid?", "desc": "seller: all members who should get this topic; seller_member: one member" },
       "memberId": "uuid?",
       "roleKey": { "type": "string?", "desc": "staff_role: resolved through access (lead, or covering backup)" }
@@ -117,7 +117,7 @@
     "TemplateVariable": { "name": { "type": "string", "desc": "order.ref, seller.name, tracking.url…" }, "desc": "string", "example": "string", "required": { "type": "bool", "desc": "e.g. the link variable: every notice must link to its record" } },
     "Topic": {
       "key": { "type": "string", "desc": "customer.shipment.dispatched, seller.dispatch.reminder, staff.approval.waiting…" },
-      "audience": "enum(customer|seller|staff)",
+      "audience": { "type": "enum(customer|seller|staff|external)", "desc": "external: suppliers and rights owners, by email only" },
       "category": "enum(essential|optional|promotional)",
       "group": "string",
       "label": "string",
@@ -535,7 +535,16 @@
       { "name": "workqueues.item.resolved", "does": "Resolve the action notices for that work item" },
       { "name": "settings.change.scheduled", "does": "Sellers (seller-visible changes): upcoming platform change with its effective date" },
       { "name": "audit.integrity.failed", "does": "Staff: urgent notice to Platform Administrator and Business Owner" },
-      { "name": "reports.export.ready", "does": "Export ready to the requester (staff or seller member), including audit, orders and module list exports" }
+      { "name": "reports.export.ready", "does": "Export ready to the requester (staff or seller member), including audit, orders and module list exports" },
+      { "name": "reports.scheduled_report.ready", "does": "Phase 2: each recipient address (external_email, topic staff.report.scheduled, email only): the scheduled report with its download link and expiry" },
+      { "name": "purchasing.purchase_order.sent", "does": "Supplier (external_email, topic supplier.purchase_order.sent, email only) when emailSupplier is true and supplierEmail is set: the purchase order with its lines, delivery location and the buyer's message; in-app copy to the Purchasing Manager role" },
+      { "name": "wallet.credit.expiring", "does": "Customer (account group, topic customer.credit.expiring): unused store credit amount and expiry date, with a link to shop" },
+      { "name": "workqueues.day_end.prepared", "does": "Staff (topic staff.day_end.summary, to roleKeys): today's day-end review is ready with open and overdue counts and the due time; action required" },
+      { "name": "advertising.campaign.ending_soon", "does": "Seller (members with advertising permission, topic seller.campaign.ending_soon) for seller campaigns; staff (ownerStaffId, else the Advertising Manager role; topic staff.campaign.ending_soon) for own and brand campaigns: ends on endsAt, renew or let it finish" },
+      { "name": "content.article.review_due", "does": "Staff (ownerStaffId, else the Content Manager role; topic staff.article.review_due): help article due for review, action required" },
+      { "name": "reviews.moderation.decided", "does": "Reporters (topic customer.review_report.decided, seller variant for sellers): reporterOutcome; author (topic customer.review.moderated, seller.content.moderated for responses and answers): kept, edited or removed with the reason and appealUntil" },
+      { "name": "trust.report.resolved", "does": "Each reporter (customers and sellers in-app and email, rights owners by external_email; topic trust.report.resolved): the reporterOutcome text, never the reported party's details" },
+      { "name": "trust.rights_report.received", "does": "Rights owner (external_email, topic rights_owner.report.received): confirmation with the TR reference and what happens next" }
     ]
   },
   "permissions": [
@@ -558,16 +567,16 @@
     { "name": "notifications.purge", "schedule": "daily", "does": "Delete notices older than noticeRetentionMonths and delivery rows older than deliveryLogRetentionDays; expire unresolved action notices whose records closed" }
   ],
   "settings": [
-    { "key": "noticeRetentionMonths", "default": 12, "desc": "Notices are kept for 12 months (seller inbox copy)" },
-    { "key": "deliveryLogRetentionDays", "default": 180, "desc": "Delivery log retention" },
-    { "key": "maxDeliveryAttempts", "default": 6, "desc": "Attempts before a delivery fails" },
-    { "key": "retryBackoffMinutes", "default": [1, 5, 15, 60, 240], "desc": "Delay before each retry" },
-    { "key": "dedupeWindowMinutes", "default": 30, "desc": "Same dedupeKey and recipient is sent once in this window" },
-    { "key": "senders", "default": { "orders": "Marketly Orders <orders@marketly.example>", "account": "Marketly <no-reply@marketly.example>", "sellers": "Marketly Seller Center <sellers@marketly.example>", "promotions": "Marketly Deals <deals@marketly.example>" }, "desc": "From addresses per topic family" },
-    { "key": "replyDomain", "default": "reply.marketly.example", "desc": "Domain for reply-to tokens on case and message emails" },
-    { "key": "testSendDomains", "default": ["marketly.example"], "desc": "Test sends only to these domains" },
-    { "key": "sellerDispatchReminderHours", "default": 4, "desc": "Hours before the dispatch deadline for the seller reminder (scheduled when shipping or orders call schedule)" },
-    { "key": "promotionalQuietHours", "default": { "from": "21:00", "to": "08:00" }, "desc": "No promotional SMS or push in this local window" }
+    { "key": "noticeRetentionMonths", "type": "duration", "default": 12, "desc": "Notices are kept for 12 months (seller inbox copy)", "unit": "months", "min": 1 },
+    { "key": "deliveryLogRetentionDays", "type": "duration", "default": 180, "desc": "Delivery log retention", "unit": "days", "min": 30 },
+    { "key": "maxDeliveryAttempts", "type": "int", "default": 6, "desc": "Attempts before a delivery fails", "min": 1, "max": 20 },
+    { "key": "retryBackoffMinutes", "type": "json", "default": [1, 5, 15, 60, 240], "desc": "Delay before each retry" },
+    { "key": "dedupeWindowMinutes", "type": "duration", "default": 30, "desc": "Same dedupeKey and recipient is sent once in this window", "unit": "minutes", "min": 0 },
+    { "key": "senders", "type": "json", "default": { "orders": "Marketly Orders <orders@marketly.example>", "account": "Marketly <no-reply@marketly.example>", "sellers": "Marketly Seller Center <sellers@marketly.example>", "promotions": "Marketly Deals <deals@marketly.example>" }, "desc": "From addresses per topic family", "approval": "second_reviewer" },
+    { "key": "replyDomain", "type": "string", "default": "reply.marketly.example", "desc": "Domain for reply-to tokens on case and message emails", "approval": "second_reviewer" },
+    { "key": "testSendDomains", "type": "json", "default": ["marketly.example"], "desc": "Test sends only to these domains", "approval": "second_reviewer" },
+    { "key": "sellerDispatchReminderHours", "type": "duration", "default": 4, "desc": "Hours before the dispatch deadline for the seller reminder (scheduled when shipping or orders call schedule)", "unit": "hours", "min": 1, "sellerVisible": true },
+    { "key": "promotionalQuietHours", "type": "json", "default": { "from": "21:00", "to": "08:00" }, "desc": "No promotional SMS or push in this local window", "approval": "second_reviewer" }
   ],
   "integrations": [
     { "name": "Transactional email provider (e.g. Amazon SES, Postmark)", "purpose": "Send email, delivery/bounce/complaint webhooks, inbound parse for replies; DKIM/SPF/DMARC on the sending domains; List-Unsubscribe headers on promotional mail" },

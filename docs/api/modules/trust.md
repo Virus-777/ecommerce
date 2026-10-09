@@ -88,6 +88,16 @@ Trust and Risk's case file: reports of counterfeit goods, suspicious orders, fak
 
 ## Types
 
+### ReportReporter
+
+| Field | Type |
+|---|---|
+| kind | `enum(customer|seller|rights_owner)` |
+| customerId | `uuid?` |
+| sellerId | `uuid?` |
+| contactName | `string?` |
+| contactEmail | `email?` Rights owners, and guests who reported by email |
+
 ### StaffRef
 
 | Field | Type |
@@ -661,7 +671,8 @@ Indexes: `(kind, at)`, `(subject_type, subject_id, at)`
 |---|---|---|---|
 | `trust.report.created` | A report is opened by a person, a detector or a referral | `{ reportId: uuid, ref: string, type: string, source: string, riskScore: int, subjects: json[] }` | notifications, workqueues |
 | `trust.report.escalated` | A report is escalated | `{ reportId: uuid, reason: text }` | - |
-| `trust.report.resolved` | A report is resolved or dismissed (reporters are told the outcome) | `{ reportId: uuid, outcome: string, reporterOutcome: text? }` | workqueues |
+| `trust.report.resolved` | A report is resolved or dismissed (reporters are told the outcome) | `{ reportId: uuid, ref: string, outcome: string, reporterOutcome: text?, reporters: ReportReporter[] }` | notifications, workqueues |
+| `trust.rights_report.received` | A rights owner submits a report through the public form | `{ reportId: uuid, ref: string, brandName: string, contactName: string, contactEmail: email }` | notifications |
 | `trust.evidence.requested` | Proof is requested from a seller or customer | `{ requestId: uuid, reportId: uuid, toType: string, toId: uuid, dueAt: datetime }` | - |
 | `trust.evidence.received` | The reported party sends proof | `{ requestId: uuid, reportId: uuid }` | - |
 | `trust.recommendation.routed` | A recommendation is sent to its owner team | `{ recommendationId: uuid, reportId: uuid, action: string, ownerTeam: string, ownerRole: string, targets: json[] }` | workqueues |
@@ -757,17 +768,17 @@ Checked through the access module (limits per role, second reviewer).
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| riskThresholds | `{"medium":40,"high":70}` | Score bands for low, medium, high |
-| highRiskDeadlineHours | `24` | Investigation deadline for high-risk reports |
-| defaultDeadlineHours | `72` | Investigation deadline for other reports |
-| appealWindowDays | `14` | Days to appeal a trust enforcement |
-| appealDecisionDays | `7` | Target to decide an appeal |
-| evidenceRequestDays | `5` | Default deadline for proof requests |
-| executionGraceMinutes | `60` | Time for an owner module to confirm execution |
-| reporterRateLimitPerDay | `20` | Reports per customer or seller per day |
-| evidenceRetentionDays | `730` | How long evidence is kept after resolution |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| riskThresholds | `{"medium":40,"high":70}` | json, approval: second reviewer | Score bands for low, medium, high |
+| highRiskDeadlineHours | `24` | duration, hours, 1–…, approval: second reviewer | Investigation deadline for high-risk reports |
+| defaultDeadlineHours | `72` | duration, hours, 1–…, approval: second reviewer | Investigation deadline for other reports |
+| appealWindowDays | `14` | duration, days, 1–…, approval: second reviewer, seller-visible | Days to appeal a trust enforcement |
+| appealDecisionDays | `7` | duration, days, 1–…, approval: second reviewer | Target to decide an appeal |
+| evidenceRequestDays | `5` | duration, days, 1–…, approval: second reviewer, seller-visible | Default deadline for proof requests |
+| executionGraceMinutes | `60` | duration, minutes, 1–… | Time for an owner module to confirm execution |
+| reporterRateLimitPerDay | `20` | int, 1–… | Reports per customer or seller per day |
+| evidenceRetentionDays | `730` | duration, days, 365–…, approval: business owner | How long evidence is kept after resolution |
 
 ## Integrations
 - **Brand registry lookups (optional)**: Check serial numbers against brand owner registries for counterfeit reports

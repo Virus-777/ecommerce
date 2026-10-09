@@ -408,6 +408,7 @@
       { "name": "content.page.unpublished", "when": "A page is unpublished or reaches its removal time", "payload": { "pageId": "uuid", "slug": "string", "reason": "text?" } },
       { "name": "content.page.removed", "when": "A correction or removal action takes content down", "payload": { "entity": "string", "entityId": "uuid", "kind": "enum(correction|removal)", "reason": "text" } },
       { "name": "content.article.published", "when": "A help article version goes live", "payload": { "articleId": "uuid", "slug": "string", "version": "int" } },
+      { "name": "content.article.review_due", "when": "A published help article has not been reviewed for articleReviewDays (daily, once per review period)", "payload": { "articleId": "uuid", "slug": "string", "title": "string", "ownerStaffId": "uuid?", "lastReviewedAt": "datetime?", "dueSince": "datetime" } },
       { "name": "content.policy.submitted", "when": "A policy version is sent for approval", "payload": { "policyVersionId": "uuid", "policyKey": "string" } },
       { "name": "content.policy.scheduled", "when": "An approved policy version is published with an effective date (customers and sellers are notified when flagged)", "payload": { "policyVersionId": "uuid", "policyKey": "string", "version": "string", "effectiveAt": "datetime", "changeSummary": "text?", "notifyCustomers": "bool", "notifySellers": "bool" } },
       { "name": "content.policy.effective", "when": "A policy version takes effect and supersedes the previous one", "payload": { "policyVersionId": "uuid", "policyKey": "string", "version": "string", "supersededVersionId": "uuid?" } }
@@ -442,16 +443,16 @@
     { "name": "content.run-schedules", "schedule": "every 1 min", "does": "Publish and unpublish sections, pages and articles whose publishAt / unpublishAt has passed; record a homepage version when the visible layout changes" },
     { "name": "content.policy-effective", "schedule": "every 1 min", "does": "Scheduled policy versions past effectiveAt → current; previous → superseded" },
     { "name": "content.refresh-collections", "schedule": "hourly", "does": "Rebuild rule-based collections (best sellers hourly, new arrivals daily) and re-check availability of curated items, replacing or removing sold-out ones" },
-    { "name": "content.article-review-due", "schedule": "daily 07:00 market time", "does": "Flag articles not reviewed for articleReviewDays; notify their owners" },
+    { "name": "content.article-review-due", "schedule": "daily 07:00 market time", "does": "Flag articles not reviewed for articleReviewDays; publish content.article.review_due (notifications tells the owner)" },
     { "name": "content.cache-warm", "schedule": "every 5 min", "does": "Rebuild the resolved homepage for desktop, phone and app" }
   ],
   "settings": [
-    { "key": "marketTimeZone", "default": "America/Los_Angeles", "desc": "Default time zone for schedules" },
-    { "key": "policyNoticeDays", "default": 14, "desc": "Minimum days between publishing and the effective date of customer-facing policy changes" },
-    { "key": "articleReviewDays", "default": 90, "desc": "Articles older than this are flagged for review" },
-    { "key": "reviewRequired", "default": { "page": false, "section": false, "article": true }, "desc": "Whether the review step is required before publishing" },
-    { "key": "availabilityCheckMinutes", "default": 60, "desc": "How often curated collections re-check stock" },
-    { "key": "maxSectionProducts", "default": 24, "desc": "Products per homepage section" }
+    { "key": "marketTimeZone", "type": "string", "default": "America/Los_Angeles", "desc": "Default time zone for schedules" },
+    { "key": "policyNoticeDays", "type": "duration", "default": 14, "desc": "Minimum days between publishing and the effective date of customer-facing policy changes", "unit": "days", "min": 0, "approval": "business_owner" },
+    { "key": "articleReviewDays", "type": "duration", "default": 90, "desc": "Articles older than this are flagged for review", "unit": "days", "min": 1 },
+    { "key": "reviewRequired", "type": "json", "default": { "page": false, "section": false, "article": true }, "desc": "Whether the review step is required before publishing", "approval": "second_reviewer" },
+    { "key": "availabilityCheckMinutes", "type": "duration", "default": 60, "desc": "How often curated collections re-check stock", "unit": "minutes", "min": 5 },
+    { "key": "maxSectionProducts", "type": "int", "default": 24, "desc": "Products per homepage section", "min": 1 }
   ],
   "integrations": [],
   "errorCodes": {

@@ -11,6 +11,23 @@ import * as reports from './reports.js';
 
 /* ------------------------------------------------------------------ types */
 
+export interface ReportReporter {
+  kind: "customer" | "seller" | "rights_owner";
+  customerId?: string | null;
+  sellerId?: string | null;
+  contactName?: string | null;
+  /** Rights owners, and guests who reported by email */
+  contactEmail?: string | null;
+}
+
+export const ReportReporter: z.ZodType<ReportReporter> = z.object({
+  kind: z.enum(["customer", "seller", "rights_owner"]),
+  customerId: z.uuid().nullish(),
+  sellerId: z.uuid().nullish(),
+  contactName: z.string().nullish(),
+  contactEmail: z.email().describe("Rights owners, and guests who reported by email").nullish(),
+}).register(common.apiTypes, { id: "trust.ReportReporter" });
+
 export interface StaffRef {
   staffId: string;
   name: string;
@@ -612,14 +629,38 @@ export const TrustReportEscalatedEvent: z.ZodType<TrustReportEscalatedEvent> = z
 /** trust.report.resolved: A report is resolved or dismissed (reporters are told the outcome) */
 export interface TrustReportResolvedEvent {
   reportId: string;
+  ref: string;
   outcome: string;
   reporterOutcome?: string | null;
+  /** Reporters to tell (customers, sellers, rights owners; not staff or detectors) */
+  reporters: ReportReporter[];
 }
 
 export const TrustReportResolvedEvent: z.ZodType<TrustReportResolvedEvent> = z.object({
   reportId: z.uuid(),
+  ref: z.string(),
   outcome: z.string(),
   reporterOutcome: z.string().nullish(),
+  get reporters() {
+    return z.array(ReportReporter);
+  },
+});
+
+/** trust.rights_report.received: A rights owner submits a report through the public form */
+export interface TrustRightsReportReceivedEvent {
+  reportId: string;
+  ref: string;
+  brandName: string;
+  contactName: string;
+  contactEmail: string;
+}
+
+export const TrustRightsReportReceivedEvent: z.ZodType<TrustRightsReportReceivedEvent> = z.object({
+  reportId: z.uuid(),
+  ref: z.string(),
+  brandName: z.string(),
+  contactName: z.string(),
+  contactEmail: z.email(),
 });
 
 /** trust.evidence.requested: Proof is requested from a seller or customer */
@@ -1193,7 +1234,7 @@ export const endpoints = defineEndpoints({
     auth: "visitor",
     scope: "public",
     summary: "Brand or rights owner reports counterfeit listings",
-    desc: "Contact details and proof of rights are required; confirmed by email before review.",
+    desc: "Contact details and proof of rights are required. The contact gets an email confirmation with the reference (trust.rights_report.received) before review.",
     body: () => z.object({
       brandName: z.string(),
       contactName: z.string(),
@@ -1208,7 +1249,7 @@ export const endpoints = defineEndpoints({
     }),
     status: 202,
     errors: ["VALIDATION_FAILED","RATE_LIMITED"],
-    events: ["trust.report.created"],
+    events: ["trust.report.created","trust.rights_report.received"],
     phase: 2,
   },
   getTrustOverview: {
@@ -2135,6 +2176,7 @@ export const spec = defineModuleSpec({
       "trust.report.created": { when: "A report is opened by a person, a detector or a referral", payload: () => TrustReportCreatedEvent },
       "trust.report.escalated": { when: "A report is escalated", payload: () => TrustReportEscalatedEvent },
       "trust.report.resolved": { when: "A report is resolved or dismissed (reporters are told the outcome)", payload: () => TrustReportResolvedEvent },
+      "trust.rights_report.received": { when: "A rights owner submits a report through the public form", payload: () => TrustRightsReportReceivedEvent },
       "trust.evidence.requested": { when: "Proof is requested from a seller or customer", payload: () => TrustEvidenceRequestedEvent },
       "trust.evidence.received": { when: "The reported party sends proof", payload: () => TrustEvidenceReceivedEvent },
       "trust.recommendation.routed": { when: "A recommendation is sent to its owner team", payload: () => TrustRecommendationRoutedEvent },
@@ -2197,39 +2239,72 @@ export const spec = defineModuleSpec({
         "medium": 40,
         "high": 70
       },
-      "desc": "Score bands for low, medium, high"
+      "desc": "Score bands for low, medium, high",
+      "type": "json",
+      "approval": "second_reviewer"
     },
     "highRiskDeadlineHours": {
       "default": 24,
-      "desc": "Investigation deadline for high-risk reports"
+      "desc": "Investigation deadline for high-risk reports",
+      "type": "duration",
+      "min": 1,
+      "unit": "hours",
+      "approval": "second_reviewer"
     },
     "defaultDeadlineHours": {
       "default": 72,
-      "desc": "Investigation deadline for other reports"
+      "desc": "Investigation deadline for other reports",
+      "type": "duration",
+      "min": 1,
+      "unit": "hours",
+      "approval": "second_reviewer"
     },
     "appealWindowDays": {
       "default": 14,
-      "desc": "Days to appeal a trust enforcement"
+      "desc": "Days to appeal a trust enforcement",
+      "type": "duration",
+      "min": 1,
+      "unit": "days",
+      "approval": "second_reviewer",
+      "sellerVisible": true
     },
     "appealDecisionDays": {
       "default": 7,
-      "desc": "Target to decide an appeal"
+      "desc": "Target to decide an appeal",
+      "type": "duration",
+      "min": 1,
+      "unit": "days",
+      "approval": "second_reviewer"
     },
     "evidenceRequestDays": {
       "default": 5,
-      "desc": "Default deadline for proof requests"
+      "desc": "Default deadline for proof requests",
+      "type": "duration",
+      "min": 1,
+      "unit": "days",
+      "approval": "second_reviewer",
+      "sellerVisible": true
     },
     "executionGraceMinutes": {
       "default": 60,
-      "desc": "Time for an owner module to confirm execution"
+      "desc": "Time for an owner module to confirm execution",
+      "type": "duration",
+      "min": 1,
+      "unit": "minutes"
     },
     "reporterRateLimitPerDay": {
       "default": 20,
-      "desc": "Reports per customer or seller per day"
+      "desc": "Reports per customer or seller per day",
+      "type": "int",
+      "min": 1
     },
     "evidenceRetentionDays": {
       "default": 730,
-      "desc": "How long evidence is kept after resolution"
+      "desc": "How long evidence is kept after resolution",
+      "type": "duration",
+      "min": 365,
+      "unit": "days",
+      "approval": "business_owner"
     }
   },
   errorCodes: {
@@ -2841,6 +2916,7 @@ declare module '../kernel/events/event-map.js' {
     "trust.report.created": TrustReportCreatedEvent;
     "trust.report.escalated": TrustReportEscalatedEvent;
     "trust.report.resolved": TrustReportResolvedEvent;
+    "trust.rights_report.received": TrustRightsReportReceivedEvent;
     "trust.evidence.requested": TrustEvidenceRequestedEvent;
     "trust.evidence.received": TrustEvidenceReceivedEvent;
     "trust.recommendation.routed": TrustRecommendationRoutedEvent;

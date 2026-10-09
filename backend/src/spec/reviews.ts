@@ -9,6 +9,17 @@ import * as common from './common.js';
 
 /* ------------------------------------------------------------------ types */
 
+export interface ContentParty {
+  kind: "customer" | "seller";
+  /** Customers-module id or seller id */
+  id: string;
+}
+
+export const ContentParty: z.ZodType<ContentParty> = z.object({
+  kind: z.enum(["customer", "seller"]),
+  id: z.uuid().describe("Customers-module id or seller id"),
+}).register(common.apiTypes, { id: "reviews.ContentParty" });
+
 export interface Author {
   kind: "customer" | "seller" | "staff";
   displayName: string;
@@ -1132,6 +1143,14 @@ export interface ReviewsModerationDecidedEvent {
   contentId: string;
   decision: string;
   reasonCode: string;
+  /** Who wrote the content; null when it is gone */
+  author?: ContentParty | null;
+  /** Everyone whose report was decided */
+  reporters: ContentParty[];
+  /** What reporters are told */
+  reporterOutcome?: string | null;
+  /** The author may appeal until then (removals) */
+  appealUntil?: string | null;
 }
 
 export const ReviewsModerationDecidedEvent: z.ZodType<ReviewsModerationDecidedEvent> = z.object({
@@ -1140,6 +1159,14 @@ export const ReviewsModerationDecidedEvent: z.ZodType<ReviewsModerationDecidedEv
   contentId: z.uuid(),
   decision: z.string(),
   reasonCode: z.string(),
+  get author() {
+    return ContentParty.nullish();
+  },
+  get reporters() {
+    return z.array(ContentParty);
+  },
+  reporterOutcome: z.string().describe("What reporters are told").nullish(),
+  appealUntil: z.iso.datetime({ offset: true }).describe("The author may appeal until then (removals)").nullish(),
 });
 
 /** reviews.appeal.submitted: An author appeals */
@@ -2522,58 +2549,103 @@ export const spec = defineModuleSpec({
   settings: {
     "minReviewLength": {
       "default": 50,
-      "desc": "Characters for a written review"
+      "desc": "Characters for a written review",
+      "type": "int",
+      "min": 0,
+      "unit": "characters"
     },
     "maxReviewPhotos": {
       "default": 6,
-      "desc": "Photos per review"
+      "desc": "Photos per review",
+      "type": "int",
+      "min": 0,
+      "max": 20
     },
     "reviewWindowDays": {
       "default": 365,
-      "desc": "Days after delivery to write a review"
+      "desc": "Days after delivery to write a review",
+      "type": "duration",
+      "min": 30,
+      "unit": "days"
     },
     "sellerFeedbackWindowDays": {
       "default": 90,
-      "desc": "Days after delivery to leave seller feedback"
+      "desc": "Days after delivery to leave seller feedback",
+      "type": "duration",
+      "min": 1,
+      "unit": "days",
+      "sellerVisible": true
     },
     "responseEditDays": {
       "default": 7,
-      "desc": "Seller can edit a public response for this long"
+      "desc": "Seller can edit a public response for this long",
+      "type": "duration",
+      "min": 0,
+      "unit": "days",
+      "sellerVisible": true
     },
     "appealWindowDays": {
       "default": 30,
-      "desc": "Days to appeal a moderation decision"
+      "desc": "Days to appeal a moderation decision",
+      "type": "duration",
+      "min": 1,
+      "unit": "days"
     },
     "hideOnReportReasons": {
       "default": [
         "personal_information",
         "hate_or_harassment"
       ],
-      "desc": "Report reasons that hide content while it is reviewed"
+      "desc": "Report reasons that hide content while it is reviewed",
+      "type": "json",
+      "approval": "second_reviewer"
     },
     "inviteDelayDays": {
       "default": 5,
-      "desc": "Ask for a review this long after delivery"
+      "desc": "Ask for a review this long after delivery",
+      "type": "duration",
+      "min": 0,
+      "unit": "days"
     },
     "sellerRatingPeriodMonths": {
       "default": 12,
-      "desc": "Period for the seller positive percentage"
+      "desc": "Period for the seller positive percentage",
+      "type": "duration",
+      "min": 1,
+      "unit": "months",
+      "approval": "second_reviewer",
+      "sellerVisible": true
     },
     "positiveThreshold": {
       "default": 4,
-      "desc": "Overall rating counted as positive (4–5); 3 is neutral"
+      "desc": "Overall rating counted as positive (4–5); 3 is neutral",
+      "type": "int",
+      "min": 1,
+      "max": 5,
+      "approval": "second_reviewer",
+      "sellerVisible": true
     },
     "moderationTargetHours": {
       "default": 48,
-      "desc": "Decision target for reported content (example)"
+      "desc": "Decision target for reported content (example)",
+      "type": "duration",
+      "min": 1,
+      "unit": "hours"
     },
     "reportCooldownDays": {
       "default": 30,
-      "desc": "Repeat reports on decided content attach without reopening"
+      "desc": "Repeat reports on decided content attach without reopening",
+      "type": "duration",
+      "min": 0,
+      "unit": "days"
     },
     "questionAnswerTargetBusinessDays": {
       "default": 1,
-      "desc": "Expected answer time shown under unanswered questions (Question.answerExpectation), example"
+      "desc": "Expected answer time shown under unanswered questions (Question.answerExpectation), example",
+      "type": "duration",
+      "min": 1,
+      "unit": "business days",
+      "sellerVisible": true
     }
   },
   errorCodes: {

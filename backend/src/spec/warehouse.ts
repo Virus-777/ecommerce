@@ -1885,33 +1885,48 @@ export const spec = defineModuleSpec({
   settings: {
     "requireBinScan": {
       "default": true,
-      "desc": "Pickers must scan the bin before the item"
+      "desc": "Pickers must scan the bin before the item",
+      "type": "bool",
+      "approval": "second_reviewer"
     },
     "requireItemScan": {
       "default": true,
-      "desc": "Every unit is scanned at pick and pack"
+      "desc": "Every unit is scanned at pick and pack",
+      "type": "bool",
+      "approval": "second_reviewer"
     },
     "autoWaveEnabled": {
       "default": false,
-      "desc": "Create waves automatically"
+      "desc": "Create waves automatically",
+      "type": "bool"
     },
     "carrierPickupTimes": {
       "default": [
         "16:00"
       ],
-      "desc": "Daily carrier pickups (market time) used for waves and ship-by"
+      "desc": "Daily carrier pickups (market time) used for waves and ship-by",
+      "type": "json"
     },
     "atRiskMinutes": {
       "default": 60,
-      "desc": "Minutes before ship-by when an unpacked order is at risk"
+      "desc": "Minutes before ship-by when an unpacked order is at risk",
+      "type": "duration",
+      "min": 0,
+      "unit": "minutes"
     },
     "weightUnit": {
       "default": "lb",
-      "desc": "Scale unit"
+      "desc": "Scale unit",
+      "type": "enum",
+      "choices": [
+        "lb",
+        "kg"
+      ]
     },
     "packingSlipShowsPrices": {
       "default": false,
-      "desc": "Packing slips list items and quantities only"
+      "desc": "Packing slips list items and quantities only",
+      "type": "bool"
     }
   },
   errorCodes: {

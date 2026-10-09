@@ -79,7 +79,7 @@
     "WorkItem": {
       "id": "uuid", "ref": { "type": "string", "desc": "e.g. WQ-261008-0042" },
       "queueKey": "string", "queueName": "string", "area": "string",
-      "kind": { "type": "enum(overdue_dispatch|missing_tracking|delivery_exception|seller_cannot_fulfill|low_stock|receiving|pick_pack|return_inspection|return_decision|approval_waiting|case_past_target|case_escalated|payout_failed|payment_check|payment_mismatch|chargeback|hold_review|product_review|application_waiting|launch_review|appeal_due|restriction_review|restriction_evidence|seller_performance|storefront_review|trust_report|trust_recommendation|data_request|seller_reply_overdue|manual_task)", "desc": "What kind of work" },
+      "kind": { "type": "enum(overdue_dispatch|missing_tracking|delivery_exception|seller_cannot_fulfill|low_stock|receiving|pick_pack|return_inspection|return_decision|approval_waiting|case_past_target|case_escalated|payout_failed|payment_check|payment_mismatch|chargeback|hold_review|product_review|application_waiting|launch_review|appeal_due|restriction_review|restriction_evidence|seller_performance|storefront_review|trust_report|trust_recommendation|data_request|seller_reply_overdue|unexpected_return_parcel|return_parcel_overdue|manual_task)", "desc": "What kind of work; how each kind closes is in the notes" },
       "title": "string", "summary": "text?",
       "subject": "WorkSubject",
       "relatedSubjects": { "type": "WorkSubject[]", "desc": "Other records the item's actions use, e.g. the delivery_exception of an overdue_dispatch item (Remind seller calls POST /api/admin/shipping/exceptions/{id}/notify-seller with its id)" },
@@ -276,7 +276,8 @@
       { "name": "workqueues.item.escalated", "when": "An item reaches the next escalation step", "payload": { "itemId": "uuid", "queueKey": "string", "level": "int", "toKind": "enum(role|staff)", "to": "string", "reason": "string" } },
       { "name": "workqueues.item.resolved", "when": "An item is resolved or dismissed", "payload": { "itemId": "uuid", "queueKey": "string", "outcome": "string" } },
       { "name": "workqueues.queue.changed", "when": "Lead, backup or escalation route changes", "payload": { "queueKey": "string", "leadId": "uuid", "backupId": "uuid" } },
-      { "name": "workqueues.day_end.completed", "when": "The day-end review is completed", "payload": { "reviewId": "uuid", "date": "date", "openItems": "int" } }
+      { "name": "workqueues.day_end.completed", "when": "The day-end review is completed", "payload": { "reviewId": "uuid", "date": "date", "openItems": "int" } },
+      { "name": "workqueues.day_end.prepared", "when": "Today's day-end review is built (the day-end summary for dayEndSharedRoles)", "payload": { "reviewId": "uuid", "date": "date", "dueAt": "datetime", "openItems": "int", "overdueItems": "int", "roleKeys": { "type": "string[]", "desc": "dayEndSharedRoles: who receives the summary" } } }
     ],
     "consumes": [
       { "name": "shipping.dispatch.overdue", "does": "Open an overdue_dispatch item about the order (seller-visible for marketplace sellers) with the payload exceptionId as a related delivery_exception subject, so Remind seller can call shipping; resolves on shipping.shipment.dispatched or orders.item.cancelled" },
@@ -298,11 +299,14 @@
       { "name": "returns.refund.approved", "does": "Resolve return decision items for that return" },
       { "name": "finance.payout.failed", "does": "Open a payout_failed item (also listed in the day-end review)" },
       { "name": "finance.payout.paid", "does": "Resolve payout_failed items for that payout" },
-      { "name": "finance.reconciliation.mismatch_found", "does": "Open a payment_mismatch item in Daily finance checks" },
-      { "name": "payments.payment.pending_check", "does": "Open a payment_check item" },
+      { "name": "finance.reconciliation.mismatch_found", "does": "Open a payment_mismatch item in finance.payment_checks" },
+      { "name": "finance.reconciliation.item_closed", "does": "Resolve the payment_mismatch item for that reconciliation item (matched, explained or corrected)" },
+      { "name": "payments.payment.pending_check", "does": "Open a payment_check item in finance.payment_checks" },
       { "name": "payments.payment.captured", "does": "Resolve payment_check items" },
       { "name": "payments.payment.failed", "does": "Resolve payment_check items (the customer is told by payments)" },
-      { "name": "payments.chargeback.opened", "does": "Open a chargeback item for Finance" },
+      { "name": "payments.payment.authorized", "does": "Resolve the payment_check item when the pending check ends authorized (capture may come later)" },
+      { "name": "payments.chargeback.opened", "does": "Open a chargeback item in finance.chargebacks" },
+      { "name": "payments.chargeback.decided", "does": "Resolve the chargeback item (won, lost or conceded; inquiries that close without a chargeback end as won)" },
       { "name": "catalog.product.submitted", "does": "Open a product_review item" },
       { "name": "catalog.product.approved", "does": "Resolve product review items" },
       { "name": "catalog.product.changes_requested", "does": "Resolve product review items" },
@@ -310,13 +314,15 @@
       { "name": "sellers.application.submitted", "does": "Open an application_waiting item with the decision target as deadline" },
       { "name": "sellers.application.information_provided", "does": "Reopen the application item for review" },
       { "name": "sellers.application.decided", "does": "Resolve application items" },
-      { "name": "sellers.launch_review.requested", "does": "Open a launch_review item" },
+      { "name": "sellers.launch_review.requested", "does": "Open a launch_review item in sellers.launch_reviews" },
       { "name": "sellers.launch_review.decided", "does": "Resolve the launch review item" },
       { "name": "sellers.appeal.submitted", "does": "Open an appeal_due item with decideBy as deadline" },
       { "name": "sellers.appeal.decided", "does": "Resolve appeal items" },
-      { "name": "sellers.restriction.evidence_submitted", "does": "Open a restriction_evidence item for the Seller Manager" },
-      { "name": "sellers.performance.below_target", "does": "Open a seller_performance item" },
-      { "name": "sellers.change_request.submitted", "does": "Open a storefront_review item" },
+      { "name": "sellers.restriction.evidence_submitted", "does": "Open a restriction_evidence item in sellers.restrictions for the Seller Manager" },
+      { "name": "sellers.restriction.lifted", "does": "Resolve restriction_evidence and restriction_review items for that restriction (lifted, expired or overturned)" },
+      { "name": "sellers.restriction.updated", "does": "Resolve the restriction_evidence item: staff reviewed the evidence and changed the restriction instead of lifting it" },
+      { "name": "sellers.performance.below_target", "does": "Open or refresh a seller_performance item in sellers.performance (closed by hand once the follow-up is done; sellers publishes no back-on-target event)" },
+      { "name": "sellers.change_request.submitted", "does": "Open a storefront_review item in sellers.launch_reviews" },
       { "name": "sellers.change_request.decided", "does": "Resolve storefront review items" },
       { "name": "trust.report.created", "does": "Open a trust_report item (priority from risk score)" },
       { "name": "trust.report.resolved", "does": "Resolve trust report items" },
@@ -325,7 +331,8 @@
       { "name": "messaging.reply.overdue", "does": "Open a seller-visible seller_reply_overdue task" },
       { "name": "messaging.message.sent", "does": "Resolve seller_reply_overdue when the seller replies" },
       { "name": "customers.data_export.requested", "does": "Open a data_request item with the promised delivery time" },
-      { "name": "customers.data_export.ready", "does": "Resolve the data request item" }
+      { "name": "customers.data_export.ready", "does": "Resolve the data request item" },
+      { "name": "warehouse.return_parcel.received", "does": "Resolve the return_parcel_overdue item for that parcel" }
     ]
   },
   "permissions": [
@@ -342,16 +349,16 @@
     { "name": "workqueues.deadline-sweep", "schedule": "every 1 min", "does": "Move items to due_soon and overdue; publish workqueues.item.overdue once; escalate along each queue's route; route to the backup when the lead is away (access absences)" },
     { "name": "workqueues.routine-generate", "schedule": "daily 00:05 market time", "does": "Create today's routine checks from templates; mark yesterday's unfinished checks late" },
     { "name": "workqueues.routine-late", "schedule": "every 15 min", "does": "Mark routine checks past their due time as late" },
-    { "name": "workqueues.day-end-prepare", "schedule": "daily 15:00 market time", "does": "Build today's day-end review from open items and other modules' forecasts" },
+    { "name": "workqueues.day-end-prepare", "schedule": "daily 15:00 market time", "does": "Build today's day-end review from open items and other modules' forecasts; publish workqueues.day_end.prepared (the summary notifications sends)" },
     { "name": "workqueues.day-end-close", "schedule": "daily 23:59 market time", "does": "Mark an uncompleted review missed; snapshot daily_counts" },
     { "name": "workqueues.archive", "schedule": "monthly", "does": "Move resolved items older than itemRetentionDays to cold storage" }
   ],
   "settings": [
-    { "key": "dueSoonMinutes", "default": 60, "desc": "When an item turns due soon" },
-    { "key": "dayEndReviewTime", "default": "17:30", "desc": "Day-end review due time, market time" },
-    { "key": "dayEndSharedRoles", "default": ["order_manager", "shipping_manager", "inventory_manager", "warehouse_manager", "finance_manager", "customer_support_manager", "seller_manager", "advertising_manager"], "desc": "Who sees and receives the day-end review" },
-    { "key": "itemRetentionDays", "default": 400, "desc": "Resolved items kept online" },
-    { "key": "seedQueues", "default": ["shipping.overdue_dispatch", "shipping.missing_tracking", "shipping.delivery_exceptions", "orders.seller_cannot_fulfill", "warehouse.pick_pack", "purchasing.receiving", "returns.inspection", "returns.decisions", "finance.daily_checks", "finance.payout_failures", "support.cases_waiting", "catalog.product_review", "sellers.applications", "sellers.appeals", "sellers.performance", "trust.reports", "access.approvals", "customers.data_requests"], "desc": "Queues created at install with placeholder leads that must be set before launch" }
+    { "key": "dueSoonMinutes", "type": "duration", "default": 60, "desc": "When an item turns due soon", "unit": "minutes", "min": 0 },
+    { "key": "dayEndReviewTime", "type": "time", "default": "17:30", "desc": "Day-end review due time, market time" },
+    { "key": "dayEndSharedRoles", "type": "json", "default": ["order_manager", "shipping_manager", "inventory_manager", "warehouse_manager", "finance_manager", "customer_support_manager", "seller_manager", "advertising_manager"], "desc": "Who sees and receives the day-end review" },
+    { "key": "itemRetentionDays", "type": "duration", "default": 400, "desc": "Resolved items kept online", "unit": "days", "min": 30 },
+    { "key": "seedQueues", "type": "json", "default": ["shipping.overdue_dispatch", "shipping.missing_tracking", "shipping.delivery_exceptions", "orders.seller_cannot_fulfill", "warehouse.pick_pack", "warehouse.return_parcels", "purchasing.receiving", "inventory.low_stock", "returns.inspection", "returns.decisions", "finance.daily_checks", "finance.payment_checks", "finance.chargebacks", "finance.payout_failures", "support.cases_waiting", "catalog.product_review", "sellers.applications", "sellers.launch_reviews", "sellers.restrictions", "sellers.appeals", "sellers.performance", "trust.reports", "access.approvals", "customers.data_requests"], "desc": "Queues created at install with placeholder leads that must be set before launch", "editable": false }
   ],
   "integrations": [],
   "errorCodes": {
@@ -362,6 +369,8 @@
     "DAY_END_INCOMPLETE": { "status": 409, "meaning": "Some day-end items are not checked yet; details.items" }
   },
   "notes": [
+    "Queues per kind (seedQueues): payment_check and payment_mismatch → finance.payment_checks; chargeback → finance.chargebacks; payout_failed → finance.payout_failures; hold_review → finance.daily_checks; launch_review and storefront_review → sellers.launch_reviews; restriction_evidence and restriction_review → sellers.restrictions; appeal_due → sellers.appeals; seller_performance → sellers.performance; low_stock → inventory.low_stock; unexpected_return_parcel and return_parcel_overdue (raised by warehouse) → warehouse.return_parcels.",
+    "How kinds close: event-raised kinds close on the events listed under consumes (chargeback on payments.chargeback.decided, payment_mismatch on finance.reconciliation.item_closed, restriction_evidence on sellers.restriction.lifted or updated, return_parcel_overdue on warehouse.return_parcel.received). seller_performance and unexpected_return_parcel are closed by hand (resolve with a note). Kinds raised through raise() (receiving, pick_pack, return_inspection, hold_review, restriction_review) are closed by the raising module with resolveBySource, or by hand.",
     "Work queues never do the work: each item links to the owning module's screen and API. Most items close themselves when the source event arrives (resolvesOn), so a queue reflects reality without double entry.",
     "Every queue has a named lead, a different backup and an escalation route (plan ch. 2). Install creates seedQueues with placeholders; launch readiness requires real people. Who receives an item right now comes from access.resolveRecipients(ownerRole) (lead, or the first available backup while the lead is away); queue lead and backup default to the role's lead and backup and can be set per queue.",
     "Events consumed here use the canonical names; finance's daily reconciliation also calls raise() directly for checks that have no event. Modules without a matching event (e.g. warehouse pick-pack, purchasing receiving) call raise() and resolveBySource().",

@@ -5,7 +5,7 @@ import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import type { FastifyInstance } from 'fastify';
 import { moduleAuthorities, type Authorities } from './kernel/auth/authorities.js';
-import type { AuthChain, WebhookVerifier } from './kernel/auth/chain.js';
+import { REFRESH_COOKIE, type AuthChain, type WebhookVerifier } from './kernel/auth/chain.js';
 import { createAuthChain } from './kernel/auth/setup.js';
 import type { Principal } from './kernel/auth/index.js';
 import type { KeyRing } from './kernel/auth/tokens.js';
@@ -100,7 +100,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
       components: {
         securitySchemes: {
           bearer: { type: 'http', scheme: 'bearer', description: common.headers.Authorization },
-          refreshCookie: { type: 'apiKey', in: 'cookie', name: '__Host-mk_refresh', description: 'Website refresh token (HttpOnly). Android sends refreshToken in the body instead.' },
+          refreshCookie: { type: 'apiKey', in: 'cookie', name: REFRESH_COOKIE, description: 'Website refresh token (HttpOnly; Secure; SameSite=Strict; Path=/api/public/identity/sessions, sent only to refresh and sign-out). Android sends refreshToken in the body instead.' },
           appProof: { type: 'apiKey', in: 'header', name: 'X-App-Proof', description: common.headers['X-App-Proof'] },
           webhookSignature: { type: 'apiKey', in: 'header', name: 'X-Signature', description: 'Provider signature, verified per provider' },
         },

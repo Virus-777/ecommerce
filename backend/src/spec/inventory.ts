@@ -2453,11 +2453,11 @@ export const spec = defineModuleSpec({
       "inventory.transfer.received": { when: "Phase 4: a transfer is received", payload: () => InventoryTransferReceivedEvent },
     },
     consumes: {
-      "orders.order.accepted": "Allocate the order's held reservation lines to order items",
+      "orders.order.accepted": "Allocate the order's held reservation (reservationId) to its order items: each reservation line is matched to an entry of items by stockItemId and quantity, so allocation never depends on checkout's attachOrder (lines it already attached keep their orderItemId)",
       "orders.item.cancelled": "Release that item's held or allocated units back to Available",
       "shipping.shipment.dispatched": "Fulfil the allocated lines in the shipment (Reserved → leaves stock)",
-      "returns.return.received": "Official Store items: add the units to Returned at the receiving warehouse. Seller returns are recorded by sellers through adjustments.",
-      "returns.return.inspected": "Create a pending return stock outcome with the inspector's proposed outcome",
+      "returns.return.received": "Official Store items: add each listed item's units (items[].stockItemId, quantity) to Returned at the receiving warehouse, once per return item. Seller returns are recorded by sellers through adjustments.",
+      "returns.return.inspected": "Create a pending return stock outcome with the inspector's proposed outcome. The units stay in Returned until the outcome is recorded (restock → Available; damaged_stock, repair, return_to_supplier → Damaged or held; write_off → outside). Units that never arrived through returns.return.received are added to Returned first, so a missed event loses no stock",
       "warehouse.bin.assigned": "Update the stock item's primary bin code shown in stock lists",
       "offers.offer.status_changed": "Archive a seller stock item when its offer is removed (reserved units stay with their orders)",
       "sellers.seller.closed": "Archive the seller's stock items",
@@ -2489,27 +2489,53 @@ export const spec = defineModuleSpec({
   settings: {
     "holdMinutes": {
       "default": 15,
-      "desc": "Checkout hold lifetime"
+      "desc": "Checkout hold lifetime",
+      "type": "duration",
+      "min": 1,
+      "max": 60,
+      "unit": "minutes",
+      "sellerVisible": false
     },
     "pendingPaymentHoldMinutes": {
       "default": 60,
-      "desc": "Maximum hold extension while a payment result is being checked"
+      "desc": "Maximum hold extension while a payment result is being checked",
+      "type": "duration",
+      "min": 1,
+      "unit": "minutes",
+      "sellerVisible": false
     },
     "defaultLowStockThreshold": {
       "default": 3,
-      "desc": "Seller items without their own threshold"
+      "desc": "Seller items without their own threshold",
+      "type": "int",
+      "min": 0,
+      "sellerVisible": true
     },
     "lowStockAlertCooldownHours": {
       "default": 24,
-      "desc": "Minimum time between inventory.stock.low events for one item"
+      "desc": "Minimum time between inventory.stock.low events for one item",
+      "type": "duration",
+      "min": 1,
+      "unit": "hours",
+      "sellerVisible": false
     },
     "costingMethod": {
       "default": "weighted_average",
-      "desc": "Company stock valuation"
+      "desc": "Company stock valuation",
+      "type": "enum",
+      "choices": [
+        "weighted_average",
+        "fifo"
+      ],
+      "approval": "business_owner",
+      "sellerVisible": false
     },
     "allowSellerNegativeAvailable": {
       "default": false,
-      "desc": "Never sell beyond available quantity (plan ch. 9)"
+      "desc": "Never sell beyond available quantity (plan ch. 9)",
+      "type": "bool",
+      "sellerVisible": false,
+      "editable": false
     }
   },
   errorCodes: {

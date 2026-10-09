@@ -231,7 +231,8 @@
     "publishes": [
       { "name": "reports.metric.published", "when": "A metric definition version is published", "payload": { "metricKey": "string", "version": "int", "effectiveFrom": "date" } },
       { "name": "reports.export.requested", "when": "An export job is created (audit and abuse monitoring)", "payload": { "exportId": "uuid", "dataset": "string", "requestedBy": "Actor", "sellerId": "uuid?" } },
-      { "name": "reports.export.ready", "when": "An export file is ready (notifications tells the requester)", "payload": { "exportId": "uuid", "requestedBy": "Actor", "expiresAt": "datetime" } }
+      { "name": "reports.export.ready", "when": "An export file is ready (notifications tells the requester)", "payload": { "exportId": "uuid", "requestedBy": "Actor", "expiresAt": "datetime" } },
+      { "name": "reports.scheduled_report.ready", "when": "Phase 2: a scheduled report file is ready (notifications emails the schedule's recipients)", "payload": { "scheduleId": "uuid", "reportKey": "string", "reportTitle": "string", "exportId": "uuid", "format": "enum(pdf|csv)", "periodLabel": { "type": "string", "desc": "e.g. Week of Oct 5, 2026" }, "recipients": "email[]", "expiresAt": "datetime" } }
     ],
     "consumes": [
       { "name": "orders.order.placed", "does": "fact_order_items rows with placement date; fact_customers" },
@@ -282,18 +283,18 @@
     { "name": "reports.run-exports", "schedule": "every 1 min", "does": "Run queued export jobs in batches: call the owner module's exportRows(dataset, filters, principal, cursor) until nextCursor is empty (report results come from runReport), drop columns the requester may not see, write the file to media; publish reports.export.ready" },
     { "name": "reports.expire-exports", "schedule": "hourly", "does": "Expire ready exports after exportLinkHours and delete files" },
     { "name": "reports.pull-daily", "schedule": "daily 02:30 market time", "does": "Pull figures that have no event: search.zeroResultStats (unavailable searches), finance fee income per seller and day (finance.marketplaceIncomeByDay), advertising displays/clicks/dismissals and attributed purchases (advertising.dailyPerformance), inventory unit costs for Official Store items" },
-    { "name": "reports.run-schedules", "schedule": "every 15 min", "does": "Phase 2: send scheduled report emails" },
+    { "name": "reports.run-schedules", "schedule": "every 15 min", "does": "Phase 2: run due schedules into export files and publish reports.scheduled_report.ready (notifications sends the emails)" },
     { "name": "reports.check-lag", "schedule": "every 5 min", "does": "Mark read models stale when their lag exceeds readModelMaxLagMinutes" }
   ],
   "settings": [
-    { "key": "reportingCurrency", "default": "USD", "desc": "One currency at launch" },
-    { "key": "reportingTimeZone", "default": "America/Los_Angeles", "desc": "Market time zone; days run 00:00–23:59" },
-    { "key": "defaultDateBasis", "default": "placement", "desc": "Default basis for sales reports" },
-    { "key": "taxIncluded", "default": false, "desc": "Sales figures exclude tax" },
-    { "key": "maxRangeDays", "default": 400, "desc": "Longest range one query may cover" },
-    { "key": "exportLinkHours", "default": 24, "desc": "Download link lifetime" },
-    { "key": "maxExportRows", "default": 500000, "desc": "Above this the export is refused; narrow the filters" },
-    { "key": "exportDatasets", "default": [
+    { "key": "reportingCurrency", "type": "string", "default": "USD", "desc": "One currency at launch", "editable": false },
+    { "key": "reportingTimeZone", "type": "string", "default": "America/Los_Angeles", "desc": "Market time zone; days run 00:00–23:59", "editable": false },
+    { "key": "defaultDateBasis", "type": "enum", "default": "placement", "desc": "Default basis for sales reports", "choices": ["placement", "payment", "shipment", "completion"] },
+    { "key": "taxIncluded", "type": "bool", "default": false, "desc": "Sales figures exclude tax", "approval": "second_reviewer" },
+    { "key": "maxRangeDays", "type": "duration", "default": 400, "desc": "Longest range one query may cover", "unit": "days", "min": 1 },
+    { "key": "exportLinkHours", "type": "duration", "default": 24, "desc": "Download link lifetime", "unit": "hours", "min": 1 },
+    { "key": "maxExportRows", "type": "int", "default": 500000, "desc": "Above this the export is refused; narrow the filters", "min": 1 },
+    { "key": "exportDatasets", "type": "json", "default": [
         { "key": "reports.report_result", "owner": "reports", "permission": "reports.<group>.view (the report group permission)", "audience": "staff", "screens": ["admin/reports", "admin/dashboard"], "phase": 1 },
         { "key": "catalog.admin.products", "owner": "catalog", "permission": "catalog.products.export", "audience": "staff", "screens": ["admin/catalog"], "phase": 1 },
         { "key": "offers.admin.offers", "owner": "offers", "permission": "offers.offers.view", "audience": "staff", "screens": ["admin/catalog"], "phase": 1 },
@@ -318,9 +319,9 @@
         { "key": "sellers.admin.accounts", "owner": "sellers", "permission": "sellers.accounts.export", "audience": "staff", "screens": ["admin/sellers"], "phase": 1 },
         { "key": "audit.admin.entries", "owner": "audit", "permission": "audit.entries.export", "audience": "staff", "screens": ["admin/audit"], "phase": 1 },
         { "key": "trust.admin.reports", "owner": "trust", "permission": "trust.reports.export", "audience": "staff", "screens": ["admin/trust"], "phase": 1 }
-      ], "desc": "Export dataset registry (seed of export_datasets). Adding a dataset needs a new ExportDatasetKey value and an exportRows provider in the owner module." },
-    { "key": "readModelMaxLagMinutes", "default": 15, "desc": "Lag before a read model shows as stale" },
-    { "key": "launchMetrics", "default": ["commerce.gross_sales", "commerce.net_sales", "commerce.orders", "commerce.average_order_value", "commerce.refunds", "marketplace.fee_income", "marketplace.seller_sales", "service.on_time_dispatch", "service.case_backlog", "discovery.unavailable_searches"], "desc": "The small launch set; others become available once they have an owner and a reliable meaning" }
+      ], "desc": "Export dataset registry (seed of export_datasets). Adding a dataset needs a new ExportDatasetKey value and an exportRows provider in the owner module.", "editable": false },
+    { "key": "readModelMaxLagMinutes", "type": "duration", "default": 15, "desc": "Lag before a read model shows as stale", "unit": "minutes", "min": 1 },
+    { "key": "launchMetrics", "type": "json", "default": ["commerce.gross_sales", "commerce.net_sales", "commerce.orders", "commerce.average_order_value", "commerce.refunds", "marketplace.fee_income", "marketplace.seller_sales", "service.on_time_dispatch", "service.case_backlog", "discovery.unavailable_searches"], "desc": "The small launch set; others become available once they have an owner and a reliable meaning", "approval": "second_reviewer" }
   ],
   "integrations": [],
   "errorCodes": {

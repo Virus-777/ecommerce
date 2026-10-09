@@ -383,6 +383,26 @@ export const WalletCreditExpiredEvent: z.ZodType<WalletCreditExpiredEvent> = z.o
   },
 });
 
+/** wallet.credit.expiring: A lot with an unused balance reaches one of expiryReminderDays before it expires */
+export interface WalletCreditExpiringEvent {
+  customerId: string;
+  lotId: string;
+  /** Unused balance of the lot */
+  amount: common.Money;
+  expiresAt: string;
+  daysLeft: number;
+}
+
+export const WalletCreditExpiringEvent: z.ZodType<WalletCreditExpiringEvent> = z.object({
+  customerId: z.uuid(),
+  lotId: z.uuid(),
+  get amount() {
+    return common.Money;
+  },
+  expiresAt: z.iso.datetime({ offset: true }),
+  daysLeft: z.number().int(),
+});
+
 /** wallet.credit.reversed: A goodwill grant is reversed */
 export interface WalletCreditReversedEvent {
   customerId: string;
@@ -1009,6 +1029,7 @@ export const spec = defineModuleSpec({
       "wallet.credit.granted": { when: "Credit is added (refund to credit, goodwill, price adjustment, gift card)", payload: () => WalletCreditGrantedEvent },
       "wallet.credit.used": { when: "A hold is captured on an accepted order", payload: () => WalletCreditUsedEvent },
       "wallet.credit.expired": { when: "A lot expires unused", payload: () => WalletCreditExpiredEvent },
+      "wallet.credit.expiring": { when: "A lot with an unused balance reaches one of expiryReminderDays before it expires", payload: () => WalletCreditExpiringEvent },
       "wallet.credit.reversed": { when: "A goodwill grant is reversed", payload: () => WalletCreditReversedEvent },
       "wallet.credit.corrected": { when: "Staff correct a balance", payload: () => WalletCreditCorrectedEvent },
       "wallet.goodwill.decided": { when: "A goodwill grant waiting for approval is granted or rejected", payload: () => WalletGoodwillDecidedEvent },
@@ -1025,7 +1046,7 @@ export const spec = defineModuleSpec({
   jobs: {
     "wallet.expire-lots": {
       "schedule": "daily 00:30 market time",
-      "does": "Expire lots past expiresAt; notify customers 30 and 7 days before expiry"
+      "does": "Expire lots past expiresAt (wallet.credit.expired); publish wallet.credit.expiring for lots expiryReminderDays (30 and 7) days before expiry, once per lot and reminder"
     },
     "wallet.release-stale-holds": {
       "schedule": "every 1 min",
@@ -1039,26 +1060,48 @@ export const spec = defineModuleSpec({
   settings: {
     "creditExpiryMonths": {
       "default": 12,
-      "desc": "Default expiry of goodwill and price-adjustment credit (refund credit follows local rules; default none)"
+      "desc": "Default expiry of goodwill and price-adjustment credit (refund credit follows local rules; default none)",
+      "type": "duration",
+      "min": 1,
+      "unit": "months",
+      "approval": "business_owner"
+    },
+    "expiryReminderDays": {
+      "default": [
+        30,
+        7
+      ],
+      "desc": "Days before a lot expires when the customer is reminded (wallet.credit.expiring)",
+      "type": "json"
     },
     "goodwillMaxPerCustomer30Days": {
       "default": {
         "amount": 10000,
         "currency": "USD"
       },
-      "desc": "Goodwill a customer can receive in 30 days before Finance approval is always needed"
+      "desc": "Goodwill a customer can receive in 30 days before Finance approval is always needed",
+      "type": "money",
+      "min": 0,
+      "approval": "business_owner"
     },
     "holdTtlMinutes": {
       "default": 30,
-      "desc": "Checkout hold lifetime"
+      "desc": "Checkout hold lifetime",
+      "type": "duration",
+      "min": 1,
+      "unit": "minutes"
     },
     "giftCardsEnabled": {
       "default": false,
-      "desc": "Gift cards are a later service"
+      "desc": "Gift cards are a later service",
+      "type": "bool",
+      "approval": "business_owner"
     },
     "loyaltyEnabled": {
       "default": false,
-      "desc": "Loyalty experiment (phase 4)"
+      "desc": "Loyalty experiment (phase 4)",
+      "type": "bool",
+      "approval": "business_owner"
     }
   },
   errorCodes: {
@@ -1424,6 +1467,7 @@ declare module '../kernel/events/event-map.js' {
     "wallet.credit.granted": WalletCreditGrantedEvent;
     "wallet.credit.used": WalletCreditUsedEvent;
     "wallet.credit.expired": WalletCreditExpiredEvent;
+    "wallet.credit.expiring": WalletCreditExpiringEvent;
     "wallet.credit.reversed": WalletCreditReversedEvent;
     "wallet.credit.corrected": WalletCreditCorrectedEvent;
     "wallet.goodwill.decided": WalletGoodwillDecidedEvent;

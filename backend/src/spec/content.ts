@@ -1355,6 +1355,25 @@ export const ContentArticlePublishedEvent: z.ZodType<ContentArticlePublishedEven
   version: z.number().int(),
 });
 
+/** content.article.review_due: A published help article has not been reviewed for articleReviewDays (daily, once per review period) */
+export interface ContentArticleReviewDueEvent {
+  articleId: string;
+  slug: string;
+  title: string;
+  ownerStaffId?: string | null;
+  lastReviewedAt?: string | null;
+  dueSince: string;
+}
+
+export const ContentArticleReviewDueEvent: z.ZodType<ContentArticleReviewDueEvent> = z.object({
+  articleId: z.uuid(),
+  slug: z.string(),
+  title: z.string(),
+  ownerStaffId: z.uuid().nullish(),
+  lastReviewedAt: z.iso.datetime({ offset: true }).nullish(),
+  dueSince: z.iso.datetime({ offset: true }),
+});
+
 /** content.policy.submitted: A policy version is sent for approval */
 export interface ContentPolicySubmittedEvent {
   policyVersionId: string;
@@ -3006,6 +3025,7 @@ export const spec = defineModuleSpec({
       "content.page.unpublished": { when: "A page is unpublished or reaches its removal time", payload: () => ContentPageUnpublishedEvent },
       "content.page.removed": { when: "A correction or removal action takes content down", payload: () => ContentPageRemovedEvent },
       "content.article.published": { when: "A help article version goes live", payload: () => ContentArticlePublishedEvent },
+      "content.article.review_due": { when: "A published help article has not been reviewed for articleReviewDays (daily, once per review period)", payload: () => ContentArticleReviewDueEvent },
       "content.policy.submitted": { when: "A policy version is sent for approval", payload: () => ContentPolicySubmittedEvent },
       "content.policy.scheduled": { when: "An approved policy version is published with an effective date (customers and sellers are notified when flagged)", payload: () => ContentPolicyScheduledEvent },
       "content.policy.effective": { when: "A policy version takes effect and supersedes the previous one", payload: () => ContentPolicyEffectiveEvent },
@@ -3036,7 +3056,7 @@ export const spec = defineModuleSpec({
     },
     "content.article-review-due": {
       "schedule": "daily 07:00 market time",
-      "does": "Flag articles not reviewed for articleReviewDays; notify their owners"
+      "does": "Flag articles not reviewed for articleReviewDays; publish content.article.review_due (notifications tells the owner)"
     },
     "content.cache-warm": {
       "schedule": "every 5 min",
@@ -3046,15 +3066,23 @@ export const spec = defineModuleSpec({
   settings: {
     "marketTimeZone": {
       "default": "America/Los_Angeles",
-      "desc": "Default time zone for schedules"
+      "desc": "Default time zone for schedules",
+      "type": "string"
     },
     "policyNoticeDays": {
       "default": 14,
-      "desc": "Minimum days between publishing and the effective date of customer-facing policy changes"
+      "desc": "Minimum days between publishing and the effective date of customer-facing policy changes",
+      "type": "duration",
+      "min": 0,
+      "unit": "days",
+      "approval": "business_owner"
     },
     "articleReviewDays": {
       "default": 90,
-      "desc": "Articles older than this are flagged for review"
+      "desc": "Articles older than this are flagged for review",
+      "type": "duration",
+      "min": 1,
+      "unit": "days"
     },
     "reviewRequired": {
       "default": {
@@ -3062,15 +3090,22 @@ export const spec = defineModuleSpec({
         "section": false,
         "article": true
       },
-      "desc": "Whether the review step is required before publishing"
+      "desc": "Whether the review step is required before publishing",
+      "type": "json",
+      "approval": "second_reviewer"
     },
     "availabilityCheckMinutes": {
       "default": 60,
-      "desc": "How often curated collections re-check stock"
+      "desc": "How often curated collections re-check stock",
+      "type": "duration",
+      "min": 5,
+      "unit": "minutes"
     },
     "maxSectionProducts": {
       "default": 24,
-      "desc": "Products per homepage section"
+      "desc": "Products per homepage section",
+      "type": "int",
+      "min": 1
     }
   },
   errorCodes: {
@@ -3653,6 +3688,7 @@ declare module '../kernel/events/event-map.js' {
     "content.page.unpublished": ContentPageUnpublishedEvent;
     "content.page.removed": ContentPageRemovedEvent;
     "content.article.published": ContentArticlePublishedEvent;
+    "content.article.review_due": ContentArticleReviewDueEvent;
     "content.policy.submitted": ContentPolicySubmittedEvent;
     "content.policy.scheduled": ContentPolicyScheduledEvent;
     "content.policy.effective": ContentPolicyEffectiveEvent;

@@ -28,6 +28,7 @@ const endpoints = defineEndpoints({
   getItem: { area: 'store', method: 'GET', path: '/items/{id}', auth: 'visitor', scope: 'public', summary: 'One item', params: () => z.object({ id: z.uuid() }), response: () => Item, status: 200, phase: 1 },
   listItems: { area: 'store', method: 'GET', path: '/items', auth: 'customer', scope: 'own-customer', summary: 'Items', query: () => z.object({ q: z.string().optional() }), paging: true, response: () => Item, status: 200, phase: 1 },
   placeOrder: { area: 'store', method: 'POST', path: '/orders', auth: 'shopper', scope: 'own-customer', summary: 'Place', body: () => z.object({ itemId: z.uuid(), quantity: z.number().int().min(1) }), response: () => z.object({ orderId: z.string(), n: z.number().int(), scope: z.string() }), status: 201, idempotent: true, phase: 1 },
+  upload: { area: 'store', method: 'PUT', path: '/uploads/{id}/content', auth: 'shopper', scope: 'own-customer', summary: 'Raw bytes', params: () => z.object({ id: z.uuid() }), bodyFormat: 'binary', body: () => z.instanceof(Uint8Array), response: () => z.object({ bytes: z.number().int(), first: z.number().int(), type: z.string() }), status: 200, phase: 1 },
   broken: { area: 'store', method: 'GET', path: '/broken', auth: 'visitor', scope: 'public', summary: 'Returns the wrong shape', response: () => Item, status: 200, phase: 1 },
   unbuilt: { area: 'store', method: 'GET', path: '/unbuilt', auth: 'visitor', scope: 'public', summary: 'Not built', response: () => Item, status: 200, phase: 1 },
   later: { area: 'store', method: 'GET', path: '/later', auth: 'visitor', scope: 'public', summary: 'Phase 3', response: () => Item, status: 200, phase: 3 },
@@ -54,6 +55,7 @@ const sets = [
     getItem: async ({ params }) => item(params.id),
     listItems: async ({ page }) => ({ items: [item(newId())], nextCursor: null, ...(page.mode === 'page' ? { page: page.page, totalPages: 1, total: 1 } : {}) }),
     placeOrder: async ({ body, scope }) => ({ orderId: `MK-${++placed}`, n: body.quantity, scope: scope.kind }),
+    upload: async ({ body, request }) => ({ bytes: body.length, first: body[0] ?? -1, type: String(request.headers['content-type']) }),
     broken: async () => ({ id: 'not-a-uuid' }) as never,
     unbuilt: notImplemented,
     later: notImplemented,
@@ -204,6 +206,16 @@ describe('caller checks', () => {
     expect(res.statusCode).toBe(201);
     expect(res.json().scope).toBe('visitor');
   });
+
+  it('hands a binary body to the handler as raw bytes, whatever the content type', async () => {
+    const url = `/api/store/demo/uploads/${newId()}/content`;
+    for (const [type, payload] of [['image/png', Buffer.from([137, 80, 78, 71, 13, 10])], ['application/json', Buffer.from('{"a":1}')], ['application/octet-stream', Buffer.alloc(3 * 1024 * 1024, 7)]] as const) {
+      const res = await app.inject({ method: 'PUT', url, headers: { ...visitor, 'content-type': type }, payload });
+      expect(res.statusCode, type).toBe(200);
+      expect(res.json()).toEqual({ bytes: payload.length, first: payload[0], type });
+    }
+    expect((await app.inject({ method: 'PUT', url, payload: Buffer.from([1]) })).statusCode).toBe(401);
+  });
 });
 
 describe('tokens other than bearer', () => {
@@ -218,7 +230,7 @@ describe('tokens other than bearer', () => {
     expect((await app.inject({ method: 'POST', url, payload: {} })).json().error.details.reason).toBe('token_missing');
     expect((await app.inject({ method: 'POST', url, payload: { refreshToken: 'wrong' } })).statusCode).toBe(401);
     expect((await app.inject({ method: 'POST', url, payload: { refreshToken: REFRESH } })).json()).toEqual({ sessionId: 'session-1' });
-    expect((await app.inject({ method: 'POST', url, headers: { cookie: `__Host-mk_refresh=${REFRESH}` }, payload: {} })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'POST', url, headers: { cookie: `__Secure-mk_refresh=${REFRESH}` }, payload: {} })).statusCode).toBe(200);
   });
 
   it('processes a signed webhook once and acknowledges replays without running the handler', async () => {

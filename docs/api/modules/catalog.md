@@ -899,10 +899,10 @@ Checked through the access module (limits per role, second reviewer).
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| maxImagesPerProduct | `12` | Images per product |
-| minDescriptionLength | `40` | Characters required before submission |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| maxImagesPerProduct | `12` | int, 1–30, seller-visible | Images per product |
+| minDescriptionLength | `40` | int, characters, 0–…, seller-visible | Characters required before submission |
 
 ## Notes
 - Official Store products follow the same review standard as seller products (plan ch. 2).

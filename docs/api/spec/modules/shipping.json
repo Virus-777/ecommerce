@@ -549,16 +549,16 @@
     { "name": "shipping.carrier-on-time", "schedule": "daily 04:00 PT", "does": "Compute 30-day on-time rates per carrier and the Official Store dispatch rate" }
   ],
   "settings": [
-    { "key": "defaultSellerHandlingDays", "default": 2, "desc": "Dispatch within business days when a seller sets nothing" },
-    { "key": "sellerHandlingRange", "default": [1, 3], "desc": "Allowed seller handling days (HANDLING_OUT_OF_RANGE outside)" },
-    { "key": "officialCutoff", "default": "14:00", "desc": "Official Store same-day cutoff, market time" },
-    { "key": "dispatchDueTime", "default": "17:00", "desc": "Local time a dispatch deadline falls on" },
-    { "key": "validTrackingWithinHours", "default": 24, "desc": "Tracking must be valid this long after dispatch" },
-    { "key": "labelScanGraceHours", "default": 36, "desc": "Label created without a carrier scan before missing_tracking opens" },
-    { "key": "stalledNoScanDays", "default": 7, "desc": "No scan for this long opens a lost_or_damaged review" },
-    { "key": "failedDeliveryChoiceDays", "default": 14, "desc": "Days the customer has to choose a next step after a failed delivery" },
-    { "key": "claimFinanceApprovalAbove", "default": { "amount": 100000, "currency": "USD" }, "desc": "Carrier claims above this need Finance approval (example value)" },
-    { "key": "marketDefaultPostalCode", "default": "97205", "desc": "Location for estimates when nothing is known (example)" }
+    { "key": "defaultSellerHandlingDays", "type": "duration", "default": 2, "desc": "Dispatch within business days when a seller sets nothing", "unit": "business days", "min": 1, "approval": "second_reviewer", "sellerVisible": true },
+    { "key": "sellerHandlingRange", "type": "json", "default": [1, 3], "desc": "Allowed seller handling days (HANDLING_OUT_OF_RANGE outside)", "approval": "second_reviewer", "sellerVisible": true },
+    { "key": "officialCutoff", "type": "time", "default": "14:00", "desc": "Official Store same-day cutoff, market time", "sellerVisible": false },
+    { "key": "dispatchDueTime", "type": "time", "default": "17:00", "desc": "Local time a dispatch deadline falls on", "sellerVisible": true },
+    { "key": "validTrackingWithinHours", "type": "duration", "default": 24, "desc": "Tracking must be valid this long after dispatch", "unit": "hours", "min": 1, "sellerVisible": true },
+    { "key": "labelScanGraceHours", "type": "duration", "default": 36, "desc": "Label created without a carrier scan before missing_tracking opens", "unit": "hours", "min": 1, "sellerVisible": true },
+    { "key": "stalledNoScanDays", "type": "duration", "default": 7, "desc": "No scan for this long opens a lost_or_damaged review", "unit": "days", "min": 1, "sellerVisible": false },
+    { "key": "failedDeliveryChoiceDays", "type": "duration", "default": 14, "desc": "Days the customer has to choose a next step after a failed delivery", "unit": "days", "min": 1, "sellerVisible": false },
+    { "key": "claimFinanceApprovalAbove", "type": "money", "default": { "amount": 100000, "currency": "USD" }, "desc": "Carrier claims above this need Finance approval (example value)", "min": 0, "approval": "business_owner", "sellerVisible": false },
+    { "key": "marketDefaultPostalCode", "type": "string", "default": "97205", "desc": "Location for estimates when nothing is known (example)", "sellerVisible": false }
   ],
   "integrations": [
     { "name": "Carrier APIs (UPS, USPS, FedEx) or a multi-carrier aggregator", "purpose": "Rates for labels, label purchase and void, tracking webhooks and polling, address type checks (PO box, military)" },

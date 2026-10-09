@@ -2545,43 +2545,78 @@ export const spec = defineModuleSpec({
   settings: {
     "firstResponseBusinessHours": {
       "default": 4,
-      "desc": "Default first reply target (example)"
+      "desc": "Default first reply target (example)",
+      "type": "duration",
+      "min": 1,
+      "unit": "business hours"
     },
     "sellerReplyBusinessDays": {
       "default": 2,
-      "desc": "Seller reply target before Marketly steps in (example)"
+      "desc": "Seller reply target before Marketly steps in (example)",
+      "type": "duration",
+      "min": 1,
+      "unit": "business days",
+      "approval": "second_reviewer",
+      "sellerVisible": true
     },
     "disputeDecisionBusinessDays": {
       "default": 5,
-      "desc": "Decision target from escalation (example)"
+      "desc": "Decision target from escalation (example)",
+      "type": "duration",
+      "min": 1,
+      "unit": "business days"
     },
     "appealWindowDays": {
       "default": 14,
-      "desc": "Appeal deadline after a decision (purchase terms say 14 days)"
+      "desc": "Appeal deadline after a decision (purchase terms say 14 days)",
+      "type": "duration",
+      "min": 1,
+      "unit": "days",
+      "approval": "business_owner"
     },
     "appealReplyBusinessDays": {
       "default": 3,
-      "desc": "Appeal review target"
+      "desc": "Appeal review target",
+      "type": "duration",
+      "min": 1,
+      "unit": "business days"
     },
     "reopenWindowDays": {
       "default": 30,
-      "desc": "Reopen a resolved case if the promised remedy did not happen"
+      "desc": "Reopen a resolved case if the promised remedy did not happen",
+      "type": "duration",
+      "min": 1,
+      "unit": "days"
     },
     "autoCloseAfterDays": {
       "default": 7,
-      "desc": "Resolved → closed"
+      "desc": "Resolved → closed",
+      "type": "duration",
+      "min": 1,
+      "unit": "days"
     },
     "lateItemRefundAfterDays": {
       "default": 14,
-      "desc": "Items not shipped this long after the estimate qualify for a full refund (purchase terms)"
+      "desc": "Items not shipped this long after the estimate qualify for a full refund (purchase terms)",
+      "type": "duration",
+      "min": 1,
+      "unit": "days",
+      "approval": "business_owner",
+      "sellerVisible": true
     },
     "maxAttachments": {
       "default": 5,
-      "desc": "Files per message"
+      "desc": "Files per message",
+      "type": "int",
+      "min": 0,
+      "max": 20
     },
     "maxAttachmentMb": {
       "default": 10,
-      "desc": "Size per file"
+      "desc": "Size per file",
+      "type": "int",
+      "min": 1,
+      "unit": "MB"
     }
   },
   errorCodes: {

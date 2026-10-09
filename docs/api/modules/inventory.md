@@ -591,7 +591,7 @@ stateDiagram-v2
   pending --> recorded: record
 ```
 
-Created on returns.return.inspected. restock: Returned → Available. different_condition: Returned → outside on this item and outside → Available on the target item, at the original unit cost. damaged_stock: Returned → Damaged or held (kept, not for sale) with a review date. repair / return_to_supplier: Returned → Damaged or held with a review date. write_off: Returned → outside; value at cost reported to finance.
+Created on returns.return.inspected; the units entered Returned on returns.return.received. restock: Returned → Available. different_condition: Returned → outside on this item and outside → Available on the target item, at the original unit cost. damaged_stock: Returned → Damaged or held (kept, not for sale) with a review date. repair / return_to_supplier: Returned → Damaged or held with a review date. write_off: Returned → outside; value at cost reported to finance.
 
 ### Discrepancy (`Discrepancy.state`)
 
@@ -944,11 +944,11 @@ Indexes: `pk (count_id, stock_item_id)`
 
 | Consumes | From | Does |
 |---|---|---|
-| `orders.order.accepted` | orders | Allocate the order's held reservation lines to order items |
+| `orders.order.accepted` | orders | Allocate the order's held reservation (reservationId) to its order items: each reservation line is matched to an entry of items by stockItemId and quantity, so allocation never depends on checkout's attachOrder (lines it already attached keep their orderItemId) |
 | `orders.item.cancelled` | orders | Release that item's held or allocated units back to Available |
 | `shipping.shipment.dispatched` | shipping | Fulfil the allocated lines in the shipment (Reserved → leaves stock) |
-| `returns.return.received` | returns | Official Store items: add the units to Returned at the receiving warehouse. Seller returns are recorded by sellers through adjustments. |
-| `returns.return.inspected` | returns | Create a pending return stock outcome with the inspector's proposed outcome |
+| `returns.return.received` | returns | Official Store items: add each listed item's units (items[].stockItemId, quantity) to Returned at the receiving warehouse, once per return item. Seller returns are recorded by sellers through adjustments. |
+| `returns.return.inspected` | returns | Create a pending return stock outcome with the inspector's proposed outcome. The units stay in Returned until the outcome is recorded (restock → Available; damaged_stock, repair, return_to_supplier → Damaged or held; write_off → outside). Units that never arrived through returns.return.received are added to Returned first, so a missed event loses no stock |
 | `warehouse.bin.assigned` | warehouse | Update the stock item's primary bin code shown in stock lists |
 | `offers.offer.status_changed` | offers | Archive a seller stock item when its offer is removed (reserved units stay with their orders) |
 | `sellers.seller.closed` | sellers | Archive the seller's stock items |
@@ -1029,14 +1029,14 @@ Checked through the access module (limits per role, second reviewer).
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| holdMinutes | `15` | Checkout hold lifetime |
-| pendingPaymentHoldMinutes | `60` | Maximum hold extension while a payment result is being checked |
-| defaultLowStockThreshold | `3` | Seller items without their own threshold |
-| lowStockAlertCooldownHours | `24` | Minimum time between inventory.stock.low events for one item |
-| costingMethod | `"weighted_average"` | Company stock valuation |
-| allowSellerNegativeAvailable | `false` | Never sell beyond available quantity (plan ch. 9) |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| holdMinutes | `15` | duration, minutes, 1–60 | Checkout hold lifetime |
+| pendingPaymentHoldMinutes | `60` | duration, minutes, 1–… | Maximum hold extension while a payment result is being checked |
+| defaultLowStockThreshold | `3` | int, 0–…, seller-visible | Seller items without their own threshold |
+| lowStockAlertCooldownHours | `24` | duration, hours, 1–… | Minimum time between inventory.stock.low events for one item |
+| costingMethod | `"weighted_average"` | enum (weighted_average \| fifo), approval: business owner | Company stock valuation |
+| allowSellerNegativeAvailable | `false` | bool, read-only | Never sell beyond available quantity (plan ch. 9) |
 
 ## Notes
 - Stock groups are quantities, not statuses: each stock item carries all five numbers per location. Every change writes one stock_movements row and updates stock_levels in the same transaction with an optimistic version check (CONFLICT on race).

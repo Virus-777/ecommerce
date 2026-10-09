@@ -67,7 +67,9 @@ declare module 'fastify' {
 
 const WEBHOOK_WINDOW_MS = 5 * 60_000;
 const CACHE_MS = 60_000;
-const REFRESH_COOKIE = '__Host-mk_refresh';
+/** Website refresh cookie: HttpOnly; Secure; SameSite=Strict; Path=REFRESH_COOKIE_PATH (sent only to refresh and sign-out) */
+export const REFRESH_COOKIE = '__Secure-mk_refresh';
+export const REFRESH_COOKIE_PATH = '/api/public/identity/sessions';
 
 /** Small TTL cache for answers from access, sellers and customers */
 class TtlCache<V> {

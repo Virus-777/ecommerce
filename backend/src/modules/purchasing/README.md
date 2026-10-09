@@ -697,7 +697,7 @@ Indexes: `(status, created_at)`, `(supplier_id)`
 
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
-| `purchasing.purchase_order.sent` | A PO is sent to the supplier | `{ purchaseOrderId: uuid, ref: string, supplierId: uuid, locationId: uuid, total: Money, lines: PurchaseOrderLine[] }` | - |
+| `purchasing.purchase_order.sent` | A PO is sent to the supplier | `{ purchaseOrderId: uuid, ref: string, supplierId: uuid, supplierName: string, supplierEmail: email?, emailSupplier: bool, message: text?, locationId: uuid, total: Money, lines: PurchaseOrderLine[] }` | notifications |
 | `purchasing.purchase_order.status_changed` | Any PO status transition | `{ purchaseOrderId: uuid, ref: string, from: string, to: string, reason: text? }` | - |
 | `purchasing.delivery.rescheduled` | An expected arrival window changes or a delivery is marked delayed | `{ deliveryId: uuid?, purchaseOrderId: uuid, ref: string, windowFrom: datetime?, windowTo: datetime?, reason: text }` | - |
 | `purchasing.delivery.late` | A delivery window passed without arrival | `{ deliveryId: uuid, purchaseOrderId: uuid, ref: string, supplierName: string }` | - |
@@ -758,15 +758,15 @@ Checked through the access module (limits per role, second reviewer).
 
 ## Settings
 
-| Key | Default | Meaning |
-|---|---|---|
-| purchaseOrderRefFormat | `"PUR-YYMM-NNNN"` | Human reference for purchase orders |
-| receiptRefFormat | `"REC-YYMMDD-NN"` | Human reference for receiving records |
-| damagePhotosRequired | `true` | Damaged lines need at least one photo |
-| overReceiptAllowedPct | `0` | Received above ordered allowed without a new PO line |
-| deliveryLateGraceMinutes | `60` | Grace after the arrival window before a delivery counts as late |
-| reorderCoverDays | `30` | Days of sales a suggested reorder should cover |
-| performanceWindowDays | `90` | Window for supplier performance figures |
+| Key | Default | Rules | Meaning |
+|---|---|---|---|
+| purchaseOrderRefFormat | `"PUR-YYMM-NNNN"` | string, read-only | Human reference for purchase orders |
+| receiptRefFormat | `"REC-YYMMDD-NN"` | string, read-only | Human reference for receiving records |
+| damagePhotosRequired | `true` | bool | Damaged lines need at least one photo |
+| overReceiptAllowedPct | `0` | number, %, 0–100, approval: second reviewer | Received above ordered allowed without a new PO line |
+| deliveryLateGraceMinutes | `60` | duration, minutes, 0–… | Grace after the arrival window before a delivery counts as late |
+| reorderCoverDays | `30` | duration, days, 1–… | Days of sales a suggested reorder should cover |
+| performanceWindowDays | `90` | duration, days, 7–… | Window for supplier performance figures |
 
 ## Integrations
 - **Email (through notifications)**: Send purchase orders and claims to supplier contacts

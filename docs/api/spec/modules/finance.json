@@ -35,6 +35,7 @@
     { "name": "recordAdCharge", "signature": "(input: { sellerId: uuid, campaignId: uuid, campaignRef: string, period: DateRange, amount: Money, description: string }) => LedgerEntry", "desc": "Posts a seller ad charge, kept separate from commission", "usedBy": ["advertising"] },
     { "name": "recordServiceFee", "signature": "(input: { sellerId: uuid, amount: Money, kind: string, reference: Reference, description: string, idempotencyKey: string }) => LedgerEntry", "desc": "Posts a fulfillment-service fee (storage, handling, receiving, returns processing, removal; kind = the FeeCharge type) to the seller ledger as service_fee, kept separate from commission and ad charges. Same idempotencyKey returns the first entry.", "usedBy": ["fulfillment-service"] },
     { "name": "creditSellerCharge", "signature": "(input: { sellerId: uuid, amount: Money, originalEntryId: uuid, reason: string, idempotencyKey: string }) => LedgerEntry", "desc": "Credits back all or part of an ad charge or service fee (originalEntryId = the LedgerEntry returned by recordAdCharge or recordServiceFee) as charge_credit; never more than the original minus earlier credits. Same idempotencyKey returns the first entry.", "usedBy": ["advertising", "fulfillment-service"] },
+    { "name": "creditSeller", "signature": "(input: { sellerId: uuid, amount: Money, reason: string, reference: Reference, idempotencyKey: string }) => SellerCredit", "desc": "Credits a seller without an original charge (fulfillment-service reimbursements for lost or damaged units, goodwill to a seller) as ledger type seller_credit. Up to creditSecondReviewerThreshold it is posted at once (status posted, ledgerEntry set). Above it the credit waits as pending_approval with an approval request (finance.credits.issue) and is posted or rejected on access.approval.decided, publishing finance.seller_credit.decided. Same idempotencyKey returns the first credit.", "usedBy": ["fulfillment-service"] },
     { "name": "recordCompanyCost", "signature": "(input: { kind: 'buying_cost' | 'shipping_expense' | 'return_loss' | 'write_off' | 'supplier_credit', amount: Money, reference: Reference, at: datetime }) => void", "desc": "Company trading costs for the Official Store margin", "usedBy": ["purchasing", "inventory", "shipping", "warehouse"] },
     { "name": "hasPayoutBlock", "signature": "(sellerId: uuid) => { blocked: bool, reasons: string[] }", "desc": "Whether a seller can be paid (verified destination, no full hold)", "usedBy": ["sellers"] },
     { "name": "marketplaceIncomeByDay", "signature": "(range: DateRange, sellerId?: uuid) => DailySellerIncome[]", "desc": "Fee income per seller per market day (commission and fees charged, fee refunds, net, ad income), from fee_charges and ledger_entries. Company revenue only; seller sales are not income.", "usedBy": ["reports"] },
@@ -126,7 +127,7 @@
     "LedgerEntry": {
       "id": "uuid",
       "at": "datetime",
-      "type": "enum(sale|shipping_charge|seller_discount|marketplace_fee|fee_refund|refund|refund_after_payout|hold|hold_release|adjustment|ad_charge|service_fee|charge_credit|label_charge|chargeback|payout|payout_returned|owed_offset|cancellation)",
+      "type": "enum(sale|shipping_charge|seller_discount|marketplace_fee|fee_refund|refund|refund_after_payout|hold|hold_release|adjustment|ad_charge|service_fee|charge_credit|seller_credit|label_charge|chargeback|payout|payout_returned|owed_offset|cancellation)",
       "typeLabel": "string",
       "reference": "Reference",
       "description": { "type": "string", "desc": "e.g. 10% of $184.00 item price (shipping excluded)" },
@@ -136,6 +137,19 @@
       "statementId": "uuid?",
       "recordedBy": "Actor?",
       "statementRef": { "type": "string?", "desc": "ST-… reference of the statement the entry is on" }
+    },
+    "SellerCredit": {
+      "id": "uuid",
+      "sellerId": "uuid",
+      "amount": "Money",
+      "reason": "text",
+      "reference": { "type": "Reference", "desc": "What the credit is for, e.g. the fulfillment-service lost-unit claim" },
+      "status": "enum(posted|pending_approval|rejected)",
+      "ledgerEntry": { "type": "LedgerEntry?", "desc": "The seller_credit entry once posted" },
+      "approvalRequestId": "uuid?",
+      "requestedBy": "Actor",
+      "createdAt": "datetime",
+      "decidedAt": "datetime?"
     },
     "EarningsLot": {
       "id": "uuid",
@@ -542,6 +556,7 @@
     { "name": "refund_allocations", "desc": "Funding split from returns.refund.approved, applied when payments.refund.sent arrives", "columns": { "refund_request_id": "uuid pk", "payment_refund_id": "uuid?", "order_id": "uuid", "owner_type": "text (official|seller)", "seller_id": "uuid?", "funded_by": "text", "seller_share": "bigint", "platform_share": "bigint", "breakdown": "jsonb", "applied_at": "timestamptz?" } },
     { "name": "holds", "columns": { "id": "uuid pk", "seller_id": "uuid", "amount": "bigint", "released_amount": "bigint", "currency": "text", "reason_code": "text", "reason": "text", "review_date": "date", "ref_kind": "text?", "ref_id": "text?", "status": "text", "placed_by": "text", "placed_at": "timestamptz", "released_at": "timestamptz?", "release_reason": "text?", "approval_request_id": "uuid?" }, "indexes": ["(seller_id, status)", "(status, review_date)"] },
     { "name": "adjustments", "columns": { "id": "uuid pk", "ref": "text unique", "seller_id": "uuid", "direction": "text", "amount": "bigint", "currency": "text", "reason_code": "text", "reason": "text", "ref_kind": "text?", "ref_id": "text?", "status": "text", "recorded_by": "text", "approval_request_id": "uuid?", "idempotency_key": "text unique?", "created_at": "timestamptz" }, "indexes": ["(seller_id, created_at desc)", "(status)"] },
+    { "name": "seller_credits", "desc": "Credits to sellers without an original charge (creditSeller); pending ones wait for finance.credits.issue", "columns": { "id": "uuid pk", "seller_id": "uuid", "amount": "bigint", "currency": "text", "reason": "text", "ref_kind": "text", "ref_id": "text", "ref_label": "text?", "status": "text (posted|pending_approval|rejected)", "idempotency_key": "text unique", "requested_by": "text", "approval_request_id": "uuid?", "ledger_entry_id": "uuid? → ledger_entries", "created_at": "timestamptz", "decided_at": "timestamptz?" }, "indexes": ["(seller_id, created_at desc)", "(status)"] },
     { "name": "amounts_owed", "columns": { "id": "uuid pk", "seller_id": "uuid", "amount": "bigint", "remaining": "bigint", "currency": "text", "since": "date", "due_by": "date?", "status": "text", "origin": "jsonb", "note": "text?" }, "indexes": ["(seller_id, status)"] },
     { "name": "payout_destinations", "desc": "Verification state of the seller's payout account (details stay in sellers)", "columns": { "id": "uuid pk", "seller_id": "uuid", "sellers_account_id": "uuid", "label": "text", "provider_destination_id": "text?", "status": "text", "verified_at": "timestamptz?", "active": "bool", "pause_until": "timestamptz?", "deposits_sent_at": "timestamptz?", "deposit_attempts": "int" }, "indexes": ["(seller_id, active)"] },
     { "name": "destination_reviews", "columns": { "id": "uuid pk", "seller_id": "uuid", "destination_id": "uuid → payout_destinations", "from_label": "text?", "to_label": "text", "requested_by": "text", "requested_at": "timestamptz", "status": "text", "checks": "jsonb", "decided_by": "text?", "decided_at": "timestamptz?", "reason": "text?" }, "indexes": ["(status, requested_at)"] },
@@ -588,6 +603,11 @@
       "name": "Adjustment", "field": "Adjustment.status", "initial": "proposed",
       "transitions": [["proposed", "record", "recorded"], ["proposed", "requireApproval", "pending_approval"], ["pending_approval", "approve", "recorded"], ["pending_approval", "reject", "rejected"]],
       "notes": "Within the recorder's limit an adjustment is recorded at once; above adjustmentSecondReviewerThreshold it waits for a second Finance reviewer."
+    },
+    {
+      "name": "Seller credit", "field": "SellerCredit.status", "initial": "pending_approval",
+      "transitions": [["pending_approval", "approve", "posted"], ["pending_approval", "reject", "rejected"]],
+      "notes": "creditSeller posts credits up to creditSecondReviewerThreshold at once (created posted). Larger credits wait for finance.credits.issue and finish on access.approval.decided."
     },
     {
       "name": "Reconciliation item", "field": "ReconItem.status", "initial": "open",
@@ -666,8 +686,8 @@
     { "id": "getReconDay", "area": "admin", "method": "GET", "path": "/reconciliation/days/{date}", "summary": "Daily finance check: checklist, totals and failed payouts", "auth": "staff", "permission": "finance.reconciliation.work", "params": { "date": "date" }, "response": "ReconDay", "screens": ["ops/finance-checks", "ops/queues"] },
     { "id": "listReconItems", "area": "admin", "method": "GET", "path": "/reconciliation/items", "summary": "Mismatched payments, seller amounts, deposits and unexplained amounts", "auth": "staff", "permission": "finance.reconciliation.work", "paging": true, "query": { "date": "date?", "check": "enum(payments_vs_orders|seller_amounts|provider_deposit|unexplained_amount)?", "status": "enum(open|explained|correction_pending|corrected|matched)?" }, "response": "ReconItem", "screens": ["ops/finance-checks", "admin/finance"] },
     { "id": "assignReconItem", "area": "admin", "method": "POST", "path": "/reconciliation/items/{id}/assign", "summary": "Set the owner of a mismatch", "auth": "staff", "permission": "finance.reconciliation.work", "params": { "id": "uuid" }, "body": { "ownerId": "uuid" }, "response": "ReconItem", "audited": true, "screens": ["ops/finance-checks", "admin/finance"] },
-    { "id": "explainReconItem", "area": "admin", "method": "POST", "path": "/reconciliation/items/{id}/explain", "summary": "Close a difference with a recorded reason (no money moves)", "auth": "staff", "permission": "finance.reconciliation.work", "params": { "id": "uuid" }, "body": { "reasonCode": "enum(timing|provider_fee|rounding|other)", "note": "text" }, "response": "ReconItem", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "screens": ["ops/finance-checks"] },
-    { "id": "correctReconItem", "area": "admin", "method": "POST", "path": "/reconciliation/items/{id}/correct", "summary": "Record a correction with a reason", "auth": "staff", "permission": "finance.reconciliation.work", "params": { "id": "uuid" }, "body": "CorrectionInput", "response": "ReconItem", "idempotent": true, "audited": true, "approval": "Approval action finance.reconciliation.correct. Corrections above correctionSecondReviewerThreshold need a second Finance reviewer (access)", "errors": ["ILLEGAL_TRANSITION", "APPROVAL_REQUIRED"], "events": ["finance.adjustment.recorded"], "screens": ["ops/finance-checks", "admin/finance"] },
+    { "id": "explainReconItem", "area": "admin", "method": "POST", "path": "/reconciliation/items/{id}/explain", "summary": "Close a difference with a recorded reason (no money moves)", "auth": "staff", "permission": "finance.reconciliation.work", "params": { "id": "uuid" }, "body": { "reasonCode": "enum(timing|provider_fee|rounding|other)", "note": "text" }, "response": "ReconItem", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["finance.reconciliation.item_closed"], "screens": ["ops/finance-checks"] },
+    { "id": "correctReconItem", "area": "admin", "method": "POST", "path": "/reconciliation/items/{id}/correct", "summary": "Record a correction with a reason", "auth": "staff", "permission": "finance.reconciliation.work", "params": { "id": "uuid" }, "body": "CorrectionInput", "response": "ReconItem", "idempotent": true, "audited": true, "approval": "Approval action finance.reconciliation.correct. Corrections above correctionSecondReviewerThreshold need a second Finance reviewer (access)", "errors": ["ILLEGAL_TRANSITION", "APPROVAL_REQUIRED"], "events": ["finance.adjustment.recorded", "finance.reconciliation.item_closed"], "screens": ["ops/finance-checks", "admin/finance"] },
     { "id": "completeReconDay", "area": "admin", "method": "POST", "path": "/reconciliation/days/{date}/complete", "summary": "Sign off the day's checks", "auth": "staff", "permission": "finance.reconciliation.work", "params": { "date": "date" }, "body": { "note": "text?" }, "response": "ReconDay", "errors": ["ILLEGAL_TRANSITION", "RECON_DAY_INCOMPLETE"], "audited": true, "screens": ["ops/finance-checks"] },
 
     { "id": "payoutWebhook", "area": "webhooks", "method": "POST", "path": "/payouts", "summary": "Payout provider status (paid, failed, returned)", "desc": "Signature verified; duplicate deliveries are ignored by providerPayoutId + event.", "auth": "provider", "body": "PayoutWebhook", "response": null, "status": 204, "events": ["finance.payout.paid", "finance.payout.failed"] }
@@ -682,6 +702,7 @@
       { "name": "finance.balance.negative", "when": "A seller's available balance drops below zero", "payload": { "sellerId": "uuid", "available": "Money", "cause": "Reference" } },
       { "name": "finance.amount_owed.created", "when": "A negative balance is not covered within the agreed period", "payload": { "amountOwedId": "uuid", "sellerId": "uuid", "amount": "Money", "dueBy": "date?" } },
       { "name": "finance.adjustment.recorded", "when": "An adjustment or correction is posted", "payload": { "adjustmentId": "uuid", "sellerId": "uuid?", "direction": "string", "amount": "Money", "reasonCode": "string" } },
+      { "name": "finance.seller_credit.decided", "when": "A seller credit that waited for approval is posted or rejected", "payload": { "creditId": "uuid", "sellerId": "uuid", "reference": "Reference", "idempotencyKey": "string", "amount": "Money", "outcome": "enum(posted|rejected)", "ledgerEntryId": "uuid?" } },
       { "name": "finance.payout_run.approved", "when": "A run has all required approvals", "payload": { "runId": "uuid", "total": "Money", "scheduledRelease": "datetime" } },
       { "name": "finance.payout_run.released", "when": "A run's payouts are sent", "payload": { "runId": "uuid", "payoutCount": "int", "total": "Money" } },
       { "name": "finance.statement.issued", "when": "A statement is issued at the payout cutoff", "payload": { "statementId": "uuid", "sellerId": "uuid", "period": "DateRange", "payoutId": "uuid?" } },
@@ -689,13 +710,14 @@
       { "name": "finance.destination.rejected", "when": "A payout destination change is rejected", "payload": { "sellerId": "uuid", "reviewId": "uuid", "reason": "text" } },
       { "name": "finance.fee_rules.proposed", "when": "A fee rule version is proposed", "payload": { "ruleSetId": "uuid", "effectiveFrom": "datetime" } },
       { "name": "finance.fee_rules.changed", "when": "A fee rule version becomes active", "payload": { "ruleSetId": "uuid", "version": "string", "effectiveFrom": "datetime" } },
-      { "name": "finance.reconciliation.mismatch_found", "when": "The daily check finds a difference", "payload": { "itemId": "uuid", "check": "string", "difference": "Money" } }
+      { "name": "finance.reconciliation.mismatch_found", "when": "The daily check finds a difference", "payload": { "itemId": "uuid", "check": "string", "difference": "Money" } },
+      { "name": "finance.reconciliation.item_closed", "when": "A reconciliation item is matched (automatically or by a later event), explained or corrected", "payload": { "itemId": "uuid", "check": "string", "date": "date", "outcome": "enum(matched|explained|corrected)" } }
     ],
     "consumes": [
       { "name": "orders.order.accepted", "does": "Create pending earnings lots and fee charges per seller item (sale, shipping charged, seller-funded discount, fee); Official Store items go to trading_entries" },
       { "name": "orders.item.cancelled", "does": "Reverse the lot; apply the cancellation fee treatment" },
       { "name": "orders.item.delivered", "does": "Start the availability clock for the item's lot" },
-      { "name": "payments.payment.captured", "does": "Record collected money for reconciliation (payments vs orders)" },
+      { "name": "payments.payment.captured", "does": "Record collected money for reconciliation (payments vs orders): card amount plus creditAmount (store credit) per capture; the daily check compares card captures plus credit with the order total less cancelled items, so a mixed card and credit payment is not a mismatch" },
       { "name": "returns.refund.approved", "does": "Store the funding split (seller, platform, shared) for the refund" },
       { "name": "payments.refund.sent", "does": "Post the refund and proportional fee refund to the seller ledger (refund_after_payout when the lot was paid out) or to company trading" },
       { "name": "payments.chargeback.opened", "does": "Place a chargeback hold on the seller (fee kept while open per fee treatment)" },
@@ -711,7 +733,7 @@
       { "name": "sellers.seller.suspended", "does": "Put the seller's pending payouts on hold with reason restriction (review date from the restriction)" },
       { "name": "sellers.seller.closed", "does": "Issue a final statement and schedule the last payout after open obligations" },
       { "name": "sellers.payout_account.changed", "does": "Open a destination review; keep paying the current verified destination" },
-      { "name": "access.approval.decided", "does": "Finish approval-required holds, adjustments, corrections, payout runs and fee rule changes" },
+      { "name": "access.approval.decided", "does": "Finish approval-required holds, adjustments, corrections, payout runs, fee rule changes and seller credits (finance.credits.issue: post or reject, publish finance.seller_credit.decided)" },
       { "name": "support.case.decided", "does": "Release or apply dispute holds linked to the case" },
       { "name": "wallet.credit.granted", "does": "Phase 3: record the store-credit liability (refund to credit, goodwill, gift cards). Only kind goodwill with chargedTo platform is booked as a platform cost; chargedTo seller is posted to the seller's earnings" },
       { "name": "wallet.credit.used", "does": "Phase 3: reduce the store-credit liability when credit pays for an order" }
@@ -736,6 +758,7 @@
     { "key": "finance.holds.place", "desc": "Place a manual hold on seller funds", "limit": "money", "secondReviewer": "above-limit", "approvers": "Finance staff within their hold limit; Finance Manager above it; Business Owner above $50,000 (example values)" },
     { "key": "finance.holds.release", "desc": "Release a hold early or apply it", "limit": "money", "secondReviewer": "above-limit", "approvers": "Finance staff within their hold limit; Finance Manager above it (example values)" },
     { "key": "finance.adjustments.record", "desc": "Record a manual seller adjustment (credit or debit)", "limit": "money", "secondReviewer": "above-limit", "approvers": "Finance staff up to adjustmentSecondReviewerThreshold (e.g. $500); a second Finance reviewer above it" },
+    { "key": "finance.credits.issue", "desc": "Post a seller credit without an original charge (creditSeller, e.g. a fulfillment-service reimbursement) above creditSecondReviewerThreshold", "limit": "money", "secondReviewer": "above-limit", "approvers": "A Finance reviewer above creditSecondReviewerThreshold (e.g. $500); Finance Manager above their limit (example values)" },
     { "key": "finance.writeoffs.approve", "desc": "Write off an amount a seller owes", "limit": "money", "secondReviewer": "always", "approvers": "A second Finance reviewer (Finance Manager or Business Owner above their limit)" },
     { "key": "finance.payouts.release", "desc": "Approve and release a payout run", "limit": "money", "secondReviewer": "above-limit", "approvers": "Finance Manager; a second Finance reviewer above runSecondReviewerThreshold (e.g. $50,000); Business Owner above the manager limit (example values)" },
     { "key": "finance.destinations.approve", "desc": "Approve a seller payout destination change before money goes to the new account", "limit": "none", "secondReviewer": "always", "approvers": "A Finance reviewer other than the person who requested or entered the change" },
@@ -746,25 +769,26 @@
     { "name": "finance.payout-run.create", "schedule": "per payoutSchedule at cutoff (e.g. Thu 23:59 PT)", "does": "Issue statements for the period and create the draft payout run" },
     { "name": "finance.payout-run.release", "schedule": "every 5 min", "does": "Release approved runs at their scheduled time" },
     { "name": "finance.payout-status.poll", "schedule": "every 30 min", "does": "Ask the provider about processing payouts without a webhook result" },
-    { "name": "finance.reconcile.daily", "schedule": "daily 06:00 PT", "does": "Build the day check: payments vs orders, seller amounts vs statements, provider deposit, unexplained amounts, failed payouts; publish mismatches" },
+    { "name": "finance.reconcile.daily", "schedule": "daily 06:00 PT", "does": "Build the day check: payments vs orders (card captures plus store credit used against the order total less cancelled items), seller amounts vs statements, provider deposit, unexplained amounts, failed payouts; publish mismatches, and finance.reconciliation.item_closed for items that now match" },
     { "name": "finance.holds.review-due", "schedule": "daily 07:00 PT", "does": "List holds reaching their review date for Finance (workqueues)" },
     { "name": "finance.negative-balance.age", "schedule": "daily", "does": "Turn negative balances older than negativeBalanceOwedAfterDays into amounts owed" },
     { "name": "finance.fee-rules.activate", "schedule": "every 5 min", "does": "Activate scheduled fee rule versions at their effective time" }
   ],
   "settings": [
-    { "key": "payoutSchedule", "default": "weekly:FRI", "desc": "Payout cadence (example: weekly, Friday)" },
-    { "key": "payoutReleaseTime", "default": "10:00", "desc": "Release time in market time zone" },
-    { "key": "availableAfterDeliveryDays", "default": 7, "desc": "Hold window after delivery before earnings become available (example)" },
-    { "key": "minimumPayout", "default": { "amount": 2500, "currency": "USD" }, "desc": "Smaller balances roll to the next run" },
-    { "key": "newSellerHoldDays", "default": 14, "desc": "Extra hold during the first newSellerPeriodDays of selling" },
-    { "key": "newSellerPeriodDays", "default": 30, "desc": "Length of the new-seller period" },
-    { "key": "runSecondReviewerThreshold", "default": { "amount": 5000000, "currency": "USD" }, "desc": "Runs above this need a second Finance reviewer ($50,000 example)" },
-    { "key": "adjustmentSecondReviewerThreshold", "default": { "amount": 50000, "currency": "USD" }, "desc": "Adjustments above this need a second reviewer ($500 example)" },
-    { "key": "correctionSecondReviewerThreshold", "default": { "amount": 20000, "currency": "USD" }, "desc": "Reconciliation corrections above this need a second reviewer ($200 example)" },
-    { "key": "negativeBalanceOwedAfterDays", "default": 30, "desc": "Uncovered negative balance becomes an amount owed" },
-    { "key": "destinationChangePauseHours", "default": 72, "desc": "Minimum wait before paying a newly verified destination" },
-    { "key": "statementPeriod", "default": "weekly", "desc": "Statement period, aligned with the payout schedule" },
-    { "key": "depositConfirmAttempts", "default": 3, "desc": "Tries to enter the two test-deposit amounts before new deposits are sent" }
+    { "key": "payoutSchedule", "type": "string", "default": "weekly:FRI", "desc": "Payout cadence (example: weekly, Friday)", "approval": "business_owner", "sellerVisible": true, "minLeadDays": 30 },
+    { "key": "payoutReleaseTime", "type": "time", "default": "10:00", "desc": "Release time in market time zone", "approval": "second_reviewer", "sellerVisible": true },
+    { "key": "availableAfterDeliveryDays", "type": "duration", "default": 7, "desc": "Hold window after delivery before earnings become available (example)", "unit": "days", "min": 0, "approval": "business_owner", "sellerVisible": true, "minLeadDays": 30 },
+    { "key": "minimumPayout", "type": "money", "default": { "amount": 2500, "currency": "USD" }, "desc": "Smaller balances roll to the next run", "min": 0, "approval": "second_reviewer", "sellerVisible": true },
+    { "key": "newSellerHoldDays", "type": "duration", "default": 14, "desc": "Extra hold during the first newSellerPeriodDays of selling", "unit": "days", "min": 0, "approval": "second_reviewer", "sellerVisible": true },
+    { "key": "newSellerPeriodDays", "type": "duration", "default": 30, "desc": "Length of the new-seller period", "unit": "days", "min": 0, "approval": "second_reviewer", "sellerVisible": true },
+    { "key": "runSecondReviewerThreshold", "type": "money", "default": { "amount": 5000000, "currency": "USD" }, "desc": "Runs above this need a second Finance reviewer ($50,000 example)", "min": 0, "approval": "business_owner", "sellerVisible": false },
+    { "key": "adjustmentSecondReviewerThreshold", "type": "money", "default": { "amount": 50000, "currency": "USD" }, "desc": "Adjustments above this need a second reviewer ($500 example)", "min": 0, "approval": "business_owner", "sellerVisible": false },
+    { "key": "correctionSecondReviewerThreshold", "type": "money", "default": { "amount": 20000, "currency": "USD" }, "desc": "Reconciliation corrections above this need a second reviewer ($200 example)", "min": 0, "approval": "business_owner", "sellerVisible": false },
+    { "key": "creditSecondReviewerThreshold", "type": "money", "default": { "amount": 50000, "currency": "USD" }, "desc": "Seller credits from other modules (creditSeller) above this wait for a Finance reviewer ($500 example)", "min": 0, "approval": "business_owner", "sellerVisible": false },
+    { "key": "negativeBalanceOwedAfterDays", "type": "duration", "default": 30, "desc": "Uncovered negative balance becomes an amount owed", "unit": "days", "min": 1, "approval": "second_reviewer", "sellerVisible": true },
+    { "key": "destinationChangePauseHours", "type": "duration", "default": 72, "desc": "Minimum wait before paying a newly verified destination", "unit": "hours", "min": 0, "approval": "business_owner", "sellerVisible": true },
+    { "key": "statementPeriod", "type": "enum", "default": "weekly", "desc": "Statement period, aligned with the payout schedule", "choices": ["weekly", "monthly"], "approval": "second_reviewer", "sellerVisible": true },
+    { "key": "depositConfirmAttempts", "type": "int", "default": 3, "desc": "Tries to enter the two test-deposit amounts before new deposits are sent", "min": 1, "max": 10, "approval": "second_reviewer", "sellerVisible": false }
   ],
   "integrations": [
     { "name": "Payout provider (bank transfer / ACH through the payment provider's payouts API)", "purpose": "Send payouts, receive paid/failed/returned results by webhook, micro-deposit verification of destinations" },
@@ -788,7 +812,7 @@
     "Fee example (illustration only): an eligible $100 item sale with a 10% fee creates $10 of fee income and $90 of seller earnings before other adjustments. Default rules: commission on item price after seller-funded discounts, shipping excluded, platform-funded discounts do not lower seller proceeds. Category rates are examples (Electronics 8%, Computers 7%, Home & Kitchen 12%, Fashion 15%, Sports 10%, Beauty 12%).",
     "Refund after payout: the refund is deducted from later earnings (refund_after_payout entry); if the balance stays negative for negativeBalanceOwedAfterDays it becomes an amount owed. Statements show the deduction with the original payout reference (acceptance scenario 6).",
     "Ad charges are separate ledger entries and a separate statement section, never part of commission.",
-    "Approvals: holds, adjustments, corrections, write-offs, payout runs and fee rule changes check the caller's limit through access; above it they return APPROVAL_REQUIRED with details.approvalRequestId and finish on access.approval.decided. Staff access to finance screens is not financial authority: approve endpoints need finance.payouts.approve and a limit.",
+    "Approvals: holds, adjustments, corrections, write-offs, payout runs and fee rule changes check the caller's limit through access (seller credits from creditSeller use creditSecondReviewerThreshold, since the caller is a module); above it they return APPROVAL_REQUIRED with details.approvalRequestId and finish on access.approval.decided. Staff access to finance screens is not financial authority: approve endpoints need finance.payouts.approve and a limit.",
     "Payout destination details belong to sellers (owner-only changes); finance stores only a label, provider destination id and verification state, and never pays an unverified destination.",
     "Chargeback cases themselves are in payments; finance holds the seller amount and applies or releases it when payments reports the outcome.",
     "Dependency note: returns, advertising, promotions, purchasing, inventory, shipping and support are optional inputs; without them their lines are simply absent from statements and trading.",

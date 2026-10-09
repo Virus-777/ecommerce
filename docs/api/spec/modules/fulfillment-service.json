@@ -211,11 +211,11 @@
     { "name": "fulfillment-service.reconcile", "schedule": "daily", "does": "Compare the ownership ledger with inventory quantities per seller SKU; open a work item for differences" }
   ],
   "settings": [
-    { "key": "longTermStorageDays", "default": 365, "desc": "Age after which the long-term storage rate applies" },
-    { "key": "discrepancyResponseDays", "default": 14, "desc": "Time for the seller to accept or claim a receiving discrepancy" },
-    { "key": "sellerNoticeDays", "default": 30, "desc": "Notice before a new fee schedule takes effect" },
-    { "key": "warehouseAddress", "default": "Reno, NV warehouse (placeholder)", "desc": "Inbound destination" },
-    { "key": "unsellableDisposalDays", "default": 60, "desc": "Unsellable units not removed by the seller are disposed after this (with notice)" }
+    { "key": "longTermStorageDays", "type": "duration", "default": 365, "desc": "Age after which the long-term storage rate applies", "unit": "days", "min": 1, "approval": "second_reviewer", "sellerVisible": true, "minLeadDays": 30 },
+    { "key": "discrepancyResponseDays", "type": "duration", "default": 14, "desc": "Time for the seller to accept or claim a receiving discrepancy", "unit": "days", "min": 1, "sellerVisible": true },
+    { "key": "sellerNoticeDays", "type": "duration", "default": 30, "desc": "Notice before a new fee schedule takes effect", "unit": "days", "min": 0, "approval": "business_owner", "sellerVisible": true },
+    { "key": "warehouseAddress", "type": "string", "default": "Reno, NV warehouse (placeholder)", "desc": "Inbound destination", "sellerVisible": true },
+    { "key": "unsellableDisposalDays", "type": "duration", "default": 60, "desc": "Unsellable units not removed by the seller are disposed after this (with notice)", "unit": "days", "min": 30, "approval": "second_reviewer", "sellerVisible": true }
   ],
   "integrations": [],
   "errorCodes": {

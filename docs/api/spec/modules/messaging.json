@@ -189,7 +189,7 @@
     }
   },
   "tables": [
-    { "name": "conversations", "columns": { "id": "uuid pk", "kind": "text", "customer_id": "uuid?", "guest_session_id": "text?", "seller_id": "uuid?", "order_id": "uuid?", "order_item_id": "uuid?", "return_id": "uuid?", "case_id": "uuid?", "application_id": "uuid?", "started_by_staff_id": "uuid?", "subject": "jsonb", "status": "text", "locked_reason": "text?", "reply_state": "text", "reply_due_at": "timestamptz?", "awaiting_since": "timestamptz?", "created_at": "timestamptz", "last_message_at": "timestamptz", "archive_after": "timestamptz?" }, "indexes": ["(customer_id, last_message_at desc)", "(seller_id, reply_state, reply_due_at)", "(order_id)", "(case_id)", "(customer_id, seller_id, order_id, order_item_id, return_id) unique"] },
+    { "name": "conversations", "columns": { "id": "uuid pk", "kind": "text", "customer_id": "uuid?", "guest_session_id": "text?", "seller_id": "uuid?", "order_id": "uuid?", "order_item_id": "uuid?", "return_id": "uuid?", "case_id": "uuid?", "application_id": "uuid?", "started_by_staff_id": "uuid?", "subject": "jsonb", "status": "text", "locked_reason": "text?", "reply_state": "text", "reply_due_at": "timestamptz?", "awaiting_since": "timestamptz?", "created_at": "timestamptz", "last_message_at": "timestamptz", "archive_after": "timestamptz?" }, "indexes": ["(customer_id, last_message_at desc)", "(seller_id, reply_state, reply_due_at)", "(order_id)", "(case_id)", "unique nulls not distinct (kind, customer_id, seller_id, application_id, order_id, order_item_id, return_id, case_id)"] },
     { "name": "participants", "columns": { "conversation_id": "uuid → conversations", "kind": "text", "participant_id": "text", "name": "text", "label": "text", "joined_at": "timestamptz", "joined_from_case_id": "uuid?", "last_read_message_id": "uuid?", "unread_count": "int" }, "indexes": ["(conversation_id, kind, participant_id) unique", "(kind, participant_id, unread_count)"] },
     { "name": "messages", "columns": { "id": "uuid pk", "conversation_id": "uuid → conversations", "kind": "text", "author_kind": "text?", "author_id": "text?", "author_label": "text", "body": "text", "original_body": "text? (staff only, before masking)", "media_ids": "jsonb", "redactions": "jsonb", "hidden": "bool", "hidden_reason": "text?", "client_message_id": "text?", "at": "timestamptz" }, "indexes": ["(conversation_id, at desc)", "(conversation_id, author_id, client_message_id) unique"] },
     { "name": "message_reports", "columns": { "id": "uuid pk", "message_id": "uuid → messages", "conversation_id": "uuid → conversations", "reporter_kind": "text", "reporter_id": "text", "reason": "text", "note": "text?", "status": "text", "outcome": "text?", "decided_by": "text?", "decided_at": "timestamptz?", "created_at": "timestamptz" }, "indexes": ["(status, created_at)"] },
@@ -272,12 +272,12 @@
     { "name": "messaging.response-stats", "schedule": "hourly", "does": "Roll up seller reply times for performance and Seller Center" }
   ],
   "settings": [
-    { "key": "sellerReplyTargetHours", "default": 24, "desc": "Seller reply target shown to sellers (example)" },
-    { "key": "maskContactDetails", "default": true, "desc": "Mask phone numbers, emails and outside links in messages" },
-    { "key": "maxAttachments", "default": 5, "desc": "Files per message" },
-    { "key": "maxAttachmentMb", "default": 10, "desc": "Size per file" },
-    { "key": "messageMaxLength", "default": 4000, "desc": "Characters per message" },
-    { "key": "archiveAfterDays", "default": 180, "desc": "Days after order completion" }
+    { "key": "sellerReplyTargetHours", "type": "duration", "default": 24, "desc": "Seller reply target shown to sellers (example)", "unit": "hours", "min": 1, "sellerVisible": true },
+    { "key": "maskContactDetails", "type": "bool", "default": true, "desc": "Mask phone numbers, emails and outside links in messages", "approval": "second_reviewer" },
+    { "key": "maxAttachments", "type": "int", "default": 5, "desc": "Files per message", "min": 0, "max": 20 },
+    { "key": "maxAttachmentMb", "type": "int", "default": 10, "desc": "Size per file", "min": 1, "unit": "MB" },
+    { "key": "messageMaxLength", "type": "int", "default": 4000, "desc": "Characters per message", "min": 1, "unit": "characters" },
+    { "key": "archiveAfterDays", "type": "duration", "default": 180, "desc": "Days after order completion", "unit": "days", "min": 30 }
   ],
   "integrations": [],
   "errorCodes": {

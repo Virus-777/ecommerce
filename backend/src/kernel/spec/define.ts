@@ -37,6 +37,8 @@ export interface EndpointDef {
   /** Adds cursor/page/limit to the query and wraps the response in Page<…> */
   readonly paging?: boolean;
   readonly body?: () => z.ZodType;
+  /** binary: the body is the raw request bytes (any content type), handed to the handler as a Uint8Array */
+  readonly bodyFormat?: 'binary';
   /** null → no content */
   readonly response: (() => z.ZodType) | null;
   readonly status: number;
@@ -62,6 +64,26 @@ export interface StateMachineDef {
   readonly transitions: readonly (readonly [string, string, string])[];
 }
 
+/**
+ * A module's runtime setting (docs/api/spec/FORMAT.md "Settings"). Only default and desc are always
+ * present; the settings module infers what the spec leaves out.
+ */
+export interface SettingDecl {
+  readonly default: unknown;
+  readonly desc: string;
+  readonly type?: 'int' | 'number' | 'bool' | 'string' | 'money' | 'duration' | 'time' | 'enum' | 'json';
+  readonly min?: number;
+  readonly max?: number;
+  /** type enum: the allowed values */
+  readonly choices?: readonly string[];
+  readonly unit?: string;
+  readonly approval?: 'none' | 'second_reviewer' | 'business_owner';
+  readonly sellerVisible?: boolean;
+  readonly minLeadDays?: number;
+  /** false = shown read-only (default true) */
+  readonly editable?: boolean;
+}
+
 export interface ModuleSpecDef {
   readonly name: string;
   readonly title: string;
@@ -80,7 +102,7 @@ export interface ModuleSpecDef {
     readonly consumes: Readonly<Record<string, string>>;
   };
   readonly jobs: Readonly<Record<string, { readonly schedule: string; readonly does: string }>>;
-  readonly settings: Readonly<Record<string, { readonly default: unknown; readonly desc: string }>>;
+  readonly settings: Readonly<Record<string, SettingDecl>>;
   readonly errorCodes: Readonly<Record<string, { readonly status: number; readonly meaning: string }>>;
   /** table → column → { type, nullable } as declared in the spec (used to detect migration drift) */
   readonly tables: Readonly<Record<string, Readonly<Record<string, { readonly type: string; readonly nullable: boolean }>>>>;

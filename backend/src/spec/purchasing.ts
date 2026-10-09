@@ -826,6 +826,13 @@ export interface PurchasingPurchaseOrderSentEvent {
   purchaseOrderId: string;
   ref: string;
   supplierId: string;
+  supplierName: string;
+  /** Supplier contact email; null when the supplier has none */
+  supplierEmail?: string | null;
+  /** The buyer asked to email the purchase order to the supplier */
+  emailSupplier: boolean;
+  /** The buyer's message to the supplier */
+  message?: string | null;
   locationId: string;
   total: common.Money;
   lines: PurchaseOrderLine[];
@@ -835,6 +842,10 @@ export const PurchasingPurchaseOrderSentEvent: z.ZodType<PurchasingPurchaseOrder
   purchaseOrderId: z.uuid(),
   ref: z.string(),
   supplierId: z.uuid(),
+  supplierName: z.string(),
+  supplierEmail: z.email().describe("Supplier contact email; null when the supplier has none").nullish(),
+  emailSupplier: z.boolean().describe("The buyer asked to email the purchase order to the supplier"),
+  message: z.string().describe("The buyer's message to the supplier").nullish(),
   locationId: z.uuid(),
   get total() {
     return common.Money;
@@ -1970,31 +1981,50 @@ export const spec = defineModuleSpec({
   settings: {
     "purchaseOrderRefFormat": {
       "default": "PUR-YYMM-NNNN",
-      "desc": "Human reference for purchase orders"
+      "desc": "Human reference for purchase orders",
+      "type": "string",
+      "editable": false
     },
     "receiptRefFormat": {
       "default": "REC-YYMMDD-NN",
-      "desc": "Human reference for receiving records"
+      "desc": "Human reference for receiving records",
+      "type": "string",
+      "editable": false
     },
     "damagePhotosRequired": {
       "default": true,
-      "desc": "Damaged lines need at least one photo"
+      "desc": "Damaged lines need at least one photo",
+      "type": "bool"
     },
     "overReceiptAllowedPct": {
       "default": 0,
-      "desc": "Received above ordered allowed without a new PO line"
+      "desc": "Received above ordered allowed without a new PO line",
+      "type": "number",
+      "min": 0,
+      "max": 100,
+      "unit": "%",
+      "approval": "second_reviewer"
     },
     "deliveryLateGraceMinutes": {
       "default": 60,
-      "desc": "Grace after the arrival window before a delivery counts as late"
+      "desc": "Grace after the arrival window before a delivery counts as late",
+      "type": "duration",
+      "min": 0,
+      "unit": "minutes"
     },
     "reorderCoverDays": {
       "default": 30,
-      "desc": "Days of sales a suggested reorder should cover"
+      "desc": "Days of sales a suggested reorder should cover",
+      "type": "duration",
+      "min": 1,
+      "unit": "days"
     },
     "performanceWindowDays": {
       "default": 90,
-      "desc": "Window for supplier performance figures"
+      "desc": "Window for supplier performance figures",
+      "type": "duration",
+      "min": 7,
+      "unit": "days"
     }
   },
   errorCodes: {
