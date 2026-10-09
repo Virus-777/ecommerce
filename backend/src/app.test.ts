@@ -61,11 +61,12 @@ describe('the launch configuration', () => {
       expect(res.json().errors[0].extensions.code).toBe('UNAUTHORIZED');
     });
 
-    it('runs persisted screen queries; unbuilt fields answer NOT_IMPLEMENTED', async () => {
+    it('runs persisted screen queries', async () => {
       const [id, op] = Object.entries(persistedQueries.store).find(([, q]) => q.name === 'OrderList')!;
       const res = await app.inject({ method: 'POST', url: '/graphql/store', payload: { persisted: true, query: id, variables: {} }, headers: auth(callers.customer()) });
       expect(op.screens).toContain('account/orders');
-      expect(res.json().errors?.[0]?.extensions?.code).toBe('NOT_IMPLEMENTED');
+      expect(res.json().errors, res.body).toBeUndefined();
+      expect(res.json().data).toBeDefined();
     });
 
     it('reports screen queries that need a module that is off at launch', () => {
