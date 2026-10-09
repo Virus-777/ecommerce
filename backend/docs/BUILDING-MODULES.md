@@ -78,6 +78,9 @@ async approveThing(id: string, input: { actor: Actor; reason?: string; requestId
 }
 ```
 
+- **Inside a transaction, touch only your own repository.** Take references (`ctx.refs`), settings,
+  other modules' calls, audit and events before the transaction or after the commit: they use their own
+  connection, and on PGlite (development and tests: one connection) a call inside a transaction waits forever.
 - **Transactions:** `ctx.db.transaction().execute(async (trx) => …)`; give the repository a `transaction(fn)` that hands `fn` a repository bound to `trx`. Use `forUpdate()` when a decision depends on the row you're changing (stock, balances, states).
 - **Events** are published **after** the commit (delivery is asynchronous; subscribers never fail the publisher). Payloads must match the spec (validated outside production). Publish exactly the events the spec lists for the action.
 - **Audit:** endpoints marked `audited` (and material changes the spec describes) write one entry via the audit module, which every module has as an optional dependency:
@@ -169,7 +172,8 @@ await app.kernel.events.drain();   // wait for event consumers
   business validation, every state transition the spec lists (and an illegal one → 409), approvals
   where relevant, events published (subscribe with `app.kernel.events.subscribe('test', name, fn)`),
   audit entries written (stub `audit.record` and assert the calls), jobs (`app.kernel.jobs.runNow`), consumers.
-- Apps on a fixed clock: set `tokenClock.now = () => clock.now()` (from `testing/app.ts`), and a larger
+- Clocks: `movingClock()` (real time you can move ahead; dev tokens stay valid) is the easy default.
+  Apps on a fixed clock: set `tokenClock.now = () => clock.now()` (from `testing/app.ts`), and a larger
   `tokenClock.ttlSeconds` if the test moves the clock far ahead, so `callers.*` tokens stay valid at the app's time.
 - Callers: `callers.visitor()`, `callers.customer({ accountId })`, `callers.seller({ sellerId, permissions })`,
   `callers.staff(['perm'])` (default all permissions). These are dev tokens; their permissions stand in for access/sellers.

@@ -40,6 +40,23 @@ export async function buildTestApp(opts: BuildOptions & { only?: string[] } = {}
 }
 
 /**
+ * A clock that follows real time and can be moved ahead (deadlines, expiry jobs) while dev tokens,
+ * signed at real time, stay valid. Pass it as `clock` to buildTestApp.
+ */
+export function movingClock(): { now(): Date; advance(ms: number): void; set(at: Date | string): void } {
+  let offset = 0;
+  return {
+    now: () => new Date(Date.now() + offset),
+    advance: (ms) => {
+      offset += ms;
+    },
+    set: (at) => {
+      offset = new Date(at).getTime() - Date.now();
+    },
+  };
+}
+
+/**
  * How test tokens are signed. Apps on a fixed clock set `tokenClock.now = () => clock.now()` (and a longer
  * `ttlSeconds` when the test moves the clock far ahead) so every `callers.*` token is valid at the app's time.
  */
