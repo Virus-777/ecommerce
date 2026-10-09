@@ -38,7 +38,7 @@ export type Target =
 
 export type RouteTarget =
   | Target
-  /** Whoever received earlier notices about this order, return, case or conversation */
+  /** Whoever received earlier notices about this order, return, case or conversation (fallback when the event names no recipient) */
   | { kind: 'subject'; audience: 'customer' | 'seller'; key: SubjectKey; value: string | null | undefined }
   /** An identity account: its customer inbox (member realm) or staff inbox (staff realm) */
   | { kind: 'account'; accountId: string }
@@ -110,6 +110,25 @@ const byOrder = (orderId: string | null | undefined): RouteTarget | null => (ord
 const byReturn = (returnId: string | null | undefined): RouteTarget | null => (returnId ? { kind: 'subject', audience: 'customer', key: 'returnId', value: returnId } : null);
 const byCase = (caseId: string | null | undefined): RouteTarget | null => (caseId ? { kind: 'subject', audience: 'customer', key: 'caseId', value: caseId } : null);
 const sellerByCase = (caseId: string): RouteTarget => ({ kind: 'subject', audience: 'seller', key: 'caseId', value: caseId });
+
+/** Who an order, return or case belongs to, as the event names them */
+interface Shopper {
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email (guests) */
+  contactEmail?: string | null;
+}
+
+/**
+ * The shopper of a customer-facing event: the customer (customers id → identity account), else the guest's
+ * contact address (email only), else, when the event names neither, whoever received earlier notices.
+ */
+const shopper = (p: Shopper, ...fallback: (RouteTarget | null)[]): (RouteTarget | null)[] =>
+  p.customerId ? [customer(p.customerId)] : p.contactEmail ? [{ kind: 'guest', email: p.contactEmail }] : fallback;
+
+/** Guests get the order link minted by identity (they have no account to open the order in) */
+const guestLink = (p: Shopper, orderId: string | null | undefined): Pick<RouteSend, 'guestOrderLink'> =>
+  !p.customerId && p.contactEmail && orderId ? { guestOrderLink: { orderId, email: p.contactEmail } } : {};
 
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
@@ -292,11 +311,12 @@ export const ROUTES: Routes = {
     sends: (p, f) => [
       {
         topic: 'customer.order.item_cancelled',
-        to: [byOrder(p.orderId)],
+        to: shopper(p, byOrder(p.orderId)),
         link: orderLink(p.orderId, p.ref),
         context: { order: { ref: p.ref }, item: { count: p.quantity }, refund: { amount: f.money(p.refund.total) } },
         subjects: { orderId: p.orderId, groupId: p.groupId },
         dedupe: `cancellation:${p.cancellationId}:${p.itemId}`,
+        ...guestLink(p, p.orderId),
       },
       p.ownerType === 'seller' &&
         p.initiatedBy !== 'seller' && {
@@ -314,11 +334,12 @@ export const ROUTES: Routes = {
     sends: (p, f) => [
       {
         topic: 'customer.order.delayed',
-        to: [byOrder(p.orderId)],
+        to: shopper(p, byOrder(p.orderId)),
         link: L('order', p.orderId, 'account/order', 'See your options'),
         context: { delay: { dispatchBy: p.expectedDispatchBy ? f.date(p.expectedDispatchBy) : 'to be confirmed', reason: p.reason } },
         subjects: { orderId: p.orderId, groupId: p.groupId },
         dedupe: `delay:${p.groupId}:${p.expectedDispatchBy ?? p.source}`,
+        ...guestLink(p, p.orderId),
       },
     ],
   },
@@ -326,11 +347,12 @@ export const ROUTES: Routes = {
     sends: (p) => [
       {
         topic: 'customer.order.cancellation_decided',
-        to: [byOrder(p.orderId)],
+        to: shopper(p, byOrder(p.orderId)),
         link: orderLink(p.orderId),
         context: { cancellation: { outcome: p.outcome === 'auto_accepted' ? 'accepted' : p.outcome } },
         subjects: { orderId: p.orderId },
         dedupe: `cancellation:${p.cancellationId}:decided`,
+        ...guestLink(p, p.orderId),
       },
     ],
   },
@@ -340,40 +362,58 @@ export const ROUTES: Routes = {
     sends: (p, f) => [
       {
         topic: 'customer.payment.captured',
-        to: [byOrder(p.orderId)],
+        to: shopper(p, byOrder(p.orderId)),
         link: orderLink(p.orderId),
         context: { payment: { amount: f.money(p.amount) } },
         subjects: { orderId: p.orderId },
         dedupe: `payment:${p.captureId}`,
         skipIfRecent: { topic: 'customer.order.accepted', key: 'orderId', value: p.orderId },
+        ...guestLink(p, p.orderId),
       },
     ],
   },
   'payments.payment.failed': {
     sends: (p) => [
-      p.orderId && { topic: 'customer.payment.failed', to: [byOrder(p.orderId)], link: L('order', p.orderId, 'account/order', 'Try again'), subjects: { orderId: p.orderId }, dedupe: `payment-failed:${p.intentId}:${p.at}` },
+      p.orderId && { topic: 'customer.payment.failed', to: shopper(p, byOrder(p.orderId)), link: L('order', p.orderId, 'account/order', 'Try again'), subjects: { orderId: p.orderId }, dedupe: `payment-failed:${p.intentId}:${p.at}`, ...guestLink(p, p.orderId) },
     ],
   },
   'payments.payment.pending_check': {
     sends: (p, f) => [
-      p.orderId && { topic: 'customer.payment.pending_check', to: [byOrder(p.orderId)], link: L('order', p.orderId, 'account/order', 'View order status'), context: { payment: { amount: f.money(p.amount) } }, subjects: { orderId: p.orderId }, dedupe: `payment-check:${p.intentId}` },
+      p.orderId && {
+        topic: 'customer.payment.pending_check',
+        to: shopper(p, byOrder(p.orderId)),
+        link: L('order', p.orderId, 'account/order', 'View order status'),
+        context: { payment: { amount: f.money(p.amount) } },
+        subjects: { orderId: p.orderId },
+        dedupe: `payment-check:${p.intentId}`,
+        ...guestLink(p, p.orderId),
+      },
     ],
   },
   'payments.refund.sent': {
     sends: (p, f) => [
       {
         topic: 'customer.refund.sent',
-        to: [byOrder(p.orderId)],
+        to: shopper(p, byOrder(p.orderId)),
         link: L('refund', p.refundId, 'account/refund', 'Track refund', p.ref),
         context: { refund: { amount: f.money(p.amount), destination: p.destination } },
         subjects: { orderId: p.orderId },
         dedupe: `refund:${p.refundId}:sent`,
+        ...guestLink(p, p.orderId),
       },
     ],
   },
   'payments.refund.failed': {
     sends: (p, f) => [
-      p.finalAttempt && { topic: 'customer.refund.failed', to: [byOrder(p.orderId)], link: L('refund', p.refundId, 'account/refund', 'View refund', p.ref), context: { refund: { amount: f.money(p.amount), reason: p.reason } }, subjects: { orderId: p.orderId }, dedupe: `refund:${p.refundId}:failed` },
+      p.finalAttempt && {
+        topic: 'customer.refund.failed',
+        to: shopper(p, byOrder(p.orderId)),
+        link: L('refund', p.refundId, 'account/refund', 'View refund', p.ref),
+        context: { refund: { amount: f.money(p.amount), reason: p.reason } },
+        subjects: { orderId: p.orderId },
+        dedupe: `refund:${p.refundId}:failed`,
+        ...guestLink(p, p.orderId),
+      },
       p.finalAttempt && {
         topic: 'staff.finance.refund_failed',
         to: [role('finance_manager')],
@@ -414,7 +454,8 @@ export const ROUTES: Routes = {
     sends: (p, f) => [
       p.kind !== 'return' && {
         topic: 'customer.shipment.dispatched',
-        to: [byOrder(p.orderId)],
+        to: shopper(p, byOrder(p.orderId)),
+        ...guestLink(p, p.orderId),
         link: L('shipment', p.shipmentId, 'account/tracking', 'Track package'),
         context: {
           package: { items: p.lines.map((l) => `${l.title}${l.variantLabel ? ` (${l.variantLabel})` : ''} × ${l.quantity}`).join(', ') },
@@ -429,7 +470,8 @@ export const ROUTES: Routes = {
     sends: (p) => [
       p.kind !== 'return' && {
         topic: 'customer.shipment.delivered',
-        to: [byOrder(p.orderId)],
+        to: shopper(p, byOrder(p.orderId)),
+        ...guestLink(p, p.orderId),
         link: L('order', p.orderId, 'account/order', 'View order'),
         context: { package: { items: p.lines.map((l) => `${l.title} × ${l.quantity}`).join(', ') } },
         subjects: { orderId: p.orderId, groupId: p.groupId },
@@ -441,7 +483,8 @@ export const ROUTES: Routes = {
     sends: (p, f) => [
       p.kind !== 'missing_tracking' && {
         topic: 'customer.shipment.exception',
-        to: [byOrder(p.orderId)],
+        to: shopper(p, byOrder(p.orderId)),
+        ...guestLink(p, p.orderId),
         link: L('shipment', p.shipmentId ?? p.orderId, 'account/tracking', 'See next steps'),
         context: { exception: { kind: f.human(p.kind), action: p.customerAction ?? 'we will update you' }, due: { date: f.dateTime(p.dueAt) } },
         subjects: { orderId: p.orderId, groupId: p.groupId },
@@ -503,7 +546,7 @@ export const ROUTES: Routes = {
   },
   'returns.return.info_requested': {
     sends: (p, f) => [
-      { topic: 'customer.return.info_requested', to: [byReturn(p.returnId)], link: returnLink(p.returnId, null, 'Reply'), context: { due: { date: f.dateTime(p.replyDueAt) } }, subjects: { returnId: p.returnId }, deadline: p.replyDueAt, dedupe: `return:${p.returnId}:info:${p.replyDueAt}` },
+      { topic: 'customer.return.info_requested', to: shopper(p, byReturn(p.returnId)), link: returnLink(p.returnId, null, 'Reply'), context: { due: { date: f.dateTime(p.replyDueAt) } }, subjects: { returnId: p.returnId }, deadline: p.replyDueAt, dedupe: `return:${p.returnId}:info:${p.replyDueAt}` },
     ],
   },
   'returns.return.approved': {
@@ -511,38 +554,46 @@ export const ROUTES: Routes = {
     sends: (p, f) => [
       {
         topic: 'customer.return.approved',
-        to: [byReturn(p.returnId)],
-        link: returnLink(p.returnId),
-        context: { return: { outcome: p.withoutReturn ? "You don't need to send the item back." : p.dropOffBy ? `Drop the package off by ${f.date(p.dropOffBy)}.` : 'We will send your return label or drop-off instructions.' } },
-        subjects: { returnId: p.returnId },
+        to: shopper(p, byReturn(p.returnId), byOrder(p.orderId)),
+        link: returnLink(p.returnId, p.ref),
+        context: { return: { ref: p.ref, outcome: p.withoutReturn ? "You don't need to send the item back." : p.dropOffBy ? `Drop the package off by ${f.date(p.dropOffBy)}.` : 'We will send your return label or drop-off instructions.' } },
+        subjects: { returnId: p.returnId, orderId: p.orderId },
         deadline: p.dropOffBy ?? null,
         dedupe: `return:${p.returnId}:approved`,
+        ...guestLink(p, p.orderId),
       },
     ],
   },
   'returns.return.rejected': {
     resolve: (p) => [`return:${p.returnId}:respond`],
     sends: (p, f) => [
-      { topic: 'customer.return.rejected', to: [byReturn(p.returnId)], link: returnLink(p.returnId, null, 'Get help'), context: { return: { reason: f.human(p.reasonCode) } }, subjects: { returnId: p.returnId }, dedupe: `return:${p.returnId}:rejected` },
+      { topic: 'customer.return.rejected', to: shopper(p, byReturn(p.returnId)), link: returnLink(p.returnId, null, 'Get help'), context: { return: { reason: f.human(p.reasonCode) } }, subjects: { returnId: p.returnId }, dedupe: `return:${p.returnId}:rejected` },
     ],
   },
   'returns.label.created': {
     effects: ['dropOffReminder'],
     sends: (p) => [
-      { topic: 'customer.return.label_ready', to: [byReturn(p.returnId) ?? byOrder(p.orderId)], link: returnLink(p.returnId, null, 'Get label'), subjects: { returnId: p.returnId, orderId: p.orderId }, dedupe: `return:${p.returnId}:label:${p.labelId}` },
+      {
+        topic: 'customer.return.label_ready',
+        to: shopper(p, byReturn(p.returnId), byOrder(p.orderId)),
+        link: returnLink(p.returnId, null, 'Get label'),
+        subjects: { returnId: p.returnId, orderId: p.orderId },
+        dedupe: `return:${p.returnId}:label:${p.labelId}`,
+        ...guestLink(p, p.orderId),
+      },
     ],
   },
   'returns.return.received': {
     cancel: (p) => [`return-dropoff:${p.returnId}`],
     sends: (p) => [
-      { topic: 'customer.return.received', to: [byReturn(p.returnId)], link: returnLink(p.returnId), subjects: { returnId: p.returnId }, dedupe: `return:${p.returnId}:received` },
+      { topic: 'customer.return.received', to: shopper(p, byReturn(p.returnId)), link: returnLink(p.returnId), subjects: { returnId: p.returnId }, dedupe: `return:${p.returnId}:received` },
       p.ownerType === 'seller' && p.sellerId && { topic: 'seller.return.received', to: [seller(p.sellerId)], link: sellerReturnLink(p.returnId), subjects: { returnId: p.returnId }, sellerId: p.sellerId, dedupe: `return:${p.returnId}:inspect` },
     ],
   },
   'returns.return.inspected': {
     resolve: (p) => [`return:${p.returnId}:inspect`],
     sends: (p, f) => [
-      { topic: 'customer.return.inspected', to: [byReturn(p.returnId)], link: returnLink(p.returnId), context: { return: { outcome: f.human(p.conditionOutcome) } }, subjects: { returnId: p.returnId }, dedupe: `return:${p.returnId}:inspected` },
+      { topic: 'customer.return.inspected', to: shopper(p, byReturn(p.returnId)), link: returnLink(p.returnId), context: { return: { outcome: f.human(p.conditionOutcome) } }, subjects: { returnId: p.returnId }, dedupe: `return:${p.returnId}:inspected` },
     ],
   },
   'returns.return.escalated': {
@@ -555,26 +606,34 @@ export const ROUTES: Routes = {
     sends: (p, f) => [
       {
         topic: 'customer.refund.approved',
-        to: [p.returnId ? byReturn(p.returnId) : p.caseId ? byCase(p.caseId) : byOrder(p.orderId), byOrder(p.orderId)],
+        to: shopper(p, p.returnId ? byReturn(p.returnId) : p.caseId ? byCase(p.caseId) : byOrder(p.orderId), byOrder(p.orderId)),
         link: L('refund', p.refundRequestId, 'account/refund', 'Track refund'),
         context: { refund: { amount: f.money(p.total) } },
         subjects: { orderId: p.orderId, returnId: p.returnId, caseId: p.caseId },
         dedupe: `refund-request:${p.refundRequestId}`,
+        ...guestLink(p, p.orderId),
       },
     ],
   },
   'returns.replacement.created': {
     sends: (p) => [
-      { topic: 'customer.replacement.created', to: [byReturn(p.returnId), byOrder(p.orderId)], link: orderLink(p.orderId), subjects: { returnId: p.returnId, orderId: p.orderId }, dedupe: `replacement:${p.replacementId}` },
+      {
+        topic: 'customer.replacement.created',
+        to: shopper(p, byReturn(p.returnId), byOrder(p.orderId)),
+        link: orderLink(p.orderId),
+        subjects: { returnId: p.returnId, orderId: p.orderId },
+        dedupe: `replacement:${p.replacementId}`,
+        ...guestLink(p, p.orderId),
+      },
     ],
   },
 
   /* ---------------------------------------------------------------- support */
   'support.case.opened': {
     sends: (p, f) => [
-      p.customerId && {
+      (p.customerId || p.contactEmail) && {
         topic: 'customer.case.opened',
-        to: [customer(p.customerId)],
+        to: shopper(p),
         link: caseLink(p.caseId, p.ref),
         context: { case: { ref: p.ref }, due: { date: p.nextResponseDueAt ? f.dateTime(p.nextResponseDueAt) : 'the next business day' } },
         subjects: { caseId: p.caseId, orderId: p.orderId },
@@ -598,10 +657,19 @@ export const ROUTES: Routes = {
     sends: (p) => [
       p.audience !== 'internal' &&
         p.audience !== 'seller' &&
-        p.authorRole !== 'customer' && { topic: 'customer.case.reply', to: [byCase(p.caseId)], link: caseLink(p.caseId), subjects: { caseId: p.caseId }, replyTo: { module: 'support', refId: p.caseId }, dedupe: `case-message:${p.messageId}` },
+        p.authorRole !== 'customer' && { topic: 'customer.case.reply', to: shopper(p, byCase(p.caseId)), link: caseLink(p.caseId), subjects: { caseId: p.caseId }, replyTo: { module: 'support', refId: p.caseId }, dedupe: `case-message:${p.messageId}` },
+      // the case's seller (Official Store cases have none; an event without the field falls back to earlier seller notices)
       p.audience !== 'internal' &&
         p.audience !== 'customer' &&
-        p.authorRole !== 'seller' && { topic: 'seller.case.reply', to: [sellerByCase(p.caseId)], link: L('case', p.caseId, 'seller/case', 'View reply'), subjects: { caseId: p.caseId }, replyTo: { module: 'support', refId: p.caseId }, dedupe: `case-message:${p.messageId}` },
+        p.authorRole !== 'seller' && {
+          topic: 'seller.case.reply',
+          to: [p.sellerId ? seller(p.sellerId) : sellerByCase(p.caseId)],
+          link: L('case', p.caseId, 'seller/case', 'View reply'),
+          subjects: { caseId: p.caseId },
+          sellerId: p.sellerId ?? null,
+          replyTo: { module: 'support', refId: p.caseId },
+          dedupe: `case-message:${p.messageId}`,
+        },
     ],
   },
   'support.case.escalated': {
@@ -630,7 +698,7 @@ export const ROUTES: Routes = {
     sends: (p, f) => [
       {
         topic: 'customer.case.decided',
-        to: [byCase(p.caseId)],
+        to: shopper(p, byCase(p.caseId)),
         link: caseLink(p.caseId, p.ref),
         context: { case: { ref: p.ref, outcome: f.human(p.outcome) }, appeal: { deadline: p.appealDeadline ? f.date(p.appealDeadline) : 'the date shown in the case' } },
         subjects: { caseId: p.caseId, orderId: p.orderId, returnId: p.returnId },
@@ -649,7 +717,7 @@ export const ROUTES: Routes = {
   },
   'support.case.resolved': {
     resolve: (p) => [`case:${p.caseId}`],
-    sends: (p) => [{ topic: 'customer.case.resolved', to: [byCase(p.caseId)], link: caseLink(p.caseId, p.ref), context: { case: { ref: p.ref } }, subjects: { caseId: p.caseId }, dedupe: `case:${p.caseId}:resolved` }],
+    sends: (p) => [{ topic: 'customer.case.resolved', to: shopper(p, byCase(p.caseId)), link: caseLink(p.caseId, p.ref), context: { case: { ref: p.ref } }, subjects: { caseId: p.caseId }, dedupe: `case:${p.caseId}:resolved` }],
   },
 
   /* ---------------------------------------------------------------- messaging */
@@ -756,6 +824,18 @@ export const ROUTES: Routes = {
         context: { review: { outcome: p.outcome === 'passed' ? 'passed' : 'needs changes' } },
         sellerId: p.sellerId,
         dedupe: `launch-review:${p.sellerId}:${p.decidedAt}`,
+      },
+    ],
+  },
+  'sellers.invitation.sent': {
+    // sensitive topic: the code is rendered into the email only (no in-app notice; the delivery log keeps a redacted subject)
+    sends: (p, f) => [
+      {
+        topic: 'seller.application.invitation',
+        to: [{ kind: 'email', email: p.email, recipientKind: 'guest_email' }],
+        link: L('seller_invitation', p.invitationId, 'seller/apply', 'Start your application'),
+        context: { invite: { business: p.businessName, code: p.code, expires: f.date(p.expiresAt) } },
+        dedupe: `seller-invitation:${p.invitationId}`,
       },
     ],
   },

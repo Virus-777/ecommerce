@@ -46,7 +46,7 @@ export class Inbox {
     return null;
   }
 
-  /** Members are known to notifications from their first visit (sellers has no member list API) */
+  /** Stores a member's default preferences on their first visit (until then sellers.listMembers supplies them with defaults) */
   async rememberMember(sellerId: string, memberId: string, accountId: string, isOwner: boolean) {
     return this.core.repo.ensureMemberPreference({
       seller_id: sellerId,

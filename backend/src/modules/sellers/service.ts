@@ -55,6 +55,15 @@ export class SellersService implements SellersPublicApi {
     return this.members.getMemberAccess(sellerId, accountId);
   }
 
+  /** Active members with their identity account (notifications: owners and members who never opened Seller Center) */
+  listMembers(sellerId: string) {
+    return this.members.activeMembers(sellerId);
+  }
+
+  ownerOf(sellerId: string) {
+    return this.members.ownerAccount(sellerId);
+  }
+
   getPerformance(sellerId: string): Promise<PerformanceSummary> {
     return this.performance.getPerformance(sellerId);
   }

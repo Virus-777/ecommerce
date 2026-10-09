@@ -125,6 +125,12 @@ export class World {
           const m = this.members.get(`${sellerId}:${accountId}`);
           return m ? { memberId: m.memberId, role: m.role, permissions: m.permissions, isOwner: m.isOwner } : null;
         },
+        listMembers: async (sellerId) =>
+          [...this.members.values()].filter((m) => m.sellerId === sellerId).map((m) => ({ memberId: m.memberId, accountId: m.accountId, role: m.role, isOwner: m.isOwner })),
+        ownerOf: async (sellerId) => {
+          const o = [...this.members.values()].find((m) => m.sellerId === sellerId && m.isOwner);
+          return o ? { accountId: o.accountId, memberId: o.memberId } : null;
+        },
         searchSellers: async () => ({ items: this.sellersList.map((id) => ({ id, ref: 'SL-1', slug: id, storeName: 'Store', status: 'approved' as const, verified: true, canSellNew: true, activeRestrictionIds: [], launchReady: true })), nextCursor: null }),
       },
       access: {

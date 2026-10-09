@@ -94,6 +94,7 @@ function repo(db: Db, inTx: boolean): NotificationsRepository {
       if (inTx) return fn(self);
       return (db as Kysely<NotificationsDb>).transaction().execute((trx) => fn(repo(trx, true)));
     },
+    claim: (inbox, key) => inbox.claim(db, key),
 
     /* ---------------------------------------------------------------- topics and templates */
     listTopics: () => db.selectFrom('topics').selectAll().execute(),
@@ -341,6 +342,10 @@ function repo(db: Db, inTx: boolean): NotificationsRepository {
     /* ---------------------------------------------------------------- deliveries */
     async insertDeliveries(rows) {
       if (rows.length) await db.insertInto('deliveries').values(rows).execute();
+    },
+    async linkedRefOf(dedupeKey) {
+      const row = await db.selectFrom('deliveries').select('linked_ref').where('dedupe_key', '=', dedupeKey).where('linked_ref', 'is not', null).limit(1).executeTakeFirst();
+      return row?.linked_ref ?? null;
     },
     async deliveryExists(q) {
       const row = await db

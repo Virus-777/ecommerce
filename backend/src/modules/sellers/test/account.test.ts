@@ -219,6 +219,16 @@ describe('members', () => {
     expect(await kit.svc.getMemberAccess(s.sellerId, accountId)).toEqual({ memberId: inv.body.id, role: 'custom', permissions: ['sellers.store.manage'], isOwner: false });
     expect(kit.callsOf('grantSellerContext').some((c) => (c[0] as any).memberId === inv.body.id && !(c[0] as any).isOwner)).toBe(true);
 
+    // public API for notifications: active members (owner first) and the owner
+    const ownerRow = (await kit.svc.core.repo.find('members', { seller_id: s.sellerId, is_owner: true }))[0]!;
+    expect(await kit.svc.listMembers(s.sellerId)).toEqual([
+      { memberId: ownerRow.id, accountId: s.accountId, role: ownerRow.role, isOwner: true },
+      { memberId: inv.body.id, accountId, role: 'custom', isOwner: false },
+    ]);
+    expect(await kit.svc.ownerOf(s.sellerId)).toEqual({ accountId: s.accountId, memberId: ownerRow.id });
+    expect(await kit.svc.ownerOf(newId())).toBeNull();
+    expect(await kit.svc.listMembers(newId())).toEqual([]);
+
     const upd = await kit.call('PATCH', `${SELLER}/members/${inv.body.id}`, s.sellerToken, { role: 'shipping' });
     expect(upd.body.role).toBe('shipping');
     expect(kit.last('sellers.member.permissions_changed')).toMatchObject({ memberId: inv.body.id });
@@ -229,6 +239,7 @@ describe('members', () => {
     const sus = await kit.call('POST', `${SELLER}/members/${inv.body.id}/suspend`, s.sellerToken, { reason: 'On leave' });
     expect(sus.body.status).toBe('suspended');
     expect(await kit.svc.getMemberAccess(s.sellerId, accountId)).toBeNull();
+    expect((await kit.svc.listMembers(s.sellerId)).map((m) => m.accountId)).toEqual([s.accountId]);
     const rm = await kit.call('POST', `${SELLER}/members/${inv.body.id}/remove`, s.sellerToken, { reason: 'Left' });
     expect(rm.body.status).toBe('removed');
     expect(kit.last('sellers.member.removed')).toMatchObject({ memberId: inv.body.id, accountId });
@@ -295,7 +306,12 @@ describe('admin views', () => {
 
   it('invitations to apply can be revoked and expire', async () => {
     const res = await kit.call('POST', `${ADMIN}/seller-invitations`, staff(), { email: 'new@shop.example.com', businessName: 'New Shop' });
-    expect(kit.last('sellers.invitation.sent')).toEqual({ invitationId: res.body.id, email: 'new@shop.example.com' });
+    // the plain code goes to notifications in the event; only its hash is stored
+    const code = kit.svc.applications.invitationCode(res.body.id);
+    expect(kit.last('sellers.invitation.sent')).toEqual({ invitationId: res.body.id, email: 'new@shop.example.com', businessName: 'New Shop', code, expiresAt: res.body.expiresAt });
+    const stored = await kit.svc.core.repo.get('seller_invitations', res.body.id);
+    expect(JSON.stringify(stored)).not.toContain(code);
+    expect(JSON.stringify(res.body)).not.toContain(code);
     expect((await kit.call('POST', `${ADMIN}/seller-invitations/${res.body.id}/revoke`, staff())).body.state).toBe('revoked');
     expect((await kit.call('POST', `${ADMIN}/seller-invitations/${res.body.id}/revoke`, staff())).status).toBe(409);
   });

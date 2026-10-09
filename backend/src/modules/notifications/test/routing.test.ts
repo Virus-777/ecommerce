@@ -48,7 +48,7 @@ function orderAccepted(o: { orderId?: string; customerId?: string | null; email:
 describe('catalogue', () => {
   it('routes every consumed event and seeds valid default templates', () => {
     expect(Object.keys(ROUTES).sort()).toEqual(Object.keys(spec.events.consumes).sort());
-    expect(Object.keys(spec.events.consumes)).toHaveLength(87);
+    expect(Object.keys(spec.events.consumes)).toHaveLength(88);
     for (const t of TOPICS) {
       for (const channel of templateChannels(t)) {
         const v = validateContent(t, channel, defaultContent(t, channel, {}));
@@ -169,7 +169,7 @@ describe('order notices', () => {
     expect(summary.json()).toMatchObject({ unread: 0, total: 1, totalByGroup: { orders: 1 } });
   });
 
-  it('tracks returns and cases through earlier notices', async () => {
+  it('falls back to earlier notices when an event names no customer (returns and cases)', async () => {
     const c = world.customer();
     const sellerId = newId();
     const owner = world.member(sellerId, { isOwner: true });
@@ -178,7 +178,7 @@ describe('order notices', () => {
     const returnId = newId();
     await publish(app, 'returns.return.requested', { returnId, ref: 'RT-261009-0001', orderId, ownerType: 'seller', sellerId, orderItemIds: [newId()], reason: 'arrived_damaged', responseDueAt: new Date(Date.now() + 2 * 86_400_000).toISOString() });
     await publish(app, 'returns.return.info_requested', { returnId, replyDueAt: new Date(Date.now() + 86_400_000).toISOString() });
-    await publish(app, 'returns.return.approved', { returnId, ownerType: 'seller', sellerId, withoutReturn: false, platformDecision: false, dropOffBy: new Date(Date.now() + 7 * 86_400_000).toISOString() });
+    await publish(app, 'returns.return.approved', { returnId, ref: 'RT-261009-0001', orderId, ownerType: 'seller', sellerId, items: [{ orderItemId: newId(), quantity: 1 }], withoutReturn: false, platformDecision: false, dropOffBy: new Date(Date.now() + 7 * 86_400_000).toISOString() });
     const notices = await inbox(as.customer(c), 'store', '?group=returns_refunds');
     expect(notices.map((n) => n.topicKey)).toEqual(['customer.return.approved', 'customer.return.info_requested']);
     expect(notices[1].actionRequired).toBe(true);
@@ -190,7 +190,7 @@ describe('order notices', () => {
     await publish(app, 'returns.label.created', { returnId, ownerType: 'seller', sellerId, labelId: newId(), orderId, cost: money(599), paidBy: 'seller' });
     const scheduled = await service.core.repo.dueScheduled(new Date(Date.now() + 30 * 86_400_000), 100);
     expect(scheduled.filter((s) => s.dedupe_key === `return-dropoff:${returnId}`)).toHaveLength(1);
-    await publish(app, 'returns.return.received', { returnId, ownerType: 'seller', sellerId, receivedAt: new Date().toISOString() });
+    await publish(app, 'returns.return.received', { returnId, ownerType: 'seller', sellerId, items: [], receivedAt: new Date().toISOString() });
     const left = await service.core.repo.dueScheduled(new Date(Date.now() + 30 * 86_400_000), 100);
     expect(left.filter((s) => s.dedupe_key === `return-dropoff:${returnId}`)).toHaveLength(0);
 

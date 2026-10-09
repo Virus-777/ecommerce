@@ -1,6 +1,7 @@
 /**
- * Runs the routing table (domain/routing.ts) for consumed events: resolves recipients that the
- * event does not name (earlier notices about the same order, return or case), realm-specific
+ * Runs the routing table (domain/routing.ts) for consumed events: the recipients the event names
+ * (customer, guest contact email, seller), falling back to earlier notices about the same order,
+ * return or case only when it names none, realm-specific
  * topics, guest order links, and the side effects some events have (consent cache, closed accounts,
  * staff re-routing, reminders). Consumers are idempotent through dedupe keys and never fail for
  * records they don't know (they log and return).
@@ -8,7 +9,7 @@
 import { isNotImplemented } from '../../../kernel/errors/index.js';
 import type { EventName, EventPayload } from '../../../kernel/events/index.js';
 import { format } from '../../../kernel/lib/money.js';
-import type { NotifyInput } from '../../../spec/notifications.js';
+import type { NotifyInput, Recipient } from '../../../spec/notifications.js';
 import { TOPICS } from '../domain/catalog.js';
 import { ROUTES, type EventRoute, type Fmt, type RouteSend, type RouteTarget, type Routes, type SubjectKey, type Target } from '../domain/routing.js';
 import { formatDate } from '../domain/rules.js';
@@ -22,7 +23,8 @@ const REF_FIELDS: [string, string][] = [
   ['case', 'caseRef'],
 ];
 
-export type Scheduler = (input: NotifyInput, sendAt: string, createdBy: string) => Promise<string>;
+/** Schedules a notice; with a claim key, only the first time (null when the key was already claimed) */
+export type Scheduler = (input: NotifyInput, sendAt: string, createdBy: string, claimKey?: string | null) => Promise<string | null>;
 
 export class Consumers {
   readonly fmt: Fmt;
@@ -46,17 +48,22 @@ export class Consumers {
     };
   }
 
-  async handle<N extends keyof Routes>(name: N, payload: EventPayload<N & EventName>): Promise<void> {
+  /**
+   * Runs the route of a consumed event. With the envelope id, every notice (and scheduled reminder) it creates
+   * claims an inbox key in the same transaction, so a redelivered event creates nothing twice; resolving and
+   * cancelling are idempotent by nature.
+   */
+  async handle<N extends keyof Routes>(name: N, payload: EventPayload<N & EventName>, eventId?: string): Promise<void> {
     const route = ROUTES[name] as unknown as EventRoute<typeof payload>;
     const now = this.core.now();
     for (const key of route.resolve?.(payload) ?? []) if (key) await this.core.repo.resolveNotices(key, null, now);
     for (const key of route.cancel?.(payload) ?? []) if (key) await this.core.repo.cancelScheduled(key);
     const sends = (route.sends?.(payload, this.fmt) ?? []).filter((s): s is RouteSend => Boolean(s));
-    for (const s of sends) await this.run(name, s);
-    for (const e of route.effects ?? []) await this.#effect(e, payload as never);
+    for (const [i, s] of sends.entries()) await this.run(name, s, eventId ? `${eventId}:send:${i}` : null);
+    for (const e of route.effects ?? []) await this.#effect(e, payload as never, eventId ?? null);
   }
 
-  async run(event: string, send: RouteSend): Promise<void> {
+  async run(event: string, send: RouteSend, claimKey: string | null = null): Promise<void> {
     const core = this.core;
     const repo = core.repo;
     let topic: string;
@@ -85,6 +92,11 @@ export class Consumers {
       if (!subjects[k]) continue;
       const known = await repo.subjectsWith(k, subjects[k]!);
       for (const [kk, vv] of Object.entries(known)) subjects[kk] ??= vv;
+    }
+    // guest orders have no notices: the order reference comes from the order confirmation email
+    if (subjects.orderId && !subjects.orderRef) {
+      const ref = await repo.linkedRefOf(`order:${subjects.orderId}:accepted`);
+      if (ref) subjects.orderRef = ref;
     }
 
     const targets: Target[] = [];
@@ -130,6 +142,7 @@ export class Consumers {
       sellerId: send.sellerId ?? null,
       group: send.group,
       replyTo: send.replyTo ?? null,
+      claimKey,
     });
   }
 
@@ -164,6 +177,17 @@ export class Consumers {
     }
   }
 
+  /** Drop-off reminder recipient: the customer or guest the event names; earlier notices only when it names neither */
+  async #returnRecipient(p: EventPayload<'returns.label.created'>): Promise<Recipient | null> {
+    if (p.customerId) {
+      const snap = await this.core.customer(p.customerId);
+      return snap?.userId ? { kind: 'customer', accountId: snap.userId } : null;
+    }
+    if (p.contactEmail) return { kind: 'guest_email', email: p.contactEmail };
+    const who = (await this.core.repo.addresseeOf('customer', 'returnId', p.returnId)) ?? (await this.core.repo.addresseeOf('customer', 'orderId', p.orderId));
+    return who ? { kind: 'customer', accountId: who.addressId } : null;
+  }
+
   async #allSellers(): Promise<Target[]> {
     const api = this.core.sellers;
     if (!api) return [];
@@ -180,10 +204,11 @@ export class Consumers {
 
   /* ---------------------------------------------------------------- side effects */
 
-  async #effect(effect: NonNullable<EventRoute<unknown>['effects']>[number], payload: unknown) {
+  async #effect(effect: NonNullable<EventRoute<unknown>['effects']>[number], payload: unknown, eventId: string | null) {
     const core = this.core;
     const repo = core.repo;
     const now = core.now();
+    const claim = (key: string) => (eventId ? `${eventId}:schedule:${key}` : null);
     switch (effect) {
       case 'refreshConsent': {
         const p = payload as EventPayload<'customers.marketing_preferences.changed'>;
@@ -236,22 +261,24 @@ export class Consumers {
       }
       case 'dropOffReminder': {
         const p = payload as EventPayload<'returns.label.created'>;
+        const recipient = await this.#returnRecipient(p);
+        if (!recipient) return;
         const approved = await repo.latestNotice({ topicKey: 'customer.return.approved', subject: { key: 'returnId', value: p.returnId } });
-        const who = (await repo.addresseeOf('customer', 'returnId', p.returnId)) ?? (await repo.addresseeOf('customer', 'orderId', p.orderId));
-        if (!who) return;
         const dropOffBy = approved?.deadline_at ?? null;
         const sendAt = dropOffBy ? new Date(dropOffBy.getTime() - 24 * 3_600_000) : new Date(now.getTime() + 5 * 86_400_000);
         if (sendAt.getTime() <= now.getTime()) return;
+        const dedupeKey = `return-dropoff:${p.returnId}`;
         await this.schedule(
           {
             topic: 'customer.return.dropoff_reminder',
-            recipients: [{ kind: 'customer', accountId: who.addressId }],
+            recipients: [recipient],
             link: { kind: 'return', id: p.returnId, screen: 'account/return', label: 'View return' },
             context: { due: { date: dropOffBy ? this.fmt.date(dropOffBy.toISOString()) : 'the date on your label' } },
-            dedupeKey: `return-dropoff:${p.returnId}`,
+            dedupeKey,
           },
           sendAt.toISOString(),
           'notifications',
+          claim(dedupeKey),
         );
         return;
       }
@@ -277,6 +304,7 @@ export class Consumers {
             },
             sendAt.toISOString(),
             'notifications',
+            claim(key),
           );
         }
         return;
@@ -299,6 +327,7 @@ export class Consumers {
           },
           sendAt.toISOString(),
           'notifications',
+          claim(`approval:${p.requestId}`),
         );
         return;
       }

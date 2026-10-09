@@ -124,7 +124,7 @@ export class Preferences {
 
   async sellerPreferences(caller: SellerCaller): Promise<SellerPreferences> {
     await this.inbox.rememberMember(caller.sellerId, caller.memberId, caller.accountId, caller.access.isOwner);
-    const rows = await this.core.repo.memberPreferences(caller.sellerId);
+    const rows = await this.core.sellerMembers(caller.sellerId); // members who never visited show their defaults
     const names = await this.core.accounts(rows.map((r) => r.account_id));
     const members: MemberPreference[] = [];
     for (const r of rows) {
@@ -145,6 +145,7 @@ export class Preferences {
     let row = await repo.memberPreference(caller.sellerId, memberId);
     const self = memberId === caller.memberId || row?.account_id === caller.accountId;
     if (!row && self) row = await this.inbox.rememberMember(caller.sellerId, caller.memberId, caller.accountId, caller.access.isOwner);
+    row ??= (await this.core.sellerMembers(caller.sellerId)).find((r) => r.member_id === memberId); // a member who never opened Seller Center
     if (!row) throw new AppError('NOT_FOUND', 'Member not found');
     if (!self && !caller.canManage) throw new AppError('FORBIDDEN', "Only the owner can change other members' notifications", { permission: 'notifications.preferences.manage' });
     const access = row.account_id === caller.accountId ? caller.access : await this.core.memberAccess(caller.sellerId, row.account_id);

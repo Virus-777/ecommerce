@@ -16,7 +16,7 @@ import { Sender, type Target } from './app/sender.js';
 import { Webhooks } from './app/webhooks.js';
 import { topicDef } from './domain/catalog.js';
 import { effectiveGroups, hashAddress } from './domain/rules.js';
-import type { NotificationsRepository, Providers } from './ports.js';
+import type { NotificationsRepository, Providers, ScheduledRow } from './ports.js';
 
 export interface NotificationsServiceDeps {
   repo: NotificationsRepository;
@@ -70,7 +70,7 @@ export class NotificationsService implements NotificationsPublicApi {
     this.inbox = new Inbox(this.core);
     this.prefs = new Preferences(this.core, this.inbox);
     this.admin = new Admin(this.core, this.sender);
-    this.consumers = new Consumers(this.core, this.sender, (input, sendAt, by) => this.#schedule(input, sendAt, by));
+    this.consumers = new Consumers(this.core, this.sender, (input, sendAt, by, claimKey) => this.#schedule(input, sendAt, by, claimKey));
     this.webhooks = new Webhooks(this.core, this.sender);
   }
 
@@ -98,18 +98,27 @@ export class NotificationsService implements NotificationsPublicApi {
 
   /** Send later (deadline reminders). Requires a dedupeKey so it can be cancelled. */
   async schedule(input: NotifyInput, sendAt: string): Promise<string> {
-    return this.#schedule(input, sendAt, 'api');
+    return (await this.#schedule(input, sendAt, 'api'))!;
   }
 
-  async #schedule(input: NotifyInput, sendAt: string, createdBy: string): Promise<string> {
+  /** With a claim key (event consumers), the reminder is scheduled once per consumed event */
+  async #schedule(input: NotifyInput, sendAt: string, createdBy: string, claimKey?: string | null): Promise<string | null> {
     if (!input.dedupeKey) throw new AppError('VALIDATION_FAILED', 'Scheduled notices need a dedupeKey so they can be cancelled', { issues: [{ path: 'dedupeKey', message: 'required' }] });
     if (!topicDef(input.topic)) throw new AppError('VALIDATION_FAILED', `Unknown notification topic ${input.topic}`, { issues: [{ path: 'topic', message: 'not in the topic catalogue' }] });
     const at = new Date(sendAt);
     if (Number.isNaN(at.getTime())) throw new AppError('VALIDATION_FAILED', 'sendAt is not a date', { issues: [{ path: 'sendAt', message: 'invalid date' }] });
     input.recipients.forEach((r) => targetOf(r, input.topic));
     const id = newId();
-    await this.core.repo.insertScheduled({ id, dedupe_key: input.dedupeKey, send_at: at, input: input as never, status: 'pending', created_by_module: createdBy, created_at: this.core.now() });
-    return id;
+    const row: ScheduledRow = { id, dedupe_key: input.dedupeKey, send_at: at, input: input as never, status: 'pending', created_by_module: createdBy, created_at: this.core.now() };
+    if (!claimKey) {
+      await this.core.repo.insertScheduled(row);
+      return id;
+    }
+    return this.core.repo.transaction(async (tx) => {
+      if (!(await tx.claim(this.core.ctx.inbox, claimKey))) return null;
+      await tx.insertScheduled(row);
+      return id;
+    });
   }
 
   /** Cancel scheduled notices (e.g. order dispatched before the reminder) */
@@ -135,7 +144,7 @@ export class NotificationsService implements NotificationsPublicApi {
       return consent.pushPromotions && (await core.repo.pushDevices({ accountIds: [recipient.accountId], audience: 'customer', activeOnly: true })).length > 0;
     }
     if ((recipient.kind === 'seller_member' || recipient.kind === 'seller') && recipient.sellerId) {
-      const rows = await core.repo.memberPreferences(recipient.sellerId);
+      const rows = await core.sellerMembers(recipient.sellerId);
       const row = rows.find((r) => (recipient.memberId && r.member_id === recipient.memberId) || (recipient.accountId && r.account_id === recipient.accountId));
       if (!row) return false;
       const access = await core.memberAccess(recipient.sellerId, row.account_id);
@@ -182,438 +191,443 @@ export class NotificationsService implements NotificationsPublicApi {
   /* ---------------------------------------------------------------- events consumed */
 
   /** identity.verification.code_issued: Email (or text, phase 2) the code: registration, email change, phone, 2-step. 'You already have an account' email when existingAccount. Code never stored in the delivery log. */
-  async onVerificationCodeIssuedFromIdentity(event: EventPayload<'identity.verification.code_issued'>): Promise<void> {
-    await this.consumers.handle('identity.verification.code_issued', event);
+  async onVerificationCodeIssuedFromIdentity(event: EventPayload<'identity.verification.code_issued'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('identity.verification.code_issued', event, eventId);
   }
 
   /** identity.password_reset.requested: Email the reset link (customer.account.password_reset / staff variant) */
-  async onPasswordResetRequestedFromIdentity(event: EventPayload<'identity.password_reset.requested'>): Promise<void> {
-    await this.consumers.handle('identity.password_reset.requested', event);
+  async onPasswordResetRequestedFromIdentity(event: EventPayload<'identity.password_reset.requested'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('identity.password_reset.requested', event, eventId);
   }
 
   /** identity.password.changed: Security alert: password changed (email + in-app, account group) */
-  async onPasswordChangedFromIdentity(event: EventPayload<'identity.password.changed'>): Promise<void> {
-    await this.consumers.handle('identity.password.changed', event);
+  async onPasswordChangedFromIdentity(event: EventPayload<'identity.password.changed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('identity.password.changed', event, eventId);
   }
 
   /** identity.session.new_device: Security alert: new sign-in on a device */
-  async onSessionNewDeviceFromIdentity(event: EventPayload<'identity.session.new_device'>): Promise<void> {
-    await this.consumers.handle('identity.session.new_device', event);
+  async onSessionNewDeviceFromIdentity(event: EventPayload<'identity.session.new_device'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('identity.session.new_device', event, eventId);
   }
 
   /** identity.email.changed: Alert to the old and new address */
-  async onEmailChangedFromIdentity(event: EventPayload<'identity.email.changed'>): Promise<void> {
-    await this.consumers.handle('identity.email.changed', event);
+  async onEmailChangedFromIdentity(event: EventPayload<'identity.email.changed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('identity.email.changed', event, eventId);
   }
 
   /** identity.two_step.changed: Security alert: 2-step verification turned on/off or reset */
-  async onTwoStepChangedFromIdentity(event: EventPayload<'identity.two_step.changed'>): Promise<void> {
-    await this.consumers.handle('identity.two_step.changed', event);
+  async onTwoStepChangedFromIdentity(event: EventPayload<'identity.two_step.changed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('identity.two_step.changed', event, eventId);
   }
 
   /** identity.account.locked: Alert the account owner; staff accounts also notify the Platform Administrator role */
-  async onAccountLockedFromIdentity(event: EventPayload<'identity.account.locked'>): Promise<void> {
-    await this.consumers.handle('identity.account.locked', event);
+  async onAccountLockedFromIdentity(event: EventPayload<'identity.account.locked'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('identity.account.locked', event, eventId);
   }
 
   /** identity.invitation.created: Email the staff or seller-member invitation link */
-  async onInvitationCreatedFromIdentity(event: EventPayload<'identity.invitation.created'>): Promise<void> {
-    await this.consumers.handle('identity.invitation.created', event);
+  async onInvitationCreatedFromIdentity(event: EventPayload<'identity.invitation.created'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('identity.invitation.created', event, eventId);
   }
 
   /** identity.user.verified: Welcome notice in the new customer's inbox */
-  async onUserVerifiedFromIdentity(event: EventPayload<'identity.user.verified'>): Promise<void> {
-    await this.consumers.handle('identity.user.verified', event);
+  async onUserVerifiedFromIdentity(event: EventPayload<'identity.user.verified'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('identity.user.verified', event, eventId);
   }
 
   /** customers.marketing_preferences.changed: Refresh the consent cache used for promotional sends and broadcasts */
-  async onMarketingPreferencesChangedFromCustomers(event: EventPayload<'customers.marketing_preferences.changed'>): Promise<void> {
-    await this.consumers.handle('customers.marketing_preferences.changed', event);
+  async onMarketingPreferencesChangedFromCustomers(event: EventPayload<'customers.marketing_preferences.changed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('customers.marketing_preferences.changed', event, eventId);
   }
 
   /** customers.account.closed: Stop all promotional sends, remove push devices, keep essential notices for open obligations only */
-  async onAccountClosedFromCustomers(event: EventPayload<'customers.account.closed'>): Promise<void> {
-    await this.consumers.handle('customers.account.closed', event);
+  async onAccountClosedFromCustomers(event: EventPayload<'customers.account.closed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('customers.account.closed', event, eventId);
   }
 
   /** customers.data_export.ready: Email the customer the export download link */
-  async onDataExportReadyFromCustomers(event: EventPayload<'customers.data_export.ready'>): Promise<void> {
-    await this.consumers.handle('customers.data_export.ready', event);
+  async onDataExportReadyFromCustomers(event: EventPayload<'customers.data_export.ready'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('customers.data_export.ready', event, eventId);
   }
 
   /** orders.order.accepted: Customer: order accepted (confirmation only after acceptance). Seller: new order per seller group (orders group, members with order permission) */
-  async onOrderAcceptedFromOrders(event: EventPayload<'orders.order.accepted'>): Promise<void> {
-    await this.consumers.handle('orders.order.accepted', event);
+  async onOrderAcceptedFromOrders(event: EventPayload<'orders.order.accepted'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('orders.order.accepted', event, eventId);
   }
 
   /** orders.item.cancelled: Customer: cancellation update for the item; seller: item cancelled */
-  async onItemCancelledFromOrders(event: EventPayload<'orders.item.cancelled'>): Promise<void> {
-    await this.consumers.handle('orders.item.cancelled', event);
+  async onItemCancelledFromOrders(event: EventPayload<'orders.item.cancelled'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('orders.item.cancelled', event, eventId);
   }
 
   /** orders.item.delayed: Customer: delay notice with the new estimate and options (wait, cancel, contact support) */
-  async onItemDelayedFromOrders(event: EventPayload<'orders.item.delayed'>): Promise<void> {
-    await this.consumers.handle('orders.item.delayed', event);
+  async onItemDelayedFromOrders(event: EventPayload<'orders.item.delayed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('orders.item.delayed', event, eventId);
   }
 
   /** orders.cancellation.decided: Customer: result of a cancellation request */
-  async onCancellationDecidedFromOrders(event: EventPayload<'orders.cancellation.decided'>): Promise<void> {
-    await this.consumers.handle('orders.cancellation.decided', event);
+  async onCancellationDecidedFromOrders(event: EventPayload<'orders.cancellation.decided'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('orders.cancellation.decided', event, eventId);
   }
 
   /** payments.payment.captured: Customer: payment accepted (combined with order accepted when simultaneous) */
-  async onPaymentCapturedFromPayments(event: EventPayload<'payments.payment.captured'>): Promise<void> {
-    await this.consumers.handle('payments.payment.captured', event);
+  async onPaymentCapturedFromPayments(event: EventPayload<'payments.payment.captured'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('payments.payment.captured', event, eventId);
   }
 
   /** payments.payment.failed: Customer: payment failed, retry link */
-  async onPaymentFailedFromPayments(event: EventPayload<'payments.payment.failed'>): Promise<void> {
-    await this.consumers.handle('payments.payment.failed', event);
+  async onPaymentFailedFromPayments(event: EventPayload<'payments.payment.failed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('payments.payment.failed', event, eventId);
   }
 
   /** payments.payment.pending_check: Customer: payment result is being checked; link to order status */
-  async onPaymentPendingCheckFromPayments(event: EventPayload<'payments.payment.pending_check'>): Promise<void> {
-    await this.consumers.handle('payments.payment.pending_check', event);
+  async onPaymentPendingCheckFromPayments(event: EventPayload<'payments.payment.pending_check'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('payments.payment.pending_check', event, eventId);
   }
 
   /** payments.refund.sent: Customer: refund sent, with destination and expected timing */
-  async onRefundSentFromPayments(event: EventPayload<'payments.refund.sent'>): Promise<void> {
-    await this.consumers.handle('payments.refund.sent', event);
+  async onRefundSentFromPayments(event: EventPayload<'payments.refund.sent'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('payments.refund.sent', event, eventId);
   }
 
   /** payments.refund.failed: Customer: refund problem and next steps; staff: Finance Manager notice */
-  async onRefundFailedFromPayments(event: EventPayload<'payments.refund.failed'>): Promise<void> {
-    await this.consumers.handle('payments.refund.failed', event);
+  async onRefundFailedFromPayments(event: EventPayload<'payments.refund.failed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('payments.refund.failed', event, eventId);
   }
 
   /** payments.chargeback.opened: Staff: unusual financial activity notice to Finance Manager; seller: dispute opened on an order */
-  async onChargebackOpenedFromPayments(event: EventPayload<'payments.chargeback.opened'>): Promise<void> {
-    await this.consumers.handle('payments.chargeback.opened', event);
+  async onChargebackOpenedFromPayments(event: EventPayload<'payments.chargeback.opened'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('payments.chargeback.opened', event, eventId);
   }
 
   /** shipping.shipment.dispatched: Customer: package dispatched with contents, carrier and tracking; cancels the seller dispatch reminder */
-  async onShipmentDispatchedFromShipping(event: EventPayload<'shipping.shipment.dispatched'>): Promise<void> {
-    await this.consumers.handle('shipping.shipment.dispatched', event);
+  async onShipmentDispatchedFromShipping(event: EventPayload<'shipping.shipment.dispatched'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('shipping.shipment.dispatched', event, eventId);
   }
 
   /** shipping.shipment.delivered: Customer: package delivered */
-  async onShipmentDeliveredFromShipping(event: EventPayload<'shipping.shipment.delivered'>): Promise<void> {
-    await this.consumers.handle('shipping.shipment.delivered', event);
+  async onShipmentDeliveredFromShipping(event: EventPayload<'shipping.shipment.delivered'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('shipping.shipment.delivered', event, eventId);
   }
 
   /** shipping.shipment.exception: Customer: delivery problem with next steps; staff: Shipping Manager */
-  async onShipmentExceptionFromShipping(event: EventPayload<'shipping.shipment.exception'>): Promise<void> {
-    await this.consumers.handle('shipping.shipment.exception', event);
+  async onShipmentExceptionFromShipping(event: EventPayload<'shipping.shipment.exception'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('shipping.shipment.exception', event, eventId);
   }
 
   /** shipping.dispatch.overdue: Seller: dispatch overdue (action required); staff: overdue shipping to Shipping Manager (lead or backup) */
-  async onDispatchOverdueFromShipping(event: EventPayload<'shipping.dispatch.overdue'>): Promise<void> {
-    await this.consumers.handle('shipping.dispatch.overdue', event);
+  async onDispatchOverdueFromShipping(event: EventPayload<'shipping.dispatch.overdue'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('shipping.dispatch.overdue', event, eventId);
   }
 
   /** returns.return.requested: Seller: new return request with response deadline */
-  async onReturnRequestedFromReturns(event: EventPayload<'returns.return.requested'>): Promise<void> {
-    await this.consumers.handle('returns.return.requested', event);
+  async onReturnRequestedFromReturns(event: EventPayload<'returns.return.requested'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('returns.return.requested', event, eventId);
   }
 
   /** returns.return.info_requested: Customer: more information needed for the return */
-  async onReturnInfoRequestedFromReturns(event: EventPayload<'returns.return.info_requested'>): Promise<void> {
-    await this.consumers.handle('returns.return.info_requested', event);
+  async onReturnInfoRequestedFromReturns(event: EventPayload<'returns.return.info_requested'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('returns.return.info_requested', event, eventId);
   }
 
   /** returns.return.approved: Customer: return approved with label or drop-off instructions */
-  async onReturnApprovedFromReturns(event: EventPayload<'returns.return.approved'>): Promise<void> {
-    await this.consumers.handle('returns.return.approved', event);
+  async onReturnApprovedFromReturns(event: EventPayload<'returns.return.approved'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('returns.return.approved', event, eventId);
   }
 
   /** returns.return.rejected: Customer: return declined with the reason and how to ask for help */
-  async onReturnRejectedFromReturns(event: EventPayload<'returns.return.rejected'>): Promise<void> {
-    await this.consumers.handle('returns.return.rejected', event);
+  async onReturnRejectedFromReturns(event: EventPayload<'returns.return.rejected'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('returns.return.rejected', event, eventId);
   }
 
   /** returns.label.created: Customer: return label ready; schedules a drop-off reminder */
-  async onLabelCreatedFromReturns(event: EventPayload<'returns.label.created'>): Promise<void> {
-    await this.consumers.handle('returns.label.created', event);
+  async onLabelCreatedFromReturns(event: EventPayload<'returns.label.created'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('returns.label.created', event, eventId);
   }
 
   /** returns.return.received: Customer: return received; seller: inspect by deadline */
-  async onReturnReceivedFromReturns(event: EventPayload<'returns.return.received'>): Promise<void> {
-    await this.consumers.handle('returns.return.received', event);
+  async onReturnReceivedFromReturns(event: EventPayload<'returns.return.received'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('returns.return.received', event, eventId);
   }
 
   /** returns.return.inspected: Customer: inspection outcome */
-  async onReturnInspectedFromReturns(event: EventPayload<'returns.return.inspected'>): Promise<void> {
-    await this.consumers.handle('returns.return.inspected', event);
+  async onReturnInspectedFromReturns(event: EventPayload<'returns.return.inspected'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('returns.return.inspected', event, eventId);
   }
 
   /** returns.return.escalated: Staff: Returns Manager; seller: platform support stepped in */
-  async onReturnEscalatedFromReturns(event: EventPayload<'returns.return.escalated'>): Promise<void> {
-    await this.consumers.handle('returns.return.escalated', event);
+  async onReturnEscalatedFromReturns(event: EventPayload<'returns.return.escalated'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('returns.return.escalated', event, eventId);
   }
 
   /** returns.refund.approved: Customer: refund approved and processing (never says the money has arrived) */
-  async onRefundApprovedFromReturns(event: EventPayload<'returns.refund.approved'>): Promise<void> {
-    await this.consumers.handle('returns.refund.approved', event);
+  async onRefundApprovedFromReturns(event: EventPayload<'returns.refund.approved'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('returns.refund.approved', event, eventId);
   }
 
   /** returns.replacement.created: Customer: replacement on its way (its own shipment) */
-  async onReplacementCreatedFromReturns(event: EventPayload<'returns.replacement.created'>): Promise<void> {
-    await this.consumers.handle('returns.replacement.created', event);
+  async onReplacementCreatedFromReturns(event: EventPayload<'returns.replacement.created'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('returns.replacement.created', event, eventId);
   }
 
   /** support.case.opened: Customer: acknowledgment with expected reply time; seller: case opened on an order */
-  async onCaseOpenedFromSupport(event: EventPayload<'support.case.opened'>): Promise<void> {
-    await this.consumers.handle('support.case.opened', event);
+  async onCaseOpenedFromSupport(event: EventPayload<'support.case.opened'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('support.case.opened', event, eventId);
   }
 
   /** support.case.message_added: Customer or seller: case reply (email carries a reply-to token) */
-  async onCaseMessageAddedFromSupport(event: EventPayload<'support.case.message_added'>): Promise<void> {
-    await this.consumers.handle('support.case.message_added', event);
+  async onCaseMessageAddedFromSupport(event: EventPayload<'support.case.message_added'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('support.case.message_added', event, eventId);
   }
 
   /** support.case.escalated: Staff: escalated case to Customer Support Manager (or Returns Manager by category) */
-  async onCaseEscalatedFromSupport(event: EventPayload<'support.case.escalated'>): Promise<void> {
-    await this.consumers.handle('support.case.escalated', event);
+  async onCaseEscalatedFromSupport(event: EventPayload<'support.case.escalated'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('support.case.escalated', event, eventId);
   }
 
   /** support.case.overdue: Staff: case past its response target to the queue lead and backup */
-  async onCaseOverdueFromSupport(event: EventPayload<'support.case.overdue'>): Promise<void> {
-    await this.consumers.handle('support.case.overdue', event);
+  async onCaseOverdueFromSupport(event: EventPayload<'support.case.overdue'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('support.case.overdue', event, eventId);
   }
 
   /** support.case.decided: Customer and seller: decision and remedy, with the appeal deadline */
-  async onCaseDecidedFromSupport(event: EventPayload<'support.case.decided'>): Promise<void> {
-    await this.consumers.handle('support.case.decided', event);
+  async onCaseDecidedFromSupport(event: EventPayload<'support.case.decided'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('support.case.decided', event, eventId);
   }
 
   /** support.case.resolved: Customer: case resolved */
-  async onCaseResolvedFromSupport(event: EventPayload<'support.case.resolved'>): Promise<void> {
-    await this.consumers.handle('support.case.resolved', event);
+  async onCaseResolvedFromSupport(event: EventPayload<'support.case.resolved'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('support.case.resolved', event, eventId);
   }
 
   /** messaging.message.sent: Recipient (customer or seller members with customer permission): new message, reply-to token in email */
-  async onMessageSentFromMessaging(event: EventPayload<'messaging.message.sent'>): Promise<void> {
-    await this.consumers.handle('messaging.message.sent', event);
+  async onMessageSentFromMessaging(event: EventPayload<'messaging.message.sent'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('messaging.message.sent', event, eventId);
   }
 
   /** sellers.application.submitted: Staff: new application to Seller Manager */
-  async onApplicationSubmittedFromSellers(event: EventPayload<'sellers.application.submitted'>): Promise<void> {
-    await this.consumers.handle('sellers.application.submitted', event);
+  async onApplicationSubmittedFromSellers(event: EventPayload<'sellers.application.submitted'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('sellers.application.submitted', event, eventId);
   }
 
   /** sellers.application.information_requested: Applicant: information required, with deadline */
-  async onApplicationInformationRequestedFromSellers(event: EventPayload<'sellers.application.information_requested'>): Promise<void> {
-    await this.consumers.handle('sellers.application.information_requested', event);
+  async onApplicationInformationRequestedFromSellers(event: EventPayload<'sellers.application.information_requested'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('sellers.application.information_requested', event, eventId);
   }
 
   /** sellers.application.decided: Applicant: application result (approved with next steps, or reasons) */
-  async onApplicationDecidedFromSellers(event: EventPayload<'sellers.application.decided'>): Promise<void> {
-    await this.consumers.handle('sellers.application.decided', event);
+  async onApplicationDecidedFromSellers(event: EventPayload<'sellers.application.decided'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('sellers.application.decided', event, eventId);
   }
 
   /** sellers.seller.restricted: Seller owner: restriction with reason, affected activity and appeal route */
-  async onSellerRestrictedFromSellers(event: EventPayload<'sellers.seller.restricted'>): Promise<void> {
-    await this.consumers.handle('sellers.seller.restricted', event);
+  async onSellerRestrictedFromSellers(event: EventPayload<'sellers.seller.restricted'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('sellers.seller.restricted', event, eventId);
   }
 
   /** sellers.seller.suspended: Seller owner: suspension with reason, what stays open and appeal route */
-  async onSellerSuspendedFromSellers(event: EventPayload<'sellers.seller.suspended'>): Promise<void> {
-    await this.consumers.handle('sellers.seller.suspended', event);
+  async onSellerSuspendedFromSellers(event: EventPayload<'sellers.seller.suspended'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('sellers.seller.suspended', event, eventId);
   }
 
   /** sellers.seller.reinstated: Seller owner: account reinstated */
-  async onSellerReinstatedFromSellers(event: EventPayload<'sellers.seller.reinstated'>): Promise<void> {
-    await this.consumers.handle('sellers.seller.reinstated', event);
+  async onSellerReinstatedFromSellers(event: EventPayload<'sellers.seller.reinstated'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('sellers.seller.reinstated', event, eventId);
   }
 
   /** sellers.warning.issued: Seller owner: performance or policy warning */
-  async onWarningIssuedFromSellers(event: EventPayload<'sellers.warning.issued'>): Promise<void> {
-    await this.consumers.handle('sellers.warning.issued', event);
+  async onWarningIssuedFromSellers(event: EventPayload<'sellers.warning.issued'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('sellers.warning.issued', event, eventId);
   }
 
   /** sellers.appeal.decided: Seller owner: appeal result */
-  async onAppealDecidedFromSellers(event: EventPayload<'sellers.appeal.decided'>): Promise<void> {
-    await this.consumers.handle('sellers.appeal.decided', event);
+  async onAppealDecidedFromSellers(event: EventPayload<'sellers.appeal.decided'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('sellers.appeal.decided', event, eventId);
   }
 
   /** sellers.payout_account.changed: Seller owner: security notice that the payout destination changed (always email) */
-  async onPayoutAccountChangedFromSellers(event: EventPayload<'sellers.payout_account.changed'>): Promise<void> {
-    await this.consumers.handle('sellers.payout_account.changed', event);
+  async onPayoutAccountChangedFromSellers(event: EventPayload<'sellers.payout_account.changed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('sellers.payout_account.changed', event, eventId);
   }
 
   /** sellers.change_request.decided: Seller owner (essential, account_finance group, topic seller.change_request.decided): the requested change was approved or rejected, with the reason and any impact on selling or payouts */
-  async onChangeRequestDecidedFromSellers(event: EventPayload<'sellers.change_request.decided'>): Promise<void> {
-    await this.consumers.handle('sellers.change_request.decided', event);
+  async onChangeRequestDecidedFromSellers(event: EventPayload<'sellers.change_request.decided'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('sellers.change_request.decided', event, eventId);
   }
 
   /** sellers.verification.changed: Seller owner (essential, topic seller.verification.changed): the Verified seller label was granted, lapsed or revoked */
-  async onVerificationChangedFromSellers(event: EventPayload<'sellers.verification.changed'>): Promise<void> {
-    await this.consumers.handle('sellers.verification.changed', event);
+  async onVerificationChangedFromSellers(event: EventPayload<'sellers.verification.changed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('sellers.verification.changed', event, eventId);
   }
 
   /** sellers.launch_review.decided: Seller owner (essential, topic seller.launch_review.decided): launch review passed or needs changes */
-  async onLaunchReviewDecidedFromSellers(event: EventPayload<'sellers.launch_review.decided'>): Promise<void> {
-    await this.consumers.handle('sellers.launch_review.decided', event);
+  async onLaunchReviewDecidedFromSellers(event: EventPayload<'sellers.launch_review.decided'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('sellers.launch_review.decided', event, eventId);
+  }
+
+  /** sellers.invitation.sent: Email the invited business its invitation code and how to apply (code never stored in the delivery log) */
+  async onInvitationSentFromSellers(event: EventPayload<'sellers.invitation.sent'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('sellers.invitation.sent', event, eventId);
   }
 
   /** finance.destination.verified: Seller owner (essential, owner-only, always email, topic seller.payout_destination.verified) */
-  async onDestinationVerifiedFromFinance(event: EventPayload<'finance.destination.verified'>): Promise<void> {
-    await this.consumers.handle('finance.destination.verified', event);
+  async onDestinationVerifiedFromFinance(event: EventPayload<'finance.destination.verified'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('finance.destination.verified', event, eventId);
   }
 
   /** finance.destination.rejected: Seller owner (essential, owner-only, always email, topic seller.payout_destination.rejected) */
-  async onDestinationRejectedFromFinance(event: EventPayload<'finance.destination.rejected'>): Promise<void> {
-    await this.consumers.handle('finance.destination.rejected', event);
+  async onDestinationRejectedFromFinance(event: EventPayload<'finance.destination.rejected'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('finance.destination.rejected', event, eventId);
   }
 
   /** catalog.product.changes_requested: Seller: requested corrections with field comments and resubmit deadline */
-  async onProductChangesRequestedFromCatalog(event: EventPayload<'catalog.product.changes_requested'>): Promise<void> {
-    await this.consumers.handle('catalog.product.changes_requested', event);
+  async onProductChangesRequestedFromCatalog(event: EventPayload<'catalog.product.changes_requested'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('catalog.product.changes_requested', event, eventId);
   }
 
   /** catalog.product.approved: Seller: product approved */
-  async onProductApprovedFromCatalog(event: EventPayload<'catalog.product.approved'>): Promise<void> {
-    await this.consumers.handle('catalog.product.approved', event);
+  async onProductApprovedFromCatalog(event: EventPayload<'catalog.product.approved'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('catalog.product.approved', event, eventId);
   }
 
   /** catalog.product.rejected: Seller: product rejected with reason */
-  async onProductRejectedFromCatalog(event: EventPayload<'catalog.product.rejected'>): Promise<void> {
-    await this.consumers.handle('catalog.product.rejected', event);
+  async onProductRejectedFromCatalog(event: EventPayload<'catalog.product.rejected'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('catalog.product.rejected', event, eventId);
   }
 
   /** inventory.stock.low: Seller: low stock (own offers); staff: stock shortage to Inventory Manager for the Official Store */
-  async onStockLowFromInventory(event: EventPayload<'inventory.stock.low'>): Promise<void> {
-    await this.consumers.handle('inventory.stock.low', event);
+  async onStockLowFromInventory(event: EventPayload<'inventory.stock.low'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('inventory.stock.low', event, eventId);
   }
 
   /** finance.payout.paid: Seller owner: payout paid (after bank confirmation) */
-  async onPayoutPaidFromFinance(event: EventPayload<'finance.payout.paid'>): Promise<void> {
-    await this.consumers.handle('finance.payout.paid', event);
+  async onPayoutPaidFromFinance(event: EventPayload<'finance.payout.paid'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('finance.payout.paid', event, eventId);
   }
 
   /** finance.payout.failed: Seller owner: payout failed and what to fix; staff: failed payout to Finance Manager */
-  async onPayoutFailedFromFinance(event: EventPayload<'finance.payout.failed'>): Promise<void> {
-    await this.consumers.handle('finance.payout.failed', event);
+  async onPayoutFailedFromFinance(event: EventPayload<'finance.payout.failed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('finance.payout.failed', event, eventId);
   }
 
   /** finance.hold.placed: Seller owner: hold with amount, reason and review date */
-  async onHoldPlacedFromFinance(event: EventPayload<'finance.hold.placed'>): Promise<void> {
-    await this.consumers.handle('finance.hold.placed', event);
+  async onHoldPlacedFromFinance(event: EventPayload<'finance.hold.placed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('finance.hold.placed', event, eventId);
   }
 
   /** finance.hold.released: Seller owner: hold released */
-  async onHoldReleasedFromFinance(event: EventPayload<'finance.hold.released'>): Promise<void> {
-    await this.consumers.handle('finance.hold.released', event);
+  async onHoldReleasedFromFinance(event: EventPayload<'finance.hold.released'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('finance.hold.released', event, eventId);
   }
 
   /** finance.balance.negative: Seller owner: amount owed; staff: Finance Manager */
-  async onBalanceNegativeFromFinance(event: EventPayload<'finance.balance.negative'>): Promise<void> {
-    await this.consumers.handle('finance.balance.negative', event);
+  async onBalanceNegativeFromFinance(event: EventPayload<'finance.balance.negative'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('finance.balance.negative', event, eventId);
   }
 
   /** finance.statement.issued: Seller owner: statement available */
-  async onStatementIssuedFromFinance(event: EventPayload<'finance.statement.issued'>): Promise<void> {
-    await this.consumers.handle('finance.statement.issued', event);
+  async onStatementIssuedFromFinance(event: EventPayload<'finance.statement.issued'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('finance.statement.issued', event, eventId);
   }
 
   /** finance.reconciliation.mismatch_found: Staff: unusual financial activity to Finance Manager */
-  async onReconciliationMismatchFoundFromFinance(event: EventPayload<'finance.reconciliation.mismatch_found'>): Promise<void> {
-    await this.consumers.handle('finance.reconciliation.mismatch_found', event);
+  async onReconciliationMismatchFoundFromFinance(event: EventPayload<'finance.reconciliation.mismatch_found'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('finance.reconciliation.mismatch_found', event, eventId);
   }
 
   /** promotions.participation.invited: Seller: invitation to join a campaign with expected earnings impact */
-  async onParticipationInvitedFromPromotions(event: EventPayload<'promotions.participation.invited'>): Promise<void> {
-    await this.consumers.handle('promotions.participation.invited', event);
+  async onParticipationInvitedFromPromotions(event: EventPayload<'promotions.participation.invited'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('promotions.participation.invited', event, eventId);
   }
 
   /** advertising.campaign.status_changed: Seller: sponsored campaign approved, rejected, live, paused or finished; staff: waiting approvals to Advertising/Content roles */
-  async onCampaignStatusChangedFromAdvertising(event: EventPayload<'advertising.campaign.status_changed'>): Promise<void> {
-    await this.consumers.handle('advertising.campaign.status_changed', event);
+  async onCampaignStatusChangedFromAdvertising(event: EventPayload<'advertising.campaign.status_changed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('advertising.campaign.status_changed', event, eventId);
   }
 
   /** reviews.invite.due: Customer: review invitation (optional category, can be turned off) */
-  async onInviteDueFromReviews(event: EventPayload<'reviews.invite.due'>): Promise<void> {
-    await this.consumers.handle('reviews.invite.due', event);
+  async onInviteDueFromReviews(event: EventPayload<'reviews.invite.due'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('reviews.invite.due', event, eventId);
   }
 
   /** reviews.report.created: Staff: reported content to the moderation queue role */
-  async onReportCreatedFromReviews(event: EventPayload<'reviews.report.created'>): Promise<void> {
-    await this.consumers.handle('reviews.report.created', event);
+  async onReportCreatedFromReviews(event: EventPayload<'reviews.report.created'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('reviews.report.created', event, eventId);
   }
 
   /** trust.report.created: Staff: new risk report to Trust and Risk Manager */
-  async onReportCreatedFromTrust(event: EventPayload<'trust.report.created'>): Promise<void> {
-    await this.consumers.handle('trust.report.created', event);
+  async onReportCreatedFromTrust(event: EventPayload<'trust.report.created'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('trust.report.created', event, eventId);
   }
 
   /** wishlist.alert.triggered: Customer: price drop or back in stock (promotional, consent required) */
-  async onAlertTriggeredFromWishlist(event: EventPayload<'wishlist.alert.triggered'>): Promise<void> {
-    await this.consumers.handle('wishlist.alert.triggered', event);
+  async onAlertTriggeredFromWishlist(event: EventPayload<'wishlist.alert.triggered'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('wishlist.alert.triggered', event, eventId);
   }
 
   /** access.approval.requested: Staff: waiting approval to eligible approvers (nominated reviewer first), action required with due date */
-  async onApprovalRequestedFromAccess(event: EventPayload<'access.approval.requested'>): Promise<void> {
-    await this.consumers.handle('access.approval.requested', event);
+  async onApprovalRequestedFromAccess(event: EventPayload<'access.approval.requested'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('access.approval.requested', event, eventId);
   }
 
   /** access.approval.partially_approved: Staff: second approval needed, to remaining eligible approvers */
-  async onApprovalPartiallyApprovedFromAccess(event: EventPayload<'access.approval.partially_approved'>): Promise<void> {
-    await this.consumers.handle('access.approval.partially_approved', event);
+  async onApprovalPartiallyApprovedFromAccess(event: EventPayload<'access.approval.partially_approved'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('access.approval.partially_approved', event, eventId);
   }
 
   /** access.approval.returned: Staff: request sent back to the requester with the comment */
-  async onApprovalReturnedFromAccess(event: EventPayload<'access.approval.returned'>): Promise<void> {
-    await this.consumers.handle('access.approval.returned', event);
+  async onApprovalReturnedFromAccess(event: EventPayload<'access.approval.returned'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('access.approval.returned', event, eventId);
   }
 
   /** access.approval.decided: Staff: outcome to the requester; resolves the approvers' action notices */
-  async onApprovalDecidedFromAccess(event: EventPayload<'access.approval.decided'>): Promise<void> {
-    await this.consumers.handle('access.approval.decided', event);
+  async onApprovalDecidedFromAccess(event: EventPayload<'access.approval.decided'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('access.approval.decided', event, eventId);
   }
 
   /** access.approval.reminder_sent: Staff: reminder to the listed reviewers */
-  async onApprovalReminderSentFromAccess(event: EventPayload<'access.approval.reminder_sent'>): Promise<void> {
-    await this.consumers.handle('access.approval.reminder_sent', event);
+  async onApprovalReminderSentFromAccess(event: EventPayload<'access.approval.reminder_sent'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('access.approval.reminder_sent', event, eventId);
   }
 
   /** access.coverage.changed: Re-route open staff action notices of that role to the new receivers */
-  async onCoverageChangedFromAccess(event: EventPayload<'access.coverage.changed'>): Promise<void> {
-    await this.consumers.handle('access.coverage.changed', event);
+  async onCoverageChangedFromAccess(event: EventPayload<'access.coverage.changed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('access.coverage.changed', event, eventId);
   }
 
   /** access.away.ended: Give the returning lead the notices received by the backup while away */
-  async onAwayEndedFromAccess(event: EventPayload<'access.away.ended'>): Promise<void> {
-    await this.consumers.handle('access.away.ended', event);
+  async onAwayEndedFromAccess(event: EventPayload<'access.away.ended'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('access.away.ended', event, eventId);
   }
 
   /** workqueues.item.overdue: Staff: overdue work item to the queue lead and backup */
-  async onItemOverdueFromWorkqueues(event: EventPayload<'workqueues.item.overdue'>): Promise<void> {
-    await this.consumers.handle('workqueues.item.overdue', event);
+  async onItemOverdueFromWorkqueues(event: EventPayload<'workqueues.item.overdue'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('workqueues.item.overdue', event, eventId);
   }
 
   /** workqueues.item.escalated: Staff: escalated item to the next role on the escalation route */
-  async onItemEscalatedFromWorkqueues(event: EventPayload<'workqueues.item.escalated'>): Promise<void> {
-    await this.consumers.handle('workqueues.item.escalated', event);
+  async onItemEscalatedFromWorkqueues(event: EventPayload<'workqueues.item.escalated'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('workqueues.item.escalated', event, eventId);
   }
 
   /** workqueues.item.resolved: Resolve the action notices for that work item */
-  async onItemResolvedFromWorkqueues(event: EventPayload<'workqueues.item.resolved'>): Promise<void> {
-    await this.consumers.handle('workqueues.item.resolved', event);
+  async onItemResolvedFromWorkqueues(event: EventPayload<'workqueues.item.resolved'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('workqueues.item.resolved', event, eventId);
   }
 
   /** settings.change.scheduled: Sellers (seller-visible changes): upcoming platform change with its effective date */
-  async onChangeScheduledFromSettings(event: EventPayload<'settings.change.scheduled'>): Promise<void> {
-    await this.consumers.handle('settings.change.scheduled', event);
+  async onChangeScheduledFromSettings(event: EventPayload<'settings.change.scheduled'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('settings.change.scheduled', event, eventId);
   }
 
   /** audit.integrity.failed: Staff: urgent notice to Platform Administrator and Business Owner */
-  async onIntegrityFailedFromAudit(event: EventPayload<'audit.integrity.failed'>): Promise<void> {
-    await this.consumers.handle('audit.integrity.failed', event);
+  async onIntegrityFailedFromAudit(event: EventPayload<'audit.integrity.failed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('audit.integrity.failed', event, eventId);
   }
 
   /** reports.export.ready: Export ready to the requester (staff or seller member), including audit, orders and module list exports */
-  async onExportReadyFromReports(event: EventPayload<'reports.export.ready'>): Promise<void> {
-    await this.consumers.handle('reports.export.ready', event);
+  async onExportReadyFromReports(event: EventPayload<'reports.export.ready'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('reports.export.ready', event, eventId);
   }
 
   /* ---------------------------------------------------------------- jobs */

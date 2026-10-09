@@ -1258,7 +1258,8 @@ export class ApplicationsPart extends Part {
       state: sellerInvitationMachine.initial,
       application_id: null,
     });
-    this.core.publish('sellers.invitation.sent', { invitationId: row.id, email: row.email }, by);
+    // the plain code travels in-process to notifications only (the invitation keeps its hash)
+    this.core.publish('sellers.invitation.sent', { invitationId: row.id, email: row.email, businessName: row.business_name, code, expiresAt: row.expires_at.toISOString() }, by);
     await this.core.audit({ action: 'sellers.invitation.send', actionLabel: 'Invited a business to apply', category: 'other', target: { type: 'seller_invitation', id: row.id, label: row.business_name, screen: 'admin/seller-invitations' }, after: { email: row.email } }, by);
     return map.invitation(row);
   }

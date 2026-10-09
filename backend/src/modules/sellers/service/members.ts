@@ -36,6 +36,20 @@ export class MembersPart extends Part {
     return { memberId: m.id, role: m.role, permissions: m.is_owner ? this.allSellerKeys() : map.strings(m.permissions), isOwner: m.is_owner };
   }
 
+  /** Public API: active members with an identity account (notifications fans out to them, owner first) */
+  async activeMembers(sellerId: string): Promise<{ memberId: string; accountId: string; role: string; isOwner: boolean }[]> {
+    if (!isUuid(sellerId)) return [];
+    const rows = await this.repo.find('members', { seller_id: sellerId, status: 'active' }, { orderBy: [['is_owner', 'desc'], ['invited_at', 'asc']] });
+    return rows.filter((m) => m.account_id).map((m) => ({ memberId: m.id, accountId: m.account_id!, role: m.role, isOwner: m.is_owner }));
+  }
+
+  /** Public API: the owner's identity account (null for an unknown seller) */
+  async ownerAccount(sellerId: string): Promise<{ accountId: string; memberId: string } | null> {
+    if (!isUuid(sellerId)) return null;
+    const owner = await this.ownerOf(sellerId);
+    return owner?.account_id ? { accountId: owner.account_id, memberId: owner.id } : null;
+  }
+
   /* ---------------------------------------------------------------- reads */
 
   async listMembers(sellerId: string): Promise<SellerMember[]> {

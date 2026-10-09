@@ -14,8 +14,8 @@ import type * as identity from '../../../spec/identity.js';
 import type * as access from '../../../spec/access.js';
 import type { NoticeLink, TemplateContent } from '../../../spec/notifications.js';
 import { defaultContent, templateChannels, TOPICS, topicDef, topicVariables, type Audience, type Channel, type TopicDef } from '../domain/catalog.js';
-import { channelLive, parseReplyToken, replyToken, signToken, verifyToken, type ChannelMap, type MemberAccessLike } from '../domain/rules.js';
-import type { NotificationsRepository, Providers, TemplateRow, TopicRow, VersionRow } from '../ports.js';
+import { channelLive, defaultGroups, defaultMemberChannel, parseReplyToken, replyToken, signToken, verifyToken, type ChannelMap, type MemberAccessLike } from '../domain/rules.js';
+import type { MemberPrefRow, NotificationsRepository, Providers, TemplateRow, TopicRow, VersionRow } from '../ports.js';
 
 export const LANGUAGE = 'en-US';
 export const SYSTEM: Actor = { kind: 'system' };
@@ -291,6 +291,35 @@ export class Core {
 
   forgetConsent(customerId: string) {
     this.#consent.delete(customerId);
+  }
+
+  /**
+   * Members of a seller for fan-out: stored preference rows plus the active members sellers knows of who never
+   * opened Seller Center (default preferences), so an owner gets essential email from day one. Owner-only topics
+   * ask sellers.ownerOf; everything else sellers.listMembers. When sellers cannot answer, the stored rows only.
+   */
+  async sellerMembers(sellerId: string, ownerOnly = false): Promise<MemberPrefRow[]> {
+    const stored = await this.repo.memberPreferences(sellerId);
+    const api = this.sellers;
+    if (!api) return stored;
+    let active: { memberId: string; accountId: string; isOwner: boolean }[];
+    try {
+      if (ownerOnly) {
+        const owner = await api.ownerOf(sellerId);
+        active = owner ? [{ ...owner, isOwner: true }] : [];
+      } else active = await api.listMembers(sellerId);
+    } catch (err) {
+      if (!isNotImplemented(err)) throw err;
+      this.log.debug({ err, sellerId }, 'sellers.listMembers is not available; members known from their visits only');
+      return stored;
+    }
+    const known = new Set(stored.map((r) => r.account_id));
+    const out = ownerOnly ? stored.filter((r) => active.some((a) => a.accountId === r.account_id)) : [...stored];
+    for (const m of active) {
+      if (known.has(m.accountId)) continue;
+      out.push({ seller_id: sellerId, member_id: m.memberId, account_id: m.accountId, groups: defaultGroups(m.isOwner) as never, channel: defaultMemberChannel(m.isOwner), updated_by: actorText(SYSTEM), updated_at: this.now() });
+    }
+    return out;
   }
 
   async memberAccess(sellerId: string, accountId: string): Promise<MemberAccessLike | null> {

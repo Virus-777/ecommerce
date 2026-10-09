@@ -39,6 +39,8 @@ export interface SendInput {
   templateVersionId?: string | null;
   /** Only these delivery channels (broadcasts go out on their consent channel only) */
   only?: DeliveryChannel[];
+  /** Inbox key of the consumed event (ctx.inbox): claimed with the notice and deliveries, so a redelivered event sends nothing */
+  claimKey?: string | null;
 }
 
 interface DeliveryPlan {
@@ -157,12 +159,15 @@ export class Sender {
       }
     }
 
-    await core.repo.transaction(async (tx) => {
+    const fresh = await core.repo.transaction(async (tx) => {
+      if (input.claimKey && !(await tx.claim(core.ctx.inbox, input.claimKey))) return false; // this event was already handled
       for (const n of notices) await tx.insertNotice(n);
       await tx.insertRecipients(recipients);
       await tx.insertDeliveries(deliveries);
       for (const d of deliveries) await tx.insertDeliveryEvent({ id: newId(), delivery_id: d.id, type: d.status, provider_event_id: null, detail: d.skip_reason ?? d.last_error ?? null, at: now });
+      return true;
     });
+    if (!fresh) return { noticeIds: [], deliveryIds: [] };
 
     for (const [id, m] of messages) this.#pending.set(id, m);
     for (const d of deliveries) {
@@ -328,7 +333,8 @@ export class Sender {
     const core = this.core;
     const { sellerId } = target;
     const direct = Boolean(target.accountId || target.memberId);
-    let members = await core.repo.memberPreferences(sellerId);
+    // stored preferences plus the members sellers lists who never opened Seller Center (owner-only topics: the owner)
+    let members = await core.sellerMembers(sellerId, !direct && t.ownerOnly);
     if (direct) {
       members = members.filter((m) => (target.memberId && m.member_id === target.memberId) || (target.accountId && m.account_id === target.accountId));
       if (!members.length && target.accountId) {
