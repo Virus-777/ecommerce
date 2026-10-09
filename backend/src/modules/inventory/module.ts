@@ -16,7 +16,7 @@ import { InventoryService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '0.1.0',
+  version: '1.0.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
@@ -24,13 +24,15 @@ export default defineModule({
     ctx.provide(service);
     ctx.http.routes(sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
+    // export datasets served through reports (inventory.seller.stock, inventory.admin.stock)
+    ctx.afterBoot(() => service.registerDatasets().catch((err) => ctx.log.warn({ err }, 'inventory: export datasets not registered; retried on first export')));
 
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("orders.order.accepted", (e) => service.onOrderAcceptedFromOrders(e.payload));
     ctx.events.on("orders.item.cancelled", (e) => service.onItemCancelledFromOrders(e.payload));
     ctx.events.on("shipping.shipment.dispatched", (e) => service.onShipmentDispatchedFromShipping(e.payload));
     ctx.events.on("returns.return.received", (e) => service.onReturnReceivedFromReturns(e.payload));
-    ctx.events.on("returns.return.inspected", (e) => service.onReturnInspectedFromReturns(e.payload));
+    ctx.events.on("returns.return.inspected", (e) => service.onReturnInspectedFromReturns(e.payload, e));
     ctx.events.on("warehouse.bin.assigned", (e) => service.onBinAssignedFromWarehouse(e.payload));
     ctx.events.on("offers.offer.status_changed", (e) => service.onOfferStatusChangedFromOffers(e.payload));
     ctx.events.on("sellers.seller.closed", (e) => service.onSellerClosedFromSellers(e.payload));
