@@ -18,6 +18,13 @@ export interface Flows {
   visitor(audience?: 'store' | 'seller' | 'admin'): Promise<string>;
   /** First Business Owner (also Platform Administrator) through the bootstrap, signed in */
   bootstrapOwner(email?: string, name?: string): Promise<Staff>;
+  /** The first Business Owner and a deputy (both Business Owner + Platform Administrator), signed in */
+  bootstrapOwners(): Promise<{ owner: Staff; deputy: Staff }>;
+  /**
+   * Invites a staff member whose role is a sensitive grant (Finance roles…): the inviter asks, the other
+   * Business Owner approves the grant, then the person accepts. Returns the signed-in staff member.
+   */
+  staffWithSensitiveRoles(inviter: Staff, approver: Staff, email: string, name: string, roleKeys: string[]): Promise<Staff>;
   /** Accepts the emailed staff invitation (password + authenticator) and returns the real admin session */
   acceptStaffInvitation(email: string): Promise<Staff>;
   /** Invites a staff member with roles (the inviter confirms with an authenticator code) and signs them in */
@@ -132,6 +139,34 @@ export function flows(app: FastifyInstance, clock: { now(): Date; advance(ms: nu
     async bootstrapOwner(email = 'owner@marketly.test', name = 'Olivia Owner') {
       await (app.kernel.boot.apis.get('access') as AccessService).bootstrapBusinessOwner({ email, name });
       await app.kernel.events.drain();
+      return self.acceptStaffInvitation(email);
+    },
+    async bootstrapOwners() {
+      await (app.kernel.boot.apis.get('access') as AccessService).bootstrapBusinessOwner({
+        email: 'owner@marketly.test',
+        name: 'Olivia Owner',
+        deputy: { email: 'deputy@marketly.test', name: 'Dan Deputy' },
+      });
+      await app.kernel.events.drain();
+      const owner = await self.acceptStaffInvitation('owner@marketly.test');
+      const deputy = await self.acceptStaffInvitation('deputy@marketly.test');
+      return { owner, deputy };
+    },
+    async staffWithSensitiveRoles(inviter, approver, email, name, roleKeys) {
+      const roles = (await call('GET', '/api/admin/access/roles', { token: inviter.accessToken })).body as { id: string; key: string }[];
+      const roleIds = roleKeys.map((k) => roles.find((r) => r.key === k)!.id);
+      const invited = await call('POST', '/api/admin/access/staff-invitations', {
+        token: inviter.accessToken,
+        body: { email, name, roleIds, reason: 'New hire' },
+        headers: { 'x-step-up-code': code(inviter) },
+      });
+      expect(invited.status, JSON.stringify(invited.body)).toBe(201);
+      const pending = (await call('GET', '/api/admin/access/approval-requests?view=to_decide', { token: approver.accessToken })).body.items as { id: string; status: string }[];
+      expect(pending.length, 'a sensitive grant waits for the other Business Owner').toBeGreaterThan(0);
+      for (const r of pending) {
+        const ok = await call('POST', `/api/admin/access/approval-requests/${r.id}/approve`, { token: approver.accessToken, body: { note: 'Agreed' }, headers: { 'x-step-up-code': code(approver) } });
+        expect(ok.status, JSON.stringify(ok.body)).toBeLessThan(300);
+      }
       return self.acceptStaffInvitation(email);
     },
     async staffWithRoles(inviter, email, name, roleKeys) {
