@@ -1793,6 +1793,7 @@ export interface AdvertisingDb {
     currency: string;
     state: string;
     posted_at: Date | null;
+    ledger_entry_id: string | null;
     statement_ref: string | null;
     reason: string | null;
   };
@@ -3828,6 +3829,10 @@ export const spec = defineModuleSpec({
       },
       "posted_at": {
         "type": "timestamptz",
+        "nullable": true
+      },
+      "ledger_entry_id": {
+        "type": "uuid",
         "nullable": true
       },
       "statement_ref": {

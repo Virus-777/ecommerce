@@ -1091,6 +1091,7 @@ Indexes: `unique (campaign_id, day)`
 | currency | text |
 | state | text |
 | posted_at | timestamptz? |
+| ledger_entry_id | uuid? |
 | statement_ref | text? |
 | reason | text? |
 

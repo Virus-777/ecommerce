@@ -823,6 +823,7 @@ export interface FulfillmentServiceDb {
     currency: string;
     state: string;
     posted_at: Date | null;
+    ledger_entry_id: string | null;
     reason: string | null;
     idempotency_key: string;
   };
@@ -2448,6 +2449,10 @@ export const spec = defineModuleSpec({
       },
       "posted_at": {
         "type": "timestamptz",
+        "nullable": true
+      },
+      "ledger_entry_id": {
+        "type": "uuid",
         "nullable": true
       },
       "reason": {
