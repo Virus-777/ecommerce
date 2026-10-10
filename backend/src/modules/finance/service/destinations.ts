@@ -117,7 +117,13 @@ export class DestinationsPart extends Part {
     return done;
   }
 
-  async approve(id: string, reason: string, by: By): Promise<DestinationReview> {
+  /**
+   * under_review → verified after all three checks passed: micro-deposits (confirm-deposits), owner
+   * re-authentication and the callback to the phone number on file, which the reviewer records here with
+   * callbackConfirmed. callbackConfirmed false records the callback as failed and the review stays under review
+   * (reject it if the owner did not ask for the change). Any check not passed: CHECKS_INCOMPLETE.
+   */
+  async approve(id: string, body: { reason: string; callbackConfirmed: boolean; callbackNote?: string | null }, by: By): Promise<DestinationReview> {
     const r = isUuid(id) ? await this.repo.get('destination_reviews', id) : undefined;
     if (!r) throw notFound('Destination review');
     if (r.status !== 'under_review') this.core.step(destinationReviewMachine, r.status, 'verify');
@@ -125,11 +131,20 @@ export class DestinationsPart extends Part {
     if (by.actor.id && requester?.id && requester.id === by.actor.id) throw this.ctx.error('SAME_APPROVER', 'The reviewer cannot be the person who requested the change');
     // a recorded review by a Finance reviewer: access decides who may (granting access is not authority)
     await this.core.authority(by, 'finance.destinations.approve');
-    const checks = (Array.isArray(r.checks) ? r.checks : []) as unknown as DestinationCheck[];
-    const pendingChecks = checks.filter((c) => c.label !== CALLBACK && c.result !== 'passed').map((c) => c.label);
+    const stored = (Array.isArray(r.checks) ? r.checks : []) as unknown as DestinationCheck[];
+    const callback: DestinationCheck['result'] = body.callbackConfirmed === true ? 'passed' : 'failed';
+    const checks = stored.some((c) => c.label === CALLBACK) ? stored.map((c) => (c.label === CALLBACK ? { ...c, result: callback } : c)) : [...stored, { label: CALLBACK, result: callback }];
+    const note = body.callbackNote?.trim() || null;
+    if (JSON.stringify(checks) !== JSON.stringify(stored)) {
+      await this.repo.updateWhere('destination_reviews', { id, status: 'under_review' }, { checks: checks as never });
+      await this.core.audit({ action: 'finance.destination.callback', actionLabel: callback === 'passed' ? 'Recorded the owner callback as confirmed' : 'Recorded the owner callback as failed', category: 'security', target: { type: 'seller', id: r.seller_id, sellerId: r.seller_id, label: r.to_label, screen: 'admin/payouts' }, after: { callback, note }, reason: note }, by);
+    }
+    if (callback === 'failed') return this.reviewView(id);
+    const pendingChecks = checks.filter((c) => c.result !== 'passed').map((c) => c.label);
     if (pendingChecks.length) throw this.ctx.error('CHECKS_INCOMPLETE', 'Destination verification checks are not all passed', { pending: pendingChecks });
-    await this.verify(id, checks.map((c) => ({ ...c, result: 'passed' as const })), by, reason || null);
-    await this.core.audit({ action: 'finance.destination.approve', actionLabel: 'Verified a new payout destination', category: 'financial', target: { type: 'seller', id: r.seller_id, sellerId: r.seller_id, label: r.to_label, screen: 'admin/payouts' }, before: { label: r.from_label }, after: { label: r.to_label }, reason, visibleToSeller: true }, by);
+    const reason = [body.reason?.trim(), note ? `Callback: ${note}` : null].filter(Boolean).join(' · ') || null;
+    await this.verify(id, checks, by, reason);
+    await this.core.audit({ action: 'finance.destination.approve', actionLabel: 'Verified a new payout destination', category: 'financial', target: { type: 'seller', id: r.seller_id, sellerId: r.seller_id, label: r.to_label, screen: 'admin/payouts' }, before: { label: r.from_label }, after: { label: r.to_label, checks }, reason, visibleToSeller: true }, by);
     return this.reviewView(id);
   }
 

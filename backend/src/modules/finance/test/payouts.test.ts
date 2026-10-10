@@ -6,6 +6,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { callers, signWebhook } from '../../../testing/app.js';
+import { nextSlot } from '../domain/rules.js';
 import { ADMIN, boot, expectLedgerMatches, SELLER, USD, type Kit } from './helpers.js';
 
 const DAY = 86_400_000;
@@ -69,7 +70,7 @@ describe('payout destinations', () => {
   });
 
   it('needs the micro-deposits before Finance can verify the change', async () => {
-    const res = await k.call('POST', `${ADMIN}/destination-reviews/${reviewId}/approve`, k.staff, { reason: 'Called the owner' }, stepUp);
+    const res = await k.call('POST', `${ADMIN}/destination-reviews/${reviewId}/approve`, k.staff, { reason: 'Called the owner', callbackConfirmed: true }, stepUp);
     expect(res.status).toBe(409);
     expect(res.body.error).toMatchObject({ code: 'CHECKS_INCOMPLETE', details: { pending: ['Micro-deposits confirmed'] } });
   });
@@ -96,12 +97,24 @@ describe('payout destinations', () => {
   });
 
   it('refuses the requester as reviewer, then verifies with a pause before paying the new account', async () => {
-    const same = await k.call('POST', `${ADMIN}/destination-reviews/${reviewId}/approve`, callers.staff(undefined, { sub: requester }), { reason: 'Mine' }, stepUp);
+    const same = await k.call('POST', `${ADMIN}/destination-reviews/${reviewId}/approve`, callers.staff(undefined, { sub: requester }), { reason: 'Mine', callbackConfirmed: true }, stepUp);
     expect(same.status).toBe(409);
     expect(same.body.error.code).toBe('SAME_APPROVER');
-    const ok = await k.call('POST', `${ADMIN}/destination-reviews/${reviewId}/approve`, k.staff, { reason: 'Callback to the registered phone done' }, stepUp);
+    // the callback to the phone on file is the third check: not confirmed, the change is not verified
+    const noCallback = await k.call('POST', `${ADMIN}/destination-reviews/${reviewId}/approve`, k.staff, { reason: 'Owner did not answer', callbackConfirmed: false, callbackNote: 'Voicemail' }, stepUp);
+    expect(noCallback.status, JSON.stringify(noCallback.body)).toBe(200);
+    expect(noCallback.body.status).toBe('under_review');
+    expect(noCallback.body.checks).toEqual([
+      { label: 'Micro-deposits confirmed', result: 'passed' },
+      { label: 'Owner re-authenticated', result: 'passed' },
+      { label: 'Callback to the registered phone', result: 'failed' },
+    ]);
+    expect(k.of('finance.destination.verified').filter((e) => e.reviewId === reviewId)).toEqual([]);
+    expect((await k.call('GET', `${SELLER}/payout-destination`, k.sellerToken(S))).body.destination).toMatchObject({ status: 'change_under_review', label: 'First Bank •••• 1111' });
+    const ok = await k.call('POST', `${ADMIN}/destination-reviews/${reviewId}/approve`, k.staff, { reason: 'Callback to the registered phone done', callbackConfirmed: true, callbackNote: 'Owner confirmed' }, stepUp);
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
     expect(ok.body.status).toBe('verified');
+    expect(ok.body.checks.every((c: any) => c.result === 'passed')).toBe(true);
     expect(ok.body.pauseUntil).toBeTruthy();
     expect(k.of('finance.destination.verified').filter((e) => e.sellerId === S).at(-1)).toEqual({ sellerId: S, reviewId });
     const d = await k.call('GET', `${SELLER}/payout-destination`, k.sellerToken(S));
@@ -109,7 +122,7 @@ describe('payout destinations', () => {
     const block = await k.svc.hasPayoutBlock(S);
     expect(block.blocked).toBe(true);
     expect(block.reasons[0]).toContain('New payout account');
-    expect((await k.call('POST', `${ADMIN}/destination-reviews/${reviewId}/approve`, k.staff, { reason: 'again' }, stepUp)).status).toBe(409);
+    expect((await k.call('POST', `${ADMIN}/destination-reviews/${reviewId}/approve`, k.staff, { reason: 'again', callbackConfirmed: true }, stepUp)).status).toBe(409);
   });
 
   it('rejects a change: the current account keeps being paid', async () => {
@@ -174,10 +187,21 @@ describe('payout run approval', () => {
     await k.call('POST', `${ADMIN}/payout-runs/${r.id}/send-back`, k.staff, { reason: 'Later' });
   });
 
-  it('above the threshold needs two different Finance approvers (the second through access)', async () => {
+  it("a run within the approver's payout limit (access) is approved by one person, whatever its size (no threshold setting)", async () => {
     await credit(S, 6_000_000);
     const big = await newRun();
-    expect(big.checks.some((c: any) => c.title === 'Second Finance reviewer needed')).toBe(true);
+    expect(big.total).toEqual(USD(6_000_000));
+    expect(big.checks.some((c: any) => c.title === 'Second Finance reviewer needed')).toBe(false);
+    await k.call('POST', `${ADMIN}/payout-runs/${big.id}/submit`, k.staff);
+    const ok = await k.call('POST', `${ADMIN}/payout-runs/${big.id}/approve`, k.staff, { confirmedReview: true }, idem());
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect(ok.body.status).toBe('approved');
+    expect(ok.body.approvals.map((a: any) => a.status)).toEqual(['approved']);
+  });
+
+  it("above the first approver's payout limit needs a second, different Finance approver (through access)", async () => {
+    await credit(S, 6_000_000);
+    const big = await newRun();
     await k.call('POST', `${ADMIN}/payout-runs/${big.id}/submit`, k.staff);
     k.authority.set('finance.payouts.release', 'approval_required');
     k.countsAsFirst.value = true;
@@ -186,6 +210,7 @@ describe('payout run approval', () => {
     expect(first.status, JSON.stringify(first.body)).toBe(200);
     expect(first.body.status).toBe('pending_approval');
     expect(first.body.approvals.map((a: any) => a.status)).toEqual(['approved', 'pending']);
+    expect(first.body.checks.some((c: any) => c.title === 'Second Finance reviewer needed')).toBe(true);
     expect(first.body.viewerCanApprove).toBe(false);
     const again = await k.call('POST', `${ADMIN}/payout-runs/${big.id}/approve`, callers.staff(undefined, { sub: firstId }), { confirmedReview: true }, idem());
     expect(again.status).toBe(409);
@@ -202,10 +227,12 @@ describe('payout run approval', () => {
     const r = await newRun();
     await k.call('POST', `${ADMIN}/payout-runs/${r.id}/submit`, k.staff);
     k.authority.set('finance.payouts.release', 'approval_required');
+    k.countsAsFirst.value = false;
     const res = await k.call('POST', `${ADMIN}/payout-runs/${r.id}/approve`, k.staff, { confirmedReview: true }, idem());
-    expect(res.status).toBe(409);
-    expect(res.body.error.code).toBe('APPROVAL_REQUIRED');
-    await k.decide(res.body.error.details.approvalRequestId, 'approved');
+    // the run waits for approval: normal status with the approval in the body (FORMAT.md, Approval responses)
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ status: 'pending_approval', approval: { approvalRequestId: expect.any(String) } });
+    await k.decide(res.body.approval.approvalRequestId, 'approved');
     expect((await k.call('GET', `${ADMIN}/payout-runs/${r.id}`, k.staff)).body.status).toBe('approved');
     const runs = await k.call('GET', `${ADMIN}/payout-runs?status=approved`, k.staff);
     expect(runs.body.items.map((x: any) => x.id)).toContain(r.id);
@@ -273,7 +300,8 @@ describe('failed payouts and recovery', () => {
     const [a, b] = k.provider.testDepositsFor('dest_new');
     await k.call('POST', `${SELLER}/payout-destination/confirm-deposits`, k.sellerToken(S), { amounts: [USD(a), USD(b)] });
     const reviewId = (await k.call('GET', `${SELLER}/payout-destination`, k.sellerToken(S))).body.destination.pendingChange.reviewId;
-    await k.call('POST', `${ADMIN}/destination-reviews/${reviewId}/approve`, k.staff, { reason: 'ok' }, stepUp);
+    const approved = await k.call('POST', `${ADMIN}/destination-reviews/${reviewId}/approve`, k.staff, { reason: 'ok', callbackConfirmed: true }, stepUp);
+    expect(approved.body.status).toBe('verified');
     const res = await k.call('POST', `${ADMIN}/payouts/${retry.id}/retry`, k.staff, { now: false, reason: 'Retry to the new account' }, idem());
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('DESTINATION_NOT_VERIFIED');
@@ -331,5 +359,46 @@ describe('statements and scheduled jobs', () => {
     k.clock.advance(5 * 60_000);
     await k.app.kernel.jobs.runNow('finance.payout-status.poll');
     expect((await k.svc.core.repo.find('payouts', { seller_id: S2 }))[0]?.status).toBe('paid');
+  });
+});
+
+describe('finance.payout-run.create (every 15 min, checks its own cutoff)', () => {
+  it('creates exactly one run per cutoff: none before it, one however often the job runs after it, none again after a cancellation, one when two runs race', async () => {
+    const tz = k.svc.core.tz();
+    const schedule = String(await k.svc.core.setting('payoutSchedule'));
+    const releaseTime = String(await k.svc.core.setting('payoutReleaseTime'));
+    const runsFor = (cutoff: Date) => k.svc.core.repo.count('payout_runs', { cutoff_at: cutoff });
+    const job = () => k.app.kernel.jobs.runNow('finance.payout-run.create');
+
+    const next = nextSlot(k.clock.now(), schedule, releaseTime, tz);
+    k.clock.set(new Date(next.cutoffAt.getTime() - 45 * 60_000));
+    for (let i = 0; i < 3; i++) {
+      await job();
+      k.clock.advance(15 * 60_000 - 1_000);
+    }
+    expect(k.clock.now().getTime()).toBeLessThan(next.cutoffAt.getTime());
+    expect(await runsFor(next.cutoffAt)).toBe(0);
+
+    k.clock.set(new Date(next.cutoffAt.getTime() + 60_000));
+    for (let i = 0; i < 4; i++) {
+      await job();
+      k.clock.advance(15 * 60_000);
+    }
+    expect(await runsFor(next.cutoffAt)).toBe(1);
+    const run = (await k.svc.core.repo.findOne('payout_runs', { cutoff_at: next.cutoffAt }))!;
+    expect(run).toMatchObject({ status: 'draft', scheduled_release: next.releaseAt });
+
+    // staff cancelled the run: the job is done with that cutoff
+    await k.svc.core.repo.update('payout_runs', run.id, { status: 'cancelled' });
+    await job();
+    expect(await runsFor(next.cutoffAt)).toBe(1);
+
+    // the following cutoff, with two job runs at once (two instances): still one run
+    const following = nextSlot(k.clock.now(), schedule, releaseTime, tz);
+    expect(following.cutoffAt.getTime()).toBeGreaterThan(next.cutoffAt.getTime());
+    k.clock.set(new Date(following.cutoffAt.getTime() + 60_000));
+    await Promise.all([job(), job()]);
+    await job();
+    expect(await runsFor(following.cutoffAt)).toBe(1);
   });
 });

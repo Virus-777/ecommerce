@@ -3,7 +3,7 @@ import { isUuid } from '../../kernel/lib/ids.js';
 import { toPageRequest } from '../../kernel/lib/pagination.js';
 import type * as common from '../../spec/common.js';
 import type * as identity from '../../spec/identity.js';
-import type { DailySellerIncome, DestinationReview, EarningsPreview, FeeCalcInput, FeeCalculation, FinancePublicApi, Hold, LedgerEntry, Payout, PayoutRun, Reference, RefundImpactPreview, RunPayoutRow, SellerBalances, SellerCredit, SellerFinanceDetail, Statement } from '../../spec/finance.js';
+import type { DailySellerIncome, DestinationReview, EarningsPreview, FeeCalcInput, FeeCalculation, FinancePublicApi, Hold, LedgerEntry, Payout, PayoutRun, ReconItem, Reference, RefundImpactPreview, RunPayoutRow, SellerBalances, SellerCredit, SellerFinanceDetail, Statement } from '../../spec/finance.js';
 import { Core, type FinanceServiceDeps } from './service/core.js';
 import { CREDIT_ACTION, CreditsPart } from './service/credits.js';
 import { DestinationsPart } from './service/destinations.js';
@@ -84,6 +84,21 @@ export class FinanceService implements FinancePublicApi {
   /** Credits a seller without an original charge as seller_credit: posted at once up to creditSecondReviewerThreshold, above it after finance.credits.issue; same idempotencyKey returns the first credit */
   creditSeller(input: { sellerId: string; amount: common.Money; reason: string; reference: Reference; idempotencyKey: string }): Promise<SellerCredit> {
     return this.credits.creditSeller(input);
+  }
+
+  /** Current state of a credit asked for with creditSeller, by id or by the caller's idempotency key */
+  getSellerCredit(by: { creditId?: string; idempotencyKey?: string }): Promise<SellerCredit | null> {
+    return this.credits.getSellerCredit(by);
+  }
+
+  /** Withdraws a credit still pending_approval (its approval request is cancelled; nothing is posted) */
+  withdrawSellerCredit(input: { creditId?: string; idempotencyKey?: string; reason: string }): Promise<SellerCredit> {
+    return this.credits.withdrawSellerCredit(input);
+  }
+
+  /** A money difference another module (wallet) found in its own books, for the daily store_credit check */
+  recordExternalDifference(input: { check: 'store_credit'; subject: string; description: string; expected: common.Money; actual: common.Money; reference?: Reference; key: string }): Promise<ReconItem> {
+    return this.recon.recordExternalDifference(input);
   }
 
   /** Company trading costs for the Official Store margin */
@@ -265,6 +280,18 @@ export class FinanceService implements FinancePublicApi {
 
   onCreditUsedFromWallet(event: EventPayload<'wallet.credit.used'>) {
     return this.ledger.onCreditUsed(event);
+  }
+
+  onCreditReversedFromWallet(event: EventPayload<'wallet.credit.reversed'>) {
+    return this.ledger.onCreditReversed(event);
+  }
+
+  onCreditExpiredFromWallet(event: EventPayload<'wallet.credit.expired'>) {
+    return this.ledger.onCreditExpired(event);
+  }
+
+  onCreditCorrectedFromWallet(event: EventPayload<'wallet.credit.corrected'>) {
+    return this.ledger.onCreditCorrected(event);
   }
 
   /* ---------------- jobs */

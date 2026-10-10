@@ -132,6 +132,41 @@ export class CreditsPart extends Part {
     return this.view(pending);
   }
 
+  private async find(by: { creditId?: string; idempotencyKey?: string }): Promise<SellerCreditRec | undefined> {
+    if (by?.creditId) return isUuid(by.creditId) ? this.repo.get('seller_credits', by.creditId) : undefined;
+    if (by?.idempotencyKey) return this.repo.findOne('seller_credits', { idempotency_key: by.idempotencyKey });
+    throw invalid([{ path: 'creditId', message: 'Give the credit id or the idempotency key used with creditSeller' }]);
+  }
+
+  /** getSellerCredit: the credit's current state, by id or by the caller's idempotency key; null when unknown */
+  async getSellerCredit(by: { creditId?: string; idempotencyKey?: string }): Promise<SellerCredit | null> {
+    const row = await this.find(by);
+    return row ? this.view(row) : null;
+  }
+
+  /**
+   * withdrawSellerCredit: pending_approval → withdrawn (the calling module no longer needs it); its approval request
+   * is cancelled through access and nothing is posted. Posted or rejected credits are ILLEGAL_TRANSITION; a
+   * withdrawn credit is returned unchanged. An approval decided afterwards finds the credit withdrawn and posts nothing.
+   */
+  async withdrawSellerCredit(input: { creditId?: string; idempotencyKey?: string; reason: string }): Promise<SellerCredit> {
+    if (!input?.reason?.trim()) throw invalid([{ path: 'reason', message: 'Give the reason for withdrawing the credit' }]);
+    const row = await this.find(input);
+    if (!row) throw notFound('Seller credit');
+    if (row.status === 'withdrawn') return this.view(row);
+    const after = await this.repo.transaction(async (tx) => {
+      const locked = (await tx.get('seller_credits', row.id, { forUpdate: true }))!;
+      if (locked.status === 'withdrawn') return null;
+      const status = this.core.step<SellerCreditRec['status']>(sellerCreditMachine, locked.status, 'withdraw'); // posted, rejected: ILLEGAL_TRANSITION
+      return tx.update('seller_credits', locked.id, { status, decided_at: this.now() });
+    });
+    if (!after) return this.view((await this.repo.get('seller_credits', row.id))!);
+    const by: By = { actor: SYSTEM };
+    if (after.approval_request_id) await this.core.optionalDep(() => this.ctx.use('access').cancelApproval(after.approval_request_id!, SYSTEM, input.reason.trim()));
+    await this.audited(after, 'finance.seller_credit.withdraw', 'Seller credit withdrawn by the requesting module', by, after.approval_request_id, input.reason.trim());
+    return this.view(after);
+  }
+
   /** access.approval.decided for finance.credits.issue: post or reject the pending credit (once) */
   async onApprovalDecided(e: EventPayload<'access.approval.decided'>) {
     const row = isUuid(e.target.id) ? await this.repo.get('seller_credits', e.target.id) : undefined;

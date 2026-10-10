@@ -59,14 +59,9 @@ export class PayoutsPart extends Part {
     return (await this.payoutViews([row]))[0]!;
   }
 
-  async threshold(): Promise<number> {
-    return this.core.num('runSecondReviewerThreshold', 5_000_000);
-  }
-
   async runView(run: RunRec, by?: By | null): Promise<PayoutRun> {
     const rows = await this.repo.find('payouts', { run_id: run.id });
     const cur = run.currency;
-    const threshold = await this.threshold();
     const days = await this.core.num('availableAfterDeliveryDays', 7);
     const prev = await this.repo.findOne('payout_runs', { created_at: { op: '<', value: run.created_at }, status: { op: '<>', value: 'cancelled' } }, { orderBy: [['created_at', 'desc']] });
     const prevFailed = prev ? await this.repo.find('payouts', { run_id: prev.id, status: 'failed' }) : [];
@@ -80,10 +75,11 @@ export class PayoutsPart extends Part {
     if (negatives.length) checks.push({ level: 'info', title: `${negatives.length} seller${negatives.length === 1 ? '' : 's'} with a negative balance`, detail: 'Refunds after payout are deducted from these payouts' });
     const unretried = prevFailed.length ? (await this.repo.find('payouts', { retry_of: prevFailed.map((p) => p.id) })).length : 0;
     if (prevFailed.length) checks.push({ level: unretried < prevFailed.length ? 'warn' : 'ok', title: `${prevFailed.length} failed payout${prevFailed.length === 1 ? '' : 's'} in the last run`, detail: `${unretried} retried` });
-    checks.push(run.total > threshold ? { level: 'info', title: 'Second Finance reviewer needed', detail: `The run is above ${fmt(threshold, cur)}` } : { level: 'ok', title: 'One Finance approval needed' });
+    // limits come from access only (decision F-D1): one approval within the approver's payout limit, a second different reviewer above it
+    checks.push(run.approval_request_id ? { level: 'info', title: 'Second Finance reviewer needed', detail: "The run is above the first approver's payout limit" } : { level: 'ok', title: 'Finance approval needed', detail: "Above the approver's payout limit a second, different Finance reviewer approves" });
     const approval = run.approval_request_id
       ? ((await this.core.approvalInfo(run.approval_request_id)) ?? { required: true, approvalRequestId: run.approval_request_id, approvers: [] })
-      : { required: true, reason: run.total > threshold ? `Above ${fmt(threshold, cur)}: two different Finance approvers` : 'Finance approval with payout authority', approvalRequestId: null, approvers: ['Finance Manager'] };
+      : { required: true, reason: "Finance approval within the approver's payout limit; a second Finance reviewer above it", approvalRequestId: null, approvers: ['Finance Manager'] };
     const approvals = (Array.isArray(run.approvals) ? run.approvals : []) as unknown as RunApproval[];
     const cutoffDay = marketDate(run.cutoff_at, this.core.tz());
     return {
@@ -228,7 +224,12 @@ export class PayoutsPart extends Part {
     const day = marketDate(release, this.core.tz()).replace(/-/g, '').slice(2);
     let ref = `PO-RUN-${day}`;
     for (let n = 2; await this.repo.findOne('payout_runs', { ref }); n++) ref = `PO-RUN-${day}-${n}`;
-    await this.repo.insert('payout_runs', { id, ref, status: payoutRunMachine.initial, scheduled_release: release, cutoff_at: cutoff, total: 0, paying_now: 0, held: 0, negative_offset: 0, currency: this.core.currency(), approvals: [] as never, approval_request_id: null, created_at: this.now(), released_at: null, completed_at: null });
+    // one live run per cutoff (unique index): a concurrent create loses here instead of adding a second run
+    const created = await this.repo.insertIgnore('payout_runs', { id, ref, status: payoutRunMachine.initial, scheduled_release: release, cutoff_at: cutoff, total: 0, paying_now: 0, held: 0, negative_offset: 0, currency: this.core.currency(), approvals: [] as never, approval_request_id: null, created_at: this.now(), released_at: null, completed_at: null });
+    if (!created) {
+      const other = await this.repo.findOne('payout_runs', { cutoff_at: cutoff, status: { op: '<>', value: 'cancelled' } });
+      throw this.ctx.error('RUN_ALREADY_EXISTS', 'A payout run already exists for this cutoff', { runId: other?.id ?? null });
+    }
     const retrySellers = (await this.repo.find('payouts', { status: 'pending', run_id: null, retry_of: { op: 'is not', value: null } })).map((p) => p.seller_id);
     const sellers = [...new Set([...(await this.repo.sellersForRun(cutoff)), ...retrySellers])];
     for (const sellerId of sellers) await this.addSeller(id, sellerId, cutoff);
@@ -330,9 +331,8 @@ export class PayoutsPart extends Part {
   async submit(id: string, by: By): Promise<PayoutRun> {
     const run = await this.run(id);
     const status = this.core.step(payoutRunMachine, run.status, 'submit');
-    const threshold = await this.threshold();
+    // the second reviewer slot is added when the first approver's limit (access) is below the run total
     const approvals: RunApproval[] = [{ order: 1, approver: null, role: 'Finance Manager', status: 'pending', at: null, dueAt: run.scheduled_release.toISOString(), note: null }];
-    if (run.total > threshold) approvals.push({ order: 2, approver: null, role: 'Finance · second reviewer', status: 'pending', at: null, dueAt: run.scheduled_release.toISOString(), note: null });
     await this.repo.update('payout_runs', id, { status, approvals: approvals as never, approval_request_id: null });
     await this.core.audit({ action: 'finance.payout_run.submit', actionLabel: 'Submitted a payout run for approval', category: 'financial', target: { type: 'payout_run', id, ref: run.ref, screen: 'admin/payouts' }, after: { total: run.total } }, by);
     return this.runView((await this.repo.get('payout_runs', id))!, by);
@@ -346,7 +346,6 @@ export class PayoutsPart extends Part {
     const approvals = ((Array.isArray(run.approvals) ? run.approvals : []) as unknown as RunApproval[]).map((a) => ({ ...a }));
     if (me && approvals.some((a) => a.status === 'approved' && a.approver?.id === me)) throw this.ctx.error('SAME_APPROVER', 'The second approval must come from a different person');
     const mine = (role: string, order: number): RunApproval => ({ order, approver: by.actor, role, status: 'approved', at: this.now().toISOString(), dueAt: null, note: body.note ?? null });
-    const threshold = await this.threshold();
     const access = this.ctx.use('access');
     const check = await this.core.authority(by, RELEASE_ACTION, run.total);
 
@@ -364,19 +363,18 @@ export class PayoutsPart extends Part {
       return this.runView((await this.repo.get('payout_runs', id))!, by);
     }
 
-    const alreadyApproved = approvals.filter((a) => a.status === 'approved').length;
-    const needsTwo = run.total > threshold;
-    if (check.decision === 'allowed' && (!needsTwo || alreadyApproved >= 1)) {
+    if (check.decision === 'allowed') {
+      // within the approver's payout limit (access): one approval releases the run
       const slot = approvals.find((a) => a.status === 'pending');
       if (slot) Object.assign(slot, mine(slot.role, slot.order));
       else approvals.push(mine('Finance Manager', approvals.length + 1));
       await this.repo.update('payout_runs', id, { approvals: approvals as never });
-      if (!needsTwo || approvals.filter((a) => a.status === 'approved').length >= 2) await this.finishApproval(id, by);
+      await this.finishApproval(id, by);
       await this.core.audit({ action: 'finance.payout_run.approve', actionLabel: 'Approved a payout run', category: 'financial', target: { type: 'payout_run', id, ref: run.ref, screen: 'admin/payouts' }, reason: body.note ?? null, approvalNote: check.reason }, by);
       return this.runView((await this.repo.get('payout_runs', id))!, by);
     }
 
-    // a second Finance reviewer (or someone above the caller's limit) approves through access
+    // above the caller's payout limit: a second, different Finance reviewer (or someone whose limit covers it) approves through access
     const req = await this.core.requestApproval(by, {
       action: RELEASE_ACTION,
       target: { type: 'payout_run', id, ref: run.ref, label: `Payout run ${run.ref}`, screen: 'admin/payouts' },
@@ -385,7 +383,7 @@ export class PayoutsPart extends Part {
       details: { scheduledRelease: run.scheduled_release.toISOString(), cutoffAt: run.cutoff_at.toISOString() },
       reason: body.note || 'Payout run approval',
     });
-    const countsAsFirst = req.requesterCountsAsFirst || (check.decision === 'allowed' && needsTwo);
+    const countsAsFirst = req.requesterCountsAsFirst;
     if (countsAsFirst) {
       const slot = approvals.find((a) => a.status === 'pending');
       if (slot) Object.assign(slot, mine(slot.role, slot.order));
@@ -395,7 +393,7 @@ export class PayoutsPart extends Part {
     await this.repo.update('payout_runs', id, { approvals: approvals as never, approval_request_id: req.id });
     if (req.status === 'approved') await this.finishApproval(id, by);
     await this.core.audit({ action: 'finance.payout_run.approve', actionLabel: countsAsFirst ? 'First approval of a payout run; second reviewer requested' : 'Requested approval of a payout run above my limit', category: 'financial', target: { type: 'payout_run', id, ref: run.ref, screen: 'admin/payouts' }, reason: body.note ?? null, approvalRequestId: req.id }, by);
-    if (!countsAsFirst) throw this.core.approvalRequired(req, { runId: id }, 'Above your payout limit: the run waits for approval');
+    // above the caller's limit the run waits for approval and answers with it (FORMAT.md, Approval responses)
     return this.runView((await this.repo.get('payout_runs', id))!, by);
   }
 
@@ -588,10 +586,15 @@ export class PayoutsPart extends Part {
 
   /* ---------------------------------------------------------------- jobs */
 
-  /** Job finance.payout-run.create: at the cutoff, issue statements and calculate the draft run */
+  /**
+   * Job finance.payout-run.create (every 15 min): checks the payoutSchedule cutoff itself. Once the latest cutoff
+   * has passed and no run exists for it, issues the statements and calculates the draft run. Idempotent per
+   * cutoff: any run for it (even one staff cancelled) means the job is done for that cutoff, and the unique index
+   * on live runs per cutoff turns a concurrent run into RUN_ALREADY_EXISTS.
+   */
   async createDue() {
     const slot = lastSlot(this.now(), String(await this.core.setting('payoutSchedule')), String(await this.core.setting('payoutReleaseTime')), this.core.tz());
-    if (await this.repo.findOne('payout_runs', { cutoff_at: slot.cutoffAt, status: { op: '<>', value: 'cancelled' } })) return;
+    if (await this.repo.findOne('payout_runs', { cutoff_at: slot.cutoffAt })) return;
     try {
       await this.createRun({ cutoffAt: slot.cutoffAt.toISOString(), scheduledRelease: slot.releaseAt.toISOString() }, { actor: SYSTEM });
     } catch (err) {

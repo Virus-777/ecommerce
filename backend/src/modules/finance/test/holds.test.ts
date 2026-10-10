@@ -80,9 +80,10 @@ describe('holds', () => {
   it('above the hold limit: the hold waits for approval and holds nothing until it is approved', async () => {
     k.authority.set('finance.holds.place', 'approval_required');
     const res = await k.call('POST', `${ADMIN}/holds`, k.staff, { sellerId: S, amount: USD(40_000), reasonCode: 'unusual_refund_rate', reason: 'Refund rate above 12%', reviewDate: plusDays(14) }, idem());
-    expect(res.status).toBe(409);
-    expect(res.body.error.code).toBe('APPROVAL_REQUIRED');
-    const { approvalRequestId, holdId: pendingId } = res.body.error.details;
+    // saved waiting for approval: 201 with approval in the body (FORMAT.md, Approval responses)
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ amount: USD(40_000), approval: { required: true, approvalRequestId: expect.any(String) } });
+    const { id: pendingId, approval: { approvalRequestId } } = res.body;
     expect((await expectLedgerMatches(k, S)).held).toBe(0);
     const listed = await k.call('GET', `${ADMIN}/holds?sellerId=${S}&status=active`, k.staff);
     expect(listed.body.items.find((h: any) => h.id === pendingId).approval).toMatchObject({ required: true, approvalRequestId });
@@ -92,18 +93,37 @@ describe('holds', () => {
 
     k.authority.set('finance.holds.release', 'approval_required');
     const rel = await k.call('POST', `${ADMIN}/holds/${pendingId}/release`, k.staff, { amount: USD(15_000), reason: 'Rate back to normal' }, idem());
-    expect(rel.status).toBe(409);
-    await k.decide(rel.body.error.details.approvalRequestId, 'approved');
+    expect(rel.status, JSON.stringify(rel.body)).toBe(200);
+    expect(rel.body.approval).toMatchObject({ required: true, approvalRequestId: expect.any(String) });
+    expect((await expectLedgerMatches(k, S)).held).toBe(40_000);
+    await k.decide(rel.body.approval.approvalRequestId, 'approved');
     expect((await expectLedgerMatches(k, S)).held).toBe(25_000);
   });
 
   it('a rejected hold request never holds money', async () => {
     k.authority.set('finance.holds.place', 'approval_required');
     const res = await k.call('POST', `${ADMIN}/holds`, k.staff, { sellerId: S, amount: USD(1_000), reasonCode: 'other', reason: 'Check', reviewDate: plusDays(2) }, idem());
-    await k.decide(res.body.error.details.approvalRequestId, 'rejected');
-    const h = await k.svc.core.repo.get('holds', res.body.error.details.holdId);
+    await k.decide(res.body.approval.approvalRequestId, 'rejected');
+    const h = await k.svc.core.repo.get('holds', res.body.id);
     expect(h?.status).toBe('released');
     expect((await expectLedgerMatches(k, S)).held).toBe(25_000);
+  });
+
+  it('a trust hold waiting for approval keeps its trust report: finance.hold.placed carries trustReportId once approved', async () => {
+    const T = newId();
+    await credit(T, 9_000);
+    const trustReportId = newId();
+    k.authority.set('finance.holds.place', 'approval_required');
+    const res = await k.call('POST', `${ADMIN}/holds`, k.staff, { sellerId: T, amount: USD(7_500), reasonCode: 'risk_review', reason: 'Trust recommendation', reviewDate: plusDays(10), trustReportId }, idem());
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect((await k.svc.core.repo.get('holds', res.body.id))?.trust_report_id).toBe(trustReportId);
+    expect(k.of('finance.hold.placed').filter((e) => e.holdId === res.body.id)).toEqual([]);
+    await k.decide(res.body.approval.approvalRequestId, 'approved');
+    expect(k.of('finance.hold.placed').filter((e) => e.holdId === res.body.id)).toEqual([
+      { holdId: res.body.id, sellerId: T, amount: USD(7_500), reasonCode: 'risk_review', reason: 'Trust recommendation', reviewDate: plusDays(10), trustReportId },
+    ]);
+    expect(await expectLedgerMatches(k, T)).toMatchObject({ total: 9_000, held: 7_500, available: 1_500 });
+    k.authority.delete('finance.holds.place');
   });
 
   it('access is not financial authority: a denied caller cannot hold money', async () => {
@@ -137,16 +157,16 @@ describe('adjustments', () => {
   it('above the threshold waits for a second Finance reviewer and posts only when approved', async () => {
     k.authority.set('finance.adjustments.record', 'approval_required');
     const res = await k.call('POST', `${ADMIN}/adjustments`, k.staff, { sellerId: S, direction: 'credit', amount: USD(80_000), reasonCode: 'carrier_claim', reason: 'Pallet lost by the carrier' }, idem());
-    expect(res.status).toBe(409);
-    expect(res.body.error).toMatchObject({ code: 'APPROVAL_REQUIRED' });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ status: 'pending_approval', amount: USD(80_000), approval: { required: true, approvalRequestId: expect.any(String) } });
     const list = await k.call('GET', `${ADMIN}/adjustments?sellerId=${S}`, k.staff);
     expect(list.body.items[0]).toMatchObject({ status: 'pending_approval', approval: { required: true } });
     expect((await expectLedgerMatches(k, S)).total).toBe(1_500);
-    await k.decide(res.body.error.details.approvalRequestId, 'approved');
+    await k.decide(res.body.approval.approvalRequestId, 'approved');
     expect((await expectLedgerMatches(k, S)).total).toBe(81_500);
     const second = await k.call('POST', `${ADMIN}/adjustments`, k.staff, { sellerId: S, direction: 'debit', amount: USD(90_000), reasonCode: 'other', reason: 'Too much' }, idem());
-    await k.decide(second.body.error.details.approvalRequestId, 'rejected');
-    const rejected = await k.svc.core.repo.get('adjustments', second.body.error.details.adjustmentId);
+    await k.decide(second.body.approval.approvalRequestId, 'rejected');
+    const rejected = await k.svc.core.repo.get('adjustments', second.body.id);
     expect(rejected?.status).toBe('rejected');
     expect((await expectLedgerMatches(k, S)).total).toBe(81_500);
   });
@@ -230,7 +250,7 @@ describe('rule-based holds', () => {
     const caseId = newId();
     const res = await k.call('POST', `${ADMIN}/holds`, k.staff, { sellerId: S, amount: USD(6_000), reasonCode: 'dispute', reason: 'Item not as described', reviewDate: plusDays(5), reference: { kind: 'case', id: caseId, ref: 'CS-1' } }, idem());
     expect(res.status).toBe(201);
-    await k.emit('support.case.decided', { caseId, ref: 'CS-1', outcome: 'customer_favored', orderId: newId(), returnId: null, sellerId: S, remedies: [{ id: newId(), kind: 'goodwill_credit', amount: USD(1_500), chargedTo: 'seller', orderItemIds: [], status: 'approved', statusLabel: 'Approved', track: [] }], appealDeadline: null, final: true });
+    await k.emit('support.case.decided', { caseId, ref: 'CS-1', outcome: 'customer_favored', orderId: newId(), returnId: null, sellerId: S, remedies: [{ id: newId(), kind: 'goodwill_credit', amount: USD(1_500), chargedTo: 'seller', orderItemIds: [], status: 'approved', statusLabel: 'Approved', track: [] }], appealDeadline: null, final: true, notified: true });
     const h = await k.svc.core.repo.get('holds', res.body.id);
     expect(h).toMatchObject({ status: 'applied', released_amount: 4_500 });
     expect(await expectLedgerMatches(k, S)).toMatchObject({ held: 0, total: 8_500 });

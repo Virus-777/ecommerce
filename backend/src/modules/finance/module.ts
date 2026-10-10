@@ -20,7 +20,7 @@ import { FinanceService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.1.0',
+  version: '1.2.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
@@ -60,6 +60,9 @@ export default defineModule({
     ctx.events.on("support.case.decided", (e) => service.onCaseDecidedFromSupport(e.payload));
     ctx.events.on("wallet.credit.granted", (e) => service.onCreditGrantedFromWallet(e.payload));
     ctx.events.on("wallet.credit.used", (e) => service.onCreditUsedFromWallet(e.payload));
+    ctx.events.on("wallet.credit.reversed", (e) => service.onCreditReversedFromWallet(e.payload));
+    ctx.events.on("wallet.credit.expired", (e) => service.onCreditExpiredFromWallet(e.payload));
+    ctx.events.on("wallet.credit.corrected", (e) => service.onCreditCorrectedFromWallet(e.payload));
 
     // Background jobs (spec jobs)
     ctx.jobs.handle("finance.release-pending", () => service.releasePending());

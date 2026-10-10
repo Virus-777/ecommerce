@@ -1,7 +1,7 @@
 /**
  * Daily finance checks: captured payments against orders, seller balances against the ledger, the provider
  * deposit against captures, unexplained amounts and failed payouts. Mismatches are explained (no money
- * moves) or corrected with a reason (second reviewer above correctionSecondReviewerThreshold), then the
+ * moves) or corrected with a reason (second reviewer above the caller's correction limit in access), then the
  * day is signed off.
  */
 import { AppError } from '../../../kernel/errors/index.js';
@@ -10,7 +10,7 @@ import { isUuid } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import { zonedTimeToUtc } from '../../../kernel/lib/clock.js';
 import type * as common from '../../../spec/common.js';
-import type { Correction, CorrectionInput, ReconChecklistItem, ReconDay, ReconItem } from '../../../spec/finance.js';
+import type { Correction, CorrectionInput, ReconChecklistItem, ReconDay, ReconItem, Reference } from '../../../spec/finance.js';
 import { addDays, dayStart, decodeActor, detId, encodeActor, fmt, isDate, SYSTEM } from '../domain/rules.js';
 import { reconciliationItemMachine } from '../domain/state-machines.js';
 import { reference } from '../mappers.js';
@@ -108,6 +108,7 @@ export class ReconPart extends Part {
       { key: 'chargebacks_reviewed', label: 'Chargebacks reviewed', state: state(chargebacks.every((h) => h.review_date > date), chargebacks.length > 0), note: chargebacks.length ? `${chargebacks.length} open` : null },
       { key: 'payments_matched', label: 'Payments matched to orders', state: state(!openOf('payments_vs_orders').length, of('payments_vs_orders').length > 0), note: null },
       { key: 'seller_amounts_matched', label: 'Seller balances match the ledger and statements', state: state(!openOf('seller_amounts').length, true), note: null },
+      { key: 'store_credit_matched', label: 'Store credit balances match the liability', state: state(!openOf('store_credit').length, of('store_credit').length > 0), note: openOf('store_credit').length ? `${openOf('store_credit').length} open` : null },
       { key: 'failed_payouts_followed', label: 'Failed payouts followed up', state: state(!unretried.length, failed.length > 0), note: unretried.length ? `${unretried.length} to retry` : null },
       { key: 'unexplained_explained', label: 'Unexplained amounts explained', state: state(!openOf('unexplained_amount').length, of('unexplained_amount').length > 0), note: null },
     ] as Omit<ReconChecklistItem, 'doneAt'>[]).map((c) => ({ ...c, doneAt: c.state === 'done' ? (stored.get(c.key)?.doneAt ?? row?.completed_at?.toISOString() ?? null) : null }));
@@ -207,6 +208,66 @@ export class ReconPart extends Part {
     await this.upsertItem({ id: detId(`capture:${e.captureId}`), date, check: 'payments_vs_orders', ref_kind: 'capture', ref_id: e.captureId, subject: order.ref, description, expected: due - credit, actual: card, difference: card + credit - due });
   }
 
+  /**
+   * recordExternalDifference: another module (wallet) reports a difference in its own books for the daily check.
+   * One item per key on the day it is first reported (store_credit, finance.reconciliation.mismatch_found); the same
+   * key returns that item, and a later report with expected = actual matches it (finance.reconciliation.item_closed).
+   */
+  async recordExternalDifference(input: { check: 'store_credit'; subject: string; description: string; expected: common.Money; actual: common.Money; reference?: Reference; key: string }): Promise<ReconItem> {
+    const currency = this.core.currency();
+    const issues: { path: string; message: string }[] = [];
+    if (input?.check !== 'store_credit') issues.push({ path: 'check', message: 'Only store_credit differences are reported by other modules' });
+    if (!input?.key?.trim()) issues.push({ path: 'key', message: 'Required' });
+    if (!input?.subject?.trim()) issues.push({ path: 'subject', message: 'Required' });
+    for (const k of ['expected', 'actual'] as const) {
+      const v = input?.[k];
+      if (!v || !Number.isSafeInteger(v.amount)) issues.push({ path: k, message: 'An amount in minor units' });
+      else if (v.currency !== currency) issues.push({ path: `${k}.currency`, message: `Finance checks are in ${currency}` });
+    }
+    if (issues.length) throw invalid(issues);
+    const id = detId(`external:${input.check}:${input.key}`);
+    const known = await this.repo.get('recon_items', id);
+    await this.upsertItem({
+      id,
+      date: known?.date ?? this.core.today(),
+      check: input.check,
+      ref_kind: input.reference?.kind ?? null,
+      ref_id: input.reference?.id ?? null,
+      subject: input.subject.trim(),
+      description: input.description?.trim() || `Reported difference ${fmt(input.actual.amount - input.expected.amount, currency)}`,
+      expected: input.expected.amount,
+      actual: input.actual.amount,
+      difference: input.actual.amount - input.expected.amount,
+    });
+    return this.itemView(id);
+  }
+
+  /**
+   * Part of finance.reconcile.daily: the store-credit liability finance booked from wallet events up to the end of
+   * the day against wallet's balances then (wallet.getLiabilityTotal), when wallet is enabled.
+   */
+  async storeCreditCheck(date: string) {
+    const wallet = this.ctx.tryUse('wallet');
+    if (!wallet) return;
+    const end = dayStart(addDays(date, 1), this.core.tz());
+    const totals = await wallet.getLiabilityTotal(end.toISOString());
+    const outstanding = totals.available.amount + totals.held.amount;
+    const liability = await this.parts.ledger.storeCreditLiability(end);
+    const cur = this.core.currency();
+    await this.upsertItem({
+      id: detId(`store_credit:${date}`),
+      date,
+      check: 'store_credit',
+      ref_kind: null,
+      ref_id: null,
+      subject: 'Store credit liability',
+      description: `Wallet balances ${fmt(outstanding, cur)} (available ${fmt(totals.available.amount, cur)}, held ${fmt(totals.held.amount, cur)}, ${totals.accounts} accounts) vs store-credit liability ${fmt(liability, cur)}`,
+      expected: liability,
+      actual: outstanding,
+      difference: outstanding - liability,
+    });
+  }
+
   /** A refund payments gave up on (final attempt failed): money owed to the customer that was not sent */
   async refundFailed(e: EventPayload<'payments.refund.failed'>) {
     await this.upsertItem({
@@ -264,6 +325,12 @@ export class ReconPart extends Part {
       const expected = captures.reduce((s, c) => s + c.actual, 0);
       await this.upsertItem({ id: detId(`deposit:${date}`), date, check: 'provider_deposit', ref_kind: null, ref_id: null, subject: 'Payment provider deposit', description: `Deposit for ${date} against ${captures.length} captured payments`, expected, actual: deposit.amount, difference: deposit.amount - expected });
     }
+    // store credit: finance's liability against wallet's balances (wallet's own per-account differences arrive through recordExternalDifference)
+    try {
+      await this.storeCreditCheck(date);
+    } catch (err) {
+      this.ctx.log.error({ err, date }, 'finance: store credit check failed');
+    }
   }
 
   async assign(id: string, ownerId: string, by: By): Promise<ReconItem> {
@@ -311,7 +378,8 @@ export class ReconPart extends Part {
     }
     await this.repo.update('recon_items', id, { status, correction: correction as never, approval_request_id: approvalId });
     await this.core.audit({ action: 'finance.reconciliation.correct', actionLabel: approvalId ? 'Proposed a correction for approval' : 'Recorded a correction', category: 'financial', target: { type: 'reconciliation_item', id, label: row.subject, screen: 'ops/finance-checks' }, after: { type: input.type, amount: input.amount.amount }, reason: input.note, approvalRequestId: approvalId }, by);
-    if (approvalId) throw this.core.approvalRequired({ id: approvalId }, { itemId: id }, 'Above your correction limit: a second Finance reviewer approves it');
+    // above the limit the correction is saved pending approval and the item answers with it (FORMAT.md, Approval responses)
+    if (approvalId) return this.itemView(id);
     await this.applyCorrection(id, by);
     return this.itemView(id);
   }

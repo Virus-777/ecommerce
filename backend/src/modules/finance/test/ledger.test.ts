@@ -79,7 +79,7 @@ describe('sales at order acceptance', () => {
 describe('a cancellation before dispatch (scenario 4: only the selected item changes)', () => {
   it('reverses the cancelled item and returns its fee; the other item is untouched', async () => {
     const item = orderA.groups[0]!.items[1]!;
-    const cancel = { orderId: orderA.id, ref: orderA.ref, groupId: orderA.groups[0]!.id, ownerType: 'seller', sellerId: S, itemId: item.id, offerId: newId(), stockItemId: newId(), quantity: 1, cancellationId: newId(), initiatedBy: 'customer', reasonCode: 'changed_mind', beforeDispatch: true, countsAgainstSeller: false, refund: { itemAmount: USD(2400), discountShare: USD(0), shippingRefund: USD(0), taxRefund: USD(0), total: USD(2400) }, paymentIntentId: newId(), trustReportId: null };
+    const cancel = { orderId: orderA.id, ref: orderA.ref, groupId: orderA.groups[0]!.id, ownerType: 'seller', sellerId: S, itemId: item.id, offerId: newId(), stockItemId: newId(), quantity: 1, cancellationId: newId(), initiatedBy: 'customer', reasonCode: 'changed_mind', beforeDispatch: true, countsAgainstSeller: false, refund: { itemAmount: USD(2400), discountShare: USD(0), shippingRefund: USD(0), taxRefund: USD(0), total: USD(2400) }, paymentIntentId: newId(), trustReportId: null, notifyCustomer: true };
     await k.emit('orders.item.cancelled', cancel);
     await k.emit('orders.item.cancelled', cancel); // redelivered
     const t = await expectLedgerMatches(k, S);
@@ -154,7 +154,7 @@ describe('a refund after payout (scenario 6)', () => {
   it('deducts the refund (with the funding split and the fee returned pro rata) from later earnings', async () => {
     const item = orderA.groups[0]!.items[0]!;
     const refundRequestId = newId();
-    await k.emit('returns.refund.approved', { refundRequestId, returnId: newId(), caseId: null, orderId: orderA.id, orderItemIds: [item.id], ownerType: 'seller', sellerId: S, source: 'return', trustReportId: null, total: USD(5560), breakdown: { itemAmount: USD(5900), discountShare: USD(340), shippingRefund: USD(0), returnShippingDeduction: USD(0), deductions: [], total: USD(5560), maxRefundable: USD(11319), destination: 'Visa •••• 4417', isEstimate: false }, fundedBy: 'shared', sellerShare: USD(5310), platformShare: USD(250), approvedBy: { kind: 'staff', id: newId() } });
+    await k.emit('returns.refund.approved', { refundRequestId, returnId: newId(), caseId: null, orderId: orderA.id, orderItemIds: [item.id], items: [{ orderItemId: item.id, quantity: 1 }], ownerType: 'seller', sellerId: S, source: 'return', trustReportId: null, total: USD(5560), breakdown: { itemAmount: USD(5900), discountShare: USD(340), shippingRefund: USD(0), returnShippingDeduction: USD(0), deductions: [], total: USD(5560), maxRefundable: USD(11319), destination: 'Visa •••• 4417', isEstimate: false }, fundedBy: 'shared', sellerShare: USD(5310), platformShare: USD(250), approvedBy: { kind: 'staff', id: newId() } });
     const sent = { refundId: newId(), ref: 'RT-261020-0533', orderId: orderA.id, origin: 'return', originId: refundRequestId, amount: USD(5560), items: [{ orderItemId: item.id, title: 'Pocket speaker', groupId: orderA.groups[0]!.id, sellerId: S, amount: USD(5560) }], destination: 'Visa •••• 4417', sentAt: k.clock.now().toISOString() };
     await k.emit('payments.refund.sent', sent);
     await k.emit('payments.refund.sent', sent); // redelivered
@@ -275,7 +275,7 @@ describe('the spec correctness pass, replayed on the ledger', () => {
     const before = await expectLedgerMatches(k, S3);
     const item = ord.groups[0]!.items[0]!;
     const refundRequestId = newId();
-    await k.emit('returns.refund.approved', { refundRequestId, returnId: newId(), caseId: null, orderId: ord.id, orderItemIds: [item.id], ownerType: 'seller', sellerId: S3, source: 'return', trustReportId: null, total: USD(8_000), breakdown: { itemAmount: USD(8_000), discountShare: USD(0), shippingRefund: USD(0), returnShippingDeduction: USD(0), deductions: [], total: USD(8_000), maxRefundable: USD(8_000), destination: 'Visa •••• 4417', isEstimate: false }, fundedBy: 'seller', sellerShare: USD(8_000), platformShare: USD(0), approvedBy: { kind: 'staff', id: newId() } });
+    await k.emit('returns.refund.approved', { refundRequestId, returnId: newId(), caseId: null, orderId: ord.id, orderItemIds: [item.id], items: [{ orderItemId: item.id, quantity: 1 }], ownerType: 'seller', sellerId: S3, source: 'return', trustReportId: null, total: USD(8_000), breakdown: { itemAmount: USD(8_000), discountShare: USD(0), shippingRefund: USD(0), returnShippingDeduction: USD(0), deductions: [], total: USD(8_000), maxRefundable: USD(8_000), destination: 'Visa •••• 4417', isEstimate: false }, fundedBy: 'seller', sellerShare: USD(8_000), platformShare: USD(0), approvedBy: { kind: 'staff', id: newId() } });
     const refundId = newId();
     const failed = { refundId, ref: 'RF-261010-0001', orderId: ord.id, customerId: newId(), contactEmail: 'ana@example.com', origin: 'return', originId: refundRequestId, amount: USD(8_000), reason: 'The card was closed', attempts: 1, finalAttempt: false };
     await k.emit('payments.refund.failed', failed);
