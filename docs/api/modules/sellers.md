@@ -77,6 +77,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | POST | `/api/seller/sellers/invitations/{id}/revoke` | Cancel an invitation _(audited, phase 2)_ | seller<br>`sellers.staff.manage` | `SellerMember` |
 | PATCH | `/api/seller/sellers/members/{id}` | Change a member's role or single permissions _(audited, phase 2)_ | seller<br>`sellers.staff.manage` | `{ role: enum(products_inventory|shipping|customer_service|custom)?, permissions: string[]? }` → `SellerMember` |
 | POST | `/api/seller/sellers/members/{id}/suspend` | Temporarily block a member _(audited, phase 2)_ | seller<br>`sellers.staff.manage` | `{ reason: text? }` → `SellerMember` |
+| POST | `/api/seller/sellers/members/{id}/reactivate` | Lift a member's suspension _(audited, phase 2)_ | seller<br>`sellers.staff.manage` | `{ reason: text? }` → `SellerMember` |
 | POST | `/api/seller/sellers/members/{id}/remove` | Remove a member _(audited, phase 2)_ | seller<br>`sellers.staff.manage` | `{ reason: text? }` → `SellerMember` |
 | GET | `/api/seller/sellers/performance` | Account health: metrics vs targets, warnings and actions | seller | `PerformanceSummary` |
 | GET | `/api/seller/sellers/restrictions` | Active and past restrictions and suspensions | seller | Page<Restriction> |
@@ -125,7 +126,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | GET | `/api/admin/sellers/appeals` | Appeals waiting for a decision | staff<br>`sellers.appeals.decide` | Page<Appeal> |
 | POST | `/api/admin/sellers/appeals/{id}/assign` | Assign an appeal reviewer (not the original decider) _(audited)_ | staff<br>`sellers.appeals.decide` | `{ reviewerId: uuid }` → `Appeal` |
 | POST | `/api/admin/sellers/appeals/{id}/decide` | Uphold, overturn or partly overturn _(audited)_ | staff<br>`sellers.appeals.decide` | `{ outcome: enum(uphold|overturn|partly_overturn), explanation: text, changes: json? }` → `Appeal` |
-| GET | `/api/admin/sellers/change-requests` | Store names, public claims, brand affiliation and business changes waiting for review | staff<br>`sellers.storefronts.review` | Page<ChangeRequest> |
+| GET | `/api/admin/sellers/change-requests` | Store names, taglines, public claims, brand affiliation and business changes waiting for review | staff<br>`sellers.storefronts.review` | Page<ChangeRequest> |
 | POST | `/api/admin/sellers/change-requests/{id}/decide` | Approve or reject a change request or public claim _(audited)_ | staff<br>`sellers.storefronts.review` | `{ approve: bool, reason: text, claimExpiresAt: datetime? }` → `ChangeRequest` |
 | POST | `/api/admin/sellers/claims/{id}/revoke` | Remove an approved claim found to be false _(audited)_ | staff<br>`sellers.storefronts.review` | `{ reason: text, recordViolation: bool }` → `PublicClaim` |
 | GET | `/api/admin/sellers/performance-targets` | Current and scheduled performance targets | staff<br>`sellers.accounts.view` | `PerformanceTarget[]` |
@@ -601,9 +602,9 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | Field | Type |
 |---|---|
 | id | `uuid` |
-| kind | `enum(store_name|public_claim|legal_name|ownership|business_address|brand_request)` |
+| kind | `enum(store_name|tagline|public_claim|legal_name|ownership|business_address|brand_request)` |
 | current | `json?` |
-| proposed | `json` brand_request: { brandName, website?, relationship, categoryIds } |
+| proposed | `json` brand_request: { brandName, website?, relationship, categoryIds }; tagline: { tagline } |
 | evidence | `MediaRef[]` |
 | state | `enum(pending|approved|rejected|withdrawn)` |
 | decisionReason | `text?` |
@@ -685,6 +686,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | location | `string?` |
 | contactOptions | `ContactOptions?` |
 | warranty | `text?` |
+| tagline | `string?` Max 80 characters. Creates a tagline change request reviewed like claims; the current tagline stays live until approved. Empty string asks to remove it (no review) |
 
 ### CollectionInput
 
@@ -882,6 +884,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | openOrders | `enum(seller_keeps_fulfilling|cancel_unshipped_and_refund)` |
 | secondReviewerId | `uuid` Suspension takes effect only after this reviewer approves (access approval request) |
 | trustReportId | `uuid?` |
+| trustEnforcementId | `uuid?` Set when the suspension executes a trust enforcement, so trust.enforcement.reversed can end it |
 
 ### SuspensionImpact
 
@@ -1123,7 +1126,7 @@ stateDiagram-v2
   pending --> withdrawn: withdraw
 ```
 
-Store name, legal name, ownership and business address. The current value stays live until approval. Ownership changes may also re-run verification checks.
+Store name, tagline, public claims, legal name, ownership, business address and brand requests. The current value stays live until approval. Ownership changes may also re-run verification checks.
 
 ### Public claim (`PublicClaim.state`)
 
@@ -1154,7 +1157,7 @@ stateDiagram-v2
   suspended --> removed: remove
 ```
 
-Accept happens in identity (identity.invitation.accepted). The owner cannot be removed or suspended; ownership moves only through an ownership change request.
+Accept happens in identity (identity.invitation.accepted). suspend and reactivate are POST /members/{id}/suspend and /reactivate (owner only); revoke cancels the identity invitation (identity.revokeInvitation). The owner cannot be removed or suspended; ownership moves only through an ownership change request.
 
 ### Launch readiness review (`LaunchReview.state`)
 
@@ -1198,7 +1201,7 @@ stateDiagram-v2
   revoked --> verified: grant
 ```
 
-Granted when identity, business registration, payout account and return address checks pass. Lapses when a checked document expires (e.g. business licence renewal). The label always says product authenticity was not checked.
+Granted when identity, business registration, payout account and return address checks pass. Lapses verifiedLabelValidDays after it was granted, or earlier when a checked document expires (e.g. business licence renewal). The label always says product authenticity was not checked.
 
 ## Data (schema `sellers`)
 
@@ -1256,6 +1259,7 @@ Indexes: `(status, id)`, `(verification_state)`, `gin(to_tsvector(store_name || 
 | account | jsonb |
 | business | jsonb |
 | verification | jsonb (tax id encrypted separately) |
+| tax_id_hash | text? (keyed hash of the normalised tax id, for duplicate checks) |
 | payout | jsonb (holder, type, label, provider token) |
 | return_address | jsonb |
 | decision | jsonb? |
@@ -1266,7 +1270,7 @@ Indexes: `(status, id)`, `(verification_state)`, `gin(to_tsvector(store_name || 
 | draft_saved_at | timestamptz |
 | created_at | timestamptz |
 
-Indexes: `(state, decision_target_at)`, `(applicant_account_id)`, `(reviewer_id, state)`
+Indexes: `(state, decision_target_at)`, `(applicant_account_id)`, `(reviewer_id, state)`, `(tax_id_hash)`
 
 **application_documents**
 
@@ -1506,6 +1510,7 @@ Indexes: `(metric, category_id, effective_from desc)`
 | issued_at | timestamptz |
 | resolved_at | timestamptz? |
 | resolution_note | text? |
+| trust_enforcement_id | uuid? |
 
 Indexes: `(seller_id, issued_at desc)`
 
@@ -1556,6 +1561,7 @@ Indexes: `(seller_id, state)`, `(state, review_date)`
 | second_reviewer_id | uuid |
 | approval_request_id | uuid? |
 | trust_report_id | uuid? |
+| trust_enforcement_id | uuid? |
 | appeal_route | jsonb |
 | started_at | timestamptz? |
 | ended_at | timestamptz? |
@@ -1635,7 +1641,8 @@ Indexes: `(email)`, `(state, expires_at)`
 
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
-| `sellers.application.submitted` | An applicant submits | `{ applicationId: uuid, sellerId: uuid, categoryIds: uuid[], sellerType: string, invited: bool }` | notifications, trust, workqueues |
+| `sellers.application.submitted` | An applicant submits | `{ applicationId: uuid, ref: string, sellerId: uuid, categoryIds: uuid[], sellerType: string, invited: bool, decisionTargetAt: datetime, taxIdHash: string?, bankTokenHash: string?, addressKey: string?, duplicateCount: int }` | notifications, trust, workqueues |
+| `sellers.application.information_reminder` | Job sellers.application-deadlines: infoReminderDaysBefore before an open information request is due (reminder three_days_before), once per request | `{ applicationId: uuid, ref: string, sellerId: uuid, applicantAccountId: uuid, dueAt: datetime, openItems: int }` | notifications |
 | `sellers.application.information_requested` | A reviewer asks for information | `{ applicationId: uuid, sellerId: uuid, dueAt: datetime, itemCount: int }` | notifications |
 | `sellers.application.information_provided` | The applicant responds | `{ applicationId: uuid, sellerId: uuid }` | workqueues |
 | `sellers.application.withdrawn` | The applicant withdraws | `{ applicationId: uuid, sellerId: uuid? }` | - |
@@ -1646,10 +1653,11 @@ Indexes: `(email)`, `(state, expires_at)`
 | `sellers.restriction.updated` | An active restriction's scope, activities or dates change | `{ sellerId: uuid, restrictionId: uuid, affectedActivities: enum(new_listings|product_submissions|new_offers|offer_reactivation|sales|advertising|promotions|payout_schedule)[], scope: RestrictionScope, reviewDate: date }` | offers, workqueues |
 | `sellers.restriction.lifted` | A restriction is lifted, expires or is overturned | `{ sellerId: uuid, restrictionId: uuid, reason: text, trustEnforcementId: uuid? }` | offers, workqueues |
 | `sellers.restriction.evidence_submitted` | A seller uploads documents to resolve a restriction | `{ sellerId: uuid, restrictionId: uuid }` | workqueues |
-| `sellers.seller.suspended` | A suspension takes effect after second review | `{ sellerId: uuid, suspensionId: uuid, reasonCode: string, reason: text, reviewDate: date, openOrders: enum(seller_keeps_fulfilling|cancel_unshipped_and_refund), appealDeadline: datetime, trustReportId: uuid? }` | advertising, cart, catalog, content, finance, fulfillment-service, notifications, offers, promotions, returns, search, trust |
-| `sellers.seller.reinstated` | A suspension ends or the last restriction is lifted, so the account is back to approved (or restricted with remaining restrictions) | `{ sellerId: uuid, from: enum(restricted|suspended), to: enum(approved|restricted), liftedRestrictionId: uuid?, endedSuspensionId: uuid?, remainingRestrictionIds: uuid[] }` | catalog, notifications, offers, search |
-| `sellers.seller.closed` | A seller account closes (seller request, staff, rejection does not use this event) | `{ sellerId: uuid, reasonCode: string, closedBy: Actor }` | finance, fulfillment-service, inventory, media, offers, reviews, search |
-| `sellers.warning.issued` | Staff send a warning | `{ sellerId: uuid, warningId: uuid, kind: string, title: string }` | notifications |
+| `sellers.seller.suspended` | A suspension takes effect after second review | `{ sellerId: uuid, suspensionId: uuid, reasonCode: string, reason: text, reviewDate: date, openOrders: enum(seller_keeps_fulfilling|cancel_unshipped_and_refund), appealDeadline: datetime, trustReportId: uuid?, trustEnforcementId: uuid? }` | advertising, cart, catalog, content, finance, fulfillment-service, notifications, offers, promotions, returns, search, trust |
+| `sellers.seller.reinstated` | A suspension ends or the last restriction is lifted, so the account is back to approved (or restricted with remaining restrictions) | `{ sellerId: uuid, from: enum(restricted|suspended), to: enum(approved|restricted), liftedRestrictionId: uuid?, endedSuspensionId: uuid?, remainingRestrictionIds: uuid[] }` | catalog, content, notifications, offers, search |
+| `sellers.seller.closed` | A seller account closes (seller request, staff, rejection does not use this event) | `{ sellerId: uuid, reasonCode: string, closedBy: Actor }` | content, finance, fulfillment-service, inventory, media, offers, reviews, search |
+| `sellers.warning.issued` | Staff send a warning, or a warn_seller trust enforcement is executed | `{ sellerId: uuid, warningId: uuid, kind: string, title: string, trustEnforcementId: uuid? }` | notifications, trust |
+| `sellers.warning.resolved` | A warning is resolved by staff or withdrawn because its trust enforcement was reversed | `{ sellerId: uuid, warningId: uuid, note: text, trustEnforcementId: uuid? }` | - |
 | `sellers.appeal.submitted` | A seller appeals a restriction, suspension or rejection | `{ appealId: uuid, sellerId: uuid, subject: string, subjectId: uuid, level: int, decideBy: datetime, trustReportId: uuid? }` | trust, workqueues |
 | `sellers.appeal.decided` | An appeal is decided | `{ appealId: uuid, sellerId: uuid, outcome: enum(upheld|overturned|partly_overturned), subject: string, subjectId: uuid, trustReportId: uuid? }` | notifications, trust, workqueues |
 | `sellers.payout_account.changed` | The owner adds or changes the payout destination (finance starts verification and review) | `{ sellerId: uuid, changeId: uuid, providerDestinationId: string, label: string, accountHolderName: string, accountType: string, previousLabel: string?, isInitial: bool, requestedBy: Actor }` | finance, notifications |
@@ -1660,6 +1668,7 @@ Indexes: `(email)`, `(state, expires_at)`
 | `sellers.member.joined` | An invited member accepts | `{ sellerId: uuid, memberId: uuid, accountId: uuid }` | - |
 | `sellers.member.permissions_changed` | A member's role or permissions change | `{ sellerId: uuid, memberId: uuid, permissions: string[] }` | - |
 | `sellers.member.removed` | A member is suspended or removed | `{ sellerId: uuid, memberId: uuid, accountId: uuid? }` | - |
+| `sellers.member.reactivated` | The owner lifts a member's suspension | `{ sellerId: uuid, memberId: uuid, accountId: uuid?, permissions: string[] }` | - |
 | `sellers.launch_review.requested` | A seller asks for the launch readiness review | `{ sellerId: uuid }` | workqueues |
 | `sellers.launch_review.decided` | The launch review passes or needs changes (offers activates eligible offers on pass) | `{ sellerId: uuid, outcome: enum(passed|changes_needed), decidedAt: datetime }` | notifications, offers, workqueues |
 | `sellers.agreement.accepted` | An agreement version is accepted | `{ sellerId: uuid?, applicationId: uuid?, key: string, versionLabel: string }` | - |
@@ -1670,10 +1679,11 @@ Indexes: `(email)`, `(state, expires_at)`
 | Consumes | From | Does |
 |---|---|---|
 | `identity.invitation.accepted` | identity | Activate the invited member and call identity.grantSellerContext |
-| `identity.account.closed` | identity | Remove the account's memberships; if it was an owner, open a Seller Manager work item |
+| `identity.account.closed` | identity | Remove the account's memberships; if it was an owner, raise a seller_owner_missing work item for the Seller Manager (workqueues) |
 | `access.approval.decided` | access | Finish pending suspensions, restrictions, closures and target changes (approved) or cancel them (declined) |
 | `trust.assessment.completed` | trust | Store risk level, flags and recommendation on the application's risk review |
-| `trust.enforcement.recorded` | trust | When the action is restrict_seller, warn_seller or suspend_seller, create the restriction or warning from the enforcement parameters (recommendedBy Trust) or start a suspension that still needs its second reviewer |
+| `trust.enforcement.recorded` | trust | When the action is restrict_seller, warn_seller or suspend_seller, create the restriction or warning from the enforcement parameters (recommendedBy Trust) or start a suspension that still needs its second reviewer; each keeps trustEnforcementId (restrictions, warnings, suspensions) and the resulting event carries it |
+| `trust.enforcement.reversed` | trust | Undo what the enforcement created (decision D9): restrict_seller lifts the active or pending restriction with that trustEnforcementId (reason from the reversal; sellers.restriction.lifted and, when the status changes, sellers.seller.reinstated); suspend_seller ends the active suspension (reinstate, keeping other restrictions) or cancels one still pending second review; warn_seller resolves the open warning with the reversal note (sellers.warning.resolved). No approval is asked: the reversal was approved in trust. Nothing found (already lifted or never applied) is a no-op; other actions are ignored |
 | `finance.destination.verified` | finance | Payout readiness → verified; setup checklist step done |
 | `finance.destination.rejected` | finance | Payout readiness back to not_added (new account) or verified (change rejected, old account stays); tell the owner why |
 | `catalog.product.submitted` | catalog | Update product approval summary and the first-submission setup step |
@@ -1704,6 +1714,7 @@ Indexes: `(email)`, `(state, expires_at)`
 | getPerformance | `(sellerId: uuid) => PerformanceSummary`<br>Latest metrics vs targets; offers uses it for main-offer eligibility, reports for seller dashboards | offers, reports, search |
 | getStorefrontCard | `(sellerIds: uuid[]) => SellerSummary[]`<br>Name, logo, verified label, rating and slug for product pages and offer lists | offers, search, content, orders, graphql |
 | requestRestriction | `(input: RestrictionInput & { sellerId: uuid, requestedBy: Actor }) => Restriction`<br>Used by trust when a Seller Manager accepts a restriction recommendation in the trust screen; follows the same approval rules as the admin endpoint | trust |
+| getApplicationParticipant | `(applicationId: uuid) => { applicationId: uuid, ref: string, state: string, applicantAccountId: uuid, sellerId: uuid | null, name: string, email: email, storeName: string | null } | null`<br>The applicant behind a seller application (identity account id, contact name and work email), so staff → applicant conversations can add the applicant as a participant (messaging maps the account to its customer id). Null for an unknown application | messaging, notifications |
 | getStorefrontBySlug | `(slug: string) => Storefront | null`<br>Public storefront by slug, same data as GET /api/store/sellers/stores/{slug}; null for unknown, unapproved or closed stores | graphql |
 | searchSellers | `(filter: { search?: string, statuses?: string[], verified?: bool, dispatchBelowPct?: number, mainCategoryId?: uuid }, page: PageInput) => Page<SellerSnapshot>`<br>Admin seller list with the same filters as GET /api/admin/sellers/sellers | graphql, search |
 | exportRows | `(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }`<br>Export rows for reports dataset sellers.admin.accounts (the filtered seller list) | reports |
@@ -1771,12 +1782,12 @@ Checked through the access module (limits per role, second reviewer).
 
 | Job | Schedule | Does |
 |---|---|---|
-| `sellers.run-verification-checks` | on submit + every 5 min for pending | Send identity, registration, tax id, payout-name match and return-address checks to providers; refer automatically to trust for riskReviewCategories |
-| `sellers.application-deadlines` | hourly | Send reminders before information deadlines; expire applications past due; raise workqueue items for applications past the decision target |
+| `sellers.run-verification-checks` | every 5 min | Send pending identity, registration, tax id, payout-name match and return-address checks to providers and retry ones without a result; refer automatically to trust for riskReviewCategories. submitApplication also runs it once right after submit |
+| `sellers.application-deadlines` | hourly | Publish sellers.application.information_reminder infoReminderDaysBefore before an information deadline (once per request, reminder three_days_before only); expire applications past due; raise workqueue items for applications past the decision target |
 | `sellers.compute-performance` | daily 06:00 market time | Recompute 30-day (and 90-day for violations) metrics from performance_events against effective targets; publish sellers.performance.below_target for new misses |
 | `sellers.restriction-reviews` | daily 07:00 market time | Expire restrictions past endsAt; raise workqueue items for restrictions and suspensions reaching their review date |
 | `sellers.appeal-deadlines` | hourly | Raise workqueue items for appeals near or past decideBy |
-| `sellers.verification-lapse` | daily | Lapse Verified labels whose checked documents expired; tell the seller what to renew |
+| `sellers.verification-lapse` | daily 05:30 market time | Lapse Verified labels past expiresAt (granted + verifiedLabelValidDays) or whose checked documents expired; publish sellers.verification.changed so the seller is told what to renew |
 | `sellers.expire-invitations` | hourly | Expire member invitations and seller invitations past their expiry |
 | `sellers.purge-documents` | daily | Delete ID and rejected-application documents after their retention period |
 | `sellers.auto-warnings` | daily 06:30 market time | Phase 2 performance controls: issue warnings automatically for repeated misses and propose restrictions to the Seller Manager (never restrict automatically) |
@@ -1801,6 +1812,7 @@ Checked through the access module (limits per role, second reviewer).
 | introMaxChars | `400` | int, characters, 1–…, seller-visible | Storefront introduction length |
 | maxCollections | `6` | int, 0–…, seller-visible | Featured collections per storefront |
 | claimReviewBusinessDays | `2` | duration, business days, 1–…, seller-visible | Target to review store name changes and public claims |
+| verifiedLabelValidDays | `365` | duration, days, 30–730, approval: second reviewer, seller-visible | How long a Verified seller label lasts after it is granted before the checks must be renewed (sets VerificationLabel.expiresAt; changes apply to labels granted afterwards) |
 | launchReviewBusinessDays | `1` | duration, business days, 1–…, seller-visible | Target for the launch readiness review |
 
 ## Integrations
@@ -1821,6 +1833,8 @@ Checked through the access module (limits per role, second reviewer).
 - The admin seller detail aggregates orders (open and overdue orders), returns (open returns), support (open cases) and finance (balances, holds, next payout) in-process; each is optional and reported in `unavailable` when off.
 - Approval actions (see approvalActions; registered with access): sellers.sellers.restrict (authority; per-role 'Permitted', 'Permitted with second review' or 'Recommend only'), sellers.sellers.suspend (always a second reviewer), sellers.sellers.close (second reviewer unless the seller asked) and sellers.performance.targets (authority).
 - Applicants use their member account (identity realm member). 'Create a new seller login' in step 1 is an identity registration done by the app before startApplication.
+- Staff → applicant conversations: messaging calls getApplicationParticipant(applicationId) to add the applicant (identity account, name, work email) as a participant when the conversation starts, so the applicant sees it on sell/status.
+- Trust reversal (decision D9): restrictions, suspensions and warnings created from a trust enforcement keep trustEnforcementId; trust.enforcement.reversed undoes exactly those records and the resulting sellers.restriction.lifted / sellers.seller.reinstated / sellers.warning.resolved events let offers and the other owners restore what they removed.
 
 ## GraphQL (read layer)
 

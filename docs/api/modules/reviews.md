@@ -3,7 +3,7 @@
 Product reviews (Verified Purchase), seller feedback kept separate from product reviews, public seller responses under rules, product questions and answers labelled by who answered, reports of inappropriate content, moderation with outcomes visible to reporter and author, appeals, and rating summaries for products and sellers.
 
 - **Group:** After-sales and money · **Launch phase:** 1 · **Plan chapters:** 17, 5
-- **Depends on:** [orders](orders.md), [catalog](catalog.md), [sellers](sellers.md) · **Optional:** [media](media.md), [offers](offers.md), [trust](trust.md), [notifications](notifications.md), [access](access.md), [audit](audit.md), [customers](customers.md), [search](search.md), [shipping](shipping.md)
+- **Depends on:** [orders](orders.md), [catalog](catalog.md), [sellers](sellers.md) · **Optional:** [media](media.md), [offers](offers.md), [trust](trust.md), [notifications](notifications.md), [access](access.md), [audit](audit.md), [customers](customers.md), [search](search.md), [shipping](shipping.md), [workqueues](workqueues.md)
 
 ## Owns
 - Product reviews: eligibility from a delivered purchase (Verified Purchase), rating, headline, text, photos, name display, edit and delete
@@ -32,6 +32,7 @@ Product reviews (Verified Purchase), seller feedback kept separate from product 
 | GET | `/api/store/reviews/products/{productId}/questions` | Questions with answers labelled Seller, Marketly staff or Customer | visitor | Page<Question> |
 | POST | `/api/store/reviews/products/{productId}/questions` | Ask a question about the product | customer | `{ text: text }` → `Question` |
 | POST | `/api/store/reviews/questions/{id}/answers` | Answer another shopper's question (labelled Customer) | customer | `{ text: text }` → `Answer` |
+| PATCH | `/api/store/reviews/me/answers/{id}` | Edit my answer, or fix and resubmit it after an edit request | customer | `{ text: text }` → `Answer` |
 | POST | `/api/store/reviews/votes` | Mark a review or answer helpful (or undo) | customer | `{ targetType: enum(product_review|answer), targetId: uuid, helpful: bool }` → `{ helpfulCount: int }` |
 | POST | `/api/store/reviews/reports` | Report a review, feedback, question, answer or seller response | customer | `ReportInput` → `MyReport` |
 | GET | `/api/store/reviews/sellers/{sellerId}/feedback` | Seller feedback with public seller responses | visitor | Page<SellerFeedback> |
@@ -55,6 +56,7 @@ Product reviews (Verified Purchase), seller feedback kept separate from product 
 |---|---|---|---|---|
 | GET | `/api/seller/reviews/questions` | Questions on products the seller offers | seller | Page<SellerQuestionRow> |
 | POST | `/api/seller/reviews/questions/{id}/answers` | Publish an answer labelled as from the seller | seller<br>`reviews.responses.post` | `{ text: text }` → `Answer` |
+| PATCH | `/api/seller/reviews/answers/{id}` | Edit the seller's answer, or fix and resubmit it after an edit request | seller<br>`reviews.responses.post` | `{ text: text }` → `Answer` |
 | GET | `/api/seller/reviews/feedback` | Seller feedback received | seller | Page<SellerFeedbackRow> |
 | GET | `/api/seller/reviews/feedback-summary` | Own feedback summary | seller | `SellerFeedbackSummary` |
 | GET | `/api/seller/reviews/product-reviews` | Product reviews of items the seller sold (to respond) | seller | Page<SellerProductReviewRow> |
@@ -75,6 +77,9 @@ Product reviews (Verified Purchase), seller feedback kept separate from product 
 | POST | `/api/admin/reviews/moderation-items/{id}/refer` | Send to Trust and Risk (suspected fake or paid reviews, payment offers) _(audited)_ | staff<br>`reviews.moderation.decide` | `{ note: text }` → `ModerationDetail` |
 | GET | `/api/admin/reviews/questions` | Customer questions on products, e.g. unanswered questions on Official Store products (plan ch. 9) | staff<br>`reviews.answers.staff` | Page<AdminQuestionRow> |
 | POST | `/api/admin/reviews/questions/{id}/answers` | Add a Marketly staff answer _(audited)_ | staff<br>`reviews.answers.staff` | `{ text: text, secondCheck: bool? }` → `Answer` |
+| GET | `/api/admin/reviews/official-store/reviews` | Product reviews of Official Store sales and Official Store feedback, to respond as the Official Store | staff<br>`reviews.answers.staff` | Page<OfficialReviewRow> |
+| POST | `/api/admin/reviews/official-store/responses` | Respond publicly as the Official Store _(audited)_ | staff<br>`reviews.answers.staff` | `ResponseInput` → `SellerResponse` |
+| PATCH | `/api/admin/reviews/official-store/responses/{id}` | Edit an Official Store response within the edit window _(audited)_ | staff<br>`reviews.answers.staff` | `{ text: text }` → `SellerResponse` |
 | GET | `/api/admin/reviews/appeals` | Appeals of moderation decisions | staff<br>`reviews.moderation.view` | Page<AppealRow> |
 | POST | `/api/admin/reviews/appeals/{id}/decide` | Decide an appeal (not by the original moderator) _(audited)_ | staff<br>`reviews.appeals.decide` | `{ overturn: bool, reason: text }` → `AppealRow` |
 | GET | `/api/admin/reviews/reviews` | Search all product reviews | staff<br>`reviews.moderation.view` | Page<AdminReviewRow> |
@@ -586,6 +591,17 @@ Product reviews (Verified Purchase), seller feedback kept separate from product 
 | customerId | `uuid` |
 | reportCount | `int` |
 
+### OfficialReviewRow
+
+| Field | Type |
+|---|---|
+| targetType | `enum(product_review|seller_feedback)` |
+| review | `ProductReview?` For product reviews of items the Official Store sold |
+| feedback | `SellerFeedback?` For feedback on Official Store packages |
+| orderRef | `string?` |
+| needsResponse | `bool` |
+| canRespond | `bool` |
+
 ## Status flows
 
 ### Product review (`MyReview.status`)
@@ -610,9 +626,15 @@ stateDiagram-v2
   held --> deleted: delete
   edit_requested --> deleted: delete
   removed --> deleted: delete
+  pending --> removed: remove
+  pending --> edit_requested: requestEdit
+  published --> edit_requested: requestEdit
+  held --> pending: edit
+  edit_requested --> published: reinstate
+  pending --> deleted: delete
 ```
 
-Submit runs automatic checks (contact details, links, profanity, payment offers); passing content publishes at once, failing content is held for moderation. Reported reviews stay visible while reviewed unless the report reason is in hideOnReportReasons (e.g. personal information). keep/remove/requestEdit are moderation decisions with a policy reason; 'harms sales' or an unfavourable rating is never a removal reason. reinstate follows an overturned appeal. Edits re-run the checks.
+Submit runs automatic checks (contact details, links, profanity, payment offers); passing content publishes at once, failing content is held for moderation. Reported reviews stay visible while reviewed unless the report reason is in hideOnReportReasons (e.g. personal information). keep/remove/requestEdit are moderation decisions with a policy reason, taken from pending, held or published content in one move; 'harms sales' or an unfavourable rating is never a removal reason. reinstate follows an overturned appeal or a reversed trust enforcement. Edits re-run the checks.
 
 ### Seller feedback (`MyFeedback.status`)
 
@@ -630,9 +652,27 @@ stateDiagram-v2
   removed --> published: reinstate
   published --> deleted: delete
   removed --> deleted: delete
+  pending --> removed: remove
+  published --> removed: remove
+  held --> pending: edit
+  held --> deleted: delete
+  pending --> deleted: delete
 ```
 
-Eligible once the seller's package is delivered (or its delivery date has passed), within sellerFeedbackWindowDays. Feedback about the product itself can be reported as off-topic; slow service mentioned in a product review stays (honest experience).
+Eligible once the seller's package is delivered (or its delivery date has passed), within sellerFeedbackWindowDays. Feedback about the product itself can be reported as off-topic; slow service mentioned in a product review stays (honest experience). Feedback has no edit request: request_edit on feedback is refused with ILLEGAL_TRANSITION.
+
+### Question (`Question.status`)
+
+```mermaid
+stateDiagram-v2
+  [*] --> pending_review
+  pending_review --> published: publish
+  pending_review --> removed: remove
+  published --> removed: remove
+  removed --> published: reinstate
+```
+
+Questions passing the automatic checks publish at once. Removing a question removes it from the product page with its answers; reinstate follows an overturned appeal or a reversed trust enforcement.
 
 ### Answer (`Answer.status`)
 
@@ -645,9 +685,13 @@ stateDiagram-v2
   edit_requested --> pending_review: resubmit
   published --> removed: remove
   removed --> published: reinstate
+  published --> edit_requested: requestEdit
+  published --> pending_review: edit
+  edit_requested --> removed: remove
+  edit_requested --> published: reinstate
 ```
 
-Answers passing the automatic checks publish at once; held ones (links, medical claims, off-platform offers) wait for review. Staff answers can require a second check (setting).
+Answers passing the automatic checks publish at once; held ones (links, medical claims, off-platform offers) wait for review. Staff answers can require a second check (setting). A published answer can get an edit request after a report (it leaves the page until resubmitted). The author edits with PATCH /me/answers/{id} (customers) or PATCH /answers/{id} (sellers): edit from published, resubmit from edit_requested; both re-run the checks.
 
 ### Seller response (`SellerResponse.status`)
 
@@ -660,9 +704,13 @@ stateDiagram-v2
   held --> rejected: reject
   published --> pending: edit
   rejected --> pending: edit
+  pending --> rejected: reject
+  published --> rejected: reject
+  held --> pending: edit
+  rejected --> published: reinstate
 ```
 
-One response per review or feedback. Rule check blocks names beyond what the customer shows, addresses, order details, offers of refunds or gifts for changing feedback, links, contact details and insults. Editable until editableUntil (responseEditDays).
+One response per review or feedback. Rule check blocks names beyond what the customer shows, addresses, order details, offers of refunds or gifts for changing feedback, links, contact details and insults. Editable until editableUntil (responseEditDays). A published response that is reported can be rejected (reject_response); reinstate follows an overturned appeal. Official Store responses follow the same machine and are written by staff.
 
 ### Moderation item (`ModerationItem.status`)
 
@@ -851,8 +899,9 @@ Indexes: `(status, queue, first_reported_at)`, `(content_type, content_id)`
 | moderator_id | uuid |
 | decided_at | timestamptz |
 | appeal_by | timestamptz? |
+| trust_enforcement_id | uuid? (trust enforcement this decision executed; reversed with it) |
 
-Indexes: `(moderation_item_id)`
+Indexes: `(moderation_item_id)`, `(trust_enforcement_id)`
 
 **appeals**
 
@@ -886,6 +935,23 @@ Indexes: `(status, submitted_at)`
 | answered_questions | int |
 | updated_at | timestamptz |
 
+**review_invites**: Delivered items waiting for a review invitation (decision D-R2): one row per order item from orders.item.delivered; the invites job publishes reviews.invite.due when due_at passes and the item is still unreviewed
+
+| Column | Type |
+|---|---|
+| order_item_id | uuid pk |
+| order_id | uuid |
+| customer_id | uuid |
+| product_id | uuid |
+| seller_id | uuid (OFFICIAL_STORE_ID for the Official Store) |
+| delivered_at | timestamptz |
+| due_at | timestamptz |
+| state | text (pending|sent|cancelled|reviewed) |
+| sent_at | timestamptz? |
+| updated_at | timestamptz |
+
+Indexes: `(state, due_at)`, `(customer_id)`
+
 **seller_feedback_summaries**: Rolling 12-month projection per seller
 
 | Column | Type |
@@ -907,26 +973,28 @@ Indexes: `(status, submitted_at)`
 |---|---|---|---|
 | `reviews.review.published` | A product review becomes visible (new, edited, kept or reinstated) | `{ reviewId: uuid, productId: uuid, sellerId: uuid, rating: int, verified: bool }` | search, trust |
 | `reviews.review.updated` | An author edits a review | `{ reviewId: uuid, productId: uuid }` | - |
-| `reviews.review.removed` | A review is removed by moderation or deleted by its author | `{ reviewId: uuid, productId: uuid, byModeration: bool, reasonCode: string? }` | - |
+| `reviews.review.removed` | A review is removed by moderation or a trust enforcement, or deleted by its author | `{ reviewId: uuid, productId: uuid, sellerId: uuid, customerId: uuid, byModeration: bool, reasonCode: string?, trustEnforcementId: uuid? }` | - |
 | `reviews.report.created` | Content is reported | `{ reportId: uuid, targetType: string, targetId: uuid, reason: string, reporterKind: string }` | notifications |
 | `reviews.feedback.published` | Seller feedback becomes visible | `{ feedbackId: uuid, sellerId: uuid, orderId: uuid, sentiment: string }` | - |
 | `reviews.feedback.removed` | Seller feedback is removed or deleted | `{ feedbackId: uuid, sellerId: uuid }` | - |
-| `reviews.question.asked` | A question is published (sellers with an offer are told) | `{ questionId: uuid, productId: uuid }` | - |
-| `reviews.answer.published` | An answer is published | `{ answerId: uuid, questionId: uuid, productId: uuid, label: string }` | - |
-| `reviews.response.published` | A seller response is published or held | `{ responseId: uuid, sellerId: uuid, targetType: string, status: string }` | - |
-| `reviews.moderation.decided` | A moderation decision is recorded (reporter and author are notified) | `{ moderationItemId: uuid, contentType: string, contentId: uuid, decision: string, reasonCode: string, author: ContentParty?, reporters: ContentParty[], reporterOutcome: text?, appealUntil: datetime? }` | notifications |
+| `reviews.question.asked` | A question is published (sellers with an offer are told; Official Store questions go to staff) | `{ questionId: uuid, productId: uuid, customerId: uuid, sellerIds: uuid[], officialStore: bool }` | - |
+| `reviews.answer.published` | An answer is published (the asker is told) | `{ answerId: uuid, questionId: uuid, productId: uuid, label: string, askerCustomerId: uuid, sellerId: uuid? }` | - |
+| `reviews.response.published` | A seller or Official Store response is published or held (the reviewer is told when published) | `{ responseId: uuid, sellerId: uuid, targetType: string, targetId: uuid, status: string, customerId: uuid }` | - |
+| `reviews.moderation.decided` | A moderation decision is recorded (reporter and author are notified), including removals and keeps for a trust enforcement | `{ moderationItemId: uuid, contentType: string, contentId: uuid, decision: string, reasonCode: string, author: ContentParty?, reporters: ContentParty[], reporterOutcome: text?, appealUntil: datetime?, trustEnforcementId: uuid? }` | notifications, trust, workqueues |
 | `reviews.appeal.submitted` | An author appeals | `{ appealId: uuid, contentType: string, contentId: uuid }` | - |
-| `reviews.appeal.decided` | An appeal is decided | `{ appealId: uuid, overturned: bool }` | - |
+| `reviews.appeal.decided` | An appeal is decided (the author is told) | `{ appealId: uuid, overturned: bool, contentType: string, contentId: uuid, author: ContentParty?, outcome: text? }` | - |
 | `reviews.content.referred` | Content is referred to Trust and Risk | `{ moderationItemId: uuid, contentType: string, contentId: uuid, authorId: string, note: text }` | trust |
 | `reviews.rating.changed` | A product or seller rating summary changes | `{ productId: uuid?, sellerId: uuid?, average: number?, count: int }` | - |
 | `reviews.invite.due` | inviteDelayDays after delivery, for items not yet reviewed | `{ customerId: uuid, orderItemId: uuid, productId: uuid, sellerId: uuid }` | notifications |
 
 | Consumes | From | Does |
 |---|---|---|
-| `orders.item.delivered` | orders | Make the item eligible for a Verified Purchase review and its seller package for feedback; schedule the invitation |
-| `orders.item.cancelled` | orders | Remove eligibility for cancelled items |
+| `orders.item.delivered` | orders | Make the item eligible for a Verified Purchase review and its seller package for feedback; insert the review_invites row (due inviteDelayDays after delivery) |
+| `orders.item.cancelled` | orders | Remove eligibility for cancelled items and cancel their pending invites |
 | `catalog.product.merged` | catalog | Move reviews, questions and the rating summary to the kept product |
-| `trust.enforcement.recorded` | trust | Remove reviews and answers named in a fake-review enforcement and notify authors |
+| `trust.enforcement.recorded` | trust | remove_reviews: remove the reviews, questions and answers named in targets with a moderation decision (reason proven_fake, trust_enforcement_id recorded), tell the authors, recalculate ratings, publish reviews.moderation.decided with trustEnforcementId (trust confirms) and reviews.review.removed for reviews. keep_reviews: decide open moderation items on the named content as kept (reason legitimate_experience) so held content is published again. Other actions are ignored |
+| `trust.enforcement.reversed` | trust | remove_reviews: reinstate the content that enforcement removed (decisions with its trust_enforcement_id) unless the author deleted it since, recalculate ratings, publish reviews.review.published and reviews.rating.changed, tell the authors |
+| `customers.account.closed` | customers | Anonymise the customer's content: display names become Former customer on reviews, feedback, questions and answers (content stays published as the honest record of a purchase); their votes and reports stay counted without the customer id; pending invites are cancelled |
 | `sellers.seller.closed` | sellers | Keep feedback published; stop new responses from the closed seller |
 
 ## In-process API (for other modules)
@@ -936,7 +1004,8 @@ Indexes: `(status, submitted_at)`
 | getRatingSummaries | `(productIds: uuid[]) => RatingSummary[]`<br>Ratings for product cards and search results | search, catalog, promotions, graphql |
 | getSellerFeedbackSummary | `(sellerId: uuid) => SellerFeedbackSummary`<br>Seller quality for offer comparison, featured-offer eligibility and storefronts | offers, sellers, graphql |
 | moveProductContent | `(fromProductId: uuid, toProductId: uuid) => { reviews: int, questions: int }`<br>Called during a duplicate merge | catalog |
-| removeContentForEnforcement | `(contentIds: uuid[], enforcementId: uuid, reason: string) => int`<br>Remove proven fake reviews named in an enforcement | trust |
+| removeContentForEnforcement | `(contentIds: uuid[], enforcementId: uuid, reason: string) => int`<br>Remove proven fake reviews named in an enforcement (same path as consuming trust.enforcement.recorded; publishes reviews.moderation.decided with trustEnforcementId) | trust |
+| exportCustomerData | `(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]`<br>The customer's product reviews, seller feedback, questions, answers and reports they made (with status and moderation outcomes) for the personal data export. Export hook called by customers.build-data-exports | customers |
 | listProductReviews | `(productId: uuid, filter: { stars?: int, verifiedOnly?: bool, withPhotos?: bool, variantLabel?: string }, sort: string, page: PageInput, viewer: Actor | null) => Page<ProductReview>`<br>Published product reviews with filters and sorting (Product.reviews) | graphql |
 | listProductQuestions | `(productId: uuid, search: string | null, page: PageInput) => Page<Question>`<br>Published questions with labelled answers (Product.questions) | graphql |
 | listSellerFeedback | `(sellerId: uuid, filter: { sentiment?: string }, page: PageInput) => Page<SellerFeedback>`<br>Seller feedback with public seller responses, newest first (Seller.feedback) | graphql |
@@ -950,7 +1019,7 @@ Indexes: `(status, submitted_at)`
 | `reviews.moderation.view` | staff | View moderation queues, reports, appeals and all reviews |
 | `reviews.moderation.decide` | staff | Keep, remove, request edits, publish; refer to Trust and Risk |
 | `reviews.appeals.decide` | staff | Decide appeals (not on one's own decisions) |
-| `reviews.answers.staff` | staff | Answer product questions as Marketly staff |
+| `reviews.answers.staff` | staff | Answer product questions as Marketly staff and respond publicly for the Official Store |
 | `reviews.responses.post` | seller | Answer questions, respond to reviews and feedback, report content, appeal |
 
 ## Error codes
@@ -972,9 +1041,9 @@ Indexes: `(status, submitted_at)`
 
 | Job | Schedule | Does |
 |---|---|---|
-| `reviews.invites` | hourly | Publish reviews.invite.due for items delivered inviteDelayDays ago without a review |
+| `reviews.invites` | hourly | Publish reviews.invite.due for pending review_invites rows past due_at whose item is still unreviewed (mark sent); rows of reviewed items become reviewed |
 | `reviews.summaries` | every 10 min | Refresh product and 12-month seller summaries; publish reviews.rating.changed |
-| `reviews.moderation-sla` | every 30 min | Flag moderation items older than moderationTargetHours (workqueues) |
+| `reviews.moderation-sla` | every 30 min | Raise a review_moderation_overdue work item (workqueues.raise, dedupe review_moderation_overdue:<moderationItemId>) for open moderation items older than moderationTargetHours; resolve it with resolveBySource when the item is decided |
 
 ## Settings
 
@@ -1001,7 +1070,10 @@ Indexes: `(status, submitted_at)`
 - Reporter and author both see the outcome (MyReport.outcome, MyReview.moderation); reporters are anonymous to authors.
 - Questions and answers are public and labelled Seller, Marketly staff or Customer. Only sellers with an offer on the product (offers, optional) can answer as seller; order-specific questions go to messaging.
 - Seller responses: one per review or feedback, public, rule-checked, editable for responseEditDays. A seller offering refunds or gifts to change a review is held and can be referred to trust.
-- Fake-review investigations belong to trust; reviews refers content (reviews.content.referred) and removes content named in trust.enforcement.recorded.
+- Fake-review investigations belong to trust; reviews refers content (reviews.content.referred), removes content named in trust.enforcement.recorded (remove_reviews), keeps it for keep_reviews and reinstates it when trust reverses the enforcement (trust.enforcement.reversed). The decisions carry trustEnforcementId so trust confirms execution (decision D-R1).
+- The Official Store responds to reviews and feedback through admin (Official Store responses, permission reviews.answers.staff); responses show fromKind official_store and seller id OFFICIAL_STORE_ID.
+- Personal data: exportForCustomer supplies the Reviews section of the customer data export; customers.account.closed anonymises the author name on the customer's content.
+- Review invitations are stored in review_invites (decision D-R2), not kept in memory, so they survive restarts and are sent once.
 - Phase 2 brings stronger moderation (plan ch. 20): the queue already supports system flags and Trust and Risk referrals.
 
 ## GraphQL (read layer)

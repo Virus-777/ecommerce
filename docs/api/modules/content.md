@@ -54,6 +54,8 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | POST | `/api/admin/content/homepage/sections/{id}/remove` | Remove a section (correction or removal, reason required) _(audited)_ | staff<br>`content.homepage.manage` | `{ kind: enum(correction|removal), reason: text, immediately: bool }` → `HomeSectionAdmin` |
 | PUT | `/api/admin/content/homepage/order` | Reorder sections in the draft (ad positions move with the layout but stay locked) | staff<br>`content.homepage.manage` | `{ sectionIds: uuid[] }` → `HomepageAdmin` |
 | POST | `/api/admin/content/homepage/preview` | Preview the homepage (draft or live) on desktop or phone at a given time | staff<br>`content.homepage.manage` | `PreviewRequest` → `Homepage` |
+| POST | `/api/admin/content/homepage/submit` | Send the draft layout for review _(audited)_ | staff<br>`content.homepage.manage` | `{ summary: string? }` → `HomepageAdmin` |
+| POST | `/api/admin/content/homepage/review` | Approve the draft layout or request changes _(audited)_ | staff<br>`content.homepage.publish` | `{ approve: bool, note: text? }` → `HomepageAdmin` |
 | POST | `/api/admin/content/homepage/publish` | Publish the draft layout as a new version _(audited)_ | staff<br>`content.homepage.publish` | `{ summary: string }` → `HomepageAdmin` |
 | POST | `/api/admin/content/homepage/discard-draft` | Discard the unpublished layout draft | staff<br>`content.homepage.manage` | `HomepageAdmin` |
 | GET | `/api/admin/content/homepage/versions` | Homepage version history | staff<br>`content.homepage.manage` | Page<Version> |
@@ -66,6 +68,7 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | POST | `/api/admin/content/pages/{id}/submit` | Send for review _(audited)_ | staff<br>`content.pages.manage` | `PageAdmin` |
 | POST | `/api/admin/content/pages/{id}/approve` | Approve or request changes _(audited)_ | staff<br>`content.pages.publish` | `{ approve: bool, reason: text? }` → `PageAdmin` |
 | POST | `/api/admin/content/pages/{id}/schedule` | Set publish and removal times _(audited)_ | staff<br>`content.pages.publish` | `{ publishAt: datetime, unpublishAt: datetime?, timeZone: string }` → `PageAdmin` |
+| POST | `/api/admin/content/pages/{id}/cancel-schedule` | Cancel a scheduled publication _(audited)_ | staff<br>`content.pages.publish` | `{ reason: text? }` → `PageAdmin` |
 | POST | `/api/admin/content/pages/{id}/publish` | Publish the draft now _(audited)_ | staff<br>`content.pages.publish` | `PageAdmin` |
 | POST | `/api/admin/content/pages/{id}/unpublish` | Take a page down (it can be republished) _(audited)_ | staff<br>`content.pages.publish` | `{ reason: text? }` → `PageAdmin` |
 | POST | `/api/admin/content/pages/{id}/remove` | Correction or removal action (reason required, takes effect now) _(audited)_ | staff<br>`content.pages.remove` | `{ kind: enum(correction|removal), reason: text, correctionNote: text? }` → `PageAdmin` |
@@ -207,6 +210,7 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | kind | `enum(new_arrivals|best_sellers|top_sellers_in_category|official_store|deals)` |
 | categoryId | `uuid?` |
 | days | `int?` |
+| campaignId | `uuid?` deals only: limit to one promotion (promotions.liveDeals({ campaignId })); the section or page then hides when that promotion ends, like linkedPromotionId |
 | description | `string` Published selection rule, e.g. Ranked by units sold in the last 30 days across all sellers. Sponsored placements don't affect rank. |
 
 ### SectionKind
@@ -278,6 +282,7 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | liveVersion | `int` |
 | draftVersion | `int?` |
 | hasDraft | `bool` |
+| draftReview | `HomepageReview` Review of the draft layout when content.reviewRequired.section is on |
 | sections | `HomeSectionAdmin[]` |
 | timeZone | `string` |
 | owner | `OwnerRef` |
@@ -332,6 +337,31 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | products | `ProductTile[]` Resolved on read for store responses; unavailable products removed or replaced |
 | items | `string[]?` Terms lines, chip labels |
 | link | `LinkRef?` |
+| sellerId | `uuid?` seller_feature blocks: the featured seller. Store reads leave the block out while the seller is suspended, restricted from sales or closed (sellers status at read time), and show it again after reinstatement |
+
+### SellerAnnouncement
+
+| Field | Type |
+|---|---|
+| policyVersionId | `uuid` |
+| policyKey | `string` |
+| title | `string` |
+| version | `string` |
+| state | `enum(scheduled|current)` |
+| effectiveAt | `datetime` |
+| changeSummary | `text?` |
+| url | `string` Public version page, /policy-versions/{id} |
+
+### HomepageReview
+
+| Field | Type |
+|---|---|
+| state | `enum(not_required|not_submitted|in_review|approved|changes_requested)` not_required when reviewRequired.section is false. Any edit to the draft after submission returns it to not_submitted |
+| submittedBy | `Actor?` |
+| submittedAt | `datetime?` |
+| reviewedBy | `Actor?` |
+| reviewedAt | `datetime?` |
+| note | `text?` |
 
 ### PageInput
 
@@ -841,6 +871,12 @@ Indexes: `(kind, status)`, `(brand_id, status)`, `(status, publish_at)`, `(statu
 | author_kind | text |
 | author_id | text? |
 | restored_from | int? |
+| review_state | text? (not_submitted|in_review|approved|changes_requested) |
+| submitted_by | text? |
+| submitted_at | timestamptz? |
+| reviewed_by | text? |
+| reviewed_at | timestamptz? |
+| review_note | text? |
 | created_at | timestamptz |
 | published_at | timestamptz? |
 
@@ -997,7 +1033,9 @@ Indexes: `unique (policy_id, version)`, `(policy_id, state, effective_at)`
 | `catalog.product.merged` | catalog | Replace the duplicate product id in sections and collections |
 | `offers.offer.status_changed` | offers | Invalidate cached product tiles |
 | `inventory.stock.changed` | inventory | Invalidate availability on curated collections |
-| `sellers.seller.suspended` | sellers | Remove the seller from Featured sellers and seller features |
+| `sellers.seller.suspended` | sellers | Remove the seller from Featured sellers; seller_feature blocks naming the seller (PageBlock.sellerId) are hidden on store reads until reinstatement; refresh cached pages |
+| `sellers.seller.reinstated` | sellers | Refresh cached pages so seller_feature blocks of the seller show again |
+| `sellers.seller.closed` | sellers | Hide seller_feature blocks naming the seller for good and flag the pages for the owner to edit |
 | `access.approval.decided` | access | Complete Business Owner approval of a policy version or a short-notice schedule |
 
 ## In-process API (for other modules)
@@ -1016,6 +1054,8 @@ Indexes: `unique (policy_id, version)`, `(policy_id, state, effective_at)`
 | getHelpCenter | `(audience: 'customer' | 'seller') => HelpHome`<br>Help Center home: topics, popular articles, popular searches, contact channels and the seller-first note (GET /help). | graphql |
 | getHelpArticle | `(slug: string) => HelpArticle | null`<br>A published help article with effective and updated dates, related articles and actions (GET /help/articles/{slug}). | graphql |
 | countHelpArticlesForPolicy | `(policyKey: string) => { count: int, articleIds: uuid[] }`<br>Published Help articles whose policyKeys include the policy (e.g. returns), so a policy change preview can say how many need review. | returns |
+| sellerAnnouncements | `(opts: { since?: datetime, limit: int }) => SellerAnnouncement[]`<br>Announcements for Seller Center, newest first: policy versions with notifySellers that are scheduled or current (audience seller or both), from policy_versions. No separate announcements table at launch. | reports, graphql |
+| contentForCampaign | `(campaignId: uuid) => { sections: { id: uuid, kind: string, heading?: string, status: string }[], pages: { id: uuid, slug: string, title: string, status: string, url: string }[] }`<br>Homepage sections and pages linked to a promotion (linkedPromotionId, or a deals SourceRule with that campaignId), for the campaign detail in promotions and ad destination checks | promotions, advertising, graphql |
 
 ## Permissions
 
@@ -1047,7 +1087,7 @@ Checked through the access module (limits per role, second reviewer).
 | `SECTION_LOCKED` | 409 | Ad positions are controlled by advertising and cannot be edited here. |
 | `SLUG_TAKEN` | 409 | Another page or article uses this URL. |
 | `DRAFT_EXISTS` | 409 | The policy already has an open draft version. |
-| `SAME_REVIEWER` | 409 | The author cannot approve their own article. |
+| `SAME_REVIEWER` | 409 | The author cannot approve their own article or homepage draft. |
 
 ## Background jobs
 
@@ -1077,6 +1117,9 @@ Checked through the access module (limits per role, second reviewer).
 - Restoring any version creates a new version; nothing is overwritten (admin/content).
 - Policies: orders keep the terms accepted at purchase. Checkout calls currentPolicyVersions and the order stores the version ids; account/order links to /policy-versions/{id}. Extending a change to open orders is allowed only when it favors the customer.
 - The About page is a page of kind about at slug 'about' (info/about).
+- Homepage review: content.reviewRequired.section applies to the homepage draft layout as a whole (submitHomepageDraft → reviewHomepageDraft → publishHomepage); pages follow reviewRequired.page through submitPage / approvePage; articles always need review.
+- Policy approvals: the owner step is a permission check plus ownership; only the Business Owner step goes through access approvals. The access seed must let content.policies.approve be requested by policy owners (recommend_only for Content Manager and other owner roles) so requestApproval is not denied for proposers.
+- Campaign content: a deals source with campaignId and sections or pages with linkedPromotionId are what contentForCampaign returns; both hide when promotions.campaign.ended arrives.
 - Dependencies follow the architecture doc (media, access); catalog, offers, inventory, promotions, advertising and sellers are optional and only enrich rendering.
 
 ## GraphQL (read layer)

@@ -5,7 +5,7 @@
 Turns a cart (or a Buy now offer) into an accepted order: identify the customer or guest, choose an address with a per-item shippability check, pick delivery options per package, apply coupons or credit with reasons and item coverage, choose payment, review sellers, return terms and totals, revalidate into a change set the customer must accept, and place the order idempotently with clear payment results.
 
 - **Group:** Buying · **Launch phase:** 1 · **Plan chapters:** 5, 6, 14
-- **Depends on:** [cart](../cart/README.md), [orders](../orders/README.md), [payments](../payments/README.md), [shipping](../shipping/README.md), [customers](../customers/README.md), [offers](../offers/README.md), [inventory](../inventory/README.md) · **Optional:** [promotions](../promotions/README.md), [wallet](../wallet/README.md), [returns](../returns/README.md), [content](../content/README.md), [identity](../identity/README.md), [fulfillment-service](../fulfillment-service/README.md), [settings](../settings/README.md)
+- **Depends on:** [cart](../cart/README.md), [orders](../orders/README.md), [payments](../payments/README.md), [shipping](../shipping/README.md), [customers](../customers/README.md), [offers](../offers/README.md), [inventory](../inventory/README.md) · **Optional:** [promotions](../promotions/README.md), [wallet](../wallet/README.md), [returns](../returns/README.md), [content](../content/README.md), [identity](../identity/README.md), [fulfillment-service](../fulfillment-service/README.md), [settings](../settings/README.md), [catalog](../catalog/README.md)
 
 ## Owns
 - Checkout sessions (the quote): source cart or Buy now, lines, packages, selections, totals and quote version
@@ -347,7 +347,7 @@ Turns a cart (or a Buy now offer) into an accepted order: identify the customer 
 | Field | Type |
 |---|---|
 | id | `uuid` |
-| kind | `enum(price_increased|price_decreased|quantity_reduced|out_of_stock|offer_ended|delivery_date_changed|delivery_option_unavailable|shipping_cost_changed|coupon_no_longer_applies|coupon_amount_changed|not_shippable|purchase_limit)` |
+| kind | `enum(price_increased|price_decreased|quantity_reduced|out_of_stock|offer_ended|delivery_date_changed|delivery_option_unavailable|shipping_cost_changed|coupon_no_longer_applies|coupon_amount_changed|not_shippable|purchase_limit|terms_changed)` terms_changed: the offer's return, warranty or dispatch terms changed since the line was quoted (offers.revalidate OfferChange kind terms; termsVersion above the line's). The customer must accept it (or remove the line) before Place order; accepting moves the line to the current termsVersion and the order snapshots the new terms |
 | lineId | `string?` |
 | packageKey | `string?` |
 | headline | `string` 'Price went up', 'Less stock available', 'Delivery date moved', 'Coupon no longer covers this item' |
@@ -495,8 +495,8 @@ Turns a cart (or a Buy now offer) into an accepted order: identify the customer 
 |---|---|
 | id | `uuid` |
 | status | `string` |
-| customerName | `string` |
-| email | `email` |
+| customerName | `string?` |
+| email | `email?` Null for a guest who has not reached the contact step; such sessions are still listed |
 | guest | `bool` |
 | total | `Money` |
 | packageCount | `int` |
@@ -732,13 +732,14 @@ Indexes: `unique (session_id, idempotency_key)`
 | `RETRY_WINDOW_EXPIRED` | 409 | The hold after the failed payment ended; start checkout again from the cart. |
 | `PAYMENT_METHOD_INVALID` | 422 | The payment method cannot be used (removed, expired or invalid token). |
 | `INSUFFICIENT_CREDIT` | 409 | Store credit is lower than the amount requested. |
+| `PAYMENT_ATTEMPTS_EXCEEDED` | 409 | This checkout reached maxPaymentAttempts; start again from the cart (nothing was charged). details.max. |
 
 ## Background jobs
 
 | Job | Schedule | Does |
 |---|---|---|
 | `checkout.expire-sessions` | every 5 min | Expire idle open sessions (sessionTtlMinutes) and payment_failed sessions past holdUntil: release stock and promotion reservations, release credit holds, void authorizations; publish checkout.session.abandoned |
-| `checkout.extend-pending-holds` | every 10 min | Keep stock holds alive for payment_pending sessions (inventory.extendHold) up to pendingHoldHours |
+| `checkout.extend-pending-holds` | every 10 min | Keep stock holds alive for payment_pending sessions (inventory.extendHold) up to pendingHoldHours, and the store credit hold too (wallet.extendHold on credit_hold_id) so a pending check does not end in INSUFFICIENT_CREDIT |
 | `checkout.purge-idempotency` | daily 03:30 PT | Delete place_requests older than idempotencyRetentionDays |
 
 ## Settings
@@ -766,11 +767,16 @@ Indexes: `unique (session_id, idempotency_key)`
 - Revalidation sources: offers.revalidate (price, availability, terms version, seller restriction; never substitutes a seller), inventory.getAvailability, shipping.quoteOptions for the selected options (date moved, option gone, shipping cost), shipping.checkCoverage, promotions.evaluateCart (coupon ended or changed, budget, limits), tax. Each difference becomes one Change with choices; alternatives come from offers for the same variant and are applied only when chosen.
 - Partial orders: removing items or unavailable items leaves a smaller order; acceptChanges requires acceptPartialOrder=true and the review step shows the revised packages and total before Place order.
 - Idempotency (scenario 3): place_requests stores each Idempotency-Key with a hash of the body; the same key and body return the stored result (refreshed with the current status), a different body returns IDEMPOTENCY_KEY_REUSED. The session lock and status guard mean even a new key cannot start a second order or charge while placing, pending or completed. payments.authorize uses sessionId + attempt number as its key.
-- Accepted path: payments.authorize → orders.createOrder (order created and accepted; dispatch deadlines from the selected options; policyVersions from content.currentPolicyVersions read at placement) → payments.linkOrder → inventory.attachOrder → promotions.commitRedemption → cart.removePurchasedItems (other cart lines stay) → identity grants the guest session access to the order → confirmation.
+- Accepted path: payments.authorize → orders.createOrder with paymentState accepted (order created and accepted in one step; never created pending_check and accepted afterwards, so a failed acceptOrder cannot leave it payment_pending; dispatch deadlines from the selected options; policyVersions from content.currentPolicyVersions read at placement) → payments.linkOrder → inventory.attachOrder → promotions.commitRedemption → cart.removePurchasedItems (other cart lines stay) → identity grants the guest session access to the order → confirmation.
 - Failed path: no order; status payment_failed; the decline reason and retry choices are shown; lines, delivery choices, coupons, the stock hold and the promotion reservation are kept until holdUntil; the customer can retry with the same card, another card or a wallet, or go back to checkout.
 - Pending path: the order is created with payment checking and its reference is shown; the customer is told not to pay again and is directed to the order status; payments' check job resolves it, and the session completes or returns to payment_failed (lines restored to the cart).
 - Buy now creates a session from one offer; it never changes the cart and still requires the review and Place order steps (plan ch. 5).
 - Per-customer purchase limits count units in this checkout plus orders.countPurchased within purchaseLimitWindowDays.
+- Order attempts: sessions.attempt_count is the payment attempt number. createOrder is called with attemptNo = attempt_count, so a retry after a pending payment was finally declined (and its order cancelled) creates a new order instead of returning the cancelled one; sessions.order_id points to the latest order. orders maps lines back by OrderItem.checkoutLineId.
+- Promotions input: evaluateCart lines carry the seller id, or OFFICIAL_STORE_ID for Official Store lines (never '' or null), categoryId when known, and contactEmail for guests (per-customer limits by email hash).
+- Payment method tokens: payment_selection stores the method kind, label and saved method id. A new card or wallet providerToken lives only until the authorize call of the place or retry request that uses it, then it is cleared; a later attempt with a new card needs a new token (PAYMENT_METHOD_INVALID otherwise).
+- catalog is optional (decision D-C1): when enabled, review lines and admin rows read product titles, images and category from catalog; otherwise from the offer title and snapshot.
+- Fulfilled by Marketly (fulfillment-service, phase 4) is not wired: checkout never sets fulfilledBy marketly_service and does not call fulfillment-service.isServiceOffer yet. Enabling fulfillment-service must be refused at boot until checkout, offers and orders call isServiceOffer (decision O6 / D-C2).
 
 ## GraphQL (read layer)
 
@@ -1233,6 +1239,8 @@ enum CheckoutChangeKind @areas(in: [STORE]) {
   COUPON_AMOUNT_CHANGED
   NOT_SHIPPABLE
   PURCHASE_LIMIT
+  "The offer's return, warranty or dispatch terms changed since the line was quoted"
+  TERMS_CHANGED
 }
 
 enum CheckoutChangeChoice @areas(in: [STORE]) {

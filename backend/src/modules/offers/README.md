@@ -105,11 +105,13 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | sellerName | `string` |
 | productId | `uuid` |
 | variantId | `uuid` |
+| title | `string` Product title with the variant label (e.g. 'Aurora Headphones – Black'), copied from catalog when the offer is created and kept current from catalog.product.updated / catalog.product.merged. Used for admin and seller title search and by modules that list offers without catalog (shipping profile usage). |
 | condition | `enum(new|used_like_new|used_good|used_acceptable|refurbished)` |
 | conditionNotes | `text?` Required for used and refurbished; shown beside the price |
 | includedItems | `string[]` What is in this seller's box (defaults to the product's included items) |
 | missingItems | `string[]` Product's standard included items that this offer does not include. Must be stated; shown as 'Missing: …' |
 | complete | `bool` True when nothing is missing |
+| missingItemsStale | `bool` True when the product's box changed (catalog.product.updated) and missingItems names items no longer in it, or no longer lists everything absent. The seller is asked to review (offers.offer.missing_items_stale); cleared when the seller saves missingItems again. The offer stays on sale meanwhile. |
 | sellerSku | `string` Seller's own code; customers do not see it |
 | stockItemId | `uuid` inventory stock item that holds this offer's quantities |
 | price | `Money` |
@@ -144,7 +146,7 @@ How one seller (or the Official Store) sells one variant in one condition: price
 |---|---|
 | businessDays | `int` 0 = same business day |
 | sameDayCutoff | `string?` Local cutoff HH:mm for same-day dispatch, market time zone |
-| shipsFrom | `string` City and region, e.g. 'Reno, NV' |
+| shipsFrom | `string` City and region, e.g. 'Reno, NV'. Official Store offers: the inventory default location (inventory.getDefaultLocation), refreshed when that location changes; seller offers: the seller's ships-from address from shipping seller settings. Never empty: falls back to the market default location label (kernel config). |
 | label | `string` e.g. 'Ships today', 'Ships in 1 business day' |
 
 ### ReturnTerms
@@ -256,6 +258,7 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | returnTerms | `ReturnTermsInput?` |
 | warranty | `WarrantyInput?` |
 | publishOnApproval | `bool?` |
+| confirmLargeChange | `bool?` The seller confirms a price change above largeSellerPriceChangePct. Without it such a PATCH returns LARGE_PRICE_CHANGE_UNCONFIRMED (details.offers) and nothing is saved; with it the change applies like any other edit. |
 
 ### CompareAtInput
 
@@ -777,6 +780,8 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | ownerType | `enum(official|seller)` |
 | sellerId | `uuid?` |
 | sellerName | `string` |
+| sellerSku | `string` Seller's own code (Official Store: company SKU) at purchase, for packing slips, seller order search and exports |
+| title | `string` Offer title at purchase (product title with variant label) |
 | condition | `string` |
 | conditionNotes | `text?` |
 | missingItems | `string[]` |
@@ -859,10 +864,12 @@ Nothing changes until apply. Only rows marked ready are applied; error rows are 
 | seller_id | uuid? |
 | product_id | uuid |
 | variant_id | uuid |
+| title | text (product title with variant label, denormalised from catalog for title search) |
 | condition | text |
 | condition_notes | text? |
 | included_items | jsonb |
 | missing_items | jsonb |
+| missing_items_stale | bool (product box changed since missingItems was saved) |
 | seller_sku | text |
 | stock_item_id | uuid |
 | price_amount | bigint |
@@ -895,7 +902,7 @@ Nothing changes until apply. Only rows marked ready are applied; error rows are 
 | created_at | timestamptz |
 | updated_at | timestamptz |
 
-Indexes: `unique (owner_type, seller_id, seller_sku)`, `unique (seller_id, variant_id) where condition = 'new' and status <> 'removed'`, `(product_id, variant_id, status)`, `(seller_id, status, id)`, `(status, id)`, `(stock_item_id)`
+Indexes: `unique nulls not distinct (owner_type, seller_id, seller_sku)`, `unique nulls not distinct (owner_type, seller_id, variant_id) where condition = 'new' and status <> 'removed'`, `unique (stock_item_id) where status <> 'removed'`, `(product_id, variant_id, status)`, `(seller_id, status, id)`, `(status, id)`, `(stock_item_id)`, `(shipping_profile_id, status)`, `gin(title gin_trgm_ops)`
 
 **offer_price_history**: Every price in force and when; basis for 'lowest price in the last 30 days' was-price checks
 
@@ -1046,7 +1053,8 @@ Indexes: `pk (job_id, row_no)`, `(job_id, result)`
 | `offers.offer.created` | An offer is created (draft or published) | `{ offerId: uuid, productId: uuid, variantId: uuid, ownerType: string, sellerId: uuid?, condition: string, stockItemId: uuid }` | catalog, search, trust |
 | `offers.offer.updated` | Customer-visible terms change (termsVersion bumped) | `{ offerId: uuid, productId: uuid, termsVersion: int, fields: string[] }` | - |
 | `offers.offer.price_changed` | A new price takes effect (direct, scheduled start, revert or bulk) | `{ offerId: uuid, productId: uuid, variantId: uuid, sellerId: uuid?, ownerType: string, from: Money, to: Money, compareAt: Money?, priceChangeId: uuid?, termsVersion: int }` | cart, catalog, promotions, search, wishlist |
-| `offers.offer.status_changed` | Any offer status transition | `{ offerId: uuid, productId: uuid, variantId: uuid, sellerId: uuid?, ownerType: string, from: string, to: string, reasonCode: string?, reason: text? }` | advertising, cart, catalog, content, inventory, promotions, search, trust, wishlist |
+| `offers.offer.status_changed` | Any offer status transition | `{ offerId: uuid, productId: uuid, variantId: uuid, sellerId: uuid?, ownerType: string, from: string, to: string, reasonCode: string?, reason: text?, stockItemId: uuid, trustEnforcementId: uuid? }` | advertising, cart, catalog, content, inventory, promotions, search, trust, wishlist |
+| `offers.offer.missing_items_stale` | catalog.product.updated changed the product's box so an offer's missingItems no longer matches it (flag set; not repeated while the flag stays set) | `{ offerId: uuid, productId: uuid, variantId: uuid, ownerType: enum(official|seller), sellerId: uuid?, title: string, staleItems: string[], newBoxItems: string[] }` | notifications |
 | `offers.offer.eligibility_changed` | An offer becomes eligible or ineligible to be featured | `{ offerId: uuid, sellerId: uuid?, eligible: bool, reasons: string[] }` | - |
 | `offers.featured.changed` | The featured offer for a variant and zone changes | `{ productId: uuid, variantId: uuid, conditionGroup: string, zoneKey: string, fromOfferId: uuid?, toOfferId: uuid? }` | search |
 | `offers.featured_rule.published` | A new featured-offer rule version is published | `{ version: int, effectiveFrom: datetime }` | - |
@@ -1063,11 +1071,12 @@ Indexes: `pk (job_id, row_no)`, `(job_id, result)`
 | `sellers.seller.closed` | sellers | Remove all the seller's offers (reason seller_closed) |
 | `catalog.product.publication_changed` | catalog | Hidden or Suspended → offers Ineligible (product_hidden / product_suspended); Active → restoreEligibility |
 | `catalog.product.approved` | catalog | Publish draft offers with publishOnApproval on that product; refresh content_gaps |
-| `catalog.product.merged` | catalog | Move offers from the duplicate to the kept product, mapping variants by options; unmatched variants are paused and the seller told |
-| `catalog.product.updated` | catalog | Flag offers whose missingItems name items no longer in the product's box; seller asked to review; refresh content_gaps on the product's offers from catalog.getProductAdmin (missing images / identifiers) |
+| `catalog.product.merged` | catalog | Move offers from the duplicate to the kept product, mapping variants by options; unmatched variants are paused and the seller told. Each moved offer's stock item follows it (inventory.updateStockItem with the kept productId / variantId) and its title is refreshed |
+| `catalog.product.updated` | catalog | Set missing_items_stale on offers whose missingItems name items no longer in the product's box (or miss new box items) and publish offers.offer.missing_items_stale once per flag; seller asked to review; refresh title and content_gaps on the product's offers from catalog.getProductAdmin (missing images / identifiers) |
 | `inventory.stock.changed` | inventory | available 0 → stockDepleted; available > 0 → stockRestored; mark featured decisions dirty |
 | `access.approval.decided` | access | Approve or reject pending price changes (and pending bulk rows) |
-| `trust.enforcement.recorded` | trust | Remove or hold offers named in an enforcement (counterfeit, abuse) |
+| `trust.enforcement.recorded` | trust | Remove or hold offers named in an enforcement (counterfeit, abuse); status_reason keeps the enforcementId so a reversal can find them |
+| `trust.enforcement.reversed` | trust | Undo what trust.enforcement.recorded did for that enforcementId (inbox-claimed per event): offers it removed go back to Paused (same path as reinstateOffer, stock item unarchived by inventory, seller told and asked to resume); offers it held are released to their previous status; offers since changed by someone else (seller ended, staff removed for another reason) are left alone (noted in offer_status_log; trust's owner work item covers the rest). Publishes offers.offer.status_changed with trustEnforcementId |
 | `promotions.campaign.started` | promotions | Mark featured decisions dirty for offers whose automatic discount changes the comparable total |
 | `promotions.campaign.ended` | promotions | Same as started |
 
@@ -1096,6 +1105,8 @@ Indexes: `pk (job_id, row_no)`, `(job_id, result)`
 | getFeaturedDecision | `(productId: uuid, variantId?: uuid, postalCode?: string) => FeaturedDecision`<br>Why each offer is or is not featured for a variant and location (staff) | graphql |
 | getPurchaseBoxOffer | `(items: { productId: uuid, offerId?: uuid, variantId?: uuid }[], postalCode?: string) => map<Offer | null>`<br>The offer for the purchase box: the requested offer when it is active on the product, otherwise the featured offer for the variant and location (ProductPage with a nullable offer id) | graphql |
 | listActiveOffersByIds | `(offerIds: uuid[], limit?: int) => Offer[]`<br>Active offers for a list of ids in the given order, inactive ones left out (storefront featured collections) | sellers, graphql |
+| getOffers | `(offerIds: uuid[]) => map<Offer | null>`<br>Batch read by id in any status (draft, removed and ineligible included), with sellerId (null for the Official Store: callers that need a seller id use OFFICIAL_STORE_ID) and title. Unknown ids map to null. Replaces per-line getOffer loops in cart revalidation, promotions evaluation and advertising checks. | cart, promotions, advertising |
+| countActiveOffersByProfile | `(shippingProfileId: uuid) => int`<br>Offers that still use a shipping profile: every status except removed (drafts and paused offers count, because they can be published again). One count query on (shipping_profile_id, status); shipping refuses to delete or deactivate a profile in use (PROFILE_IN_USE) without paging through listOffersAdmin. | shipping |
 | exportRows | `(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }`<br>Export rows for reports datasets offers.admin.offers and offers.seller.offers (seller rows scoped to the principal's seller) | reports |
 
 ## Permissions
@@ -1148,7 +1159,7 @@ Checked through the access module (limits per role, second reviewer).
 | `offers.reevaluate-eligibility` | hourly | Read seller performance (on-time dispatch over the window, delivery reviews, open restrictions) from sellers and update offer_eligibility; publish offers.offer.eligibility_changed |
 | `offers.verify-compare-at` | daily 02:00 market time | Drop compare-at prices whose basis no longer holds (e.g. no longer the 30-day low before the sale) and tell the owner |
 | `offers.expire-bulk-previews` | hourly | Expire preview_ready jobs past expiresAt |
-| `offers.parse-bulk-file` | on demand (queue) | Parse uploaded CSV, resolve seller SKUs, validate rows, build preview |
+| `offers.parse-bulk-file` | every 1 min | Parse uploaded CSVs still waiting (normally parsed right after upload), resolve seller SKUs, validate rows, build preview. Reads the file bytes through media.readFile, not the signed URL |
 
 ## Settings
 
@@ -1181,6 +1192,12 @@ Checked through the access module (limits per role, second reviewer).
 - Dependencies differ from the architecture table only by optional ones: shipping (delivery quotes), returns (baseline validation), promotions (automatic discounts in comparable totals), access (approval requests), audit.
 - Seller list support: content_gaps is a copy of the product's missing images / identifiers (catalog ProductAdmin.missing), kept on each offer row so GET /offers can filter by missingContent without a cross-module join. Tab counts combine offer status with the product review state copied from catalog.
 - Exports: seller offer exports run through reports (registerDataset / requestExport) like every other module's exports. Offers registers dataset offers.seller.offers (seller audience; columns: product, variant, seller SKU, condition, price, compare-at, available, review state, publication, status, updated at) and serves it from POST /api/seller/offers/offers/exports. Bulk hide of selected rows (POST /offers/bulk-pause) is phase 1 like selected-row price changes.
+- Uniqueness is enforced by the database for the Official Store too (seller_id null): unique nulls not distinct on (owner_type, seller_id, seller_sku) and on (owner_type, seller_id, variant_id) for live New offers, and one live offer per stock item (unique stock_item_id where status <> 'removed'). The service checks stay for friendly DUPLICATE_OFFER details; a 23505 from these indexes maps to DUPLICATE_OFFER too.
+- Stock item follows the offer: a draft's variant change and a catalog merge move the stock item with inventory.updateStockItem(stockItemId, { productId, variantId }); removal archives and reinstatement unarchives it (inventory on offers.offer.status_changed). No stale stock item is left on the old variant.
+- Official Store ships-from (decision O3): DispatchTerms.shipsFrom of Official Store offers is the inventory default location (inventory.getDefaultLocation().label), not a constant.
+- Offer title (decision O4): the title column of the offers table is denormalised from catalog so admin q search and shipping's profile usage lists need no catalog join.
+- Trust enforcements on offers (decision D8): suspend_offer / remove_offer recommendations are owned by the Catalog Manager, who holds offers.offers.remove. Reversals arrive as trust.enforcement.reversed and are undone here (see consumes).
+- Shipping profile ownership: create, update and bulk rows that set shippingProfileId check the owner with shipping.getProfileOwners([profileId]) (seller id, or official); a profile of another seller is SHIPPING_PROFILE_INVALID.
 
 ## GraphQL (read layer)
 

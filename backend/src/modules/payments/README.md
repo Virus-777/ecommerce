@@ -221,7 +221,8 @@ Charging customers through provider adapters (card, digital wallet): payment int
 |---|---|
 | id | `uuid` |
 | groupId | `uuid?` |
-| amount | `Money` |
+| amount | `Money` Card amount captured; 0 for a credit-only capture (store credit alone paid the order or group, no provider call) |
+| creditAmount | `Money?` Store-credit share charged with this capture; null when no credit was used |
 | status | `enum(pending|succeeded|failed|unknown)` |
 | providerRef | `string?` |
 | at | `datetime` |
@@ -231,7 +232,7 @@ Charging customers through provider adapters (card, digital wallet): payment int
 | Field | Type |
 |---|---|
 | at | `datetime` |
-| operation | `enum(authorize|capture|void|refund|retrieve|setup|detach)` |
+| operation | `enum(authorize|capture|void|partial_void|refund|retrieve|setup|detach|dispute_retrieve|dispute_evidence|dispute_accept)` partial_void lowers an authorization when the adapter supports it; dispute_* calls are logged against the dispute's intent |
 | outcome | `enum(ok|declined|error|timeout)` |
 | providerRef | `string?` |
 | message | `string?` |
@@ -495,9 +496,11 @@ stateDiagram-v2
   partially_captured --> captured: close_remainder
   authorized --> voided: void
   authorized --> expired: expire
+  authorized --> authorized: reduce
+  partially_captured --> partially_captured: reduce
 ```
 
-Customer view: Accepted = authorized, partially_captured or captured; Pending = authorizing, requires_action or pending_check; Failed = failed, voided before an order or expired. Refunded and Partly refunded are derived from refunds. A retry after failed is a new intent (attempt n+1) for the same checkout session; only one non-failed intent per session can exist, so a double submit cannot authorize twice. pending_check is resolved only by asking the provider (job or webhook), never by charging again.
+Customer view: Accepted = authorized, partially_captured or captured; Pending = authorizing, requires_action or pending_check; Failed = failed, voided before an order or expired. Refunded and Partly refunded are derived from refunds. A retry after failed is a new intent (attempt n+1) for the same checkout session; only one non-failed intent per session can exist, so a double submit cannot authorize twice. pending_check is resolved only by asking the provider (job or webhook), never by charging again. reduce lowers the authorized amount through the adapter's partial reversal (ProviderCall partial_void) when items are cancelled before capture and the adapter supports it; without support the authorized amount stays and the cancelled card share is only taken off the allocations (released at the final capture by close_remainder). An intent paid entirely by store credit (card share 0) goes authorized → captured on capture with no provider call.
 
 ### Refund execution (`Refund.status`)
 
@@ -512,7 +515,7 @@ stateDiagram-v2
   failed --> cancelled: cancel
 ```
 
-Starts when returns hands over an approved refund request, orders cancels items, finance records a correction or payments finds an orphan payment. Approval (Under review, Approved) lives in returns. processing covers provider-pending and unknown outcomes (outcomeUnknown); retry first retrieves the provider's record of the earlier attempt and only resends when the provider confirms nothing was sent, so a refund is never sent twice. Retries stop at refundMaxAttempts; then the customer is asked for a new destination or support takes over. Store credit destinations (phase 3) go through wallet.creditRefund and are sent immediately. cancel requires a reason (e.g. settled another way) and releases the in-flight amount.
+Starts when returns hands over an approved refund request, orders cancels items, finance records a correction or payments finds an orphan payment. Approval (Under review, Approved) lives in returns. processing covers provider-pending and unknown outcomes (outcomeUnknown); retry first retrieves the provider's record of the earlier attempt and only resends when the provider confirms nothing was sent, so a refund is never sent twice. Each attempt stores its provider idempotency key (refunds.attempt_key) before the provider call, so a status check or retry after a restart asks about the same attempt. Retries stop at refundMaxAttempts; then the customer is asked for a new destination or support takes over. A new destination chosen by the customer (saved method or single-use token) is stored on the refund (refunds.destination_ref) before it is sent, so an uncertain send is checked and retried to the same destination after a restart; it is cleared when the refund is sent or cancelled. Store credit destinations (phase 3) go through wallet.creditRefund and are sent immediately. cancel requires a reason (e.g. settled another way) and releases the in-flight amount.
 
 ### Payment dispute (`Dispute.status`)
 
@@ -564,7 +567,7 @@ The provider takes the money back when a chargeback opens; finance holds the sel
 | created_at | timestamptz |
 | updated_at | timestamptz |
 
-Indexes: `(checkout_session_id, attempt_no)`, `unique (checkout_session_id) where status not in ('failed','voided','expired')`, `(order_id)`, `(status, next_check_at)`, `(provider, provider_ref)`
+Indexes: `(checkout_session_id, attempt_no)`, `unique (checkout_session_id) where status not in ('failed','voided','expired')`, `(order_id)`, `(status, next_check_at)`, `(provider, provider_ref)`, `(status, updated_at, id)`
 
 **allocations**: Captured money per seller group
 
@@ -578,7 +581,7 @@ Indexes: `(checkout_session_id, attempt_no)`, `unique (checkout_session_id) wher
 
 Indexes: `(intent_id)`, `(group_id)`
 
-**captures**
+**captures**: One row per capture attempt key; a credit-only capture is a succeeded row with amount 0 and no provider call
 
 | Column | Type |
 |---|---|
@@ -586,6 +589,7 @@ Indexes: `(intent_id)`, `(group_id)`
 | intent_id | uuid → intents |
 | group_id | uuid? |
 | amount | int |
+| credit_amount | int (store-credit share charged with this capture; 0 when none) |
 | status | text |
 | provider_ref | text? |
 | idempotency_key | text unique |
@@ -631,13 +635,15 @@ Indexes: `(intent_id, at)`, `(refund_id, at)`
 | reason | text |
 | requested_by | jsonb |
 | idempotency_key | text unique |
+| destination_ref | text? (provider method id or single-use token of a customer-chosen new destination; kept until the refund is sent or cancelled, then cleared) |
+| attempt_key | text? (provider idempotency key of the attempt in flight; status checks and retries of that attempt reuse it) |
 | sent_at | timestamptz? |
 | last_attempt_at | timestamptz? |
 | next_attempt_at | timestamptz? |
 | created_at | timestamptz |
 | updated_at | timestamptz |
 
-Indexes: `(order_id)`, `(status, next_attempt_at)`, `unique (origin, origin_id) where origin_id is not null and status <> 'cancelled'`
+Indexes: `(order_id)`, `(status, next_attempt_at)`, `unique (origin, origin_id) where origin_id is not null and origin <> 'cancellation' and status <> 'cancelled'`, `(origin, origin_id)`
 
 **refund_items**: Refund amount per order item; the cap check sums these
 
@@ -740,15 +746,15 @@ Indexes: `unique (kind, day)`
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
 | `payments.payment.authorized` | An authorization succeeds (directly or after a pending check) | `{ intentId: uuid, checkoutSessionId: uuid, orderId: uuid?, amount: Money, methodLabel: string, at: datetime }` | checkout, orders, workqueues |
-| `payments.payment.captured` | Money is captured (whole order or one seller group) | `{ intentId: uuid, captureId: uuid, orderId: uuid, customerId: uuid?, contactEmail: email?, groupId: uuid?, amount: Money, creditAmount: Money?, allocations: Allocation[], providerRef: string?, capturedAt: datetime }` | finance, notifications, orders, reports, workqueues |
+| `payments.payment.captured` | Money is captured (whole order or one seller group). Also published with amount 0 when store credit alone pays the order or a group (credit-only order, or a group whose card share is 0): a capture row is written without a provider call and creditAmount carries the credit | `{ intentId: uuid, captureId: uuid, orderId: uuid, customerId: uuid?, contactEmail: email?, groupId: uuid?, amount: Money, creditAmount: Money?, allocations: Allocation[], providerRef: string?, capturedAt: datetime }` | finance, notifications, orders, reports, workqueues |
 | `payments.payment.failed` | An authorization is declined or a pending check ends declined | `{ intentId: uuid, checkoutSessionId: uuid, orderId: uuid?, customerId: uuid?, contactEmail: email?, declineCategory: string, afterPendingCheck: bool, at: datetime }` | checkout, notifications, orders, promotions, trust, wallet, workqueues |
 | `payments.payment.pending_check` | The provider's answer is uncertain; the status-check job takes over | `{ intentId: uuid, checkoutSessionId: uuid, orderId: uuid?, customerId: uuid?, contactEmail: email?, amount: Money, since: datetime }` | notifications, workqueues |
 | `payments.payment.voided` | An authorization is released without capture | `{ intentId: uuid, checkoutSessionId: uuid, orderId: uuid?, reason: string }` | - |
-| `payments.payment.orphaned` | Money was authorized or captured but no order exists after the grace period | `{ intentId: uuid, checkoutSessionId: uuid, amount: Money, captured: bool, action: enum(voided|refund_started|needs_review) }` | - |
+| `payments.payment.orphaned` | Money was authorized or captured but no order exists after the grace period | `{ intentId: uuid, checkoutSessionId: uuid, amount: Money, creditAmount: Money?, captured: bool, action: enum(voided|refund_started|needs_review) }` | - |
 | `payments.refund.status_changed` | Any refund status change (requested, processing, sent, failed, cancelled) | `{ refundId: uuid, ref: string, orderId: uuid, origin: string, originId: uuid?, from: string?, to: string, amount: Money, items: RefundItem[] }` | orders |
 | `payments.refund.sent` | The provider confirms the refund was sent (or store credit was granted) | `{ refundId: uuid, ref: string, orderId: uuid, customerId: uuid?, contactEmail: email?, origin: string, originId: uuid?, amount: Money, items: RefundItem[], destination: string, sentAt: datetime }` | finance, notifications, orders, reports, returns, shipping, support |
 | `payments.refund.failed` | A refund attempt failed | `{ refundId: uuid, ref: string, orderId: uuid, customerId: uuid?, contactEmail: email?, origin: string, originId: uuid?, amount: Money, reason: string, attempts: int, finalAttempt: bool }` | finance, notifications, returns, support |
-| `payments.refund.destination_requested` | The customer is asked for a new refund destination | `{ refundId: uuid, orderId: uuid, amount: Money }` | - |
+| `payments.refund.destination_requested` | The customer is asked for a new refund destination | `{ refundId: uuid, ref: string, orderId: uuid, orderRef: string, customerId: uuid?, contactEmail: email?, amount: Money, failureReason: string?, message: text? }` | notifications |
 | `payments.chargeback.opened` | A provider dispute or chargeback is opened | `{ disputeId: uuid, ref: string, kind: string, orderId: uuid, customerId: uuid?, contactEmail: email?, groupId: uuid?, sellerId: uuid?, amount: Money, evidenceDueAt: datetime? }` | finance, notifications, orders, trust, workqueues |
 | `payments.chargeback.status_changed` | Evidence is submitted or the provider moves the case | `{ disputeId: uuid, status: string }` | - |
 | `payments.chargeback.decided` | The dispute is won or lost (including conceded) | `{ disputeId: uuid, orderId: uuid, sellerId: uuid?, outcome: enum(won|lost), amount: Money }` | finance, workqueues |
@@ -758,10 +764,10 @@ Indexes: `unique (kind, day)`
 | Consumes | From | Does |
 |---|---|---|
 | `orders.order.placed` | orders | Link the intent to the order and store seller-group allocations (fallback when linkOrder was not called) |
-| `orders.order.accepted` | orders | Capture the authorization when captureMode is on_acceptance: the card is charged only the card share; the store-credit share is taken from the wallet hold and reported as creditAmount |
-| `shipping.shipment.dispatched` | shipping | Capture the group's allocation when captureMode is per_group_on_dispatch: the card is charged only the group's card share (allocation minus its store-credit share, reported as creditAmount) |
+| `orders.order.accepted` | orders | Capture the authorization when captureMode is on_acceptance: the card is charged only the card share; the store-credit share is taken from the wallet hold and reported as creditAmount (a credit-only order is captured with amount 0) |
+| `shipping.shipment.dispatched` | shipping | Capture the group's allocation when captureMode is per_group_on_dispatch: the card is charged only the group's card share (allocation minus its store-credit share, reported as creditAmount; a group paid entirely by credit is captured with amount 0) |
 | `orders.order.cancelled` | orders | Void the authorization if nothing was captured, and return the uncaptured store-credit share to the wallet |
-| `orders.item.cancelled` | orders | Start a cancellation refund for the item's refund breakdown (origin cancellation, no Finance approval) or reduce the uncaptured authorization. Before capture, the item's store-credit share goes back to the wallet (wallet.creditRefund, keyed by the item) and only its card share is taken off the authorization; an authorization whose remaining card amount drops to 0 is voided (payments.payment.voided) instead of being left to lapse |
+| `orders.item.cancelled` | orders | Start a cancellation refund for the item's refund breakdown (origin cancellation, originId = the event's cancellationId, no Finance approval; one cancellation of several items publishes one event per item, so each item gets its own refund keyed by cancellationId + itemId and the (origin, origin_id) uniqueness does not apply to cancellations) or reduce the uncaptured authorization (partial reversal through the adapter when supported). Before capture, the item's store-credit share goes back to the wallet (wallet.creditRefund, keyed by the item) and only its card share is taken off the authorization; an authorization whose remaining card amount drops to 0 is voided (payments.payment.voided) instead of being left to lapse |
 | `access.approval.decided` | access | Complete or drop a dispute concession waiting for approval |
 
 ## In-process API (for other modules)
@@ -810,7 +816,7 @@ Checked through the access module (limits per role, second reviewer).
 | `PROVIDER_UNAVAILABLE` | 503 | The payment provider did not respond; nothing was charged by this call. Retry later. |
 | `CAPTURE_EXCEEDS_AUTHORIZED` | 422 | The capture is more than the remaining authorized amount. |
 | `REFUND_EXCEEDS_REFUNDABLE` | 422 | The refund is more than the remaining refundable amount for an item or the payment. details.items with remaining per item. |
-| `DUPLICATE_REFUND` | 409 | A refund for the same origin (cancellation, return or request) already exists. details.refundId. |
+| `DUPLICATE_REFUND` | 409 | A refund for the same origin (return, case, exception, correction or orphan payment; for cancellations the same cancellation and item) already exists. details.refundId. |
 | `REFUND_RETRY_LIMIT` | 409 | The refund reached its maximum attempts; ask the customer for a new destination. |
 | `REFUND_OUTCOME_UNKNOWN` | 409 | The provider has not confirmed the earlier attempt; check status before retrying. |
 | `EVIDENCE_WINDOW_CLOSED` | 409 | The provider's evidence deadline has passed. |
@@ -820,10 +826,10 @@ Checked through the access module (limits per role, second reviewer).
 
 | Job | Schedule | Does |
 |---|---|---|
-| `payments.check-uncertain` | every 30 s | Retrieve pending_check intents from the provider with backoff (30 s, 1 min, 2 min, 5 min…); after uncertainMaxHours raise it to Finance (payments.payment.orphaned with needs_review if money moved) |
+| `payments.check-uncertain` | every 30 s | Retrieve pending_check intents from the provider with backoff (30 s, 1 min, 2 min, 5 min…); while an intent with a store-credit hold is pending, keep the hold alive with wallet.extendHold (until the next check plus a margin) so it never lapses into INSUFFICIENT_CREDIT; after uncertainMaxHours raise it to Finance (payments.payment.orphaned with needs_review if money moved) |
 | `payments.process-refunds` | every 1 min | Submit requested refunds; retrieve processing refunds with unknown outcome; retry failed refunds with retryable reasons up to refundMaxAttempts after confirming with the provider that nothing was sent |
 | `payments.detect-orphans` | every 10 min | Intents authorized or captured with no order after orphanGraceMinutes and a completed or expired checkout session: void authorizations, start refunds for captures, publish payments.payment.orphaned |
-| `payments.expire-authorizations` | hourly | Authorizations near expiry: capture if the order is accepted, otherwise void; an authorization with no card amount left is voided at once |
+| `payments.expire-authorizations` | hourly | Walks every live authorization (authorized or partially_captured) in keyset pages ordered by (updated_at, id) until none are left, never only the oldest page: an authorization with no card amount left is voided at once (groups paid entirely by store credit count as charged, never as open card amount); authorizations near expiry are captured if the order is accepted, otherwise voided. A failed expiry capture is retried on the next run with a new capture key (intent id + expiry + attempt number), never blocked by the failed row's key; one failing intent never stops the walk |
 | `payments.dispute-deadlines` | hourly | Flag disputes with evidence due within 48 h; mark lost when the deadline passed without evidence |
 | `payments.card-expiry` | daily 05:00 PT | Mark saved cards expired; apply provider card-updater results |
 
@@ -843,7 +849,7 @@ Checked through the access module (limits per role, second reviewer).
 | statementDescriptor | `"MARKETLY"` | string, approval: business owner | Text on the customer's bank statement |
 
 ## Integrations
-- **Card processor (provider adapter)**: Hosted card fields and tokens, authorization, capture, void, refunds, retrieve, saved methods, disputes, webhooks
+- **Card processor (provider adapter)**: Hosted card fields and tokens, authorization, capture, void, partial reversal of an authorization (optional capability), refunds, retrieve, saved methods, disputes (retrieve, submit evidence, accept), webhooks
 - **Digital wallets (through the card processor)**: Apple Pay and Google Pay tokens on web and Android
 - **Secret store**: Provider API keys and webhook signing secrets
 
@@ -852,6 +858,8 @@ Checked through the access module (limits per role, second reviewer).
 - Order of events at Place order: authorize (accepted or pending_check) → checkout creates the order (orders.createOrder) → linkOrder with seller-group allocations → orders.order.accepted → capture. A decline creates no order; the customer keeps the cart and delivery choices and can retry with the same or another method (new intent, same checkout session). If an order never appears, detect-orphans voids or refunds the money.
 - Capture per seller group: allocations record each group's share; with per_group_on_dispatch each group is captured when it ships and cancelled groups are never captured. At launch the default is one capture on acceptance ('charged once, when the order is accepted').
 - Capture with store credit (mixed tender): each group's allocation is split into a card share and a store-credit share in proportion to the tenders. A capture charges the card only the card share and reports the credit share as creditAmount on payments.payment.captured. When items are cancelled before capture, their credit share goes back to the wallet and their card share comes off the authorization; an authorization whose card amount drops to 0 is voided. Finance's daily check compares card captures plus creditAmount with the order total.
+- Credit-only captures: when store credit alone pays the order (card share 0) or a seller group (its card share is 0), the capture still happens: payments writes a succeeded capture row with amount 0 and credit_amount, captures the wallet hold share, and publishes payments.payment.captured with amount 0 and creditAmount, keyed like any capture so it happens once. Such groups count as charged everywhere (card amount left, expiry sweep, release of an authorization with nothing left).
+- Partial reversal (decision D-P1): the provider port has an optional partial reversal (lower an authorization by an amount). When the adapter supports it, cancelling items before capture lowers the authorization by their card share (ProviderCall partial_void, intent transition reduce); when it does not, the authorized amount stays, the card share is tracked in the allocations and the remainder is released at the final capture (close_remainder) or voided when nothing is left.
 - Refund caps: remaining = paid per item (orders.getPaidAmounts) − sent − in flight (requested, processing). Every refund names its items, so a partial refund never marks other items refunded. Destination is the original method by default; card refunds show the timing note; a failed card refund asks the customer for a new destination. The credit part of a mixed tender goes back to store credit first (wallet, phase 3).
 - Approval split: returns approves refund requests (Finance limits from access) and hands them over with startRefund; cancellation refunds follow the cancellation policy and start from orders.item.cancelled; finance starts correction refunds. Payments never shows Approved; its customer states are Requested, Processing, Sent and Failed.
 - Saved methods: only provider tokens and display data are stored. Removing a method detaches it at the provider; payments keep their MethodSnapshot so receipts and refunds are unaffected.

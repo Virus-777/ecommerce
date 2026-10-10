@@ -77,6 +77,7 @@ Help cases and disputes: customer help and order-problem cases opened from the o
 | POST | `/api/admin/support/cases/{id}/resolve` | Resolve a case _(audited)_ | staff<br>`support.cases.handle` | `{ summary: text }` → `AdminCaseDetail` |
 | POST | `/api/admin/support/cases/{id}/reopen` | Reopen a resolved or closed case _(audited)_ | staff<br>`support.cases.handle` | `{ reason: text }` → `AdminCaseDetail` |
 | POST | `/api/admin/support/cases/{id}/appeal/decide` | Decide an appeal (reviewer must differ from the original decider) _(idempotent, audited)_ | staff<br>`support.appeals.decide` | `{ overturn: bool, reason: text, remedies: RemedyInput[]? }` → `AdminCaseDetail` |
+| POST | `/api/admin/support/cases/{id}/remedies/{remedyId}/settle` | Record that a remedy was completed or cancelled outside the system _(audited)_ | staff<br>`support.disputes.decide` | `{ outcome: enum(completed|cancelled), note: text, externalRef: string? }` → `AdminCaseDetail` |
 | GET | `/api/admin/support/categories` | Case categories with priority, team and SLA targets | staff<br>`support.cases.view` | `CaseCategory[]` |
 | PUT | `/api/admin/support/categories/{key}` | Create or change a category and its targets _(audited)_ | staff<br>`support.sla.manage` | `CaseCategoryInput` → `CaseCategory` |
 
@@ -103,6 +104,8 @@ Help cases and disputes: customer help and order-problem cases opened from the o
 | Field | Type |
 |---|---|
 | label | `string` |
+| audience | `enum(customer|seller)?` Required when creating a category; unchanged when left out on an existing one |
+| group | `enum(delivery|damaged_or_wrong|returns_refunds|payment|order_change|account|seller_report|account_health|fees_payouts|listing_rules|shipping_dispatch|advertising|other)?` Required when creating a category; unchanged when left out on an existing one |
 | defaultPriority | `enum(low|medium|high|urgent)` |
 | team | `enum(customer_support|returns|finance|trust|seller_management|official_store)` |
 | sellerHandlesFirst | `bool` |
@@ -551,7 +554,7 @@ Help cases and disputes: customer help and order-problem cases opened from the o
 | remedies | `RemedyInput[]` |
 | reason | `text` |
 | appealDeadline | `datetime?` |
-| notifyParties | `bool` |
+| notifyParties | `bool` False records the decision without emailing the parties (support.case.decided carries notified=false and notifications skips it); the parties still see it on the case |
 
 ### DecisionDraft
 
@@ -598,6 +601,7 @@ Help cases and disputes: customer help and order-problem cases opened from the o
 | message | `text` |
 | priority | `enum(low|medium|high|urgent)?` |
 | ownerId | `uuid?` |
+| trustReportId | `uuid?` Trust and Risk report this case acts on (inform_customers outreach); carried on support.case.opened so trust confirms the enforcement |
 
 ## Status flows
 
@@ -649,9 +653,14 @@ stateDiagram-v2
   pending_approval --> cancelled: cancel
   approved --> cancelled: cancel
   failed --> cancelled: cancel
+  pending_approval --> completed: settle
+  approved --> completed: settle
+  in_progress --> completed: settle
+  failed --> completed: settle
+  in_progress --> cancelled: cancel
 ```
 
-Refund remedies mirror the returns refund request and payments: approve on returns.refund.approved, start on handover, complete on payments.refund.sent, fail on payments.refund.failed. Replacement remedies complete on delivery of the replacement shipment. Ship-by-deadline remedies complete when the item ships by the date and otherwise fall back to a refund.
+Refund remedies mirror the returns refund request and payments: approve on returns.refund.approved, start on handover, complete on payments.refund.sent, fail on payments.refund.failed, cancel on returns.refund.declined (the case goes back to the owner's queue). Goodwill credit remedies follow the wallet grant (wallet.goodwill.decided). Replacement remedies complete on delivery of the replacement shipment. Ship-by-deadline remedies complete on shipping.shipment.dispatched when the items ship by the date and otherwise fall back to a refund. settle (and cancel from in_progress) is a staff action (POST …/remedies/{remedyId}/settle) for remedies nothing in the system can finish: refunds recorded for Finance while returns is off, goodwill or refunds of guests without a refund path; it is refused (REMEDY_NOT_SETTLEABLE) while a returns refund request, a wallet grant or a replacement still drives the remedy.
 
 ### Case offer (`CaseOffer.status`)
 
@@ -860,11 +869,11 @@ Indexes: `(case_id, at)`
 
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
-| `support.case.opened` | A case is opened by a customer, seller, staff or another module | `{ caseId: uuid, ref: string, kind: string, category: string, priority: string, customerId: uuid?, contactEmail: email?, sellerId: uuid?, orderId: uuid?, orderItemIds: uuid[], handler: string, nextResponseDueAt: datetime? }` | messaging, notifications, orders, reports, sellers, shipping, trust |
+| `support.case.opened` | A case is opened by a customer, seller, staff or another module | `{ caseId: uuid, ref: string, kind: string, category: string, priority: string, customerId: uuid?, contactEmail: email?, sellerId: uuid?, orderId: uuid?, orderItemIds: uuid[], handler: string, ownerStaffId: uuid?, trustReportId: uuid?, nextResponseDueAt: datetime? }` | messaging, notifications, orders, reports, sellers, shipping, trust |
 | `support.case.escalated` | Marketly steps in, a case becomes a dispute, or it moves to another team | `{ caseId: uuid, ref: string, to: string, reason: string, sellerId: uuid?, orderId: uuid? }` | notifications, workqueues |
-| `support.case.decided` | A decision (or appeal decision) is recorded | `{ caseId: uuid, ref: string, outcome: string, orderId: uuid?, customerId: uuid?, contactEmail: email?, returnId: uuid?, sellerId: uuid?, remedies: Remedy[], appealDeadline: datetime?, final: bool }` | finance, notifications, returns |
-| `support.case.resolved` | A case is resolved | `{ caseId: uuid, ref: string, customerId: uuid?, contactEmail: email?, sellerId: uuid?, resolvedAt: datetime }` | notifications, reports, sellers, workqueues |
-| `support.case.reopened` | A case is reopened | `{ caseId: uuid, by: Actor, reason: text }` | - |
+| `support.case.decided` | A decision (or appeal decision) is recorded | `{ caseId: uuid, ref: string, outcome: string, orderId: uuid?, customerId: uuid?, contactEmail: email?, returnId: uuid?, sellerId: uuid?, remedies: Remedy[], appealDeadline: datetime?, final: bool, notified: bool }` | finance, notifications, returns |
+| `support.case.resolved` | A case is resolved (orders clears its open-case alert on the items) | `{ caseId: uuid, ref: string, orderId: uuid?, orderItemIds: uuid[], customerId: uuid?, contactEmail: email?, sellerId: uuid?, resolvedAt: datetime }` | notifications, orders, reports, sellers, workqueues |
+| `support.case.reopened` | A case is reopened (orders shows the open-case alert again) | `{ caseId: uuid, ref: string, orderId: uuid?, orderItemIds: uuid[], customerId: uuid?, contactEmail: email?, sellerId: uuid?, by: Actor, reason: text }` | orders |
 | `support.case.appealed` | A party appeals a decision | `{ caseId: uuid, by: Actor }` | - |
 | `support.case.appeal_decided` | An appeal is decided | `{ caseId: uuid, overturned: bool }` | - |
 | `support.case.assigned` | Owner changes | `{ caseId: uuid, ownerId: uuid, team: string }` | - |
@@ -875,13 +884,16 @@ Indexes: `(case_id, at)`
 |---|---|---|
 | `returns.return.escalated` | returns | Open or link a dispute case for the return and assign it to the Returns team |
 | `returns.refund.approved` | returns | Move the matching refund remedy to approved/in progress |
+| `returns.refund.declined` | returns | Cancel the refund remedy behind the declined refund request (Finance's reason in the case history) and put the case back in the owner's queue so they decide again |
 | `payments.refund.sent` | payments | Complete the refund remedy; the case can now be resolved |
 | `wallet.goodwill.decided` | wallet | For a case's goodwill credit remedy waiting for approval: mark it granted (done) or rejected and put the case back in the owner's queue |
 | `payments.refund.failed` | payments | Mark the refund remedy failed and put the case back in the owner's queue |
 | `returns.replacement.created` | returns | Link the replacement to its remedy |
 | `shipping.shipment.delivered` | shipping | Complete replacement remedies when their shipment is delivered |
+| `shipping.shipment.dispatched` | shipping | Complete ship-by-deadline remedies whose items shipped by the promised date (lines, shippedAt); a later dispatch leaves the remedy to fall back to a refund |
 | `shipping.dispatch.overdue` | shipping | Add the overdue dispatch to open cases for the item and expose the customer escalation route |
-| `shipping.shipment.exception` | shipping | Open a case for lost or damaged packages when the customer has not already |
+| `shipping.shipment.exception` | shipping | Open a case for lost or damaged packages reported by the carrier or the system. Exceptions with source customer_report, or with a caseRef (opened from a case), are only noted on the existing case, never a new one |
+| `notifications.email_reply.received` | notifications | module support: add the reply to the case thread (refId = case id) as a customer message when fromEmail is the case's customer or order contact; other senders are dropped with a log line. Attachments come as media assets |
 | `orders.item.cancelled` | orders | Note cancellations on linked cases (e.g. ship-by remedy fell back to cancellation) |
 | `sellers.seller.restricted` | sellers | Keep cases open; route seller-handled cases of a suspended seller to Marketly support |
 | `access.approval.decided` | access | Finish approval-required remedies |
@@ -890,7 +902,8 @@ Indexes: `(case_id, at)`
 
 | Function | Signature | Used by |
 |---|---|---|
-| openCase | `(input: { kind: string, category: string, orderId?: uuid, orderItemIds?: uuid[], customerId?: uuid, sellerId?: uuid, returnId?: uuid, subject: string, message: string, openedBy: Actor }) => CaseView`<br>Open a case from another module (return escalation, delivery exception, failed refund). With returnId the return's evidence is copied in through returns.listEvidence. | returns, shipping, payments |
+| openCase | `(input: { kind: string, category: string, orderId?: uuid, orderItemIds?: uuid[], customerId?: uuid, sellerId?: uuid, returnId?: uuid, trustReportId?: uuid, subject: string, message: string, openedBy: Actor }) => CaseView`<br>Open a case from another module (return escalation, delivery exception, failed refund). With returnId the return's evidence is copied in through returns.listEvidence. trustReportId links customer outreach to a Trust and Risk report (support.case.opened carries it). | returns, shipping, payments |
+| customerIdsWithOpenCases | `(filter: { ids?: uuid[] }) => uuid[]`<br>Customers-module ids with at least one case that is not resolved or closed. With ids only those ids are checked; without, every matching id is returned. The customer list filters hasOpenCases with it before paging, so pages are full and totals right. | customers |
 | casesForOrder | `(orderId: uuid) => { caseId: uuid, ref: string, status: string, orderItemIds: uuid[] }[]`<br>Open and recent cases per order item for the order page | orders, returns |
 | sellerCaseStats | `(sellerId: uuid, range: DateRange) => { open: int, unresolved: int, decidedAgainstSeller: int, medianReplyMinutes: int }`<br>Unresolved cases for seller performance | sellers, reports |
 | hasUnresolvedRemedy | `(caseId: uuid) => bool`<br>Whether a promised refund or replacement is still open | workqueues |
@@ -937,6 +950,9 @@ Checked through the access module (limits per role, second reviewer).
 | `SAME_DECIDER` | 409 | An appeal must be decided by someone other than the original decider. |
 | `OFFER_EXPIRED` | 409 | The offer expired or was withdrawn. |
 | `ESCALATION_NOT_AVAILABLE` | 409 | The seller is still within its reply deadline. details.availableFrom. |
+| `GOODWILL_UNAVAILABLE` | 422 | Goodwill credit needs the wallet module, which is off; choose a refund or partial refund instead. |
+| `REPLACEMENT_NEEDS_RETURN` | 422 | A replacement can only be promised on a case with a return (returns creates the replacement from it); ask for a return or choose a refund. |
+| `REMEDY_NOT_SETTLEABLE` | 409 | The remedy is still driven by a refund request, wallet grant or replacement, or is already finished. details.status. |
 
 ## Background jobs
 
@@ -961,6 +977,7 @@ Checked through the access module (limits per role, second reviewer).
 | lateItemRefundAfterDays | `14` | duration, days, 1–…, approval: business owner, seller-visible | Items not shipped this long after the estimate qualify for a full refund (purchase terms) |
 | maxAttachments | `5` | int, 0–20 | Files per message |
 | maxAttachmentMb | `10` | int, MB, 1–… | Size per file |
+| priorityTargetFactors | `{"low":1.5,"medium":1,"high":0.75,"urgent":0.5}` | json, approval: second reviewer | Multiplier on the category's response and resolution targets per case priority (urgent halves them); deadlines are recalculated when the priority changes (decision D-S1) |
 
 ## Integrations
 - **Email reply-by-email (through notifications)**: Customers can answer case emails; replies are added to the case thread
@@ -971,10 +988,13 @@ Checked through the access module (limits per role, second reviewer).
 - Disputes reuse the order-problem case: escalate sets kind = dispute and assigns a support owner. The decision cites the purchase terms snapshot from orders and the shipment evidence from shipping; both are composed at read time, not copied.
 - Remedies are tracked on the case and mirror returns and payments progress; Approved is never shown as money arrived. A case stays open until each promised remedy completes (REMEDY_PENDING).
 - Internal notes (audience internal) are never returned on store or seller endpoints.
-- Goodwill-credit remedies call wallet.grantGoodwill when the wallet module (phase 3) is on; until then goodwill is a platform-funded partial refund through returns.
+- Goodwill-credit remedies call wallet.grantGoodwill when the wallet module (phase 3) is on; while it is off they are refused with GOODWILL_UNAVAILABLE (decision D-RT3), so no remedy waits for a credit that cannot exist. Guests have no wallet: their goodwill becomes a platform-funded partial refund through returns of the case's items. Goodwill and refund remedies without items default to the case's items.
+- No remedy may stay pending for ever: without returns a refund remedy is recorded for Finance and closed with POST …/remedies/{remedyId}/settle once paid outside the system; declined refund requests cancel their remedy (returns.refund.declined); ship-by remedies complete on dispatch (shipping.shipment.dispatched).
+- Case actions are recorded in audit under category support (audit adds the category).
+- Email replies (notifications.email_reply.received, module support) join the thread like a reply from the customer.
 - Seller support requests (seller/help) are cases of kind seller_request handled by the Seller Manager team with their own categories (Account health, Fees and payouts, Listing rules, Shipping, Returns and disputes, Advertising).
 - Business-hour deadlines use the market time zone and business hours from settings (optional dependency; defaults Mon–Sat 8 AM–8 PM PT).
-- Dependency note: returns, payments, shipping, sellers, messaging and media are optional; without returns a refund remedy is recorded as a request to Finance outside the system.
+- Dependency note: returns, payments, shipping, sellers, messaging and media are optional; without returns a refund remedy is recorded as a request to Finance outside the system and settled by staff (settleRemedy).
 - openCase with a returnId (return escalation) copies the return's evidence into the case at opening through returns.listEvidence, each item marked as from the return with its original author and time. Later additions on the return are not synced; the case is the record from then on. Without returns enabled no evidence is copied.
 
 ## GraphQL (read layer)

@@ -33,6 +33,8 @@ Trust and Risk's case file: reports of counterfeit goods, suspicious orders, fak
 | GET | `/api/store/trust/enforcements` | Trust actions that affect my account, with appeal route | customer | `MyEnforcement[]` |
 | POST | `/api/store/trust/appeals` | Appeal a trust action on my account before the deadline | customer | `{ enforcementId: uuid, argument: text, evidenceIds: uuid[]? }` → `TrustAppeal` |
 | GET | `/api/store/trust/appeals` | My appeals | customer | `TrustAppeal[]` |
+| GET | `/api/store/trust/evidence-requests` | Proof Trust and Risk asked me for (e.g. confirm an order or explain a message) | customer | `EvidenceRequest[]` |
+| POST | `/api/store/trust/evidence-requests/{id}/answer` | Send the requested proof or explanation | customer | `{ answer: text, mediaIds: uuid[]? }` → `EvidenceRequest` |
 
 ## Seller API
 
@@ -96,7 +98,7 @@ Trust and Risk's case file: reports of counterfeit goods, suspicious orders, fak
 | customerId | `uuid?` |
 | sellerId | `uuid?` |
 | contactName | `string?` |
-| contactEmail | `email?` Rights owners, and guests who reported by email |
+| contactEmail | `email?` Rights owners, guests who reported by email, and customer and seller reporters: the signed-in account's email (identity) is stored with the report when it is made, so the outcome reaches the reporter even when customers or sellers no longer know the account |
 
 ### StaffRef
 
@@ -163,6 +165,69 @@ Trust and Risk's case file: reports of counterfeit goods, suspicious orders, fak
 | answer | `text?` |
 | answerMedia | `MediaRef[]` |
 | answeredAt | `datetime?` |
+| reportRef | `string?` Reference of the report the proof is for, e.g. TR-3391 (never the reporter) |
+
+### RestrictSellerParams
+
+| Field | Type |
+|---|---|
+| title | `string` |
+| reasonCode | `enum(performance|policy_violation|brand_claim|counterfeit_risk|fraud_risk|unresolved_cases|verification_lapsed|approval_condition|other)` |
+| reason | `text` |
+| ruleRef | `string?` |
+| affectedActivities | `enum(new_listings|product_submissions|new_offers|offer_reactivation|sales|advertising|promotions|payout_schedule)[]` |
+| scope | `json?` sellers.RestrictionInput scope |
+| stillWorks | `string[]?` |
+| toResolve | `text` |
+| appealDays | `int` |
+| reviewDate | `date` |
+| endsAt | `datetime?` |
+
+### WarnSellerParams
+
+| Field | Type |
+|---|---|
+| kind | `enum(performance|listing|policy|conduct)` |
+| title | `string` |
+| detail | `text` |
+
+### SuspendSellerParams
+
+| Field | Type |
+|---|---|
+| reasonCode | `enum(performance|policy_violation|brand_claim|counterfeit_risk|fraud_risk|unresolved_cases|verification_lapsed|approval_condition|other)` |
+| reason | `text` |
+| reviewDate | `date` |
+| openOrders | `enum(seller_keeps_fulfilling|cancel_unshipped_and_refund)` |
+| secondReviewerId | `uuid?` |
+
+### SuspendOfferParams
+
+| Field | Type |
+|---|---|
+| mode | `enum(remove|hold)` |
+| reviewDate | `date?` |
+
+### CustomerRestrictionParams
+
+| Field | Type |
+|---|---|
+| endsAt | `datetime?` Null: until lifted |
+| customerMessage | `text?` |
+| reasonCode | `enum(customer_request|suspected_takeover|abusive_messages|payment_fraud_review|policy_violation|other)` |
+
+### HoldPayoutParams
+
+| Field | Type |
+|---|---|
+| amount | `Money?` |
+| reviewDate | `date` |
+
+### RefundBuyersParams
+
+| Field | Type |
+|---|---|
+| amount | `Money?` |
 
 ### Recommendation
 
@@ -172,11 +237,11 @@ Trust and Risk's case file: reports of counterfeit goods, suspicious orders, fak
 | reportId | `uuid` |
 | action | `enum(suspend_offer|suspend_product|remove_reviews|keep_reviews|restrict_seller|suspend_seller|warn_seller|revoke_claim|hold_payout|hold_dispatch|review_payments|refund_buyers|inform_customers|request_identity_confirmation|restrict_customer_messaging|restrict_customer_account|lock_conversation|other)` |
 | label | `string` e.g. Suspend the Gadget Grove offer for BRL-S2 |
-| ownerTeam | `enum(catalog|sellers|support|finance|orders|reviews|customers|messaging)` |
+| ownerTeam | `enum(catalog|sellers|support|finance|orders|reviews|customers|messaging)` suspend_offer and suspend_product belong to catalog: the Catalog Manager accepts offer suspensions with offers.offers.remove (offers executes them) |
 | ownerRole | `string` access role key, e.g. catalog_manager |
 | owner | `StaffRef?` |
 | targets | `TrustSubject[]` |
-| params | `json` Action parameters the owner reviews, e.g. sellers.RestrictionInput for restrict_seller, { amount, reviewDate } for hold_payout, { endsAt } for messaging restrictions |
+| params | `json` Action parameters the owner reviews, completed with defaults when the recommendation is accepted: RestrictSellerParams (restrict_seller), WarnSellerParams (warn_seller), SuspendSellerParams (suspend_seller), SuspendOfferParams (suspend_offer), CustomerRestrictionParams (restrict_customer_messaging, restrict_customer_account), HoldPayoutParams (hold_payout), RefundBuyersParams (refund_buyers); {} for the other actions |
 | rationale | `text` |
 | state | `enum(pending|sent_to_owner|completed|declined|withdrawn)` |
 | routedAt | `datetime?` |
@@ -189,13 +254,13 @@ Trust and Risk's case file: reports of counterfeit goods, suspicious orders, fak
 
 | Field | Type |
 |---|---|
-| action | `string` |
+| action | `enum(suspend_offer|suspend_product|remove_reviews|keep_reviews|restrict_seller|suspend_seller|warn_seller|revoke_claim|hold_payout|hold_dispatch|review_payments|refund_buyers|inform_customers|request_identity_confirmation|restrict_customer_messaging|restrict_customer_account|lock_conversation|other)` |
 | label | `string` |
-| ownerTeam | `string` |
+| ownerTeam | `enum(catalog|sellers|support|finance|orders|reviews|customers|messaging)?` Default: the action's owner team |
 | ownerRole | `string?` |
 | ownerStaffId | `uuid?` |
 | targets | `TrustSubject[]` |
-| params | `json?` |
+| params | `json?` See Recommendation.params |
 | rationale | `text` |
 
 ### Enforcement
@@ -207,11 +272,11 @@ Trust and Risk's case file: reports of counterfeit goods, suspicious orders, fak
 | reportId | `uuid` |
 | reportRef | `string` |
 | recommendationId | `uuid?` |
-| action | `string` |
-| ownerTeam | `string` |
+| action | `enum(suspend_offer|suspend_product|remove_reviews|keep_reviews|restrict_seller|suspend_seller|warn_seller|revoke_claim|hold_payout|hold_dispatch|review_payments|refund_buyers|inform_customers|request_identity_confirmation|restrict_customer_messaging|restrict_customer_account|lock_conversation|other)` |
+| ownerTeam | `enum(catalog|sellers|support|finance|orders|reviews|customers|messaging)` |
 | targets | `TrustSubject[]` |
 | reason | `text` Recorded reason (also shown to the affected party where the owning module shows reasons) |
-| params | `json` |
+| params | `json` See Recommendation.params |
 | effects | `string[]` What changes and what stays, e.g. 'open orders and returns stay active' |
 | recordedBy | `Actor` |
 | recordedAt | `datetime` |
@@ -405,7 +470,7 @@ stateDiagram-v2
   sent_to_owner --> withdrawn: withdraw
 ```
 
-Route sends it to the owner team's queue (workqueues). Accept is done by someone holding the owner team's permission for that action (e.g. catalog.products.publish for suspend_product, sellers.accounts.restrict for restrict_seller, customers.accounts.act for customer restrictions) and records an Enforcement with the owner's reason. Decline needs a reason. Trust staff cannot accept their own recommendations (separate duties, plan ch. 18).
+Route sends it to the owner team's queue (workqueues). Accept is done by someone holding the owner team's permission for that action (e.g. catalog.products.publish for suspend_product, sellers.accounts.restrict for restrict_seller, customers.accounts.act for customer restrictions) and records an Enforcement with the owner's reason. Decline needs a reason. Trust staff cannot accept their own recommendations (separate duties, plan ch. 18). Actions that no module executes on trust.enforcement.recorded (hold_payout, hold_dispatch, review_payments, refund_buyers, inform_customers, revoke_claim, request_identity_confirmation, other) are done by the owner in its own screen first; accepting them requires externalRef, the record the owner created there (hold id, approval ref, case ref, claim id...), otherwise EXTERNAL_REF_REQUIRED (decision D4). keep_reviews needs no externalRef.
 
 ### Enforcement execution (`Enforcement.executionState`)
 
@@ -418,7 +483,7 @@ stateDiagram-v2
   applied --> reversed: reverse
 ```
 
-Confirmed when the owning module's event arrives carrying the enforcement id (catalog.product.publication_changed, offers.offer.status_changed, sellers.seller.restricted, customers.account.restricted, finance.hold.placed...) or when the owner records the external reference. Reverse (e.g. appeal overturned) publishes trust.enforcement.reversed so the owner undoes it.
+Confirmed when the owning module's event arrives carrying the enforcement id or the report id: suspend_product catalog.product.publication_changed; suspend_offer offers.offer.status_changed; restrict_seller sellers.seller.restricted; suspend_seller sellers.seller.suspended; warn_seller sellers.warning.issued (trustEnforcementId); remove_reviews reviews.moderation.decided (trustEnforcementId); lock_conversation messaging.conversation.locked (trustEnforcementId); restrict_customer_* customers.account.restricted; hold_payout finance.hold.placed (trustReportId, also when the hold was placed after an approval); hold_dispatch and review_payments orders.item.cancelled (trustReportId); refund_buyers returns.refund.approved (trustReportId); inform_customers support.case.opened (trustReportId). Those stay pending until the event arrives even when accepted with externalRef. Actions nothing can confirm (keep_reviews, revoke_claim, request_identity_confirmation, other) are applied when recorded. Reverse (appeal overturned or error) publishes trust.enforcement.reversed, which the executing modules consume to undo the action (customers, catalog, sellers, offers, reviews, messaging, advertising), and raises a enforcement_reversal work item in the owner team's queue so a person checks the undo (stopgap until every owner confirms reversals).
 
 ### Evidence request (`EvidenceRequest.state`)
 
@@ -673,14 +738,14 @@ Indexes: `(kind, at)`, `(subject_type, subject_id, at)`
 | `trust.report.escalated` | A report is escalated | `{ reportId: uuid, reason: text }` | - |
 | `trust.report.resolved` | A report is resolved or dismissed (reporters are told the outcome) | `{ reportId: uuid, ref: string, outcome: string, reporterOutcome: text?, reporters: ReportReporter[] }` | notifications, workqueues |
 | `trust.rights_report.received` | A rights owner submits a report through the public form | `{ reportId: uuid, ref: string, brandName: string, contactName: string, contactEmail: email }` | notifications |
-| `trust.evidence.requested` | Proof is requested from a seller or customer | `{ requestId: uuid, reportId: uuid, toType: string, toId: uuid, dueAt: datetime }` | - |
+| `trust.evidence.requested` | Proof is requested from a seller or customer (notifications tells them) | `{ requestId: uuid, reportId: uuid, reportRef: string, toType: string, toId: uuid, customerId: uuid?, sellerId: uuid?, question: text, dueAt: datetime }` | notifications |
 | `trust.evidence.received` | The reported party sends proof | `{ requestId: uuid, reportId: uuid }` | - |
 | `trust.recommendation.routed` | A recommendation is sent to its owner team | `{ recommendationId: uuid, reportId: uuid, action: string, ownerTeam: string, ownerRole: string, targets: json[] }` | workqueues |
 | `trust.recommendation.decided` | The owner team accepts or declines, or Trust withdraws it | `{ recommendationId: uuid, reportId: uuid, state: string, reason: text }` | workqueues |
-| `trust.enforcement.recorded` | An owner accepts a recommendation; the owning module executes it | `{ enforcementId: uuid, reportId: uuid, action: string, ownerTeam: string, targets: json[], reason: text, params: json, appealDeadline: datetime?, alreadyApplied: bool }` | advertising, catalog, customers, messaging, offers, reviews, sellers |
-| `trust.enforcement.reversed` | An enforcement is reversed (appeal overturned or error); owners undo it | `{ enforcementId: uuid, action: string, targets: json[], reason: text }` | - |
+| `trust.enforcement.recorded` | An owner accepts a recommendation; the owning module executes it | `{ enforcementId: uuid, reportId: uuid, action: enum(suspend_offer|suspend_product|remove_reviews|keep_reviews|restrict_seller|suspend_seller|warn_seller|revoke_claim|hold_payout|hold_dispatch|review_payments|refund_buyers|inform_customers|request_identity_confirmation|restrict_customer_messaging|restrict_customer_account|lock_conversation|other), ownerTeam: enum(catalog|sellers|support|finance|orders|reviews|customers|messaging), targets: TrustSubject[], reason: text, params: json, appealDeadline: datetime?, alreadyApplied: bool }` | advertising, catalog, customers, messaging, offers, reviews, sellers |
+| `trust.enforcement.reversed` | An enforcement is reversed (appeal overturned or error); the executing module undoes it and the owner team gets a enforcement_reversal work item | `{ enforcementId: uuid, ref: string, reportId: uuid, reportRef: string, action: enum(suspend_offer|suspend_product|remove_reviews|keep_reviews|restrict_seller|suspend_seller|warn_seller|revoke_claim|hold_payout|hold_dispatch|review_payments|refund_buyers|inform_customers|request_identity_confirmation|restrict_customer_messaging|restrict_customer_account|lock_conversation|other), ownerTeam: enum(catalog|sellers|support|finance|orders|reviews|customers|messaging), targets: TrustSubject[], params: json, appliedRef: string?, executionState: enum(pending|applied|failed), reason: text, appealId: uuid?, reversedBy: Actor, reversedAt: datetime }` | advertising, catalog, customers, messaging, offers, reviews, sellers |
 | `trust.appeal.submitted` | A customer or seller appeals a trust enforcement | `{ appealId: uuid, enforcementId: uuid, decideBy: datetime }` | - |
-| `trust.appeal.decided` | A trust appeal is decided | `{ appealId: uuid, enforcementId: uuid, outcome: string }` | - |
+| `trust.appeal.decided` | A trust appeal is decided (notifications tells the appellant) | `{ appealId: uuid, ref: string, enforcementId: uuid, outcome: enum(upheld|overturned|partly_overturned), explanation: text, customerId: uuid?, sellerId: uuid? }` | notifications |
 | `trust.assessment.completed` | A seller application or account assessment is recorded | `{ reportId: uuid, subjectType: string, subjectId: uuid, level: string, flags: json[], recommendation: text, recommendedHoldDays: int? }` | sellers |
 
 | Consumes | From | Does |
@@ -692,20 +757,23 @@ Indexes: `(kind, at)`, `(subject_type, subject_id, at)`
 | `payments.chargeback.opened` | payments | Add a signal to suspicious-order detection and open reports for repeated chargebacks |
 | `payments.payment.failed` | payments | Signal for card-testing detection |
 | `reviews.review.published` | reviews | Feed the review-burst detection rule |
-| `offers.offer.created` | offers | Feed the price-far-below-authorized and restricted-brand rules |
-| `catalog.product.publication_changed` | catalog | Confirm execution of suspend_product enforcements. setPublication accepts trustReportId; until catalog's publication_changed payload carries it (request to the catalog owner), match by the enforcement reference in the reason |
-| `offers.offer.status_changed` | offers | Confirm execution of suspend_offer enforcements |
+| `offers.offer.created` | offers | Feed the price-far-below and restricted-brand rules. The price rule compares the offer's price with the median price of the other active offers on the product (offers.listActiveOffersForProduct), not an authorised price list (decision D7) |
+| `catalog.product.publication_changed` | catalog | Confirm execution of suspend_product enforcements by trustEnforcementId (or trustReportId) on the payload |
+| `offers.offer.status_changed` | offers | Confirm execution of suspend_offer enforcements by trustEnforcementId on the payload |
 | `sellers.seller.restricted` | sellers | Confirm restrict_seller enforcements (trustEnforcementId) |
-| `sellers.seller.suspended` | sellers | Confirm suspend_seller enforcements |
+| `sellers.seller.suspended` | sellers | Confirm suspend_seller enforcements (trustEnforcementId) |
+| `sellers.warning.issued` | sellers | Confirm warn_seller enforcements (trustEnforcementId) |
+| `reviews.moderation.decided` | reviews | Confirm remove_reviews enforcements once every named review, question or answer is removed (trustEnforcementId) |
+| `messaging.conversation.locked` | messaging | Confirm lock_conversation enforcements (trustEnforcementId) |
 | `sellers.appeal.submitted` | sellers | Mirror appeals of restrictions that came from a trust report into the Appeals tab |
 | `sellers.appeal.decided` | sellers | Update the mirrored appeal |
 | `customers.account.restricted` | customers | Confirm customer restriction enforcements |
 | `customers.account.restriction_lifted` | customers | Record that a customer restriction ended |
-| `finance.hold.placed` | finance | Confirm hold_payout enforcements when the hold carries trustReportId |
+| `finance.hold.placed` | finance | Confirm hold_payout enforcements of the report named by trustReportId for the same seller (also holds placed after an approval) |
 | `orders.item.cancelled` | orders | When trustReportId is set: record the staff cancellation on the report (confirms hold_dispatch, review_payments or other recommendations that ended in cancellation) |
 | `returns.refund.approved` | returns | When trustReportId is set: confirm refund_buyers enforcements |
-| `support.case.opened` | support | Confirm inform_customers outreach cases that reference the report |
-| `sellers.application.submitted` | sellers | Run application detection rules (duplicate tax id, bank token or address of a closed account) and add signals to any assessment |
+| `support.case.opened` | support | Confirm inform_customers enforcements of the report named by trustReportId; cases without trustReportId never confirm anything |
+| `sellers.application.submitted` | sellers | Run application detection rules (duplicate tax id, bank token or address of a closed account, from taxIdHash, bankTokenHash and addressKey on the payload) and add signals to any assessment |
 
 ## In-process API (for other modules)
 
@@ -715,6 +783,7 @@ Indexes: `(kind, at)`, `(subject_type, subject_id, at)`
 | requestAssessment | `(input: { subjectType: 'seller_application' | 'seller' | 'customer', subjectId: uuid, sellerId?: uuid, question: string, requestedBy: Actor }) => { reportId: uuid, ref: string }`<br>Seller Manager asks Trust and Risk to assess an application or account; the answer comes back as trust.assessment.completed | sellers |
 | reportsAbout | `(subjectType: string, subjectId: uuid) => { filedBy: int, against: int, open: int, reportIds: uuid[] }`<br>Counts for customer and seller detail pages | customers, sellers, support, graphql |
 | enforcementsFor | `(subjectType: string, subjectId: uuid) => Enforcement[]`<br>Active enforcement on an offer, product, seller or customer, with appeal route | offers, catalog, sellers, customers |
+| subjectIdsWithReports | `(subjectType: 'customer' | 'seller', filter: { role?: 'filed_by' | 'against', openOnly?: bool, ids?: uuid[] }) => uuid[]`<br>Ids of customers or sellers with reports filed by them (filed_by) or about them, their offers, products and claims (against; both when role is left out); openOnly keeps reports that are open, under review or escalated. With ids only those ids are checked; without, every matching id is returned. The customer and seller lists use it to filter hasAbuseReports before paging, so pages are full and totals right | customers, sellers |
 | listReportsAbout | `(subjectType: 'customer' | 'seller', subjectId: uuid, filter: { role?: 'filed_by' | 'against', statuses?: string[] }, page: PageInput) => Page<TrustReport>`<br>Reports filed by or about a customer or seller (including its offers, products and claims) for the admin 360 views; reporter identity, evidence and internal notes are left out | graphql |
 | getReportSummaries | `(reportIds: uuid[]) => TrustReport[]`<br>Batch lookup of reports by id (e.g. the report behind a restriction) without reporter identity, evidence or internal notes | graphql |
 | exportRows | `(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }`<br>Export rows for reports dataset trust.admin.reports (reporter identities only with trust.reports.export-identities) | reports |
@@ -755,6 +824,7 @@ Checked through the access module (limits per role, second reviewer).
 | `SAME_REVIEWER_NOT_ALLOWED` | 409 | The reviewer recommended or accepted the original action |
 | `SEPARATE_DUTIES` | 403 | Trust staff cannot accept their own recommendations; the owner team decides |
 | `RECOMMENDATIONS_OPEN` | 409 | Recommendations are still waiting for their owner teams |
+| `EXTERNAL_REF_REQUIRED` | 422 | No module executes this action: do it in the owning module's screen first and accept with externalRef (the hold, case, claim or approval reference) |
 
 ## Background jobs
 
@@ -785,7 +855,10 @@ Checked through the access module (limits per role, second reviewer).
 
 ## Notes
 - Trust recommends, owners act (plan ch. 17): Catalog suspends products, offers handle offer removal, Seller Manager restricts sellers, Support informs customers, Finance holds payouts. The owner's acceptance in trust records the enforcement and publishes trust.enforcement.recorded; catalog, offers, sellers, customers, reviews, messaging and advertising execute it and their own events confirm execution.
-- Owner modules that do not consume trust.enforcement.recorded (finance holds, orders dispatch holds, support outreach) act in their own screens; the owner then accepts the recommendation with externalRef so the enforcement is recorded as already applied (alreadyApplied=true in the event, so nobody executes it twice). Executing actions take an optional trustReportId so trust can confirm them: catalog setPublication, sellers createRestriction / suspendSeller (sellers.seller.restricted / suspended), finance placeHold (finance.hold.placed), orders cancel-items (orders.item.cancelled), customers account actions (customers.account.restricted) and returns exception refunds (returns.refund.approved).
+- Owner modules that do not consume trust.enforcement.recorded (finance holds, orders dispatch holds, payments reviews, buyer refunds, support outreach, storefront claims, identity confirmation) act in their own screens; the owner then accepts the recommendation with externalRef, which is required for these actions (decision D4; EXTERNAL_REF_REQUIRED), and the event carries alreadyApplied=true so nobody executes it twice. Executing actions take an optional trustReportId so trust can confirm them: catalog setPublication, sellers createRestriction / suspendSeller / warnings (sellers.seller.restricted / suspended, sellers.warning.issued), finance placeHold (finance.hold.placed), orders cancel-items (orders.item.cancelled), customers account actions (customers.account.restricted), returns exception refunds (returns.refund.approved) and support staff cases (support.case.opened).
+- Executing modules confirm with the enforcement id they were given: sellers.warning.issued, reviews.moderation.decided and messaging.conversation.locked carry trustEnforcementId; remove_reviews, warn_seller and lock_conversation are no longer applied on record. keep_reviews stays applied on record; reviews closes the open moderation items on the named content as kept.
+- Reversals (decision D9): trust.enforcement.reversed carries the action, typed params, targets and the appliedRef so each executing module undoes exactly what it did (customers lifts the restriction, catalog republishes, sellers lifts the restriction or ends the suspension, offers reinstates the offer, reviews reinstates removed content, messaging unlocks, advertising resumes). Until every owner confirms its undo, trust also raises a enforcement_reversal work item in the owner team's queue (dedupe trust_reversal:<enforcementId>), closed by the owner by hand.
+- Offer suspension is owned by the Catalog Manager (decision D8): suspend_offer routes to the catalog team, is accepted with offers.offers.remove and is executed by offers.
 - Valid order history and access to help are preserved for everyone involved in every enforcement (plan ch. 17); each recorded effect list states what keeps working.
 - Reporters are never revealed to reported parties. Reports on reviews, answers and questions stay in reviews; the account/reviews 'Reports you made' tab merges both lists.
 - Appeals: trust decides appeals on its enforcement (offers, products, claims, customer restrictions from trust). Seller account restrictions and suspensions are appealed and decided in sellers; trust mirrors linked ones read-only so the Trust and Risk Manager sees them in one Appeals tab.

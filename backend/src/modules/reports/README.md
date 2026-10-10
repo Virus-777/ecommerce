@@ -53,6 +53,8 @@ Business reporting with stated meanings: metric definitions with a named owner a
 | PATCH | `/api/admin/reports/metrics/{key}` | Revise a definition (new draft version) _(audited)_ | staff<br>`reports.definitions.manage` | `MetricInput` → `MetricDefinition` |
 | POST | `/api/admin/reports/metrics/{key}/publish` | Publish the draft version with an effective date _(audited)_ | staff<br>`reports.definitions.manage` | `{ effectiveFrom: date, changeNote: text }` → `MetricDefinition` |
 | POST | `/api/admin/reports/metrics/{key}/retire` | Retire a metric _(audited)_ | staff<br>`reports.definitions.manage` | `{ reason: text }` → `MetricDefinition` |
+| PUT | `/api/admin/reports/metrics/{key}/owner` | Name (or change) the staff member who owns a metric _(audited)_ | staff<br>`reports.definitions.manage` | `{ ownerId: uuid, reason: text }` → `MetricDefinition` |
+| PUT | `/api/admin/reports/groups/{key}/owner` | Name (or change) the staff member who owns a report group _(audited)_ | staff<br>`reports.definitions.manage` | `{ ownerId: uuid, reason: text }` → `ReportGroup` |
 | POST | `/api/admin/reports/metrics/{key}/suggestions` | Suggest a change to a definition | staff<br>`reports.library.view` | `{ proposed: text, reason: text }` → `MetricSuggestion` |
 | POST | `/api/admin/reports/metric-suggestions/{id}/decide` | Accept or decline a suggestion _(audited)_ | staff<br>`reports.definitions.manage` | `{ accept: bool, note: text }` → `MetricSuggestion` |
 | GET | `/api/admin/reports/saved-views` | My saved report views plus shared ones | staff<br>`reports.library.view` | `SavedView[]` |
@@ -62,11 +64,11 @@ Business reporting with stated meanings: metric definitions with a named owner a
 | GET | `/api/admin/reports/export-datasets` | Export dataset registry: what each screen can export, its owner and permission | staff<br>`reports.exports.create` | `ExportDataset[]` |
 | GET | `/api/admin/reports/exports` | My exports | staff<br>`reports.exports.create` | Page<ExportJob> |
 | GET | `/api/admin/reports/exports/{id}` | Export status and download link (requester only) | staff<br>`reports.exports.create` | `ExportJob` |
-| POST | `/api/admin/reports/schedules` | Email a report on a schedule _(audited, phase 2)_ | staff<br>`reports.schedules.manage` | `{ reportKey: string, savedViewId: uuid?, recipients: email[], frequency: enum(daily|weekly|monthly), dayOfWeek: int?, time: string, format: enum(pdf|csv) }` → `ReportSchedule` |
+| POST | `/api/admin/reports/schedules` | Email a report on a schedule _(audited, phase 2)_ | staff<br>`reports.schedules.manage` | `{ reportKey: string, savedViewId: uuid?, recipientStaffIds: uuid[], frequency: enum(daily|weekly|monthly), dayOfWeek: int?, time: string, format: enum(csv|xlsx) }` → `ReportSchedule` |
 | GET | `/api/admin/reports/schedules` | Report email schedules _(phase 2)_ | staff<br>`reports.schedules.manage` | `ReportSchedule[]` |
 | DELETE | `/api/admin/reports/schedules/{id}` | Stop a schedule _(audited, phase 2)_ | staff<br>`reports.schedules.manage` | 204 No content |
 | GET | `/api/admin/reports/read-models` | Read model health: lag, last event, rebuild state | staff<br>`reports.readmodels.manage` | `ReadModelStatus[]` |
-| POST | `/api/admin/reports/read-models/{key}/rebuild` | Rebuild a read model from the event log or source snapshots _(audited)_ | staff<br>`reports.readmodels.manage` | `{ reason: text }` → `ReadModelStatus` |
+| POST | `/api/admin/reports/read-models/{key}/rebuild` | Rebuild a read model from source snapshots _(audited)_ | staff<br>`reports.readmodels.manage` | `{ reason: text }` → `ReadModelStatus` |
 
 ## Types
 
@@ -97,7 +99,7 @@ Business reporting with stated meanings: metric definitions with a named owner a
 | relatedKeys | `string[]` e.g. gross sales ↔ sales after cancellations and refunds; marketplace sales ↔ marketplace fee income |
 | audience | `enum(staff|seller|both)` |
 | launchMeasure | `bool` Part of the small launch set (plan ch. 19) |
-| owner | `StaffRef` |
+| owner | `StaffRef?` Named owner; null until someone is named (seeded metrics start without one). Publishing needs an owner (OWNER_REQUIRED) |
 | status | `enum(draft|published|retired)` |
 | version | `int` |
 | effectiveFrom | `date` |
@@ -120,7 +122,7 @@ Business reporting with stated meanings: metric definitions with a named owner a
 | relatedKeys | `string[]?` |
 | audience | `enum(staff|seller|both)` |
 | launchMeasure | `bool?` |
-| ownerId | `uuid` |
+| ownerId | `uuid?` Staff member who owns the metric; may be named later (PUT /metrics/{key}/owner) |
 | effectiveFrom | `date?` |
 | changeNote | `text` |
 
@@ -171,7 +173,8 @@ Business reporting with stated meanings: metric definitions with a named owner a
 |---|---|
 | key | `string` |
 | label | `string` |
-| owner | `StaffRef` |
+| owner | `StaffRef?` Named owner of the group; null until someone is named |
+| ownerRole | `string` Role expected to own it, e.g. Finance Manager (shown while no person is named) |
 | reports | `ReportDefinition[]` |
 
 ### ReportQuery
@@ -244,11 +247,11 @@ Business reporting with stated meanings: metric definitions with a named owner a
 | id | `uuid` |
 | reportKey | `string` |
 | savedViewId | `uuid?` |
-| recipients | `email[]` |
+| recipients | `StaffRef[]` Staff only (decision D2); each must hold the report's group permission |
 | frequency | `enum(daily|weekly|monthly)` |
 | dayOfWeek | `int?` |
 | time | `string` |
-| format | `enum(pdf|csv)` |
+| format | `enum(csv|xlsx)` |
 | nextRunAt | `datetime` |
 | owner | `StaffRef` |
 | active | `bool` |
@@ -356,6 +359,8 @@ Business reporting with stated meanings: metric definitions with a named owner a
 | rows | `int` |
 | state | `enum(live|rebuilding|stale|failed)` |
 | rebuildProgressPct | `int?` |
+| rebuildable | `bool` False for read models kept from events only (refunds, returns, service): there is no event log to replay yet, so rebuild is refused |
+| rebuildNote | `string?` What a rebuild reads, e.g. order facts from orders, or why it is unavailable |
 
 ## Status flows
 
@@ -418,7 +423,7 @@ Accepting opens a new draft version of the metric for its owner.
 | related_keys | jsonb |
 | audience | text |
 | launch_measure | bool |
-| owner_staff_id | uuid |
+| owner_staff_id | uuid? (null until an owner is named) |
 | status | text |
 | version | int |
 | effective_from | date |
@@ -476,7 +481,7 @@ Indexes: `unique(metric_key, version)`
 |---|---|
 | key | text pk |
 | label | text |
-| owner_staff_id | uuid |
+| owner_staff_id | uuid? (null until an owner is named) |
 | position | int |
 
 **saved_views**
@@ -498,11 +503,11 @@ Indexes: `unique(metric_key, version)`
 | id | uuid pk |
 | report_key | text |
 | saved_view_id | uuid? |
-| recipients | jsonb |
+| recipients | jsonb (staff ids) |
 | frequency | text |
 | day_of_week | int? |
 | time | text |
-| format | text |
+| format | text (csv|xlsx) |
 | next_run_at | timestamptz |
 | owner_staff_id | uuid |
 | active | bool |
@@ -580,21 +585,21 @@ Indexes: `(requested_by_id, created_at desc)`, `(state, created_at)`
 
 Indexes: `(placed_at)`, `(paid_at)`, `(shipped_at)`, `(completed_at)`, `(seller_id, placed_at)`, `(product_id, placed_at)`
 
-**fact_refunds**
+**fact_refunds**: One row per refund and seller share (decision D5): a refund over several sellers' items is split by the items it names (payments.refund.sent items), the rest (shipping, unnamed amounts) proportionally to each seller's item amounts on the order
 
 | Column | Type |
 |---|---|
-| refund_id | uuid pk |
+| refund_id | uuid |
+| seller_id | uuid (OFFICIAL_STORE_ID for the Official Store) |
 | order_id | uuid |
 | owner_type | text (official|seller) |
-| seller_id | uuid? |
 | amount_minor | bigint |
 | currency | text |
 | reason | text? |
-| after_payout | bool |
+| after_payout | bool (a payout to this seller was paid after the item's delivery and before the refund, so the sale may already have been paid out) |
 | sent_at | timestamptz |
 
-Indexes: `(sent_at)`, `(seller_id, sent_at)`
+Indexes: `pk (refund_id, seller_id)`, `(sent_at)`, `(seller_id, sent_at)`
 
 **fact_returns**
 
@@ -721,7 +726,7 @@ Indexes: `unique(campaign_kind, campaign_id, day)`
 | `reports.metric.published` | A metric definition version is published | `{ metricKey: string, version: int, effectiveFrom: date }` | - |
 | `reports.export.requested` | An export job is created (audit and abuse monitoring) | `{ exportId: uuid, dataset: string, requestedBy: Actor, sellerId: uuid? }` | - |
 | `reports.export.ready` | An export file is ready (notifications tells the requester) | `{ exportId: uuid, requestedBy: Actor, expiresAt: datetime }` | notifications |
-| `reports.scheduled_report.ready` | Phase 2: a scheduled report file is ready (notifications emails the schedule's recipients) | `{ scheduleId: uuid, reportKey: string, reportTitle: string, exportId: uuid, format: enum(pdf|csv), periodLabel: string, recipients: email[], expiresAt: datetime }` | notifications |
+| `reports.scheduled_report.ready` | Phase 2: a scheduled report file is ready (notifications emails each staff recipient a link to their own export) | `{ scheduleId: uuid, reportKey: string, reportTitle: string, format: enum(csv|xlsx), periodLabel: string, deliveries: json[], skippedStaffIds: uuid[], expiresAt: datetime }` | notifications |
 
 | Consumes | From | Does |
 |---|---|---|
@@ -734,7 +739,7 @@ Indexes: `unique(campaign_kind, campaign_id, day)`
 | `orders.item.delivered` | orders | Delivered date |
 | `orders.order.completed` | orders | Completion date basis |
 | `orders.item.cancelled` | orders | Cancellations (by customer or seller) and cancelled amounts |
-| `payments.refund.sent` | payments | Refunds sent (refund date and amount); 'approved' refunds are never counted as sent |
+| `payments.refund.sent` | payments | Refunds sent (refund date and amount); 'approved' refunds are never counted as sent. One fact_refunds row per seller: the named items' amounts go to their sellers, the rest is split proportionally to each seller's item amounts on the order (decision D5); after_payout from the seller's paid payouts |
 | `returns.return.requested` | returns | fact_returns with reason |
 | `returns.return.inspected` | returns | Return outcome |
 | `inventory.stock.changed` | inventory | Stockout minutes per product |
@@ -742,7 +747,7 @@ Indexes: `unique(campaign_kind, campaign_id, day)`
 | `messaging.message.sent` | messaging | Response time per seller |
 | `support.case.opened` | support | Case backlog and complaint patterns |
 | `support.case.resolved` | support | Case backlog |
-| `finance.payout.paid` | finance | Completed payouts |
+| `finance.payout.paid` | finance | Completed payouts; also the paid-payout dates that decide fact_refunds.after_payout |
 | `finance.payout.failed` | finance | Failed payouts |
 | `finance.hold.placed` | finance | Held amounts |
 | `finance.hold.released` | finance | Held amounts |
@@ -793,6 +798,8 @@ Indexes: `unique(campaign_kind, campaign_id, day)`
 | `OWNER_REQUIRED` | 422 | A metric needs a named owner before it is published |
 | `METRIC_IN_USE` | 409 | A published report still uses this metric |
 | `DATASET_UNAVAILABLE` | 409 | The dataset is not in the export registry or its owner module is disabled |
+| `RECIPIENT_NOT_PERMITTED` | 422 | Scheduled report recipients must be active staff holding the report's permission. details.staffIds. |
+| `REBUILD_UNAVAILABLE` | 409 | This read model is kept from events only and cannot be rebuilt until an event log exists |
 
 ## Background jobs
 
@@ -801,7 +808,7 @@ Indexes: `unique(campaign_kind, campaign_id, day)`
 | `reports.run-exports` | every 1 min | Run queued export jobs in batches: call the owner module's exportRows(dataset, filters, principal, cursor) until nextCursor is empty (report results come from runReport), drop columns the requester may not see, write the file to media; publish reports.export.ready |
 | `reports.expire-exports` | hourly | Expire ready exports after exportLinkHours and delete files |
 | `reports.pull-daily` | daily 02:30 market time | Pull figures that have no event: search.zeroResultStats (unavailable searches), finance fee income per seller and day (finance.marketplaceIncomeByDay), advertising displays/clicks/dismissals and attributed purchases (advertising.dailyPerformance), inventory unit costs for Official Store items |
-| `reports.run-schedules` | every 15 min | Phase 2: run due schedules into export files and publish reports.scheduled_report.ready (notifications sends the emails) |
+| `reports.run-schedules` | every 15 min | Phase 2: run due schedules: re-check each staff recipient's permission, create one export job per remaining recipient (requested in their name) and publish reports.scheduled_report.ready (notifications sends the emails) |
 | `reports.check-lag` | every 5 min | Mark read models stale when their lag exceeds readModelMaxLagMinutes |
 
 ## Settings
@@ -830,6 +837,9 @@ Indexes: `unique(campaign_kind, campaign_id, day)`
 - Module export endpoints (orders, customers, sellers, workqueues, catalog, offers, inventory, returns, audit, trust) are shortcuts that call requestExport with their dataset key; POST /exports accepts the same keys directly, so the Export buttons on admin/returns, admin/finance, admin/payouts, admin/cases, admin/promotions, ops/inventory, ops/receiving, ops/dispatch, ops/return-inspection and ops/finance-checks need no endpoint of their own.
 - Phase 2: scheduled report emails and seller report exports (POST /api/seller/reports/exports on seller/reports; plan ch. 20 'better seller reports'). Seller list exports are phase 1: orders.seller.orders, offers.seller.offers, inventory.seller.stock, returns.seller.requests and finance.seller.ledger run through requestExport from their owner modules, because the seller Orders, Products, Inventory, Returns and Finance ledger lists are phase-1 seller operations (plan ch. 11 and 20) and their screens have Export. Launch measures are a small set (settings.launchMetrics); more are added when each has an owner.
 - dependsOn is empty as in the architecture doc; everything else is optional and degrades to `unavailable`.
+- Scheduled reports go to staff only (decision D2): recipients are staff ids with the report's permission, checked when the schedule is saved and at every run; each recipient gets an export job in their own name, so the download link works for them and nobody else. Formats are CSV and XLSX; PDF was removed.
+- Metric and group owners are nullable (decision D10): seeded metrics and groups start without a person (shown with the expected role) and are named with PUT /metrics/{key}/owner and PUT /groups/{key}/owner; a metric still needs an owner to be published.
+- Refunds over several sellers are split per seller (decision D5); see fact_refunds.
 
 ## GraphQL (read layer)
 

@@ -98,7 +98,8 @@ Who is told what, on which channel: notification topics for customers, sellers a
 | Field | Type |
 |---|---|
 | kind | `enum(customer|guest_email|seller|seller_member|staff_role|staff_member|external_email)` external_email: a contact outside Marketly (supplier, rights owner, scheduled-report address); email only, essential topics only |
-| accountId | `uuid?` Identity account (customer, seller member, staff member) |
+| accountId | `uuid?` Identity account (seller member, staff member; a customer only when no customerId is known) |
+| customerId | `uuid?` customer: the customers-module id (preferred over accountId; never an account id). notifications resolves the identity account and email through customers.getCustomer, so modules that only know an order's customerId (shipping, returns, payments) address the customer directly instead of the order email |
 | email | `email?` Guests (checkout email) and external_email recipients |
 | sellerId | `uuid?` seller: all members who should get this topic; seller_member: one member |
 | memberId | `uuid?` |
@@ -164,6 +165,8 @@ Who is told what, on which channel: notification topics for customers, sellers a
 | actionRequired | `bool` |
 | deadline | `Deadline?` |
 | resolvedAt | `datetime?` The work was done (shows 'Resolved Oct 7') |
+| state | `enum(open|resolved|expired)?` Action notices only (null for information notices): open; resolved = the work was done; expired = no longer needed (the record closed another way or the notice aged out), shown as 'No longer needed', never as Resolved |
+| expiredAt | `datetime?` |
 | routedTo | `RoutingInfo?` Staff notices only |
 
 ### InboxSummary
@@ -258,6 +261,7 @@ Who is told what, on which channel: notification topics for customers, sellers a
 | seller | `Topic[]` |
 | staff | `Topic[]` |
 | promotional | `Topic[]` |
+| external | `Topic[]` Email-only topics for contacts outside Marketly (suppliers, rights owners) |
 | stats | `DeliveryStats` |
 
 ### TemplateContent
@@ -327,7 +331,7 @@ Who is told what, on which channel: notification topics for customers, sellers a
 |---|---|
 | id | `uuid` |
 | topicKey | `string` |
-| audience | `enum(customer|seller|staff)` |
+| audience | `enum(customer|seller|staff|external)` external: email templates for suppliers and rights owners |
 | channel | `enum(email|in_app|sms|push)` |
 | language | `string` en-US (only locale at launch) |
 | live | `TemplateVersionSummary?` |
@@ -368,7 +372,7 @@ Who is told what, on which channel: notification topics for customers, sellers a
 | noticeId | `uuid?` |
 | topicKey | `string` |
 | channel | `enum(email|sms|push)` |
-| recipientKind | `enum(customer|guest_email|seller_member|staff_member)` |
+| recipientKind | `enum(customer|guest_email|seller_member|staff_member|external_email)` |
 | accountId | `uuid?` |
 | addressMasked | `string` |
 | status | `enum(queued|sending|sent|delivered|retrying|failed|bounced|complained|suppressed|skipped)` |
@@ -635,7 +639,7 @@ stateDiagram-v2
 
 Recipients are resolved at start from consent (customers.getMarketingConsent, seller member promotions group) minus suppressions; quiet hours apply to SMS and push.
 
-### Action notice (`Notice.resolvedAt`)
+### Action notice (`Notice.state`)
 
 ```mermaid
 stateDiagram-v2
@@ -644,7 +648,7 @@ stateDiagram-v2
   open --> expired: expire
 ```
 
-Only notices with actionRequired. resolve comes from the owning module (resolve(dedupeKey)) when the work is done; expire when the notice ages out. Read state is separate and per person.
+Only notices with actionRequired. resolve comes from the owning module (resolve(dedupeKey)) when the work is done and sets resolvedAt; expire (purge job: the record closed without the work, or the deadline passed long ago) sets expiredAt and never resolvedAt. Read state is separate and per person.
 
 ## Data (schema `notifications`)
 
@@ -723,6 +727,7 @@ Indexes: `unique (template_id, version)`, `(template_id) where status = 'draft'`
 | dedupe_key | text? |
 | resolved_at | timestamptz? |
 | resolve_note | text? |
+| expired_at | timestamptz? (action notices that ended without being resolved) |
 | created_at | timestamptz |
 | expires_at | timestamptz |
 
@@ -891,7 +896,7 @@ Indexes: `(status, scheduled_at)`
 | `notifications.topic.changed` | Channels of a topic are switched | `{ topicKey: string, channels: ChannelSetting[], by: Actor }` | - |
 | `notifications.broadcast.scheduled` | A broadcast is scheduled | `{ broadcastId: uuid, audience: string, scheduledAt: datetime, campaignId: uuid? }` | - |
 | `notifications.broadcast.sent` | A broadcast finishes sending | `{ broadcastId: uuid, stats: BroadcastStats, campaignId: uuid? }` | - |
-| `notifications.email_reply.received` | A valid email reply arrives for a case or conversation | `{ module: enum(support|messaging), refId: uuid, fromEmail: email, accountId: uuid?, text: text, attachmentAssetIds: uuid[], receivedAt: datetime }` | - |
+| `notifications.email_reply.received` | A valid email reply arrives for a case or conversation | `{ module: enum(support|messaging), refId: uuid, fromEmail: email, accountId: uuid?, text: text, attachmentAssetIds: uuid[], receivedAt: datetime }` | messaging, support |
 
 | Consumes | From | Does |
 |---|---|---|
@@ -908,10 +913,10 @@ Indexes: `(status, scheduled_at)`
 | `customers.account.closed` | customers | Stop all promotional sends, remove push devices, keep essential notices for open obligations only |
 | `customers.data_export.ready` | customers | Email the customer the export download link |
 | `orders.order.accepted` | orders | Customer: order accepted (confirmation only after acceptance). Seller: new order per seller group (orders group, members with order permission) |
-| `orders.item.cancelled` | orders | Customer: cancellation update for the item; seller: item cancelled |
+| `orders.item.cancelled` | orders | Customer: cancellation update for the item, skipped when the payload's notifyCustomer is false (staff cancelled without telling the customer); seller: item cancelled (always) |
 | `orders.item.delayed` | orders | Customer: delay notice with the new estimate and options (wait, cancel, contact support) |
 | `orders.cancellation.decided` | orders | Customer: result of a cancellation request |
-| `payments.payment.captured` | payments | Customer: payment accepted (combined with order accepted when simultaneous) |
+| `payments.payment.captured` | payments | Customer: payment accepted (combined with order accepted when simultaneous); for orders paid fully with store credit (amount 0, creditAmount set) the notice says paid with store credit |
 | `payments.payment.failed` | payments | Customer: payment failed, retry link |
 | `payments.payment.pending_check` | payments | Customer: payment result is being checked; link to order status |
 | `payments.refund.sent` | payments | Customer: refund sent, with destination and expected timing |
@@ -935,9 +940,9 @@ Indexes: `(status, scheduled_at)`
 | `support.case.message_added` | support | Customer or seller: case reply (email carries a reply-to token) |
 | `support.case.escalated` | support | Staff: escalated case to Customer Support Manager (or Returns Manager by category) |
 | `support.case.overdue` | support | Staff: case past its response target to the queue lead and backup |
-| `support.case.decided` | support | Customer and seller: decision and remedy, with the appeal deadline |
+| `support.case.decided` | support | Customer and seller: decision and remedy, with the appeal deadline. Nothing is sent when the payload's notified is false (staff decided without notifying the parties) |
 | `support.case.resolved` | support | Customer: case resolved |
-| `messaging.message.sent` | messaging | Recipient (customer or seller members with customer permission): new message, reply-to token in email |
+| `messaging.message.sent` | messaging | Recipient (customer or seller members with customer permission): new message, reply-to token in email. When the recipient seller is the Official Store (OFFICIAL_STORE_ID) the notice goes to staff instead (topic staff.official_store.message_received, Official Store Manager role through access, action required until the conversation is answered) |
 | `sellers.invitation.sent` | sellers | Email the invited business its invitation code and how to apply (code never stored in the delivery log) |
 | `sellers.application.submitted` | sellers | Staff: new application to Seller Manager |
 | `sellers.application.information_requested` | sellers | Applicant: information required, with deadline |
@@ -983,15 +988,23 @@ Indexes: `(status, scheduled_at)`
 | `settings.change.scheduled` | settings | Sellers (seller-visible changes): upcoming platform change with its effective date |
 | `audit.integrity.failed` | audit | Staff: urgent notice to Platform Administrator and Business Owner |
 | `reports.export.ready` | reports | Export ready to the requester (staff or seller member), including audit, orders and module list exports |
-| `reports.scheduled_report.ready` | reports | Phase 2: each recipient address (external_email, topic staff.report.scheduled, email only): the scheduled report with its download link and expiry |
-| `purchasing.purchase_order.sent` | purchasing | Supplier (external_email, topic supplier.purchase_order.sent, email only) when emailSupplier is true and supplierEmail is set: the purchase order with its lines, delivery location and the buyer's message; in-app copy to the Purchasing Manager role |
+| `reports.scheduled_report.ready` | reports | Phase 2: each staff recipient (staff_member, topic staff.report.scheduled, in-app and email): the scheduled report with a link to its export in the Admin Center (scheduled reports go to staff only; no outside addresses) |
+| `purchasing.purchase_order.sent` | purchasing | Supplier (external_email, topic supplier.purchase_order.sent, email only) when emailSupplier is true and supplierEmail is set: the purchase order with its lines, the delivery address from the payload's shipTo (location name and address) and the buyer's message; in-app copy to the Purchasing Manager role |
 | `wallet.credit.expiring` | wallet | Customer (account group, topic customer.credit.expiring): unused store credit amount and expiry date, with a link to shop |
-| `workqueues.day_end.prepared` | workqueues | Staff (topic staff.day_end.summary, to roleKeys): today's day-end review is ready with open and overdue counts and the due time; action required |
+| `workqueues.day_end.prepared` | workqueues | Staff (topic staff.day_end.summary, to roleKeys): reminder that today's day-end review is open, with open and overdue counts and the due time; action required (resolved when the review is completed). workqueues does not publish it once the review is completed |
 | `advertising.campaign.ending_soon` | advertising | Seller (members with advertising permission, topic seller.campaign.ending_soon) for seller campaigns; staff (ownerStaffId, else the Advertising Manager role; topic staff.campaign.ending_soon) for own and brand campaigns: ends on endsAt, renew or let it finish |
 | `content.article.review_due` | content | Staff (ownerStaffId, else the Content Manager role; topic staff.article.review_due): help article due for review, action required |
 | `reviews.moderation.decided` | reviews | Reporters (topic customer.review_report.decided, seller variant for sellers): reporterOutcome; author (topic customer.review.moderated, seller.content.moderated for responses and answers): kept, edited or removed with the reason and appealUntil |
 | `trust.report.resolved` | trust | Each reporter (customers and sellers in-app and email, rights owners by external_email; topic trust.report.resolved): the reporterOutcome text, never the reported party's details |
 | `trust.rights_report.received` | trust | Rights owner (external_email, topic rights_owner.report.received): confirmation with the TR reference and what happens next |
+| `trust.evidence.requested` | trust | The asked party: customer (topic customer.trust.evidence_requested, cases group) or seller owner (topic seller.trust.evidence_requested): Trust and Risk needs proof, what to send and by when; action required until trust records the answer (resolve by the request's dedupe key) |
+| `trust.appeal.decided` | trust | The appellant: customer (topic customer.trust.appeal_decided) or seller owner (topic seller.trust.appeal_decided): the appeal outcome and what changes (restriction lifted or kept) |
+| `payments.refund.destination_requested` | payments | Customer (by the payload's customerId, else the order email; topic customer.refund.destination_needed, returns_refunds group): the refund could not go back to the original payment method; choose where to receive it, with the deadline; action required |
+| `customers.closure.delayed` | customers | Customer (topic customer.account.closure_delayed, account group): the account closure is waiting because new obligations appeared (blockers listed), and when it is checked again |
+| `offers.offer.missing_items_stale` | offers | Ask the seller to review the offer's missing-items list after the product's box contents changed (topic seller.offer.missing_items_review, members with offers.offers.manage); Official Store offers go to staff (topic staff.offer.missing_items_review, Catalog Manager role) |
+| `inventory.stock.low_digest` | inventory | Daily digest of items at or below their reorder point: Official Store items to staff (topic staff.inventory.low_stock_digest, Inventory Manager role); each seller's own items to that seller (topic seller.stock.low_digest, members with the stock permission). Replaces one notice per item for non-urgent low stock |
+| `sellers.application.information_reminder` | sellers | Applicant (topic seller.application.information_reminder, owner only): reminder that requested information is still missing, with the deadline; same action notice as the original request |
+| `workqueues.day_end.completed` | workqueues | Staff (topic staff.day_end.completed, to the payload's roleKeys): the day-end summary (who completed it, open and overdue counts, items with notes); resolves the staff.day_end.summary action notices |
 
 ## In-process API (for other modules)
 
@@ -1039,12 +1052,12 @@ Indexes: `(status, scheduled_at)`
 
 | Job | Schedule | Does |
 |---|---|---|
-| `notifications.dispatch` | queue worker | Render and send queued deliveries per channel with provider rate limits; mark sent |
+| `notifications.dispatch` | every minute | Also started at once after notices are queued. Render and send queued deliveries per channel with provider rate limits; mark sent |
 | `notifications.retry` | every minute | Re-send retrying deliveries whose nextAttemptAt passed; give up after maxDeliveryAttempts (notifications.delivery.failed) |
 | `notifications.send-scheduled` | every minute | Send scheduled notices due now (dispatch deadline reminders 4 h before, drop-off reminders, approval due reminders) |
 | `notifications.send-broadcasts` | every minute | Start scheduled broadcasts, resolve consenting recipients, respect quiet hours for SMS and push, publish notifications.broadcast.sent |
-| `notifications.staff-digest` | daily at the start of business hours | Email the daily digest to staff who chose it |
-| `notifications.purge` | daily | Delete notices older than noticeRetentionMonths and delivery rows older than deliveryLogRetentionDays; expire unresolved action notices whose records closed |
+| `notifications.staff-digest` | daily 08:00 market time | Email the daily digest to staff who chose it (08:00 is the start of business hours; on closed days it waits for the next open day) |
+| `notifications.purge` | daily | Delete notices older than noticeRetentionMonths and delivery rows older than deliveryLogRetentionDays; mark unresolved action notices whose records closed as expired (expired_at, not resolved_at) |
 
 ## Settings
 

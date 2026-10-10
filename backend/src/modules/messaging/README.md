@@ -5,7 +5,7 @@
 Private service conversations linked to an order, item, return or case: customer with seller (or the Official Store), which Marketly support can join from a case, with attachments, read state, seller reply targets and overdue flags, and staff moderation. No promotional messages.
 
 - **Group:** After-sales and money · **Launch phase:** 1 · **Plan chapters:** 7, 11, 17
-- **Depends on:** [orders](../orders/README.md) · **Optional:** [media](../media/README.md), [sellers](../sellers/README.md), [support](../support/README.md), [returns](../returns/README.md), [notifications](../notifications/README.md), [trust](../trust/README.md), [audit](../audit/README.md), [customers](../customers/README.md), [shipping](../shipping/README.md)
+- **Depends on:** [orders](../orders/README.md) · **Optional:** [media](../media/README.md), [sellers](../sellers/README.md), [support](../support/README.md), [returns](../returns/README.md), [notifications](../notifications/README.md), [trust](../trust/README.md), [audit](../audit/README.md), [customers](../customers/README.md), [shipping](../shipping/README.md), [identity](../identity/README.md), [workqueues](../workqueues/README.md), [settings](../settings/README.md)
 
 ## Owns
 - Conversations between a customer and a seller (or the Official Store) about an order, item or return
@@ -28,7 +28,7 @@ Private service conversations linked to an order, item, return or case: customer
 | GET | `/api/store/messaging/conversations` | Inbox: conversations with sellers and Marketly support | shopper | Page<ConversationSummary> |
 | GET | `/api/store/messaging/conversations/{id}` | Conversation header: counterparty, response time, linked order or item and its status | shopper | `Conversation` |
 | GET | `/api/store/messaging/conversations/{id}/messages` | Messages, newest first (cursor for older) | shopper | Page<Message> |
-| POST | `/api/store/messaging/conversations` | Message a seller or Marketly support about an order, item or return | shopper | `StartConversationInput` → `{ conversation: Conversation, message: Message }` |
+| POST | `/api/store/messaging/conversations` | Message a seller, the Official Store or Marketly support about an order, item or return | shopper | `StartConversationInput` → `{ conversation: Conversation, message: Message }` |
 | POST | `/api/store/messaging/conversations/{id}/messages` | Send a message with optional photos or files | shopper | `MessageInput` → `Message` |
 | POST | `/api/store/messaging/conversations/{id}/read` | Mark messages read up to a message | shopper | `{ upToMessageId: uuid }` → 204 No content |
 | GET | `/api/store/messaging/unread-count` | Unread conversations for the header and account menu | shopper | `{ conversations: int, messages: int }` |
@@ -100,8 +100,8 @@ Private service conversations linked to an order, item, return or case: customer
 
 | Field | Type |
 |---|---|
-| kind | `enum(customer|seller|staff)` |
-| id | `string` |
+| kind | `enum(customer|guest|seller|staff)` guest: the buyer of a guest order; any guest session with access to the order acts as this participant |
+| id | `string` customer: customers-module id; guest: order:<orderId>; seller: seller id (OFFICIAL_STORE_ID for the Official Store); staff: staff account id |
 | name | `string` |
 | label | `string` e.g. Marketly Support |
 | joinedAt | `datetime` |
@@ -175,9 +175,9 @@ Private service conversations linked to an order, item, return or case: customer
 
 | Field | Type |
 |---|---|
-| with | `enum(seller|marketplace_support)` |
+| with | `enum(seller|official_store|marketplace_support)` official_store: about Official Store items in the order (answered by Marketly staff for the Official Store) |
 | orderId | `uuid` |
-| sellerId | `uuid?` Required for with = seller; must be a seller in the order |
+| sellerId | `uuid?` Required for with = seller; must be a seller in the order. Ignored for official_store (OFFICIAL_STORE_ID is used) |
 | orderItemId | `uuid?` |
 | returnId | `uuid?` |
 | caseId | `uuid?` |
@@ -216,6 +216,7 @@ Private service conversations linked to an order, item, return or case: customer
 |---|---|
 | targetHours | `int` |
 | averageReplyMinutes | `int?` |
+| medianReplyMinutes | `int?` Median first reply time in the period (reports' first_reply_minutes_p50, support's seller stats) |
 | repliedWithinTargetPct | `number?` |
 | awaitingReply | `int` |
 | overdue | `int` |
@@ -290,7 +291,7 @@ stateDiagram-v2
   archived --> open: reopen
 ```
 
-lock is a staff action with a reason (abuse, fraud); the thread stays readable. archive happens archiveAfterDays after the order completes; a new message about the same subject reopens it. A seller restriction never locks customer conversations about existing orders.
+lock is a staff action with a reason (abuse, fraud), or trust's lock_conversation enforcement (only that action; restrict_customer_messaging is executed by customers and checked when the customer writes); the thread stays readable. Reversing the enforcement unlocks the conversations it locked (locked_by_enforcement_id). archive happens archiveAfterDays after the order completes; a new message about the same subject reopens it. A seller restriction never locks customer conversations about existing orders.
 
 ### Seller reply (`Conversation.replyState`)
 
@@ -304,7 +305,7 @@ stateDiagram-v2
   overdue --> replied: sellerReplies
 ```
 
-Only customer–seller conversations have a reply state. reply_due_at = first unanswered customer message + sellerReplyTargetHours. Overdue conversations are highlighted in Seller Center and count in seller performance.
+Customer–seller and customer–Official Store conversations have a reply state (decision D-M1). reply_due_at = first unanswered customer message + sellerReplyTargetHours. Overdue seller conversations are highlighted in Seller Center and count in seller performance. For the Official Store, sellerReplies is a staff message, and while a conversation is awaiting_seller or overdue messaging keeps an official_store_reply work item open in workqueues (dedupe official_store_reply:<conversationId>, due at reply_due_at), resolved with resolveBySource when staff reply.
 
 ### Message report (`MessageReport.status`)
 
@@ -337,6 +338,7 @@ Actioning hides the message or locks the conversation; serious cases are referre
 | subject | jsonb |
 | status | text |
 | locked_reason | text? |
+| locked_by_enforcement_id | uuid? (trust enforcement that locked it; unlocked when that enforcement is reversed) |
 | reply_state | text |
 | reply_due_at | timestamptz? |
 | awaiting_since | timestamptz? |
@@ -344,7 +346,7 @@ Actioning hides the message or locks the conversation; serious cases are referre
 | last_message_at | timestamptz |
 | archive_after | timestamptz? |
 
-Indexes: `(customer_id, last_message_at desc)`, `(seller_id, reply_state, reply_due_at)`, `(order_id)`, `(case_id)`, `unique nulls not distinct (kind, customer_id, seller_id, application_id, order_id, order_item_id, return_id, case_id)`
+Indexes: `(customer_id, last_message_at desc)`, `(seller_id, reply_state, reply_due_at)`, `(order_id)`, `(case_id)`, `unique nulls not distinct (kind, customer_id, seller_id, application_id, order_id, order_item_id, return_id) where kind <> 'support'`, `unique nulls not distinct (kind, customer_id, order_id, case_id) where kind = 'support'`
 
 **participants**
 
@@ -414,6 +416,16 @@ Indexes: `(status, created_at)`
 
 Indexes: `(seller_id)`
 
+**conversation_aliases**: Ids of duplicate conversations merged into another (dedupe migration); lookups by an old id (notifications links, support case links) resolve to the kept conversation
+
+| Column | Type |
+|---|---|
+| old_id | uuid pk |
+| conversation_id | uuid → conversations |
+| merged_at | timestamptz |
+
+Indexes: `(conversation_id)`
+
 **staff_access_log**: Each time staff open a private conversation, with the reason
 
 | Column | Type |
@@ -431,23 +443,27 @@ Indexes: `(conversation_id, at)`
 
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
-| `messaging.message.sent` | A participant sends a message (notifications sends the in-app and email notice) | `{ messageId: uuid, conversationId: uuid, authorKind: string, recipientKinds: string[], customerId: uuid?, sellerId: uuid?, orderId: uuid? }` | notifications, reports, sellers, workqueues |
-| `messaging.conversation.started` | A new conversation is created | `{ conversationId: uuid, kind: string, orderId: uuid?, sellerId: uuid? }` | - |
-| `messaging.reply.overdue` | A seller misses the reply target | `{ conversationId: uuid, sellerId: uuid, orderId: uuid?, dueAt: datetime }` | workqueues |
+| `messaging.message.sent` | A participant sends a message (notifications sends the in-app and email notice) | `{ messageId: uuid, conversationId: uuid, conversationKind: enum(order|support|staff_seller), authorKind: enum(customer|guest|seller|staff|system), recipientKinds: enum(customer|guest|seller|official_store|staff)[], customerId: uuid?, contactEmail: email?, applicantAccountId: uuid?, sellerId: uuid?, officialStore: bool, staffIds: uuid[], orderId: uuid?, caseId: uuid? }` | notifications, reports, sellers, workqueues |
+| `messaging.conversation.started` | A new conversation is created | `{ conversationId: uuid, kind: string, orderId: uuid?, customerId: uuid?, sellerId: uuid?, officialStore: bool, applicationId: uuid? }` | - |
+| `messaging.reply.overdue` | A seller or the Official Store misses the reply target | `{ conversationId: uuid, sellerId: uuid, officialStore: bool, orderId: uuid?, dueAt: datetime }` | workqueues |
 | `messaging.message.reported` | A message is reported | `{ reportId: uuid, messageId: uuid, reason: string }` | trust |
-| `messaging.conversation.locked` | Staff lock a conversation | `{ conversationId: uuid, reason: text }` | - |
+| `messaging.conversation.locked` | Staff lock a conversation, a message report is actioned with a lock, or a trust lock_conversation enforcement is executed | `{ conversationId: uuid, reason: text, lockedBy: Actor, trustEnforcementId: uuid?, customerId: uuid?, sellerId: uuid? }` | trust |
+| `messaging.conversation.unlocked` | Staff unlock a conversation or the trust enforcement that locked it is reversed | `{ conversationId: uuid, reason: text, unlockedBy: Actor, trustEnforcementId: uuid? }` | - |
 
 | Consumes | From | Does |
 |---|---|---|
-| `support.case.opened` | support | If the case concerns an order conversation, add Marketly Support as a participant and post a system note |
+| `support.case.opened` | support | If the case concerns an order conversation, add Marketly Support as a participant (the case owner, ownerStaffId, when set) and post a system note |
 | `orders.order.completed` | orders | Schedule archiving of the order's conversations after archiveAfterDays |
-| `trust.enforcement.recorded` | trust | Lock conversations named in an abuse enforcement |
+| `trust.enforcement.recorded` | trust | Only action lock_conversation: lock the conversations named in targets (conversation, or the conversation of a message), record the enforcement id and publish messaging.conversation.locked with trustEnforcementId. Other actions (restrict_customer_messaging is customers') are ignored |
+| `trust.enforcement.reversed` | trust | Action lock_conversation: unlock the conversations that enforcement locked (locked_by_enforcement_id) unless staff locked them again since; publish messaging.conversation.unlocked |
+| `notifications.email_reply.received` | notifications | module messaging: append the reply to the conversation (refId = conversation id) as a message from the participant whose email matches fromEmail (customer, guest order contact or seller member); other senders are dropped. Attachments come as media assets. Locked conversations refuse it |
+| `customers.account.closed` | customers | Anonymise the customer's side: participant name and message author labels become Former customer; message text stays for the seller's service record, contact details already masked; the customer's own attachments are released |
 
 ## In-process API (for other modules)
 
 | Function | Signature | Used by |
 |---|---|---|
-| findOrStartForOrder | `(input: { orderId: uuid, sellerId: uuid, orderItemId?: uuid, returnId?: uuid }) => Conversation`<br>One conversation per customer, seller and subject; reused when it exists | orders, returns |
+| findOrStartForOrder | `(input: { orderId: uuid, sellerId: uuid, orderItemId?: uuid, returnId?: uuid }) => Conversation`<br>One conversation per customer, seller and subject; reused when it exists. sellerId is OFFICIAL_STORE_ID for the Official Store | orders, returns |
 | postSystemNote | `(conversationId: uuid, text: string) => Message`<br>e.g. Marketly Support joined from case CS-261005-3381 | support, returns |
 | addStaffParticipant | `(conversationId: uuid, staff: Actor, caseId: uuid) => Conversation`<br>Support joins an order conversation when a case is opened | support |
 | sellerResponseStats | `(sellerId: uuid, range: DateRange) => ResponseStats`<br>Response time for seller performance and reports | sellers, reports, graphql |
@@ -459,6 +475,7 @@ Indexes: `(conversation_id, at)`
 | listInbox | `(participant: Actor, filter: { unreadOnly?: bool, replyState?: string }, page: PageInput) => Page<ConversationSummary>`<br>Inbox of a customer or seller; the seller inbox lists overdue first | graphql |
 | getConversation | `(participant: Actor, conversationId: uuid) => Conversation | null`<br>Conversation header and messages for a participant | graphql |
 | customerConversationSummaries | `(customerIds: uuid[]) => map<CustomerConversationSummary>`<br>Counts, last message time and counterparties of each customer's conversations for the customer 360; never message content | customers, graphql |
+| exportCustomerData | `(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]`<br>The customer's conversations and the messages they can see (no hidden messages, internal notes or other parties' contact details) for the personal data export. Export hook called by customers.build-data-exports | customers |
 
 ## Permissions
 
@@ -474,6 +491,7 @@ Indexes: `(conversation_id, at)`
 | Code | Status | Meaning |
 |---|---|---|
 | `CONVERSATION_LOCKED` | 409 | The conversation is locked or archived for new messages. details.reason. |
+| `MESSAGING_RESTRICTED` | 403 | The customer's account is restricted from messaging sellers (replies inside a case stay possible). details.reason, details.endsAt. |
 | `ORDER_NOT_ELIGIBLE` | 422 | The caller cannot message about this order (not their order, or seller not in the order). |
 
 ## Background jobs
@@ -501,7 +519,10 @@ Indexes: `(conversation_id, at)`
 - Promotional messages are not allowed here; marketing goes through notifications with separate preferences (plan ch. 15, 19).
 - Product questions and answers are public and live in reviews; order-specific questions belong here.
 - clientMessageId makes sends safe to retry from the Android app without duplicates.
-- Guests can message about orders reached through guest order access (auth shopper).
+- Guests can message about orders reached through guest order access (auth shopper). The key is the order, not the session (decision D-M2): a conversation on a guest order has customer_id null and a guest participant (id order:<orderId>) created with the conversation, so any later session with identity.hasGuestOrderAccess to the order sees it with its read state; guest_session_id only records the session that started it.
+- Official Store conversations (decision D-M1): customers reach the Official Store with with = official_store; seller_id is OFFICIAL_STORE_ID, the reply state and reply target apply as for sellers, staff answer from admin (sendStaffMessage, filter official_awaiting), messaging keeps an official_store_reply work item per waiting conversation, and messaging.message.sent with officialStore=true drives the staff notification topic for Official Store messages.
+- Personal data: exportForCustomer supplies the Messages section of the customer data export; customers.account.closed anonymises the customer's side of their conversations.
+- Conversation identity: case_id is a link, not part of the key, for order and staff conversations (a case can be opened on an existing conversation later); only support-kind conversations are keyed by case. Merging duplicates keeps the oldest conversation, moves messages and participants, recomputes reply_state, reply_due_at and unread counts from the merged messages, and records each removed id in conversation_aliases.
 
 ## GraphQL (read layer)
 

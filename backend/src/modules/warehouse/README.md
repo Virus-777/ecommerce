@@ -409,6 +409,7 @@ stateDiagram-v2
   packed --> dispatched: dispatch
   picking --> on_hold: hold
   packing --> on_hold: hold
+  picked --> on_hold: hold
   on_hold --> picking: resume
   awaiting_pick --> cancelled: cancel
   picking --> cancelled: cancel
@@ -416,7 +417,7 @@ stateDiagram-v2
   on_hold --> cancelled: cancel
 ```
 
-startPicking when its wave starts. hold on a shortage or damage report: the order stays in the wave and is not packed partly. resume on inventory.discrepancy.resolved (reallocated) or by staff. cancel only when every line is cancelled (orders.item.cancelled); single cancelled lines are removed and picked units go back to their bin. dispatch on shipping.shipment.dispatched.
+startPicking when its wave starts. hold on a shortage or damage report (also one found after every line was picked, before packing starts): the order stays in the wave and is not packed partly. resume goes back to picking; lines already picked stay picked, so finishPicking follows once the replacement unit is picked. resume on inventory.discrepancy.resolved (reallocated) or by staff. cancel only when every line is cancelled (orders.item.cancelled); single cancelled lines are removed and picked units go back to their bin. dispatch on shipping.shipment.dispatched.
 
 ### Package (`Package.status`)
 
@@ -674,6 +675,7 @@ Indexes: `(status, expected_by)`, `(return_id)`, `(tracking_number)`
 | Consumes | From | Does |
 |---|---|---|
 | `orders.order.accepted` | orders | Create a fulfillment for the order's Official Store seller group (lines carry stock item ids from the purchase snapshot and ship-by from shipping) |
+| `orders.item.split` | orders | A line was split (partial cancel, shipment or return; decision S-D1): split the fulfillment line of itemId so newItemId gets its own line with quantity units (picked units stay on the original line first), so later cancel and dispatch events that name either item find their line. Idempotent per newItemId |
 | `orders.item.cancelled` | orders | Cancel the line; if already picked, return units to the bin; if packed, flag the package to be reopened |
 | `inventory.discrepancy.resolved` | inventory | Resume a held fulfillment when the shortage or damage was reallocated |
 | `purchasing.receipt.recorded` | purchasing | Create put-away tasks for received units (damaged units to a quarantine bin) |
@@ -752,6 +754,8 @@ Indexes: `(status, expected_by)`, `(return_id)`, `(tracking_number)`
 - Return receipt: warehouse scans the parcel in and hands it over; returns owns inspection, condition and outcome proposal; inventory records the stock outcome; finance approves refunds. Receiving calls returns.recordWarehouseReceipt in-process (returns publishes returns.return.received); warehouse.return_parcel.received is for work queues and reports.
 - Receiving labels (GET /putaway-tasks/labels) are rendered here from the put-away tasks of a purchasing receipt: SKU barcode, product label and suggested bin. Carrier service options at packing come from shipping.quoteLabelOptions, so the rule 'only services that keep the customer's promise' is the same one updatePackage enforces.
 - Bins live here; inventory keeps quantities per location (site) and shows the primary bin code it learns from warehouse.bin.assigned.
+- Damage photos (DamageReport.photoIds) and return parcel photos are attached with media.attach (usage kind inspection_photo, refId the fulfillment or parcel id) before they are passed on, so the media orphan sweep never deletes them; inventory attaches the same photos to its discrepancy.
+- Item scans match the SKU label or the variant GTIN (inventory.getStockItems returns gtin from catalog).
 
 ## GraphQL (read layer)
 

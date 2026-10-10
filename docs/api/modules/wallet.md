@@ -3,7 +3,7 @@
 Customer store credit with an auditable ledger (refunds to credit, goodwill credit within approval limits, price adjustments, use at checkout, expiry), gift cards, and a placeholder for loyalty rewards. Checkout and payments use the balance through the in-process public API.
 
 - **Group:** Later phases · **Launch phase:** 3 · **Plan chapters:** 15, 7, 13, 6
-- **Depends on:** [customers](customers.md), [payments](payments.md) · **Optional:** [access](access.md), [support](support.md), [orders](orders.md), [notifications](notifications.md), [finance](finance.md), [audit](audit.md)
+- **Depends on:** [customers](customers.md), [payments](payments.md) · **Optional:** [access](access.md), [support](support.md), [orders](orders.md), [notifications](notifications.md), [finance](finance.md), [audit](audit.md), [media](media.md)
 
 ## Owns
 - Store credit accounts and balance, made of credit lots with their source and expiry
@@ -40,7 +40,8 @@ Customer store credit with an auditable ledger (refunds to credit, goodwill cred
 | GET | `/api/admin/wallet/goodwill` | Goodwill grants for review | staff<br>`wallet.credit.view` | Page<GoodwillGrant> |
 | POST | `/api/admin/wallet/goodwill/{id}/reverse` | Reverse an unused goodwill grant _(idempotent, audited)_ | staff<br>`wallet.credit.correct` | `{ reason: text }` → `GoodwillGrant` |
 | POST | `/api/admin/wallet/customers/{customerId}/corrections` | Correct a balance (positive or negative) with a reason _(idempotent, audited)_ | staff<br>`wallet.credit.correct` | `{ amount: Money, reason: text, reference: string? }` → `LedgerEntry` |
-| POST | `/api/admin/wallet/gift-cards` | Issue a batch of gift cards _(idempotent, audited)_ | staff<br>`wallet.gift_cards.manage` | `GiftCardBatchInput` → `{ batchId: uuid, count: int, total: Money, codesFileId: uuid }` |
+| POST | `/api/admin/wallet/gift-cards` | Issue a batch of gift cards _(idempotent, audited)_ | staff<br>`wallet.gift_cards.manage` | `GiftCardBatchInput` → `{ batchId: uuid, count: int, total: Money, status: enum(issued|pending_approval), codesFileId: uuid?, codesAvailableUntil: datetime? }` |
+| GET | `/api/admin/wallet/gift-cards/batches/{id}/codes` | Download a batch's gift card codes once _(audited)_ | staff<br>`wallet.gift_cards.manage` | `{ batchId: uuid, codes: string[], count: int, deliveredAt: datetime }` |
 | GET | `/api/admin/wallet/gift-cards` | Gift cards | staff<br>`wallet.gift_cards.manage` | Page<GiftCard> |
 | POST | `/api/admin/wallet/gift-cards/{id}/void` | Void a gift card (lost, fraud) _(idempotent, audited)_ | staff<br>`wallet.gift_cards.manage` | `{ reason: text }` → `GiftCard` |
 
@@ -208,9 +209,10 @@ stateDiagram-v2
   held --> captured: capture
   held --> released: release
   held --> released: expire
+  held --> held: extend
 ```
 
-A hold never outlives holdTtlMinutes; captured credit returns only through creditRefund.
+A hold expires after holdTtlMinutes unless extended: while its payment is pending check, payments extends it (extendHold) up to pendingHoldMaxHours after it was made, so a slow bank answer never turns into INSUFFICIENT_CREDIT at capture. Captured credit returns only through creditRefund.
 
 ### Goodwill grant (`GoodwillGrant.state`)
 
@@ -302,6 +304,30 @@ Indexes: `(customer_id, at)`, `unique (idempotency_key)`, `unique (refund_id, ki
 | expires_at | timestamptz |
 | idempotency_key | text unique |
 
+**gift_card_batches**: Issued batches. The plain codes are kept only encrypted (secret-store key) until the issuer downloads them once or giftCardCodesTtlHours pass, then cleared; cards keep only code hashes
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| count | int |
+| amount | bigint |
+| currency | text |
+| purpose | text |
+| expires_at | timestamptz? |
+| reason | text |
+| cost_center | text? |
+| status | text (pending_approval|issued|rejected) |
+| approval_request_id | uuid? |
+| codes_ciphertext | text? |
+| codes_file_id | uuid? (private media document, usage gift_card_codes, when media is enabled) |
+| codes_delivered_at | timestamptz? |
+| codes_expire_at | timestamptz? |
+| created_by | text |
+| idempotency_key | text unique |
+| created_at | timestamptz |
+
+Indexes: `(status, created_at)`, `(codes_expire_at) where codes_ciphertext is not null`
+
 **goodwill_grants**
 
 | Column | Type |
@@ -362,10 +388,10 @@ Indexes: `(state, created_at)`, `(customer_id, created_at)`
 |---|---|---|---|
 | `wallet.credit.granted` | Credit is added (refund to credit, goodwill, price adjustment, gift card) | `{ customerId: uuid, entryId: uuid, kind: enum(refund_to_credit|order_refund_returned|goodwill|price_adjustment|gift_card_redeemed), amount: Money, chargedTo: enum(platform|seller)?, sellerId: uuid?, caseId: uuid?, orderId: uuid? }` | finance |
 | `wallet.credit.used` | A hold is captured on an accepted order | `{ customerId: uuid, orderId: uuid, amount: Money }` | finance |
-| `wallet.credit.expired` | A lot expires unused | `{ customerId: uuid, lotId: uuid, amount: Money }` | - |
+| `wallet.credit.expired` | A lot expires unused | `{ customerId: uuid, entryId: uuid, lotId: uuid, source: enum(refund|goodwill|price_adjustment|gift_card|correction), amount: Money }` | finance |
 | `wallet.credit.expiring` | A lot with an unused balance reaches one of expiryReminderDays before it expires | `{ customerId: uuid, lotId: uuid, amount: Money, expiresAt: datetime, daysLeft: int }` | notifications |
-| `wallet.credit.reversed` | A goodwill grant is reversed | `{ customerId: uuid, grantId: uuid, amount: Money, reason: text }` | - |
-| `wallet.credit.corrected` | Staff correct a balance | `{ customerId: uuid, entryId: uuid, amount: Money, reason: text }` | - |
+| `wallet.credit.reversed` | A goodwill grant is reversed | `{ customerId: uuid, entryId: uuid, grantId: uuid, grantEntryId: uuid, amount: Money, chargedTo: enum(platform|seller), sellerId: uuid?, caseId: uuid?, orderId: uuid?, reason: text }` | finance |
+| `wallet.credit.corrected` | Staff correct a balance | `{ customerId: uuid, entryId: uuid, amount: Money, reason: text }` | finance |
 | `wallet.goodwill.decided` | A goodwill grant waiting for approval is granted or rejected | `{ grantId: uuid, customerId: uuid, status: enum(granted|rejected), amount: Money, caseId: uuid? }` | support |
 | `wallet.gift_card.issued` | A gift card batch is issued | `{ batchId: uuid, count: int, total: Money, purpose: string }` | - |
 | `wallet.gift_card.redeemed` | A gift card is added to store credit | `{ giftCardId: uuid, customerId: uuid, amount: Money }` | - |
@@ -385,6 +411,8 @@ Indexes: `(state, created_at)`, `(customer_id, created_at)`
 | holdCredit | `(customerId: uuid, quoteId: uuid, amount: Money, idempotencyKey: string) => CreditHold`<br>Reserve credit for a quote; earliest-expiring lots first. Fails with INSUFFICIENT_CREDIT. | checkout, payments |
 | captureHold | `(holdId: uuid, orderId: uuid) => CreditHold`<br>Turn a hold into a use when the order is accepted. | payments, checkout |
 | releaseHold | `(holdId: uuid) => CreditHold`<br>Release a hold on payment failure or quote expiry. | payments, checkout |
+| extendHold | `(holdId: uuid, until: datetime) => CreditHold`<br>Keep a held credit hold alive while its payment is pending check (payments calls it from the status-check job until the result is known), so the hold does not expire into INSUFFICIENT_CREDIT at capture. Never shortens a hold; capped at pendingHoldMaxHours after the hold was made; a captured or released hold is returned unchanged. | payments, checkout |
+| getLiabilityTotal | `(asOf?: datetime) => { available: Money, held: Money, accounts: int }`<br>Total store credit outstanding (available plus held) over all accounts, for finance's daily store_credit check against its liability | finance |
 | creditRefund | `(input: { customerId: uuid, refundId: uuid, orderId: uuid, amount: Money, reason: string }, idempotencyKey: string) => LedgerEntry`<br>Refund to store credit (customer's choice) or return the credit part of a refunded order. Called by returns for return refunds to store credit and by payments for the refunds it executes (other origins with destination store_credit, and the credit part of a mixed tender). Idempotent per refundId; the payment tender split decides how much goes back to credit. | payments, returns |
 | grantGoodwill | `(input: GoodwillInput, actor: Actor, idempotencyKey: string) => GoodwillGrant`<br>Goodwill credit from a support case or order; above the actor's limit it becomes pending approval. | support |
 | getCustomerWallet | `(customerId: uuid) => CustomerWalletAdmin`<br>Staff view of a customer's credit: balance, lots, goodwill in the last 30 days against the per-customer limit, and pending grants (GET /admin/wallet/customers/{customerId}). | graphql |
@@ -416,14 +444,15 @@ Checked through the access module (limits per role, second reviewer).
 | `GOODWILL_LIMIT_EXCEEDED` | 409 | The customer's 30-day goodwill limit would be exceeded. |
 | `CREDIT_ALREADY_USED` | 409 | The credit was already used and cannot be reversed. |
 | `GIFT_CARD_INVALID` | 422 | Unknown, voided, expired or already redeemed gift card. |
+| `GIFT_CARD_CODES_UNAVAILABLE` | 410 | The batch's codes were already downloaded, have expired (giftCardCodesTtlHours) or the batch is not issued yet. Void the batch and issue a new one if the codes were lost. |
 
 ## Background jobs
 
 | Job | Schedule | Does |
 |---|---|---|
 | `wallet.expire-lots` | daily 00:30 market time | Expire lots past expiresAt (wallet.credit.expired); publish wallet.credit.expiring for lots expiryReminderDays (30 and 7) days before expiry, once per lot and reminder |
-| `wallet.release-stale-holds` | every 1 min | Release holds past expiresAt |
-| `wallet.balance-check` | daily | Verify every account balance equals the ledger sum; flag differences to Finance checks |
+| `wallet.release-stale-holds` | every 1 min | Release holds past expiresAt (an extended hold's expiresAt is the extended time); delete undelivered gift card codes past giftCardCodesTtlHours |
+| `wallet.balance-check` | daily 05:00 market time | Verify every account balance equals the ledger sum; report each difference to Finance's daily check with finance.recordExternalDifference (check store_credit, key = customer id + date; expected = ledger sum, actual = balance) when finance is enabled, otherwise log it |
 
 ## Settings
 
@@ -433,6 +462,8 @@ Checked through the access module (limits per role, second reviewer).
 | expiryReminderDays | `[30,7]` | json | Days before a lot expires when the customer is reminded (wallet.credit.expiring) |
 | goodwillMaxPerCustomer30Days | `{"amount":10000,"currency":"USD"}` | money, 0–…, approval: business owner | Goodwill a customer can receive in 30 days before Finance approval is always needed |
 | holdTtlMinutes | `30` | duration, minutes, 1–… | Checkout hold lifetime |
+| pendingHoldMaxHours | `48` | duration, hours, 1–168 | Longest a hold can be extended while its payment is pending check (extendHold), counted from when it was made |
+| giftCardCodesTtlHours | `24` | duration, hours, 1–168, approval: second reviewer | How long the issuer can download a batch's plain gift card codes before they are deleted |
 | giftCardsEnabled | `false` | bool, approval: business owner | Gift cards are a later service |
 | loyaltyEnabled | `false` | bool, approval: business owner | Loyalty experiment (phase 4) |
 
@@ -440,7 +471,9 @@ Checked through the access module (limits per role, second reviewer).
 - Phase 3 (plan ch. 15 'later services'; ch. 7 'Coupons, Credits when supported'). The store-credit part of account/coupons and the 'Use my Marketly credit' checkbox in checkout use this module when enabled.
 - Money moves only through the ledger; every write is idempotent (refundId, Idempotency-Key) so a retry never credits twice.
 - Store credit used at checkout is a payment tender: payments records the tender split, and a later refund returns the credit part through creditRefund before any card refund.
-- Goodwill funded by a seller (e.g. late dispatch) is posted to seller earnings by finance from wallet.credit.granted with chargedTo=seller; platform goodwill is a company cost.
+- Goodwill funded by a seller (e.g. late dispatch) is posted to seller earnings by finance from wallet.credit.granted with chargedTo=seller; platform goodwill is a company cost. Reversing a grant publishes wallet.credit.reversed with grantEntryId, chargedTo and sellerId so finance credits the seller back and reduces the liability; expiries and corrections carry their ledger entry id (entryId) for the same reason.
+- Gift card codes: plain codes exist only at issue time. They are kept encrypted on the batch (gift_card_batches.codes_ciphertext) until the issuer downloads them once (GET /gift-cards/batches/{id}/codes) or giftCardCodesTtlHours pass; with media enabled they are also written as a private media document (usage gift_card_codes, owner the batch) returned as codesFileId. Nothing keeps codes in process memory.
+- Balance differences: wallet.balance-check reports every account whose balance differs from its ledger sum to finance (recordExternalDifference, check store_credit); finance also compares its liability with getLiabilityTotal each day.
 - Granting access is not financial authority: goodwill and corrections use approval limits from access, never the permission alone.
 - dependsOn follows the architecture doc (customers, payments); access is optional only so the module can boot alone in tests — production requires it for limits.
 
