@@ -6,6 +6,7 @@
 import { sql } from 'kysely';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { m0002Pass3SeedPermissions } from '../infra/postgres/migrations/0002_pass3_seed_permissions.js';
+import { m0003Pass4SeedAuditView } from '../infra/postgres/migrations/0003_pass4_seed_audit_view.js';
 import { accessFixture, usd, type Fixture } from './fixture.js';
 
 let f: Fixture;
@@ -98,6 +99,17 @@ describe('seeded permissions', () => {
     expect(await permissionsOf('catalog_manager')).toContain('offers.offers.remove');
     // running it again changes nothing
     await sql.raw(m0002Pass3SeedPermissions.sql!).execute(f.app.kernel.database.kysely);
+  });
+
+  it('pass 4: the Platform Administrator reads the action history (fresh seed and migration 0003 on older installs)', async () => {
+    expect(await permissionsOf('platform_administrator')).toContain('audit.entries.view');
+    expect(await permissionsOf('business_owner')).toContain('audit.entries.view');
+    expect(await permissionsOf('finance_manager')).not.toContain('audit.entries.view');
+    const pa = await f.roleId('platform_administrator');
+    await f.db.deleteFrom('role_permissions').where('role_id', '=', pa).where('permission_key', '=', 'audit.entries.view').execute();
+    await sql.raw(m0003Pass4SeedAuditView.sql).execute(f.app.kernel.database.kysely);
+    expect(await permissionsOf('platform_administrator')).toContain('audit.entries.view');
+    await sql.raw(m0003Pass4SeedAuditView.sql).execute(f.app.kernel.database.kysely); // idempotent
   });
 });
 
