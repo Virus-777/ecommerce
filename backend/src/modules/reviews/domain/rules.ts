@@ -7,7 +7,7 @@ import type { ModerationReason, RatingBucket } from '../../../spec/reviews.js';
 
 /** The Official Store's seller id (spec constant) where a column needs a seller id (product_reviews.seller_id, seller_feedback.seller_id …) */
 export { OFFICIAL_STORE_ID };
-export const OFFICIAL_STORE_NAME = 'Marketly Official Store';
+export { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 /** Moderator id of decisions taken by the system or Trust and Risk (moderation_decisions.moderator_id is required) */
 export const SYSTEM_MODERATOR_ID = '00000000-0000-0000-0000-000000000000';
 

@@ -138,6 +138,17 @@ export class Core {
     }
   }
 
+  /**
+   * Who is told about a new question: the sellers with an active offer on the product, and whether the Official
+   * Store has one (its questions go to staff). Offers off or failing: nobody beyond the asker's own notice.
+   */
+  async questionAudience(p: EventMap['reviews.question.asked']): Promise<EventMap['reviews.question.asked']> {
+    const page = await this.optional('offers', (o) => o.listOffersAdmin({ productId: p.productId, status: ['active'] }, { limit: 100 }));
+    const offers = page?.items ?? [];
+    const sellerIds = [...new Set(offers.filter((o) => o.ownerType === 'seller' && o.sellerId && !isOfficial(o.sellerId)).map((o) => o.sellerId!))];
+    return { ...p, sellerIds, officialStore: offers.some((o) => o.ownerType === 'official') };
+  }
+
   /* ---------------------------------------------------------------- lookups */
 
   /** Products by id (catalog); unknown products are missing from the map */
@@ -396,7 +407,10 @@ export class Core {
 
   /** After the commit: events, rating changes and photo takedowns, in that order */
   async flush(fx: Effects, by: By) {
-    for (const e of fx.events) this.publish(e.name as OwnEvent, e.payload as never, by);
+    for (const e of fx.events) {
+      const payload = e.name === 'reviews.question.asked' ? await this.questionAudience(e.payload as EventMap['reviews.question.asked']) : e.payload;
+      this.publish(e.name as OwnEvent, payload as never, by);
+    }
     for (const [productId, r] of fx.productRatings) this.publish('reviews.rating.changed', { productId, sellerId: null, average: r.average, count: r.count }, by);
     if (fx.sellers.size) {
       const since = fx.sellerSince ?? (await this.sellerPeriodStart());

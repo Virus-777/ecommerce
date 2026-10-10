@@ -9,7 +9,9 @@ export const productReviewMachine = createStateMachine("Product review", spec.st
 export const sellerFeedbackMachine = createStateMachine("Seller feedback", spec.stateMachines["Seller feedback"]);
 
 /** Answer: Answer.status. Answers passing the automatic checks publish at once; held ones (links, medical claims, off-platform offers) wait for review. Staff answers can require a second check (setting). */
-export const answerMachine = createStateMachine("Answer", spec.stateMachines["Answer"]);
+export const questionMachine = createStateMachine("Question", spec.stateMachines["Question"]);
+
+export const answerMachine =createStateMachine("Answer", spec.stateMachines["Answer"]);
 
 /** Seller response: SellerResponse.status. One response per review or feedback. Rule check blocks names beyond what the customer shows, addresses, order details, offers of refunds or gifts for changing feedback, links, contact details and insults. Editable until editableUntil (responseEditDays). */
 export const sellerResponseMachine = createStateMachine("Seller response", spec.stateMachines["Seller response"]);

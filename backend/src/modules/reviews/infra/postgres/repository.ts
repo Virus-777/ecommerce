@@ -1,6 +1,7 @@
 import { sql, type Kysely } from 'kysely';
 import { decodeCursor, encodeCursor, paginate, type PageRequest } from '../../../../kernel/lib/pagination.js';
 import type * as common from '../../../../spec/common.js';
+import type { Inbox } from '../../../../kernel/events/inbox.js';
 import type { ReviewsDb } from '../../../../spec/reviews.js';
 import type { ReviewsRepository } from '../../ports.js';
 
@@ -60,14 +61,26 @@ const notHidden = (contentType: string, idRef: string) =>
   sql<boolean>`not exists (select 1 from reviews.moderation_items m where m.content_type = ${contentType} and m.content_id = ${sql.ref(idRef)} and m.status = 'open' and m.visibility = 'hidden')`;
 
 /** Postgres adapter for ReviewsRepository. `db` is scoped to the `reviews` schema. */
-export function createPostgresReviewsRepository(db: Kysely<ReviewsDb>): ReviewsRepository {
+export function createPostgresReviewsRepository(db: Kysely<ReviewsDb>, inbox?: Inbox): ReviewsRepository {
   // generic table access: the row types are checked at the ReviewsRepository boundary
   const d: any = db;
 
   const repo: ReviewsRepository = {
     async transaction(fn) {
       if (db.isTransaction) return fn(repo);
-      return db.transaction().execute((trx) => fn(createPostgresReviewsRepository(trx)));
+      return db.transaction().execute((trx) => fn(createPostgresReviewsRepository(trx, inbox)));
+    },
+    async claim(key) {
+      if (!inbox) throw new Error('reviews: no inbox wired');
+      return inbox.claim(db, key);
+    },
+    async insertIgnore(table, row) {
+      const r = await d
+        .insertInto(table)
+        .values(encode(table, row as Record<string, unknown>))
+        .onConflict((oc: any) => oc.doNothing())
+        .executeTakeFirst();
+      return Number(r?.numInsertedOrUpdatedRows ?? 0) > 0;
     },
 
     /* ---------------------------------------------------------------- generic */

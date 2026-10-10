@@ -276,7 +276,7 @@ export class ReviewsPart {
       const status = productReviewMachine.next(locked.status as MyReview['status'], 'delete');
       await tx.update('product_reviews', id, { status, visible: false });
       await this.core.touchProduct(tx, fx, locked.product_id);
-      if (locked.status !== 'draft') fx.emit('reviews.review.removed', { reviewId: id, productId: locked.product_id, byModeration: false, reasonCode: null });
+      if (locked.status !== 'draft') fx.emit('reviews.review.removed', { reviewId: id, productId: locked.product_id, sellerId: locked.seller_id, customerId: locked.customer_id, byModeration: false, reasonCode: null, trustEnforcementId: null });
       fx.detach.push(...((locked.media_ids as string[]) ?? []).map((assetId) => ({ assetId, refId: id })));
       await this.moderation.closeForDeleted(tx, 'product_review', id);
     });

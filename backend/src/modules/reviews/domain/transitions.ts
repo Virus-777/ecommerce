@@ -26,6 +26,18 @@ export function walk<S extends string, E extends string>(machine: StateMachine<S
   throw new AppError('ILLEGAL_TRANSITION', `${machine.name}: cannot move from "${from}" to "${to}"`, { machine: machine.name, from, to, allowed: machine.eventsFrom(from) });
 }
 
+/**
+ * A moderation decision is one state move from the content's current state (spec: decideModeration): the allowed
+ * event that leads straight to the target, or ILLEGAL_TRANSITION.
+ */
+export function oneStep<S extends string, E extends string>(machine: StateMachine<S, E>, from: S, to: S, allowed: readonly string[]): E[] {
+  if (from === to) return [];
+  for (const event of machine.eventsFrom(from)) {
+    if (allowed.includes(event) && machine.targets(from, event).includes(to)) return [event];
+  }
+  throw new AppError('ILLEGAL_TRANSITION', `${machine.name}: cannot move from "${from}" to "${to}" in one step`, { machine: machine.name, from, to, allowed: machine.eventsFrom(from) });
+}
+
 /** Applies a chain of events, checking each step against the machine */
 export function apply<S extends string, E extends string>(machine: StateMachine<S, E>, from: S, events: readonly E[]): S {
   return events.reduce<S>((s, e) => machine.next(s, e), from);

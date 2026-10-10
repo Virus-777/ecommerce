@@ -110,7 +110,7 @@ describe('decisions', () => {
       },
     ]);
     expect(Date.parse(k.of('reviews.moderation.decided')[0]!.appealUntil!)).toBeGreaterThan(k.clock.now().getTime());
-    expect(k.of('reviews.review.removed')).toEqual([{ reviewId: r.reviewId, productId: r.productId, byModeration: true, reasonCode: 'personal_information' }]);
+    expect(k.of('reviews.review.removed')).toEqual([{ reviewId: r.reviewId, productId: r.productId, sellerId: r.sellerId, customerId: r.customerId, byModeration: true, reasonCode: 'personal_information', trustEnforcementId: null }]);
     expect(k.callsOf('media.remove')).toEqual([[photo, { reason: expect.any(String), by: expect.objectContaining({ kind: 'staff', id: staffId }) }]]);
     expect(k.audits).toEqual([expect.objectContaining({ action: 'reviews.moderation.decide', category: 'content', reason: expect.any(String), actor: expect.objectContaining({ id: staffId }) })]);
     const mine = await k.call('GET', `${STORE}/me/reviews`, r.author);
@@ -142,7 +142,7 @@ describe('decisions', () => {
     const r = await published();
     await report(tokens.customer(newId()), r.reviewId);
     const item = await itemOf(r.reviewId);
-    expect((await k.call('POST', `${ADMIN}/moderation-items/${item.id}/decide`, tokens.staff(), { decision: 'reject_response', reasonCode: 'off_topic' })).status).toBe(400);
+    expect((await k.call('POST', `${ADMIN}/moderation-items/${item.id}/decide`, tokens.staff(), { decision: 'reject_response', reasonCode: 'off_topic' })).status).toBe(409);
     const reasons = await k.call('GET', `${ADMIN}/moderation-reasons`, tokens.staff());
     expect(reasons.body.find((x: any) => x.code === 'legitimate_experience')).toMatchObject({ removes: false });
     expect(reasons.body.some((x: any) => x.code === 'harms_sales')).toBe(false);
@@ -190,7 +190,7 @@ describe('appeals', () => {
     k.reset();
     const decided = await k.call('POST', `${ADMIN}/appeals/${appeal.body.id}/decide`, tokens.staff(newId()), { overturn: true, reason: 'The review has no link; restored.' });
     expect(decided.body).toMatchObject({ id: appeal.body.id, status: 'overturned' });
-    expect(k.of('reviews.appeal.decided')).toEqual([{ appealId: appeal.body.id, overturned: true }]);
+    expect(k.of('reviews.appeal.decided')).toEqual([{ appealId: appeal.body.id, overturned: true, contentType: 'product_review', contentId: r.reviewId, author: { kind: 'customer', id: r.customerId }, outcome: expect.any(String) }]);
     expect(k.of('reviews.review.published')).toEqual([expect.objectContaining({ reviewId: r.reviewId })]);
     expect(k.audits.map((a) => a.action)).toEqual(['reviews.appeal.decide']);
     const mine = await k.call('GET', `${STORE}/me/reviews`, r.author);
@@ -217,7 +217,7 @@ describe('seller responses', () => {
     const res = await k.call('POST', `${SELLER}/responses`, tokens.seller(r.sellerId), { targetType: 'product_review', targetId: r.reviewId, text: 'Sorry to hear that. Our support team can help with the settings.' });
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     expect(res.body).toMatchObject({ fromName: 'Gadget Grove', fromKind: 'seller', status: 'published', ruleCheck: { passed: true, failures: [] }, editableUntil: expect.any(String) });
-    expect(k.of('reviews.response.published')).toEqual([{ responseId: res.body.id, sellerId: r.sellerId, targetType: 'product_review', status: 'published' }]);
+    expect(k.of('reviews.response.published')).toEqual([{ responseId: res.body.id, sellerId: r.sellerId, targetType: 'product_review', targetId: r.reviewId, status: 'published', customerId: r.customerId }]);
     const pub = await k.call('GET', `${STORE}/products/${r.productId}/reviews`, tokens.visitor());
     expect(pub.body.items[0].response).toMatchObject({ id: res.body.id, status: 'published', ruleCheck: null, editableUntil: null });
     const dup = await k.call('POST', `${SELLER}/responses`, tokens.seller(r.sellerId), { targetType: 'product_review', targetId: r.reviewId, text: 'Again' });
@@ -290,8 +290,9 @@ describe('admin review search and consumers', () => {
     const sellerReporter = seller(k, 'Rival Store');
     await k.call('POST', `${SELLER}/reports`, tokens.seller(sellerReporter), { targetType: 'product_review', targetId: r.reviewId, reason: 'fake_or_paid' });
     k.reset();
-    await k.emit('trust', 'trust.enforcement.recorded', { enforcementId: newId(), reportId: newId(), action: 'remove_reviews', ownerTeam: 'reviews', targets: [{ type: 'review', id: r.reviewId, label: 'review' }], reason: 'Paid review ring', params: {}, alreadyApplied: false });
-    expect(k.of('reviews.review.removed')).toEqual([{ reviewId: r.reviewId, productId: r.productId, byModeration: true, reasonCode: 'proven_fake' }]);
+    const enforcementId = newId();
+    await k.emit('trust', 'trust.enforcement.recorded', { enforcementId, reportId: newId(), action: 'remove_reviews', ownerTeam: 'reviews', targets: [{ type: 'review', id: r.reviewId, label: 'review' }], reason: 'Paid review ring', params: {}, alreadyApplied: false });
+    expect(k.of('reviews.review.removed')).toEqual([{ reviewId: r.reviewId, productId: r.productId, sellerId: r.sellerId, customerId: r.customerId, byModeration: true, reasonCode: 'proven_fake', trustEnforcementId: enforcementId }]);
     expect(k.of('reviews.moderation.decided')).toEqual([
       {
         moderationItemId: expect.any(String),
@@ -306,6 +307,7 @@ describe('admin review search and consumers', () => {
         ],
         reporterOutcome: 'We removed this review after a Trust and Risk investigation.',
         appealUntil: null,
+        trustEnforcementId: enforcementId,
       },
     ]);
     expect(k.callsOf('media.remove').map((c) => c[0])).toEqual([photo]);
