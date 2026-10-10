@@ -92,6 +92,15 @@
       ]
     },
     {
+      "name": "revokeInvitation",
+      "signature": "(invitationId: uuid, input: { reason: string, by: Actor, contextRef?: string }) => Invitation",
+      "desc": "Cancel a pending invitation (the accept link stops working at once) and publish identity.invitation.revoked. contextRef, when given, must match the invitation's (sellers passes its sellerId so a seller can only revoke its own member invitations; NOT_FOUND otherwise). Revoking an invitation that is already revoked returns it unchanged; an accepted or expired one fails with ILLEGAL_TRANSITION.",
+      "usedBy": [
+        "sellers",
+        "access"
+      ]
+    },
+    {
       "name": "grantSellerContext",
       "signature": "(input: { accountId: uuid, sellerId: uuid, memberId: uuid, sellerName: string, roleLabel: string, isOwner: bool }) => void",
       "desc": "Allow an account to sign in to Seller Center for this seller. Called again to refresh the label.",

@@ -59,7 +59,7 @@
       "action": { "type": "string", "desc": "Key, e.g. finance.hold.released" },
       "actionLabel": { "type": "string", "desc": "Released payout hold" },
       "module": "string",
-      "category": "enum(financial|seller_enforcement|catalog|orders|returns|customers|settings|access|security|content|advertising|other)",
+      "category": "enum(financial|seller_enforcement|catalog|orders|returns|customers|settings|access|security|content|advertising|support|trust|inventory|shipping|other)",
       "target": "AuditTarget",
       "relatedTargets": "AuditTarget[]",
       "reason": "text?",
@@ -78,7 +78,7 @@
       "action": "string",
       "actionLabel": "string",
       "module": "string",
-      "category": "enum(financial|seller_enforcement|catalog|orders|returns|customers|settings|access|security|content|advertising|other)",
+      "category": "enum(financial|seller_enforcement|catalog|orders|returns|customers|settings|access|security|content|advertising|support|trust|inventory|shipping|other)",
       "target": "AuditTarget",
       "relatedTargets": "AuditTarget[]?",
       "reason": "text?",
@@ -99,7 +99,7 @@
       "actorId": "string?",
       "roleKey": "string?",
       "module": "string?",
-      "category": "enum(financial|seller_enforcement|catalog|orders|returns|customers|settings|access|security|content|advertising|other)?",
+      "category": "enum(financial|seller_enforcement|catalog|orders|returns|customers|settings|access|security|content|advertising|support|trust|inventory|shipping|other)?",
       "targetType": "string?",
       "targetId": "string?",
       "sellerId": "uuid?",
@@ -134,6 +134,9 @@
       "lastVerifiedAt": "datetime?",
       "lastVerifiedSeq": "int?",
       "brokenAtSeq": "int?",
+      "lastCheckpointSeq": { "type": "int?", "desc": "Newest signed checkpoint" },
+      "lastCheckpointAt": "datetime?",
+      "checkpointSignatureOk": { "type": "bool?", "desc": "False when a checkpoint's HMAC does not verify (someone rewrote the chain and its hashes)" },
       "message": "string?"
     },
     "SellerAuditEntry": {
@@ -151,6 +154,7 @@
     { "name": "entry_targets", "desc": "Related targets for history lookups (an order item entry also appears under its order and seller)", "columns": { "entry_id": "uuid → entries", "target_type": "text", "target_id": "text", "at": "timestamptz" }, "indexes": ["(target_type, target_id, at desc)"] },
     { "name": "approval_states", "desc": "Projection of access approval requests referenced by entries; updated from access events, so entries stay immutable", "columns": { "approval_request_id": "uuid pk", "state": "text", "approvers": "jsonb", "steps": "jsonb", "awaiting": "text?", "decided_at": "timestamptz?", "updated_at": "timestamptz" }, "indexes": ["(state)"] },
     { "name": "retention", "desc": "Single row", "columns": { "id": "int pk (1)", "retain_years": "int", "pending_years": "int?", "pending_reason": "text?", "pending_approval_request_id": "uuid?", "pending_requested_by": "text?", "updated_by": "text?", "updated_at": "timestamptz?", "last_purge_at": "timestamptz?", "last_purge_removed": "bigint?", "last_purge_through": "timestamptz?" } },
+    { "name": "checkpoints", "desc": "Signed chain checkpoints: written after each successful verification and before a purge, so verification continues across purged ranges and a rewritten chain is detected even if every hash was recomputed", "columns": { "id": "uuid pk", "seq": "bigint unique", "hash": "bytea", "mac": "text (hex HMAC-SHA256 of seq || hash)", "key_id": "text (secret derivation label, e.g. audit.checkpoint.v1)", "kind": "text (verified|purge)", "created_at": "timestamptz" }, "indexes": ["(created_at desc)"] },
     { "name": "integrity_checks", "columns": { "id": "uuid pk", "started_at": "timestamptz", "finished_at": "timestamptz?", "from_seq": "bigint", "to_seq": "bigint", "ok": "bool?", "broken_at_seq": "bigint?" }, "indexes": ["(started_at desc)"] }
   ],
   "stateMachines": [
@@ -167,11 +171,11 @@
     }
   ],
   "endpoints": [
-    { "id": "listEntries", "area": "admin", "method": "GET", "path": "/entries", "summary": "Action history with filters", "desc": "Newest first. Each item is complete (actor and role, action, target, reason, before → after, approval state), so the table and phone list render from one call.", "auth": "staff", "permission": "audit.entries.view", "paging": true, "query": { "q": "string?", "actorId": "string?", "roleKey": "string?", "module": "string?", "category": "enum(financial|seller_enforcement|catalog|orders|returns|customers|settings|access|security|content|advertising|other)?", "targetType": "string?", "targetId": "string?", "sellerId": "uuid?", "action": "string?", "approvalState": "enum(not_required|pending|partially_approved|approved|rejected|returned|cancelled|expired)?", "from": "datetime?", "to": "datetime?" }, "response": "AuditEntry", "screens": ["admin/audit"] },
+    { "id": "listEntries", "area": "admin", "method": "GET", "path": "/entries", "summary": "Action history with filters", "desc": "Newest first. Each item is complete (actor and role, action, target, reason, before → after, approval state), so the table and phone list render from one call.", "auth": "staff", "permission": "audit.entries.view", "paging": true, "query": { "q": "string?", "actorId": "string?", "roleKey": "string?", "module": "string?", "category": "enum(financial|seller_enforcement|catalog|orders|returns|customers|settings|access|security|content|advertising|support|trust|inventory|shipping|other)?", "targetType": "string?", "targetId": "string?", "sellerId": "uuid?", "action": "string?", "approvalState": "enum(not_required|pending|partially_approved|approved|rejected|returned|cancelled|expired)?", "from": "datetime?", "to": "datetime?" }, "response": "AuditEntry", "screens": ["admin/audit"] },
     { "id": "getEntry", "area": "admin", "method": "GET", "path": "/entries/{id}", "summary": "One entry with evidence and approval history", "auth": "staff", "permission": "audit.entries.view", "params": { "id": "uuid" }, "response": "AuditEntry", "screens": ["admin/audit"] },
     { "id": "getSummary", "area": "admin", "method": "GET", "path": "/summary", "summary": "Counts for the filter chips (pending second review, financial, enforcement, settings)", "auth": "staff", "permission": "audit.entries.view", "query": { "from": "date?", "to": "date?" }, "response": "AuditSummary", "screens": ["admin/audit", "admin/dashboard"] },
     { "id": "listTargetHistory", "area": "admin", "method": "GET", "path": "/targets/{type}/{id}", "summary": "History of one record (order, seller, payout, product, setting…)", "desc": "Includes entries where the record is a related target. Used for 'staff history with reasons' panels.", "auth": "staff", "permission": "audit.entries.view", "params": { "type": "string", "id": "string" }, "paging": true, "response": "AuditEntry", "screens": ["admin/order", "admin/seller", "admin/payouts", "admin/customers", "admin/settings", "admin/staff"] },
-    { "id": "createExport", "area": "admin", "method": "POST", "path": "/exports", "summary": "Export filtered history (authorized, recorded)", "desc": "Records the reason in the action history, then creates an authorized export job through reports.requestExport (dataset audit.admin.entries, csv or jsonl). Poll GET /exports/{id} for the download link. Limited to reports.maxExportRows.", "auth": "staff", "permission": "audit.entries.export", "body": { "filters": "AuditFilters", "format": "enum(csv|jsonl)", "reason": "text" }, "response": "reports.ExportJob", "status": 202, "errors": ["EXPORT_TOO_LARGE"], "audited": true, "screens": ["admin/audit"] },
+    { "id": "createExport", "area": "admin", "method": "POST", "path": "/exports", "summary": "Export filtered history (authorized, recorded)", "desc": "Records the reason in the action history, then creates an authorized export job through reports.requestExport (dataset audit.admin.entries, csv or jsonl). Poll GET /exports/{id} for the download link. Limited to reports.maxExportRows, read through settings (settings.get('reports.maxExportRows')) and checked against the matching entry count before the job is created.", "auth": "staff", "permission": "audit.entries.export", "body": { "filters": "AuditFilters", "format": "enum(csv|jsonl)", "reason": "text" }, "response": "reports.ExportJob", "status": 202, "errors": ["EXPORT_TOO_LARGE"], "audited": true, "screens": ["admin/audit"] },
     { "id": "listExports", "area": "admin", "method": "GET", "path": "/exports", "summary": "My exports (all exports with audit.retention.manage)", "auth": "staff", "permission": "audit.entries.export", "paging": true, "query": { "status": "enum(queued|running|ready|failed|expired)?" }, "response": "reports.ExportJob", "screens": ["admin/audit"], "desc": "Proxies reports.listExports for dataset audit.admin.entries: the caller's own jobs, or every requester's with audit.retention.manage." },
     { "id": "getExport", "area": "admin", "method": "GET", "path": "/exports/{id}", "summary": "Export status and a fresh download link", "desc": "Proxies reports.getExport: only the requester may download, and each signed link is recorded.", "auth": "staff", "permission": "audit.entries.export", "params": { "id": "uuid" }, "response": "reports.ExportJob", "audited": true, "screens": ["admin/audit"], "errors": ["NOT_FOUND"] },
     { "id": "getRetention", "area": "admin", "method": "GET", "path": "/retention", "summary": "Retention setting and last purge", "auth": "staff", "permission": "audit.entries.view", "response": "RetentionPolicy", "screens": ["admin/audit", "admin/settings"] },
@@ -194,14 +198,14 @@
   "permissions": [
     { "key": "audit.entries.view", "audience": "staff", "desc": "Read the action history (Platform Administrator, Business Owner, Finance Manager, Reports Analyst)" },
     { "key": "audit.entries.export", "audience": "staff", "desc": "Export action history (sensitive; every export is recorded)" },
-    { "key": "audit.retention.manage", "audience": "staff", "desc": "Change the retention period (shortening still needs Business Owner approval)" },
+    { "key": "audit.retention.manage", "audience": "staff", "desc": "Change the retention period (shortening still needs Business Owner approval). Seeded to the Business Owner and Platform Administrator roles" },
     { "key": "audit.own-history.view", "audience": "seller", "desc": "See changes made on the seller's own account (owner by default)" }
   ],
   "approvalActions": [
     { "key": "audit.retention.change", "desc": "Shorten the action-history retention period (never below the legal minimum; lengthening needs no approval)", "limit": "none", "secondReviewer": "always", "approvers": "Business Owner" }
   ],
   "jobs": [
-    { "name": "audit.verify-chain", "schedule": "daily 03:00 market time", "does": "Recompute hashes from the last verified seq; on mismatch publish audit.integrity.failed (Platform Administrator and Business Owner are notified)" },
+    { "name": "audit.verify-chain", "schedule": "daily 03:00 market time", "does": "Verify the newest checkpoint's HMAC, recompute hashes from it; on success write a new signed checkpoint at the last seq; on a hash or signature mismatch publish audit.integrity.failed (Platform Administrator and Business Owner are notified)" },
     { "name": "audit.purge-expired", "schedule": "monthly", "does": "Drop month partitions entirely older than retainYears (never below minimumRetentionYears), keep a signed checkpoint hash so the chain still verifies, record the purge as an entry" }
   ],
   "settings": [
@@ -210,14 +214,15 @@
     { "key": "redactKeys", "type": "json", "default": ["password", "token", "secret", "accountNumber", "cardNumber"], "desc": "Keys masked in before/after JSON at record time", "approval": "second_reviewer" }
   ],
   "errorCodes": {
-    "EXPORT_TOO_LARGE": { "status": 400, "meaning": "The filters match more than reports.maxExportRows; narrow the date range. details.matched." },
+    "EXPORT_TOO_LARGE": { "status": 422, "meaning": "The filters match more than reports.maxExportRows; narrow the date range. details.matched, details.max." },
     "BELOW_LEGAL_MINIMUM": { "status": 400, "meaning": "Retention cannot be shorter than details.minimumYears." }
   },
   "notes": [
     "Material actions: every endpoint marked audited in any module calls audit.record (the kernel provides a helper that fills actor, roles, requestId and IP from the request). Modules pass before/after as structured JSON plus short human text ('Held $1,240.00' → 'Available $1,240.00') for the list.",
     "audit has no hard dependencies so every module can use it. It is optional for others (ctx.tryUse('audit')); if disabled, modules still work and the kernel logs a warning that material actions are not being recorded. It should stay enabled in every real deployment.",
     "Entries are never updated. The approval column comes from approval_states, which follows access events (requested → partially approved → approved), so an entry created with 'Pending · waiting for Morgan Hale' later shows 'Approved'.",
-    "Tamper evidence: entries form a hash chain by seq; the app's database role has INSERT and SELECT only on entries. Purges keep a checkpoint so verification continues across purged ranges.",
+    "Tamper evidence: entries form a hash chain by seq; the app's database role has INSERT and SELECT only on entries. Checkpoints (table checkpoints) carry an HMAC-SHA256 over seq and hash keyed with secretFor(config, 'audit.checkpoint'), a key the database never holds, so rewriting entries and recomputing every hash is still detected. Purges write a checkpoint first so verification continues across purged ranges. Month partitions are a later infrastructure step; until then purge deletes by at.",
+    "Categories: support (cases, remedies, goodwill decisions), trust (reports, recommendations, enforcements, appeals), inventory (adjustments, transfers, counts, discrepancies), shipping (labels, claims, carrier services, holidays, exceptions) join the earlier ones; modules that recorded these as other switch to their own category (old entries keep theirs).",
     "Secrets are never stored: redactKeys are masked at record time; payout account numbers appear only as last 4 digits.",
     "Retention 7 years is the prototype's example; the legal requirement is a business decision to confirm.",
     "Exports: audit registers dataset audit.admin.entries with reports.registerDataset and serves the rows through exportRows; the job, file, link expiry and link logging are reports' (requestExport, getExport, listExports). reports is an optional dependency checked at call time; while it is disabled the audit Export button is hidden (DATASET_UNAVAILABLE)."
