@@ -175,6 +175,8 @@ export interface ReturnFilter {
   guestSessionId?: string | null;
   sellerId?: string;
   ownerType?: 'official' | 'seller';
+  /** Returns that come to the Marketly returns dock: Official Store and Fulfilled by Marketly returns */
+  marketlyDock?: boolean;
   orderId?: string;
   statuses?: string[];
   notStatuses?: string[];

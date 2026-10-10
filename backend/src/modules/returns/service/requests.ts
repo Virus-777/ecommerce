@@ -38,6 +38,15 @@ import type { Handling } from './handling.js';
 import type { Policies } from './policies.js';
 import type { Views } from './views.js';
 
+/** The order group's fulfilment, copied to the return (official_warehouse for Official Store groups) */
+function fulfilledByOf(group: SellerGroup): ReturnRec['fulfilled_by'] {
+  if (group.seller.ownerType === 'official') return 'official_warehouse';
+  return group.fulfilledBy === 'marketly_service' ? 'marketly_service' : 'seller';
+}
+
+/** A seller's group Marketly fulfils: Marketly handles its returns (decision D7) */
+const isServiceGroup = (group: SellerGroup) => fulfilledByOf(group) === 'marketly_service';
+
 export interface Shopper {
   customerId?: string | null;
   guestSessionId?: string | null;
@@ -175,8 +184,9 @@ export class Requests {
 
   /* ---------------------------------------------------------------- eligibility */
 
-  private async destination(sellerId: string | null, sellerName: string): Promise<ReturnDestination> {
-    if (!sellerId) {
+  /** Official Store and Fulfilled by Marketly returns go to the Marketly returns dock; seller returns to the seller's return address */
+  private async destination(sellerId: string | null, sellerName: string, service: boolean): Promise<ReturnDestination> {
+    if (!sellerId || service) {
       const address = await this.core.officialReturnAddress();
       return { kind: 'marketly_warehouse', name: address.name, address };
     }
@@ -254,8 +264,10 @@ export class Requests {
       const group = lines[0]!.ctx.group;
       const sellerId = group.seller.ownerType === 'seller' ? (group.seller.id ?? null) : null;
       const sellerName = group.seller.ownerType === 'official' ? OFFICIAL_STORE_NAME : group.seller.name;
+      // Fulfilled by Marketly (D7): the seller's terms and window; Marketly handles the return and receives it
+      const service = isServiceGroup(group);
       const terms = await this.termsAtPurchase(order, group, lines.map((l) => l.ctx.item));
-      const destination = await this.destination(sellerId, sellerName);
+      const destination = await this.destination(sellerId, sellerName, service);
       const reason = req.reason ?? 'changed_mind';
       const payer = this.policies.payerFor(terms, reason, group.seller.ownerType, fee);
       const checked = lines.map((l) => {
@@ -304,7 +316,7 @@ export class Requests {
           returnShippingCost: payer.paidBy === 'customer' ? money(payer.customerFee, currency) : null,
           labelMethod: 'prepaid_qr',
           remedies,
-          responseBy: group.seller.ownerType === 'official' ? OFFICIAL_STORE_NAME : sellerName,
+          responseBy: group.seller.ownerType === 'official' ? OFFICIAL_STORE_NAME : service ? 'Marketly' : sellerName,
           responseDueBusinessDays: terms.responseTargetBusinessDays,
           estimate: this.views.amounts.breakdown(b, currency, [], destinationLabel, true),
           terms,
@@ -382,6 +394,7 @@ export class Requests {
         categories: Object.fromEntries(g.lines.map((l) => [l.ctx.item.id, l.ctx.item.categoryId ?? null])),
       };
       const official = g.group.seller.ownerType === 'official';
+      const service = isServiceGroup(g.group);
       prepared.push({
         ret: {
           id,
@@ -392,19 +405,20 @@ export class Requests {
           guest_session_id: who.guestSessionId && !who.customerId ? who.guestSessionId : null,
           owner_type: g.group.seller.ownerType,
           seller_id: g.sellerId,
+          fulfilled_by: fulfilledByOf(g.group),
           status: 'requested',
           reason: body.reason,
           details: body.details?.trim() ?? '',
           media_ids: mediaIds,
           remedy: body.remedy,
           exchange_variant_id: body.remedy === 'exchange' ? (body.exchangeVariantId ?? null) : null,
-          handled_by: official ? 'official_store' : 'seller',
+          handled_by: official ? 'official_store' : service ? 'marketplace_support' : 'seller',
           terms_snapshot: { terms: g.terms, meta },
           shipping_paid_by: g.payer.paidBy,
           response_due_at: addBusinessDays(now, responseDays, this.core.tz),
           info_request: null,
           decision: null,
-          platform_handling: false,
+          platform_handling: service,
           escalation: null,
           owner_staff_id: null,
           case_id: null,
@@ -444,25 +458,27 @@ export class Requests {
         }
         await tx.insert('returns', p.ret);
         await tx.insertMany('return_items', p.items);
-        await this.core.timeline(tx, p.ret.id, [{ kind: 'requested', label: 'Return requested', detail: `${p.items.reduce((n, i) => n + i.quantity, 0)} item(s): ${p.items.map((i) => i.title).join(', ')}`, visibility: 'customer', actor: by.actor }]);
+        await this.core.timeline(tx, p.ret.id, [
+          { kind: 'requested', label: 'Return requested', detail: `${p.items.reduce((n, i) => n + i.quantity, 0)} item(s): ${p.items.map((i) => i.title).join(', ')}`, visibility: 'customer', actor: by.actor },
+          ...(this.core.isService(p.ret) ? [{ kind: 'fulfilled_by_marketly', label: 'Fulfilled by Marketly: Marketly handles this return', detail: 'It comes back to the Marketly returns dock and Marketly inspects it; the refund is funded by the seller.', visibility: 'seller' as const }] : []),
+        ]);
       }
     });
     for (const p of prepared) {
       this.core.publish(
         'returns.return.requested',
-        { returnId: p.ret.id, ...this.core.refs(p.ret), ownerType: p.ret.owner_type, sellerId: p.ret.seller_id, orderItemIds: p.items.map((i) => i.order_item_id), reason: p.ret.reason, responseDueAt: p.ret.response_due_at!.toISOString() },
+        { returnId: p.ret.id, ...this.core.refs(p.ret), ...this.core.owner(p.ret), orderItemIds: p.items.map((i) => i.order_item_id), reason: p.ret.reason, responseDueAt: p.ret.response_due_at!.toISOString() },
         by,
       );
     }
-    // Official Store returns inside the window may be approved automatically
-    if (await this.core.ctx.settings.get('autoApproveOfficialWithinWindow')) {
-      for (const p of prepared.filter((x) => x.ret.owner_type === 'official')) {
-        try {
-          const agg = (await this.core.load(p.ret.id))!;
-          await this.decisions.approve(p.ret.id, { labelMethod: 'prepaid_qr', note: 'Approved automatically: inside the return window' }, { actor: SYSTEM, requestId: by.requestId }, 'auto', agg);
-        } catch (err) {
-          this.core.ctx.log.warn({ err, returnId: p.ret.id }, 'returns: automatic approval failed; the return waits for the Official Store team');
-        }
+    // Official Store returns, and Fulfilled by Marketly returns (inside the seller's window, D7), may be approved automatically
+    const [autoOfficial, autoService] = await Promise.all([this.core.ctx.settings.get('autoApproveOfficialWithinWindow'), this.core.ctx.settings.get('autoApproveServiceWithinWindow')]);
+    for (const p of prepared.filter((x) => (x.ret.owner_type === 'official' && autoOfficial) || (this.core.isService(x.ret) && autoService))) {
+      try {
+        const agg = (await this.core.load(p.ret.id))!;
+        await this.decisions.approve(p.ret.id, { labelMethod: 'prepaid_qr', note: 'Approved automatically: inside the return window' }, { actor: SYSTEM, requestId: by.requestId }, 'auto', agg);
+      } catch (err) {
+        this.core.ctx.log.warn({ err, returnId: p.ret.id }, `returns: automatic approval failed; the return waits for ${p.ret.owner_type === 'official' ? 'the Official Store team' : 'Marketly staff (Fulfilled by Marketly)'}`);
       }
     }
     return [...(await this.core.loadMany(prepared.map((p) => p.ret.id))).values()].sort((a, b) => a.ret.ref.localeCompare(b.ret.ref));

@@ -12,6 +12,12 @@ import type { ReturnsService } from '../service.js';
  */
 export const sellerRoutes = (service: ReturnsService) => {
   const own = (id: string, sellerId: string) => service.core.visible(id, { area: 'seller', sellerId });
+  /** A return the seller may change: Fulfilled by Marketly returns are read-only for the seller (Marketly handles them) */
+  const writable = async (id: string, sellerId: string) => {
+    const agg = await own(id, sellerId);
+    service.core.sellerMayAct(agg.ret);
+    return agg;
+  };
   const caseOf = async (id: string) => service.views.returnCase((await service.core.load(id))!, 'seller');
   const by = (i: { actor: By['actor']; requestId: string; principal: Principal; can: (p: string) => Promise<boolean> }): By => ({ actor: i.actor, requestId: i.requestId, principal: i.principal, can: i.can });
 
@@ -28,43 +34,43 @@ export const sellerRoutes = (service: ReturnsService) => {
     getSellerReturn: async ({ params, sellerId }) => service.views.returnCase(await own(params.id, sellerId), 'seller'),
     /** POST /requests/{id}/approve: Approve and issue the return label */
     sellerApproveReturn: async (i) => {
-      const agg = await own(i.params.id, i.sellerId);
+      const agg = await writable(i.params.id, i.sellerId);
       await service.decisions.approve(i.params.id, i.body, by(i), 'seller', agg);
       return caseOf(i.params.id);
     },
     /** POST /requests/{id}/request-info: Ask the customer a question (pauses the respond-by clock) */
     sellerRequestInfo: async (i) => {
-      const agg = await own(i.params.id, i.sellerId);
+      const agg = await writable(i.params.id, i.sellerId);
       await service.decisions.requestInfo(i.params.id, i.body.question, by(i), 'seller', agg);
       return caseOf(i.params.id);
     },
     /** POST /requests/{id}/reject: Reject with a reason and an explanation shown to the customer */
     sellerRejectReturn: async (i) => {
-      const agg = await own(i.params.id, i.sellerId);
+      const agg = await writable(i.params.id, i.sellerId);
       await service.decisions.reject(i.params.id, i.body, by(i), 'seller', agg);
       return caseOf(i.params.id);
     },
     /** POST /requests/{id}/approve-without-return: Refund without asking for the item back (recorded reason) */
     sellerApproveWithoutReturn: async (i) => {
-      const agg = await own(i.params.id, i.sellerId);
+      const agg = await writable(i.params.id, i.sellerId);
       await service.decisions.approveWithoutReturn(i.params.id, i.body, by(i), 'seller', agg);
       return caseOf(i.params.id);
     },
     /** POST /requests/{id}/receive: Mark the return as received at the seller's return address */
     sellerReceiveReturn: async (i) => {
-      const agg = await own(i.params.id, i.sellerId);
+      const agg = await writable(i.params.id, i.sellerId);
       await service.handling.receive(i.params.id, { receivedAt: i.body.receivedAt, note: i.body.note }, by(i), agg);
       return caseOf(i.params.id);
     },
     /** POST /requests/{id}/inspection: Record the condition on arrival and the stock outcome */
     sellerRecordInspection: async (i) => {
-      const agg = await own(i.params.id, i.sellerId);
+      const agg = await writable(i.params.id, i.sellerId);
       await service.handling.recordInspection(i.params.id, i.body, by(i), agg, 'seller');
       return caseOf(i.params.id);
     },
     /** PUT /requests/{id}/inspection-draft: Save an unsent inspection and refund decision */
     saveSellerInspectionDraft: async (i) => {
-      const agg = await own(i.params.id, i.sellerId);
+      const agg = await writable(i.params.id, i.sellerId);
       return service.handling.saveDraft(i.params.id, i.body, by(i), agg, true);
     },
     /** POST /requests/{id}/evidence: Attach evidence to a return before any case exists */
@@ -74,7 +80,7 @@ export const sellerRoutes = (service: ReturnsService) => {
     },
     /** POST /requests/{id}/remedy: Confirm the refund (full or partial) or ship a replacement or exchange */
     sellerIssueRemedy: async (i) => {
-      const agg = await own(i.params.id, i.sellerId);
+      const agg = await writable(i.params.id, i.sellerId);
       await service.handling.remedy(i.params.id, i.body, by(i), agg, 'seller');
       return caseOf(i.params.id);
     },

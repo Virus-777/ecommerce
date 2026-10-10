@@ -2,11 +2,13 @@
  * Migration 0004 (gap pass 4) backfills what pass 3 kept in jsonb and marker rows: returns.received_at from the
  * 'received_at' timeline rows, the refund request columns, items and history from refund_requests.deductions and
  * order_item_ids. Run against that state: the 0004 objects are dropped, legacy rows inserted, and the migration's
- * SQL applied again.
+ * SQL applied again. Migration 0005 (returns.fulfilled_by, Fulfilled by Marketly) is run the same way: its column
+ * dropped, the SQL applied again.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { m0004Pass4 } from '../infra/postgres/migrations/0004_pass4.js';
+import { m0005FulfilledBy } from '../infra/postgres/migrations/0005_fulfilled_by.js';
 import { group, harness, idem, line, placeOrder, product, tokens, type Harness } from './helpers.js';
 
 let h: Harness;
@@ -90,5 +92,37 @@ values
     // a migrated request keeps working: its history grows in the new table
     await repo.addRefundEvents(exceptionId, [{ at: new Date().toISOString(), label: 'Refund sent back', detail: 'Check the amount', actor: null }]);
     expect((await repo.get('refund_requests', exceptionId))!.history.map((e) => e.label)).toEqual(['Refund sent back']);
+  });
+});
+
+describe('migration 0005 (Fulfilled by Marketly)', () => {
+  it('copies fulfilledBy on new returns and backfills older ones from the owner', async () => {
+    const official = product(h, { title: 'Kettle', price: 5000, ownerType: 'official' });
+    const o = await placeOrder(h, [group(h, [line(official, 1)], { ownerType: 'official' })]);
+    const a = await h.call('POST', '/api/store/returns/requests', tokens.customer(o.customerId), { orderId: o.order.id, items: [{ orderItemId: o.items[0]![0]!, quantity: 1 }], reason: 'defective', details: 'Cold', remedy: 'refund' }, idem());
+    expect(a.status, JSON.stringify(a.body)).toBe(201);
+    const sellerId = newId();
+    const own = product(h, { title: 'Vase', price: 4000, sellerId });
+    const s = await placeOrder(h, [group(h, [line(own, 1)], { sellerId })]);
+    const b = await h.call('POST', '/api/store/returns/requests', tokens.customer(s.customerId), { orderId: s.order.id, items: [{ orderItemId: s.items[0]![0]!, quantity: 1 }], reason: 'damaged', details: 'Cracked', remedy: 'refund' }, idem());
+    expect(b.status, JSON.stringify(b.body)).toBe(201);
+    const officialId = a.body.returns[0].id;
+    const sellerReturnId = b.body.returns[0].id;
+    const repo = h.service.core.repo;
+    const db = h.app.kernel.database;
+
+    // fresh install: the column is filled at request and only takes the three values
+    expect((await repo.get('returns', officialId))!.fulfilled_by).toBe('official_warehouse');
+    expect((await repo.get('returns', sellerReturnId))!.fulfilled_by).toBe('seller');
+    await expect(db.exec(`update returns.returns set fulfilled_by = 'drone' where id = '${sellerReturnId}'`)).rejects.toThrow();
+    await expect(db.exec(`update returns.returns set fulfilled_by = null where id = '${sellerReturnId}'`)).rejects.toThrow();
+
+    // an install from before: no column, then the migration
+    await db.exec('alter table returns.returns drop constraint returns_fulfilled_by_check; alter table returns.returns drop column fulfilled_by;');
+    await db.exec(m0005FulfilledBy.sql);
+    expect((await repo.get('returns', officialId))!.fulfilled_by).toBe('official_warehouse');
+    expect((await repo.get('returns', sellerReturnId))!.fulfilled_by).toBe('seller');
+    const view = await h.call('GET', `/api/admin/returns/requests/${sellerReturnId}`, tokens.staff());
+    expect(view.body.fulfilledBy).toBe('seller');
   });
 });

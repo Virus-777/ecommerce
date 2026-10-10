@@ -105,6 +105,8 @@ export class Views {
       outcome: agg.ret.terms_snapshot.meta.outcome ?? null,
       platformHandling: agg.ret.platform_handling,
       inspecting: !!agg.ret.inspector,
+      service: this.core.isService(agg.ret),
+      escalated: !!agg.ret.escalation || !!agg.ret.case_id,
     };
   }
 
@@ -176,6 +178,7 @@ export class Views {
 
   handlerName(ret: ReturnRec): string {
     if (ret.owner_type === 'official') return OFFICIAL_STORE_NAME;
+    if (this.core.isService(ret) && !ret.escalation) return 'Marketly';
     if (ret.platform_handling) return 'Marketly support';
     return ret.terms_snapshot.meta.sellerName;
   }
@@ -390,7 +393,7 @@ export class Views {
     if (r.exception && !r.exception.approvedBy) out.push({ kind: 'refund_without_return_proposed', label: 'Refund without return proposed' });
     if (r.exception?.approvedBy) out.push({ kind: 'refund_without_return_approved', label: 'Refund without return' });
     if (r.escalation && ['seller_no_response', 'seller_missed_inspection'].includes(r.escalation.reason)) out.push({ kind: 'seller_missed_deadline', label: 'Seller missed a deadline' });
-    if (r.platform_handling && r.owner_type === 'seller') out.push({ kind: 'platform_took_over', label: 'Marketly is handling' });
+    if (r.platform_handling && r.owner_type === 'seller') out.push({ kind: 'platform_took_over', label: this.core.isService(r) ? 'Fulfilled by Marketly: Marketly handles it' : 'Marketly is handling' });
     if (agg.refunds.some((x) => x.status === 'failed')) out.push({ kind: 'refund_failed', label: 'Refund failed' });
     if (r.escalation && (r.escalation.by.kind === 'customer' || r.escalation.by.kind === 'visitor')) out.push({ kind: 'customer_escalated', label: 'Customer asked Marketly to step in' });
     if (r.case_id && is(OPEN_STATUSES, r.status)) out.push({ kind: 'dispute_open', label: 'Dispute open' });
@@ -405,6 +408,8 @@ export class Views {
     const liveRefund = agg.refunds.some((x) => is(LIVE_REFUND, x.status));
     const liveReplacement = agg.replacements.some((x) => x.status !== 'cancelled');
     if (area === 'seller') {
+      // Fulfilled by Marketly: the seller follows the return read-only (evidence for a dispute stays open)
+      if (this.core.isService(r)) return is(OPEN_STATUSES, s) ? ['evidence'] : [];
       const own = !r.platform_handling;
       if (own && s === 'requested') out.push('approve', 'request-info', 'reject', 'approve-without-return');
       if (own && (s === 'approved' || s === 'in_transit')) out.push('approve-without-return');
@@ -534,6 +539,7 @@ export class Views {
       customer: { displayName: r.terms_snapshot.meta.customerName, city: r.terms_snapshot.meta.city, ordersWithSeller: Math.max(1, orders?.total ?? 1) },
       payment: { itemPaid: this.m(itemPaid, currency), shippingPaid: this.m(shippingPaid, currency), discountShare: this.m(discount, currency), maxRefundable: this.m(cap, currency), refundedSoFar: this.m(refunded, currency), methodLabel },
       policyApplied: r.terms_snapshot.terms,
+      fulfilledBy: r.fulfilled_by,
       shippingPaidBy: r.shipping_paid_by as ReturnCase['shippingPaidBy'],
       deadlines: this.deadlines(agg),
       inspection: await this.inspection(agg, refs),

@@ -188,7 +188,7 @@ describe('seller decisions and the return parcel', () => {
     expect(h.calls.notices.at(-1)).toMatchObject({ topic: 'customer.return.label_ready', recipients: [{ kind: 'customer', accountId: m.customerId }] });
 
     const shipmentId = ok.body.detail.shipment.shippingShipmentId;
-    await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId, kind: 'return', orderId: m.order.id, groupId: m.order.groups[0]!.id, returnId: m.ret.id, ownerType: 'seller', sellerId: m.sellerA, lines: [], shippedAt: now(), dispatchDueAt: null, onTime: null, trackingValid: true, estimatedArrival: null });
+    await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId, kind: 'return', orderId: m.order.id, groupId: m.order.groups[0]!.id, returnId: m.ret.id, ownerType: 'seller', fulfilledBy: 'seller', sellerId: m.sellerA, lines: [], shippedAt: now(), dispatchDueAt: null, onTime: null, trackingValid: true, estimatedArrival: null });
     let detail = await h.call('GET', `/api/store/returns/requests/${m.ret.id}`, m.token);
     expect(detail.body).toMatchObject({ status: 'in_transit', statusLabel: 'Sent back', shipment: { status: 'in_transit' } });
     expect(h.named('returns.return.shipped').find((e) => e.returnId === m.ret.id)).toBeTruthy();

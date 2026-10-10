@@ -349,7 +349,25 @@ export class Core {
     return { ref: r.ref, orderId: r.order_id, orderRef: r.order_ref };
   }
 
-  /** Where Official Store returns go (officialReturnAddress setting, Business Owner approval; decision D-RT1) */
+  /** owner and fulfilment carried by the returns.return.* events that name the seller */
+  owner(r: ReturnRec): { ownerType: ReturnRec['owner_type']; sellerId: string | null; fulfilledBy: ReturnRec['fulfilled_by'] } {
+    return { ownerType: r.owner_type, sellerId: r.seller_id, fulfilledBy: r.fulfilled_by };
+  }
+
+  /**
+   * A Fulfilled by Marketly return (decision D7): Marketly handles it from the request (platform handling), it
+   * comes back to the Marketly returns dock and Marketly inspects it; the seller funds the refund and follows it read-only.
+   */
+  isService(r: ReturnRec): boolean {
+    return r.fulfilled_by === 'marketly_service';
+  }
+
+  /** Sellers never act on a Fulfilled by Marketly return */
+  sellerMayAct(r: ReturnRec): void {
+    if (this.isService(r)) throw illegal('Marketly handles returns of items it fulfils; you can follow this return here', { from: r.status, allowed: [] });
+  }
+
+  /** Where Official Store and Fulfilled by Marketly returns go (officialReturnAddress setting, Business Owner approval; decision D-RT1) */
   async officialReturnAddress(): Promise<common.Address> {
     const a = (await this.ctx.settings.get('officialReturnAddress').catch(() => null)) as common.Address | null;
     return a && typeof a === 'object' && a.line1 ? { ...a, name: a.name || OFFICIAL_RETURN_ADDRESS.name } : OFFICIAL_RETURN_ADDRESS;
@@ -362,8 +380,7 @@ export class Core {
       returnId: r.id,
       ...this.refs(r),
       ...this.recipient(r),
-      ownerType: r.owner_type,
-      sellerId: r.seller_id,
+      ...this.owner(r),
       items: a.items.map((i) => ({ orderItemId: i.order_item_id, quantity: i.quantity })),
       withoutReturn: o.withoutReturn,
       platformDecision: o.platformDecision,

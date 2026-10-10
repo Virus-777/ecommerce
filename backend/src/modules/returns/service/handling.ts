@@ -12,7 +12,7 @@ import type * as offers from '../../../spec/offers.js';
 import type { InspectionDraft, InspectionInput, InspectionQueueRow, RemedyInput, Replacement, ReturnEvidence } from '../../../spec/returns.js';
 import { replacementMachine, returnMachine, returnShipmentMachine } from '../domain/state-machines.js';
 import { actorText, human, is, LIVE_REFUND, type ReturnStatus } from '../domain/rules.js';
-import type { ReplacementRec, ReturnsRepository } from '../ports.js';
+import type { ReplacementRec, ReturnRec, ReturnsRepository } from '../ports.js';
 import { Batch, illegal, invalid, invalidField, notFound, SYSTEM, type Agg, type By, type Core } from './core.js';
 import type { Refunds } from './refunds.js';
 import type { Views } from './views.js';
@@ -59,7 +59,7 @@ export class Handling {
         { kind: 'received', label: `Return received at ${a.ret.terms_snapshot.meta.destination.name}`, detail: 'It will be inspected next.', visibility: 'customer', actor: by.actor },
         ...(o.note ? [{ kind: 'note', label: 'Receipt note', detail: o.note, visibility: 'seller' as const, actor: by.actor }] : []),
       ]);
-      batch.push('returns.return.received', { returnId: id, ...this.core.refs(a.ret), ...this.core.recipient(a.ret), ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, items: this.core.returnedItems(a), receivedAt: at.toISOString() });
+      batch.push('returns.return.received', { returnId: id, ...this.core.refs(a.ret), ...this.core.recipient(a.ret), ...this.core.owner(a.ret), items: this.core.returnedItems(a), receivedAt: at.toISOString() });
     });
   }
 
@@ -130,7 +130,7 @@ export class Handling {
         { kind: 'inspection_detail', label: `Grade ${human(input.grade)}, proposed stock outcome ${human(input.proposedStockOutcome)}`, detail: input.notes ?? null, visibility: 'seller', actor: by.actor },
       ]);
       for (const i of this.core.returnedItems(a)) {
-        batch.push('returns.return.inspected', { returnId: id, ...this.core.refs(a.ret), ...this.core.recipient(a.ret), ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, conditionOutcome: input.conditionOutcome, proposedStockOutcome: input.proposedStockOutcome, orderItemId: i.orderItemId, variantId: i.variantId, stockItemId: i.stockItemId ?? null, quantity: i.quantity });
+        batch.push('returns.return.inspected', { returnId: id, ...this.core.refs(a.ret), ...this.core.recipient(a.ret), ...this.core.owner(a.ret), conditionOutcome: input.conditionOutcome, proposedStockOutcome: input.proposedStockOutcome, orderItemId: i.orderItemId, variantId: i.variantId, stockItemId: i.stockItemId ?? null, quantity: i.quantity });
       }
     });
     if (party === 'staff') {
@@ -161,6 +161,7 @@ export class Handling {
    */
   async remedy(id: string, input: RemedyInput, by: By, agg: Agg, mode: 'seller' | 'admin'): Promise<void> {
     const r = agg.ret;
+    if (mode === 'seller') this.core.sellerMayAct(r);
     if (mode === 'seller' && r.platform_handling) throw illegal('Marketly is handling this return now', { from: r.status });
     if (mode === 'admin' && r.owner_type === 'seller' && !r.platform_handling) throw illegal('The seller decides the remedy unless Marketly takes over', { from: r.status });
     if (r.status !== 'awaiting_remedy') throw illegal('Inspect the return before deciding the remedy', { from: r.status, allowed: [] });
@@ -429,10 +430,10 @@ export class Handling {
   }
 
   /** Who owns a replacement (its return's seller, or the order item's for case replacements) */
-  private async ownerOf(rep: ReplacementRec): Promise<{ ownerType: 'official' | 'seller'; sellerId: string | null } | null> {
+  private async ownerOf(rep: ReplacementRec): Promise<{ ownerType: 'official' | 'seller'; sellerId: string | null; ret?: ReturnRec } | null> {
     if (rep.return_id) {
       const ret = await this.core.repo.get('returns', rep.return_id);
-      return ret ? { ownerType: ret.owner_type, sellerId: ret.seller_id } : null;
+      return ret ? { ownerType: ret.owner_type, sellerId: ret.seller_id, ret } : null;
     }
     const info = await this.core.quiet('order item owner', () => this.core.ctx.use('orders').getOrderItem(rep.order_item_id));
     return info ? { ownerType: info.ownerType, sellerId: info.ownerType === 'seller' ? (info.sellerId ?? null) : null } : null;
@@ -448,6 +449,7 @@ export class Handling {
     if (!rep) throw notFound('Replacement');
     const owner = await this.ownerOf(rep);
     if (viewer.area === 'seller' && (!owner || owner.ownerType !== 'seller' || owner.sellerId !== viewer.sellerId)) throw notFound('Replacement');
+    if (viewer.area === 'seller' && owner?.ret) this.core.sellerMayAct(owner.ret);
     if (!reason?.trim()) throw invalidField('reason', 'Say why the replacement is cancelled');
     const why = reason.trim();
     const now = this.core.now();

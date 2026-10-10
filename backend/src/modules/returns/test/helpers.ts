@@ -16,6 +16,7 @@
  *   access: check → h.authority (allowed by default), requestApproval / decide / getApproval / approvalInfo recorded.
  *   support (not built): openCase → a case CS-000123. finance (not built): previewRefundImpact → −the refund, 10% fee back.
  *   reports (not built): registerDataset / requestExport / getExport recorded. audit.record and notifications.notify recorded.
+ *   settings.get → h.settings ('<module>.<key>'), else null (the declared default applies).
  */
 import type { FastifyInstance } from 'fastify';
 import { AppError } from '../../../kernel/errors/index.js';
@@ -54,6 +55,8 @@ export interface Harness {
   ownOffers: Map<string, offers.Offer[]>;
   /** Category paths catalog.getCategoryPaths answers with */
   categoryPaths: Map<string, catalog.CategoryPath>;
+  /** Setting values in force by full key ('returns.autoApproveServiceWithinWindow'); others are their defaults */
+  settings: Map<string, unknown>;
   calls: {
     labels: shipping.LabelRequest[];
     voided: string[];
@@ -117,6 +120,7 @@ export async function harness(o: { only?: string[] } = {}): Promise<Harness> {
     carrierServiceId: newId(),
     ownOffers: new Map<string, offers.Offer[]>(),
     categoryPaths: new Map<string, catalog.CategoryPath>(),
+    settings: new Map<string, unknown>(),
     calls: { labels: [], voided: [], tracking: [], refunds: [], holds: [], allocations: [], released: [], approvals: [], decided: [], cancelledApprovals: [], cases: [], notices: [], exports: [] } as Harness['calls'],
   };
   const refunded = new Map<string, number>();
@@ -254,6 +258,9 @@ export async function harness(o: { only?: string[] } = {}): Promise<Harness> {
           h.calls.cases.push(input);
           return { id: newId(), ref: 'CS-000123' } as never;
         },
+      },
+      settings: {
+        get: async <T,>(key: string) => (h.settings.has(key) ? h.settings.get(key) : null) as T,
       },
       finance: {
         previewRefundImpact: async (_ids, refund) => ({ sellerEarningsChange: USD(-refund.amount), feeReturned: USD(Math.round(refund.amount / 10)), afterPayout: false, note: 'Deducted from the next payout' }),
@@ -393,13 +400,21 @@ export async function placeOrder(h: Harness, groups: OrderGroupInput[], o: { cus
       const shipmentId = newId();
       const lines = g.items.map((i) => ({ orderItemId: i.id, quantity: i.quantity, title: 'x', variantLabel: '' }));
       const sellerId = g.seller.id ?? null;
-      await h.publish('shipping', 'shipping.shipment.created', { shipmentId, kind: 'outbound', orderId: order.id, groupId: g.id, sellerId, packageLabel: 'Package', carrierCode: 'ups', carrierName: 'UPS', serviceName: null, trackingNumber: '1Z1', trackingUrl: null, lines, status: 'label_created' });
-      await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId, kind: 'outbound', orderId: order.id, groupId: g.id, ownerType: g.seller.ownerType, sellerId, lines, shippedAt: now(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
+      await h.publish('shipping', 'shipping.shipment.created', { shipmentId, kind: 'outbound', orderId: order.id, groupId: g.id, sellerId, fulfilledBy: g.fulfilledBy, packageLabel: 'Package', carrierCode: 'ups', carrierName: 'UPS', serviceName: null, trackingNumber: '1Z1', trackingUrl: null, lines, status: 'label_created' });
+      await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId, kind: 'outbound', orderId: order.id, groupId: g.id, ownerType: g.seller.ownerType, fulfilledBy: g.fulfilledBy, sellerId, lines, shippedAt: now(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
       await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId, kind: 'outbound', orderId: order.id, groupId: g.id, sellerId, lines, deliveredAt: now() });
     }
   }
   const fresh = (await h.orders.getOrder(order.id))!;
   return { order: fresh, customerId: customerId ?? '', items: fresh.groups.map((g) => g.items.map((i) => i.id)) };
+}
+
+/**
+ * Makes a placed seller group Fulfilled by Marketly. orders.createOrder only takes marketly_service groups whose
+ * offers fulfillment-service confirms (off in these tests), so the test sets the stored group as orders would.
+ */
+export async function makeServiceGroup(h: Harness, groupId: string): Promise<void> {
+  await h.app.kernel.database.exec(`update orders.seller_groups set fulfilled_by = 'marketly_service' where id = '${groupId}'`);
 }
 
 export const tokens = {
