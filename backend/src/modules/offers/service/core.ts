@@ -16,7 +16,7 @@ import type { IneligibilityReason, Offer, StatusReason } from '../../../spec/off
 import type * as sellers from '../../../spec/sellers.js';
 import { reason, type IneligibilityCode, type OfferStatus } from '../domain/rules.js';
 import { offerStatusMachine } from '../domain/state-machines.js';
-import { OFFICIAL_NAME, isoReq, money, offerTitle, toOffer } from '../mappers.js';
+import { OFFICIAL_NAME, SERVICE_INELIGIBLE, isoReq, money, offerTitle, ownFulfilment, serviceFulfilment, toOffer, type Fulfilment } from '../mappers.js';
 import type { BulkFileReader, EligibilityRec, OfferRec, OffersRepository } from '../ports.js';
 import type { BulkPart } from './bulk.js';
 import type { EnforcementPart } from './enforcement.js';
@@ -71,7 +71,7 @@ export interface TransitionSpec {
   /** Sellable quantity read before the transaction: publish / resume / restore land on out_of_stock when 0 */
   available?: number;
   /** makeIneligible: where the hold comes from */
-  source?: { kind: 'restriction' | 'suspension' | 'product' | 'staff' | 'enforcement'; id: string | null };
+  source?: { kind: 'restriction' | 'suspension' | 'product' | 'staff' | 'enforcement' | 'fulfillment_service'; id: string | null };
 }
 
 export interface Step {
@@ -223,9 +223,21 @@ export class Core {
 
   async toOffers(rows: readonly OfferRec[]): Promise<Offer[]> {
     if (!rows.length) return [];
-    const [names, elig, lookback] = await Promise.all([this.sellerNames(rows), this.repo.getEligibility(rows.map((r) => r.id)), this.lookbackDays()]);
+    const [names, elig, lookback, fulfilment] = await Promise.all([this.sellerNames(rows), this.repo.getEligibility(rows.map((r) => r.id)), this.lookbackDays(), this.fulfilment(rows)]);
     const e = new Map(elig.map((x) => [x.offer_id, x]));
-    return rows.map((r) => toOffer(r, { sellerName: this.nameOf(r, names), eligibility: e.get(r.id), lookbackDays: lookback }));
+    const now = this.now();
+    return rows.map((r) => toOffer(r, { sellerName: this.nameOf(r, names), eligibility: e.get(r.id), lookbackDays: lookback, fulfilment: fulfilment.get(r.id), now }));
+  }
+
+  /**
+   * Effective customer-facing fulfilment per offer (Offer.shipping): own terms for seller and Official Store offers;
+   * for marketly_service offers Marketly's terms from one batched fulfillment-service.getServiceTerms call. The service
+   * off, failing or answering null makes those offers not sellable, never seller-shipped (decision D5).
+   */
+  async fulfilment(rows: readonly OfferRec[]): Promise<Map<string, Fulfilment>> {
+    const service = rows.filter((r) => r.fulfilled_by === 'marketly_service');
+    const terms = service.length ? ((await this.optional('fulfillment-service', 'getServiceTerms', (fs) => fs.getServiceTerms([...new Set(service.map((r) => r.id))]))) ?? {}) : {};
+    return new Map(rows.map((r) => [r.id, r.fulfilled_by === 'marketly_service' ? serviceFulfilment(r, terms[r.id]) : ownFulfilment(r)]));
   }
 
   async toOffer(r: OfferRec): Promise<Offer> {
@@ -379,6 +391,7 @@ export class Core {
         return [reason('out_of_stock')];
       case 'ineligible': {
         const src = (r.ineligible_source ?? {}) as { kind?: string };
+        if (src.kind === 'fulfillment_service') return [SERVICE_INELIGIBLE];
         const code: IneligibilityCode =
           src.kind === 'restriction' ? 'seller_restricted' : src.kind === 'suspension' ? 'seller_suspended' : src.kind === 'product' ? 'product_not_purchasable' : src.kind === 'staff' || src.kind === 'enforcement' ? 'staff_hold' : 'offer_not_active';
         return [reason(code)];

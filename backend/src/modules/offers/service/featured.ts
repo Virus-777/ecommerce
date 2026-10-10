@@ -5,7 +5,7 @@
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
 import type { DeliverTo, FeaturedCandidate, FeaturedDecision, FeaturedRule, FeaturedRuleInput, FeaturedRuleParameters } from '../../../spec/offers.js';
 import { CONDITIONS, conditionGroup, DEFAULT_RULE, rankCandidates, reason, RULE_NOTES, zoneKey, type ConditionGroup } from '../domain/rules.js';
-import { actorText, featuredRule, iso, isoReq, money } from '../mappers.js';
+import { actorText, featuredRule, iso, isoReq, money, SERVICE_INELIGIBLE, serviceHeld } from '../mappers.js';
 import type { OfferRec, RuleRec } from '../ports.js';
 import { invalid, invalidField, Part, SYSTEM, type By, type ProductCache } from './core.js';
 import type { Facts } from './storefront.js';
@@ -159,6 +159,8 @@ export class FeaturedPart extends Part {
       const e = elig.get(r.id);
       const reasons = [...(Array.isArray(e?.reasons) ? (e!.reasons as unknown as FeaturedCandidate['reasons']) : this.core.statusReasons(r))];
       const add = (code: Parameters<typeof reason>[0]) => !reasons.some((x) => x.code === code) && reasons.push(reason(code));
+      // a Marketly-fulfilled offer the service does not let sell cannot be featured (decision D5)
+      if (serviceHeld(r, f.fulfilment) && !reasons.some((x) => x.message === SERVICE_INELIGIBLE.message)) reasons.unshift(SERVICE_INELIGIBLE);
       if (r.status === 'active' && f.availability.state === 'out_of_stock') add('out_of_stock');
       if (!f.delivery.shipsToLocation) add('does_not_ship_to_location');
       if (group === 'new' && !competing.includes(r.condition)) add('condition_not_competing');
@@ -172,7 +174,8 @@ export class FeaturedPart extends Part {
           total: f.total.amount,
           itemPrice: f.unitPrice.amount,
           arrivesTo: f.delivery.arrivesTo ?? null,
-          dispatchDays: r.dispatch_business_days,
+          // effective dispatch (Offer.shipping): Marketly's for marketly_service offers
+          dispatchDays: f.fulfilment.shipping.dispatch.businessDays,
           onTimePct: onTime,
           publishedAt: r.published_at,
         },

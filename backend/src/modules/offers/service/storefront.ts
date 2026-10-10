@@ -22,7 +22,7 @@ import type {
   VariantAvailability,
 } from '../../../spec/offers.js';
 import { CONDITION_LABEL, conditionGroup, discountPct, dispatchLabel, formatMoney, TAX_NOTE, type ConditionGroup } from '../domain/rules.js';
-import { compareAtOf, dispatchOf, isoReq, money, OFFICIAL_NAME, returnTermsOf, strings, variantLabel, warrantyOf } from '../mappers.js';
+import { compareAtOf, FULFILLED_BY_MARKETLY_LABEL, isoReq, money, OFFICIAL_NAME, returnTermsOf, SERVICE_INELIGIBLE, serviceHeld, shownStatus, strings, variantLabel, warrantyOf, type Fulfilment } from '../mappers.js';
 import type { EligibilityRec, OfferRec } from '../ports.js';
 import { notFound, Part } from './core.js';
 import { DEFAULT_PARCEL } from './manage.js';
@@ -37,6 +37,8 @@ export interface Facts {
   delivery: DeliveryEstimate;
   total: common.Money;
   availability: Availability & { expectedRestockDate: string | null };
+  /** Effective fulfilment (Offer.shipping): what the delivery estimate and the featured rule use */
+  fulfilment: Fulfilment;
 }
 
 const LISTED = ['active', 'out_of_stock', 'ineligible'];
@@ -59,14 +61,15 @@ export class StorefrontPart extends Part {
     const out = new Map<string, Facts>();
     if (!rows.length) return out;
     const qty = Math.max(1, Math.floor(quantity) || 1);
-    const [avail, promos] = await Promise.all([
+    const [avail, promos, fulfilment] = await Promise.all([
       this.core.soft('inventory.getOfferAvailability', () =>
         this.ctx.use('inventory').getOfferAvailability(rows.map((r) => ({ offerId: r.id, stockItemId: r.stock_item_id, ...(r.purchase_limit ? { purchaseLimit: r.purchase_limit } : {}) }))),
       ),
       this.core.optional('promotions', 'priceOffers', (p) => p.priceOffers(rows.map((r) => r.id), { at: isoReq(this.now()) })),
+      this.core.fulfilment(rows),
     ]);
     const promoBy = new Map((promos ?? []).map((p) => [p.offerId, p]));
-    const deliveries = await Promise.all(rows.map((r) => this.deliveryFor({ profileId: r.shipping_profile_id, ...dispatchOf(r) }, deliverTo)));
+    const deliveries = await Promise.all(rows.map((r) => this.deliveryOf(fulfilment.get(r.id)!, deliverTo)));
     rows.forEach((r, i) => {
       const regular = money(r.price_amount, r.currency);
       const promo = promoBy.get(r.id);
@@ -95,17 +98,32 @@ export class StorefrontPart extends Part {
         delivery,
         total: money(unit.amount * qty + ship, r.currency),
         availability,
+        fulfilment: fulfilment.get(r.id)!,
       });
     });
     return out;
   }
 
+  /**
+   * Delivery estimate from the effective fulfilment (Offer.shipping): Marketly's profile, dispatch, ships-from and the
+   * SKU's parcel for marketly_service offers, labelled 'Ships from Marketly'. An offer the service does not let sell
+   * gets no quote (it is never quoted as seller-shipped).
+   */
+  deliveryOf(f: Fulfilment, deliverTo: DeliverTo): Promise<DeliveryEstimate> {
+    const d = f.shipping.dispatch;
+    const label = f.shipping.fulfilledBy === 'marketly_service' ? FULFILLED_BY_MARKETLY_LABEL : null;
+    return this.deliveryFor({ profileId: f.shipping.profileId, businessDays: d.businessDays, sameDayCutoff: d.sameDayCutoff ?? null, shipsFrom: d.shipsFrom, label: d.label, parcel: f.parcel, fulfilledByLabel: label, quote: f.sellable }, deliverTo);
+  }
+
   /** Delivery estimate from shipping.quote; without shipping only the dispatch label is known */
-  async deliveryFor(d: { profileId: string; businessDays: number; sameDayCutoff?: string | null; shipsFrom: string; label: string }, deliverTo: DeliverTo): Promise<DeliveryEstimate> {
+  async deliveryFor(
+    d: { profileId: string; businessDays: number; sameDayCutoff?: string | null; shipsFrom: string; label: string; parcel?: { weightGrams: number; lengthCm?: number | null; widthCm?: number | null; heightCm?: number | null } | null; fulfilledByLabel?: string | null; quote?: boolean },
+    deliverTo: DeliverTo,
+  ): Promise<DeliveryEstimate> {
     const shipping = this.ctx.tryUse('shipping');
-    const plain: DeliveryEstimate = { shipsToLocation: true, arrivesFrom: null, arrivesTo: null, label: d.label, shippingCost: null, free: false, freeOver: null, carrier: null, service: null, shipsFrom: d.shipsFrom, dispatchLabel: d.label, orderWithinMinutes: null, serviceNotice: null };
-    if (!shipping) return plain;
-    const q = await this.core.soft('shipping.quote', () => shipping.quote(d.profileId, deliverTo.postalCode, DEFAULT_PARCEL, { businessDays: d.businessDays, sameDayCutoff: d.sameDayCutoff ?? null, shipsFrom: d.shipsFrom }));
+    const plain: DeliveryEstimate = { shipsToLocation: true, arrivesFrom: null, arrivesTo: null, label: d.label, shippingCost: null, free: false, freeOver: null, carrier: null, service: null, shipsFrom: d.shipsFrom, fulfilledByLabel: d.fulfilledByLabel ?? null, dispatchLabel: d.label, orderWithinMinutes: null, serviceNotice: null };
+    if (!shipping || d.quote === false) return plain;
+    const q = await this.core.soft('shipping.quote', () => shipping.quote(d.profileId, deliverTo.postalCode, d.parcel ?? DEFAULT_PARCEL, { businessDays: d.businessDays, sameDayCutoff: d.sameDayCutoff ?? null, shipsFrom: d.shipsFrom }));
     if (!q) return plain;
     if (!q.shipsToLocation) return { ...plain, shipsToLocation: false, label: q.reason ?? 'Does not ship to this location' };
     const o = q.default ?? q.options[0];
@@ -122,6 +140,7 @@ export class StorefrontPart extends Part {
       carrier: o.carrierService ?? null,
       service: o.methodName,
       shipsFrom: d.shipsFrom,
+      fulfilledByLabel: d.fulfilledByLabel ?? null,
       dispatchLabel: o.dispatchLabel || d.label,
       orderWithinMinutes: minutes,
       serviceNotice: o.notices[0] ?? null,
@@ -174,8 +193,12 @@ export class StorefrontPart extends Part {
     const now = this.now();
     const saleOver = r.sale_ends_at && r.sale_ends_at <= now;
     const compareAt = saleOver ? null : compareAtOf(r, seller.name, lookback);
-    const reasons = (Array.isArray(e?.reasons) ? e!.reasons : this.core.statusReasons(r)) as { code: string; message: string }[];
-    const eligible = reasons.length === 0 && f.delivery.shipsToLocation && r.status === 'active';
+    const stored = (Array.isArray(e?.reasons) ? e!.reasons : this.core.statusReasons(r)) as { code: string; message: string }[];
+    // a Marketly-fulfilled offer the service does not let sell is shown Ineligible (decision D5)
+    const held = serviceHeld(r, f.fulfilment);
+    const status = shownStatus(r, f.fulfilment);
+    const reasons = held ? [SERVICE_INELIGIBLE, ...stored] : stored;
+    const eligible = reasons.length === 0 && f.delivery.shipsToLocation && status === 'active';
     const note = !eligible ? (reasons[0]?.message ?? (!f.delivery.shipsToLocation ? 'Does not ship to this location' : null)) : null;
     const missing = strings(r.missing_items);
     const { expectedRestockDate: _restock, ...availability } = f.availability;
@@ -202,7 +225,8 @@ export class StorefrontPart extends Part {
       featured,
       featuredEligible: eligible,
       ineligibleNote: note,
-      status: r.status as OfferView['status'],
+      status,
+      fulfilledBy: r.fulfilled_by,
       termsVersion: r.terms_version,
     };
   }
@@ -223,7 +247,8 @@ export class StorefrontPart extends Part {
     if (!d.winnerOfferId) return null;
     const row = await this.repo.get('offers', d.winnerOfferId);
     if (!row || row.status !== 'active') return null;
-    return (await this.views([row], deliverTo, 1, { featured: new Map([[variantId, row.id]]) }))[0]!;
+    const view = (await this.views([row], deliverTo, 1, { featured: new Map([[variantId, row.id]]) }))[0]!;
+    return view.status === 'active' ? view : null;
   }
 
   /** The store product (approved, not merged) or 404 */
@@ -356,10 +381,11 @@ export class StorefrontPart extends Part {
   async variantSummaries(variants: readonly { id: string; options: Record<string, string> }[]): Promise<Record<string, VariantAvailability>> {
     const ids = variants.map((v) => v.id).filter(isUuid);
     const rows = ids.length ? await this.repo.allOffers({ variantIds: ids, statuses: ['active', 'out_of_stock'] }, 2000) : [];
+    const fulfilment = await this.core.fulfilment(rows);
     const out: Record<string, VariantAvailability> = {};
     for (const v of variants) {
       const mine = rows.filter((r) => r.variant_id === v.id);
-      const active = mine.filter((r) => r.status === 'active');
+      const active = mine.filter((r) => r.status === 'active' && !serviceHeld(r, fulfilment.get(r.id)));
       const lowest = active.length ? active.reduce((m, r) => (r.price_amount < m.price_amount ? r : m)) : null;
       const lowestPrice = lowest ? money(lowest.price_amount, lowest.currency) : null;
       const summary = active.length === 0 ? (mine.length ? 'Out of stock' : 'Unavailable') : active.length === 1 ? `${formatMoney(lowestPrice!)} · In stock` : `${active.length} offers from ${formatMoney(lowestPrice!)}`;
@@ -395,9 +421,15 @@ export class StorefrontPart extends Part {
       const d = await this.parts.featured.decision(variantId, 'new', deliverTo, { productId: i.productId });
       if (!d.winnerOfferId) continue;
       const row = await this.repo.get('offers', d.winnerOfferId);
-      if (row && row.status === 'active' && row.product_id === i.productId) out[i.productId] = await this.core.toOffer(row);
+      if (row && row.status === 'active' && row.product_id === i.productId) out[i.productId] = await this.activeOffer(row);
     }
     return out;
+  }
+
+  /** The offer while it sells (a Marketly-fulfilled offer the service holds is shown Ineligible), else null */
+  private async activeOffer(row: OfferRec): Promise<Offer | null> {
+    const o = await this.core.toOffer(row);
+    return o.status === 'active' ? o : null;
   }
 
   async getPurchaseBoxOffer(items: { productId: string; offerId?: string; variantId?: string }[], postalCode?: string): Promise<Record<string, Offer | null>> {
@@ -407,7 +439,8 @@ export class StorefrontPart extends Part {
     const byId = new Map(requested.map((r) => [r.id, r]));
     for (const i of items) {
       const r = i.offerId ? byId.get(i.offerId) : undefined;
-      if (r && r.product_id === i.productId && r.status === 'active') out[i.productId] = await this.core.toOffer(r);
+      const offer = r && r.product_id === i.productId && r.status === 'active' ? await this.activeOffer(r) : null;
+      if (offer) out[i.productId] = offer;
       else fallback.push({ productId: i.productId, ...(i.variantId ? { variantId: i.variantId } : r && r.product_id === i.productId ? { variantId: r.variant_id } : {}) });
     }
     if (fallback.length) Object.assign(out, await this.getFeaturedOfferForProduct(fallback, postalCode));
@@ -439,7 +472,9 @@ export class StorefrontPart extends Part {
   async listActiveOffersByIds(offerIds: string[], limit?: number): Promise<Offer[]> {
     const rows = new Map((await this.repo.getMany('offers', offerIds.filter(isUuid))).map((r) => [r.id, r]));
     const ordered = offerIds.map((id) => rows.get(id)).filter((r): r is OfferRec => Boolean(r && r.status === 'active'));
-    return this.core.toOffers(limit && limit > 0 ? ordered.slice(0, limit) : ordered);
+    // a Marketly-fulfilled offer the service holds is shown Ineligible and left out like any inactive offer
+    const offers = (await this.core.toOffers(ordered)).filter((o) => o.status === 'active');
+    return limit && limit > 0 ? offers.slice(0, limit) : offers;
   }
 
   async listActiveOffersForProduct(productId: string): Promise<OfferSummary[]> {
@@ -455,6 +490,7 @@ export class StorefrontPart extends Part {
     if (!row || row.status !== 'active') return false;
     const e = (await this.repo.getEligibility([row.id]))[0];
     if (e && !e.eligible) return false;
+    if (serviceHeld(row, (await this.core.fulfilment([row])).get(row.id))) return false;
     return ((await this.core.available([row.stock_item_id])).get(row.stock_item_id) ?? 0) > 0;
   }
 
@@ -470,7 +506,7 @@ export class StorefrontPart extends Part {
     const alternatives = async (r: OfferRec) => {
       if (!altCache.has(r.variant_id)) {
         const others = (await this.repo.find('offers', { variant_id: r.variant_id, status: 'active' }, { orderBy: [['price_amount', 'asc']], limit: 6 })).filter((o) => o.id !== r.id);
-        altCache.set(r.variant_id, (await this.views(others, deliverTo, 1)).filter((v) => v.availability.maxPerOrder > 0 && v.delivery.shipsToLocation).slice(0, 3));
+        altCache.set(r.variant_id, (await this.views(others, deliverTo, 1)).filter((v) => v.status === 'active' && v.availability.maxPerOrder > 0 && v.delivery.shipsToLocation).slice(0, 3));
       }
       return altCache.get(r.variant_id)!;
     };
@@ -487,8 +523,9 @@ export class StorefrontPart extends Part {
         changes.push({ offerId: r.id, kind: 'seller_restricted', before: null, after: null, previous: null, current: null, message: `${v.seller.name} can't sell this item right now. Choose another offer if you still want it.`, alternatives: await alternatives(r) });
         continue;
       }
-      if (r.status !== 'active' || v.availability.maxPerOrder < l.quantity) {
-        const left = r.status === 'active' ? v.availability.maxPerOrder : 0;
+      // v.status: a Marketly-fulfilled offer the service holds is Ineligible here even when its stored status is active
+      if (v.status !== 'active' || v.availability.maxPerOrder < l.quantity) {
+        const left = v.status === 'active' ? v.availability.maxPerOrder : 0;
         changes.push({
           offerId: r.id,
           kind: 'availability',
@@ -520,9 +557,12 @@ export class StorefrontPart extends Part {
   async snapshotForOrder(offerId: string): Promise<OfferSnapshot> {
     const r = isUuid(offerId) ? await this.repo.get('offers', offerId) : undefined;
     if (!r || r.status === 'draft') throw notFound();
-    if (r.status !== 'active') {
+    // effective fulfilment: Marketly's dispatch terms for marketly_service offers; held by the service = not buyable (D5)
+    const fulfilment = (await this.core.fulfilment([r])).get(r.id)!;
+    const status = shownStatus(r, fulfilment);
+    if (status !== 'active') {
       const others = await this.repo.find('offers', { variant_id: r.variant_id, status: 'active' }, { orderBy: [['price_amount', 'asc']], limit: 5 });
-      throw this.core.error('OFFER_UNAVAILABLE', 'This offer can no longer be bought', { status: r.status, alternatives: others.filter((o) => o.id !== r.id).map((o) => ({ offerId: o.id, price: money(o.price_amount, o.currency) })) });
+      throw this.core.error('OFFER_UNAVAILABLE', 'This offer can no longer be bought', { status, alternatives: others.filter((o) => o.id !== r.id).map((o) => ({ offerId: o.id, price: money(o.price_amount, o.currency) })) });
     }
     const names = await this.core.sellerNames([r]);
     const lookback = await this.core.lookbackDays();
@@ -540,7 +580,8 @@ export class StorefrontPart extends Part {
       missingItems: strings(r.missing_items),
       price: money(r.price_amount, r.currency),
       compareAt: compareAt?.amount ?? null,
-      dispatch: { ...dispatchOf(r), label: dispatchLabel(r.dispatch_business_days) },
+      dispatch: { ...fulfilment.shipping.dispatch, label: dispatchLabel(fulfilment.shipping.dispatch.businessDays) },
+      fulfilledBy: r.fulfilled_by,
       returnTerms: returnTermsOf(r),
       warranty: warrantyOf(r),
       stockItemId: r.stock_item_id,

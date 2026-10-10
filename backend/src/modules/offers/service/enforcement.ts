@@ -9,13 +9,14 @@ import type { EventPayload } from '../../../kernel/events/index.js';
 import type * as common from '../../../spec/common.js';
 import type { StatusReason } from '../../../spec/offers.js';
 import { activityLabel, inScope, type ScopeLike } from '../domain/rules.js';
-import { enforcementIdOf, offerTitle, strings } from '../mappers.js';
+import { enforcementIdOf, offerTitle, SERVICE_HOLD, strings } from '../mappers.js';
 import type { OfferRec } from '../ports.js';
 import { Part, SYSTEM, type By, type ProductCache, type TransitionSpec } from './core.js';
 
 type Source = NonNullable<TransitionSpec['source']>;
 const STOPPABLE = ['active', 'paused', 'out_of_stock'];
 const SELLER_APPEAL = 'Appeal from Seller Center > Account health';
+const SERVICE_ACTIVITY = 'Sales of this offer';
 
 export class EnforcementPart extends Part {
   /* ================================================================ helpers */
@@ -65,6 +66,12 @@ export class EnforcementPart extends Part {
         if (snap?.status === 'closed') return { source: { kind: 'suspension', id: null }, reason: this.core.statusReason('seller_closed', check.reason ?? 'The seller account is closed', by) };
         if (check.restrictionId) return { source: { kind: 'restriction', id: check.restrictionId }, reason: this.core.statusReason('seller_restricted', check.reason ?? 'Sales are restricted', by, { affectedActivity: activityLabel(['sales']), appealRoute: check.appealRoute ?? SELLER_APPEAL }) };
       }
+    }
+    // Fulfilled by Marketly says the offer does not sell (enrollment suspended or offboarding). Only an answer counts:
+    // with the service off nothing here would ever lift a hold, and the read paths already show the offer Ineligible.
+    if (r.fulfilled_by === 'marketly_service') {
+      const terms = (await this.core.optional('fulfillment-service', 'getServiceTerms', (fs) => fs.getServiceTerms([r.id])))?.[r.id];
+      if (terms && !terms.sellable) return { source: { kind: 'fulfillment_service', id: terms.skuEnrollmentId }, reason: this.core.statusReason('fulfillment_service_suspended', SERVICE_HOLD[terms.notSellableReason ?? 'service_unavailable'], by, { affectedActivity: SERVICE_ACTIVITY }) };
     }
     return null;
   }
@@ -398,5 +405,44 @@ export class EnforcementPart extends Part {
   async onCampaignEnded(_e: EventPayload<'promotions.campaign.ended'>) {
     // the event names no offers: every cached decision is recomputed by the job
     await this.repo.markFeaturedDirty({ all: true });
+  }
+
+  /* ================================================================ Fulfilled by Marketly */
+
+  /**
+   * fulfillment-service.offer.service_changed, once per event (inbox): fulfilled_by follows the service; a change of
+   * who ships is a customer-visible terms change (termsVersion bumped, offers.offer.updated). sellable false makes the
+   * offer Ineligible (fulfillment_service_suspended; it never switches to seller shipping, decision D5); sellable true,
+   * or leaving the service, restores offers held by the service. Featured decisions for the variant are recomputed.
+   */
+  async onServiceChanged(e: EventPayload<'fulfillment-service.offer.service_changed'>, eventId: string | undefined, actor?: common.Actor) {
+    const r = isUuid(e.offerId) ? await this.repo.get('offers', e.offerId) : undefined;
+    if (!r || r.owner_type !== 'seller' || r.seller_id !== e.sellerId) {
+      this.ctx.log.warn({ offerId: e.offerId, sellerId: e.sellerId }, 'offers: service change for no matching seller offer, ignored');
+      return;
+    }
+    const by: By = { actor: actor ?? SYSTEM };
+    const applied = await this.repo.transaction(async (tx) => {
+      if (!(await tx.claim(eventId ?? `service-changed:${e.offerId}:${e.reason}:${e.at}`))) return null;
+      const locked = await this.core.offerRow(e.offerId, { repo: tx, forUpdate: true });
+      if (locked.fulfilled_by === e.fulfilledBy) return { row: locked, bumped: false };
+      const bumped = Boolean(locked.published_at);
+      const row = await tx.update('offers', locked.id, { fulfilled_by: e.fulfilledBy, ...(bumped ? { terms_version: locked.terms_version + 1 } : {}), updated_at: this.now() });
+      return { row, bumped };
+    });
+    if (!applied) return;
+    const row = applied.row;
+    if (applied.bumped) this.core.publish('offers.offer.updated', { offerId: row.id, productId: row.product_id, termsVersion: row.terms_version, fields: ['fulfilledBy'] }, by);
+    await this.core.markDirty([row.variant_id]);
+
+    if (e.fulfilledBy === 'marketly_service' && !e.sellable) {
+      const text = SERVICE_HOLD[e.reason === 'enrollment_offboarding' ? 'enrollment_offboarding' : e.reason === 'enrollment_suspended' ? 'enrollment_suspended' : 'service_unavailable'];
+      const reason = this.core.statusReason('fulfillment_service_suspended', text, by, { affectedActivity: SERVICE_ACTIVITY });
+      await this.makeIneligible([row], { kind: 'fulfillment_service', id: e.skuEnrollmentId }, reason, by);
+      return;
+    }
+    if (row.status === 'ineligible' && this.sourceOf(row).kind === 'fulfillment_service') {
+      await this.restoreOrSwitch(row, { by, log: { reasonCode: e.reason, reason: e.fulfilledBy === 'seller' ? 'The offer left Fulfilled by Marketly' : 'Fulfilled by Marketly sells the offer again' } });
+    }
   }
 }

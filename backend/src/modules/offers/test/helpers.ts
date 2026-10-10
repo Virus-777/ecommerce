@@ -20,8 +20,10 @@ import { newId } from '../../../kernel/lib/ids.js';
 import type * as access from '../../../spec/access.js';
 import type * as audit from '../../../spec/audit.js';
 import type * as catalog from '../../../spec/catalog.js';
+import type * as fulfillment from '../../../spec/fulfillment-service.js';
 import type * as media from '../../../spec/media.js';
 import type { OffersPublicApi } from '../../../spec/offers.js';
+import type { OffersService } from '../service.js';
 import type * as sellers from '../../../spec/sellers.js';
 import type * as shipping from '../../../spec/shipping.js';
 import { auth, buildTestApp, movingClock, token } from '../../../testing/app.js';
@@ -68,7 +70,11 @@ export interface Harness {
 const iso = (d: Date) => d.toISOString();
 const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86_400_000).toISOString().slice(0, 10);
 
-export async function harness(): Promise<Harness> {
+/**
+ * o.serviceTerms: the fulfillment service is on, its getServiceTerms answering from the map (offers missing from it: null).
+ * Without it the fulfillment service is off.
+ */
+export async function harness(o: { serviceTerms?: Map<string, fulfillment.ServiceTerms | null> } = {}): Promise<Harness> {
   const clock = movingClock();
   const h = {
     clock,
@@ -245,7 +251,19 @@ export async function harness(): Promise<Harness> {
   });
   for (const name of OFFER_EVENTS) app.kernel.events.subscribe('test', name, (e) => void h.events.push({ name, payload: e.payload }));
   fakeInventory(app, h);
+  if (o.serviceTerms) fakeFulfillmentService(app, o.serviceTerms);
   return { ...h, app, api: app.kernel.boot.apis.get('offers') as OffersPublicApi };
+}
+
+/**
+ * fulfillment-service is being rebuilt in parallel and cannot boot yet, so apiStubs (which only replace functions of
+ * running modules) cannot reach it: offers' optional-module lookup answers a stand-in whose getServiceTerms reads the map.
+ */
+function fakeFulfillmentService(app: FastifyInstance, terms: Map<string, fulfillment.ServiceTerms | null>) {
+  const ctx = (app.kernel.boot.apis.get('offers') as OffersService).core.ctx as unknown as { tryUse: (m: string) => unknown };
+  const tryUse = ctx.tryUse.bind(ctx);
+  const stub = { getServiceTerms: async (offerIds: string[]) => Object.fromEntries(offerIds.map((id) => [id, terms.get(id) ?? null])) };
+  ctx.tryUse = (m: string) => (m === 'fulfillment-service' ? stub : tryUse(m));
 }
 
 /**
