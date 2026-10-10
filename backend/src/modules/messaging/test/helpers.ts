@@ -51,7 +51,8 @@ export interface Harness {
   runJob(name: 'messaging.reply-deadlines' | 'messaging.archive' | 'messaging.response-stats'): Promise<void>;
 }
 
-export async function harness(): Promise<Harness> {
+/** o.trust = false boots without the trust module (refer_to_trust → TRUST_UNAVAILABLE) */
+export async function harness(o: { trust?: boolean } = {}): Promise<Harness> {
   const clock = movingClock();
   // tokens are signed at the app's time and outlive the clock moves of the deadline tests
   tokenClock.now = () => clock.now();
@@ -76,7 +77,7 @@ export async function harness(): Promise<Harness> {
     return s ? { id, ref: 'SL-20714', slug: s.storeName.toLowerCase().replace(/\W+/g, '-'), storeName: s.storeName, status: 'approved', verified: s.verified ?? true, canSellNew: true, activeRestrictionIds: [], launchReady: true } : null;
   };
   const app = await buildTestApp({
-    only: ['messaging', 'orders', 'customers', 'identity', 'media', 'audit', 'notifications', 'sellers', 'returns', 'support', 'trust', 'workqueues'],
+    only: ['messaging', 'orders', 'customers', 'identity', 'media', 'audit', 'notifications', 'sellers', 'returns', 'support', ...(o.trust === false ? [] : ['trust']), 'workqueues'],
     clock,
     config: { rateLimits: false, launchPhase: 4 },
     apiStubs: {
@@ -103,12 +104,16 @@ export async function harness(): Promise<Harness> {
       support: {
         casesForOrder: async (orderId) => h.cases.filter((c) => c.orderId === orderId).map(({ caseId, ref, status, orderItemIds }) => ({ caseId, ref, status, orderItemIds })),
       },
-      trust: {
-        raiseSignal: async (input) => {
-          h.signals.push(input);
-          return { id: newId(), ref: 'TR-261009-0001' } as unknown as trust.TrustReport;
-        },
-      },
+      ...(o.trust === false
+        ? {}
+        : {
+            trust: {
+              raiseSignal: async (input: Parameters<trust.TrustPublicApi['raiseSignal']>[0]) => {
+                h.signals.push(input);
+                return { id: newId(), ref: 'TR-261009-0001' } as unknown as trust.TrustReport;
+              },
+            },
+          }),
       sellers: {
         getSeller: async (id) => sellerSnapshot(id),
         getSellers: async (ids) => ids.map(sellerSnapshot).filter((s): s is sellers.SellerSnapshot => !!s),

@@ -23,7 +23,7 @@
   "optionalDeps": ["media", "sellers", "support", "returns", "notifications", "trust", "audit", "customers", "shipping", "identity", "workqueues", "settings"],
   "publicApi": [
     { "name": "findOrStartForOrder", "signature": "(input: { orderId: uuid, sellerId: uuid, orderItemId?: uuid, returnId?: uuid }) => Conversation", "desc": "One conversation per customer, seller and subject; reused when it exists. sellerId is OFFICIAL_STORE_ID for the Official Store", "usedBy": ["orders", "returns"] },
-    { "name": "postSystemNote", "signature": "(conversationId: uuid, text: string) => Message", "desc": "e.g. Marketly Support joined from case CS-261005-3381", "usedBy": ["support", "returns"] },
+    { "name": "postSystemNote", "signature": "(conversationId: uuid, text: string) => Message", "desc": "A system note (Message.kind system), e.g. Marketly Support joined from case CS-261005-3381: unread for every participant, no reply-state change, no messaging.message.sent (nobody is notified)", "usedBy": ["support", "returns"] },
     { "name": "addStaffParticipant", "signature": "(conversationId: uuid, staff: Actor, caseId: uuid) => Conversation", "desc": "Support joins an order conversation when a case is opened", "usedBy": ["support"] },
     { "name": "sellerResponseStats", "signature": "(sellerId: uuid, range: DateRange) => ResponseStats", "desc": "Response time for seller performance and reports", "usedBy": ["sellers", "reports", "graphql"] },
     { "name": "unreadCount", "signature": "(participant: Actor) => int", "desc": "Badge counts for the account and Seller Center", "usedBy": ["notifications"] },
@@ -103,7 +103,7 @@
     "Message": {
       "id": "uuid",
       "conversationId": "uuid",
-      "kind": "enum(text|system)",
+      "kind": { "type": "enum(text|system)", "desc": "system: a note from Marketly (e.g. support joined from a case): unread for every participant, no author, no reply-state change and no messaging.message.sent (no notice is sent)" },
       "author": "Actor?",
       "authorLabel": { "type": "string", "desc": "e.g. Marisol, Casa Verde Home / You" },
       "fromMe": "bool",
@@ -197,7 +197,8 @@
     { "name": "message_reports", "columns": { "id": "uuid pk", "message_id": "uuid → messages", "conversation_id": "uuid → conversations", "reporter_kind": "text", "reporter_id": "text", "reason": "text", "note": "text?", "status": "text", "outcome": "text?", "decided_by": "text?", "decided_at": "timestamptz?", "created_at": "timestamptz" }, "indexes": ["(status, created_at)"] },
     { "name": "reply_templates", "columns": { "id": "uuid pk", "seller_id": "uuid", "name": "text", "body": "text", "updated_at": "timestamptz" }, "indexes": ["(seller_id)"] },
     { "name": "conversation_aliases", "desc": "Ids of duplicate conversations merged into another (dedupe migration); lookups by an old id (notifications links, support case links) resolve to the kept conversation", "columns": { "old_id": "uuid pk", "conversation_id": "uuid → conversations", "merged_at": "timestamptz" }, "indexes": ["(conversation_id)"] },
-    { "name": "staff_access_log", "desc": "Each time staff open a private conversation, with the reason", "columns": { "id": "uuid pk", "conversation_id": "uuid → conversations", "staff_id": "uuid", "reason": "text", "case_id": "uuid?", "at": "timestamptz" }, "indexes": ["(conversation_id, at)"] }
+    { "name": "staff_access_log", "desc": "Each time staff open a private conversation, with the reason", "columns": { "id": "uuid pk", "conversation_id": "uuid → conversations", "staff_id": "uuid", "reason": "text", "case_id": "uuid?", "at": "timestamptz" }, "indexes": ["(conversation_id, at)"] },
+    { "name": "seller_reply_stats", "desc": "30-day reply figures per seller, rolled up by messaging.response-stats (behind 'Usually replies within …' on conversations and Seller.replyStats); computed on first use for a seller without a row", "tenant": false, "columns": { "seller_id": "uuid pk", "period_from": "date", "period_to": "date", "average_reply_minutes": "int?", "median_reply_minutes": "int?", "replied": "int (reply rounds answered)", "replied_within_target": "int", "decided": "int (rounds answered or past the reply target)", "computed_at": "timestamptz" }, "indexes": ["(computed_at)"] }
   ],
   "stateMachines": [
     {
@@ -246,7 +247,7 @@
     { "id": "hideMessage", "area": "admin", "method": "POST", "path": "/messages/{id}/hide", "summary": "Hide a message that breaks the rules", "auth": "staff", "permission": "messaging.conversations.moderate", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "Message", "audited": true, "screens": ["admin/trust", "admin/customers"] },
     { "id": "lockConversation", "area": "admin", "method": "POST", "path": "/conversations/{id}/lock", "summary": "Lock or unlock a conversation", "auth": "staff", "permission": "messaging.conversations.moderate", "params": { "id": "uuid" }, "body": { "locked": "bool", "reason": "text" }, "response": "Conversation", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["messaging.conversation.locked", "messaging.conversation.unlocked"], "screens": ["admin/trust", "admin/customers"] },
     { "id": "listMessageReports", "area": "admin", "method": "GET", "path": "/reports", "summary": "Reported messages", "auth": "staff", "permission": "messaging.conversations.moderate", "paging": true, "query": { "status": "enum(open|actioned|dismissed)?" }, "response": "MessageReport", "screens": ["admin/trust", "admin/customers"] },
-    { "id": "decideMessageReport", "area": "admin", "method": "POST", "path": "/reports/{id}/decide", "summary": "Action or dismiss a report", "auth": "staff", "permission": "messaging.conversations.moderate", "params": { "id": "uuid" }, "body": { "action": "enum(hide_message|lock_conversation|refer_to_trust|dismiss)", "reason": "text" }, "response": "MessageReport", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["messaging.conversation.locked"], "screens": ["admin/trust"] },
+    { "id": "decideMessageReport", "area": "admin", "method": "POST", "path": "/reports/{id}/decide", "summary": "Action or dismiss a report", "auth": "staff", "permission": "messaging.conversations.moderate", "params": { "id": "uuid" }, "desc": "refer_to_trust raises a Trust and Risk signal (trust.raiseSignal); while the trust module is off it is refused with TRUST_UNAVAILABLE (hide the message or lock the conversation instead).", "body": { "action": "enum(hide_message|lock_conversation|refer_to_trust|dismiss)", "reason": "text" }, "response": "MessageReport", "errors": ["ILLEGAL_TRANSITION", "TRUST_UNAVAILABLE"], "audited": true, "events": ["messaging.conversation.locked"], "screens": ["admin/trust"] },
     { "id": "getSellerResponseAdmin", "area": "admin", "method": "GET", "path": "/sellers/{sellerId}/response-stats", "summary": "A seller's reply performance", "auth": "staff", "permission": "messaging.conversations.read", "params": { "sellerId": "uuid" }, "query": { "from": "date?", "to": "date?" }, "response": "ResponseStats", "screens": ["admin/seller"] }
   ],
   "events": {
@@ -287,7 +288,7 @@
   "jobs": [
     { "name": "messaging.reply-deadlines", "schedule": "every 10 min", "does": "Move awaiting conversations past their due time to overdue and publish messaging.reply.overdue" },
     { "name": "messaging.archive", "schedule": "daily 04:00 PT", "does": "Archive conversations past archiveAfterDays" },
-    { "name": "messaging.response-stats", "schedule": "hourly", "does": "Roll up seller reply times for performance and Seller Center" }
+    { "name": "messaging.response-stats", "schedule": "hourly", "does": "Roll up 30-day seller reply times into seller_reply_stats for sellers with messages in the last 2 hours and rows older than a day (bounded batches)" }
   ],
   "settings": [
     { "key": "sellerReplyTargetHours", "type": "duration", "default": 24, "desc": "Seller reply target shown to sellers (example)", "unit": "hours", "min": 1, "sellerVisible": true },
@@ -299,11 +300,13 @@
   ],
   "integrations": [],
   "errorCodes": {
-    "CONVERSATION_LOCKED": { "status": 409, "meaning": "The conversation is locked or archived for new messages. details.reason." },
+    "CONVERSATION_LOCKED": { "status": 409, "meaning": "The conversation takes no new messages: locked by Marketly (details.reason = the lock reason) or archived (details.reason = archived; starting a conversation on the same subject reopens an archived one, replying inside it does not)." },
+    "TRUST_UNAVAILABLE": { "status": 422, "meaning": "refer_to_trust needs the Trust and Risk module, which is off; hide the message or lock the conversation instead." },
     "MESSAGING_RESTRICTED": { "status": 403, "meaning": "The customer's account is restricted from messaging sellers (replies inside a case stay possible). details.reason, details.endsAt." },
     "ORDER_NOT_ELIGIBLE": { "status": 422, "meaning": "The caller cannot message about this order (not their order, or seller not in the order)." }
   },
   "notes": [
+    "Public API participants (participant: Actor): a customer actor carries the customers-module id (the customer participant id), never the account id; a guest session is a visitor actor (its session id), a seller actor the seller id, staff the staff account id.",
     "Conversations are private to the customer, the seller and Marketly support. Sellers never see other sellers' conversations; staff reads are logged with a reason.",
     "One conversation per customer + seller + subject (order, item or return); starting again appends to it, so history stays linked to the transaction.",
     "Promotional messages are not allowed here; marketing goes through notifications with separate preferences (plan ch. 15, 19).",

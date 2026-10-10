@@ -80,6 +80,7 @@ enum ConversationPartyKind @areas(in: [STORE, SELLER]) {
 
 type ConversationParticipant @areas(in: [STORE, SELLER]) {
   kind: ConversationParticipantKind!
+  "CUSTOMER: customers-module id; GUEST: order:<orderId>; SELLER: seller id (OFFICIAL_STORE_ID for the Official Store); STAFF: staff account id"
   id: String!
   name: String!
   "e.g. Marketly Support"
@@ -90,6 +91,8 @@ type ConversationParticipant @areas(in: [STORE, SELLER]) {
 
 enum ConversationParticipantKind @areas(in: [STORE, SELLER]) {
   CUSTOMER
+  "The buyer of a guest order (participant id order:<orderId>)"
+  GUEST
   SELLER
   STAFF
 }

@@ -17,6 +17,7 @@ export type MessageRec = Db['messages'];
 export type ReportRec = Db['message_reports'];
 export type TemplateRec = Db['reply_templates'];
 export type AccessLogRec = Db['staff_access_log'];
+export type ReplyStatsRec = Db['seller_reply_stats'];
 
 /** A column condition: a value (=), a list (in), null (is null) or an operator */
 export type Cond<V> = V | readonly V[] | { op: '<' | '<=' | '>' | '>=' | '<>' | 'is not'; value: V | null };
@@ -134,6 +135,10 @@ export interface MessagingRepository {
   dueAwaiting(now: Date, limit: number): Promise<ConversationRec[]>;
   dueArchive(now: Date, limit: number): Promise<ConversationRec[]>;
   sellersActiveSince(since: Date, limit: number): Promise<string[]>;
+  /** Writes a seller's rolled-up reply figures (one row per seller) */
+  upsertReplyStats(row: ReplyStatsRec): Promise<void>;
+  /** Sellers whose reply figures were computed before this time, oldest first */
+  staleReplyStats(before: Date, limit: number): Promise<string[]>;
   /** Awaiting and overdue counts, oldest waiting and unread conversations of a seller */
   sellerInbox(sellerId: string): Promise<{ awaiting: number; overdue: number; oldestWaitingSince: Date | null; unreadConversations: number }>;
 
