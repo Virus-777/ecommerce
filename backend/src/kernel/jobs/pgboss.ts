@@ -78,6 +78,13 @@ export function cronOf(s: Schedule): string | undefined {
   return `${m} ${h} 1 * *`;
 }
 
+/** Installs or upgrades pg-boss's tables (npm run migrate), so servers don't need to on start */
+export async function migrateJobQueue(connectionString: string, schema = 'pgboss'): Promise<void> {
+  const boss = new PgBoss({ connectionString, schema, schedule: false, supervise: false, max: 1 });
+  await boss.start();
+  await boss.stop({ graceful: false, close: true });
+}
+
 /** A stable UUID for a name (pg-boss job ids are uuids) */
 function uuidOf(text: string): string {
   const h = createHash('sha256').update(text).digest('hex');
@@ -88,7 +95,6 @@ export class PgBossScheduler extends JobRegistry implements JobScheduler {
   readonly backend = 'pgboss' as const;
   readonly #o: PgBossSchedulerOptions;
   readonly #retry: RetryPolicy;
-  #boss?: PgBoss;
   #booting?: Promise<PgBoss>;
   readonly #workers = new Map<string, string>();
   readonly #timers = new Set<NodeJS.Timeout>();
@@ -136,7 +142,6 @@ export class PgBossScheduler extends JobRegistry implements JobScheduler {
           await boss.updateQueue(name, settings);
         } else await boss.createQueue(name, queue());
       }
-      this.#boss = boss;
       return boss;
     })();
     return this.#booting;

@@ -7,8 +7,8 @@ import { TestClock } from 'pg-boss';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { pgliteServer, type PgServer } from '../../testing/pg-server.js';
 import { InProcessScheduler, type JobScheduler } from './index.js';
-import { cronOf, PgBossScheduler, type PgBossSchedulerOptions } from './pgboss.js';
 import { parseSchedule } from './index.js';
+import { cronOf, migrateJobQueue, PgBossScheduler, type PgBossSchedulerOptions } from './pgboss.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const errors: unknown[] = [];
@@ -237,6 +237,19 @@ describe('pg-boss runner', () => {
     await web.start();
     await web.runNow('t.split');
     expect(ranOn).toBe('worker');
+  });
+
+  it('npm run migrate installs the queue tables ahead of the servers', async () => {
+    await migrateJobQueue(server.url, 'jobs_migrated');
+    const s = pgboss({ schema: 'jobs_migrated' });
+    let ran = false;
+    s.declare(job('t.after-migrate'));
+    s.handle('test', 't.after-migrate', async () => {
+      ran = true;
+    });
+    await s.start();
+    await s.runNow('t.after-migrate');
+    expect(ran).toBe(true);
   });
 
   it('stop lets the run in progress finish, then nothing runs', async () => {
