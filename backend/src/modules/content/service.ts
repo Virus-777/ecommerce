@@ -1,7 +1,7 @@
 import type { EventPayload } from '../../kernel/events/index.js';
 import { newId } from '../../kernel/lib/ids.js';
 import type * as catalog from '../../spec/catalog.js';
-import type { ContentPublicApi, FooterGroup, HelpCategory, LinkRef, PageInput, SellerAnnouncement, ServiceStrip, SiteNavigation } from '../../spec/content.js';
+import type { ContentPublicApi, FooterGroup, HelpCategory, LinkRef, PageDraftInput, SellerAnnouncement, ServiceStrip, SiteNavigation } from '../../spec/content.js';
 import type * as sellers from '../../spec/sellers.js';
 import { inWindow } from './domain/rules.js';
 import type { NavigationRow, PageRow, VersionRow } from './ports.js';
@@ -19,14 +19,16 @@ export type { ContentServiceDeps } from './service/base.js';
 export class ContentService extends ContentPolicies implements ContentPublicApi {
   /* ---------------------------------------------------------------- navigation */
 
-  private async companyLine(): Promise<string> {
+  /** Footer company facts from settings (market.companyLine and market.legalName); fallbacks when settings is off */
+  private async company(): Promise<{ companyLine: string; legalName: string }> {
     const settingsApi = this.ctx.tryUse('settings');
     const info = await this.soft('settings.storeInfo', settingsApi && (() => settingsApi.storeInfo()), null);
-    const year = this.now().getUTCFullYear();
-    return `© ${year} Marketly${info?.market.serviceRegionLabel ? ` · Serving ${info.market.serviceRegionLabel}` : ''}`;
+    const legalName = info?.market.legalName?.trim() || 'Marketly';
+    const companyLine = info?.market.companyLine?.trim() || `© ${this.now().getUTCFullYear()} ${legalName}`;
+    return { companyLine, legalName };
   }
 
-  private navigationFrom(rows: NavigationRow[], opts: { strip: 'active' | 'any' }): Omit<SiteNavigation, 'contact' | 'companyLine'> {
+  private navigationFrom(rows: NavigationRow[], opts: { strip: 'active' | 'any' }): Omit<SiteNavigation, 'contact' | 'companyLine' | 'legalName'> {
     const link = (r: NavigationRow): LinkRef => ({ label: r.label, url: r.url, kind: (r.kind === 'none' ? null : r.kind) as LinkRef['kind'] });
     const header = rows.filter((r) => r.area === 'header').map(link);
     const footer: FooterGroup[] = [];
@@ -45,7 +47,7 @@ export class ContentService extends ContentPolicies implements ContentPublicApi 
   /** Header and footer links, the service strip inside its window, contact details and the company line */
   async getNavigation(): Promise<SiteNavigation> {
     const rows = await this.repo.listNavigation();
-    return { ...this.navigationFrom(rows, { strip: 'active' }), contact: await this.contactChannels('customer'), companyLine: await this.companyLine() };
+    return { ...this.navigationFrom(rows, { strip: 'active' }), contact: await this.contactChannels('customer'), ...(await this.company()) };
   }
 
   async updateNavigation(body: { header: LinkRef[]; footer: FooterGroup[]; serviceStrip?: ServiceStrip | null; reason?: string | null }, by: By): Promise<SiteNavigation> {
@@ -83,7 +85,7 @@ export class ContentService extends ContentPolicies implements ContentPublicApi 
     await this.repo.transaction((tx) => tx.replaceNavigation(rows));
     const after = await this.repo.listNavigation();
     await this.audit({ action: 'content.navigation.update', actionLabel: 'Replaced header and footer links', target: { type: 'navigation', id: 'site', label: 'Site navigation' }, before: this.navigationFrom(before, { strip: 'any' }), after: this.navigationFrom(after, { strip: 'any' }), reason: body.reason ?? null }, by);
-    return { ...this.navigationFrom(after, { strip: 'any' }), contact: await this.contactChannels('customer'), companyLine: await this.companyLine() };
+    return { ...this.navigationFrom(after, { strip: 'any' }), contact: await this.contactChannels('customer'), ...(await this.company()) };
   }
 
   /* ---------------------------------------------------------------- events consumed */
@@ -132,7 +134,7 @@ export class ContentService extends ContentPolicies implements ContentPublicApi 
     );
     for (const p of await this.repo.listPages({})) {
       const base: VersionRow | undefined = p.draft_version_id ? await this.repo.getVersion(p.draft_version_id) : p.live_version_id ? await this.repo.getVersion(p.live_version_id) : undefined;
-      const snap = base?.snapshot as unknown as PageInput | undefined;
+      const snap = base?.snapshot as unknown as PageDraftInput | undefined;
       if (!base || !snap?.blocks) continue;
       let changed = false;
       const blocks = snap.blocks.map((b) => {
@@ -199,7 +201,7 @@ export class ContentService extends ContentPolicies implements ContentPublicApi 
     const flagged: PageRow[] = [];
     for (const p of await this.repo.listPages({})) {
       const versions = await this.repo.getVersions([p.live_version_id, p.draft_version_id].filter((x): x is string => Boolean(x)));
-      if (versions.some((v) => ((v.snapshot as unknown as PageInput | null)?.blocks ?? []).some((b) => b.type === 'seller_feature' && b.sellerId === event.sellerId))) flagged.push(p);
+      if (versions.some((v) => ((v.snapshot as unknown as PageDraftInput | null)?.blocks ?? []).some((b) => b.type === 'seller_feature' && b.sellerId === event.sellerId))) flagged.push(p);
     }
     // the claim and the flags commit together: a redelivered event flags nothing twice
     await this.repo.transaction(async (tx) => {
@@ -250,7 +252,7 @@ export class ContentService extends ContentPolicies implements ContentPublicApi 
       if (!linked) {
         const versions = await this.repo.getVersions([p.live_version_id, p.draft_version_id].filter((x): x is string => Boolean(x)));
         linked = versions.some((v) => {
-          const snap = v.snapshot as unknown as PageInput | null;
+          const snap = v.snapshot as unknown as PageDraftInput | null;
           return snap?.linkedPromotionId === campaignId || (snap?.blocks ?? []).some((b) => b.productSource?.mode === 'rule' && b.productSource.rule?.kind === 'deals' && b.productSource.rule.campaignId === campaignId);
         });
       }
@@ -276,7 +278,7 @@ export class ContentService extends ContentPolicies implements ContentPublicApi 
       const [last] = await this.repo.logsOf('page', p.id, 'availability_check');
       if (last && now.getTime() - last.at.getTime() < minutes * 60_000) continue;
       const v = p.live_version_id ? await this.repo.getVersion(p.live_version_id) : undefined;
-      const snap = v?.snapshot as unknown as PageInput | undefined;
+      const snap = v?.snapshot as unknown as PageDraftInput | undefined;
       let hidden = 0;
       let shown = 0;
       for (const b of snap?.blocks ?? []) {
@@ -331,7 +333,7 @@ export class ContentService extends ContentPolicies implements ContentPublicApi 
     const p = await this.repo.getPage(pageId);
     if (!p || p.kind !== 'collection' || !this.pageIsLive(p)) return null;
     const v = p.live_version_id ? await this.repo.getVersion(p.live_version_id) : undefined;
-    const snap = v?.snapshot as unknown as PageInput | undefined;
+    const snap = v?.snapshot as unknown as PageDraftInput | undefined;
     const sources = (snap?.blocks ?? []).map((b) => b.productSource).filter(Boolean);
     const rule = sources.find((s) => s?.mode === 'rule')?.rule;
     const [check] = await this.repo.logsOf('page', p.id, 'availability_check');
@@ -353,7 +355,7 @@ export class ContentService extends ContentPolicies implements ContentPublicApi 
     const p = await this.repo.getPage(pageId);
     const versionId = p ? (opts.draft ? (p.draft_version_id ?? p.live_version_id) : p.live_version_id) : null;
     const v = versionId ? await this.repo.getVersion(versionId) : undefined;
-    const snap = v?.snapshot as unknown as PageInput | undefined;
+    const snap = v?.snapshot as unknown as PageDraftInput | undefined;
     if (!p) return null;
     return { seoTitle: snap?.seoTitle ?? null, seoDescription: snap?.seoDescription ?? null, linkedPromotionId: snap?.linkedPromotionId ?? p.linked_promotion_id };
   }

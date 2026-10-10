@@ -16,9 +16,11 @@ import { actorFromKey, actorKey, invalid, iso, notFound, requireText, SYSTEM, ty
 import { ContentHelp, HELPFUL_WINDOW_DAYS } from './help.js';
 
 type State = PolicyVersion['state'];
-type PolicyKey = PolicySummary['key'];
+type PolicyKind = PolicySummary['kind'];
 
-export const POLICY_KEYS: readonly PolicyKey[] = ['returns', 'shipping', 'privacy', 'purchase_terms', 'seller_rules', 'advertising', 'cookies', 'other'];
+export const POLICY_KINDS: readonly PolicyKind[] = ['returns', 'shipping', 'privacy', 'purchase_terms', 'seller_rules', 'advertising', 'cookies', 'other'];
+/** A policy key is the URL slug: lowercase letters, digits, - and _ */
+const POLICY_KEY = /^[a-z0-9](?:[a-z0-9_-]{0,58}[a-z0-9])?$/;
 const APPROVE_ACTION = 'content.policies.approve';
 const SHORT_NOTICE_ACTION = 'content.policies.short-notice';
 const SHORT_NOTICE_NOTE = 'Short notice';
@@ -85,7 +87,8 @@ export class ContentPolicies extends ContentHelp {
       const draft = opts.store ? undefined : this.openOf(mine);
       return {
         id: p.id,
-        key: p.key as PolicyKey,
+        key: p.key,
+        kind: p.kind as PolicyKind,
         title: p.title,
         owner: opts.store ? { staffId: null, name: 'Marketly', role: 'Policy owner' } : owners[i * 2]!,
         editor: opts.store || !p.editor_staff_id ? null : owners[i * 2 + 1]!,
@@ -225,12 +228,14 @@ export class ContentPolicies extends ContentHelp {
 
   /* ---------------------------------------------------------------- writes */
 
-  async createPolicy(body: { key: string; title: string; ownerStaffId: string; editorStaffId?: string | null; audience: 'customer' | 'seller' | 'both' }, by: By): Promise<PolicySummary> {
-    const key = body.key?.trim();
-    if (!POLICY_KEYS.includes(key as PolicyKey)) throw invalid('key', `Use one of ${POLICY_KEYS.join(', ')}`);
+  async createPolicy(body: { key: string; kind?: PolicyKind | null; title: string; ownerStaffId: string; editorStaffId?: string | null; audience: 'customer' | 'seller' | 'both' }, by: By): Promise<PolicySummary> {
+    const key = body.key?.trim() ?? '';
+    if (key.length < 2 || !POLICY_KEY.test(key)) throw invalid('key', 'Use 2–60 lowercase letters, digits, - or _ (it is the policy URL)');
+    if (body.kind != null && !POLICY_KINDS.includes(body.kind)) throw invalid('kind', `Use one of ${POLICY_KINDS.join(', ')}`);
+    const kind: PolicyKind = body.kind ?? (POLICY_KINDS.includes(key as PolicyKind) ? (key as PolicyKind) : 'other');
     const title = requireText(body.title, 'title', 'A policy needs a title');
     if (await this.repo.policyByKey(key)) throw new AppError('CONFLICT', `The ${key} policy already exists`);
-    const row = await this.repo.insertPolicy({ id: newId(), key, title, owner_staff_id: body.ownerStaffId, editor_staff_id: body.editorStaffId ?? null, audience: body.audience });
+    const row = await this.repo.insertPolicy({ id: newId(), key, kind, title, owner_staff_id: body.ownerStaffId, editor_staff_id: body.editorStaffId ?? null, audience: body.audience });
     await this.audit({ action: 'content.policy.create', actionLabel: 'Created policy', target: { type: 'policy', id: row.id, ref: key, label: title }, after: row }, by);
     return (await this.policySummaries([row]))[0]!;
   }

@@ -151,7 +151,7 @@
       "reviewedBy": "Actor?", "reviewedAt": "datetime?",
       "note": "text?"
     },
-    "PageInput": {
+    "PageDraftInput": {
       "kind": "enum(campaign|collection|about|landing)",
       "collectionKind": "enum(curated|new_arrivals|best_sellers|seasonal|brand|official)?",
       "brandId": { "type": "uuid?", "desc": "Required when collectionKind is brand: the brand page lists the collection" },
@@ -176,8 +176,8 @@
     },
     "PageAdmin": {
       "summary": "PageSummary",
-      "draft": "PageInput?",
-      "live": "PageInput?",
+      "draft": "PageDraftInput?",
+      "live": "PageDraftInput?",
       "linkedPromotion": { "type": "LinkedPromotion?" },
       "checks": { "type": "Check[]", "desc": "e.g. unavailable products hidden, campaign starts at the same time as the page, missing images" },
       "removal": "RemovalInfo?"
@@ -252,7 +252,10 @@
     },
     "PolicyVersionRef": { "policyKey": "string", "versionId": "uuid", "version": "string", "effectiveAt": "datetime" },
     "PolicySummary": {
-      "id": "uuid", "key": "enum(returns|shipping|privacy|purchase_terms|seller_rules|advertising|cookies|other)", "title": "string",
+      "id": "uuid",
+      "key": { "type": "string", "desc": "Slug in the policy URL (/policies/{key}), unique, lowercase letters, digits, - and _, e.g. returns, gift-cards" },
+      "kind": { "type": "enum(returns|shipping|privacy|purchase_terms|seller_rules|advertising|cookies|other)", "desc": "What the policy governs; several policies may share other" },
+      "title": "string",
       "owner": "OwnerRef", "editor": "OwnerRef?",
       "current": "PolicyVersionRef?", "scheduled": "PolicyVersionRef?", "draft": "PolicyVersionRef?"
     },
@@ -286,7 +289,7 @@
       "owner": "string",
       "siblings": "LinkRef[]"
     },
-    "SiteNavigation": { "header": "LinkRef[]", "footer": "FooterGroup[]", "contact": "ContactChannel[]", "companyLine": "string", "serviceStrip": { "type": "ServiceStrip?", "desc": "Service message above the store header; null when none is active" } },
+    "SiteNavigation": { "header": "LinkRef[]", "footer": "FooterGroup[]", "contact": "ContactChannel[]", "companyLine": { "type": "string", "desc": "settings.storeInfo market.companyLine (footer line, e.g. Marketly, Inc. · 500 Market St …); when settings is off: '© <year> Marketly'" }, "legalName": { "type": "string", "desc": "settings.storeInfo market.legalName; 'Marketly' when settings is off" }, "serviceStrip": { "type": "ServiceStrip?", "desc": "Service message above the store header; null when none is active" } },
     "ServiceStrip": {
       "text": { "type": "string", "desc": "e.g. Free delivery on Official Store orders over $35 · 30-day returns on most items. Thresholds in the text must match the shipping and returns settings; the editor checks this before saving." },
       "link": { "type": "LinkRef?", "desc": "e.g. Delivery details → shipping policy" },
@@ -302,7 +305,7 @@
     { "name": "help_categories", "columns": { "id": "uuid pk", "slug": "text unique", "name": "text", "icon": "text?", "description": "text?", "position": "int", "visible": "bool", "audience": "text" } },
     { "name": "help_articles", "columns": { "id": "uuid pk", "slug": "text unique", "category_id": "uuid → help_categories", "title": "text", "summary": "text?", "audience": "text", "topics": "jsonb", "related_ids": "jsonb", "policy_keys": "jsonb", "featured": "bool", "popular_search": "text?", "owner_staff_id": "uuid?", "status": "text", "publish_at": "timestamptz?", "unpublish_at": "timestamptz?", "effective_at": "timestamptz?", "review_due_at": "timestamptz?", "live_version_id": "uuid? → versions", "draft_version_id": "uuid? → versions", "views": "int", "search": "tsvector (generated from live version)", "updated_at": "timestamptz" }, "indexes": ["(category_id, status)", "gin(search)", "(status, review_due_at)"] },
     { "name": "article_feedback", "columns": { "id": "uuid pk", "article_id": "uuid → help_articles", "helpful": "bool", "comment": "text?", "visitor_key": "text", "customer_id": "uuid?", "at": "timestamptz" }, "indexes": ["unique (article_id, visitor_key)"] },
-    { "name": "policies", "columns": { "id": "uuid pk", "key": "text unique", "title": "text", "owner_staff_id": "uuid", "editor_staff_id": "uuid?", "audience": "text (customer|seller|both)" } },
+    { "name": "policies", "columns": { "id": "uuid pk", "key": "text unique (URL slug)", "kind": "text (returns|shipping|privacy|purchase_terms|seller_rules|advertising|cookies|other)", "title": "text", "owner_staff_id": "uuid", "editor_staff_id": "uuid?", "audience": "text (customer|seller|both)" } },
     { "name": "policy_versions", "desc": "Never edited after approval; orders reference these ids", "columns": { "id": "uuid pk", "policy_id": "uuid → policies", "version": "text", "state": "text", "title": "text", "body": "text", "tables": "jsonb?", "effective_at": "timestamptz?", "change_summary": "text?", "impact": "text", "notify_customers": "bool", "notify_sellers": "bool", "approval_request_id": "uuid?", "created_by": "text", "created_at": "timestamptz", "published_at": "timestamptz?" }, "indexes": ["unique (policy_id, version)", "(policy_id, state, effective_at)"] },
     { "name": "policy_approvals", "columns": { "id": "uuid pk", "policy_version_id": "uuid → policy_versions", "role": "text", "reviewer_id": "text?", "state": "text", "note": "text?", "at": "timestamptz?" } },
     { "name": "navigation", "desc": "Header and footer link groups (versioned through versions with entity page kind 'navigation' is not needed; edits are audited)", "columns": { "id": "uuid pk", "area": "text (header|footer|service_strip)", "group_title": "text?", "position": "int", "label": "text", "url": "text", "kind": "text", "text": "text? (service_strip only)", "active_from": "timestamptz?", "active_until": "timestamptz?" } },
@@ -322,13 +325,15 @@
         ["scheduled", "publish", "published"],
         ["scheduled", "cancelSchedule", "draft"],
         ["published", "unpublish", "unpublished"],
+        ["draft", "remove", "removed"],
+        ["scheduled", "remove", "removed"],
         ["published", "remove", "removed"],
         ["unpublished", "schedule", "scheduled"],
         ["unpublished", "publish", "published"],
         ["unpublished", "remove", "removed"],
         ["removed", "restore", "draft"]
       ],
-      "notes": "Applies to pages, collections, homepage sections and help articles. Review is optional for pages and sections (content.reviewRequired setting) and required for help articles. scheduled → publish runs from the schedule job at publishAt; unpublish also runs at unpublishAt ('Removed Sep 16'). remove is the correction or removal action for content that must come down now: it requires a reason, records who and why, and leaves a correction note where configured. Editing a published item creates a new draft version; the live version stays until the draft is published."
+      "notes": "Applies to pages, collections, homepage sections and help articles. Review is optional for pages and sections (content.reviewRequired setting) and required for help articles. scheduled → publish runs from the schedule job at publishAt; unpublish also runs at unpublishAt ('Removed Sep 16'). remove is the correction or removal action for content that must come down now (also a draft or a scheduled item that must never go live; a scheduled one loses its schedule): it requires a reason, records who and why, and leaves a correction note where configured. Editing a published item creates a new draft version; the live version stays until the draft is published."
     },
     {
       "name": "Policy version", "field": "PolicyVersion.state", "initial": "draft",
@@ -378,9 +383,9 @@
     { "id": "restoreHomepageVersion", "area": "admin", "method": "POST", "path": "/homepage/versions/{number}/restore", "summary": "Restore an earlier layout (creates a new version; nothing is overwritten)", "auth": "staff", "permission": "content.homepage.publish", "params": { "number": "int" }, "body": { "reason": "text", "publish": "bool" }, "response": "HomepageAdmin", "errors": ["NOT_FOUND"], "audited": true, "events": ["content.page.published"], "screens": ["admin/content"] },
 
     { "id": "listPagesAdmin", "area": "admin", "method": "GET", "path": "/pages", "summary": "Campaign pages and collections with publish and removal times", "auth": "staff", "permission": "content.pages.manage", "paging": true, "query": { "kind": "enum(campaign|collection|about|landing)?", "status": "string?", "q": "string?" }, "response": "PageSummary", "screens": ["admin/content"] },
-    { "id": "createPage", "area": "admin", "method": "POST", "path": "/pages", "summary": "Create a page or collection draft", "auth": "staff", "permission": "content.pages.manage", "body": "PageInput", "response": "PageAdmin", "status": 201, "errors": ["SLUG_TAKEN"], "audited": true, "screens": ["admin/content"] },
+    { "id": "createPage", "area": "admin", "method": "POST", "path": "/pages", "summary": "Create a page or collection draft", "auth": "staff", "permission": "content.pages.manage", "body": "PageDraftInput", "response": "PageAdmin", "status": 201, "errors": ["SLUG_TAKEN"], "audited": true, "screens": ["admin/content"] },
     { "id": "getPageAdmin", "area": "admin", "method": "GET", "path": "/pages/{id}", "summary": "Page with draft and live versions, checks and linked promotion", "auth": "staff", "permission": "content.pages.manage", "params": { "id": "uuid" }, "response": "PageAdmin", "screens": ["admin/content"] },
-    { "id": "updatePage", "area": "admin", "method": "PATCH", "path": "/pages/{id}", "summary": "Edit the page draft (creates or updates the draft version)", "auth": "staff", "permission": "content.pages.manage", "params": { "id": "uuid" }, "body": "PageInput", "response": "PageAdmin", "errors": ["SLUG_TAKEN", "CONFLICT"], "audited": true, "screens": ["admin/content"] },
+    { "id": "updatePage", "area": "admin", "method": "PATCH", "path": "/pages/{id}", "summary": "Edit the page draft (creates or updates the draft version)", "auth": "staff", "permission": "content.pages.manage", "params": { "id": "uuid" }, "body": "PageDraftInput", "response": "PageAdmin", "errors": ["SLUG_TAKEN", "CONFLICT"], "audited": true, "screens": ["admin/content"] },
     { "id": "previewPage", "area": "admin", "method": "POST", "path": "/pages/{id}/preview", "summary": "Preview the draft as customers will see it", "auth": "staff", "permission": "content.pages.manage", "params": { "id": "uuid" }, "body": "PreviewRequest", "response": "StorePage", "screens": ["admin/content"] },
     { "id": "submitPage", "area": "admin", "method": "POST", "path": "/pages/{id}/submit", "summary": "Send for review", "auth": "staff", "permission": "content.pages.manage", "params": { "id": "uuid" }, "response": "PageAdmin", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "screens": ["admin/content"] },
     { "id": "approvePage", "area": "admin", "method": "POST", "path": "/pages/{id}/approve", "summary": "Approve or request changes", "auth": "staff", "permission": "content.pages.publish", "params": { "id": "uuid" }, "body": { "approve": "bool", "reason": "text?" }, "response": "PageAdmin", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "screens": ["admin/content"] },
@@ -405,7 +410,7 @@
     { "id": "restoreArticleVersion", "area": "admin", "method": "POST", "path": "/help/articles/{id}/versions/{number}/restore", "summary": "Restore an earlier article version as a new draft", "auth": "staff", "permission": "content.help.manage", "params": { "id": "uuid", "number": "int" }, "body": { "reason": "text" }, "response": "HelpArticleAdmin", "errors": ["NOT_FOUND"], "audited": true, "screens": ["admin/help-content"] },
 
     { "id": "listPoliciesAdmin", "area": "admin", "method": "GET", "path": "/policies", "summary": "Policies with current, scheduled and draft versions", "auth": "staff", "permission": "content.policies.edit", "response": "PolicySummary[]", "screens": ["admin/help-content", "admin/settings"] },
-    { "id": "createPolicy", "area": "admin", "method": "POST", "path": "/policies", "summary": "Create a new policy with its business owner", "auth": "staff", "permission": "content.policies.manage", "body": { "key": "string", "title": "string", "ownerStaffId": "uuid", "editorStaffId": "uuid?", "audience": "enum(customer|seller|both)" }, "response": "PolicySummary", "status": 201, "audited": true, "screens": ["admin/help-content"] },
+    { "id": "createPolicy", "area": "admin", "method": "POST", "path": "/policies", "summary": "Create a new policy with its business owner", "auth": "staff", "permission": "content.policies.manage", "body": { "key": { "type": "string", "desc": "URL slug: lowercase letters, digits, - and _ (2–60 characters); unique (CONFLICT when taken)" }, "kind": { "type": "enum(returns|shipping|privacy|purchase_terms|seller_rules|advertising|cookies|other)?", "desc": "Default: the key when it is one of the kinds, else other" }, "title": "string", "ownerStaffId": "uuid", "editorStaffId": "uuid?", "audience": "enum(customer|seller|both)" }, "response": "PolicySummary", "status": 201, "errors": ["VALIDATION_FAILED", "CONFLICT"], "audited": true, "screens": ["admin/help-content"] },
     { "id": "listPolicyVersionsAdmin", "area": "admin", "method": "GET", "path": "/policies/{id}/versions", "summary": "All versions of a policy with effective date, summary and approver", "auth": "staff", "permission": "content.policies.edit", "params": { "id": "uuid" }, "response": "PolicyVersion[]", "screens": ["admin/help-content"] },
     { "id": "createPolicyVersion", "area": "admin", "method": "POST", "path": "/policies/{id}/versions", "summary": "Start a new version draft (copies the current text)", "auth": "staff", "permission": "content.policies.edit", "params": { "id": "uuid" }, "body": { "version": { "type": "string?", "desc": "Defaults to the next minor number, e.g. 3.1" } }, "response": "PolicyVersion", "status": 201, "errors": ["DRAFT_EXISTS"], "audited": true, "screens": ["admin/help-content"] },
     { "id": "getPolicyVersionAdmin", "area": "admin", "method": "GET", "path": "/policy-versions/{id}", "summary": "A policy version with approvals", "auth": "staff", "permission": "content.policies.edit", "params": { "id": "uuid" }, "response": "PolicyVersion", "screens": ["admin/help-content"] },

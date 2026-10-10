@@ -6,21 +6,21 @@ import { AppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { pageOf, toPageRequest, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
-import type { BannerBlock, Check, CollectionCard, LinkedPromotion, PageAdmin, PageBlock, PageInput, PageSummary, ProductSource, ProductTile, RemovalInfo, StorePage, Version } from '../../../spec/content.js';
+import type { BannerBlock, Check, CollectionCard, LinkedPromotion, PageAdmin, PageBlock, PageDraftInput, PageSummary, ProductSource, ProductTile, RemovalInfo, StorePage, Version } from '../../../spec/content.js';
 import { isValidSlug, isValidTimeZone, sanitizeHtml, slugify } from '../domain/rules.js';
 import { contentPublicationMachine } from '../domain/state-machines.js';
 import type { PageRow, VersionRow } from '../ports.js';
 import { dateOrNull, invalid, unique, iso, notFound, requireText, SYSTEM, type By, type DraftReview } from './base.js';
 import { ContentTiles } from './tiles.js';
 
-type PageSnapshot = PageInput & { _review?: DraftReview | null };
+type PageSnapshot = PageDraftInput & { _review?: DraftReview | null };
 type Removal = RemovalInfo & { correctionNote?: string | null };
 type Status = PageSummary['status'];
 
 const COLLECTION_NOTES = ['Only in-stock offers are included', 'No seller paid to be included', 'Prices and stock are live'];
 
 /** Files a page uses: the card image and banner images of its blocks */
-export const pageMediaIds = (p: PageInput | null | undefined): { id: string; path: string }[] => {
+export const pageMediaIds = (p: PageDraftInput | null | undefined): { id: string; path: string }[] => {
   if (!p) return [];
   const out: { id: string; path: string }[] = [];
   if (p.coverImage?.id) out.push({ id: p.coverImage.id, path: 'coverImage' });
@@ -49,7 +49,7 @@ export class ContentPages extends ContentTiles {
     return { ...s, productIds: s.productIds ? [...new Set(s.productIds)] : s.productIds };
   }
 
-  private async normalizePage(input: PageInput, opts: { pageId?: string }): Promise<PageSnapshot> {
+  private async normalizePage(input: PageDraftInput, opts: { pageId?: string }): Promise<PageSnapshot> {
     const title = requireText(input.title, 'title', 'A page needs a title');
     if (input.kind === 'collection' && !input.collectionKind) throw invalid('collectionKind', 'Pick the kind of collection');
     if (input.kind !== 'collection' && input.collectionKind) throw invalid('collectionKind', 'Only collections have a collection kind');
@@ -108,7 +108,7 @@ export class ContentPages extends ContentTiles {
     return v ? (v.snapshot as unknown as PageSnapshot) : null;
   }
 
-  private stripMeta(s: PageSnapshot | null): PageInput | null {
+  private stripMeta(s: PageSnapshot | null): PageDraftInput | null {
     if (!s) return null;
     const { _review, ...rest } = s;
     void _review;
@@ -320,26 +320,23 @@ export class ContentPages extends ContentTiles {
     return this.storePageFrom(p, snap, v);
   }
 
-  async collectionProducts(pageId: string, opts: { categoryId?: string; paging: unknown; blockId?: string }): Promise<common.Page<ProductTile>> {
+  /** publicApi collectionProducts: paging is the common PageInput (cursor or page, limit) */
+  async collectionProducts(pageId: string, opts: { categoryId?: string; paging: common.PageInput; blockId?: string }): Promise<common.Page<ProductTile>> {
+    return this.collectionPage(pageId, opts, toPageRequest(opts?.paging ?? {}));
+  }
+
+  protected async collectionPage(pageId: string, opts: { categoryId?: string; blockId?: string }, req: PageRequest): Promise<common.Page<ProductTile>> {
     const items = await this.collectionItems(pageId, { categoryId: opts?.categoryId ?? null, blockId: opts?.blockId ?? null });
-    const req = this.pagingOf(opts?.paging);
     return pageOf(
       items.map((i) => i.tile),
       req,
     );
   }
 
-  /** The spec types `paging` as PageInput; accept the common paging input or a PageRequest */
-  protected pagingOf(p: unknown): PageRequest {
-    if (p && typeof p === 'object' && 'mode' in p) return p as PageRequest;
-    const x = (p ?? {}) as common.PageInput;
-    return toPageRequest({ ...(x.cursor ? { cursor: x.cursor } : {}), ...(x.page ? { page: x.page } : {}), ...(x.limit ? { limit: x.limit } : {}) });
-  }
-
   async listPageProducts(slug: string, q: { categoryId?: string; blockId?: string }, page: PageRequest): Promise<common.Page<ProductTile>> {
     const p = await this.repo.pageBySlug(slug);
     if (!p || !this.pageIsLive(p)) throw notFound('Page');
-    return this.collectionProducts(p.id, { categoryId: q.categoryId, blockId: q.blockId, paging: page });
+    return this.collectionPage(p.id, { categoryId: q.categoryId, blockId: q.blockId }, page);
   }
 
   async listCollections(q: { brandId?: string; collectionKind?: string }, page: PageRequest): Promise<common.Page<CollectionCard>> {
@@ -383,7 +380,7 @@ export class ContentPages extends ContentTiles {
 
   /* ---------------------------------------------------------------- writes */
 
-  async createPage(input: PageInput, by: By): Promise<PageAdmin> {
+  async createPage(input: PageDraftInput, by: By): Promise<PageAdmin> {
     const id = newId();
     const snap = await this.normalizePage(input, {});
     const tz = await this.marketTimeZone();
@@ -428,7 +425,7 @@ export class ContentPages extends ContentTiles {
     return err;
   }
 
-  async updatePage(id: string, input: PageInput, by: By): Promise<PageAdmin> {
+  async updatePage(id: string, input: PageDraftInput, by: By): Promise<PageAdmin> {
     const p = await this.pageOrThrow(id);
     const review = (await this.reviewRequired()).page;
     if (p.status === 'in_review') throw new AppError('CONFLICT', 'The page is in review; request changes before editing');
@@ -621,7 +618,8 @@ export class ContentPages extends ContentTiles {
     const p = await this.pageOrThrow(id);
     const status = contentPublicationMachine.next(p.status as Status, 'remove');
     const removal: Removal = { kind: body.kind, reason, actor: by.actor, at: this.now().toISOString(), correctionNote: body.correctionNote?.trim() ? sanitizeHtml(body.correctionNote) : null };
-    const row = await this.repo.updatePage(id, { status, removal: removal as never, updated_at: this.now() });
+    // a scheduled page that is removed never goes live: its schedule goes too
+    const row = await this.repo.updatePage(id, { status, removal: removal as never, ...(p.status === 'scheduled' ? { publish_at: null, unpublish_at: null } : {}), updated_at: this.now() });
     this.invalidateHome();
     this.ctx.events.publish('content.page.removed', { entity: 'page', entityId: id, kind: body.kind, reason }, { actor: by.actor, requestId: by.requestId });
     await this.logAction('page', id, body.kind, by, reason);
