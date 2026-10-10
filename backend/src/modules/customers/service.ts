@@ -38,6 +38,8 @@ import type {
 } from '../../spec/customers.js';
 import type * as identity from '../../spec/identity.js';
 import type * as reports from '../../spec/reports.js';
+import { spec as customersSpec } from '../../spec/customers.js';
+import { specs } from '../../spec/index.js';
 import { checkAddress, cleanAddress, hardIssues, sameAddress } from './domain/address.js';
 import {
   blocker,
@@ -120,6 +122,17 @@ const PREFS: Record<PrefKey, [PrefColumn, string]> = {
   recentSearches: ['recent_searches', 'recent_searches'],
 };
 const PROMOTIONAL_OFF: Partial<Record<PrefKey, boolean>> = { emailPromotions: false, smsPromotions: false, pushPromotions: false, wishlistAlerts: false };
+
+/** Optional dependencies whose spec declares the customer data export hook (FORMAT.md, Customer data export hook) */
+const EXPORT_HOOK_MODULES = customersSpec.optionalDeps.filter((m) => (specs as Record<string, { publicApi: readonly string[] } | undefined>)[m]?.publicApi.includes('exportCustomerData'));
+/** Attachment errors that leave the file out (listed in the README) instead of failing the export */
+const SKIPPED_ATTACHMENT = new Set(['NOT_FOUND', 'ASSET_NOT_OWNED', 'ILLEGAL_TRANSITION', 'FILE_TOO_LARGE']);
+const safeName = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
 
 const invalid = (path: string, message: string) => new AppError('VALIDATION_FAILED', message, { issues: [{ path, message }] });
 const notFound = (what: string) => new AppError('NOT_FOUND', `${what} not found`);
@@ -1073,10 +1086,14 @@ export class CustomersService implements CustomersPublicApi {
     query: { q?: string; status?: string; verification?: string; hasOpenCases?: boolean; hasAbuseReports?: boolean; joinedFrom?: string; joinedTo?: string; sort?: 'newest' | 'spend' | 'orders' | 'name' },
     page: PageRequest,
   ): Promise<common.Page<AdminCustomerRow>> {
+    // open cases and abuse reports live in support and trust: their id sets filter the query before paging
+    const { onlyIds, excludeIds } = await this.crossModuleFilter(query);
     const p = await this.repo.searchCustomers(
       {
         q: query.q,
         extraIds: await this.idsForQuery(query.q),
+        onlyIds,
+        excludeIds,
         statuses: query.status ? [query.status] : undefined,
         verification: query.verification,
         joinedFrom: this.dateFrom(query.joinedFrom),
@@ -1085,11 +1102,32 @@ export class CustomersService implements CustomersPublicApi {
       },
       page,
     );
-    let items = await this.adminRows(p.items);
-    // open cases and abuse reports live in support and trust: these two filters narrow the page they return
-    if (query.hasOpenCases !== undefined) items = items.filter((r) => r.openCases > 0 === query.hasOpenCases);
-    if (query.hasAbuseReports !== undefined) items = items.filter((r) => r.abuseReports > 0 === query.hasAbuseReports);
-    return { ...p, items };
+    return { ...p, items: await this.adminRows(p.items) };
+  }
+
+  /**
+   * hasOpenCases / hasAbuseReports as id sets from support and trust (true: only those customers, false: all but them).
+   * A filter whose source module is off is refused rather than ignored.
+   */
+  private async crossModuleFilter(query: { hasOpenCases?: boolean; hasAbuseReports?: boolean }): Promise<{ onlyIds?: string[]; excludeIds?: string[] }> {
+    const wanted: { key: 'hasOpenCases' | 'hasAbuseReports'; value: boolean; ids: () => Promise<string[]> | undefined; source: string }[] = [];
+    const support = this.ctx.tryUse('support');
+    const trust = this.ctx.tryUse('trust');
+    if (query.hasOpenCases !== undefined) wanted.push({ key: 'hasOpenCases', value: query.hasOpenCases, source: 'support', ids: () => support?.customerIdsWithOpenCases({}) });
+    if (query.hasAbuseReports !== undefined) wanted.push({ key: 'hasAbuseReports', value: query.hasAbuseReports, source: 'trust', ids: () => trust?.subjectIdsWithReports('customer', { role: 'against' }) });
+    const unavailable = wanted.filter((w) => (w.source === 'support' ? !support : !trust));
+    if (unavailable.length) {
+      const message = `This filter is not available right now (${unavailable.map((w) => w.source).join(', ')} is off)`;
+      throw new AppError('VALIDATION_FAILED', message, { issues: unavailable.map((w) => ({ path: w.key, message })), unavailable: unavailable.map((w) => w.source) });
+    }
+    let onlyIds: string[] | undefined;
+    const excludeIds: string[] = [];
+    for (const w of wanted) {
+      const ids = (await w.ids()) ?? [];
+      if (!w.value) excludeIds.push(...ids);
+      else onlyIds = onlyIds ? onlyIds.filter((id) => ids.includes(id)) : [...new Set(ids)];
+    }
+    return { onlyIds, excludeIds: excludeIds.length ? [...new Set(excludeIds)] : undefined };
   }
 
   private async adminRows(rows: CustomerRow[]): Promise<AdminCustomerRow[]> {
@@ -1749,7 +1787,6 @@ export class CustomersService implements CustomersPublicApi {
 
   /** orders.order.placed: guest buyer row for guest checkouts; order count, spend and the used address's lastUsedAt for customers */
   async onOrderPlacedFromOrders(event: EventPayload<'orders.order.placed'>, eventId?: string): Promise<void> {
-    const orders = this.ctx.tryUse('orders');
     const placedAt = new Date(event.placedAt);
     const c = event.customerId ? await this.repo.getCustomer(event.customerId) : undefined;
     if (event.customerId && !c) this.ctx.log.warn({ customerId: event.customerId, orderId: event.orderId, eventId }, 'customers: order for an unknown customer; ignored');
@@ -1757,8 +1794,8 @@ export class CustomersService implements CustomersPublicApi {
     // a member with the guest email: orders attaches the order on verification, no guest buyer row
     const guest = email && !(await this.repo.findCustomerByEmail(email)) ? email : null;
     if (!c && !guest) return;
-    const order = await this.soft('order detail', orders && (() => orders.getOrder(event.orderId)));
-    const used = c && order?.deliveryAddress ? (await this.repo.listAddresses(c.id)).find((a) => sameAddress(map.addressOf(a), order.deliveryAddress)) : undefined;
+    // the saved address the order used comes in the payload (no orders lookup); only this customer's own address counts
+    const used = c && event.deliveryAddressId ? await this.repo.getAddress(c.id, event.deliveryAddressId) : undefined;
     await this.repo.transaction(async (repo) => {
       // the claim commits with the counts: a second delivery of the same order changes nothing
       if (!(await repo.claim(`order-placed:${event.orderId}`))) return;
@@ -1773,7 +1810,7 @@ export class CustomersService implements CustomersPublicApi {
         });
         if (used && (!used.last_used_at || used.last_used_at < placedAt)) await repo.updateAddress(used.id, { last_used_at: placedAt });
       }
-      if (guest) await this.recordGuestOrder(repo, event, guest, order?.contact?.name || order?.deliveryAddress?.name || guest.split('@')[0]!);
+      if (guest) await this.recordGuestOrder(repo, event, guest, event.contactName?.trim() || guest.split('@')[0]!);
     });
   }
 
@@ -1917,6 +1954,47 @@ export class CustomersService implements CustomersPublicApi {
     }
   }
 
+  /**
+   * trust.enforcement.reversed: lift every active restriction that enforcement created (actor system on behalf of trust);
+   * the last one returns the account to active. Restrictions already lifted or expired stay as they are, so a
+   * redelivered event changes nothing; each lift also claims (event, restriction) in the inbox.
+   */
+  async onEnforcementReversedFromTrust(event: EventPayload<'trust.enforcement.reversed'>, eventId?: string): Promise<void> {
+    const rows = await this.repo.activeRestrictionsByEnforcement(event.enforcementId);
+    if (!rows.length) return;
+    const reason = `Trust reversed enforcement ${event.ref}: ${event.reason}`.slice(0, 1000);
+    const by: By = { actor: SYSTEM_ACTOR };
+    for (const r of rows) {
+      const now = this.now();
+      const out = await this.repo.transaction(async (repo) => {
+        if (!(await repo.claim(`enforcement-reversed:${eventId ?? event.enforcementId}:${r.id}`))) return undefined;
+        const c = await repo.getCustomer(r.customer_id, { forUpdate: true });
+        const cur = c && (await repo.getRestriction(r.customer_id, r.id, { forUpdate: true }));
+        if (!c || !cur || cur.state !== 'active') return undefined;
+        const ended = await this.endRestriction(repo, c, cur, 'lift', reason, now);
+        await repo.insertAction(
+          this.actionRow(c, { action: 'lift_restriction', reasonCode: cur.reason_code, details: reason, from: ended.from, to: ended.to, restrictionId: cur.id, actor: by.actor, at: now }),
+        );
+        return { c, ...ended };
+      });
+      if (!out) continue;
+      this.lifted(out.c, out.row, by);
+      this.statusChanged(out.c, out.from, out.to, out.row.reason_code, by);
+      await this.audit(
+        {
+          action: 'customers.account.lift_restriction',
+          actionLabel: 'Lifted a customer restriction (trust enforcement reversed)',
+          category: 'customers',
+          target: this.target(out.c),
+          reason,
+          before: { restriction: 'active', accountStatus: out.from },
+          after: { restriction: 'lifted', accountStatus: out.to, restrictionId: out.row.id, trustEnforcementId: event.enforcementId },
+        },
+        by,
+      );
+    }
+  }
+
   /** catalog.product.merged: recently viewed rows follow the kept product */
   async onProductMergedFromCatalog(event: EventPayload<'catalog.product.merged'>): Promise<void> {
     if (event.duplicateProductId === event.keptProductId) return;
@@ -2010,24 +2088,55 @@ export class CustomersService implements CustomersPublicApi {
       }
       return out;
     };
-    const orders = this.ctx.tryUse('orders');
-    const returns = this.ctx.tryUse('returns');
-    const support = this.ctx.tryUse('support');
+    // every enabled module that declares the export hook (FORMAT.md, Customer data export hook); one that throws fails the export (retried)
+    const sections = await this.exportSections({ customerId: c.id, accountId: c.user_id });
+    const hooked = new Set(sections.map((s) => s.module));
+    const hookModules = new Set(EXPORT_HOOK_MODULES);
+    // modules without the hook yet: their customer lists, as before
+    const orders = hookModules.has('orders') ? undefined : this.ctx.tryUse('orders');
+    const returns = hookModules.has('returns') ? undefined : this.ctx.tryUse('returns');
+    const support = hookModules.has('support') ? undefined : this.ctx.tryUse('support');
     const [orderList, returnList, caseList] = await Promise.all([
-      pages('orders', orders && ((p) => orders.listOrdersForCustomer(c.id, {}, p))),
-      pages('returns', returns && ((p) => returns.listForCustomer(c.id, { state: 'all' }, p))),
-      pages('cases', support && ((p) => support.listCasesForCustomer(c.id, {}, p))),
+      hookModules.has('orders') ? null : pages('orders', orders && ((p) => orders.listOrdersForCustomer(c.id, {}, p))),
+      hookModules.has('returns') ? null : pages('returns', returns && ((p) => returns.listForCustomer(c.id, { state: 'all' }, p))),
+      hookModules.has('support') ? null : pages('cases', support && ((p) => support.listCasesForCustomer(c.id, {}, p))),
     ]);
-    // messaging and reviews expose no export hook yet (spec gap)
-    unavailable.push('messages', 'reviews');
+    for (const m of EXPORT_HOOK_MODULES) if (!this.ctx.modules.includes(m) && !hooked.has(m)) unavailable.push(m);
     const json = (v: unknown) => `${JSON.stringify(v, null, 2)}\n`;
+    const legacy = [
+      ...(orderList ? [{ name: 'orders.json', data: json(orderList) }] : []),
+      ...(returnList ? [{ name: 'returns.json', data: json(returnList) }] : []),
+      ...(caseList ? [{ name: 'cases.json', data: json(caseList) }] : []),
+    ];
+    const used = new Set(['readme', 'profile', 'addresses', 'marketing-preferences', 'consent-log', 'recently-viewed', 'restrictions', 'data-requests', 'orders', 'returns', 'cases']);
+    const sectionFiles: { name: string; data: string; title: string; module: string }[] = [];
+    for (const s of sections) {
+      let key = safeName(s.key) || safeName(s.module) || 'section';
+      if (used.has(key)) key = `${safeName(s.module)}-${key}`;
+      for (let i = 2; used.has(key); i++) key = `${safeName(s.key)}-${i}`;
+      used.add(key);
+      sectionFiles.push({ name: `${key}.json`, data: json(s.records), title: s.title, module: s.module });
+    }
+    const attachments = await this.exportAttachments(sections, c.user_id, unavailable);
     const entries = [
       {
         name: 'README.json',
         data: json({
           generatedAt: map.iso(now),
           customer: c.ref,
-          files: ['profile.json', 'addresses.json', 'marketing-preferences.json', 'consent-log.json', 'recently-viewed.json', 'restrictions.json', 'data-requests.json', 'orders.json', 'returns.json', 'cases.json'],
+          files: [
+            'profile.json',
+            'addresses.json',
+            'marketing-preferences.json',
+            'consent-log.json',
+            'recently-viewed.json',
+            'restrictions.json',
+            'data-requests.json',
+            ...legacy.map((f) => f.name),
+            ...sectionFiles.map((f) => f.name),
+            ...attachments.map((a) => a.name),
+          ],
+          sections: sectionFiles.map((f) => ({ file: f.name, title: f.title, module: f.module })),
           notIncluded: unavailable,
         }),
       },
@@ -2038,9 +2147,9 @@ export class CustomersService implements CustomersPublicApi {
       { name: 'recently-viewed.json', data: json(views.map((v) => ({ productId: v.product_id, variantId: v.variant_id, title: v.title, viewedAt: map.iso(v.viewed_at) }))) },
       { name: 'restrictions.json', data: json(restrictions.map(map.restriction)) },
       { name: 'data-requests.json', data: json(requests.map((x) => map.dataRequest(x))) },
-      { name: 'orders.json', data: json(orderList ?? []) },
-      { name: 'returns.json', data: json(returnList ?? []) },
-      { name: 'cases.json', data: json(caseList ?? []) },
+      ...legacy,
+      ...sectionFiles.map(({ name, data }) => ({ name, data })),
+      ...attachments,
     ];
     const file = zip(entries, now);
     const days = await this.ctx.settings.get('exportLinkValidDays');
@@ -2061,6 +2170,45 @@ export class CustomersService implements CustomersPublicApi {
       failure: null,
     });
     this.ctx.events.publish('customers.data_export.ready', { customerId: c.id, requestId: row.id, expiresAt: map.iso(expiresAt) }, this.meta({ actor: SYSTEM_ACTOR }));
+  }
+
+  /** exportCustomerData of every enabled module that declares it; any failure fails the export (retried, never left out) */
+  private async exportSections(input: { customerId: string; accountId: string }): Promise<common.CustomerDataSection[]> {
+    const out: common.CustomerDataSection[] = [];
+    for (const m of EXPORT_HOOK_MODULES) {
+      const api = this.ctx.tryUse(m) as unknown as { exportCustomerData(i: typeof input): Promise<common.CustomerDataSection[]> } | undefined;
+      if (!api) continue;
+      let sections: common.CustomerDataSection[];
+      try {
+        sections = await api.exportCustomerData(input);
+      } catch (err) {
+        throw new Error(`${m} could not export its part (${(err as Error)?.message ?? 'unknown error'})`, { cause: err });
+      }
+      for (const s of sections ?? []) out.push({ ...s, module: s.module || m, records: Array.isArray(s.records) ? s.records : [] });
+    }
+    return out;
+  }
+
+  /** The customer's own uploads the sections name (attachments/<section>/<file>); files gone or not theirs are listed as not included */
+  private async exportAttachments(sections: common.CustomerDataSection[], accountId: string, notIncluded: string[]): Promise<{ name: string; data: Buffer }[]> {
+    const wanted = sections.flatMap((s) => (s.attachmentIds ?? []).map((id) => ({ id, folder: safeName(s.key) || 'files' })));
+    if (!wanted.length) return [];
+    const media = this.ctx.tryUse('media');
+    if (!media) throw new Error('File storage (media) is not available');
+    const out: { name: string; data: Buffer }[] = [];
+    const seen = new Set<string>();
+    for (const w of wanted) {
+      if (seen.has(w.id)) continue;
+      seen.add(w.id);
+      try {
+        const f = await media.readFile(w.id, { kind: 'customer', id: accountId });
+        out.push({ name: `attachments/${w.folder}/${w.id.slice(0, 8)}-${safeName(f.fileName.replace(/\.[^.]*$/, '')) || 'file'}${/\.[A-Za-z0-9]{1,8}$/.exec(f.fileName)?.[0] ?? ''}`, data: Buffer.from(f.body) });
+      } catch (err) {
+        if (!isAppError(err) || !SKIPPED_ATTACHMENT.has(err.code)) throw err;
+        notIncluded.push(`attachment ${w.id} (${err.code === 'FILE_TOO_LARGE' ? 'too large' : 'no longer available'})`);
+      }
+    }
+    return out;
   }
 
   /** customers.expire-export-links: ready exports past their link lifetime expire and the file is deleted */
@@ -2099,6 +2247,7 @@ export class CustomersService implements CustomersPublicApi {
       if (why) {
         // new obligations appeared: the request keeps waiting (shown in the privacy queue)
         if (r.failure !== why) await this.repo.updateDataRequest(r.id, { failure: why });
+        if (blockers.length) await this.closureDelayed(c, r, blockers);
         waiting++;
         continue;
       }
@@ -2107,6 +2256,26 @@ export class CustomersService implements CustomersPublicApi {
       completed++;
     }
     return { completed, waiting };
+  }
+
+  /** customers.closure.delayed, once per new set of blockers (the set of blocker kinds, claimed in the inbox per request) */
+  private async closureDelayed(c: CustomerRow, r: DataRequestRow, blockers: ClosureBlocker[]) {
+    const kinds = [...new Set(blockers.map((b) => b.kind))].sort().join(',');
+    const fresh = await this.repo.transaction((repo) => repo.claim(`closure-delayed:${r.id}:${kinds}`));
+    if (!fresh) return;
+    this.ctx.events.publish(
+      'customers.closure.delayed',
+      { customerId: c.id, userId: c.user_id, requestId: r.id, blockers, nextCheckAt: this.nextClosureCheck().toISOString() },
+      this.meta({ actor: SYSTEM_ACTOR }),
+    );
+  }
+
+  /** The next run of customers.complete-closures (daily 02:00 market time) */
+  private nextClosureCheck(): Date {
+    const now = this.now();
+    const today = dateInZone(now, this.tz);
+    const at = zonedTimeToUtc(today, '02:00', this.tz);
+    return at > now ? at : zonedTimeToUtc(addDays(today, 1), '02:00', this.tz);
   }
 
   /** customers.prune-recently-viewed: views older than recentlyViewedRetentionDays, and guest views whose session has expired */

@@ -18,7 +18,7 @@ import { CustomersService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.0.0',
+  version: '1.1.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
@@ -40,6 +40,7 @@ export default defineModule({
     ctx.events.on("identity.email.changed", (e) => service.onEmailChangedFromIdentity(e.payload));
     ctx.events.on("identity.account.closed", (e) => service.onAccountClosedFromIdentity(e.payload));
     ctx.events.on("trust.enforcement.recorded", (e) => service.onEnforcementRecordedFromTrust(e.payload, e.actor));
+    ctx.events.on("trust.enforcement.reversed", (e) => service.onEnforcementReversedFromTrust(e.payload, e.id));
     ctx.events.on("catalog.product.merged", (e) => service.onProductMergedFromCatalog(e.payload));
 
     // Background jobs (spec jobs)

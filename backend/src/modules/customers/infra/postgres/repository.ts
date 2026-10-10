@@ -99,6 +99,8 @@ export function createPostgresCustomersRepository(db: Kysely<CustomersDb>, inbox
           ]),
         );
       }
+      if (f.onlyIds) q = f.onlyIds.length ? q.where('id', 'in', f.onlyIds) : q.where(sql<boolean>`false`);
+      if (f.excludeIds?.length) q = q.where('id', 'not in', f.excludeIds);
       if (f.statuses?.length) q = q.where('account_status', 'in', f.statuses);
       if (f.verification === 'not_verified') q = q.where('email_verified_at', 'is', null);
       if (f.verification === 'email_only') q = q.where('email_verified_at', 'is not', null).where('phone_verified_at', 'is', null);
@@ -257,6 +259,9 @@ export function createPostgresCustomersRepository(db: Kysely<CustomersDb>, inbox
     },
     async findRestrictionByEnforcement(customerId, enforcementId) {
       return db.selectFrom('account_restrictions').selectAll().where('customer_id', '=', customerId).where('trust_enforcement_id', '=', enforcementId).executeTakeFirst();
+    },
+    async activeRestrictionsByEnforcement(enforcementId) {
+      return db.selectFrom('account_restrictions').selectAll().where('trust_enforcement_id', '=', enforcementId).where('state', '=', 'active').execute();
     },
     async insertRestriction(row) {
       return db
