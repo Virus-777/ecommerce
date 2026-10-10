@@ -55,8 +55,15 @@ export interface SearchRepository {
   documentStats(): Promise<{ documents: number; offerRows: number; lastIndexedAt: Date | null }>;
 
   /* best sellers and popularity */
-  addSales(units: { productId: string; units: number }[], at: Date): Promise<void>;
-  decaySales(factor: number): Promise<void>;
+  /**
+   * Adds (sign 1) or subtracts (sign -1) an order's units per product on its market day in product_sales_daily
+   * (never below 0), and moves the documents' live counts the same way until the nightly job recomputes them.
+   */
+  recordSales(day: string, units: { productId: string; units: number }[], sign: 1 | -1, at: Date): Promise<void>;
+  /** sales_30d (and popularity) = units of the last 30 market days from product_sales_daily, `from` inclusive */
+  sumSales(from: string): Promise<void>;
+  /** Deletes daily rows before `before` (exclusive) */
+  pruneSales(before: string): Promise<void>;
   platformUnits30d(): Promise<number>;
   rankBestSellers(top: number, enabled: boolean): Promise<void>;
   bestSellerRows(productIds: string[]): Promise<DocRow[]>;

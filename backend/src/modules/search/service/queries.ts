@@ -11,15 +11,13 @@ import type * as catalog from '../../../spec/catalog.js';
 import type * as common from '../../../spec/common.js';
 import type { AppliedFilter, CategoryContext, EmptyGuidance, Facet, FacetValue, ProductCard, RecentSearch, SearchContext, SearchHit, SortOption, StoreMatch, Suggestions } from '../../../spec/search.js';
 import { chips, clearAll, fromRest, toQueryString, validateFilters, FilterError, type Chip, type Labels, type QueryState, type RestSearchParams } from '../domain/query.js';
-import { DEFAULT_FACTORS, FROM_PRICE_NOTE, OFFICIAL_STORE_NAME, RANKING_NOTE, STORE_NOTE, weightsOf } from '../domain/ranking.js';
+import { DEFAULT_FACTORS, FROM_PRICE_NOTE, OFFICIAL_BADGE, OFFICIAL_STORE_NAME, RANKING_NOTE, STORE_NOTE, weightsOf } from '../domain/ranking.js';
 import { attrKey, expandQuery, isUuid, normalizeQuery, plural, queryGtin, synonymTerms, tokens, type SynonymSet } from '../domain/text.js';
 import type { PageInfo, SearchFilters, SearchMatch, SearchQuery, SearchResultSet, SearchSession, SortKey, SponsoredSlot } from '../domain/types.js';
 import type { DocRow, EngineFilters, EngineHit, EngineQuery, FacetCounts, RecentRow } from '../ports.js';
 import type { CategoryNode, CategoryTree } from './base.js';
 import { SearchIndexer } from './indexer.js';
 
-/** Standard transit after dispatch, for 'arrives by' and delivery cues (no carrier estimates in the index) */
-const TRANSIT_BUSINESS_DAYS = 2;
 const FACET_VALUES = 10;
 
 export type Mode = { kind: 'search' } | { kind: 'category' } | { kind: 'seller'; sellerId: string } | { kind: 'collection' };
@@ -198,7 +196,7 @@ export class SearchQueries extends SearchIndexer {
     if (f.conditions?.length) ef.conditions = f.conditions;
     if (f.freeDelivery) ef.freeDelivery = true;
     if (f.shipsToday) ef.shipsToday = true;
-    if (f.arrivesBy) ef.maxDispatchDays = businessDaysBetween(this.marketDate(), f.arrivesBy) - TRANSIT_BUSINESS_DAYS;
+    if (f.arrivesBy) ef.maxDispatchDays = businessDaysBetween(this.marketDate(), f.arrivesBy) - Number(await this.setting('transitBusinessDays'));
     if (f.onSale) ef.onSale = true;
     if (f.listedWithinDays) ef.listedSince = new Date(this.now().getTime() - f.listedWithinDays * 86_400_000);
 
@@ -306,6 +304,8 @@ export class SearchQueries extends SearchIndexer {
     const now = this.now();
     const newDays = await this.setting('newArrivalsWindowDays');
     const today = this.marketDate(now);
+    // carrier transit assumed for every destination (setting transitBusinessDays, decision S-D4)
+    const transit = Number(await this.setting('transitBusinessDays'));
     return hits.map((h, i) => {
       const d = h.doc;
       const o = h.offer;
@@ -336,7 +336,7 @@ export class SearchQueries extends SearchIndexer {
       const free = o?.freeDelivery ?? d.free_delivery;
       const official = o?.official ?? d.featured_official;
       const badges: string[] = [];
-      if (official) badges.push(OFFICIAL_STORE_NAME);
+      if (official) badges.push(OFFICIAL_BADGE);
       if (featured && d.on_sale) badges.push('Deal');
       if (d.first_listed_at && now.getTime() - new Date(d.first_listed_at).getTime() <= newDays * 86_400_000) badges.push('New listing');
       if (d.best_seller_rank !== null && d.best_seller_rank <= 3) badges.push('Best seller');
@@ -360,7 +360,7 @@ export class SearchQueries extends SearchIndexer {
         wasPrice: was ? money(was, d.currency) : null,
         discountPct: was ? Math.round(((was - price) / was) * 100) : null,
         dealEndsAt: featured && d.on_sale && d.deal_ends_at ? new Date(d.deal_ends_at).toISOString() : null,
-        deliveryCue: inStock && dispatch !== null && dispatch !== undefined ? `${free ? 'Free delivery' : 'Arrives'} ${businessDate(today, dispatch + TRANSIT_BUSINESS_DAYS)}` : null,
+        deliveryCue: inStock && dispatch !== null && dispatch !== undefined ? `${free ? 'Free delivery' : 'Arrives'} ${businessDate(today, dispatch + transit)}` : null,
         freeDelivery: free,
         availability: !inStock ? 'out_of_stock' : featured && d.low_stock ? 'low_stock' : 'in_stock',
         offerCount: d.offer_count,
@@ -781,10 +781,27 @@ export class SearchQueries extends SearchIndexer {
     return 'collection';
   }
 
+  /**
+   * Who is looking, for ad targeting: a signed-in customer's id, and personalization only when that customer
+   * allows personalized recommendations (customers marketing preferences). Visitors carry no privacy choice
+   * here, so their ads use page context only.
+   */
+  protected async adPrivacyOf(principal: Principal | null): Promise<{ personalizationAllowed: boolean; customerId: string | null }> {
+    if (principal?.kind !== 'customer' || !principal.accountId) return { personalizationAllowed: false, customerId: null };
+    const customerId = (await this.customerIdOf(principal.accountId)) ?? null;
+    if (!customerId) return { personalizationAllowed: false, customerId: null };
+    const prefs = await this.optional('customers', 'marketing consent', (c) => c.getMarketingConsent(customerId));
+    return { personalizationAllowed: Boolean(prefs?.personalizedRecommendations), customerId };
+  }
+
   /** Sponsored hits: a labelled top row on search, inline positions on listings (advertising decides; none when it is off) */
   protected async addSponsored(items: SearchHit[], p: Prepared, hits: EngineHit[], principal: Principal | null) {
+    if (!this.ctx.tryUse('advertising')) return;
+    const privacy = await this.adPrivacyOf(principal);
     const slots = await this.optional('advertising', 'sponsored products', (a) =>
       a.sponsoredForResults({
+        personalizationAllowed: privacy.personalizationAllowed,
+        ...(privacy.customerId ? { customerId: privacy.customerId } : {}),
         page: { page: this.pageTypeOf(p) as never },
         ...(p.text.normalized ? { query: p.text.correctedTo ?? p.text.normalized } : {}),
         ...(p.category ? { categoryId: p.category.node.id } : {}),

@@ -18,7 +18,7 @@ import { SearchService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.0.0',
+  version: '1.1.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
@@ -47,6 +47,7 @@ export default defineModule({
     ctx.events.on("promotions.campaign.started", (e) => service.onCampaignStartedFromPromotions(e.payload));
     ctx.events.on("promotions.campaign.ended", (e) => service.onCampaignEndedFromPromotions(e.payload));
     ctx.events.on("orders.order.placed", (e) => service.onOrderPlacedFromOrders(e.payload));
+    ctx.events.on("orders.order.cancelled", (e) => service.onOrderCancelledFromOrders(e.payload));
     ctx.events.on("identity.guest_session.claimed", (e) => service.onGuestSessionClaimedFromIdentity(e.payload));
     ctx.events.on("catalog.brand.changed", (e) => service.onBrandChangedFromCatalog(e.payload));
     ctx.events.on("customers.marketing_preferences.changed", (e) => service.onMarketingPreferencesChangedFromCustomers(e.payload));

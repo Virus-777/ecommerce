@@ -3,6 +3,7 @@
  * applied-filter chips with their removal query strings, and filter validation that needs no I/O.
  */
 import { CONDITION_GROUPS, SORT_KEYS, type ConditionGroup, type SearchFilters, type SearchQuery, type SortKey } from './types.js';
+import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import { attrKey, formatMoney } from './text.js';
 
 /** REST query parameters of GET /products and GET /facets (spec endpoints) */
@@ -193,7 +194,7 @@ export function chips(s: QueryState, labels: Labels, opts: { categoryIsFilter: b
   for (const v of s.seller) {
     const w = clone();
     w.seller = w.seller.filter((x) => x !== v);
-    out.push({ key: 'seller', value: v, label: v === 'official' ? 'Official Store' : (labels.sellers.find((x) => x.key === v)?.name ?? v), without: w });
+    out.push({ key: 'seller', value: v, label: v === 'official' ? OFFICIAL_STORE_NAME : (labels.sellers.find((x) => x.key === v)?.name ?? v), without: w });
   }
   if (s.priceMin !== undefined || s.priceMax !== undefined) {
     const w = clone();

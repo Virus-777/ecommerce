@@ -94,7 +94,7 @@ export class SearchBase {
     return this.ctx.use('offers');
   }
 
-  protected async setting<K extends 'pageSize' | 'typoSimilarityThreshold' | 'autoCorrectBelowResults' | 'recentSearchesMax' | 'recentSearchRetentionDays' | 'newArrivalsWindowDays' | 'bestSellingMinOrders' | 'excludeOutOfStockByDefault' | 'searchEngine'>(key: K) {
+  protected async setting<K extends 'pageSize' | 'typoSimilarityThreshold' | 'autoCorrectBelowResults' | 'recentSearchesMax' | 'recentSearchRetentionDays' | 'newArrivalsWindowDays' | 'bestSellingMinOrders' | 'transitBusinessDays' | 'excludeOutOfStockByDefault' | 'searchEngine'>(key: K) {
     return this.ctx.settings.get(key);
   }
 
@@ -114,12 +114,9 @@ export class SearchBase {
     }
   }
 
-  /**
-   * Audited endpoints (synonyms, reindex, ranking policy). Spec gap: audit is not in search's optionalDeps,
-   * so the module cannot call audit.record; the entry is written to the log until the spec adds it.
-   */
+  /** Audited endpoints (synonyms, reindex, ranking policy): written to the action history when audit is enabled */
   protected async audit(entry: Omit<audit.RecordInput, 'actor' | 'module' | 'requestId'>, by: By) {
-    this.ctx.log.info({ audit: { ...entry, actor: by.actor, module: this.ctx.name, requestId: by.requestId ?? null } }, `search audit: ${entry.actionLabel}`);
+    await this.ctx.tryUse('audit')?.record({ ...entry, actor: by.actor, module: this.ctx.name, requestId: by.requestId });
   }
 
   protected filterError(err: unknown): never {

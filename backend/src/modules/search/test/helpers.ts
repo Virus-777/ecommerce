@@ -61,8 +61,14 @@ export class World {
   ratings = new Map<string, { average: number; count: number }>();
   sellers = new Map<string, { id: string; slug: string; storeName: string; verified: boolean; status: string }>();
   promos = new Map<string, { price: number; regular: number; endsAt: string }>();
-  customers = new Map<string, { id: string; recentSearches: boolean }>();
+  customers = new Map<string, { id: string; recentSearches: boolean; personalized?: boolean }>();
   orders = new Map<string, { productId: string; quantity: number }[]>();
+  /** orderId → placedAt (default now) */
+  placedAt = new Map<string, string>();
+  /** What advertising.sponsoredForResults was asked */
+  sponsoredCalls: unknown[] = [];
+  /** audit.record entries */
+  audits: { action: string; [k: string]: unknown }[] = [];
   sponsored: { position: number; productId: string; offerId: string; price: number; advertiser: string }[] = [];
   /** Modules answering NOT_IMPLEMENTED (like an unbuilt module) */
   down = new Set<string>();
@@ -96,7 +102,7 @@ export class World {
   }
 
   brand(name: string, active = true) {
-    const b = { id: newId(), name, slug: slugify(name), logo: null, description: null, productCount: 0, banner: null, active };
+    const b = { id: newId(), name, slug: slugify(name), logo: null, description: null, productCount: 0, banner: null, status: (active ? 'active' : 'blocked') as 'active' | 'blocked', active };
     this.brands.set(b.slug, b);
     return b;
   }
@@ -121,7 +127,7 @@ export class World {
       ref: `PRD-${String(this.seq++).padStart(5, '0')}`,
       title: o.title,
       slug: slugify(o.title),
-      brand: brand ? { id: brand.id, name: brand.name, slug: brand.slug, logo: null, description: null, productCount: 0, banner: null } : null,
+      brand: brand ? { id: brand.id, name: brand.name, slug: brand.slug, logo: null, description: null, productCount: 0, banner: null, status: brand.status } : null,
       categoryId: o.categoryId,
       categoryPath: path,
       description: o.description ?? `${o.title}: a product for tests.`,
@@ -311,7 +317,7 @@ export class World {
         },
         getMarketingConsent: async (customerId: string) => {
           const c = [...w.customers.values()].find((x) => x.id === customerId);
-          return { emailPromotions: false, smsPromotions: false, pushPromotions: false, wishlistAlerts: false, personalizedRecommendations: false, recentSearches: Boolean(c?.recentSearches), essentialAlwaysOn: true, updatedAt: new Date().toISOString() } as never;
+          return { emailPromotions: false, smsPromotions: false, pushPromotions: false, wishlistAlerts: false, personalizedRecommendations: Boolean(c?.personalized), recentSearches: Boolean(c?.recentSearches), essentialAlwaysOn: true, updatedAt: new Date().toISOString() } as never;
         },
         searchCustomers: async (f: { search?: string }) => ({ items: f.search?.toLowerCase().startsWith('ana') ? [{ id: newId(), userId: newId(), ref: 'CU-208114', displayName: 'Ana Ruiz', email: 'ana@example.com', accountStatus: 'active', canOrder: true, canMessage: true }] : [], nextCursor: null }) as never,
       },
@@ -319,7 +325,7 @@ export class World {
         getOrder: async (orderId: string) => {
           await notImplemented('orders');
           const items = w.orders.get(orderId);
-          return items ? ({ id: orderId, groups: [{ items: items.map((i) => ({ product: { productId: i.productId }, quantity: i.quantity })) }] } as never) : null;
+          return items ? ({ id: orderId, placedAt: w.placedAt.get(orderId) ?? new Date().toISOString(), groups: [{ items: items.map((i) => ({ product: { productId: i.productId }, quantity: i.quantity })) }] } as never) : null;
         },
         listOrdersAdmin: async (f: { q?: string }) => {
           await notImplemented('orders');
@@ -336,8 +342,15 @@ export class World {
           return { items: [], nextCursor: null } as never;
         },
       },
+      audit: {
+        record: async (e: { action: string }) => {
+          w.audits.push(e);
+          return newId();
+        },
+      },
       advertising: {
-        sponsoredForResults: async () => {
+        sponsoredForResults: async (ctx: unknown) => {
+          w.sponsoredCalls.push(ctx);
           await notImplemented('advertising');
           return w.sponsored.map((s) => ({
             position: s.position,
@@ -366,14 +379,16 @@ export interface Kit {
   close(): Promise<void>;
 }
 
-export async function boot(): Promise<Kit> {
+/** `settings`: search setting overrides by key (e.g. { transitBusinessDays: 0 }); others keep their defaults */
+export async function boot(o: { settings?: Record<string, unknown> } = {}): Promise<Kit> {
   const world = new World();
   const clock = movingClock();
+  const overrides = o.settings ?? {};
   const app = await buildTestApp({
-    only: ['search', 'inventory', 'reviews', 'sellers', 'advertising', 'promotions', 'customers', 'orders', 'returns'],
+    only: ['search', 'inventory', 'reviews', 'sellers', 'advertising', 'promotions', 'customers', 'orders', 'returns', 'audit'],
     clock,
     config: { rateLimits: false, launchPhase: 4 },
-    apiStubs: world.stubs() as never,
+    apiStubs: { ...(world.stubs() as object), ...(o.settings ? { settings: { get: async (key: string) => (key.startsWith('search.') ? (overrides[key.slice(7)] ?? null) : null) } } : {}) } as never,
   });
   const events: EventEnvelope[] = [];
   for (const n of ['search.synonym.changed', 'search.index.rebuilt', 'search.ranking_policy.published']) app.kernel.events.subscribe('test', n, (e) => void events.push(e));

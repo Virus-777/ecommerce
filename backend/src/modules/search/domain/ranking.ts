@@ -35,4 +35,7 @@ export function weightsOf(factors: RankingFactor[]): Record<RankingFactorKey, nu
 export const RANKING_NOTE = 'Sponsored items are paid placements and are labeled. How results are ranked: /help/ranking-policy';
 export const FROM_PRICE_NOTE = "'From' prices are the lowest price of one eligible offer, named on the card. Delivery may cost extra.";
 export const STORE_NOTE = 'Stores are listed here, not mixed into product results.';
-export const OFFICIAL_STORE_NAME = 'Official Store';
+/** The Official Store's display name (common constant) wherever a seller name is shown */
+export { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
+/** Card badge marking Official Store offers (a badge, not the store's name) */
+export const OFFICIAL_BADGE = 'Official Store';
