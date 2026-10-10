@@ -77,8 +77,21 @@ export class CheckoutService implements CheckoutPublicApi {
 
   /* ================================================================ start */
 
-  async startCheckout(scope: Scope, body: { source: 'cart' | 'buy_now'; cartItemIds?: string[] | null; offerId?: string | null; quantity?: number | null }, by: By): Promise<CheckoutView> {
+  /**
+   * Who is checking out, for guest ad attribution: the caller's app session id (the visitor id advertising keys
+   * clicks by) and whether the shopper allowed personalization. A signed-in customer's personalizedRecommendations
+   * preference decides; visitor sessions carry no privacy choice, so personalization is off for them.
+   */
+  private async privacyOf(owner: Owner, principal: { sessionId?: string | null } | null | undefined): Promise<{ visitorKey: string | null; personalizationAllowed: boolean }> {
+    const visitorKey = principal?.sessionId ?? null;
+    if (!owner.customerId) return { visitorKey, personalizationAllowed: false };
+    const prefs = await this.core.optional('customers.getMarketingConsent', () => this.ctx.use('customers').getMarketingConsent(owner.customerId!));
+    return { visitorKey, personalizationAllowed: Boolean(prefs?.personalizedRecommendations) };
+  }
+
+  async startCheckout(scope: Scope, body: { source: 'cart' | 'buy_now'; cartItemIds?: string[] | null; offerId?: string | null; quantity?: number | null }, by: By, principal?: { sessionId?: string | null } | null): Promise<CheckoutView> {
     const owner = await this.core.ownerOf(scope);
+    const privacy = await this.privacyOf(owner, principal);
     const customers = this.ctx.use('customers');
     let account: StoredAccount = { kind: 'guest', customerId: null, name: null, email: null, phone: null, createAccountAfter: false, marketingOptIn: false, hidePricesOnSlip: false };
     if (owner.guestSessionId) {
@@ -170,16 +183,21 @@ export class CheckoutService implements CheckoutPublicApi {
       cart_id: cartId,
       customer_id: owner.customerId ?? null,
       guest_session_id: owner.guestSessionId ?? null,
-      account: account as never,
+      ...this.core.accountPatch(account),
+      visitor_key: privacy.visitorKey,
+      personalization_allowed: privacy.personalizationAllowed,
       address: null,
       address_id: null,
       status: checkoutSessionMachine.initial,
       quote_version: 0,
       currency,
-      totals: quote as never,
+      ...this.core.quotePatch(quote),
       coupon_codes: couponCodes as never,
       credit: null,
       payment_selection: null,
+      payment_intent_id: null,
+      payment_state: null,
+      order_attempt: null,
       gift_note: null,
       promotion_evaluation_id: null,
       redemption_reservation_id: null,
@@ -275,7 +293,7 @@ export class CheckoutService implements CheckoutPublicApi {
       createAccountAfter: a.kind === 'guest' ? Boolean(body.createAccountAfter) : false,
       marketingOptIn: Boolean(body.marketingOptIn),
     };
-    const saved = await this.repo.updateSession(id, { account: next as never, updated_at: this.now(), expires_at: s.status === 'payment_failed' ? s.expires_at : await this.core.idleExpiry() });
+    const saved = await this.repo.updateSession(id, { ...this.core.accountPatch(next), updated_at: this.now(), expires_at: s.status === 'payment_failed' ? s.expires_at : await this.core.idleExpiry() });
     return this.views.checkout(saved);
   }
 
@@ -312,7 +330,7 @@ export class CheckoutService implements CheckoutPublicApi {
     // a new address re-checks every line that is not removed
     for (const l of d.lines) if (l.status === 'not_shippable') l.status = 'included';
     const account = this.core.account(draftSession);
-    const accountPatch = account.kind === 'guest' && !account.name ? { account: { ...account, name: address.name, phone: account.phone ?? address.phone ?? null } as never } : {};
+    const accountPatch = account.kind === 'guest' && !account.name ? this.core.accountPatch({ ...account, name: address.name, phone: account.phone ?? address.phone ?? null }) : {};
     const saved = await this.quoter.requote(d, { coverage: true, shipping: true, allowed: [e.from], patch: { ...patch, ...accountPatch, address: address as never, address_id: addressId } });
     return this.views.checkout(saved);
   }
@@ -395,7 +413,7 @@ export class CheckoutService implements CheckoutPublicApi {
     const saved = await this.repo.transaction(async (tx) => {
       const locked = (await tx.getSession(id, { forUpdate: true }))!;
       if (!EDITABLE_INFO.includes(locked.status)) throw new AppError('ILLEGAL_TRANSITION', 'This checkout can no longer be changed', { machine: 'Checkout session', from: locked.status });
-      return tx.updateSession(id, { payment_selection: { ...this.core.payment(locked), method: chosen.method, view: chosen.view } as never, updated_at: this.now() });
+      return tx.updateSession(id, { ...this.core.paymentPatch({ ...this.core.payment(locked), method: chosen.method, view: chosen.view }), updated_at: this.now() });
     });
     await this.core.log(id, 'Payment method chosen', chosen.view?.label ?? method.kind);
     return this.views.checkout(saved);
@@ -406,7 +424,7 @@ export class CheckoutService implements CheckoutPublicApi {
     const note = body.giftNote === undefined ? s.gift_note : body.giftNote?.trim() || null;
     if (note && note.length > 500) throw invalid([{ path: 'giftNote', message: 'Keep the gift note under 500 characters' }], 'The gift note is too long');
     const a = this.core.account(s);
-    const saved = await this.repo.updateSession(id, { gift_note: note, account: { ...a, hidePricesOnSlip: body.hidePricesOnSlip ?? a.hidePricesOnSlip } as never, updated_at: this.now() });
+    const saved = await this.repo.updateSession(id, { gift_note: note, ...this.core.accountPatch({ ...a, hidePricesOnSlip: body.hidePricesOnSlip ?? a.hidePricesOnSlip }), updated_at: this.now() });
     return this.views.checkout(saved);
   }
 
@@ -578,7 +596,7 @@ export class CheckoutService implements CheckoutPublicApi {
       await this.repo.transaction(async (tx) => {
         const locked = await tx.getSession(s.id, { forUpdate: true });
         if (!locked || locked.customer_id) return;
-        await tx.updateSession(s.id, { customer_id: customer.id, account: account as never, updated_at: this.now() });
+        await tx.updateSession(s.id, { customer_id: customer.id, ...this.core.accountPatch(account), updated_at: this.now() });
       });
       await this.core.log(s.id, 'Signed in', 'The checkout now belongs to the customer account');
     }

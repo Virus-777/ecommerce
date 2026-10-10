@@ -5,8 +5,8 @@
  *   claim (open → placing, row lock) → revalidate (changes → changes_pending, nothing charged)
  *   → inventory.hold → promotions.reserveRedemption (key: the session id) → wallet.holdCredit
  *   → payments.authorize (key: session id + attempt number)
- *   → accepted / pending: orders.createOrder (payment pending) → promotions.commitRedemption
- *     → inventory.attachOrder → payments.linkOrder → orders.acceptOrder (accepted only)
+ *   → accepted / pending: orders.createOrder (open when accepted, payment pending otherwise)
+ *     → promotions.commitRedemption → inventory.attachOrder → payments.linkOrder → wallet.captureHold (accepted)
  *     → cart.removePurchasedItems → identity.grantGuestOrderAccess → completed / payment_pending
  *   → failed: no order, holds kept until holdUntil → payment_failed
  *   → requires_action: awaiting_action until POST /complete-action or the payments event
@@ -101,14 +101,14 @@ export class Placement {
       const s = (await tx.getSession(id, { forUpdate: true }))!;
       const p = this.core.payment(s);
       if (!p.method?.providerToken) return s;
-      return tx.updateSession(id, { payment_selection: { ...p, method: { ...p.method, providerToken: null } } as never });
+      return tx.updateSession(id, this.core.paymentPatch({ ...p, method: { ...p.method, providerToken: null } }));
     });
   }
 
   private async savePayment(id: string, patch: Partial<StoredPayment>): Promise<SessionRow> {
     return this.core.repo.transaction(async (tx) => {
       const s = (await tx.getSession(id, { forUpdate: true }))!;
-      return tx.updateSession(id, { payment_selection: { ...this.core.payment(s), ...patch } as never });
+      return tx.updateSession(id, this.core.paymentPatch({ ...this.core.payment(s), ...patch }));
     });
   }
 
@@ -133,7 +133,7 @@ export class Placement {
       request_hash: hash,
       kind,
       outcome: result.outcome,
-      response: { quoteVersion: session.quote_version, total: this.core.quote(session).totals.total.amount, replayOf: 'current_status', result: { outcome: result.outcome, orderId: result.orderId ?? null } } as never,
+      response: { quoteVersion: session.quote_version, total: session.quote_total, replayOf: 'current_status', result: { outcome: result.outcome, orderId: result.orderId ?? null } } as never,
       payment_intent_id: this.core.payment(session).intentId,
       created_at: now,
       completed_at: now,
@@ -157,7 +157,7 @@ export class Placement {
     const [lines, packages] = await Promise.all([this.core.repo.listLines(session.id), this.core.repo.listPackages(session.id)]);
     const missing = missingSteps(this.views.stepFacts(session, lines, packages));
     if (missing.length) throw this.core.error('CHECKOUT_INCOMPLETE', `Finish these steps first: ${missing.join(', ')}`, { missingSteps: missing });
-    const total = this.core.quote(session).totals.total;
+    const total = { amount: session.quote_total, currency: session.currency };
     if (quoteVersion !== session.quote_version || expectedTotal.amount !== total.amount || expectedTotal.currency !== total.currency) {
       throw this.core.error('QUOTE_OUTDATED', 'Your order total changed. Check the new total before placing your order.', { quoteVersion: session.quote_version, total });
     }
@@ -218,7 +218,7 @@ export class Placement {
     const claimed = await this.core.repo.transaction(async (tx) => {
       const s = (await tx.getSession(id, { forUpdate: true }))!;
       if (s.status !== 'open' || s.quote_version !== input.quoteVersion) return { session: s, req: undefined };
-      const req = await tx.insertPlaceRequest({ id: newId(), session_id: id, idempotency_key: key, request_hash: hash, kind: 'place', outcome: null, response: { quoteVersion: s.quote_version, total: this.core.quote(s).totals.total.amount } as never, payment_intent_id: null, created_at: this.now(), completed_at: null });
+      const req = await tx.insertPlaceRequest({ id: newId(), session_id: id, idempotency_key: key, request_hash: hash, kind: 'place', outcome: null, response: { quoteVersion: s.quote_version, total: s.quote_total } as never, payment_intent_id: null, created_at: this.now(), completed_at: null });
       if (!req) return { session: s, req: undefined };
       return { session: await tx.updateSession(id, { status: checkoutSessionMachine.next('open', 'place'), channel: input.channel, updated_at: this.now() }), req };
     });
@@ -229,7 +229,7 @@ export class Placement {
       if (session.status === 'open') throw this.core.error('QUOTE_OUTDATED', 'Your order total changed. Check the new total before placing your order.', { quoteVersion: session.quote_version, total: this.core.quote(session).totals.total });
       return this.currentResult(session);
     }
-    await this.core.log(id, 'Place order', `Key ${key}, total ${this.core.quote(session).totals.total.amount}`);
+    await this.core.log(id, 'Place order', `Key ${key}, total ${session.quote_total}`);
     return this.run(session, claimed.req, { from: 'open', returnUrl: input.returnUrl, method: pay.method! }, by);
   }
 
@@ -244,7 +244,7 @@ export class Placement {
     if (session.status !== 'payment_failed') checkoutSessionMachine.next(session.status as Status, 'retry_payment');
     if (session.hold_until && session.hold_until.getTime() <= this.now().getTime()) throw this.core.error('RETRY_WINDOW_EXPIRED', 'The hold after your declined payment ended. Start checkout again from your cart.', { holdUntil: session.hold_until.toISOString() });
     await this.checkAttempts(session);
-    const total = this.core.quote(session).totals.total;
+    const total = { amount: session.quote_total, currency: session.currency };
     if (input.quoteVersion !== session.quote_version || input.expectedTotal.amount !== total.amount || input.expectedTotal.currency !== total.currency) {
       throw this.core.error('QUOTE_OUTDATED', 'Your order total changed. Check the new total before paying.', { quoteVersion: session.quote_version, total });
     }
@@ -256,7 +256,7 @@ export class Placement {
       const req = await tx.insertPlaceRequest({ id: newId(), session_id: id, idempotency_key: key, request_hash: hash, kind: 'retry', outcome: null, response: { quoteVersion: s.quote_version, total: total.amount } as never, payment_intent_id: null, created_at: this.now(), completed_at: null });
       if (!req) return { session: s, req: undefined };
       const payment = { ...this.core.payment(s), method: chosen.method, view: chosen.view };
-      return { session: await tx.updateSession(id, { status: checkoutSessionMachine.next('payment_failed', 'retry_payment'), payment_selection: payment as never, updated_at: this.now() }), req };
+      return { session: await tx.updateSession(id, { status: checkoutSessionMachine.next('payment_failed', 'retry_payment'), ...this.core.paymentPatch(payment), updated_at: this.now() }), req };
     });
     session = claimed.session;
     if (!claimed.req) {
@@ -570,8 +570,8 @@ export class Placement {
       // inventory allocates from this hold on orders.order.accepted even before attachOrder runs
       reservationId: session.stock_reservation_id,
       deliveryAddressId: session.customer_id ? session.address_id : null,
-      // checkout does not know the shopper's personalization choice: no visitor id for ad attribution
-      visitorId: null,
+      // guest ad attribution only with the shopper's personalization choice (advertising decision)
+      visitorId: session.personalization_allowed ? session.visitor_key : null,
       contact:{ kind: account.kind, customerId: session.customer_id, name: account.name ?? address.name, email: account.email!, phone: account.phone ?? address.phone ?? null },
       channel: (session.channel as 'web' | 'android' | null) ?? 'web',
       currency: cur,
@@ -598,8 +598,9 @@ export class Placement {
     const [lines0, packages] = await Promise.all([this.core.repo.listLines(id), this.core.repo.listPackages(id)]);
     const lines = lines0.filter(included).sort(byLineOrder);
     const policyVersions = await this.views.policyVersions();
-    const order = await this.ctx.use('orders').createOrder(this.orderInput(session, lines, packages, intent, policyVersions));
-    session = await this.core.repo.updateSession(id, { order_id: order.id, order_ref: order.ref, updated_at: this.now() });
+    const input = this.orderInput(session, lines, packages, intent, policyVersions);
+    const order = await this.ctx.use('orders').createOrder(input);
+    session = await this.core.repo.updateSession(id, { order_id: order.id, order_ref: order.ref, order_attempt: input.attemptNo ?? 1, updated_at: this.now() });
 
     // order items per checkout line (OrderItem.checkoutLineId; by offer for an order without it)
     const items = order.groups.flatMap((g) => g.items);
@@ -686,7 +687,7 @@ export class Placement {
     if (['completed', 'payment_pending', 'payment_failed', 'placing'].includes(session.status)) return this.answered(session, 'complete_action', key, hash, await this.currentResult(session));
     if (session.status !== 'awaiting_action') checkoutSessionMachine.next(session.status as Status, 'payment_accepted');
     const pay = this.core.payment(session);
-    const req = await this.core.repo.insertPlaceRequest({ id: newId(), session_id: id, idempotency_key: key, request_hash: hash, kind: 'complete_action', outcome: null, response: { quoteVersion: session.quote_version, total: this.core.quote(session).totals.total.amount } as never, payment_intent_id: pay.intentId, created_at: this.now(), completed_at: null });
+    const req = await this.core.repo.insertPlaceRequest({ id: newId(), session_id: id, idempotency_key: key, request_hash: hash, kind: 'complete_action', outcome: null, response: { quoteVersion: session.quote_version, total: session.quote_total } as never, payment_intent_id: pay.intentId, created_at: this.now(), completed_at: null });
     if (!req) return (await this.replayed(session, 'complete_action', key, { resultToken })).replay ?? this.currentResult(session);
     try {
       const auth = await this.ctx.use('payments').completeAction(pay.intentId!, resultToken, `${id}:${key}`);
@@ -786,7 +787,8 @@ export class Placement {
       hold_until: holdUntil,
       order_id: null,
       order_ref: null,
-      payment_selection: { ...pay, intentState: 'failed', decline, cancelledOrders: orderId ? [...pay.cancelledOrders, { orderId, ref: orderRef ?? '' }] : pay.cancelledOrders } as never,
+      order_attempt: null,
+      ...this.core.paymentPatch({ ...pay, intentState: 'failed', decline, cancelledOrders: orderId ? [...pay.cancelledOrders, { orderId, ref: orderRef ?? '' }] : pay.cancelledOrders }),
     });
     if (!t.won) return;
     if (orderId) {

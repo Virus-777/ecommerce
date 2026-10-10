@@ -483,7 +483,7 @@ export class Quoter {
         credit: d.credit as never,
         promotion_evaluation_id: quote.evaluation?.id ?? null,
         ...patch,
-        totals: quote as never,
+        ...this.core.quotePatch(quote),
         quote_version: locked.quote_version + (changed ? 1 : 0),
         expires_at: ['open', 'changes_pending'].includes(patch.status ?? locked.status) ? expires : locked.expires_at,
         updated_at: now,

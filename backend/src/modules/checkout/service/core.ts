@@ -92,13 +92,14 @@ export class Core {
 
   /* ================================================================ jsonb readers */
 
+  /** sessions.account (jsonb) with the email and name columns */
   account(row: SessionRow): StoredAccount {
     const a = (row.account ?? {}) as Partial<StoredAccount>;
     return {
       kind: a.kind === 'customer' ? 'customer' : 'guest',
       customerId: a.customerId ?? row.customer_id ?? null,
-      name: a.name ?? null,
-      email: a.email ?? null,
+      name: row.contact_name ?? null,
+      email: row.email ?? null,
       phone: a.phone ?? null,
       createAccountAfter: Boolean(a.createAccountAfter),
       marketingOptIn: Boolean(a.marketingOptIn),
@@ -106,17 +107,35 @@ export class Core {
     };
   }
 
+  /** The session columns an account is written to: email and name in their columns, the rest in sessions.account */
+  accountPatch(a: StoredAccount): Pick<SessionRow, 'account' | 'email' | 'contact_name'> {
+    const { email, name, ...rest } = a;
+    return { account: rest as never, email: email ?? null, contact_name: name ?? null };
+  }
+
+  /** sessions.payment_selection (jsonb) with the intent columns */
   payment(row: SessionRow): StoredPayment {
     const p = (row.payment_selection ?? {}) as Partial<StoredPayment>;
     return {
       method: p.method ?? null,
       view: p.view ?? null,
-      intentId: p.intentId ?? null,
-      intentState: p.intentState ?? null,
+      intentId: row.payment_intent_id ?? null,
+      intentState: (row.payment_state as StoredPayment['intentState']) ?? null,
       methodLabel: p.methodLabel ?? null,
       decline: p.decline ?? null,
       cancelledOrders: p.cancelledOrders ?? [],
     };
+  }
+
+  /** The session columns a payment selection is written to: the intent and its state in their columns, the rest in sessions.payment_selection */
+  paymentPatch(p: StoredPayment): Pick<SessionRow, 'payment_selection' | 'payment_intent_id' | 'payment_state'> {
+    const { intentId, intentState, ...rest } = p;
+    return { payment_selection: rest as never, payment_intent_id: intentId ?? null, payment_state: intentState ?? null };
+  }
+
+  /** The session columns a quote is written to: the whole quote in sessions.totals, its payable total in quote_total */
+  quotePatch(q: StoredQuote): Pick<SessionRow, 'totals' | 'quote_total'> {
+    return { totals: q as never, quote_total: q.totals.total.amount };
   }
 
   quote(row: SessionRow): StoredQuote {

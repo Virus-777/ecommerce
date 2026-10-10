@@ -69,7 +69,7 @@ export function createPostgresCheckoutRepository(db: Kysely<CheckoutDb>): Checko
       if (filter.to) q = q.where('created_at', '<', filter.to);
       if (filter.q?.trim()) {
         const like = `%${filter.q.trim().replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
-        q = q.where(sql<boolean>`(account->>'email' ilike ${like} or account->>'name' ilike ${like} or order_ref ilike ${like})`);
+        q = q.where(sql<boolean>`(email ilike ${like} or contact_name ilike ${like} or order_ref ilike ${like})`);
       }
       return paginate(q, page, { column: 'created_at', direction: 'desc' });
     },
