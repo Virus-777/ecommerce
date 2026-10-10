@@ -154,7 +154,7 @@ export class Queues {
     if (people.length) throw new AppError('VALIDATION_FAILED', 'The lead and backup must be known staff members', { issues: people });
   }
 
-  #row(input: QueueInput, by: By): Omit<QueueRow, 'key'> {
+  #row(input: QueueInput, by: By, before?: QueueRow): Omit<QueueRow, 'key'> {
     return {
       name: input.name.trim(),
       area: input.area,
@@ -165,6 +165,7 @@ export class Queues {
       escalation_label: escalationLabel(input.escalationRoute),
       default_deadline_minutes: input.defaultDeadlineMinutes,
       business_hours_only: input.businessHoursOnly ?? false,
+      pause_while_waiting: input.pauseWhileWaiting ?? before?.pause_while_waiting ?? false,
       screen: input.screen.trim(),
       screen_filter: input.screenFilter ?? null,
       visible_to_seller: input.visibleToSeller ?? false,
@@ -193,7 +194,7 @@ export class Queues {
     await this.#validate(input);
     const { before, after } = await this.repo.transaction(async (tx) => {
       const before = (await tx.getQueue(key, { forUpdate: true }))!;
-      const after = await tx.updateQueue(key, this.#row(input, by));
+      const after = await tx.updateQueue(key, this.#row(input, by, before));
       return { before, after };
     });
     const [beforeDef, afterDef] = await this.definitions([before, after]);

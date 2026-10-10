@@ -1,8 +1,9 @@
 /**
  * The day-end review: built before dayEndReviewTime from open items and other modules' forecasts,
  * checked item by item (a note is required where overdue work is still open), completed (the summary
- * goes to the shared roles when it is prepared: workqueues.day_end.prepared), or marked missed at the end of the market day (then listed on the
- * next day's review). The close job also snapshots daily_counts.
+ * goes to the shared roles on completion: workqueues.day_end.completed; the prepare job only sends
+ * workqueues.day_end.prepared as a reminder while the review is still open), or marked missed at the end
+ * of the market day (then listed on the next day's review). The close job also snapshots daily_counts.
  */
 import { AppError } from '../../../kernel/errors/index.js';
 import { zonedTimeToUtc } from '../../../kernel/lib/clock.js';
@@ -144,24 +145,35 @@ export class DayEnd {
   }
 
   /**
-   * Job day-end-prepare: build today's review and publish workqueues.day_end.prepared once per date
-   * (notifications sends the summary to the shared roles). A review already built on first read is
-   * announced by the job; a second run changes nothing.
+   * Job day-end-prepare: build today's review, or refresh the items of one staff opened earlier (checks
+   * and notes already made are kept), and publish workqueues.day_end.prepared, the reminder, once per date
+   * and only while the review is still open. The summary itself goes out on completion.
    */
   async prepareAndAnnounce(date = this.core.today()): Promise<DayEndReviewRow> {
     const core = this.core;
-    const built = await this.prepare(date);
+    const existing = await this.repo.reviewByDate(date);
+    let built = existing ?? (await this.prepare(date));
+    if (existing?.state === 'open') {
+      const fresh = await this.#items(date);
+      built = await this.repo.transaction(async (tx) => {
+        const r = (await tx.getReview(existing.id, { forUpdate: true }))!;
+        if (r.state !== 'open') return r;
+        const before = new Map(((r.items ?? []) as unknown as DayEndItem[]).map((i) => [i.key === 'custom' ? `custom:${i.title}` : i.key, i]));
+        const items = fresh.map((i) => {
+          const old = before.get(i.key === 'custom' ? `custom:${i.title}` : i.key);
+          return old ? { ...i, checked: old.checked, checkedBy: old.checkedBy, checkedAt: old.checkedAt, note: old.note } : i;
+        });
+        return tx.updateReview(r.id, { items: items as never });
+      });
+    }
+    if (built.state !== 'open') return built;
     const roles = (built.shared_with_roles ?? []) as string[];
-    const notifying = (core.ctx.modules as readonly string[]).includes('notifications');
     const now = core.now();
     const [openItems, overdueItems] = await Promise.all([this.repo.countItems({ states: ACTIVE }), this.repo.countItems({ states: ACTIVE, deadlineStates: ['overdue'], now })]);
-    const row = await this.repo.transaction(async (tx) => {
-      if (!(await tx.claim(`day-end-prepared:${date}`))) return null;
-      return tx.updateReview(built.id, { summary_sent_to: (notifying ? roles : []) as never });
-    });
-    if (!row) return built;
-    core.ctx.events.publish('workqueues.day_end.prepared', { reviewId: row.id, date: row.date, dueAt: row.due_at.toISOString(), openItems, overdueItems, roleKeys: roles }, { actor: SYSTEM });
-    return row;
+    const claimed = await this.repo.transaction((tx) => tx.claim(`day-end-prepared:${date}`));
+    if (!claimed) return built;
+    core.ctx.events.publish('workqueues.day_end.prepared', { reviewId: built.id, date: built.date, dueAt: built.due_at.toISOString(), openItems, overdueItems, roleKeys: roles }, { actor: SYSTEM });
+    return built;
   }
 
   /* ---------------------------------------------------------------- reading */
@@ -231,16 +243,25 @@ export class DayEnd {
     const state = dayEndReviewMachine.next(existing.state as never, 'complete');
     const unchecked = ((existing.items ?? []) as unknown as DayEndItem[]).filter((i) => !i.checked).map((i) => i.key);
     if (unchecked.length) throw new AppError('DAY_END_INCOMPLETE', `${unchecked.length} item${unchecked.length === 1 ? ' is' : 's are'} not checked yet`, { items: unchecked });
-    const openItems = await this.repo.countItems({ states: [...ACTIVE] });
-    // the summary went to the shared roles when the review was prepared (workqueues.day_end.prepared, sent by notifications)
-    const sentTo = (existing.summary_sent_to ?? []) as string[];
+    const now = core.now();
+    const [openItems, overdueItems] = await Promise.all([this.repo.countItems({ states: [...ACTIVE] }), this.repo.countItems({ states: [...ACTIVE], deadlineStates: ['overdue'], now })]);
+    // the summary goes to the shared roles now (workqueues.day_end.completed, sent by notifications)
+    const roles = (existing.shared_with_roles ?? []) as string[];
+    const notifying = (core.ctx.modules as readonly string[]).includes('notifications');
+    const sentTo = notifying ? roles : [];
+    const text = note?.trim() || null;
     const row = await this.repo.transaction(async (tx) => {
       const r = (await tx.getReview(id, { forUpdate: true }))!;
       dayEndReviewMachine.next(r.state as never, 'complete');
-      return tx.updateReview(id, { state, completed_by: v.staffId, completed_at: core.now() });
+      return tx.updateReview(id, { state, completed_by: v.staffId, completed_at: now, summary_sent_to: sentTo as never });
     });
-    core.ctx.events.publish('workqueues.day_end.completed', { reviewId: id, date: row.date, openItems }, by);
-    await core.audit({ action: 'workqueues.day_end.complete', actionLabel: 'Completed the day-end review', target: { type: 'day_end_review', id, ref: row.date, label: `Day-end review ${row.date}` }, reason: note ?? null, after: { state: row.state, openItems, summarySentTo: sentTo } }, by);
+    const items = ((row.items ?? []) as unknown as DayEndItem[]).map((i) => ({ key: i.key, title: i.title, summary: i.summary, ...(i.note ? { note: i.note } : {}) }));
+    core.ctx.events.publish(
+      'workqueues.day_end.completed',
+      { reviewId: id, date: row.date, completedBy: by.actor, completedAt: now.toISOString(), openItems, overdueItems, note: text, items, roleKeys: roles },
+      by,
+    );
+    await core.audit({ action: 'workqueues.day_end.complete', actionLabel: 'Completed the day-end review', target: { type: 'day_end_review', id, ref: row.date, label: `Day-end review ${row.date}` }, reason: text, after: { state: row.state, openItems, overdueItems, summarySentTo: sentTo } }, by);
     return this.view(row);
   }
 

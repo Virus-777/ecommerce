@@ -37,6 +37,8 @@ export class Sweep {
       for (const row of batch) {
         checked++;
         const queue = queues.get(row.queue_key);
+        // the deadline clock stops while waiting on someone outside the team (resume moves dueAt later)
+        if (row.state === 'waiting' && queue?.pause_while_waiting) continue;
         const state = deadlineState(row.due_at, now, dueSoon);
         if (state !== row.deadline_state) {
           await core.repo.updateItem(row.id, { deadline_state: state });
@@ -75,22 +77,23 @@ export class Sweep {
     return { checked, overdue, escalated };
   }
 
-  /** Resolved and dismissed items older than itemRetentionDays leave the online tables for cold storage */
+  /**
+   * Resolved and dismissed items older than itemRetentionDays are marked archived (archived_at). Rows,
+   * notes and history stay in Postgres: archived items leave the default lists and stay reachable by id
+   * and with archived=true. Nothing is deleted.
+   */
   async archive(): Promise<number> {
     const core = this.core;
     const days = Number(await core.ctx.settings.get('itemRetentionDays')) || 400;
-    const before = new Date(core.now().getTime() - days * 86_400_000);
-    let moved = 0;
-    for (let i = 0; i < 100; i++) {
-      const rows = await core.repo.closedBefore(before, 500);
-      if (!rows.length) break;
-      const items = await core.workItems(rows);
-      await core.archive.put({ at: core.now().toISOString(), items });
-      await core.repo.transaction((tx) => tx.deleteItems(rows.map((r) => r.id)));
-      moved += rows.length;
-      if (rows.length < 500) break;
+    const now = core.now();
+    const before = new Date(now.getTime() - days * 86_400_000);
+    let archived = 0;
+    for (let i = 0; i < 1000; i++) {
+      const n = await core.repo.archiveClosedBefore(before, now, 500);
+      archived += n;
+      if (n < 500) break;
     }
-    if (moved) core.log.info({ moved }, 'workqueues: archived resolved items');
-    return moved;
+    if (archived) core.log.info({ archived }, 'workqueues: archived resolved items');
+    return archived;
   }
 }

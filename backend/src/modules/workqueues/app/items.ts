@@ -9,14 +9,14 @@ import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type { Actor, Money, Page } from '../../../spec/common.js';
 import type { EscalationStep, SellerTask, WorkItem, WorkItemNote, WorkSubject } from '../../../spec/workqueues.js';
-import { ACTIVE_STATES, bump, isActive, isArea, KIND_QUEUES, priorityRank, PRIORITIES, sellerScreen, type Kind, type Priority } from '../domain/catalog.js';
+import { ACTIVE_STATES, bump, CLOSED_STATES, isActive, isArea, KIND_QUEUES, KINDS as ALL_KINDS, priorityRank, PRIORITIES, sellerScreen, type Kind, type Priority } from '../domain/catalog.js';
 import type { Link } from '../domain/intake.js';
 import { deadlineState, durationLabel, nextStep, parseDuration, stepTarget } from '../domain/rules.js';
 import { workItemMachine } from '../domain/state-machines.js';
 import type { ItemQuery, ItemRow, ItemSort, Match, QueueRow, WorkqueuesRepository } from '../ports.js';
 import { SYSTEM, type By, type Core, type Viewer } from './core.js';
 
-const KINDS = new Set<string>(['overdue_dispatch', 'missing_tracking', 'delivery_exception', 'seller_cannot_fulfill', 'low_stock', 'receiving', 'pick_pack', 'return_inspection', 'return_decision', 'approval_waiting', 'case_past_target', 'case_escalated', 'payout_failed', 'payment_check', 'payment_mismatch', 'chargeback', 'hold_review', 'product_review', 'application_waiting', 'launch_review', 'appeal_due', 'restriction_review', 'restriction_evidence', 'seller_performance', 'storefront_review', 'trust_report', 'trust_recommendation', 'data_request', 'seller_reply_overdue', 'unexpected_return_parcel', 'return_parcel_overdue', 'manual_task']);
+const KINDS = new Set<string>(ALL_KINDS);
 const STATES = new Set<string>(['open', 'assigned', 'in_progress', 'waiting', 'resolved', 'dismissed']);
 const DEADLINES = new Set<string>(['on_time', 'due_soon', 'overdue']);
 const SORTS = new Set<string>(['deadline', 'oldest', 'priority', 'amount']);
@@ -90,6 +90,7 @@ export class Items {
     if (!KINDS.has(spec.kind)) throw invalid('kind', `Unknown work item kind ${spec.kind}`);
     if (!spec.dedupeKey?.trim()) throw invalid('dedupeKey', 'A dedupe key is required');
     if (!spec.title?.trim()) throw invalid('title', 'A title is required');
+    if (!spec.source.module?.trim()) throw invalid('sourceModule', 'The calling module is required');
     if (spec.priority && !PRIORITIES.includes(spec.priority)) throw invalid('priority', 'Unknown priority');
     if (spec.sellerId && !isUuid(spec.sellerId)) throw invalid('sellerId', 'Not a seller id');
     if (spec.customerId && !isUuid(spec.customerId)) throw invalid('customerId', 'Not a customer id');
@@ -118,12 +119,14 @@ export class Items {
               state: workItemMachine.next('dismissed', 'reopen'),
               assignee_staff_id: null,
               waiting_on: null,
+              waiting_since: null,
               escalation_level: 0,
               escalated_to: null,
               due_at: due,
               deadline_state: deadlineState(due, now, dueSoon),
               resolved_at: null,
               resolution: null,
+              archived_at: null,
               updated_at: now,
             });
             await core.history(row.id, 'reopened_by_source', 'Reopened: the source fired again after it was dismissed', spec.source.by, {}, tx);
@@ -150,6 +153,7 @@ export class Items {
             priority: spec.priority ?? 'normal',
             state: assignee ? workItemMachine.next('open', 'assign') : workItemMachine.initial,
             waiting_on: null,
+            waiting_since: null,
             escalation_level: 0,
             escalated_to: null,
             dedupe_key: spec.dedupeKey,
@@ -160,6 +164,7 @@ export class Items {
             updated_at: now,
             resolved_at: null,
             resolution: null,
+            archived_at: null,
           } as ItemRow);
           await core.history(id, 'raised', spec.source.event ? `Raised from ${spec.source.event}` : spec.kind === 'manual_task' ? 'Created by hand' : `Raised by ${spec.source.module}`, spec.source.by, {}, tx);
           if (receiver.viaBackup) await core.history(id, 'routed_to_backup', `Routed to the backup ${receiver.backupName} while ${receiver.leadName} is away`, SYSTEM, {}, tx);
@@ -230,6 +235,7 @@ export class Items {
       if (existing.state === 'waiting') {
         patch.state = workItemMachine.next('waiting', 'resume');
         patch.waiting_on = null;
+        patch.waiting_since = null;
       }
       label = 'Back for review: the source fired again';
     } else if (dueAt) patch.due_at = dueAt;
@@ -246,11 +252,19 @@ export class Items {
     return row;
   }
 
-  /** Close the active items of these kinds about these subjects (resolvesOn events) */
-  async closeMatching(kinds: Kind[], matches: Match[], note: string, by: Actor, event: string | null): Promise<number> {
+  /**
+   * Close the active items of these kinds about these subjects, or with these dedupe keys (resolvesOn
+   * events). With a claim key (ctx.inbox) the claim commits with the closing: a redelivered event changes nothing.
+   */
+  async closeMatching(kinds: Kind[], matches: Match[], note: string, by: Actor, event: string | null, opts: { dedupeKeys?: string[]; claimKey?: string } = {}): Promise<number> {
     const core = this.core;
     const closed = await this.repo.transaction(async (tx) => {
-      const rows = await tx.activeMatching(kinds, matches);
+      if (opts.claimKey && !(await tx.claim(opts.claimKey))) return [];
+      const rows = matches.length ? await tx.activeMatching(kinds, matches) : [];
+      for (const key of opts.dedupeKeys ?? []) {
+        const r = await tx.activeByDedupe(key, { forUpdate: true });
+        if (r && (kinds as string[]).includes(r.kind) && !rows.some((x) => x.id === r.id)) rows.push(r);
+      }
       for (const r of rows) await this.#close(tx, r, 'fixed_at_source', note, by, event);
       return rows;
     });
@@ -261,7 +275,7 @@ export class Items {
   async #close(tx: WorkqueuesRepository, r: ItemRow, outcome: 'fixed_at_source' | 'resolved' | 'dismissed', note: string, by: Actor, event: string | null) {
     const now = this.core.now();
     const state = workItemMachine.next(r.state as never, outcome === 'dismissed' ? 'dismiss' : 'resolve');
-    const row = await tx.updateItem(r.id, { state, resolved_at: now, resolution: { outcome, note, by } as never, waiting_on: null, updated_at: now });
+    const row = await tx.updateItem(r.id, { state, resolved_at: now, resolution: { outcome, note, by } as never, waiting_on: null, waiting_since: null, updated_at: now });
     const label = outcome === 'fixed_at_source' ? (event ? `Fixed at source (${event})` : 'Fixed at source') : outcome === 'dismissed' ? 'Dismissed' : 'Resolved';
     await this.core.history(r.id, outcome, label, by, { text: note }, tx);
     return row;
@@ -361,6 +375,11 @@ export class Items {
     if (subjectRef) query.subjectRef = subjectRef;
     const search = str(f.q) ?? str(f.search);
     if (search) query.search = search;
+    // archived items (resolved more than itemRetentionDays ago) only with archived=true
+    if (bool(f.archived)) {
+      query.archived = true;
+      if (!states) query.states = [...CLOSED_STATES];
+    } else query.archived = false;
     const sort = str(f.sort)?.toLowerCase() ?? 'deadline';
     if (!SORTS.has(sort)) throw invalid('sort', 'Use deadline, oldest, priority or amount');
     return { query, sort: sort as ItemSort };
@@ -405,7 +424,7 @@ export class Items {
 
   async sellerTasks(sellerId: string, state: 'open' | 'resolved' | undefined, page: PageRequest): Promise<Page<SellerTask>> {
     const res = await this.repo.listItems(
-      { sellerId, visibleToSeller: true, states: state === 'resolved' ? ['resolved'] : state === 'open' ? [...ACTIVE_STATES] : [...ACTIVE_STATES, 'resolved'], now: this.core.now() },
+      { sellerId, visibleToSeller: true, archived: false, states: state === 'resolved' ? ['resolved'] : state === 'open' ? [...ACTIVE_STATES] : [...ACTIVE_STATES, 'resolved'], now: this.core.now() },
       page,
       'deadline',
     );
@@ -487,8 +506,9 @@ export class Items {
       if (row.assignee_staff_id && row.assignee_staff_id !== v.staffId && row.state !== 'open') {
         throw new AppError('CONFLICT', `Already assigned to ${holder?.staffId === row.assignee_staff_id ? holder.name : 'someone else'}`, { assigneeId: row.assignee_staff_id });
       }
-      const assignedState = row.state === 'open' ? workItemMachine.next('open', 'assign') : workItemMachine.next(row.state as never, 'assign');
-      const state = workItemMachine.next(assignedState, 'start');
+      const assignedState = workItemMachine.next(row.state as never, 'assign');
+      // open and assigned items start; in-progress and waiting items keep their state with the new holder
+      const state = assignedState === 'assigned' ? workItemMachine.next(assignedState, 'start') : assignedState;
       const next = await tx.updateItem(row.id, { state, assignee_staff_id: v.staffId, updated_at: this.core.now() });
       await this.core.history(row.id, 'claimed', `Claimed by ${me} and started`, by.actor, { assigneeId: v.staffId }, tx);
       return next;
@@ -514,7 +534,7 @@ export class Items {
     const author = await this.#authorName(by.actor);
     const { after } = await this.#mutate(v, id, async (tx, row) => {
       const state = workItemMachine.next(row.state as never, 'wait');
-      const next = await tx.updateItem(row.id, { state, waiting_on: body.waitingOn, updated_at: this.core.now() });
+      const next = await tx.updateItem(row.id, { state, waiting_on: body.waitingOn, waiting_since: this.core.now(), updated_at: this.core.now() });
       await this.#note(tx, row.id, body.note.trim(), by.actor, author);
       await this.core.history(row.id, 'waiting', `Waiting on ${body.waitingOn}`, by.actor, { text: body.followUpAt ? `${body.note.trim()} (follow up ${body.followUpAt})` : body.note.trim(), followUpAt: body.followUpAt ?? null }, tx);
       return next;
@@ -523,10 +543,21 @@ export class Items {
   }
 
   async resume(v: Viewer, id: string, by: By): Promise<WorkItem> {
-    const { after } = await this.#mutate(v, id, async (tx, row) => {
+    const now = this.core.now();
+    const dueSoon = await this.core.dueSoonMinutes();
+    const { after } = await this.#mutate(v, id, async (tx, row, queue) => {
       const state = workItemMachine.next(row.state as never, 'resume');
-      const next = await tx.updateItem(row.id, { state, waiting_on: null, updated_at: this.core.now() });
-      await this.core.history(row.id, 'resumed', 'Back in progress', by.actor, {}, tx);
+      const patch: Partial<ItemRow> = { state, waiting_on: null, waiting_since: null, updated_at: now };
+      let label = 'Back in progress';
+      // the queue pauses the deadline clock while waiting: the deadline moves later by the time spent waiting
+      const waited = row.waiting_since ? now.getTime() - new Date(row.waiting_since).getTime() : 0;
+      if (queue?.pause_while_waiting && waited > 0) {
+        patch.due_at = new Date(row.due_at.getTime() + waited);
+        patch.deadline_state = deadlineState(patch.due_at, now, dueSoon);
+        label = `Back in progress; deadline moved ${durationLabel(Math.max(1, Math.round(waited / 60_000)))} later (paused while waiting)`;
+      }
+      const next = await tx.updateItem(row.id, patch);
+      await this.core.history(row.id, 'resumed', label, by.actor, patch.due_at ? { dueAt: patch.due_at.toISOString() } : {}, tx);
       return next;
     });
     return this.core.workItem(after);
@@ -551,7 +582,7 @@ export class Items {
       const state = workItemMachine.next(row.state as never, 'reopen');
       const other = await tx.activeByDedupe(row.dedupe_key);
       if (other && other.id !== row.id) throw new AppError('CONFLICT', `${other.ref} is already open for the same source`, { itemId: other.id });
-      const next = await tx.updateItem(row.id, { state, assignee_staff_id: null, waiting_on: null, resolved_at: null, resolution: null, deadline_state: deadlineState(row.due_at, now, dueSoon), updated_at: now });
+      const next = await tx.updateItem(row.id, { state, assignee_staff_id: null, waiting_on: null, waiting_since: null, resolved_at: null, resolution: null, archived_at: null, deadline_state: deadlineState(row.due_at, now, dueSoon), updated_at: now });
       await this.core.history(row.id, 'reopened', 'Reopened', by.actor, { text: reason.trim() }, tx);
       return next;
     });

@@ -118,7 +118,7 @@ describe('day-end review', () => {
     expect(review.items.find((i: { key: string }) => i.key === 'upcoming_campaigns').source).toBe('unavailable');
     expect((await call('GET', '/day-end-reviews/current', lead, WORKER)).json().id).toBe(review.id);
 
-    // the prepare job announces the review built on first read: workqueues.day_end.prepared once per date
+    // the prepare job reminds about the review built on first read: workqueues.day_end.prepared once per date while open
     const prepared = capture(t.app, 'workqueues.day_end.prepared');
     await t.app.kernel.jobs.runNow('workqueues.day-end-prepare');
     await t.app.kernel.jobs.runNow('workqueues.day-end-prepare');
@@ -126,7 +126,8 @@ describe('day-end review', () => {
     expect(prepared.map((e) => e.payload)).toEqual([{ reviewId: review.id, date: review.date, dueAt: review.dueAt, openItems: expect.any(Number), overdueItems: expect.any(Number), roleKeys: review.sharedWithRoles }]);
     expect(prepared[0]!.payload.openItems).toBeGreaterThanOrEqual(1);
     expect(prepared[0]!.payload.overdueItems).toBeGreaterThanOrEqual(1);
-    expect((await call('GET', '/day-end-reviews/current', lead, WORKER)).json()).toMatchObject({ id: review.id, summarySentTo: review.sharedWithRoles });
+    // the reminder is not the summary: nothing is marked sent until the review is completed
+    expect((await call('GET', '/day-end-reviews/current', lead, WORKER)).json()).toMatchObject({ id: review.id, summarySentTo: [] });
 
     const early = await call('POST', `/day-end-reviews/${review.id}/complete`, lead, RUNNER, {});
     expect(early.statusCode).toBe(409);
@@ -148,9 +149,19 @@ describe('day-end review', () => {
     expect(done.statusCode, done.body).toBe(200);
     expect(done.json()).toMatchObject({ state: 'completed', completedBy: { staffId: lead.id }, summarySentTo: review.sharedWithRoles });
     await t.app.kernel.events.drain();
-    expect(seen[0]!.payload).toMatchObject({ reviewId: review.id, date: review.date });
+    // the summary goes out on completion: notifications sends it to the shared roles from this event
+    expect(seen[0]!.payload).toMatchObject({
+      reviewId: review.id,
+      date: review.date,
+      completedBy: { kind: 'staff', id: lead.id },
+      completedAt: expect.any(String),
+      note: 'Quiet day',
+      roleKeys: review.sharedWithRoles,
+      items: expect.arrayContaining([{ key: 'unresolved_commitments', title: 'Unresolved commitments', summary: expect.any(String), note: 'Seller promised dispatch tonight' }, { key: 'failed_payouts', title: 'Failed payouts', summary: expect.any(String) }]),
+    });
     expect(seen[0]!.payload.openItems).toBeGreaterThanOrEqual(1);
-    // notifications sends the summary from workqueues.day_end.prepared; completing sends nothing itself
+    expect(seen[0]!.payload.overdueItems).toBeGreaterThanOrEqual(1);
+    // completing sends nothing itself (notifications consumes the event)
     expect(t.world.notices.filter((n) => n.topic === 'staff.mention')).toEqual([]);
     expect(t.world.audits.some((a) => a.action === 'workqueues.day_end.complete')).toBe(true);
     expect((await call('POST', `/day-end-reviews/${review.id}/items/failed_payouts/check`, lead, RUNNER, {})).statusCode).toBe(409);
@@ -217,7 +228,7 @@ describe('deadline sweep and escalation', () => {
 
   it('a refreshed later deadline goes back to on time', async () => {
     const subjectId = newId();
-    const base = { queueKey: 'warehouse.pick_pack', kind: 'pick_pack' as const, title: 'Pick', subject: { type: 'order' as const, id: subjectId }, dedupeKey: `pick_pack:${subjectId}`, dueAt: new Date(t.clock.now().getTime() - H).toISOString() };
+    const base = { sourceModule: 'warehouse', queueKey: 'warehouse.pick_pack', kind: 'pick_pack' as const, title: 'Pick', subject: { type: 'order' as const, id: subjectId }, dedupeKey: `pick_pack:${subjectId}`, dueAt: new Date(t.clock.now().getTime() - H).toISOString() };
     const first = await t.service.raise(base);
     await sweep();
     expect((await t.service.core.repo.getItem(first.id))!.deadline_state).toBe('overdue');
@@ -234,7 +245,7 @@ describe('deadline sweep and escalation', () => {
     lead.away = true;
     await publish(t.app, 'access.away.started', { awayPeriodId: newId(), accountId: lead.id, until: new Date(t.clock.now().getTime() + 3 * 86_400_000).toISOString(), coverage: [], delegateApprovals: false });
     const subjectId = newId();
-    const item = await t.service.raise({ queueKey: q.json().key, kind: 'manual_task', title: 'Call carrier', subject: { type: 'other', id: subjectId }, dedupeKey: `lead-test:${subjectId}`, dueAt: new Date(t.clock.now().getTime() - MIN).toISOString() });
+    const item = await t.service.raise({ sourceModule: 'test', queueKey: q.json().key, kind: 'manual_task', title: 'Call carrier', subject: { type: 'other', id: subjectId }, dedupeKey: `lead-test:${subjectId}`, dueAt: new Date(t.clock.now().getTime() - MIN).toISOString() });
     expect(item.history.map((h) => h.label)).toEqual(expect.arrayContaining([expect.stringContaining('Routed to the backup')]));
     await sweep();
     await t.app.kernel.events.drain();
@@ -244,19 +255,39 @@ describe('deadline sweep and escalation', () => {
     lead.away = false;
     await publish(t.app, 'access.away.ended', { awayPeriodId: newId(), accountId: lead.id });
     const subject2 = newId();
-    await t.service.raise({ queueKey: q.json().key, kind: 'manual_task', title: 'Another', subject: { type: 'other', id: subject2 }, dedupeKey: `lead-test:${subject2}` });
+    await t.service.raise({ sourceModule: 'test', queueKey: q.json().key, kind: 'manual_task', title: 'Another', subject: { type: 'other', id: subject2 }, dedupeKey: `lead-test:${subject2}` });
     await t.app.kernel.events.drain();
     expect(seen.filter((e) => e.name === 'workqueues.item.created').at(-1)!.payload.leadId).toBe(lead.id);
   });
 
-  it('archive moves resolved items older than itemRetentionDays to cold storage', async () => {
+  it('archive marks resolved items older than itemRetentionDays archived and deletes nothing (bug: rows were deleted into memory)', async () => {
     const subjectId = newId();
-    const item = await t.service.raise({ queueKey: 'warehouse.pick_pack', kind: 'pick_pack', title: 'Old', subject: { type: 'order', id: subjectId }, dedupeKey: `old:${subjectId}` });
+    const item = await t.service.raise({ sourceModule: 'test', queueKey: 'warehouse.pick_pack', kind: 'pick_pack', title: 'Old', subject: { type: 'order', id: subjectId }, dedupeKey: `old:${subjectId}` });
+    const note = await call('POST', `/items/${item.id}/notes`, owner, [...WORKER, 'workqueues.items.view-all'], { body: 'kept with the item' });
+    expect(note.statusCode, note.body).toBe(201);
     await t.service.resolveBySource(`old:${subjectId}`, { note: 'done', by: { kind: 'system' } });
+    const openSubject = newId();
+    const open = await t.service.raise({ sourceModule: 'test', queueKey: 'warehouse.pick_pack', kind: 'pick_pack', title: 'Still open', subject: { type: 'order', id: openSubject }, dedupeKey: `old:${openSubject}` });
     t.clock.advance(401 * 24 * H);
     try {
       await t.app.kernel.jobs.runNow('workqueues.archive');
-      expect(await t.service.core.repo.getItem(item.id)).toBeNull();
+      const row = await t.service.core.repo.getItem(item.id);
+      expect(row).toMatchObject({ state: 'resolved', archived_at: expect.any(Date) });
+      expect((await t.service.core.repo.getItem(open.id))!.archived_at).toBeNull();
+      // reachable by id with notes and history; out of the default lists; listed with archived=true
+      const v = await t.service.viewer({ kind: 'staff', accountId: owner.id } as never, async () => true);
+      const got = await t.service.items.get(v, item.id);
+      expect(got).toMatchObject({ archived: true, notes: [{ body: 'kept with the item' }] });
+      expect(got.history.length).toBeGreaterThan(1);
+      const page = { mode: 'cursor' as const, cursor: null, limit: 100 };
+      const resolved = await t.service.items.list(v, { state: 'resolved' }, page);
+      expect(resolved.items.map((i) => i.id)).not.toContain(item.id);
+      const archived = await t.service.items.list(v, { archived: true }, page);
+      expect(archived.items.map((i) => i.id)).toContain(item.id);
+      expect(archived.items.every((i) => i.archived)).toBe(true);
+      // a second run changes nothing
+      await t.app.kernel.jobs.runNow('workqueues.archive');
+      expect((await t.service.core.repo.getItem(item.id))!.archived_at).toEqual(row!.archived_at);
     } finally {
       t.clock.advance(-401 * 24 * H);
     }
