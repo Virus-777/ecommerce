@@ -26,7 +26,8 @@
     { "name": "isSaved", "signature": "(customerId: uuid, productIds: uuid[]) => map<bool>", "desc": "Saved state for product cards rendered by other modules.", "usedBy": ["search", "content", "graphql"] },
     { "name": "listItems", "signature": "(customerId: uuid, opts: { listId?: uuid, paging: PageInput }) => Paged<SavedItem>", "desc": "Saved items of a list (default list when omitted) with price hints and alert toggles (GET /wishlist, GET /lists/{id}/items).", "usedBy": ["graphql"] },
     { "name": "listLists", "signature": "(customerId: uuid) => WishlistList[]", "desc": "The customer's lists with item counts and share state (GET /lists).", "usedBy": ["graphql"] },
-    { "name": "listAlerts", "signature": "(customerId: uuid) => Alert[]", "desc": "The customer's price-drop and back-in-stock alerts (GET /alerts).", "usedBy": ["graphql"] }
+    { "name": "listAlerts", "signature": "(customerId: uuid) => Alert[]", "desc": "The customer's price-drop and back-in-stock alerts (GET /alerts).", "usedBy": ["graphql"] },
+    { "name": "exportCustomerData", "signature": "(customerId: uuid) => { module: string, title: string, records: json[] }", "desc": "Customer data export hook (decision: every module that keeps customer data answers the customers data export): lists, saved items with notes and alerts as plain records. Called by customers when it builds a data export", "usedBy": ["customers"] }
   ],
   "types": {
     "WishlistList": { "id": "uuid", "name": "string", "isDefault": "bool", "itemCount": "int", "shared": "bool", "shareUrl": "string?", "createdAt": "datetime", "updatedAt": "datetime" },
@@ -101,7 +102,7 @@
     { "id": "saveItem", "area": "store", "method": "POST", "path": "/items", "summary": "Save a product (optionally with alerts)", "desc": "Saving the same product and variant twice to a list returns the existing item.", "auth": "customer", "body": "SaveItemInput", "response": "SavedItem", "status": 201, "errors": ["LIST_LIMIT_REACHED"], "events": ["wishlist.item.saved"], "screens": ["store/product", "account/wishlist"], "phase": 3 },
     { "id": "removeItem", "area": "store", "method": "DELETE", "path": "/items/{id}", "summary": "Remove a saved item (its alerts are removed too)", "auth": "customer", "params": { "id": "uuid" }, "response": null, "status": 204, "events": ["wishlist.item.removed"], "screens": ["account/wishlist"], "phase": 3 },
     { "id": "moveItem", "area": "store", "method": "POST", "path": "/items/{id}/move", "summary": "Move an item to another list", "auth": "customer", "params": { "id": "uuid" }, "body": { "listId": "uuid" }, "response": "SavedItem", "screens": ["account/wishlist"], "phase": 3 },
-    { "id": "moveToCart", "area": "store", "method": "POST", "path": "/items/{id}/move-to-cart", "summary": "Add the item to the cart with an explicit offer", "desc": "Uses the saved offer, or the current main offer shown on the card; the seller is never swapped silently. The item stays saved unless removeFromList is true.", "auth": "customer", "params": { "id": "uuid" }, "body": { "offerId": "uuid?", "quantity": "int", "removeFromList": "bool?" }, "response": { "cartLineId": "string", "cartItemCount": "int", "item": "SavedItem?" }, "errors": ["OUT_OF_STOCK", "OFFER_CHANGED"], "screens": ["account/wishlist"], "phase": 3 },
+    { "id": "moveToCart", "area": "store", "method": "POST", "path": "/items/{id}/move-to-cart", "summary": "Add the item to the cart with an explicit offer", "desc": "Uses the saved offer, or the current main offer shown on the card; the seller is never swapped silently. With expectedPrice (the price the card showed), a different current price returns OFFER_CHANGED with details { offerId, price, previousPrice, availability } and nothing is added; the app confirms and retries with the new price. The item stays saved unless removeFromList is true.", "auth": "customer", "params": { "id": "uuid" }, "body": { "offerId": "uuid?", "quantity": "int", "removeFromList": "bool?", "expectedPrice": { "type": "Money?", "desc": "Price shown on the card; protects the customer from a silent price change" } }, "response": { "cartLineId": "string", "cartItemCount": "int", "item": "SavedItem?" }, "errors": ["OUT_OF_STOCK", "OFFER_CHANGED"], "screens": ["account/wishlist"], "phase": 3 },
     { "id": "updateItemAlerts", "area": "store", "method": "PUT", "path": "/items/{id}/alerts", "summary": "Turn price-drop and back-in-stock alerts on or off for an item", "auth": "customer", "params": { "id": "uuid" }, "body": "AlertToggle", "response": "SavedItem", "screens": ["account/wishlist"], "phase": 3 },
     { "id": "listLists", "area": "store", "method": "GET", "path": "/lists", "summary": "My lists", "auth": "customer", "response": "WishlistList[]", "screens": ["account/wishlist"], "phase": 3 },
     { "id": "createList", "area": "store", "method": "POST", "path": "/lists", "summary": "Create a named list", "auth": "customer", "body": { "name": "string" }, "response": "WishlistList", "status": 201, "errors": ["LIST_LIMIT_REACHED"], "screens": ["account/wishlist"], "phase": 3 },
@@ -123,17 +124,18 @@
     ],
     "consumes": [
       { "name": "offers.offer.price_changed", "does": "Evaluate price-drop alerts for saved offers" },
-      { "name": "inventory.stock.changed", "does": "Evaluate back-in-stock alerts when available goes from 0 to positive" },
+      { "name": "inventory.stock.changed", "does": "Evaluate back-in-stock alerts when available goes from 0 to positive: alerts for the offer, for the variant (variantId) and whole-product alerts (productId on the payload), narrowed by the alert's sellerId when set" },
       { "name": "offers.offer.status_changed", "does": "Evaluate back-in-stock alerts for reactivated offers; clear saved offer ids of closed offers" },
       { "name": "catalog.product.merged", "does": "Move saved items and alerts to the kept product" },
-      { "name": "catalog.product.publication_changed", "does": "Pause alerts for suspended products; mark items unavailable" }
+      { "name": "catalog.product.publication_changed", "does": "Pause alerts for suspended products; mark items unavailable" },
+      { "name": "customers.account.closed", "does": "Delete the customer's lists, saved items and alerts (closure erases wishlist data; share links stop working)" }
     ]
   },
   "permissions": [
     { "key": "wishlist.insights.view", "audience": "staff", "desc": "Aggregate wishlist insights" }
   ],
   "jobs": [
-    { "name": "wishlist.evaluate-alerts", "schedule": "every 10 min", "does": "Batch-evaluate alert conditions changed by recent events, apply cooldown, publish wishlist.alert.triggered" }
+    { "name": "wishlist.evaluate-alerts", "schedule": "every 10 min", "does": "Batch-evaluate alert conditions changed by recent events, apply cooldown, publish wishlist.alert.triggered. Also re-checks every active back-in-stock alert against current availability (offers and inventory.getAvailability), so a restock missed by events or skipped inside the cooldown still triggers once the cooldown has passed" }
   ],
   "settings": [
     { "key": "maxLists", "type": "int", "default": 10, "desc": "Lists per customer", "min": 1 },
@@ -154,6 +156,8 @@
     "Phase 3 (plan ch. 20 Customer growth): the module ships as a scaffold and stays off at launch; account/wishlist is marked 'coming later'.",
     "Recently viewed belongs to customers (brief); the wishlist page shows it by calling customers.",
     "Alerts are promotional: notifications delivers them only if the customer allows wishlist alerts (account/notifications) and never mixes them into essential order updates.",
-    "Price hints are honest: 'Lowest in 30 days' only when the current price is the lowest in the window, from offers.priceRange(offerId, priceHintDays) (offers keeps the only price history); campaign was-prices come from promotions.referencePrice when enabled."
+    "Price hints are honest: 'Lowest in 30 days' only when the current price is the lowest in the window, from offers.priceRange(offerId, priceHintDays) (offers keeps the only price history); campaign was-prices come from promotions.referencePrice when enabled.",
+    "GraphQL: the store schema's WishlistAlert exposes sellerId (Alert.sellerId) and the seller field is resolved by the sellers module's shared mapper (decision: GraphQL shared mappers per owning module); wishlist itself has no sellers dependency.",
+    "Wishlist is for signed-in customers only (decision D3): every store endpoint except the shared-list view needs a customer token."
   ]
 }
