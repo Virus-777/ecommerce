@@ -339,10 +339,9 @@ export class Core {
   /** The recipient of a refund request: its return's, what the request stored, or the order's contact */
   async refundRecipient(rr: RefundRec, ret?: ReturnRec | null): Promise<{ customerId: string | null; contactEmail: string | null }> {
     if (ret) return this.recipient(ret);
-    const x = rr.deductions;
-    if (x.contactEmail !== undefined) return { customerId: x.customerId ?? null, contactEmail: x.contactEmail ?? null };
+    if (rr.customer_id || rr.contact_email) return { customerId: rr.customer_id, contactEmail: rr.contact_email };
     const order = await this.quiet('order contact', () => this.ctx.use('orders').getOrder(rr.order_id));
-    return { customerId: x.customerId ?? order?.contact.customerId ?? null, contactEmail: order?.contact.email ?? null };
+    return { customerId: order?.contact.customerId ?? null, contactEmail: order?.contact.email ?? null };
   }
 
   /** ref, orderId and orderRef carried by every returns.return.* event */
@@ -379,9 +378,8 @@ export class Core {
     return a.items.map((i) => ({ orderItemId: i.order_item_id, quantity: i.quantity, variantId: i.variant_id, stockItemId: stock[i.order_item_id] ?? null }));
   }
 
-  /** When the parcel reached the destination (receipt time) */
+  /** When the parcel reached the destination: the recorded receipt time, else the carrier's delivery */
   receivedAt(agg: Agg): Date | null {
-    const e = [...agg.events].reverse().find((x) => x.kind === 'received_at');
-    return e?.at ?? this.shipmentOf(agg)?.delivered_at ?? null;
+    return agg.ret.received_at ?? this.shipmentOf(agg)?.delivered_at ?? null;
   }
 }

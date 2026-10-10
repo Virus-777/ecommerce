@@ -5,7 +5,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { group, harness, idem, line, now, placeOrder, product, tokens, type Harness } from './helpers.js';
+import { group, harness, idem, line, now, placeOrder, product, tokens, USD, type Harness } from './helpers.js';
 
 let h: Harness;
 beforeAll(async () => {
@@ -237,6 +237,24 @@ describe('seller decisions and the return parcel', () => {
     // a second delivery of the event changes nothing
     await h.publish('payments', 'payments.refund.sent', { refundId: newId(), ref: refund.body.refundRequest.ref, orderId: m.order.id, origin: 'return', originId: refund.body.refundRequest.id, amount: { amount: 12000, currency: 'USD' }, items: startRefund.items.map((i) => ({ ...i, title: 'Headphones', groupId: m.order.groups[0]!.id })), destination: 'Visa •••• 4417', sentAt: now() });
     expect(h.named('returns.return.completed').filter((e) => e.returnId === m.ret.id)).toHaveLength(1);
+
+    // pass 4: the receipt time, the refund's items and history are columns and tables, not jsonb or marker rows
+    const repo = h.service.core.repo;
+    expect((await repo.get('returns', m.ret.id))!.received_at).toBeInstanceOf(Date);
+    expect(await repo.find('return_events', { return_id: m.ret.id, kind: 'received_at' })).toEqual([]);
+    const rr = (await repo.get('refund_requests', refund.body.refundRequest.id))!;
+    expect(rr).toMatchObject({ destination: 'original_method', destination_label: 'Visa •••• 4417', remedy_kind: 'full_refund', max_refundable: 12000, customer_id: m.customerId, contact_email: 'sam@example.com', order_ref: m.order.ref, deductions: [] });
+    expect(rr.approved_at).toBeInstanceOf(Date);
+    expect(rr.sent_at).toBeInstanceOf(Date);
+    expect(rr.items).toEqual([{ orderItemId: m.items[0]![0]!, quantity: 2, amount: 12000 }]);
+    expect(rr.history.map((e) => e.label)).toEqual(['Refund approved', 'Handed to payments', 'Refund sent']);
+
+    // the customer data export: the return with the customer's own words and the refund
+    const sections = await h.service.exportCustomerData({ customerId: m.customerId, accountId: m.customerId });
+    expect(sections.map((s) => s.key)).toEqual(['return_requests', 'refunds']);
+    expect(sections[0]!.records).toContainEqual(expect.objectContaining({ ref: m.ret.ref, reason: 'damaged', description: 'Broken hinge', status: 'completed', items: [expect.objectContaining({ quantity: 2 })] }));
+    expect(sections[1]!.records).toContainEqual(expect.objectContaining({ ref: refund.body.refundRequest.ref, returnRef: m.ret.ref, amount: USD(12000), status: 'Sent', destination: 'Visa •••• 4417' }));
+    expect((await h.service.exportCustomerData({ customerId: newId(), accountId: newId() })).every((s) => s.records.length === 0)).toBe(true);
   });
 
   it('rejects with an explanation and lets the customer ask Marketly to step in', async () => {

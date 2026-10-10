@@ -13,7 +13,7 @@ import type * as common from '../../../spec/common.js';
 import type { ExceptionRefundInput, RefundBreakdown, RefundDeduction, RefundRequest, RemedyInput } from '../../../spec/returns.js';
 import { refundRequestMachine, returnMachine } from '../domain/state-machines.js';
 import { actorFrom, actorText, is, LIVE_REFUND, type BreakdownResult, type RefundStatus, type ReturnStatus } from '../domain/rules.js';
-import type { RefundExtras, RefundRec, ReturnRec, ReturnsRepository } from '../ports.js';
+import type { RefundItem, RefundRec, ReturnRec, ReturnsRepository } from '../ports.js';
 import { Batch, invalid, invalidField, notFound, SYSTEM, type Agg, type By, type Core } from './core.js';
 import type { Views } from './views.js';
 
@@ -84,8 +84,26 @@ export class Refunds {
 
   /* ---------------------------------------------------------------- creating */
 
-  private extras(p: RefundPlan, x: Partial<RefundExtras> = {}): RefundExtras {
-    return { list: p.deductions, destination: p.destination, destinationLabel: p.destinationLabel, maxRefundable: p.b.maxRefundable, kind: p.kind, perItem: p.b.perItem, taxRefund: p.b.taxRefund || null, history: [], ...x };
+  /** The columns a plan sets on a refund request */
+  private planColumns(p: RefundPlan) {
+    return { deductions: p.deductions, destination: p.destination, destination_label: p.destinationLabel, max_refundable: p.b.maxRefundable, remedy_kind: p.kind, tax_refund: p.b.taxRefund || null };
+  }
+
+  /**
+   * The items of a request, in order: the amount per item (the split handed to payments; without a split the
+   * whole total on the first item) and the refunded quantity (null: the returned units).
+   */
+  static items(ids: string[], perItem: { orderItemId: string; amount: number }[], quantities: { orderItemId: string; quantity: number }[], total: number): RefundItem[] {
+    return ids.map((orderItemId, n) => ({
+      orderItemId,
+      quantity: quantities.find((q) => q.orderItemId === orderItemId)?.quantity ?? null,
+      amount: perItem.length ? (perItem.find((x) => x.orderItemId === orderItemId)?.amount ?? 0) : n === 0 ? total : 0,
+    }));
+  }
+
+  /** One history line of a refund request */
+  private ev(label: string, detail: string | null, actor: common.Actor | null, at: Date | string = this.core.now()): common.TimelineEvent {
+    return { at: typeof at === 'string' ? at : at.toISOString(), label, detail, actor };
   }
 
   /** Inserts the refund request of a return (inside the caller's transaction) */
@@ -101,14 +119,29 @@ export class Refunds {
       case_id: ret.case_id,
       order_id: ret.order_id,
       order_item_ids: agg.items.map((i) => i.order_item_id),
+      items: Refunds.items(
+        agg.items.map((i) => i.order_item_id),
+        p.b.perItem,
+        agg.items.map((i) => ({ orderItemId: i.order_item_id, quantity: i.quantity })),
+        p.b.total,
+      ),
+      history: [],
       owner_type: ret.owner_type,
       seller_id: ret.seller_id,
+      customer_id: ret.customer_id,
+      contact_email: ret.terms_snapshot.meta.contactEmail ?? null,
+      customer_name: ret.terms_snapshot.meta.customerName ?? null,
+      seller_name: ret.terms_snapshot.meta.sellerName ?? null,
+      order_ref: ret.order_ref,
+      note: null,
+      approved_at: null,
+      sent_at: null,
       status: o.status,
       item_amount: p.b.itemAmount,
       discount_share: p.b.discountShare,
       shipping_refund: p.b.shippingRefund,
       return_shipping_deduction: p.b.returnShippingDeduction,
-      deductions: this.extras(p, { items: agg.items.map((i) => ({ orderItemId: i.order_item_id, quantity: i.quantity })), customerId: ret.customer_id, contactEmail: ret.terms_snapshot.meta.contactEmail ?? null, customerName: ret.terms_snapshot.meta.customerName, sellerName: ret.terms_snapshot.meta.sellerName, orderRef: ret.order_ref }),
+      ...this.planColumns(p),
       total: p.b.total,
       currency: p.currency,
       funded_by: seller ? 'seller' : 'official_store',
@@ -189,29 +222,34 @@ export class Refunds {
       case_id: null,
       order_id: order.id,
       order_item_ids: ids,
+      items: Refunds.items(
+        ids,
+        perItem,
+        input.items.map((l) => ({ orderItemId: l.orderItemId, quantity: l.quantity })),
+        total,
+      ),
+      history: [this.ev('Refund proposed', input.reason, by.actor, now)],
       owner_type: group.seller.ownerType,
       seller_id: group.seller.ownerType === 'seller' ? (group.seller.id ?? null) : null,
+      customer_id: order.contact.customerId ?? null,
+      contact_email: order.contact.email ?? null,
+      customer_name: order.contact.name ?? null,
+      seller_name: group.seller.name ?? null,
+      order_ref: order.ref,
+      note: input.note ?? null,
+      approved_at: null,
+      sent_at: null,
       status: refundRequestMachine.next('requested', 'submitForReview'),
       item_amount: itemsTotal,
       discount_share: 0,
       shipping_refund: shipping,
       return_shipping_deduction: 0,
-      deductions: {
-        list: [],
-        destination,
-        destinationLabel: methodLabel,
-        maxRefundable: cap,
-        kind: 'exception',
-        perItem,
-        items: input.items.map((l) => ({ orderItemId: l.orderItemId, quantity: l.quantity })),
-        customerId: order.contact.customerId ?? null,
-        contactEmail: order.contact.email ?? null,
-        customerName: order.contact.name,
-        sellerName: group.seller.name,
-        orderRef: order.ref,
-        note: input.note ?? null,
-        history: [{ at: now.toISOString(), label: 'Refund proposed', detail: input.reason, actor: by.actor }],
-      },
+      deductions: [],
+      destination,
+      destination_label: methodLabel,
+      max_refundable: cap,
+      remedy_kind: 'exception',
+      tax_refund: null,
       total,
       currency,
       funded_by: input.fundedBy,
@@ -320,29 +358,29 @@ export class Refunds {
       case_id: input.caseId ?? null,
       order_id: order.id,
       order_item_ids: input.orderItemIds,
+      items: Refunds.items(input.orderItemIds, perItem, quantities, b.total.amount),
+      history: [this.ev('Refund proposed', input.reason, input.proposedBy, now)],
       owner_type: group.seller.ownerType,
       seller_id: group.seller.ownerType === 'seller' ? (group.seller.id ?? null) : null,
+      customer_id: order.contact.customerId ?? null,
+      contact_email: order.contact.email ?? null,
+      customer_name: order.contact.name ?? null,
+      seller_name: group.seller.name ?? null,
+      order_ref: order.ref,
+      note: null,
+      approved_at: null,
+      sent_at: null,
       status: refundRequestMachine.next('requested', 'submitForReview'),
       item_amount: b.itemAmount.amount,
       discount_share: b.discountShare.amount,
       shipping_refund: b.shippingRefund.amount,
       return_shipping_deduction: b.returnShippingDeduction.amount,
-      deductions: {
-        list: b.deductions,
-        destination: 'original_method',
-        destinationLabel: b.destination || order.progress.payment.methodLabel || 'Original payment method',
-        maxRefundable: cap,
-        kind: input.source,
-        perItem,
-        items: quantities,
-        taxRefund: b.taxRefund?.amount ?? null,
-        customerId: order.contact.customerId ?? null,
-        contactEmail: order.contact.email ?? null,
-        customerName: order.contact.name,
-        sellerName: group.seller.name,
-        orderRef: order.ref,
-        history: [{ at: now.toISOString(), label: 'Refund proposed', detail: input.reason, actor: input.proposedBy }],
-      },
+      deductions: b.deductions,
+      destination: 'original_method',
+      destination_label: b.destination || order.progress.payment.methodLabel || 'Original payment method',
+      max_refundable: cap,
+      remedy_kind: input.source,
+      tax_refund: b.taxRefund?.amount ?? null,
       total: b.total.amount,
       currency: b.total.currency,
       funded_by: fundedBy,
@@ -479,12 +517,8 @@ export class Refunds {
       if (!rr) throw notFound('Refund request');
       if (rr.status === 'approved') return; // a hand-over that did not go through is retried below
       const status = refundRequestMachine.next(rr.status as RefundStatus, 'approve');
-      const approved = await tx.update('refund_requests', id, {
-        status,
-        approved_by: actorText(approver),
-        updated_at: now,
-        deductions: { ...rr.deductions, approvedAt: now.toISOString(), history: [...rr.deductions.history, { at: now.toISOString(), label: 'Refund approved', detail: o.note ?? null, actor: approver }] },
-      });
+      const approved = await tx.update('refund_requests', id, { status, approved_by: actorText(approver), approved_at: now, updated_at: now });
+      await tx.addRefundEvents(id, [this.ev('Refund approved', o.note ?? null, approver, now)]);
       if (approved.return_id) await this.core.timeline(tx, approved.return_id, [{ kind: 'refund_approved', label: 'Refund approved', detail: "Approved, not sent yet. We'll tell you when the money is on its way.", visibility: 'customer', actor: approver }]);
     });
     await this.handOver(id, approver, by);
@@ -494,14 +528,13 @@ export class Refunds {
   async handOver(id: string, approver: common.Actor, by: By): Promise<void> {
     const rr = (await this.repo.get('refund_requests', id))!;
     if (rr.status !== 'approved' || rr.payment_refund_id) return;
-    const x = rr.deductions;
-    const items = (x.perItem.length ? x.perItem : rr.order_item_ids.map((orderItemId, n) => ({ orderItemId, amount: n === 0 ? rr.total : 0 }))).filter((i) => i.amount > 0).map((i) => ({ orderItemId: i.orderItemId, amount: money(i.amount, rr.currency) }));
+    const items = rr.items.filter((i) => i.amount > 0).map((i) => ({ orderItemId: i.orderItemId, amount: money(i.amount, rr.currency) }));
     let paymentRefundId: string;
     let credited = false;
-    if (x.destination === 'store_credit') {
+    if (rr.destination === 'store_credit') {
       const wallet = this.core.ctx.tryUse('wallet');
-      if (!wallet || !x.customerId) throw this.core.error('REMEDY_NOT_AVAILABLE', 'Store credit is not available', { remedy: 'store_credit' });
-      const entry = await wallet.creditRefund({ customerId: x.customerId, refundId: rr.id, orderId: rr.order_id, amount: money(rr.total, rr.currency), reason: rr.reason ?? `Refund ${rr.ref}` }, `refund-request:${rr.id}`);
+      if (!wallet || !rr.customer_id) throw this.core.error('REMEDY_NOT_AVAILABLE', 'Store credit is not available', { remedy: 'store_credit' });
+      const entry = await wallet.creditRefund({ customerId: rr.customer_id, refundId: rr.id, orderId: rr.order_id, amount: money(rr.total, rr.currency), reason: rr.reason ?? `Refund ${rr.ref}` }, `refund-request:${rr.id}`);
       paymentRefundId = (entry as { id: string }).id;
       credited = true;
     } else {
@@ -519,13 +552,10 @@ export class Refunds {
       const locked = (await tx.get('refund_requests', id, { forUpdate: true }))!;
       if (locked.status !== 'approved') return null;
       let status = refundRequestMachine.next('approved', 'handOver');
-      const history = [...locked.deductions.history, { at: now.toISOString(), label: credited ? 'Store credit issued' : 'Handed to payments', detail: null, actor: SYSTEM }];
-      let sentAt: string | null = null;
-      if (credited) {
-        status = refundRequestMachine.next(status, 'confirmSent');
-        sentAt = now.toISOString();
-      }
-      const updated = await tx.update('refund_requests', id, { status, payment_refund_id: paymentRefundId, updated_at: now, deductions: { ...locked.deductions, sentAt, history } });
+      // store credit is added by wallet at once: approved → processing → sent in this call
+      if (credited) status = refundRequestMachine.next(status, 'confirmSent');
+      const updated = await tx.update('refund_requests', id, { status, payment_refund_id: paymentRefundId, updated_at: now, sent_at: credited ? now : null });
+      await tx.addRefundEvents(id, [this.ev(credited ? 'Store credit issued' : 'Handed to payments', null, SYSTEM, now)]);
       if (updated.return_id) {
         await this.core.timeline(tx, updated.return_id, [{ kind: credited ? 'refund_sent' : 'refund_processing', label: credited ? 'Store credit issued' : 'Refund processing', detail: credited ? `${(updated.total / 100).toFixed(2)} ${updated.currency} added to your store credit` : 'Your refund is on its way to your payment provider.', visibility: 'customer' }]);
         if (credited) await this.completeLinked(tx, updated, batch);
@@ -563,9 +593,8 @@ export class Refunds {
 
   /** Refunded quantity per item: stored on the request, else the return's units, else one unit per item */
   async itemsOf(rr: RefundRec): Promise<{ orderItemId: string; quantity: number }[]> {
-    if (rr.deductions.items?.length) return rr.deductions.items;
-    const returned = rr.return_id ? await this.repo.find('return_items', { return_id: rr.return_id }) : [];
-    return rr.order_item_ids.map((id) => ({ orderItemId: id, quantity: returned.find((i) => i.order_item_id === id)?.quantity ?? 1 }));
+    const returned = rr.items.some((i) => i.quantity === null) && rr.return_id ? await this.repo.find('return_items', { return_id: rr.return_id }) : [];
+    return rr.items.map((i) => ({ orderItemId: i.orderItemId, quantity: i.quantity ?? returned.find((x) => x.order_item_id === i.orderItemId)?.quantity ?? 1 }));
   }
 
   /** A proposed refund-without-return is approved together with its refund */
@@ -583,7 +612,7 @@ export class Refunds {
     let ret: ReturnRec | undefined = rr.return_id ? await tx.get('returns', rr.return_id, { forUpdate: true }) : undefined;
     if (!ret && rr.case_id) ret = (await tx.find('returns', { case_id: rr.case_id, status: 'awaiting_remedy' }, { forUpdate: true }))[0];
     if (!ret || ret.status !== 'awaiting_remedy') return;
-    const outcome = OUTCOME[rr.deductions.kind] ?? (rr.deductions.destination === 'store_credit' ? 'credited' : 'refunded');
+    const outcome = OUTCOME[rr.remedy_kind] ?? (rr.destination === 'store_credit' ? 'credited' : 'refunded');
     const now = this.core.now();
     await tx.update('returns', ret.id, { status: returnMachine.next(ret.status as ReturnStatus, 'complete'), completed_at: now, updated_at: now, terms_snapshot: { ...ret.terms_snapshot, meta: { ...ret.terms_snapshot.meta, outcome } } });
     await this.core.timeline(tx, ret.id, [{ kind: 'completed', label: outcome === 'partly_refunded' ? 'Partly refunded' : outcome === 'credited' ? 'Refunded as store credit' : 'Refunded', visibility: 'customer' }]);
@@ -612,12 +641,8 @@ export class Refunds {
           kept.push(rr);
           continue;
         }
-        const after = await tx.update('refund_requests', rr.id, {
-          status: refundRequestMachine.next(rr.status as RefundStatus, 'cancel'),
-          approval_request_id: null,
-          updated_at: now,
-          deductions: { ...rr.deductions, history: [...rr.deductions.history, { at: now.toISOString(), label: 'Refund cancelled', detail: why, actor: by.actor }] },
-        });
+        await tx.addRefundEvents(rr.id, [this.ev('Refund cancelled', why, by.actor, now)]);
+        const after = await tx.update('refund_requests', rr.id, { status: refundRequestMachine.next(rr.status as RefundStatus, 'cancel'), approval_request_id: null, updated_at: now });
         if (after.return_id) await this.core.timeline(tx, after.return_id, [{ kind: 'refund_cancelled', label: `Refund ${after.ref} cancelled`, detail: why, visibility: 'staff', actor: by.actor }]);
         cancelled.push({ before: rr, after });
       }
@@ -648,13 +673,8 @@ export class Refunds {
       const before = await tx.get('refund_requests', id, { forUpdate: true });
       if (!before) throw notFound('Refund request');
       const status = refundRequestMachine.next(before.status as RefundStatus, 'decline');
-      const after = await tx.update('refund_requests', id, {
-        status,
-        decline_reason: reason.trim(),
-        approval_request_id: null,
-        updated_at: now,
-        deductions: { ...before.deductions, history: [...before.deductions.history, { at: now.toISOString(), label: 'Refund sent back', detail: reason.trim(), actor: by.actor }] },
-      });
+      await tx.addRefundEvents(id, [this.ev('Refund sent back', reason.trim(), by.actor, now)]);
+      const after = await tx.update('refund_requests', id, { status, decline_reason: reason.trim(), approval_request_id: null, updated_at: now });
       if (after.return_id) await this.core.timeline(tx, after.return_id, [{ kind: 'refund_declined', label: 'Refund sent back by Finance', detail: reason.trim(), visibility: 'staff', actor: by.actor }]);
       return { before, after };
     });
@@ -679,6 +699,7 @@ export class Refunds {
       const locked = (await tx.get('refund_requests', id, { forUpdate: true }))!;
       const status = refundRequestMachine.next(locked.status as RefundStatus, 'revise');
       let patch: Partial<RefundRec>;
+      let items: RefundItem[];
       if (p) {
         patch = {
           item_amount: p.b.itemAmount,
@@ -688,20 +709,23 @@ export class Refunds {
           total: p.b.total,
           seller_share: locked.seller_share === null ? null : p.b.total,
           platform_share: locked.platform_share === null ? null : p.b.total,
-          deductions: { ...locked.deductions, ...this.extras(p, { history: locked.deductions.history }) },
+          ...this.planColumns(p),
         };
+        items = Refunds.items(locked.order_item_ids, p.b.perItem, locked.items.map((i) => ({ orderItemId: i.orderItemId, quantity: i.quantity ?? 0 })).filter((q) => q.quantity > 0), p.b.total);
       } else {
         // case and exception refunds: the amount is the asked partial amount within the stored cap
         const deductions = remedy.deductions ?? [];
         const full = locked.item_amount - locked.discount_share + locked.shipping_refund - locked.return_shipping_deduction;
         const total = remedy.amount?.amount ?? Math.max(0, full - deductions.reduce((s, d) => s + d.amount.amount, 0));
-        if (total > locked.deductions.maxRefundable) throw this.core.error('REFUND_EXCEEDS_REFUNDABLE', 'The amount is above what can still be refunded for these items', { maxRefundable: money(locked.deductions.maxRefundable, locked.currency) });
+        if (total > locked.max_refundable) throw this.core.error('REFUND_EXCEEDS_REFUNDABLE', 'The amount is above what can still be refunded for these items', { maxRefundable: money(locked.max_refundable, locked.currency) });
         const ratio = locked.total > 0 ? total / locked.total : 0;
-        patch = { total, deductions: { ...locked.deductions, list: deductions, perItem: locked.deductions.perItem.map((x) => ({ ...x, amount: Math.floor(x.amount * ratio) })) } };
-        const sum = patch.deductions!.perItem.reduce((s, x) => s + x.amount, 0);
-        if (patch.deductions!.perItem.length) patch.deductions!.perItem[0]!.amount += total - sum;
+        patch = { total, deductions };
+        items = locked.items.map((x) => ({ ...x, amount: Math.floor(x.amount * ratio) }));
+        const sum = items.reduce((s, x) => s + x.amount, 0);
+        if (items.length) items[0]!.amount += total - sum;
       }
-      patch.deductions = { ...patch.deductions!, history: [...locked.deductions.history, { at: now.toISOString(), label: 'Refund revised and resubmitted', detail: remedy.explanation ?? null, actor: by.actor }] };
+      await tx.setRefundItems(id, items);
+      await tx.addRefundEvents(id, [this.ev('Refund revised and resubmitted', remedy.explanation ?? null, by.actor, now)]);
       const updated = await tx.update('refund_requests', id, { ...patch, status, decline_reason: null, updated_at: now });
       if (updated.return_id) await this.core.timeline(tx, updated.return_id, [{ kind: 'refund_revised', label: 'Refund revised', detail: remedy.explanation ?? null, visibility: 'staff', actor: by.actor }]);
       return updated;
@@ -736,13 +760,8 @@ export class Refunds {
         return;
       }
       status = refundRequestMachine.next(status, 'confirmSent');
-      const updated = await tx.update('refund_requests', rr.id, {
-        status,
-        payment_refund_id: locked.payment_refund_id ?? e.refundId,
-        failed_reason: null,
-        updated_at: this.core.now(),
-        deductions: { ...locked.deductions, sentAt: e.sentAt, history: [...locked.deductions.history, { at: e.sentAt, label: 'Refund sent', detail: `To ${e.destination}`, actor: SYSTEM }] },
-      });
+      await tx.addRefundEvents(rr.id, [this.ev('Refund sent', `To ${e.destination}`, SYSTEM, e.sentAt)]);
+      const updated = await tx.update('refund_requests', rr.id, { status, payment_refund_id: locked.payment_refund_id ?? e.refundId, failed_reason: null, updated_at: this.core.now(), sent_at: new Date(e.sentAt) });
       if (updated.return_id) await this.core.timeline(tx, updated.return_id, [{ kind: 'refund_sent', label: 'Refund sent', detail: `Sent to ${e.destination}. Banks usually show it in 3–5 business days.`, visibility: 'customer' }]);
       await this.completeLinked(tx, updated, batch);
     });
@@ -760,13 +779,8 @@ export class Refunds {
       if (status !== 'processing' && status !== 'failed') return;
       if (status === 'processing') status = refundRequestMachine.next(status, 'fail');
       const now = this.core.now();
-      const updated = await tx.update('refund_requests', rr.id, {
-        status,
-        failed_reason: e.reason,
-        payment_refund_id: locked.payment_refund_id ?? e.refundId,
-        updated_at: now,
-        deductions: { ...locked.deductions, history: [...locked.deductions.history, { at: now.toISOString(), label: 'Refund failed', detail: e.reason, actor: SYSTEM }] },
-      });
+      await tx.addRefundEvents(rr.id, [this.ev('Refund failed', e.reason, SYSTEM, now)]);
+      const updated = await tx.update('refund_requests', rr.id, { status, failed_reason: e.reason, payment_refund_id: locked.payment_refund_id ?? e.refundId, updated_at: now });
       if (updated.return_id) {
         await this.core.timeline(tx, updated.return_id, [
           { kind: 'refund_failed', label: 'Refund could not be sent yet', detail: e.finalAttempt ? 'Marketly support will contact you.' : 'We are retrying.', visibility: 'customer' },

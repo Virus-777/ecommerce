@@ -47,7 +47,7 @@ export class Handling {
     if (at.getTime() > now.getTime() + 5 * 60_000) throw invalidField('receivedAt', 'The receipt time cannot be in the future');
     await this.core.write(id, by, async (tx, a, batch) => {
       const status = returnMachine.next(a.ret.status as ReturnStatus, 'receive');
-      await tx.update('returns', id, { status, updated_at: now });
+      await tx.update('returns', id, { status, received_at: at, updated_at: now });
       const sh = this.core.shipmentOf(a);
       if (sh) {
         const patch: Partial<typeof sh> = { delivered_at: sh.delivered_at ?? at };
@@ -59,8 +59,6 @@ export class Handling {
         { kind: 'received', label: `Return received at ${a.ret.terms_snapshot.meta.destination.name}`, detail: 'It will be inspected next.', visibility: 'customer', actor: by.actor },
         ...(o.note ? [{ kind: 'note', label: 'Receipt note', detail: o.note, visibility: 'seller' as const, actor: by.actor }] : []),
       ]);
-      // the timeline row carries the receipt time
-      await tx.insert('return_events', { id: newId(), return_id: id, kind: 'received_at', label: 'Parcel received', detail: at.toISOString(), visibility: 'staff', actor_kind: by.actor.kind, actor_id: by.actor.id ?? null, at });
       batch.push('returns.return.received', { returnId: id, ...this.core.refs(a.ret), ...this.core.recipient(a.ret), ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, items: this.core.returnedItems(a), receivedAt: at.toISOString() });
     });
   }

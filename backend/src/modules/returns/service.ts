@@ -157,6 +157,11 @@ export class ReturnsService implements ReturnsPublicApi {
     return this.refunds.cancelForCase(caseId, reason, actor);
   }
 
+  /** Customer data export hook: the customer's returns and refunds as plain records, with their uploaded photos */
+  exportCustomerData(input: { customerId: string; accountId: string }): Promise<common.CustomerDataSection[]> {
+    return this.reads.exportCustomerData(input);
+  }
+
   countOpenReturnsForProducts(productIds: string[]): Promise<Record<string, number>> {
     return this.reads.countOpenReturnsForProducts(productIds);
   }

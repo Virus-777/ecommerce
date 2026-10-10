@@ -22,7 +22,7 @@ import type {
   SellerReturnCounts,
   SellerReturnRow,
 } from '../../../spec/returns.js';
-import { ACTIVE_STATUSES, CLOSED_STATUSES, DAY, deadline, is, itemVerdict, OPEN_STATUSES, PENDING_REFUND, shortDate } from '../domain/rules.js';
+import { ACTIVE_STATUSES, CLOSED_STATUSES, DAY, deadline, is, itemVerdict, OPEN_STATUSES, PENDING_REFUND, REFUND_LABEL, shortDate } from '../domain/rules.js';
 import type { RefundFilter, ReturnFilter } from '../ports.js';
 import { notFound, unavailable, type Agg, type By, type Core, type Visibility } from './core.js';
 import type { Views } from './views.js';
@@ -109,7 +109,7 @@ export class Reads {
     const open = all.filter((r) => is(OPEN_STATUSES, r.status));
     const dropOff = open.filter((r) => r.status === 'approved');
     const onTheWay = refunds.filter((r) => is(['approved', 'processing'], r.status));
-    const sentThisYear = refunds.filter((r) => r.status === 'sent' && new Date(r.deductions.sentAt ?? r.updated_at).getTime() >= yearStart.getTime());
+    const sentThisYear = refunds.filter((r) => r.status === 'sent' && new Date(r.sent_at ?? r.updated_at).getTime() >= yearStart.getTime());
     let openNote: string | null = null;
     if (dropOff.length) {
       const shipments = await this.core.repo.find('return_shipments', { return_id: dropOff.map((r) => r.id), status: 'label_issued' }, { orderBy: [['drop_off_by', 'asc']] });
@@ -610,5 +610,65 @@ export class Reads {
   /** Deadline of the next seller response, for jobs and views */
   respondBy(agg: Agg) {
     return deadline(agg.ret.response_due_at, this.core.now());
+  }
+
+  /**
+   * Customer data export hook (FORMAT.md): the customer's returns (their reason, description and remedy, items,
+   * status, dates) and refunds (amount, destination, status, dates), with the photos they uploaded. Staff notes,
+   * inspection details and internal reasons are left out.
+   */
+  async exportCustomerData(input: { customerId: string; accountId: string }): Promise<common.CustomerDataSection[]> {
+    const ids = [...new Set([input.customerId, input.accountId].filter((v) => isUuid(v)))];
+    const returns = ids.length ? await this.core.repo.find('returns', { customer_id: ids }, { orderBy: [['requested_at', 'asc']] }) : [];
+    const returnIds = returns.map((r) => r.id);
+    const [items, evidence, byReturn, byCustomer] = await Promise.all([
+      returnIds.length ? this.core.repo.find('return_items', { return_id: returnIds }) : [],
+      returnIds.length ? this.core.repo.find('return_evidence', { return_id: returnIds, party: 'customer' }) : [],
+      returnIds.length ? this.core.repo.find('refund_requests', { return_id: returnIds }) : [],
+      ids.length ? this.core.repo.find('refund_requests', { customer_id: ids }) : [],
+    ]);
+    const refunds = [...new Map([...byReturn, ...byCustomer].map((r) => [r.id, r])).values()].sort((a, b) => a.created_at.getTime() - b.created_at.getTime());
+    const refOf = new Map(returns.map((r) => [r.id, r.ref]));
+    const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
+    const photos = [...returns.flatMap((r) => r.media_ids), ...evidence.flatMap((e) => e.media_ids)];
+    return [
+      {
+        key: 'return_requests',
+        title: 'Returns',
+        module: 'returns',
+        records: returns.map((r) => ({
+          ref: r.ref,
+          orderRef: r.order_ref,
+          seller: r.terms_snapshot.meta.sellerName ?? null,
+          status: r.status,
+          reason: r.reason,
+          description: r.details,
+          remedy: r.remedy,
+          items: items.filter((i) => i.return_id === r.id).map((i) => ({ title: i.title, sku: i.sku, quantity: i.quantity, unitPrice: money(i.unit_price, i.currency) })),
+          evidence: evidence.filter((e) => e.return_id === r.id).map((e) => ({ kind: e.kind, note: e.note, addedAt: iso(e.added_at), files: e.media_ids.length })),
+          requestedAt: iso(r.requested_at),
+          receivedAt: iso(r.received_at),
+          completedAt: iso(r.completed_at),
+        })),
+        attachmentIds: [...new Set(photos)],
+      },
+      {
+        key: 'refunds',
+        title: 'Refunds',
+        module: 'returns',
+        records: refunds.map((r) => ({
+          ref: r.ref,
+          returnRef: r.return_id ? (refOf.get(r.return_id) ?? null) : null,
+          orderRef: r.order_ref,
+          status: REFUND_LABEL[(r.status === 'declined' ? 'under_review' : r.status) as keyof typeof REFUND_LABEL] ?? r.status, // a declined request is being reworked: the customer sees Under review
+          amount: money(r.total, r.currency),
+          destination: r.destination_label,
+          deductions: r.deductions.map((d) => ({ label: d.label, amount: d.amount, reason: d.reason })),
+          requestedAt: iso(r.created_at),
+          approvedAt: iso(r.approved_at),
+          sentAt: iso(r.sent_at),
+        })),
+      },
+    ];
   }
 }

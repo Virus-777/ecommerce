@@ -119,37 +119,26 @@ export interface InspectionRec extends Omit<Db['inspections'], 'checks' | 'missi
   media_ids: string[];
 }
 
-/**
- * refund_requests.deductions holds the itemised deductions plus what the table has no column for:
- * destination, the cap at decision time, the per-item split handed to payments, approval and payment
- * times and the request's own history (case and exception refunds have no return timeline).
- */
-export interface RefundExtras {
-  list: RefundDeduction[];
-  destination: 'original_method' | 'store_credit';
-  destinationLabel: string;
-  maxRefundable: number;
-  /** Remedy kind that produced it (full_refund, partial_refund, store_credit, exception) */
-  kind: string;
-  perItem: { orderItemId: string; amount: number }[];
-  /** Refunded quantity per item (returns.refund.approved items): returned units, or the requested quantities */
-  items?: { orderItemId: string; quantity: number }[];
-  /** Sales tax included in total (RefundBreakdown.taxRefund) */
-  taxRefund?: number | null;
-  customerId?: string | null;
-  /** Order contact email (customer-facing events reach guests through it) */
-  contactEmail?: string | null;
-  customerName?: string | null;
-  sellerName?: string | null;
-  orderRef?: string | null;
-  approvedAt?: string | null;
-  sentAt?: string | null;
-  note?: string | null;
-  history: common.TimelineEvent[];
+/** One order item of a refund request (refund_request_items) */
+export interface RefundItem {
+  orderItemId: string;
+  /** Refunded quantity (returns.refund.approved items); null: the returned units */
+  quantity: number | null;
+  /** Amount refunded on the item (the split handed to payments) */
+  amount: number;
 }
-export interface RefundRec extends Omit<Db['refund_requests'], 'order_item_ids' | 'deductions'> {
+/**
+ * A refund request with its items (refund_request_items, in order) and history (refund_request_events, oldest
+ * first), loaded by the repository. Items are written with the request (or replaced with setRefundItems); the
+ * history is appended with addRefundEvents (an update ignores items, order_item_ids and history).
+ */
+export interface RefundRec extends Omit<Db['refund_requests'], 'deductions'> {
+  /** The itemised deductions with reasons */
+  deductions: RefundDeduction[];
+  items: RefundItem[];
+  /** The order items covered (from items; read-only) */
   order_item_ids: string[];
-  deductions: RefundExtras;
+  history: common.TimelineEvent[];
 }
 export type ReplacementRec = Db['replacements'];
 export type EventRec = Db['return_events'];
@@ -217,9 +206,11 @@ export interface RefundFilter {
   orderId?: string;
   caseId?: string;
   returnIds?: string[];
+  /** The order customer (customer data export) */
+  customerIds?: string[];
 }
 
-/** Persistence for this module's own tables: returns.policy_versions, returns.category_exceptions, returns.seller_terms, returns.returns, returns.return_items, returns.return_shipments, returns.inspection_drafts, returns.return_evidence, returns.inspections, returns.refund_requests, returns.replacements, returns.return_events. */
+/** Persistence for this module's own tables: returns.policy_versions, returns.category_exceptions, returns.seller_terms, returns.returns, returns.return_items, returns.return_shipments, returns.inspection_drafts, returns.return_evidence, returns.inspections, returns.refund_requests (with refund_request_items and refund_request_events), returns.replacements, returns.return_events. */
 export interface ReturnsRepository {
   /** Runs fn in one transaction (nested calls join the outer one) */
   transaction<T>(fn: (tx: ReturnsRepository) => Promise<T>): Promise<T>;
@@ -232,6 +223,11 @@ export interface ReturnsRepository {
   insertMany<T extends Table>(table: T, rows: Recs[T][]): Promise<void>;
   update<T extends Table>(table: T, id: string, patch: Partial<Recs[T]>): Promise<Recs[T]>;
   remove<T extends Table>(table: T, id: string): Promise<void>;
+
+  /** Replaces a refund request's items */
+  setRefundItems(refundRequestId: string, items: RefundItem[]): Promise<void>;
+  /** Appends to a refund request's history */
+  addRefundEvents(refundRequestId: string, events: common.TimelineEvent[]): Promise<void>;
 
   /** Inserts or replaces the draft of a return */
   upsertDraft(row: DraftRec): Promise<DraftRec>;
