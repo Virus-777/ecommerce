@@ -14,7 +14,8 @@ import type { EventEnvelope } from '../../../kernel/events/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type * as catalog from '../../../spec/catalog.js';
 import { auth, buildTestApp, callers, movingClock } from '../../../testing/app.js';
-import type { OpenSearchConfig } from '../infra/config.js';
+import { readSearchEngineConfig, type OpenSearchConfig } from '../infra/config.js';
+import { createOpenSearchClient, OsApi } from '../infra/opensearch/client.js';
 import { openSearchTesting } from '../infra/select.js';
 import type { SearchService } from '../service.js';
 import { fakeClientOptions, FakeOpenSearch } from './opensearch-fake/connection.js';
@@ -386,11 +387,33 @@ export interface Kit {
 }
 
 /**
- * Which engine the kit boots: postgres (default) or opensearch (the OpenSearch adapter on the in-memory fake).
- * SEARCH_TEST_ENGINE=opensearch runs every search test file on the OpenSearch adapter.
+ * Which engine the kit boots: postgres (default), opensearch (the OpenSearch adapter on the in-memory fake) or
+ * opensearch-live (the adapter on the cluster at OPENSEARCH_URL, with throwaway indices).
+ * SEARCH_TEST_ENGINE=opensearch (or opensearch-live) runs every search test file on that engine.
  */
-export type Engine = 'postgres' | 'opensearch';
-export const defaultEngine = (): Engine => (process.env.SEARCH_TEST_ENGINE === 'opensearch' ? 'opensearch' : 'postgres');
+export type Engine = 'postgres' | 'opensearch' | 'opensearch-live';
+export const defaultEngine = (): Engine => {
+  const e = process.env.SEARCH_TEST_ENGINE;
+  return e === 'opensearch' || e === 'opensearch-live' ? e : 'postgres';
+};
+
+/** The cluster at OPENSEARCH_URL (credentials from OPENSEARCH_USERNAME/PASSWORD or OPENSEARCH_API_KEY), with a throwaway index prefix */
+export function liveOpenSearchConfig(o: Partial<OpenSearchConfig> = {}): OpenSearchConfig {
+  const env = readSearchEngineConfig({ ...process.env, SEARCH_ENGINE: 'opensearch', OPENSEARCH_INDEX_PREFIX: undefined });
+  if (env.engine !== 'opensearch') throw new Error('OPENSEARCH_URL is not set');
+  return { ...env.opensearch, indexPrefix: `it-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, replicas: 0, refresh: 'wait_for', aliasCacheMs: 0, ...o };
+}
+
+/** Deletes a test run's indices from a live cluster */
+export async function dropLiveIndices(cfg: OpenSearchConfig): Promise<void> {
+  const os = new OsApi(createOpenSearchClient(cfg));
+  try {
+    const r = await os.request<{ index: string }[]>('GET', `/_cat/indices/${cfg.indexPrefix}-products*`, undefined, { querystring: { format: 'json', h: 'index' }, ignore: [404] });
+    for (const i of Array.isArray(r.body) ? r.body : []) await os.request('DELETE', `/${i.index}`, undefined, { ignore: [404] });
+  } finally {
+    await os.close();
+  }
+}
 
 /** OpenSearch settings for tests: no waiting on alias caches, writes visible at once */
 export const testOpenSearchConfig = (o: Partial<OpenSearchConfig> = {}): OpenSearchConfig => ({
@@ -413,11 +436,13 @@ export async function boot(o: { settings?: Record<string, unknown>; engine?: Eng
   const overrides = o.settings ?? {};
   const engine = o.engine ?? defaultEngine();
   const fake = engine === 'opensearch' ? (o.fake ?? new FakeOpenSearch()) : undefined;
+  const live = engine === 'opensearch-live' ? liveOpenSearchConfig(o.opensearch) : undefined;
   if (fake) {
     openSearchTesting.config = { engine: 'opensearch', opensearch: testOpenSearchConfig(o.opensearch) };
     openSearchTesting.clientOptions = fakeClientOptions(fake);
     openSearchTesting.sleep = async () => {};
-  } else openSearchTesting.config = { engine: 'postgres' };
+  } else if (live) openSearchTesting.config = { engine: 'opensearch', opensearch: live };
+  else openSearchTesting.config = { engine: 'postgres' };
   const app = await buildTestApp({
     only: ['search', 'inventory', 'reviews', 'sellers', 'advertising', 'promotions', 'customers', 'orders', 'returns', 'audit'],
     clock,
@@ -457,7 +482,10 @@ export async function boot(o: { settings?: Record<string, unknown>; engine?: Eng
       await app.kernel.jobs.runNow(name as never);
       await app.kernel.events.drain();
     },
-    close: () => app.close(),
+    async close() {
+      await app.close();
+      if (live) await dropLiveIndices(live);
+    },
     engine,
     ...(fake ? { fake } : {}),
   };
