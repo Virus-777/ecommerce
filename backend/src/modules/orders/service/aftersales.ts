@@ -180,7 +180,7 @@ export class AfterSales {
         replacement_of_item_id: original.id,
         checkout_line_id: null,
       });
-      await tx.insert('item_state_log', { id: newId(), item_id: id, from_state: 'pending_payment', to_state: 'confirmed', event: 'replacement', reason: `Replacement for return`, actor_kind: 'system', actor_id: null, at: now });
+      await tx.insert('item_state_log', { id: newId(), item_id: id, from_state: 'pending_payment', to_state: 'confirmed', event: 'replacement', reason: e.returnId ? 'Replacement for a return' : 'Replacement for a support case', actor_kind: 'system', actor_id: null, at: now });
       await this.core.timeline(tx, agg.order.id, [
         { group_id: original.group_id, visibility: 'customer', label: 'Replacement on the way', detail: `${product.title} × ${e.quantity} will ship as a replacement.` },
         { group_id: original.group_id, visibility: 'seller', label: 'Replacement to ship', detail: `${product.title} × ${e.quantity}` },

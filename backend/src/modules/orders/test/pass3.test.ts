@@ -134,6 +134,22 @@ describe('notifyCustomer on staff cancellations', () => {
   });
 });
 
+describe('replacement decided on a support case (no return)', () => {
+  it('adds a zero-charge confirmed line from returns.replacement.created with returnId null, once', async () => {
+    const sellerId = newId();
+    const p = product(h, { title: 'Vase', price: 4500, sellerId });
+    const order = await h.service.createOrder(checkout([group(h, [line(p, 2)], { sellerId })], { customerId: newId() }));
+    const original = order.groups[0]!.items[0]!;
+    const event = { replacementId: newId(), returnId: null, caseId: newId(), orderId: order.id, customerId: null, contactEmail: null, orderItemId: original.id, ownerType: 'seller', sellerId, variantId: p.variantId, offerId: p.offerId, quantity: 1, kind: 'same_item' };
+    await h.publish('returns', 'returns.replacement.created', event);
+    await h.publish('returns', 'returns.replacement.created', event);
+    const items = (await h.service.getOrder(order.id))!.groups[0]!.items;
+    const replacement = items.filter((i) => i.replacementOfItemId === original.id);
+    expect(replacement).toHaveLength(1);
+    expect(replacement[0]).toMatchObject({ quantity: 1, state: 'confirmed', paidAmount: { amount: 0 }, checkoutLineId: null });
+  });
+});
+
 describe('support cases resolved and reopened', () => {
   it('clears the case_open flag on resolve, sets it again on reopen, and ignores a redelivered event', async () => {
     const sellerId = newId();
