@@ -5,6 +5,8 @@
  *   → orders accepts each order and inventory reserves exactly what was bought (also checks the
  *     race between payments' "authorized" event and checkout attaching the stock hold)
  *   → placing twice never creates a second order or charge.
+ * Gap pass 3: a line split by a partial cancellation is followed by inventory (orders.item.split), so the
+ * cancelled unit is released and the shipped units leave stock: nothing stays reserved.
  */
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -110,6 +112,40 @@ describe('an order, end to end', () => {
     await app.kernel.events.drain();
     expect(JSON.stringify(placed.body)).toMatch(/declined|payment_failed/);
     expect((await f.call('GET', '/api/store/orders/orders', { token: c.accessToken })).body.items).toHaveLength(0);
+  });
+});
+
+describe('a line split by a partial cancellation', () => {
+  it('releases the cancelled unit and ships the rest: nothing of the order stays reserved', async () => {
+    const before = await reserved();
+    const c = await f.customer('split@example.com');
+    const v = await readyCheckout(c.accessToken, 3);
+    const placed = await f.call('POST', `/api/store/checkout/sessions/${v.id}/place`, { token: c.accessToken, body: placeBody(v), headers: { 'idempotency-key': key() } });
+    await app.kernel.events.drain();
+    const orderId = JSON.stringify(placed.body).match(/"orderId":"([0-9a-f-]{36})"/)![1]!;
+    expect(await reserved(), 'the order reserves 3').toBe(before + 3);
+    const order = await f.call('GET', `/api/store/orders/orders/${orderId}`, { token: c.accessToken });
+    const groupId = order.body.groups[0].id as string;
+    const itemId = order.body.groups[0].items[0].id as string;
+
+    // the seller cancels 1 of the 3 units: orders splits the line
+    const cancelled = await f.call('POST', `/api/seller/orders/orders/${groupId}/cancel-items`, { token: listing.sellerToken, body: { items: [{ itemId, quantity: 1 }], reasonCode: 'out_of_stock' }, headers: { 'idempotency-key': key() } });
+    expect(cancelled.status, JSON.stringify(cancelled.body)).toBeLessThan(300);
+    await app.kernel.events.drain();
+    expect(await reserved(), 'the cancelled unit is released').toBe(before + 2);
+
+    // the remaining 2 units are on the split-off line; shipping them takes them out of stock
+    const after = await f.call('GET', `/api/store/orders/orders/${orderId}`, { token: c.accessToken });
+    const open = (after.body.groups[0].items as { id: string; quantity: number; state: string }[]).find((i) => i.state !== 'cancelled')!;
+    expect(open.quantity, JSON.stringify(after.body.groups[0].items)).toBe(2);
+    const tracking = `1ZSPLIT0${String(Date.now()).slice(-10)}`;
+    const shipped = await f.call('POST', '/api/seller/shipping/shipments', {
+      token: listing.sellerToken,
+      body: { groupId, carrierCode: 'ups', serviceName: 'UPS Ground', trackingNumber: tracking, shippedAt: clock.now().toISOString(), items: [{ orderItemId: open.id, quantity: 2 }] },
+    });
+    expect(shipped.status, JSON.stringify(shipped.body)).toBe(201);
+    await app.kernel.events.drain();
+    expect(await reserved(), 'nothing of the order stays reserved').toBe(before);
   });
 });
 

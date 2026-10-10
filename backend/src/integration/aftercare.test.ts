@@ -6,6 +6,7 @@
  *   → Trust and Risk reports the seller, a Seller Manager accepts the restriction → the seller can
  *     no longer sell and the cart says so → the Business Owner sees it in the action history
  *   → the seller dashboard in reports shows the sale.
+ * Gap pass 3: reversing the trust enforcement lifts the seller restriction it created.
  * Gap pass 2: credits to a seller without an original charge (a small one posts at once, a larger one
  * waits for the Finance Manager).
  */
@@ -167,6 +168,26 @@ describe('after the order', () => {
     expect(offer.body.offer.status, JSON.stringify(offer.body.offer)).not.toBe('active');
     const cart = await f.call('GET', '/api/store/cart/cart', { token: shopper.accessToken });
     expect(JSON.stringify(cart.body)).toContain('"kind":"seller_unavailable"');
+
+    // an overturned decision: reversing the enforcement lifts the restriction it created (sellers consumes trust.enforcement.reversed)
+    const reportView = await f.call('GET', `/api/admin/trust/reports/${report.body.id}`, { token: trustManager.accessToken });
+    const enforcementId =
+      JSON.stringify(decided.body).match(/"enforcementId":"([0-9a-f-]{36})"/)?.[1] ??
+      JSON.stringify(decided.body).match(/"enforcement":\{"id":"([0-9a-f-]{36})"/)?.[1] ??
+      JSON.stringify(reportView.body).match(/"enforcements":\[\{"id":"([0-9a-f-]{36})"/)?.[1];
+    expect(enforcementId, JSON.stringify(decided.body)).toBeTruthy();
+    const restrictedBefore = await f.call('GET', '/api/seller/sellers/restrictions?state=active', { token: listing.sellerToken });
+    expect(restrictedBefore.body.items.length, JSON.stringify(restrictedBefore.body)).toBeGreaterThan(0);
+    let reversed = await f.call('POST', `/api/admin/trust/enforcements/${enforcementId}/reverse`, { token: trustManager.accessToken, body: { reason: 'Appeal upheld: the units were genuine' } });
+    if (reversed.status === 409 && reversed.body.error.code === 'APPROVAL_REQUIRED') {
+      const ok = await f.call('POST', `/api/admin/access/approval-requests/${reversed.body.error.details.approvalRequestId}/approve`, { token: listing.owner.accessToken, body: { note: 'Agreed' }, headers: { 'x-step-up-code': f.code(listing.owner) } });
+      expect(ok.status, JSON.stringify(ok.body)).toBeLessThan(300);
+      reversed = await f.call('POST', `/api/admin/trust/enforcements/${enforcementId}/reverse`, { token: trustManager.accessToken, body: { reason: 'Appeal upheld: the units were genuine' } });
+    }
+    expect(reversed.status, JSON.stringify(reversed.body)).toBeLessThan(300);
+    await app.kernel.events.drain();
+    const restrictedAfter = await f.call('GET', '/api/seller/sellers/restrictions?state=active', { token: listing.sellerToken });
+    expect(restrictedAfter.body.items, JSON.stringify(restrictedAfter.body)).toHaveLength(0);
   });
 
   it('keeps the history and the figures: action history for the owner, the sale on the seller dashboard', async () => {
