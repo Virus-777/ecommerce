@@ -34,7 +34,7 @@ import { Batch, invalid, iso, notFound, SYSTEM, type By, type Core } from './cor
 import type { Estimates, Owner } from './estimates.js';
 import type { Exceptions } from './exceptions.js';
 import type { Profiles } from './profiles.js';
-import { carrierNameOf, labelMeta, type LabelMeta, type Views } from './views.js';
+import { carrierNameOf, labelCarrier, type BilledTo, type Views } from './views.js';
 
 export interface GroupCtx {
   task: orders.FulfillmentTask;
@@ -655,7 +655,7 @@ export class Shipments {
       parcel: Parcel;
       serviceId: string;
       cost: common.Money;
-      billedTo: LabelMeta['billedTo'];
+      billedTo: BilledTo;
       key: string;
       from: Partial<common.Address> | null;
       to: Partial<common.Address>;
@@ -685,17 +685,6 @@ export class Shipments {
     );
     const now = this.core.now();
     const kindInfo = o.kind === 'return' ? { kind: 'return' as const, returnId: o.returnId } : this.kindOf(g, o.items);
-    const meta: LabelMeta = {
-      asset: asset?.id ?? null,
-      qr: bought.qrCode,
-      dropOffBy: o.dropOffBy?.toISOString() ?? null,
-      billedTo: o.billedTo,
-      kind: kindInfo.kind,
-      returnId: kindInfo.returnId,
-      serviceName: service.name,
-      carrierName: carrier.name,
-      carrierCode: carrier.code,
-    };
     const batch = new Batch(by);
     const packageNo = o.kind === 'return' ? 0 : await this.nextPackageNo(g.task.orderId);
     const lines = o.kind === 'return' ? o.items.map((i) => ({ shipment_id: id, order_item_id: i.orderItemId, title: g.group?.items.find((x) => x.id === i.orderItemId)?.title ?? 'Returned item', variant_label: g.group?.items.find((x) => x.id === i.orderItemId)?.variantLabel ?? '', quantity: i.quantity })) : this.linesOf(g, o.items, id);
@@ -738,7 +727,10 @@ export class Shipments {
         // customer: the customer pays (returns deducts it from the refund; finance books nothing for the label)
         billed_to: o.billedTo,
         tracking_number: tracking,
-        storage_key: JSON.stringify(meta),
+        storage_key: asset?.id ?? null,
+        kind: kindInfo.kind,
+        return_id: kindInfo.returnId,
+        qr_code: bought.qrCode,
         format: o.format,
         drop_off_by: o.dropOffBy,
         status: labelMachine.initial,
@@ -770,8 +762,8 @@ export class Shipments {
     if (l.status === 'voided') return this.views.label(l, by.principal);
     labelMachine.next(l.status as never, 'void');
     if (s && s.status !== 'label_created') throw new AppError('ILLEGAL_TRANSITION', 'The carrier already has this package; the label cannot be voided', { machine: 'Label', from: l.status, event: 'void', allowed: [] });
-    const meta = labelMeta(l);
-    await this.core.carriers.voidLabel({ carrierCode: meta.carrierCode, trackingNumber: l.tracking_number });
+    const { carrierCode } = await labelCarrier(this.core, l);
+    await this.core.carriers.voidLabel({ carrierCode, trackingNumber: l.tracking_number });
     const batch = new Batch(by);
     const after = await this.repo.transaction(async (tx) => {
       const fresh = await tx.get('labels', labelId, { forUpdate: true });
@@ -783,7 +775,7 @@ export class Shipments {
         await tx.insert('tracking_events', { id: newId(), shipment_id: s.id, code: 'info', label: 'Label voided', detail: reason.trim(), location: null, source: 'system', carrier_event_id: null, at: now });
         this.statusChanged(batch, cancelled, s.status, cancelled.status, now);
       }
-      batch.push('shipping.label.voided', { labelId, shipmentId: l.shipment_id, orderId: s?.order_id ?? '', kind: meta.kind, returnId: meta.returnId, sellerId: s?.seller_id ?? null, billedTo: meta.billedTo, cost: money(l.cost, l.currency) });
+      batch.push('shipping.label.voided', { labelId, shipmentId: l.shipment_id, orderId: s?.order_id ?? '', kind: l.kind as 'outbound' | 'replacement' | 'return', returnId: l.return_id, sellerId: s?.seller_id ?? null, billedTo: l.billed_to as BilledTo, cost: money(l.cost, l.currency) });
       return updated;
     });
     await this.core.flush(batch);
@@ -823,7 +815,7 @@ export class Shipments {
       return updated;
     });
     await this.core.flush(batch);
-    if (o.staff) await this.core.audit({ action: 'shipping.tracking.correct', actionLabel: 'Corrected tracking', category: 'orders', target: { type: 'shipment', id: s.id, ref: s.order_ref, label: toLabel }, before: { carrier: s.carrier_code, trackingNumber: s.tracking_number }, after: { carrier: carrier.code, trackingNumber: tracking, customerNotified: notified }, reason: body.reason }, by);
+    if (o.staff) await this.core.audit({ action: 'shipping.tracking.correct', actionLabel: 'Corrected tracking', category: 'shipping', target: { type: 'shipment', id: s.id, ref: s.order_ref, label: toLabel }, before: { carrier: s.carrier_code, trackingNumber: s.tracking_number }, after: { carrier: carrier.code, trackingNumber: tracking, customerNotified: notified }, reason: body.reason }, by);
     await this.matchStored(after);
     return this.view((await this.repo.get('shipments', s.id))!, by.principal);
   }
@@ -930,7 +922,7 @@ export class Shipments {
     }
     await this.applyScan(s.id, { code: normalizeCode(body.code), at, detail: `${body.detail.trim()}${body.evidenceIds?.length ? ` (evidence: ${body.evidenceIds.length} file${body.evidenceIds.length === 1 ? '' : 's'})` : ''}`, location: null, source: 'staff', carrierEventId: `staff:${newId()}` }, by);
     const after = await this.load(id);
-    await this.core.audit({ action: 'shipping.shipment.record_event', actionLabel: `Recorded a carrier event: ${EVENT_LABELS[normalizeCode(body.code)]}`, category: 'orders', target: { type: 'shipment', id, ref: s.order_ref, label: after.tracking_number ?? 'Package' }, before: { status: s.status }, after: { status: after.status, evidenceIds: body.evidenceIds ?? [] }, reason: body.reason }, by);
+    await this.core.audit({ action: 'shipping.shipment.record_event', actionLabel: `Recorded a carrier event: ${EVENT_LABELS[normalizeCode(body.code)]}`, category: 'shipping', target: { type: 'shipment', id, ref: s.order_ref, label: after.tracking_number ?? 'Package' }, before: { status: s.status }, after: { status: after.status, evidenceIds: body.evidenceIds ?? [] }, reason: body.reason }, by);
     return this.view(after, by.principal);
   }
 

@@ -70,7 +70,7 @@ export class Exceptions {
     nextStep?: string;
     dueAt: Date;
     by: By;
-    owner?: { staffId: string | null; name: string } | null;
+    owner?: { staffId: string | null; name: string; role?: string | null } | null;
     caseRef?: string | null;
     sellerNotified?: boolean;
     publish?: boolean;
@@ -90,11 +90,13 @@ export class Exceptions {
         owner_type: o.group.ownerType,
         seller_id: o.group.sellerId,
         items_summary: o.itemsSummary,
+        order_item_ids: o.itemIds,
         situation: o.situation,
         next_step: o.nextStep ?? DEFAULT_NEXT_STEP[o.kind],
         status: o.owner ? 'in_progress' : 'open',
         owner_staff_id: o.owner?.staffId ?? null,
         owner_name: o.owner?.name ?? null,
+        owner_role: o.owner?.role ?? null,
         due_at: o.dueAt,
         customer_notified_at: null,
         seller_notified_at: o.sellerNotified ? now : null,
@@ -244,11 +246,12 @@ export class Exceptions {
 
   /* ---------------------------------------------------------------- staff actions */
 
-  private async staffName(staffId: string): Promise<string> {
+  /** A staff member's name and primary role label (access; identity's display name when access is off) */
+  private async staffRef(staffId: string): Promise<{ name: string; role: string | null }> {
     const ref = await this.core.soft('access', 'getStaffRef', (a) => a.getStaffRef(staffId));
-    if (ref) return ref.roleLabel ? `${ref.name}, ${ref.roleLabel}` : ref.name;
+    if (ref) return { name: ref.name, role: ref.roleLabel ?? null };
     const acc = await this.core.soft('identity', 'getAccounts', (i) => i.getAccounts([staffId]));
-    return acc?.[0]?.displayName ?? 'Staff member';
+    return { name: acc?.[0]?.displayName ?? 'Staff member', role: null };
   }
 
   async openManual(input: OpenExceptionInput, by: By): Promise<DeliveryException> {
@@ -271,7 +274,7 @@ export class Exceptions {
     const kind = input.kind as ExceptionKind;
     const dueAt = input.dueAt ? new Date(input.dueAt) : new Date(this.core.now().getTime() + FIRST_DEADLINE_HOURS[kind] * HOUR_MS);
     if (Number.isNaN(dueAt.getTime())) throw invalid([{ path: 'dueAt', message: 'Not a date-time' }]);
-    const owner = input.ownerStaffId ? { staffId: input.ownerStaffId, name: await this.staffName(input.ownerStaffId) } : null;
+    const owner = input.ownerStaffId ? { staffId: input.ownerStaffId, ...(await this.staffRef(input.ownerStaffId)) } : null;
     const existing = await this.openFor(input.groupId, kind, shipmentId);
     if (existing) throw this.core.error('EXCEPTION_ALREADY_OPEN', `An open ${KIND_LABEL[kind].toLowerCase()} exception exists for this package`, { exceptionId: existing.id });
     const { row, created } = await this.open({
@@ -288,7 +291,7 @@ export class Exceptions {
     });
     if (!created) throw this.core.error('EXCEPTION_ALREADY_OPEN', `An open ${KIND_LABEL[kind].toLowerCase()} exception exists for this package`, { exceptionId: row.id });
     const view = await this.view(row.id);
-    await this.core.audit({ action: 'shipping.exception.open', actionLabel: `Opened a ${KIND_LABEL[kind].toLowerCase()} exception`, category: 'orders', target: { type: 'delivery_exception', id: row.id, ref: row.order_ref, label: KIND_LABEL[kind] }, before: null, after: view }, by);
+    await this.core.audit({ action: 'shipping.exception.open', actionLabel: `Opened a ${KIND_LABEL[kind].toLowerCase()} exception`, category: 'shipping', target: { type: 'delivery_exception', id: row.id, ref: row.order_ref, label: KIND_LABEL[kind] }, before: null, after: view }, by);
     return view;
   }
 
@@ -303,13 +306,13 @@ export class Exceptions {
   async assign(id: string, ownerStaffId: string, by: By, o: { audit?: boolean } = {}): Promise<DeliveryException> {
     const before = await this.get(id);
     this.requireOpen(before, 'assign');
-    const name = await this.staffName(ownerStaffId);
+    const { name, role } = await this.staffRef(ownerStaffId);
     const status = before.status === 'open' ? deliveryExceptionMachine.next('open', 'assign') : before.status;
-    await this.repo.update('exceptions', id, { owner_staff_id: ownerStaffId, owner_name: name, status });
+    await this.repo.update('exceptions', id, { owner_staff_id: ownerStaffId, owner_name: name, owner_role: role, status });
     await this.log(id, 'assigned', name, by.actor);
     this.updated(before, 'assigned', by);
     const view = await this.view(id);
-    if (o.audit !== false) await this.core.audit({ action: 'shipping.exception.assign', actionLabel: 'Assigned a delivery exception', category: 'orders', target: { type: 'delivery_exception', id, ref: before.order_ref, label: KIND_LABEL[before.kind as ExceptionKind] }, before: { owner: before.owner_name, status: before.status }, after: { owner: name, status } }, by);
+    if (o.audit !== false) await this.core.audit({ action: 'shipping.exception.assign', actionLabel: 'Assigned a delivery exception', category: 'shipping', target: { type: 'delivery_exception', id, ref: before.order_ref, label: KIND_LABEL[before.kind as ExceptionKind] }, before: { owner: before.owner_name, status: before.status }, after: { owner: name, status } }, by);
     return view;
   }
 
@@ -401,7 +404,7 @@ export class Exceptions {
     await this.log(id, `escalated:${to}`, reason.trim(), by.actor);
     this.updated(before, `escalated:${to}`, by);
     const view = await this.view(id);
-    if (o.audit !== false) await this.core.audit({ action: 'shipping.exception.escalate', actionLabel: 'Escalated a delivery exception', category: 'orders', target: { type: 'delivery_exception', id, ref: before.order_ref, label: KIND_LABEL[before.kind as ExceptionKind] }, before: { status: before.status, escalatedTo: before.escalated_to }, after: { status, escalatedTo: to }, reason }, by);
+    if (o.audit !== false) await this.core.audit({ action: 'shipping.exception.escalate', actionLabel: 'Escalated a delivery exception', category: 'shipping', target: { type: 'delivery_exception', id, ref: before.order_ref, label: KIND_LABEL[before.kind as ExceptionKind] }, before: { status: before.status, escalatedTo: before.escalated_to }, after: { status, escalatedTo: to }, reason }, by);
     return view;
   }
 
@@ -414,7 +417,7 @@ export class Exceptions {
     await this.log(id, `resolved:${body.kind}`, body.note.trim(), by.actor);
     this.core.publish('shipping.exception.resolved', { exceptionId: id, kind: before.kind, orderId: before.order_id, groupId: before.group_id, resolution: body.kind }, by);
     const view = await this.view(id);
-    await this.core.audit({ action: 'shipping.exception.resolve', actionLabel: 'Resolved a delivery exception', category: 'orders', target: { type: 'delivery_exception', id, ref: before.order_ref, label: KIND_LABEL[before.kind as ExceptionKind] }, before: { status: before.status }, after: { status, resolution }, reason: body.note }, by);
+    await this.core.audit({ action: 'shipping.exception.resolve', actionLabel: 'Resolved a delivery exception', category: 'shipping', target: { type: 'delivery_exception', id, ref: before.order_ref, label: KIND_LABEL[before.kind as ExceptionKind] }, before: { status: before.status }, after: { status, resolution }, reason: body.note }, by);
     return view;
   }
 
@@ -434,7 +437,7 @@ export class Exceptions {
         failed.push(id);
       }
     }
-    await this.core.audit({ action: 'shipping.exception.bulk', actionLabel: `Bulk ${body.action.replace('_', ' ')} on delivery exceptions`, category: 'orders', target: { type: 'delivery_exception', id: body.ids[0] ?? 'none', label: `${body.ids.length} exceptions` }, after: { action: body.action, updated, failed, ownerStaffId: body.ownerStaffId ?? null, to: body.to ?? null }, ...(body.reason ? { reason: body.reason } : {}) }, by);
+    await this.core.audit({ action: 'shipping.exception.bulk', actionLabel: `Bulk ${body.action.replace('_', ' ')} on delivery exceptions`, category: 'shipping', target: { type: 'delivery_exception', id: body.ids[0] ?? 'none', label: `${body.ids.length} exceptions` }, after: { action: body.action, updated, failed, ownerStaffId: body.ownerStaffId ?? null, to: body.to ?? null }, ...(body.reason ? { reason: body.reason } : {}) }, by);
     return { updated, failed };
   }
 
@@ -820,7 +823,7 @@ export class Exceptions {
         approvalRequestId = req.id;
       }
     }
-    const owner = by.actor.name ?? (by.actor.id ? await this.staffName(by.actor.id) : 'Shipping Manager');
+    const owner = by.actor.name ?? (by.actor.id ? (await this.staffRef(by.actor.id)).name : 'Shipping Manager');
     const row = await this.repo.insert('claims', {
       id,
       claim_number: input.claimNumber?.trim() || null,
@@ -844,7 +847,7 @@ export class Exceptions {
     await this.linkClaim(exception, id, by);
     this.claimEvent(row, by);
     const view = await this.claimView(id);
-    await this.core.audit({ action: 'shipping.claim.open', actionLabel: 'Opened a carrier claim', category: 'financial', target: { type: 'carrier_claim', id, ref: s.order_ref, label: `${carrier.name} claim` }, before: null, after: view, reason: input.note }, by);
+    await this.core.audit({ action: 'shipping.claim.open', actionLabel: 'Opened a carrier claim', category: 'shipping', target: { type: 'carrier_claim', id, ref: s.order_ref, label: `${carrier.name} claim` }, before: null, after: view, reason: input.note }, by);
     return view;
   }
 
@@ -907,7 +910,7 @@ export class Exceptions {
     }
     this.claimEvent(after, by);
     const view = await this.claimView(id);
-    await this.core.audit({ action: 'shipping.claim.status', actionLabel: `Carrier claim: ${body.event.replace('_', ' ')}`, category: 'financial', target: { type: 'carrier_claim', id, ref: after.claim_number ?? undefined, label: 'Carrier claim' }, before, after, reason: body.note }, by);
+    await this.core.audit({ action: 'shipping.claim.status', actionLabel: `Carrier claim: ${body.event.replace('_', ' ')}`, category: 'shipping', target: { type: 'carrier_claim', id, ref: after.claim_number ?? undefined, label: 'Carrier claim' }, before, after, reason: body.note }, by);
     return view;
   }
 

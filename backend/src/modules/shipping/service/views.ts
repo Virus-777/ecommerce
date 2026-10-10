@@ -27,26 +27,14 @@ import { CARRIER_CATALOG, statusLabel, trackingUrlOf } from '../domain/tracking.
 import type { CarrierRec, ClaimRec, ClosureRec, CorrectionRec, EventRec, ExceptionLogRec, ExceptionRec, LabelRec, LineRec, MethodRec, NoticeRec, ProfileRec, RuleRec, ServiceRec, ShipmentRec, ZoneRec } from '../ports.js';
 import { iso, type Core } from './core.js';
 
-/** Extra facts kept with a label (labels.storage_key holds them as JSON: no columns for them in the spec) */
-export interface LabelMeta {
-  asset: string | null;
-  qr: string | null;
-  dropOffBy: string | null;
-  billedTo: 'seller' | 'company' | 'platform' | 'customer';
-  kind: 'outbound' | 'replacement' | 'return';
-  returnId: string | null;
-  serviceName: string;
-  carrierName: string;
-  carrierCode: string;
-}
+/** Who pays a label (labels.billed_to) */
+export type BilledTo = 'seller' | 'company' | 'platform' | 'customer';
 
-export function labelMeta(l: LabelRec): LabelMeta {
-  try {
-    const m = JSON.parse(l.storage_key) as Partial<LabelMeta>;
-    return { asset: m.asset ?? null, qr: m.qr ?? null, dropOffBy: m.dropOffBy ?? null, billedTo: m.billedTo ?? (l.billed_to as LabelMeta['billedTo']), kind: m.kind ?? 'outbound', returnId: m.returnId ?? null, serviceName: m.serviceName ?? 'Carrier service', carrierName: m.carrierName ?? 'Carrier', carrierCode: m.carrierCode ?? 'other' };
-  } catch {
-    return { asset: l.storage_key || null, qr: null, dropOffBy: null, billedTo: l.billed_to as LabelMeta['billedTo'], kind: 'outbound', returnId: null, serviceName: 'Carrier service', carrierName: 'Carrier', carrierCode: 'other' };
-  }
+/** The carrier and service a label was bought for (labels.carrier_service_id) */
+export async function labelCarrier(core: Core, l: Pick<LabelRec, 'carrier_service_id'>): Promise<{ carrierCode: string; carrierName: string; serviceName: string }> {
+  const service = await core.repo.get('carrier_services', l.carrier_service_id);
+  const carrier = service ? await core.repo.get('carriers', service.carrier_id) : undefined;
+  return { carrierCode: carrier?.code ?? 'other', carrierName: carrier?.name ?? 'Carrier', serviceName: service?.name ?? 'Carrier service' };
 }
 
 export interface ShipmentParts {
@@ -237,9 +225,10 @@ export class Views {
   }
 
   async label(l: LabelRec, principal?: Principal | null): Promise<Label> {
-    const meta = labelMeta(l);
+    const meta = await labelCarrier(this.core, l);
     const fallback = `${this.core.ctx.config.publicUrls.seller.replace(/\/$/, '')}/shipping/labels/${l.id}.pdf`;
-    const link = meta.asset ? await this.core.soft('media', 'label link', (m) => m.signedDownload(meta.asset!, principal ?? { kind: 'staff', accountId: null }, 'Shipping label')) : undefined;
+    const asset = l.storage_key;
+    const link = asset ? await this.core.soft('media', 'label link', (m) => m.signedDownload(asset, principal ?? { kind: 'staff', accountId: null }, 'Shipping label')) : undefined;
     return {
       id: l.id,
       shipmentId: l.shipment_id,
@@ -250,8 +239,8 @@ export class Views {
       cost: money(l.cost, l.currency),
       trackingNumber: l.tracking_number,
       labelUrl: link?.url ?? fallback,
-      qrCodeUrl: meta.qr ? `${this.core.ctx.config.publicUrls.store.replace(/\/$/, '')}/returns/drop-off/${encodeURIComponent(meta.qr)}` : null,
-      dropOffBy: l.drop_off_by?.toISOString() ?? meta.dropOffBy,
+      qrCodeUrl: l.qr_code ? `${this.core.ctx.config.publicUrls.store.replace(/\/$/, '')}/returns/drop-off/${encodeURIComponent(l.qr_code)}` : null,
+      dropOffBy: iso(l.drop_off_by),
       format: l.format as Label['format'],
       status: l.status as Label['status'],
       purchasedBy: l.purchased_by,
@@ -334,12 +323,13 @@ export class Views {
       sellerId: e.seller_id,
       sellerName: this.core.nameOf(names, e.owner_type, e.seller_id),
       itemsSummary: e.items_summary,
+      orderItemIds: e.order_item_ids ?? [],
       situation: e.situation,
       requiredResponse: REQUIRED_RESPONSE[kind] ?? '',
       nextStep: e.next_step,
       customerNotifiedAt: iso(e.customer_notified_at),
       sellerNotifiedAt: iso(e.seller_notified_at),
-      owner: e.owner_staff_id || e.owner_name ? { staffId: e.owner_staff_id, name: e.owner_name ?? 'Staff member', role: null } : null,
+      owner: e.owner_staff_id || e.owner_name ? { staffId: e.owner_staff_id, name: e.owner_name ?? 'Staff member', role: e.owner_role } : null,
       deadline: { dueAt: e.due_at.toISOString(), state: open ? deadlineState(e.due_at, now) : 'on_time' },
       deadlineLabel: open ? deadlineLabel(e.due_at, now, this.core.tz) : e.status === 'resolved' ? 'Resolved' : 'Closed',
       status: e.status as DeliveryException['status'],
