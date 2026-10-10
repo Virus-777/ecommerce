@@ -257,9 +257,14 @@ export class NotificationsService implements NotificationsPublicApi {
     await this.consumers.handle('customers.data_export.ready', event, eventId);
   }
 
-  /** orders.order.accepted: Customer: order accepted (confirmation only after acceptance). Seller: new order per seller group (orders group, members with order permission) */
+  /** orders.order.accepted: Customer: order accepted (confirmation only after acceptance). Seller: new order and dispatch reminder per seller-fulfilled group (none for Fulfilled by Marketly groups) */
   async onOrderAcceptedFromOrders(event: EventPayload<'orders.order.accepted'>, eventId?: string): Promise<void> {
     await this.consumers.handle('orders.order.accepted', event, eventId);
+  }
+
+  /** orders.cancellation.requested: Seller (seller-fulfilled groups, action required until respondBy); Official Store and Fulfilled by Marketly groups: the Order Manager */
+  async onCancellationRequestedFromOrders(event: EventPayload<'orders.cancellation.requested'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('orders.cancellation.requested', event, eventId);
   }
 
   /** orders.item.cancelled: Customer: cancellation update for the item; seller: item cancelled */

@@ -48,7 +48,7 @@ function orderAccepted(o: { orderId?: string; customerId?: string | null; email:
 describe('catalogue', () => {
   it('routes every consumed event and seeds valid default templates', () => {
     expect(Object.keys(ROUTES).sort()).toEqual(Object.keys(spec.events.consumes).sort());
-    expect(Object.keys(spec.events.consumes)).toHaveLength(106);
+    expect(Object.keys(spec.events.consumes)).toHaveLength(107);
     for (const t of TOPICS) {
       for (const channel of templateChannels(t)) {
         const v = validateContent(t, channel, defaultContent(t, channel, {}));
@@ -120,7 +120,7 @@ describe('order notices', () => {
     expect(await service.core.repo.hasPendingScheduled(`seller.dispatch.reminder:${groupId}`)).toBe(true);
 
     // dispatch: event without customer id → found from the order notice; overdue notice resolved
-    await publish(app, 'shipping.dispatch.overdue', { orderId, orderRef: payload.ref, groupId, ownerType: 'seller', sellerId, orderItemIds: [newId()], dueAt: new Date(Date.now() - 3_600_000).toISOString(), exceptionId: newId() });
+    await publish(app, 'shipping.dispatch.overdue', { orderId, orderRef: payload.ref, groupId, ownerType: 'seller', sellerId, fulfilledBy: 'seller', orderItemIds: [newId()], dueAt: new Date(Date.now() - 3_600_000).toISOString(), exceptionId: newId() });
     let sellerNotices = await inbox(as.seller(owner), 'seller', '?actionRequired=true');
     expect(sellerNotices.map((n) => n.topicKey)).toEqual(['seller.dispatch.overdue']);
     expect(sellerNotices[0].deadline.state).toBe('overdue');
@@ -133,6 +133,7 @@ describe('order notices', () => {
       returnId: null,
       ownerType: 'seller',
       sellerId,
+      fulfilledBy: 'seller',
       lines: [{ orderItemId: newId(), title: 'Aurora Desk Lamp', variantLabel: 'Black', quantity: 1 }],
       shippedAt: new Date().toISOString(),
       dispatchDueAt: null,
@@ -203,9 +204,9 @@ describe('order notices', () => {
     const { payload, orderId } = orderAccepted({ customerId: c.customerId, email: c.email, sellerId });
     await publish(app, 'orders.order.accepted', payload);
     const returnId = newId();
-    await publish(app, 'returns.return.requested', { returnId, ref: 'RT-261009-0001', orderId, orderRef: payload.ref, ownerType: 'seller', sellerId, orderItemIds: [newId()], reason: 'arrived_damaged', responseDueAt: new Date(Date.now() + 2 * 86_400_000).toISOString() });
+    await publish(app, 'returns.return.requested', { returnId, ref: 'RT-261009-0001', orderId, orderRef: payload.ref, ownerType: 'seller', sellerId, fulfilledBy: 'seller', orderItemIds: [newId()], reason: 'arrived_damaged', responseDueAt: new Date(Date.now() + 2 * 86_400_000).toISOString() });
     await publish(app, 'returns.return.info_requested', { returnId, ref: 'RT-261009-0001', orderId, orderRef: payload.ref, replyDueAt: new Date(Date.now() + 86_400_000).toISOString() });
-    await publish(app, 'returns.return.approved', { returnId, ref: 'RT-261009-0001', orderId, orderRef: payload.ref, ownerType: 'seller', sellerId, items: [{ orderItemId: newId(), quantity: 1 }], withoutReturn: false, platformDecision: false, dropOffBy: new Date(Date.now() + 7 * 86_400_000).toISOString() });
+    await publish(app, 'returns.return.approved', { returnId, ref: 'RT-261009-0001', orderId, orderRef: payload.ref, ownerType: 'seller', sellerId, fulfilledBy: 'seller', items: [{ orderItemId: newId(), quantity: 1 }], withoutReturn: false, platformDecision: false, dropOffBy: new Date(Date.now() + 7 * 86_400_000).toISOString() });
     const notices = await inbox(as.customer(c), 'store', '?group=returns_refunds');
     expect(notices.map((n) => n.topicKey)).toEqual(['customer.return.approved', 'customer.return.info_requested']);
     expect(notices[1].actionRequired).toBe(true);
@@ -217,7 +218,7 @@ describe('order notices', () => {
     await publish(app, 'returns.label.created', { returnId, ref: 'RT-261009-0001', orderRef: payload.ref, ownerType: 'seller', sellerId, labelId: newId(), orderId, cost: money(599), paidBy: 'seller' });
     const scheduled = await service.core.repo.dueScheduled(new Date(Date.now() + 30 * 86_400_000), 100);
     expect(scheduled.filter((s) => s.dedupe_key === `return-dropoff:${returnId}`)).toHaveLength(1);
-    await publish(app, 'returns.return.received', { returnId, ref: 'RT-261009-0001', orderId, orderRef: payload.ref, ownerType: 'seller', sellerId, items: [], receivedAt: new Date().toISOString() });
+    await publish(app, 'returns.return.received', { returnId, ref: 'RT-261009-0001', orderId, orderRef: payload.ref, ownerType: 'seller', sellerId, fulfilledBy: 'seller', items: [], receivedAt: new Date().toISOString() });
     const left = await service.core.repo.dueScheduled(new Date(Date.now() + 30 * 86_400_000), 100);
     expect(left.filter((s) => s.dedupe_key === `return-dropoff:${returnId}`)).toHaveLength(0);
 
@@ -241,7 +242,7 @@ describe('staff routing', () => {
     world.role('shipping_manager', { leadAccountId: lead.accountId, accountIds: [backup.accountId], ccAccountIds: [lead.accountId], viaBackup: true });
     const groupId = newId();
     const orderId = newId();
-    await publish(app, 'shipping.dispatch.overdue', { orderId, orderRef: 'MK-261009-77777', groupId, ownerType: 'official', sellerId: null, orderItemIds: [], dueAt: new Date(Date.now() - 60_000).toISOString(), exceptionId: newId() });
+    await publish(app, 'shipping.dispatch.overdue', { orderId, orderRef: 'MK-261009-77777', groupId, ownerType: 'official', sellerId: null, fulfilledBy: 'official_warehouse', orderItemIds: [], dueAt: new Date(Date.now() - 60_000).toISOString(), exceptionId: newId() });
     const mine = await inbox(as.staff(backup), 'admin');
     expect(mine).toHaveLength(1);
     expect(mine[0]).toMatchObject({ topicKey: 'staff.shipping.dispatch_overdue', group: 'Shipping', actionRequired: true, routedTo: { roleKey: 'shipping_manager', roleName: 'Shipping Manager', reason: 'backup', coveringFor: 'Theo Grant' } });

@@ -78,6 +78,7 @@ function cancelled(o: { customerId: string; sellerId: string; notifyCustomer: bo
     groupId: newId(),
     ownerType: 'seller',
     sellerId: o.sellerId,
+    fulfilledBy: 'seller',
     itemId: newId(),
     offerId: newId(),
     stockItemId: newId(),

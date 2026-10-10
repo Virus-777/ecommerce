@@ -19,7 +19,7 @@ export const CHANNELS: readonly Channel[] = ['in_app', 'email', 'sms', 'push'];
 export const CHANNEL_PHASE: Record<Channel, number> = { in_app: 1, email: 1, sms: 2, push: 3 };
 
 /** Seller member preference groups (MemberPreference.groups keys) */
-export type SellerPrefGroup = 'new_orders' | 'dispatch_overdue' | 'returns_cases' | 'customer_messages' | 'payouts_holds' | 'products' | 'promotions' | 'account';
+export type SellerPrefGroup = 'new_orders' | 'dispatch_overdue' | 'returns_cases' | 'customer_messages' | 'payouts_holds' | 'products' | 'fulfillment_service' | 'promotions' | 'account';
 
 export interface SellerGroupDef {
   key: SellerPrefGroup;
@@ -41,6 +41,8 @@ export const SELLER_GROUPS: readonly SellerGroupDef[] = [
   { key: 'payouts_holds', label: 'Payouts, holds and statements', ownerOnly: true, essentialForOwner: true, permission: 'finance.balances.view', defaultOn: true },
   { key: 'products', label: 'Products, stock and corrections', ownerOnly: false, essentialForOwner: true, permission: null, defaultOn: true },
   { key: 'account', label: 'Account health, restrictions and verification', ownerOnly: true, essentialForOwner: true, permission: null, defaultOn: true },
+  /** Fulfilled by Marketly (phase 4): enrollment, inbound shipments, stock at Marketly's warehouse, removals and fees */
+  { key: 'fulfillment_service', label: 'Fulfilled by Marketly', ownerOnly: false, essentialForOwner: true, permission: 'fulfillment-service.inbound.manage', defaultOn: true },
   { key: 'promotions', label: 'Seller tips and campaigns', ownerOnly: false, essentialForOwner: false, permission: null, defaultOn: false },
 ];
 
@@ -224,6 +226,27 @@ const VARIABLE_EXAMPLES: Record<string, string> = {
   'dayend.by': 'Morgan Hale',
   'dayend.notes': 'Carrier pickup moved to 6 PM.',
   'offer.items': 'no longer in the box: USB cable',
+  'shipper.name': 'Fulfilled by Marketly',
+  'cancel.note': 'Do not ship them.',
+  // Fulfilled by Marketly: the context fields fulfillment-service sends (fulfillment-service spec notes)
+  'enrollment.state': 'approved',
+  reason: 'Capacity confirmed for 40 SKUs.',
+  sku: 'LAMP-BLK',
+  result: 'approved',
+  'inbound.ref': 'FS-IN-261009-0042',
+  received: '48',
+  damaged: '2',
+  note: 'Some counts differ from your shipment plan: accept them or claim the discrepancy.',
+  units: '46',
+  decision: 'reimburse',
+  items: 'Aurora Desk Lamp, black × 2',
+  outcome: 'restocked',
+  'removal.ref': 'FS-RM-261009-0007',
+  'removal.refs': 'FS-RM-261009-0007, FS-RM-261009-0008',
+  available: '3',
+  effective: 'Nov 1',
+  days: '90',
+  version: '2026-11',
 };
 
 /* ------------------------------------------------------------------ topics */
@@ -266,6 +289,8 @@ export interface TopicDef {
   template: DefaultTemplate;
   /** Topic variables (beyond the standard ones) */
   vars: string[];
+  /** Words derived from the caller's context before rendering (codes and flags a template cannot branch on) */
+  derive?: (ctx: Record<string, unknown>) => Record<string, unknown>;
 }
 
 interface TopicInput {
@@ -290,6 +315,7 @@ interface TopicInput {
   icon?: string;
   tone?: Tone;
   t: DefaultTemplate;
+  derive?: (ctx: Record<string, unknown>) => Record<string, unknown>;
 }
 
 const VAR = /\{\{\s*([\w.]+)\s*\}\}/g;
@@ -327,12 +353,43 @@ function topic(audience: Audience, key: string, i: TopicInput): TopicDef {
     tone: i.tone ?? 'info',
     template: i.t,
     vars,
+    ...(i.derive ? { derive: i.derive } : {}),
   };
 }
 
 const cu = (key: string, i: TopicInput) => topic('customer', `customer.${key}`, i);
 const se = (key: string, i: TopicInput) => topic('seller', `seller.${key}`, i);
 const st = (key: string, i: TopicInput) => topic('staff', `staff.${key}`, { supports: ['in_app', 'email'], ...i });
+
+/* Fulfilled by Marketly (phase 4): fulfillment-service sends every one of these through notify */
+const fbm = (key: string, i: TopicInput) => se(`fulfillment.${key}`, { pref: 'fulfillment_service', phase: 4, icon: 'warehouse', ...i });
+const fbmStaff = (key: string, i: TopicInput) => st(`fulfillment.${key}`, { phase: 4, icon: 'warehouse', ...i });
+
+/** snake_case code → words ("info_requested" → "info requested"); anything else unchanged */
+const words = (v: unknown) => (typeof v === 'string' ? v.replace(/[_.-]+/g, ' ').trim() : v);
+const record = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
+
+/** Order items as words: a count, labels, or { label | title | sku, quantity } lines */
+function itemsText(v: unknown): unknown {
+  if (typeof v === 'number') return `${v} item${v === 1 ? '' : 's'}`;
+  if (!Array.isArray(v)) return v;
+  return v
+    .map((x) => {
+      if (!x || typeof x !== 'object') return String(x);
+      const l = x as Record<string, unknown>;
+      const name = String(l.label ?? l.title ?? l.sku ?? 'item');
+      return l.quantity != null ? `${name} × ${String(l.quantity)}` : name;
+    })
+    .join(', ');
+}
+
+/** The inbound count note: a discrepancy text as given, a flag or a non-zero difference → "review it", false or 0 → "matches" */
+function discrepancyNote(v: unknown): string {
+  if (typeof v === 'string') return v;
+  if (v === true || (typeof v === 'number' && v !== 0) || (Array.isArray(v) && v.length > 0)) return 'Some counts differ from your shipment plan: accept them or claim the discrepancy.';
+  if (v === false || v === 0 || (Array.isArray(v) && v.length === 0)) return 'The counts match your shipment plan.';
+  return '';
+}
 
 const EMAIL_ONLY: Channel[] = ['email'];
 /** People outside Marketly (suppliers, rights owners): essential email only, never an inbox notice */
@@ -469,11 +526,14 @@ export const TOPICS: readonly TopicDef[] = [
   se('order.new', { group: 'orders', label: 'New order', opens: 'Seller order', triggers: ['orders.order.accepted'], pref: 'new_orders', permission: 'orders.fulfillment.view', icon: 'shopping-bag', tone: 'brand',
     t: { title: 'New order {{order.ref}}', body: 'You have a new order {{order.ref}} ({{order.total}}). Dispatch by {{due.date}}.', subject: 'New order {{order.ref}}', button: 'Open order' } }),
   se('order.item_cancelled', { group: 'orders', label: 'Item cancelled', opens: 'Seller order', triggers: ['orders.item.cancelled'], pref: 'new_orders', permission: 'orders.fulfillment.view', icon: 'x-circle', tone: 'warning',
-    t: { title: 'Item cancelled in {{order.ref}}', body: '{{item.count}} item(s) in order {{order.ref}} were cancelled. Do not ship them.', subject: 'Item cancelled in {{order.ref}}', button: 'Open order' } }),
+    t: { title: 'Item cancelled in {{order.ref}}', body: '{{item.count}} item(s) in order {{order.ref}} were cancelled. {{cancel.note}}', subject: 'Item cancelled in {{order.ref}}', button: 'Open order' } }),
   se('dispatch.reminder', { group: 'orders', label: 'Dispatch deadline, 4 h before', opens: 'Seller order', triggers: ['scheduled'], pref: 'dispatch_overdue', permission: 'orders.fulfillment.view', icon: 'clock', tone: 'warning', action: true,
     t: { title: 'Dispatch {{order.ref}} by {{due.date}}', body: 'Order {{order.ref}} must be dispatched by {{due.date}} to stay on time.', subject: 'Reminder: dispatch {{order.ref}} by {{due.date}}', button: 'Open dispatch queue' } }),
   se('dispatch.overdue', { group: 'orders', label: 'Dispatch overdue', opens: 'Seller order', triggers: ['shipping.dispatch.overdue'], pref: 'dispatch_overdue', permission: 'orders.fulfillment.view', icon: 'alert-triangle', tone: 'danger', action: true,
     t: { title: 'Dispatch overdue: {{order.ref}}', body: 'Order {{order.ref}} was due for dispatch on {{due.date}}. Dispatch it now or tell the customer about the delay.', subject: 'Overdue: dispatch {{order.ref}} now', button: 'Open order' } }),
+  se('order.cancellation_requested', { group: 'orders', label: 'Cancellation request', opens: 'Seller order', triggers: ['orders.cancellation.requested'], pref: 'new_orders', permission: 'orders.fulfillment.view', icon: 'x-circle', tone: 'warning', action: true,
+    description: 'A customer asks to cancel items of a group the seller ships; action required until the respond-by time',
+    t: { title: 'Cancellation requested on {{order.ref}}', body: 'The customer asked to cancel {{item.count}} item(s) in order {{order.ref}}. Accept, or decline if it has already shipped, by {{due.date}}.', subject: 'Cancellation request on {{order.ref}}', button: 'Respond' } }),
   se('order.dispute_opened', { group: 'returns_cases', label: 'Payment dispute opened', opens: 'Seller order', triggers: ['payments.chargeback.opened'], pref: 'returns_cases', permission: 'orders.fulfillment.view', icon: 'scale', tone: 'danger', action: true,
     t: { title: 'Dispute opened on {{order.ref}}', body: 'The customer disputed {{chargeback.amount}} with their bank. Add evidence by {{due.date}}.', subject: 'Payment dispute on {{order.ref}}', button: 'Add evidence' } }),
   se('message.new', { group: 'orders', label: 'Customer message', opens: 'Conversation', triggers: ['messaging.message.sent'], pref: 'customer_messages', permission: 'messaging.conversations.reply', icon: 'message-circle',
@@ -580,11 +640,49 @@ export const TOPICS: readonly TopicDef[] = [
   se('promotions.tips', { group: 'account_finance', label: 'Seller tips and campaigns', opens: 'Seller Center', category: 'promotional', frequency: 'Monthly', pref: 'promotions', family: 'promotions', icon: 'lightbulb', tone: 'deal', supports: ['in_app', 'email'],
     t: { title: 'Tips to grow your sales', body: 'New tips and campaigns for your store.', subject: 'Seller tips and campaigns this month', button: 'Read more' } }),
 
+  /* ---------------------------------------------------------------- seller: Fulfilled by Marketly (sent by fulfillment-service) */
+  fbm('enrollment_decided', { group: 'account_finance', label: 'Fulfilled by Marketly: enrollment', opens: 'Fulfilled by Marketly', description: 'A decision on the seller\'s Fulfilled by Marketly enrollment (approved, information requested, rejected, suspended, reinstated, closed)',
+    derive: (c) => ({ enrollment: { ...record(c.enrollment), state: words(record(c.enrollment).state) } }),
+    t: { title: 'Fulfilled by Marketly enrollment {{enrollment.state}}', body: 'Your Fulfilled by Marketly enrollment is now {{enrollment.state}}. {{reason}}', subject: 'Your Fulfilled by Marketly enrollment: {{enrollment.state}}', button: 'View enrollment' } }),
+  fbm('sku_reviewed', { group: 'products', label: 'Fulfilled by Marketly: SKU review', opens: 'Fulfilled by Marketly SKU', icon: 'package-check',
+    derive: (c) => ({ result: c.approved === true ? 'approved' : c.approved === false ? 'not approved' : (c.result ?? 'reviewed') }),
+    t: { title: '{{sku}} {{result}} for Fulfilled by Marketly', body: 'Marketly reviewed {{sku}} for Fulfilled by Marketly: {{result}}. {{reason}}', subject: '{{sku}} {{result}} for Fulfilled by Marketly', button: 'View SKU' } }),
+  fbm('inbound_received', { group: 'products', label: 'Fulfilled by Marketly: inbound shipment counted', opens: 'Inbound shipment', icon: 'package',
+    derive: (c) => ({ note: discrepancyNote(c.discrepancy) }),
+    t: { title: 'Inbound {{inbound.ref}} received', body: "Marketly's warehouse counted {{received}} units of inbound shipment {{inbound.ref}} ({{damaged}} damaged). {{note}}", subject: 'Inbound shipment {{inbound.ref}} received', button: 'View inbound shipment' } }),
+  fbm('stock_available', { group: 'products', label: 'Fulfilled by Marketly: stock on sale', opens: 'Stock', icon: 'package-check', tone: 'success',
+    t: { title: '{{units}} units from {{inbound.ref}} are on sale', body: "The receipt of inbound shipment {{inbound.ref}} is confirmed: {{units}} units are now available to sell from Marketly's warehouse.", subject: 'Units from {{inbound.ref}} are on sale', button: 'View stock' } }),
+  fbm('discrepancy_decided', { group: 'products', label: 'Fulfilled by Marketly: discrepancy decided', opens: 'Inbound shipment', icon: 'scale',
+    derive: (c) => ({ decision: words(c.decision) }),
+    t: { title: 'Discrepancy on {{inbound.ref}} decided', body: 'Marketly decided the receiving discrepancy on inbound shipment {{inbound.ref}}: {{decision}}.', subject: 'Discrepancy on {{inbound.ref}} decided', button: 'View inbound shipment' } }),
+  fbm('order_received', { group: 'orders', label: 'Fulfilled by Marketly: new order', opens: 'Seller order', icon: 'shopping-bag', tone: 'brand', description: "An order for units at Marketly's warehouse: Marketly picks, packs and ships it (no seller action)",
+    derive: (c) => ({ items: itemsText(c.items) }),
+    t: { title: 'New order {{order.ref}}, shipped by Marketly', body: "Order {{order.ref}} is Fulfilled by Marketly: {{items}}. Marketly's warehouse picks, packs and ships it; you don't need to do anything.", subject: 'New order {{order.ref}}, shipped by Marketly', button: 'View order' } }),
+  fbm('return_inspected', { group: 'returns_cases', label: 'Fulfilled by Marketly: return inspected', opens: 'Seller return', icon: 'search',
+    derive: (c) => ({ outcome: words(c.outcome) }),
+    t: { title: 'Return {{return.ref}} inspected', body: "Marketly's warehouse inspected the returned unit for {{return.ref}}: {{outcome}}.", subject: 'Return {{return.ref}} inspected by Marketly', button: 'View return' } }),
+  fbm('removal_completed', { group: 'products', label: 'Fulfilled by Marketly: removal completed', opens: 'Removal order', icon: 'truck', tone: 'success',
+    t: { title: 'Removal {{removal.ref}} completed', body: "{{units}} units left Marketly's warehouse with removal order {{removal.ref}}.", subject: 'Removal {{removal.ref}} completed', button: 'View removal' } }),
+  fbm('stock_low', { group: 'products', label: 'Fulfilled by Marketly: low stock', opens: 'Stock', icon: 'package', tone: 'warning', description: "Low stock at Marketly's warehouse (replaces the generic low-stock notice for these items)",
+    t: { title: 'Low stock at Marketly: {{stock.label}}', body: "Only {{available}} left of {{stock.label}} at Marketly's warehouse. Send more in an inbound shipment to keep selling.", subject: 'Low stock at Marketly: {{stock.label}}', button: 'Plan an inbound shipment' } }),
+  fbm('stock_aged', { group: 'products', label: 'Fulfilled by Marketly: long-term storage soon', opens: 'Stock', icon: 'clock', tone: 'warning',
+    t: { title: '{{units}} units reach long-term storage {{effective}}', body: "{{units}} units at Marketly's warehouse reach long-term storage on {{effective}} and will then incur long-term storage fees. Sell them or request their removal.", subject: 'Units reach long-term storage {{effective}}', button: 'View stock' } }),
+  fbm('disposal_scheduled', { group: 'products', label: 'Fulfilled by Marketly: disposal scheduled', opens: 'Removal order', icon: 'trash-2', tone: 'warning',
+    t: { title: '{{units}} units will be disposed of', body: "{{units}} unsellable units left at Marketly's warehouse for over {{days}} days will be disposed of ({{removal.ref}}). Ask for them back to keep them.", subject: 'Units at Marketly will be disposed of', button: 'View removal' } }),
+  fbm('fee_schedule_changed', { group: 'account_finance', label: 'Fulfilled by Marketly: new fees', opens: 'Fees', icon: 'calendar',
+    t: { title: 'New Fulfilled by Marketly fees from {{effective}}', body: 'Fee schedule {{version}} for Fulfilled by Marketly takes effect on {{effective}}.', subject: 'New Fulfilled by Marketly fees from {{effective}}', button: 'View fees' } }),
+  fbm('offboarding', { group: 'account_finance', label: 'Fulfilled by Marketly: units to collect', opens: 'Removal order', icon: 'log-out', tone: 'warning', action: true, description: 'The enrollment is closing: ask for the units at Marketly\'s warehouse back or have them disposed of',
+    t: { title: 'Collect your units from Marketly', body: "Fulfilled by Marketly is ending for your account. Ask for your units at Marketly's warehouse back or have them disposed of. Removal orders: {{removal.refs}}.", subject: 'Fulfilled by Marketly is ending: collect your units', button: 'Request removal' } }),
+
   /* ---------------------------------------------------------------- staff */
-  st('shipping.dispatch_overdue', { group: 'Shipping', label: 'Overdue shipping', opens: 'Dispatch queue', triggers: ['shipping.dispatch.overdue'], roles: ['shipping_manager'], action: true, urgent: true, icon: 'truck', tone: 'danger',
+  st('shipping.dispatch_overdue', { group: 'Shipping', label: 'Overdue shipping', opens: 'Dispatch queue', triggers: ['shipping.dispatch.overdue'], roles: ['shipping_manager', 'warehouse_manager'], action: true,
+    description: 'A package missed its dispatch deadline: Shipping Manager; Fulfilled by Marketly packages (the Marketly warehouse is late) go to the Warehouse Manager', urgent: true, icon: 'truck', tone: 'danger',
     t: { title: 'Overdue dispatch {{order.ref}}', body: '{{seller.name}} missed the dispatch deadline for {{order.ref}} ({{due.date}}).', subject: 'Overdue dispatch: {{order.ref}}', button: 'Open dispatch queue' } }),
   st('shipping.exception', { group: 'Shipping', label: 'Delivery exception', opens: 'Dispatch queue', triggers: ['shipping.shipment.exception'], roles: ['shipping_manager'], action: true, icon: 'alert-triangle', tone: 'warning',
     t: { title: 'Delivery exception on {{order.ref}}', body: 'Exception: {{exception.kind}}. Due {{due.date}}.', subject: 'Delivery exception on {{order.ref}}', button: 'Open exception' } }),
+  st('orders.cancellation_requested', { group: 'Operations', label: 'Cancellation request to decide', opens: 'Order', triggers: ['orders.cancellation.requested'], roles: ['order_manager'], action: true, icon: 'x-circle', tone: 'warning',
+    description: 'A customer asks to cancel Official Store or Fulfilled by Marketly items already being picked; the Order Manager decides (sellers decide only the groups they ship)',
+    t: { title: 'Cancellation request on {{order.ref}}', body: 'The customer asked to cancel {{item.count}} item(s) in {{order.ref}} ({{shipper.name}}), already being picked. Decide by {{due.date}}.', subject: 'Cancellation request on {{order.ref}}', button: 'Decide cancellation' } }),
   st('inventory.stock_shortage', { group: 'Inventory', label: 'Stock shortage', opens: 'Stock', triggers: ['inventory.stock.low'], roles: ['inventory_manager'], action: true, icon: 'package', tone: 'warning',
     t: { title: 'Stock shortage: {{stock.label}}', body: 'Official Store stock of {{stock.label}} is down to {{stock.available}}.', subject: 'Stock shortage: {{stock.label}}', button: 'Open stock' } }),
   st('inventory.low_stock_digest', { group: 'Inventory', label: 'Low stock: daily digest', opens: 'Stock', triggers: ['inventory.stock.low_digest'], roles: ['inventory_manager'], icon: 'package', tone: 'warning', frequency: 'Daily',
@@ -672,6 +770,12 @@ export const TOPICS: readonly TopicDef[] = [
   st('report.scheduled', { group: 'Reports', label: 'Scheduled report', opens: 'Exports', triggers: ['reports.scheduled_report.ready'], phase: 2, icon: 'calendar',
     description: 'A scheduled report ready for each staff recipient, with a link to their export in the Admin Center (scheduled reports go to staff only)',
     t: { title: '{{report.title}}: {{report.period}}', body: 'Your scheduled report {{report.title}} for {{report.period}} ({{report.format}}) is ready in the Admin Center. Download it before {{export.expires}}.', subject: '{{report.title}}: {{report.period}}', button: 'Download' } }),
+  fbmStaff('enrollment_submitted', { group: 'Sellers', label: 'Fulfilled by Marketly: enrollment to review', opens: 'Fulfilled by Marketly enrollment', roles: ['seller_manager'], action: true,
+    t: { title: 'New Fulfilled by Marketly enrollment {{link.ref}}', body: 'A seller applied for Fulfilled by Marketly. Review the enrollment and confirm the capacity.', subject: 'New Fulfilled by Marketly enrollment', button: 'Review enrollment' } }),
+  fbmStaff('inbound_submitted', { group: 'Inventory', label: 'Fulfilled by Marketly: inbound shipment submitted', opens: 'Receiving', roles: ['warehouse_manager'], icon: 'package',
+    t: { title: 'Inbound shipment {{link.ref}} submitted', body: "A seller submitted inbound shipment {{link.ref}} to Marketly's warehouse. Plan the receiving.", subject: 'Inbound shipment {{link.ref}} submitted', button: 'Open receiving' } }),
+  fbmStaff('discrepancy_claimed', { group: 'Inventory', label: 'Fulfilled by Marketly: discrepancy claimed', opens: 'Receiving', roles: ['warehouse_manager'], action: true, icon: 'scale', tone: 'warning',
+    t: { title: 'Discrepancy claimed on {{link.ref}}', body: 'A seller claimed the receiving discrepancy on inbound shipment {{link.ref}}. Check the count and decide it.', subject: 'Discrepancy claimed on {{link.ref}}', button: 'Decide discrepancy' } }),
   st('mention', { group: 'Operations', label: 'Mention', opens: 'Record', icon: 'at-sign',
     t: { title: '{{mention.by}} mentioned you', body: '{{mention.text}}', subject: '{{mention.by}} mentioned you', button: 'Open' } }),
   st('digest.daily', { group: 'Operations', label: 'Daily digest', opens: 'Inbox', triggers: ['scheduled'], supports: EMAIL_ONLY, icon: 'inbox',

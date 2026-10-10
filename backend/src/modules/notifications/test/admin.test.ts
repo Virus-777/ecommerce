@@ -125,7 +125,7 @@ describe('templates', () => {
     const c = world.customer();
     const order = { orderId: newId(), ref: 'MK-261009-55555', customerId: c.customerId, contactEmail: c.email, total: money(100), groups: [], items: [], acceptedAt: clock.now().toISOString() };
     await publish(app, 'orders.order.accepted', order);
-    await publish(app, 'shipping.shipment.dispatched', { shipmentId: newId(), kind: 'outbound', orderId: order.orderId, groupId: newId(), returnId: null, ownerType: 'official', sellerId: null, lines: [{ orderItemId: newId(), title: 'Lamp', variantLabel: '', quantity: 2 }], shippedAt: clock.now().toISOString(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
+    await publish(app, 'shipping.shipment.dispatched', { shipmentId: newId(), kind: 'outbound', orderId: order.orderId, groupId: newId(), returnId: null, ownerType: 'official', sellerId: null, fulfilledBy: 'official_warehouse', lines: [{ orderItemId: newId(), title: 'Lamp', variantLabel: '', quantity: 2 }], shippedAt: clock.now().toISOString(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
     expect(emailsTo(c.email).map((e) => e.message.subject)).toContain('On its way: MK-261009-55555');
 
     // restore version 1 as a new draft, then discard it

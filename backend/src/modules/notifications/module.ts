@@ -22,7 +22,7 @@ import { createDevPushProvider } from './infra/push/dev.js';
  */
 export default defineModule({
   spec,
-  version: '1.2.0',
+  version: '1.3.0',
   migrations,
   graphql: typeDefs,
   async register(ctx) {
@@ -50,6 +50,7 @@ export default defineModule({
     ctx.events.on("customers.account.closed", (e) => service.onAccountClosedFromCustomers(e.payload, e.id));
     ctx.events.on("customers.data_export.ready", (e) => service.onDataExportReadyFromCustomers(e.payload, e.id));
     ctx.events.on("orders.order.accepted", (e) => service.onOrderAcceptedFromOrders(e.payload, e.id));
+    ctx.events.on("orders.cancellation.requested", (e) => service.onCancellationRequestedFromOrders(e.payload, e.id));
     ctx.events.on("orders.item.cancelled", (e) => service.onItemCancelledFromOrders(e.payload, e.id));
     ctx.events.on("orders.item.delayed", (e) => service.onItemDelayedFromOrders(e.payload, e.id));
     ctx.events.on("orders.cancellation.decided", (e) => service.onCancellationDecidedFromOrders(e.payload, e.id));
