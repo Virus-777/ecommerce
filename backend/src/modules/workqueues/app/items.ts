@@ -9,7 +9,7 @@ import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type { Actor, Money, Page } from '../../../spec/common.js';
 import type { EscalationStep, SellerTask, WorkItem, WorkItemNote, WorkSubject } from '../../../spec/workqueues.js';
-import { ACTIVE_STATES, bump, CLOSED_STATES, isActive, isArea, KIND_QUEUES, KINDS as ALL_KINDS, priorityRank, PRIORITIES, sellerScreen, type Kind, type Priority } from '../domain/catalog.js';
+import { ACTIVE_STATES, bump, CLOSED_STATES, DEDUPE_PREFIX_QUEUES, isActive, isArea, KIND_QUEUES, KINDS as ALL_KINDS, priorityRank, PRIORITIES, sellerScreen, type Kind, type Priority } from '../domain/catalog.js';
 import type { Link } from '../domain/intake.js';
 import { deadlineState, durationLabel, nextStep, parseDuration, stepTarget } from '../domain/rules.js';
 import { workItemMachine } from '../domain/state-machines.js';
@@ -193,7 +193,7 @@ export class Items {
 
   /** The queue of a raise: the kind's own queue when it is installed and active (KIND_QUEUES), else the one named */
   async #queueFor(spec: RaiseSpec): Promise<QueueRow> {
-    const home = KIND_QUEUES[spec.kind as Kind];
+    const home = KIND_QUEUES[spec.kind as Kind] ?? DEDUPE_PREFIX_QUEUES.find(([prefix]) => spec.dedupeKey.startsWith(prefix))?.[1];
     if (home && home !== spec.queueKey) {
       const q = await this.repo.getQueue(home);
       if (q?.active) return q;

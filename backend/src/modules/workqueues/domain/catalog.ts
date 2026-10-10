@@ -113,6 +113,7 @@ export const QUEUE_SEEDS: Record<string, QueueSeed> = Object.fromEntries(
     seed({ key: 'purchasing.receiving', name: 'Receiving', area: 'purchasing', ownerRole: 'purchasing_manager', defaultDeadlineMinutes: D, screen: 'ops/receiving', escalationRoute: [role('official_store_manager', 0), role(OWNER, 2 * D)] }),
     seed({ key: 'inventory.reservations', name: 'Stock reservations', area: 'inventory_warehouse', ownerRole: 'inventory_manager', defaultDeadlineMinutes: D, businessHoursOnly: true, screen: 'ops/inventory', screenFilter: 'reservations', escalationRoute: [role('order_manager', 0), role('official_store_manager', D)] }),
     seed({ key: 'inventory.low_stock', name: 'Low stock', area: 'inventory_warehouse', ownerRole: 'inventory_manager', defaultDeadlineMinutes: D, businessHoursOnly: true, screen: 'ops/inventory', screenFilter: 'low_stock', escalationRoute: [role('purchasing_manager', 0), role('official_store_manager', D)] }),
+    seed({ key: 'inventory.merge_candidates', name: 'SKU merge candidates', area: 'inventory_warehouse', ownerRole: 'inventory_manager', defaultDeadlineMinutes: 3 * D, businessHoursOnly: true, screen: 'ops/inventory', screenFilter: 'merge_candidates', escalationRoute: [role('official_store_manager', 2 * D)] }),
     seed({ key: 'official_store.messages', name: 'Official Store messages', area: 'support', ownerRole: 'official_store_manager', defaultDeadlineMinutes: 4 * H, businessHoursOnly: true, screen: 'admin/official', screenFilter: 'messages', escalationRoute: [role('customer_support_manager', 0), role(OWNER, D)] }),
     seed({ key: 'returns.inspection', name: 'Return inspection', area: 'returns', ownerRole: 'returns_manager', defaultDeadlineMinutes: D, screen: 'ops/return-inspection', escalationRoute: [role('warehouse_manager', 0), role(OWNER, 2 * D)] }),
     seed({ key: 'returns.decisions', name: 'Return decisions', area: 'returns', ownerRole: 'returns_manager', defaultDeadlineMinutes: D, screen: 'admin/returns', screenFilter: 'escalated', escalationRoute: [role('customer_support_manager', 0), role(OWNER, 2 * D)] }),
@@ -159,6 +160,12 @@ export const KIND_QUEUES: Partial<Record<Kind, string>> = {
   review_moderation_overdue: 'reviews.moderation',
   official_store_reply: 'official_store.messages',
 };
+
+/**
+ * Items routed by their dedupe key prefix, for raisers that use the generic manual_task kind (spec notes,
+ * "Queues per kind"): same rule as KIND_QUEUES, applied when the kind has no home queue.
+ */
+export const DEDUPE_PREFIX_QUEUES: readonly (readonly [prefix: string, queueKey: string])[] = [['inventory.merge_candidate:', 'inventory.merge_candidates']];
 
 /** Every work item kind (spec WorkItem.kind) */
 export const KINDS: readonly Kind[] = ['overdue_dispatch', 'missing_tracking', 'delivery_exception', 'seller_cannot_fulfill', 'low_stock', 'receiving', 'pick_pack', 'return_inspection', 'return_decision', 'approval_waiting', 'case_past_target', 'case_escalated', 'payout_failed', 'payment_check', 'payment_mismatch', 'chargeback', 'hold_review', 'product_review', 'application_waiting', 'launch_review', 'appeal_due', 'restriction_review', 'restriction_evidence', 'seller_performance', 'seller_owner_missing', 'storefront_review', 'trust_report', 'trust_recommendation', 'enforcement_reversal', 'review_moderation_overdue', 'official_store_reply', 'data_request', 'seller_reply_overdue', 'unexpected_return_parcel', 'return_parcel_overdue', 'manual_task'];
