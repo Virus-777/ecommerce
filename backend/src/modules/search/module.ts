@@ -26,6 +26,8 @@ export default defineModule({
     ctx.log.debug({ engine: engine.name }, 'search: engine');
     const service = new SearchService({ repo, engine, ctx });
     ctx.provide(service);
+    // an engine with its own index: a new or outdated index is filled by a queued full reindex (in the background: never blocks startup)
+    if (engine.feed) ctx.afterBoot(() => void service.bootstrapEngineIndex().catch((err) => ctx.log.warn({ err }, 'search: could not check the search engine index')));
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
 

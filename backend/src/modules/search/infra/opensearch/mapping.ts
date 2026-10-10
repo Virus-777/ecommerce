@@ -8,6 +8,9 @@
  */
 export const MAPPING_VERSION = 1;
 
+/** Deepest result a page can reach (index.max_result_window); later pages are empty */
+export const MAX_RESULT_WINDOW = 10_000;
+
 /** Searchable text fields and their weights (title and brand A, category B, attributes C, description D) */
 export const TEXT_FIELDS = ['title^10', 'brand_name^10', 'category_text^4', 'attributes_text^2', 'description^1'] as const;
 
@@ -97,7 +100,7 @@ export const productMappings = {
 export function productIndexBody(o: { shards: number; replicas: number }) {
   return {
     settings: {
-      index: { number_of_shards: o.shards, number_of_replicas: o.replicas, max_result_window: 10_000 },
+      index: { number_of_shards: o.shards, number_of_replicas: o.replicas, max_result_window: MAX_RESULT_WINDOW },
       analysis: {
         filter: {
           en_possessive: { type: 'stemmer', language: 'possessive_english' },

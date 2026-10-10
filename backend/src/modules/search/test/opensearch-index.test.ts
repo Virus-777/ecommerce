@@ -86,6 +86,18 @@ describe('index lifecycle', () => {
     expect(await other.ensure()).toBe(name);
     expect(fake.requests.filter((r) => r.method === 'PUT')).toHaveLength(1);
     expect(await index.describe()).toBe(`opensearch (green, index ${name})`);
+    // the server that created it knows it is empty; the others do not reindex again
+    expect(await index.needsRebuild()).toBe(`${name}@v${MAPPING_VERSION}`);
+    expect(await other.needsRebuild()).toBeNull();
+  });
+
+  it('servers starting together create one index', async () => {
+    const { fake, os, cfg } = setup();
+    const a = new ProductIndex(os, { cfg, log: silentLog });
+    const b = new ProductIndex(os, { cfg, log: silentLog });
+    const [x, y] = await Promise.all([a.ensure(), b.ensure()]);
+    expect(x).toBe(y);
+    expect(fake.indices.size).toBe(1);
   });
 
   it('reports an index built with an older mapping', async () => {
@@ -93,6 +105,7 @@ describe('index lifecycle', () => {
     const body = productIndexBody({ shards: 1, replicas: 0 });
     fake.handle('PUT', '/test-products-20260101000000000', {}, JSON.stringify({ ...body, mappings: { ...body.mappings, _meta: { mappingVersion: MAPPING_VERSION - 1 } }, aliases: { 'test-products': {} } }));
     expect(await index.describe()).toBe(`opensearch (green, index test-products-20260101000000000, mapping v${MAPPING_VERSION - 1} < v${MAPPING_VERSION}: full reindex needed)`);
+    expect(await index.needsRebuild()).toBe(`test-products-20260101000000000@v${MAPPING_VERSION}`);
   });
 
   it('reports an unreachable cluster', async () => {
@@ -220,6 +233,18 @@ describe('feeding from the read model', () => {
   it('indexes the rebuilt document with its texts', async () => {
     expect(engineDoc()).toMatchObject({ product_id: productId, title: 'Brass floor lamp', category_text: 'Lighting', offers: [expect.objectContaining({ offer_id: offerId, card_rank: 0, featured: true })] });
     expect((await search('brass'))[0]).toMatchObject({ productId, price: { amount: 5000 } });
+  });
+
+  it('a new engine index over a populated read model is filled by a queued full reindex', async () => {
+    const status = async () => (await k.call('GET', '/api/admin/search/index', k.staff)).body;
+    await k.svc.bootstrapEngineIndex();
+    expect((await status()).runningJob).toMatchObject({ scope: 'all', state: 'queued', reason: 'The search engine index is new or was built with an older mapping' });
+    await k.job('search.process-dirty');
+    expect((await status()).runningJob).toBeNull();
+    // once per index and mapping
+    await k.svc.bootstrapEngineIndex();
+    expect((await status()).runningJob).toBeNull();
+    expect((await search('brass'))[0]).toMatchObject({ productId });
   });
 
   it('passes on only what a transaction committed', async () => {

@@ -43,6 +43,8 @@ export class ProductIndex {
   private live: Promise<string> | null = null;
   private building: { name: string | null; at: number } | null = null;
   private mappingVersion: number | null = null;
+  /** This server created the live index (it starts empty) */
+  private created = false;
 
   constructor(
     private readonly os: OsApi,
@@ -76,15 +78,20 @@ export class ProductIndex {
       await this.checkMapping(found);
       return found;
     }
-    const name = this.newName();
+    // the first index has a fixed name, so servers starting together cannot create two
+    const name = `${this.alias}-${'0'.repeat(17)}`;
     const r = await this.os.request('PUT', `/${name}`, { ...productIndexBody(this.o.cfg), aliases: { [this.alias]: {} } }, { ignore: [400] });
     if (r.status === 400) {
       // another server created it first
       const again = await this.aliasTarget(this.alias);
-      if (again) return again;
+      if (again) {
+        await this.checkMapping(again);
+        return again;
+      }
       throw new OpenSearchError(400, r.body, `Could not create the search index ${name}`);
     }
     this.mappingVersion = MAPPING_VERSION;
+    this.created = true;
     this.o.log.info({ index: name, alias: this.alias }, 'search: created the OpenSearch products index');
     return name;
   }
@@ -104,7 +111,7 @@ export class ProductIndex {
   async aliasTarget(alias: string): Promise<string | null> {
     const r = await this.os.request<Record<string, unknown>>('GET', `/_alias/${alias}`, undefined, { ignore: [404] });
     if (r.status === 404) return null;
-    return Object.keys(r.body ?? {}).sort().at(-1) ?? null;
+    return Object.keys(r.body ?? {}).sort()[0] ?? null;
   }
 
   /** The index a running full reindex builds (cached for OPENSEARCH_ALIAS_CACHE_MS) */
@@ -114,6 +121,15 @@ export class ProductIndex {
     const name = await this.aliasTarget(this.buildingAlias);
     this.building = { name, at: Date.now() };
     return name;
+  }
+
+  /**
+   * Whether the live index needs a full reindex: this server just created it (empty), or it was built with an
+   * older mapping. Answers a key naming the index and mapping (servers queue one reindex per key), else null.
+   */
+  async needsRebuild(): Promise<string | null> {
+    const index = await this.ensure();
+    return this.created || (this.mappingVersion ?? MAPPING_VERSION) < MAPPING_VERSION ? `${index}@v${MAPPING_VERSION}` : null;
   }
 
   async beginRebuild(): Promise<void> {
@@ -148,6 +164,7 @@ export class ProductIndex {
     this.building = null;
     this.live = Promise.resolve(name);
     this.mappingVersion = MAPPING_VERSION;
+    this.created = false;
     this.o.log.info({ index: name, previous: old }, 'search: the new OpenSearch index is live');
     // keep the previous index for a rollback; older ones go
     const all = await this.os.request<{ index: string }[]>('GET', `/_cat/indices/${this.alias}-*`, undefined, { querystring: { format: 'json', h: 'index' }, ignore: [404] });

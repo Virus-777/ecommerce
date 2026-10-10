@@ -194,6 +194,8 @@ export interface IndexedDocument {
 export interface SearchIndexFeed {
   /** Writes and removes documents; answers the products that could not be written (they are marked dirty and rebuilt) */
   write(upserts: IndexedDocument[], deletes: string[]): Promise<{ failed: string[] }>;
+  /** A key when the engine's index needs a full reindex (new and empty, or an older mapping), else null */
+  needsRebuild(): Promise<string | null>;
   /** Full reindex: starts a new index; until finishRebuild every write goes to the live index and the new one */
   beginRebuild(): Promise<void>;
   /** ok: the new index becomes the live one atomically (carryOver: products the rebuild could not build, copied from the old index). Not ok: the new index is dropped. */

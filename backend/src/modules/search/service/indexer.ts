@@ -506,6 +506,34 @@ export class SearchIndexer extends SearchBase {
     );
   }
 
+  /**
+   * At startup: an engine index that is new (empty) or was built with an older mapping gets a full reindex,
+   * queued for search.process-dirty (once per index and mapping, whichever server sees it first).
+   */
+  async bootstrapEngineIndex(): Promise<void> {
+    const feed = this.engine.feed;
+    if (!feed) return;
+    const key = await feed.needsRebuild();
+    if (!key || (await this.repo.activeFullJob()) || !(await this.repo.documentStats()).documents) return;
+    await this.repo.transaction(async (tx) => {
+      if (!(await tx.claim(`engine-index:${key}`))) return;
+      await tx.insertJob({
+        id: newId(),
+        scope: 'all',
+        ids: [],
+        state: 'queued',
+        total: 0,
+        processed: 0,
+        requested_by: JSON.stringify({ kind: SYSTEM_ACTOR.kind, id: SYSTEM_ACTOR.id ?? null, name: 'Search engine index' }),
+        reason: 'The search engine index is new or was built with an older mapping',
+        started_at: null,
+        finished_at: null,
+        error: null,
+      });
+    });
+    this.ctx.log.info({ key }, 'search: full reindex queued for the search engine index');
+  }
+
   /** search.full-reindex: nightly full rebuild (catches category tree changes) */
   async fullReindex(): Promise<void> {
     let job = await this.repo.activeFullJob();

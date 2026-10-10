@@ -16,7 +16,7 @@ import type { EngineHit, EngineQuery, FacetCounts, SearchEngine, SearchIndexFeed
 import type { TermLookup } from '../postgres/terms.js';
 import type { OsApi } from './client.js';
 import { docOf } from './document.js';
-import { TEXT_FIELDS } from './mapping.js';
+import { MAX_RESULT_WINDOW, TEXT_FIELDS } from './mapping.js';
 import type { ProductIndex } from './products-index.js';
 import { alternative, countBody, facetsBody, HIT_SOURCE, MATCH_ALL, priceRangeBodies, priceStreamBodies, searchBody, summaryBody, type Q, type Weights } from './query.js';
 import { docFactors, eoFactors, TEXT_RELEVANCE } from './scripts.js';
@@ -146,13 +146,16 @@ export function createOpenSearchEngine(d: OpenSearchEngineDeps): SearchEngine & 
 
     feed: {
       write: (upserts, deletes) => index.write(upserts, deletes),
+      needsRebuild: () => index.needsRebuild(),
       beginRebuild: () => index.beginRebuild(),
       finishRebuild: (ok, carryOver) => index.finishRebuild(ok, carryOver),
     },
 
     describe: () => index.describe(),
 
-    async search(q, sort: SortKey, weights: Record<RankingFactorKey, number>, window) {
+    async search(q, sort: SortKey, weights: Record<RankingFactorKey, number>, requested) {
+      // results are paged within the index's max_result_window
+      const window = { offset: requested.offset, limit: Math.min(requested.limit, MAX_RESULT_WINDOW - requested.offset) };
       if (window.limit <= 0) return { hits: [], total: await count(countBody(q)) };
       if (sort === 'price_asc' || sort === 'price_desc') {
         const { hits, total } = await priceSearch(q, sort === 'price_asc' ? 'asc' : 'desc', weights, window);
