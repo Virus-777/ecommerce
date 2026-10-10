@@ -83,6 +83,11 @@ function withStubs(api: object | undefined, stub: object): object {
 
 export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance> {
   const config = loadConfig(opts.env ?? process.env, opts.config);
+  // Phase 4 guard: checkout, offers and orders don't route Marketly-fulfilled items yet (isServiceOffer is unused), so
+  // with fulfillment-service on, sellers would be told to ship orders Marketly fulfils. Tests boot it by name (opts.modules).
+  if (!opts.modules && (config.modules ?? enabledModules).includes('fulfillment-service')) {
+    throw new Error('fulfillment-service cannot be enabled yet: checkout, offers and orders must call fulfillment-service.isServiceOffer first (phase 4)');
+  }
   const app = createServer(config);
 
   // independent startup work runs in parallel: the database and the module imports
