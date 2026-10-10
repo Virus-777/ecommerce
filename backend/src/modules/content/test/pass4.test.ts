@@ -73,6 +73,34 @@ describe('migration 0003', () => {
   });
 });
 
+describe('service strip checks', () => {
+  it('warns (never blocks) when the strip disagrees with the free-shipping threshold or the return window in force', async () => {
+    const app = await buildTestApp({
+      only: ['content', 'shipping', 'returns'],
+      clock: h.clock,
+      apiStubs: {
+        shipping: { getOfficialFreeShipping: async () => ({ threshold: { amount: 3500, currency: 'USD' }, methodCode: 'standard', active: true, label: 'Free shipping over $35' }) },
+        returns: { defaultWindowDays: async () => ({ windowDays: 30, policyVersion: '1.0' }) },
+      },
+    });
+    try {
+      const put = (text: string) =>
+        app.inject({ method: 'PUT', url: '/api/admin/content/navigation', headers: auth(callers.staff()), payload: { header: [], footer: [], serviceStrip: { text, link: null, activeFrom: null, activeUntil: null } } });
+      const res = await put('Free shipping over $49 · 30-day returns');
+      expect(res.statusCode, res.body).toBe(200);
+      expect(res.json().checks).toEqual([
+        expect.objectContaining({ state: 'warn', label: 'The free-shipping amount in the strip differs from shipping', detail: 'Strip: $49.00; in force: $35.00' }),
+        expect.objectContaining({ state: 'ok', label: 'Return window matches the returns policy' }),
+      ]);
+      const ok = (await put('Free shipping over $35 · 60-day returns')).json();
+      expect(ok.checks.map((c: { state: string }) => c.state)).toEqual(['ok', 'warn']);
+      expect((await put('Holiday hours: support closes at 6 pm')).json().checks).toEqual([]);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
 describe('navigation company facts', () => {
   it('come from settings.storeInfo (market.companyLine and market.legalName)', async () => {
     const app = await buildTestApp({ only: ['content', 'settings'], clock: h.clock });

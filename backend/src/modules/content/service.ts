@@ -1,7 +1,8 @@
 import type { EventPayload } from '../../kernel/events/index.js';
 import { newId } from '../../kernel/lib/ids.js';
 import type * as catalog from '../../spec/catalog.js';
-import type { ContentPublicApi, FooterGroup, HelpCategory, LinkRef, PageDraftInput, SellerAnnouncement, ServiceStrip, SiteNavigation } from '../../spec/content.js';
+import { format as formatMoney } from '../../kernel/lib/money.js';
+import type { Check, ContentPublicApi, FooterGroup, HelpCategory, LinkRef, PageDraftInput, SellerAnnouncement, ServiceStrip, SiteNavigation } from '../../spec/content.js';
 import type * as sellers from '../../spec/sellers.js';
 import { inWindow } from './domain/rules.js';
 import type { NavigationRow, PageRow, VersionRow } from './ports.js';
@@ -85,7 +86,40 @@ export class ContentService extends ContentPolicies implements ContentPublicApi 
     await this.repo.transaction((tx) => tx.replaceNavigation(rows));
     const after = await this.repo.listNavigation();
     await this.audit({ action: 'content.navigation.update', actionLabel: 'Replaced header and footer links', target: { type: 'navigation', id: 'site', label: 'Site navigation' }, before: this.navigationFrom(before, { strip: 'any' }), after: this.navigationFrom(after, { strip: 'any' }), reason: body.reason ?? null }, by);
-    return { ...this.navigationFrom(after, { strip: 'any' }), contact: await this.contactChannels('customer'), ...(await this.company()) };
+    return { ...this.navigationFrom(after, { strip: 'any' }), contact: await this.contactChannels('customer'), ...(await this.company()), checks: await this.stripChecks(strip?.text ?? null) };
+  }
+
+  /**
+   * Warn-only checks of the service strip text against the facts in force (decision: warn, never block): a
+   * free-shipping amount against shipping.getOfficialFreeShipping, an 'N-day returns' window against
+   * returns.defaultWindowDays. A module that is off (or cannot answer) is simply not checked.
+   */
+  protected async stripChecks(text: string | null): Promise<Check[]> {
+    if (!text?.trim()) return [];
+    const checks: Check[] = [];
+    const freeShip = /free (?:shipping|delivery)[^$]{0,40}\$\s?([\d,]+(?:\.\d{2})?)|\$\s?([\d,]+(?:\.\d{2})?)[^$]{0,40}free (?:shipping|delivery)/i.exec(text);
+    if (freeShip) {
+      const shipping = this.ctx.tryUse('shipping');
+      const official = await this.soft('shipping.getOfficialFreeShipping', shipping && (() => shipping.getOfficialFreeShipping()), null);
+      if (official) {
+        const stated = Math.round(Number((freeShip[1] ?? freeShip[2])!.replace(/,/g, '')) * 100);
+        const inForce = official.active && official.threshold ? official.threshold.amount : null;
+        if (inForce === null) checks.push({ state: 'warn', label: 'The strip promises free shipping the Official Store does not offer now', detail: 'No free-shipping threshold is in force in shipping.' });
+        else if (inForce !== stated) checks.push({ state: 'warn', label: 'The free-shipping amount in the strip differs from shipping', detail: `Strip: ${formatMoney({ amount: stated, currency: official.threshold!.currency })}; in force: ${formatMoney(official.threshold!)}` });
+        else checks.push({ state: 'ok', label: 'Free-shipping amount matches shipping' });
+      }
+    }
+    const window = /(\d{1,3})[- ]day (?:free )?returns?/i.exec(text);
+    if (window) {
+      const returns = this.ctx.tryUse('returns');
+      const inForce = await this.soft('returns.defaultWindowDays', returns && (() => returns.defaultWindowDays()), null);
+      if (inForce) {
+        const stated = Number(window[1]);
+        if (stated !== inForce.windowDays) checks.push({ state: 'warn', label: 'The return window in the strip differs from the returns policy', detail: `Strip: ${stated} days; in force: ${inForce.windowDays} days${inForce.policyVersion ? ` (policy ${inForce.policyVersion})` : ''}` });
+        else checks.push({ state: 'ok', label: 'Return window matches the returns policy' });
+      }
+    }
+    return checks;
   }
 
   /* ---------------------------------------------------------------- events consumed */
