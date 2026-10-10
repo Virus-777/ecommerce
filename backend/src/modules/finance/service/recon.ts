@@ -66,6 +66,7 @@ export class ReconPart extends Part {
         description: r.description,
         expected: { amount: r.expected, currency: r.currency },
         actual: { amount: r.actual, currency: r.currency },
+        credit: r.ref_kind === 'capture' ? { amount: r.credit, currency: r.currency } : null,
         difference: { amount: r.difference, currency: r.currency },
         detectedAt: r.detected_at.toISOString(),
         ageDays: Math.max(0, Math.floor((now - r.detected_at.getTime()) / DAY_MS)),
@@ -165,7 +166,8 @@ export class ReconPart extends Part {
   }
 
   /** Records a check result; new mismatches are published for Finance's queue, an open item that now matches is closed */
-  async upsertItem(row: Omit<ReconItemRec, 'status' | 'note' | 'owner_staff_id' | 'correction' | 'approval_request_id' | 'currency' | 'detected_at'>) {
+  async upsertItem(input: Omit<ReconItemRec, 'status' | 'note' | 'owner_staff_id' | 'correction' | 'approval_request_id' | 'currency' | 'detected_at' | 'credit'> & { credit?: number }) {
+    const row = { ...input, credit: input.credit ?? 0 };
     await this.ensureDay(row.date);
     const matched = row.difference === 0;
     const inserted = await this.repo.insertIgnore('recon_items', { ...row, currency: this.core.currency(), detected_at: this.now(), status: matched ? this.core.step(reconciliationItemMachine, 'open', 'autoMatch') : 'open', note: null, owner_staff_id: null, correction: null, approval_request_id: null });
@@ -180,20 +182,37 @@ export class ReconPart extends Part {
   }
 
   /**
-   * payments.payment.captured: the card amount plus the store credit applied (creditAmount) against the order (or
-   * package) total less the items cancelled before they were charged. Stored as the card amount (actual, what the
-   * provider deposits) against what the card had to pay (the total less cancelled items less the store credit),
-   * so a mixed card and credit payment is no mismatch and the deposit check still adds up card money only.
+   * payments.payment.captured: the capture is recorded (captures: card amount and store credit applied), then
+   * checked: card plus store credit (creditAmount) against the order (or package) total less the items cancelled
+   * before they were charged. The item keeps expected = that total, actual = the card amount (what the provider
+   * deposits) and credit = the store credit, so a mixed card and credit payment is no mismatch and the deposit
+   * check adds up card money only.
    */
   async onPaymentCaptured(e: EventPayload<'payments.payment.captured'>) {
-    const at = new Date(e.capturedAt);
-    const date = this.core.today(Number.isNaN(at.getTime()) ? this.now() : at);
+    const at0 = new Date(e.capturedAt);
+    const at = Number.isNaN(at0.getTime()) ? this.now() : at0;
+    const date = this.core.today(at);
     const card = e.amount.amount;
     const credit = e.creditAmount && e.creditAmount.amount > 0 ? e.creditAmount.amount : 0;
     const creditNote = credit ? ` (store credit ${fmt(credit, e.creditAmount!.currency)} also applied)` : '';
+    const itemId = detId(`capture:${e.captureId}`);
     const order = await this.parts.ledger.order(e.orderId);
+    if (isUuid(e.captureId)) {
+      await this.repo.insertIgnore('captures', {
+        id: e.captureId,
+        intent_id: isUuid(e.intentId) ? e.intentId : null,
+        order_id: order && isUuid(e.orderId) ? e.orderId : null,
+        group_id: e.groupId && isUuid(e.groupId) ? e.groupId : null,
+        card_amount: card,
+        credit_amount: credit,
+        currency: e.amount.currency,
+        provider_ref: e.providerRef ?? null,
+        captured_at: at,
+        recon_item_id: itemId,
+      });
+    }
     if (!order) {
-      await this.upsertItem({ id: detId(`capture:${e.captureId}`), date, check: 'unexplained_amount', ref_kind: 'capture', ref_id: e.captureId, subject: e.providerRef ?? 'Captured payment', description: `Captured payment with no matching order${creditNote}`, expected: 0, actual: card, difference: card });
+      await this.upsertItem({ id: itemId, date, check: 'unexplained_amount', ref_kind: 'capture', ref_id: e.captureId, subject: e.providerRef ?? 'Captured payment', description: `Captured payment with no matching order${creditNote}`, expected: 0, actual: card, credit, difference: card + credit });
       return;
     }
     const group = e.groupId ? order.groups.find((g) => g.id === e.groupId) : undefined;
@@ -205,7 +224,7 @@ export class ReconPart extends Part {
     const cur = order.totals.total.currency;
     const against = `${group ? `package ${group.packageLabel}` : 'the order'} total ${fmt(total, cur)}${cancelled ? ` less ${fmt(cancelled, cur)} of cancelled items` : ''}`;
     const description = credit ? `Card capture ${fmt(card, cur)} plus store credit ${fmt(credit, cur)} against ${against}` : `Capture against ${against}`;
-    await this.upsertItem({ id: detId(`capture:${e.captureId}`), date, check: 'payments_vs_orders', ref_kind: 'capture', ref_id: e.captureId, subject: order.ref, description, expected: due - credit, actual: card, difference: card + credit - due });
+    await this.upsertItem({ id: itemId, date, check: 'payments_vs_orders', ref_kind: 'capture', ref_id: e.captureId, subject: order.ref, description, expected: due, actual: card, credit, difference: card + credit - due });
   }
 
   /**
@@ -319,10 +338,10 @@ export class ReconPart extends Part {
     }
     // the provider's deposit against the day's captures
     const tz = this.core.tz();
-    const captures = (await this.repo.find('recon_items', { ref_kind: 'capture', detected_at: { op: '>=', value: dayStart(date, tz) } })).filter((c) => c.detected_at < dayStart(addDays(date, 1), tz));
+    const captures = (await this.repo.find('captures', { captured_at: { op: '>=', value: dayStart(date, tz) } })).filter((c) => c.captured_at < dayStart(addDays(date, 1), tz));
     const deposit = await this.core.provider.settlementReport(date, this.core.currency());
     if (deposit) {
-      const expected = captures.reduce((s, c) => s + c.actual, 0);
+      const expected = captures.reduce((s, c) => s + c.card_amount, 0);
       await this.upsertItem({ id: detId(`deposit:${date}`), date, check: 'provider_deposit', ref_kind: null, ref_id: null, subject: 'Payment provider deposit', description: `Deposit for ${date} against ${captures.length} captured payments`, expected, actual: deposit.amount, difference: deposit.amount - expected });
     }
     // store credit: finance's liability against wallet's balances (wallet's own per-account differences arrive through recordExternalDifference)

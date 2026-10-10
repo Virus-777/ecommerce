@@ -14,7 +14,7 @@ import { renderPdf, type PdfLine } from '../domain/pdf.js';
 import { addDays, feeBasisNote, fmt, marketDate, sectionOf, SECTIONS, type EntryType, type SectionKey } from '../domain/rules.js';
 import { statementMachine } from '../domain/state-machines.js';
 import { reference, toStatementSummary } from '../mappers.js';
-import type { EntryRec, FinanceRepository, StatementRec } from '../ports.js';
+import type { AccountRec, EntryRec, FinanceRepository, StatementRec } from '../ports.js';
 import { notFound, Part } from './core.js';
 
 export interface Prepared {
@@ -143,20 +143,43 @@ export class StatementsPart extends Part {
     this.core.publish('finance.statement.issued', { statementId: p.id, sellerId, period: p.period, payoutId: null });
   }
 
-  /** The current period's open statement (created when first looked at) */
-  async ensureOpen(sellerId: string): Promise<StatementRec | undefined> {
+  /**
+   * Opens the current period's statement when the seller has none: at seller approval, after a statement is
+   * issued (the next period) and from finance.payout-run.create for accounts that have none. Never on read.
+   */
+  async openStatement(sellerId: string): Promise<StatementRec | undefined> {
     const open = await this.repo.findOne('statements', { seller_id: sellerId, status: 'open' });
     if (open) return open;
-    const hasActivity = (await this.repo.count('ledger_entries', { seller_id: sellerId })) > 0;
-    if (!hasActivity) return undefined;
     const today = this.core.today();
     const last = await this.repo.findOne('statements', { seller_id: sellerId, status: 'issued' }, { orderBy: [['period_to', 'desc']] });
     const from = last ? addDays(last.period_to, 1) : today;
     const id = newId();
     const rule = await this.core.activeRule();
     const cur = this.core.currency();
-    await this.repo.insertIgnore('statements', { id, ref: await this.nextRef(sellerId, today), seller_id: sellerId, period_from: from <= today ? from : today, period_to: today, status: statementMachine.initial, issued_at: null, payout_id: null, sections: [] as never, reconciliation: { openingAvailable: { amount: 0, currency: cur }, lines: [], payout: { amount: 0, currency: cur }, closingAvailable: { amount: 0, currency: cur } } as never, rule_version: rule.version, pdf_media_id: null, csv_media_id: null });
+    await this.repo.insertIgnore('statements', { id, ref: await this.nextRef(sellerId, today), seller_id: sellerId, period_from: from, period_to: from <= today ? today : from, status: statementMachine.initial, issued_at: null, payout_id: null, sections: [] as never, reconciliation: { openingAvailable: { amount: 0, currency: cur }, lines: [], payout: { amount: 0, currency: cur }, closingAvailable: { amount: 0, currency: cur } } as never, rule_version: rule.version, pdf_media_id: null, csv_media_id: null });
     return this.repo.findOne('statements', { seller_id: sellerId, status: 'open' });
+  }
+
+  /** Part of finance.payout-run.create: seller accounts without an open statement get one (bounded batch per run, keyset by seller) */
+  async openMissing(limit = 200): Promise<number> {
+    let opened = 0;
+    let after: string | null = null;
+    for (;;) {
+      const accounts: AccountRec[] = await this.repo.find('seller_accounts', after ? { seller_id: { op: '>', value: after } } : {}, { orderBy: [['seller_id', 'asc']], limit });
+      if (!accounts.length) break;
+      const withOpen = new Set((await this.repo.find('statements', { seller_id: accounts.map((a) => a.seller_id), status: 'open' })).map((s) => s.seller_id));
+      for (const a of accounts) {
+        if (withOpen.has(a.seller_id)) continue;
+        try {
+          if (await this.openStatement(a.seller_id)) opened++;
+        } catch (err) {
+          this.ctx.log.warn({ err, sellerId: a.seller_id }, 'finance: could not open a statement');
+        }
+      }
+      if (accounts.length < limit) break;
+      after = accounts.at(-1)!.seller_id;
+    }
+    return opened;
   }
 
   /* ---------------------------------------------------------------- views */
@@ -207,13 +230,11 @@ export class StatementsPart extends Part {
   }
 
   async list(sellerId: string, page: PageRequest): Promise<common.Page<StatementSummary>> {
-    await this.ensureOpen(sellerId);
     const res = await this.repo.page('statements', { seller_id: sellerId }, page, { column: 'period_to', direction: 'desc' });
     return { ...res, items: await this.summaries(res.items) };
   }
 
   async listFull(sellerId: string, page: PageRequest): Promise<common.Page<Statement>> {
-    await this.ensureOpen(sellerId);
     const res = await this.repo.page('statements', { seller_id: sellerId }, page, { column: 'period_to', direction: 'desc' });
     return { ...res, items: await Promise.all(res.items.map((r) => this.view(r))) };
   }

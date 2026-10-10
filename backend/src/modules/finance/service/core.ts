@@ -232,8 +232,7 @@ export class Core {
 
   async ruleModel(row: RuleSetRec, repo: FinanceRepository = this.repo): Promise<RuleModel> {
     const rates = await repo.find('fee_category_rates', { rule_set_id: row.id });
-    const t = (row.treatment ?? {}) as unknown as FeeTreatment & { categoryNames?: Record<string, string> };
-    const { categoryNames: _names, ...treatment } = t;
+    const treatment = (row.treatment ?? {}) as unknown as FeeTreatment;
     return {
       id: row.id,
       version: row.version,

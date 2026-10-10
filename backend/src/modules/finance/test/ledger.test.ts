@@ -227,7 +227,7 @@ describe('the spec correctness pass, replayed on the ledger', () => {
 
   it('charges the category fee rate of the category the order item was bought in', async () => {
     const rule = await k.svc.core.activeRule();
-    await repo().insert('fee_category_rates', { rule_set_id: rule.id, category_id: CATEGORY, rate_bps: 1500 });
+    await repo().insert('fee_category_rates', { rule_set_id: rule.id, category_id: CATEGORY, category_name: 'Electronics', rate_bps: 1500 });
     const ord = k.order(S3, [
       { title: 'Espresso machine', quantity: 1, price: 20_000, categoryId: CATEGORY },
       { title: 'Milk jug', quantity: 1, price: 2_000 },
@@ -313,12 +313,14 @@ describe('the spec correctness pass, replayed on the ledger', () => {
     const eventId = newId();
     await k.svc.onRedemptionReversedFromPromotions(part, eventId);
     await k.svc.onRedemptionReversedFromPromotions(part, eventId); // redelivered
-    const rows = async () => repo().find('trading_entries', { ref_id: redemptionId });
-    const net = async (kind: string) => (await rows()).filter((r) => r.ref_kind === kind).reduce((s, r) => s + r.amount, 0);
-    expect([await net('coupon_redemption'), await net('coupon_seller_part')]).toEqual([600, 300]);
-    expect((await rows()).find((r) => r.amount === -400)).toMatchObject({ order_id: orderId, order_item_id: orderItemId });
+    const rows = async () => repo().find('discount_funding', { redemption_id: redemptionId });
+    const net = async (by: string) => (await rows()).filter((r) => r.funded_by === by).reduce((s, r) => s + r.amount, 0);
+    expect([await net('platform'), await net('seller')]).toEqual([600, 300]);
+    expect((await rows()).find((r) => r.amount === -400)).toMatchObject({ kind: 'reversed', order_id: orderId, order_item_id: orderItemId });
     await k.emit('promotions.redemption.reversed', { redemptionId, orderItemId, amount: USD(900), platformPart: USD(600), sellerPart: USD(300) });
-    expect([await net('coupon_redemption'), await net('coupon_seller_part')]).toEqual([0, 0]);
+    expect([await net('platform'), await net('seller')]).toEqual([0, 0]);
+    // marketplace facts never land in Official Store trading
+    expect(await repo().find('trading_entries', { ref_id: redemptionId })).toEqual([]);
   });
 
   it('books only platform-funded goodwill as a cost; seller-charged goodwill comes out of the seller earnings', async () => {
@@ -331,9 +333,10 @@ describe('the spec correctness pass, replayed on the ledger', () => {
     await k.emit('wallet.credit.granted', seller); // redelivered
     await k.emit('wallet.credit.granted', { ...base, entryId: ids.refund, kind: 'refund_to_credit', amount: USD(2_500), chargedTo: null, sellerId: null, caseId: null });
     await k.emit('wallet.credit.granted', { customerId: base.customerId, entryId: ids.gift, kind: 'gift_card_redeemed', amount: USD(5_000), chargedTo: null, sellerId: null, caseId: null, orderId: null });
-    const costs = await repo().find('trading_entries', { ref_kind: 'wallet_credit', ref_id: Object.values(ids) });
+    const costs = await repo().find('platform_costs', { kind: 'goodwill_credit', ref_id: Object.values(ids) });
     expect(costs.map((c) => [c.ref_id, c.amount])).toEqual([[ids.platform, 1_000]]);
-    const liability = await repo().find('trading_entries', { ref_kind: 'wallet_liability', ref_id: Object.values(ids) });
+    const liability = await repo().find('store_credit_liability', { wallet_entry_id: Object.values(ids) });
+    expect(liability.every((r) => r.kind === 'granted')).toBe(true);
     expect(liability.reduce((s, r) => s + r.amount, 0)).toBe(1_000 + 700 + 2_500 + 5_000);
     expect((await expectLedgerMatches(k, S3)).total).toBe(before.total - 700);
     const adj = await k.call('GET', `${ADMIN}/adjustments?sellerId=${S3}`, k.staff);

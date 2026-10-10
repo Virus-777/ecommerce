@@ -70,8 +70,10 @@ export function toAdjustment(r: AdjustmentRec, sellerName: string, approval: com
   };
 }
 
-export function toOwed(r: OwedRec, sellerName: string): AmountOwed {
+export function toOwed(r: OwedRec, sellerName: string, approvals?: Map<string, common.ApprovalInfo>): AmountOwed {
   return {
+    pendingWriteOff: r.write_off_amount !== null ? m(r.write_off_amount, r.currency) : null,
+    approval: r.approval_request_id ? (approvals?.get(r.approval_request_id) ?? { required: true, approvalRequestId: r.approval_request_id, approvers: [] }) : null,
     id: r.id,
     sellerId: r.seller_id,
     sellerName,
@@ -160,9 +162,8 @@ export function toReview(r: ReviewRec, sellerName: string, pauseUntil: Date | nu
   };
 }
 
-export function toRuleSet(r: RuleSetRec, rates: { category_id: string; rate_bps: number }[], approval: common.ApprovalInfo | null): FeeRuleSet {
-  const t = (r.treatment ?? {}) as unknown as FeeRuleSet['treatment'] & { categoryNames?: Record<string, string> };
-  const { categoryNames, ...treatment } = t;
+export function toRuleSet(r: RuleSetRec, rates: { category_id: string; category_name: string; rate_bps: number }[], approval: common.ApprovalInfo | null): FeeRuleSet {
+  const treatment = (r.treatment ?? {}) as unknown as FeeRuleSet['treatment'];
   return {
     id: r.id,
     version: r.version,
@@ -171,7 +172,7 @@ export function toRuleSet(r: RuleSetRec, rates: { category_id: string; rate_bps:
     includeShipping: r.include_shipping,
     platformDiscountsReduceFee: r.platform_discounts_reduce_fee,
     defaultRateBps: r.default_rate_bps,
-    categoryRates: rates.map((c) => ({ categoryId: c.category_id, categoryName: categoryNames?.[c.category_id] ?? 'Category', rateBps: c.rate_bps })),
+    categoryRates: rates.map((c) => ({ categoryId: c.category_id, categoryName: c.category_name, rateBps: c.rate_bps })),
     treatment,
     agreementVersion: r.agreement_version,
     effectiveFrom: iso(r.effective_from),

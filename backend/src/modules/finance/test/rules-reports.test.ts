@@ -297,7 +297,7 @@ describe('daily finance checks', () => {
     const mixed = k.order(S, [{ title: 'Lamp', quantity: 1, price: 6_000 }, { title: 'Shade', quantity: 1, price: 4_000 }]);
     const c1 = captured(mixed.id, { card: 7_000, credit: 3_000 });
     await c1.emit();
-    expect(await itemOf(c1.captureId)).toMatchObject({ check: 'payments_vs_orders', status: 'matched', expected: 7_000, actual: 7_000, difference: 0 });
+    expect(await itemOf(c1.captureId)).toMatchObject({ check: 'payments_vs_orders', status: 'matched', expected: 10_000, actual: 7_000, credit: 3_000, difference: 0 });
     expect((await itemOf(c1.captureId)).description).toContain('plus store credit $30.00');
 
     // per package with an item cancelled before it was charged: the package total less that item
@@ -305,7 +305,7 @@ describe('daily finance checks', () => {
     const group = split.groups[0]!;
     const c2 = captured(split.id, { card: 6_000, credit: 3_000, groupId: group.id });
     await c2.emit();
-    expect(await itemOf(c2.captureId)).toMatchObject({ status: 'matched', expected: 6_000, actual: 6_000, difference: 0 });
+    expect(await itemOf(c2.captureId)).toMatchObject({ status: 'matched', expected: 9_000, actual: 6_000, credit: 3_000, difference: 0 });
     expect((await itemOf(c2.captureId)).description).toContain('less $50.00 of cancelled items');
 
     // an item cancelled after the capture was refunded, not left out of the capture
@@ -319,7 +319,7 @@ describe('daily finance checks', () => {
     const c4 = captured(over.id, { card: 2_100, credit: 3_000 });
     await c4.emit();
     const mismatch = await itemOf(c4.captureId);
-    expect(mismatch).toMatchObject({ status: 'open', expected: 2_000, actual: 2_100, difference: 100 });
+    expect(mismatch).toMatchObject({ status: 'open', expected: 5_000, actual: 2_100, credit: 3_000, difference: 100 });
     expect(k.of('finance.reconciliation.mismatch_found')).toContainEqual({ itemId: mismatch.id, check: 'payments_vs_orders', difference: USD(100) });
     await c4.emit(); // redelivered: nothing new
     expect(k.of('finance.reconciliation.mismatch_found').filter((x) => x.itemId === mismatch.id)).toHaveLength(1);
