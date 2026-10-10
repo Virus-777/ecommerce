@@ -379,7 +379,7 @@
       { "name": "purchasing.claim.settled", "when": "A supplier settles a claim", "payload": { "claimId": "uuid", "supplierId": "uuid", "purchaseOrderId": "uuid", "settlement": "string", "amount": "Money" } }
     ],
     "consumes": [
-      { "name": "inventory.receipt.confirmed", "does": "Mark the receipt confirmed (who made the stock sellable) and add it to the PO timeline" },
+      { "name": "inventory.receipt.confirmed", "does": "Mark the receipt confirmed (who made the stock sellable) and add it to the PO timeline. Receipts with source.kind service_inbound (Fulfilled by Marketly) are not purchasing's and are ignored" },
       { "name": "inventory.stock.low", "does": "Refresh reorder suggestions for company stock items" },
       { "name": "access.approval.decided", "does": "Send an approved PO; record a rejection on the PO timeline" }
     ]
