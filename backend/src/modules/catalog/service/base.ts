@@ -8,7 +8,17 @@ import type { ModuleContext } from '../../../kernel/module-system/index.js';
 import type * as audit from '../../../spec/audit.js';
 import type * as common from '../../../spec/common.js';
 import type { MediaOwner, UsageInput } from '../../../spec/media.js';
+import { addBusinessDays } from '../domain/rules.js';
 import type { CatalogRepository, CategoryRow } from '../ports.js';
+
+/**
+ * Review dates of a new submission, prepared before a transaction: the target (setting reviewTargetBusinessDays) and
+ * business-day arithmetic on the settings business calendar (Monday to Friday in UTC while settings is off).
+ */
+export interface ReviewClock {
+  targetDays: number;
+  addBusinessDays(from: Date, days: number): Date;
+}
 
 export interface CatalogServiceDeps {
   repo: CatalogRepository;
@@ -161,6 +171,21 @@ export class CatalogBase {
   protected async reviewTargetDays(): Promise<number> {
     const v = Number(await this.ctx.settings.get('reviewTargetBusinessDays'));
     return Number.isFinite(v) && v >= 1 ? Math.round(v) : 1;
+  }
+
+  /** The review target and the market's business calendar (settings.businessCalendar); read before a transaction */
+  protected async reviewClock(): Promise<ReviewClock> {
+    const targetDays = await this.reviewTargetDays();
+    const settings = this.ctx.tryUse('settings');
+    if (settings) {
+      try {
+        const cal = await settings.businessCalendar();
+        return { targetDays, addBusinessDays: (from, days) => new Date(cal.addBusinessDays(from.toISOString(), days)) };
+      } catch (err) {
+        this.ctx.log.warn({ err }, 'catalog: business calendar unavailable; review dates count Monday to Friday');
+      }
+    }
+    return { targetDays, addBusinessDays };
   }
 
   /**

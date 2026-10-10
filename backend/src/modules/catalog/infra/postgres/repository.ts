@@ -12,6 +12,7 @@ import type {
   CatalogRepository,
   CategoryRow,
   CategoryStatsRow,
+  CheckDismissalRow,
   CheckRow,
   CorrectionRow,
   ImageStandardRow,
@@ -40,6 +41,7 @@ const JSON_COLUMNS: Record<string, readonly string[]> = {
   correction_suggestions: ['evidence_media_ids'],
   submissions: ['submitted_by', 'last_saved_by'],
   submission_checks: ['details', 'evidence', 'dismissed_by'],
+  check_dismissals: ['dismissed_by'],
   review_drafts: ['fields'],
   brand_authorized_sellers: ['added_by'],
   offer_index: ['price'],
@@ -327,7 +329,7 @@ class PgCatalogRepository implements CatalogRepository {
       .selectFrom('submissions')
       .select(sql<number>`count(*)::int`.as('n'))
       .where('state', '=', 'open')
-      .where('review_due_at', 'is not', null)
+      .where('paused_at', 'is', null)
       .executeTakeFirstOrThrow();
     const offers = await this.db.selectFrom('offer_index').select(sql<number>`count(*)::int`.as('n')).where('status', '!=', 'removed').executeTakeFirstOrThrow();
     return { ...r, inReview: queue.n, offers: offers.n };
@@ -498,6 +500,7 @@ class PgCatalogRepository implements CatalogRepository {
       .innerJoin('products as p', 'p.id', 's.product_id')
       .selectAll('s')
       .where('s.state', '=', 'open')
+      .where('s.paused_at', 'is', null)
       .where('s.review_due_at', 'is not', null)
       .where('p.merged_into_id', 'is', null);
     if (filter.kind) q = q.where('s.kind', '=', filter.kind as SubmissionRow['kind']);
@@ -512,8 +515,8 @@ class PgCatalogRepository implements CatalogRepository {
       .where('p.owner_seller_id', '=', sellerId)
       .where('s.state', '=', 'open');
     if (opts.categoryIds?.length) q = q.where('p.category_id', 'in', opts.categoryIds);
-    if (opts.paused === true) q = q.where('s.review_due_at', 'is', null);
-    if (opts.paused === false) q = q.where('s.review_due_at', 'is not', null);
+    if (opts.paused === true) q = q.where('s.paused_at', 'is not', null);
+    if (opts.paused === false) q = q.where('s.paused_at', 'is', null);
     return q.execute();
   }
   async pausedCounts(sellerIds: string[]) {
@@ -524,7 +527,7 @@ class PgCatalogRepository implements CatalogRepository {
       .select(['p.owner_seller_id', sql<number>`count(*)::int`.as('n')])
       .where('p.owner_seller_id', 'in', sellerIds)
       .where('s.state', '=', 'open')
-      .where('s.review_due_at', 'is', null)
+      .where('s.paused_at', 'is not', null)
       .groupBy('p.owner_seller_id')
       .execute();
     return new Map(rows.map((r) => [r.owner_seller_id!, r.n]));
@@ -538,6 +541,13 @@ class PgCatalogRepository implements CatalogRepository {
   }
   async updateCheck(id: string, patch: Partial<CheckRow>) {
     await this.db.updateTable('submission_checks').set(enc('submission_checks', patch)).where('id', '=', id).execute();
+  }
+  async insertDismissals(rows: CheckDismissalRow[]) {
+    if (rows.length) await this.db.insertInto('check_dismissals').values(rows.map((r) => enc('check_dismissals', r))).onConflict((oc) => oc.columns(['check_id', 'matched_product_id']).doNothing()).execute();
+  }
+  async dismissalsOf(checkIds: string[]) {
+    if (!checkIds.length) return [];
+    return this.db.selectFrom('check_dismissals').selectAll().where('check_id', 'in', checkIds).execute();
   }
   async saveDraft(row: ReviewDraftRow) {
     const values = enc('review_drafts', row);

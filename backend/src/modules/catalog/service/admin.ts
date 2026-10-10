@@ -69,9 +69,8 @@ export class CatalogAdmin extends CatalogReview {
 
   /** Open submissions, by review deadline; paused ones (restricted or suspended sellers) are left out */
   async reviewQueue(filter: { kind?: string; categoryId?: string }, page: PageRequest, viewer: Viewer): Promise<common.Page<ProductAdmin>> {
-    const kind = filter.kind === 'correction' ? 'content_change' : filter.kind;
     const categoryIds = filter.categoryId ? (await this.taxonomy()).subtree(filter.categoryId) : undefined;
-    const p = await this.repo.reviewQueue({ kind, categoryIds }, page);
+    const p = await this.repo.reviewQueue({ kind: filter.kind, categoryIds }, page);
     const products = new Map((await this.repo.getProducts(p.items.map((s) => s.product_id))).map((r) => [r.id, r]));
     const rows = p.items.flatMap((s) => (products.has(s.product_id) ? [products.get(s.product_id)!] : []));
     return { ...p, items: await this.adminViews(rows, viewer) };
@@ -266,7 +265,7 @@ export class CatalogAdmin extends CatalogReview {
     if (body.accept && !current) throw notFound();
     const patch = current ? await this.correctionPatch(current, before.field, before.proposed) : {};
     const ref = current && IDENTITY_FIELDS.includes(before.field) && current.review_state === 'approved' ? await this.submissionRef() : null;
-    const targetDays = ref ? await this.reviewTargetDays() : 1;
+    const clock = ref ? await this.reviewClock() : null;
     let product: ProductRow | null = null;
     let reopened: Awaited<ReturnType<typeof this.reopenTx>> | null = null;
     const after = await this.repo.transaction(async (tx) => {
@@ -278,7 +277,7 @@ export class CatalogAdmin extends CatalogReview {
         product = await tx.updateProduct(p.id, { ...patch, version: p.version + 1, updated_at: now });
         await tx.insertLog({ id: newId(), product_id: p.id, action: 'correction_accepted', reason, fields: { field: locked.field, proposed: locked.proposed.slice(0, 500) } as never, actor_kind: by.actor.kind, actor_id: by.actor.id ?? null, at: now });
         if (ref && product.review_state === 'approved') {
-          reopened = await this.reopenTx(tx, product, by, `Accepted correction to ${locked.field}: ${locked.proposed.slice(0, 200)}`, ref, targetDays);
+          reopened = await this.reopenTx(tx, product, by, `Accepted correction to ${locked.field}: ${locked.proposed.slice(0, 200)}`, ref, clock!);
           product = reopened.product;
         }
       }

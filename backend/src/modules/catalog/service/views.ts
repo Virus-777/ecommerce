@@ -203,6 +203,7 @@ export class CatalogViews extends CatalogBase {
     const subBy = new Map<string, SubmissionRow>(subs.map((s) => [s.product_id, s]));
     // checks are read for every viewer (duplicateSuspected), but only staff see them
     const checks = await this.repo.checksOf(subs.map((s) => s.id));
+    const dismissals = await this.repo.dismissalsOf(checks.filter((c) => c.kind === 'duplicate').map((c) => c.id));
     const drafts = viewer.kind === 'staff' && viewer.staffId ? await this.repo.draftsOf(subs.filter((s) => s.state === 'open').map((s) => s.id), viewer.staffId) : [];
     const listingBy = new Map(listing.map((l) => [l.product_id, l]));
 
@@ -213,7 +214,13 @@ export class CatalogViews extends CatalogBase {
       if (!c || c.result === 'pass' || (c.dismissed_at && !c.dismissed_matched_product_id)) continue;
       candidateIds.set(
         s.product_id,
-        [...new Set(evidenceOf(c.evidence).filter((e) => e.matchedProductId && !e.dismissedAt).map((e) => e.matchedProductId!))],
+        [
+          ...new Set(
+            evidenceOf(c.evidence)
+              .filter((e) => e.matchedProductId && !dismissals.some((d) => d.check_id === c.id && d.matched_product_id === e.matchedProductId))
+              .map((e) => e.matchedProductId!),
+          ),
+        ],
       );
     }
     const candidateSummaries = staff ? await this.summaries(await this.repo.getProducts([...candidateIds.values()].flat())) : new Map<string, ProductSummary>();
@@ -237,7 +244,7 @@ export class CatalogViews extends CatalogBase {
         reviewLog: logs.filter((g) => g.product_id === r.id && (LOG_ACTIONS as readonly string[]).includes(g.action)).map(toLogEntry),
         duplicateCandidates: staff ? dupIds.flatMap((id) => (candidateSummaries.has(id) ? [candidateSummaries.get(id)!] : [])) : [],
         submission: sub ? toSubmission(sub, now, { staff }) : null,
-        checks: staff ? subChecks.map(toCheck) : [],
+        checks: staff ? subChecks.map((c) => toCheck(c, dismissals)) : [],
         requestedBrand: (r.requested_brand as RequestedBrand | null) ?? null,
         contentScore: r.content_score,
         duplicateSuspected: staff && dupIds.length > 0,

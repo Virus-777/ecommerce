@@ -191,6 +191,8 @@ type ProductSubmission @areas(in: [SELLER, ADMIN]) {
   expectedReviewBy: DateTime
   "Internal review target that orders the queue"
   reviewDeadline: Deadline
+  "Set while a restriction or suspension of the seller pauses the review (left out of the review queue until reinstated)"
+  pausedAt: DateTime @areas(in: [ADMIN])
   "Reviewer who picked up the submission"
   assignee: Actor @areas(in: [ADMIN])
   decidedAt: DateTime
@@ -285,6 +287,8 @@ type ProductCheckEvidence @areas(in: [ADMIN]) {
   media: MediaRef
   "Category the CATEGORY_FIT check suggests instead"
   suggestedCategory: Category
+  "DUPLICATE candidates: when a reviewer marked this matched product not a duplicate"
+  dismissedAt: DateTime
 }
 
 type ReviewLogEntry @areas(in: [SELLER, ADMIN]) {
@@ -325,7 +329,7 @@ extend type Query {
   myProduct(id: UUID!): Product @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "catalog", fn: "getProductForSeller")
 
   "Submissions waiting for review, by review deadline (Product.submission carries kind, submittedAt and reviewDeadline)"
-  productReviewQueue(kind: String, categoryId: UUID, paging: PageInput): ProductPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "catalog.products.review") @source(module: "catalog", fn: "listReviewQueue")
+  productReviewQueue(kind: ProductSubmissionKind, categoryId: UUID, paging: PageInput): ProductPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "catalog.products.review") @source(module: "catalog", fn: "listReviewQueue")
 
   "Any product with review history (staff)"
   productAdmin(id: UUID!): Product @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "catalog", fn: "getProductAdmin")
