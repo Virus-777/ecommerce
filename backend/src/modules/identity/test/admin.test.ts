@@ -192,8 +192,9 @@ describe('staff invitations', () => {
     expect(kit.last('identity.invitation.revoked')).toMatchObject({ invitationId: inv.id, purpose: 'staff' });
     expect((await identity.findAccountByEmail(email, 'staff'))!.status).toBe('closed');
     const again = await kit.call('POST', `${ADMIN}/invitations/${inv.id}/revoke`, { token: staffToken(), headers: code, body: { reason: 'again' } });
-    expect(again.status).toBe(409);
-    expect(again.body.error.code).toBe('ILLEGAL_TRANSITION');
+    // already revoked: answered unchanged (identity.revokeInvitation is idempotent)
+    expect(again.status).toBe(200);
+    expect(again.body.status).toBe('revoked');
     expect((await kit.call('POST', `${ADMIN}/invitations/${'01900000-0000-7000-8000-00000000abcd'}/resend`, { token: staffToken(), headers: code })).status).toBe(404);
   });
 });

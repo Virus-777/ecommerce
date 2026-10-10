@@ -150,6 +150,44 @@ describe('seller-member invitations', () => {
   });
 });
 
+describe('revokeInvitation (public API)', () => {
+  it("cancels only its own context's pending invitation, is idempotent, and refuses accepted or expired ones", async () => {
+    const sellerId = newId();
+    const by = { kind: 'seller' as const, id: newId() };
+    const inv = await identity.inviteSellerMember({ email: uniqueEmail('revoke'), name: 'Rae Revoke', sellerId, sellerName: 'Epsilon', invitedBy: by });
+    await kit.app.kernel.events.drain();
+    const token = new URL(kit.last('identity.invitation.created').acceptUrl).hash.replace('#token=', '');
+    // another seller's id: not found (never confirms the invitation exists)
+    await expect(identity.revokeInvitation(inv.id, { reason: 'no', by, contextRef: newId() })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(identity.revokeInvitation(newId(), { reason: 'no', by })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const before = kit.of('identity.invitation.revoked').length;
+    const revoked = await identity.revokeInvitation(inv.id, { reason: 'Hired elsewhere', by, contextRef: sellerId });
+    expect(revoked).toMatchObject({ id: inv.id, status: 'revoked' });
+    await kit.app.kernel.events.drain();
+    expect(kit.last('identity.invitation.revoked')).toMatchObject({ invitationId: inv.id, purpose: 'seller_member', contextRef: sellerId });
+    // the link stops working at once
+    const v = await visitor(kit, 'seller');
+    expect((await kit.call('POST', `${PUBLIC}/invitations/lookups`, { token: v.accessToken, body: { token } })).body.error.code).toBe('INVITATION_INVALID');
+    // again: unchanged, no second event
+    expect(await identity.revokeInvitation(inv.id, { reason: 'again', by, contextRef: sellerId })).toMatchObject({ status: 'revoked' });
+    await kit.app.kernel.events.drain();
+    expect(kit.of('identity.invitation.revoked').length).toBe(before + 1);
+
+    // accepted
+    const acc = await identity.inviteSellerMember({ email: uniqueEmail('accepted'), name: 'Ace Accepted', sellerId, sellerName: 'Epsilon', invitedBy: by });
+    await kit.app.kernel.events.drain();
+    const t2 = new URL(kit.last('identity.invitation.created').acceptUrl).hash.replace('#token=', '');
+    const v2 = await visitor(kit, 'seller');
+    expect((await kit.call('POST', `${PUBLIC}/invitations/accept`, { token: v2.accessToken, body: { token: t2, password: STRONG, device: web } })).status).toBe(200);
+    await expect(identity.revokeInvitation(acc.id, { reason: 'late', by, contextRef: sellerId })).rejects.toMatchObject({ code: 'ILLEGAL_TRANSITION' });
+
+    // expired (past the link's end, before the hourly job marks it)
+    const old = await identity.inviteSellerMember({ email: uniqueEmail('expired'), name: 'Old Link', sellerId, sellerName: 'Epsilon', invitedBy: by });
+    kit.clock.advance(8 * 24 * 3600_000);
+    await expect(identity.revokeInvitation(old.id, { reason: 'late', by, contextRef: sellerId })).rejects.toMatchObject({ code: 'ILLEGAL_TRANSITION' });
+  });
+});
+
 describe('guest sessions and order links', () => {
   it('grants a visitor session access to an order and redeems emailed links', async () => {
     const v = await visitor(kit);
