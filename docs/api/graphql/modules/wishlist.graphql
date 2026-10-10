@@ -80,7 +80,9 @@ type WishlistAlert @areas(in: [STORE]) @phase(n: 3) {
   itemId: UUID
   product: Product!
   variant: Variant
-  "Seller the alert is limited to, if any"
+  "Seller the alert is limited to, if any (Alert.sellerId)"
+  sellerId: UUID
+  "Seller the alert is limited to, if any (resolved by the sellers module's shared mapper from sellerId)"
   seller: SellerPublicProfile
   kind: WishlistAlertKind!
   "e.g. Any drop below $329.00; Olive, from Trailhead Outfitters"

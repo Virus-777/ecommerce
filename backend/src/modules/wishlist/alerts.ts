@@ -175,7 +175,7 @@ export class AlertEngine {
     let fired = 0;
     let after: string | null = null;
     for (;;) {
-      const batch = await this.repo.activePriceAlertsAfter(after, BATCH);
+      const batch = await this.repo.activeAlertsAfter('price_drop', after, BATCH);
       if (!batch.length) break;
       after = batch.at(-1)!.id;
       const byProduct = new Map<string, AlertCandidate[]>();
@@ -203,6 +203,49 @@ export class AlertEngine {
           const best = changes.filter((c) => concerns(a, c.change)).sort((x, y) => x.price.amount - y.price.amount)[0];
           if (!best || !dropMet(best.price.amount, a.reference_price, a.target_price, minDrop)) continue;
           fired += await this.fire([a], { change: best.change, price: best.price, recheck: (r) => dropMet(best.price.amount, r.reference_price, r.target_price, minDrop) });
+        }
+      }
+      if (batch.length < BATCH) break;
+    }
+    return fired;
+  }
+
+  /**
+   * Every active back-in-stock alert against what customers can buy now: catches a restock whose event was missed
+   * or arrived inside the cooldown (fire() skips alerts still in cooldown, so they trigger on a later run). An offer
+   * counts when it is active and its availability is not out of stock. Batches by product.
+   */
+  async evaluateRestocks(): Promise<number> {
+    const offersApi = this.ctx.use('offers');
+    let fired = 0;
+    let after: string | null = null;
+    for (;;) {
+      const batch = await this.repo.activeAlertsAfter('back_in_stock', after, BATCH);
+      if (!batch.length) break;
+      after = batch.at(-1)!.id;
+      const byProduct = new Map<string, AlertCandidate[]>();
+      for (const a of batch) byProduct.set(a.product_id, [...(byProduct.get(a.product_id) ?? []), a]);
+      for (const [productId, alerts] of byProduct) {
+        const lk = new Lookups(this.ctx);
+        if (!(await lk.purchasable(productId))) continue;
+        let summaries: { id: string }[] = [];
+        try {
+          summaries = await offersApi.listActiveOffersForProduct(productId);
+        } catch (err) {
+          this.ctx.log.warn({ err, productId }, 'wishlist: offers of a watched product could not be read');
+          continue;
+        }
+        const inStock: { change: Change; price: common.Money }[] = [];
+        for (const s of summaries) {
+          const [offer, quote] = await Promise.all([lk.offer(s.id), lk.quote(s.id)]);
+          if (!offer || offer.status !== 'active' || !quote || quote.status !== 'active' || quote.availability.state === 'out_of_stock') continue;
+          inStock.push({ change: { productId, variantId: offer.variantId, offerId: offer.id, sellerId: offer.sellerId ?? null }, price: quote.price });
+        }
+        if (!inStock.length) continue;
+        for (const a of alerts) {
+          const best = inStock.filter((c) => concerns(a, c.change)).sort((x, y) => x.price.amount - y.price.amount)[0];
+          if (!best) continue;
+          fired += await this.fire([a], { change: best.change, price: best.price, recheck: () => true });
         }
       }
       if (batch.length < BATCH) break;
