@@ -17,7 +17,7 @@ import type * as common from '../../../spec/common.js';
 import type { ItemPaidAmount } from '../../../spec/orders.js';
 import type { Refund, RefundableItem, RefundableSummary, RefundView, StartRefundInput } from '../../../spec/payments.js';
 import { refundExecutionMachine } from '../domain/state-machines.js';
-import { ACCEPTED, is, isExpired, methodLabel, refundBackoffMs, retryableRefundFailure, type RefundStatus } from '../domain/rules.js';
+import { ACCEPTED, is, isExpired, methodLabel, refundBackoffMs, retryableRefundFailure, type RefundStatus, refundOrderKey } from '../domain/rules.js';
 import { ProviderError, type IntentRec, type PaymentsRepository, type ProviderRefund, type RefundDestination, type RefundItemRec, type RefundLogRec, type RefundRec } from '../ports.js';
 import type { Scope } from '../../../kernel/auth/scope.js';
 import { Batch, SYSTEM, illegal, invalid, notFound, type By, type Cfg, type Core, type Lookup, type OrderInfo } from './core.js';
@@ -263,12 +263,13 @@ export class Refunds {
     return this.core.nextRef('RF');
   }
 
-  private newRow(o: { ref: string; orderId: string; intent: IntentRec; origin: string; originId: string | null; originRef: string | null; amount: number; destination: string; reason: string; requestedBy: common.Actor; key: string }): RefundRec {
+  private newRow(o: { ref: string; orderId: string | null; intent: IntentRec; origin: string; originId: string | null; originRef: string | null; amount: number; destination: string; reason: string; requestedBy: common.Actor; key: string }): RefundRec {
     const now = this.core.now();
     return {
       id: newId(),
       ref: o.ref,
       order_id: o.orderId,
+      checkout_session_id: o.intent.checkout_session_id,
       intent_id: o.intent.id,
       origin: o.origin,
       origin_id: o.originId,
@@ -302,7 +303,7 @@ export class Refunds {
 
   private async publishChange(r: RefundRec, from: string | null, to: string, by: { actor?: common.Actor; requestId?: string }) {
     const items = await this.views.refundItems(r, await this.repo.find('refund_items', { refund_id: r.id }), this.core.lookup());
-    this.core.publish('payments.refund.status_changed', { refundId: r.id, ref: r.ref, orderId: r.order_id, origin: r.origin, originId: r.origin_id, from, to, amount: this.m(r.amount, r.currency), items }, by);
+    this.core.publish('payments.refund.status_changed', { refundId: r.id, ref: r.ref, orderId: refundOrderKey(r), origin: r.origin, originId: r.origin_id, from, to, amount: this.m(r.amount, r.currency), items }, by);
   }
 
   /** orders.item.cancelled: a cancellation refund for the item's breakdown, or a smaller uncaptured authorization */
@@ -365,7 +366,7 @@ export class Refunds {
       if (amount <= 0) return null;
       const r = await tx.insertIfNew(
         'refunds',
-        this.newRow({ ref, orderId: locked.order_id ?? locked.checkout_session_id, intent: locked, origin: 'orphan_payment', originId: locked.id, originRef: locked.ref, amount, destination: 'original_method', reason, requestedBy: by.actor, key: `orphan:${locked.id}` }),
+        this.newRow({ ref, orderId: locked.order_id, intent: locked, origin: 'orphan_payment', originId: locked.id, originRef: locked.ref, amount, destination: 'original_method', reason, requestedBy: by.actor, key: `orphan:${locked.id}` }),
       );
       if (!r) return null;
       await this.log(tx, r.id, null, 'requested', 'Payment without an order', by.actor);
@@ -459,7 +460,7 @@ export class Refunds {
     if (r.destination === 'store_credit') {
       // all of it to store credit: wallet gives the order's credit back first and adds the rest as a refund to credit
       const credited = await this.core.soft('wallet', 'creditRefund', (w) =>
-        w.creditRefund({ customerId: intent.customer_id!, refundId: r.id, orderId: r.order_id, amount: this.m(r.amount, r.currency), reason: r.reason }, `refund:${r.id}`),
+        w.creditRefund({ customerId: intent.customer_id!, refundId: r.id, orderId: refundOrderKey(r), amount: this.m(r.amount, r.currency), reason: r.reason }, `refund:${r.id}`),
       );
       if (credited && !share.sent) await this.credit.confirm(intent.id, key);
       return this.apply(r.id, credited ? { status: 'succeeded', providerRef: credited.id ?? null } : creditUnavailable, by, cfg);
@@ -542,7 +543,7 @@ export class Refunds {
         updated_at: now,
       });
       await this.log(tx, r.id, 'processing', to, f.reason, by.actor);
-      batch.push('payments.refund.failed', { refundId: r.id, ref: r.ref, orderId: r.order_id, ...who, origin: r.origin, originId: r.origin_id, amount: this.m(r.amount, r.currency), reason: f.reason, attempts: r.attempts, finalAttempt: final });
+      batch.push('payments.refund.failed', { refundId: r.id, ref: r.ref, orderId: refundOrderKey(r), ...who, origin: r.origin, originId: r.origin_id, amount: this.m(r.amount, r.currency), reason: f.reason, attempts: r.attempts, finalAttempt: final });
       changed = { r: updated, from: 'processing' };
       return updated;
     });
@@ -551,7 +552,7 @@ export class Refunds {
       await this.publishChange(c.r, c.from, c.r.status, by);
       if (c.r.status === 'sent') {
         const items = await this.views.refundItems(c.r, await this.repo.find('refund_items', { refund_id: c.r.id }), this.core.lookup());
-        this.core.publish('payments.refund.sent', { refundId: c.r.id, ref: c.r.ref, orderId: c.r.order_id, ...who, origin: c.r.origin, originId: c.r.origin_id, amount: this.m(c.r.amount, c.r.currency), items, destination: c.r.destination, sentAt: c.r.sent_at!.toISOString() }, by);
+        this.core.publish('payments.refund.sent', { refundId: c.r.id, ref: c.r.ref, orderId: refundOrderKey(c.r), ...who, origin: c.r.origin, originId: c.r.origin_id, amount: this.m(c.r.amount, c.r.currency), items, destination: c.r.destination, sentAt: c.r.sent_at!.toISOString() }, by);
       }
     }
     this.core.flush(batch, by);
@@ -699,7 +700,7 @@ export class Refunds {
     const who = payer ? await this.core.contactOf({ customer_id: payer.customer_id, guest_email: payer.guest_email, order_id: r.order_id }, lookup) : { customerId: null, contactEmail: null };
     this.core.publish(
       'payments.refund.destination_requested',
-      { refundId: r.id, ref: r.ref, orderId: r.order_id, orderRef: order?.ref ?? r.origin_ref ?? r.ref, ...who, amount: this.m(r.amount, r.currency), failureReason: r.failure_reason ?? null, message: message?.trim() || null },
+      { refundId: r.id, ref: r.ref, orderId: refundOrderKey(r), orderRef: order?.ref ?? r.origin_ref ?? r.ref, ...who, amount: this.m(r.amount, r.currency), failureReason: r.failure_reason ?? null, message: message?.trim() || null },
       by,
     );
     await this.core.audit({ action: 'payments.refund.request_destination', actionLabel: 'Asked the customer for a new refund destination', category: 'financial', target: { type: 'refund', id: r.id, ref: r.ref, label: r.destination_label, screen: 'admin/finance' }, reason: message ?? null }, by);

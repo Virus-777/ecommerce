@@ -119,6 +119,79 @@ export class PaymentsService implements PaymentsPublicApi {
     return this.methods.listSavedMethods(customerId);
   }
 
+  /**
+   * Export hook (FORMAT.md, Customer data export hook): saved methods masked (never a provider token), the
+   * customer's payments and their refunds. No provider references or staff notes.
+   */
+  async exportCustomerData(input: { customerId: string; accountId: string }): Promise<common.CustomerDataSection[]> {
+    const repo = this.core.repo;
+    const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
+    const money = (amount: number, currency: string) => ({ amount, currency });
+    const [methods, intents] = await Promise.all([
+      repo.find('saved_methods', { customer_id: input.customerId }, { orderBy: [['created_at', 'asc']] }),
+      repo.find('intents', { customer_id: input.customerId }, { orderBy: [['created_at', 'asc']] }),
+    ]);
+    const refunds = intents.length ? await repo.find('refunds', { intent_id: intents.map((i) => i.id) }, { orderBy: [['created_at', 'asc']] }) : [];
+    const lookup = this.core.lookup();
+    const orderRef = async (orderId: string | null) => (orderId ? ((await lookup.order(orderId))?.ref ?? null) : null);
+    return [
+      {
+        key: 'payment_methods',
+        title: 'Saved payment methods',
+        module: 'payments',
+        records: methods.map((m) => ({
+          kind: m.kind,
+          brand: m.brand,
+          label: m.label,
+          last4: m.last4,
+          expires: `${String(m.exp_month).padStart(2, '0')}/${m.exp_year}`,
+          billingCity: m.billing_address?.city ?? null,
+          billingPostalCode: m.billing_address?.postalCode ?? null,
+          isDefault: m.is_default,
+          savedAt: m.created_at.toISOString(),
+          removedAt: iso(m.removed_at),
+        })),
+      },
+      {
+        key: 'payments',
+        title: 'Payments',
+        module: 'payments',
+        records: await Promise.all(
+          intents.map(async (i) => ({
+            ref: i.ref,
+            orderRef: await orderRef(i.order_id),
+            amount: money(i.amount, i.currency),
+            method: i.method.label,
+            status: i.status,
+            declined: i.decline ? i.decline.message : null,
+            authorizedAt: iso(i.authorized_at),
+            captured: money(i.captured_amount, i.currency),
+            capturedAt: iso(i.captured_at),
+            refunded: money(i.refunded_amount, i.currency),
+            createdAt: i.created_at.toISOString(),
+          })),
+        ),
+      },
+      {
+        key: 'refunds',
+        title: 'Refunds',
+        module: 'payments',
+        records: await Promise.all(
+          refunds.map(async (r) => ({
+            ref: r.ref,
+            orderRef: await orderRef(r.order_id),
+            origin: r.origin,
+            amount: money(r.amount, r.currency),
+            destination: r.destination_label,
+            status: r.status,
+            requestedAt: r.created_at.toISOString(),
+            sentAt: iso(r.sent_at),
+          })),
+        ),
+      },
+    ];
+  }
+
   /* ---------------------------------------------------------------- store */
 
   /** The intent if the shopper owns its checkout: the customer, or the guest session (checkout or order access) */

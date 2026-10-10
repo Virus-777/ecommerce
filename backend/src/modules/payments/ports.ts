@@ -11,8 +11,8 @@ type Db = PaymentsDb;
 
 /* ---------------------------------------------------------------- stored rows (jsonb columns typed) */
 
-/** intents.method: the MethodSnapshot plus the bank challenge waiting for the customer (no column for it in the spec) */
-export type StoredMethod = MethodSnapshot & { pendingAction?: NextAction | null };
+/** intents.method: the MethodSnapshot (the bank challenge waiting for the customer is intents.next_action) */
+export type StoredMethod = MethodSnapshot;
 
 /**
  * A store-credit share given back through wallet, keyed by what returned it (a refund id, or the intent id when a
@@ -37,10 +37,11 @@ export interface CaptureCredit {
  */
 export type StoredTender = Tender & { creditReturns?: Record<string, CreditReturn>; captureCredits?: Record<string, CaptureCredit> };
 
-export interface IntentRec extends Omit<Db['intents'], 'tenders' | 'method' | 'decline'> {
+export interface IntentRec extends Omit<Db['intents'], 'tenders' | 'method' | 'decline' | 'next_action'> {
   tenders: StoredTender[];
   method: StoredMethod;
   decline: Decline | null;
+  next_action: NextAction | null;
 }
 export type AllocationRec = Db['allocations'];
 export type CaptureRec = Db['captures'];
@@ -54,8 +55,8 @@ export interface RefundLogRec extends Omit<Db['refund_log'], 'actor'> {
 }
 
 /**
- * disputes.evidence: the DisputeEvidence of the API plus the case history and a concession waiting for
- * approval (the spec has no dispute log table and no approval column, so they live with the evidence).
+ * disputes.evidence: the DisputeEvidence of the API with the file ids (the history is payments.dispute_log, a
+ * concession waiting for approval disputes.approval_request_id and concession_reason).
  */
 export interface StoredEvidence {
   text?: string | null;
@@ -63,13 +64,12 @@ export interface StoredEvidence {
   files: common.MediaRef[];
   submittedAt?: string | null;
   submittedBy?: common.Actor | null;
-  history: common.TimelineEvent[];
-  pendingConcession?: { approvalRequestId: string; reason: string; requestedBy: common.Actor; at: string } | null;
-  /** dispute-deadlines already flagged the 48 h warning */
-  dueSoonFlagged?: boolean;
 }
 export interface DisputeRec extends Omit<Db['disputes'], 'evidence'> {
   evidence: StoredEvidence;
+}
+export interface DisputeLogRec extends Omit<Db['dispute_log'], 'actor'> {
+  actor: common.Actor;
 }
 export interface SavedMethodRec extends Omit<Db['saved_methods'], 'billing_address'> {
   /** A copy of the address (never a reference to the address book); {} when none was given */
@@ -88,6 +88,7 @@ export interface Recs {
   refund_items: RefundItemRec;
   refund_log: RefundLogRec;
   disputes: DisputeRec;
+  dispute_log: DisputeLogRec;
   saved_methods: SavedMethodRec;
   webhook_events: WebhookRec;
 }
@@ -131,7 +132,7 @@ export interface RefundTotals {
   inFlight: number;
 }
 
-/** Persistence for this module's own tables: payments.intents, payments.allocations, payments.captures, payments.provider_calls, payments.refunds, payments.refund_items, payments.refund_log, payments.disputes, payments.saved_methods, payments.webhook_events, payments.ref_sequences. */
+/** Persistence for this module's own tables: payments.intents, payments.allocations, payments.captures, payments.provider_calls, payments.refunds, payments.refund_items, payments.refund_log, payments.disputes, payments.dispute_log, payments.saved_methods, payments.webhook_events, payments.ref_sequences. */
 export interface PaymentsRepository {
   /** Runs fn in a transaction with a repository bound to it (nested calls join the outer one) */
   transaction<T>(fn: (tx: PaymentsRepository) => Promise<T>): Promise<T>;
@@ -165,7 +166,8 @@ export interface PaymentsRepository {
   listIntents(f: PaymentListFilter, page: PageRequest): Promise<common.Page<IntentRec>>;
   listRefunds(f: RefundListFilter, page: PageRequest): Promise<common.Page<RefundRec>>;
   listDisputes(f: DisputeListFilter, page: PageRequest): Promise<common.Page<DisputeRec>>;
-  webhooksFor(provider: string, refs: string[]): Promise<WebhookRec[]>;
+  /** Provider events applied to the payment or to one of its refunds, oldest first */
+  webhooksFor(intentId: string): Promise<WebhookRec[]>;
 }
 
 /* ---------------------------------------------------------------- payment provider port */

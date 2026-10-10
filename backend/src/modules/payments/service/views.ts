@@ -20,6 +20,7 @@ import {
   refundFailureAction,
   refundSteps,
   retryableRefundFailure,
+  refundOrderKey,
   sellerBalanceEffect,
   type DisputeStatus,
   type RefundStatus,
@@ -29,10 +30,9 @@ import type { Cfg, Core, Lookup } from './core.js';
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 
-/** The MethodSnapshot of the API (internal keys stripped) */
+/** The MethodSnapshot of the API */
 export function snapshotOf(i: IntentRec): MethodSnapshot {
-  const { pendingAction: _p, ...m } = i.method;
-  return m;
+  return i.method;
 }
 
 export class Views {
@@ -87,7 +87,7 @@ export class Views {
       repo.find('provider_calls', { intent_id: i.id }, { orderBy: [['at', 'asc']] }),
       lookup.order(i.order_id),
     ]);
-    const webhooks = await repo.webhooksFor(i.provider, [i.provider_ref ?? '', i.id]);
+    const webhooks = await repo.webhooksFor(i.id);
     return {
       id: i.id,
       ref: i.ref,
@@ -147,7 +147,7 @@ export class Views {
         decline: null,
         nextCheckInSeconds: null,
         holdNote: null,
-        nextAction: i.method.pendingAction ?? null,
+        nextAction: i.next_action ?? null,
       };
     }
     if (i.status === 'failed' || i.status === 'voided' || i.status === 'expired') {
@@ -212,7 +212,8 @@ export class Views {
     return {
       id: r.id,
       ref: r.ref,
-      orderId: r.order_id,
+      orderId: refundOrderKey(r),
+      checkoutSessionId: r.checkout_session_id,
       orderRef: order?.ref ?? intent.ref,
       paymentIntentId: r.intent_id,
       customerName: await lookup.customerName(intent),
@@ -265,7 +266,7 @@ export class Views {
     return {
       id: r.id,
       ref: r.ref,
-      orderId: r.order_id,
+      orderId: refundOrderKey(r),
       orderRef: order?.ref ?? intent.ref,
       status,
       statusLabel: REFUND_STATUS_LABEL[status],
@@ -301,7 +302,7 @@ export class Views {
   /* ---------------------------------------------------------------- disputes */
 
   async dispute(d: DisputeRec, lookup: Lookup): Promise<Dispute> {
-    const [order, intent] = await Promise.all([lookup.order(d.order_id), this.core.repo.get('intents', d.intent_id)]);
+    const [order, intent, logs] = await Promise.all([lookup.order(d.order_id), this.core.repo.get('intents', d.intent_id), this.core.repo.find('dispute_log', { dispute_id: d.id }, { orderBy: [['at', 'asc'], ['id', 'asc']] })]);
     const group = d.group_id ? order?.groups.get(d.group_id) : undefined;
     const ownerType = group?.ownerType ?? null;
     const status = d.status as DisputeStatus;
@@ -325,11 +326,11 @@ export class Views {
       amount: this.m(d.amount, d.currency),
       evidenceDue: status === 'opened' ? deadlineOf(d.evidence_due_at, this.core.now()) : d.evidence_due_at ? { dueAt: d.evidence_due_at.toISOString(), state: 'on_time' } : null,
       status,
-      statusLabel: e.pendingConcession && status === 'opened' ? 'Concession waiting for approval' : DISPUTE_STATUS_LABEL[status],
+      statusLabel: d.approval_request_id && status === 'opened' ? 'Concession waiting for approval' : DISPUTE_STATUS_LABEL[status],
       sellerBalanceEffect: sellerBalanceEffect(d, ownerType),
       evidence: { text: e.text ?? null, files: e.files ?? [], submittedAt: e.submittedAt ?? null, submittedBy: e.submittedBy ?? null },
       owner: await lookup.staffName(d.owner_staff_id),
-      history: e.history ?? [],
+      history: logs.map((l) => ({ at: l.at.toISOString(), label: l.label, detail: l.detail, actor: l.actor })),
       openedAt: d.opened_at.toISOString(),
       decidedAt: iso(d.decided_at),
     };

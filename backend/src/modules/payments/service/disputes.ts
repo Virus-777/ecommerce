@@ -46,16 +46,18 @@ export class Disputes {
 
   toApi = async (d: DisputeRec): Promise<Dispute> => this.views.dispute(d, this.core.lookup());
 
-  private entry(label: string, detail: string | null, actor: common.Actor): common.TimelineEvent {
-    return { at: this.core.now().toISOString(), label, detail, actor };
+  /** One payments.dispute_log entry (Dispute.history) */
+  private async log(tx: PaymentsRepository, disputeId: string, label: string, detail: string | null, actor: common.Actor): Promise<void> {
+    await tx.insert('dispute_log', { id: newId(), dispute_id: disputeId, label, detail, actor, at: this.core.now() });
   }
 
   /** One transition with a history entry; events collected in the batch */
   private async transition(tx: PaymentsRepository, d: DisputeRec, event: DEv, o: { label: string; detail?: string | null; actor: common.Actor; evidence?: Partial<StoredEvidence> }, batch: Batch): Promise<DisputeRec> {
     const to = paymentDisputeMachine.next(d.status as never, event);
     const decided = to === 'won' || to === 'lost';
-    const evidence: StoredEvidence = { ...d.evidence, ...o.evidence, history: [...(d.evidence.history ?? []), this.entry(o.label, o.detail ?? null, o.actor)], ...(decided ? { pendingConcession: null } : {}) };
-    const updated = await tx.update('disputes', d.id, { status: to, evidence, ...(decided ? { decided_at: this.core.now() } : {}) });
+    const evidence: StoredEvidence = { ...d.evidence, ...o.evidence };
+    const updated = await tx.update('disputes', d.id, { status: to, evidence, ...(decided ? { decided_at: this.core.now(), approval_request_id: null, concession_reason: null } : {}) });
+    await this.log(tx, d.id, o.label, o.detail ?? null, o.actor);
     batch.push('payments.chargeback.status_changed', { disputeId: d.id, status: to });
     if (decided) batch.push('payments.chargeback.decided', { disputeId: d.id, orderId: d.order_id, sellerId: d.seller_id, outcome: to, amount: { amount: d.amount, currency: d.currency } });
     return updated;
@@ -93,12 +95,15 @@ export class Disputes {
       currency: o.currency ?? intent.currency,
       evidence_due_at: due && !Number.isNaN(due.getTime()) ? due : null,
       status: paymentDisputeMachine.initial,
-      evidence: { text: null, fileIds: [], files: [], submittedAt: null, submittedBy: null, history: [this.entry(kind === 'chargeback' ? 'Chargeback opened' : 'Dispute opened', `${o.reason ?? 'Opened by the card issuer'} · ${fmt({ amount, currency: o.currency ?? intent.currency })}`, PROVIDER_ACTOR)] },
+      evidence: { text: null, fileIds: [], files: [], submittedAt: null, submittedBy: null },
+      due_soon_flagged_at: null,
+      approval_request_id: null,
+      concession_reason: null,
       owner_staff_id: null,
       opened_at: now,
       decided_at: null,
     };
-    const inserted = await this.insertDispute(row);
+    const inserted = await this.insertDispute(row, `${o.reason ?? 'Opened by the card issuer'} · ${fmt({ amount, currency: o.currency ?? intent.currency })}`);
     if (!inserted) return 'known';
     const who = await this.core.contactOf(intent);
     this.core.publish(
@@ -109,9 +114,13 @@ export class Disputes {
     return 'opened';
   }
 
-  private async insertDispute(row: DisputeRec): Promise<DisputeRec | null> {
+  private async insertDispute(row: DisputeRec, detail: string): Promise<DisputeRec | null> {
     try {
-      return await this.repo.insert('disputes', row);
+      return await this.repo.transaction(async (tx) => {
+        const inserted = await tx.insert('disputes', row);
+        await this.log(tx, row.id, row.kind === 'chargeback' ? 'Chargeback opened' : 'Dispute opened', detail, PROVIDER_ACTOR);
+        return inserted;
+      });
     } catch (err) {
       if ((await this.repo.find('disputes', { provider: row.provider, provider_case_id: row.provider_case_id }))[0]) return null;
       throw err;
@@ -162,7 +171,8 @@ export class Disputes {
     if (access && !staff) throw invalid([{ path: 'ownerStaffId', message: 'Choose a staff member' }]);
     const after = await this.repo.transaction(async (tx) => {
       const d = (await tx.get('disputes', disputeId, { forUpdate: true }))!;
-      return tx.update('disputes', d.id, { owner_staff_id: ownerStaffId, evidence: { ...d.evidence, history: [...d.evidence.history, this.entry('Owner set', staff?.name ?? null, by.actor)] } });
+      await this.log(tx, d.id, 'Owner set', staff?.name ?? null, by.actor);
+      return tx.update('disputes', d.id, { owner_staff_id: ownerStaffId });
     });
     await this.core.audit({ action: 'payments.dispute.assign', actionLabel: 'Set the dispute owner', category: 'financial', target: this.target(before), before: { ownerStaffId: before.owner_staff_id }, after: { ownerStaffId } }, by);
     return this.toApi(after);
@@ -210,7 +220,10 @@ export class Disputes {
       const d = (await tx.get('disputes', disputeId, { forUpdate: true }))!;
       if (d.status !== 'opened') throw illegal('Evidence can be changed only while the dispute is open', { status: d.status });
       const evidence: Partial<StoredEvidence> = { text, fileIds, files };
-      if (!body.submit) return tx.update('disputes', d.id, { evidence: { ...d.evidence, ...evidence, history: [...d.evidence.history, this.entry('Evidence saved', null, by.actor)] } });
+      if (!body.submit) {
+        await this.log(tx, d.id, 'Evidence saved', null, by.actor);
+        return tx.update('disputes', d.id, { evidence: { ...d.evidence, ...evidence } });
+      }
       return this.transition(tx, d, 'submit_evidence', { label: 'Evidence submitted', detail: `${files.length} file${files.length === 1 ? '' : 's'}`, actor: by.actor, evidence: { ...evidence, submittedAt: this.core.now().toISOString(), submittedBy: by.actor } }, batch);
     });
     this.core.flush(batch, by);
@@ -228,7 +241,7 @@ export class Disputes {
     const check = access && by.principal ? await access.check(by.principal as never, ACCEPT_ACTION, { money: amount }) : null;
     if (check?.decision === 'denied') throw new AppError('FORBIDDEN', check.reason || 'Your role cannot concede disputes');
     if (check?.decision === 'approval_required') {
-      if (d.evidence.pendingConcession) throw new AppError('APPROVAL_REQUIRED', 'A concession of this dispute is already waiting for approval', { approvalRequestId: d.evidence.pendingConcession.approvalRequestId });
+      if (d.approval_request_id) throw new AppError('APPROVAL_REQUIRED', 'A concession of this dispute is already waiting for approval', { approvalRequestId: d.approval_request_id });
       const request = await access!.requestApproval({
         action: ACCEPT_ACTION,
         target: { type: 'payment_dispute', id: d.id, ref: d.ref, label: d.reason, sellerId: d.seller_id, screen: 'admin/finance' },
@@ -240,9 +253,8 @@ export class Disputes {
       });
       await this.repo.transaction(async (tx) => {
         const x = (await tx.get('disputes', d.id, { forUpdate: true }))!;
-        await tx.update('disputes', x.id, {
-          evidence: { ...x.evidence, pendingConcession: { approvalRequestId: request.id, reason: reason.trim(), requestedBy: by.actor, at: this.core.now().toISOString() }, history: [...x.evidence.history, this.entry('Concession sent for approval', reason.trim(), by.actor)] },
-        });
+        await tx.update('disputes', x.id, { approval_request_id: request.id, concession_reason: reason.trim() });
+        await this.log(tx, x.id, 'Concession sent for approval', reason.trim(), by.actor);
       });
       await this.core.audit({ action: 'payments.dispute.accept_request', actionLabel: 'Asked to concede a dispute', category: 'financial', target: this.target(d), reason, approvalRequestId: request.id }, by);
       throw new AppError('APPROVAL_REQUIRED', 'Conceding this dispute needs approval above your limit. It was sent for approval.', { approvalRequestId: request.id, approval: { id: request.id, ref: request.ref, status: request.status } });
@@ -275,10 +287,10 @@ export class Disputes {
   async onApprovalDecided(e: { actionKey: string; target: { type: string; id: string }; outcome: string; requestId: string; decidedBy?: common.Actor | null; reason?: string | null }) {
     if (e.actionKey !== ACCEPT_ACTION || e.target.type !== 'payment_dispute') return;
     const d = await this.repo.get('disputes', e.target.id);
-    if (!d || d.evidence.pendingConcession?.approvalRequestId !== e.requestId) return;
+    if (!d || d.approval_request_id !== e.requestId) return;
     const actor = e.decidedBy ?? SYSTEM;
     if (e.outcome === 'approved' && d.status === 'opened') {
-      const reason = d.evidence.pendingConcession.reason;
+      const reason = d.concession_reason ?? 'Concession approved';
       try {
         const after = await this.concede(d.id, reason, { actor });
         await this.core.audit({ action: 'payments.dispute.accept', actionLabel: 'Conceded a dispute after approval', category: 'financial', target: this.target(d), reason, approvalRequestId: e.requestId, before: { status: d.status }, after: { status: after.status } }, { actor });
@@ -294,7 +306,8 @@ export class Disputes {
   private async clearPending(disputeId: string, label: string, actor: common.Actor) {
     await this.repo.transaction(async (tx) => {
       const x = (await tx.get('disputes', disputeId, { forUpdate: true }))!;
-      await tx.update('disputes', x.id, { evidence: { ...x.evidence, pendingConcession: null, history: [...x.evidence.history, this.entry(label, null, actor)] } });
+      await tx.update('disputes', x.id, { approval_request_id: null, concession_reason: null });
+      await this.log(tx, x.id, label, null, actor);
     });
   }
 
@@ -309,8 +322,9 @@ export class Disputes {
         if (d.status !== 'opened' || !d.evidence_due_at) return;
         if (d.evidence_due_at.getTime() < now.getTime()) {
           await this.transition(tx, d, 'deadline_passed', { label: 'Evidence deadline passed', detail: 'No evidence was submitted in time', actor: SYSTEM }, batch);
-        } else if (!d.evidence.dueSoonFlagged) {
-          await tx.update('disputes', d.id, { evidence: { ...d.evidence, dueSoonFlagged: true, history: [...d.evidence.history, this.entry('Evidence due within 48 hours', null, SYSTEM)] } });
+        } else if (!d.due_soon_flagged_at) {
+          await tx.update('disputes', d.id, { due_soon_flagged_at: now });
+          await this.log(tx, d.id, 'Evidence due within 48 hours', null, SYSTEM);
         }
       });
       this.core.flush(batch, { actor: SYSTEM });

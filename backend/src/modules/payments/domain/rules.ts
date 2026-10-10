@@ -176,3 +176,6 @@ export function sellerBalanceEffect(d: { status: string; amount: number; currenc
 
 /** Reference prefix per dispute kind: CB- chargebacks, DP- inquiries and wallet disputes */
 export const disputePrefix = (kind: string) => (kind === 'chargeback' ? 'CB' : 'DP');
+
+/** The order a refund belongs to as the API and the refund events show it: an orphan payment refund has no order, its checkout session stands in */
+export const refundOrderKey = (r: { order_id: string | null; checkout_session_id: string }): string => r.order_id ?? r.checkout_session_id;
