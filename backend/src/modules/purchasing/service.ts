@@ -1359,8 +1359,12 @@ export class PurchasingService implements PurchasingPublicApi {
 
   /* ================================================================ events consumed */
 
-  /** inventory.receipt.confirmed: Mark the receipt confirmed (who made the stock sellable) and add it to the PO timeline */
+  /**
+   * inventory.receipt.confirmed: Mark the receipt confirmed (who made the stock sellable) and add it to the PO timeline.
+   * Receipts of Fulfilled by Marketly inbound shipments (source.kind service_inbound) are fulfillment-service's, never ours.
+   */
   async onReceiptConfirmedFromInventory(event: EventPayload<'inventory.receipt.confirmed'>, meta?: { at?: string }): Promise<void> {
+    if (event.source?.kind === 'service_inbound') return;
     const receipt = await this.repo.getReceipt(event.receiptId);
     if (!receipt) {
       this.ctx.log.info({ receiptId: event.receiptId }, 'purchasing: confirmed receipt is not ours; ignored');
