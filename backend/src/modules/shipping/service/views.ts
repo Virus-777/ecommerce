@@ -22,7 +22,7 @@ import type {
   Zone,
 } from '../../../spec/shipping.js';
 import { deadlineLabel, deadlineState, rangeLabel } from '../domain/calendar.js';
-import { KIND_LABEL, OPEN_STATUSES, REQUIRED_RESPONSE, RESOLUTION_LABEL, RESPONSE_LABEL, ESCALATION_LABEL, type ExceptionKind } from '../domain/exceptions.js';
+import { KIND_LABEL, MARKETLY_REQUIRED_RESPONSE, OPEN_STATUSES, REQUIRED_RESPONSE, RESOLUTION_LABEL, RESPONSE_LABEL, ESCALATION_LABEL, type ExceptionKind } from '../domain/exceptions.js';
 import { CARRIER_CATALOG, statusLabel, trackingUrlOf } from '../domain/tracking.js';
 import type { CarrierRec, ClaimRec, ClosureRec, CorrectionRec, EventRec, ExceptionLogRec, ExceptionRec, LabelRec, LineRec, MethodRec, NoticeRec, ProfileRec, RuleRec, ServiceRec, ShipmentRec, ZoneRec } from '../ports.js';
 import { iso, type Core } from './core.js';
@@ -325,7 +325,7 @@ export class Views {
       itemsSummary: e.items_summary,
       orderItemIds: e.order_item_ids ?? [],
       situation: e.situation,
-      requiredResponse: REQUIRED_RESPONSE[kind] ?? '',
+      requiredResponse: (e.fulfilled_by === 'marketly_service' ? MARKETLY_REQUIRED_RESPONSE[kind] : undefined) ?? REQUIRED_RESPONSE[kind] ?? '',
       nextStep: e.next_step,
       customerNotifiedAt: iso(e.customer_notified_at),
       sellerNotifiedAt: iso(e.seller_notified_at),

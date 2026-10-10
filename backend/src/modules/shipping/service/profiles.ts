@@ -551,6 +551,23 @@ export class Profiles {
     return { threshold: null, methodCode: null, active: false, label: null };
   }
 
+  /**
+   * getOfficialDefaultProfile: the Official Store's default active profile (its lineage id, what offers reference) with
+   * the Official dispatch settings in force: handling days and the same-day cutoff. null when no active profile exists.
+   */
+  async officialDefaultProfile(): Promise<{ profileId: string; handlingDays: number; sameDayCutoff: string | null } | null> {
+    await this.core.ensureSeeded();
+    const official: Owner = { ownerType: 'official', sellerId: null };
+    const active = (await this.lineages(official)).filter((l) => l.current.status === 'active');
+    // lineages are sorted default first
+    const p = active[0]?.current;
+    if (!p) return null;
+    const w = await this.estimates.world();
+    const settings = await this.estimates.settingsFor(official, w.at, w.cfg);
+    const cutoff = w.targets.official.cutoff || settings.same_day_cutoff || w.cfg.officialCutoff;
+    return { profileId: p.lineage_id, handlingDays: settings.handling_days, sameDayCutoff: cutoff || null };
+  }
+
   async summaries(sellerIds: string[]): Promise<Record<string, SellerSummary | null>> {
     const out: Record<string, SellerSummary | null> = {};
     const ids = [...new Set(sellerIds)];

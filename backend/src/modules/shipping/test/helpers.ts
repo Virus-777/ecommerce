@@ -13,10 +13,12 @@
  *     staff names; dev staff tokens carry no access roles).
  *   audit.record → h.audits. notifications.notify → h.notices. reports.registerDataset → recorded (not built).
  *   sellers.getSellers → store names from h.sellerNames.
+ *   fulfillment-service.getServiceLocation → h.serviceLocation (Fulfilled by Marketly, built in parallel).
  */
 import type { FastifyInstance } from 'fastify';
 import { newId } from '../../../kernel/lib/ids.js';
 import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
+import type * as common from '../../../spec/common.js';
 import type * as access from '../../../spec/access.js';
 import type * as audit from '../../../spec/audit.js';
 import type * as catalog from '../../../spec/catalog.js';
@@ -44,6 +46,8 @@ export interface Harness {
   guestGrants: Set<string>;
   sellerNames: Map<string, string>;
   access: { decision: 'allowed' | 'approval_required' | 'denied'; approvals: Map<string, access.ApprovalRequest['status']>; requested: any[] };
+  /** fulfillment-service.getServiceLocation (Fulfilled by Marketly is built in parallel) */
+  serviceLocation: { locationId: string; address: common.Address; shipsFrom: string } | null;
   call(method: string, url: string, token: string | null, body?: unknown, headers?: Record<string, string>): Promise<{ status: number; body: any }>;
   webhook(carrier: string, body: unknown, o?: { eventId?: string; secret?: string }): Promise<{ status: number; body: any }>;
   publish(source: string, name: string, payload: unknown): Promise<void>;
@@ -91,6 +95,13 @@ export async function harness(): Promise<Harness> {
     guestGrants: new Set<string>(),
     sellerNames: new Map<string, string>(),
     access: { decision: 'allowed' as Harness['access']['decision'], approvals: new Map<string, access.ApprovalRequest['status']>(), requested: [] as any[] },
+    serviceLocation: { locationId: newId(), address: { name: 'Marketly Fulfillment', line1: '400 Dock St', city: 'Reno', region: 'NV', postalCode: '89502', country: 'US' }, shipsFrom: 'Reno, NV (Marketly warehouse)' } as Harness['serviceLocation'],
+  };
+  let out: Harness | undefined;
+  // read from the harness the test holds, so a test can set h.serviceLocation (null: no service location)
+  const serviceLocation = () => {
+    const loc = (out ?? h).serviceLocation;
+    return loc ? structuredClone(loc) : null;
   };
   const app = await buildTestApp({
     only: ['shipping', 'orders', 'customers', 'identity', 'media', 'audit', 'notifications', 'settings', 'access', 'sellers'],
@@ -136,6 +147,9 @@ export async function harness(): Promise<Harness> {
           return { noticeIds: [newId()], deliveryIds: [] };
         },
       },
+      'fulfillment-service': {
+        getServiceLocation: async () => serviceLocation(),
+      },
       sellers: {
         getSellers: async (ids) =>
           ids.map((id) => ({ id, ref: 'SL-1', slug: 'seller', storeName: h.sellerNames.get(id) ?? 'Casa Verde Home', status: 'approved', verified: true, canSellNew: true, activeRestrictionIds: [], launchReady: true })),
@@ -156,6 +170,9 @@ export async function harness(): Promise<Harness> {
     },
   });
   const service = app.kernel.boot.apis.get('shipping') as ShippingService;
+  // fulfillment-service (phase 4, rebuilt in parallel) cannot boot here yet, and tryUse only reaches enabled modules:
+  // its getServiceLocation answer is fed straight to shipping's lookup until it can
+  if (!app.kernel.modules.includes('fulfillment-service')) service.core.serviceLocation = async () => serviceLocation();
   const ordersApi = app.kernel.boot.apis.get('orders') as Harness['orders'];
   for (const name of EVENTS) app.kernel.events.subscribe('test', name, (e) => void h.events.push({ name: e.name, payload: e.payload }));
   const call: Harness['call'] = async (method, url, token, body, headers = {}) => {
@@ -163,7 +180,7 @@ export async function harness(): Promise<Harness> {
     await app.kernel.events.drain();
     return { status: res.statusCode, body: res.body ? JSON.parse(res.body) : null };
   };
-  return {
+  out = {
     ...h,
     app,
     service,
@@ -190,6 +207,7 @@ export async function harness(): Promise<Harness> {
       await app.kernel.events.drain();
     },
   };
+  return out;
 }
 
 /* ---------------------------------------------------------------- orders */
@@ -240,7 +258,7 @@ export function line(p: P, quantity: number): OrderItemInput {
   };
 }
 
-export function group(h: Harness, items: OrderItemInput[], o: { ownerType?: 'official' | 'seller'; sellerId?: string | null; dispatchInHours?: number } = {}): OrderGroupInput {
+export function group(h: Harness, items: OrderItemInput[], o: { ownerType?: 'official' | 'seller'; sellerId?: string | null; dispatchInHours?: number; fulfilledBy?: OrderGroupInput['fulfilledBy'] } = {}): OrderGroupInput {
   const ownerType = o.ownerType ?? 'seller';
   const total = items.reduce((s, i) => s + i.unitPrice.amount * i.quantity, 0);
   const now = h.clock.now();
@@ -250,7 +268,7 @@ export function group(h: Harness, items: OrderItemInput[], o: { ownerType?: 'off
     ownerType,
     sellerId: ownerType === 'seller' ? (o.sellerId ?? null) : null,
     shipsFrom: 'Reno, NV',
-    fulfilledBy: ownerType === 'official' ? 'official_warehouse' : 'seller',
+    fulfilledBy: o.fulfilledBy ?? (ownerType === 'official' ? 'official_warehouse' : 'seller'),
     delivery: { methodName: 'Standard', carrier: 'UPS', service: 'Ground', price: USD(0), free: true, fundedBy: 'seller', arrival: { from: day(4), to: day(9) }, dispatchBy: new Date(now.getTime() + (o.dispatchInHours ?? 48) * 3_600_000).toISOString() },
     returnTermsSummary: '30-day returns.',
     items,
@@ -279,13 +297,13 @@ export function checkout(groups: OrderGroupInput[], o: { customerId?: string | n
 }
 
 /** A seller order with two lines (2 speakers, 1 lamp), accepted (the dispatch watch is fed) */
-export async function sellerOrder(h: Harness, o: { sellerId?: string; customerId?: string; dispatchInHours?: number; ownerType?: 'official' | 'seller' } = {}) {
+export async function sellerOrder(h: Harness, o: { sellerId?: string; customerId?: string; dispatchInHours?: number; ownerType?: 'official' | 'seller'; fulfilledBy?: OrderGroupInput['fulfilledBy'] } = {}) {
   const sellerId = o.sellerId ?? newId();
   const customerId = o.customerId ?? newId();
   const ownerType = o.ownerType ?? 'seller';
   const a = product(h, { title: 'Pocket Speaker', price: 5000, sellerId, ownerType });
   const b = product(h, { title: 'Desk Lamp', price: 3000, sellerId, ownerType, variant: 'Black' });
-  const order = await h.orders.createOrder(checkout([group(h, [line(a, 2), line(b, 1)], { sellerId, ownerType, ...(o.dispatchInHours !== undefined ? { dispatchInHours: o.dispatchInHours } : {}) })], { customerId }));
+  const order = await h.orders.createOrder(checkout([group(h, [line(a, 2), line(b, 1)], { sellerId, ownerType, ...(o.fulfilledBy ? { fulfilledBy: o.fulfilledBy } : {}), ...(o.dispatchInHours !== undefined ? { dispatchInHours: o.dispatchInHours } : {}) })], { customerId }));
   await h.app.kernel.events.drain();
   const g = order.groups[0]!;
   const speaker = g.items.find((i) => i.title.startsWith('Pocket'))!;
@@ -303,7 +321,7 @@ export const tokens = {
 export const idem = () => ({ 'idempotency-key': newId() });
 
 /** An offer (for estimates and profile use) pointing at a shipping profile */
-export function offer(h: Harness, o: { profileId: string; sellerId?: string | null; businessDays?: number; status?: offers.Offer['status'] }): offers.Offer {
+export function offer(h: Harness, o: { profileId: string; sellerId?: string | null; businessDays?: number; status?: offers.Offer['status']; shipping?: offers.OfferShipping }): offers.Offer {
   const id = newId();
   const x = {
     id,
@@ -321,6 +339,7 @@ export function offer(h: Harness, o: { profileId: string; sellerId?: string | nu
     price: USD(4000),
     dispatch: { businessDays: o.businessDays ?? 1, sameDayCutoff: null, shipsFrom: 'Reno, NV', label: 'Ships in 1 business day' },
     shippingProfileId: o.profileId,
+    ...(o.shipping ? { shipping: o.shipping } : {}),
     status: o.status ?? 'active',
   } as unknown as offers.Offer;
   h.offers.set(id, x);

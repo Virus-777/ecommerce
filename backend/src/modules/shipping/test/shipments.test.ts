@@ -295,7 +295,7 @@ describe('labels', () => {
     expect(label.label).toMatchObject({ format: 'zpl', dropOffBy: null });
     await h.app.kernel.events.drain();
     expect(h.named('shipping.label.purchased').at(-1)).toMatchObject({ billedTo: 'company', sellerId: null });
-    await h.publish('warehouse', 'warehouse.package.packed', { packageId: newId(), fulfillmentId: newId(), orderId: o.order.id, sellerGroupId: o.groupId, items: [], carrier: 'ups', service: 'Ground', trackingNumber: label.label.trackingNumber, weight: { value: 2.5, unit: 'kg' }, dimensions: null });
+    await h.publish('warehouse', 'warehouse.package.packed', { packageId: newId(), fulfillmentId: newId(), orderId: o.order.id, sellerGroupId: o.groupId, ownerType: 'official', sellerId: null, fulfilledBy: 'official_warehouse', items: [], carrier: 'ups', service: 'Ground', trackingNumber: label.label.trackingNumber, weight: { value: 2.5, unit: 'kg' }, dimensions: null });
     const s = (await h.call('GET', `${ADMIN}/shipments/${label.shipment.id}`, tokens.staff())).body;
     expect(s.status).toBe('shipped');
     expect(await h.service.core.repo.get('dispatch_watch', o.groupId)).toBeUndefined();
