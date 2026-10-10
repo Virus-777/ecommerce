@@ -303,22 +303,10 @@ export class AuditService implements AuditPublicApi {
     return this.ctx.error('EXPORT_TOO_LARGE', `The filters match ${matched} entries, more than one export can hold (${max}); narrow the date range`, { matched, max });
   }
 
-  /**
-   * reports.maxExportRows, read through settings (spec: settings.get('reports.maxExportRows')). The kernel's
-   * cross-module reader ctx.settings.read(fullKey) is used when it exists; until then (and when settings or
-   * reports is off) the reports default applies.
-   */
+  /** reports.maxExportRows through the kernel's cross-module settings reader (the reports default when settings is off) */
   private async maxExportRows(): Promise<number> {
-    const read = (this.ctx.settings as { read?: (key: string) => Promise<unknown> }).read;
-    if (typeof read === 'function') {
-      try {
-        const v = await read.call(this.ctx.settings, 'reports.maxExportRows');
-        if (typeof v === 'number' && Number.isFinite(v) && v > 0) return v;
-      } catch (err) {
-        this.ctx.log.debug({ err }, 'audit: reports.maxExportRows unavailable, using the default');
-      }
-    }
-    return DEFAULT_MAX_EXPORT_ROWS;
+    const v = await this.ctx.settings.read('reports.maxExportRows');
+    return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : DEFAULT_MAX_EXPORT_ROWS;
   }
 
   /** reports reads the rows through exportRows; the dataset is registered once, before the first export */

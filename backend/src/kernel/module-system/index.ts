@@ -61,6 +61,8 @@ export interface ModuleContext<N extends ModuleName> {
   /** Runtime settings declared in the spec: value in force from the settings module, else the spec default */
   readonly settings: {
     get<K extends keyof SettingsOf<N> & string>(key: K): Promise<Widen<SettingsOf<N>[K] extends { default: infer D } ? D : unknown>>;
+    /** Another module's setting by full key ('reports.maxExportRows'), read-only: the value in force, else that module's spec default */
+    read(fullKey: string): Promise<unknown>;
   };
   /** An AppError with this module's status for the code (module codes are scoped; use it instead of new AppError for module codes) */
   error(code: keyof SpecOf<N>['errorCodes'] | (string & {}), message?: string, details?: unknown): AppError;

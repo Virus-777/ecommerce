@@ -187,8 +187,9 @@ describe('exports', () => {
 
   it('checks reports.maxExportRows (read through settings) before creating the job', async () => {
     await auditApi(app).recordMany([entry(), entry()]);
-    // the kernel's cross-module settings reader (ctx.settings.read) once it exists
+    // the kernel's cross-module settings reader (ctx.settings.read), answering a lowered limit
     const ctx = (app.kernel.boot.apis.get('audit') as unknown as { deps: { ctx: { settings: Record<string, unknown> } } }).deps.ctx;
+    const original = ctx.settings.read;
     const read = vi.fn(async (key: string) => (key === 'reports.maxExportRows' ? 1 : undefined));
     ctx.settings.read = read;
     try {
@@ -198,7 +199,7 @@ describe('exports', () => {
       expect(read).toHaveBeenCalledWith('reports.maxExportRows');
       expect(reports.requestExport).not.toHaveBeenCalled();
     } finally {
-      delete ctx.settings.read;
+      ctx.settings.read = original;
     }
   });
 
