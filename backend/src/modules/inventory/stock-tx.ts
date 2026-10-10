@@ -11,7 +11,7 @@ import { inventoryError } from './errors.js';
 import { newId } from '../../kernel/lib/ids.js';
 import type { Actor } from '../../spec/common.js';
 import type { InventoryStockChangedEvent, InventoryStockLowEvent, MovementRef, StockQuantities } from '../../spec/inventory.js';
-import { addQty, applyMove, stockState, unitsIn, zeroQty, type GroupOrOutside } from './domain/rules.js';
+import { addQty, applyMove, sellsFrom, stockState, unitsIn, zeroQty, type GroupOrOutside } from './domain/rules.js';
 import type { InventoryRepository, Row } from './ports.js';
 
 export interface HoldInfo {
@@ -31,6 +31,8 @@ export interface MoveMeta {
   hold?: HoldInfo;
   /** Error when the from-group is short (default GROUP_QUANTITY_EXCEEDED) */
   insufficient?: (have: number) => AppError;
+  /** The ledger row's id (default a new one); moveServiceStock derives it from its idempotency key */
+  movementId?: string;
 }
 
 export const levelQty = (l: Row<'stock_levels'> | undefined): StockQuantities =>
@@ -103,20 +105,21 @@ export class StockTx {
     return this.#locations.get(id);
   }
 
-  isSellable(locationId: string) {
-    const loc = this.#locations.get(locationId);
-    return !!loc && loc.sellable && loc.active;
+  /** Whether the item's Available units at this location can be sold (sellable rule: domain/rules sellsFrom) */
+  isSellable(itemId: string, locationId: string) {
+    const item = this.items.get(itemId);
+    return !!item && sellsFrom(item, this.#locations.get(locationId));
   }
 
-  /** Available units at sellable, active locations (what checkout can hold) */
+  /** Available units the item can sell (what checkout can hold): sellable, active locations under the sellable rule */
   sellableAvailable(itemId: string): number {
-    return this.levels(itemId).reduce((n, l) => n + (this.isSellable(l.location_id) ? l.available : 0), 0);
+    return this.levels(itemId).reduce((n, l) => n + (this.isSellable(itemId, l.location_id) ? l.available : 0), 0);
   }
 
   /** Sellable locations of an item with Available units, default location first, most units next */
   sellableLevels(itemId: string): Row<'stock_levels'>[] {
     return this.levels(itemId)
-      .filter((l) => this.isSellable(l.location_id) && l.available > 0)
+      .filter((l) => this.isSellable(itemId, l.location_id) && l.available > 0)
       .sort((a, b) => Number(this.#locations.get(b.location_id)?.is_default) - Number(this.#locations.get(a.location_id)?.is_default) || b.available - a.available);
   }
 
@@ -143,7 +146,7 @@ export class StockTx {
     this.#levels.get(itemId)!.set(locationId, { ...level, ...values, version: level.version + 1 });
 
     const movement = await this.tx.insertMovement({
-      id: newId(this.now.getTime()),
+      id: meta.movementId ?? newId(this.now.getTime()),
       stock_item_id: itemId,
       location_id: locationId,
       from_group: from,
@@ -224,7 +227,7 @@ export class StockTx {
       const cooled = !item.low_since || this.now.getTime() - item.low_since.getTime() >= opts.cooldownHours * 3_600_000;
       if (threshold !== null && !item.archived && available <= threshold && available < before.available && cooled) {
         this.items.set(id, await this.tx.update('stock_items', id, { low_since: this.now }));
-        out.low.push({ stockItemId: id, offerId: item.offer_id, ownerType: item.owner_type, sellerId: item.seller_id, productId: item.product_id, variantId: item.variant_id, sku: item.sku, label: item.label, available, threshold });
+        out.low.push({ stockItemId: id, offerId: item.offer_id, ownerType: item.owner_type, sellerId: item.seller_id, productId: item.product_id, variantId: item.variant_id, sku: item.sku, label: item.label, available, threshold, serviceManaged: item.owner_type === 'seller' && !!item.service_location_id });
       }
     }
     return out;

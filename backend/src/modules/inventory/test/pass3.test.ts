@@ -78,6 +78,7 @@ const cancelled = async (orderId: string, itemId: string, stockItemId: string, q
     reasonCode: 'changed_mind',
     beforeDispatch: true,
     countsAgainstSeller: false,
+    fulfilledBy: 'official_warehouse' as const,
     refund: { itemAmount: zero, discountShare: zero, shippingRefund: zero, taxRefund: zero, total: zero },
     paymentIntentId: newId(),
   });
@@ -95,6 +96,7 @@ const dispatched = async (orderId: string, lines: { orderItemId: string; quantit
     lines: lines.map((l) => ({ ...l, title: 'Aurora', variantLabel: 'Black' })),
     shippedAt: new Date().toISOString(),
     trackingValid: true,
+    fulfilledBy: 'official_warehouse' as const,
   });
   await h.app.kernel.events.drain();
 };

@@ -52,6 +52,7 @@ const cancelled = (orderId: string, itemId: string, stockItemId: string, quantit
     reasonCode: 'changed_mind',
     beforeDispatch: true,
     countsAgainstSeller: false,
+    fulfilledBy: 'official_warehouse' as const,
     refund: { itemAmount: { amount: 0, currency: 'USD' }, discountShare: { amount: 0, currency: 'USD' }, shippingRefund: { amount: 0, currency: 'USD' }, taxRefund: { amount: 0, currency: 'USD' }, total: { amount: 0, currency: 'USD' } },
     paymentIntentId: newId(),
   });
@@ -67,6 +68,7 @@ const dispatched = (orderId: string, lines: { orderItemId: string; quantity: num
     lines: lines.map((l) => ({ ...l, title: 'Aurora', variantLabel: 'Black' })),
     shippedAt: new Date().toISOString(),
     trackingValid: true,
+    fulfilledBy: 'official_warehouse' as const,
   });
 
 describe('checkout holds', () => {

@@ -133,6 +133,7 @@ describe('mapping reservation lines to the accepted order items', () => {
       reasonCode: 'changed_mind',
       beforeDispatch: true,
       countsAgainstSeller: false,
+      fulfilledBy: 'official_warehouse' as const,
       refund: { itemAmount: { amount: 0, currency: 'USD' }, discountShare: { amount: 0, currency: 'USD' }, shippingRefund: { amount: 0, currency: 'USD' }, taxRefund: { amount: 0, currency: 'USD' }, total: { amount: 0, currency: 'USD' } },
       paymentIntentId: newId(),
     });

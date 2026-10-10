@@ -146,11 +146,11 @@ describe('receiving', () => {
 
 describe('returns', () => {
   const inspected = async (returnId: string, variantId: string, quantity: number, proposed = 'restock', o: { orderItemId?: string; stockItemId?: string | null } = {}) => {
-    h.app.kernel.events.publish('returns', 'returns.return.inspected', { returnId, ref: 'RT-261010-0001', orderId: newId(), orderRef: 'MK-261010-0001', ownerType: 'official', sellerId: null, conditionOutcome: 'Like new, opened', proposedStockOutcome: proposed, orderItemId: o.orderItemId ?? newId(), variantId, stockItemId: o.stockItemId ?? null, quantity });
+    h.app.kernel.events.publish('returns', 'returns.return.inspected', { returnId, ref: 'RT-261010-0001', orderId: newId(), orderRef: 'MK-261010-0001', ownerType: 'official', sellerId: null, fulfilledBy: 'official_warehouse', conditionOutcome: 'Like new, opened', proposedStockOutcome: proposed, orderItemId: o.orderItemId ?? newId(), variantId, stockItemId: o.stockItemId ?? null, quantity });
     await h.app.kernel.events.drain();
   };
   const received = async (returnId: string, items: { orderItemId: string; quantity: number; variantId: string; stockItemId?: string | null }[], ownerType: 'official' | 'seller' = 'official') => {
-    h.app.kernel.events.publish('returns', 'returns.return.received', { returnId, ref: 'RT-261010-0001', orderId: newId(), orderRef: 'MK-261010-0001', ownerType, sellerId: ownerType === 'seller' ? newId() : null, items, receivedAt: new Date().toISOString() });
+    h.app.kernel.events.publish('returns', 'returns.return.received', { returnId, ref: 'RT-261010-0001', orderId: newId(), orderRef: 'MK-261010-0001', ownerType, sellerId: ownerType === 'seller' ? newId() : null, fulfilledBy: ownerType === 'seller' ? 'seller' : 'official_warehouse', items, receivedAt: new Date().toISOString() });
     await h.app.kernel.events.drain();
   };
 
@@ -169,7 +169,7 @@ describe('returns', () => {
 
     await inspected(returnId, a.variantId, 2, 'restock', { orderItemId: itemA, stockItemId: a.id });
     await inspected(returnId, a.variantId, 2, 'restock', { orderItemId: itemA, stockItemId: a.id }); // replay
-    h.app.kernel.events.publish('returns', 'returns.return.inspected', { returnId: newId(), ref: 'RT-261010-0002', orderId: newId(), orderRef: 'MK-261010-0002', ownerType: 'seller', sellerId: newId(), conditionOutcome: 'x', proposedStockOutcome: 'restock', orderItemId: newId(), variantId: a.variantId, quantity: 1 });
+    h.app.kernel.events.publish('returns', 'returns.return.inspected', { returnId: newId(), ref: 'RT-261010-0002', orderId: newId(), orderRef: 'MK-261010-0002', ownerType: 'seller', sellerId: newId(), fulfilledBy: 'seller', conditionOutcome: 'x', proposedStockOutcome: 'restock', orderItemId: newId(), variantId: a.variantId, quantity: 1 });
     await h.app.kernel.events.drain();
     expect(await quantities(h, a.id)).toMatchObject({ returned: 2, available: 0 }); // inspection moves nothing
     const pending = (await admin(h, 'GET', '/return-outcomes?state=pending')).json().items.filter((o: { returnId: string }) => o.returnId === returnId);
@@ -282,7 +282,7 @@ describe('discrepancies', () => {
     expect(await reservedMismatches(h)).toEqual([]);
 
     const b = await officialItem(h, loc.id, 0);
-    h.app.kernel.events.publish('returns', 'returns.return.inspected', { returnId: newId(), ref: 'RT-261010-0002', orderId: newId(), orderRef: 'MK-261010-0002', ownerType: 'official', sellerId: null, conditionOutcome: 'New', proposedStockOutcome: 'restock', orderItemId: newId(), variantId: b.variantId, quantity: 1 });
+    h.app.kernel.events.publish('returns', 'returns.return.inspected', { returnId: newId(), ref: 'RT-261010-0002', orderId: newId(), orderRef: 'MK-261010-0002', ownerType: 'official', sellerId: null, fulfilledBy: 'official_warehouse', conditionOutcome: 'New', proposedStockOutcome: 'restock', orderItemId: newId(), variantId: b.variantId, quantity: 1 });
     await h.app.kernel.events.drain();
     await admin(h, 'POST', '/adjustments', { stockItemId: b.id, fromGroup: 'outside', toGroup: 'available', quantity: 1, reasonCode: 'found_stock' });
     const ob = await order(b.id, 1);
@@ -299,7 +299,7 @@ describe('low stock and jobs', () => {
     await admin(h, 'PATCH', `/stock-items/${a.id}`, { reorderQuantity: 40 });
     const b = await officialItem(h, loc.id, 1, { lowStockThreshold: 4 });
     const o = await order(b.id, 1);
-    h.app.kernel.events.publish('shipping', 'shipping.shipment.dispatched', { shipmentId: newId(), kind: 'outbound', orderId: o.orderId, groupId: newId(), ownerType: 'official', sellerId: null, lines: [{ orderItemId: o.orderItemId, title: 'x', variantLabel: 'y', quantity: 1 }], shippedAt: new Date().toISOString(), trackingValid: true });
+    h.app.kernel.events.publish('shipping', 'shipping.shipment.dispatched', { shipmentId: newId(), kind: 'outbound', orderId: o.orderId, groupId: newId(), ownerType: 'official', sellerId: null, lines: [{ orderItemId: o.orderItemId, title: 'x', variantLabel: 'y', quantity: 1 }], shippedAt: new Date().toISOString(), trackingValid: true, fulfilledBy: 'official_warehouse' });
     await h.app.kernel.events.drain();
     const rows = (await admin(h, 'GET', '/low-stock?limit=100')).json().items;
     expect(rows.find((r: { item: { id: string } }) => r.item.id === a.id)).toMatchObject({ suggestedReorderQuantity: 40, daysOfCover: null });

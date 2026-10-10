@@ -9,6 +9,7 @@ import type {
   Location,
   Movement,
   MovementRef,
+  ReceiptSource,
   Reservation,
   ReservationLine,
   ReturnOutcome,
@@ -17,7 +18,7 @@ import type {
   StockQuantities,
   Transfer,
 } from '../../spec/inventory.js';
-import { addQty, onHand, reasonLabel, stockState, zeroQty } from './domain/rules.js';
+import { addQty, onHand, reasonLabel, sellsFrom, stockState, zeroQty } from './domain/rules.js';
 import type { Row } from './ports.js';
 import { levelQty } from './stock-tx.js';
 
@@ -74,17 +75,21 @@ export interface ItemContext {
   image?: MediaRef | null;
 }
 
-/** Available units at sellable, active locations */
-export const sellableAvailable = (levels: Row<'stock_levels'>[], locations: Map<string, Row<'locations'>>) =>
-  levels.reduce((n, l) => {
-    const loc = locations.get(l.location_id);
-    return n + (loc && loc.sellable && loc.active ? l.available : 0);
-  }, 0);
+/** Available units the item can sell: sellable, active locations under the sellable rule (sellsFrom) */
+export const sellableAvailable = (item: Row<'stock_items'>, levels: Row<'stock_levels'>[], locations: Map<string, Row<'locations'>>) =>
+  levels.reduce((n, l) => n + (l.stock_item_id === item.id && sellsFrom(item, locations.get(l.location_id)) ? l.available : 0), 0);
+
+/** A seller item Fulfilled by Marketly: it has a service location */
+export const isServiceItem = (item: Row<'stock_items'>) => item.owner_type === 'seller' && !!item.service_location_id;
+
+const sumQty = (levels: Row<'stock_levels'>[]) => levels.reduce((sum, l) => addQty(sum, levelQty(l)), zeroQty());
 
 export function toStockItem(item: Row<'stock_items'>, c: ItemContext): StockItem {
-  const levels = c.locationId ? c.levels.filter((l) => l.location_id === c.locationId) : c.levels;
-  const quantities = levels.reduce((sum, l) => addQty(sum, levelQty(l)), zeroQty());
-  const available = sellableAvailable(c.levels, c.locations);
+  const service = isServiceItem(item);
+  // a service item's quantities are those at its service location ('At Marketly'); its own-location units are apart
+  const levels = c.locationId ? c.levels.filter((l) => l.location_id === c.locationId) : service ? c.levels.filter((l) => l.location_id === item.service_location_id) : c.levels;
+  const quantities = sumQty(levels);
+  const available = sellableAvailable(item, c.levels, c.locations);
   const threshold = effectiveThreshold(item, c.defaultSellerThreshold);
   const unitCost = unitCostOf(item);
   const next = c.expectations.find((e) => e.quantity_open > 0);
@@ -107,6 +112,8 @@ export function toStockItem(item: Row<'stock_items'>, c: ItemContext): StockItem
     valueAtCost: unitCost ? money(unitCost.amount * onHand(quantities), unitCost.currency) : null,
     binCode: item.primary_bin_code,
     nextIncoming: next ? incomingCue(next) : null,
+    serviceLocationId: item.owner_type === 'seller' ? item.service_location_id : null,
+    ownLocationQuantities: service ? sumQty(c.levels.filter((l) => c.locations.get(l.location_id)?.owner_type === 'seller')) : null,
     archived: item.archived,
     updatedAt: iso(item.updated_at),
   };
@@ -172,17 +179,27 @@ export function toInboundLine(l: Row<'inbound_lines'>, item: Row<'stock_items'> 
     damaged: l.damaged,
     shortage: Math.max(0, l.expected - l.received),
     binCode: l.bin_code,
-    unitCost: money(Number(l.unit_cost_amount), item?.currency.trim() ?? currency),
+    unitCost: l.unit_cost_amount === null ? null : money(Number(l.unit_cost_amount), item?.currency.trim() ?? currency),
     sellable: l.sellable ?? Math.max(0, l.received - l.damaged),
     outOfStockNow,
   };
 }
+
+/** What a receipt's units arrive against: the purchase order, or the Fulfilled by Marketly inbound shipment */
+export const receiptSourceOf = (r: Row<'inbound_receipts'>): ReceiptSource => ({
+  kind: r.source_kind,
+  id: r.source_id ?? r.purchase_order_id ?? r.receipt_id,
+  ref: r.source_ref ?? r.purchase_order_ref ?? r.receipt_ref,
+});
 
 export function toInbound(r: Row<'inbound_receipts'>, lines: InboundLine[], openPickShortages: number): InboundReceipt {
   return {
     id: r.id,
     receiptId: r.receipt_id,
     receiptRef: r.receipt_ref,
+    source: receiptSourceOf(r),
+    ownerType: r.owner_type,
+    sellerId: r.seller_id,
     purchaseOrderId: r.purchase_order_id,
     purchaseOrderRef: r.purchase_order_ref,
     supplierName: r.supplier_name,
