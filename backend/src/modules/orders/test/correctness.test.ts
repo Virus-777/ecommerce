@@ -21,7 +21,7 @@ async function deliver(orderId: string, groupId: string, sellerId: string | null
   const lines = items.map((i) => ({ orderItemId: i.id, quantity: i.quantity, title: 'x', variantLabel: '' }));
   await h.publish('shipping', 'shipping.shipment.created', { shipmentId, kind: 'outbound', orderId, groupId, sellerId, fulfilledBy: sellerId ? 'seller' : 'official_warehouse', packageLabel: 'Package', carrierCode: 'ups', carrierName: 'UPS', serviceName: null, trackingNumber: '1Z9', trackingUrl: null, lines, status: 'label_created' });
   await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId, kind: 'outbound', orderId, groupId, ownerType: sellerId ? 'seller' : 'official', fulfilledBy: sellerId ? 'seller' : 'official_warehouse', sellerId, lines, shippedAt: now(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
-  await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId, kind: 'outbound', orderId, groupId, sellerId, lines, deliveredAt: now() });
+  await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId, kind: 'outbound', orderId, groupId, sellerId, fulfilledBy: sellerId ? 'seller' : 'official_warehouse', lines, deliveredAt: now() });
 }
 
 describe('category at purchase', () => {

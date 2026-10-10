@@ -225,12 +225,16 @@ export class ReadModels {
     await this.touch([marketly ? 'marketly_fulfillment' : 'service'], env);
   }
 
+  /** Delivery issues: a Fulfilled by Marketly package's go to the Marketly fulfillment row of its seller of record, never the seller's own */
   async onShipmentException(p: EventPayload<'shipping.shipment.exception'>, env: Env) {
     const day = await this.day(env.at);
+    const marketly = isMarketly(p);
     await this.repo.transaction(async (tx) => {
-      if (await tx.claim(`service:exception:${p.exceptionId}`)) await tx.bumpService(p.sellerId ?? OFFICIAL_KEY, day, { delivery_exceptions: 1 });
+      if (!(await tx.claim(`service:exception:${p.exceptionId}`))) return;
+      if (marketly) await tx.bumpDaily('fact_marketly_fulfillment_daily', { seller_id: p.sellerId!, day }, { delivery_exceptions: 1 });
+      else await tx.bumpService(p.sellerId ?? OFFICIAL_KEY, day, { delivery_exceptions: 1 });
     });
-    await this.touch(['service'], env);
+    await this.touch([marketly ? 'marketly_fulfillment' : 'service'], env);
   }
 
   async onItemDelivered(p: EventPayload<'orders.item.delivered'>, env: Env) {

@@ -572,12 +572,12 @@ export class Queries {
     };
     // Fulfilled by Marketly: Marketly's own dispatches for sellers' groups, never in the seller rows above (staff only)
     if (staff) {
-      const M_COLS = ['dispatched', 'dispatched_on_time', 'overdue'];
+      const M_COLS = ['dispatched', 'dispatched_on_time', 'overdue', 'delivery_exceptions'];
       const mTotal = (await this.core.repo.dailySums('fact_marketly_fulfillment_daily', f(rq.range), M_COLS, 'none'))[0] ?? zeros(M_COLS);
       const mPrev = rq.compare ? ((await this.core.repo.dailySums('fact_marketly_fulfillment_daily', f(rq.compare), M_COLS, 'none'))[0] ?? zeros(M_COLS)) : null;
       if (this.core.running('fulfillment-service') || mTotal.dispatched || mTotal.overdue) {
-        kpis.push(this.kpi('service.marketly_on_time_dispatch', onTime(mTotal), c, mPrev?.dispatched ? onTime(mPrev) : null, `${mTotal.dispatched_on_time} of ${mTotal.dispatched} packages · ${mTotal.overdue} overdue`));
-        part.callouts.push({ kind: 'info', title: 'Fulfilled by Marketly is shown apart', body: "Packages Marketly's warehouse ships for sellers count in Fulfilled by Marketly on-time dispatch, never in the sellers' own dispatch figures." });
+        kpis.push(this.kpi('service.marketly_on_time_dispatch', onTime(mTotal), c, mPrev?.dispatched ? onTime(mPrev) : null, `${mTotal.dispatched_on_time} of ${mTotal.dispatched} packages · ${mTotal.overdue} overdue${mTotal.delivery_exceptions ? ` · ${mTotal.delivery_exceptions} delivery issues` : ''}`));
+        part.callouts.push({ kind: 'info', title: 'Fulfilled by Marketly is shown apart', body: "Packages Marketly's warehouse ships for sellers count in Fulfilled by Marketly on-time dispatch, never in the sellers' own dispatch or delivery-issue figures." });
         part.models.push('marketly_fulfillment');
       } else part.unavailable.push('service.marketly_on_time_dispatch');
     }

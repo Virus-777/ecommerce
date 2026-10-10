@@ -1975,6 +1975,8 @@ export interface ShippingShipmentDeliveredEvent {
   groupId: string;
   returnId?: string | null;
   sellerId?: string | null;
+  /** Who shipped the package (the shipment's fulfilledBy): a marketly_service delivery is not a seller dispatch fact */
+  fulfilledBy: "official_warehouse" | "seller" | "marketly_service";
   lines: ShipmentLine[];
   deliveredAt: string;
 }
@@ -1988,6 +1990,7 @@ export const ShippingShipmentDeliveredEvent: z.ZodType<ShippingShipmentDelivered
   groupId: z.uuid(),
   returnId: z.uuid().nullish(),
   sellerId: z.uuid().nullish(),
+  fulfilledBy: z.enum(["official_warehouse", "seller", "marketly_service"]).describe("Who shipped the package (the shipment's fulfilledBy): a marketly_service delivery is not a seller dispatch fact"),
   get lines() {
     return z.array(ShipmentLine);
   },
@@ -3053,7 +3056,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => Label,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION"],
+    errors: ["ILLEGAL_TRANSITION","FULFILLED_BY_MARKETLY"],
     idempotent: true,
     events: ["shipping.label.voided"],
     screens: ["seller/order"],

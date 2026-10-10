@@ -892,7 +892,7 @@ export class Shipments {
         current = await tx.update('shipments', s.id, step);
         this.statusChanged(batch, current, status, next, e.at);
         if (ev === 'hand_over') this.dispatched(batch, current, lines);
-        if (next === 'delivered') batch.push('shipping.shipment.delivered', { shipmentId: s.id, kind: s.kind as 'outbound', orderId: s.order_id, groupId: s.group_id, returnId: s.return_id, sellerId: s.seller_id, lines: this.views.contents(lines), deliveredAt: e.at.toISOString() });
+        if (next === 'delivered') batch.push('shipping.shipment.delivered', { shipmentId: s.id, kind: s.kind as 'outbound', orderId: s.order_id, groupId: s.group_id, returnId: s.return_id, sellerId: s.seller_id, fulfilledBy: fulfilledByOf(s.owner_type, s.fulfilled_by), lines: this.views.contents(lines), deliveredAt: e.at.toISOString() });
         status = next;
       }
       if (!path?.events.length && Object.keys(patch).length) current = await tx.update('shipments', s.id, patch);

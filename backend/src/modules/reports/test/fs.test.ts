@@ -1,13 +1,15 @@
 /**
  * Fulfilled by Marketly (fulfillment-service, phase 4): fact_order_items.fulfilled_by, Marketly's dispatches kept in
  * fact_marketly_fulfillment_daily (never the seller's service row), service fees from fulfillment-service fee events,
- * the two seeded metrics, the seller dashboard's service-fees line, the four dataset keys and migration 0005.
+ * the two seeded metrics, the seller dashboard's service-fees line, the four dataset keys and migrations 0005 and 0006
+ * (delivery issues of Marketly's packages in the Marketly row).
  * fulfillment-service itself is off here: its events are published with the contract payloads.
  */
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { m0005FulfilledByMarketly } from '../infra/postgres/migrations/0005_fulfilled_by_marketly.js';
+import { m0006MarketlyDeliveryExceptions } from '../infra/postgres/migrations/0006_marketly_delivery_exceptions.js';
 import { harness, usd, type Harness } from './harness.js';
 
 let h: Harness;
@@ -22,8 +24,9 @@ const kpi = (body: any, key: string) => body.kpis.find((k: any) => k.metricKey =
 const db = () => h.app.kernel.database.kysely;
 const factsOf = async (orderId: string) =>
   (await sql<{ order_item_id: string; owner_type: string; fulfilled_by: string | null }>`select order_item_id, owner_type, fulfilled_by from reports.fact_order_items where order_id = ${orderId}`.execute(db())).rows;
-const serviceRow = async (sellerId: string) => (await sql<{ dispatched: number; dispatched_on_time: number; overdue: number }>`select dispatched, dispatched_on_time, overdue from reports.fact_service_daily where seller_id = ${sellerId}`.execute(db())).rows;
-const marketlyRow = async (sellerId: string) => (await sql<{ dispatched: number; dispatched_on_time: number; overdue: number }>`select dispatched, dispatched_on_time, overdue from reports.fact_marketly_fulfillment_daily where seller_id = ${sellerId}`.execute(db())).rows;
+type Row = { dispatched: number; dispatched_on_time: number; overdue: number; delivery_exceptions: number };
+const serviceRow = async (sellerId: string) => (await sql<Row>`select dispatched, dispatched_on_time, overdue, delivery_exceptions from reports.fact_service_daily where seller_id = ${sellerId}`.execute(db())).rows;
+const marketlyRow = async (sellerId: string) => (await sql<Row>`select dispatched, dispatched_on_time, overdue, delivery_exceptions from reports.fact_marketly_fulfillment_daily where seller_id = ${sellerId}`.execute(db())).rows;
 
 function dispatched(o: { id: string; groups: { id: string; items: { id: string }[] }[] }, sellerId: string, fulfilledBy: 'seller' | 'marketly_service', onTime: boolean) {
   const now = h.clock.now().toISOString();
@@ -76,10 +79,16 @@ describe("Marketly's dispatches", () => {
     const overdue = { orderId: late.id, orderRef: late.ref, groupId: late.groups[0]!.id, ownerType: 'seller', sellerId, fulfilledBy: 'marketly_service', orderItemIds: [late.groups[0]!.items[0]!.id], dueAt: h.clock.now().toISOString(), exceptionId: newId() };
     h.publish('shipping', 'shipping.dispatch.overdue', overdue);
     h.publish('shipping', 'shipping.dispatch.overdue', overdue);
+    // delivery issues: Marketly's package counts in the Marketly row, the seller's own in its row
+    const exception = (o: typeof own, fulfilledBy: 'seller' | 'marketly_service') => ({ exceptionId: newId(), kind: 'lost_or_damaged', orderId: o.id, groupId: o.groups[0]!.id, shipmentId: newId(), sellerId, fulfilledBy, orderItemIds: [o.groups[0]!.items[0]!.id], dueAt: h.clock.now().toISOString(), customerAction: null, source: 'carrier', caseRef: null });
+    const lost = exception(service, 'marketly_service');
+    h.publish('shipping', 'shipping.shipment.exception', lost);
+    h.publish('shipping', 'shipping.shipment.exception', lost); // redelivered
+    h.publish('shipping', 'shipping.shipment.exception', exception(own, 'seller'));
     await h.drain();
 
-    expect(await serviceRow(sellerId)).toEqual([{ dispatched: 1, dispatched_on_time: 1, overdue: 0 }]);
-    expect(await marketlyRow(sellerId)).toEqual([{ dispatched: 2, dispatched_on_time: 1, overdue: 1 }]);
+    expect(await serviceRow(sellerId)).toEqual([{ dispatched: 1, dispatched_on_time: 1, overdue: 0, delivery_exceptions: 1 }]);
+    expect(await marketlyRow(sellerId)).toEqual([{ dispatched: 2, dispatched_on_time: 1, overdue: 1, delivery_exceptions: 1 }]);
     // the shipment date basis still fills for the service items
     const shipped = (await sql<{ shipped_at: Date | null }>`select shipped_at from reports.fact_order_items where order_id = ${service.id}`.execute(db())).rows;
     expect(shipped[0]!.shipped_at).not.toBeNull();
@@ -95,7 +104,7 @@ describe("Marketly's dispatches", () => {
     expect(staff.status).toBe(200);
     expect(kpi(staff.body, 'service.on_time_dispatch')).toMatchObject({ value: 100 });
     expect(kpi(staff.body, 'service.overdue_dispatch').value).toBe(0);
-    expect(kpi(staff.body, 'service.marketly_on_time_dispatch')).toMatchObject({ value: 50, note: '1 of 2 packages · 1 overdue' });
+    expect(kpi(staff.body, 'service.marketly_on_time_dispatch')).toMatchObject({ value: 50, note: '1 of 2 packages · 1 overdue · 1 delivery issues' });
     expect(staff.body.definitions.map((d: any) => d.key)).toContain('service.marketly_on_time_dispatch');
     expect(staff.body.unavailable).not.toContain('service.marketly_on_time_dispatch');
   });
@@ -110,7 +119,7 @@ describe("Marketly's dispatches", () => {
   it('lists the read model with its rows', async () => {
     const list = await h.call('GET', '/api/admin/reports/read-models', h.tokens.staff());
     expect(list.status).toBe(200);
-    expect(list.body.find((m: any) => m.key === 'marketly_fulfillment')).toMatchObject({ sourceEvents: ['shipping.shipment.dispatched', 'shipping.dispatch.overdue'], rebuildable: false });
+    expect(list.body.find((m: any) => m.key === 'marketly_fulfillment')).toMatchObject({ sourceEvents: ['shipping.shipment.dispatched', 'shipping.dispatch.overdue', 'shipping.shipment.exception'], rebuildable: false });
   });
 });
 
@@ -183,8 +192,8 @@ describe('seeded definitions and datasets', () => {
   });
 });
 
-describe('migration 0005 on an install from before it', () => {
-  it('adds the columns and the table, filling fulfilled_by from the owner and service fees with 0', async () => {
+describe('migrations 0005 and 0006 on an install from before them', () => {
+  it('adds the columns and the table, filling fulfilled_by from the owner, service fees and delivery issues with 0', async () => {
     const sellerId = newId();
     const own = h.order({ sellerId });
     const official = h.order({ sellerId: null });
@@ -200,6 +209,11 @@ alter table reports.fact_order_items drop column fulfilled_by;
 alter table reports.fact_marketplace_finance_daily drop column service_fees_minor;
 drop table reports.fact_marketly_fulfillment_daily;`);
     await h.app.kernel.database.exec(m0005FulfilledByMarketly.sql!);
+    // a Marketly row recorded between 0005 and 0006 gets 0 delivery issues
+    const between = newId();
+    await h.app.kernel.database.exec(`insert into reports.fact_marketly_fulfillment_daily (seller_id, day, dispatched, dispatched_on_time, overdue) values ('${between}', current_date, 3, 2, 1)`);
+    await h.app.kernel.database.exec(m0006MarketlyDeliveryExceptions.sql);
+    expect(await marketlyRow(between)).toEqual([{ dispatched: 3, dispatched_on_time: 2, overdue: 1, delivery_exceptions: 0 }]);
 
     expect((await factsOf(own.id)).map((r) => r.fulfilled_by)).toEqual(['seller']);
     expect((await factsOf(official.id)).map((r) => r.fulfilled_by)).toEqual(['official_warehouse']);

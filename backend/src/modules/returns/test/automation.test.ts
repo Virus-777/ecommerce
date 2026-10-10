@@ -140,7 +140,7 @@ describe('events from other modules', () => {
     await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'lost_or_damaged', orderId: m.order.id, groupId, shipmentId, sellerId: m.sellerId, fulfilledBy: 'seller', orderItemIds: [], dueAt: now(), customerAction: null, source: 'carrier', caseRef: null });
     d = await detail(m.ret.id, m.sellerId);
     expect(d.detail.shipment.status).toBe('exception');
-    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId, kind: 'return', orderId: m.order.id, groupId, returnId: m.ret.id, sellerId: m.sellerId, lines: [], deliveredAt: now() });
+    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId, kind: 'return', orderId: m.order.id, groupId, returnId: m.ret.id, sellerId: m.sellerId, fulfilledBy: 'seller', lines: [], deliveredAt: now() });
     d = await detail(m.ret.id, m.sellerId);
     expect(d.detail.shipment.status).toBe('delivered');
     expect(d.detail.shipment.events.map((e: any) => e.label)).toEqual(expect.arrayContaining(['In transit']));

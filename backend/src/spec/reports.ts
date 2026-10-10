@@ -958,6 +958,8 @@ export interface ReportsDb {
     dispatched: number;
     dispatched_on_time: number;
     overdue: number;
+    /** shipping.shipment.exception on marketly_service packages */
+    delivery_exceptions: number;
   };
   /** Per product and day: views, cart additions, purchases, stockout minutes */
   fact_discovery_daily: {
@@ -1828,7 +1830,7 @@ export const spec = defineModuleSpec({
       "payments.payment.captured": "Payment date basis",
       "shipping.shipment.dispatched": "Shipment date basis; on-time dispatch in fact_service_daily, or in fact_marketly_fulfillment_daily when fulfilledBy is marketly_service (never in the seller's row)",
       "shipping.dispatch.overdue": "Overdue counts in fact_service_daily, or in fact_marketly_fulfillment_daily when fulfilledBy is marketly_service",
-      "shipping.shipment.exception": "Delivery issues",
+      "shipping.shipment.exception": "Delivery issues in fact_service_daily, or in fact_marketly_fulfillment_daily when fulfilledBy is marketly_service (never in the seller's row)",
       "orders.item.delivered": "Delivered date",
       "orders.order.completed": "Completion date basis",
       "orders.item.cancelled": "Cancellations (by customer or seller) and cancelled amounts",
@@ -3034,6 +3036,10 @@ export const spec = defineModuleSpec({
         "nullable": false
       },
       "overdue": {
+        "type": "int",
+        "nullable": false
+      },
+      "delivery_exceptions": {
         "type": "int",
         "nullable": false
       }

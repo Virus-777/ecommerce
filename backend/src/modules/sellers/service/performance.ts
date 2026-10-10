@@ -56,15 +56,9 @@ export class PerformancePart extends Part {
     await this.fact(e.sellerId, 'dispatched_late', e.groupId, e.dueAt);
   }
 
-  /**
-   * Confirms carrier-scanned tracking of a shipment the seller dispatched (one with a tracking fact from its
-   * dispatch). The delivered event carries no fulfilledBy, so a Fulfilled by Marketly shipment, which has no
-   * dispatch fact, is left out this way.
-   */
+  /** Confirms carrier-scanned tracking of a package the seller shipped (Fulfilled by Marketly deliveries are not its facts) */
   async onShipmentDelivered(e: EventPayload<'shipping.shipment.delivered'>) {
-    if (e.kind !== 'outbound' || !e.sellerId || !isUuid(e.shipmentId)) return;
-    const dispatched = await this.repo.findOne('performance_events', { seller_id: e.sellerId, subject_id: e.shipmentId, kind: ['tracking_valid', 'tracking_missing'] });
-    if (!dispatched) return;
+    if (e.kind !== 'outbound' || !e.sellerId || e.fulfilledBy !== 'seller' || !isUuid(e.shipmentId)) return;
     await this.fact(e.sellerId, 'tracking_valid', e.shipmentId, e.deliveredAt);
   }
 

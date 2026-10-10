@@ -192,7 +192,7 @@ describe('replacements: allocated, cancelled with a release', () => {
     await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId, kind: 'replacement', orderId: m.order.id, groupId: m.order.groups[0]!.id, returnId: null, ownerType: 'seller', fulfilledBy: 'seller', sellerId, lines: [{ orderItemId: itemId, title: 'Bowl', variantLabel: '', quantity: 1 }], shippedAt: now(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
     let row = (await h.service.core.repo.get('replacements', rep.id))!;
     expect(row).toMatchObject({ status: 'shipped', shipping_shipment_id: shipmentId });
-    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId, kind: 'replacement', orderId: m.order.id, groupId: m.order.groups[0]!.id, returnId: null, sellerId, lines: [{ orderItemId: itemId, title: 'Bowl', variantLabel: '', quantity: 1 }], deliveredAt: now() });
+    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId, kind: 'replacement', orderId: m.order.id, groupId: m.order.groups[0]!.id, returnId: null, sellerId, fulfilledBy: sellerId ? 'seller' : 'official_warehouse', lines: [{ orderItemId: itemId, title: 'Bowl', variantLabel: '', quantity: 1 }], deliveredAt: now() });
     row = (await h.service.core.repo.get('replacements', rep.id))!;
     expect(row.status).toBe('delivered');
     expect((await h.call('POST', `/api/admin/returns/replacements/${rep.id}/cancel`, staff(), { reason: 'late' })).status).toBe(409);

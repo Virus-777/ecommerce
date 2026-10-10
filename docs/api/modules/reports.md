@@ -691,6 +691,7 @@ Indexes: `unique(seller_id, day)`
 | dispatched | int |
 | dispatched_on_time | int |
 | overdue | int |
+| delivery_exceptions | int (shipping.shipment.exception on marketly_service packages) |
 
 Indexes: `unique(seller_id, day)`
 
@@ -793,7 +794,7 @@ Indexes: `pk (kind, ref_id)`
 | `payments.payment.captured` | payments | Payment date basis |
 | `shipping.shipment.dispatched` | shipping | Shipment date basis; on-time dispatch in fact_service_daily, or in fact_marketly_fulfillment_daily when fulfilledBy is marketly_service (never in the seller's row) |
 | `shipping.dispatch.overdue` | shipping | Overdue counts in fact_service_daily, or in fact_marketly_fulfillment_daily when fulfilledBy is marketly_service |
-| `shipping.shipment.exception` | shipping | Delivery issues |
+| `shipping.shipment.exception` | shipping | Delivery issues in fact_service_daily, or in fact_marketly_fulfillment_daily when fulfilledBy is marketly_service (never in the seller's row) |
 | `orders.item.delivered` | orders | Delivered date |
 | `orders.order.completed` | orders | Completion date basis |
 | `orders.item.cancelled` | orders | Cancellations (by customer or seller) and cancelled amounts |
@@ -900,7 +901,7 @@ Indexes: `pk (kind, ref_id)`
 - Scheduled reports go to staff only (decision D2): recipients are staff ids with the report's permission, checked when the schedule is saved and at every run; each recipient gets an export job in their own name, so the download link works for them and nobody else. Formats are CSV and XLSX; PDF was removed.
 - Metric and group owners are nullable (decision D10): seeded metrics and groups start without a person (shown with the expected role) and are named with PUT /metrics/{key}/owner and PUT /groups/{key}/owner; a metric still needs an owner to be published.
 - Refunds over several sellers are split per seller (decision D5); see fact_refunds.
-- Fulfilled by Marketly (fulfillment-service, phase 4): fact_order_items.fulfilled_by from orders.order.placed groups; Marketly's dispatches for those groups go to fact_marketly_fulfillment_daily, never to the seller's fact_service_daily row, so seller on-time dispatch and overdue figures only count what the seller shipped; service fees per seller and day go to fact_marketplace_finance_daily.service_fees_minor from fulfillment-service.fee.charged and fee.reversed. Metric definitions (seeded): 'Service fees' (marketplace finance group, Σ service_fees_minor) and 'Fulfilled by Marketly on-time dispatch' (service group, Σ dispatched_on_time ÷ Σ dispatched × 100 over fact_marketly_fulfillment_daily). The seller dashboard shows a service-fees line. Export datasets fulfillment-service.seller.fees, fulfillment-service.seller.stock, fulfillment-service.admin.stock_by_owner and fulfillment-service.admin.fees are registered and served by fulfillment-service.
+- Fulfilled by Marketly (fulfillment-service, phase 4): fact_order_items.fulfilled_by from orders.order.placed groups; Marketly's dispatches, overdue packages and delivery issues (shipping.shipment.exception) for those groups go to fact_marketly_fulfillment_daily, never to the seller's fact_service_daily row, so seller on-time dispatch, overdue and delivery-issue figures only count what the seller shipped; service fees per seller and day go to fact_marketplace_finance_daily.service_fees_minor from fulfillment-service.fee.charged and fee.reversed. Metric definitions (seeded): 'Service fees' (marketplace finance group, Σ service_fees_minor) and 'Fulfilled by Marketly on-time dispatch' (service group, Σ dispatched_on_time ÷ Σ dispatched × 100 over fact_marketly_fulfillment_daily). The seller dashboard shows a service-fees line. Export datasets fulfillment-service.seller.fees, fulfillment-service.seller.stock, fulfillment-service.admin.stock_by_owner and fulfillment-service.admin.fees are registered and served by fulfillment-service.
 
 ## GraphQL (read layer)
 

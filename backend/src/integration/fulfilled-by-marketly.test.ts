@@ -142,6 +142,11 @@ describe('Fulfilled by Marketly, end to end', () => {
     });
     w.ownOfferId = own.offer.id;
     await app.kernel.events.drain();
+
+    // with fulfillment-service running, the products_inventory template grants (sellers migration 0004) were applied at start
+    const grants = await (app.kernel.boot.apis.get('sellers') as { core: { repo: { find(t: string, w: object): Promise<{ applied_at: Date | null }[]> } } }).core.repo.find('template_grants', {});
+    expect(grants.length).toBe(2);
+    expect(grants.every((g) => g.applied_at !== null)).toBe(true);
   });
 
   it('the seller applies to the service and the Seller Manager approves it; the seller enrolls a SKU that staff approve', async () => {
@@ -309,11 +314,14 @@ describe('Fulfilled by Marketly, end to end', () => {
   });
 
   it('the customer returns it: Marketly approves, receives and inspects it, the outcome restocks it, the seller funds the refund', async () => {
-    // delivered (carrier event)
+    // delivered (carrier event): Marketly's delivery, not a seller performance fact
+    const delivered: any[] = [];
+    app.kernel.events.subscribe('fbm-test', 'shipping.shipment.delivered', (e) => void delivered.push(e.payload));
     const raw = JSON.stringify({ id: `evt-${w.tracking}-delivered`, trackingNumber: w.tracking, code: 'delivered', at: clock.now().toISOString(), location: 'Portland, OR' });
     const hook = await app.inject({ method: 'POST', url: '/webhooks/shipping/carriers/ups/events', headers: { 'content-type': 'application/json', ...signWebhook('dev-webhook-secret', raw, Math.floor(clock.now().getTime() / 1000)) }, payload: raw });
     expect(hook.statusCode, hook.body).toBeLessThan(300);
     await app.kernel.events.drain();
+    expect(delivered.find((d) => d.groupId === w.serviceGroupId)).toMatchObject({ sellerId: listing.sellerId, fulfilledBy: 'marketly_service' });
 
     const created = await ok('POST', '/api/store/returns/requests', w.customer.accessToken, { orderId: w.orderId, items: [{ orderItemId: w.serviceItemId, quantity: 1 }], reason: 'changed_mind', details: 'Too tight', remedy: 'refund' }, { 'idempotency-key': key() });
     const ret = created.returns[0];

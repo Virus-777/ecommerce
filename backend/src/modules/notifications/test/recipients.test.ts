@@ -83,6 +83,7 @@ describe('customers named by the event', () => {
       groupId: newId(),
       returnId: null,
       sellerId: null,
+      fulfilledBy: 'official_warehouse',
       lines: [{ orderItemId: newId(), title: 'Aurora Desk Lamp', variantLabel: "Black", quantity: 1 }],
       deliveredAt: new Date().toISOString(),
     });

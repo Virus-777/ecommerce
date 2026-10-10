@@ -1687,6 +1687,19 @@ Indexes: `(state, decide_by)`, `(seller_id)`, `unique(subject, subject_id, level
 
 Indexes: `(seller_id, at desc)`
 
+**template_grants**: Permissions added to a member role template after members were invited with it (migration 0004: the two Fulfilled by Marketly keys of products_inventory). Applied once, on the first start where the permission's module runs, to the open members of that template who lack it
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| template | text (products_inventory|shipping|customer_service) |
+| permission | text |
+| created_at | timestamptz |
+| applied_at | timestamptz? (null while the permission's module is off) |
+| members_updated | int? |
+
+Indexes: `unique(template, permission)`
+
 **seller_invitations**: Invitations to apply (invite-only launch)
 
 | Column | Type |
@@ -1762,7 +1775,7 @@ Indexes: `(email)`, `(state, expires_at)`
 | `orders.item.cancelled` | orders | Performance: count seller-caused cancellations |
 | `shipping.shipment.dispatched` | shipping | Performance: on-time vs late dispatch and whether tracking is valid; skipped for fulfilledBy marketly_service (Marketly dispatched it) |
 | `shipping.dispatch.overdue` | shipping | Performance: overdue dispatch counts towards dispatch reliability; skipped for fulfilledBy marketly_service |
-| `shipping.shipment.delivered` | shipping | Performance: confirm carrier-scanned tracking |
+| `shipping.shipment.delivered` | shipping | Performance: confirm carrier-scanned tracking of packages the seller shipped (fulfilledBy seller; Fulfilled by Marketly deliveries are left out) |
 | `returns.return.requested` | returns | Performance: return rate |
 | `support.case.opened` | support | Performance: open cases per seller |
 | `support.case.resolved` | support | Performance: unresolved cases past deadline |
@@ -1888,7 +1901,7 @@ Checked through the access module (limits per role, second reviewer).
 - **Address verification**: Street address and PO box check for return addresses
 
 ## Notes
-- Fulfilled by Marketly: the products_inventory member role template also grants fulfillment-service.inbound.manage and fulfillment-service.fees.view. Seller performance never counts dispatch facts of groups Marketly fulfils (shipping events with fulfilledBy marketly_service): no on-time, late or overdue fact for the seller.
+- Fulfilled by Marketly: the products_inventory member role template also grants fulfillment-service.inbound.manage and fulfillment-service.fees.view. Members invited with that template before (permissions are stored per member) get the two keys from template_grants (migration 0004): the grant waits while fulfillment-service is off (a key the permission catalogue does not know would make the member uneditable) and is applied once, at the first start where fulfillment-service runs, to every open products_inventory member who lacks it (sellers.member.permissions_changed per member, system actor). Members who later have a key removed keep it removed. Seller performance never counts dispatch facts of groups Marketly fulfils (shipping events with fulfilledBy marketly_service): no on-time, late or overdue fact for the seller.
 - Principals from actors: access.check and access.requestApproval take an identity.Principal. Endpoints pass the caller's principal; event consumers and jobs that act for a staff member (e.g. trust.enforcement.recorded carrying the Seller Manager who accepted the recommendation) build one from the event's Actor: kind staff, audience admin, accountId = actor.id, sessionId sellers:<actor kind>. Its permissions are what access holds for that account, so authority is checked against the person, never widened.
 - Payout account changes: every destination handed to finance (the initial one at approval and each owner change) is a payout_changes row (id = changeId in sellers.payout_account.changed): pending until finance.destination.verified (verified: it becomes the current destination and the one it replaces becomes replaced) or finance.destination.rejected (rejected with the reason; payouts keep going to the current destination). At most one row per seller is pending and one is verified (the current destination). Blocked reasons live in sellers.payout_blocked_reasons.
 - Pending staff changes: a seller closure (sellers.sellers.close), a change to an active restriction and a performance target change that need a second reviewer are kept in pending_changes with the access approval request id; access.approval.decided applies (approved) or drops them. The call answers its normal status with the record unchanged, pendingChange (PendingStaffChange) and approval (ApprovalInfo) in the body (FORMAT.md, Approval responses), never APPROVAL_REQUIRED; the change is applied on approval and is not sent again. Staff views of a seller account (closure) and of a restriction (restriction change) show the pending change until it is decided.

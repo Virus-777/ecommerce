@@ -83,7 +83,7 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | POST | `/api/admin/returns/requests/{id}/assign` | Set the owner of a return _(audited)_ | staff<br>`returns.requests.manage` | `{ ownerId: uuid, note: text? }` → `ReturnCase` |
 | POST | `/api/admin/returns/requests/{id}/approve-without-return` | Propose refund-without-return (controlled exception) _(idempotent, audited)_ | staff<br>`returns.exceptions.propose` | `ExceptionInput` → `ReturnCase` |
 | POST | `/api/admin/returns/requests/{id}/receive` | Record receipt at a seller's address for a platform-handled return _(audited)_ | staff<br>`returns.inspections.record` | `{ receivedAt: datetime?, trackingNumber: string?, note: text? }` → `ReturnCase` |
-| GET | `/api/admin/returns/inspections` | Official Store returns received, arriving and decided | staff<br>`returns.inspections.record` | Page<InspectionQueueRow> |
+| GET | `/api/admin/returns/inspections` | Official Store and Fulfilled by Marketly returns received, arriving and decided | staff<br>`returns.inspections.record` | Page<InspectionQueueRow> |
 | GET | `/api/admin/returns/inspections/stats` | Inspection queue KPIs | staff<br>`returns.inspections.record` | `InspectionQueueStats` |
 | POST | `/api/admin/returns/requests/{id}/start-inspection` | Start (or continue) inspecting a received return: sets the inspector and status Inspecting _(audited)_ | staff<br>`returns.inspections.record` | `{ inspectorId: uuid? }` → `InspectionQueueRow` |
 | PUT | `/api/admin/returns/requests/{id}/inspection-draft` | Save an unsent inspection (checks ticked so far, notes, photos) | staff<br>`returns.inspections.record` | `{ inspection: json }` → `InspectionDraft` |

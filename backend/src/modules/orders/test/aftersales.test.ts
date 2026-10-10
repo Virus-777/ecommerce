@@ -52,7 +52,7 @@ describe('shipping and delivery', () => {
     expect(task.openLines[0]!.quantityToShip).toBe(1);
 
     await h.publish('shipping', 'shipping.shipment.status_changed', { shipmentId: s1, kind: 'outbound', orderId: m.order.id, groupId: m.gA.id, from: 'shipped', to: 'in_transit', statusLabel: 'In transit', estimatedArrival: null, at: now() });
-    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId: s1, kind: 'outbound', orderId: m.order.id, groupId: m.gA.id, sellerId: m.sellerA, lines: [{ orderItemId: item.id, title: 'x', variantLabel: '', quantity: 1 }], deliveredAt: now() });
+    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId: s1, kind: 'outbound', orderId: m.order.id, groupId: m.gA.id, sellerId: m.sellerA, fulfilledBy: 'seller', lines: [{ orderItemId: item.id, title: 'x', variantLabel: '', quantity: 1 }], deliveredAt: now() });
     const delivered = h.named('orders.item.delivered').find((e) => e.itemId === item.id);
     expect(delivered).toMatchObject({ orderId: m.order.id, ownerType: 'seller', sellerId: m.sellerA, quantity: 1, customerId: m.customerId, contactEmail: 'sam@example.com' });
     expect(new Date(delivered.returnWindowEndsAt).getTime() - new Date(delivered.deliveredAt).getTime()).toBe(30 * 86_400_000);
@@ -108,7 +108,7 @@ describe('returns, refunds, cases and completion', () => {
     const m = await twoSellerOrder();
     const itemB = m.gB.items[0]!;
     const s = await ship(m.order.id, m.gB.id, m.sellerB, [{ orderItemId: itemB.id, quantity: 1 }]);
-    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId: s, kind: 'outbound', orderId: m.order.id, groupId: m.gB.id, sellerId: m.sellerB, lines: [{ orderItemId: itemB.id, title: 'x', variantLabel: '', quantity: 1 }], deliveredAt: now() });
+    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId: s, kind: 'outbound', orderId: m.order.id, groupId: m.gB.id, sellerId: m.sellerB, fulfilledBy: 'seller', lines: [{ orderItemId: itemB.id, title: 'x', variantLabel: '', quantity: 1 }], deliveredAt: now() });
     const returnId = newId();
     await h.publish('returns', 'returns.return.requested', { returnId, ref: 'RT-261009-0001', orderId: m.order.id, orderRef: m.order.ref, ownerType: 'seller', fulfilledBy: 'seller', sellerId: m.sellerB, orderItemIds: [itemB.id], reason: 'damaged', responseDueAt: now() });
     let o = (await h.service.getOrder(m.order.id))!;
@@ -143,7 +143,7 @@ describe('returns, refunds, cases and completion', () => {
     const m = await twoSellerOrder();
     const itemB = m.gB.items[0]!;
     const s = await ship(m.order.id, m.gB.id, m.sellerB, [{ orderItemId: itemB.id, quantity: 1 }]);
-    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId: s, kind: 'outbound', orderId: m.order.id, groupId: m.gB.id, sellerId: m.sellerB, lines: [], deliveredAt: now() });
+    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId: s, kind: 'outbound', orderId: m.order.id, groupId: m.gB.id, sellerId: m.sellerB, fulfilledBy: 'seller', lines: [], deliveredAt: now() });
     const returnId = newId();
     await h.publish('returns', 'returns.return.requested', { returnId, ref: 'RT-2', orderId: m.order.id, orderRef: m.order.ref, ownerType: 'seller', fulfilledBy: 'seller', sellerId: m.sellerB, orderItemIds: [itemB.id], reason: 'x', responseDueAt: now() });
     await h.publish('returns', 'returns.return.rejected', { returnId, ref: 'RT-2', orderId: m.order.id, orderRef: m.order.ref, ownerType: 'seller', sellerId: m.sellerB, reasonCode: 'used', platformDecision: false });
@@ -194,7 +194,7 @@ describe('returns, refunds, cases and completion', () => {
     const order = await h.service.createOrder(checkout([group(h, [line(p, 1)], { sellerId })], { customerId }));
     const item = order.groups[0]!.items[0]!;
     const s = await ship(order.id, order.groups[0]!.id, sellerId, [{ orderItemId: item.id, quantity: 1 }]);
-    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId: s, kind: 'outbound', orderId: order.id, groupId: order.groups[0]!.id, sellerId, lines: [], deliveredAt: now() });
+    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId: s, kind: 'outbound', orderId: order.id, groupId: order.groups[0]!.id, sellerId, fulfilledBy: order.groups[0]!.fulfilledBy, lines: [], deliveredAt: now() });
     await h.app.kernel.jobs.runNow('orders.complete-orders');
     expect((await h.service.getOrder(order.id))!.lifecycle).toBe('open');
     h.clock.advance(31 * 86_400_000);

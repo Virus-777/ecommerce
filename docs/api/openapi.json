@@ -95471,7 +95471,7 @@
         "tags": [
           "Admin API · Returns"
         ],
-        "summary": "Official Store returns received, arriving and decided",
+        "summary": "Official Store and Fulfilled by Marketly returns received, arriving and decided",
         "description": "**Permission:** `returns.inspections.record`\n\n**Screens:** ops/return-inspection, ops/queues",
         "security": [
           {
@@ -119884,7 +119884,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nFULFILLED_BY_MARKETLY: Marketly ships this package; you can't record shipments, buy labels, correct tracking or answer exceptions for it.",
             "content": {
               "application/json": {
                 "schema": {

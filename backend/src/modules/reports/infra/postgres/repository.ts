@@ -33,7 +33,7 @@ const DAILY: Record<DailyTable, { key: string[]; defaults: Record<string, unknow
     key: ['seller_id', 'day'],
     defaults: { seller_sales_minor: 0, fee_income_minor: 0, platform_discount_minor: 0, seller_discount_minor: 0, held_minor: 0, payouts_paid_minor: 0, payouts_failed: 0, owed_minor: 0, ad_charges_minor: 0, service_fees_minor: 0 },
   },
-  fact_marketly_fulfillment_daily: { key: ['seller_id', 'day'], defaults: { dispatched: 0, dispatched_on_time: 0, overdue: 0 } },
+  fact_marketly_fulfillment_daily: { key: ['seller_id', 'day'], defaults: { dispatched: 0, dispatched_on_time: 0, overdue: 0, delivery_exceptions: 0 } },
   fact_service_daily: {
     key: ['seller_id', 'day'],
     defaults: { dispatched: 0, dispatched_on_time: 0, overdue: 0, valid_tracking: 0, seller_cancellations: 0, delivery_exceptions: 0, messages_received: 0, first_reply_minutes_p50: null, cases_opened: 0, cases_open_eod: 0, complaints_by_category: {} },

@@ -3595,7 +3595,7 @@ export const endpoints = defineEndpoints({
     auth: "staff",
     permission: "returns.inspections.record",
     scope: "staff",
-    summary: "Official Store returns received, arriving and decided",
+    summary: "Official Store and Fulfilled by Marketly returns received, arriving and decided",
     query: () =>
       z.object({
         tab: z.enum(["received", "arriving", "decided"]).optional(),

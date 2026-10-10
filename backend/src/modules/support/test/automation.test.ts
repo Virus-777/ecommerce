@@ -113,7 +113,7 @@ describe('consumers', () => {
     const reply = await h.call('POST', `/api/seller/support/cases/${c.caseId}/messages`, tokens.seller(c.sellerId), { body: 'Shipping Friday', offer: { kind: 'ship_by_date', shipBy } });
     await h.call('POST', `/api/store/support/cases/${c.caseId}/offers/${reply.body.offers[0].id}/respond`, tokens.customer(c.customerId), { accept: true });
     const lines = [{ orderItemId: c.itemId, quantity: 1, title: 'Linen Throw', variantLabel: '' }];
-    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId: newId(), kind: 'outbound', orderId: c.order.id, groupId: c.order.groups[0]!.id, sellerId: c.sellerId, lines, deliveredAt: h.clock.now().toISOString() });
+    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId: newId(), kind: 'outbound', orderId: c.order.id, groupId: c.order.groups[0]!.id, sellerId: c.sellerId, fulfilledBy: 'seller', lines, deliveredAt: h.clock.now().toISOString() });
     const view = await h.call('GET', `/api/store/support/cases/${c.caseId}`, tokens.customer(c.customerId));
     expect(view.body.remedies[0]).toMatchObject({ kind: 'ship_by_deadline', status: 'completed', statusLabel: 'Shipped' });
   });

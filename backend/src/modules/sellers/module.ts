@@ -20,7 +20,7 @@ import { SellersService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.3.0',
+  version: '1.4.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
@@ -54,6 +54,15 @@ export default defineModule({
     ctx.events.on("support.case.opened", (e) => service.onCaseOpenedFromSupport(e.payload));
     ctx.events.on("support.case.resolved", (e) => service.onCaseResolvedFromSupport(e.payload));
     ctx.events.on("messaging.message.sent", (e) => service.onMessageSentFromMessaging(e.payload));
+
+    // template permissions added after members were invited (template_grants): once their module runs
+    ctx.afterBoot(async () => {
+      try {
+        await service.members.applyTemplateGrants();
+      } catch (err) {
+        ctx.log.warn({ err }, 'sellers: template grants not applied');
+      }
+    });
 
     // Background jobs (spec jobs)
     ctx.jobs.handle("sellers.run-verification-checks", () => service.runVerificationChecks());
