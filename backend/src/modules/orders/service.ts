@@ -235,6 +235,12 @@ export class OrdersService implements OrdersPublicApi {
     return this.core.repo.openInCategories([...ids], before);
   }
 
+  /** Export hook (FORMAT.md, Customer data export hook): the customer's orders as they see them */
+  exportCustomerData(input: { customerId: string; accountId: string }): Promise<common.CustomerDataSection[]> {
+    if (!isUuid(input.customerId)) return Promise.resolve([{ key: 'orders', title: 'Orders', module: 'orders', records: [] }]);
+    return this.reads.exportForCustomer(input.customerId);
+  }
+
   /* ---------------- events consumed */
 
   onPaymentAuthorizedFromPayments(event: EventPayload<'payments.payment.authorized'>) {

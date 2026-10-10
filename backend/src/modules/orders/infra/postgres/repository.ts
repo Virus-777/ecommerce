@@ -7,7 +7,7 @@ import type { AdminOrderFilter, OrderRec, OrdersRepository, Recs, Table } from '
 
 /** jsonb columns per table: values are sent as JSON text (pg would turn JS arrays into PG arrays) */
 const JSON_COLUMNS: Record<Table, readonly string[]> = {
-  orders: ['flags', 'delivery_address', 'policy_versions', 'coupon_codes'],
+  orders: ['delivery_address', 'policy_versions', 'coupon_codes'],
   seller_groups: ['delivery', 'dispatch_by_history'],
   order_items: ['product_snapshot', 'offer_snapshot', 'return_terms', 'discounts'],
   item_state_log: [],
@@ -17,6 +17,7 @@ const JSON_COLUMNS: Record<Table, readonly string[]> = {
   notes: [],
   documents: [],
   saved_filters: ['query'],
+  order_facts: [],
 };
 
 const KEY: Partial<Record<Table, string>> = { shipment_refs: 'shipment_id' };
@@ -112,6 +113,15 @@ export function createPostgresOrdersRepository(db: Kysely<OrdersDb>, inbox?: Inb
         .returningAll()
         .executeTakeFirst();
       return (r as OrderRec | undefined) ?? null;
+    },
+    async insertFactIfNew(row) {
+      const r = await d
+        .insertInto('order_facts')
+        .values(encode('order_facts', row as unknown as Record<string, unknown>))
+        .onConflict((oc: any) => oc.columns(['order_id', 'kind', 'source_id']).doNothing())
+        .returningAll()
+        .executeTakeFirst();
+      return r ?? null;
     },
     async upsertShipment(row) {
       const values = encode('shipment_refs', row as unknown as Record<string, unknown>);
@@ -446,7 +456,7 @@ function adminQuery(d: any, f: AdminOrderFilter, now: Date): any {
       q = q.where(sql<boolean>`captured_total > 0 and refunded_total = 0`);
       break;
   }
-  if (f.flag) q = q.where(sql<boolean>`flags->'kinds' @> ${JSON.stringify([f.flag])}::jsonb`);
+  if (f.flag) q = q.where(sql<boolean>`flag_kinds @> array[${f.flag}]::text[]`);
   return q;
 }
 

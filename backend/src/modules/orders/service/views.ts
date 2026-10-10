@@ -146,7 +146,7 @@ export class Views {
 
   afterSales(agg: Agg, i: ItemRec): ItemAfterSales {
     const cancellation = [...agg.cancellations].reverse().find((c) => c.items.some((l) => l.itemId === i.id) && c.status !== 'withdrawn');
-    const caseRef = (agg.order.flags?.cases ?? []).find((c) => c.itemIds.includes(i.id))?.ref ?? null;
+    const caseRef = (agg.facts.cases ?? []).find((c) => c.itemIds.includes(i.id))?.ref ?? null;
     const status = (ITEM_REFUND as readonly string[]).includes(i.refund_status) ? (i.refund_status as ItemAfterSales['refundStatus']) : 'none';
     return { cancellationId: cancellation?.id ?? null, returnId: i.return_id, returnRef: i.return_ref, refundStatus: status, refundedAmount: this.m(i.refunded_amount, agg), caseRef };
   }
@@ -281,8 +281,8 @@ export class Views {
   }
 
   alert(agg: Agg, g: GroupRec): GroupAlert | null {
-    const issue = (agg.order.flags?.deliveryIssues ?? []).filter((d) => d.groupId === g.id).at(-1);
-    const caseRef = (agg.order.flags?.cases ?? []).find((c) => c.itemIds.some((id) => agg.items.some((i) => i.id === id && i.group_id === g.id)))?.ref ?? null;
+    const issue = (agg.facts.deliveryIssues ?? []).filter((d) => d.groupId === g.id).at(-1);
+    const caseRef = (agg.facts.cases ?? []).find((c) => c.itemIds.some((id) => agg.items.some((i) => i.id === id && i.group_id === g.id)))?.ref ?? null;
     if (issue && !['delivered', 'cancelled', 'partly_cancelled'].includes(g.status)) {
       const msg: Record<string, string> = {
         failed_delivery: 'The carrier could not deliver this package. Choose a new delivery attempt or contact support.',
@@ -374,7 +374,7 @@ export class Views {
         expected.push({ label: 'Cancellation refund', ref: null, amount: c.refund_preview.total, status: c.refund_status });
       }
     }
-    for (const a of o.flags?.refundApprovals ?? []) expected.push({ label: 'Return refund', ref: a.returnRef ?? null, amount: this.m(a.amount, agg), status: 'approved' });
+    for (const a of agg.facts.refundApprovals ?? []) expected.push({ label: 'Return refund', ref: a.returnRef ?? null, amount: this.m(a.amount, agg), status: 'approved' });
     return {
       itemCount: this.units(agg),
       items: this.m(o.items_total, agg),
@@ -403,7 +403,7 @@ export class Views {
   progress(agg: Agg): OrderProgress {
     const o = agg.order;
     const pay = this.paymentState(agg);
-    const captures = o.flags?.captures ?? [];
+    const captures = agg.facts.captures ?? [];
     const chargedAt = captures.at(-1)?.at ?? null;
     const refunds = o.refunded_total > 0 ? ` ${fmt(o.refunded_total, o.currency)} refunded so far.` : ' No refunds sent yet.';
     const payNote =
@@ -468,7 +468,7 @@ export class Views {
   }
 
   cases(agg: Agg): CaseRef[] {
-    return (agg.order.flags?.cases ?? []).map((c) => ({ caseId: c.caseId, ref: c.ref, status: c.status, itemIds: c.itemIds, nextUpdateBy: c.nextUpdateBy ?? null }));
+    return (agg.facts.cases ?? []).map((c) => ({ caseId: c.caseId, ref: c.ref, status: c.status, itemIds: c.itemIds, nextUpdateBy: c.nextUpdateBy ?? null }));
   }
 
   timeline(rows: readonly TimelineRec[], viewer: Viewer): common.TimelineEvent[] {
@@ -758,7 +758,9 @@ export class Views {
     if (!own.length) return null;
     const ownIds = new Set(own.map((g) => g.id));
     const scoped: Agg = {
-      order: { ...agg.order, flags: { kinds: [] } },
+      order: { ...agg.order, flag_kinds: [] },
+      factRows: [],
+      facts: {},
       groups: own,
       items: agg.items.filter((i) => ownIds.has(i.group_id)),
       cancellations: agg.cancellations.filter((c) => ownIds.has(c.group_id)),
@@ -788,7 +790,7 @@ export class Views {
   }
 
   flags(agg: Agg): OrderFlag[] {
-    const kinds = agg.order.flags?.kinds ?? [];
+    const kinds = agg.order.flag_kinds ?? [];
     const now = this.core.now();
     const TONE: Record<string, OrderFlag['tone']> = {
       payment_failed: 'danger',
@@ -828,8 +830,8 @@ export class Views {
       const a = this.alert(agg, g);
       if (a && a.tone === 'danger') out.push({ ...a, message: `Package ${g.position}: ${a.message}` });
     }
-    for (const c of agg.order.flags?.chargebacks ?? []) out.push({ tone: 'danger', title: 'Chargeback opened', message: `A ${c.kind} dispute was opened on this order.` });
-    if (agg.order.flags?.kinds?.includes('seller_restricted')) out.push({ tone: 'warning', title: 'Seller restricted', message: 'A seller on this order is restricted. The order stays fulfillable.' });
+    for (const c of agg.facts.chargebacks ?? []) out.push({ tone: 'danger', title: 'Chargeback opened', message: `A ${c.kind} dispute was opened on this order.` });
+    if (agg.order.flag_kinds.includes('seller_restricted')) out.push({ tone: 'warning', title: 'Seller restricted', message: 'A seller on this order is restricted. The order stays fulfillable.' });
     return out;
   }
 
@@ -902,10 +904,9 @@ export class Views {
     );
     const email = o.canViewContact ? agg.order.contact_email : maskEmail(agg.order.contact_email);
     const phone = o.canViewContact ? agg.order.contact_phone : maskPhone(agg.order.contact_phone);
-    // OrderDetail.contact.email is typed `email`: the masked form must stay a valid address
-    order.contact = { ...order.contact, email: o.canViewContact ? email : email.replace('***@', '---@'), phone };
+    order.contact = { ...order.contact, email, phone };
     if (!o.canViewContact) order.deliveryAddress = { ...order.deliveryAddress, phone: maskPhone(order.deliveryAddress.phone) };
-    const captures = agg.order.flags?.captures ?? [];
+    const captures = agg.facts.captures ?? [];
     return {
       order,
       customer: { customerId: agg.order.customer_id, guest: !agg.order.customer_id, name: agg.order.contact_name, email, phone, customerSince: null, orderCount: o.orderCount ?? null },

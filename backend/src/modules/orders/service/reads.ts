@@ -9,7 +9,7 @@ import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { AdminOrderDetail, AdminOrderRow, DelayedItemAlert, ItemPaidAmount, OrderDetail, OrderSummary, SellerOrderCounts, SellerOrderDetail, SellerOrderRow } from '../../../spec/orders.js';
 import { DAY, dayStart, endOfMarketDay, rangeStart } from '../domain/rules.js';
-import type { AdminOrderFilter, GroupRec, SellerGroupFilter } from '../ports.js';
+import type { AdminOrderFilter, GroupRec, OrderRec, SellerGroupFilter } from '../ports.js';
 import { notFound, type Agg, type Cfg, type Core } from './core.js';
 import type { Fees, Views } from './views.js';
 
@@ -88,6 +88,27 @@ export class Reads {
     return { ...rows, items };
   }
 
+  /**
+   * exportCustomerData: every order of the customer as they see it in their account (customer-visible timeline,
+   * no staff notes or staff-only entries), without the screen-only fields. Walks all pages.
+   */
+  async exportForCustomer(customerId: string): Promise<common.CustomerDataSection[]> {
+    const records: Record<string, unknown>[] = [];
+    const cfg = await this.core.cfg();
+    let cursor: string | null = null;
+    for (let round = 0; round < 1000; round++) {
+      const rows: common.Page<OrderRec> = await this.core.repo.customerOrders(customerId, {}, { mode: 'cursor', cursor, limit: 100 });
+      const aggs = await this.core.loadMany(rows.items.map((r) => r.id));
+      for (const r of rows.items) {
+        const { canCancelSomething: _c, paymentIntentId: _p, documents, ...order } = await this.storeDetail(aggs.get(r.id)!, cfg);
+        records.push({ ...order, documents: documents.map((d) => ({ kind: d.kind, label: d.label, number: d.number, issuedAt: d.issuedAt })) });
+      }
+      cursor = rows.nextCursor ?? null;
+      if (!cursor) break;
+    }
+    return [{ key: 'orders', title: 'Orders', module: 'orders', records }];
+  }
+
   async countByTab(customerId: string | null, range?: string) {
     if (!customerId) return { all: 0, inProgress: 0, delivered: 0, returns: 0, cancelled: 0, delayedPackages: 0 };
     const counts = await this.core.repo.customerTabCounts(customerId, rangeStart(range, this.core.now(), this.core.tz));
@@ -102,7 +123,7 @@ export class Reads {
       const agg = aggs.get(g.order_id)!;
       const items = agg.items.filter((i) => i.group_id === g.id && i.state !== 'cancelled');
       const est = this.views.latestEstimate(g);
-      const caseRef = (agg.order.flags?.cases ?? []).find((c) => c.itemIds.some((id) => items.some((i) => i.id === id)))?.ref ?? null;
+      const caseRef = (agg.facts.cases ?? []).find((c) => c.itemIds.some((id) => items.some((i) => i.id === id)))?.ref ?? null;
       return {
         orderId: agg.order.id,
         orderRef: agg.order.ref,

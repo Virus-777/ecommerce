@@ -13,7 +13,7 @@ import type * as audit from '../../../spec/audit.js';
 import type * as common from '../../../spec/common.js';
 import { orderItemMachine, orderLifecycleMachine } from '../domain/state-machines.js';
 import { displayStatus, groupStatus, is, OPEN_GROUP, paidOf, splitMoney, MINUTE, type ItemState, type Lifecycle } from '../domain/rules.js';
-import type { CancellationRec, DocumentRec, FlagData, GroupRec, ItemRec, OrderRec, OrdersRepository, ShipmentRec, TimelineRec } from '../ports.js';
+import type { CancellationRec, DocumentRec, FactRec, FlagData, GroupRec, ItemRec, OrderRec, OrdersRepository, ShipmentRec, TimelineRec } from '../ports.js';
 
 export interface OrdersServiceDeps {
   repo: OrdersRepository;
@@ -44,7 +44,38 @@ export interface Agg {
   cancellations: CancellationRec[];
   shipments: ShipmentRec[];
   documents: DocumentRec[];
+  /** orders.order_facts rows (oldest first) and the views' reading of them */
+  factRows: FactRec[];
+  facts: FlagData;
 }
+
+const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
+
+/** The views' reading of an order's facts (orders.order_facts) */
+export function factsOf(rows: readonly FactRec[]): FlagData {
+  const f: FlagData = {};
+  const of = (kind: FactRec['kind']) => rows.filter((r) => r.kind === kind);
+  const captures = of('capture');
+  if (captures.length) f.captures = captures.map((r) => ({ captureId: r.source_id, amount: r.amount ?? 0, at: r.at.toISOString() }));
+  const chargebacks = of('chargeback');
+  if (chargebacks.length) f.chargebacks = chargebacks.map((r) => ({ disputeId: r.source_id, kind: r.subkind ?? '', groupId: r.group_id, at: r.at.toISOString() }));
+  const cases = of('case');
+  if (cases.length) f.cases = cases.map((r) => ({ caseId: r.source_id, ref: r.ref ?? '', itemIds: r.item_ids ?? [], status: r.status ?? 'open', nextUpdateBy: iso(r.due_at) }));
+  const issues = of('delivery_issue');
+  if (issues.length) f.deliveryIssues = issues.map((r) => ({ exceptionId: r.source_id, kind: r.subkind ?? '', groupId: r.group_id ?? '', shipmentId: r.shipment_id, dueAt: iso(r.due_at) ?? r.at.toISOString(), customerAction: r.customer_action, at: r.at.toISOString() }));
+  const restricted = of('seller_restricted');
+  if (restricted.length) f.restrictedGroups = restricted.map((r) => r.group_id ?? r.source_id);
+  const sent = of('refund_sent');
+  if (sent.length) f.refundsSent = sent.map((r) => r.source_id);
+  const approvals = of('refund_approval').filter((r) => r.status !== 'sent');
+  if (approvals.length) f.refundApprovals = approvals.map((r) => ({ id: r.source_id, returnRef: r.ref, amount: r.amount ?? 0, itemIds: r.item_ids ?? [] }));
+  const resent = of('confirmation_resent').length;
+  if (resent) f.confirmationsResent = resent;
+  return f;
+}
+
+/** A fact to record: kind and source, the rest optional */
+export type NewFact = Pick<FactRec, 'kind' | 'source_id'> & Partial<Omit<FactRec, 'id' | 'order_id' | 'kind' | 'source_id'>>;
 
 type OwnEvent = keyof EventMap & `orders.${string}`;
 type Optional = Parameters<ModuleContext<'orders'>['tryUse']>[0];
@@ -139,20 +170,23 @@ export class Core {
     const ids = [...new Set(orderIds)];
     const out = new Map<string, Agg>();
     if (!ids.length) return out;
-    const [orders, groups, items, cancellations, shipments, documents] = await Promise.all([
+    const [orders, groups, items, cancellations, shipments, documents, facts] = await Promise.all([
       repo.find('orders', { id: ids }),
       repo.find('seller_groups', { order_id: ids }, { orderBy: [['position', 'asc']] }),
       repo.find('order_items', { order_id: ids }, { orderBy: [['id', 'asc']] }),
       repo.find('cancellations', { order_id: ids }, { orderBy: [['created_at', 'asc']] }),
       repo.find('shipment_refs', { order_id: ids }, { orderBy: [['shipment_id', 'asc']] }),
       repo.find('documents', { order_id: ids }, { orderBy: [['issued_at', 'asc']] }),
+      repo.find('order_facts', { order_id: ids }, { orderBy: [['at', 'asc'], ['id', 'asc']] }),
     ]);
-    for (const o of orders) out.set(o.id, { order: o, groups: [], items: [], cancellations: [], shipments: [], documents: [] });
+    for (const o of orders) out.set(o.id, { order: o, groups: [], items: [], cancellations: [], shipments: [], documents: [], factRows: [], facts: {} });
     for (const g of groups) out.get(g.order_id)?.groups.push(g);
     for (const i of items) out.get(i.order_id)?.items.push(i);
     for (const c of cancellations) out.get(c.order_id)?.cancellations.push(c);
     for (const s of shipments) out.get(s.order_id)?.shipments.push(s);
     for (const d of documents) out.get(d.order_id)?.documents.push(d);
+    for (const f of facts) out.get(f.order_id)?.factRows.push(f);
+    for (const agg of out.values()) agg.facts = factsOf(agg.factRows);
     return out;
   }
 
@@ -266,11 +300,11 @@ export class Core {
   /** OrderFlag kinds in force for an order */
   flagKinds(agg: Agg, now: Date, dueSoonMinutes: number): string[] {
     const { order, groups, items, cancellations } = agg;
-    const f = order.flags ?? { kinds: [] };
+    const f = agg.facts;
     const kinds: string[] = [];
     const open = order.lifecycle === 'open';
     const openGroups = groups.filter((g) => is(OPEN_GROUP, g.status));
-    if (order.payment_state === 'failed' || f.paymentFailed) kinds.push('payment_failed');
+    if (order.payment_state === 'failed') kinds.push('payment_failed');
     if (order.payment_state === 'pending_check' && order.lifecycle === 'payment_pending') kinds.push('payment_checking');
     if (open && openGroups.some((g) => g.dispatch_by.getTime() < now.getTime())) kinds.push('overdue_dispatch');
     else if (open && openGroups.some((g) => g.dispatch_by.getTime() - now.getTime() <= dueSoonMinutes * MINUTE)) kinds.push('due_soon');
@@ -312,15 +346,40 @@ export class Core {
     const status = displayStatus(lifecycle, agg.items);
     if (status !== order.display_status) patch.display_status = status;
     const kinds = this.flagKinds({ ...agg, order: { ...order, lifecycle } }, now, cfg.dueSoonMinutes);
-    if (JSON.stringify(kinds) !== JSON.stringify(order.flags?.kinds ?? [])) patch.flags = { ...(order.flags ?? { kinds: [] }), kinds };
+    if (JSON.stringify(kinds) !== JSON.stringify(order.flag_kinds ?? [])) patch.flag_kinds = kinds;
     if (Object.keys(patch).length) agg.order = await tx.update('orders', orderId, patch);
     return agg;
   }
 
-  /** Updates the event-fed flag data of an order (inside the transaction) */
-  async setFlags(tx: OrdersRepository, order: OrderRec, change: (f: FlagData) => FlagData): Promise<OrderRec> {
-    const next = change(structuredClone(order.flags ?? { kinds: [] }));
-    return tx.update('orders', order.id, { flags: next });
+  /** Records an event-fed fact of an order (inside the transaction); false when that source was already recorded */
+  async addFact(tx: OrdersRepository, orderId: string, fact: NewFact): Promise<boolean> {
+    const row = await tx.insertFactIfNew({
+      id: newId(),
+      order_id: orderId,
+      group_id: null,
+      shipment_id: null,
+      ref: null,
+      status: null,
+      subkind: null,
+      customer_action: null,
+      amount: null,
+      item_ids: null,
+      due_at: null,
+      at: this.now(),
+      ...fact,
+    });
+    return Boolean(row);
+  }
+
+  /** Changes a recorded fact (inside the transaction) */
+  async updateFact(tx: OrdersRepository, agg: Agg, kind: FactRec['kind'], sourceId: string, patch: Partial<Pick<FactRec, 'status' | 'item_ids' | 'ref' | 'due_at'>>): Promise<void> {
+    const row = agg.factRows.find((r) => r.kind === kind && r.source_id === sourceId);
+    if (row) await tx.update('order_facts', row.id, patch);
+  }
+
+  /** Whether a fact of that kind and source is recorded on the order (pre-checks outside a transaction) */
+  async hasFact(orderId: string, kind: FactRec['kind'], sourceId: string): Promise<boolean> {
+    return (await this.repo.count('order_facts', { order_id: orderId, kind, source_id: sourceId })) > 0;
   }
 
   /** Runs a write on one order: lock, change, refresh derived values, commit, then publish */

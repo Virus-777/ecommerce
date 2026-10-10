@@ -10,10 +10,8 @@ import type { AcceptedPolicyVersion, CancellationLine, DeliveryPromise, Discount
 
 type Db = OrdersDb;
 
-/** Event-fed facts kept on the order (orders.flags) next to the materialized flag kinds */
+/** Event-fed facts of an order (orders.order_facts rows) as the views read them (core.factsOf) */
 export interface FlagData {
-  /** OrderFlag kinds in force, refreshed on every change and by orders.refresh-flags */
-  kinds: string[];
   chargebacks?: { disputeId: string; kind: string; groupId?: string | null; at: string }[];
   deliveryIssues?: { exceptionId: string; kind: string; groupId: string; shipmentId?: string | null; dueAt: string; customerAction?: string | null; at: string }[];
   cases?: { caseId: string; ref: string; itemIds: string[]; status: string; nextUpdateBy?: string | null }[];
@@ -23,7 +21,6 @@ export interface FlagData {
   refundsSent?: string[];
   /** Approved return refunds not sent yet (returns.refund.approved) */
   refundApprovals?: { id: string; returnRef?: string | null; amount: number; itemIds: string[] }[];
-  paymentFailed?: boolean;
   confirmationsResent?: number;
 }
 
@@ -43,8 +40,7 @@ export interface DispatchChange {
 }
 export type StoredCancellationLine = CancellationLine & { groupId?: string };
 
-export interface OrderRec extends Omit<Db['orders'], 'flags' | 'delivery_address' | 'policy_versions' | 'coupon_codes'> {
-  flags: FlagData;
+export interface OrderRec extends Omit<Db['orders'], 'delivery_address' | 'policy_versions' | 'coupon_codes'> {
   delivery_address: common.Address;
   policy_versions: AcceptedPolicyVersion[];
   coupon_codes: string[];
@@ -72,6 +68,7 @@ export interface SavedFilterRec extends Omit<Db['saved_filters'], 'query'> {
   query: Record<string, unknown>;
 }
 export type StateLogRec = Db['item_state_log'];
+export type FactRec = Db['order_facts'];
 export type TimelineRec = Db['timeline'];
 export type NoteRec = Db['notes'];
 export type DocumentRec = Db['documents'];
@@ -87,6 +84,7 @@ export interface Recs {
   notes: NoteRec;
   documents: DocumentRec;
   saved_filters: SavedFilterRec;
+  order_facts: FactRec;
 }
 export type Table = keyof Recs;
 
@@ -158,7 +156,7 @@ export interface ItemInfoRow {
   return_window_ends_at: Date | null;
 }
 
-/** Persistence for this module's own tables: orders.orders, orders.seller_groups, orders.order_items, orders.item_state_log, orders.cancellations, orders.shipment_refs, orders.timeline, orders.notes, orders.documents, orders.saved_filters, orders.ref_sequences. */
+/** Persistence for this module's own tables: orders.orders, orders.seller_groups, orders.order_items, orders.item_state_log, orders.cancellations, orders.shipment_refs, orders.timeline, orders.notes, orders.documents, orders.saved_filters, orders.order_facts, orders.ref_sequences. */
 export interface OrdersRepository {
   /** Runs fn in one transaction (nested calls join the outer one) */
   transaction<T>(fn: (tx: OrdersRepository) => Promise<T>): Promise<T>;
@@ -176,6 +174,8 @@ export interface OrdersRepository {
   claim(key: string): Promise<boolean>;
   /** Inserts the order unless the (checkout session, attempt) pair already has one (then null) */
   insertOrderIfNew(row: OrderRec): Promise<OrderRec | null>;
+  /** Inserts a fact unless the order already has one of that kind for the same source (then null) */
+  insertFactIfNew(row: FactRec): Promise<FactRec | null>;
   upsertShipment(row: ShipmentRec): Promise<ShipmentRec>;
 
   /* lists */
