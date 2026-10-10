@@ -182,6 +182,26 @@ export class Core {
     });
   }
 
+  /** Changes of a kind still waiting for a second reviewer, by target (seller id for closures, restriction id for restriction changes) */
+  async pendingChangesFor(kind: PendingChangeRec['kind'], targetIds: string[]): Promise<Map<string, PendingChangeRec>> {
+    const out = new Map<string, PendingChangeRec>();
+    if (!targetIds.length) return out;
+    const rows = await this.repo.find('pending_changes', { kind, state: 'pending', target_id: targetIds }, { orderBy: [['requested_at', 'asc']] });
+    for (const r of rows) if (r.target_id) out.set(r.target_id, r); // the latest wins
+    return out;
+  }
+
+  /** ApprovalInfo of an access approval request (null when access cannot answer) */
+  async approvalInfo(id: string | null | undefined): Promise<common.ApprovalInfo | null> {
+    if (!id) return null;
+    try {
+      return await this.ctx.use('access').approvalInfo(id);
+    } catch (err) {
+      this.ctx.log.warn({ err, id }, 'sellers: approval info unavailable');
+      return null;
+    }
+  }
+
   /**
    * The pending change of an approval request, marked applied or declined (once: null when already decided).
    * undefined when there is no row (requests made before pending_changes existed keep their payload in access).

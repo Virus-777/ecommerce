@@ -10,6 +10,7 @@ import type {
   InfoRequestItem,
   LaunchReview,
   PayoutReadiness,
+  PendingStaffChange,
   PerformanceTarget,
   PublicClaim,
   Restriction,
@@ -37,6 +38,7 @@ import type {
   InvitationRec,
   MemberRec,
   NoteRec,
+  PendingChangeRec,
   RestrictionRec,
   RiskReviewRec,
   SellerRec,
@@ -46,6 +48,19 @@ import type {
 
 export const iso = (d: Date | string | null | undefined): string | null => (d ? (typeof d === 'string' ? new Date(d).toISOString() : d.toISOString()) : null);
 export const isoReq = (d: Date | string) => iso(d)!;
+
+/** A staff change waiting for a second reviewer (pending_changes) */
+export const pendingStaffChange = (r: PendingChangeRec): PendingStaffChange => ({
+  id: r.id,
+  kind: r.kind as PendingStaffChange['kind'],
+  state: r.state as PendingStaffChange['state'],
+  approvalRequestId: r.approval_request_id,
+  proposed: r.payload,
+  reason: r.reason,
+  requestedBy: (r.requested_by ?? { kind: 'system', id: null }) as unknown as common.Actor,
+  requestedAt: isoReq(r.requested_at),
+  decidedAt: iso(r.decided_at),
+});
 
 /** Actors live in text columns as JSON */
 export const actorText = (a: common.Actor): string => JSON.stringify({ kind: a.kind, id: a.id ?? null, ...(a.name ? { name: a.name } : {}) });

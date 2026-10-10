@@ -110,8 +110,9 @@ describe('performance', () => {
     kit.authority.set('sellers.performance.targets', 'approval_required');
     try {
       const pending = await kit.call('PUT', `${ADMIN}/performance-targets`, staff(), { targets: [{ ...t, threshold: 97 }], reason: 'Tighter' });
-      expect(pending.body.error.code).toBe('APPROVAL_REQUIRED');
-      await kit.decide(pending.body.error.details.approvalRequestId, 'approved');
+      expect(pending.status).toBe(200);
+      expect(pending.body).toMatchObject({ approval: { required: true }, pendingChange: { kind: 'performance_targets', state: 'pending' } });
+      await kit.decide(pending.body.approval.approvalRequestId, 'approved');
       const after = await kit.call('GET', `${ADMIN}/performance-targets`, staff());
       expect(after.body.find((x: any) => x.metric === 'dispatch_reliability').threshold).toBe(97);
     } finally {

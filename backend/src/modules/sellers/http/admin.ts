@@ -22,7 +22,7 @@ export const adminRoutes = (service: SellersService) => {
     suspendSeller: async ({ params, body, actor, requestId, principal }) => enforcement.suspendSeller(params.id, body, { actor, requestId, principal }),
     reinstateSeller: async ({ params, body, actor, requestId, principal }) => {
       const s = await enforcement.reinstateSeller(params.id, body, { actor, requestId, principal });
-      return accounts.account(s, null);
+      return accounts.account(s, null, [], { staff: true });
     },
     closeSeller: async ({ params, body, actor, requestId, principal }) => accounts.closeSeller(params.id, body, { actor, requestId, principal }),
     issueWarning: async ({ params, body, actor, requestId }) => enforcement.issueWarning(params.id, body, { actor, requestId }),
