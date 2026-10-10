@@ -1509,7 +1509,7 @@ export interface ContentPublicApi {
   /** Announcements for Seller Center, newest first: policy versions with notifySellers that are scheduled or current (audience seller or both), from policy_versions. No separate announcements table at launch. Used by: reports, graphql. */
   sellerAnnouncements(opts: { since?: string, limit: number }): Promise<SellerAnnouncement[]>;
   /** Homepage sections and pages linked to a promotion (linkedPromotionId, or a deals SourceRule with that campaignId), for the campaign detail in promotions and ad destination checks Used by: promotions, advertising, graphql. */
-  contentForCampaign(campaignId: string): Promise<{ sections: { id: string, kind: string, heading: string?: unknown, status: string }[], pages: { id: string, slug: string, title: string, status: string, url: string }[] }>;
+  contentForCampaign(campaignId: string): Promise<{ sections: { id: string, kind: string, heading?: string, status: string }[], pages: { id: string, slug: string, title: string, status: string, url: string }[] }>;
 }
 
 /* ------------------------------------------------------------------ tables (Kysely row types) */
