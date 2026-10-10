@@ -1,7 +1,7 @@
 import type { EventPayload } from '../../kernel/events/index.js';
 import { newId } from '../../kernel/lib/ids.js';
 import type * as catalog from '../../spec/catalog.js';
-import type { ContentPublicApi, FooterGroup, HelpCategory, LinkRef, PageInput, ServiceStrip, SiteNavigation } from '../../spec/content.js';
+import type { ContentPublicApi, FooterGroup, HelpCategory, LinkRef, PageInput, SellerAnnouncement, ServiceStrip, SiteNavigation } from '../../spec/content.js';
 import type * as sellers from '../../spec/sellers.js';
 import { inWindow } from './domain/rules.js';
 import type { NavigationRow, PageRow, VersionRow } from './ports.js';
@@ -91,7 +91,7 @@ export class ContentService extends ContentPolicies implements ContentPublicApi 
   /** promotions.campaign.ended: hide homepage sections linked to the promotion; flag linked pages that stay up longer */
   async onCampaignEndedFromPromotions(event: EventPayload<'promotions.campaign.ended'>): Promise<void> {
     await this.changeSections(
-      (s) => s.linkedPromotionId === event.campaignId && !s.config.hiddenByPromotion,
+      (s) => (s.linkedPromotionId === event.campaignId || this.dealsCampaignOf(s) === event.campaignId) && !s.config.hiddenByPromotion,
       (s) => ({ ...s, config: { ...s.config, hiddenByPromotion: true } }),
       `Promotion ended (${event.reason.replace(/_/g, ' ')}): hid linked sections`,
     );
@@ -106,7 +106,7 @@ export class ContentService extends ContentPolicies implements ContentPublicApi 
   /** promotions.campaign.started: linked sections and pages are re-resolved */
   async onCampaignStartedFromPromotions(event: EventPayload<'promotions.campaign.started'>): Promise<void> {
     await this.changeSections(
-      (s) => s.linkedPromotionId === event.campaignId && Boolean(s.config.hiddenByPromotion),
+      (s) => (s.linkedPromotionId === event.campaignId || this.dealsCampaignOf(s) === event.campaignId) && Boolean(s.config.hiddenByPromotion),
       (s) => ({ ...s, config: { ...s.config, hiddenByPromotion: false } }),
       'Promotion started: linked sections shown again',
     );
@@ -186,6 +186,77 @@ export class ContentService extends ContentPolicies implements ContentPublicApi 
       (s) => ({ ...s, config: { ...s.config, sellerIds: (s.config.sellerIds ?? []).filter((x) => x !== event.sellerId) } }),
       'Removed a suspended seller from Featured sellers',
     );
+  }
+
+  /** sellers.seller.reinstated: seller_feature blocks naming the seller show again (status is read at render time) */
+  async onSellerReinstatedFromSellers(_event: EventPayload<'sellers.seller.reinstated'>): Promise<void> {
+    this.invalidateHome();
+  }
+
+  /** sellers.seller.closed: seller_feature blocks stay hidden for good; pages naming the seller are flagged for their owner (once per closure) */
+  async onSellerClosedFromSellers(event: EventPayload<'sellers.seller.closed'>, eventId?: string): Promise<void> {
+    this.invalidateHome();
+    const flagged: PageRow[] = [];
+    for (const p of await this.repo.listPages({})) {
+      const versions = await this.repo.getVersions([p.live_version_id, p.draft_version_id].filter((x): x is string => Boolean(x)));
+      if (versions.some((v) => ((v.snapshot as unknown as PageInput | null)?.blocks ?? []).some((b) => b.type === 'seller_feature' && b.sellerId === event.sellerId))) flagged.push(p);
+    }
+    // the claim and the flags commit together: a redelivered event flags nothing twice
+    await this.repo.transaction(async (tx) => {
+      if (!(await tx.claim(`seller-closed:${eventId ?? event.sellerId}`))) return;
+      for (const p of flagged) await this.logAction('page', p.id, 'seller_closed', SYSTEM, `A featured seller closed (${event.reasonCode}); edit the seller feature block`, tx);
+    });
+  }
+
+  /** Seller Center announcements: policy versions flagged for sellers that are scheduled or current, newest first */
+  async sellerAnnouncements(opts: { since?: string; limit: number }): Promise<SellerAnnouncement[]> {
+    const limit = Math.min(Math.max(1, Math.floor(opts.limit || 10)), 100);
+    const since = opts.since ? new Date(opts.since) : null;
+    if (since && Number.isNaN(since.getTime())) throw invalid('since', 'Use an ISO date and time');
+    const policies = (await this.repo.listPolicies()).filter((p) => p.audience === 'seller' || p.audience === 'both');
+    if (!policies.length) return [];
+    const byId = new Map(policies.map((p) => [p.id, p]));
+    const versions = (await this.repo.policyVersionsOf(policies.map((p) => p.id)))
+      .filter((v) => v.notify_sellers && (v.state === 'scheduled' || v.state === 'current') && v.effective_at)
+      .filter((v) => !since || (v.published_at ?? v.effective_at!) >= since)
+      .sort((a, b) => b.effective_at!.getTime() - a.effective_at!.getTime() || b.created_at.getTime() - a.created_at.getTime());
+    return versions.slice(0, limit).map((v) => {
+      const p = byId.get(v.policy_id)!;
+      return {
+        policyVersionId: v.id,
+        policyKey: p.key,
+        title: v.title || p.title,
+        version: v.version,
+        state: v.state as SellerAnnouncement['state'],
+        effectiveAt: v.effective_at!.toISOString(),
+        changeSummary: v.change_summary,
+        url: `/policy-versions/${v.id}`,
+      };
+    });
+  }
+
+  /** Homepage sections and pages linked to a promotion (linkedPromotionId, or a deals source limited to it) */
+  async contentForCampaign(campaignId: string): Promise<{ sections: { id: string; kind: string; heading?: string; status: string }[]; pages: { id: string; slug: string; title: string; status: string; url: string }[] }> {
+    const rows = await this.repo.listSections();
+    const sections = rows
+      .filter((r) => r.status !== 'removed')
+      .map((r) => this.snapOf(r))
+      .filter((s) => s.linkedPromotionId === campaignId || this.dealsCampaignOf(s) === campaignId)
+      .map((s) => ({ id: s.id, kind: s.kind, ...(s.heading ? { heading: s.heading } : {}), status: s.status }));
+    const pages: { id: string; slug: string; title: string; status: string; url: string }[] = [];
+    for (const p of await this.repo.listPages({})) {
+      if (p.status === 'removed') continue;
+      let linked = p.linked_promotion_id === campaignId;
+      if (!linked) {
+        const versions = await this.repo.getVersions([p.live_version_id, p.draft_version_id].filter((x): x is string => Boolean(x)));
+        linked = versions.some((v) => {
+          const snap = v.snapshot as unknown as PageInput | null;
+          return snap?.linkedPromotionId === campaignId || (snap?.blocks ?? []).some((b) => b.productSource?.mode === 'rule' && b.productSource.rule?.kind === 'deals' && b.productSource.rule.campaignId === campaignId);
+        });
+      }
+      if (linked) pages.push({ id: p.id, slug: p.slug, title: p.title, status: p.status, url: this.pageUrl(p) });
+    }
+    return { sections, pages };
   }
 
   /* ---------------------------------------------------------------- jobs */

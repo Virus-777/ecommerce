@@ -6,11 +6,11 @@ import { AppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { pageOf, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
-import type { BannerBlock, HomeSection, HomeSectionAdmin, Homepage, HomepageAdmin, LinkRef, PreviewRequest, ProductSource, PromiseItem, SectionInput, SectionProductRow, Version } from '../../../spec/content.js';
+import type { BannerBlock, HomeSection, HomeSectionAdmin, Homepage, HomepageAdmin, HomepageReview, LinkRef, PreviewRequest, ProductSource, PromiseItem, SectionInput, SectionProductRow, Version } from '../../../spec/content.js';
 import { DEFAULT_AD_POSITIONS, DEFAULT_RULES, HOMEPAGE_ID, inWindow, PRODUCT_KINDS, SECTION_KIND_LABEL } from '../domain/rules.js';
 import { contentPublicationMachine } from '../domain/state-machines.js';
 import type { ContentRepository, SectionRow, VersionRow } from '../ports.js';
-import { actorKey, dateOrNull, invalid, iso, notFound, requireText, SYSTEM, unique, type By } from './base.js';
+import { actorFromKey, actorKey, dateOrNull, invalid, iso, notFound, requireText, SYSTEM, unique, type By } from './base.js';
 import { ContentPages } from './pages.js';
 
 /** What home_sections.config keeps: the kind-specific parts of SectionInput */
@@ -113,10 +113,77 @@ export class ContentHomepage extends ContentPages {
     const { draft } = await this.homepageVersions(tx);
     if (draft) {
       const text = draft.summary ? `${draft.summary}; ${summary}` : summary;
-      await tx.updateVersion(draft.id, { snapshot: layout as never, summary: text.length > 480 ? `${text.slice(0, 477)}…` : text, author_kind: by.actor.kind, author_id: by.actor.id ?? null });
+      // a person's edit after submission sends the draft back to not_submitted (system upkeep does not)
+      const reset = by.actor.kind !== 'system' && draft.review_state && draft.review_state !== 'not_submitted';
+      await tx.updateVersion(draft.id, {
+        snapshot: layout as never,
+        summary: text.length > 480 ? `${text.slice(0, 477)}…` : text,
+        ...(by.actor.kind !== 'system' ? { author_kind: by.actor.kind, author_id: by.actor.id ?? null } : {}),
+        ...(reset ? { review_state: 'not_submitted' as const, submitted_by: null, submitted_at: null, reviewed_by: null, reviewed_at: null } : {}),
+      });
     } else {
-      await tx.insertVersion(this.newVersionRow('homepage', HOMEPAGE_ID, (await tx.maxVersionNumber('homepage', HOMEPAGE_ID)) + 1, layout, by, { summary }));
+      await tx.insertVersion(this.newVersionRow('homepage', HOMEPAGE_ID, (await tx.maxVersionNumber('homepage', HOMEPAGE_ID)) + 1, layout, by, { summary, review_state: 'not_submitted' }));
     }
+  }
+
+  /** The promotion a deals source is limited to (SourceRule.campaignId), if any */
+  protected dealsCampaignOf(s: { config: SectionConfig }): string | null {
+    const rule = s.config.productSource?.mode === 'rule' ? s.config.productSource.rule : null;
+    return rule?.kind === 'deals' ? (rule.campaignId ?? null) : null;
+  }
+
+  /** HomepageAdmin.draftReview: not_required unless content.reviewRequired.section is on */
+  private draftReviewOf(draft: VersionRow | undefined, required: boolean): HomepageReview {
+    if (!required) return { state: 'not_required', submittedBy: null, submittedAt: null, reviewedBy: null, reviewedAt: null, note: null };
+    return {
+      state: (draft?.review_state ?? 'not_submitted') as HomepageReview['state'],
+      submittedBy: draft?.submitted_by ? actorFromKey(draft.submitted_by) : null,
+      submittedAt: iso(draft?.submitted_at),
+      reviewedBy: draft?.reviewed_by ? actorFromKey(draft.reviewed_by) : null,
+      reviewedAt: iso(draft?.reviewed_at),
+      note: draft?.review_note ?? null,
+    };
+  }
+
+  /** Draft layout → in_review (only when content.reviewRequired.section is on) */
+  async submitHomepageDraft(body: { summary?: string | null }, by: By): Promise<HomepageAdmin> {
+    if (!(await this.reviewRequired()).section) throw new AppError('ILLEGAL_TRANSITION', 'Homepage review is off: publish the draft directly', { machine: 'Homepage review', event: 'submit', reason: 'review_not_required' });
+    const now = this.now();
+    let number = 0;
+    await this.repo.transaction(async (tx) => {
+      const { draft } = await this.homepageVersions(tx);
+      if (!draft) throw new AppError('CONFLICT', 'There are no unpublished changes to send for review');
+      const from = draft.review_state ?? 'not_submitted';
+      if (from !== 'not_submitted' && from !== 'changes_requested') throw new AppError('ILLEGAL_TRANSITION', from === 'in_review' ? 'The draft is already waiting for review' : 'The draft is already approved', { machine: 'Homepage review', from, event: 'submit' });
+      const extra = body.summary?.trim();
+      const text = extra ? (draft.summary ? `${draft.summary}; ${extra}` : extra) : draft.summary;
+      await tx.updateVersion(draft.id, { review_state: 'in_review', submitted_by: actorKey(by.actor), submitted_at: now, reviewed_by: null, reviewed_at: null, review_note: null, summary: text && text.length > 480 ? `${text.slice(0, 477)}…` : text });
+      number = draft.number;
+    });
+    await this.logAction('homepage', HOMEPAGE_ID, 'submit', by, body.summary ?? null);
+    await this.audit({ action: 'content.homepage.submit', actionLabel: `Sent homepage draft version ${number} for review`, target: { type: 'homepage', id: HOMEPAGE_ID, label: `Homepage v${number}` }, reason: body.summary ?? null }, by);
+    return this.getHomepageAdmin();
+  }
+
+  /** in_review → approved or changes_requested; whoever submitted or last edited the draft cannot approve it */
+  async reviewHomepageDraft(body: { approve: boolean; note?: string | null }, by: By): Promise<HomepageAdmin> {
+    if (!(await this.reviewRequired()).section) throw new AppError('ILLEGAL_TRANSITION', 'Homepage review is off: publish the draft directly', { machine: 'Homepage review', event: 'review', reason: 'review_not_required' });
+    const note = body.approve ? body.note?.trim() || null : requireText(body.note, 'note', 'Say what needs to change');
+    const now = this.now();
+    let number = 0;
+    await this.repo.transaction(async (tx) => {
+      const { draft } = await this.homepageVersions(tx);
+      const from = draft?.review_state ?? 'not_submitted';
+      if (!draft || from !== 'in_review') throw new AppError('ILLEGAL_TRANSITION', 'The draft is not waiting for review', { machine: 'Homepage review', from, event: body.approve ? 'approve' : 'request_changes' });
+      const me = actorKey(by.actor);
+      const lastEditor = draft.author_id ? `${draft.author_kind}:${draft.author_id}` : null;
+      if (body.approve && (draft.submitted_by === me || lastEditor === me)) throw this.ctx.error('SAME_REVIEWER', 'Someone other than the person who submitted or last edited the homepage draft must approve it.');
+      await tx.updateVersion(draft.id, { review_state: body.approve ? 'approved' : 'changes_requested', reviewed_by: me, reviewed_at: now, review_note: note });
+      number = draft.number;
+    });
+    await this.logAction('homepage', HOMEPAGE_ID, body.approve ? 'review_approved' : 'review_changes_requested', by, note);
+    await this.audit({ action: body.approve ? 'content.homepage.approve' : 'content.homepage.request-changes', actionLabel: body.approve ? `Approved homepage draft version ${number}` : `Requested changes to homepage draft version ${number}`, target: { type: 'homepage', id: HOMEPAGE_ID, label: `Homepage v${number}` }, reason: note }, by);
+    return this.getHomepageAdmin();
   }
 
   /** Records a new live layout (publish, restore, immediate removal, scheduled changes) */
@@ -290,11 +357,12 @@ export class ContentHomepage extends ContentPages {
   }
 
   async getHomepageAdmin(): Promise<HomepageAdmin> {
-    const [list, versions, tz] = await Promise.all([this.adminRows(), this.homepageVersions(), this.marketTimeZone()]);
+    const [list, versions, tz, review] = await Promise.all([this.adminRows(), this.homepageVersions(), this.marketTimeZone(), this.reviewRequired()]);
     return {
       liveVersion: versions.live?.number ?? 0,
       draftVersion: versions.draft?.number ?? null,
       hasDraft: Boolean(versions.draft),
+      draftReview: this.draftReviewOf(versions.draft, review.section),
       sections: await this.sectionsAdmin(list),
       timeZone: tz,
       owner: { staffId: null, name: 'Content team', role: 'Content' },
@@ -555,11 +623,15 @@ export class ContentHomepage extends ContentPages {
   async publishHomepage(body: { summary: string }, by: By): Promise<HomepageAdmin> {
     const summary = body.summary?.trim() || 'Published the homepage';
     const now = this.now();
+    const reviewOn = (await this.reviewRequired()).section;
     let version!: VersionRow;
     let dropped: SectionRow[] = [];
     await this.repo.transaction(async (tx) => {
       const { draft } = await this.homepageVersions(tx);
       if (!draft) throw new AppError('CONFLICT', 'There are no unpublished changes');
+      if (reviewOn && draft.review_state !== 'approved') {
+        throw new AppError('ILLEGAL_TRANSITION', 'The homepage draft needs an approved review before it is published', { machine: 'Homepage review', from: draft.review_state ?? 'not_submitted', event: 'publish', reason: 'review_required' });
+      }
       const rows = await tx.listSections();
       for (const r of rows) {
         if (r.status === 'removed' || r.kind === 'ad_position') continue;
@@ -672,9 +744,10 @@ export class ContentHomepage extends ContentPages {
     if (s.status !== 'published' && s.status !== 'scheduled') return false;
     if (!inWindow(at, s.showFrom, s.removeAt)) return false;
     if (s.config.hiddenByPromotion) return false;
-    if (s.linkedPromotionId) {
+    // a linked promotion, or a deals source limited to one promotion: the section hides when it is not running
+    for (const campaignId of unique([s.linkedPromotionId, this.dealsCampaignOf(s)].filter((x): x is string => Boolean(x)))) {
       const promotions = this.ctx.tryUse('promotions');
-      const active = await this.soft('promotions.isCampaignActive', promotions && (() => promotions.isCampaignActive(s.linkedPromotionId!)), { active: true });
+      const active = await this.soft('promotions.isCampaignActive', promotions && (() => promotions.isCampaignActive(campaignId)), { active: true });
       if (!active.active) return false;
     }
     return true;
@@ -732,7 +805,8 @@ export class ContentHomepage extends ContentPages {
     if (s.kind === 'brand_collections') base.brands = await this.brandTiles(s.config.brandIds ?? []);
     if (s.kind === 'deals') {
       const promotions = this.ctx.tryUse('promotions');
-      base.deals = await this.soft('promotions.liveDeals', promotions && (() => promotions.liveDeals({ limit: 4 })), null);
+      const campaignId = this.dealsCampaignOf(s);
+      base.deals = await this.soft('promotions.liveDeals', promotions && (() => promotions.liveDeals({ limit: 4, ...(campaignId ? { campaignId } : {}) })), null);
     }
     return base;
   }

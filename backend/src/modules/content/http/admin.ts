@@ -1,4 +1,4 @@
-import { routes, notImplemented } from '../../../kernel/http/index.js';
+import { routes } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/content.js';
 import type { ContentService } from '../service.js';
 import type { By } from '../service/base.js';
@@ -68,10 +68,10 @@ export const adminRoutes = (service: ContentService) =>
 
     /* ---------------------------------------------------------------- navigation */
     updateNavigation: async (i) => service.updateNavigation(i.body, by(i)),
-    /** POST /homepage/submit: Send the draft layout for review (TODO pass 3: implement) */
-    submitHomepageDraft: notImplemented,
-    /** POST /homepage/review: Approve the draft layout or request changes (TODO pass 3: implement) */
-    reviewHomepageDraft: notImplemented,
-    /** POST /pages/{id}/cancel-schedule: Cancel a scheduled publication (TODO pass 3: implement) */
-    cancelPageSchedule: notImplemented,
+    /** POST /homepage/submit: Send the draft layout for review */
+    submitHomepageDraft: async (i) => service.submitHomepageDraft(i.body ?? {}, by(i)),
+    /** POST /homepage/review: Approve the draft layout or request changes */
+    reviewHomepageDraft: async (i) => service.reviewHomepageDraft(i.body, by(i)),
+    /** POST /pages/{id}/cancel-schedule: Cancel a scheduled publication */
+    cancelPageSchedule: async (i) => service.cancelPageSchedule(i.params.id, i.body ?? {}, by(i)),
   });

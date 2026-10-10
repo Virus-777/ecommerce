@@ -341,10 +341,12 @@ export class ContentPolicies extends ContentHelp {
     }
 
     if (!by.principal) throw new AppError('FORBIDDEN', 'Sign in as staff to approve');
+    // the owner step was decided above (permission + ownership); access only says whether the caller also
+    // finishes the Business Owner step: allowed → one step, approval_required or denied → an approval request.
+    // An owner is never refused here because of access limits (a Content Manager owner has none).
     const check = await access.check(by.principal, APPROVE_ACTION);
-    if (check.decision === 'denied') throw new AppError('FORBIDDEN', check.reason || 'You cannot approve policy versions');
     let requestId: string | null = null;
-    if (check.decision === 'approval_required') {
+    if (check.decision !== 'allowed') {
       const req = await access.requestApproval({
         action: APPROVE_ACTION,
         target: this.approvalTarget(p, v),
