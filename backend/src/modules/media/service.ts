@@ -25,6 +25,7 @@ import type {
   StorageEvent,
   UploadRequest,
   UploadTicket,
+  Usage,
   UsageInput,
 } from '../../spec/media.js';
 import { evaluateImage, passed, type BaselineRules } from './domain/image-check.js';
@@ -33,6 +34,7 @@ import {
   MAX_IMAGE_PIXELS,
   MAX_IMAGE_SIDE,
   MIME_OF,
+  SENSITIVE_GENERATED,
   allowedPurposes,
   deleteCheck,
   extendRetention,
@@ -92,7 +94,14 @@ const BATCH = 100;
 const IMAGE_SIZES = ['thumb', 'small', 'medium', 'large', 'zoom'] as const;
 const TRANSCODED_PURPOSES = ['product_video', 'ad_video'];
 /** Downloads of these are recorded in the action history even when another module checked access */
-const SENSITIVE_PURPOSES = ['verification_document', 'return_evidence', 'case_evidence', 'inspection_photo', 'data_export'];
+const SENSITIVE_PURPOSES = ['verification_document', 'return_evidence', 'case_evidence', 'inspection_photo', 'data_export', ...SENSITIVE_GENERATED];
+/** readFile reads at most this much unless the caller says otherwise */
+const READ_MAX_BYTES = 25 * 1024 * 1024;
+/** storeInboundFile: purposes an inbound file may have, and the uploader kind its upload record carries */
+const INBOUND_PURPOSES: readonly string[] = ['message_attachment', 'case_evidence', 'other_document'];
+const INBOUND_UPLOADER = 'inbound';
+const SIMILAR_MAX_DISTANCE = 6;
+const SIMILAR_LIMIT = 20;
 /** Statuses an owner no longer sees */
 const GONE = ['deleted'];
 const PLACEHOLDER_KEY = 'placeholders/removed.png';
@@ -100,6 +109,9 @@ const PLACEHOLDER_KEY = 'placeholders/removed.png';
 const PLACEHOLDER_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 
 const notFound = () => new AppError('NOT_FOUND', 'File not found');
+/** The upload was started by this caller (no caller given: no check) */
+const startedBy = (upload: { created_by_kind: string; created_by_id: string | null }, by?: { kind: string; id: string | null }) =>
+  !by || (Boolean(by.id) && upload.created_by_kind === by.kind && upload.created_by_id === by.id);
 const invalid = (path: string, message: string) => new AppError('VALIDATION_FAILED', message, { issues: [{ path, message }] });
 const label = (s: string) => s.replace(/_/g, ' ');
 const mb = (bytes: number) => `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`;
@@ -244,7 +256,7 @@ export class MediaService implements MediaPublicApi {
     contentType: string;
     body: ReadableStream;
     ttlHours?: number;
-    purpose: 'export' | 'statement' | 'report' | 'correction_report' | 'data_export' | 'label';
+    purpose: 'export' | 'statement' | 'report' | 'correction_report' | 'data_export' | 'label' | 'gift_card_codes';
   }): Promise<MediaAsset> {
     if (!isGeneratedPurpose(input.purpose)) throw invalid('purpose', `Generated files are ${GENERATED_PURPOSES.join(', ')}`);
     if (!input.fileName?.trim()) throw invalid('fileName', 'A file name is required');
@@ -298,6 +310,8 @@ export class MediaService implements MediaPublicApi {
     const row = await this.repo.getAsset(assetId);
     if (!row || GONE.includes(row.status) || row.status === 'expired') throw notFound();
     if (row.status !== 'ready' && row.status !== 'removed') throw notUsable(row);
+    // gift card codes: the owning module checked access; the link is always recorded with why it was opened
+    if (SENSITIVE_GENERATED.includes(row.purpose) && !reason?.trim()) throw invalid('reason', 'Say why this file is opened');
     const link = await this.downloadLink(row);
     if (SENSITIVE_PURPOSES.includes(row.purpose)) {
       await this.audit(
@@ -311,6 +325,142 @@ export class MediaService implements MediaPublicApi {
   /** Takedown on behalf of a moderation decision (trust, reviews, catalog) */
   async remove(assetId: string, input: { reason: string; by: common.Actor }): Promise<void> {
     await this.removeAsset(assetId, { reason: input.reason, showPlaceholder: true }, { actor: input.by });
+  }
+
+  /**
+   * The stored bytes of a ready file, for modules that parse uploads in-process (offers bulk files, purchasing
+   * supplier files). ASSET_NOT_OWNED when expectedOwner differs, ILLEGAL_TRANSITION when not ready, FILE_TOO_LARGE
+   * above maxBytes (default 25 MB). Works with every storage adapter: callers never fetch signed URLs themselves.
+   */
+  async readFile(
+    assetId: string,
+    expectedOwner?: MediaOwner,
+    opts?: { maxBytes?: number },
+  ): Promise<{ fileName: string; contentType: string; sizeBytes: number; body: Uint8Array }> {
+    const row = isUuid(assetId) ? await this.repo.getAsset(assetId) : null;
+    if (!row || GONE.includes(row.status)) throw notFound();
+    if (expectedOwner && !sameOwner(expectedOwner, ownerOf(row))) throw new AppError('ASSET_NOT_OWNED', 'This file belongs to another owner.', { assetId });
+    if (row.status !== 'ready') throw new AppError('ILLEGAL_TRANSITION', `This file is ${label(row.status)}, not ready to read.`, { from: row.status, event: 'read' });
+    const maxBytes = opts?.maxBytes ?? READ_MAX_BYTES;
+    if (Number(row.size_bytes) > maxBytes) throw new AppError('FILE_TOO_LARGE', `The file is ${mb(Number(row.size_bytes))}; at most ${mb(maxBytes)} can be read.`, { maxBytes });
+    const body = row.storage_bucket === ERASED_BUCKET ? null : await this.storage.get(row.storage_bucket, row.storage_key);
+    if (!body) throw new AppError('NOT_FOUND', 'The stored file is missing');
+    if (body.byteLength > maxBytes) throw new AppError('FILE_TOO_LARGE', `The file is ${mb(body.byteLength)}; at most ${mb(maxBytes)} can be read.`, { maxBytes });
+    return { fileName: row.file_name, contentType: row.content_type, sizeBytes: body.byteLength, body };
+  }
+
+  /**
+   * A file that arrived outside an upload session (inbound email attachments), under the purpose's type and size
+   * limits. Processed like an upload (scan, strip, renditions): it starts in processing and the receiving module
+   * attaches it like any upload. source (e.g. inbound-email:<providerEventId>) goes on the asset history.
+   */
+  async storeInboundFile(input: {
+    owner: MediaOwner;
+    purpose: 'message_attachment' | 'case_evidence' | 'other_document';
+    fileName: string;
+    contentType: string;
+    body: Uint8Array;
+    source: string;
+  }): Promise<MediaAsset> {
+    if (!INBOUND_PURPOSES.includes(input.purpose)) throw invalid('purpose', `Inbound files are ${INBOUND_PURPOSES.join(', ')}`);
+    const fileName = input.fileName?.trim() ?? '';
+    if (!fileName) throw invalid('fileName', 'A file name is required');
+    if (fileName.length > 255) throw invalid('fileName', 'File name is too long (255 characters at most)');
+    if (!input.source?.trim()) throw invalid('source', 'The source is required');
+    const body = input.body instanceof Uint8Array ? input.body : new Uint8Array(0);
+    if (!body.byteLength) throw invalid('body', 'The file is empty');
+    const limits = limitFor(input.purpose, (await this.ctx.settings.get('limitsByPurpose')) as unknown as Record<string, PurposeLimit>);
+    const type = fileTypeOf(input.contentType, fileName);
+    if (!type || !limits.types.includes(type)) {
+      throw new AppError('FILE_TYPE_NOT_ALLOWED', `This type of file isn't accepted for a ${label(input.purpose)}. Use ${limits.types.map((t) => t.toUpperCase()).join(', ')}.`, {
+        allowed: limits.types,
+        contentType: input.contentType,
+      });
+    }
+    if (body.byteLength > limits.maxBytes) {
+      throw new AppError('FILE_TOO_LARGE', `The file is ${mb(body.byteLength)}; the limit for a ${label(input.purpose)} is ${mb(limits.maxBytes)}.`, { maxBytes: limits.maxBytes });
+    }
+    const now = this.now();
+    const assetId = newId();
+    const key = `originals/${assetId}.${type}`;
+    const ownerLabel = input.owner.label ?? (await this.ownerLabel(input.owner));
+    await this.storage.put(this.storage.buckets.private, key, body, input.contentType);
+    const row = await this.repo.transaction(async (tx) => {
+      const inserted = await tx.insertAsset({
+        id: assetId,
+        kind: kindOf(type),
+        purpose: input.purpose,
+        // received in full: it starts where a completed upload does
+        status: this.next(assetMachine.initial, 'complete'),
+        file_name: fileName,
+        content_type: input.contentType,
+        size_bytes: body.byteLength,
+        sha256: sha256(body),
+        phash: null,
+        width: null,
+        height: null,
+        duration_seconds: null,
+        page_count: null,
+        alt: null,
+        title: null,
+        owner_kind: input.owner.kind,
+        owner_id: input.owner.id ?? null,
+        owner_label: ownerLabel,
+        visibility: visibilityOf(input.purpose),
+        storage_bucket: this.storage.buckets.private,
+        storage_key: key,
+        check_result: null,
+        rejection_reason: null,
+        removed_reason: null,
+        removed_by: null,
+        retain_until: null,
+        expires_at: null,
+        created_at: now,
+        ready_at: null,
+        deleted_at: null,
+      });
+      // the upload record keeps where the file came from (shown on the asset history)
+      await tx.insertUpload({
+        id: newId(),
+        asset_id: assetId,
+        expected_bytes: body.byteLength,
+        expected_sha256: null,
+        url_expires_at: now,
+        completed_at: now,
+        client_ip: null,
+        created_by_kind: INBOUND_UPLOADER,
+        created_by_id: input.source.trim().slice(0, 200),
+      });
+      await tx.insertProcessingJob({ id: newId(), asset_id: assetId, step: 'scan', status: 'queued', attempts: 0, provider_ref: null, error: null, next_attempt_at: now, created_at: now, finished_at: null });
+      return inserted;
+    });
+    this.kickProcessing();
+    return this.view(row, { signPrivate: true });
+  }
+
+  /**
+   * Ready images whose perceptual hash is within maxDistance (Hamming, default 6) of this image, closest first
+   * (default limit 20), for duplicate-product checks. Never returns private evidence files.
+   */
+  async findSimilar(
+    assetId: string,
+    scope: { ownerKind?: 'seller' | 'platform'; ownerId?: string; usageKinds?: string[]; maxDistance?: number; limit?: number },
+  ): Promise<{ assetId: string; distance: number; owner: MediaOwner; usages: Usage[] }[]> {
+    const row = isUuid(assetId) ? await this.repo.getAsset(assetId) : null;
+    if (!row || GONE.includes(row.status)) throw notFound();
+    if (row.phash == null) return []; // not an image, or not processed yet
+    const maxDistance = Math.min(64, Math.max(0, Math.trunc(scope?.maxDistance ?? SIMILAR_MAX_DISTANCE)));
+    const limit = Math.min(100, Math.max(1, Math.trunc(scope?.limit ?? SIMILAR_LIMIT)));
+    const hits = await this.repo.similarImages(Number(row.phash), {
+      excludeId: row.id,
+      maxDistance,
+      limit,
+      ownerKind: scope?.ownerKind,
+      ownerId: scope?.ownerId,
+      usageKinds: scope?.usageKinds,
+    });
+    const usages = groupBy(await this.repo.usagesOf(hits.map((h) => h.asset.id), { activeOnly: true }), (u) => u.asset_id);
+    return hits.map((h) => ({ assetId: h.asset.id, distance: h.distance, owner: ownerOf(h.asset), usages: (usages.get(h.asset.id) ?? []).map(toUsage) }));
   }
 
   /* ================================================================ uploads */
@@ -432,13 +582,13 @@ export class MediaService implements MediaPublicApi {
    * PUT /uploads/{id}/content: development storage only. Receives the bytes of a pending upload the caller
    * reaches (real storage takes them directly at the signed ticket URL), with the checks the signed URL makes:
    * not expired, at most the ticket's maxBytes. Stored under the declared content type, as storage does. The
-   * client then completes the upload. Store and Seller Center reach their own uploads (owner); Admin Center the
-   * uploads staff started.
+   * client then completes the upload. Store and Seller Center reach their own uploads (owner); Admin Center only the
+   * uploads the calling staff member started (startedBy).
    */
-  async receiveUploadContent(uploadId: string, bytes: Uint8Array | undefined, opts: { area: UploadArea; owner?: OwnerFilter }): Promise<void> {
+  async receiveUploadContent(uploadId: string, bytes: Uint8Array | undefined, opts: { area: UploadArea; owner?: OwnerFilter; startedBy?: { kind: string; id: string | null } }): Promise<void> {
     if (!this.devStorage) throw this.ctx.error('DEV_STORAGE_ONLY', 'Upload the file to the storage URL in the upload ticket.');
     const upload = await this.repo.getUpload(uploadId);
-    const inArea = upload && (opts.area !== 'admin' || upload.created_by_kind === 'staff');
+    const inArea = upload && (opts.area !== 'admin' || upload.created_by_kind === 'staff') && startedBy(upload, opts.startedBy);
     const asset = inArea ? await this.repo.getAsset(upload.asset_id, { owner: opts.owner }) : null;
     if (!upload || !asset) throw new AppError('NOT_FOUND', 'Upload not found');
     if (asset.status === 'expired' || this.now() > upload.url_expires_at) throw new AppError('UPLOAD_EXPIRED', 'The upload link expired; start a new upload.');
@@ -478,10 +628,14 @@ export class MediaService implements MediaPublicApi {
     return signed.url;
   }
 
-  /** POST /uploads/{id}/complete: verifies the stored object (size, sha256) and queues processing (202) */
-  async completeUpload(uploadId: string, opts: { owner?: OwnerFilter; by: By }): Promise<MediaAsset> {
+  /**
+   * POST /uploads/{id}/complete: verifies the stored object (size, sha256) and queues processing (202). Owners reach
+   * their own uploads (owner); staff only the uploads they started (startedBy): the response carries the asset, so
+   * completing someone else's upload would leak a private file.
+   */
+  async completeUpload(uploadId: string, opts: { owner?: OwnerFilter; startedBy?: { kind: string; id: string | null }; by: By }): Promise<MediaAsset> {
     const upload = await this.repo.getUpload(uploadId);
-    if (!upload) throw new AppError('NOT_FOUND', 'Upload not found');
+    if (!upload || !startedBy(upload, opts.startedBy)) throw new AppError('NOT_FOUND', 'Upload not found');
     const asset = await this.repo.getAsset(upload.asset_id, { owner: opts.owner });
     if (!asset) throw new AppError('NOT_FOUND', 'Upload not found');
     const row = await this.completeAsset(asset, upload, { strict: true, by: opts.by });
@@ -679,6 +833,8 @@ export class MediaService implements MediaPublicApi {
   async staffDownload(id: string, reason: string, by: By): Promise<DownloadLink> {
     if (!reason.trim()) throw invalid('reason', 'Say why you need this file');
     const row = await this.findAsset(id);
+    // gift card code files open only through their owning module (wallet), which checks access first
+    if (SENSITIVE_GENERATED.includes(row.purpose)) throw notFound();
     if (!['ready', 'removed', 'rejected'].includes(row.status) || row.storage_bucket === ERASED_BUCKET) throw notUsable(row);
     if (!(await this.storage.head(row.storage_bucket, row.storage_key))) throw new AppError('NOT_FOUND', 'The stored file is missing');
     const link = await this.downloadLink(row);
@@ -801,7 +957,7 @@ export class MediaService implements MediaPublicApi {
 
   /* ================================================================ jobs */
 
-  /** Job media.process (queue worker): Scan, probe, strip metadata, build renditions, run baseline image checks, start video transcodes; retry with backoff; publish media.asset.ready or media.asset.rejected */
+  /** Job media.process (every minute, and started at once when an upload completes): Scan, probe, strip metadata, build renditions, run baseline image checks, start video transcodes; retry with backoff; publish media.asset.ready or media.asset.rejected */
   async process(): Promise<{ processed: number }> {
     let processed = 0;
     for (let round = 0; round < 100; round++) {
@@ -1175,7 +1331,7 @@ export class MediaService implements MediaPublicApi {
     const at = (d: Date) => d.toISOString();
     events.push({ at: at(row.created_at), label: 'Upload started', detail: row.file_name });
     const upload = await this.repo.uploadOfAsset(row.id);
-    if (upload?.completed_at) events.push({ at: at(upload.completed_at), label: 'Uploaded' });
+    if (upload?.completed_at) events.push(upload.created_by_kind === INBOUND_UPLOADER ? { at: at(upload.completed_at), label: 'Received', detail: upload.created_by_id } : { at: at(upload.completed_at), label: 'Uploaded' });
     if (row.ready_at) events.push({ at: at(row.ready_at), label: 'Ready to use' });
     if (row.status === 'rejected') {
       const failed = (await this.repo.processingJobsOf(row.id)).filter((j) => j.status === 'failed' && j.finished_at).at(-1);
@@ -1295,6 +1451,7 @@ const evidenceKinds = (usages: readonly UsageRow[]) => usages.filter((u) => u.ev
 
 function categoryOf(row: AssetRow): audit.RecordInput['category'] {
   if (row.purpose.startsWith('ad_')) return 'advertising';
+  if (SENSITIVE_GENERATED.includes(row.purpose)) return 'financial';
   if (['product_image', 'product_video', 'offer_photo', 'brand_logo'].includes(row.purpose)) return 'catalog';
   if (['return_evidence', 'inspection_photo'].includes(row.purpose)) return 'returns';
   if (row.owner_kind === 'customer' || row.owner_kind === 'guest') return 'customers';

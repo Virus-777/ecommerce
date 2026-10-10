@@ -21,7 +21,7 @@ import { MediaService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.0.0',
+  version: '1.1.0',
   migrations,
   register(ctx) {
     // Providers: deterministic dev adapters (no network). S3-compatible storage, ClamAV and an image /

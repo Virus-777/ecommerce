@@ -25,10 +25,11 @@ export const adminRoutes = (service: MediaService) =>
         by: { actor, requestId },
       });
     },
-    /** PUT /uploads/{id}/content: Development storage only: the file bytes for an upload ticket (uploads staff started) */
-    uploadAdminContent: async ({ params, body }) => service.receiveUploadContent(params.id, body, { area: 'admin' }),
-    /** POST /uploads/{id}/complete: Confirm a staff upload */
-    completeAdminUpload: async ({ params, actor, requestId }) => service.completeUpload(params.id, { by: { actor, requestId } }),
+    /** PUT /uploads/{id}/content: Development storage only: the file bytes for an upload ticket (only the staff member who started it) */
+    uploadAdminContent: async ({ params, body, principal }) => service.receiveUploadContent(params.id, body, { area: 'admin', startedBy: { kind: 'staff', id: principal.accountId ?? null } }),
+    /** POST /uploads/{id}/complete: Confirm a staff upload (only the staff member who started it: the response carries the asset) */
+    completeAdminUpload: async ({ params, principal, actor, requestId }) =>
+      service.completeUpload(params.id, { startedBy: { kind: 'staff', id: principal.accountId ?? null }, by: { actor, requestId } }),
     /** GET /assets: All files with filters */
     listAssetsAdmin: async ({ query, page, can }) =>
       service.listAssets(
