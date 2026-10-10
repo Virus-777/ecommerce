@@ -78,24 +78,28 @@ declare module 'fastify' {
 }
 
 /**
- * A module's API with some functions replaced. The module's own methods stay bound to the module object, so a
- * service class with #private fields keeps working when one of its methods runs next to a stubbed one (calls
- * between the module's own methods are not redirected to the stubs). */
+ * A module's API as other modules see it, with some functions replaced. Callers through the API get the stubs; the
+ * module's own methods stay bound to the module object, so a service class with #private fields keeps working when
+ * one of its methods runs next to a stubbed one (a Proxy as `this` would make its private fields throw "Receiver must
+ * be an instance"). The module itself is untouched: its routes, consumers and `this.fn()` calls run its own code.
+ * Assigning a function through the API (a test replacing it later) sets it on the module object, and over a stub of
+ * the same name.
+ */
 export function withStubs(api: object | undefined, stub: object): object {
+  const stubs = stub as Record<PropertyKey, unknown>;
   const bound = new Map<PropertyKey, unknown>();
   return new Proxy(api ?? {}, {
     get: (target, key) => {
-      if (key in stub) return (stub as Record<PropertyKey, unknown>)[key];
+      if (key in stubs) return stubs[key];
       const value: unknown = Reflect.get(target, key, target);
       if (typeof value !== 'function') return value;
       if (!bound.has(key)) bound.set(key, (value as (...args: unknown[]) => unknown).bind(target));
       return bound.get(key);
     },
-    has: (target, key) => key in stub || key in target,
-    // a test replacing a function later (api.fn = …) replaces it on the module object and over a stub of the same name
+    has: (target, key) => key in stubs || key in target,
     set: (target, key, value) => {
       bound.delete(key);
-      if (key in stub) Reflect.set(stub, key, value);
+      if (key in stubs) stubs[key] = value;
       return Reflect.set(target, key, value);
     },
   });

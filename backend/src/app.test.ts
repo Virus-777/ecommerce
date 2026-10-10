@@ -107,15 +107,24 @@ describe('apiStubs (tests)', () => {
   }
 
   it("keeps the module's own methods (with #private fields) working next to a stubbed one", () => {
-    const api = withStubs(new Counter(), { bump: () => 100 }) as Counter;
-    expect(api.bump()).toBe(100); // the stub
-    expect(api.twice()).toBe(2); // the module's own method, on the module object: its private field and its own bump
-    const unstubbed = withStubs(new Counter(), {}) as Counter;
-    expect(unstubbed.twice()).toBe(2);
-    expect(unstubbed.twice).toBe(unstubbed.twice); // bound once
-    // a function assigned later replaces the stub of the same name
+    class Doubler extends Counter {
+      #step = 2;
+      double() {
+        return this.bump() * this.#step;
+      }
+    }
+    const service = new Doubler();
+    const api = withStubs(service, { bump: () => 100 }) as Doubler;
+    expect(api.bump()).toBe(100); // callers through the API get the stub
+    expect(api.double()).toBe(2); // the module's own method runs on the module: its private fields and its own bump
+    expect(api.twice()).toBe(3);
+    expect(api.twice).toBe(api.twice); // bound once
+    // a function assigned through the API later replaces the stub, on the module object too
     (api as { bump: () => number }).bump = () => 7;
     expect(api.bump()).toBe(7);
+    expect(service.bump()).toBe(7);
+    // a module that is off: only the stubs
+    expect('bump' in (withStubs(undefined, { bump: () => 1 }) as object)).toBe(true);
   });
 
   it('answers an optional lookup (tryUse) of a module that is off with its stub', async () => {
