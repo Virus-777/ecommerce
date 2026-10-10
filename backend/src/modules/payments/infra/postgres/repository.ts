@@ -73,6 +73,15 @@ export function createPostgresPaymentsRepository(db: Kysely<PaymentsDb>): Paymen
     async insert(table, row) {
       return d.insertInto(table).values(encode(table, row as Record<string, unknown>)).returningAll().executeTakeFirstOrThrow();
     },
+    async liveAuthorizations(after, upTo, limit) {
+      let q = db
+        .selectFrom('intents')
+        .selectAll()
+        .where('status', 'in', ['authorized', 'partially_captured'])
+        .where('updated_at', '<=', upTo);
+      if (after) q = q.where((eb) => eb.or([eb('updated_at', '>', after.updatedAt), eb.and([eb('updated_at', '=', after.updatedAt), eb('id', '>', after.id)])]));
+      return (await q.orderBy('updated_at', 'asc').orderBy('id', 'asc').limit(limit).execute()) as never;
+    },
     async insertMany(table, rows) {
       if (!rows.length) return;
       await d

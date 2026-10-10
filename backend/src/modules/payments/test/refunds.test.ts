@@ -165,7 +165,9 @@ describe('execution', () => {
 
     const asked = await h.call('POST', `/api/admin/payments/refunds/${r.id}/request-destination`, staff(), { message: 'Your card was closed' });
     expect(asked.status, JSON.stringify(asked.body)).toBe(200);
-    expect(h.named('payments.refund.destination_requested')).toEqual([{ refundId: r.id, orderId: placed.order.id, amount: USD(4000) }]);
+    expect(h.named('payments.refund.destination_requested')).toEqual([
+      { refundId: r.id, ref: r.ref, orderId: placed.order.id, orderRef: placed.order.ref, customerId, contactEmail: 'sam@example.com', amount: USD(4000), failureReason: 'Card closed by the issuer', message: 'Your card was closed' },
+    ]);
     expect(h.audits.find((a) => a.action === 'payments.refund.request_destination')).toBeTruthy();
 
     const owner = tokens.customer(customerId);
@@ -180,6 +182,42 @@ describe('execution', () => {
     expect(await h.service.getRefund(r.id)).toMatchObject({ destination: 'new_method', status: 'sent' });
     const again = await h.call('POST', `/api/store/payments/refunds/${r.id}/destination`, owner, { providerToken: 'tok_mastercard' }, idem());
     expect(again.status).toBe(409);
+  });
+
+  it('stores the chosen destination and the attempt key before sending: a lost send is checked later and resent with the same key to the same card', async () => {
+    const customerId = newId();
+    const placed = await placeOrder(h, { customerId, products: [[{ price: 10000 }]], token: 'tok_closed' });
+    const r = await h.service.startRefund(refundInput(placed.order.id, [{ orderItemId: placed.items[0]!, amount: 2500 }]), newId());
+    await h.run('payments.process-refunds');
+    expect(await h.service.getRefund(r.id)).toMatchObject({ status: 'failed', failureCode: 'card_closed' });
+    const owner = tokens.customer(customerId);
+    // the first send to this card is lost in transit (the processor has no record of it)
+    const chosen = await h.call('POST', `/api/store/payments/refunds/${r.id}/destination`, owner, { providerToken: 'tok_refund_lost' }, idem());
+    expect(chosen.status, JSON.stringify(chosen.body)).toBe(200);
+    expect(chosen.body).toMatchObject({ status: 'processing', destinationLabel: 'Visa •••• 7777' });
+    const stored = (await h.service.core.repo.get('refunds', r.id))!;
+    expect(stored).toMatchObject({ status: 'processing', outcome_unknown: true, destination: 'new_method', destination_ref: 'token:tok_refund_lost', attempt_key: expect.stringMatching(/^refund:/) });
+
+    // later (a restart reads only the database): the check finds no record and resends the same attempt there
+    h.clock.advance(10 * 60_000);
+    await h.run('payments.process-refunds');
+    expect(await h.service.getRefund(r.id)).toMatchObject({ status: 'sent', destination: 'new_method', destinationLabel: 'Visa •••• 7777', amount: USD(2500) });
+    const sent = (await h.service.core.repo.get('refunds', r.id))!;
+    expect(sent).toMatchObject({ destination_ref: null, attempt_key: null });
+    const calls = await h.service.core.repo.find('provider_calls', { refund_id: r.id, operation: 'refund' }, { orderBy: [['at', 'asc']] });
+    expect(calls.map((c) => c.outcome)).toEqual(['declined', 'timeout', 'ok']);
+    expect(h.named('payments.refund.sent').filter((e) => e.refundId === r.id)).toEqual([expect.objectContaining({ amount: USD(2500), destination: 'new_method' })]);
+  });
+
+  it('keeps the attempt key of a failed refund for its check and clears it when the refund is cancelled', async () => {
+    const placed = await placeOrder(h, { products: [[{ price: 10000 }]], token: 'tok_closed' });
+    const r = await h.service.startRefund(refundInput(placed.order.id, [{ orderItemId: placed.items[0]!, amount: 1500 }]), newId());
+    await h.run('payments.process-refunds');
+    const failed = (await h.service.core.repo.get('refunds', r.id))!;
+    expect(failed).toMatchObject({ status: 'failed', attempt_key: expect.stringMatching(/^refund:/), destination_ref: null });
+    const cancelled = await h.call('POST', `/api/admin/payments/refunds/${r.id}/cancel`, staff(), { reason: 'Settled another way' }, idem());
+    expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
+    expect(await h.service.core.repo.get('refunds', r.id)).toMatchObject({ status: 'cancelled', attempt_key: null, destination_ref: null });
   });
 
   it('cancels a requested refund (releasing the cap) and refuses to cancel a sent one', async () => {
@@ -238,6 +276,7 @@ describe('cancellations from orders', () => {
     refund: { itemAmount: USD(total), discountShare: USD(0), shippingRefund: USD(0), taxRefund: USD(0), total: USD(total) },
     paymentIntentId: placed.intentId,
     trustReportId: null,
+    notifyCustomer: true,
   });
 
   it('starts one cancellation refund for every item of a cancellation, once', async () => {
@@ -247,17 +286,47 @@ describe('cancellations from orders', () => {
     await h.publish('orders', 'orders.item.cancelled', cancelled(placed, a, cancellationId, 12000));
     await h.publish('orders', 'orders.item.cancelled', cancelled(placed, b, cancellationId, 3000));
     await h.publish('orders', 'orders.item.cancelled', cancelled(placed, b, cancellationId, 3000)); // replay
+    // one refund per cancelled item, each with the cancellation as its origin (keyed by cancellation + item)
     const refunds = await h.service.listRefundsForOrder(placed.order.id);
-    expect(refunds).toHaveLength(1);
-    expect(refunds[0]).toMatchObject({ origin: 'cancellation', originId: cancellationId, amount: USD(15000), status: 'requested' });
-    expect(refunds[0]!.items.map((i) => i.orderItemId).sort()).toEqual([a, b].sort());
-    expect(refunds[0]!.requestedBy.kind).toBe('customer');
+    expect(refunds.map((r) => [r.origin, r.originId, r.amount, r.status, r.items.map((i) => [i.orderItemId, i.amount])]).sort((x, y) => String(x[4]).localeCompare(String(y[4])))).toEqual(
+      [
+        ['cancellation', cancellationId, USD(12000), 'requested', [[a, USD(12000)]]],
+        ['cancellation', cancellationId, USD(3000), 'requested', [[b, USD(3000)]]],
+      ].sort((x, y) => String(x[4]).localeCompare(String(y[4]))),
+    );
+    expect(refunds.every((r) => r.requestedBy.kind === 'customer')).toBe(true);
+    const rows = await h.service.core.repo.find('refunds', { origin: 'cancellation', origin_id: cancellationId });
+    expect(rows.map((r) => r.idempotency_key).sort()).toEqual([`cancel:${cancellationId}:${a}`, `cancel:${cancellationId}:${b}`].sort());
   });
 
   it('reduces the uncaptured authorization instead when the group was not charged yet', async () => {
     h.settings['payments.captureMode'] = 'per_group_on_dispatch';
     const placed = await placeOrder(h, { products: [[{ price: 12000 }, { price: 3000 }]] });
-    await h.publish('orders', 'orders.item.cancelled', cancelled(placed, placed.items[1]!, newId(), 3000));
+    // staff cancel the item through orders (orders.item.cancelled follows), then the event comes again
+    const res = await h.call('POST', `/api/admin/orders/orders/${placed.order.id}/cancel-items`, staff(), { items: [{ itemId: placed.items[1]!, quantity: 1 }], reasonCode: 'seller_cannot_fulfill', reason: 'Seller has no stock', notifyCustomer: false }, idem());
+    expect(res.status, JSON.stringify(res.body)).toBeLessThan(300);
+    await h.publish('orders', 'orders.item.cancelled', cancelled(placed, placed.items[1]!, newId(), 3000)); // replayed: lowered once
     expect(await h.service.listRefundsForOrder(placed.order.id)).toEqual([]);
+    // the adapter lowers the authorization by the item's card share (partial reversal, intent transition reduce)
+    const i = (await h.service.core.repo.get('intents', placed.intentId))!;
+    expect(i).toMatchObject({ status: 'authorized', authorized_amount: 12000, captured_amount: 0 });
+    expect((await h.calls(placed.intentId, 'partial_void')).map((c) => c.outcome)).toEqual(['ok', 'ok']);
+    // the group is charged what is left when it ships
+    await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId: newId(), kind: 'outbound', orderId: placed.order.id, groupId: placed.order.groups[0]!.id, ownerType: 'seller', sellerId: null, lines: [], shippedAt: h.clock.now().toISOString(), trackingValid: true });
+    expect(await h.service.core.repo.get('intents', placed.intentId)).toMatchObject({ status: 'captured', authorized_amount: 12000, captured_amount: 12000 });
+  });
+
+  it('gives an item cancelled after the first refund was sent its own refund with the same cancellation as origin', async () => {
+    const placed = await placeOrder(h, { products: [[{ price: 8000 }, { price: 2000 }]] });
+    const [a, b] = placed.items as [string, string];
+    const cancellationId = newId();
+    await h.publish('orders', 'orders.item.cancelled', cancelled(placed, a, cancellationId, 8000));
+    await h.run('payments.process-refunds');
+    await h.publish('orders', 'orders.item.cancelled', cancelled(placed, b, cancellationId, 2000));
+    const rows = await h.service.core.repo.find('refunds', { order_id: placed.order.id }, { orderBy: [['created_at', 'asc']] });
+    expect(rows.map((r) => [r.origin, r.origin_id, r.amount, r.status])).toEqual([
+      ['cancellation', cancellationId, 8000, 'sent'],
+      ['cancellation', cancellationId, 2000, 'requested'],
+    ]);
   });
 });

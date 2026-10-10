@@ -235,11 +235,11 @@ export class Intents {
           if ((status as IntentStatus) === 'captured') {
             // the provider captured on its own (confirm_captured): record it as one whole-payment capture
             const captured = p.capturedAmount || authorized;
-            const capture = await tx.insertIfNew('captures', { id: newId(), intent_id: i.id, group_id: null, amount: captured, status: 'succeeded', provider_ref: p.providerRef ?? i.provider_ref, idempotency_key: `${i.id}:capture:provider`, at: now });
+            // a whole-payment capture: all the store credit still used goes with it (an order's only)
+            const credit = i.order_id ? Math.max(0, (this.credit.tender(i)?.amount.amount ?? 0) - this.credit.outside(i)) : 0;
+            const capture = await tx.insertIfNew('captures', { id: newId(), intent_id: i.id, group_id: null, amount: captured, credit_amount: credit, status: 'succeeded', provider_ref: p.providerRef ?? i.provider_ref, idempotency_key: `${i.id}:capture:provider`, at: now });
             Object.assign(patch, { captured_amount: captured, captured_at: now });
             if (capture && i.order_id) {
-              // a whole-payment capture: all the store credit still used goes with it
-              const credit = Math.max(0, (this.credit.tender(i)?.amount.amount ?? 0) - this.credit.outside(i));
               const withShare: IntentRec = credit > 0 ? { ...i, tenders: this.credit.withShare(i, capture.id, { amount: credit, groupId: null }) } : i;
               if (credit > 0) patch.tenders = withShare.tenders;
               batch.push('payments.payment.captured', await this.capturedPayload(tx, withShare, capture, null, who));
@@ -491,6 +491,10 @@ export class Intents {
     let excessCredit = 0;
     let excessKey = EXCESS_KEY;
     let release = false;
+    let closeRest = false;
+    const batch = new Batch();
+    const pre = await this.repo.get('intents', intentId);
+    const who = pre?.order_id ? await this.core.contactOf(pre) : { customerId: null, contactEmail: null };
     const prepared = await this.repo.transaction(async (tx) => {
       const i = await tx.get('intents', intentId, { forUpdate: true });
       if (!i) throw notFound();
@@ -500,12 +504,8 @@ export class Intents {
         if (o.strict) paymentIntentMachine.next(i.status as never, 'capture'); // ILLEGAL_TRANSITION
         return null;
       }
-      if (this.credit.card(i) === 0) {
-        // paid entirely with store credit (used when the order was placed): nothing to ask a card processor
-        if (i.status === 'authorized' && i.order_id) await tx.update('intents', i.id, { status: paymentIntentMachine.next('authorized', 'capture'), captured_at: this.core.now(), updated_at: this.core.now() });
-        return null;
-      }
-      if (!i.provider_ref) throw illegal('The authorization has no processor reference yet');
+      const creditOnly = this.credit.card(i) === 0;
+      if (creditOnly && !i.order_id) return null; // store credit is only charged for an order
       const captures = await tx.find('captures', { intent_id: i.id });
       const holding = captures.filter((c) => c.status === 'pending' || c.status === 'unknown').reduce((s, c) => s + c.amount, 0);
       const remaining = i.authorized_amount - i.captured_amount - holding;
@@ -534,10 +534,10 @@ export class Intents {
           } else amount = Math.max(0, due - done);
         } else {
           const groupsDone = live.filter((c) => c.group_id);
-          const total = allocations.length ? allocations.filter((a) => !groupsDone.some((c) => c.group_id === a.group_id)).reduce((s, a) => s + a.amount, 0) : remaining;
           // the card pays what the store credit did not: items cancelled before the capture come off the card, and
           // credit beyond what is left of the order goes back to the customer's credit
-          const credit = allocations.length ? this.credit.unallocated(i) : 0;
+          const credit = allocations.length || creditOnly ? this.credit.unallocated(i) : 0;
+          const total = allocations.length ? allocations.filter((a) => !groupsDone.some((c) => c.group_id === a.group_id)).reduce((s, a) => s + a.amount, 0) : creditOnly ? credit : remaining;
           excessCredit = Math.max(0, credit - total);
           creditShare = Math.min(credit, total);
           amount = Math.min(Math.max(0, total - credit), remaining);
@@ -550,27 +550,50 @@ export class Intents {
       }
       if (!Number.isSafeInteger(amount) || amount < 0) throw invalid([{ path: 'amount', message: 'Enter an amount of zero or more' }]);
       if (amount > remaining) throw this.core.error('CAPTURE_EXCEEDS_AUTHORIZED', undefined, { remaining: this.m(Math.max(0, remaining), i.currency) });
+      if (amount === 0 && creditShare > 0 && o.amount == null) {
+        // store credit alone pays this order or group: a succeeded capture of 0 on the card carrying the credit share,
+        // keyed like any capture (once), reported as payments.payment.captured with amount 0 and creditAmount
+        const now = this.core.now();
+        const capture = await tx.insert('captures', { id: newId(), intent_id: i.id, group_id: o.groupId ?? null, amount: 0, credit_amount: creditShare, status: 'succeeded', provider_ref: null, idempotency_key: o.key, at: now });
+        let x = await tx.update('intents', i.id, { tenders: this.credit.withShare(i, capture.id, { amount: creditShare, groupId: o.groupId ?? null }), updated_at: now });
+        const allocations = await tx.find('allocations', { intent_id: i.id });
+        const done = await tx.find('captures', { intent_id: i.id, status: 'succeeded' });
+        const groupsLeft = capture.group_id ? allocations.filter((a) => a.amount > 0 && !done.some((c) => c.group_id === a.group_id || c.group_id === null)) : [];
+        const last = Boolean(o.final) || capture.group_id === null || groupsLeft.length === 0;
+        if (creditOnly) {
+          // nothing on a card: authorized → partially_captured (more groups to go) or captured, with no provider call
+          const status = last ? paymentIntentMachine.next(i.status as never, 'capture') : i.status === 'authorized' ? paymentIntentMachine.next('authorized', 'capture_part') : i.status;
+          x = await tx.update('intents', i.id, { status, captured_at: now, updated_at: now });
+        } else if (last && !holding) {
+          // nothing left for the card: an untouched authorization is voided, the rest of a partly captured one released
+          if (i.status === 'authorized' && i.captured_amount === 0) release = true;
+          else if (i.status === 'partially_captured') closeRest = true;
+        }
+        batch.push('payments.payment.captured', await this.capturedPayload(tx, x, capture, capture.group_id, who));
+        return { i: x, capture, fresh: false };
+      }
       if (amount === 0) {
         if (o.strict) throw invalid([{ path: 'amount', message: 'Nothing is left to capture' }]);
         if (o.final && i.status === 'partially_captured') {
           await tx.update('intents', i.id, { status: paymentIntentMachine.next('partially_captured', 'close_remainder'), updated_at: this.core.now() });
         }
-        // the store credit alone pays what is left: its share counts as charged (no card capture to report it with)
-        if (creditShare > 0 && o.amount == null) await tx.update('intents', i.id, { tenders: this.credit.withShare(i, `nocard:${o.key}`, { amount: creditShare, groupId: o.groupId ?? null }), updated_at: this.core.now() });
         // nothing left for the card: the authorization is released (voided) instead of being left to lapse
         if (o.final && i.status === 'authorized' && i.captured_amount === 0 && !holding) release = true;
         return null;
       }
-      const capture = await tx.insert('captures', { id: newId(), intent_id: i.id, group_id: o.groupId ?? null, amount, status: 'pending', provider_ref: null, idempotency_key: o.key, at: this.core.now() });
+      if (!i.provider_ref) throw illegal('The authorization has no processor reference yet');
+      const capture = await tx.insert('captures', { id: newId(), intent_id: i.id, group_id: o.groupId ?? null, amount, credit_amount: creditShare, status: 'pending', provider_ref: null, idempotency_key: o.key, at: this.core.now() });
       // the capture's store-credit share, kept with the tender (reported as creditAmount once the capture succeeds)
       if (creditShare > 0) await tx.update('intents', i.id, { tenders: this.credit.withShare(i, capture.id, { amount: creditShare, groupId: o.groupId ?? null }), updated_at: this.core.now() });
       return { i, capture, fresh: true };
     });
+    this.core.flush(batch, o.by);
     if (excessCredit > 0) {
       const i = (await this.repo.get('intents', intentId))!;
       await this.credit.returnOutsideRefund(i, excessKey, excessCredit, 'Items were cancelled before the payment was taken: the store credit they no longer need is returned');
     }
     if (release) await this.void(intentId, 'Nothing is left to charge to the card', o.by);
+    if (closeRest) await this.closeRemainder((await this.repo.get('intents', intentId))!, 'Nothing is left to charge to the card', o.by);
     if (!prepared) return null;
     const { i, capture } = prepared;
     if (capture.status === 'succeeded' || capture.status === 'failed') return capture;
@@ -785,14 +808,47 @@ export class Intents {
     const i = await this.repo.get('intents', intentId);
     if (!i || !is(ACCEPTED, i.status)) return;
     const item = order?.items.get(itemId);
+    let creditShare = 0;
     if (this.credit.tender(i) && order && item) {
       const charged = new Set((await this.repo.find('captures', { intent_id: i.id, status: ['succeeded', 'pending', 'unknown'] })).map((c) => c.group_id));
       // the last item still to be charged takes all the credit not charged yet (the shares add up to the credit)
       const stillOpen = charged.has(null) ? false : [...order.items.entries()].some(([id, x]) => id !== itemId && x.state !== 'cancelled' && x.paid > 0 && !charged.has(x.groupId));
       const share = this.credit.proportional(i, item.paid, !stillOpen);
+      creditShare = share; // the item's credit share is not card money, whether wallet took it back now or on a redelivery
       await this.credit.returnOutsideRefund(i, itemKey(itemId), share, `${item.title} was cancelled before it was charged: its store credit is returned`);
     }
-    await this.releaseIfNothingLeft(intentId, { actor: SYSTEM }, 'Every item was cancelled before the card was charged');
+    if (await this.releaseIfNothingLeft(intentId, { actor: SYSTEM }, 'Every item was cancelled before the card was charged')) return;
+    if (item) await this.reduceAuthorization(intentId, itemId, item.paid - creditShare);
+  }
+
+  /**
+   * Partial reversal (decision D-P1): when the adapter supports it, the authorization is lowered by the cancelled
+   * item's card share (ProviderCall partial_void, intent transition reduce), once per item. Without it, or when the
+   * provider refuses, the amount stays authorized and the remainder is released at the final capture.
+   */
+  async reduceAuthorization(intentId: string, itemId: string, cardShare: number): Promise<void> {
+    const partialVoid = this.core.provider.partialVoid?.bind(this.core.provider);
+    if (!partialVoid || cardShare <= 0) return;
+    const i = await this.repo.get('intents', intentId);
+    if (!i?.provider_ref || (i.status !== 'authorized' && i.status !== 'partially_captured')) return;
+    const holding = (await this.repo.find('captures', { intent_id: i.id, status: ['pending', 'unknown'] })).reduce((s, c) => s + c.amount, 0);
+    const amount = Math.min(cardShare, i.authorized_amount - i.captured_amount - holding);
+    if (amount <= 0) return;
+    let left: number;
+    try {
+      left = (
+        await this.core.call('partial_void', { intentId }, () => partialVoid({ providerRef: i.provider_ref!, amount: this.m(amount, i.currency), idempotencyKey: `${i.id}:reduce:${itemId}` }), (r) => ({ outcome: 'ok', providerRef: i.provider_ref, message: `authorization lowered by ${amount} to ${r.authorizedAmount}` }))
+      ).authorizedAmount;
+    } catch (err) {
+      if (!(err instanceof ProviderError)) throw err;
+      return void this.core.ctx.log.warn({ err, intentId, itemId }, 'payments: authorization not lowered; the remainder is released at the final capture');
+    }
+    await this.repo.transaction(async (tx) => {
+      const x = (await tx.get('intents', intentId, { forUpdate: true }))!;
+      if (x.status !== 'authorized' && x.status !== 'partially_captured') return;
+      if (x.authorized_amount === left) return; // already applied (the provider answers the same for the same key)
+      await tx.update('intents', x.id, { status: paymentIntentMachine.next(x.status as never, 'reduce'), authorized_amount: left, updated_at: this.core.now() });
+    });
   }
 
   /** Card amount the authorization still has to charge: the allocations of groups not captured less their store credit; null when unknown */
@@ -800,7 +856,11 @@ export class Intents {
     if (!i.order_id) return null;
     const [allocations, captures] = await Promise.all([this.repo.find('allocations', { intent_id: i.id }), this.repo.find('captures', { intent_id: i.id, status: ['succeeded', 'pending', 'unknown'] })]);
     if (!allocations.length || captures.some((c) => c.group_id === null)) return null;
-    const open = allocations.filter((a) => !captures.some((c) => c.group_id === a.group_id)).reduce((s, a) => s + a.amount, 0);
+    // groups paid entirely by store credit are charged: they have a credit-only capture (amount 0), or, recorded
+    // before those existed, a "nocard:" credit share on the tender
+    const legacy = Object.entries(this.credit.tender(i)?.captureCredits ?? {}).filter(([key]) => key.startsWith('nocard:')).map(([, c]) => c.groupId);
+    if (legacy.includes(null)) return 0;
+    const open = allocations.filter((a) => !captures.some((c) => c.group_id === a.group_id) && !legacy.includes(a.group_id)).reduce((s, a) => s + a.amount, 0);
     return Math.max(0, open - this.credit.unallocated(i));
   }
 
@@ -826,9 +886,12 @@ export class Intents {
     for (const i of due) {
       try {
         const after = await this.sync(i.id, { actor: SYSTEM });
+        if (after.status === 'pending_check') await this.keepCreditHold(after);
         if (after.status === 'pending_check' && !after.orphan && now.getTime() - after.created_at.getTime() > cfg.uncertainMaxHours * HOUR) {
           await this.repo.update('intents', after.id, { orphan: true, updated_at: now });
-          this.core.publish('payments.payment.orphaned', { intentId: after.id, checkoutSessionId: after.checkout_session_id, amount: this.m(after.amount, after.currency), captured: false, action: 'needs_review' });
+          // what may have moved on the card (never the intent amount with its store credit), and the credit held for it
+          const credit = this.credit.tender(after)?.amount.amount ?? 0;
+          this.core.publish('payments.payment.orphaned', { intentId: after.id, checkoutSessionId: after.checkout_session_id, amount: this.m(after.authorized_amount || this.credit.card(after), after.currency), creditAmount: credit > 0 ? this.m(credit, after.currency) : null, captured: false, action: 'needs_review' });
         }
       } catch (err) {
         this.core.ctx.log.warn({ err, intentId: i.id }, 'payments: status check failed');
@@ -839,6 +902,22 @@ export class Intents {
       const i = await this.repo.get('intents', intentId);
       if (i) await this.resolveUnknownCaptures(i, { actor: SYSTEM });
     }
+  }
+
+  /** Margin past the next status check that a pending payment's store-credit hold is kept alive */
+  static readonly HOLD_MARGIN_MS = 15 * MINUTE;
+
+  /**
+   * While a payment is pending check its store-credit hold must not lapse (the capture would then fail with
+   * INSUFFICIENT_CREDIT): wallet.extendHold until the next check plus a margin. Wallet caps it
+   * (pendingHoldMaxHours) and never shortens a hold; a failure is logged, the next check tries again.
+   */
+  async keepCreditHold(i: IntentRec): Promise<void> {
+    const holdId = this.credit.tender(i)?.creditHoldId;
+    if (!holdId) return;
+    const next = i.next_check_at ?? this.core.now();
+    const until = new Date(next.getTime() + Intents.HOLD_MARGIN_MS).toISOString();
+    await this.core.soft('wallet', 'extendHold', (w) => w.extendHold(holdId, until));
   }
 
   /** payments.detect-orphans: money without an order after the grace period and an ended checkout session */
@@ -867,6 +946,11 @@ export class Intents {
     await this.repo.update('intents', i.id, { orphan: true, updated_at: this.core.now() });
     let action: 'voided' | 'refund_started' | 'needs_review' = 'needs_review';
     const captured = i.captured_amount > 0;
+    // card money that moved without an order: what the orphan refund returns (captured less refunds already sent or
+    // in flight), else the authorized amount; the store credit held for it is reported apart
+    const totals = captured ? await this.repo.intentRefundTotals(i.id) : { sent: 0, inFlight: 0 };
+    const moved = captured ? Math.max(0, i.captured_amount - totals.sent - totals.inFlight) : i.authorized_amount;
+    const credit = this.credit.tender(i)?.amount.amount ?? 0;
     try {
       if (i.status === 'authorized' && !captured) {
         const after = await this.void(i.id, reason, by);
@@ -879,48 +963,80 @@ export class Intents {
       this.core.ctx.log.warn({ err, intentId: i.id }, 'payments: orphan payment needs review');
       action = 'needs_review';
     }
-    this.core.publish('payments.payment.orphaned', { intentId: i.id, checkoutSessionId: i.checkout_session_id, amount: this.m(i.captured_amount || i.authorized_amount || i.amount, i.currency), captured, action }, by);
+    this.core.publish('payments.payment.orphaned', { intentId: i.id, checkoutSessionId: i.checkout_session_id, amount: this.m(moved, i.currency), creditAmount: credit > 0 ? this.m(credit, i.currency) : null, captured, action }, by);
     return action;
   }
 
-  /** payments.expire-authorizations: capture accepted orders before the authorization lapses, otherwise void */
-  async expireAuthorizations(): Promise<void> {
-    const now = this.core.now();
-    // an authorization with no card amount left (its items cancelled, or paid by store credit) is voided at once
-    const live = await this.repo.find('intents', { status: ['authorized', 'partially_captured'], order_id: { op: 'is not', value: null } }, { orderBy: [['updated_at', 'asc']], limit: 200 });
-    for (const i of live) {
-      try {
-        await this.releaseIfNothingLeft(i.id, { actor: SYSTEM }, 'Nothing is left to charge to the card');
-      } catch (err) {
-        this.core.ctx.log.warn({ err, intentId: i.id }, 'payments: authorization with no card amount left not released');
-      }
-    }
-    const soon = new Date(now.getTime() + DAY);
-    const due = await this.repo.find('intents', { status: ['authorized', 'partially_captured'], authorization_expires_at: { op: '<=', value: soon } }, { orderBy: [['authorization_expires_at', 'asc']], limit: 50 });
+  /** Page size of the expiry sweep (keyset pages over (updated_at, id)); tests lower it to walk several pages */
+  expiryPageSize = 200;
+
+  /**
+   * payments.expire-authorizations: walks every live authorization (authorized, partially_captured) in keyset
+   * pages ordered by (updated_at, id) until none are left. One with no card amount left (its items cancelled, or
+   * its groups paid by store credit) is voided at once; one near expiry is captured if the order is accepted,
+   * otherwise voided. One failing intent never stops the walk; rows the walk itself changes are not visited again.
+   */
+  async expireAuthorizations(): Promise<{ visited: number; failed: number }> {
+    const start = this.core.now();
+    const soon = new Date(start.getTime() + DAY);
     const lookup = this.core.lookup();
-    for (const i of due) {
-      try {
-        const order = await lookup.order(i.order_id);
-        if (order && (order.lifecycle === 'open' || order.lifecycle === 'completed')) {
-          await this.refreshAllocations(i, order);
-          await this.capture(i.id, { key: `${i.id}:capture:expiry`, final: true, by: { actor: SYSTEM } });
-          continue;
-        }
-        if (i.order_id && !order) continue; // orders did not answer: try again next hour
+    let after: { updatedAt: Date; id: string } | null = null;
+    let visited = 0;
+    let failed = 0;
+    for (;;) {
+      const page = await this.repo.liveAuthorizations(after, start, this.expiryPageSize);
+      for (const i of page) {
+        visited++;
         try {
-          await this.void(i.id, 'Authorization expiring without an accepted order', { actor: SYSTEM });
+          await this.expireOne(i, soon, lookup);
         } catch (err) {
-          if (!(err instanceof AppError) || !i.authorization_expires_at || i.authorization_expires_at > now || i.status !== 'authorized') throw err;
-          // the provider did not answer and the authorization has lapsed anyway
-          await this.repo.transaction(async (tx) => {
-            const x = (await tx.get('intents', i.id, { forUpdate: true }))!;
-            if (x.status === 'authorized') await tx.update('intents', x.id, { status: paymentIntentMachine.next('authorized', 'expire'), updated_at: now });
-          });
+          failed++;
+          this.core.ctx.log.warn({ err, intentId: i.id }, 'payments: live authorization not handled by the expiry sweep');
         }
-      } catch (err) {
-        this.core.ctx.log.warn({ err, intentId: i.id }, 'payments: expiring authorization not handled');
       }
+      if (page.length < this.expiryPageSize) break;
+      const last = page.at(-1)!;
+      after = { updatedAt: last.updated_at, id: last.id };
     }
+    return { visited, failed };
+  }
+
+  private async expireOne(i: IntentRec, soon: Date, lookup: Lookup): Promise<void> {
+    if (i.order_id && (await this.releaseIfNothingLeft(i.id, { actor: SYSTEM }, 'Nothing is left to charge to the card'))) return;
+    const x = await this.repo.get('intents', i.id);
+    if (!x || (x.status !== 'authorized' && x.status !== 'partially_captured')) return;
+    if (!x.authorization_expires_at || x.authorization_expires_at > soon) return;
+    const now = this.core.now();
+    const order = await lookup.order(x.order_id);
+    if (order && (order.lifecycle === 'open' || order.lifecycle === 'completed')) {
+      await this.refreshAllocations(x, order);
+      await this.capture(x.id, { key: await this.expiryCaptureKey(x.id), final: true, by: { actor: SYSTEM } });
+      return;
+    }
+    if (x.order_id && !order) return; // orders did not answer: try again next hour
+    try {
+      await this.void(x.id, 'Authorization expiring without an accepted order', { actor: SYSTEM });
+    } catch (err) {
+      if (!(err instanceof AppError) || !x.authorization_expires_at || x.authorization_expires_at > now || x.status !== 'authorized') throw err;
+      // the provider did not answer and the authorization has lapsed anyway
+      await this.repo.transaction(async (tx) => {
+        const y = (await tx.get('intents', x.id, { forUpdate: true }))!;
+        if (y.status === 'authorized') await tx.update('intents', y.id, { status: paymentIntentMachine.next('authorized', 'expire'), updated_at: now });
+      });
+    }
+  }
+
+  /**
+   * The capture key of the expiry capture: intent + expiry + attempt number. An attempt still in flight (pending,
+   * unknown) or one that succeeded keeps its key (capture answers with it); after a failed attempt the next run
+   * uses a new key, so the failed row never blocks the capture.
+   */
+  async expiryCaptureKey(intentId: string): Promise<string> {
+    const base = `${intentId}:capture:expiry`;
+    const attempts = (await this.repo.find('captures', { intent_id: intentId })).filter((c) => c.idempotency_key === base || c.idempotency_key.startsWith(`${base}:`));
+    const open = attempts.find((c) => c.status !== 'failed');
+    if (open) return open.idempotency_key;
+    return `${base}:${attempts.length + 1}`;
   }
 
   /* ---------------------------------------------------------------- admin */

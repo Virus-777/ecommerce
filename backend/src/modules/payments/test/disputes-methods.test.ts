@@ -95,8 +95,13 @@ describe('disputes', () => {
     const saved = await h.call('POST', `/api/admin/payments/disputes/${dispute.id}/evidence`, staff(), { text: 'Delivered, signed by S. Rivera', fileIds: [fileId], submit: false });
     expect(saved.status, JSON.stringify(saved.body)).toBe(200);
     expect(saved.body).toMatchObject({ status: 'opened', evidence: { text: 'Delivered, signed by S. Rivera', files: [expect.objectContaining({ id: fileId })], submittedAt: null } });
+    // the evidence file is attached to the dispute, so the media orphan sweep keeps it
+    expect(h.attached.filter((a) => a.assetId === fileId)).toEqual([{ assetId: fileId, usage: { module: 'payments', kind: 'dispute_evidence', refId: dispute.id, refLabel: dispute.ref }, owner: { kind: 'staff', id: 'staff-1' } }]);
     const submitted = await h.call('POST', `/api/admin/payments/disputes/${dispute.id}/evidence`, staff(), { text: 'Delivered, signed by S. Rivera', submit: true });
     expect(submitted.status, JSON.stringify(submitted.body)).toBe(200);
+    // the provider call is logged against the dispute's payment
+    const row = (await h.service.core.repo.get('disputes', dispute.id))!;
+    expect((await h.service.core.repo.find('provider_calls', { intent_id: row.intent_id, operation: 'dispute_evidence' })).map((c) => [c.outcome, c.provider_ref])).toEqual([['ok', caseId]]);
     expect(submitted.body.status).toBe('under_review');
     expect(submitted.body.evidence.submittedAt).toBeTruthy();
     expect(h.named('payments.chargeback.status_changed')).toEqual([{ disputeId: dispute.id, status: 'under_review' }]);
@@ -132,6 +137,8 @@ describe('disputes', () => {
     const ok = await h.call('POST', `/api/admin/payments/disputes/${within.dispute.id}/accept`, staff(), { reason: 'Customer is right' });
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
     expect(ok.body.status).toBe('lost');
+    const conceded = (await h.service.core.repo.get('disputes', within.dispute.id))!;
+    expect((await h.service.core.repo.find('provider_calls', { intent_id: conceded.intent_id, operation: 'dispute_accept' })).map((c) => [c.outcome, c.provider_ref])).toEqual([['ok', within.caseId]]);
     expect(h.named('payments.chargeback.decided')).toEqual([expect.objectContaining({ disputeId: within.dispute.id, outcome: 'lost' })]);
     expect(h.audits.find((a) => a.action === 'payments.dispute.accept')).toMatchObject({ reason: 'Customer is right', category: 'financial' });
 
