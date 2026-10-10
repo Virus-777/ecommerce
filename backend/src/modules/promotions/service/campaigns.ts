@@ -7,6 +7,7 @@ import { AppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { pageOf, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
+import { OFFICIAL_STORE_ID, OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type * as offers from '../../../spec/offers.js';
 import type {
   Campaign,
@@ -76,7 +77,8 @@ export function campaignFields(input: CampaignInput, currency: string): { row: P
       internal_note: input.internalNote ?? null,
       kind: input.discount.kind,
       discount: input.discount as never,
-      auto_apply: input.autoApply ?? !normalizeCode(input.code),
+      // authoritative (decision P1); default false: no code and not automatic = clip-only
+      auto_apply: input.autoApply ?? false,
       starts_at: new Date(input.startsAt),
       ends_at: new Date(input.endsAt),
       time_zone: input.timeZone,
@@ -1053,7 +1055,7 @@ export class CampaignsPart extends Part {
     return {
       result: await this.result(c, rows, c.status),
       daily: rows.map((r) => ({ date: r.day, value: m(r.cost_platform + r.cost_seller, c.currency), partial: r.day === today })),
-      bySeller: [...bySeller.entries()].map(([sellerId, s]) => ({ sellerId, sellerName: names.get(sellerId) ?? 'Official Store', sales: m(s.sales, c.currency), sellerFunded: m(s.sellerFunded, c.currency), platformFunded: m(s.platformFunded, c.currency) })),
+      bySeller: [...bySeller.entries()].map(([sellerId, s]) => ({ sellerId, sellerName: sellerId === OFFICIAL_STORE_ID ? OFFICIAL_STORE_NAME : (names.get(sellerId) ?? OFFICIAL_STORE_NAME), sales: m(s.sales, c.currency), sellerFunded: m(s.sellerFunded, c.currency), platformFunded: m(s.platformFunded, c.currency) })),
     };
   }
 
@@ -1106,7 +1108,8 @@ export class CampaignsPart extends Part {
       couponRedemptions: sum(couponRows, 'redemptions'),
       redemptionShareOfOrders: orders > 0 ? Math.round((sum(couponRows, 'orders') / orders) * 1000) / 10 : 0,
       returnsOnPromotedPct: orders > 0 ? Math.round((sum(rows, 'returned_items') / orders) * 1000) / 10 : 0,
-      storeReturnsPct: 0,
+      // the store-wide return rate comes from reports, which promotions cannot read yet: null, never 0 as a stand-in
+      storeReturnsPct: null,
       tabs: [
         tab('live', 'Live', (r) => r.status === 'live'),
         tab('scheduled', 'Scheduled', (r) => r.status === 'scheduled'),

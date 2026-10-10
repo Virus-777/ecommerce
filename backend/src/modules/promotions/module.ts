@@ -17,7 +17,7 @@ import { PromotionsService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.0.0',
+  version: '1.1.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
@@ -31,6 +31,7 @@ export default defineModule({
     ctx.events.on("orders.order.placed", (e) => service.onOrderPlacedFromOrders(e.payload));
     ctx.events.on("orders.item.cancelled", (e) => service.onItemCancelledFromOrders(e.payload));
     ctx.events.on("returns.refund.approved", (e) => service.onRefundApprovedFromReturns(e.payload));
+    ctx.events.on("orders.item.split", (e) => service.onItemSplitFromOrders(e.payload));
     ctx.events.on("payments.payment.failed", (e) => service.onPaymentFailedFromPayments(e.payload));
     ctx.events.on("offers.offer.price_changed", (e) => service.onOfferPriceChangedFromOffers(e.payload));
     ctx.events.on("offers.offer.status_changed", (e) => service.onOfferStatusChangedFromOffers(e.payload));

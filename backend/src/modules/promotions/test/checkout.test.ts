@@ -97,7 +97,7 @@ describe('cart evaluation and redemption', () => {
 
   it('gives free shipping per package when the minimum spend is met', async () => {
     const o = k.offer({ sellerId: SELLER_A, categoryId: HOME, price: USD(8000) });
-    await liveCampaign(k, campaignInput(k.clock, { name: 'Free shipping over $75', discount: { kind: 'free_shipping', minSpend: USD(7500), minSpendScope: 'seller_package' }, scope: { mode: 'sitewide', include: [], exclude: [] }, stacking: { withSellerMarkdowns: true, withOtherCoupons: true, withFreeShipping: true, withFlashSalePrices: true } }));
+    await liveCampaign(k, campaignInput(k.clock, { name: 'Free shipping over $75', autoApply: true, discount: { kind: 'free_shipping', minSpend: USD(7500), minSpendScope: 'seller_package' }, scope: { mode: 'sitewide', include: [], exclude: [] }, stacking: { withSellerMarkdowns: true, withOtherCoupons: true, withFreeShipping: true, withFlashSalePrices: true } }));
     const pkg = line(o).packageId;
     const ev = await cart([line(o, 1)], { shipping: { [pkg]: USD(799), other: USD(500) } });
     expect(ev.packages[0]).toMatchObject({ packageId: pkg, freeShipping: true, shippingDiscount: USD(799), allocation: { platformPart: USD(799) } });
@@ -122,7 +122,7 @@ describe('cart evaluation and redemption', () => {
     const ev2 = await cart([line(o, 1)], { codes: ['REL10'] });
     const res2 = await k.svc.reserveRedemption(ev2.evaluationId, session2);
     const orderId = newId();
-    await k.emit('orders.order.placed', { orderId, ref: 'MK-261009-00002', checkoutSessionId: session2, customerId: null, guestEmail: 'g@example.com', paymentIntentId: newId(), paymentState: 'accepted', total: USD(9000), couponCodes: ['REL10'], groups: [], placedAt: new Date().toISOString() });
+    await k.emit('orders.order.placed', { orderId, ref: 'MK-261009-00002', checkoutSessionId: session2, customerId: null, guestEmail: 'g@example.com', paymentIntentId: newId(), paymentState: 'accepted', total: USD(9000), couponCodes: ['REL10'], groups: [], placedAt: new Date().toISOString(), attemptNo: 1, contactName: 'Guest Shopper' });
     const rows = await k.svc.core.repo.find('redemptions', { reservation_id: res2.reservationId });
     expect(rows[0]).toMatchObject({ state: 'committed', order_id: orderId });
 
@@ -217,7 +217,7 @@ describe('refunds after delivery', () => {
     const share = await k.svc.refundShare(itemId, 1);
     expect(share.couponShare).toEqual(USD(500));
     const breakdown = { itemAmount: USD(5000), discountShare: USD(500), shippingRefund: USD(0), returnShippingDeduction: USD(0), deductions: [], total: USD(4500), maxRefundable: USD(9000), destination: 'Visa', isEstimate: false };
-    const event = { refundRequestId: newId(), returnId: newId(), caseId: null, orderId, orderItemIds: [itemId], ownerType: 'seller', sellerId: SELLER_A, source: 'return', total: USD(4500), breakdown, fundedBy: 'seller', approvedBy: { kind: 'staff', id: newId() } };
+    const event = { refundRequestId: newId(), returnId: newId(), caseId: null, orderId, orderItemIds: [itemId], items: [{ orderItemId: itemId, quantity: 1 }], ownerType: 'seller', sellerId: SELLER_A, source: 'return', total: USD(4500), breakdown, fundedBy: 'seller', approvedBy: { kind: 'staff', id: newId() } };
     await k.emit('returns.refund.approved', event);
     await k.emit('returns.refund.approved', event); // the same event twice: once
     expect(k.of('promotions.redemption.reversed').filter((e) => e.orderItemId === itemId)).toHaveLength(1);

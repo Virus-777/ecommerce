@@ -7,7 +7,9 @@ import { createHash } from 'node:crypto';
 import { AppError } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
+import { isUuid } from '../../../kernel/lib/ids.js';
 import type * as common from '../../../spec/common.js';
+import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
 import type { CartEvaluation, CartEvaluationInput, FundingSplit, Redemption, RedemptionReservation, RefundShare, RejectedCode } from '../../../spec/promotions.js';
 import { evaluate, type CouponCandidate, type EvalLine, type Hold, type PriceOption } from '../domain/evaluate.js';
 import { flashItemMachine, redemptionMachine } from '../domain/state-machines.js';
@@ -37,26 +39,47 @@ export function stableUuid(name: string): string {
 }
 
 export const guestKey = (guestSessionId: string) => `guest:${sha(guestSessionId).slice(0, 40)}`;
+/** A guest's per-customer key from the checkout contact email (trimmed, lower case), so a new guest session is the same person */
+export const emailKey = (email: string) => `email:${sha(email.trim().toLowerCase()).slice(0, 40)}`;
 
 export class CheckoutPart extends Part {
   /* ---------------------------------------------------------------- evaluation */
 
   isClippable = (c: CampaignModel) => Boolean(c.deals?.show && c.deals.section === 'coupons');
-  /** Applies without a code or clip: no shared or unique codes and not a clip coupon */
-  isAutomatic = (c: CampaignModel) => !c.code && !c.hasUniqueCodes && !this.isClippable(c);
+  /** autoApply is authoritative (decision P1): true applies to every eligible cart with or without the code; false only through the code or a clip */
+  isAutomatic = (c: CampaignModel) => c.autoApply;
+
+  /**
+   * Official Store lines carry OFFICIAL_STORE_ID as seller id. Defensive: '' or null becomes OFFICIAL_STORE_ID when
+   * officialStore is true (VALIDATION_FAILED otherwise), so redemption_lines.seller_id is always a uuid.
+   */
+  normalizeLines(lines: CartEvaluationInput['lines']): CartEvaluationInput['lines'] {
+    const issues: { path: string; message: string }[] = [];
+    const out = lines.map((l, i) => {
+      const sellerId = typeof l.sellerId === 'string' ? l.sellerId.trim() : '';
+      if (sellerId && isUuid(sellerId)) return { ...l, sellerId };
+      if (l.officialStore && !sellerId) return { ...l, sellerId: OFFICIAL_STORE_ID };
+      issues.push({ path: `lines.${i}.sellerId`, message: sellerId ? 'Not a seller id' : 'A seller id is required for marketplace lines' });
+      return l;
+    });
+    if (issues.length) throw invalid(issues);
+    return out;
+  }
 
   async lineAttrs(lines: CartEvaluationInput['lines']): Promise<EvalLine[]> {
     const out: EvalLine[] = [];
     for (const l of lines) {
-      out.push({ ...l, attrs: { offerId: l.offerId, productId: l.productId, sellerId: l.sellerId, official: l.officialStore, categoryIds: await this.core.categoryChain(l.categoryId), brandId: l.brandId ?? null } });
+      out.push({ ...l, attrs: { offerId: l.offerId, productId: l.productId, sellerId: l.officialStore ? null : l.sellerId, official: l.officialStore, categoryIds: await this.core.categoryChain(l.categoryId ?? null), brandId: l.brandId ?? null } });
     }
     return out;
   }
 
-  async isNewCustomer(customerId: string): Promise<boolean | null> {
-    const recent = await this.core.optional('orders', (o) => o.listRecentForCustomer(customerId, 1));
-    if (recent) return recent.length === 0;
-    const used = await this.repo.count('redemptions', { customer_id: customerId, state: ['committed', 'partially_reversed', 'reversed'] });
+  /** New customer (audience new_customers): orders.hasPlacedOrder by customer id, or by contact email for guests */
+  async isNewCustomer(who: { customerId?: string; email?: string }, key: string): Promise<boolean | null> {
+    const placed = await this.core.optional('orders', (o) => o.hasPlacedOrder(who));
+    if (placed !== undefined && placed !== null) return !placed;
+    // orders off: a committed redemption still proves an earlier order
+    const used = await this.repo.count('redemptions', who.customerId ? { customer_id: who.customerId, state: ['committed', 'partially_reversed', 'reversed'] } : { guest_key: key, state: ['committed', 'partially_reversed', 'reversed'] });
     return used ? false : null;
   }
 
@@ -67,9 +90,12 @@ export class CheckoutPart extends Part {
     const issues = input.lines.flatMap((l, i) => [...(l.quantity < 0 ? [{ path: `lines.${i}.quantity`, message: 'Quantity cannot be negative' }] : []), ...(l.unitPrice.amount < 0 ? [{ path: `lines.${i}.unitPrice`, message: 'Price cannot be negative' }] : [])]);
     if (new Set(input.lines.map((l) => l.lineId)).size !== input.lines.length) issues.push({ path: 'lines', message: 'Line ids must be unique' });
     if (issues.length) throw invalid(issues);
+    input = { ...input, lines: this.normalizeLines(input.lines) };
     const currency = input.lines[0]?.unitPrice.currency ?? this.core.currency();
     const customerId = input.customerId ?? null;
-    const customerKey = customerId ?? (input.guestSessionId ? guestKey(input.guestSessionId) : null);
+    // guests: limits and new-customer checks key on the contact email when checkout has it, else on the session
+    const contactEmail = !customerId && input.contactEmail?.trim() ? input.contactEmail.trim() : null;
+    const customerKey = customerId ?? (contactEmail ? emailKey(contactEmail) : input.guestSessionId ? guestKey(input.guestSessionId) : null);
     const lines = await this.lineAttrs(input.lines);
 
     // campaigns that may apply
@@ -125,7 +151,8 @@ export class CheckoutPart extends Part {
         usage.set(u.customer_key === customerKey ? u.campaign_id : `${u.campaign_id}:${u.customer_key.slice(customerKey.length + 1)}`, { uses: u.uses, units: u.units });
       }
     }
-    const isNew = customerId && all.some((c) => c.eligibility.audience === 'new_customers') ? await this.isNewCustomer(customerId) : null;
+    const wantsNew = all.some((c) => c.eligibility.audience === 'new_customers');
+    const isNew = !wantsNew ? null : customerId ? await this.isNewCustomer({ customerId }, customerId) : contactEmail ? await this.isNewCustomer({ email: contactEmail }, customerKey!) : null;
 
     const priceOptions = new Map<string, PriceOption[]>();
     for (const line of lines) {
@@ -150,7 +177,9 @@ export class CheckoutPart extends Part {
       at,
       currency,
       customerId,
+      customerKey,
       signedIn: Boolean(customerId),
+      guestEmail: Boolean(contactEmail),
       isNewCustomer: isNew,
       region: input.region ?? null,
       couponsPerPackage: Math.max(1, Number(await this.core.setting('couponsPerSellerPackage')) || 1),
@@ -166,7 +195,7 @@ export class CheckoutPart extends Part {
     const ttl = await this.core.ttlMinutes();
     const evaluationId = newId();
     const validUntil = new Date(now.getTime() + ttl * 60_000);
-    const result: Omit<CartEvaluation, 'changes'> = { evaluationId, validUntil: validUntil.toISOString(), lines: out.lines, packages: out.packages, applied: out.applied, rejected: out.rejected, totals: out.totals };
+    const result: Omit<CartEvaluation, 'changes'> = { evaluationId, validUntil: validUntil.toISOString(), lines: out.lines, packages: out.packages, applied: out.applied, rejected: out.rejected, skipped: out.skipped, totals: out.totals };
     const hash = sha(JSON.stringify({ c: customerKey, l: input.lines.map((l) => [l.lineId, l.offerId, l.quantity, l.unitPrice.amount]), k: typed.map((t) => t.toUpperCase()).sort(), r: input.region ?? null }));
     const previous = await this.repo.findOne('evaluations', { input_hash: hash }, { orderBy: [['valid_until', 'desc']] });
     const changes = previous ? this.changes((previous.result as unknown as StoredEvaluation).result, result, currency) : [];
@@ -284,7 +313,8 @@ export class CheckoutPart extends Part {
           expires_at: expiresAt,
           created_at: now,
         });
-        if (h.lines.length) await tx.insertMany('redemption_lines', h.lines.map((l) => ({ redemption_id: redemptionId, line_id: l.lineId, order_item_id: null, offer_id: l.offerId, seller_id: l.sellerId, quantity: l.quantity, amount: l.amount, platform_part: l.platform, seller_part: l.seller, reversed: 0 })));
+        // seller_id is a uuid column: an Official Store line stored before seller ids were normalised still gets OFFICIAL_STORE_ID
+        if (h.lines.length) await tx.insertMany('redemption_lines', h.lines.map((l) => ({ redemption_id: redemptionId, line_id: l.lineId, order_item_id: null, offer_id: l.offerId, seller_id: isUuid(l.sellerId) ? l.sellerId : OFFICIAL_STORE_ID, quantity: l.quantity, amount: l.amount, platform_part: l.platform, seller_part: l.seller, reversed: 0 })));
       }
     });
     for (const f of soldOut) this.core.publish('promotions.flash_item.sold_out', { campaignId: f.campaign_id, offerId: f.offer_id, at: now.toISOString() });
@@ -508,23 +538,76 @@ export class CheckoutPart extends Part {
     });
   }
 
+  /**
+   * returns.refund.approved: each refunded item's allocations are reversed by its refunded quantity (payload items,
+   * { orderItemId, quantity }): the whole remaining amount when every unit of the line is refunded, otherwise the
+   * per-unit share. A refund without items reverses nothing (logged). Once per refund and item (reverseItem keys).
+   */
   async onRefundApproved(e: EventPayload<'returns.refund.approved'>) {
+    const items = (e.items ?? []).filter((i) => i.quantity > 0);
+    if (!items.length) {
+      this.ctx.log.warn({ refundRequestId: e.refundRequestId, orderId: e.orderId }, 'promotions: refund approved without refunded items; no discount reversed');
+      return;
+    }
     const restoreBudget = Boolean(await this.core.setting('refundRestoresBudget'));
-    let share = Math.max(0, e.breakdown.discountShare.amount);
-    // the coupon share of the refunded items, spread over their allocations by remaining value
-    const perItem = await Promise.all(e.orderItemIds.map(async (id) => ({ id, lines: await this.committedLines(id) })));
-    const remaining = perItem.reduce((a, x) => a + x.lines.reduce((b, l) => b + (l.line.amount - l.line.reversed), 0), 0);
-    share = Math.min(share, remaining);
-    for (const item of perItem) {
-      const itemRemaining = item.lines.reduce((b, l) => b + (l.line.amount - l.line.reversed), 0);
-      const itemShare = remaining ? Math.round((share * itemRemaining) / remaining) : 0;
-      await this.reverseItem(item.id, `refund:${e.refundRequestId}`, (line) => (itemRemaining ? Math.round((itemShare * (line.amount - line.reversed)) / itemRemaining) : 0), { restoreBudget, restoreUses: false, returnUnits: 0 });
-      for (const campaignId of new Set(item.lines.map((l) => l.redemption.campaign_id))) {
-        const key = `refund:${e.refundRequestId}:${item.id}`;
+    for (const item of items) {
+      const lines = await this.committedLines(item.orderItemId);
+      if (!lines.length) continue;
+      await this.reverseItem(item.orderItemId, `refund:${e.refundRequestId}`, (line) => (item.quantity >= line.quantity ? line.amount - line.reversed : Math.round((line.amount * item.quantity) / Math.max(1, line.quantity))), {
+        restoreBudget,
+        restoreUses: false,
+        returnUnits: 0,
+      });
+      for (const campaignId of new Set(lines.map((l) => l.redemption.campaign_id))) {
+        const key = `refund:${e.refundRequestId}:${item.orderItemId}`;
         if (await this.repo.findOne('campaign_log', { campaign_id: campaignId, action: 'returned', reason: key })) continue;
-        await this.repo.transaction((tx) => this.core.log(tx, campaignId, 'returned', { actor: e.approvedBy ?? SYSTEM }, key, { items: 1, orderItemId: item.id }));
+        await this.repo.transaction((tx) => this.core.log(tx, campaignId, 'returned', { actor: e.approvedBy ?? SYSTEM }, key, { items: item.quantity, orderItemId: item.orderItemId }));
       }
     }
+  }
+
+  /**
+   * orders.item.split: the item's redemption lines are split between the original and the new order item in
+   * proportion to the units moved, so later cancellations, refundShare and fundingSplitFor on either id find their
+   * share. Inbox-claimed per split (item and new item).
+   */
+  async onItemSplit(e: EventPayload<'orders.item.split'>) {
+    if (e.quantity <= 0) return;
+    await this.repo.transaction(async (tx) => {
+      // natural key: one split per new order item, however often (or under whichever envelope) it is delivered
+      if (!(await tx.claim(`item-split:${e.itemId}:${e.newItemId}`))) return;
+      const lines = await tx.find('redemption_lines', { order_item_id: e.itemId });
+      for (const l of lines) {
+        if (l.quantity <= 0) continue;
+        const before = e.quantity + e.remainingQuantity;
+        // units of this allocation that moved with the split (an allocation can cover fewer units than the item)
+        const moved = Math.min(l.quantity, Math.round((l.quantity * e.quantity) / Math.max(1, before)));
+        if (moved <= 0) continue;
+        const part = (v: number) => (moved >= l.quantity ? v : Math.round((v * moved) / l.quantity));
+        const amount = part(l.amount);
+        const platform = part(l.platform_part);
+        const reversed = Math.min(amount, part(l.reversed));
+        await tx.updateWhere('redemption_lines', { redemption_id: l.redemption_id, line_id: l.line_id }, {
+          quantity: l.quantity - moved,
+          amount: l.amount - amount,
+          platform_part: l.platform_part - platform,
+          seller_part: l.seller_part - (amount - platform),
+          reversed: l.reversed - reversed,
+        });
+        await tx.insert('redemption_lines', {
+          redemption_id: l.redemption_id,
+          line_id: `${l.line_id}:split:${e.newItemId}`,
+          order_item_id: e.newItemId,
+          offer_id: l.offer_id,
+          seller_id: l.seller_id,
+          quantity: moved,
+          amount,
+          platform_part: platform,
+          seller_part: amount - platform,
+          reversed,
+        });
+      }
+    });
   }
 
   /**

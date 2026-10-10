@@ -10,6 +10,7 @@ import { withDependencies } from '../../../kernel/module-system/loader.js';
 import { auth, buildTestApp, callers, movingClock } from '../../../testing/app.js';
 import type * as access from '../../../spec/access.js';
 import type * as audit from '../../../spec/audit.js';
+import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type { CampaignInput } from '../../../spec/promotions.js';
 import type { PromotionsService } from '../service.js';
 
@@ -67,7 +68,9 @@ function toOffer(o: FakeOffer) {
     id: o.id,
     ownerType: o.ownerType,
     sellerId: o.sellerId,
-    sellerName: o.ownerType === 'official' ? 'Marketly Official Store' : 'Seller',
+    sellerName: o.ownerType === 'official' ? OFFICIAL_STORE_NAME : 'Seller',
+    title: `Product ${o.sellerSku}`,
+    missingItemsStale: false,
     productId: o.productId,
     variantId: o.variantId,
     condition: 'new',
@@ -101,6 +104,7 @@ export async function boot(): Promise<Kit> {
     apiStubs: {
       offers: {
         getOffer: async (id: string) => (offers.has(id) ? toOffer(offers.get(id)!) : null),
+        getOffers: async (ids: string[]) => Object.fromEntries(ids.map((id) => [id, offers.has(id) ? toOffer(offers.get(id)!) : null])),
         getOwnOffer: async (sellerId: string, id: string) => (offers.get(id)?.sellerId === sellerId ? toOffer(offers.get(id)!) : null),
         listActiveOffersByIds: async (ids: string[]) => ids.map((id) => offers.get(id)).filter((o): o is FakeOffer => Boolean(o && o.status === 'active')).map(toOffer),
         listOffersAdmin: async (f: any, page: any) => {

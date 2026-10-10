@@ -11,6 +11,7 @@ import type { StateMachine } from '../../../kernel/lib/state-machine.js';
 import type { ModuleContext, PublicApiMap } from '../../../kernel/module-system/index.js';
 import type * as audit from '../../../spec/audit.js';
 import type * as common from '../../../spec/common.js';
+import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type * as offers from '../../../spec/offers.js';
 import { pctOf, type CampaignModel, type OfferAttrs } from '../domain/rules.js';
 import { toModel } from '../mappers.js';
@@ -243,7 +244,9 @@ export class Core {
     const out = new Map<string, OfferCard>();
     if (!ids.length) return out;
     const api = this.ctx.use('offers');
-    const found = await Promise.all(ids.map((id) => (o.sellerId ? api.getOwnOffer(o.sellerId, id) : api.getOffer(id))));
+    // one batch read (any status) unless a seller reads its own offers (scoped per offer)
+    const sellerId = o.sellerId;
+    const found = sellerId ? await Promise.all(ids.map((id) => api.getOwnOffer(sellerId, id))) : Object.values(await api.getOffers(ids));
     const list = found.filter((x): x is offers.Offer => Boolean(x));
     const products = new Map<string, Awaited<ReturnType<Core['product']>>>();
     for (const pid of new Set(list.map((x) => x.productId))) products.set(pid, await this.product(pid));
@@ -257,7 +260,7 @@ export class Core {
         title: p?.title ?? offer.sellerSku ?? 'Product',
         image: p?.image ?? null,
         categoryId: p?.categoryId ?? null,
-        sellerName: offer.ownerType === 'official' ? 'Marketly Official Store' : (names.get(offer.sellerId ?? '') ?? offer.sellerName ?? 'Seller'),
+        sellerName: offer.ownerType === 'official' ? OFFICIAL_STORE_NAME : (names.get(offer.sellerId ?? '') ?? offer.sellerName ?? 'Seller'),
         stock: stock.has(offer.stockItemId) ? stock.get(offer.stockItemId)! : null,
       });
     }

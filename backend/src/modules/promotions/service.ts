@@ -75,7 +75,7 @@ export class PromotionsService implements PromotionsPublicApi {
     return this.storefront.isCampaignActive(campaignId);
   }
 
-  liveDeals(opts: { limit: number }): Promise<FlashSaleBlock[]> {
+  liveDeals(opts: { limit: number; campaignId?: string }): Promise<FlashSaleBlock[]> {
     return this.storefront.liveDeals(opts);
   }
 
@@ -120,6 +120,11 @@ export class PromotionsService implements PromotionsPublicApi {
 
   onItemCancelledFromOrders(event: EventPayload<'orders.item.cancelled'>) {
     return this.checkout.onItemCancelled(event);
+  }
+
+  /** orders.item.split: split the item's redemption lines between the original and the new order item */
+  onItemSplitFromOrders(event: EventPayload<'orders.item.split'>) {
+    return this.checkout.onItemSplit(event);
   }
 
   onRefundApprovedFromReturns(event: EventPayload<'returns.refund.approved'>) {

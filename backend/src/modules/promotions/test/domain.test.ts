@@ -150,7 +150,12 @@ describe('cart evaluation', () => {
     expect(why.KITCHEN!.message).toContain('Home & Kitchen');
     expect(why.OLD!.reason).toBe('expired');
     const guest = evaluate(input([cartLine(5000, 1)], [code(newOnly, 'NEW')], { customerId: null, signedIn: false }));
-    expect(guest.rejected[0]!.reason).toBe('sign_in_required');
+    // a guest without a contact email is not eligible; with one, orders decides (isNewCustomer)
+    expect(guest.rejected[0]!.reason).toBe('customer_not_eligible');
+    const guestWithEmail = evaluate(input([cartLine(5000, 1)], [code(newOnly, 'NEW')], { customerId: null, signedIn: false, guestEmail: true, isNewCustomer: true }));
+    expect(guestWithEmail.applied).toHaveLength(1);
+    const returningGuest = evaluate(input([cartLine(5000, 1)], [code(newOnly, 'NEW')], { customerId: null, signedIn: false, guestEmail: true, isNewCustomer: false }));
+    expect(returningGuest.rejected[0]!.reason).toBe('customer_not_eligible');
     const returning = evaluate(input([cartLine(5000, 1)], [code(newOnly, 'NEW')], { isNewCustomer: false }));
     expect(returning.rejected[0]!.reason).toBe('customer_not_eligible');
     const used = evaluate(input([cartLine(5000, 1)], [code(campaign({ limits: { perCustomer: 1 } }), 'ONCE')], { usage: new Map() }));
@@ -206,13 +211,30 @@ describe('cart evaluation', () => {
     expect(over.lines[0]!.limitExceeded).toBe(false);
     const l3 = cartLine(10000, 3);
     const limited = evaluate(input([l3], [], { priceOptions: new Map([[l3.lineId, opts.get(l.lineId)!]]) }));
-    expect(limited.lines[0]).toMatchObject({ unitPrice: { amount: 10000 }, limitExceeded: true, purchaseLimit: 2 });
+    // decision P2: units over the deal limit are split off at the regular price, not refused
+    expect(limited.lines[0]).toMatchObject({ regularUnitPrice: { amount: 10000 }, unitPrice: { amount: 6000 }, discountedQuantity: 2, lineDiscount: { amount: 8000 }, limitExceeded: true, purchaseLimit: 2 });
+    expect(limited.holds[0]).toMatchObject({ units: 2, flash: [{ qty: 2 }] });
+    expect(over.lines[0]!.discountedQuantity).toBe(3);
   });
 
   it('holds only what the budget allows and rejects a coupon over the remaining budget', () => {
     const c = campaign({ limits: { budget: { amount: 1000, currency: 'USD' } }, budgetUsed: 500 });
     const out = evaluate(input([cartLine(10000, 1)], [code(c, 'BUDGET')]));
-    expect(out.rejected[0]).toMatchObject({ reason: 'budget_exhausted' });
+    // decision P3: 500 left of the budget does not cover the 2,000 discount: nothing is applied
+    expect(out.rejected[0]).toMatchObject({ reason: 'budget_insufficient' });
+    expect(out.applied).toEqual([]);
+    // an automatic campaign in the same spot is listed in skipped with the reason, never applied in part
+    const auto = evaluate(input([cartLine(10000, 1)], [{ campaign: c, source: 'automatic', code: null, codeInfo: null }]));
+    expect(auto.applied).toEqual([]);
+    expect(auto.rejected).toEqual([]);
+    expect(auto.skipped).toEqual([expect.objectContaining({ campaignId: c.id, reason: 'budget_insufficient' })]);
+    expect(auto.holds).toEqual([]);
+    // a markdown whose budget does not cover the line is skipped too, the regular price stays
+    const md = campaign({ kind: 'markdown', discount: { kind: 'markdown', percentOffBps: 2000 }, limits: { budget: { amount: 1000, currency: 'USD' } }, budgetUsed: 0 });
+    const l = cartLine(10000, 1);
+    const mdOut = evaluate(input([l], [], { priceOptions: new Map([[l.lineId, [{ campaign: md }]]]) }));
+    expect(mdOut.lines[0]).toMatchObject({ unitPrice: { amount: 10000 }, lineDiscount: { amount: 0 } });
+    expect(mdOut.skipped).toEqual([expect.objectContaining({ campaignId: md.id, reason: 'budget_insufficient' })]);
     expect(out.holds).toEqual([]);
   });
 });
