@@ -104,4 +104,9 @@ export interface CartRepository {
   insertSaved(row: SavedRow): Promise<void>;
   updateSaved(id: string, patch: Partial<SavedRow>): Promise<void>;
   deleteSaved(id: string): Promise<void>;
+  /**
+   * Moves a guest session's saved items to a customer (sign-in merge): an offer the customer already
+   * saved keeps the customer's row and drops the guest's. Returns how many rows moved.
+   */
+  moveGuestSaved(guestSessionId: string, customerId: string): Promise<number>;
 }

@@ -26,6 +26,7 @@ export const SEVERITY: Record<NoticeKind, Severity> = {
   not_shippable: 'blocking',
   delivery_estimate_changed: 'info',
   coupon_no_longer_applies: 'info',
+  terms_changed: 'warning',
 };
 
 /** A new notice replaces open notices of the same family (a price rise replaces a price drop) */
@@ -41,6 +42,7 @@ const FAMILY: Record<NoticeKind, string> = {
   not_shippable: 'not_shippable',
   delivery_estimate_changed: 'delivery',
   coupon_no_longer_applies: 'coupon',
+  terms_changed: 'terms',
 };
 
 export type JsonObject = { [key: string]: Json };
@@ -71,6 +73,8 @@ export function signature(kind: NoticeKind, current: Json): string {
       return `${c.message ?? ''}`;
     case 'coupon_no_longer_applies':
       return `${c.code ?? ''}`;
+    case 'terms_changed':
+      return `${c.termsVersion ?? ''}`;
     default:
       return '';
   }
@@ -201,6 +205,8 @@ export function noticeMessage(kind: NoticeKind, previous: Json, current: Json, c
       return typeof n.message === 'string' && n.message ? n.message : 'The delivery estimate for this item changed.';
     case 'coupon_no_longer_applies':
       return `Coupon ${n.code} no longer applies to this item.`;
+    case 'terms_changed':
+      return `${c.sellerName} updated the delivery, return or warranty terms of this offer since you added it. Review them to continue.`;
   }
 }
 
@@ -210,6 +216,7 @@ export function noticeActions(kind: NoticeKind, o: { alternatives: boolean; save
   const save: NoticeAction[] = o.saveForLater ? ['save_for_later'] : [];
   switch (kind) {
     case 'price_increased':
+    case 'terms_changed':
       return ['accept', 'remove', ...choose];
     case 'quantity_reduced':
     case 'purchase_limit_reduced':

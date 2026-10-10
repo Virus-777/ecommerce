@@ -226,6 +226,23 @@ export function createPostgresCartRepository(db: Kysely<CartDb>): CartRepository
     async deleteSaved(id) {
       await db.deleteFrom('saved_items').where('id', '=', id).execute();
     },
+    async moveGuestSaved(guestSessionId, customerId) {
+      // the customer's own row wins for an offer both saved (unique customer_id, offer_id)
+      await db
+        .deleteFrom('saved_items as g')
+        .where('g.owner_kind', '=', 'guest')
+        .where('g.guest_session_id', '=', guestSessionId)
+        .where((eb) => eb.exists(eb.selectFrom('saved_items as c').select('c.id').where('c.owner_kind', '=', 'customer').where('c.customer_id', '=', customerId).whereRef('c.offer_id', '=', 'g.offer_id')))
+        .execute();
+      const moved = await db
+        .updateTable('saved_items')
+        .set({ owner_kind: 'customer', customer_id: customerId, guest_session_id: null })
+        .where('owner_kind', '=', 'guest')
+        .where('guest_session_id', '=', guestSessionId)
+        .returning('id')
+        .execute();
+      return moved.length;
+    },
   };
   return repo;
 }

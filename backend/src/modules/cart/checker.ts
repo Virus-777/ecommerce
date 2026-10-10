@@ -8,6 +8,7 @@ import { newId } from '../../kernel/lib/ids.js';
 import { money, type Money } from '../../kernel/lib/money.js';
 import type { ModuleContext } from '../../kernel/module-system/index.js';
 import type * as catalog from '../../spec/catalog.js';
+import { OFFICIAL_STORE_ID } from '../../spec/common.js';
 import type {
   CartDestination,
   CartItem,
@@ -128,8 +129,9 @@ export class CartChecker {
     const result: Facts = { offers: new Map(), products: new Map() };
     if (!items.length) return result;
 
-    const offerList = await Promise.all(offerIds.map((id) => offersApi.getOffer(id)));
-    const byId = new Map(offerIds.map((id, i) => [id, offerList[i] ?? null]));
+    // one batch read of every line's offer, any status
+    const found = await offersApi.getOffers(offerIds);
+    const byId = new Map(offerIds.map((id) => [id, found[id] ?? null]));
     const qty = new Map<string, number>();
     for (const i of items) qty.set(i.offer_id, (qty.get(i.offer_id) ?? 0) + i.quantity);
     const stockOf = (id: string) => byId.get(id)?.stockItemId ?? items.find((i) => i.offer_id === id)!.stock_item_id;
@@ -345,7 +347,11 @@ export class CartChecker {
         inserts.push(...plan.insert);
         resolves.push(...plan.resolve);
         const patch: Partial<ItemRow> = { last_checked_at: now };
-        if (e.newAcceptedPrice !== null) patch.accepted_price = e.newAcceptedPrice;
+        if (e.newAcceptedPrice !== null) {
+          patch.accepted_price = e.newAcceptedPrice;
+          // the price drop is accepted automatically: its terms version too, so it is not shown again as terms_changed
+          if (e.offer) patch.accepted_terms_version = e.offer.termsVersion;
+        }
         if (e.offer) {
           if (e.offer.dispatch.shipsFrom !== e.item.ships_from) patch.ships_from = e.offer.dispatch.shipsFrom;
           if (e.offer.stockItemId !== e.item.stock_item_id) patch.stock_item_id = e.offer.stockItemId;
@@ -489,9 +495,10 @@ export class CartChecker {
                 offerId: e.item.offer_id,
                 productId: e.item.product_id,
                 variantId: e.item.variant_id,
-                sellerId: e.item.seller_id ?? '',
+                // never '' or null: Official Store lines carry the Official Store's seller id
+                sellerId: e.item.owner_type === 'official' || !e.item.seller_id ? OFFICIAL_STORE_ID : e.item.seller_id,
                 officialStore: e.item.owner_type === 'official',
-                categoryId: e.product.product?.categoryId ?? '',
+                categoryId: e.product.product?.categoryId ?? null,
                 brandId: e.product.product?.brand?.id ?? null,
                 quantity: e.item.quantity,
                 unitPrice: e.regularPrice,

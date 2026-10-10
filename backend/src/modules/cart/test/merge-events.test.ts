@@ -109,7 +109,7 @@ describe('events from other modules and jobs', () => {
     const v = k.visitor();
     await add(v.token, offer.id);
     k.change(offer.id, { status: 'removed' });
-    await k.publish('offers', 'offers.offer.status_changed', { offerId: offer.id, productId: p.productId, variantId: p.variantIds[0], sellerId: offer.sellerId, ownerType: 'seller', from: 'active', to: 'removed', reasonCode: 'ended_by_seller', reason: 'Ended' });
+    await k.publish('offers', 'offers.offer.status_changed', { offerId: offer.id, productId: p.productId, variantId: p.variantIds[0], sellerId: offer.sellerId, ownerType: 'seller', from: 'active', to: 'removed', reasonCode: 'ended_by_seller', reason: 'Ended', stockItemId: offer.stockItemId });
     expect((await k.call('GET', `${STORE}/cart/badge`, { token: v.token })).body.attentionCount).toBe(1);
     await k.app.kernel.jobs.runNow('cart.recheck-queued');
     const view = (await k.call('GET', `${STORE}/cart`, { token: v.token })).body;

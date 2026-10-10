@@ -327,7 +327,9 @@ export class CartService implements CartPublicApi {
     await this.repo.transaction(async (tx) => {
       const locked = await tx.getItem(cart.id, item.id, { forUpdate: true });
       if (!locked) throw notFound();
-      await tx.updateItem(item.id, { quantity, updated_at: this.now() });
+      // reducing to a lower purchase limit accepts the offer edit that lowered it (its terms version)
+      const version = limitTermsVersion((await tx.listNotices([item.id])).filter((n) => !n.resolved_at), quantity);
+      await tx.updateItem(item.id, { quantity, ...(version > locked.accepted_terms_version ? { accepted_terms_version: version } : {}), updated_at: this.now() });
       await this.touch(cart.id, days, tx);
     });
     return this.viewFor(s);
@@ -368,8 +370,15 @@ export class CartService implements CartPublicApi {
         patch.accepted_price = cur.price;
         if (line.eval.offer) patch.accepted_terms_version = line.eval.offer.termsVersion;
       }
+      if (n.kind === 'terms_changed') {
+        const version = Math.max(typeof cur.termsVersion === 'number' ? cur.termsVersion : 0, line.eval.offer?.termsVersion ?? 0);
+        if (version) patch.accepted_terms_version = version;
+      }
       if (n.kind === 'quantity_reduced' && typeof cur.available === 'number') quantity = Math.min(quantity, Math.max(cur.available, 1));
-      if (n.kind === 'purchase_limit_reduced' && typeof cur.limit === 'number') quantity = Math.min(quantity, Math.max(cur.limit, 1));
+      if (n.kind === 'purchase_limit_reduced' && typeof cur.limit === 'number') {
+        quantity = Math.min(quantity, Math.max(cur.limit, 1));
+        if (typeof cur.termsVersion === 'number' && cur.termsVersion > (patch.accepted_terms_version ?? line.eval.item.accepted_terms_version)) patch.accepted_terms_version = cur.termsVersion;
+      }
     }
     if (quantity !== line.eval.item.quantity) patch.quantity = quantity;
     const days = await this.retention(s.kind);
@@ -561,10 +570,19 @@ export class CartService implements CartPublicApi {
    */
   async merge(s: Shopper, guestSessionId: string, by: By): Promise<MergeReport | null> {
     if (!isUuid(guestSessionId) || s.kind !== 'customer' || !s.customerId) return null;
+    const customerId = s.customerId;
     const guest = await this.repo.getGuestCart(guestSessionId);
-    if (!guest) return null;
-    if (guest.status === 'merged') return this.storedReport(guest, s);
-    if (guest.status !== 'active') return null;
+    if (guest?.status === 'merged') {
+      const stored = await this.storedReport(guest, s);
+      // items saved by the guest after the cart was merged (normally none) still move
+      if (stored) await this.repo.transaction((tx) => tx.moveGuestSaved(guestSessionId, customerId));
+      return stored;
+    }
+    if (!guest || guest.status !== 'active') {
+      // no cart to fold in: the guest's saved-for-later items still move to the customer
+      const moved = await this.repo.transaction((tx) => tx.moveGuestSaved(guestSessionId, customerId));
+      return moved ? { mergedFromCartId: null, lines: [], savedItemsMoved: moved, message: `We moved ${plural(moved, 'saved item')} from before you signed in.` } : null;
+    }
 
     const guestItems = await this.repo.listItems(guest.id);
     const target = await this.ensureCart(s);
@@ -621,17 +639,21 @@ export class CartService implements CartPublicApi {
               : { itemId: i.id, offerId: i.offer_id, title, outcome: 'added', note: 'Added from before you signed in.' },
         );
       }
+      // saved-for-later items move with the cart, in the same transaction
+      const savedItemsMoved = await tx.moveGuestSaved(guestSessionId, customerId);
       const merged = lines.filter((l) => l.outcome !== 'dropped_unavailable').length;
       const dropped = lines.length - merged;
-      const message = !lines.length
-        ? null
-        : [
-            merged ? `We added ${plural(merged, 'item')} from before you signed in.` : null,
-            dropped ? `${plural(dropped, 'item')} ${merged ? '' : 'from before you signed in '}${dropped === 1 ? 'is' : 'are'} no longer available.` : null,
-          ]
-            .filter(Boolean)
-            .join(' ');
-      const report: MergeReport = { mergedFromCartId: guest.id, lines, message };
+      const message =
+        !lines.length && !savedItemsMoved
+          ? null
+          : [
+              merged ? `We added ${plural(merged, 'item')} from before you signed in.` : null,
+              dropped ? `${plural(dropped, 'item')} ${merged ? '' : 'from before you signed in '}${dropped === 1 ? 'is' : 'are'} no longer available.` : null,
+              savedItemsMoved ? `We moved ${plural(savedItemsMoved, 'saved item')} to your Saved for later.` : null,
+            ]
+              .filter(Boolean)
+              .join(' ');
+      const report: MergeReport = { mergedFromCartId: guest.id, lines, savedItemsMoved, message };
       // coupons are carried over and checked again on the customer's next view; the deliver-to location when the customer has none
       const intoCodes = storedCoupons(into.coupon_codes);
       const carried = storedCoupons(lockedGuest.coupon_codes).filter((c) => !intoCodes.some((x) => x.code === c.code));
@@ -667,7 +689,7 @@ export class CartService implements CartPublicApi {
     if (!m) return null;
     const into = await this.repo.getCart(m.into_cart_id);
     if (!into || into.owner_kind !== 'customer' || (into.customer_id !== s.customerId && into.customer_id !== s.accountId)) return null;
-    return m.report as unknown as MergeReport;
+    return withSavedCount(m.report);
   }
 
   /* ================================================================ save for later (phase 3) */
@@ -779,7 +801,7 @@ export class CartService implements CartPublicApi {
     if (!cart) throw notFound('Cart');
     const checked = await this.checkFor(cart, this.ownerOf(cart), false);
     const [agg, merges] = await Promise.all([this.repo.aggregateCart(cart.id), this.repo.listMerges(cart.id)]);
-    return { summary: this.summary(agg!), cart: checked.view, merges: merges.map((m) => m.report as unknown as MergeReport) };
+    return { summary: this.summary(agg!), cart: checked.view, merges: merges.map((m) => withSavedCount(m.report)) };
   }
 
   /* ================================================================ public API (in-process) */
@@ -839,7 +861,8 @@ export class CartService implements CartPublicApi {
     const cart = isUuid(cartId) ? await this.repo.getCart(cartId) : undefined;
     if (!cart) throw notFound('Cart');
     const offersApi = this.ctx.use('offers');
-    const found = await Promise.all(lines.map(async (l) => ({ line: l, offer: await offersApi.getOffer(l.offerId) })));
+    const offerMap = lines.length ? await offersApi.getOffers([...new Set(lines.map((l) => l.offerId))]) : {};
+    const found = lines.map((l) => ({ line: l, offer: offerMap[l.offerId] ?? null }));
     const s = this.ownerOf(cart);
     const days = await this.retention(s.kind);
     const now = this.now();
@@ -1054,4 +1077,20 @@ export class CartService implements CartPublicApi {
       if (carts.length < JOB_BATCH) return;
     }
   }
+}
+
+/** The terms version an open purchase_limit_reduced notice carries when the new quantity is within its limit (0 = none) */
+function limitTermsVersion(open: { kind: string; current: unknown }[], quantity: number): number {
+  let version = 0;
+  for (const n of open) {
+    const cur = (n.current ?? {}) as Record<string, unknown>;
+    if (n.kind === 'purchase_limit_reduced' && typeof cur.limit === 'number' && quantity <= cur.limit && typeof cur.termsVersion === 'number') version = Math.max(version, cur.termsVersion);
+  }
+  return version;
+}
+
+/** A stored merge report; reports saved before savedItemsMoved existed count 0 */
+function withSavedCount(report: unknown): MergeReport {
+  const r = report as MergeReport;
+  return { ...r, savedItemsMoved: typeof r.savedItemsMoved === 'number' ? r.savedItemsMoved : 0 };
 }
