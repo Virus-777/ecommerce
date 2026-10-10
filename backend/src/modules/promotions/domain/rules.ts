@@ -405,6 +405,8 @@ export function limitIssues(l: Limits): Issue[] {
     const v = l[k];
     if (v != null && v < 1) issues.push({ path: `limits.${k}`, message: 'Must be at least 1' });
   }
+  // a campaign applies at most once per order (one candidate per campaign in evaluation)
+  if (l.perOrder != null && l.perOrder > 1) issues.push({ path: 'limits.perOrder', message: 'A campaign applies once per order: leave it empty or set 1' });
   return issues;
 }
 

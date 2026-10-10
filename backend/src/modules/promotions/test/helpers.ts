@@ -128,6 +128,7 @@ export async function boot(): Promise<Kit> {
           const o = products().get(id);
           return o ? ({ id, title: `Product ${o.sellerSku}`, images: [], categoryId: o.categoryId, brand: o.brandId ? { id: o.brandId, name: 'Brand' } : null } as any) : null;
         },
+        getProducts: async (ids: string[]) => ids.map((id) => products().get(id)).filter((o): o is FakeOffer => Boolean(o)).map((o) => ({ product: { id: o.productId, title: `Product ${o.sellerSku}`, images: [], categoryId: o.categoryId, brand: o.brandId ? { id: o.brandId, name: 'Brand' } : null }, reviewState: 'approved', publication: 'active', purchasable: true, ownerSellerId: null, mergedIntoId: null }) as any),
         listCategories: async () => [{ id: HOME, parentId: null, name: 'Home', children: [{ id: KITCHEN, parentId: HOME, name: 'Kitchen', children: [] }] }, { id: ELECTRONICS, parentId: null, name: 'Electronics', children: [] }] as any,
       },
       inventory: {

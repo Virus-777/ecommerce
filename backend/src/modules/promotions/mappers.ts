@@ -6,11 +6,6 @@ import type { CampaignLogEntry, CampaignSummary, CouponCode, DealsPlacement, Dis
 import { fundingLabel, m, periodDisplay, type CampaignModel, type Kind, type Status } from './domain/rules.js';
 import type { CampaignRec, CodeRec, FundingReviewRec, LogRec, RedemptionRec, TargetRec } from './ports.js';
 
-/** What campaigns.deals holds: the Deals placement and the funding note (no column of its own) */
-export interface StoredDeals {
-  placement?: DealsPlacement | null;
-  fundingNote?: string | null;
-}
 
 export const iso = (d: Date | string) => new Date(d).toISOString();
 export const isoOrNull = (d: Date | string | null | undefined) => (d ? new Date(d).toISOString() : null);
@@ -35,14 +30,14 @@ export function scopeOf(mode: string, targets: readonly TargetRec[]): Scope {
   return { mode: mode as Scope['mode'], include: targets.filter((t) => !t.excluded).map(ref), exclude: targets.filter((t) => t.excluded).map(ref) };
 }
 
-export const storedDeals = (row: Pick<CampaignRec, 'deals'>): StoredDeals => ((row.deals ?? {}) as StoredDeals) || {};
+/** campaigns.deals holds the Deals placement (the funding note has its own column, funding_note, since pass 4) */
+export const dealsOf = (row: Pick<CampaignRec, 'deals'>): DealsPlacement | null => (row.deals as unknown as DealsPlacement | null) ?? null;
 
 /** The shared code of a campaign (latest shared row) */
 export const sharedCodeOf = (codes: readonly CodeRec[]) => codes.filter((c) => c.kind === 'shared').sort((a, b) => Number(b.active) - Number(a.active) || +new Date(b.created_at) - +new Date(a.created_at))[0]?.code ?? null;
 
 export function toModel(row: CampaignRec, targets: readonly TargetRec[], codes: readonly CodeRec[] = []): CampaignModel {
   const cur = row.currency;
-  const d = storedDeals(row);
   return {
     id: row.id,
     ref: row.ref,
@@ -66,10 +61,10 @@ export function toModel(row: CampaignRec, targets: readonly TargetRec[], codes: 
       perOrder: row.per_order,
       perCustomerUnits: row.per_customer_units,
     },
-    funding: { owner: row.funding_owner as 'platform' | 'seller' | 'shared', platformShareBps: row.platform_share_bps, costCenter: row.cost_center, note: d.fundingNote ?? null },
+    funding: { owner: row.funding_owner as 'platform' | 'seller' | 'shared', platformShareBps: row.platform_share_bps, costCenter: row.cost_center, note: row.funding_note },
     stacking: { ...(row.stacking as unknown as StackingRules), exclusiveGroup: row.exclusive_group },
     participation: (row.participation as unknown as ParticipationSettings | null) ?? null,
-    deals: d.placement ?? null,
+    deals: dealsOf(row),
     terms: row.terms,
     status: row.status as Status,
     budgetUsed: row.budget_used,
