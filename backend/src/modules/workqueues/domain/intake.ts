@@ -135,6 +135,10 @@ const SELLER_MISSED = new Set(['seller_no_response', 'seller_missed_inspection',
 
 const DISPATCH_KINDS: Kind[] = ['overdue_dispatch', 'missing_tracking', 'seller_cannot_fulfill'];
 
+/** Fulfilled by Marketly: Marketly's warehouse ships the package, so its dispatch and delivery items are never the seller's */
+const marketly = (p: { fulfilledBy?: string | null }) => p.fulfilledBy === 'marketly_service';
+export const FBM_SUMMARY = 'Fulfilled by Marketly (warehouse)';
+
 /** A product subject (typed since pass 3; 'other' before) */
 const product = (id: string) => [M('product', id), M('other', id)];
 
@@ -146,24 +150,40 @@ export const INTAKE: IntakeTable = {
     opens: [
       {
         kind: 'overdue_dispatch',
-        queues: ['shipping.overdue_dispatch'],
+        queues: ['shipping.overdue_dispatch', 'warehouse.pick_pack'],
         title: 'Overdue dispatch {orderRef}',
         dedupe: 'overdue_dispatch:{orderItemId}',
         deadline: 'now + queue default',
         priority: 'high',
         build: (p) =>
-          p.orderItemIds.map((itemId) => ({
-            queueKey: 'shipping.overdue_dispatch',
-            title: `Overdue dispatch ${p.orderRef}`,
-            summary: `${p.ownerType === 'seller' ? 'Marketplace seller' : 'Official Store'} missed the dispatch deadline of ${p.dueAt}`,
-            subject: { type: 'order', id: p.orderId, ref: p.orderRef },
-            related: list(S('order_item', itemId), S('delivery_exception', p.exceptionId, null, 'Late dispatch')),
-            sellerId: p.sellerId ?? null,
-            priority: 'high',
-            dedupeKey: `overdue_dispatch:${itemId}`,
-            links: [L('Open order', 'admin/order', p.orderId), L('Open dispatch queue', 'ops/dispatch', 'overdue')],
-            visibleToSeller: p.ownerType === 'seller' && Boolean(p.sellerId),
-          })),
+          p.orderItemIds.map((itemId) =>
+            // Fulfilled by Marketly: the Marketly warehouse is late, not the seller (pick and pack team; not seller-visible)
+            marketly(p)
+              ? {
+                  queueKey: 'warehouse.pick_pack',
+                  title: `Overdue dispatch ${p.orderRef}`,
+                  summary: FBM_SUMMARY,
+                  subject: { type: 'order', id: p.orderId, ref: p.orderRef },
+                  related: list(S('order_item', itemId), S('delivery_exception', p.exceptionId, null, 'Late dispatch')),
+                  sellerId: p.sellerId ?? null,
+                  priority: 'high',
+                  dedupeKey: `overdue_dispatch:${itemId}`,
+                  links: [L('Open order', 'admin/order', p.orderId), L('Open pick and pack', 'ops/pick-pack')],
+                  visibleToSeller: false,
+                }
+              : {
+                  queueKey: 'shipping.overdue_dispatch',
+                  title: `Overdue dispatch ${p.orderRef}`,
+                  summary: `${p.ownerType === 'seller' ? 'Marketplace seller' : 'Official Store'} missed the dispatch deadline of ${p.dueAt}`,
+                  subject: { type: 'order', id: p.orderId, ref: p.orderRef },
+                  related: list(S('order_item', itemId), S('delivery_exception', p.exceptionId, null, 'Late dispatch')),
+                  sellerId: p.sellerId ?? null,
+                  priority: 'high',
+                  dedupeKey: `overdue_dispatch:${itemId}`,
+                  links: [L('Open order', 'admin/order', p.orderId), L('Open dispatch queue', 'ops/dispatch', 'overdue')],
+                  visibleToSeller: p.ownerType === 'seller' && Boolean(p.sellerId),
+                },
+          ),
       },
     ],
   },
@@ -188,14 +208,14 @@ export const INTAKE: IntakeTable = {
             : p.orderItemIds.map((itemId) => ({
                 queueKey: 'shipping.missing_tracking',
                 title: 'Missing tracking on an order',
-                summary: 'The package has no valid tracking number',
+                summary: marketly(p) ? `${FBM_SUMMARY}: the package has no valid tracking number` : 'The package has no valid tracking number',
                 subject: { type: 'order', id: p.orderId },
                 related: list(S('order_item', itemId), S('delivery_exception', p.exceptionId, null, 'Missing tracking'), S('shipment', p.shipmentId)),
                 sellerId: p.sellerId ?? null,
                 dueAt: p.dueAt,
                 dedupeKey: `missing_tracking:${itemId}`,
                 links: [L('Open order', 'admin/order', p.orderId), L('Open dispatch queue', 'ops/dispatch', 'missing_tracking')],
-                visibleToSeller: Boolean(p.sellerId),
+                visibleToSeller: Boolean(p.sellerId) && !marketly(p),
               })),
       },
       {
@@ -209,7 +229,7 @@ export const INTAKE: IntakeTable = {
           p.kind === 'seller_cannot_fulfill' && {
             queueKey: 'orders.seller_cannot_fulfill',
             title: 'Seller cannot fulfill an order',
-            summary: `${p.orderItemIds.length} item${p.orderItemIds.length === 1 ? '' : 's'} cannot be fulfilled; cancel, replace or refund`,
+            summary: `${marketly(p) ? `${FBM_SUMMARY}: ` : ''}${p.orderItemIds.length} item${p.orderItemIds.length === 1 ? '' : 's'} cannot be fulfilled; cancel, replace or refund`,
             subject: { type: 'delivery_exception', id: p.exceptionId, label: 'Seller cannot fulfill' },
             related: list(S('order', p.orderId), ...p.orderItemIds.map((id) => S('order_item', id))),
             sellerId: p.sellerId ?? null,
@@ -217,7 +237,7 @@ export const INTAKE: IntakeTable = {
             priority: 'high',
             dedupeKey: `exception:${p.exceptionId}`,
             links: [L('Open order', 'admin/order', p.orderId)],
-            visibleToSeller: Boolean(p.sellerId),
+            visibleToSeller: Boolean(p.sellerId) && !marketly(p),
           },
         ],
       },
@@ -232,7 +252,7 @@ export const INTAKE: IntakeTable = {
           (p.kind === 'lost_or_damaged' || p.kind === 'failed_delivery') && {
             queueKey: 'shipping.delivery_exceptions',
             title: `Delivery exception: ${human(p.kind)}`,
-            summary: p.customerAction ? `Customer action: ${p.customerAction}` : null,
+            summary: marketly(p) ? (p.customerAction ? `${FBM_SUMMARY}. Customer action: ${p.customerAction}` : FBM_SUMMARY) : p.customerAction ? `Customer action: ${p.customerAction}` : null,
             subject: { type: 'delivery_exception', id: p.exceptionId, label: human(p.kind) },
             related: list(S('order', p.orderId), S('shipment', p.shipmentId), ...p.orderItemIds.map((id) => S('order_item', id))),
             sellerId: p.sellerId ?? null,
