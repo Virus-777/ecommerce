@@ -524,10 +524,23 @@ export class CampaignsPart extends Part {
   }
 
   /** One review step; the campaign is approved when all are, then the afterApproval choice applies */
-  async approve(id: string, body: { role: ReviewRole; note?: string | null }, by: By): Promise<AdCampaign> {
+  /** The caller's review step on this campaign, from their access roles (body.role only picks among them) */
+  private async campaignRole(row: CampaignRec, requested: ReviewRole | null | undefined, by: By): Promise<ReviewRole> {
+    const steps = await this.repo.find('approval_steps', { campaign_id: row.id }, { orderBy: [['submission', 'desc']] });
+    const latest = steps[0]?.submission ?? 0;
+    const current = steps.filter((s) => s.submission === latest);
+    const stepOf = (r: ReviewRole) => {
+      const slot = stepFor(r, row.advertiser_kind);
+      return slot ? current.find((s) => (slot === 'advertising' ? s.role === 'advertising' : s.role === 'content' || s.role === 'marketing')) : undefined;
+    };
+    return this.core.reviewRoleFor(by, requested, { applicable: (r) => stepFor(r, row.advertiser_kind) !== null, waiting: (r) => stepOf(r)?.state === 'waiting' });
+  }
+
+  async approve(id: string, input: { role?: ReviewRole | null; note?: string | null }, by: By): Promise<AdCampaign> {
     if (!isUuid(id)) throw notFound('Campaign');
     const row = await this.repo.get('campaigns', id);
     if (!row) throw notFound('Campaign');
+    const body = { ...input, role: await this.campaignRole(row, input.role, by) };
     const slot = stepFor(body.role, row.advertiser_kind);
     if (!slot) throw invalid([{ path: 'role', message: 'Marketing reviews own promotions; seller and brand ads need Content' }], 'This role cannot approve this campaign');
     const reviewer = encodeActor(by.actor);
@@ -578,9 +591,13 @@ export class CampaignsPart extends Part {
     if (r.starts_at && r.starts_at.getTime() <= this.now().getTime()) await this.parts.ops.startDue([r.id]);
   }
 
-  async requestChanges(id: string, body: { role: ReviewRole; reason: string }, by: By): Promise<AdCampaign> {
-    const reason = body.reason?.trim();
+  async requestChanges(id: string, input: { role?: ReviewRole | null; reason: string }, by: By): Promise<AdCampaign> {
+    const reason = input.reason?.trim();
     if (!reason) throw invalid([{ path: 'reason', message: 'Say what needs to change' }]);
+    if (!isUuid(id)) throw notFound('Campaign');
+    const row = await this.repo.get('campaigns', id);
+    if (!row) throw notFound('Campaign');
+    const body = { ...input, role: await this.campaignRole(row, input.role, by) };
     const { before } = await this.transition(id, 'requestChanges', by, { reason });
     await this.markSteps(id, body.role, 'changes_requested', reason, by);
     await this.core.audit({ action: 'advertising.campaign.request-changes', actionLabel: `Requested changes to ${before.ref}`, target: this.target(before), reason, after: { role: body.role } }, by);

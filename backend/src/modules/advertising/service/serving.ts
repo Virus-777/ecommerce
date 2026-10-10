@@ -11,7 +11,7 @@
 import type { Principal } from '../../../kernel/auth/index.js';
 import type { Scope } from '../../../kernel/auth/scope.js';
 import { AppError } from '../../../kernel/errors/index.js';
-import { newId } from '../../../kernel/lib/ids.js';
+import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { AdImpression, AdPreview, PageType, PopupTrigger, PromotedOfferCard, RotationRule, ServeDecision, ServeRequest, SponsoredProductSlot, TrackEvent } from '../../../spec/advertising.js';
 import type * as common from '../../../spec/common.js';
 import { advertiserIsOwn, footnoteFor, frequencyBlock, isLayoutPosition, isPageType, OVERLAY_KEYS, ownAdvertiserName, rank, suppressionUntil, windowDaysOf } from '../domain/rules.js';
@@ -139,7 +139,7 @@ export class ServingPart extends Part {
 
     const customerId = who.scope.kind === 'customer' ? (who.scope.customerId ?? null) : null;
     const viewer: Viewer = {
-      keys: this.keysFor(req.visitorId, customerId),
+      keys: this.keysFor({ visitorId: req.visitorId, sessionId: req.sessionId, customerId, personalizationAllowed: req.personalizationAllowed }),
       sessionId: req.sessionId,
       customerId,
       signedIn: who.principal?.kind === 'customer',
@@ -210,15 +210,18 @@ export class ServingPart extends Part {
   }
 
   /** Sponsored product cards for a results list (search, catalog); first page only is the caller's job */
-  async sponsoredForResults(ctx: { page: PageType; query?: string; categoryId?: string; productId?: string; visitorId: string; sessionId: string; device: string; organicOfferIds: string[] }): Promise<SponsoredProductSlot[]> {
+  async sponsoredForResults(ctx: { page: PageType; query?: string; categoryId?: string; productId?: string; visitorId: string; sessionId: string; device: string; organicOfferIds: string[]; personalizationAllowed?: boolean; customerId?: string }): Promise<SponsoredProductSlot[]> {
     const page = ctx.page?.page;
     const rules = await this.core.rules();
     if (!isPageType(page) || rules.blockedPages.includes(page)) return [];
     const placement = (await this.core.placementRows()).find((p) => p.key === 'sponsored_product');
     if (!placement?.enabled || !((placement.eligible_pages ?? []) as string[]).includes(page)) return [];
     const now = this.now();
-    const viewer: Viewer = { keys: this.keysFor(ctx.visitorId || ctx.sessionId || 'anonymous', null), sessionId: ctx.sessionId || 'anonymous', customerId: null, signedIn: false, page, device: ctx.device };
-    // no privacy choices here: only campaigns for everyone (page context targeting)
+    // personalization off (or not told): session-only frequency, no customer, no visitor key kept for attribution
+    const personal = ctx.personalizationAllowed === true;
+    const customerId = personal && ctx.customerId && isUuid(ctx.customerId) ? ctx.customerId : null;
+    const viewer: Viewer = { keys: this.keysFor({ visitorId: ctx.visitorId, sessionId: ctx.sessionId, customerId, personalizationAllowed: personal }), sessionId: ctx.sessionId || 'anonymous', customerId, signedIn: Boolean(customerId), page, device: ctx.device };
+    // only campaigns for everyone: results lists use page context targeting (query, category, product)
     const list = (await this.live()).filter((e) => e.m.placement.id === placement.id && this.runsNow(e, now) && e.m.pages.includes(page) && e.m.audience?.mode !== 'selected');
     const allowed = await this.filterDeliverable(list, viewer, now, rules.removeUnavailable);
     return this.sponsoredFrom(allowed, placement, viewer, { query: ctx.query ?? null, categoryId: ctx.categoryId ?? null, productId: ctx.productId ?? null, organicOfferIds: ctx.organicOfferIds ?? [] });
@@ -229,10 +232,21 @@ export class ServingPart extends Part {
     return r.starts_at !== null && r.ends_at !== null && r.starts_at.getTime() <= now.getTime() && r.ends_at.getTime() > now.getTime();
   }
 
-  private keysFor(visitorId: string, customerId: string | null): string[] {
-    const keys = [visitorKey('v', visitorId || 'anonymous', this.core.secret)];
-    if (customerId) keys.push(visitorKey('c', customerId, this.core.secret));
+  /**
+   * Frequency and event keys. With personalization: the visitor (and the signed-in customer, so caps follow them
+   * across devices). Without: the session only, so nothing recorded can be matched to the visitor later (no
+   * attribution by visitor id).
+   */
+  private keysFor(o: { visitorId: string; sessionId: string; customerId: string | null; personalizationAllowed: boolean }): string[] {
+    if (!o.personalizationAllowed) return [visitorKey('s', o.sessionId || o.visitorId || 'anonymous', this.core.secret)];
+    const keys = [visitorKey('v', o.visitorId || o.sessionId || 'anonymous', this.core.secret)];
+    if (o.customerId) keys.push(visitorKey('c', o.customerId, this.core.secret));
     return keys;
+  }
+
+  /** The key a click was stored under for a visitor who allowed personalization (guest attribution) */
+  attributionKey(visitorId: string): string {
+    return visitorKey('v', visitorId, this.core.secret);
   }
 
   /** Audience rules, using only what the visitor's privacy choices allow */

@@ -236,8 +236,18 @@ export class CreativesPart extends Part {
   }
 
   /** Approve (every required role), request changes, reject/revoke, or leave a note */
-  async review(id: string, body: { role: ReviewRole; decision: 'approved' | 'changes_requested' | 'rejected' | 'note'; reasonCode?: string | null; comment?: string | null }, by: By): Promise<Creative> {
+  async review(id: string, input: { role?: ReviewRole | null; decision: 'approved' | 'changes_requested' | 'rejected' | 'note'; reasonCode?: string | null; comment?: string | null }, by: By): Promise<Creative> {
     const before = await this.row(id);
+    // the reviewing step comes from the caller's access roles; marketing stands in for content on own ads only
+    const own = before.advertiser_kind === 'platform' || before.advertiser_kind === 'official_store';
+    const approvedRoles = async () => {
+      const prior = await this.repo.find('creative_reviews', { creative_id: id }, { orderBy: [['at', 'asc']] });
+      const lastReset = Math.max(-1, ...prior.map((p, i) => (p.decision === 'changes_requested' || p.decision === 'rejected' ? i : -1)));
+      return new Set(prior.slice(lastReset + 1).filter((p) => p.decision === 'approved').map((p) => p.role));
+    };
+    const done = await approvedRoles();
+    const role = await this.core.reviewRoleFor(by, input.role, { applicable: (r) => r !== 'marketing' || own, waiting: (r) => !done.has(r) && !(r !== 'advertising' && (done.has('content') || done.has('marketing'))) });
+    const body = { ...input, role };
     if ((body.decision === 'changes_requested' || body.decision === 'rejected') && !body.comment?.trim() && !body.reasonCode) throw invalid([{ path: 'comment', message: 'Give a reason' }]);
     const reviewer = encodeActor(by.actor);
     const now = this.now();

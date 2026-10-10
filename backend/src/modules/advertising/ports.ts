@@ -143,4 +143,8 @@ export interface AdvertisingRepository {
   reach(placementKey: string, since: Date): Promise<number>;
   /** The visitor's latest click within the window (by customer id) */
   lastClick(customerId: string, since: Date): Promise<EventRec | undefined>;
+  /** Last click stored under a visitor key (guests who allowed personalization) */
+  lastClickByVisitor(visitorKey: string, since: Date): Promise<EventRec | undefined>;
+  /** Creatives revoked and campaigns rejected with this marker in their reason (trust enforcement id) */
+  enforcementTargets(marker: string): Promise<{ creativeIds: string[]; campaignIds: string[] }>;
 }

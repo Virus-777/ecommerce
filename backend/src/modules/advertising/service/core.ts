@@ -12,8 +12,9 @@ import type { ModuleContext, PublicApiMap } from '../../../kernel/module-system/
 import type { GlobalRules, Placement } from '../../../spec/advertising.js';
 import type * as audit from '../../../spec/audit.js';
 import type * as common from '../../../spec/common.js';
+import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type * as offers from '../../../spec/offers.js';
-import { DEFAULT_RULES, pagesLabel, type RuleValues } from '../domain/rules.js';
+import { DEFAULT_RULES, pagesLabel, type ReviewRole, type RuleValues } from '../domain/rules.js';
 import type { AdvertisingRepository, PlacementRec, RulesRec, Span } from '../ports.js';
 import type { BillingPart } from './billing.js';
 import type { CampaignsPart } from './campaigns.js';
@@ -52,6 +53,10 @@ export interface Parts {
 type OwnEvent = keyof EventMap & `advertising.${string}`;
 type Optional = Parameters<ModuleContext<'advertising'>['tryUse']>[0];
 type SettingKey = Parameters<ModuleContext<'advertising'>['settings']['get']>[0];
+
+const REVIEW_ROLES: readonly ReviewRole[] = ['advertising', 'content', 'marketing'];
+/** access role key → the advertising review step it reviews */
+const ROLE_STEP: Record<string, ReviewRole> = { advertising_manager: 'advertising', content_manager: 'content', marketing_manager: 'marketing' };
 
 export const SYSTEM: common.Actor = { kind: 'system', id: null };
 export const SYSTEM_BY: By = { actor: SYSTEM };
@@ -198,6 +203,37 @@ export class Core {
     this.parts?.serving?.invalidate();
   }
 
+  /**
+   * The review step a staff member acts on, from their access roles (access.rolesOf), never from the request alone:
+   * Advertising Manager → advertising, Content Manager → content, Marketing Manager → marketing, Business Owner any.
+   * `requested` only picks among the caller's own steps (a step their roles do not cover is FORBIDDEN); without it the
+   * caller's single applicable step is used, preferring `waiting` steps, else VALIDATION_FAILED asks for one.
+   */
+  async reviewRoleFor(by: By, requested: ReviewRole | null | undefined, o: { applicable?: (r: ReviewRole) => boolean; waiting?: (r: ReviewRole) => boolean } = {}): Promise<ReviewRole> {
+    const accountId = by.principal?.accountId ?? (by.actor.kind === 'staff' ? by.actor.id : null);
+    const roles = accountId ? await this.ctx.use('access').rolesOf(accountId) : [];
+    const mine = new Set<ReviewRole>();
+    for (const r of roles) {
+      if (r.key === 'business_owner') for (const x of REVIEW_ROLES) mine.add(x);
+      const mapped = ROLE_STEP[r.key];
+      if (mapped) mine.add(mapped);
+    }
+    if (requested) {
+      if (!mine.has(requested)) throw new AppError('FORBIDDEN', `Your roles do not cover the ${requested} review step`);
+      return requested;
+    }
+    let candidates = [...mine].filter((r) => o.applicable?.(r) ?? true);
+    if (!candidates.length) throw new AppError('FORBIDDEN', 'Your roles do not cover a review step of this item');
+    if (candidates.length > 1 && o.waiting) {
+      const open = candidates.filter((r) => o.waiting!(r));
+      if (open.length) candidates = open;
+    }
+    // content and marketing fill the same step: content is the default reviewer of it
+    if (candidates.includes('content') && candidates.includes('marketing')) candidates = candidates.filter((r) => r !== 'marketing');
+    if (candidates.length > 1) throw invalid([{ path: 'role', message: `Choose the review step: ${candidates.join(', ')}` }], 'You hold more than one reviewing role');
+    return candidates[0]!;
+  }
+
   async placementRows(): Promise<PlacementRec[]> {
     const t = Date.now();
     if (!this.#placements || t - this.#placements.at > CACHE_MS) this.#placements = { at: t, rows: await this.repo.find('placements', {}, { orderBy: [['id', 'asc']] }) };
@@ -233,6 +269,7 @@ export class Core {
       positions: (p.positions ?? null) as never,
       label: p.label as Placement['label'],
       liveCampaigns,
+      version: p.version,
       updatedAt: p.updated_at.toISOString(),
       updatedBy: decodeActor(p.updated_by),
     };
@@ -330,7 +367,7 @@ export class Core {
         title: p?.title ?? o.sellerSku ?? 'Product',
         image: p?.image ?? null,
         categoryId: p?.categoryId ?? null,
-        sellerName: o.ownerType === 'official' ? 'Marketly Official Store' : (sellerNames.get(o.sellerId ?? '') ?? o.sellerName ?? 'Seller'),
+        sellerName: o.ownerType === 'official' ? OFFICIAL_STORE_NAME : (sellerNames.get(o.sellerId ?? '') ?? o.sellerName ?? 'Seller'),
         available,
         promotable: reason === null,
         reason,

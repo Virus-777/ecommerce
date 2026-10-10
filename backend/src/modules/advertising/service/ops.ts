@@ -6,8 +6,15 @@
 import { AppError } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
+import { adCampaignMachine, creativeReviewMachine } from '../domain/state-machines.js';
 import type { CampaignRec } from '../ports.js';
-import { Part, SYSTEM, SYSTEM_BY } from './core.js';
+import { encodeActor, Part, SYSTEM, SYSTEM_BY } from './core.js';
+
+type CampaignStatus = Parameters<typeof adCampaignMachine.next>[0];
+type CreativeStatus = Parameters<typeof creativeReviewMachine.next>[0];
+
+/** How a trust enforcement id is kept with a revoke or reject reason */
+export const enforcementMarker = (enforcementId: string) => `(enforcement ${enforcementId})`;
 import { CHARGE_TARGET, VOID_ACTION } from './billing.js';
 import { RULES_ACTION, RULES_TARGET } from './setup.js';
 import { OFFER_PRODUCT, PAUSE_ACTIONS } from './views.js';
@@ -147,7 +154,8 @@ export class OpsPart extends Part {
     if (!offerIds.length && !productIds.length) return;
     const rows = [...(await this.campaignsFor(['offer'], offerIds)), ...(await this.campaignsFor(['product', OFFER_PRODUCT], productIds))];
     const seen = new Set<string>();
-    const reason = `Trust enforcement: ${e.reason}`;
+    // the enforcement id stays with the revoke or reject reason, so trust.enforcement.reversed can find them
+    const reason = `Trust enforcement: ${e.reason} ${enforcementMarker(e.enforcementId)}`;
     for (const r of rows) {
       if (seen.has(r.id)) continue;
       seen.add(r.id);
@@ -158,13 +166,60 @@ export class OpsPart extends Part {
     }
   }
 
-  /** Attribute the order to the customer's last ad click within the attribution period */
+  /**
+   * trust.enforcement.reversed (inbox-claimed per event): creatives that enforcement revoked go back to review
+   * (reinstate, never straight to approved) and seller requests it rejected reopen as drafts the seller may
+   * resubmit. Ads finished because of it are not restarted. The campaign log records the reversal.
+   */
+  async onEnforcementReversed(e: EventPayload<'trust.enforcement.reversed'>, eventId?: string) {
+    if (!isUuid(e.enforcementId)) return;
+    const { creativeIds, campaignIds } = await this.repo.enforcementTargets(enforcementMarker(e.enforcementId));
+    if (!creativeIds.length && !campaignIds.length) return;
+    const note = `Trust enforcement ${e.ref} reversed: ${e.reason}`;
+    const by = { actor: e.reversedBy ?? SYSTEM };
+    const now = this.now();
+    const changed = await this.repo.transaction(async (tx) => {
+      if (!(await tx.claim(`enforcement-reversed:${eventId ?? e.enforcementId}`))) return null;
+      const reopened: { row: CampaignRec; from: string }[] = [];
+      const reinstated: string[] = [];
+      for (const id of creativeIds) {
+        const c = await tx.get('creatives', id, { forUpdate: true });
+        if (!c || !creativeReviewMachine.can(c.status as CreativeStatus, 'reinstate')) continue;
+        await tx.update('creatives', id, { status: creativeReviewMachine.next(c.status as CreativeStatus, 'reinstate') });
+        await tx.insert('creative_reviews', { id: newId(), creative_id: id, reviewer_id: encodeActor(by.actor), role: 'advertising', decision: 'note', reason_code: null, comment: note, at: now });
+        reinstated.push(id);
+      }
+      for (const id of campaignIds) {
+        const c = await tx.get('campaigns', id, { forUpdate: true });
+        if (!c || !adCampaignMachine.can(c.status as CampaignStatus, 'reopen')) continue;
+        const to = adCampaignMachine.next(c.status as CampaignStatus, 'reopen');
+        const row = await tx.update('campaigns', id, { status: to, paused_reason: null, updated_at: now, version: c.version + 1 });
+        await this.core.log(tx, id, 'reopen', by, { from: c.status, to, reason: note });
+        reopened.push({ row, from: c.status });
+      }
+      return { reopened, reinstated };
+    });
+    if (!changed) return;
+    for (const r of changed.reopened) this.parts.campaigns.statusChanged(r.row, r.from, note, by);
+    for (const id of changed.reinstated) {
+      const link = await this.repo.findOne('campaign_creatives', { creative_id: id });
+      this.core.publish('advertising.creative.reviewed', { creativeId: id, campaignId: link?.campaign_id ?? null, decision: 'note', reasonCode: null }, by);
+    }
+    this.parts.serving.invalidate();
+  }
+
+  /**
+   * Attribute the order to the last ad click within the attribution period: by customerId for signed-in shoppers,
+   * for guests by visitorId (only on the payload when they allowed personalization; clicks made without it are kept
+   * under a session key and never match). Neither: not attributed.
+   */
   async onOrderPlaced(e: EventPayload<'orders.order.placed'>) {
-    if (!e.customerId || !isUuid(e.orderId)) return;
+    if (!isUuid(e.orderId) || (!e.customerId && !e.visitorId)) return;
     const rules = await this.core.rules();
     const placedAt = new Date(e.placedAt);
     const at = Number.isNaN(placedAt.getTime()) ? this.now() : placedAt;
-    const click = await this.repo.lastClick(e.customerId, new Date(at.getTime() - rules.attributionDays * 86_400_000));
+    const since = new Date(at.getTime() - rules.attributionDays * 86_400_000);
+    const click = e.customerId ? await this.repo.lastClick(e.customerId, since) : await this.repo.lastClickByVisitor(this.parts.serving.attributionKey(e.visitorId!), since);
     if (!click || click.at.getTime() > at.getTime() + 60_000) return;
     const c = await this.repo.get('campaigns', click.campaign_id);
     if (!c) return;
@@ -200,7 +255,7 @@ export class OpsPart extends Part {
   }
 
   async onApprovalDecided(e: EventPayload<'access.approval.decided'>, eventId?: string) {
-    if (e.actionKey === RULES_ACTION && e.target?.type === RULES_TARGET) await this.parts.setup.onRulesDecided(e);
+    if (e.actionKey === RULES_ACTION && e.target?.type === RULES_TARGET) await this.parts.setup.onRulesDecided(e, eventId);
     else if (e.actionKey === VOID_ACTION && e.target?.type === CHARGE_TARGET) await this.parts.billing.onVoidDecided(e, eventId);
   }
 

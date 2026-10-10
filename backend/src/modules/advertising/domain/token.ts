@@ -58,8 +58,8 @@ export function verifyImpression(token: string, secret: string, nowMs: number): 
   return { ok: true, claims };
 }
 
-/** First-party visitor or customer id → the hashed key stored with counters and events */
-export const visitorKey = (kind: 'v' | 'c', id: string, secret: string) => createHash('sha256').update(`${secret}:${kind}:${id}`).digest('base64url').slice(0, 32);
+/** First-party visitor, customer or (without personalization) session id → the hashed key stored with counters and events */
+export const visitorKey = (kind: 'v' | 'c' | 's', id: string, secret: string) => createHash('sha256').update(`${secret}:${kind}:${id}`).digest('base64url').slice(0, 32);
 
 /** Deterministic event id per impression and kind: duplicates of the same event are ignored */
 export function eventId(impressionId: string, kind: string): string {

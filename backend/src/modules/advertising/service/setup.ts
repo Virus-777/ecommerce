@@ -154,15 +154,22 @@ export class SetupPart extends Part {
   }
 
   /** access.approval.decided for advertising.rules.change */
-  async onRulesDecided(e: EventPayload<'access.approval.decided'>) {
+  async onRulesDecided(e: EventPayload<'access.approval.decided'>, eventId?: string) {
     const version = Number(e.target.id);
     if (!Number.isInteger(version)) return;
-    const row = await this.repo.findOne('global_rules', { version });
-    if (!row || row.approval_request_id !== e.requestId) return;
-    const rules = row.rules as Record<string, unknown>;
-    if (rules.state !== 'pending') return;
     const state = e.outcome === 'approved' ? 'approved' : 'rejected';
-    await this.repo.updateWhere('global_rules', { version }, { rules: { ...rules, state } as never });
+    // the inbox claim (per event, else per request) and the state change commit together: a redelivered or
+    // concurrent decision applies once and writes one audit entry
+    const applied = await this.repo.transaction(async (tx) => {
+      if (!(await tx.claim(`rules-decided:${eventId ?? e.requestId}`))) return false;
+      const row = await tx.findOne('global_rules', { version });
+      if (!row || row.approval_request_id !== e.requestId) return false;
+      const rules = row.rules as Record<string, unknown>;
+      if (rules.state !== 'pending') return false;
+      await tx.updateWhere('global_rules', { version }, { rules: { ...rules, state } as never });
+      return true;
+    });
+    if (!applied) return;
     this.core.invalidate();
     await this.core.audit(
       { action: `advertising.rules.${state === 'approved' ? 'approve' : 'reject'}`, actionLabel: state === 'approved' ? `Advertising rules v${version} approved` : `Advertising rules v${version} not approved (${e.outcome})`, category: 'settings', target: { type: RULES_TARGET, id: String(version), ref: `Rules v${version}`, label: 'Advertising rules' }, reason: e.reason ?? null, approvalRequestId: e.requestId },

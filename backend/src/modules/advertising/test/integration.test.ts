@@ -34,8 +34,8 @@ beforeAll(async () => {
   f = flows(app, clock);
   listing = await f.liveListing({ quantity: 40 });
   ads = await f.staffWithRoles(listing.owner, 'ada@marketly.test', 'Ada Ads', ['advertising_manager']);
-  // the seeded Content and Marketing roles have no advertising.campaigns.review (reported as a gap): a second Advertising reviewer approves the Content step
-  ads2 = await f.staffWithRoles(listing.owner, 'ben@marketly.test', 'Ben Ads', ['advertising_manager']);
+  // the Content step is reviewed by a Content Manager (review steps come from access roles, access.rolesOf)
+  ads2 = await f.staffWithRoles(listing.owner, 'ben@marketly.test', 'Ben Content', ['content_manager']);
 }, 120_000);
 afterAll(async () => {
   await app?.close();
@@ -82,8 +82,9 @@ describe('a sponsored product campaign, end to end', () => {
   it('Advertising and a second reviewer approve it; it goes live and fills sponsored results', async () => {
     let res = await f.call('POST', `/api/admin/advertising/campaigns/${campaignId}/approve`, { token: ads.accessToken, body: { role: 'advertising', note: 'Limits fine' } });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
+    // an Advertising Manager cannot take the Content step by naming it
     res = await f.call('POST', `/api/admin/advertising/campaigns/${campaignId}/approve`, { token: ads.accessToken, body: { role: 'content' } });
-    expect(res.body.error?.code).toBe('SAME_REVIEWER');
+    expect(res.status).toBe(403);
     res = await f.call('POST', `/api/admin/advertising/campaigns/${campaignId}/approve`, { token: ads2.accessToken, body: { role: 'content', note: 'Claims match the product page' } });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.status).toBe('live');

@@ -149,7 +149,7 @@ describe('seller sponsored campaigns', () => {
     expect((await k.call('GET', `${SELLER}/campaigns/${id}`, sellerA())).body.campaign.status).toBe('live');
     const tokens: string[] = [];
     for (let i = 0; i < 3; i++) {
-      const slots = await k.svc.sponsoredForResults({ page: { page: 'search' }, query: 'linen sheets', visitorId: `v-${i}`, sessionId: `s-${i}`, device: 'web', organicOfferIds: [offer.id] });
+      const slots = await k.svc.sponsoredForResults({ page: { page: 'search' }, query: 'linen sheets', visitorId: `v-${i}`, sessionId: `s-${i}`, device: 'web', organicOfferIds: [offer.id], personalizationAllowed: false });
       expect(slots[0]?.impression.campaignId).toBe(id);
       tokens.push(slots[0]!.impression.impressionToken);
     }
@@ -159,10 +159,10 @@ describe('seller sponsored campaigns', () => {
     expect(view.body.spend).toEqual(USD(70));
     expect(k.of('advertising.budget.reached')).toEqual([{ campaignId: id, sellerId: SELLER_A, limit: 'daily' }]);
     // delivery stops for the day: another $0.35 would pass the limit
-    expect(await k.svc.sponsoredForResults({ page: { page: 'search' }, query: 'linen sheets', visitorId: 'v-9', sessionId: 's-9', device: 'web', organicOfferIds: [offer.id] })).toEqual([]);
+    expect(await k.svc.sponsoredForResults({ page: { page: 'search' }, query: 'linen sheets', visitorId: 'v-9', sessionId: 's-9', device: 'web', organicOfferIds: [offer.id], personalizationAllowed: false })).toEqual([]);
     // the next market day it serves again
     k.clock.advance(86_400_000);
-    expect((await k.svc.sponsoredForResults({ page: { page: 'search' }, query: 'linen sheets', visitorId: 'v-10', sessionId: 's-10', device: 'web', organicOfferIds: [offer.id] }))[0]?.impression.campaignId).toBe(id);
+    expect((await k.svc.sponsoredForResults({ page: { page: 'search' }, query: 'linen sheets', visitorId: 'v-10', sessionId: 's-10', device: 'web', organicOfferIds: [offer.id], personalizationAllowed: false }))[0]?.impression.campaignId).toBe(id);
   });
 
   it('parallel clicks can never overspend the total limit; reaching it finishes the campaign', async () => {
@@ -170,7 +170,7 @@ describe('seller sponsored campaigns', () => {
     const id = await liveRequest([offer.id], { dailyLimit: USD(70), totalLimit: USD(70), name: 'Throw boost' });
     const tokens: string[] = [];
     for (let i = 0; i < 6; i++) {
-      const slots = await k.svc.sponsoredForResults({ page: { page: 'search' }, query: 'wool throw', visitorId: `p-${i}`, sessionId: `ps-${i}`, device: 'web', organicOfferIds: [] });
+      const slots = await k.svc.sponsoredForResults({ page: { page: 'search' }, query: 'wool throw', visitorId: `p-${i}`, sessionId: `ps-${i}`, device: 'web', organicOfferIds: [], personalizationAllowed: false });
       tokens.push(slots.find((s) => s.impression.campaignId === id)!.impression.impressionToken);
     }
     const results = await Promise.all(tokens.map((t) => track(k, [{ impressionToken: t, kind: 'click' }])));

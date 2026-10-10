@@ -48,7 +48,7 @@ export class AdvertisingService implements AdvertisingPublicApi {
   /* ---------------- public API (in-process) */
 
   /** Sponsored product cards and their positions for a results list (max per page from the placement; relevance first, then priority). Only eligible, in-stock offers are returned. */
-  sponsoredForResults(ctx: { page: PageType; query?: string; categoryId?: string; productId?: string; visitorId: string; sessionId: string; device: string; organicOfferIds: string[] }): Promise<SponsoredProductSlot[]> {
+  sponsoredForResults(ctx: { page: PageType; query?: string; categoryId?: string; productId?: string; visitorId: string; sessionId: string; device: string; organicOfferIds: string[]; personalizationAllowed: boolean; customerId?: string }): Promise<SponsoredProductSlot[]> {
     return this.serving.sponsoredForResults(ctx);
   }
 
@@ -120,6 +120,10 @@ export class AdvertisingService implements AdvertisingPublicApi {
 
   onEnforcementRecordedFromTrust(event: EventPayload<'trust.enforcement.recorded'>) {
     return this.ops.onEnforcementRecorded(event);
+  }
+
+  onEnforcementReversedFromTrust(event: EventPayload<'trust.enforcement.reversed'>, eventId?: string) {
+    return this.ops.onEnforcementReversed(event, eventId);
   }
 
   onOrderPlacedFromOrders(event: EventPayload<'orders.order.placed'>) {

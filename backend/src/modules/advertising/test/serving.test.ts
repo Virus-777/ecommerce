@@ -196,12 +196,12 @@ describe('positions for content and sponsored products for search', () => {
       dismissal: null,
       frequencyCap: null,
     });
-    const slots = await k.svc.sponsoredForResults({ page: { page: 'search' }, query: 'brass lamp', visitorId: 'v1', sessionId: 's1', device: 'web', organicOfferIds: [] });
+    const slots = await k.svc.sponsoredForResults({ page: { page: 'search' }, query: 'brass lamp', visitorId: 'v1', sessionId: 's1', device: 'web', organicOfferIds: [], personalizationAllowed: false });
     expect(slots).toHaveLength(1);
     expect(slots[0]).toMatchObject({ position: 3, impression: { campaignId: c.id, label: 'Sponsored', promotedOffer: { offerId: lamp.id, title: 'Brass desk lamp', price: { amount: 4900 }, wasPrice: { amount: 5900 }, sellerName: 'Marketly Official Store' } } });
     expect(low.stock).toBe(3);
     // nothing on blocked pages
-    expect(await k.svc.sponsoredForResults({ page: { page: 'checkout' }, visitorId: 'v1', sessionId: 's1', device: 'web', organicOfferIds: [] })).toEqual([]);
+    expect(await k.svc.sponsoredForResults({ page: { page: 'checkout' }, visitorId: 'v1', sessionId: 's1', device: 'web', organicOfferIds: [], personalizationAllowed: false })).toEqual([]);
     // the serve decision fills sponsored products too
     const d = await serve(k, { page: 'search', slots: ['sponsored_product'], context: { query: 'towels' } });
     expect(d.sponsoredProducts.map((s: any) => s.impression.promotedOffer.offerId)).toEqual([other.id]);
@@ -218,10 +218,10 @@ describe('positions for content and sponsored products for search', () => {
     expect(d.overlay?.campaignId).toBe(c.id);
     expect((await track(k, [{ impressionToken: d.overlay!.impressionToken, kind: 'click' }], token)).status).toBe(202);
     const orderId = newId();
-    const order = { orderId, ref: 'MK-1', checkoutSessionId: newId(), customerId, paymentIntentId: newId(), paymentState: 'accepted', total: { amount: 12000, currency: 'USD' }, couponCodes: [], groups: [], placedAt: k.clock.now().toISOString() };
+    const order = { orderId, ref: 'MK-1', checkoutSessionId: newId(), customerId, paymentIntentId: newId(), paymentState: 'accepted', total: { amount: 12000, currency: 'USD' }, couponCodes: [], groups: [], placedAt: k.clock.now().toISOString(), attemptNo: 1, contactName: 'Sam Rivera' };
     await k.emit('orders.order.placed', order);
     await k.emit('orders.order.placed', order);
-    const cancellation = { orderId, ref: 'MK-1', groupId: newId(), ownerType: 'official', sellerId: null, itemId: newId(), offerId: newId(), stockItemId: newId(), quantity: 1, cancellationId: newId(), initiatedBy: 'customer', reasonCode: 'changed_mind', beforeDispatch: true, countsAgainstSeller: false, refund: { itemAmount: { amount: 2000, currency: 'USD' }, discountShare: { amount: 0, currency: 'USD' }, shippingRefund: { amount: 0, currency: 'USD' }, taxRefund: { amount: 0, currency: 'USD' }, total: { amount: 2000, currency: 'USD' } }, paymentIntentId: newId() };
+    const cancellation = { orderId, ref: 'MK-1', groupId: newId(), ownerType: 'official', sellerId: null, itemId: newId(), offerId: newId(), stockItemId: newId(), quantity: 1, cancellationId: newId(), initiatedBy: 'customer', reasonCode: 'changed_mind', beforeDispatch: true, countsAgainstSeller: false, refund: { itemAmount: { amount: 2000, currency: 'USD' }, discountShare: { amount: 0, currency: 'USD' }, shippingRefund: { amount: 0, currency: 'USD' }, taxRefund: { amount: 0, currency: 'USD' }, total: { amount: 2000, currency: 'USD' } }, paymentIntentId: newId(), notifyCustomer: true };
     await k.emit('orders.item.cancelled', cancellation);
     await k.emit('orders.item.cancelled', cancellation);
     await k.job('advertising.stats-rollup');
