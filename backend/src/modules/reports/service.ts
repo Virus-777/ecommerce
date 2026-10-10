@@ -3,7 +3,9 @@ import { newId } from '../../kernel/lib/ids.js';
 import type { Actor } from '../../spec/common.js';
 import type * as identity from '../../spec/identity.js';
 import type { AdminDashboard, ExportDataset, ExportJob, MetricDefinition, ReportQuery, ReportResult, ReportsPublicApi, SellerDashboard } from '../../spec/reports.js';
-import { nextRun } from './domain/rules.js';
+import { nextRun, periodLabel } from './domain/rules.js';
+
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 import { ReportsCore, SYSTEM, type Caller, type ReportsServiceDeps } from './service/core.js';
 import { Definitions, staffId } from './service/definitions.js';
 import { Exports, REPORT_DATASET } from './service/exports.js';
@@ -274,23 +276,51 @@ export class ReportsService implements ReportsPublicApi {
         return true;
       });
       if (!claimed || !report || !report.active) continue;
-      // the export belongs to the schedule owner, as long as they may still see the report; the file's
-      // readiness is announced to the schedule's recipients (reports.scheduled_report.ready)
-      const owner = { kind: 'staff' as const, accountId: s.owner_staff_id };
-      if (!(await this.core.principalCan(owner, report.permission))) {
-        this.core.ctx.log.warn({ scheduleId: s.id }, 'reports: schedule owner may no longer see the report; run skipped');
-        continue;
+      // staff only (decision D2): every recipient is re-checked now; each one gets an export in their own name, so
+      // the download link works for them and nobody else (getExport is requester-only)
+      const recipients = strings(s.recipients);
+      const { allowed, denied } = await this.defs.recipientsAllowed(recipients, report.permission);
+      const format = s.format === 'xlsx' ? 'xlsx' : 'csv';
+      const jobs: { staffId: string; exportId: string }[] = [];
+      for (const staffId of allowed) {
+        const principal = { kind: 'staff' as const, accountId: staffId };
+        try {
+          const job = await this.exports.request(
+            { dataset: REPORT_DATASET, reportKey: report.key, query: (view?.query as ReportQuery | undefined) ?? {}, format },
+            { principal, actor: SYSTEM, can: (perm) => this.core.principalCan(principal, perm) },
+            'api',
+            { scheduleId: s.id },
+          );
+          jobs.push({ staffId, exportId: job.id });
+        } catch (err) {
+          this.core.ctx.log.warn({ err, scheduleId: s.id, staffId }, 'reports: scheduled report not queued for a recipient');
+        }
       }
-      try {
-        await this.exports.request(
-          { dataset: REPORT_DATASET, reportKey: report.key, query: (view?.query as ReportQuery | undefined) ?? {}, format: 'csv' },
-          { principal: owner, actor: SYSTEM, can: (perm) => this.core.principalCan(owner, perm) },
-          'api',
-          { scheduleId: s.id },
-        );
-      } catch (err) {
-        this.core.ctx.log.warn({ err, scheduleId: s.id }, 'reports: scheduled report not queued');
+      if (!jobs.length && !denied.length) continue;
+      // the files are produced now, so the event announces ready files
+      const deliveries: { staffId: string; exportId: string }[] = [];
+      let expiresAt: Date | null = null;
+      for (const j of jobs) {
+        await this.exports.runOne(j.exportId);
+        const done = await this.core.repo.getJob(j.exportId);
+        if (done?.state !== 'ready' || !done.expires_at) {
+          this.core.ctx.log.warn({ scheduleId: s.id, exportId: j.exportId, state: done?.state }, 'reports: scheduled export not ready');
+          continue;
+        }
+        deliveries.push(j);
+        if (!expiresAt || done.expires_at < expiresAt) expiresAt = done.expires_at;
       }
+      if (denied.length) this.core.ctx.log.info({ scheduleId: s.id, skipped: denied }, 'reports: scheduled report recipients without the permission were skipped');
+      this.core.ctx.events.publish('reports.scheduled_report.ready', {
+        scheduleId: s.id,
+        reportKey: report.key,
+        reportTitle: report.title,
+        format,
+        periodLabel: periodLabel((await this.queries.resolve((view?.query as ReportQuery | undefined) ?? {}, { seller: false })).range),
+        deliveries,
+        skippedStaffIds: denied,
+        expiresAt: (expiresAt ?? new Date(now.getTime() + cfg.exportLinkHours * 3_600_000)).toISOString(),
+      });
     }
   }
 

@@ -30,7 +30,8 @@ describe('report library', () => {
     expect(all.status).toBe(200);
     expect(all.body.map((g: any) => g.key)).toEqual(['commerce', 'company_trading', 'marketplace_finance', 'products_discovery', 'service_sellers', 'customers_marketing_ads']);
     expect(all.body[0].reports.map((r: any) => r.key)).toContain('commerce.sales');
-    expect(all.body[0].owner).toMatchObject({ role: 'Order Manager' });
+    // seeded groups start without a person (decision D10): the expected role is shown
+    expect(all.body[0]).toMatchObject({ owner: null, ownerRole: 'Order Manager' });
     const commerceOnly = await h.call('GET', '/api/admin/reports/catalogue', h.tokens.staff(['reports.library.view', 'reports.commerce.view']));
     expect(commerceOnly.body.map((g: any) => g.key)).toEqual(['commerce']);
   });
@@ -62,7 +63,7 @@ describe('metric definitions', () => {
     expect(r.body.map((m: any) => m.key).sort()).toEqual(
       ['commerce.average_order_value', 'commerce.gross_sales', 'commerce.net_sales', 'commerce.orders', 'commerce.refunds', 'discovery.unavailable_searches', 'marketplace.fee_income', 'marketplace.seller_sales', 'service.case_backlog', 'service.on_time_dispatch'].sort(),
     );
-    expect(r.body.every((m: any) => m.status === 'published' && m.definition && m.owner.name)).toBe(true);
+    expect(r.body.every((m: any) => m.status === 'published' && m.definition && m.owner === null)).toBe(true);
     const fee = r.body.find((m: any) => m.key === 'marketplace.fee_income');
     expect(fee.relatedKeys).toContain('marketplace.seller_sales');
     expect((await h.call('GET', '/api/admin/reports/metrics?group=company_trading', h.tokens.staff())).body.every((m: any) => m.group === 'company_trading')).toBe(true);
@@ -174,52 +175,82 @@ describe('saved views', () => {
 });
 
 describe('scheduled report emails (phase 2)', () => {
-  it('validates, lists, runs the owner export when due and stops', async () => {
+  it('staff recipients only, checked on save and at each run; one export per recipient in their own name (D2)', async () => {
     const owner = newId();
-    const bad = await h.call('POST', '/api/admin/reports/schedules', h.tokens.staff(undefined, owner), { reportKey: 'commerce.sales', recipients: ['lead@marketly.test'], frequency: 'weekly', time: '25:00', format: 'csv' });
+    const ana = newId();
+    const ben = newId();
+    h.staff.set(ana, { name: 'Ana Lead', roleLabel: 'Order Manager' });
+    h.staff.set(ben, { name: 'Ben Ops', roleLabel: 'Operations' });
+    const bad = await h.call('POST', '/api/admin/reports/schedules', h.tokens.staff(undefined, owner), { reportKey: 'commerce.sales', recipientStaffIds: [ana], frequency: 'weekly', time: '25:00', format: 'csv' });
     expect(bad.status).toBe(400);
     expect(bad.body.error.details.issues.map((i: any) => i.path)).toEqual(expect.arrayContaining(['dayOfWeek', 'time']));
-    const s = await h.call('POST', '/api/admin/reports/schedules', h.tokens.staff(undefined, owner), { reportKey: 'commerce.sales', recipients: ['Lead@Marketly.test'], frequency: 'daily', time: '07:30', format: 'csv' });
+    // PDF is gone; emails are no recipients
+    expect((await h.call('POST', '/api/admin/reports/schedules', h.tokens.staff(undefined, owner), { reportKey: 'commerce.sales', recipientStaffIds: [ana], frequency: 'daily', time: '07:30', format: 'pdf' })).status).toBe(400);
+    expect((await h.call('POST', '/api/admin/reports/schedules', h.tokens.staff(undefined, owner), { reportKey: 'commerce.sales', recipients: ['lead@marketly.test'], frequency: 'daily', time: '07:30', format: 'csv' })).status).toBe(400);
+    // bug (pass 3): recipients were never checked; an unknown person or one without the report's permission is refused
+    const cy = newId();
+    h.staff.set(cy, { name: 'Cy Temp', roleLabel: 'Support' });
+    h.denied.add(`${cy}:reports.commerce.view`);
+    const stranger = newId();
+    const refused = await h.call('POST', '/api/admin/reports/schedules', h.tokens.staff(undefined, owner), { reportKey: 'commerce.sales', recipientStaffIds: [ana, cy, stranger], frequency: 'daily', time: '07:30', format: 'csv' });
+    expect(refused.status).toBe(422);
+    expect(refused.body.error).toMatchObject({ code: 'RECIPIENT_NOT_PERMITTED', details: { staffIds: [cy, stranger] } });
+
+    const s = await h.call('POST', '/api/admin/reports/schedules', h.tokens.staff(undefined, owner), { reportKey: 'commerce.sales', recipientStaffIds: [ana, ben, ana], frequency: 'daily', time: '07:30', format: 'xlsx' });
     expect(s.status, JSON.stringify(s.body)).toBe(201);
-    expect(s.body).toMatchObject({ reportKey: 'commerce.sales', recipients: ['lead@marketly.test'], active: true });
+    expect(s.body).toMatchObject({ reportKey: 'commerce.sales', format: 'xlsx', recipients: [{ staffId: ana, name: 'Ana Lead' }, { staffId: ben, name: 'Ben Ops' }], active: true });
     expect(new Date(s.body.nextRunAt).getTime()).toBeGreaterThan(h.clock.now().getTime());
     expect((await h.call('GET', '/api/admin/reports/schedules', h.tokens.staff())).body.map((x: any) => x.id)).toContain(s.body.id);
 
     const ready: any[] = [];
     h.app.kernel.events.subscribe('test', 'reports.scheduled_report.ready', (e) => void ready.push(e.payload));
+    // Ben loses the permission before the run: skipped
     h.clock.advance(26 * 3_600_000);
+    h.denied.add(`${ben}:reports.commerce.view`);
     await h.app.kernel.jobs.runNow('reports.run-schedules');
     await h.app.kernel.jobs.runNow('reports.run-schedules');
-    const mine = await h.call('GET', '/api/admin/reports/exports', h.tokens.staff(undefined, owner));
-    const runs = mine.body.items.filter((j: any) => j.reportKey === 'commerce.sales' && j.requestedBy.id === owner);
-    expect(runs).toHaveLength(1);
-    const next = (await h.call('GET', '/api/admin/reports/schedules', h.tokens.staff())).body.find((x: any) => x.id === s.body.id);
-    expect(new Date(next.nextRunAt).getTime()).toBeGreaterThan(h.clock.now().getTime());
-
-    // the file is made by the export runner; then the schedule's recipients are told, once
-    expect(ready).toEqual([]);
-    await h.app.kernel.jobs.runNow('reports.run-exports');
-    await h.app.kernel.jobs.runNow('reports.run-exports');
     await h.app.kernel.events.drain();
-    const file = (await h.call('GET', '/api/admin/reports/exports', h.tokens.staff(undefined, owner))).body.items.find((j: any) => j.id === runs[0].id);
-    expect(file.state).toBe('ready');
+    const anaJobs = (await h.call('GET', '/api/admin/reports/exports', h.tokens.staff(undefined, ana))).body.items.filter((j: any) => j.reportKey === 'commerce.sales');
+    expect(anaJobs).toEqual([expect.objectContaining({ state: 'ready', format: 'xlsx', requestedBy: expect.objectContaining({ id: ana }) })]);
+    expect((await h.call('GET', '/api/admin/reports/exports', h.tokens.staff(undefined, ben))).body.items.filter((j: any) => j.reportKey === 'commerce.sales')).toEqual([]);
+    // bug (pass 3): recipients other than the owner got NOT_FOUND on the link; now the export is theirs
+    expect((await h.call('GET', `/api/admin/reports/exports/${anaJobs[0].id}`, h.tokens.staff(undefined, ana))).status).toBe(200);
     expect(ready).toEqual([
       {
         scheduleId: s.body.id,
         reportKey: 'commerce.sales',
         reportTitle: expect.any(String),
-        exportId: runs[0].id,
-        format: 'csv',
+        format: 'xlsx',
         periodLabel: expect.stringMatching(/^[A-Z][a-z]{2} \d{1,2}(, \d{4})? – [A-Z][a-z]{2} \d{1,2}, \d{4}$/),
-        recipients: ['lead@marketly.test'],
-        expiresAt: file.expiresAt,
+        deliveries: [{ staffId: ana, exportId: anaJobs[0].id }],
+        skippedStaffIds: [ben],
+        expiresAt: anaJobs[0].expiresAt,
       },
     ]);
-    expect(ready[0].reportTitle.length).toBeGreaterThan(0);
+    h.denied.delete(`${ben}:reports.commerce.view`);
 
     expect((await h.call('DELETE', `/api/admin/reports/schedules/${s.body.id}`, h.tokens.staff())).status).toBe(204);
     expect((await h.call('GET', '/api/admin/reports/schedules', h.tokens.staff())).body.map((x: any) => x.id)).not.toContain(s.body.id);
     expect((await h.call('DELETE', `/api/admin/reports/schedules/${s.body.id}`, h.tokens.staff())).status).toBe(404);
     expect(h.audits.some((a) => a.action === 'reports.schedule.stop')).toBe(true);
+  });
+});
+
+describe('owners (D10)', () => {
+  it('names the owner of a metric and of a group; publishing needs an owner', async () => {
+    const lead = newId();
+    h.staff.set(lead, { name: 'Ola Owner', roleLabel: 'Finance Manager' });
+    expect((await h.call('PUT', '/api/admin/reports/metrics/marketplace.fee_income/owner', h.tokens.staff(), { ownerId: newId(), reason: 'x' })).status).toBe(400);
+    expect((await h.call('PUT', '/api/admin/reports/metrics/nope.metric/owner', h.tokens.staff(), { ownerId: lead, reason: 'x' })).status).toBe(404);
+    const m = await h.call('PUT', '/api/admin/reports/metrics/marketplace.fee_income/owner', h.tokens.staff(), { ownerId: lead, reason: 'Finance owns fee income' });
+    expect(m.status, JSON.stringify(m.body)).toBe(200);
+    expect(m.body.owner).toMatchObject({ staffId: lead, name: 'Ola Owner' });
+    expect(h.audits.some((a) => a.action === 'reports.metric.owner')).toBe(true);
+    const g = await h.call('PUT', '/api/admin/reports/groups/marketplace_finance/owner', h.tokens.staff(), { ownerId: lead, reason: 'Finance lead' });
+    expect(g.status, JSON.stringify(g.body)).toBe(200);
+    expect(g.body).toMatchObject({ key: 'marketplace_finance', owner: { staffId: lead }, ownerRole: 'Finance Manager' });
+    const cat = await h.call('GET', '/api/admin/reports/catalogue', h.tokens.staff());
+    expect(cat.body.find((x: any) => x.key === 'marketplace_finance').owner).toMatchObject({ staffId: lead });
+    expect((await h.call('PUT', '/api/admin/reports/groups/nope/owner', h.tokens.staff(), { ownerId: lead, reason: 'x' })).status).toBe(404);
   });
 });

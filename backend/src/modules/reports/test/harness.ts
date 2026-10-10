@@ -195,6 +195,8 @@ export async function harness() {
       couponCodes: [],
       groups: [group],
       placedAt: d.placedAt,
+      attemptNo: 1,
+      contactName: 'Ben Buyer',
     });
     return group;
   };

@@ -77,6 +77,9 @@ export function createPostgresReportsRepository(db: Kysely<ReportsDb>, inbox: In
     async seedGroup(row) {
       await d.insertInto('report_groups').values(row).onConflict((oc: any) => oc.column('key').doUpdateSet({ label: row.label, position: row.position })).execute();
     },
+    async setGroupOwner(key, ownerStaffId) {
+      return (await d.updateTable('report_groups').set({ owner_staff_id: ownerStaffId }).where('key', '=', key).returningAll().executeTakeFirst()) as never;
+    },
     async listGroups() {
       return db.selectFrom('report_groups').selectAll().orderBy('position').execute();
     },
@@ -349,14 +352,18 @@ export function createPostgresReportsRepository(db: Kysely<ReportsDb>, inbox: In
     /* ---------------------------------------------------------------- facts: refunds, returns, customers */
 
     async insertRefund(row) {
-      const r = await db.insertInto('fact_refunds').values(row).onConflict((oc) => oc.column('refund_id').doNothing()).returning('refund_id').execute();
+      const r = await db.insertInto('fact_refunds').values(row).onConflict((oc) => oc.columns(['refund_id', 'seller_id']).doNothing()).returning('refund_id').execute();
+      return r.length > 0;
+    },
+    async paidPayoutBetween(sellerId, fromDay, toDay) {
+      const r = await d.selectFrom('fact_marketplace_finance_daily').select('day').where('seller_id', '=', sellerId).where('payouts_paid_minor', '>', 0).where('day', '>=', fromDay).where('day', '<=', toDay).limit(1).execute();
       return r.length > 0;
     },
     async refundsAgg(f, group, bucket = 'day') {
       const keyExpr = group === 'bucket' ? bucketExpr(sql`sent_at at time zone ${f.timeZone}`, bucket) : group === 'reason' ? sql<string>`coalesce(reason, 'unspecified')` : sql<string>`null::text`;
       let q = d
         .selectFrom('fact_refunds')
-        .select([keyExpr.as('key'), sumInt('amount_minor').as('amount'), sql<number>`count(*)::int`.as('count')])
+        .select([keyExpr.as('key'), sumInt('amount_minor').as('amount'), sql<number>`count(distinct refund_id)::int`.as('count')])
         .where('sent_at', '>=', f.start)
         .where('sent_at', '<', f.end);
       if (f.ownerType) q = q.where('owner_type', '=', f.ownerType);
