@@ -176,13 +176,30 @@ describe('exports', () => {
     expect(reports.registerDataset).not.toHaveBeenCalled(); // once per process
   });
 
-  it('needs a reason; too many rows → EXPORT_TOO_LARGE (400) with details.matched', async () => {
+  it('needs a reason; too many rows → EXPORT_TOO_LARGE (422) with details.matched and details.max', async () => {
     const blank = await call('POST', '/exports', { filters: {}, format: 'csv', reason: '' });
     expect(blank.statusCode).toBe(400);
     reports.requestExport.mockRejectedValueOnce(new AppError('EXPORT_TOO_LARGE', 'too many', undefined, 422));
     const big = await call('POST', '/exports', { filters: {}, format: 'csv', reason: 'Everything' });
-    expect(big.statusCode).toBe(400);
-    expect(big.json().error).toMatchObject({ code: 'EXPORT_TOO_LARGE', details: { matched: expect.any(Number) } });
+    expect(big.statusCode).toBe(422);
+    expect(big.json().error).toMatchObject({ code: 'EXPORT_TOO_LARGE', details: { matched: expect.any(Number), max: 500_000 } });
+  });
+
+  it('checks reports.maxExportRows (read through settings) before creating the job', async () => {
+    await auditApi(app).recordMany([entry(), entry()]);
+    // the kernel's cross-module settings reader (ctx.settings.read) once it exists
+    const ctx = (app.kernel.boot.apis.get('audit') as unknown as { deps: { ctx: { settings: Record<string, unknown> } } }).deps.ctx;
+    const read = vi.fn(async (key: string) => (key === 'reports.maxExportRows' ? 1 : undefined));
+    ctx.settings.read = read;
+    try {
+      const big = await call('POST', '/exports', { filters: {}, format: 'csv', reason: 'Everything' });
+      expect(big.statusCode).toBe(422);
+      expect(big.json().error).toMatchObject({ code: 'EXPORT_TOO_LARGE', details: { max: 1 } });
+      expect(read).toHaveBeenCalledWith('reports.maxExportRows');
+      expect(reports.requestExport).not.toHaveBeenCalled();
+    } finally {
+      delete ctx.settings.read;
+    }
   });
 
   it('lists the caller’s own exports, or everyone’s with audit.retention.manage', async () => {

@@ -87,6 +87,10 @@ enum AuditCategory @areas(in: [ADMIN]) {
   SECURITY
   CONTENT
   ADVERTISING
+  SUPPORT
+  TRUST
+  INVENTORY
+  SHIPPING
   OTHER
 }
 

@@ -4,7 +4,7 @@ import type { Page, TimelineEvent } from '../../../../spec/common.js';
 import { paginate, type PageRequest } from '../../../../kernel/lib/pagination.js';
 import type { ChainRow, ChainTarget } from '../../domain/chain.js';
 import { PURGE_ACTION, type ApprovalProjection } from '../../domain/rules.js';
-import type { AuditRepository, EntryQuery, IntegrityCheckRow, NewChainRow, RetentionRow, SummaryCounts } from '../../ports.js';
+import type { AuditRepository, CheckpointRow, EntryQuery, IntegrityCheckRow, NewChainRow, RetentionRow, SummaryCounts } from '../../ports.js';
 
 type Db = Kysely<AuditDb>;
 type EntriesQuery = SelectQueryBuilder<AuditDb, 'entries', any>;
@@ -458,6 +458,23 @@ export function createPostgresAuditRepository(db: Db, inTransaction = false): Au
         .insertInto('integrity_checks')
         .values(values)
         .onConflict((oc) => oc.column('id').doUpdateSet(update))
+        .execute();
+    },
+
+    /* ---------------------------------------------------------------- signed checkpoints */
+
+    async latestCheckpoint() {
+      const r = await db.selectFrom('checkpoints').selectAll().orderBy('seq', 'desc').limit(1).executeTakeFirst();
+      return r
+        ? { id: r.id, seq: Number(r.seq), hash: bytes(r.hash), mac: r.mac, keyId: r.key_id, kind: r.kind as CheckpointRow['kind'], createdAt: r.created_at }
+        : null;
+    },
+
+    async insertCheckpoint(c) {
+      await db
+        .insertInto('checkpoints')
+        .values({ id: c.id, seq: c.seq, hash: c.hash, mac: c.mac, key_id: c.keyId, kind: c.kind, created_at: c.createdAt })
+        .onConflict((oc) => oc.column('seq').doNothing())
         .execute();
     },
   };

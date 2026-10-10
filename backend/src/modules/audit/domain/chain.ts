@@ -8,7 +8,7 @@
  * what the database returns gives the same bytes. `seq` is not part of it: the chain order is the
  * prev_hash links, and seq only orders the walk (a reordered, removed or inserted row breaks a link).
  */
-import { createHash } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
 /** prev_hash of the first entry ever written */
 export const GENESIS_HASH: Uint8Array = new Uint8Array(32);
@@ -122,6 +122,23 @@ export const sameBytes = (a: Uint8Array | null | undefined, b: Uint8Array | null
 
 export const toHex = (b: Uint8Array): string => Buffer.from(b).toString('hex');
 export const fromHex = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, 'hex'));
+
+/** Derivation label of the checkpoint key: secretFor(config, CHECKPOINT_PURPOSE) */
+export const CHECKPOINT_PURPOSE = 'audit.checkpoint';
+/** Stored with each checkpoint so a rotated key can be told apart */
+export const CHECKPOINT_KEY_ID = 'audit.checkpoint.v1';
+
+/** hex HMAC-SHA256 over seq (decimal text, then a 0 byte) and the entry hash */
+export function checkpointMac(key: string, seq: number, hash: Uint8Array): string {
+  return createHmac('sha256', Buffer.from(key, 'hex')).update(`${seq}\u0000`, 'utf8').update(hash).digest('hex');
+}
+
+/** Constant-time check of a stored checkpoint's mac */
+export function checkpointMacOk(key: string, c: { seq: number; hash: Uint8Array; mac: string }): boolean {
+  const want = Buffer.from(checkpointMac(key, c.seq, c.hash), 'hex');
+  const got = /^[0-9a-f]+$/i.test(c.mac) ? Buffer.from(c.mac, 'hex') : Buffer.alloc(0);
+  return got.length === want.length && timingSafeEqual(got, want);
+}
 
 /** A purge checkpoint: the last removed entry, so the first kept entry's prev_hash still verifies. */
 export interface Checkpoint {

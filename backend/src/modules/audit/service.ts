@@ -6,6 +6,7 @@ import { isUuid, newId } from '../../kernel/lib/ids.js';
 import type { ModuleContext } from '../../kernel/module-system/index.js';
 import { decodeCursor, encodeCursor, toPageRequest, type PageRequest } from '../../kernel/lib/pagination.js';
 import { dateInZone } from '../../kernel/lib/clock.js';
+import { secretFor } from '../../kernel/lib/secrets.js';
 import type * as common from '../../spec/common.js';
 import type * as identity from '../../spec/identity.js';
 import type * as reports from '../../spec/reports.js';
@@ -22,7 +23,7 @@ import {
   type RoleName,
   type SellerAuditEntry,
 } from '../../spec/audit.js';
-import { GENESIS_HASH, hashRow, normalizeTargets, sameBytes, toHex, verifyRows, type ChainRow } from './domain/chain.js';
+import { CHECKPOINT_KEY_ID, CHECKPOINT_PURPOSE, checkpointMac, checkpointMacOk, GENESIS_HASH, hashRow, normalizeTargets, sameBytes, toHex, verifyRows, type ChainRow } from './domain/chain.js';
 import { cleanOptionalText, cleanText, redact } from './domain/redaction.js';
 import {
   addDays,
@@ -44,7 +45,7 @@ import {
   type Category,
 } from './domain/rules.js';
 import { retentionChangeMachine } from './domain/state-machines.js';
-import type { AuditRepository, EntryQuery, NewChainRow, RetentionRow } from './ports.js';
+import type { AuditRepository, CheckpointRow, EntryQuery, NewChainRow, RetentionRow } from './ports.js';
 
 export interface AuditServiceDeps {
   repo: AuditRepository;
@@ -245,8 +246,8 @@ export class AuditService implements AuditPublicApi {
     const reason = body.reason?.trim();
     if (!reason) throw invalid('reason', 'Say why you are exporting the action history');
     const filters = this.parseFilters(body.filters ?? {});
-    const matched = await this.repo.countEntries(this.entryQuery(filters));
-    if (matched > DEFAULT_MAX_EXPORT_ROWS) throw this.tooLarge(matched);
+    const [matched, max] = await Promise.all([this.repo.countEntries(this.entryQuery(filters)), this.maxExportRows()]);
+    if (matched > max) throw this.tooLarge(matched, max);
     await this.registerDataset(reportsApi);
 
     // the reason is in the action history before the job exists
@@ -265,7 +266,7 @@ export class AuditService implements AuditPublicApi {
     try {
       return await reportsApi.requestExport({ dataset: DATASET, filters, format: body.format, principal: by.principal });
     } catch (err) {
-      if (isAppError(err) && err.code === 'EXPORT_TOO_LARGE') throw this.tooLarge(matched);
+      if (isAppError(err) && err.code === 'EXPORT_TOO_LARGE') throw this.tooLarge(matched, max);
       throw err;
     }
   }
@@ -298,8 +299,26 @@ export class AuditService implements AuditPublicApi {
     return job;
   }
 
-  private tooLarge(matched: number) {
-    return new AppError('EXPORT_TOO_LARGE', `The filters match ${matched} entries, more than one export can hold; narrow the date range`, { matched, maxRows: DEFAULT_MAX_EXPORT_ROWS }, 400);
+  private tooLarge(matched: number, max: number) {
+    return this.ctx.error('EXPORT_TOO_LARGE', `The filters match ${matched} entries, more than one export can hold (${max}); narrow the date range`, { matched, max });
+  }
+
+  /**
+   * reports.maxExportRows, read through settings (spec: settings.get('reports.maxExportRows')). The kernel's
+   * cross-module reader ctx.settings.read(fullKey) is used when it exists; until then (and when settings or
+   * reports is off) the reports default applies.
+   */
+  private async maxExportRows(): Promise<number> {
+    const read = (this.ctx.settings as { read?: (key: string) => Promise<unknown> }).read;
+    if (typeof read === 'function') {
+      try {
+        const v = await read.call(this.ctx.settings, 'reports.maxExportRows');
+        if (typeof v === 'number' && Number.isFinite(v) && v > 0) return v;
+      } catch (err) {
+        this.ctx.log.debug({ err }, 'audit: reports.maxExportRows unavailable, using the default');
+      }
+    }
+    return DEFAULT_MAX_EXPORT_ROWS;
   }
 
   /** reports reads the rows through exportRows; the dataset is registered once, before the first export */
@@ -475,20 +494,43 @@ export class AuditService implements AuditPublicApi {
   /* ---------------------------------------------------------------- integrity */
 
   async integrity(): Promise<IntegrityStatus> {
-    const [last, lastOk] = await Promise.all([this.repo.lastIntegrityCheck(), this.repo.lastOkIntegrityCheck()]);
-    if (!last) return { ok: true, lastVerifiedAt: null, lastVerifiedSeq: null, brokenAtSeq: null, message: 'The chain has not been verified yet' };
-    const ok = last.ok !== false;
+    const [last, lastOk, cp] = await Promise.all([this.repo.lastIntegrityCheck(), this.repo.lastOkIntegrityCheck(), this.repo.latestCheckpoint()]);
+    const signatureOk = cp ? this.checkpointOk(cp) : null;
+    const checkpoint = { lastCheckpointSeq: cp?.seq ?? null, lastCheckpointAt: cp ? cp.createdAt.toISOString() : null, checkpointSignatureOk: signatureOk };
+    const forged = `The signed checkpoint at entry #${cp?.seq} does not verify: the action history may have been rewritten. Platform Administrator and Business Owner were notified.`;
+    if (!last) {
+      if (signatureOk === false) return { ok: false, lastVerifiedAt: null, lastVerifiedSeq: null, brokenAtSeq: cp!.seq, ...checkpoint, message: forged };
+      return { ok: true, lastVerifiedAt: null, lastVerifiedSeq: null, brokenAtSeq: null, ...checkpoint, message: 'The chain has not been verified yet' };
+    }
+    const ok = last.ok !== false && signatureOk !== false;
     return {
       ok,
       lastVerifiedAt: (last.finishedAt ?? last.startedAt).toISOString(),
       lastVerifiedSeq: lastOk ? lastOk.toSeq : null,
-      brokenAtSeq: ok ? null : last.brokenAtSeq,
+      brokenAtSeq: ok ? null : signatureOk === false ? cp!.seq : last.brokenAtSeq,
+      ...checkpoint,
       message: ok
         ? lastOk && lastOk.toSeq > 0
           ? `Every entry through #${lastOk.toSeq} verifies`
           : 'No entries to verify yet'
-        : `Broken link at entry #${last.brokenAtSeq}: entries from there on cannot be trusted. Platform Administrator and Business Owner were notified.`,
+        : signatureOk === false
+          ? forged
+          : `Broken link at entry #${last.brokenAtSeq}: entries from there on cannot be trusted. Platform Administrator and Business Owner were notified.`,
     };
+  }
+
+  /** The checkpoint key (HKDF from APP_SECRET, never stored in the database) */
+  private checkpointKey(): string {
+    return secretFor(this.ctx.config, CHECKPOINT_PURPOSE);
+  }
+
+  private checkpointOk(cp: CheckpointRow): boolean {
+    return checkpointMacOk(this.checkpointKey(), cp);
+  }
+
+  /** Signs and stores a checkpoint at seq (ignored when one exists there already) */
+  private async writeCheckpoint(repo: AuditRepository, seq: number, hash: Uint8Array, kind: CheckpointRow['kind']): Promise<void> {
+    await repo.insertCheckpoint({ id: newId(), seq, hash, mac: checkpointMac(this.checkpointKey(), seq, hash), keyId: CHECKPOINT_KEY_ID, kind, createdAt: this.now() });
   }
 
   /* ================================================================ seller endpoint */
@@ -627,17 +669,40 @@ export class AuditService implements AuditPublicApi {
 
   /* ================================================================ jobs */
 
-  /** Job audit.verify-chain (daily 03:00 market time): Recompute hashes from the last verified seq; on mismatch publish audit.integrity.failed (Platform Administrator and Business Owner are notified) */
+  /**
+   * Job audit.verify-chain (daily 03:00 market time): Verify the newest checkpoint's HMAC, recompute hashes from it;
+   * on success write a new signed checkpoint at the last seq; on a hash or signature mismatch publish
+   * audit.integrity.failed (Platform Administrator and Business Owner are notified)
+   */
   async verifyChain(): Promise<IntegrityStatus> {
     const startedAt = this.now();
     const id = newId();
     const maxSeq = await this.repo.maxSeq();
-    const anchorCheck = await this.repo.lastOkIntegrityCheck();
+    const checkpoint = await this.repo.latestCheckpoint();
+    const anchorCheck = checkpoint ? null : await this.repo.lastOkIntegrityCheck();
     let broken: number | null = null;
     let expectedPrev: Uint8Array | undefined;
     let afterSeq: number | null = null;
 
-    if (anchorCheck && anchorCheck.toSeq > 0 && maxSeq !== null) {
+    if (checkpoint) {
+      if (!this.checkpointOk(checkpoint)) broken = checkpoint.seq; // someone rewrote the checkpoint (or its key changed)
+      else {
+        const anchor = await this.repo.entryBySeq(checkpoint.seq);
+        if (anchor) {
+          // the entry the checkpoint signed is still that entry: the same hash, and that hash recomputes from the row
+          if (!sameBytes(anchor.hash, checkpoint.hash) || !sameBytes(hashRow(anchor.prevHash, anchor), anchor.hash)) broken = anchor.seq!;
+          else {
+            expectedPrev = anchor.hash;
+            afterSeq = anchor.seq!;
+          }
+        } else if (checkpoint.kind === 'purge') {
+          // purged through the checkpoint: the first kept entry links to it
+          expectedPrev = checkpoint.hash;
+          afterSeq = checkpoint.seq;
+        } else broken = checkpoint.seq; // a verified entry disappeared without a purge
+      }
+    } else if (anchorCheck && anchorCheck.toSeq > 0 && maxSeq !== null) {
+      // installs verified before checkpoints existed: continue from the last clean run
       const anchor = await this.repo.entryBySeq(anchorCheck.toSeq);
       if (anchor) {
         // the anchor itself is recomputed too, so an edit of the last verified row is caught
@@ -667,6 +732,8 @@ export class AuditService implements AuditPublicApi {
       lastSeq = afterSeq;
     }
 
+    // a clean run signs where it stopped, so the next run starts there and a later rewrite of everything up to it is caught
+    if (broken === null && lastSeq !== null && expectedPrev && (!checkpoint || lastSeq > checkpoint.seq)) await this.writeCheckpoint(this.repo, lastSeq, expectedPrev, 'verified');
     const toSeq = broken ?? lastSeq ?? 0;
     await this.repo.saveIntegrityCheck({ id, startedAt, finishedAt: this.now(), fromSeq: Math.min(fromSeq ?? toSeq, toSeq), toSeq, ok: broken === null, brokenAtSeq: broken });
     if (broken !== null) {
@@ -696,6 +763,8 @@ export class AuditService implements AuditPublicApi {
       const keepFrom = await tx.firstSeqAtOrAfter(cutoff);
       const purged = await tx.purgeEntries(keepFrom);
       if (!purged.removed || !purged.last) return 0;
+      // a signed checkpoint at the last removed entry, in the same transaction: verification continues from it
+      await this.writeCheckpoint(tx, purged.last.seq, purged.last.hash, 'purge');
       const entry = await this.prepare(
         {
           actor: SYSTEM,

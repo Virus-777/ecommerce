@@ -50,6 +50,10 @@ describe('audit.purge-expired', () => {
 
     const purge = (await call('GET', '/entries?action=audit.retention.purged')).json().items[0];
     expect(purge).toMatchObject({ actor: { kind: 'system' }, category: 'settings', after: { removedEntries: 2, retainYears: 7, checkpoint: { seq: expect.any(Number), hash: expect.stringMatching(/^[0-9a-f]{64}$/) } } });
+    // and a signed purge checkpoint at the last removed entry
+    const cps = (await sql<{ seq: number; kind: string; hash: Uint8Array; key_id: string }>`select seq::int, kind, hash, key_id from audit.checkpoints`.execute(app.kernel.database.kysely)).rows;
+    expect(cps).toEqual([expect.objectContaining({ seq: purge.after.checkpoint.seq, kind: 'purge', key_id: 'audit.checkpoint.v1' })]);
+    expect(Buffer.from(cps[0]!.hash).toString('hex')).toBe(purge.after.checkpoint.hash);
 
     const policy = (await call('GET', '/retention')).json();
     expect(policy.lastPurge).toEqual({ at: '2026-10-09T12:00:00.000Z', removedEntries: 2, removedThrough: '2019-10-01T07:00:00.000Z' });
@@ -66,8 +70,9 @@ describe('audit.purge-expired', () => {
   it('a forged first link is still caught after a purge', async () => {
     const first = (await sql<{ id: string; seq: number }>`select id, seq::int from audit.entries order by seq limit 1`.execute(app.kernel.database.kysely)).rows[0]!;
     await tamper(app, sql`update audit.entries set prev_hash = ${new Uint8Array(32).fill(7)} where id = ${first.id}`);
-    // a fresh check (no verified anchor) walks from the oldest kept entry
+    // a fresh check (no verified anchor or verified checkpoint) walks from the purge checkpoint
     await tamper(app, sql`delete from audit.integrity_checks`);
+    await tamper(app, sql`delete from audit.checkpoints where kind = 'verified'`);
     await app.kernel.jobs.runNow('audit.verify-chain');
     expect((await call('GET', '/integrity')).json()).toMatchObject({ ok: false, brokenAtSeq: first.seq });
   });

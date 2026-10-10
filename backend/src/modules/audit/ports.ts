@@ -46,6 +46,18 @@ export interface IntegrityCheckRow {
   brokenAtSeq: number | null;
 }
 
+/** A signed chain checkpoint (audit.checkpoints) */
+export interface CheckpointRow {
+  id: string;
+  seq: number;
+  hash: Uint8Array;
+  /** hex HMAC-SHA256 over seq and hash */
+  mac: string;
+  keyId: string;
+  kind: 'verified' | 'purge';
+  createdAt: Date;
+}
+
 export interface SummaryCounts {
   total: number;
   pendingSecondReview: number;
@@ -102,4 +114,10 @@ export interface AuditRepository {
   lastIntegrityCheck(): Promise<IntegrityCheckRow | null>;
   lastOkIntegrityCheck(): Promise<IntegrityCheckRow | null>;
   saveIntegrityCheck(row: IntegrityCheckRow): Promise<void>;
+
+  /* ---- signed checkpoints */
+  /** The checkpoint with the highest seq */
+  latestCheckpoint(): Promise<CheckpointRow | null>;
+  /** One checkpoint per seq: a second one at the same seq is ignored */
+  insertCheckpoint(row: CheckpointRow): Promise<void>;
 }
