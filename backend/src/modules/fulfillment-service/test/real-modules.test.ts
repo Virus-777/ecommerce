@@ -1,13 +1,10 @@
 /**
- * With real modules (identity, access, sellers, catalog, offers, inventory, orders, finance, warehouse; the seller
- * signs in for real): a seller with a live offer enrolls in the service, enrolls the offer's SKU, sends an inbound
- * shipment that is counted and confirmed into seller-owned stock at the service location, an accepted order of a
- * Marketly-fulfilled group becomes a fulfillment request reserving those units, and the fees post to the seller's
- * ledger in the real finance module.
- *
- * inventory's Fulfilled by Marketly functions (K7) are built in parallel in inventory: they are modelled in memory
- * here (serviceInventory). Response validation is off because offers and orders gain contract fields in their own
- * batches (Offer.fulfilledBy, Offer.shipping); the integration test of the whole flow comes with batch Z.
+ * With real modules (identity, access, sellers, catalog, offers, inventory, orders, finance, warehouse, shipping; the
+ * seller signs in for real) and response validation on: a seller with a live offer enrolls in the service, enrolls the
+ * offer's SKU, sends an inbound shipment that inventory expects at the service location, counts it and the Inventory
+ * Manager confirms it into seller-owned stock there; an order of a Marketly-fulfilled group placed against a real
+ * inventory hold becomes a fulfillment request on the reserved units, and the fees post to the seller's ledger in the
+ * real finance module. The whole journey through HTTP is src/integration/fulfilled-by-marketly.test.ts.
  */
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -18,28 +15,22 @@ import type { InventoryPublicApi } from '../../../spec/inventory.js';
 import type { OrderCreateInput, OrdersPublicApi } from '../../../spec/orders.js';
 import { auth, buildTestApp, callers, movingClock } from '../../../testing/app.js';
 import { flows, type Flows, type Listing } from '../../../testing/flows.js';
-import { serviceInventory, WAREHOUSE } from './helpers.js';
+import { WAREHOUSE } from './helpers.js';
 
 const clock = movingClock();
 let app: FastifyInstance;
 let f: Flows;
 let listing: Listing;
-let inv: ReturnType<typeof serviceInventory>;
 const staff = callers.staff();
 const USD = (amount: number) => ({ amount, currency: 'USD' });
 const ADDRESS = { name: 'Ben Ortiz', line1: '1120 SW 5th Ave', city: 'Portland', region: 'OR', postalCode: '97204', country: 'US', phone: '+15035550101' };
 
 beforeAll(async () => {
   app = await buildTestApp({
-    only: withDependencies(['identity', 'access', 'audit', 'media', 'notifications', 'settings', 'customers', 'sellers', 'catalog', 'inventory', 'offers', 'orders', 'finance', 'warehouse', 'fulfillment-service']),
+    only: withDependencies(['identity', 'access', 'audit', 'media', 'notifications', 'settings', 'customers', 'sellers', 'catalog', 'inventory', 'offers', 'orders', 'finance', 'warehouse', 'shipping', 'fulfillment-service']),
     clock,
-    config: { rateLimits: false, launchPhase: 4, responseValidation: false },
+    config: { rateLimits: false, launchPhase: 4 },
   });
-  inv = serviceInventory(async (name, payload) => {
-    app.kernel.events.publish('inventory', name, payload, { actor: { kind: 'system' } });
-    await app.kernel.events.drain();
-  });
-  Object.assign(app.kernel.boot.apis.get('inventory')!, inv.stubs);
   f = flows(app, clock);
   listing = await f.liveListing({ quantity: 2 });
 });
@@ -101,16 +92,22 @@ describe('a seller stores and ships with Marketly (real modules)', () => {
     const submitted = await call('POST', S(`/inbound/${id}/submit`), { token: seller });
     expect(submitted.body.state).toBe('submitted');
     expect(submitted.body.labels).toHaveLength(1);
-    expect(inv.level(stockItem.id).incoming).toBe(6);
+    const levels = async () => (await inventory.getLevels([stockItem.id], location!))[stockItem.id]!;
+    expect(await levels()).toMatchObject({ incoming: 6, available: 0 });
     expect((await call('POST', S(`/inbound/${id}/ship`), { token: seller, body: { carrier: 'UPS', tracking: '1Z999AA10123456784' } })).body.state).toBe('in_transit');
     expect((await call('POST', A(`/inbound/${id}/arrive`), { body: { boxesArrived: 1 } })).body.state).toBe('arrived');
     const received = await call('POST', A(`/inbound/${id}/receive`), { body: { lines: [{ skuEnrollmentId: sku.body.id, received: 6, damaged: 0 }], complete: true }, headers: { 'idempotency-key': newId() } });
     expect(received.status, JSON.stringify(received.body)).toBe(200);
     expect(received.body.state).toBe('closed');
     expect(await service.isServiceOffer(listing.offerId)).toBe(false);
-    await inv.confirmAll(id);
-    expect(inv.level(stockItem.id)).toMatchObject({ available: 6, incoming: 0 });
-    expect(inv.setCalls).toEqual([{ stockItemId: stockItem.id, locationId: location }]);
+    // the Inventory Manager confirms the service receipt in inventory's queue
+    const waiting = await call('GET', '/api/admin/inventory/inbound?source=service_inbound&state=awaiting_confirmation');
+    const receipt = waiting.body.items.find((r: any) => r.source.id === id);
+    expect(receipt, JSON.stringify(waiting.body)).toMatchObject({ ownerType: 'seller', sellerId: listing.sellerId, locationId: location });
+    const confirmed = await call('POST', `/api/admin/inventory/inbound/${receipt.id}/confirm`, { body: { lines: [{ stockItemId: stockItem.id, sellable: 6, damaged: 0 }], checked: true } });
+    expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(200);
+    expect(await levels()).toMatchObject({ available: 6, incoming: 0 });
+    expect((await call('GET', `/api/admin/inventory/stock-items/${stockItem.id}`)).body).toMatchObject({ item: { serviceLocationId: location } });
     expect(changed).toEqual([expect.objectContaining({ offerId: listing.offerId, fulfilledBy: 'marketly_service', sellable: true, reason: 'sku_activated' })]);
     expect(await service.stockOwner(stockItem.id)).toEqual({ kind: 'seller', sellerId: listing.sellerId });
     expect(await service.isServiceOffer(listing.offerId)).toBe(true);
@@ -148,8 +145,11 @@ describe('a seller stores and ships with Marketly (real modules)', () => {
       ],
       totals: { items: USD(37800), discounts: USD(0), shipping: USD(0), tax: USD(0), total: USD(37800) },
     };
+    // placed as checkout does: a hold on the units at the service location, then the order, then the hold attached
+    const hold = await inventory.hold(`test:${input.checkoutSessionId}`, [{ stockItemId: stockItem.id, quantity: 2 }], 30);
     const order = await orders.createOrder(input);
     const item = order.groups[0]!.items[0]!;
+    await inventory.attachOrder(hold.id, order.id, [{ stockItemId: stockItem.id, orderItemId: item.id }]);
     await orders.acceptOrder(order.id, input.paymentIntentId);
     await app.kernel.events.drain();
     const requests = await call('GET', A(`/fulfillment-requests?sellerId=${listing.sellerId}`));
