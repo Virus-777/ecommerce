@@ -203,7 +203,9 @@ export class Cases {
       owner_staff_id: ownerId,
       team,
       support_following: handler === 'seller' || d.kind === 'dispute',
-      next_action: { label: '', whoMustAct: 'none', note: null, facts },
+      next_action: { label: '', whoMustAct: 'none', note: null },
+      facts,
+      pending: null,
       first_response_due_at: firstDue,
       next_response_due_at: firstDue,
       resolution_due_at: resolutionDue,
@@ -530,7 +532,7 @@ export class Cases {
       } else if (a.c.handler_kind !== 'seller' && ['open', 'reopened', 'escalated'].includes(status) && !a.c.next_response_due_at) {
         patch.next_response_due_at = staffDue;
       }
-      const m = await this.core.message(tx, a.c.id, { author: by.actor, authorLabel: a.c.next_action.facts?.customerName ?? 'Customer', role: 'customer', audience: 'all', body: body.body.trim(), mediaIds });
+      const m = await this.core.message(tx, a.c.id, { author: by.actor, authorLabel: a.c.facts.customerName ?? 'Customer', role: 'customer', audience: 'all', body: body.body.trim(), mediaIds });
       if (mediaIds.length) await tx.insert('case_evidence', { id: newId(), case_id: a.c.id, party: 'customer', kind: 'photo', media_ids: mediaIds, note: null, added_by: actorText(by.actor), at: this.core.now() });
       if (patch.status && patch.status !== a.c.status) await this.core.timeline(tx, a.c.id, [{ kind: 'customer_replied', label: 'Customer replied', visibility: 'all', actor: by.actor }]);
       await this.core.save(tx, a, patch, facts);
@@ -571,13 +573,13 @@ export class Cases {
       if (a.c.status === 'waiting_on_seller') {
         patch.status = caseMachine.next('waiting_on_seller', 'sellerReplied');
         Object.assign(patch, a.c.handler_kind === 'seller' ? { next_response_due_at: null, waiting_on: 'customer' } : { next_response_due_at: staffDue, waiting_on: 'marketplace' });
-        if (a.c.next_action.facts?.infoRequest?.from === 'seller') facts.infoRequest = null;
+        if (a.c.facts.infoRequest?.from === 'seller') facts.infoRequest = null;
       } else if (a.c.kind === 'seller_request' && a.c.handler_kind !== 'seller' && !a.c.next_response_due_at) patch.next_response_due_at = staffDue;
       if (a.c.kind !== 'seller_request') {
-        facts.sellerRepliedAt = a.c.next_action.facts?.sellerRepliedAt ?? now.toISOString();
+        facts.sellerRepliedAt = a.c.facts.sellerRepliedAt ?? now.toISOString();
         if (a.c.handler_kind === 'seller' && !a.c.first_replied_at) patch.first_replied_at = now;
       }
-      const label = `${a.c.next_action.facts?.sellerName ?? 'Seller'} (seller)`;
+      const label = `${a.c.facts.sellerName ?? 'Seller'} (seller)`;
       const m = await this.core.message(tx, a.c.id, { author: by.actor, authorLabel: label, role: 'seller', audience: 'all', body: body.body.trim(), mediaIds });
       if (mediaIds.length) a.evidence.push(await tx.insert('case_evidence', { id: newId(), case_id: a.c.id, party: 'seller', kind: 'photo', media_ids: mediaIds, note: null, added_by: actorText(by.actor), at: now }));
       if (body.offer) {
@@ -601,7 +603,7 @@ export class Cases {
             responded_at: null,
           }),
         );
-        await this.core.timeline(tx, a.c.id, [{ kind: 'offer_made', label: `${a.c.next_action.facts?.sellerName ?? 'The seller'} made an offer`, detail: body.offer.kind.replace(/_/g, ' '), visibility: 'all', actor: by.actor }]);
+        await this.core.timeline(tx, a.c.id, [{ kind: 'offer_made', label: `${a.c.facts.sellerName ?? 'The seller'} made an offer`, detail: body.offer.kind.replace(/_/g, ' '), visibility: 'all', actor: by.actor }]);
       }
       await this.core.save(tx, a, patch, facts);
       batch.push('support.case.message_added', this.core.messageAdded(a.c, m.id, 'all', 'seller'));
@@ -657,7 +659,7 @@ export class Cases {
         if (row.kind === 'ship_by_deadline' && caseMachine.can(a.c.status as CaseStatus, 'sendToSeller')) Object.assign(patch, { status: caseMachine.next(a.c.status as CaseStatus, 'sendToSeller'), next_response_due_at: row.due_at, waiting_on: 'seller' });
       }
       if (body.note?.trim()) {
-        const m = await this.core.message(tx, a.c.id, { author: by.actor, authorLabel: a.c.next_action.facts?.customerName ?? 'Customer', role: 'customer', audience: 'all', body: body.note.trim() });
+        const m = await this.core.message(tx, a.c.id, { author: by.actor, authorLabel: a.c.facts.customerName ?? 'Customer', role: 'customer', audience: 'all', body: body.note.trim() });
         batch.push('support.case.message_added', this.core.messageAdded(a.c, m.id, 'all', 'customer'));
       }
       await this.core.timeline(tx, a.c.id, [{ kind: body.accept ? 'offer_accepted' : 'offer_declined', label: body.accept ? 'The customer accepted the offer' : 'The customer declined the offer', detail: o.kind.replace(/_/g, ' '), visibility: 'all', actor: by.actor }]);
@@ -691,8 +693,8 @@ export class Cases {
 
   /** Marketly steps in: the case becomes a dispute handled by Marketly support (customer, staff, jobs) */
   async escalate(agg: Agg, o: { reason: string; to: string; note?: string | null; convertToDispute?: boolean; team?: Team | null; label: string; customerVisible?: string }, by: By): Promise<void> {
-    const sameState = agg.c.status === 'escalated';
-    if (!sameState) caseMachine.next(agg.c.status as CaseStatus, 'escalate');
+    // escalated → escalated moves an escalated case to another team (spec machine)
+    caseMachine.next(agg.c.status as CaseStatus, 'escalate');
     const team = (o.team ?? agg.c.team) as Team;
     const [disputeDays, cat] = await Promise.all([this.core.setting('disputeDecisionBusinessDays', 5), this.core.category(agg.c.category_key)]);
     const teamChanged = team !== agg.c.team;
@@ -702,7 +704,7 @@ export class Cases {
     await this.core.write(agg.c.id, by, async (tx, a, batch) => {
       const now = this.core.now();
       const already = a.c.status === 'escalated';
-      const status = already ? a.c.status : caseMachine.next(a.c.status as CaseStatus, 'escalate');
+      const status = caseMachine.next(a.c.status as CaseStatus, 'escalate');
       const dispute = o.convertToDispute || (a.c.kind === 'order_problem' && !already && o.convertToDispute !== false);
       await this.core.save(
         tx,
@@ -736,7 +738,7 @@ export class Cases {
     caseMachine.next(c.status as CaseStatus, 'escalate');
     if (c.handler_kind === 'seller') {
       const now = this.core.now();
-      const f = c.next_action.facts ?? {};
+      const f = c.facts;
       const deadlinePassed = c.status !== 'waiting_on_seller' || (c.next_response_due_at !== null && c.next_response_due_at.getTime() <= now.getTime());
       const unresolvedRefund = agg.remedies.some((r) => ['refund', 'partial_refund', 'replacement', 'ship_by_deadline'].includes(r.kind) && (UNRESOLVED_REMEDY as readonly string[]).includes(r.status));
       const sellerAnswered = !!f.sellerRepliedAt || agg.offers.length > 0;
@@ -748,7 +750,7 @@ export class Cases {
     await this.escalate(agg, { reason: body.reason, to: 'customer_support', note: body.note?.trim() || null, label: 'You asked Marketly to step in', convertToDispute: c.kind === 'order_problem' }, by);
     if (body.note?.trim()) {
       await this.core.write(agg.c.id, by, async (tx, a, batch) => {
-        const m = await this.core.message(tx, a.c.id, { author: by.actor, authorLabel: a.c.next_action.facts?.customerName ?? 'Customer', role: 'customer', audience: 'all', body: body.note!.trim() });
+        const m = await this.core.message(tx, a.c.id, { author: by.actor, authorLabel: a.c.facts.customerName ?? 'Customer', role: 'customer', audience: 'all', body: body.note!.trim() });
         batch.push('support.case.message_added', this.core.messageAdded(a.c, m.id, 'all', 'customer'));
       });
     }

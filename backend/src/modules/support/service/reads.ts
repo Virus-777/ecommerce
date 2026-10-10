@@ -310,7 +310,7 @@ export class Reads {
     const inRange = rows.filter((r) => r.opened_at < to && kinds.includes(r.kind));
     const decided = await this.core.repo.find('cases', { seller_id: sellerId, decision: { op: 'is not', value: null } });
     const against = decided.filter((c) => c.decision && ['customer_favored', 'shared'].includes(c.decision.outcome) && c.decision.decidedAt >= from.toISOString() && c.decision.decidedAt < to.toISOString());
-    const replies = inRange.filter((r) => r.next_action.facts?.sellerRepliedAt).map((r) => (new Date(r.next_action.facts.sellerRepliedAt!).getTime() - r.opened_at.getTime()) / 60_000);
+    const replies = inRange.filter((r) => r.facts.sellerRepliedAt).map((r) => (new Date(r.facts.sellerRepliedAt!).getTime() - r.opened_at.getTime()) / 60_000);
     return { open, unresolved: inRange.filter((r) => !CLOSED.includes(r.status)).length, decidedAgainstSeller: against.length, medianReplyMinutes: median(replies) };
   }
 
@@ -325,19 +325,74 @@ export class Reads {
     return this.listMine({ customerId }, filter.open === true ? 'open' : filter.open === false ? 'closed' : 'all', this.page(page));
   }
 
-  async listForOrder(orderId: string, viewer: { area: Area; customerId?: string; sellerId?: string }): Promise<Agg[]> {
+  /**
+   * Open and recent cases on one order the viewer may see: staff all, a seller the cases about its items, a
+   * customer their own, a guest session the cases it opened or of guest orders identity granted it (core.canSee).
+   * A store viewer with neither a customer id nor a guest session sees none.
+   */
+  async listForOrder(orderId: string, viewer: { area: Area; customerId?: string; guestSessionId?: string; sellerId?: string }): Promise<Agg[]> {
     if (!isUuid(orderId)) return [];
+    if (viewer.area === 'store' && !viewer.customerId && !viewer.guestSessionId) return [];
     const rows = await this.core.repo.find('cases', { order_id: orderId }, { orderBy: [['opened_at', 'desc']] });
     const recent = new Date(this.core.now().getTime() - 180 * DAY);
-    const visible = rows.filter((c: CaseRec) => {
-      if (c.status === 'closed' && c.closed_at && c.closed_at < recent) return false;
-      if (viewer.area === 'admin') return true;
-      if (viewer.area === 'seller') return !!viewer.sellerId && c.seller_id === viewer.sellerId;
-      if (c.kind === 'seller_request') return false;
-      return viewer.customerId ? c.customer_id === viewer.customerId : !c.customer_id;
-    });
+    const v = viewer.area === 'admin' ? { area: 'admin' as const } : viewer.area === 'seller' ? { area: 'seller' as const, sellerId: viewer.sellerId ?? '' } : { area: 'store' as const, customerId: viewer.customerId ?? null, guestSessionId: viewer.customerId ? null : (viewer.guestSessionId ?? null) };
+    const visible: CaseRec[] = [];
+    for (const c of rows) {
+      if (c.status === 'closed' && c.closed_at && c.closed_at < recent) continue;
+      if (viewer.area === 'seller' && !viewer.sellerId) continue;
+      if (await this.core.canSee(c, v)) visible.push(c);
+    }
     const aggs = await this.core.loadMany(visible.map((c) => c.id));
     return visible.map((c) => aggs.get(c.id)!).filter(Boolean);
+  }
+
+  /**
+   * Customer data export hook (customers.build-data-exports): the customer's cases with the messages they can see
+   * (no internal notes, no seller-only or staff-only messages; staff shown as Marketly support), what they asked
+   * for, the decision and remedies. attachmentIds are the files the customer attached.
+   */
+  async exportCustomerData(input: { customerId: string; accountId: string }): Promise<common.CustomerDataSection[]> {
+    if (!isUuid(input.customerId)) return [];
+    const rows = await this.core.repo.find('cases', { customer_id: input.customerId, kind: ['customer_help', 'order_problem', 'dispute'] }, { orderBy: [['opened_at', 'asc'], ['id', 'asc']] });
+    const records: unknown[] = [];
+    const attachmentIds = new Set<string>();
+    for (let i = 0; i < rows.length; i += 50) {
+      const chunk = rows.slice(i, i + 50);
+      const aggs = await this.core.loadMany(chunk.map((c) => c.id));
+      const list = chunk.map((c) => aggs.get(c.id)).filter((a): a is Agg => !!a);
+      const x = await this.views.prepare(list, { orders: false });
+      for (const a of list) {
+        const v = this.views.caseView(a, 'store', x);
+        const own = (m: Agg['messages'][number]) => m.role === 'customer' && (m.author_kind === 'customer' || m.author_kind === 'visitor');
+        for (const m of a.messages) if (own(m) && (m.audience === 'all' || m.audience === 'customer')) m.media_ids.forEach((id) => attachmentIds.add(id));
+        records.push({
+          ref: a.c.ref,
+          kind: a.c.kind,
+          topic: v.category.label,
+          subject: a.c.subject,
+          orderRef: v.order?.ref || null,
+          returnRef: v.returnRef ?? null,
+          items: v.items.map((it) => ({ title: it.title, quantity: it.quantity, seller: it.sellerName })),
+          problemType: a.c.facts.problemType ?? null,
+          askedFor: a.c.facts.desiredRemedy ?? null,
+          replyChannel: a.c.reply_channel,
+          callbackPhone: a.c.facts.callbackPhone ?? null,
+          status: v.statusLabel,
+          openedAt: v.openedAt,
+          resolvedAt: a.c.resolved_at?.toISOString() ?? null,
+          closedAt: a.c.closed_at?.toISOString() ?? null,
+          decision: v.decision ? { outcome: v.decision.outcome, reason: v.decision.reason, decidedAt: v.decision.decidedAt, final: v.decision.final } : null,
+          remedies: v.remedies.map((r) => ({ kind: r.kind, amount: r.amount, status: r.statusLabel })),
+          appeal: v.appeal ? { reason: v.appeal.reason, submittedAt: v.appeal.submittedAt, status: v.appeal.status, outcome: v.appeal.outcome ?? null } : null,
+          messages: v.messages.map((m) => {
+            const rec = a.messages.find((r) => r.id === m.id);
+            const mine = !!rec && own(rec);
+            return { at: m.at, from: mine ? 'You' : m.role === 'system' ? 'Marketly' : m.authorLabel, text: m.body, attachments: m.attachments.length };
+          }),
+        });
+      }
+    }
+    return [{ key: 'support-cases', title: 'Help cases', module: 'support', records, attachmentIds: [...attachmentIds] }];
   }
 
   async casesForReturns(returnIds: string[], viewer: { area: Area; customerId?: string; guestSessionId?: string; sellerId?: string }): Promise<Record<string, CaseView | AdminCaseDetail | null>> {

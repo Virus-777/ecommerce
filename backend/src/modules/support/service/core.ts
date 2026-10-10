@@ -373,12 +373,12 @@ export class Core {
     });
   }
 
-  /** Updates the case row and the stored next action (inside the transaction) */
+  /** Updates the case row, its fact columns and the stored next action (inside the transaction) */
   async save(tx: SupportRepository, agg: Agg, patch: Partial<CaseRec>, facts?: Partial<CaseFacts>): Promise<CaseRec> {
-    const merged = { ...agg.c, ...patch };
-    const f = { ...agg.c.next_action.facts, ...(patch.next_action?.facts ?? {}), ...(facts ?? {}) };
-    const next = nextActionOf(this.nextFacts({ ...agg, c: { ...merged, next_action: { ...merged.next_action, facts: f } } }), this.now());
-    const updated = await tx.update('cases', agg.c.id, { ...patch, next_action: { label: next.label, whoMustAct: next.whoMustAct, note: next.note ?? null, facts: f }, updated_at: this.now() });
+    const f: CaseFacts = { ...agg.c.facts, ...(patch.facts ?? {}), ...(facts ?? {}) };
+    const merged = { ...agg.c, ...patch, facts: f };
+    const next = nextActionOf(this.nextFacts({ ...agg, c: merged }), this.now());
+    const updated = await tx.update('cases', agg.c.id, { ...patch, ...(facts || patch.facts ? { facts: f } : {}), next_action: { label: next.label, whoMustAct: next.whoMustAct, note: next.note ?? null }, updated_at: this.now() });
     agg.c = updated;
     return updated;
   }
@@ -386,7 +386,7 @@ export class Core {
   /** What the next-action rule needs from a case */
   nextFacts(agg: Agg): NextFacts {
     const c = agg.c;
-    const f = c.next_action.facts ?? {};
+    const f = c.facts;
     const now = this.now();
     const openOffer = agg.offers.find((o) => o.status === 'open' && (!o.respond_by || o.respond_by.getTime() > now.getTime()));
     const pending = agg.remedies.find((r) => r.status === 'failed') ?? agg.remedies.find((r) => (UNRESOLVED_REMEDY as readonly string[]).includes(r.status));
@@ -409,7 +409,7 @@ export class Core {
   }
 
   handlerName(c: CaseRec): string {
-    const f = c.next_action.facts ?? {};
+    const f = c.facts;
     if (c.handler_kind === 'seller') return f.sellerName ?? 'The seller';
     if (c.handler_kind === 'official_store') return OFFICIAL_STORE_NAME;
     return SUPPORT_NAME;
@@ -421,7 +421,7 @@ export class Core {
 
   /** Who customer-facing case events reach: the customer, or the contact email for guests */
   recipient(c: CaseRec): { customerId: string | null; contactEmail: string | null } {
-    return { customerId: c.customer_id && isUuid(c.customer_id) ? c.customer_id : null, contactEmail: c.next_action.facts?.contactEmail ?? null };
+    return { customerId: c.customer_id && isUuid(c.customer_id) ? c.customer_id : null, contactEmail: c.facts.contactEmail ?? null };
   }
 
   /** support.case.message_added: the parties a visible message is for */

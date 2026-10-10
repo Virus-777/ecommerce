@@ -93,7 +93,7 @@ export class SupportService implements SupportPublicApi {
   }
 
   /** Open and recent cases on one order with linked items, filtered to what the viewer may see. Batched per order (Order.cases). */
-  async listCasesForOrder(orderId: string, viewer: { area: 'store' | 'seller' | 'admin'; customerId?: string; sellerId?: string }): Promise<CaseView[]> {
+  async listCasesForOrder(orderId: string, viewer: { area: 'store' | 'seller' | 'admin'; customerId?: string; guestSessionId?: string; sellerId?: string }): Promise<CaseView[]> {
     return this.views.views(await this.reads.listForOrder(orderId, viewer), viewer.area);
   }
 
@@ -115,6 +115,11 @@ export class SupportService implements SupportPublicApi {
   /** Open customer cases per product (cases linked to an order item of the product, not resolved or closed). Catalog publication-impact preview. */
   countOpenCasesForProducts(productIds: string[]): Promise<Record<string, number>> {
     return this.reads.countOpenForProducts(productIds);
+  }
+
+  /** Customer data export hook: the customer's cases and the messages they can see on them */
+  exportCustomerData(input: { customerId: string; accountId: string }): Promise<common.CustomerDataSection[]> {
+    return this.reads.exportCustomerData(input);
   }
 
   /* ---------------- events consumed */
@@ -161,6 +166,11 @@ export class SupportService implements SupportPublicApi {
   /** returns.replacement.created: Link the replacement to its remedy */
   onReplacementCreatedFromReturns(event: EventPayload<'returns.replacement.created'>): Promise<void> {
     return this.automation.onReplacementCreated(event);
+  }
+
+  /** returns.replacement.cancelled: Cancel the remedy the replacement drove and put the case back in the owner's queue */
+  onReplacementCancelledFromReturns(event: EventPayload<'returns.replacement.cancelled'>): Promise<void> {
+    return this.automation.onReplacementCancelled(event);
   }
 
   /** shipping.shipment.delivered: Complete replacement remedies when their shipment is delivered */

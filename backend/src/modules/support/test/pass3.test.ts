@@ -1,7 +1,7 @@
 /**
  * Gap pass 3: remedies never stay pending for ever (goodwill needs wallet, guests get a partial refund, items
  * default to the case's, settle by staff, declined refunds cancel their remedy, ship-by remedies complete on
- * dispatch), replacements only with a return (through returns.requestReplacement), notifyParties=false,
+ * dispatch), replacements through returns.requestReplacement (with or without a return), notifyParties=false,
  * the exception loop, email replies joining the thread, and the new event fields and public API.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -70,12 +70,24 @@ describe('goodwill (decision D-RT3)', () => {
   });
 });
 
-describe('replacements (decision D-S5)', () => {
-  it('needs a return on the case', async () => {
+describe('replacements (returns.requestReplacement)', () => {
+  it('without a return on the case, returns creates a replacement without one; cancelling it cancels the remedy', async () => {
     const d = await dispute(h);
+    h.stock.set(d.product.stockItemId, 2);
     const res = await decide(h, d.caseId, [{ kind: 'replacement' }]);
-    expect(res.status).toBe(422);
-    expect(res.body.error.code).toBe('REPLACEMENT_NEEDS_RETURN');
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const created = h.named('returns.replacement.created').find((e) => e.caseId === d.caseId);
+    expect(created).toMatchObject({ returnId: null, orderItemId: d.itemId });
+    const [remedy] = (await h.service.core.load(d.caseId))!.remedies;
+    expect(remedy).toMatchObject({ kind: 'replacement', status: 'in_progress', replacement_id: created.replacementId });
+    const cancelled = await h.call('POST', `/api/admin/returns/replacements/${created.replacementId}/cancel`, tokens.staff(), { reason: 'Out of stock after all' });
+    expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
+    const after = (await h.service.core.load(d.caseId))!;
+    expect(after.remedies[0]).toMatchObject({ status: 'cancelled', note: 'Replacement cancelled: Out of stock after all' });
+    expect(after.c.waiting_on).toBe('marketplace');
+    expect(after.events.some((e) => e.label === 'The replacement was cancelled before it shipped')).toBe(true);
+    // nothing pending any more: the case can be resolved
+    expect((await h.call('POST', `/api/admin/support/cases/${d.caseId}/resolve`, tokens.staff(), { summary: 'Refund instead' })).status).toBe(200);
   });
 
   it("asks returns for the replacement on a case with a return and links it to the remedy", async () => {

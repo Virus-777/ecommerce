@@ -75,7 +75,7 @@ export class Decisions {
     const out: Planned[] = [];
     const issues: { path: string; message: string }[] = [];
     const caseItems = agg.items.map((i) => i.order_item_id);
-    const official = agg.c.next_action.facts?.ownerType === 'official';
+    const official = agg.c.facts.ownerType === 'official';
     const order = agg.c.order_id ? await this.core.quiet('order', () => this.core.ctx.use('orders').getOrder(agg.c.order_id!)) : null;
     const orderItems = new Set(order?.groups.flatMap((g) => g.items.map((i) => i.id)) ?? caseItems);
     const wallet = this.core.ctx.modules.includes('wallet');
@@ -90,8 +90,8 @@ export class Decisions {
         // goodwill is store credit (decision D-RT3): refused while wallet is off, never turned into a card refund
         else if (!wallet || guest) throw this.core.error('GOODWILL_UNAVAILABLE', 'Goodwill credit needs Marketly store credit, which is not available; choose a refund or partial refund instead', { path: `${p}.kind` });
       }
-      // decision D-S5: a replacement is created from the case's return until returns can create one without it
-      if (r.kind === 'replacement' && (!agg.c.return_id || !this.core.ctx.tryUse('returns'))) throw this.core.error('REPLACEMENT_NEEDS_RETURN', 'A replacement can only be promised on a case with a return; ask for a return or choose a refund', { path: `${p}.kind` });
+      // returns creates and ships replacements (with the case's return when it covers the item, else without one)
+      if (r.kind === 'replacement' && !this.core.ctx.tryUse('returns')) throw this.core.error('REPLACEMENT_NEEDS_RETURN', 'Replacements are not available right now; choose a refund instead', { path: `${p}.kind` });
       const ids = r.orderItemIds?.length ? [...new Set(r.orderItemIds)] : caseItems;
       if (ids.some((id) => !orderItems.has(id))) issues.push({ path: `${p}.orderItemIds`, message: 'Some items are not part of the order' });
       const needsOrder = r.kind === 'refund' || r.kind === 'partial_refund' || r.kind === 'replacement' || r.kind === 'return_label' || r.kind === 'ship_by_deadline';
@@ -127,15 +127,19 @@ export class Decisions {
     return planned.filter((p) => ['refund', 'partial_refund', 'replacement'].includes(p.kind)).reduce((s, p) => s + platformShare(p.value, p.chargedTo), 0);
   }
 
-  /** Within the decider's limit, or sent for approval (APPROVAL_REQUIRED) with the decision kept pending */
-  private async authorize(agg: Agg, planned: Planned[], pending: Omit<PendingApproval, 'requestId' | 'ref' | 'requestedBy' | 'principal' | 'requestedAt'>, reason: string, by: By): Promise<void> {
+  /**
+   * Within the decider's limit (false: go ahead), or sent for approval (true): the decision is saved pending on the
+   * case (approval_request_id, pending_decision) and published on access.approval.decided. The endpoint answers
+   * 200 with AdminCaseDetail.pendingApproval (FORMAT.md, Approval responses).
+   */
+  private async authorize(agg: Agg, planned: Planned[], pending: Omit<PendingApproval, 'requestId' | 'ref' | 'requestedBy' | 'principal' | 'requestedAt'>, reason: string, by: By): Promise<boolean> {
     const total = this.platformTotal(planned);
-    if (!total) return;
+    if (!total) return false;
     if (!by.principal) throw new AppError('APPROVAL_REQUIRED', 'A platform-funded remedy needs an approver', { action: APPROVE_ACTION });
     const access = this.core.ctx.use('access');
     const amount: common.Money = { amount: total, currency: this.core.currency };
     const check = await access.check(by.principal, APPROVE_ACTION, { money: amount });
-    if (check.decision === 'allowed') return;
+    if (check.decision === 'allowed') return false;
     if (check.decision === 'denied') throw new AppError('FORBIDDEN', check.reason || 'Your role cannot decide platform-funded remedies', { action: APPROVE_ACTION });
     const req = await access.requestApproval({
       action: APPROVE_ACTION,
@@ -148,19 +152,11 @@ export class Decisions {
     });
     const now = this.core.now();
     await this.core.write(agg.c.id, by, async (tx, a) => {
-      const draft = a.c.decision_draft;
-      await this.core.save(tx, a, {
-        decision_draft: {
-          draft: draft?.draft ?? pending.decision ?? null,
-          savedAt: draft?.savedAt ?? now.toISOString(),
-          savedBy: draft?.savedBy ?? by.actor,
-          pending: { ...pending, requestId: req.id, ref: req.ref ?? null, requestedBy: by.actor, principal: by.principal!, requestedAt: now.toISOString() },
-        },
-      });
+      await this.core.save(tx, a, { pending: { ...pending, requestId: req.id, ref: req.ref ?? null, requestedBy: by.actor, principal: by.principal!, requestedAt: now.toISOString() } });
       await this.core.timeline(tx, a.c.id, [{ kind: 'approval_requested', label: `${pending.kind === 'appeal' ? 'Appeal decision' : 'Decision'} sent for approval (${req.ref ?? 'approval'})`, detail: check.reason, visibility: 'staff', actor: by.actor }]);
     });
     await this.core.audit({ action: 'support.remedies.request_approval', actionLabel: 'Sent a case decision for approval', category: 'financial', target: this.cases.target(agg), reason, after: { amount, remedies: planned.map((p) => p.kind) }, approvalRequestId: req.id }, by);
-    throw new AppError('APPROVAL_REQUIRED', check.reason || 'Above your limit: another approver must approve this decision', { approvalRequestId: req.id, ...(req.ref ? { approvalRef: req.ref } : {}) });
+    return true;
   }
 
   /** Requests what each remedy needs (refund requests, goodwill) and returns the rows to insert */
@@ -169,11 +165,12 @@ export class Decisions {
     const out: NewRemedy[] = [];
     const returnsOn = !!this.core.ctx.tryUse('returns');
     const wallet = this.core.ctx.tryUse('wallet');
-    const official = agg.c.next_action.facts?.ownerType === 'official';
+    const official = agg.c.facts.ownerType === 'official';
     for (const [n, p] of planned.entries()) {
       let status: RemedyStatus = 'pending_approval';
       let refundRequestId: string | null = null;
       let replacementId: string | null = null;
+      let grantId: string | null = null;
       let note = p.note;
       const viaRefund = p.kind === 'refund' || p.kind === 'partial_refund';
       if (p.kind === 'goodwill_credit') {
@@ -183,6 +180,7 @@ export class Decisions {
           by.actor,
           `case:${agg.c.id}:goodwill:${n}:${p.amount}`,
         );
+        grantId = grant.id;
         status = grant.state === 'granted' ? 'completed' : grant.state === 'rejected' ? 'cancelled' : 'pending_approval';
         note = note ?? (grant.state === 'pending_approval' ? 'Waiting for approval of the credit' : null);
       } else if (viaRefund && agg.c.return_id && returnsOn && !p.guestGoodwill) {
@@ -206,9 +204,9 @@ export class Decisions {
       } else if (viaRefund) {
         note = note ?? 'Recorded as a refund request to Finance';
       } else if (p.kind === 'replacement') {
-        // the case's return exists (plan refuses otherwise): returns allocates the stock and ships it
+        // returns allocates the stock and ships it: on the case's open return when it covers the item, else without a return
         const returns = this.core.ctx.tryUse('returns');
-        if (!returns || !agg.c.order_id || !agg.c.return_id) throw this.core.error('REPLACEMENT_NEEDS_RETURN', 'A replacement can only be promised on a case with a return');
+        if (!returns || !agg.c.order_id) throw this.core.error('REPLACEMENT_NEEDS_RETURN', 'Replacements are not available right now; choose a refund instead');
         for (const [k, itemId] of p.orderItemIds.entries()) {
           const quantity = agg.items.find((i) => i.order_item_id === itemId)?.snapshot.quantity ?? 1;
           const rep = await returns.requestReplacement({ caseId: agg.c.id, orderId: agg.c.order_id, orderItemId: itemId, quantity, reason: `Case ${agg.c.ref}: ${reason}`, requestedBy: by.actor }, `case:${agg.c.id}:replacement:${agg.remedies.length + n}:${k}:${itemId}`);
@@ -227,6 +225,7 @@ export class Decisions {
         status,
         refund_request_id: refundRequestId,
         replacement_id: replacementId,
+        goodwill_grant_id: grantId,
         due_at: p.dueAt,
         note,
         created_by: actorText(by.actor),
@@ -249,8 +248,9 @@ export class Decisions {
 
   /* ================================================================ decision */
 
+  /** Another decision is already waiting for approval: nothing is saved (409 APPROVAL_REQUIRED with that request) */
   private stillPending(agg: Agg) {
-    const p = agg.c.decision_draft?.pending;
+    const p = agg.c.pending;
     if (p) throw new AppError('APPROVAL_REQUIRED', 'A decision on this case is waiting for approval', { approvalRequestId: p.requestId, ...(p.ref ? { approvalRef: p.ref } : {}) });
   }
 
@@ -265,14 +265,14 @@ export class Decisions {
       if (Number.isNaN(appealDeadline.getTime()) || appealDeadline.getTime() <= now.getTime()) throw invalidField('appealDeadline', 'Choose an appeal deadline in the future');
     } else appealDeadline = new Date(now.getTime() + (await this.core.setting('appealWindowDays', 14)) * DAY);
     const planned = await this.plan(agg, input.remedies ?? []);
-    if (!o.approved) await this.authorize(agg, planned, { kind: 'decision', decision: input }, input.reason.trim(), by);
+    if (!o.approved && (await this.authorize(agg, planned, { kind: 'decision', decision: input }, input.reason.trim(), by))) return;
     const rows = await this.execute(agg, planned, input.reason.trim(), by);
     const decided = await this.core.write(agg.c.id, by, async (tx, a, batch) => {
       const status = caseMachine.next(a.c.status as CaseStatus, 'decide');
       const inserted = await this.insertRemedies(tx, a, rows);
       await this.withdrawOffers(tx, a);
       const decision: StoredDecision = { outcome: input.outcome, reason: input.reason.trim(), decidedBy: by.actor, decidedAt: now.toISOString(), publishedAt: input.notifyParties ? now.toISOString() : null, appealDeadline: appealDeadline.toISOString(), final: false, notifyParties: input.notifyParties };
-      await this.core.save(tx, a, { status, decision, decision_draft: null, appeal_deadline: appealDeadline, next_response_due_at: null, waiting_on: null, handler_kind: 'marketplace_support', support_following: true, ...(a.c.first_replied_at ? {} : { first_replied_at: now }) }, { infoRequest: null, appealWindowClosed: false });
+      await this.core.save(tx, a, { status, decision, decision_draft: null, pending: null, appeal_deadline: appealDeadline, next_response_due_at: null, waiting_on: null, handler_kind: 'marketplace_support', support_following: true, ...(a.c.first_replied_at ? {} : { first_replied_at: now }) }, { infoRequest: null, appealWindowClosed: false });
       await this.core.timeline(tx, a.c.id, [{ kind: 'decided', label: `Decision: ${human(input.outcome)}`, detail: input.reason.trim(), visibility: 'all', actor: by.actor }]);
       if (input.notifyParties) await this.decisionMessage(tx, a, batch, decision, inserted, by);
       batch.push('support.case.decided', { caseId: a.c.id, ref: a.c.ref, outcome: input.outcome, orderId: a.c.order_id, ...this.core.recipient(a.c), returnId: a.c.return_id, sellerId: a.c.seller_id, remedies: a.remedies.map((r) => this.views.remedy(r, this.core.currency)), appealDeadline: appealDeadline.toISOString(), final: false, notified: !!input.notifyParties });
@@ -321,7 +321,7 @@ export class Decisions {
     if (!caseMachine.can(agg.c.status as CaseStatus, 'decide') && agg.c.status !== 'appealed') throw illegal('A decision can only be drafted while the case is open for a decision', { from: agg.c.status, event: 'decide' });
     const now = this.core.now();
     await this.core.write(agg.c.id, by, async (tx, a) => {
-      await this.core.save(tx, a, { decision_draft: { draft: input, savedAt: now.toISOString(), savedBy: by.actor, pending: a.c.decision_draft?.pending ?? null } });
+      await this.core.save(tx, a, { decision_draft: { draft: input, savedAt: now.toISOString(), savedBy: by.actor } });
       await this.core.timeline(tx, a.c.id, [{ kind: 'draft_saved', label: 'Decision draft saved', visibility: 'staff', actor: by.actor }]);
     });
     return { draft: input, savedAt: now.toISOString(), savedBy: by.actor };
@@ -330,8 +330,7 @@ export class Decisions {
   async deleteDraft(agg: Agg, by: By): Promise<void> {
     if (!agg.c.decision_draft?.draft) return;
     await this.core.write(agg.c.id, by, async (tx, a) => {
-      const pending = a.c.decision_draft?.pending ?? null;
-      await this.core.save(tx, a, { decision_draft: pending ? { ...a.c.decision_draft!, draft: null } : null });
+      await this.core.save(tx, a, { decision_draft: null });
       await this.core.timeline(tx, a.c.id, [{ kind: 'draft_discarded', label: 'Decision draft discarded', visibility: 'staff', actor: by.actor }]);
     });
   }
@@ -353,7 +352,7 @@ export class Decisions {
       const now = this.core.now();
       const status = caseMachine.next(a.c.status as CaseStatus, 'appeal');
       a.appeals.push(await tx.insert('case_appeals', { id: newId(), case_id: a.c.id, by_kind: by.actor.kind, by_id: by.actor.id ?? party, reason: body.reason.trim(), media_ids: mediaIds, status: appealMachine.initial, reviewer_staff_id: null, submitted_at: now, decided_at: null, outcome: null }));
-      const label = party === 'seller' ? `${a.c.next_action.facts?.sellerName ?? 'Seller'} (seller)` : (a.c.next_action.facts?.customerName ?? 'Customer');
+      const label = party === 'seller' ? `${a.c.facts.sellerName ?? 'Seller'} (seller)` : (a.c.facts.customerName ?? 'Customer');
       const m = await this.core.message(tx, a.c.id, { author: by.actor, authorLabel: label, role: party, audience: 'all', body: `Appeal: ${body.reason.trim()}`, mediaIds });
       if (mediaIds.length) await tx.insert('case_evidence', { id: newId(), case_id: a.c.id, party, kind: 'photo', media_ids: mediaIds, note: 'Attached to the appeal', added_by: actorText(by.actor), at: now });
       await this.core.timeline(tx, a.c.id, [{ kind: 'appealed', label: party === 'seller' ? 'The seller appealed the decision' : 'The customer appealed the decision', detail: body.reason.trim(), visibility: 'all', actor: by.actor }]);
@@ -373,7 +372,7 @@ export class Decisions {
     const decider = c.decision.decidedBy;
     if (decider.kind === 'staff' && decider.id && by.actor.id && decider.id === by.actor.id) throw this.core.error('SAME_DECIDER', 'A different staff member must review the appeal');
     const planned = body.overturn ? await this.plan(agg, body.remedies ?? []) : [];
-    if (!o.approved && planned.length) await this.authorize(agg, planned, { kind: 'appeal', appeal: { overturn: body.overturn, reason: body.reason, remedies: body.remedies ?? [] } }, body.reason.trim(), by);
+    if (!o.approved && planned.length && (await this.authorize(agg, planned, { kind: 'appeal', appeal: { overturn: body.overturn, reason: body.reason, remedies: body.remedies ?? [] } }, body.reason.trim(), by))) return;
     // the overturned decision's refund requests are cancelled first (new refunds for the same items would be duplicates)
     const refunds = body.overturn ? await this.core.soft('returns', 'cancel case refunds', (r) => r.cancelRefundsForCase(c.id, `Case ${c.ref}: the appeal changed the decision`, by.actor)) : undefined;
     const moving = new Set((refunds?.notCancellable ?? []).map((r) => r.id));
@@ -412,7 +411,7 @@ export class Decisions {
       const decision: StoredDecision = body.overturn
         ? { outcome: overturnedOutcome(old.outcome, hasMoney), reason: body.reason.trim(), decidedBy: by.actor, decidedAt: now.toISOString(), publishedAt: now.toISOString(), appealDeadline: null, final: true, notifyParties: true, previous: [...(old.previous ?? []), { outcome: old.outcome, reason: old.reason, decidedBy: old.decidedBy, decidedAt: old.decidedAt }] }
         : { ...old, final: true, appealDeadline: null };
-      await this.core.save(tx, a, { status, decision, appeal_deadline: null, next_response_due_at: null, waiting_on: null, decision_draft: a.c.decision_draft?.draft ? { ...a.c.decision_draft, pending: null } : null });
+      await this.core.save(tx, a, { status, decision, appeal_deadline: null, next_response_due_at: null, waiting_on: null, pending: null });
       await this.core.timeline(tx, a.c.id, [{ kind: 'appeal_decided', label: body.overturn ? 'Appeal accepted: the decision was changed' : 'Appeal reviewed: the decision stands', detail: body.reason.trim(), visibility: 'all', actor: by.actor }]);
       const m = await this.core.message(tx, a.c.id, { author: by.actor, authorLabel: 'Marketly appeal review', role: 'system', audience: 'all', body: `${body.overturn ? `The appeal was accepted. New decision: ${human(decision.outcome)}` : 'The appeal was reviewed and the decision stands'}: ${body.reason.trim()}. This decision is final.` });
       batch.push('support.case.message_added', this.core.messageAdded(a.c, m.id, 'all', 'system'));
@@ -474,7 +473,7 @@ export class Decisions {
     await this.core.write(c.id, by, async (tx, a, batch) => {
       const status = caseMachine.next(a.c.status as CaseStatus, 'reopen');
       if (who === 'customer') {
-        const m = await this.core.message(tx, a.c.id, { author: by.actor, authorLabel: a.c.next_action.facts?.customerName ?? 'Customer', role: 'customer', audience: 'all', body: body.reason.trim() });
+        const m = await this.core.message(tx, a.c.id, { author: by.actor, authorLabel: a.c.facts.customerName ?? 'Customer', role: 'customer', audience: 'all', body: body.reason.trim() });
         batch.push('support.case.message_added', this.core.messageAdded(a.c, m.id, 'all', 'customer'));
       } else await this.core.message(tx, a.c.id, { author: by.actor, authorLabel: 'Reopened (internal note)', role: 'internal_note', audience: 'internal', body: body.reason.trim() });
       await this.core.timeline(tx, a.c.id, [{ kind: 'reopened', label: who === 'customer' ? 'You reopened the case' : 'Marketly reopened the case', detail: body.reason.trim(), visibility: 'all', actor: by.actor, reason: body.reason.trim() }]);
@@ -491,7 +490,7 @@ export class Decisions {
     if (e.actionKey !== APPROVE_ACTION || (e.module && e.module !== 'support')) return;
     const caseId = e.target?.type === 'case' ? e.target.id : null;
     const agg = caseId ? await this.core.load(caseId) : undefined;
-    const pending = agg?.c.decision_draft?.pending;
+    const pending = agg?.c.pending;
     if (!agg || !pending || pending.requestId !== e.requestId) return;
     const decider: By = { actor: pending.requestedBy, principal: pending.principal };
     if (e.outcome === 'approved') {
@@ -505,7 +504,7 @@ export class Decisions {
       }
       await this.core.write(agg.c.id, { actor: e.decidedBy ?? SYSTEM }, async (tx, a) => {
         await this.core.timeline(tx, a.c.id, [{ kind: 'approval_decided', label: `Approval ${e.ref} granted`, detail: e.reason ?? null, visibility: 'staff', actor: e.decidedBy ?? SYSTEM }]);
-        if (a.c.decision_draft?.pending) await this.core.save(tx, a, { decision_draft: a.c.decision_draft.draft ? { ...a.c.decision_draft, pending: null } : null });
+        if (a.c.pending) await this.core.save(tx, a, { pending: null });
       });
       return;
     }
@@ -514,9 +513,10 @@ export class Decisions {
 
   private async clearPending(caseId: string, label: string, actor: common.Actor) {
     await this.core.write(caseId, { actor }, async (tx, a) => {
-      if (!a.c.decision_draft?.pending) return;
-      const draft = a.c.decision_draft;
-      await this.core.save(tx, a, { decision_draft: draft.draft ? { ...draft, pending: null } : draft.pending?.decision ? { draft: draft.pending.decision, savedAt: draft.savedAt, savedBy: draft.savedBy, pending: null } : null });
+      const p = a.c.pending;
+      if (!p) return;
+      // the decision that was not approved comes back as the draft (an existing draft is kept)
+      await this.core.save(tx, a, { pending: null, ...(!a.c.decision_draft && p.decision ? { decision_draft: { draft: p.decision, savedAt: p.requestedAt, savedBy: p.requestedBy } } : {}) });
       await this.core.timeline(tx, a.c.id, [{ kind: 'approval_decided', label, visibility: 'staff', actor }]);
       await this.core.message(tx, a.c.id, { author: actor, authorLabel: 'Approval (internal note)', role: 'internal_note', audience: 'internal', body: `${label}. The decision was not published; change it and decide again.` });
     });

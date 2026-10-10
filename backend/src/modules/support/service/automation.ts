@@ -5,7 +5,7 @@
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import { caseMachine, caseOfferMachine, remedyMachine } from '../domain/state-machines.js';
-import { CLOSED_STATUSES, nextActionOf, type CaseStatus, type RemedyStatus } from '../domain/rules.js';
+import { CLOSED_STATUSES, nextActionOf, UNRESOLVED_REMEDY, type CaseStatus, type RemedyStatus } from '../domain/rules.js';
 import type { RemedyRec } from '../ports.js';
 import type { Cases } from './cases.js';
 import { DAY, SYSTEM, type By, type Core } from './core.js';
@@ -96,6 +96,22 @@ export class Automation {
   }
 
   /**
+   * returns.replacement.cancelled: a replacement cancelled before it shipped (no stock, the seller or staff), with or
+   * without a return. The remedy it drives is cancelled (the reason in the case history) and the case goes back to
+   * the owner's queue to choose another remedy. Remedies that never linked the replacement are found by case and item.
+   */
+  async onReplacementCancelled(e: EventPayload<'returns.replacement.cancelled'>): Promise<void> {
+    if (!isUuid(e.replacementId)) return;
+    let remedy = (await this.core.repo.find('case_remedies', { replacement_id: e.replacementId }))[0];
+    if (!remedy && e.caseId && isUuid(e.caseId)) {
+      const open = await this.core.repo.find('case_remedies', { case_id: e.caseId, kind: 'replacement', replacement_id: null, status: ['pending_approval', 'approved', 'in_progress'] }, { orderBy: [['created_at', 'asc']] });
+      remedy = open.find((r) => r.order_item_ids.includes(e.orderItemId));
+    }
+    if (!remedy || !(UNRESOLVED_REMEDY as readonly string[]).includes(remedy.status)) return;
+    await this.decisions.moveRemedy(remedy.id, 'cancelled', { replacementId: e.replacementId, label: 'The replacement was cancelled before it shipped', note: `Replacement cancelled: ${e.reason}`, visibility: 'all', requeue: true });
+  }
+
+  /**
    * returns.refund.declined: Finance sent the refund request back. The refund remedy behind it is cancelled
    * (Finance's reason in the case history) and the case goes back to the owner's queue to decide again.
    */
@@ -128,19 +144,23 @@ export class Automation {
 
   /**
    * wallet.goodwill.decided: the case's goodwill credit remedy waiting for approval is granted (completed) or
-   * rejected (cancelled), and the case goes back to the top of its owner's queue. The remedy keeps no grant id,
-   * so it is matched by case, kind and amount (the oldest pending one). Claimed once per grant in the inbox.
+   * rejected (cancelled), and the case goes back to the top of its owner's queue. The remedy is matched on its
+   * goodwill_grant_id; remedies recorded before the column existed (no grant id) by case, kind and amount (the oldest
+   * pending one). Claimed once per grant in the inbox.
    */
   async onGoodwillDecided(e: EventPayload<'wallet.goodwill.decided'>): Promise<void> {
-    if (!e.caseId || !isUuid(e.caseId)) return;
-    const c = await this.core.repo.get('cases', e.caseId);
+    const byGrant = isUuid(e.grantId) ? (await this.core.repo.find('case_remedies', { goodwill_grant_id: e.grantId }))[0] : undefined;
+    const caseId = byGrant?.case_id ?? (e.caseId && isUuid(e.caseId) ? e.caseId : null);
+    if (!caseId) return;
+    const c = await this.core.repo.get('cases', caseId);
     if (!c) return;
     const granted = e.status === 'granted';
     const amount = `${(e.amount.amount / 100).toFixed(2)} ${e.amount.currency}`;
     await this.core.write(c.id, SYS, async (tx, a) => {
       if (!(await tx.claim(`wallet.goodwill.decided:${e.grantId}`))) return;
       const pending = a.remedies.filter((r) => r.kind === 'goodwill_credit' && r.status === 'pending_approval').sort((x, y) => x.created_at.getTime() - y.created_at.getTime());
-      const remedy = pending.find((r) => r.amount === e.amount.amount && (!r.currency || r.currency === e.amount.currency)) ?? pending[0];
+      const legacy = pending.filter((r) => !r.goodwill_grant_id);
+      const remedy = byGrant ? pending.find((r) => r.id === byGrant.id) : (legacy.find((r) => r.amount === e.amount.amount && (!r.currency || r.currency === e.amount.currency)) ?? legacy[0]);
       if (!remedy) return;
       const path = remedyPath(remedy.status as RemedyStatus, granted ? 'completed' : 'cancelled');
       if (!path?.length) return;
@@ -200,7 +220,7 @@ export class Automation {
     const ids = [...new Set(links.map((l) => l.caseId))];
     for (const id of ids) {
       await this.core.write(id, SYS, async (tx, a) => {
-        if (a.c.next_action.facts?.dispatchOverdue?.dueAt === e.dueAt) return;
+        if (a.c.facts.dispatchOverdue?.dueAt === e.dueAt) return;
         await this.core.timeline(tx, a.c.id, [{ kind: 'dispatch_overdue', label: 'The seller missed the dispatch deadline', detail: `Was due ${e.dueAt}. You can ask Marketly to step in.`, visibility: 'all' }]);
         await this.core.message(tx, a.c.id, { author: SYSTEM, authorLabel: 'Marketly', role: 'system', audience: 'customer', body: 'The item was not shipped by its dispatch deadline. If you would rather not wait, ask Marketly to step in from this case.' });
         await this.core.save(tx, a, {}, { dispatchOverdue: { dueAt: e.dueAt, at: this.core.now().toISOString() } });
@@ -264,7 +284,7 @@ export class Automation {
     const from = e.fromEmail.trim().toLowerCase();
     const known = new Set<string>();
     const add = (x: string | null | undefined) => x && known.add(x.trim().toLowerCase());
-    add(agg.c.next_action.facts?.contactEmail);
+    add(agg.c.facts.contactEmail);
     if (agg.c.customer_id && isUuid(agg.c.customer_id)) add((await this.core.soft('customers', 'customer', (c) => c.getCustomer(agg.c.customer_id!)))?.email);
     if (agg.c.order_id) add((await this.core.quiet('order contact', () => this.core.ctx.use('orders').getOrder(agg.c.order_id!)))?.contact.email);
     if (!known.has(from) || agg.c.kind === 'seller_request') {
@@ -325,13 +345,13 @@ export class Automation {
   /** Response deadlines that passed: support.case.overdue once per deadline (workqueues raises it); ship-by dates */
   async slaTimers(): Promise<void> {
     const now = this.core.now();
-    const due = await this.core.repo.listCases({ statuses: ['open', 'waiting_on_seller', 'waiting_on_customer', 'escalated', 'decision_made', 'appealed', 'reopened'], dueBefore: now }, 'next_deadline', { mode: 'page', page: 1, limit: BATCH });
+    const due = await this.core.repo.listCases({ statuses: ['open', 'waiting_on_seller', 'waiting_on_customer', 'escalated', 'decision_made', 'appealed', 'reopened'], dueBefore: now, overdueUnannounced: true }, 'next_deadline', { mode: 'page', page: 1, limit: BATCH });
     for (const c of due.items) {
       const dueAt = c.next_response_due_at!.toISOString();
-      if (c.next_action.facts?.overdueNotified === dueAt) continue;
+      if (c.facts.overdueNotified === dueAt) continue;
       await this.safely('overdue case', async () => {
         await this.core.write(c.id, SYS, async (tx, a, batch) => {
-          if (a.c.next_action.facts?.overdueNotified === dueAt || !a.c.next_response_due_at || a.c.next_response_due_at.toISOString() !== dueAt) return;
+          if (a.c.facts.overdueNotified === dueAt || !a.c.next_response_due_at || a.c.next_response_due_at.toISOString() !== dueAt) return;
           const next = nextActionOf(this.core.nextFacts(a), now);
           const who = next.whoMustAct === 'none' ? 'marketplace' : next.whoMustAct;
           await this.core.timeline(tx, a.c.id, [{ kind: 'overdue', label: `Response deadline passed (${who} to act)`, detail: dueAt, visibility: 'staff' }]);
@@ -414,11 +434,11 @@ export class Automation {
         });
       });
     }
-    const appeals = await this.core.repo.find('cases', { status: 'decision_made', appeal_deadline: { op: '<', value: now } }, { limit: BATCH });
-    for (const c of appeals.filter((x) => !x.next_action.facts?.appealWindowClosed)) {
+    const appeals = (await this.core.repo.listCases({ statuses: ['decision_made'], appealDeadlineBefore: now, appealWindowOpen: true }, 'newest', { mode: 'page', page: 1, limit: BATCH })).items;
+    for (const c of appeals) {
       await this.safely('appeal window', async () => {
         await this.core.write(c.id, SYS, async (tx, a) => {
-          if (a.c.next_action.facts?.appealWindowClosed || a.appeals.length) return;
+          if (a.c.facts.appealWindowClosed || a.appeals.length) return;
           await this.core.timeline(tx, a.c.id, [{ kind: 'appeal_window_closed', label: 'The appeal window ended', visibility: 'all' }]);
           await this.core.save(tx, a, {}, { appealWindowClosed: true });
         });

@@ -1,9 +1,10 @@
 import { sql, type Kysely } from 'kysely';
 import type { Inbox } from '../../../../kernel/events/inbox.js';
 import { decodeCursor, encodeCursor } from '../../../../kernel/lib/pagination.js';
+import type * as common from '../../../../spec/common.js';
 import type { SupportDb } from '../../../../spec/support.js';
 import { CLOSED_STATUSES } from '../../domain/rules.js';
-import type { CaseFilter, CaseRec, CaseSort, SupportRepository, Table } from '../../ports.js';
+import { FACT_COLUMNS, type CaseFacts, type CaseFilter, type CaseRec, type CaseSort, type FactColumn, type PendingApproval, type StoredPending, type SupportRepository, type Table } from '../../ports.js';
 
 /** jsonb columns per table: values are sent as JSON text (pg would turn JS arrays into PG arrays) */
 const JSON_COLUMNS: Record<Table, readonly string[]> = {
@@ -20,15 +21,109 @@ const JSON_COLUMNS: Record<Table, readonly string[]> = {
 
 const keyOf = (t: Table) => (t === 'case_categories' ? 'key' : 'id');
 
+const iso = (d: Date | string | null | undefined) => (d ? new Date(d).toISOString() : null);
+const date = (s: string | null | undefined) => (s ? new Date(s) : null);
+const actorText = (a: unknown) => (a ? JSON.stringify(a) : null);
+function actorOf(text: string | null | undefined): common.Actor | null {
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as common.Actor;
+  } catch {
+    return null;
+  }
+}
+
+/** CaseFacts → the fact columns of cases (every column, so a saved facts object replaces the stored one) */
+function factColumns(f: CaseFacts): Record<FactColumn, unknown> {
+  return {
+    order_ref: f.orderRef ?? null,
+    placed_at: date(f.placedAt),
+    return_ref: f.returnRef ?? null,
+    customer_name: f.customerName ?? null,
+    contact_email: f.contactEmail ?? null,
+    city: f.city ?? null,
+    seller_name: f.sellerName ?? null,
+    owner_type: f.ownerType ?? null,
+    reference: f.reference ?? null,
+    trust_report_id: f.trustReportId ?? null,
+    problem_type: f.problemType ?? null,
+    desired_remedy: f.desiredRemedy ?? null,
+    callback_phone: f.callbackPhone ?? null,
+    info_request_from: f.infoRequest?.from ?? null,
+    info_request_question: f.infoRequest?.question ?? null,
+    info_request_due_at: date(f.infoRequest?.dueAt),
+    info_requested_at: date(f.infoRequest?.askedAt),
+    info_requested_by: actorText(f.infoRequest?.askedBy),
+    escalated_at: date(f.escalation?.at),
+    escalated_by: actorText(f.escalation?.by),
+    escalation_reason: f.escalation?.reason ?? null,
+    escalated_to: f.escalation?.to ?? null,
+    escalation_note: f.escalation?.note ?? null,
+    seller_replied_at: date(f.sellerRepliedAt),
+    dispatch_overdue_due_at: date(f.dispatchOverdue?.dueAt),
+    dispatch_overdue_noted_at: date(f.dispatchOverdue?.at),
+    overdue_notified_for: date(f.overdueNotified),
+    appeal_window_closed: !!f.appealWindowClosed,
+  };
+}
+
+/** A cases row → CaseRec (fact columns gathered in facts, the pending approval in pending) */
+function decodeCase(row: Record<string, any> | undefined): CaseRec | undefined {
+  if (!row) return undefined;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(row)) if (!(FACT_COLUMNS as readonly string[]).includes(k) && k !== 'approval_request_id' && k !== 'pending_decision') out[k] = v;
+  const r = row;
+  const facts: CaseFacts = {
+    orderRef: r.order_ref,
+    placedAt: iso(r.placed_at),
+    returnRef: r.return_ref,
+    customerName: r.customer_name,
+    contactEmail: r.contact_email,
+    city: r.city,
+    sellerName: r.seller_name,
+    ownerType: r.owner_type,
+    reference: r.reference,
+    trustReportId: r.trust_report_id,
+    problemType: r.problem_type,
+    desiredRemedy: r.desired_remedy,
+    callbackPhone: r.callback_phone,
+    infoRequest: r.info_request_from ? { from: r.info_request_from, question: r.info_request_question ?? '', dueAt: iso(r.info_request_due_at) ?? '', askedAt: iso(r.info_requested_at) ?? '', askedBy: actorOf(r.info_requested_by) ?? { kind: 'system', id: null } } : null,
+    escalation: r.escalated_at ? { at: iso(r.escalated_at)!, by: actorOf(r.escalated_by) ?? { kind: 'system', id: null }, reason: r.escalation_reason ?? '', to: r.escalated_to ?? '', note: r.escalation_note } : null,
+    sellerRepliedAt: iso(r.seller_replied_at),
+    dispatchOverdue: r.dispatch_overdue_due_at ? { dueAt: iso(r.dispatch_overdue_due_at)!, at: iso(r.dispatch_overdue_noted_at) ?? iso(r.dispatch_overdue_due_at)! } : null,
+    overdueNotified: iso(r.overdue_notified_for),
+    appealWindowClosed: !!r.appeal_window_closed,
+  };
+  out.facts = facts;
+  out.pending = r.approval_request_id && r.pending_decision ? { ...(r.pending_decision as StoredPending), requestId: r.approval_request_id } : null;
+  return out as unknown as CaseRec;
+}
+
 function encode(table: Table, row: Record<string, unknown>): Record<string, unknown> {
   const cols = JSON_COLUMNS[table];
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(row)) {
     if (v === undefined) continue;
+    if (table === 'cases' && k === 'facts') {
+      Object.assign(out, factColumns((v ?? {}) as CaseFacts));
+      continue;
+    }
+    if (table === 'cases' && k === 'pending') {
+      const p = v as PendingApproval | null;
+      out.approval_request_id = p?.requestId ?? null;
+      if (p) {
+        const { requestId: _id, ...rest } = p;
+        out.pending_decision = JSON.stringify(rest);
+      } else out.pending_decision = null;
+      continue;
+    }
     out[k] = cols.includes(k) ? (v === null ? null : JSON.stringify(v)) : v;
   }
   return out;
 }
+
+/** Rows read from a table, cases decoded */
+const decode = (table: Table, row: any) => (table === 'cases' ? decodeCase(row) : row);
 
 const isOp = (v: unknown): v is { op: string; value: unknown } => typeof v === 'object' && v !== null && !Array.isArray(v) && !(v instanceof Date) && 'op' in v;
 
@@ -46,7 +141,7 @@ function applyWhere(q: any, where: Record<string, unknown>): any {
 }
 
 const like = (s: string) => `%${s.trim().toLowerCase().replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-const fact = (key: string) => sql<string>`lower(coalesce(cases.next_action->'facts'->>${key}, ''))`;
+const fact = (column: 'order_ref' | 'customer_name' | 'seller_name' | 'return_ref') => sql<string>`lower(coalesce(${sql.ref(`cases.${column}`)}, ''))`;
 
 function caseQuery(d: any, f: CaseFilter): any {
   let q = d.selectFrom('cases');
@@ -70,12 +165,15 @@ function caseQuery(d: any, f: CaseFilter): any {
   if (f.category) q = q.where('category_key', '=', f.category);
   if (f.priority) q = q.where('priority', '=', f.priority);
   if (f.handler) q = q.where('handler_kind', '=', f.handler);
+  if (f.appealWindowOpen) q = q.where('appeal_window_closed', '=', false);
+  if (f.appealDeadlineBefore) q = q.where('appeal_deadline', '<', f.appealDeadlineBefore);
+  if (f.overdueUnannounced) q = q.where(sql<boolean>`overdue_notified_for is distinct from next_response_due_at`);
   if (f.openedFrom) q = q.where('opened_at', '>=', f.openedFrom);
   if (f.openedTo) q = q.where('opened_at', '<', f.openedTo);
   if (f.q?.trim()) {
     const term = like(f.q);
     q = q.where(
-      sql<boolean>`(lower(cases.ref) like ${term} or lower(cases.subject) like ${term} or ${fact('orderRef')} like ${term} or ${fact('customerName')} like ${term} or ${fact('sellerName')} like ${term} or ${fact('returnRef')} like ${term})`,
+      sql<boolean>`(lower(cases.ref) like ${term} or lower(cases.subject) like ${term} or ${fact('order_ref')} like ${term} or ${fact('customer_name')} like ${term} or ${fact('seller_name')} like ${term} or ${fact('return_ref')} like ${term})`,
     );
   }
   return q;
@@ -116,21 +214,21 @@ export function createPostgresSupportRepository(db: Kysely<SupportDb>, inbox?: I
     async get(table, id, o) {
       let q = d.selectFrom(table).selectAll().where(keyOf(table), '=', id);
       if (o?.forUpdate) q = q.forUpdate();
-      return q.executeTakeFirst();
+      return decode(table, await q.executeTakeFirst());
     },
     async find(table, where, o) {
       let q = applyWhere(d.selectFrom(table).selectAll(), where as Record<string, unknown>);
       for (const [c, dir] of o?.orderBy ?? []) q = q.orderBy(c, dir);
       if (o?.limit) q = q.limit(o.limit);
       if (o?.forUpdate) q = q.forUpdate();
-      return q.execute();
+      return ((await q.execute()) as unknown[]).map((row) => decode(table, row));
     },
     async count(table, where) {
       const r = await applyWhere(d.selectFrom(table).select(sql<number>`count(*)::int`.as('n')), where as Record<string, unknown>).executeTakeFirst();
       return (r as { n: number } | undefined)?.n ?? 0;
     },
     async insert(table, row) {
-      return d.insertInto(table).values(encode(table, row as Record<string, unknown>)).returningAll().executeTakeFirstOrThrow();
+      return decode(table, await d.insertInto(table).values(encode(table, row as Record<string, unknown>)).returningAll().executeTakeFirstOrThrow());
     },
     async insertMany(table, rows) {
       if (!rows.length) return;
@@ -142,7 +240,7 @@ export function createPostgresSupportRepository(db: Kysely<SupportDb>, inbox?: I
     async update(table, id, patch) {
       const values = encode(table, patch as Record<string, unknown>);
       if (!Object.keys(values).length) return (await repo.get(table, id))!;
-      return d.updateTable(table).set(values).where(keyOf(table), '=', id).returningAll().executeTakeFirstOrThrow();
+      return decode(table, await d.updateTable(table).set(values).where(keyOf(table), '=', id).returningAll().executeTakeFirstOrThrow());
     },
 
     async seedCategories(rows) {
@@ -169,7 +267,7 @@ export function createPostgresSupportRepository(db: Kysely<SupportDb>, inbox?: I
       const rows = (await sorted(base.selectAll(), sort)
         .limit(page.limit + 1)
         .offset(offset)
-        .execute()) as CaseRec[];
+        .execute()).map((row: Record<string, unknown>) => decodeCase(row)!) as CaseRec[];
       const items = rows.slice(0, page.limit);
       const more = rows.length > page.limit;
       const nextCursor = more ? encodeCursor([offset + page.limit]) : null;

@@ -72,6 +72,7 @@ export function gqlCase(v: CaseView, extra: { updatedAt: string; area: 'store' |
     deadlines: (d?.deadlines ?? []).map((x) => ({ label: x.label, deadline: deadline(x.deadline), party: upper(x.party) })),
     history: timeline(d?.history ?? []),
     reopened: extra.reopened,
+    pendingApproval: d?.pendingApproval ? { required: d.pendingApproval.required, reason: d.pendingApproval.reason ?? null, approvalRequestId: d.pendingApproval.approvalRequestId ?? null, approvers: d.pendingApproval.approvers } : null,
     decisionDraft: d?.decisionDraft
       ? {
           outcome: upper(d.decisionDraft.draft.outcome),
@@ -130,7 +131,7 @@ export const resolvers = (service: SupportService): ModuleResolvers => {
           return sellerId ? cases(await service.reads.listForOrder(order.id, { area: 'seller', sellerId }), 'seller') : [];
         }
         const who = await shopper(ctx);
-        return cases(await service.reads.listForOrder(order.id, { area: 'store', ...(who.customerId ? { customerId: who.customerId } : {}) }), 'store');
+        return cases(await service.reads.listForOrder(order.id, { area: 'store', ...(who.customerId ? { customerId: who.customerId } : who.guestSessionId ? { guestSessionId: who.guestSessionId } : {}) }), 'store');
       },
     },
     Return: {
