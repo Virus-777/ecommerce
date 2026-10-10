@@ -38,7 +38,7 @@
   }
   /** Render any spec type value (string, {type,desc}, or inline object) as a readable tree. */
   function tree(v, mod, depth = 0) {
-    if (v === null) return '<span class="d">no content (204)</span>';
+    if (v === null) return '<span class="d">no content</span>';
     if (v === undefined) return '';
     if (typeof v === 'string') return typeExpr(v, mod);
     if (typeof v.type === 'string') return `${typeExpr(v.type, mod)}${v.desc ? ` <span class="d">${esc(v.desc)}</span>` : ''}`;
