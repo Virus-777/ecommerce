@@ -13,7 +13,8 @@
  *     staff names; dev staff tokens carry no access roles).
  *   audit.record → h.audits. notifications.notify → h.notices. reports.registerDataset → recorded (not built).
  *   sellers.getSellers → store names from h.sellerNames.
- *   fulfillment-service.getServiceLocation → h.serviceLocation (Fulfilled by Marketly, built in parallel).
+ *   fulfillment-service (not booted; apiStubs answer shipping's and orders' optional lookups): getServiceLocation →
+ *     h.serviceLocation; isServiceOffer → offers placed in a marketly_service group (h.serviceOffers).
  */
 import type { FastifyInstance } from 'fastify';
 import { newId } from '../../../kernel/lib/ids.js';
@@ -46,8 +47,10 @@ export interface Harness {
   guestGrants: Set<string>;
   sellerNames: Map<string, string>;
   access: { decision: 'allowed' | 'approval_required' | 'denied'; approvals: Map<string, access.ApprovalRequest['status']>; requested: any[] };
-  /** fulfillment-service.getServiceLocation (Fulfilled by Marketly is built in parallel) */
+  /** fulfillment-service.getServiceLocation answer (null: no service location) */
   serviceLocation: { locationId: string; address: common.Address; shipsFrom: string } | null;
+  /** fulfillment-service.isServiceOffer: offers group() put in a marketly_service group */
+  serviceOffers: Set<string>;
   call(method: string, url: string, token: string | null, body?: unknown, headers?: Record<string, string>): Promise<{ status: number; body: any }>;
   webhook(carrier: string, body: unknown, o?: { eventId?: string; secret?: string }): Promise<{ status: number; body: any }>;
   publish(source: string, name: string, payload: unknown): Promise<void>;
@@ -96,6 +99,7 @@ export async function harness(): Promise<Harness> {
     sellerNames: new Map<string, string>(),
     access: { decision: 'allowed' as Harness['access']['decision'], approvals: new Map<string, access.ApprovalRequest['status']>(), requested: [] as any[] },
     serviceLocation: { locationId: newId(), address: { name: 'Marketly Fulfillment', line1: '400 Dock St', city: 'Reno', region: 'NV', postalCode: '89502', country: 'US' }, shipsFrom: 'Reno, NV (Marketly warehouse)' } as Harness['serviceLocation'],
+    serviceOffers: new Set<string>(),
   };
   let out: Harness | undefined;
   // read from the harness the test holds, so a test can set h.serviceLocation (null: no service location)
@@ -149,6 +153,7 @@ export async function harness(): Promise<Harness> {
       },
       'fulfillment-service': {
         getServiceLocation: async () => serviceLocation(),
+        isServiceOffer: async (offerId) => h.serviceOffers.has(offerId),
       },
       sellers: {
         getSellers: async (ids) =>
@@ -170,9 +175,6 @@ export async function harness(): Promise<Harness> {
     },
   });
   const service = app.kernel.boot.apis.get('shipping') as ShippingService;
-  // fulfillment-service (phase 4, rebuilt in parallel) cannot boot here yet, and tryUse only reaches enabled modules:
-  // its getServiceLocation answer is fed straight to shipping's lookup until it can
-  if (!app.kernel.modules.includes('fulfillment-service')) service.core.serviceLocation = async () => serviceLocation();
   const ordersApi = app.kernel.boot.apis.get('orders') as Harness['orders'];
   for (const name of EVENTS) app.kernel.events.subscribe('test', name, (e) => void h.events.push({ name: e.name, payload: e.payload }));
   const call: Harness['call'] = async (method, url, token, body, headers = {}) => {
@@ -263,6 +265,7 @@ export function group(h: Harness, items: OrderItemInput[], o: { ownerType?: 'off
   const total = items.reduce((s, i) => s + i.unitPrice.amount * i.quantity, 0);
   const now = h.clock.now();
   const day = (d: number) => new Date(now.getTime() + d * 86_400_000).toISOString().slice(0, 10);
+  if (o.fulfilledBy === 'marketly_service') for (const i of items) h.serviceOffers.add(i.offerId);
   return {
     key: newId(),
     ownerType,

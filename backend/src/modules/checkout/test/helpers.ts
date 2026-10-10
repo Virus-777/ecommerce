@@ -12,15 +12,17 @@
  *     destinations in Alaska are not served. shipping.checkCoverage: Alaska → outside_seller_coverage.
  *     `ship.shiftDays` moves arrival dates, `ship.standardPrice` changes the Standard price; `ship.knobs.quotes` keeps every input.
  *
- * Fulfilled by Marketly: offers resolves the effective Offer.shipping (fulfilledBy, profile, dispatch) in a batch built in
- * parallel; until it does, the world gives offers' Offer reads their shipping here (the offer's own terms), and
- * `w.marketly.enroll(offerId)` makes an offer Marketly-fulfilled (Marketly's service profile, dispatch and ships-from).
+ * Fulfilled by Marketly (world({ fulfillment: true })): fulfillment-service is not booted; an apiStubs entry answers the
+ * optional lookups of offers (getServiceTerms: Marketly's service profile, dispatch and ships-from) and orders
+ * (isServiceOffer). `await w.marketly.enroll(offerId)` publishes fulfillment-service.offer.service_changed the way the
+ * service does when a SKU activates, so offers moves the offer to marketly_service (termsVersion bumped); `leave` undoes it.
  */
 import type { FastifyInstance } from 'fastify';
 import { expect } from 'vitest';
 import { AppError } from '../../../kernel/errors/index.js';
 import type { EventEnvelope } from '../../../kernel/events/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
+import type { PublicApiMap } from '../../../kernel/module-system/index.js';
 import { withDependencies } from '../../../kernel/module-system/loader.js';
 import type * as offers from '../../../spec/offers.js';
 import type * as payments from '../../../spec/payments.js';
@@ -206,8 +208,8 @@ export interface World {
   offers: { black: string; white: string; officialWhite: string };
   stock: { black: string; white: string; officialWhite: string };
   service: CheckoutService;
-  /** Fulfilled by Marketly: Marketly's service terms, and offers moved onto (or off) the service */
-  marketly: { terms: offers.OfferShipping; enroll(offerId: string): void; leave(offerId: string): void };
+  /** Fulfilled by Marketly (world({ fulfillment: true })): Marketly's service terms, and offers moved onto (or off) the service */
+  marketly: { terms: offers.OfferShipping; enroll(offerId: string): Promise<void>; leave(offerId: string): Promise<void> };
   call(method: string, url: string, token?: string, body?: unknown, headers?: Record<string, string>): Promise<{ status: number; body: any }>;
   named(name: string): any[];
   api<T = any>(module: string): T;
@@ -218,21 +220,21 @@ export interface World {
 
 /**
  * o.wallet: also run the real wallet (phase 3, off at launch) with the launch phase that opens the credit step.
- * o.fulfillment: also run fulfillment-service (phase 4), so orders can check Marketly-fulfilled groups; its
- * isServiceOffer answers for the offers enrolled with w.marketly.enroll.
+ * o.fulfillment: fulfillment-service is on for offers and orders (stubbed, launch phase 4): getServiceTerms and
+ * isServiceOffer answer for the offers enrolled with w.marketly.enroll.
  */
 export async function world(o: { wallet?: boolean; fulfillment?: boolean } = {}): Promise<World> {
   const clock = movingClock();
   const pay = fakePayments(clock);
   const ship = fakeShipping(clock);
-  const enrolled = new Set<string>();
+  const marketly = fakeFulfillmentService(clock, ship.profileFor({ ownerType: 'official', sellerId: null }));
   const app = await buildTestApp({
-    only: withDependencies(['identity', 'access', 'audit', 'media', 'notifications', 'settings', 'customers', 'sellers', 'catalog', 'inventory', 'offers', 'cart', 'orders', 'promotions', 'content', 'checkout', ...(o.wallet ? ['wallet'] : []), ...(o.fulfillment ? ['fulfillment-service'] : [])]),
+    only: withDependencies(['identity', 'access', 'audit', 'media', 'notifications', 'settings', 'customers', 'sellers', 'catalog', 'inventory', 'offers', 'cart', 'orders', 'promotions', 'content', 'checkout', ...(o.wallet ? ['wallet'] : [])]),
     clock,
     config: { rateLimits: false, ...(o.wallet ? { launchPhase: 3 } : {}), ...(o.fulfillment ? { launchPhase: 4 } : {}) },
-    apiStubs: { payments: pay.api, shipping: ship.api, ...(o.fulfillment ? { 'fulfillment-service': { isServiceOffer: async (offerId: string) => enrolled.has(offerId) } } : {}) },
+    apiStubs: { payments: pay.api, shipping: ship.api, ...(o.fulfillment ? { 'fulfillment-service': marketly.api } : {}) },
   });
-  const marketly = shimOfferShipping(app, ship.profileFor({ ownerType: 'official', sellerId: null }), enrolled);
+  marketly.app = app;
   if (o.wallet) pay.hooks.releaseCredit = (holdId) => (app.kernel.boot.apis.get('wallet') as { releaseHold(id: string): Promise<unknown> }).releaseHold(holdId);
   const f = flows(app, clock);
   const events: EventEnvelope[] = [];
@@ -285,6 +287,7 @@ export async function world(o: { wallet?: boolean; fulfillment?: boolean } = {})
   };
   const ob = await offerFor(black!.id, 18900, 'NW-AU-100-BK');
   const ow = await offerFor(white!.id, 2500, 'NW-AU-100-WH');
+  for (const x of [ob, ow]) marketly.offers.set(x.id, { sellerId: seller.sellerId, stockItemId: x.stockItemId });
   const approved = await f.call('POST', `/api/admin/catalog/products/${productId}/approve`, { token: catalogToken, body: {} });
   expect(approved.status, JSON.stringify(approved.body)).toBe(200);
   await app.kernel.events.drain();
@@ -317,7 +320,7 @@ export async function world(o: { wallet?: boolean; fulfillment?: boolean } = {})
     offers: { black: ob.id, white: ow.id, officialWhite: official.body.offer.id },
     stock: { black: ob.stockItemId, white: ow.stockItemId, officialWhite: officialStock.id },
     service: app.kernel.boot.apis.get('checkout') as CheckoutService,
-    marketly,
+    marketly: { terms: marketly.terms, enroll: (id) => marketly.flip(id, true), leave: (id) => marketly.flip(id, false) },
     async call(method, url, token, body, headers) {
       const res = await app.inject({ method: method as never, url, headers: { ...(token ? auth(token) : {}), ...headers }, ...(body !== undefined ? { payload: body as never } : {}) });
       await app.kernel.events.drain();
@@ -336,26 +339,46 @@ export async function world(o: { wallet?: boolean; fulfillment?: boolean } = {})
 }
 
 /**
- * Offer.shipping for the real offers module until it resolves it itself (Fulfilled by Marketly is built in parallel):
- * every Offer read gets its own terms as its effective shipping, and enrolled offers Marketly's service terms (a
- * fulfilledBy change bumps termsVersion in offers; checkout compares fulfilledBy itself).
+ * fulfillment-service as offers and orders see it: getServiceTerms / isServiceOffer for the enrolled offers, and
+ * flip() publishing offer.service_changed (SKU activated / deactivated) the way the service does.
  */
-function shimOfferShipping(app: FastifyInstance, serviceProfileId: string, enrolled: Set<string>): World['marketly'] {
-  const terms: offers.OfferShipping = {
-    fulfilledBy: 'marketly_service',
-    profileId: serviceProfileId,
-    dispatch: { businessDays: 0, sameDayCutoff: '14:00', shipsFrom: 'Reno, NV (Marketly warehouse)', label: 'Ships today' },
+function fakeFulfillmentService(clock: { now(): Date }, serviceProfileId: string) {
+  const SHIPS_FROM = 'Reno, NV (Marketly warehouse)';
+  const terms: offers.OfferShipping = { fulfilledBy: 'marketly_service', profileId: serviceProfileId, dispatch: { businessDays: 0, sameDayCutoff: '14:00', shipsFrom: SHIPS_FROM, label: 'Ships today' } };
+  const enrolled = new Set<string>();
+  const offerRefs = new Map<string, { sellerId: string; stockItemId: string; skuEnrollmentId?: string }>();
+  const locationId = newId();
+  const ref = (offerId: string) => {
+    const r = offerRefs.get(offerId);
+    if (!r) throw new Error(`world: no seller offer ${offerId}`);
+    r.skuEnrollmentId ??= newId();
+    return r as Required<typeof r>;
   };
-  const core = (app.kernel.boot.apis.get('offers') as { core: { toOffers(rows: readonly unknown[]): Promise<offers.Offer[]> } }).core;
-  const toOffers = core.toOffers.bind(core);
-  core.toOffers = async (rows) =>
-    (await toOffers(rows)).map((o) => {
-      if (enrolled.has(o.id)) return { ...o, fulfilledBy: 'marketly_service', shipping: structuredClone(terms) };
-      if (o.shipping && o.fulfilledBy !== 'marketly_service') return o;
-      const own = o.ownerType === 'official' ? 'official_warehouse' : 'seller';
-      return { ...o, fulfilledBy: own, shipping: { fulfilledBy: own, profileId: o.shippingProfileId, dispatch: o.dispatch } };
-    });
-  return { terms, enroll: (id) => void enrolled.add(id), leave: (id) => void enrolled.delete(id) };
+  const api: Partial<PublicApiMap['fulfillment-service']> = {
+    isServiceOffer: async (offerId) => enrolled.has(offerId),
+    getServiceTerms: async (offerIds) =>
+      Object.fromEntries(
+        offerIds.map((offerId) => {
+          if (!enrolled.has(offerId)) return [offerId, null];
+          const r = ref(offerId);
+          return [offerId, { offerId, sellerId: r.sellerId, skuEnrollmentId: r.skuEnrollmentId, stockItemId: r.stockItemId, sellable: true, locationId, shipsFrom: SHIPS_FROM, dispatch: { businessDays: 0, sameDayCutoff: '14:00' }, shippingProfileId: serviceProfileId, parcel: { weightGrams: 600, dimensionsCm: { length: 25, width: 20, height: 10 } } }];
+        }),
+      ),
+  };
+  const fake = {
+    api,
+    terms,
+    offers: offerRefs,
+    app: undefined as FastifyInstance | undefined,
+    async flip(offerId: string, on: boolean) {
+      if (on) enrolled.add(offerId);
+      else enrolled.delete(offerId);
+      const r = ref(offerId);
+      fake.app!.kernel.events.publish('fulfillment-service', 'fulfillment-service.offer.service_changed', { offerId, sellerId: r.sellerId, skuEnrollmentId: r.skuEnrollmentId, stockItemId: r.stockItemId, fulfilledBy: on ? 'marketly_service' : 'seller', sellable: true, reason: on ? 'sku_activated' : 'sku_deactivated', at: clock.now().toISOString() });
+      await fake.app!.kernel.events.drain();
+    },
+  };
+  return fake;
 }
 
 /** Adds offers to the shopper's cart */

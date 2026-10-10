@@ -12,11 +12,10 @@ import { STORE, fillCart, key, placeBody, readyCheckout, world, type World } fro
 let w: World;
 
 beforeAll(async () => {
-  // fulfillment-service cannot boot until its own Fulfilled by Marketly batch lands; then orders checks marketly_service
-  // groups with isServiceOffer and this world needs it: world({ fulfillment: true })
-  w = await world();
+  // orders checks marketly_service groups with fulfillment-service.isServiceOffer
+  w = await world({ fulfillment: true });
   // the seller's black headphones are stored and shipped by Marketly; the white ones the seller ships
-  w.marketly.enroll(w.offers.black);
+  await w.marketly.enroll(w.offers.black);
 }, 180_000);
 afterAll(async () => {
   await w?.app.close();
@@ -103,7 +102,7 @@ describe('revalidation', () => {
     expect(v.packages.map((p: any) => p.fulfilledBy)).toEqual(['seller']);
 
     // Marketly starts fulfilling the white headphones
-    w.marketly.enroll(w.offers.white);
+    await w.marketly.enroll(w.offers.white);
     try {
       const placed = await w.call('POST', `${STORE}/sessions/${v.id}/place`, cy.token, placeBody(v), { 'idempotency-key': key() });
       expect(placed.body.outcome, JSON.stringify(placed.body)).toBe('changes_required');
@@ -123,7 +122,7 @@ describe('revalidation', () => {
       expect(again.body.outcome, JSON.stringify(again.body)).toBe('accepted');
       expect((await groupsOf(again.body.orderId)).map((g) => g.fulfilledBy)).toEqual(['marketly_service']);
     } finally {
-      w.marketly.leave(w.offers.white);
+      await w.marketly.leave(w.offers.white);
     }
   });
 
@@ -134,7 +133,7 @@ describe('revalidation', () => {
       { offerId: w.offers.officialWhite, quantity: 1 },
     ]);
     const v = await readyCheckout(w, dee.token, { source: 'cart' });
-    w.marketly.enroll(w.offers.white);
+    await w.marketly.enroll(w.offers.white);
     try {
       const found = await w.call('POST', `${STORE}/sessions/${v.id}/revalidate`, dee.token);
       expect(found.body.outcome, JSON.stringify(found.body)).toBe('changes_found');
@@ -145,7 +144,7 @@ describe('revalidation', () => {
       expect(ok.status, JSON.stringify(ok.body)).toBe(200);
       expect(ok.body.packages.map((p: any) => p.fulfilledBy)).toEqual(['official_warehouse']);
     } finally {
-      w.marketly.leave(w.offers.white);
+      await w.marketly.leave(w.offers.white);
     }
   });
 });

@@ -23,7 +23,7 @@ import type * as catalog from '../../../spec/catalog.js';
 import type * as fulfillment from '../../../spec/fulfillment-service.js';
 import type * as media from '../../../spec/media.js';
 import type { OffersPublicApi } from '../../../spec/offers.js';
-import type { OffersService } from '../service.js';
+import type { PublicApiMap } from '../../../kernel/module-system/index.js';
 import type * as sellers from '../../../spec/sellers.js';
 import type * as shipping from '../../../spec/shipping.js';
 import { auth, buildTestApp, movingClock, token } from '../../../testing/app.js';
@@ -94,11 +94,15 @@ export async function harness(o: { serviceTerms?: Map<string, fulfillment.Servic
     const s = seller(id);
     return s ? { id, ref: 'SL-1', slug: s.name.toLowerCase().replace(/\s+/g, '-'), storeName: s.name, status: s.status, verified: true, canSellNew: s.status === 'approved' || s.status === 'restricted', activeRestrictionIds: s.restrictions.map((r) => r.id), launchReady: s.launchReady } : null;
   };
+  let booted: FastifyInstance | undefined;
   const app = await buildTestApp({
     only: ['offers', 'access', 'audit', 'media', 'shipping', 'returns', 'reports'],
     clock,
     config: { rateLimits: false, launchPhase: 4 },
     apiStubs: {
+      inventory: fakeInventory(() => booted!, h),
+      // fulfillment-service is not booted: with o.serviceTerms its stub answers offers' optional lookup
+      ...(o.serviceTerms ? { 'fulfillment-service': fakeFulfillmentService(o.serviceTerms) } : {}),
       catalog: {
         getProduct: async (id) => h.products.get(id)?.product ?? null,
         getProductAdmin: async (id) => h.products.get(id) ?? null,
@@ -250,34 +254,26 @@ export async function harness(o: { serviceTerms?: Map<string, fulfillment.Servic
     },
   });
   for (const name of OFFER_EVENTS) app.kernel.events.subscribe('test', name, (e) => void h.events.push({ name, payload: e.payload }));
-  fakeInventory(app, h);
-  if (o.serviceTerms) fakeFulfillmentService(app, o.serviceTerms);
+  booted = app;
   return { ...h, app, api: app.kernel.boot.apis.get('offers') as OffersPublicApi };
 }
 
-/**
- * fulfillment-service is being rebuilt in parallel and cannot boot yet, so apiStubs (which only replace functions of
- * running modules) cannot reach it: offers' optional-module lookup answers a stand-in whose getServiceTerms reads the map.
- */
-function fakeFulfillmentService(app: FastifyInstance, terms: Map<string, fulfillment.ServiceTerms | null>) {
-  const ctx = (app.kernel.boot.apis.get('offers') as OffersService).core.ctx as unknown as { tryUse: (m: string) => unknown };
-  const tryUse = ctx.tryUse.bind(ctx);
-  const stub = { getServiceTerms: async (offerIds: string[]) => Object.fromEntries(offerIds.map((id) => [id, terms.get(id) ?? null])) };
-  ctx.tryUse = (m: string) => (m === 'fulfillment-service' ? stub : tryUse(m));
+/** fulfillment-service.getServiceTerms answered from the map (offers missing from it: null) */
+function fakeFulfillmentService(terms: Map<string, fulfillment.ServiceTerms | null>): Partial<PublicApiMap['fulfillment-service']> {
+  return { getServiceTerms: async (offerIds: string[]) => Object.fromEntries(offerIds.map((id) => [id, terms.get(id) ?? null])) };
 }
 
 /**
  * In-memory stock behind the inventory functions offers calls (inventory itself is being changed in parallel):
  * stock items per offer with available units, SKU uniqueness per owner (SKU_TAKEN), availability cues and
- * inventory.stock.changed published the way inventory does. Replaced on the service instance, because apiStubs
- * would wrap the service in a proxy its private methods refuse.
+ * inventory.stock.changed published the way inventory does (an apiStubs entry: inventory's other functions stay real).
  */
-function fakeInventory(app: FastifyInstance, h: Pick<Harness, 'stockUpdates'> & { clock: ReturnType<typeof movingClock> }) {
+function fakeInventory(app: () => FastifyInstance, h: Pick<Harness, 'stockUpdates'> & { clock: ReturnType<typeof movingClock> }): Partial<PublicApiMap['inventory']> {
   type Item = { id: string; ownerType: 'official' | 'seller'; sellerId: string | null; sku: string; offerId: string | null; productId: string; variantId: string; condition: string; label: string; available: number; lowStockThreshold: number | null; archived: boolean };
   const items = new Map<string, Item>();
   const stateOf = (i: Item) => (i.available <= 0 ? 'out_of_stock' : i.lowStockThreshold !== null && i.available <= i.lowStockThreshold ? 'low_stock' : 'in_stock');
   const changed = (i: Item, previousAvailable: number, cause: string) =>
-    app.kernel.events.publish('inventory', 'inventory.stock.changed', { stockItemId: i.id, offerId: i.offerId, ownerType: i.ownerType, sellerId: i.sellerId, productId: i.productId, variantId: i.variantId, available: i.available, reserved: 0, previousAvailable, state: stateOf(i), archived: i.archived, cause }, { actor: { kind: 'system', id: null } });
+    app().kernel.events.publish('inventory', 'inventory.stock.changed', { stockItemId: i.id, offerId: i.offerId, ownerType: i.ownerType, sellerId: i.sellerId, productId: i.productId, variantId: i.variantId, available: i.available, reserved: 0, previousAvailable, state: stateOf(i), archived: i.archived, cause }, { actor: { kind: 'system', id: null } });
   const api = (i: Item) => ({
     id: i.id,
     ownerType: i.ownerType,
@@ -296,7 +292,7 @@ function fakeInventory(app: FastifyInstance, h: Pick<Harness, 'stockUpdates'> & 
     archived: i.archived,
     updatedAt: h.clock.now().toISOString(),
   });
-  const inventory = app.kernel.boot.apis.get('inventory') as Record<string, unknown>;
+  const inventory: Record<string, unknown> = {};
   inventory.createStockItem = async (input: { ownerType: 'official' | 'seller'; sellerId?: string; offerId?: string; sku: string; productId: string; variantId: string; condition: string; label: string; initialAvailable: number; lowStockThreshold?: number }) => {
     const owner = input.ownerType === 'seller' ? (input.sellerId ?? null) : null;
     if ([...items.values()].some((i) => !i.archived && i.ownerType === input.ownerType && i.sellerId === owner && i.sku === input.sku)) throw new AppError('SKU_TAKEN', `SKU ${input.sku} is already used by another stock item`, undefined, 409);
@@ -338,6 +334,7 @@ function fakeInventory(app: FastifyInstance, h: Pick<Harness, 'stockUpdates'> & 
     if (i) Object.assign(i, Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)));
     return i ? api(i) : { id: stockItemId };
   };
+  return inventory as Partial<PublicApiMap['inventory']>;
 }
 
 /* ---------------------------------------------------------------- callers */

@@ -47,5 +47,8 @@ export const enabledModules: string[] = [
   // Later phases (off at launch)
   // 'wallet',              // phase 3: store credit and gift cards
   // 'wishlist',            // phase 3: saved items and alerts
-  // 'fulfillment-service', // phase 4: storage and shipping for sellers
+  // 'fulfillment-service', // phase 4: storage and shipping for sellers (Fulfilled by Marketly). Before enabling it, set
+  //                        // fulfillment-service.serviceLocationId and serviceShippingProfileId, or rely on the defaults:
+  //                        // inventory's default company location and shipping's Official Store default profile (without
+  //                        // either, getServiceTerms answers service_unavailable and no offer sells as Fulfilled by Marketly)
 ];

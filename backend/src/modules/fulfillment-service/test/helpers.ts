@@ -337,6 +337,8 @@ export async function boot(): Promise<Kit> {
     clock,
     config: { rateLimits: false, launchPhase: 4 },
     apiStubs: {
+      inventory: inv.stubs,
+      access: accessStubs,
       finance: financeStubs(financeLedger, financeCredits, financeCalls),
       shipping: { getOfficialDefaultProfile: async () => PROFILE },
       notifications: {
@@ -375,10 +377,6 @@ export async function boot(): Promise<Kit> {
       },
     },
   });
-  // inventory's K7 functions on the real inventory service (apiStubs' proxy would call its other methods with the
-  // proxy as `this`, which its private fields refuse)
-  Object.assign(app.kernel.boot.apis.get('inventory')!, inv.stubs);
-  Object.assign(app.kernel.boot.apis.get('access')!, accessStubs);
   publishFn = async (name, payload) => {
     app.kernel.events.publish(name.split('.')[0]!, name, payload, { actor: { kind: 'system' } });
     await app.kernel.events.drain();

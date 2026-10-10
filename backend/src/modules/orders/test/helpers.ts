@@ -19,7 +19,6 @@ import type * as catalog from '../../../spec/catalog.js';
 import type * as offers from '../../../spec/offers.js';
 import type { OrderCreateInput, OrderGroupInput, OrderItemInput } from '../../../spec/orders.js';
 import type * as reports from '../../../spec/reports.js';
-import type { PublicApiMap } from '../../../kernel/module-system/index.js';
 import { auth, buildTestApp, callers, movingClock } from '../../../testing/app.js';
 import type { OrdersService } from '../service.js';
 
@@ -49,9 +48,8 @@ export interface Harness {
 export const CATEGORY = { root: newId(), child: newId() };
 
 /**
- * fulfillmentService: orders sees fulfillment-service as on, with isServiceOffer answered from h.serviceOffers.
- * fulfillment-service itself is not booted (its phase 4 rebuild lands in another batch and it can't boot on this
- * base), so orders' tryUse('fulfillment-service') is answered by the stub instead of an apiStubs entry.
+ * fulfillmentService: orders sees fulfillment-service as on (an apiStubs entry answers its optional lookup without
+ * booting it), with isServiceOffer answered from h.serviceOffers.
  */
 export async function harness(o: { fulfillmentService?: boolean } = {}): Promise<Harness> {
   const clock = movingClock();
@@ -85,6 +83,7 @@ export async function harness(o: { fulfillmentService?: boolean } = {}): Promise
     clock,
     config: { rateLimits: false, launchPhase: 4 },
     apiStubs: {
+      ...(o.fulfillmentService ? { 'fulfillment-service': { isServiceOffer: async (offerId: string) => h.serviceOffers.has(offerId) } } : {}),
       offers: {
         snapshotForOrder: async (offerId) => {
           const o = h.offers.get(offerId);
@@ -138,13 +137,6 @@ export async function harness(o: { fulfillmentService?: boolean } = {}): Promise
       },
     },
   });
-  const service = app.kernel.boot.apis.get('orders') as OrdersService | undefined;
-  if (o.fulfillmentService && service) {
-    const ctx = service.core.ctx as { tryUse: (m: string) => unknown };
-    const real = ctx.tryUse.bind(ctx);
-    const fs: Partial<PublicApiMap['fulfillment-service']> = { isServiceOffer: async (offerId) => h.serviceOffers.has(offerId) };
-    ctx.tryUse = (m) => (m === 'fulfillment-service' ? fs : real(m));
-  }
   const events: Harness['events'] = h.events;
   for (const name of [
     'orders.order.placed',
@@ -173,7 +165,7 @@ export async function harness(o: { fulfillmentService?: boolean } = {}): Promise
   return {
     ...h,
     app,
-    service: service!,
+    service: app.kernel.boot.apis.get('orders') as OrdersService,
     call,
     async publish(source, name, payload) {
       app.kernel.events.publish(source, name, payload);

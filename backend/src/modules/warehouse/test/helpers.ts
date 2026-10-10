@@ -133,6 +133,8 @@ export async function harness(opts: { fulfillmentService?: boolean } = {}): Prom
     clock,
     config: { rateLimits: false },
     apiStubs: {
+      // fulfillment-service is not booted: its stub answers warehouse's optional lookup
+      ...(opts.fulfillmentService ? { 'fulfillment-service': { getServiceLocation: async () => structuredClone(self.serviceLocation) } } : {}),
       orders: {
         getFulfillmentTask: async (groupId) => {
           const t = h.tasks.get(groupId);
@@ -242,13 +244,6 @@ export async function harness(opts: { fulfillmentService?: boolean } = {}): Prom
     app.kernel.events.subscribe('warehouse-test', name, (e) => void h.events.push({ name: e.name, payload: e.payload }));
   }
   const service = app.kernel.boot.apis.get('warehouse') as WarehouseService;
-  if (opts.fulfillmentService) {
-    // fulfillment-service is an optional dependency, off in tests (apiStubs reach only modules that run, and it does not
-    // boot alone while its own Fulfilled by Marketly batch is built): warehouse's tryUse answers getServiceLocation here
-    const ctx = service.core.ctx as unknown as { tryUse: (m: string) => unknown };
-    const tryUse = ctx.tryUse.bind(ctx);
-    ctx.tryUse = (m) => (m === 'fulfillment-service' ? { getServiceLocation: async () => structuredClone(self.serviceLocation) } : tryUse(m));
-  }
   const staffId = newId();
   const staff = callers.staff(undefined, { sub: staffId });
 
