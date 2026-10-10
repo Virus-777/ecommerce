@@ -17,6 +17,8 @@ type WarehouseTask @areas(in: [ADMIN]) {
   packages: [WarehousePackage!]!
   "e.g. 'Shortage reported: bin F-12-3 empty. Inventory is checking.'"
   holdReason: String
+  "When shipping reported the dispatch deadline missed; the order then leads the pick list"
+  dispatchOverdueAt: DateTime
   "e.g. 'This order also has Package 2 of 2 from Pixel & Port. They ship it separately.'"
   mixedOrderNote: String
   totalPackagesInOrder: Int!

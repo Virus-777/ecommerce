@@ -85,6 +85,7 @@
       "lines": "FulfillmentLine[]",
       "packages": "Package[]",
       "holdReason": { "type": "string?", "desc": "e.g. 'Shortage reported: bin F-12-3 empty. Inventory is checking.'" },
+      "dispatchOverdueAt": { "type": "datetime?", "desc": "When shipping reported the dispatch deadline missed (shipping.dispatch.overdue); the order then leads the pick list" },
       "mixedOrderNote": { "type": "string?", "desc": "e.g. 'This order also has Package 2 of 2 from Pixel & Port. They ship it separately.'" },
       "totalPackagesInOrder": "int",
       "createdAt": "datetime"
@@ -145,6 +146,7 @@
       "handlingNote": "string?",
       "carrier": "string?",
       "service": "string?",
+      "carrierServiceId": { "type": "uuid?", "desc": "Shipping carrier service chosen at packing (PackageUpdate.serviceCode); the label is bought with it" },
       "trackingNumber": "string?",
       "labelUrl": "url?",
       "packedBy": "Actor?",
@@ -223,12 +225,12 @@
   "tables": [
     { "name": "bins", "columns": { "id": "uuid pk", "location_id": "uuid", "code": "text", "zone": "text", "kind": "text", "barcode": "text", "active": "bool" }, "indexes": ["unique (location_id, code)", "unique (barcode)", "(location_id, zone)"] },
     { "name": "bin_assignments", "desc": "Which stock items are stored in which bins", "columns": { "stock_item_id": "uuid", "bin_id": "uuid → bins", "primary_bin": "bool", "assigned_at": "timestamptz" }, "indexes": ["pk (stock_item_id, bin_id)", "unique (stock_item_id) where primary_bin", "(bin_id)"] },
-    { "name": "fulfillments", "desc": "One per Official Store seller group of an accepted order", "columns": { "id": "uuid pk", "order_id": "uuid", "order_ref": "text", "seller_group_id": "uuid unique", "location_id": "uuid", "status": "text", "ship_by": "timestamptz", "delivery_choice": "text", "ship_to": "jsonb", "wave_id": "uuid? → waves", "hold_reason": "text?", "discrepancy_ids": "jsonb", "total_packages_in_order": "int", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(status, ship_by)", "(wave_id)", "(order_id)"] },
+    { "name": "fulfillments", "desc": "One per Official Store seller group of an accepted order", "columns": { "id": "uuid pk", "order_id": "uuid", "order_ref": "text", "seller_group_id": "uuid unique", "location_id": "uuid", "status": "text", "ship_by": "timestamptz", "delivery_choice": "text", "ship_to": "jsonb", "wave_id": "uuid? → waves", "hold_reason": "text?", "dispatch_overdue_at": "timestamptz? (shipping.dispatch.overdue: the dispatch deadline was missed)", "discrepancy_ids": "jsonb", "total_packages_in_order": "int", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(status, ship_by)", "(wave_id)", "(order_id)"] },
     { "name": "fulfillment_lines", "columns": { "id": "uuid pk", "fulfillment_id": "uuid → fulfillments", "order_item_id": "uuid", "stock_item_id": "uuid", "sku": "text", "label": "text", "quantity": "int", "bin_code": "text?", "picked": "int", "short": "int", "state": "text", "picked_by": "text?", "picked_at": "timestamptz?" }, "indexes": ["(fulfillment_id)", "(bin_code)"] },
     { "name": "waves", "columns": { "id": "uuid pk", "ref": "text", "location_id": "uuid", "status": "text", "carrier_pickup_at": "timestamptz?", "created_by": "text", "created_at": "timestamptz", "completed_at": "timestamptz?" }, "indexes": ["(location_id, status)"] },
     { "name": "scan_log", "desc": "Every scan at pick, pack, put-away and returns (troubleshooting and productivity)", "columns": { "id": "uuid pk", "context": "text", "context_id": "uuid?", "code": "text", "result": "text", "actor_id": "text", "station": "text?", "at": "timestamptz" }, "indexes": ["(context, context_id, at)"] },
     { "name": "box_types", "columns": { "id": "uuid pk", "name": "text", "kind": "text", "dimensions": "jsonb", "max_weight": "jsonb?", "active": "bool" } },
-    { "name": "packages", "columns": { "id": "uuid pk", "fulfillment_id": "uuid → fulfillments", "index_in_order": "int", "of_in_order": "int", "status": "text", "box_type_id": "uuid? → box_types", "dimensions": "jsonb?", "weight": "jsonb?", "fragile": "bool", "handling_note": "text?", "carrier": "text?", "service": "text?", "tracking_number": "text?", "label_media_id": "uuid?", "label_idempotency_key": "text?", "shipment_id": "uuid?", "packed_by": "text?", "packed_at": "timestamptz?", "station": "text?" }, "indexes": ["(fulfillment_id)", "unique (tracking_number)"] },
+    { "name": "packages", "columns": { "id": "uuid pk", "fulfillment_id": "uuid → fulfillments", "index_in_order": "int", "of_in_order": "int", "status": "text", "box_type_id": "uuid? → box_types", "dimensions": "jsonb?", "weight": "jsonb?", "fragile": "bool", "handling_note": "text?", "carrier": "text?", "service": "text?", "carrier_service_id": "uuid? (shipping carrier service chosen at packing)", "tracking_number": "text?", "label_media_id": "uuid?", "label_idempotency_key": "text?", "shipment_id": "uuid?", "packed_by": "text?", "packed_at": "timestamptz?", "station": "text?" }, "indexes": ["(fulfillment_id)", "unique (tracking_number)"] },
     { "name": "package_items", "columns": { "package_id": "uuid → packages", "order_item_id": "uuid", "stock_item_id": "uuid", "quantity": "int", "scanned": "int", "serial_numbers": "text[]" }, "indexes": ["pk (package_id, order_item_id)"] },
     { "name": "putaway_tasks", "columns": { "id": "uuid pk", "receipt_id": "uuid", "receipt_ref": "text", "location_id": "uuid", "stock_item_id": "uuid", "quantity": "int", "suggested_bin_code": "text?", "bin_code": "text?", "status": "text", "done_by": "text?", "done_at": "timestamptz?" }, "indexes": ["(status, receipt_id)"] },
     { "name": "return_parcels", "columns": { "id": "uuid pk", "location_id": "uuid", "return_id": "uuid?", "return_ref": "text?", "order_ref": "text?", "tracking_number": "text?", "status": "text", "expected_by": "date?", "expected_items": "jsonb", "unexpected": "bool", "parcel_condition": "text?", "photo_media_ids": "jsonb", "note": "text?", "received_by": "text?", "received_at": "timestamptz?", "handed_over_to": "text?", "handed_over_at": "timestamptz?" }, "indexes": ["(status, expected_by)", "(return_id)", "(tracking_number)"] }
@@ -386,6 +388,7 @@
     "PARCEL_ALREADY_RECEIVED": { "status": 409, "meaning": "This return parcel was already received. details.parcelId" }
   },
   "notes": [
+    "Event consumers and once-only jobs are idempotent through the kernel inbox (ctx.inbox), never through scan_log rows: orders.item.cancelled claims item-cancelled:<cancellationId>, shipping.dispatch.overdue claims dispatch-overdue:<exceptionId> and the at-risk job claims at-risk:<fulfillmentId>. scan_log stays a troubleshooting and productivity log.",
     "Scope is Official Store stock only at launch. Outside sellers pick and pack their own orders; their tasks and shipments are in orders and shipping. The future fulfillment service (phase 4) reuses fulfillments, waves and packing for seller-owned stock.",
     "Mixed orders: a fulfillment covers only the Official Store seller group. The packing slip lists only those items and says which package number it is and that other packages ship separately.",
     "Labels are bought through shipping (shipping.createLabel with the package, the delivery choice and an idempotency key); warehouse never talks to carriers directly.",

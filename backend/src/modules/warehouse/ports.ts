@@ -85,6 +85,8 @@ export interface PageOptions<R> {
 export interface WarehouseRepository {
   /** Runs fn in one transaction (nested calls join the outer one) */
   transaction<T>(fn: (tx: WarehouseRepository) => Promise<T>): Promise<T>;
+  /** Claims a consumer's or job's once-only key (kernel inbox) on this connection; false when already handled */
+  claim(key: string): Promise<boolean>;
 
   get<T extends IdTable>(table: T, id: string, o?: { forUpdate?: boolean }): Promise<Recs[T] | undefined>;
   find<T extends Table>(table: T, where: Where<Recs[T]>, o?: FindOptions<Recs[T]>): Promise<Recs[T][]>;

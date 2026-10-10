@@ -54,7 +54,7 @@ export class Bins {
       {
         action: 'warehouse.bins.create',
         actionLabel: created.length === 1 ? 'Created a bin' : `Created ${created.length} bins`,
-        category: 'other',
+        category: 'inventory',
         target: { type: 'bin', id: created[0]!.id, ref: created[0]!.code, label: created.length === 1 ? `${body.kind} bin ${created[0]!.code}` : `${created.length} ${body.kind} bins`, screen: 'ops/inventory' },
         after: { locationId: body.locationId, kind: body.kind, codes },
       },
@@ -83,7 +83,7 @@ export class Bins {
         {
           action: 'warehouse.bins.update',
           actionLabel: after.active ? 'Changed a bin' : 'Deactivated a bin',
-          category: 'other',
+          category: 'inventory',
           target: { type: 'bin', id, ref: after.code, label: `Bin ${after.code}`, screen: 'ops/inventory' },
           before: { kind: before.kind, active: before.active },
           after: { kind: after.kind, active: after.active },
@@ -154,7 +154,7 @@ export class Bins {
       {
         action: 'warehouse.bins.assign',
         actionLabel: 'Changed the bins of a stock item',
-        category: 'other',
+        category: 'inventory',
         target: { type: 'stock_item', id: stockItemId, ref: info.sku, label: info.label, screen: 'ops/inventory' },
         before: await Promise.all(before.map(async (r) => ({ binCode: await codeOf(r.bin_id), primary: r.primary_bin }))),
         after: after.map((a) => ({ binCode: a.binCode, primary: a.primary })),

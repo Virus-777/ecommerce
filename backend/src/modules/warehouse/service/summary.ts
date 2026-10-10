@@ -186,8 +186,12 @@ export class Summary {
     const rows = await this.repo.find('fulfillments', { status: [...UNPACKED_STATUSES], ship_by: { op: '<=', value: due } }, { orderBy: [['ship_by', 'asc']], limit: 500 });
     let flagged = 0;
     for (const f of rows) {
-      if ((await this.repo.count('scan_log', { context: 'at_risk', context_id: f.id })) > 0) continue;
-      await this.core.logScan({ context: 'at_risk', contextId: f.id, code: f.order_ref, result: f.status, actor: SYSTEM });
+      const first = await this.repo.transaction(async (tx) => {
+        if (!(await tx.claim(`at-risk:${f.id}`))) return false;
+        await this.core.logScan({ context: 'at_risk', contextId: f.id, code: f.order_ref, result: f.status, actor: SYSTEM }, tx);
+        return true;
+      });
+      if (!first) continue;
       this.core.publish('warehouse.fulfillment.at_risk', { fulfillmentId: f.id, orderId: f.order_id, shipBy: f.ship_by.toISOString(), status: f.status });
       await this.core.soft('workqueues', 'at-risk pick and pack', (w) =>
         w.raise({
