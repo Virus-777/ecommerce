@@ -64,7 +64,9 @@ export const Counterparty: z.ZodType<Counterparty> = z.object({
 }).register(common.apiTypes, { id: "messaging.Counterparty" });
 
 export interface Participant {
-  kind: "customer" | "seller" | "staff";
+  /** guest: the buyer of a guest order; any guest session with access to the order acts as this participant */
+  kind: "customer" | "guest" | "seller" | "staff";
+  /** customer: customers-module id; guest: order:<orderId>; seller: seller id (OFFICIAL_STORE_ID for the Official Store); staff: staff account id */
   id: string;
   name: string;
   /** e.g. Marketly Support */
@@ -75,8 +77,8 @@ export interface Participant {
 }
 
 export const Participant: z.ZodType<Participant> = z.object({
-  kind: z.enum(["customer", "seller", "staff"]),
-  id: z.string(),
+  kind: z.enum(["customer", "guest", "seller", "staff"]).describe("guest: the buyer of a guest order; any guest session with access to the order acts as this participant"),
+  id: z.string().describe("customer: customers-module id; guest: order:<orderId>; seller: seller id (OFFICIAL_STORE_ID for the Official Store); staff: staff account id"),
   name: z.string(),
   label: z.string().describe("e.g. Marketly Support"),
   joinedAt: z.iso.datetime({ offset: true }),
@@ -222,9 +224,10 @@ export const MessageInput: z.ZodType<MessageInput> = z.object({
 }).register(common.apiTypes, { id: "messaging.MessageInput" });
 
 export interface StartConversationInput {
-  with: "seller" | "marketplace_support";
+  /** official_store: about Official Store items in the order (answered by Marketly staff for the Official Store) */
+  with: "seller" | "official_store" | "marketplace_support";
   orderId: string;
-  /** Required for with = seller; must be a seller in the order */
+  /** Required for with = seller; must be a seller in the order. Ignored for official_store (OFFICIAL_STORE_ID is used) */
   sellerId?: string | null;
   orderItemId?: string | null;
   returnId?: string | null;
@@ -235,9 +238,9 @@ export interface StartConversationInput {
 }
 
 export const StartConversationInput: z.ZodType<StartConversationInput> = z.object({
-  with: z.enum(["seller", "marketplace_support"]),
+  with: z.enum(["seller", "official_store", "marketplace_support"]).describe("official_store: about Official Store items in the order (answered by Marketly staff for the Official Store)"),
   orderId: z.uuid(),
-  sellerId: z.uuid().describe("Required for with = seller; must be a seller in the order").nullish(),
+  sellerId: z.uuid().describe("Required for with = seller; must be a seller in the order. Ignored for official_store (OFFICIAL_STORE_ID is used)").nullish(),
   orderItemId: z.uuid().nullish(),
   returnId: z.uuid().nullish(),
   caseId: z.uuid().nullish(),
@@ -294,6 +297,8 @@ export const SellerStartInput: z.ZodType<SellerStartInput> = z.object({
 export interface ResponseStats {
   targetHours: number;
   averageReplyMinutes?: number | null;
+  /** Median first reply time in the period (reports' first_reply_minutes_p50, support's seller stats) */
+  medianReplyMinutes?: number | null;
   repliedWithinTargetPct?: number | null;
   awaitingReply: number;
   overdue: number;
@@ -303,6 +308,7 @@ export interface ResponseStats {
 export const ResponseStats: z.ZodType<ResponseStats> = z.object({
   targetHours: z.number().int(),
   averageReplyMinutes: z.number().int().nullish(),
+  medianReplyMinutes: z.number().int().describe("Median first reply time in the period (reports' first_reply_minutes_p50, support's seller stats)").nullish(),
   repliedWithinTargetPct: z.number().nullish(),
   awaitingReply: z.number().int(),
   overdue: z.number().int(),
@@ -422,21 +428,39 @@ export const CustomerConversationSummary: z.ZodType<CustomerConversationSummary>
 export interface MessagingMessageSentEvent {
   messageId: string;
   conversationId: string;
-  authorKind: string;
-  recipientKinds: string[];
+  conversationKind: "order" | "support" | "staff_seller";
+  authorKind: "customer" | "guest" | "seller" | "staff" | "system";
+  /** official_store: the Official Store team (staff topic for Official Store messages) */
+  recipientKinds: ("customer" | "guest" | "seller" | "official_store" | "staff")[];
+  /** Customers-module id of the customer participant; null for guests */
   customerId?: string | null;
+  /** Order contact email of a guest participant */
+  contactEmail?: string | null;
+  /** Applicant account in a seller-application conversation */
+  applicantAccountId?: string | null;
+  /** Seller participant; OFFICIAL_STORE_ID for the Official Store */
   sellerId?: string | null;
+  officialStore: boolean;
+  /** Staff participants other than the author (e.g. the case owner who joined) */
+  staffIds: string[];
   orderId?: string | null;
+  caseId?: string | null;
 }
 
 export const MessagingMessageSentEvent: z.ZodType<MessagingMessageSentEvent> = z.object({
   messageId: z.uuid(),
   conversationId: z.uuid(),
-  authorKind: z.string(),
-  recipientKinds: z.array(z.string()),
-  customerId: z.uuid().nullish(),
-  sellerId: z.uuid().nullish(),
+  conversationKind: z.enum(["order", "support", "staff_seller"]),
+  authorKind: z.enum(["customer", "guest", "seller", "staff", "system"]),
+  recipientKinds: z.array(z.enum(["customer", "guest", "seller", "official_store", "staff"])).describe("official_store: the Official Store team (staff topic for Official Store messages)"),
+  customerId: z.uuid().describe("Customers-module id of the customer participant; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email of a guest participant").nullish(),
+  applicantAccountId: z.uuid().describe("Applicant account in a seller-application conversation").nullish(),
+  sellerId: z.uuid().describe("Seller participant; OFFICIAL_STORE_ID for the Official Store").nullish(),
+  officialStore: z.boolean(),
+  staffIds: z.array(z.uuid()).describe("Staff participants other than the author (e.g. the case owner who joined)"),
   orderId: z.uuid().nullish(),
+  caseId: z.uuid().nullish(),
 });
 
 /** messaging.conversation.started: A new conversation is created */
@@ -444,27 +468,37 @@ export interface MessagingConversationStartedEvent {
   conversationId: string;
   kind: string;
   orderId?: string | null;
+  customerId?: string | null;
   sellerId?: string | null;
+  officialStore: boolean;
+  applicationId?: string | null;
 }
 
 export const MessagingConversationStartedEvent: z.ZodType<MessagingConversationStartedEvent> = z.object({
   conversationId: z.uuid(),
   kind: z.string(),
   orderId: z.uuid().nullish(),
+  customerId: z.uuid().nullish(),
   sellerId: z.uuid().nullish(),
+  officialStore: z.boolean(),
+  applicationId: z.uuid().nullish(),
 });
 
-/** messaging.reply.overdue: A seller misses the reply target */
+/** messaging.reply.overdue: A seller or the Official Store misses the reply target */
 export interface MessagingReplyOverdueEvent {
   conversationId: string;
+  /** OFFICIAL_STORE_ID for the Official Store */
   sellerId: string;
+  /** True: staff owe the reply (official_store_reply work item), not a seller task */
+  officialStore: boolean;
   orderId?: string | null;
   dueAt: string;
 }
 
 export const MessagingReplyOverdueEvent: z.ZodType<MessagingReplyOverdueEvent> = z.object({
   conversationId: z.uuid(),
-  sellerId: z.uuid(),
+  sellerId: z.uuid().describe("OFFICIAL_STORE_ID for the Official Store"),
+  officialStore: z.boolean().describe("True: staff owe the reply (official_store_reply work item), not a seller task"),
   orderId: z.uuid().nullish(),
   dueAt: z.iso.datetime({ offset: true }),
 });
@@ -482,22 +516,50 @@ export const MessagingMessageReportedEvent: z.ZodType<MessagingMessageReportedEv
   reason: z.string(),
 });
 
-/** messaging.conversation.locked: Staff lock a conversation */
+/** messaging.conversation.locked: Staff lock a conversation, a message report is actioned with a lock, or a trust lock_conversation enforcement is executed */
 export interface MessagingConversationLockedEvent {
   conversationId: string;
   reason: string;
+  lockedBy: common.Actor;
+  /** Set when trust's lock_conversation enforcement locked it (trust confirms execution) */
+  trustEnforcementId?: string | null;
+  customerId?: string | null;
+  sellerId?: string | null;
 }
 
 export const MessagingConversationLockedEvent: z.ZodType<MessagingConversationLockedEvent> = z.object({
   conversationId: z.uuid(),
   reason: z.string(),
+  get lockedBy() {
+    return common.Actor;
+  },
+  trustEnforcementId: z.uuid().describe("Set when trust's lock_conversation enforcement locked it (trust confirms execution)").nullish(),
+  customerId: z.uuid().nullish(),
+  sellerId: z.uuid().nullish(),
+});
+
+/** messaging.conversation.unlocked: Staff unlock a conversation or the trust enforcement that locked it is reversed */
+export interface MessagingConversationUnlockedEvent {
+  conversationId: string;
+  reason: string;
+  unlockedBy: common.Actor;
+  trustEnforcementId?: string | null;
+}
+
+export const MessagingConversationUnlockedEvent: z.ZodType<MessagingConversationUnlockedEvent> = z.object({
+  conversationId: z.uuid(),
+  reason: z.string(),
+  get unlockedBy() {
+    return common.Actor;
+  },
+  trustEnforcementId: z.uuid().nullish(),
 });
 
 /* ------------------------------------------------------------------ public API (in-process) */
 
 /** What other modules may call in-process: `ctx.use('messaging')` (or `ctx.tryUse` for an optional dependency). */
 export interface MessagingPublicApi {
-  /** One conversation per customer, seller and subject; reused when it exists Used by: orders, returns. */
+  /** One conversation per customer, seller and subject; reused when it exists. sellerId is OFFICIAL_STORE_ID for the Official Store Used by: orders, returns. */
   findOrStartForOrder(input: { orderId: string, sellerId: string, orderItemId?: string, returnId?: string }): Promise<Conversation>;
   /** e.g. Marketly Support joined from case CS-261005-3381 Used by: support, returns. */
   postSystemNote(conversationId: string, text: string): Promise<Message>;
@@ -521,6 +583,8 @@ export interface MessagingPublicApi {
   getConversation(participant: common.Actor, conversationId: string): Promise<Conversation | null>;
   /** Counts, last message time and counterparties of each customer's conversations for the customer 360; never message content Used by: customers, graphql. */
   customerConversationSummaries(customerIds: string[]): Promise<Record<string, CustomerConversationSummary>>;
+  /** The customer's conversations and the messages they can see (no hidden messages, internal notes or other parties' contact details) for the personal data export. Export hook called by customers.build-data-exports Used by: customers. */
+  exportCustomerData(input: { customerId: string, accountId: string }): Promise<common.CustomerDataSection[]>;
 }
 
 /* ------------------------------------------------------------------ tables (Kysely row types) */
@@ -542,6 +606,8 @@ export interface MessagingDb {
     subject: Json;
     status: string;
     locked_reason: string | null;
+    /** trust enforcement that locked it; unlocked when that enforcement is reversed */
+    locked_by_enforcement_id: string | null;
     reply_state: string;
     reply_due_at: Date | null;
     awaiting_since: Date | null;
@@ -597,6 +663,12 @@ export interface MessagingDb {
     name: string;
     body: string;
     updated_at: Date;
+  };
+  /** Ids of duplicate conversations merged into another (dedupe migration); lookups by an old id (notifications links, support case links) resolve to the kept conversation */
+  conversation_aliases: {
+    old_id: string;
+    conversation_id: string;
+    merged_at: Date;
   };
   /** Each time staff open a private conversation, with the reason */
   staff_access_log: {
@@ -671,8 +743,8 @@ export const endpoints = defineEndpoints({
     path: "/conversations",
     auth: "shopper",
     scope: "own-customer",
-    summary: "Message a seller or Marketly support about an order, item or return",
-    desc: "Reuses the existing conversation for the same subject and appends the message.",
+    summary: "Message a seller, the Official Store or Marketly support about an order, item or return",
+    desc: "Reuses the existing conversation for the same subject and appends the message. A customer with an active messaging restriction (customers.canSendMessages) gets MESSAGING_RESTRICTED; replies inside a case conversation stay allowed. Guests write as the order's guest participant (any session with access to the order).",
     body: () => StartConversationInput,
     response: () => z.object({
       get conversation() {
@@ -683,7 +755,7 @@ export const endpoints = defineEndpoints({
       },
     }),
     status: 201,
-    errors: ["ORDER_NOT_ELIGIBLE","NOT_FOUND"],
+    errors: ["ORDER_NOT_ELIGIBLE","NOT_FOUND","MESSAGING_RESTRICTED"],
     events: ["messaging.conversation.started","messaging.message.sent"],
     screens: ["account/order","account/tracking","account/messages","account/return"],
     phase: 1,
@@ -702,7 +774,7 @@ export const endpoints = defineEndpoints({
     body: () => MessageInput,
     response: () => Message,
     status: 201,
-    errors: ["CONVERSATION_LOCKED"],
+    errors: ["CONVERSATION_LOCKED","MESSAGING_RESTRICTED"],
     events: ["messaging.message.sent"],
     screens: ["account/messages"],
     phase: 1,
@@ -991,14 +1063,14 @@ export const endpoints = defineEndpoints({
     permission: "messaging.conversations.read",
     scope: "staff",
     summary: "Find conversations by order, customer or seller",
-    desc: "Returns headers only; reading messages is a separate, logged call.",
+    desc: "Returns headers only; reading messages is a separate, logged call. filter=official_awaiting lists Official Store conversations waiting for a staff reply (awaiting or overdue), oldest due first.",
     query: () =>
       z.object({
         orderId: z.uuid().optional(),
         customerId: z.uuid().optional(),
         sellerId: z.uuid().optional(),
         caseId: z.uuid().optional(),
-        filter: z.enum(["overdue", "reported", "locked"]).optional(),
+        filter: z.enum(["overdue", "reported", "locked", "official_awaiting"]).optional(),
       }),
     paging: true,
     response: () => AdminConversationRow,
@@ -1038,7 +1110,7 @@ export const endpoints = defineEndpoints({
     permission: "messaging.conversations.participate",
     scope: "staff",
     summary: "Start a Marketly staff conversation with a seller or seller applicant, optionally about an order, items or a return",
-    desc: "Used by Message seller (admin/seller), Message applicant (admin/seller-application) and Contact seller (admin/order). Creates a staff_seller conversation shown to the seller in Seller Center messages with counterparty Marketly Support, or to the applicant on their account (sell/status) before approval. One open conversation per seller + subject: starting again appends to it. The customer is never a participant.",
+    desc: "Used by Message seller (admin/seller), Message applicant (admin/seller-application) and Contact seller (admin/order). Creates a staff_seller conversation shown to the seller in Seller Center messages with counterparty Marketly Support, or to the applicant on their account (sell/status) before approval: the applicant's account is added as a participant when the conversation starts (sellers.getApplicationParticipant), not on their first action. One open conversation per seller + subject: starting again appends to it. The customer is never a participant.",
     body: () => StaffStartInput,
     response: () => Conversation,
     status: 201,
@@ -1056,6 +1128,7 @@ export const endpoints = defineEndpoints({
     permission: "messaging.conversations.participate",
     scope: "staff",
     summary: "Post as Marketly Support (joins the conversation)",
+    desc: "In an Official Store conversation the message is the Official Store's reply: it moves the reply state to replied and resolves the official_store_reply work item.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1114,7 +1187,7 @@ export const endpoints = defineEndpoints({
     status: 200,
     errors: ["ILLEGAL_TRANSITION"],
     audited: true,
-    events: ["messaging.conversation.locked"],
+    events: ["messaging.conversation.locked","messaging.conversation.unlocked"],
     screens: ["admin/trust","admin/customers"],
     phase: 1,
   },
@@ -1156,6 +1229,7 @@ export const endpoints = defineEndpoints({
     status: 200,
     errors: ["ILLEGAL_TRANSITION"],
     audited: true,
+    events: ["messaging.conversation.locked"],
     screens: ["admin/trust"],
     phase: 1,
   },
@@ -1193,8 +1267,8 @@ export const spec = defineModuleSpec({
   chapters: [7,11,17],
   summary: "Private service conversations linked to an order, item, return or case: customer with seller (or the Official Store), which Marketly support can join from a case, with attachments, read state, seller reply targets and overdue flags, and staff moderation. No promotional messages.",
   dependsOn: ["orders"],
-  optionalDeps: ["media","sellers","support","returns","notifications","trust","audit","customers","shipping"],
-  publicApi: ["findOrStartForOrder","postSystemNote","addStaffParticipant","sellerResponseStats","unreadCount","listForOrder","getForSubject","unreadSummary","sellerInboxSummary","listInbox","getConversation","customerConversationSummaries"],
+  optionalDeps: ["media","sellers","support","returns","notifications","trust","audit","customers","shipping","identity","workqueues","settings"],
+  publicApi: ["findOrStartForOrder","postSystemNote","addStaffParticipant","sellerResponseStats","unreadCount","listForOrder","getForSubject","unreadSummary","sellerInboxSummary","listInbox","getConversation","customerConversationSummaries","exportCustomerData"],
   permissions: [
     {
       "key": "messaging.conversations.read",
@@ -1297,14 +1371,18 @@ export const spec = defineModuleSpec({
     publishes: {
       "messaging.message.sent": { when: "A participant sends a message (notifications sends the in-app and email notice)", payload: () => MessagingMessageSentEvent },
       "messaging.conversation.started": { when: "A new conversation is created", payload: () => MessagingConversationStartedEvent },
-      "messaging.reply.overdue": { when: "A seller misses the reply target", payload: () => MessagingReplyOverdueEvent },
+      "messaging.reply.overdue": { when: "A seller or the Official Store misses the reply target", payload: () => MessagingReplyOverdueEvent },
       "messaging.message.reported": { when: "A message is reported", payload: () => MessagingMessageReportedEvent },
-      "messaging.conversation.locked": { when: "Staff lock a conversation", payload: () => MessagingConversationLockedEvent },
+      "messaging.conversation.locked": { when: "Staff lock a conversation, a message report is actioned with a lock, or a trust lock_conversation enforcement is executed", payload: () => MessagingConversationLockedEvent },
+      "messaging.conversation.unlocked": { when: "Staff unlock a conversation or the trust enforcement that locked it is reversed", payload: () => MessagingConversationUnlockedEvent },
     },
     consumes: {
-      "support.case.opened": "If the case concerns an order conversation, add Marketly Support as a participant and post a system note",
+      "support.case.opened": "If the case concerns an order conversation, add Marketly Support as a participant (the case owner, ownerStaffId, when set) and post a system note",
       "orders.order.completed": "Schedule archiving of the order's conversations after archiveAfterDays",
-      "trust.enforcement.recorded": "Lock conversations named in an abuse enforcement"
+      "trust.enforcement.recorded": "Only action lock_conversation: lock the conversations named in targets (conversation, or the conversation of a message), record the enforcement id and publish messaging.conversation.locked with trustEnforcementId. Other actions (restrict_customer_messaging is customers') are ignored",
+      "trust.enforcement.reversed": "Action lock_conversation: unlock the conversations that enforcement locked (locked_by_enforcement_id) unless staff locked them again since; publish messaging.conversation.unlocked",
+      "notifications.email_reply.received": "module messaging: append the reply to the conversation (refId = conversation id) as a message from the participant whose email matches fromEmail (customer, guest order contact or seller member); other senders are dropped. Attachments come as media assets. Locked conversations refuse it",
+      "customers.account.closed": "Anonymise the customer's side: participant name and message author labels become Former customer; message text stays for the seller's service record, contact details already masked; the customer's own attachments are released"
     },
   },
   jobs: {
@@ -1370,6 +1448,10 @@ export const spec = defineModuleSpec({
       "status": 409,
       "meaning": "The conversation is locked or archived for new messages. details.reason."
     },
+    "MESSAGING_RESTRICTED": {
+      "status": 403,
+      "meaning": "The customer's account is restricted from messaging sellers (replies inside a case stay possible). details.reason, details.endsAt."
+    },
     "ORDER_NOT_ELIGIBLE": {
       "status": 422,
       "meaning": "The caller cannot message about this order (not their order, or seller not in the order)."
@@ -1431,6 +1513,10 @@ export const spec = defineModuleSpec({
       },
       "locked_reason": {
         "type": "text",
+        "nullable": true
+      },
+      "locked_by_enforcement_id": {
+        "type": "uuid",
         "nullable": true
       },
       "reply_state": {
@@ -1626,6 +1712,20 @@ export const spec = defineModuleSpec({
         "nullable": false
       }
     },
+    "conversation_aliases": {
+      "old_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "conversation_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "merged_at": {
+        "type": "timestamptz",
+        "nullable": false
+      }
+    },
     "staff_access_log": {
       "id": {
         "type": "uuid",
@@ -1673,6 +1773,7 @@ declare module '../kernel/events/event-map.js' {
     "messaging.reply.overdue": MessagingReplyOverdueEvent;
     "messaging.message.reported": MessagingMessageReportedEvent;
     "messaging.conversation.locked": MessagingConversationLockedEvent;
+    "messaging.conversation.unlocked": MessagingConversationUnlockedEvent;
   }
 }
 

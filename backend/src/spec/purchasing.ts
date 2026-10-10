@@ -432,6 +432,25 @@ export const PurchasingSummary: z.ZodType<PurchasingSummary> = z.object({
   reorderSuggested: z.number().int(),
 }).register(common.apiTypes, { id: "purchasing.PurchasingSummary" });
 
+export interface PurchaseOrderShipTo {
+  locationId: string;
+  code: string;
+  /** e.g. Reno, NV warehouse */
+  name: string;
+  address?: common.Address | null;
+  timeZone: string;
+}
+
+export const PurchaseOrderShipTo: z.ZodType<PurchaseOrderShipTo> = z.object({
+  locationId: z.uuid(),
+  code: z.string(),
+  name: z.string().describe("e.g. Reno, NV warehouse"),
+  get address() {
+    return common.Address.nullish();
+  },
+  timeZone: z.string(),
+}).register(common.apiTypes, { id: "purchasing.PurchaseOrderShipTo" });
+
 export interface ReorderSuggestion {
   stockItemId: string;
   sku: string;
@@ -439,6 +458,7 @@ export interface ReorderSuggestion {
   available: number;
   reorderPoint?: number | null;
   incoming: number;
+  /** From inventory.getSalesRate over the last 30 days */
   avgDailySales?: number | null;
   suggestedQuantity: number;
   supplier?: SupplierCue | null;
@@ -453,7 +473,7 @@ export const ReorderSuggestion: z.ZodType<ReorderSuggestion> = z.object({
   available: z.number().int(),
   reorderPoint: z.number().int().nullish(),
   incoming: z.number().int(),
-  avgDailySales: z.number().nullish(),
+  avgDailySales: z.number().describe("From inventory.getSalesRate over the last 30 days").nullish(),
   suggestedQuantity: z.number().int(),
   get supplier() {
     return SupplierCue.nullish();
@@ -834,6 +854,8 @@ export interface PurchasingPurchaseOrderSentEvent {
   /** The buyer's message to the supplier */
   message?: string | null;
   locationId: string;
+  /** Where the supplier delivers, so the supplier email can name and address the warehouse */
+  shipTo: PurchaseOrderShipTo;
   total: common.Money;
   lines: PurchaseOrderLine[];
 }
@@ -847,6 +869,9 @@ export const PurchasingPurchaseOrderSentEvent: z.ZodType<PurchasingPurchaseOrder
   emailSupplier: z.boolean().describe("The buyer asked to email the purchase order to the supplier"),
   message: z.string().describe("The buyer's message to the supplier").nullish(),
   locationId: z.uuid(),
+  get shipTo() {
+    return PurchaseOrderShipTo;
+  },
   get total() {
     return common.Money;
   },
@@ -1404,12 +1429,15 @@ export const endpoints = defineEndpoints({
     permission: "purchasing.orders.manage",
     scope: "staff",
     summary: "Create draft POs (one per preferred supplier) from selected suggestions",
+    desc: "Every draft ships to shipToLocationId, or to inventory.getDefaultLocation() when omitted (never copied from an earlier PO, so it also works before the first PO exists). VALIDATION_FAILED when the location is unknown, inactive or not a company warehouse, or when a selected item has no preferred supplier.",
     body: () => z.object({
       stockItemIds: z.array(z.uuid()),
       quantities: z.record(z.string(), z.number().int()).describe("stockItemId → quantity override").nullish(),
+      shipToLocationId: z.uuid().describe("Company stock location (inventory.getLocations); the default location when omitted").nullish(),
     }),
     response: () => z.array(PurchaseOrder),
     status: 201,
+    errors: ["VALIDATION_FAILED"],
     audited: true,
     screens: ["admin/purchasing"],
     phase: 1,
@@ -1975,7 +2003,7 @@ export const spec = defineModuleSpec({
     },
     "purchasing.reorder-suggestions": {
       "schedule": "hourly",
-      "does": "Rebuild suggestions from inventory low stock, incoming quantities and 30-day sales velocity"
+      "does": "Rebuild suggestions from inventory low stock, incoming quantities and 30-day sales velocity (inventory.getSalesRate)"
     }
   },
   settings: {

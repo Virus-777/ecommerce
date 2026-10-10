@@ -20,6 +20,8 @@ export interface Offer {
   sellerName: string;
   productId: string;
   variantId: string;
+  /** Product title with the variant label (e.g. 'Aurora Headphones – Black'), copied from catalog when the offer is created and kept current from catalog.product.updated / catalog.product.merged. Used for admin and seller title search and by modules that list offers without catalog (shipping profile usage). */
+  title: string;
   condition: "new" | "used_like_new" | "used_good" | "used_acceptable" | "refurbished";
   /** Required for used and refurbished; shown beside the price */
   conditionNotes?: string | null;
@@ -29,6 +31,8 @@ export interface Offer {
   missingItems: string[];
   /** True when nothing is missing */
   complete: boolean;
+  /** True when the product's box changed (catalog.product.updated) and missingItems names items no longer in it, or no longer lists everything absent. The seller is asked to review (offers.offer.missing_items_stale); cleared when the seller saves missingItems again. The offer stays on sale meanwhile. */
+  missingItemsStale: boolean;
   /** Seller's own code; customers do not see it */
   sellerSku: string;
   /** inventory stock item that holds this offer's quantities */
@@ -62,11 +66,13 @@ export const Offer: z.ZodType<Offer> = z.object({
   sellerName: z.string(),
   productId: z.uuid(),
   variantId: z.uuid(),
+  title: z.string().describe("Product title with the variant label (e.g. 'Aurora Headphones – Black'), copied from catalog when the offer is created and kept current from catalog.product.updated / catalog.product.merged. Used for admin and seller title search and by modules that list offers without catalog (shipping profile usage)."),
   condition: z.enum(["new", "used_like_new", "used_good", "used_acceptable", "refurbished"]),
   conditionNotes: z.string().describe("Required for used and refurbished; shown beside the price").nullish(),
   includedItems: z.array(z.string()).describe("What is in this seller's box (defaults to the product's included items)"),
   missingItems: z.array(z.string()).describe("Product's standard included items that this offer does not include. Must be stated; shown as 'Missing: …'"),
   complete: z.boolean().describe("True when nothing is missing"),
+  missingItemsStale: z.boolean().describe("True when the product's box changed (catalog.product.updated) and missingItems names items no longer in it, or no longer lists everything absent. The seller is asked to review (offers.offer.missing_items_stale); cleared when the seller saves missingItems again. The offer stays on sale meanwhile."),
   sellerSku: z.string().describe("Seller's own code; customers do not see it"),
   stockItemId: z.uuid().describe("inventory stock item that holds this offer's quantities"),
   get price() {
@@ -125,7 +131,7 @@ export interface DispatchTerms {
   businessDays: number;
   /** Local cutoff HH:mm for same-day dispatch, market time zone */
   sameDayCutoff?: string | null;
-  /** City and region, e.g. 'Reno, NV' */
+  /** City and region, e.g. 'Reno, NV'. Official Store offers: the inventory default location (inventory.getDefaultLocation), refreshed when that location changes; seller offers: the seller's ships-from address from shipping seller settings. Never empty: falls back to the market default location label (kernel config). */
   shipsFrom: string;
   /** e.g. 'Ships today', 'Ships in 1 business day' */
   label: string;
@@ -134,7 +140,7 @@ export interface DispatchTerms {
 export const DispatchTerms: z.ZodType<DispatchTerms> = z.object({
   businessDays: z.number().int().describe("0 = same business day"),
   sameDayCutoff: z.string().describe("Local cutoff HH:mm for same-day dispatch, market time zone").nullish(),
-  shipsFrom: z.string().describe("City and region, e.g. 'Reno, NV'"),
+  shipsFrom: z.string().describe("City and region, e.g. 'Reno, NV'. Official Store offers: the inventory default location (inventory.getDefaultLocation), refreshed when that location changes; seller offers: the seller's ships-from address from shipping seller settings. Never empty: falls back to the market default location label (kernel config)."),
   label: z.string().describe("e.g. 'Ships today', 'Ships in 1 business day'"),
 }).register(common.apiTypes, { id: "offers.DispatchTerms" });
 
@@ -344,6 +350,8 @@ export interface OfferUpdate {
   returnTerms?: ReturnTermsInput | null;
   warranty?: WarrantyInput | null;
   publishOnApproval?: boolean | null;
+  /** The seller confirms a price change above largeSellerPriceChangePct. Without it such a PATCH returns LARGE_PRICE_CHANGE_UNCONFIRMED (details.offers) and nothing is saved; with it the change applies like any other edit. */
+  confirmLargeChange?: boolean | null;
 }
 
 export const OfferUpdate: z.ZodType<OfferUpdate> = z.object({
@@ -369,6 +377,7 @@ export const OfferUpdate: z.ZodType<OfferUpdate> = z.object({
     return WarrantyInput.nullish();
   },
   publishOnApproval: z.boolean().nullish(),
+  confirmLargeChange: z.boolean().describe("The seller confirms a price change above largeSellerPriceChangePct. Without it such a PATCH returns LARGE_PRICE_CHANGE_UNCONFIRMED (details.offers) and nothing is saved; with it the change applies like any other edit.").nullish(),
 }).register(common.apiTypes, { id: "offers.OfferUpdate" });
 
 export interface CompareAtInput {
@@ -1469,6 +1478,10 @@ export interface OfferSnapshot {
   ownerType: "official" | "seller";
   sellerId?: string | null;
   sellerName: string;
+  /** Seller's own code (Official Store: company SKU) at purchase, for packing slips, seller order search and exports */
+  sellerSku: string;
+  /** Offer title at purchase (product title with variant label) */
+  title: string;
   condition: string;
   conditionNotes?: string | null;
   missingItems: string[];
@@ -1487,6 +1500,8 @@ export const OfferSnapshot: z.ZodType<OfferSnapshot> = z.object({
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
   sellerName: z.string(),
+  sellerSku: z.string().describe("Seller's own code (Official Store: company SKU) at purchase, for packing slips, seller order search and exports"),
+  title: z.string().describe("Offer title at purchase (product title with variant label)"),
   condition: z.string(),
   conditionNotes: z.string().nullish(),
   missingItems: z.array(z.string()),
@@ -1591,6 +1606,10 @@ export interface OffersOfferStatusChangedEvent {
   to: string;
   reasonCode?: string | null;
   reason?: string | null;
+  /** inventory archives the stock item when to = removed and unarchives it when from = removed (reinstate, enforcement reversed) */
+  stockItemId: string;
+  /** Trust enforcement that caused (or, on reversal, undid) the change; trust confirms execution from it */
+  trustEnforcementId?: string | null;
 }
 
 export const OffersOfferStatusChangedEvent: z.ZodType<OffersOfferStatusChangedEvent> = z.object({
@@ -1603,6 +1622,34 @@ export const OffersOfferStatusChangedEvent: z.ZodType<OffersOfferStatusChangedEv
   to: z.string(),
   reasonCode: z.string().nullish(),
   reason: z.string().nullish(),
+  stockItemId: z.uuid().describe("inventory archives the stock item when to = removed and unarchives it when from = removed (reinstate, enforcement reversed)"),
+  trustEnforcementId: z.uuid().describe("Trust enforcement that caused (or, on reversal, undid) the change; trust confirms execution from it").nullish(),
+});
+
+/** offers.offer.missing_items_stale: catalog.product.updated changed the product's box so an offer's missingItems no longer matches it (flag set; not repeated while the flag stays set) */
+export interface OffersOfferMissingItemsStaleEvent {
+  offerId: string;
+  productId: string;
+  variantId: string;
+  ownerType: "official" | "seller";
+  /** Seller told to review (notifications topic offers.missing_items_review); null for the Official Store (Official Store Manager work list) */
+  sellerId?: string | null;
+  title: string;
+  /** Listed missing items no longer in the product's box */
+  staleItems: string[];
+  /** Items added to the product's box that the offer does not say it includes or misses */
+  newBoxItems: string[];
+}
+
+export const OffersOfferMissingItemsStaleEvent: z.ZodType<OffersOfferMissingItemsStaleEvent> = z.object({
+  offerId: z.uuid(),
+  productId: z.uuid(),
+  variantId: z.uuid(),
+  ownerType: z.enum(["official", "seller"]),
+  sellerId: z.uuid().describe("Seller told to review (notifications topic offers.missing_items_review); null for the Official Store (Official Store Manager work list)").nullish(),
+  title: z.string(),
+  staleItems: z.array(z.string()).describe("Listed missing items no longer in the product's box"),
+  newBoxItems: z.array(z.string()).describe("Items added to the product's box that the offer does not say it includes or misses"),
 });
 
 /** offers.offer.eligibility_changed: An offer becomes eligible or ineligible to be featured */
@@ -1715,6 +1762,10 @@ export interface OffersPublicApi {
   getPurchaseBoxOffer(items: { productId: string, offerId?: string, variantId?: string }[], postalCode?: string): Promise<Record<string, Offer | null>>;
   /** Active offers for a list of ids in the given order, inactive ones left out (storefront featured collections) Used by: sellers, graphql. */
   listActiveOffersByIds(offerIds: string[], limit?: number): Promise<Offer[]>;
+  /** Batch read by id in any status (draft, removed and ineligible included), with sellerId (null for the Official Store: callers that need a seller id use OFFICIAL_STORE_ID) and title. Unknown ids map to null. Replaces per-line getOffer loops in cart revalidation, promotions evaluation and advertising checks. Used by: cart, promotions, advertising. */
+  getOffers(offerIds: string[]): Promise<Record<string, Offer | null>>;
+  /** Offers that still use a shipping profile: every status except removed (drafts and paused offers count, because they can be published again). One count query on (shipping_profile_id, status); shipping refuses to delete or deactivate a profile in use (PROFILE_IN_USE) without paging through listOffersAdmin. Used by: shipping. */
+  countActiveOffersByProfile(shippingProfileId: string): Promise<number>;
   /** Export rows for reports datasets offers.admin.offers and offers.seller.offers (seller rows scoped to the principal's seller) Used by: reports. */
   exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[], nextCursor?: string }>;
 }
@@ -1730,10 +1781,14 @@ export interface OffersDb {
     seller_id: string | null;
     product_id: string;
     variant_id: string;
+    /** product title with variant label, denormalised from catalog for title search */
+    title: string;
     condition: string;
     condition_notes: string | null;
     included_items: Json;
     missing_items: Json;
+    /** product box changed since missingItems was saved */
+    missing_items_stale: boolean;
     seller_sku: string;
     stock_item_id: string;
     price_amount: number;
@@ -2059,7 +2114,7 @@ export const endpoints = defineEndpoints({
     permission: "offers.offers.manage",
     scope: "own-seller",
     summary: "Create an offer on a catalog product (draft or published)",
-    desc: "Creates the inventory stock item with the initial quantity. Used and refurbished need condition notes; anything missing from the product's included items must be listed. A draft on a product still in review can publish on approval.",
+    desc: "Creates the inventory stock item with the initial quantity. Used and refurbished need condition notes; anything missing from the product's included items must be listed. A draft on a product still in review can publish on approval. shippingProfileId must be one of the seller's own profiles (shipping.getProfileOwners; Official Store offers need an Official Store profile), otherwise SHIPPING_PROFILE_INVALID.",
     body: () => OfferInput,
     response: () => SellerOfferDetail,
     status: 201,
@@ -2076,7 +2131,7 @@ export const endpoints = defineEndpoints({
     permission: "offers.offers.manage",
     scope: "own-seller",
     summary: "Edit offer terms or price",
-    desc: "Customer-visible changes bump termsVersion so carts show the change before checkout. Price changes go into price history.",
+    desc: "Customer-visible changes bump termsVersion so carts show the change before checkout. Price changes go into price history. A price change above largeSellerPriceChangePct needs confirmLargeChange: true in the same body, otherwise LARGE_PRICE_CHANGE_UNCONFIRMED and nothing is saved. shippingProfileId must be one of the seller's own profiles (shipping.getProfileOwners), otherwise SHIPPING_PROFILE_INVALID. Saving missingItems clears missingItemsStale.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -2413,10 +2468,11 @@ export const endpoints = defineEndpoints({
     summary: "All offers with filters (seller, product, status, eligibility)",
     query: () =>
       z.object({
-        q: z.string().optional(),
+        q: z.string().describe("Offer title (trigram match on the denormalised title column), seller SKU or offer id").optional(),
         ownerType: z.enum(["official", "seller"]).optional(),
         sellerId: z.uuid().optional(),
         productId: z.uuid().optional(),
+        shippingProfileId: z.uuid().optional(),
         status: z.enum(["draft", "active", "paused", "out_of_stock", "ineligible", "removed"]).optional(),
         condition: z.string().optional(),
         featuredEligible: z.stringbool().optional(),
@@ -2519,6 +2575,7 @@ export const endpoints = defineEndpoints({
     permission: "offers.offers.remove",
     scope: "staff",
     summary: "Reinstate a removed offer as Paused (e.g. after a successful appeal)",
+    desc: "The stock item inventory archived when the offer was removed is unarchived: inventory does it on offers.offer.status_changed with from = removed (the payload carries stockItemId), so the offer can go back on sale with its stock once resumed. DUPLICATE_OFFER when another live offer took the stock item, SKU or New-variant slot meanwhile.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -2528,7 +2585,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => OfferAdminDetail,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION"],
+    errors: ["ILLEGAL_TRANSITION","DUPLICATE_OFFER"],
     audited: true,
     events: ["offers.offer.status_changed"],
     screens: ["admin/catalog"],
@@ -2895,7 +2952,7 @@ export const spec = defineModuleSpec({
   summary: "How one seller (or the Official Store) sells one variant in one condition: price and authentic was-price, purchase limit, seller SKU, dispatch, shipping profile, return and warranty terms, offer status, and the published featured-offer rule that picks the main offer for a delivery location.",
   dependsOn: ["catalog","sellers","inventory"],
   optionalDeps: ["shipping","returns","promotions","access","audit","cart","finance","fulfillment-service","media","purchasing","reviews","trust","reports"],
-  publicApi: ["getOffer","quoteOffer","revalidate","snapshotForOrder","getFeaturedOffer","listActiveOffersForProduct","isPromotable","lowestPrice","priceRange","compareOffers","getFeaturedOfferForProduct","getOfferStats","getVariantOfferSummaries","listOwnOffersForProduct","getOwnOffer","searchOwnOffers","getOfferAdmin","listOffersAdmin","getFeaturedDecision","getPurchaseBoxOffer","listActiveOffersByIds","exportRows"],
+  publicApi: ["getOffer","quoteOffer","revalidate","snapshotForOrder","getFeaturedOffer","listActiveOffersForProduct","isPromotable","lowestPrice","priceRange","compareOffers","getFeaturedOfferForProduct","getOfferStats","getVariantOfferSummaries","listOwnOffersForProduct","getOwnOffer","searchOwnOffers","getOfferAdmin","listOffersAdmin","getFeaturedDecision","getPurchaseBoxOffer","listActiveOffersByIds","getOffers","countActiveOffersByProfile","exportRows"],
   permissions: [
     {
       "key": "offers.offers.manage",
@@ -3133,6 +3190,7 @@ export const spec = defineModuleSpec({
       "offers.offer.updated": { when: "Customer-visible terms change (termsVersion bumped)", payload: () => OffersOfferUpdatedEvent },
       "offers.offer.price_changed": { when: "A new price takes effect (direct, scheduled start, revert or bulk)", payload: () => OffersOfferPriceChangedEvent },
       "offers.offer.status_changed": { when: "Any offer status transition", payload: () => OffersOfferStatusChangedEvent },
+      "offers.offer.missing_items_stale": { when: "catalog.product.updated changed the product's box so an offer's missingItems no longer matches it (flag set; not repeated while the flag stays set)", payload: () => OffersOfferMissingItemsStaleEvent },
       "offers.offer.eligibility_changed": { when: "An offer becomes eligible or ineligible to be featured", payload: () => OffersOfferEligibilityChangedEvent },
       "offers.featured.changed": { when: "The featured offer for a variant and zone changes", payload: () => OffersFeaturedChangedEvent },
       "offers.featured_rule.published": { when: "A new featured-offer rule version is published", payload: () => OffersFeaturedRulePublishedEvent },
@@ -3148,11 +3206,12 @@ export const spec = defineModuleSpec({
       "sellers.seller.closed": "Remove all the seller's offers (reason seller_closed)",
       "catalog.product.publication_changed": "Hidden or Suspended → offers Ineligible (product_hidden / product_suspended); Active → restoreEligibility",
       "catalog.product.approved": "Publish draft offers with publishOnApproval on that product; refresh content_gaps",
-      "catalog.product.merged": "Move offers from the duplicate to the kept product, mapping variants by options; unmatched variants are paused and the seller told",
-      "catalog.product.updated": "Flag offers whose missingItems name items no longer in the product's box; seller asked to review; refresh content_gaps on the product's offers from catalog.getProductAdmin (missing images / identifiers)",
+      "catalog.product.merged": "Move offers from the duplicate to the kept product, mapping variants by options; unmatched variants are paused and the seller told. Each moved offer's stock item follows it (inventory.updateStockItem with the kept productId / variantId) and its title is refreshed",
+      "catalog.product.updated": "Set missing_items_stale on offers whose missingItems name items no longer in the product's box (or miss new box items) and publish offers.offer.missing_items_stale once per flag; seller asked to review; refresh title and content_gaps on the product's offers from catalog.getProductAdmin (missing images / identifiers)",
       "inventory.stock.changed": "available 0 → stockDepleted; available > 0 → stockRestored; mark featured decisions dirty",
       "access.approval.decided": "Approve or reject pending price changes (and pending bulk rows)",
-      "trust.enforcement.recorded": "Remove or hold offers named in an enforcement (counterfeit, abuse)",
+      "trust.enforcement.recorded": "Remove or hold offers named in an enforcement (counterfeit, abuse); status_reason keeps the enforcementId so a reversal can find them",
+      "trust.enforcement.reversed": "Undo what trust.enforcement.recorded did for that enforcementId (inbox-claimed per event): offers it removed go back to Paused (same path as reinstateOffer, stock item unarchived by inventory, seller told and asked to resume); offers it held are released to their previous status; offers since changed by someone else (seller ended, staff removed for another reason) are left alone (noted in offer_status_log; trust's owner work item covers the rest). Publishes offers.offer.status_changed with trustEnforcementId",
       "promotions.campaign.started": "Mark featured decisions dirty for offers whose automatic discount changes the comparable total",
       "promotions.campaign.ended": "Same as started"
     },
@@ -3179,8 +3238,8 @@ export const spec = defineModuleSpec({
       "does": "Expire preview_ready jobs past expiresAt"
     },
     "offers.parse-bulk-file": {
-      "schedule": "on demand (queue)",
-      "does": "Parse uploaded CSV, resolve seller SKUs, validate rows, build preview"
+      "schedule": "every 1 min",
+      "does": "Parse uploaded CSVs still waiting (normally parsed right after upload), resolve seller SKUs, validate rows, build preview. Reads the file bytes through media.readFile, not the signed URL"
     }
   },
   settings: {
@@ -3328,6 +3387,10 @@ export const spec = defineModuleSpec({
         "type": "uuid",
         "nullable": false
       },
+      "title": {
+        "type": "text",
+        "nullable": false
+      },
       "condition": {
         "type": "text",
         "nullable": false
@@ -3342,6 +3405,10 @@ export const spec = defineModuleSpec({
       },
       "missing_items": {
         "type": "jsonb",
+        "nullable": false
+      },
+      "missing_items_stale": {
+        "type": "bool",
         "nullable": false
       },
       "seller_sku": {
@@ -3863,6 +3930,7 @@ declare module '../kernel/events/event-map.js' {
     "offers.offer.updated": OffersOfferUpdatedEvent;
     "offers.offer.price_changed": OffersOfferPriceChangedEvent;
     "offers.offer.status_changed": OffersOfferStatusChangedEvent;
+    "offers.offer.missing_items_stale": OffersOfferMissingItemsStaleEvent;
     "offers.offer.eligibility_changed": OffersOfferEligibilityChangedEvent;
     "offers.featured.changed": OffersFeaturedChangedEvent;
     "offers.featured_rule.published": OffersFeaturedRulePublishedEvent;

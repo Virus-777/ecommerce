@@ -1007,6 +1007,30 @@ export const AdminReviewRow: z.ZodType<AdminReviewRow> = z.object({
   reportCount: z.number().int(),
 }).register(common.apiTypes, { id: "reviews.AdminReviewRow" });
 
+export interface OfficialReviewRow {
+  targetType: "product_review" | "seller_feedback";
+  /** For product reviews of items the Official Store sold */
+  review?: ProductReview | null;
+  /** For feedback on Official Store packages */
+  feedback?: SellerFeedback | null;
+  orderRef?: string | null;
+  needsResponse: boolean;
+  canRespond: boolean;
+}
+
+export const OfficialReviewRow: z.ZodType<OfficialReviewRow> = z.object({
+  targetType: z.enum(["product_review", "seller_feedback"]),
+  get review() {
+    return ProductReview.nullish();
+  },
+  get feedback() {
+    return SellerFeedback.nullish();
+  },
+  orderRef: z.string().nullish(),
+  needsResponse: z.boolean(),
+  canRespond: z.boolean(),
+}).register(common.apiTypes, { id: "reviews.OfficialReviewRow" });
+
 /* ------------------------------------------------------------------ events */
 
 /** reviews.review.published: A product review becomes visible (new, edited, kept or reinstated) */
@@ -1037,19 +1061,28 @@ export const ReviewsReviewUpdatedEvent: z.ZodType<ReviewsReviewUpdatedEvent> = z
   productId: z.uuid(),
 });
 
-/** reviews.review.removed: A review is removed by moderation or deleted by its author */
+/** reviews.review.removed: A review is removed by moderation or a trust enforcement, or deleted by its author */
 export interface ReviewsReviewRemovedEvent {
   reviewId: string;
   productId: string;
+  /** Seller of the reviewed item (OFFICIAL_STORE_ID for the Official Store) */
+  sellerId: string;
+  /** Author (customers-module id) */
+  customerId: string;
   byModeration: boolean;
   reasonCode?: string | null;
+  /** Set when a trust remove_reviews enforcement removed it */
+  trustEnforcementId?: string | null;
 }
 
 export const ReviewsReviewRemovedEvent: z.ZodType<ReviewsReviewRemovedEvent> = z.object({
   reviewId: z.uuid(),
   productId: z.uuid(),
+  sellerId: z.uuid().describe("Seller of the reviewed item (OFFICIAL_STORE_ID for the Official Store)"),
+  customerId: z.uuid().describe("Author (customers-module id)"),
   byModeration: z.boolean(),
   reasonCode: z.string().nullish(),
+  trustEnforcementId: z.uuid().describe("Set when a trust remove_reviews enforcement removed it").nullish(),
 });
 
 /** reviews.report.created: Content is reported */
@@ -1095,23 +1128,36 @@ export const ReviewsFeedbackRemovedEvent: z.ZodType<ReviewsFeedbackRemovedEvent>
   sellerId: z.uuid(),
 });
 
-/** reviews.question.asked: A question is published (sellers with an offer are told) */
+/** reviews.question.asked: A question is published (sellers with an offer are told; Official Store questions go to staff) */
 export interface ReviewsQuestionAskedEvent {
   questionId: string;
   productId: string;
+  /** Who asked */
+  customerId: string;
+  /** Sellers with an active offer on the product (offers, optional), without the Official Store */
+  sellerIds: string[];
+  /** The Official Store has an active offer on the product */
+  officialStore: boolean;
 }
 
 export const ReviewsQuestionAskedEvent: z.ZodType<ReviewsQuestionAskedEvent> = z.object({
   questionId: z.uuid(),
   productId: z.uuid(),
+  customerId: z.uuid().describe("Who asked"),
+  sellerIds: z.array(z.uuid()).describe("Sellers with an active offer on the product (offers, optional), without the Official Store"),
+  officialStore: z.boolean().describe("The Official Store has an active offer on the product"),
 });
 
-/** reviews.answer.published: An answer is published */
+/** reviews.answer.published: An answer is published (the asker is told) */
 export interface ReviewsAnswerPublishedEvent {
   answerId: string;
   questionId: string;
   productId: string;
   label: string;
+  /** Who asked the question */
+  askerCustomerId: string;
+  /** For seller answers */
+  sellerId?: string | null;
 }
 
 export const ReviewsAnswerPublishedEvent: z.ZodType<ReviewsAnswerPublishedEvent> = z.object({
@@ -1119,24 +1165,32 @@ export const ReviewsAnswerPublishedEvent: z.ZodType<ReviewsAnswerPublishedEvent>
   questionId: z.uuid(),
   productId: z.uuid(),
   label: z.string(),
+  askerCustomerId: z.uuid().describe("Who asked the question"),
+  sellerId: z.uuid().describe("For seller answers").nullish(),
 });
 
-/** reviews.response.published: A seller response is published or held */
+/** reviews.response.published: A seller or Official Store response is published or held (the reviewer is told when published) */
 export interface ReviewsResponsePublishedEvent {
   responseId: string;
+  /** OFFICIAL_STORE_ID for Official Store responses */
   sellerId: string;
   targetType: string;
+  targetId: string;
   status: string;
+  /** Author of the review or feedback being answered */
+  customerId: string;
 }
 
 export const ReviewsResponsePublishedEvent: z.ZodType<ReviewsResponsePublishedEvent> = z.object({
   responseId: z.uuid(),
-  sellerId: z.uuid(),
+  sellerId: z.uuid().describe("OFFICIAL_STORE_ID for Official Store responses"),
   targetType: z.string(),
+  targetId: z.uuid(),
   status: z.string(),
+  customerId: z.uuid().describe("Author of the review or feedback being answered"),
 });
 
-/** reviews.moderation.decided: A moderation decision is recorded (reporter and author are notified) */
+/** reviews.moderation.decided: A moderation decision is recorded (reporter and author are notified), including removals and keeps for a trust enforcement */
 export interface ReviewsModerationDecidedEvent {
   moderationItemId: string;
   contentType: string;
@@ -1151,6 +1205,8 @@ export interface ReviewsModerationDecidedEvent {
   reporterOutcome?: string | null;
   /** The author may appeal until then (removals) */
   appealUntil?: string | null;
+  /** Set when the decision executes a trust remove_reviews or keep_reviews enforcement (trust confirms remove_reviews with it) */
+  trustEnforcementId?: string | null;
 }
 
 export const ReviewsModerationDecidedEvent: z.ZodType<ReviewsModerationDecidedEvent> = z.object({
@@ -1167,6 +1223,7 @@ export const ReviewsModerationDecidedEvent: z.ZodType<ReviewsModerationDecidedEv
   },
   reporterOutcome: z.string().describe("What reporters are told").nullish(),
   appealUntil: z.iso.datetime({ offset: true }).describe("The author may appeal until then (removals)").nullish(),
+  trustEnforcementId: z.uuid().describe("Set when the decision executes a trust remove_reviews or keep_reviews enforcement (trust confirms remove_reviews with it)").nullish(),
 });
 
 /** reviews.appeal.submitted: An author appeals */
@@ -1182,15 +1239,26 @@ export const ReviewsAppealSubmittedEvent: z.ZodType<ReviewsAppealSubmittedEvent>
   contentId: z.uuid(),
 });
 
-/** reviews.appeal.decided: An appeal is decided */
+/** reviews.appeal.decided: An appeal is decided (the author is told) */
 export interface ReviewsAppealDecidedEvent {
   appealId: string;
   overturned: boolean;
+  contentType: string;
+  contentId: string;
+  /** Who appealed */
+  author?: ContentParty | null;
+  outcome?: string | null;
 }
 
 export const ReviewsAppealDecidedEvent: z.ZodType<ReviewsAppealDecidedEvent> = z.object({
   appealId: z.uuid(),
   overturned: z.boolean(),
+  contentType: z.string(),
+  contentId: z.uuid(),
+  get author() {
+    return ContentParty.nullish();
+  },
+  outcome: z.string().nullish(),
 });
 
 /** reviews.content.referred: Content is referred to Trust and Risk */
@@ -1250,8 +1318,10 @@ export interface ReviewsPublicApi {
   getSellerFeedbackSummary(sellerId: string): Promise<SellerFeedbackSummary>;
   /** Called during a duplicate merge Used by: catalog. */
   moveProductContent(fromProductId: string, toProductId: string): Promise<{ reviews: number, questions: number }>;
-  /** Remove proven fake reviews named in an enforcement Used by: trust. */
+  /** Remove proven fake reviews named in an enforcement (same path as consuming trust.enforcement.recorded; publishes reviews.moderation.decided with trustEnforcementId) Used by: trust. */
   removeContentForEnforcement(contentIds: string[], enforcementId: string, reason: string): Promise<number>;
+  /** The customer's product reviews, seller feedback, questions, answers and reports they made (with status and moderation outcomes) for the personal data export. Export hook called by customers.build-data-exports Used by: customers. */
+  exportCustomerData(input: { customerId: string, accountId: string }): Promise<common.CustomerDataSection[]>;
   /** Published product reviews with filters and sorting (Product.reviews) Used by: graphql. */
   listProductReviews(productId: string, filter: { stars?: number, verifiedOnly?: boolean, withPhotos?: boolean, variantLabel?: string }, sort: string, page: common.PageInput, viewer: common.Actor | null): Promise<common.Page<ProductReview>>;
   /** Published questions with labelled answers (Product.questions) Used by: graphql. */
@@ -1391,6 +1461,8 @@ export interface ReviewsDb {
     moderator_id: string;
     decided_at: Date;
     appeal_by: Date | null;
+    /** trust enforcement this decision executed; reversed with it */
+    trust_enforcement_id: string | null;
   };
   appeals: {
     id: string;
@@ -1415,6 +1487,20 @@ export interface ReviewsDb {
     distribution: Json;
     with_photos: number;
     answered_questions: number;
+    updated_at: Date;
+  };
+  /** Delivered items waiting for a review invitation (decision D-R2): one row per order item from orders.item.delivered; the invites job publishes reviews.invite.due when due_at passes and the item is still unreviewed */
+  review_invites: {
+    order_item_id: string;
+    order_id: string;
+    customer_id: string;
+    product_id: string;
+    /** OFFICIAL_STORE_ID for the Official Store */
+    seller_id: string;
+    delivered_at: Date;
+    due_at: Date;
+    state: 'pending' | 'sent' | 'cancelled' | 'reviewed';
+    sent_at: Date | null;
     updated_at: Date;
   };
   /** Rolling 12-month projection per seller */
@@ -1554,6 +1640,28 @@ export const endpoints = defineEndpoints({
     status: 201,
     events: ["reviews.answer.published"],
     screens: ["store/product"],
+    phase: 1,
+  },
+  editMyAnswer: {
+    area: "store",
+    method: "PATCH",
+    path: "/me/answers/{id}",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "Edit my answer, or fix and resubmit it after an edit request",
+    desc: "Published answers go back through the automatic checks (edit); answers with an edit request are resubmitted for review (resubmit).",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      text: z.string(),
+    }),
+    response: () => Answer,
+    status: 200,
+    errors: ["ILLEGAL_TRANSITION","NOT_FOUND"],
+    events: ["reviews.answer.published"],
+    screens: ["store/product","account/reviews"],
     phase: 1,
   },
   voteHelpful: {
@@ -1854,6 +1962,29 @@ export const endpoints = defineEndpoints({
     screens: ["seller/customers"],
     phase: 1,
   },
+  editSellerAnswer: {
+    area: "seller",
+    method: "PATCH",
+    path: "/answers/{id}",
+    auth: "seller",
+    permission: "reviews.responses.post",
+    scope: "own-seller",
+    summary: "Edit the seller's answer, or fix and resubmit it after an edit request",
+    desc: "Only answers this seller wrote. Same moves as the customer edit: edit from published, resubmit from edit_requested.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      text: z.string(),
+    }),
+    response: () => Answer,
+    status: 200,
+    errors: ["ILLEGAL_TRANSITION","NOT_FOUND"],
+    events: ["reviews.answer.published"],
+    screens: ["seller/customers"],
+    phase: 1,
+  },
   listSellerFeedback: {
     area: "seller",
     method: "GET",
@@ -2046,7 +2177,7 @@ export const endpoints = defineEndpoints({
     permission: "reviews.moderation.decide",
     scope: "staff",
     summary: "Keep, remove for a policy reason, request an edit, publish, or reject a seller response",
-    desc: "The reporter and the author both see the outcome. Removing with reason legitimate_experience is refused.",
+    desc: "The reporter and the author both see the outcome. Removing with reason legitimate_experience is refused. Each decision is one state move from the content's current state (e.g. request_edit on a published answer, remove on pending content); a decision the content's machine does not allow is ILLEGAL_TRANSITION.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -2127,6 +2258,67 @@ export const endpoints = defineEndpoints({
     audited: true,
     events: ["reviews.answer.published"],
     screens: ["admin/reviews"],
+    phase: 1,
+  },
+  listOfficialStoreReviews: {
+    area: "admin",
+    method: "GET",
+    path: "/official-store/reviews",
+    auth: "staff",
+    permission: "reviews.answers.staff",
+    scope: "staff",
+    summary: "Product reviews of Official Store sales and Official Store feedback, to respond as the Official Store",
+    query: () =>
+      z.object({
+        targetType: z.enum(["product_review", "seller_feedback"]).optional(),
+        needsResponse: z.stringbool().optional(),
+        rating: z.coerce.number().int().optional(),
+      }),
+    paging: true,
+    response: () => OfficialReviewRow,
+    status: 200,
+    screens: ["admin/official","admin/reviews"],
+    phase: 1,
+  },
+  postOfficialResponse: {
+    area: "admin",
+    method: "POST",
+    path: "/official-store/responses",
+    auth: "staff",
+    permission: "reviews.answers.staff",
+    scope: "staff",
+    summary: "Respond publicly as the Official Store",
+    desc: "Same rules as seller responses (one per review or feedback, rule check, responseEditDays); the target must be a product review of an item the Official Store sold or Official Store feedback.",
+    body: () => ResponseInput,
+    response: () => SellerResponse,
+    status: 201,
+    errors: ["RESPONSE_ALREADY_EXISTS","NOT_AN_OFFER_SELLER"],
+    audited: true,
+    events: ["reviews.response.published"],
+    screens: ["admin/official","admin/reviews"],
+    phase: 1,
+  },
+  editOfficialResponse: {
+    area: "admin",
+    method: "PATCH",
+    path: "/official-store/responses/{id}",
+    auth: "staff",
+    permission: "reviews.answers.staff",
+    scope: "staff",
+    summary: "Edit an Official Store response within the edit window",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      text: z.string(),
+    }),
+    response: () => SellerResponse,
+    status: 200,
+    errors: ["RESPONSE_EDIT_WINDOW_CLOSED","ILLEGAL_TRANSITION","NOT_FOUND"],
+    audited: true,
+    events: ["reviews.response.published"],
+    screens: ["admin/official","admin/reviews"],
     phase: 1,
   },
   listAppeals: {
@@ -2218,8 +2410,8 @@ export const spec = defineModuleSpec({
   chapters: [17,5],
   summary: "Product reviews (Verified Purchase), seller feedback kept separate from product reviews, public seller responses under rules, product questions and answers labelled by who answered, reports of inappropriate content, moderation with outcomes visible to reporter and author, appeals, and rating summaries for products and sellers.",
   dependsOn: ["orders","catalog","sellers"],
-  optionalDeps: ["media","offers","trust","notifications","access","audit","customers","search","shipping"],
-  publicApi: ["getRatingSummaries","getSellerFeedbackSummary","moveProductContent","removeContentForEnforcement","listProductReviews","listProductQuestions","listSellerFeedback","reviewStatusForItems","getOfferSellerRatings"],
+  optionalDeps: ["media","offers","trust","notifications","access","audit","customers","search","shipping","workqueues"],
+  publicApi: ["getRatingSummaries","getSellerFeedbackSummary","moveProductContent","removeContentForEnforcement","exportCustomerData","listProductReviews","listProductQuestions","listSellerFeedback","reviewStatusForItems","getOfferSellerRatings"],
   permissions: [
     {
       "key": "reviews.moderation.view",
@@ -2239,7 +2431,7 @@ export const spec = defineModuleSpec({
     {
       "key": "reviews.answers.staff",
       "audience": "staff",
-      "desc": "Answer product questions as Marketly staff"
+      "desc": "Answer product questions as Marketly staff and respond publicly for the Official Store"
     },
     {
       "key": "reviews.responses.post",
@@ -2337,6 +2529,36 @@ export const spec = defineModuleSpec({
           "removed",
           "delete",
           "deleted"
+        ],
+        [
+          "pending",
+          "remove",
+          "removed"
+        ],
+        [
+          "pending",
+          "requestEdit",
+          "edit_requested"
+        ],
+        [
+          "published",
+          "requestEdit",
+          "edit_requested"
+        ],
+        [
+          "held",
+          "edit",
+          "pending"
+        ],
+        [
+          "edit_requested",
+          "reinstate",
+          "published"
+        ],
+        [
+          "pending",
+          "delete",
+          "deleted"
         ]
       ]
     },
@@ -2398,6 +2620,57 @@ export const spec = defineModuleSpec({
           "removed",
           "delete",
           "deleted"
+        ],
+        [
+          "pending",
+          "remove",
+          "removed"
+        ],
+        [
+          "published",
+          "remove",
+          "removed"
+        ],
+        [
+          "held",
+          "edit",
+          "pending"
+        ],
+        [
+          "held",
+          "delete",
+          "deleted"
+        ],
+        [
+          "pending",
+          "delete",
+          "deleted"
+        ]
+      ]
+    },
+    "Question": {
+      "field": "Question.status",
+      "initial": "pending_review",
+      "transitions": [
+        [
+          "pending_review",
+          "publish",
+          "published"
+        ],
+        [
+          "pending_review",
+          "remove",
+          "removed"
+        ],
+        [
+          "published",
+          "remove",
+          "removed"
+        ],
+        [
+          "removed",
+          "reinstate",
+          "published"
         ]
       ]
     },
@@ -2432,6 +2705,26 @@ export const spec = defineModuleSpec({
         ],
         [
           "removed",
+          "reinstate",
+          "published"
+        ],
+        [
+          "published",
+          "requestEdit",
+          "edit_requested"
+        ],
+        [
+          "published",
+          "edit",
+          "pending_review"
+        ],
+        [
+          "edit_requested",
+          "remove",
+          "removed"
+        ],
+        [
+          "edit_requested",
           "reinstate",
           "published"
         ]
@@ -2470,6 +2763,26 @@ export const spec = defineModuleSpec({
           "rejected",
           "edit",
           "pending"
+        ],
+        [
+          "pending",
+          "reject",
+          "rejected"
+        ],
+        [
+          "published",
+          "reject",
+          "rejected"
+        ],
+        [
+          "held",
+          "edit",
+          "pending"
+        ],
+        [
+          "rejected",
+          "reinstate",
+          "published"
         ]
       ]
     },
@@ -2510,32 +2823,34 @@ export const spec = defineModuleSpec({
     publishes: {
       "reviews.review.published": { when: "A product review becomes visible (new, edited, kept or reinstated)", payload: () => ReviewsReviewPublishedEvent },
       "reviews.review.updated": { when: "An author edits a review", payload: () => ReviewsReviewUpdatedEvent },
-      "reviews.review.removed": { when: "A review is removed by moderation or deleted by its author", payload: () => ReviewsReviewRemovedEvent },
+      "reviews.review.removed": { when: "A review is removed by moderation or a trust enforcement, or deleted by its author", payload: () => ReviewsReviewRemovedEvent },
       "reviews.report.created": { when: "Content is reported", payload: () => ReviewsReportCreatedEvent },
       "reviews.feedback.published": { when: "Seller feedback becomes visible", payload: () => ReviewsFeedbackPublishedEvent },
       "reviews.feedback.removed": { when: "Seller feedback is removed or deleted", payload: () => ReviewsFeedbackRemovedEvent },
-      "reviews.question.asked": { when: "A question is published (sellers with an offer are told)", payload: () => ReviewsQuestionAskedEvent },
-      "reviews.answer.published": { when: "An answer is published", payload: () => ReviewsAnswerPublishedEvent },
-      "reviews.response.published": { when: "A seller response is published or held", payload: () => ReviewsResponsePublishedEvent },
-      "reviews.moderation.decided": { when: "A moderation decision is recorded (reporter and author are notified)", payload: () => ReviewsModerationDecidedEvent },
+      "reviews.question.asked": { when: "A question is published (sellers with an offer are told; Official Store questions go to staff)", payload: () => ReviewsQuestionAskedEvent },
+      "reviews.answer.published": { when: "An answer is published (the asker is told)", payload: () => ReviewsAnswerPublishedEvent },
+      "reviews.response.published": { when: "A seller or Official Store response is published or held (the reviewer is told when published)", payload: () => ReviewsResponsePublishedEvent },
+      "reviews.moderation.decided": { when: "A moderation decision is recorded (reporter and author are notified), including removals and keeps for a trust enforcement", payload: () => ReviewsModerationDecidedEvent },
       "reviews.appeal.submitted": { when: "An author appeals", payload: () => ReviewsAppealSubmittedEvent },
-      "reviews.appeal.decided": { when: "An appeal is decided", payload: () => ReviewsAppealDecidedEvent },
+      "reviews.appeal.decided": { when: "An appeal is decided (the author is told)", payload: () => ReviewsAppealDecidedEvent },
       "reviews.content.referred": { when: "Content is referred to Trust and Risk", payload: () => ReviewsContentReferredEvent },
       "reviews.rating.changed": { when: "A product or seller rating summary changes", payload: () => ReviewsRatingChangedEvent },
       "reviews.invite.due": { when: "inviteDelayDays after delivery, for items not yet reviewed", payload: () => ReviewsInviteDueEvent },
     },
     consumes: {
-      "orders.item.delivered": "Make the item eligible for a Verified Purchase review and its seller package for feedback; schedule the invitation",
-      "orders.item.cancelled": "Remove eligibility for cancelled items",
+      "orders.item.delivered": "Make the item eligible for a Verified Purchase review and its seller package for feedback; insert the review_invites row (due inviteDelayDays after delivery)",
+      "orders.item.cancelled": "Remove eligibility for cancelled items and cancel their pending invites",
       "catalog.product.merged": "Move reviews, questions and the rating summary to the kept product",
-      "trust.enforcement.recorded": "Remove reviews and answers named in a fake-review enforcement and notify authors",
+      "trust.enforcement.recorded": "remove_reviews: remove the reviews, questions and answers named in targets with a moderation decision (reason proven_fake, trust_enforcement_id recorded), tell the authors, recalculate ratings, publish reviews.moderation.decided with trustEnforcementId (trust confirms) and reviews.review.removed for reviews. keep_reviews: decide open moderation items on the named content as kept (reason legitimate_experience) so held content is published again. Other actions are ignored",
+      "trust.enforcement.reversed": "remove_reviews: reinstate the content that enforcement removed (decisions with its trust_enforcement_id) unless the author deleted it since, recalculate ratings, publish reviews.review.published and reviews.rating.changed, tell the authors",
+      "customers.account.closed": "Anonymise the customer's content: display names become Former customer on reviews, feedback, questions and answers (content stays published as the honest record of a purchase); their votes and reports stay counted without the customer id; pending invites are cancelled",
       "sellers.seller.closed": "Keep feedback published; stop new responses from the closed seller"
     },
   },
   jobs: {
     "reviews.invites": {
       "schedule": "hourly",
-      "does": "Publish reviews.invite.due for items delivered inviteDelayDays ago without a review"
+      "does": "Publish reviews.invite.due for pending review_invites rows past due_at whose item is still unreviewed (mark sent); rows of reviewed items become reviewed"
     },
     "reviews.summaries": {
       "schedule": "every 10 min",
@@ -2543,7 +2858,7 @@ export const spec = defineModuleSpec({
     },
     "reviews.moderation-sla": {
       "schedule": "every 30 min",
-      "does": "Flag moderation items older than moderationTargetHours (workqueues)"
+      "does": "Raise a review_moderation_overdue work item (workqueues.raise, dedupe review_moderation_overdue:<moderationItemId>) for open moderation items older than moderationTargetHours; resolve it with resolveBySource when the item is decided"
     }
   },
   settings: {
@@ -3119,6 +3434,10 @@ export const spec = defineModuleSpec({
       "appeal_by": {
         "type": "timestamptz",
         "nullable": true
+      },
+      "trust_enforcement_id": {
+        "type": "uuid",
+        "nullable": true
       }
     },
     "appeals": {
@@ -3205,6 +3524,48 @@ export const spec = defineModuleSpec({
         "nullable": false
       }
     },
+    "review_invites": {
+      "order_item_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "order_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "customer_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "product_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "seller_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "delivered_at": {
+        "type": "timestamptz",
+        "nullable": false
+      },
+      "due_at": {
+        "type": "timestamptz",
+        "nullable": false
+      },
+      "state": {
+        "type": "text",
+        "nullable": false
+      },
+      "sent_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
+      "updated_at": {
+        "type": "timestamptz",
+        "nullable": false
+      }
+    },
     "seller_feedback_summaries": {
       "seller_id": {
         "type": "uuid",
@@ -3267,6 +3628,10 @@ export const spec = defineModuleSpec({
       "seller": "seller_id"
     },
     "helpful_votes": {
+      "customer": "customer_id"
+    },
+    "review_invites": {
+      "seller": "seller_id",
       "customer": "customer_id"
     },
     "seller_feedback_summaries": {

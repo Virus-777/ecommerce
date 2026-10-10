@@ -29,7 +29,7 @@
     { "name": "getSellerFeedbackSummary", "signature": "(sellerId: uuid) => SellerFeedbackSummary", "desc": "Seller quality for offer comparison, featured-offer eligibility and storefronts", "usedBy": ["offers", "sellers", "graphql"] },
     { "name": "moveProductContent", "signature": "(fromProductId: uuid, toProductId: uuid) => { reviews: int, questions: int }", "desc": "Called during a duplicate merge", "usedBy": ["catalog"] },
     { "name": "removeContentForEnforcement", "signature": "(contentIds: uuid[], enforcementId: uuid, reason: string) => int", "desc": "Remove proven fake reviews named in an enforcement (same path as consuming trust.enforcement.recorded; publishes reviews.moderation.decided with trustEnforcementId)", "usedBy": ["trust"] },
-    { "name": "exportForCustomer", "signature": "(customerId: uuid) => CustomerExportSection", "desc": "The customer's product reviews, seller feedback, questions, answers and reports they made (with status and moderation outcomes) for the personal data export. Export hook called by customers.build-data-exports", "usedBy": ["customers"] },
+    { "name": "exportCustomerData", "signature": "(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]", "desc": "The customer's product reviews, seller feedback, questions, answers and reports they made (with status and moderation outcomes) for the personal data export. Export hook called by customers.build-data-exports", "usedBy": ["customers"] },
     { "name": "listProductReviews", "signature": "(productId: uuid, filter: { stars?: int, verifiedOnly?: bool, withPhotos?: bool, variantLabel?: string }, sort: string, page: PageInput, viewer: Actor | null) => Page<ProductReview>", "desc": "Published product reviews with filters and sorting (Product.reviews)", "usedBy": ["graphql"] },
     { "name": "listProductQuestions", "signature": "(productId: uuid, search: string | null, page: PageInput) => Page<Question>", "desc": "Published questions with labelled answers (Product.questions)", "usedBy": ["graphql"] },
     { "name": "listSellerFeedback", "signature": "(sellerId: uuid, filter: { sentiment?: string }, page: PageInput) => Page<SellerFeedback>", "desc": "Seller feedback with public seller responses, newest first (Seller.feedback)", "usedBy": ["graphql"] },
@@ -311,11 +311,6 @@
       "orderRef": "string?",
       "needsResponse": "bool",
       "canRespond": "bool"
-    },
-    "CustomerExportSection": {
-      "module": { "type": "string", "desc": "reviews" },
-      "title": { "type": "string", "desc": "e.g. Reviews and questions" },
-      "records": { "type": "json[]", "desc": "{ kind: product_review|seller_feedback|question|answer|report, product or seller, text, rating?, status, createdAt, moderation? }" }
     }
   },
   "tables": [

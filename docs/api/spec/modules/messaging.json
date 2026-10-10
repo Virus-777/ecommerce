@@ -34,7 +34,7 @@
     { "name": "listInbox", "signature": "(participant: Actor, filter: { unreadOnly?: bool, replyState?: string }, page: PageInput) => Page<ConversationSummary>", "desc": "Inbox of a customer or seller; the seller inbox lists overdue first", "usedBy": ["graphql"] },
     { "name": "getConversation", "signature": "(participant: Actor, conversationId: uuid) => Conversation | null", "desc": "Conversation header and messages for a participant", "usedBy": ["graphql"] },
     { "name": "customerConversationSummaries", "signature": "(customerIds: uuid[]) => map<CustomerConversationSummary>", "desc": "Counts, last message time and counterparties of each customer's conversations for the customer 360; never message content", "usedBy": ["customers", "graphql"] },
-    { "name": "exportForCustomer", "signature": "(customerId: uuid) => CustomerExportSection", "desc": "The customer's conversations and the messages they can see (no hidden messages, internal notes or other parties' contact details) for the personal data export. Export hook called by customers.build-data-exports", "usedBy": ["customers"] }
+    { "name": "exportCustomerData", "signature": "(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]", "desc": "The customer's conversations and the messages they can see (no hidden messages, internal notes or other parties' contact details) for the personal data export. Export hook called by customers.build-data-exports", "usedBy": ["customers"] }
   ],
   "types": {
     "Subject": {
@@ -188,11 +188,6 @@
         "type": "json[]",
         "desc": "{ kind: seller|official_store, sellerId?, name, conversationCount, lastMessageAt }, most recent first"
       }
-    },
-    "CustomerExportSection": {
-      "module": { "type": "string", "desc": "messaging" },
-      "title": { "type": "string", "desc": "e.g. Messages" },
-      "records": { "type": "json[]", "desc": "One record per conversation: { subject, counterparty, startedAt, messages: [{ at, from, body, attachments: fileName[] }] }" }
     }
   },
   "tables": [

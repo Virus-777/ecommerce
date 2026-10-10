@@ -616,7 +616,8 @@ export const AlternativeOffer: z.ZodType<AlternativeOffer> = z.object({
 
 export interface Change {
   id: string;
-  kind: "price_increased" | "price_decreased" | "quantity_reduced" | "out_of_stock" | "offer_ended" | "delivery_date_changed" | "delivery_option_unavailable" | "shipping_cost_changed" | "coupon_no_longer_applies" | "coupon_amount_changed" | "not_shippable" | "purchase_limit";
+  /** terms_changed: the offer's return, warranty or dispatch terms changed since the line was quoted (offers.revalidate OfferChange kind terms; termsVersion above the line's). The customer must accept it (or remove the line) before Place order; accepting moves the line to the current termsVersion and the order snapshots the new terms */
+  kind: "price_increased" | "price_decreased" | "quantity_reduced" | "out_of_stock" | "offer_ended" | "delivery_date_changed" | "delivery_option_unavailable" | "shipping_cost_changed" | "coupon_no_longer_applies" | "coupon_amount_changed" | "not_shippable" | "purchase_limit" | "terms_changed";
   lineId?: string | null;
   packageKey?: string | null;
   /** 'Price went up', 'Less stock available', 'Delivery date moved', 'Coupon no longer covers this item' */
@@ -640,7 +641,7 @@ export interface Change {
 
 export const Change: z.ZodType<Change> = z.object({
   id: z.uuid(),
-  kind: z.enum(["price_increased", "price_decreased", "quantity_reduced", "out_of_stock", "offer_ended", "delivery_date_changed", "delivery_option_unavailable", "shipping_cost_changed", "coupon_no_longer_applies", "coupon_amount_changed", "not_shippable", "purchase_limit"]),
+  kind: z.enum(["price_increased", "price_decreased", "quantity_reduced", "out_of_stock", "offer_ended", "delivery_date_changed", "delivery_option_unavailable", "shipping_cost_changed", "coupon_no_longer_applies", "coupon_amount_changed", "not_shippable", "purchase_limit", "terms_changed"]).describe("terms_changed: the offer's return, warranty or dispatch terms changed since the line was quoted (offers.revalidate OfferChange kind terms; termsVersion above the line's). The customer must accept it (or remove the line) before Place order; accepting moves the line to the current termsVersion and the order snapshots the new terms"),
   lineId: z.string().nullish(),
   packageKey: z.string().nullish(),
   headline: z.string().describe("'Price went up', 'Less stock available', 'Delivery date moved', 'Coupon no longer covers this item'"),
@@ -933,8 +934,9 @@ export const ConfirmationView: z.ZodType<ConfirmationView> = z.object({
 export interface CheckoutSessionAdminRow {
   id: string;
   status: string;
-  customerName: string;
-  email: string;
+  customerName?: string | null;
+  /** Null for a guest who has not reached the contact step; such sessions are still listed */
+  email?: string | null;
   guest: boolean;
   total: common.Money;
   packageCount: number;
@@ -948,8 +950,8 @@ export interface CheckoutSessionAdminRow {
 export const CheckoutSessionAdminRow: z.ZodType<CheckoutSessionAdminRow> = z.object({
   id: z.uuid(),
   status: z.string(),
-  customerName: z.string(),
-  email: z.email(),
+  customerName: z.string().nullish(),
+  email: z.email().describe("Null for a guest who has not reached the contact step; such sessions are still listed").nullish(),
   guest: z.boolean(),
   get total() {
     return common.Money;
@@ -1503,7 +1505,7 @@ export const endpoints = defineEndpoints({
     auth: "shopper",
     scope: "own-customer",
     summary: "Place the order and pay",
-    desc: "Requires an Idempotency-Key; the same key returns the first result, and while a session is placing, pending or completed any further call returns the current result without a new charge. Steps: lock; check quoteVersion and expectedTotal; revalidate (changes → changes_required, nothing charged); hold stock (inventory.hold); reserve promotions; read content.currentPolicyVersions(['returns', 'shipping', 'purchase_terms']) (the versions accepted with this order); authorize (payments.authorize); then accepted → order created and accepted (confirmation); pending → order created with payment checking (payment-result page, no second payment); failed → no order, cart and choices kept, holds kept until retryUntil; requires_action → bank challenge.",
+    desc: "Requires an Idempotency-Key; the same key returns the first result, and while a session is placing, pending or completed any further call returns the current result without a new charge. Steps: lock; check quoteVersion and expectedTotal; revalidate (changes → changes_required, nothing charged); hold stock (inventory.hold); reserve promotions; read content.currentPolicyVersions(['returns', 'shipping', 'purchase_terms']) (the versions accepted with this order); authorize (payments.authorize); then accepted → order created and accepted (confirmation); pending → order created with payment checking (payment-result page, no second payment); failed → no order, cart and choices kept, holds kept until retryUntil; requires_action → bank challenge. Before authorizing, the session's attempt count is checked against maxPaymentAttempts (PAYMENT_ATTEMPTS_EXCEEDED); editing the checkout never resets it, so edit → place cannot bypass the limit. createOrder gets the real authorize result as paymentState (accepted creates the order open in one step) and the session's attemptNo. A new card's providerToken is used for this authorize only and cleared from payment_selection afterwards, whatever the outcome.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1511,7 +1513,7 @@ export const endpoints = defineEndpoints({
     body: () => PlaceOrderInput,
     response: () => PlaceOrderResult,
     status: 200,
-    errors: ["QUOTE_OUTDATED","CHECKOUT_INCOMPLETE","TERMS_NOT_ACCEPTED","SESSION_EXPIRED","ORDERING_RESTRICTED","PAYMENT_METHOD_INVALID","IDEMPOTENCY_KEY_REUSED","ILLEGAL_TRANSITION"],
+    errors: ["QUOTE_OUTDATED","CHECKOUT_INCOMPLETE","TERMS_NOT_ACCEPTED","SESSION_EXPIRED","ORDERING_RESTRICTED","PAYMENT_METHOD_INVALID","PAYMENT_ATTEMPTS_EXCEEDED","IDEMPOTENCY_KEY_REUSED","ILLEGAL_TRANSITION"],
     idempotent: true,
     events: ["checkout.session.completed","checkout.changes.detected"],
     screens: ["store/checkout","store/payment-result","store/confirmation","store/checkout-review-changes"],
@@ -1546,7 +1548,7 @@ export const endpoints = defineEndpoints({
     auth: "shopper",
     scope: "own-customer",
     summary: "Pay again with the same or another method after a decline",
-    desc: "Only from payment_failed within the retry window. Revalidates first (changes are shown before paying). Creates a new payment attempt; never reuses a declined authorization.",
+    desc: "Only from payment_failed within the retry window. Revalidates first (changes are shown before paying). Creates a new payment attempt; never reuses a declined authorization. Refused with PAYMENT_ATTEMPTS_EXCEEDED once maxPaymentAttempts is reached. When the declined attempt had created an order (pending payment finally declined, order cancelled), the new attempt creates a new order with the next attemptNo.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1554,7 +1556,7 @@ export const endpoints = defineEndpoints({
     body: () => RetryPaymentInput,
     response: () => PlaceOrderResult,
     status: 200,
-    errors: ["RETRY_WINDOW_EXPIRED","QUOTE_OUTDATED","PAYMENT_METHOD_INVALID","IDEMPOTENCY_KEY_REUSED","ILLEGAL_TRANSITION"],
+    errors: ["RETRY_WINDOW_EXPIRED","QUOTE_OUTDATED","PAYMENT_METHOD_INVALID","PAYMENT_ATTEMPTS_EXCEEDED","IDEMPOTENCY_KEY_REUSED","ILLEGAL_TRANSITION"],
     idempotent: true,
     events: ["checkout.payment.retried","checkout.session.completed"],
     screens: ["store/payment-result"],
@@ -1646,7 +1648,7 @@ export const spec = defineModuleSpec({
   chapters: [5,6,14],
   summary: "Turns a cart (or a Buy now offer) into an accepted order: identify the customer or guest, choose an address with a per-item shippability check, pick delivery options per package, apply coupons or credit with reasons and item coverage, choose payment, review sellers, return terms and totals, revalidate into a change set the customer must accept, and place the order idempotently with clear payment results.",
   dependsOn: ["cart","orders","payments","shipping","customers","offers","inventory"],
-  optionalDeps: ["promotions","wallet","returns","content","identity","fulfillment-service","settings"],
+  optionalDeps: ["promotions","wallet","returns","content","identity","fulfillment-service","settings","catalog"],
   publicApi: ["getSessionForOrder","getSessionView","getConfirmation"],
   permissions: [
     {
@@ -1792,7 +1794,7 @@ export const spec = defineModuleSpec({
     },
     "checkout.extend-pending-holds": {
       "schedule": "every 10 min",
-      "does": "Keep stock holds alive for payment_pending sessions (inventory.extendHold) up to pendingHoldHours"
+      "does": "Keep stock holds alive for payment_pending sessions (inventory.extendHold) up to pendingHoldHours, and the store credit hold too (wallet.extendHold on credit_hold_id) so a pending check does not end in INSUFFICIENT_CREDIT"
     },
     "checkout.purge-idempotency": {
       "schedule": "daily 03:30 PT",
@@ -1941,6 +1943,10 @@ export const spec = defineModuleSpec({
     "INSUFFICIENT_CREDIT": {
       "status": 409,
       "meaning": "Store credit is lower than the amount requested."
+    },
+    "PAYMENT_ATTEMPTS_EXCEEDED": {
+      "status": 409,
+      "meaning": "This checkout reached maxPaymentAttempts; start again from the cart (nothing was charged). details.max."
     }
   },
   tables: {

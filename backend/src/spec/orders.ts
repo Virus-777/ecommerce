@@ -164,6 +164,8 @@ export interface OrderItem {
   /** Set when a partial cancel, shipment or return split the line */
   splitFromItemId?: string | null;
   replacementOfItemId?: string | null;
+  /** Checkout session line the item came from (OrderItemInput.checkoutLineId); checkout maps its lines to order items by it, not by offer id. Split lines keep it; replacement lines have none */
+  checkoutLineId?: string | null;
   afterSales: ItemAfterSales;
   /** What the viewer can do now */
   actions: ("cancel" | "return" | "track" | "view_return" | "review" | "report_problem" | "contact_seller" | "buy_again")[];
@@ -215,6 +217,7 @@ export const OrderItem: z.ZodType<OrderItem> = z.object({
   returnWindowEndsAt: z.iso.datetime({ offset: true }).nullish(),
   splitFromItemId: z.uuid().describe("Set when a partial cancel, shipment or return split the line").nullish(),
   replacementOfItemId: z.uuid().nullish(),
+  checkoutLineId: z.string().describe("Checkout session line the item came from (OrderItemInput.checkoutLineId); checkout maps its lines to order items by it, not by offer id. Split lines keep it; replacement lines have none").nullish(),
   get afterSales() {
     return ItemAfterSales;
   },
@@ -1612,8 +1615,14 @@ export const AcceptedPolicyVersion: z.ZodType<AcceptedPolicyVersion> = z.object(
 
 export interface OrderCreateInput {
   checkoutSessionId: string;
+  /** Payment attempt that this order belongs to (default 1). createOrder is idempotent per (checkoutSessionId, attemptNo); checkout passes the next number when the customer retries after a pending payment was finally declined */
+  attemptNo?: number | null;
   /** Checkout's inventory stock hold for this order; carried on orders.order.accepted so inventory can allocate from it */
   reservationId?: string | null;
+  /** Saved customer address the delivery address came from (customers module); null for guests and one-off addresses */
+  deliveryAddressId?: string | null;
+  /** Visitor id of the shopper's app session, set only when the shopper allowed personalization (advertising attributes guest orders to ad clicks by it). Null otherwise */
+  visitorId?: string | null;
   contact: Contact;
   channel: "web" | "android";
   currency: string;
@@ -1624,6 +1633,7 @@ export interface OrderCreateInput {
   policyVersions: AcceptedPolicyVersion[];
   couponCodes: string[];
   paymentIntentId: string;
+  /** The authorize result: accepted when the payment is already authorized (or nothing is left to pay by card), pending_check only when the provider is still checking */
   paymentState: "accepted" | "pending_check";
   paymentMethodLabel: string;
   groups: OrderGroupInput[];
@@ -1632,7 +1642,10 @@ export interface OrderCreateInput {
 
 export const OrderCreateInput: z.ZodType<OrderCreateInput> = z.object({
   checkoutSessionId: z.uuid(),
+  attemptNo: z.number().int().describe("Payment attempt that this order belongs to (default 1). createOrder is idempotent per (checkoutSessionId, attemptNo); checkout passes the next number when the customer retries after a pending payment was finally declined").nullish(),
   reservationId: z.uuid().describe("Checkout's inventory stock hold for this order; carried on orders.order.accepted so inventory can allocate from it").nullish(),
+  deliveryAddressId: z.uuid().describe("Saved customer address the delivery address came from (customers module); null for guests and one-off addresses").nullish(),
+  visitorId: z.string().describe("Visitor id of the shopper's app session, set only when the shopper allowed personalization (advertising attributes guest orders to ad clicks by it). Null otherwise").nullish(),
   get contact() {
     return Contact;
   },
@@ -1648,7 +1661,7 @@ export const OrderCreateInput: z.ZodType<OrderCreateInput> = z.object({
   },
   couponCodes: z.array(z.string()),
   paymentIntentId: z.uuid(),
-  paymentState: z.enum(["accepted", "pending_check"]),
+  paymentState: z.enum(["accepted", "pending_check"]).describe("The authorize result: accepted when the payment is already authorized (or nothing is left to pay by card), pending_check only when the provider is still checking"),
   paymentMethodLabel: z.string(),
   get groups() {
     return z.array(OrderGroupInput);
@@ -1740,6 +1753,13 @@ export interface OrdersOrderPlacedEvent {
   couponCodes: string[];
   groups: PlacedGroup[];
   placedAt: string;
+  attemptNo: number;
+  /** Saved customer address used, if any (customers, trust) */
+  deliveryAddressId?: string | null;
+  /** Order contact name (guests have no customer record) */
+  contactName: string;
+  /** Only when the shopper allowed personalization; advertising attributes guest orders by it */
+  visitorId?: string | null;
 }
 
 export const OrdersOrderPlacedEvent: z.ZodType<OrdersOrderPlacedEvent> = z.object({
@@ -1758,6 +1778,10 @@ export const OrdersOrderPlacedEvent: z.ZodType<OrdersOrderPlacedEvent> = z.objec
     return z.array(PlacedGroup);
   },
   placedAt: z.iso.datetime({ offset: true }),
+  attemptNo: z.number().int(),
+  deliveryAddressId: z.uuid().describe("Saved customer address used, if any (customers, trust)").nullish(),
+  contactName: z.string().describe("Order contact name (guests have no customer record)"),
+  visitorId: z.string().describe("Only when the shopper allowed personalization; advertising attributes guest orders by it").nullish(),
 });
 
 /** orders.order.accepted: Payment accepted: fulfillment tasks start, confirmation is sent */
@@ -1867,6 +1891,8 @@ export interface OrdersItemCancelledEvent {
   refund: RefundBreakdownPayload;
   paymentIntentId: string;
   trustReportId?: string | null;
+  /** False when staff cancelled with notifyCustomer false (cancelItemsAdmin); notifications then sends no customer notice for this cancellation. Always true for customer, seller and system cancellations */
+  notifyCustomer: boolean;
 }
 
 export const OrdersItemCancelledEvent: z.ZodType<OrdersItemCancelledEvent> = z.object({
@@ -1891,6 +1917,40 @@ export const OrdersItemCancelledEvent: z.ZodType<OrdersItemCancelledEvent> = z.o
   },
   paymentIntentId: z.uuid(),
   trustReportId: z.uuid().nullish(),
+  notifyCustomer: z.boolean().describe("False when staff cancelled with notifyCustomer false (cancelItemsAdmin); notifications then sends no customer notice for this cancellation. Always true for customer, seller and system cancellations"),
+});
+
+/** orders.item.split: A partial cancellation, shipment or return splits an item line: the original line keeps its id with the remaining quantity and a new line takes the split-off quantity (splitFromItemId = original) */
+export interface OrdersItemSplitEvent {
+  orderId: string;
+  groupId: string;
+  /** Original line; keeps remainingQuantity */
+  itemId: string;
+  /** New line holding the split-off quantity */
+  newItemId: string;
+  /** First line of the chain (equals itemId unless the original was itself split off) */
+  rootItemId: string;
+  offerId: string;
+  stockItemId: string;
+  /** Units moved to newItemId */
+  quantity: number;
+  remainingQuantity: number;
+  reason: "cancellation" | "shipment" | "return" | "replacement";
+  at: string;
+}
+
+export const OrdersItemSplitEvent: z.ZodType<OrdersItemSplitEvent> = z.object({
+  orderId: z.uuid(),
+  groupId: z.uuid(),
+  itemId: z.uuid().describe("Original line; keeps remainingQuantity"),
+  newItemId: z.uuid().describe("New line holding the split-off quantity"),
+  rootItemId: z.uuid().describe("First line of the chain (equals itemId unless the original was itself split off)"),
+  offerId: z.uuid(),
+  stockItemId: z.uuid(),
+  quantity: z.number().int().describe("Units moved to newItemId"),
+  remainingQuantity: z.number().int(),
+  reason: z.enum(["cancellation", "shipment", "return", "replacement"]),
+  at: z.iso.datetime({ offset: true }),
 });
 
 /** orders.item.delayed: Items become Delayed (seller report or overdue dispatch) */
@@ -2025,7 +2085,7 @@ export const OrdersConfirmationRequestedEvent: z.ZodType<OrdersConfirmationReque
 
 /** What other modules may call in-process: `ctx.use('orders')` (or `ctx.tryUse` for an optional dependency). */
 export interface OrdersPublicApi {
-  /** Create the order from an authorized or pending payment. Freezes catalog.snapshotForOrder and offers.snapshotForOrder per item. Status open when paymentState=accepted (publishes orders.order.placed and orders.order.accepted in one transaction), payment_pending otherwise (publishes orders.order.placed only). Idempotent per checkoutSessionId: a second call returns the existing order. Used by: checkout. */
+  /** Create the order from an authorized or pending payment. Freezes catalog.snapshotForOrder and offers.snapshotForOrder per item. Status open when paymentState=accepted (publishes orders.order.placed and orders.order.accepted in one transaction), payment_pending otherwise (publishes orders.order.placed only). Idempotent per (checkoutSessionId, attemptNo): a second call with the same pair returns the existing order; a retry after a finally declined pending payment passes the next attemptNo and gets a new order (the declined one stays cancelled). paymentState is the real authorize result: accepted creates the order open in one step; only pending_check creates it payment_pending. Attaches each item's snapshot image to the order (media.attach, usage kind order_evidence, ref the order id) so the image outlives catalog changes. Used by: checkout. */
   createOrder(input: OrderCreateInput): Promise<OrderDetail>;
   /** payment_pending → open when the payment result arrives (also done on payments.payment.authorized). Idempotent. Used by: checkout. */
   acceptOrder(orderId: string, paymentIntentId: string): Promise<OrderDetail>;
@@ -2053,6 +2113,8 @@ export interface OrdersPublicApi {
   listDelayedItemsForCustomer(customerId: string): Promise<DelayedItemAlert[]>;
   /** Units bought recently, for per-customer purchase limits Used by: checkout, promotions. */
   countPurchased(customerId: string, offerId: string, sinceDays: number): Promise<number>;
+  /** True when the customer (or, for guests, the normalised contact email) has an order that was accepted (lifecycle open, completed, or cancelled after acceptance). Orders still payment_pending or cancelled for a declined payment do not count. Promotions new_customers audience. Used by: promotions. */
+  hasPlacedOrder(who: { customerId?: string, email?: string }): Promise<boolean>;
   /** Delivered purchase of the product for Verified Purchase labels Used by: reviews. */
   isVerifiedPurchase(customerId: string, productId: string): Promise<{ orderItemId: string, deliveredAt: string } | null>;
   /** Store order detail by reference. Returns the order only when it belongs to the signed-in customer or the guest session has access (identity.hasGuestOrderAccess); otherwise null (NOT_FOUND). Used by: graphql. */
@@ -2097,7 +2159,9 @@ export interface OrdersDb {
     /** MK-YYMMDD-NNNNN */
     ref: string;
     checkout_session_id: string;
+    attempt_no: number;
     reservation_id: string | null;
+    delivery_address_id: string | null;
     customer_id: string | null;
     contact_email: string;
     contact_phone: string | null;
@@ -2126,8 +2190,6 @@ export interface OrdersDb {
     placed_at: Date;
     accepted_at: Date | null;
     completed_at: Date | null;
-    /** ref, contact, product titles, tracking numbers */
-    search: string | null;
   };
   /** One per seller package; the seller's fulfillment task */
   seller_groups: {
@@ -2185,7 +2247,7 @@ export interface OrdersDb {
     return_window_ends_at: Date | null;
     split_from_item_id: string | null;
     replacement_of_item_id: string | null;
-    checkout_line_id: string;
+    checkout_line_id: string | null;
   };
   /** Every item state change */
   item_state_log: {
@@ -3062,7 +3124,7 @@ export const spec = defineModuleSpec({
   summary: "The accepted purchase: one order per checkout, one seller group per seller package, and items with their own state (Confirmed, Preparing, Delayed, Shipped, Delivered, cancellation, return, refund). Keeps frozen purchase snapshots, derives the overall status from the items, tracks payment, delivery and returns progress separately, and runs item-level cancellations, seller fulfillment tasks with dispatch deadlines, timelines and purchase documents.",
   dependsOn: ["catalog","offers"],
   optionalDeps: ["identity","finance","support","returns","promotions","messaging","content","audit","customers","fulfillment-service","inventory","media","notifications","payments","reports","sellers","settings","trust","warehouse","workqueues"],
-  publicApi: ["createOrder","acceptOrder","cancelForDeclinedPayment","getOrder","getFulfillmentTask","canShipItems","setDispatchDeadline","getPaidAmounts","findGuestOrder","listGuestOrdersByEmail","countInProgress","listRecentForCustomer","listDelayedItemsForCustomer","countPurchased","isVerifiedPurchase","getOrderForViewer","listOrdersForCustomer","countOrdersByTab","getOrderForSeller","listOrdersForSeller","countSellerOrders","getOrderAdmin","listOrdersAdmin","getOrdersByIds","countOrdersForSellers","exportRows","countOrderItemsForProducts","getOrderItem","listDeliveredItems","countOpenOrdersInCategory"],
+  publicApi: ["createOrder","acceptOrder","cancelForDeclinedPayment","getOrder","getFulfillmentTask","canShipItems","setDispatchDeadline","getPaidAmounts","findGuestOrder","listGuestOrdersByEmail","countInProgress","listRecentForCustomer","listDelayedItemsForCustomer","countPurchased","hasPlacedOrder","isVerifiedPurchase","getOrderForViewer","listOrdersForCustomer","countOrdersByTab","getOrderForSeller","listOrdersForSeller","countSellerOrders","getOrderAdmin","listOrdersAdmin","getOrdersByIds","countOrdersForSellers","exportRows","countOrderItemsForProducts","getOrderItem","listDeliveredItems","countOpenOrdersInCategory"],
   permissions: [
     {
       "key": "orders.orders.view",
@@ -3329,6 +3391,7 @@ export const spec = defineModuleSpec({
       "orders.order.completed": { when: "Every item is final and no return, case or refund is open", payload: () => OrdersOrderCompletedEvent },
       "orders.item.state_changed": { when: "Any item state change (for timelines, notifications and reports)", payload: () => OrdersItemStateChangedEvent },
       "orders.item.cancelled": { when: "Items are cancelled (customer request accepted, seller cannot fulfill, staff)", payload: () => OrdersItemCancelledEvent },
+      "orders.item.split": { when: "A partial cancellation, shipment or return splits an item line: the original line keeps its id with the remaining quantity and a new line takes the split-off quantity (splitFromItemId = original)", payload: () => OrdersItemSplitEvent },
       "orders.item.delayed": { when: "Items become Delayed (seller report or overdue dispatch)", payload: () => OrdersItemDelayedEvent },
       "orders.item.delivered": { when: "Items in a delivered shipment become Delivered", payload: () => OrdersItemDeliveredEvent },
       "orders.cancellation.requested": { when: "A customer asks to cancel items that need the seller's confirmation", payload: () => OrdersCancellationRequestedEvent },
@@ -3358,6 +3421,8 @@ export const spec = defineModuleSpec({
       "returns.refund.approved": "Item refund status Approved (shown as not yet sent)",
       "returns.replacement.created": "Add a replacement line (confirmed) linked to the original item; the original keeps its history",
       "support.case.opened": "Flag the order and link the case to its items",
+      "support.case.resolved": "Unlink the case (payload orderId); clear the case_open flag when no other case on the order is open",
+      "support.case.reopened": "Link the case again and set the case_open flag (payload orderId)",
       "sellers.seller.restricted": "Flag open groups of the seller (seller_restricted); orders stay accessible and fulfillable",
       "identity.user.verified": "Attach guest orders placed with the verified email to the new customer account"
     },
@@ -3451,7 +3516,15 @@ export const spec = defineModuleSpec({
         "type": "uuid",
         "nullable": false
       },
+      "attempt_no": {
+        "type": "int",
+        "nullable": false
+      },
       "reservation_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "delivery_address_id": {
         "type": "uuid",
         "nullable": true
       },
@@ -3561,10 +3634,6 @@ export const spec = defineModuleSpec({
       },
       "completed_at": {
         "type": "timestamptz",
-        "nullable": true
-      },
-      "search": {
-        "type": "tsvector",
         "nullable": true
       }
     },
@@ -3765,7 +3834,7 @@ export const spec = defineModuleSpec({
       },
       "checkout_line_id": {
         "type": "text",
-        "nullable": false
+        "nullable": true
       }
     },
     "item_state_log": {
@@ -4096,6 +4165,7 @@ declare module '../kernel/events/event-map.js' {
     "orders.order.completed": OrdersOrderCompletedEvent;
     "orders.item.state_changed": OrdersItemStateChangedEvent;
     "orders.item.cancelled": OrdersItemCancelledEvent;
+    "orders.item.split": OrdersItemSplitEvent;
     "orders.item.delayed": OrdersItemDelayedEvent;
     "orders.item.delivered": OrdersItemDeliveredEvent;
     "orders.cancellation.requested": OrdersCancellationRequestedEvent;

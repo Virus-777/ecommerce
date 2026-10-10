@@ -1403,7 +1403,7 @@ export const endpoints = defineEndpoints({
     permission: "warehouse.packing.perform",
     scope: "staff",
     summary: "Buy the carrier label through shipping (service matching the customer's delivery choice)",
-    desc: "Buys postage, so an Idempotency-Key is required; a retry returns the same label.",
+    desc: "Buys postage, so an Idempotency-Key is required; a retry returns the same label. format is passed through to shipping.createLabel (LabelRequest.format): zpl for thermal printers, pdf otherwise (default pdf); the label file comes back in that format.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1735,6 +1735,11 @@ export const spec = defineModuleSpec({
           "on_hold"
         ],
         [
+          "picked",
+          "hold",
+          "on_hold"
+        ],
+        [
           "on_hold",
           "resume",
           "picking"
@@ -1860,6 +1865,7 @@ export const spec = defineModuleSpec({
     },
     consumes: {
       "orders.order.accepted": "Create a fulfillment for the order's Official Store seller group (lines carry stock item ids from the purchase snapshot and ship-by from shipping)",
+      "orders.item.split": "A line was split (partial cancel, shipment or return; decision S-D1): split the fulfillment line of itemId so newItemId gets its own line with quantity units (picked units stay on the original line first), so later cancel and dispatch events that name either item find their line. Idempotent per newItemId",
       "orders.item.cancelled": "Cancel the line; if already picked, return units to the bin; if packed, flag the package to be reopened",
       "inventory.discrepancy.resolved": "Resume a held fulfillment when the shortage or damage was reallocated",
       "purchasing.receipt.recorded": "Create put-away tasks for received units (damaged units to a quarantine bin)",

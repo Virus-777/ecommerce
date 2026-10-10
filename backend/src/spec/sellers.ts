@@ -937,9 +937,9 @@ export const BusinessDetails: z.ZodType<BusinessDetails> = z.object({
 
 export interface ChangeRequest {
   id: string;
-  kind: "store_name" | "public_claim" | "legal_name" | "ownership" | "business_address" | "brand_request";
+  kind: "store_name" | "tagline" | "public_claim" | "legal_name" | "ownership" | "business_address" | "brand_request";
   current?: unknown | null;
-  /** brand_request: { brandName, website?, relationship, categoryIds } */
+  /** brand_request: { brandName, website?, relationship, categoryIds }; tagline: { tagline } */
   proposed?: unknown;
   evidence: common.MediaRef[];
   state: "pending" | "approved" | "rejected" | "withdrawn";
@@ -956,9 +956,9 @@ export interface ChangeRequest {
 
 export const ChangeRequest: z.ZodType<ChangeRequest> = z.object({
   id: z.uuid(),
-  kind: z.enum(["store_name", "public_claim", "legal_name", "ownership", "business_address", "brand_request"]),
+  kind: z.enum(["store_name", "tagline", "public_claim", "legal_name", "ownership", "business_address", "brand_request"]),
   current: z.unknown().nullish(),
-  proposed: z.unknown().describe("brand_request: { brandName, website?, relationship, categoryIds }"),
+  proposed: z.unknown().describe("brand_request: { brandName, website?, relationship, categoryIds }; tagline: { tagline }"),
   get evidence() {
     return z.array(common.MediaRef);
   },
@@ -1110,6 +1110,8 @@ export interface StoreProfileInput {
   location?: string | null;
   contactOptions?: ContactOptions | null;
   warranty?: string | null;
+  /** Max 80 characters. Creates a tagline change request reviewed like claims; the current tagline stays live until approved. Empty string asks to remove it (no review) */
+  tagline?: string | null;
 }
 
 export const StoreProfileInput: z.ZodType<StoreProfileInput> = z.object({
@@ -1122,6 +1124,7 @@ export const StoreProfileInput: z.ZodType<StoreProfileInput> = z.object({
     return ContactOptions.nullish();
   },
   warranty: z.string().nullish(),
+  tagline: z.string().describe("Max 80 characters. Creates a tagline change request reviewed like claims; the current tagline stays live until approved. Empty string asks to remove it (no review)").nullish(),
 }).register(common.apiTypes, { id: "sellers.StoreProfileInput" });
 
 export interface CollectionInput {
@@ -1516,6 +1519,8 @@ export interface SuspensionInput {
   /** Suspension takes effect only after this reviewer approves (access approval request) */
   secondReviewerId: string;
   trustReportId?: string | null;
+  /** Set when the suspension executes a trust enforcement, so trust.enforcement.reversed can end it */
+  trustEnforcementId?: string | null;
 }
 
 export const SuspensionInput: z.ZodType<SuspensionInput> = z.object({
@@ -1525,6 +1530,7 @@ export const SuspensionInput: z.ZodType<SuspensionInput> = z.object({
   openOrders: z.enum(["seller_keeps_fulfilling", "cancel_unshipped_and_refund"]),
   secondReviewerId: z.uuid().describe("Suspension takes effect only after this reviewer approves (access approval request)"),
   trustReportId: z.uuid().nullish(),
+  trustEnforcementId: z.uuid().describe("Set when the suspension executes a trust enforcement, so trust.enforcement.reversed can end it").nullish(),
 }).register(common.apiTypes, { id: "sellers.SuspensionInput" });
 
 export interface SuspensionImpact {
@@ -1781,18 +1787,54 @@ export const SellerInvitation: z.ZodType<SellerInvitation> = z.object({
 /** sellers.application.submitted: An applicant submits */
 export interface SellersApplicationSubmittedEvent {
   applicationId: string;
+  ref: string;
   sellerId: string;
   categoryIds: string[];
   sellerType: string;
   invited: boolean;
+  /** Decision target, the work item deadline */
+  decisionTargetAt: string;
+  /** Keyed hash (HMAC-SHA256, platform key) of the normalised tax id; never the tax id itself */
+  taxIdHash?: string | null;
+  /** Hash of the payout provider destination token */
+  bankTokenHash?: string | null;
+  /** Normalised business address key (lower-case line1 + postal code + country), hashed */
+  addressKey?: string | null;
+  /** Matches sellers found itself (each also sent with trust.raiseSignal) */
+  duplicateCount: number;
 }
 
 export const SellersApplicationSubmittedEvent: z.ZodType<SellersApplicationSubmittedEvent> = z.object({
   applicationId: z.uuid(),
+  ref: z.string(),
   sellerId: z.uuid(),
   categoryIds: z.array(z.uuid()),
   sellerType: z.string(),
   invited: z.boolean(),
+  decisionTargetAt: z.iso.datetime({ offset: true }).describe("Decision target, the work item deadline"),
+  taxIdHash: z.string().describe("Keyed hash (HMAC-SHA256, platform key) of the normalised tax id; never the tax id itself").nullish(),
+  bankTokenHash: z.string().describe("Hash of the payout provider destination token").nullish(),
+  addressKey: z.string().describe("Normalised business address key (lower-case line1 + postal code + country), hashed").nullish(),
+  duplicateCount: z.number().int().describe("Matches sellers found itself (each also sent with trust.raiseSignal)"),
+});
+
+/** sellers.application.information_reminder: Job sellers.application-deadlines: infoReminderDaysBefore before an open information request is due (reminder three_days_before), once per request */
+export interface SellersApplicationInformationReminderEvent {
+  applicationId: string;
+  ref: string;
+  sellerId: string;
+  applicantAccountId: string;
+  dueAt: string;
+  openItems: number;
+}
+
+export const SellersApplicationInformationReminderEvent: z.ZodType<SellersApplicationInformationReminderEvent> = z.object({
+  applicationId: z.uuid(),
+  ref: z.string(),
+  sellerId: z.uuid(),
+  applicantAccountId: z.uuid(),
+  dueAt: z.iso.datetime({ offset: true }),
+  openItems: z.number().int(),
 });
 
 /** sellers.application.information_requested: A reviewer asks for information */
@@ -1974,6 +2016,8 @@ export interface SellersSellerSuspendedEvent {
   openOrders: "seller_keeps_fulfilling" | "cancel_unshipped_and_refund";
   appealDeadline: string;
   trustReportId?: string | null;
+  /** Set when the suspension executes a trust enforcement (trust confirms it applied) */
+  trustEnforcementId?: string | null;
 }
 
 export const SellersSellerSuspendedEvent: z.ZodType<SellersSellerSuspendedEvent> = z.object({
@@ -1985,6 +2029,7 @@ export const SellersSellerSuspendedEvent: z.ZodType<SellersSellerSuspendedEvent>
   openOrders: z.enum(["seller_keeps_fulfilling", "cancel_unshipped_and_refund"]),
   appealDeadline: z.iso.datetime({ offset: true }),
   trustReportId: z.uuid().nullish(),
+  trustEnforcementId: z.uuid().describe("Set when the suspension executes a trust enforcement (trust confirms it applied)").nullish(),
 });
 
 /** sellers.seller.reinstated: A suspension ends or the last restriction is lifted, so the account is back to approved (or restricted with remaining restrictions) */
@@ -2023,12 +2068,14 @@ export const SellersSellerClosedEvent: z.ZodType<SellersSellerClosedEvent> = z.o
   },
 });
 
-/** sellers.warning.issued: Staff send a warning */
+/** sellers.warning.issued: Staff send a warning, or a warn_seller trust enforcement is executed */
 export interface SellersWarningIssuedEvent {
   sellerId: string;
   warningId: string;
   kind: string;
   title: string;
+  /** Set when the warning executes a trust enforcement (trust confirms it applied) */
+  trustEnforcementId?: string | null;
 }
 
 export const SellersWarningIssuedEvent: z.ZodType<SellersWarningIssuedEvent> = z.object({
@@ -2036,6 +2083,22 @@ export const SellersWarningIssuedEvent: z.ZodType<SellersWarningIssuedEvent> = z
   warningId: z.uuid(),
   kind: z.string(),
   title: z.string(),
+  trustEnforcementId: z.uuid().describe("Set when the warning executes a trust enforcement (trust confirms it applied)").nullish(),
+});
+
+/** sellers.warning.resolved: A warning is resolved by staff or withdrawn because its trust enforcement was reversed */
+export interface SellersWarningResolvedEvent {
+  sellerId: string;
+  warningId: string;
+  note: string;
+  trustEnforcementId?: string | null;
+}
+
+export const SellersWarningResolvedEvent: z.ZodType<SellersWarningResolvedEvent> = z.object({
+  sellerId: z.uuid(),
+  warningId: z.uuid(),
+  note: z.string(),
+  trustEnforcementId: z.uuid().nullish(),
 });
 
 /** sellers.appeal.submitted: A seller appeals a restriction, suspension or rejection */
@@ -2199,6 +2262,21 @@ export const SellersMemberRemovedEvent: z.ZodType<SellersMemberRemovedEvent> = z
   accountId: z.uuid().nullish(),
 });
 
+/** sellers.member.reactivated: The owner lifts a member's suspension */
+export interface SellersMemberReactivatedEvent {
+  sellerId: string;
+  memberId: string;
+  accountId?: string | null;
+  permissions: string[];
+}
+
+export const SellersMemberReactivatedEvent: z.ZodType<SellersMemberReactivatedEvent> = z.object({
+  sellerId: z.uuid(),
+  memberId: z.uuid(),
+  accountId: z.uuid().nullish(),
+  permissions: z.array(z.string()),
+});
+
 /** sellers.launch_review.requested: A seller asks for the launch readiness review */
 export interface SellersLaunchReviewRequestedEvent {
   sellerId: string;
@@ -2300,6 +2378,8 @@ export interface SellersPublicApi {
   getStorefrontCard(sellerIds: string[]): Promise<SellerSummary[]>;
   /** Used by trust when a Seller Manager accepts a restriction recommendation in the trust screen; follows the same approval rules as the admin endpoint Used by: trust. */
   requestRestriction(input: RestrictionInput & { sellerId: string, requestedBy: common.Actor }): Promise<Restriction>;
+  /** The applicant behind a seller application (identity account id, contact name and work email), so staff → applicant conversations can add the applicant as a participant (messaging maps the account to its customer id). Null for an unknown application Used by: messaging, notifications. */
+  getApplicationParticipant(applicationId: string): Promise<{ applicationId: string, ref: string, state: string, applicantAccountId: string, sellerId: string | null, name: string, email: string, storeName: string | null } | null>;
   /** Public storefront by slug, same data as GET /api/store/sellers/stores/{slug}; null for unknown, unapproved or closed stores Used by: graphql. */
   getStorefrontBySlug(slug: string): Promise<Storefront | null>;
   /** Admin seller list with the same filters as GET /api/admin/sellers/sellers Used by: graphql, search. */
@@ -2360,6 +2440,8 @@ export interface SellersDb {
     business: Json;
     /** tax id encrypted separately */
     verification: Json;
+    /** keyed hash of the normalised tax id, for duplicate checks */
+    tax_id_hash: string | null;
     /** holder, type, label, provider token */
     payout: Json;
     return_address: Json;
@@ -2549,6 +2631,7 @@ export interface SellersDb {
     issued_at: Date;
     resolved_at: Date | null;
     resolution_note: string | null;
+    trust_enforcement_id: string | null;
   };
   restrictions: {
     id: string;
@@ -2590,6 +2673,7 @@ export interface SellersDb {
     second_reviewer_id: string;
     approval_request_id: string | null;
     trust_report_id: string | null;
+    trust_enforcement_id: string | null;
     appeal_route: Json;
     started_at: Date | null;
     ended_at: Date | null;
@@ -2778,7 +2862,7 @@ export const endpoints = defineEndpoints({
     auth: "customer",
     scope: "own-customer",
     summary: "Accept the agreements and submit",
-    desc: "Records each agreement version with the typed signature, creates the seller row (status applied), starts automated verification checks and sets the decision target. Fails with APPLICATION_INCOMPLETE (details.missing per step) or AGREEMENT_VERSION_OUTDATED if a newer version became effective while the applicant was reading.",
+    desc: "Records each agreement version with the typed signature, creates the seller row (status applied), starts automated verification checks and sets the decision target. Duplicate checks run in the same call: the tax id hash, payout token, business and return address and work email are matched against other applications and sellers (including closed ones); every match is added to duplicateSignals and sent to trust with trust.raiseSignal (type duplicate_application, subjects the application and the matched seller, dedupeKey per application) when trust is enabled. sellers.application.submitted carries the hashes for trust's own rules. Fails with APPLICATION_INCOMPLETE (details.missing per step) or AGREEMENT_VERSION_OUTDATED if a newer version became effective while the applicant was reading.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -3050,7 +3134,7 @@ export const endpoints = defineEndpoints({
     permission: "sellers.store.manage",
     scope: "own-seller",
     summary: "Save storefront changes",
-    desc: "Logo, banner, introduction (max introMaxChars), location, contact options and warranty publish on save. A new store name becomes a change request and the current name stays live until approved.",
+    desc: "Logo, banner, introduction (max introMaxChars), location, contact options and warranty publish on save. A new store name or tagline becomes a change request (kind store_name or tagline) and the current value stays live until approved (decision: the tagline is reviewed like claims). Removing the tagline needs no review.",
     body: () => StoreProfileInput,
     response: () => StoreProfile,
     status: 200,
@@ -3324,6 +3408,30 @@ export const endpoints = defineEndpoints({
     errors: ["ILLEGAL_TRANSITION","LAST_OWNER"],
     audited: true,
     events: ["sellers.member.removed"],
+    screens: ["seller/staff"],
+    phase: 2,
+  },
+  reactivateMember: {
+    area: "seller",
+    method: "POST",
+    path: "/members/{id}/reactivate",
+    auth: "seller",
+    permission: "sellers.staff.manage",
+    scope: "own-seller",
+    summary: "Lift a member's suspension",
+    desc: "suspended → active with the role and permissions the member had. Calls identity.grantSellerContext so the member can act for the seller again on their next request.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      reason: z.string().nullish(),
+    }),
+    response: () => SellerMember,
+    status: 200,
+    errors: ["ILLEGAL_TRANSITION","OWNER_ONLY"],
+    audited: true,
+    events: ["sellers.member.reactivated"],
     screens: ["seller/staff"],
     phase: 2,
   },
@@ -3906,6 +4014,7 @@ export const endpoints = defineEndpoints({
     response: () => SellerWarning,
     status: 200,
     audited: true,
+    events: ["sellers.warning.resolved"],
     screens: ["admin/seller"],
     phase: 1,
   },
@@ -4278,10 +4387,10 @@ export const endpoints = defineEndpoints({
     auth: "staff",
     permission: "sellers.storefronts.review",
     scope: "staff",
-    summary: "Store names, public claims, brand affiliation and business changes waiting for review",
+    summary: "Store names, taglines, public claims, brand affiliation and business changes waiting for review",
     query: () =>
       z.object({
-        kind: z.enum(["store_name", "public_claim", "legal_name", "ownership", "business_address", "brand_request"]).optional(),
+        kind: z.enum(["store_name", "tagline", "public_claim", "legal_name", "ownership", "business_address", "brand_request"]).optional(),
         state: z.enum(["pending", "approved", "rejected", "withdrawn"]).optional(),
       }),
     paging: true,
@@ -4484,7 +4593,7 @@ export const spec = defineModuleSpec({
   summary: "Seller admission and the seller account: the Sell with us programme and multi-step application, verification checks and review decisions, seller statuses with account status, product approval and payout readiness kept separate, setup and launch readiness, storefront profile and public storefront, seller members and permissions, performance against targets, warnings, restrictions, suspensions and appeals.",
   dependsOn: ["identity","access","media"],
   optionalDeps: ["catalog","offers","orders","shipping","returns","support","finance","reviews","trust","content","promotions","search","messaging","workqueues","reports","notifications","audit","settings"],
-  publicApi: ["getSeller","getSellers","canSell","getMemberAccess","listMembers","ownerOf","getPerformance","getStorefrontCard","requestRestriction","getStorefrontBySlug","searchSellers","exportRows"],
+  publicApi: ["getSeller","getSellers","canSell","getMemberAccess","listMembers","ownerOf","getPerformance","getStorefrontCard","requestRestriction","getApplicationParticipant","getStorefrontBySlug","searchSellers","exportRows"],
   permissions: [
     {
       "key": "sellers.accounts.view",
@@ -5121,6 +5230,7 @@ export const spec = defineModuleSpec({
   events: {
     publishes: {
       "sellers.application.submitted": { when: "An applicant submits", payload: () => SellersApplicationSubmittedEvent },
+      "sellers.application.information_reminder": { when: "Job sellers.application-deadlines: infoReminderDaysBefore before an open information request is due (reminder three_days_before), once per request", payload: () => SellersApplicationInformationReminderEvent },
       "sellers.application.information_requested": { when: "A reviewer asks for information", payload: () => SellersApplicationInformationRequestedEvent },
       "sellers.application.information_provided": { when: "The applicant responds", payload: () => SellersApplicationInformationProvidedEvent },
       "sellers.application.withdrawn": { when: "The applicant withdraws", payload: () => SellersApplicationWithdrawnEvent },
@@ -5134,7 +5244,8 @@ export const spec = defineModuleSpec({
       "sellers.seller.suspended": { when: "A suspension takes effect after second review", payload: () => SellersSellerSuspendedEvent },
       "sellers.seller.reinstated": { when: "A suspension ends or the last restriction is lifted, so the account is back to approved (or restricted with remaining restrictions)", payload: () => SellersSellerReinstatedEvent },
       "sellers.seller.closed": { when: "A seller account closes (seller request, staff, rejection does not use this event)", payload: () => SellersSellerClosedEvent },
-      "sellers.warning.issued": { when: "Staff send a warning", payload: () => SellersWarningIssuedEvent },
+      "sellers.warning.issued": { when: "Staff send a warning, or a warn_seller trust enforcement is executed", payload: () => SellersWarningIssuedEvent },
+      "sellers.warning.resolved": { when: "A warning is resolved by staff or withdrawn because its trust enforcement was reversed", payload: () => SellersWarningResolvedEvent },
       "sellers.appeal.submitted": { when: "A seller appeals a restriction, suspension or rejection", payload: () => SellersAppealSubmittedEvent },
       "sellers.appeal.decided": { when: "An appeal is decided", payload: () => SellersAppealDecidedEvent },
       "sellers.payout_account.changed": { when: "The owner adds or changes the payout destination (finance starts verification and review)", payload: () => SellersPayoutAccountChangedEvent },
@@ -5145,6 +5256,7 @@ export const spec = defineModuleSpec({
       "sellers.member.joined": { when: "An invited member accepts", payload: () => SellersMemberJoinedEvent },
       "sellers.member.permissions_changed": { when: "A member's role or permissions change", payload: () => SellersMemberPermissionsChangedEvent },
       "sellers.member.removed": { when: "A member is suspended or removed", payload: () => SellersMemberRemovedEvent },
+      "sellers.member.reactivated": { when: "The owner lifts a member's suspension", payload: () => SellersMemberReactivatedEvent },
       "sellers.launch_review.requested": { when: "A seller asks for the launch readiness review", payload: () => SellersLaunchReviewRequestedEvent },
       "sellers.launch_review.decided": { when: "The launch review passes or needs changes (offers activates eligible offers on pass)", payload: () => SellersLaunchReviewDecidedEvent },
       "sellers.agreement.accepted": { when: "An agreement version is accepted", payload: () => SellersAgreementAcceptedEvent },
@@ -5154,10 +5266,11 @@ export const spec = defineModuleSpec({
     },
     consumes: {
       "identity.invitation.accepted": "Activate the invited member and call identity.grantSellerContext",
-      "identity.account.closed": "Remove the account's memberships; if it was an owner, open a Seller Manager work item",
+      "identity.account.closed": "Remove the account's memberships; if it was an owner, raise a seller_owner_missing work item for the Seller Manager (workqueues)",
       "access.approval.decided": "Finish pending suspensions, restrictions, closures and target changes (approved) or cancel them (declined)",
       "trust.assessment.completed": "Store risk level, flags and recommendation on the application's risk review",
-      "trust.enforcement.recorded": "When the action is restrict_seller, warn_seller or suspend_seller, create the restriction or warning from the enforcement parameters (recommendedBy Trust) or start a suspension that still needs its second reviewer",
+      "trust.enforcement.recorded": "When the action is restrict_seller, warn_seller or suspend_seller, create the restriction or warning from the enforcement parameters (recommendedBy Trust) or start a suspension that still needs its second reviewer; each keeps trustEnforcementId (restrictions, warnings, suspensions) and the resulting event carries it",
+      "trust.enforcement.reversed": "Undo what the enforcement created (decision D9): restrict_seller lifts the active or pending restriction with that trustEnforcementId (reason from the reversal; sellers.restriction.lifted and, when the status changes, sellers.seller.reinstated); suspend_seller ends the active suspension (reinstate, keeping other restrictions) or cancels one still pending second review; warn_seller resolves the open warning with the reversal note (sellers.warning.resolved). No approval is asked: the reversal was approved in trust. Nothing found (already lifted or never applied) is a no-op; other actions are ignored",
       "finance.destination.verified": "Payout readiness → verified; setup checklist step done",
       "finance.destination.rejected": "Payout readiness back to not_added (new account) or verified (change rejected, old account stays); tell the owner why",
       "catalog.product.submitted": "Update product approval summary and the first-submission setup step",
@@ -5178,12 +5291,12 @@ export const spec = defineModuleSpec({
   },
   jobs: {
     "sellers.run-verification-checks": {
-      "schedule": "on submit + every 5 min for pending",
-      "does": "Send identity, registration, tax id, payout-name match and return-address checks to providers; refer automatically to trust for riskReviewCategories"
+      "schedule": "every 5 min",
+      "does": "Send pending identity, registration, tax id, payout-name match and return-address checks to providers and retry ones without a result; refer automatically to trust for riskReviewCategories. submitApplication also runs it once right after submit"
     },
     "sellers.application-deadlines": {
       "schedule": "hourly",
-      "does": "Send reminders before information deadlines; expire applications past due; raise workqueue items for applications past the decision target"
+      "does": "Publish sellers.application.information_reminder infoReminderDaysBefore before an information deadline (once per request, reminder three_days_before only); expire applications past due; raise workqueue items for applications past the decision target"
     },
     "sellers.compute-performance": {
       "schedule": "daily 06:00 market time",
@@ -5198,8 +5311,8 @@ export const spec = defineModuleSpec({
       "does": "Raise workqueue items for appeals near or past decideBy"
     },
     "sellers.verification-lapse": {
-      "schedule": "daily",
-      "does": "Lapse Verified labels whose checked documents expired; tell the seller what to renew"
+      "schedule": "daily 05:30 market time",
+      "does": "Lapse Verified labels past expiresAt (granted + verifiedLabelValidDays) or whose checked documents expired; publish sellers.verification.changed so the seller is told what to renew"
     },
     "sellers.expire-invitations": {
       "schedule": "hourly",
@@ -5352,6 +5465,16 @@ export const spec = defineModuleSpec({
       "type": "duration",
       "min": 1,
       "unit": "business days",
+      "sellerVisible": true
+    },
+    "verifiedLabelValidDays": {
+      "default": 365,
+      "desc": "How long a Verified seller label lasts after it is granted before the checks must be renewed (sets VerificationLabel.expiresAt; changes apply to labels granted afterwards)",
+      "type": "duration",
+      "min": 30,
+      "max": 730,
+      "unit": "days",
+      "approval": "second_reviewer",
       "sellerVisible": true
     },
     "launchReviewBusinessDays": {
@@ -5604,6 +5727,10 @@ export const spec = defineModuleSpec({
       "verification": {
         "type": "jsonb",
         "nullable": false
+      },
+      "tax_id_hash": {
+        "type": "text",
+        "nullable": true
       },
       "payout": {
         "type": "jsonb",
@@ -6256,6 +6383,10 @@ export const spec = defineModuleSpec({
       "resolution_note": {
         "type": "text",
         "nullable": true
+      },
+      "trust_enforcement_id": {
+        "type": "uuid",
+        "nullable": true
       }
     },
     "restrictions": {
@@ -6402,6 +6533,10 @@ export const spec = defineModuleSpec({
         "nullable": true
       },
       "trust_report_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "trust_enforcement_id": {
         "type": "uuid",
         "nullable": true
       },
@@ -6658,6 +6793,7 @@ export const spec = defineModuleSpec({
 declare module '../kernel/events/event-map.js' {
   interface EventMap {
     "sellers.application.submitted": SellersApplicationSubmittedEvent;
+    "sellers.application.information_reminder": SellersApplicationInformationReminderEvent;
     "sellers.application.information_requested": SellersApplicationInformationRequestedEvent;
     "sellers.application.information_provided": SellersApplicationInformationProvidedEvent;
     "sellers.application.withdrawn": SellersApplicationWithdrawnEvent;
@@ -6672,6 +6808,7 @@ declare module '../kernel/events/event-map.js' {
     "sellers.seller.reinstated": SellersSellerReinstatedEvent;
     "sellers.seller.closed": SellersSellerClosedEvent;
     "sellers.warning.issued": SellersWarningIssuedEvent;
+    "sellers.warning.resolved": SellersWarningResolvedEvent;
     "sellers.appeal.submitted": SellersAppealSubmittedEvent;
     "sellers.appeal.decided": SellersAppealDecidedEvent;
     "sellers.payout_account.changed": SellersPayoutAccountChangedEvent;
@@ -6682,6 +6819,7 @@ declare module '../kernel/events/event-map.js' {
     "sellers.member.joined": SellersMemberJoinedEvent;
     "sellers.member.permissions_changed": SellersMemberPermissionsChangedEvent;
     "sellers.member.removed": SellersMemberRemovedEvent;
+    "sellers.member.reactivated": SellersMemberReactivatedEvent;
     "sellers.launch_review.requested": SellersLaunchReviewRequestedEvent;
     "sellers.launch_review.decided": SellersLaunchReviewDecidedEvent;
     "sellers.agreement.accepted": SellersAgreementAcceptedEvent;

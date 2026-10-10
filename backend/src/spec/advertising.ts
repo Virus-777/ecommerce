@@ -130,6 +130,8 @@ export interface Placement {
   positions?: number[] | null;
   label: "Ad" | "Sponsored";
   liveCampaigns: number;
+  /** Increments on every change; PATCH must send the version it read (PlacementPatch.version), otherwise CONFLICT */
+  version: number;
   updatedAt: string;
   updatedBy?: common.Actor | null;
 }
@@ -163,6 +165,7 @@ export const Placement: z.ZodType<Placement> = z.object({
   positions: z.array(z.number().int()).describe("Fixed positions in results lists, e.g. [3, 8]").nullish(),
   label: z.enum(["Ad", "Sponsored"]),
   liveCampaigns: z.number().int(),
+  version: z.number().int().describe("Increments on every change; PATCH must send the version it read (PlacementPatch.version), otherwise CONFLICT"),
   updatedAt: z.iso.datetime({ offset: true }),
   get updatedBy() {
     return common.Actor.nullish();
@@ -1596,8 +1599,8 @@ export const AdvertisingCampaignEndingSoonEvent: z.ZodType<AdvertisingCampaignEn
 
 /** What other modules may call in-process: `ctx.use('advertising')` (or `ctx.tryUse` for an optional dependency). */
 export interface AdvertisingPublicApi {
-  /** Sponsored product cards and their positions for a results list (max per page from the placement; relevance first, then priority). Only eligible, in-stock offers are returned. Used by: search, catalog. */
-  sponsoredForResults(ctx: { page: PageType, query?: string, categoryId?: string, productId?: string, visitorId: string, sessionId: string, device: string, organicOfferIds: string[] }): Promise<SponsoredProductSlot[]>;
+  /** Sponsored product cards and their positions for a results list (max per page from the placement; relevance first, then priority). Only eligible, in-stock offers are returned. personalizationAllowed false: only page context (query, category, product) is used, frequency state is kept per session only and clicks are not kept for attribution by visitor; customerId (signed-in shopper) lets frequency caps and attribution follow the customer across devices when personalization is allowed. Used by: search, catalog. */
+  sponsoredForResults(ctx: { page: PageType, query?: string, categoryId?: string, productId?: string, visitorId: string, sessionId: string, device: string, organicOfferIds: string[], personalizationAllowed: boolean, customerId?: string }): Promise<SponsoredProductSlot[]>;
   /** Ad positions on a page, so content can show them as locked markers in homepage sections. Used by: content. */
   adPositionsFor(page: PageType): Promise<{ placementKey: string, name: string, enabled: boolean }[]>;
   /** Ads linked to a promotion (shown on the promotion detail). Used by: promotions, graphql. */
@@ -2032,18 +2035,18 @@ export const endpoints = defineEndpoints({
     permission: "advertising.campaigns.review",
     scope: "staff",
     summary: "Approve one review step (the campaign is approved when all steps are)",
-    desc: "The step is chosen from the caller's role: Advertising (placement, schedule, limits) or Content/Marketing (creative, claims, links). The same person cannot approve two required steps.",
+    desc: "The step is chosen from the caller's access roles (access.rolesOf), not from the request: Advertising (placement, schedule, limits) or Content/Marketing (creative, claims, links). The same person cannot approve two required steps.",
     params: () =>
       z.object({
         id: z.uuid(),
       }),
     body: () => z.object({
-      role: z.enum(["advertising", "content", "marketing"]),
+      role: z.enum(["advertising", "content", "marketing"]).describe("Which review step to act on. The steps the caller may act on come from the caller's access roles (access.rolesOf: Advertising Manager → advertising, Content Manager → content, Marketing Manager → marketing; Business Owner any), never from this field alone. Needed only when the caller holds more than one reviewing role; a step the caller's roles do not cover is FORBIDDEN").nullish(),
       note: z.string().nullish(),
     }),
     response: () => AdCampaign,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","SAME_REVIEWER"],
+    errors: ["ILLEGAL_TRANSITION","SAME_REVIEWER","FORBIDDEN"],
     audited: true,
     events: ["advertising.campaign.status_changed"],
     screens: ["admin/ad-campaign","admin/ads"],
@@ -2062,12 +2065,12 @@ export const endpoints = defineEndpoints({
         id: z.uuid(),
       }),
     body: () => z.object({
-      role: z.enum(["advertising", "content", "marketing"]),
+      role: z.enum(["advertising", "content", "marketing"]).describe("Which review step to act on. The steps the caller may act on come from the caller's access roles (access.rolesOf: Advertising Manager → advertising, Content Manager → content, Marketing Manager → marketing; Business Owner any), never from this field alone. Needed only when the caller holds more than one reviewing role; a step the caller's roles do not cover is FORBIDDEN").nullish(),
       reason: z.string(),
     }),
     response: () => AdCampaign,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION"],
+    errors: ["ILLEGAL_TRANSITION","FORBIDDEN"],
     audited: true,
     events: ["advertising.campaign.status_changed"],
     screens: ["admin/ad-campaign"],
@@ -2309,7 +2312,7 @@ export const endpoints = defineEndpoints({
     permission: "advertising.placements.manage",
     scope: "staff",
     summary: "Edit a placement's rules or turn it on/off",
-    desc: "Takes effect for new displays immediately. Blocked pages from the global rules can never be added. Turning on a 'later' placement requires its phase feature flag.",
+    desc: "Takes effect for new displays immediately. Blocked pages from the global rules can never be added. Turning on a 'later' placement requires its phase feature flag. body.version must equal Placement.version (optimistic lock); a stale version is CONFLICT and nothing changes.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -2470,14 +2473,14 @@ export const endpoints = defineEndpoints({
         id: z.uuid(),
       }),
     body: () => z.object({
-      role: z.enum(["advertising", "content", "marketing"]),
+      role: z.enum(["advertising", "content", "marketing"]).describe("Which review step to act on. The steps the caller may act on come from the caller's access roles (access.rolesOf: Advertising Manager → advertising, Content Manager → content, Marketing Manager → marketing; Business Owner any), never from this field alone. Needed only when the caller holds more than one reviewing role; a step the caller's roles do not cover is FORBIDDEN").nullish(),
       decision: z.enum(["approved", "changes_requested", "rejected", "note"]),
       reasonCode: z.enum(["no_changes", "unsupported_claim", "broken_link", "product_unavailable", "label_missing", "image_quality", "policy"]).nullish(),
       comment: z.string().nullish(),
     }),
     response: () => Creative,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION"],
+    errors: ["ILLEGAL_TRANSITION","FORBIDDEN"],
     audited: true,
     events: ["advertising.creative.reviewed"],
     screens: ["admin/ad-assets"],
@@ -2965,6 +2968,11 @@ export const spec = defineModuleSpec({
           "rejected",
           "archive",
           "archived"
+        ],
+        [
+          "rejected",
+          "reopen",
+          "draft"
         ]
       ]
     },
@@ -3006,6 +3014,11 @@ export const spec = defineModuleSpec({
           "approved",
           "revoke",
           "rejected"
+        ],
+        [
+          "rejected",
+          "reinstate",
+          "in_review"
         ]
       ]
     },
@@ -3051,11 +3064,12 @@ export const spec = defineModuleSpec({
       "catalog.product.publication_changed": "Pause ads promoting hidden or suspended products",
       "sellers.seller.restricted": "Pause the seller's ads when the restriction covers new sales or advertising",
       "sellers.seller.suspended": "Finish the seller's ads (seller_restricted); charges only for delivery so far",
-      "trust.enforcement.recorded": "Revoke creatives and reject requests that promote the enforced offer or product",
-      "orders.order.placed": "Attribute the order to the visitor's last ad click within the attribution period",
+      "trust.enforcement.recorded": "Revoke creatives and reject requests that promote the enforced offer or product; the enforcementId is stored with the revoke or reject reason so a reversal can find them",
+      "trust.enforcement.reversed": "Inbox-claimed per event. Creatives revoked by that enforcementId go back to in_review (reinstate) and seller requests it rejected reopen as drafts (reopen) the seller may resubmit; ads finished because of it are not restarted. The seller (or staff owner) is told; the campaign log records the reversal",
+      "orders.order.placed": "Attribute the order to the last ad click within attributionDays: by customerId for signed-in shoppers, and for guests by the payload visitorId (present only when the shopper allowed personalization; hashed like ad_events.visitor_key). Orders with neither are not attributed. unique (order_id, campaign_id) keeps redelivery idempotent",
       "orders.item.cancelled": "Reduce attributed sales for cancelled items",
       "content.page.published": "Re-run link checks for creatives pointing at the page",
-      "access.approval.decided": "Apply an approved global rules change at its effective time",
+      "access.approval.decided": "Apply an approved global rules change at its effective time (and finish non-draft fee schedule approvals). Inbox-claimed per event (ctx.inbox) before acting, so a redelivered decision applies once and writes one audit entry",
       "catalog.product.merged": "Repoint ads, ad requests and creatives that promote the duplicate product (or its variants, mapped through newVariantId / intoVariantId) to the kept product; delivery, spend and attribution history stay on the ad"
     },
   },

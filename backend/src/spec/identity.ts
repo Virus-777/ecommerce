@@ -1073,6 +1073,8 @@ export interface IdentityPublicApi {
   inviteStaff(input: { email: string, name: string, invitedBy: common.Actor }): Promise<Invitation>;
   /** Invite a person to act for a seller. Reuses an existing member account when the email has one. Used by: sellers. */
   inviteSellerMember(input: { email: string, name: string, sellerId: string, sellerName: string, invitedBy: common.Actor }): Promise<Invitation>;
+  /** Cancel a pending invitation (the accept link stops working at once) and publish identity.invitation.revoked. contextRef, when given, must match the invitation's (sellers passes its sellerId so a seller can only revoke its own member invitations; NOT_FOUND otherwise). Revoking an invitation that is already revoked returns it unchanged; an accepted or expired one fails with ILLEGAL_TRANSITION. Used by: sellers, access. */
+  revokeInvitation(invitationId: string, input: { reason: string, by: common.Actor, contextRef?: string }): Promise<Invitation>;
   /** Allow an account to sign in to Seller Center for this seller. Called again to refresh the label. Used by: sellers. */
   grantSellerContext(input: { accountId: string, sellerId: string, memberId: string, sellerName: string, roleLabel: string, isOwner: boolean }): Promise<void>;
   /** Remove seller access and revoke sessions bound to that seller Used by: sellers. */
@@ -2240,7 +2242,7 @@ export const spec = defineModuleSpec({
   summary: "Who someone is and how they prove it: accounts for customers, seller members and staff, credentials, email verification, sessions and refresh tokens for the website and the Android app, password recovery, 2-step verification, signed-in devices, guest sessions and the security activity log.",
   dependsOn: [],
   optionalDeps: ["audit","sellers","customers"],
-  publicApi: ["getAccount","getAccounts","findAccountByEmail","inviteStaff","inviteSellerMember","grantSellerContext","revokeSellerContext","revokeSessions","verifyStepUp","grantGuestOrderAccess","hasGuestOrderAccess","issueOrderLink","closeAccount","sendPasswordReset","startPhoneVerification","verifyReauthToken","accountSecurityOf","consumeReauthToken","revocationsSince","verifyRefreshToken"],
+  publicApi: ["getAccount","getAccounts","findAccountByEmail","inviteStaff","inviteSellerMember","revokeInvitation","grantSellerContext","revokeSellerContext","revokeSessions","verifyStepUp","grantGuestOrderAccess","hasGuestOrderAccess","issueOrderLink","closeAccount","sendPasswordReset","startPhoneVerification","verifyReauthToken","accountSecurityOf","consumeReauthToken","revocationsSince","verifyRefreshToken"],
   permissions: [
     {
       "key": "identity.accounts.view",

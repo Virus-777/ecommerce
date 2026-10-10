@@ -16,7 +16,7 @@ export interface ReportReporter {
   customerId?: string | null;
   sellerId?: string | null;
   contactName?: string | null;
-  /** Rights owners, and guests who reported by email */
+  /** Rights owners, guests who reported by email, and customer and seller reporters: the signed-in account's email (identity) is stored with the report when it is made, so the outcome reaches the reporter even when customers or sellers no longer know the account */
   contactEmail?: string | null;
 }
 
@@ -25,7 +25,7 @@ export const ReportReporter: z.ZodType<ReportReporter> = z.object({
   customerId: z.uuid().nullish(),
   sellerId: z.uuid().nullish(),
   contactName: z.string().nullish(),
-  contactEmail: z.email().describe("Rights owners, and guests who reported by email").nullish(),
+  contactEmail: z.email().describe("Rights owners, guests who reported by email, and customer and seller reporters: the signed-in account's email (identity) is stored with the report when it is made, so the outcome reaches the reporter even when customers or sellers no longer know the account").nullish(),
 }).register(common.apiTypes, { id: "trust.ReportReporter" });
 
 export interface StaffRef {
@@ -130,6 +130,8 @@ export interface EvidenceRequest {
   answer?: string | null;
   answerMedia: common.MediaRef[];
   answeredAt?: string | null;
+  /** Reference of the report the proof is for, e.g. TR-3391 (never the reporter) */
+  reportRef?: string | null;
 }
 
 export const EvidenceRequest: z.ZodType<EvidenceRequest> = z.object({
@@ -149,7 +151,110 @@ export const EvidenceRequest: z.ZodType<EvidenceRequest> = z.object({
     return z.array(common.MediaRef);
   },
   answeredAt: z.iso.datetime({ offset: true }).nullish(),
+  reportRef: z.string().describe("Reference of the report the proof is for, e.g. TR-3391 (never the reporter)").nullish(),
 }).register(common.apiTypes, { id: "trust.EvidenceRequest" });
+
+export interface RestrictSellerParams {
+  title: string;
+  reasonCode: "performance" | "policy_violation" | "brand_claim" | "counterfeit_risk" | "fraud_risk" | "unresolved_cases" | "verification_lapsed" | "approval_condition" | "other";
+  reason: string;
+  ruleRef?: string | null;
+  affectedActivities: ("new_listings" | "product_submissions" | "new_offers" | "offer_reactivation" | "sales" | "advertising" | "promotions" | "payout_schedule")[];
+  /** sellers.RestrictionInput scope */
+  scope?: unknown | null;
+  stillWorks?: string[] | null;
+  toResolve: string;
+  appealDays: number;
+  reviewDate: string;
+  endsAt?: string | null;
+}
+
+export const RestrictSellerParams: z.ZodType<RestrictSellerParams> = z.object({
+  title: z.string(),
+  reasonCode: z.enum(["performance", "policy_violation", "brand_claim", "counterfeit_risk", "fraud_risk", "unresolved_cases", "verification_lapsed", "approval_condition", "other"]),
+  reason: z.string(),
+  ruleRef: z.string().nullish(),
+  affectedActivities: z.array(z.enum(["new_listings", "product_submissions", "new_offers", "offer_reactivation", "sales", "advertising", "promotions", "payout_schedule"])),
+  scope: z.unknown().describe("sellers.RestrictionInput scope").nullish(),
+  stillWorks: z.array(z.string()).nullish(),
+  toResolve: z.string(),
+  appealDays: z.number().int(),
+  reviewDate: z.iso.date(),
+  endsAt: z.iso.datetime({ offset: true }).nullish(),
+}).register(common.apiTypes, { id: "trust.RestrictSellerParams" });
+
+export interface WarnSellerParams {
+  kind: "performance" | "listing" | "policy" | "conduct";
+  title: string;
+  detail: string;
+}
+
+export const WarnSellerParams: z.ZodType<WarnSellerParams> = z.object({
+  kind: z.enum(["performance", "listing", "policy", "conduct"]),
+  title: z.string(),
+  detail: z.string(),
+}).register(common.apiTypes, { id: "trust.WarnSellerParams" });
+
+export interface SuspendSellerParams {
+  reasonCode: "performance" | "policy_violation" | "brand_claim" | "counterfeit_risk" | "fraud_risk" | "unresolved_cases" | "verification_lapsed" | "approval_condition" | "other";
+  reason: string;
+  reviewDate: string;
+  openOrders: "seller_keeps_fulfilling" | "cancel_unshipped_and_refund";
+  secondReviewerId?: string | null;
+}
+
+export const SuspendSellerParams: z.ZodType<SuspendSellerParams> = z.object({
+  reasonCode: z.enum(["performance", "policy_violation", "brand_claim", "counterfeit_risk", "fraud_risk", "unresolved_cases", "verification_lapsed", "approval_condition", "other"]),
+  reason: z.string(),
+  reviewDate: z.iso.date(),
+  openOrders: z.enum(["seller_keeps_fulfilling", "cancel_unshipped_and_refund"]),
+  secondReviewerId: z.uuid().nullish(),
+}).register(common.apiTypes, { id: "trust.SuspendSellerParams" });
+
+export interface SuspendOfferParams {
+  mode: "remove" | "hold";
+  reviewDate?: string | null;
+}
+
+export const SuspendOfferParams: z.ZodType<SuspendOfferParams> = z.object({
+  mode: z.enum(["remove", "hold"]),
+  reviewDate: z.iso.date().nullish(),
+}).register(common.apiTypes, { id: "trust.SuspendOfferParams" });
+
+export interface CustomerRestrictionParams {
+  /** Null: until lifted */
+  endsAt?: string | null;
+  customerMessage?: string | null;
+  reasonCode: "customer_request" | "suspected_takeover" | "abusive_messages" | "payment_fraud_review" | "policy_violation" | "other";
+}
+
+export const CustomerRestrictionParams: z.ZodType<CustomerRestrictionParams> = z.object({
+  endsAt: z.iso.datetime({ offset: true }).describe("Null: until lifted").nullish(),
+  customerMessage: z.string().nullish(),
+  reasonCode: z.enum(["customer_request", "suspected_takeover", "abusive_messages", "payment_fraud_review", "policy_violation", "other"]),
+}).register(common.apiTypes, { id: "trust.CustomerRestrictionParams" });
+
+export interface HoldPayoutParams {
+  amount?: common.Money | null;
+  reviewDate: string;
+}
+
+export const HoldPayoutParams: z.ZodType<HoldPayoutParams> = z.object({
+  get amount() {
+    return common.Money.nullish();
+  },
+  reviewDate: z.iso.date(),
+}).register(common.apiTypes, { id: "trust.HoldPayoutParams" });
+
+export interface RefundBuyersParams {
+  amount?: common.Money | null;
+}
+
+export const RefundBuyersParams: z.ZodType<RefundBuyersParams> = z.object({
+  get amount() {
+    return common.Money.nullish();
+  },
+}).register(common.apiTypes, { id: "trust.RefundBuyersParams" });
 
 export interface Recommendation {
   id: string;
@@ -157,12 +262,13 @@ export interface Recommendation {
   action: "suspend_offer" | "suspend_product" | "remove_reviews" | "keep_reviews" | "restrict_seller" | "suspend_seller" | "warn_seller" | "revoke_claim" | "hold_payout" | "hold_dispatch" | "review_payments" | "refund_buyers" | "inform_customers" | "request_identity_confirmation" | "restrict_customer_messaging" | "restrict_customer_account" | "lock_conversation" | "other";
   /** e.g. Suspend the Gadget Grove offer for BRL-S2 */
   label: string;
+  /** suspend_offer and suspend_product belong to catalog: the Catalog Manager accepts offer suspensions with offers.offers.remove (offers executes them) */
   ownerTeam: "catalog" | "sellers" | "support" | "finance" | "orders" | "reviews" | "customers" | "messaging";
   /** access role key, e.g. catalog_manager */
   ownerRole: string;
   owner?: StaffRef | null;
   targets: TrustSubject[];
-  /** Action parameters the owner reviews, e.g. sellers.RestrictionInput for restrict_seller, { amount, reviewDate } for hold_payout, { endsAt } for messaging restrictions */
+  /** Action parameters the owner reviews, completed with defaults when the recommendation is accepted: RestrictSellerParams (restrict_seller), WarnSellerParams (warn_seller), SuspendSellerParams (suspend_seller), SuspendOfferParams (suspend_offer), CustomerRestrictionParams (restrict_customer_messaging, restrict_customer_account), HoldPayoutParams (hold_payout), RefundBuyersParams (refund_buyers); {} for the other actions */
   params?: unknown;
   rationale: string;
   state: "pending" | "sent_to_owner" | "completed" | "declined" | "withdrawn";
@@ -179,7 +285,7 @@ export const Recommendation: z.ZodType<Recommendation> = z.object({
   reportId: z.uuid(),
   action: z.enum(["suspend_offer", "suspend_product", "remove_reviews", "keep_reviews", "restrict_seller", "suspend_seller", "warn_seller", "revoke_claim", "hold_payout", "hold_dispatch", "review_payments", "refund_buyers", "inform_customers", "request_identity_confirmation", "restrict_customer_messaging", "restrict_customer_account", "lock_conversation", "other"]),
   label: z.string().describe("e.g. Suspend the Gadget Grove offer for BRL-S2"),
-  ownerTeam: z.enum(["catalog", "sellers", "support", "finance", "orders", "reviews", "customers", "messaging"]),
+  ownerTeam: z.enum(["catalog", "sellers", "support", "finance", "orders", "reviews", "customers", "messaging"]).describe("suspend_offer and suspend_product belong to catalog: the Catalog Manager accepts offer suspensions with offers.offers.remove (offers executes them)"),
   ownerRole: z.string().describe("access role key, e.g. catalog_manager"),
   get owner() {
     return StaffRef.nullish();
@@ -187,7 +293,7 @@ export const Recommendation: z.ZodType<Recommendation> = z.object({
   get targets() {
     return z.array(TrustSubject);
   },
-  params: z.unknown().describe("Action parameters the owner reviews, e.g. sellers.RestrictionInput for restrict_seller, { amount, reviewDate } for hold_payout, { endsAt } for messaging restrictions"),
+  params: z.unknown().describe("Action parameters the owner reviews, completed with defaults when the recommendation is accepted: RestrictSellerParams (restrict_seller), WarnSellerParams (warn_seller), SuspendSellerParams (suspend_seller), SuspendOfferParams (suspend_offer), CustomerRestrictionParams (restrict_customer_messaging, restrict_customer_account), HoldPayoutParams (hold_payout), RefundBuyersParams (refund_buyers); {} for the other actions"),
   rationale: z.string(),
   state: z.enum(["pending", "sent_to_owner", "completed", "declined", "withdrawn"]),
   routedAt: z.iso.datetime({ offset: true }).nullish(),
@@ -200,26 +306,28 @@ export const Recommendation: z.ZodType<Recommendation> = z.object({
 }).register(common.apiTypes, { id: "trust.Recommendation" });
 
 export interface RecommendationInput {
-  action: string;
+  action: "suspend_offer" | "suspend_product" | "remove_reviews" | "keep_reviews" | "restrict_seller" | "suspend_seller" | "warn_seller" | "revoke_claim" | "hold_payout" | "hold_dispatch" | "review_payments" | "refund_buyers" | "inform_customers" | "request_identity_confirmation" | "restrict_customer_messaging" | "restrict_customer_account" | "lock_conversation" | "other";
   label: string;
-  ownerTeam: string;
+  /** Default: the action's owner team */
+  ownerTeam?: "catalog" | "sellers" | "support" | "finance" | "orders" | "reviews" | "customers" | "messaging" | null;
   ownerRole?: string | null;
   ownerStaffId?: string | null;
   targets: TrustSubject[];
+  /** See Recommendation.params */
   params?: unknown | null;
   rationale: string;
 }
 
 export const RecommendationInput: z.ZodType<RecommendationInput> = z.object({
-  action: z.string(),
+  action: z.enum(["suspend_offer", "suspend_product", "remove_reviews", "keep_reviews", "restrict_seller", "suspend_seller", "warn_seller", "revoke_claim", "hold_payout", "hold_dispatch", "review_payments", "refund_buyers", "inform_customers", "request_identity_confirmation", "restrict_customer_messaging", "restrict_customer_account", "lock_conversation", "other"]),
   label: z.string(),
-  ownerTeam: z.string(),
+  ownerTeam: z.enum(["catalog", "sellers", "support", "finance", "orders", "reviews", "customers", "messaging"]).describe("Default: the action's owner team").nullish(),
   ownerRole: z.string().nullish(),
   ownerStaffId: z.uuid().nullish(),
   get targets() {
     return z.array(TrustSubject);
   },
-  params: z.unknown().nullish(),
+  params: z.unknown().describe("See Recommendation.params").nullish(),
   rationale: z.string(),
 }).register(common.apiTypes, { id: "trust.RecommendationInput" });
 
@@ -230,11 +338,12 @@ export interface Enforcement {
   reportId: string;
   reportRef: string;
   recommendationId?: string | null;
-  action: string;
-  ownerTeam: string;
+  action: "suspend_offer" | "suspend_product" | "remove_reviews" | "keep_reviews" | "restrict_seller" | "suspend_seller" | "warn_seller" | "revoke_claim" | "hold_payout" | "hold_dispatch" | "review_payments" | "refund_buyers" | "inform_customers" | "request_identity_confirmation" | "restrict_customer_messaging" | "restrict_customer_account" | "lock_conversation" | "other";
+  ownerTeam: "catalog" | "sellers" | "support" | "finance" | "orders" | "reviews" | "customers" | "messaging";
   targets: TrustSubject[];
   /** Recorded reason (also shown to the affected party where the owning module shows reasons) */
   reason: string;
+  /** See Recommendation.params */
   params?: unknown;
   /** What changes and what stays, e.g. 'open orders and returns stay active' */
   effects: string[];
@@ -257,13 +366,13 @@ export const Enforcement: z.ZodType<Enforcement> = z.object({
   reportId: z.uuid(),
   reportRef: z.string(),
   recommendationId: z.uuid().nullish(),
-  action: z.string(),
-  ownerTeam: z.string(),
+  action: z.enum(["suspend_offer", "suspend_product", "remove_reviews", "keep_reviews", "restrict_seller", "suspend_seller", "warn_seller", "revoke_claim", "hold_payout", "hold_dispatch", "review_payments", "refund_buyers", "inform_customers", "request_identity_confirmation", "restrict_customer_messaging", "restrict_customer_account", "lock_conversation", "other"]),
+  ownerTeam: z.enum(["catalog", "sellers", "support", "finance", "orders", "reviews", "customers", "messaging"]),
   get targets() {
     return z.array(TrustSubject);
   },
   reason: z.string().describe("Recorded reason (also shown to the affected party where the owning module shows reasons)"),
-  params: z.unknown(),
+  params: z.unknown().describe("See Recommendation.params"),
   effects: z.array(z.string()).describe("What changes and what stays, e.g. 'open orders and returns stay active'"),
   get recordedBy() {
     return common.Actor;
@@ -663,20 +772,30 @@ export const TrustRightsReportReceivedEvent: z.ZodType<TrustRightsReportReceived
   contactEmail: z.email(),
 });
 
-/** trust.evidence.requested: Proof is requested from a seller or customer */
+/** trust.evidence.requested: Proof is requested from a seller or customer (notifications tells them) */
 export interface TrustEvidenceRequestedEvent {
   requestId: string;
   reportId: string;
+  reportRef: string;
   toType: string;
   toId: string;
+  /** Customers-module id when the request goes to a customer */
+  customerId?: string | null;
+  /** When the request goes to a seller (or one of its offers, products or claims) */
+  sellerId?: string | null;
+  question: string;
   dueAt: string;
 }
 
 export const TrustEvidenceRequestedEvent: z.ZodType<TrustEvidenceRequestedEvent> = z.object({
   requestId: z.uuid(),
   reportId: z.uuid(),
+  reportRef: z.string(),
   toType: z.string(),
   toId: z.uuid(),
+  customerId: z.uuid().describe("Customers-module id when the request goes to a customer").nullish(),
+  sellerId: z.uuid().describe("When the request goes to a seller (or one of its offers, products or claims)").nullish(),
+  question: z.string(),
   dueAt: z.iso.datetime({ offset: true }),
 });
 
@@ -729,40 +848,73 @@ export const TrustRecommendationDecidedEvent: z.ZodType<TrustRecommendationDecid
 export interface TrustEnforcementRecordedEvent {
   enforcementId: string;
   reportId: string;
-  action: string;
-  ownerTeam: string;
-  targets: unknown[];
+  action: "suspend_offer" | "suspend_product" | "remove_reviews" | "keep_reviews" | "restrict_seller" | "suspend_seller" | "warn_seller" | "revoke_claim" | "hold_payout" | "hold_dispatch" | "review_payments" | "refund_buyers" | "inform_customers" | "request_identity_confirmation" | "restrict_customer_messaging" | "restrict_customer_account" | "lock_conversation" | "other";
+  ownerTeam: "catalog" | "sellers" | "support" | "finance" | "orders" | "reviews" | "customers" | "messaging";
+  targets: TrustSubject[];
   reason: string;
+  /** Typed per action: see Recommendation.params */
   params?: unknown;
   appealDeadline?: string | null;
+  /** True when the owner acted in its own screen (externalRef); nobody executes it again */
   alreadyApplied: boolean;
 }
 
 export const TrustEnforcementRecordedEvent: z.ZodType<TrustEnforcementRecordedEvent> = z.object({
   enforcementId: z.uuid(),
   reportId: z.uuid(),
-  action: z.string(),
-  ownerTeam: z.string(),
-  targets: z.array(z.unknown()),
+  action: z.enum(["suspend_offer", "suspend_product", "remove_reviews", "keep_reviews", "restrict_seller", "suspend_seller", "warn_seller", "revoke_claim", "hold_payout", "hold_dispatch", "review_payments", "refund_buyers", "inform_customers", "request_identity_confirmation", "restrict_customer_messaging", "restrict_customer_account", "lock_conversation", "other"]),
+  ownerTeam: z.enum(["catalog", "sellers", "support", "finance", "orders", "reviews", "customers", "messaging"]),
+  get targets() {
+    return z.array(TrustSubject);
+  },
   reason: z.string(),
-  params: z.unknown(),
+  params: z.unknown().describe("Typed per action: see Recommendation.params"),
   appealDeadline: z.iso.datetime({ offset: true }).nullish(),
-  alreadyApplied: z.boolean(),
+  alreadyApplied: z.boolean().describe("True when the owner acted in its own screen (externalRef); nobody executes it again"),
 });
 
-/** trust.enforcement.reversed: An enforcement is reversed (appeal overturned or error); owners undo it */
+/** trust.enforcement.reversed: An enforcement is reversed (appeal overturned or error); the executing module undoes it and the owner team gets a enforcement_reversal work item */
 export interface TrustEnforcementReversedEvent {
   enforcementId: string;
-  action: string;
-  targets: unknown[];
+  /** e.g. EN-261006-0012 */
+  ref: string;
+  reportId: string;
+  reportRef: string;
+  action: "suspend_offer" | "suspend_product" | "remove_reviews" | "keep_reviews" | "restrict_seller" | "suspend_seller" | "warn_seller" | "revoke_claim" | "hold_payout" | "hold_dispatch" | "review_payments" | "refund_buyers" | "inform_customers" | "request_identity_confirmation" | "restrict_customer_messaging" | "restrict_customer_account" | "lock_conversation" | "other";
+  ownerTeam: "catalog" | "sellers" | "support" | "finance" | "orders" | "reviews" | "customers" | "messaging";
+  targets: TrustSubject[];
+  /** The params the enforcement was executed with (see Recommendation.params) */
+  params?: unknown;
+  /** Record the owning module created when executing, e.g. the restriction, hold or lock id; undo that record */
+  appliedRef?: string | null;
+  /** State before the reversal: pending or failed means the owning module may not have acted; undo only what exists */
+  executionState: "pending" | "applied" | "failed";
   reason: string;
+  /** Set when an overturned appeal caused the reversal */
+  appealId?: string | null;
+  reversedBy: common.Actor;
+  reversedAt: string;
 }
 
 export const TrustEnforcementReversedEvent: z.ZodType<TrustEnforcementReversedEvent> = z.object({
   enforcementId: z.uuid(),
-  action: z.string(),
-  targets: z.array(z.unknown()),
+  ref: z.string().describe("e.g. EN-261006-0012"),
+  reportId: z.uuid(),
+  reportRef: z.string(),
+  action: z.enum(["suspend_offer", "suspend_product", "remove_reviews", "keep_reviews", "restrict_seller", "suspend_seller", "warn_seller", "revoke_claim", "hold_payout", "hold_dispatch", "review_payments", "refund_buyers", "inform_customers", "request_identity_confirmation", "restrict_customer_messaging", "restrict_customer_account", "lock_conversation", "other"]),
+  ownerTeam: z.enum(["catalog", "sellers", "support", "finance", "orders", "reviews", "customers", "messaging"]),
+  get targets() {
+    return z.array(TrustSubject);
+  },
+  params: z.unknown().describe("The params the enforcement was executed with (see Recommendation.params)"),
+  appliedRef: z.string().describe("Record the owning module created when executing, e.g. the restriction, hold or lock id; undo that record").nullish(),
+  executionState: z.enum(["pending", "applied", "failed"]).describe("State before the reversal: pending or failed means the owning module may not have acted; undo only what exists"),
   reason: z.string(),
+  appealId: z.uuid().describe("Set when an overturned appeal caused the reversal").nullish(),
+  get reversedBy() {
+    return common.Actor;
+  },
+  reversedAt: z.iso.datetime({ offset: true }),
 });
 
 /** trust.appeal.submitted: A customer or seller appeals a trust enforcement */
@@ -778,17 +930,27 @@ export const TrustAppealSubmittedEvent: z.ZodType<TrustAppealSubmittedEvent> = z
   decideBy: z.iso.datetime({ offset: true }),
 });
 
-/** trust.appeal.decided: A trust appeal is decided */
+/** trust.appeal.decided: A trust appeal is decided (notifications tells the appellant) */
 export interface TrustAppealDecidedEvent {
   appealId: string;
+  ref: string;
   enforcementId: string;
-  outcome: string;
+  outcome: "upheld" | "overturned" | "partly_overturned";
+  explanation: string;
+  /** Customers-module id when a customer appealed */
+  customerId?: string | null;
+  /** When a seller appealed */
+  sellerId?: string | null;
 }
 
 export const TrustAppealDecidedEvent: z.ZodType<TrustAppealDecidedEvent> = z.object({
   appealId: z.uuid(),
+  ref: z.string(),
   enforcementId: z.uuid(),
-  outcome: z.string(),
+  outcome: z.enum(["upheld", "overturned", "partly_overturned"]),
+  explanation: z.string(),
+  customerId: z.uuid().describe("Customers-module id when a customer appealed").nullish(),
+  sellerId: z.uuid().describe("When a seller appealed").nullish(),
 });
 
 /** trust.assessment.completed: A seller application or account assessment is recorded */
@@ -824,6 +986,8 @@ export interface TrustPublicApi {
   reportsAbout(subjectType: string, subjectId: string): Promise<{ filedBy: number, against: number, open: number, reportIds: string[] }>;
   /** Active enforcement on an offer, product, seller or customer, with appeal route Used by: offers, catalog, sellers, customers. */
   enforcementsFor(subjectType: string, subjectId: string): Promise<Enforcement[]>;
+  /** Ids of customers or sellers with reports filed by them (filed_by) or about them, their offers, products and claims (against; both when role is left out); openOnly keeps reports that are open, under review or escalated. With ids only those ids are checked; without, every matching id is returned. The customer and seller lists use it to filter hasAbuseReports before paging, so pages are full and totals right Used by: customers, sellers. */
+  subjectIdsWithReports(subjectType: 'customer' | 'seller', filter: { role?: 'filed_by' | 'against', openOnly?: boolean, ids?: string[] }): Promise<string[]>;
   /** Reports filed by or about a customer or seller (including its offers, products and claims) for the admin 360 views; reporter identity, evidence and internal notes are left out Used by: graphql. */
   listReportsAbout(subjectType: 'customer' | 'seller', subjectId: string, filter: { role?: 'filed_by' | 'against', statuses?: string[] }, page: common.PageInput): Promise<common.Page<TrustReport>>;
   /** Batch lookup of reports by id (e.g. the report behind a restriction) without reporter identity, evidence or internal notes Used by: graphql. */
@@ -1011,7 +1175,7 @@ export const endpoints = defineEndpoints({
     auth: "customer",
     scope: "own-customer",
     summary: "Report a listing, seller, order or message",
-    desc: "From the Report link on a product, offer, storefront, order or conversation. Reports on reviews, answers and questions go to reviews. The reported party never sees the reporter's name. Same subject + same reporter within 24 h updates the existing report.",
+    desc: "From the Report link on a product, offer, storefront, order or conversation. Reports on reviews, answers and questions go to reviews. The reported party never sees the reporter's name. Same subject + same reporter within 24 h updates the existing report. The account's email is stored as the reporter contact so the outcome can be sent later.",
     body: () => StoreReportInput,
     response: () => MyReport,
     status: 201,
@@ -1112,6 +1276,46 @@ export const endpoints = defineEndpoints({
     response: () => z.array(TrustAppeal),
     status: 200,
     screens: ["help/case"],
+    phase: 1,
+  },
+  listMyEvidenceRequests: {
+    area: "store",
+    method: "GET",
+    path: "/evidence-requests",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "Proof Trust and Risk asked me for (e.g. confirm an order or explain a message)",
+    desc: "Requests addressed to the caller's customer record (to.type customer); the reporter is never named.",
+    query: () =>
+      z.object({
+        state: z.enum(["open", "answered", "expired"]).optional(),
+      }),
+    response: () => z.array(EvidenceRequest),
+    status: 200,
+    screens: ["account/messages","help/case"],
+    phase: 1,
+  },
+  answerMyEvidenceRequest: {
+    area: "store",
+    method: "POST",
+    path: "/evidence-requests/{id}/answer",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "Send the requested proof or explanation",
+    desc: "Only while the request is open and before dueAt; files are attached to the report as evidence from the reported party.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      answer: z.string(),
+      mediaIds: z.array(z.uuid()).nullish(),
+    }),
+    response: () => EvidenceRequest,
+    status: 200,
+    errors: ["ILLEGAL_TRANSITION","NOT_FOUND"],
+    events: ["trust.evidence.received"],
+    screens: ["account/messages","help/case"],
     phase: 1,
   },
   createSellerReport: {
@@ -1586,7 +1790,7 @@ export const endpoints = defineEndpoints({
     permission: "trust.recommendations.decide",
     scope: "staff",
     summary: "Owner team accepts (records enforcement) or declines with a reason",
-    desc: "Accept checks the owner's own permission for the action through access (e.g. catalog.products.publish, sellers.accounts.restrict, customers.accounts.act, finance.holds.place) and its approval limit; above the limit it returns APPROVAL_REQUIRED. Accept records an Enforcement and publishes trust.enforcement.recorded, which the owning module executes. For actions done directly in the owning module (e.g. Finance placing a hold in admin/finance), pass externalRef and the enforcement is recorded as already applied.",
+    desc: "Accept checks the owner's own permission for the action through access (e.g. catalog.products.publish, sellers.accounts.restrict, customers.accounts.act, finance.holds.place) and its approval limit; above the limit it returns APPROVAL_REQUIRED. Accept records an Enforcement and publishes trust.enforcement.recorded, which the owning module executes. Actions no module executes (hold_payout, hold_dispatch, review_payments, refund_buyers, inform_customers, revoke_claim, request_identity_confirmation, other) are done in the owning module's screen first (e.g. Finance places the hold in admin/finance with the trustReportId) and accepted with externalRef; without it the accept is refused with EXTERNAL_REF_REQUIRED (alreadyApplied=true in the event so nobody executes it twice). Their enforcement is applied when the owning module's confirming event arrives (see the Enforcement execution machine) or at once when nothing can confirm it.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1594,8 +1798,8 @@ export const endpoints = defineEndpoints({
     body: () => z.object({
       accept: z.boolean(),
       reason: z.string(),
-      params: z.unknown().nullish(),
-      externalRef: z.string().nullish(),
+      params: z.unknown().describe("See Recommendation.params").nullish(),
+      externalRef: z.string().describe("Required to accept an action no module executes: the record created in the owning module (hold id, approval ref, case ref, claim id)").nullish(),
     }),
     response: () => z.object({
       get recommendation() {
@@ -1606,7 +1810,7 @@ export const endpoints = defineEndpoints({
       },
     }),
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","FORBIDDEN","APPROVAL_REQUIRED","SEPARATE_DUTIES"],
+    errors: ["ILLEGAL_TRANSITION","FORBIDDEN","APPROVAL_REQUIRED","SEPARATE_DUTIES","EXTERNAL_REF_REQUIRED","VALIDATION_FAILED"],
     audited: true,
     events: ["trust.recommendation.decided","trust.enforcement.recorded"],
     screens: ["admin/trust","admin/catalog","admin/seller","admin/cases","admin/finance"],
@@ -1759,6 +1963,7 @@ export const endpoints = defineEndpoints({
     permission: "trust.enforcements.reverse",
     scope: "staff",
     summary: "Reverse an enforcement (overturned appeal or error)",
+    desc: "Publishes trust.enforcement.reversed (the executing module undoes the action) and raises a enforcement_reversal work item in the owner team's queue (workqueues, optional) so the owner checks the undo, especially for actions done in its own screen (holds, cancellations, outreach).",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1825,7 +2030,7 @@ export const endpoints = defineEndpoints({
     permission: "trust.appeals.decide",
     scope: "staff",
     summary: "Uphold, overturn or partly overturn",
-    desc: "Overturn reverses the enforcement (trust.enforcement.reversed). Restrictions and history stay recorded; valid order history and access to help are preserved for everyone involved.",
+    desc: "Overturn reverses the enforcement (trust.enforcement.reversed and the owner's enforcement_reversal work item, as reverseEnforcement). Restrictions and history stay recorded; valid order history and access to help are preserved for everyone involved.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1912,7 +2117,7 @@ export const spec = defineModuleSpec({
   summary: "Trust and Risk's case file: reports of counterfeit goods, suspicious orders, fake reviews and abuse from customers, sellers, staff, brand owners and automated signals, with evidence, a risk score, an investigation workflow, enforcement recommendations routed to the team that owns the action, recorded enforcement with reasons, and appeals decided by someone other than the original decider. Trust recommends; Catalog, Seller Manager, Support, Finance and the other owners act.",
   dependsOn: ["access"],
   optionalDeps: ["media","catalog","offers","sellers","customers","orders","payments","reviews","messaging","support","finance","workqueues","reports","notifications","audit","identity"],
-  publicApi: ["raiseSignal","requestAssessment","reportsAbout","enforcementsFor","listReportsAbout","getReportSummaries","exportRows"],
+  publicApi: ["raiseSignal","requestAssessment","reportsAbout","enforcementsFor","subjectIdsWithReports","listReportsAbout","getReportSummaries","exportRows"],
   permissions: [
     {
       "key": "trust.reports.view",
@@ -2177,14 +2382,14 @@ export const spec = defineModuleSpec({
       "trust.report.escalated": { when: "A report is escalated", payload: () => TrustReportEscalatedEvent },
       "trust.report.resolved": { when: "A report is resolved or dismissed (reporters are told the outcome)", payload: () => TrustReportResolvedEvent },
       "trust.rights_report.received": { when: "A rights owner submits a report through the public form", payload: () => TrustRightsReportReceivedEvent },
-      "trust.evidence.requested": { when: "Proof is requested from a seller or customer", payload: () => TrustEvidenceRequestedEvent },
+      "trust.evidence.requested": { when: "Proof is requested from a seller or customer (notifications tells them)", payload: () => TrustEvidenceRequestedEvent },
       "trust.evidence.received": { when: "The reported party sends proof", payload: () => TrustEvidenceReceivedEvent },
       "trust.recommendation.routed": { when: "A recommendation is sent to its owner team", payload: () => TrustRecommendationRoutedEvent },
       "trust.recommendation.decided": { when: "The owner team accepts or declines, or Trust withdraws it", payload: () => TrustRecommendationDecidedEvent },
       "trust.enforcement.recorded": { when: "An owner accepts a recommendation; the owning module executes it", payload: () => TrustEnforcementRecordedEvent },
-      "trust.enforcement.reversed": { when: "An enforcement is reversed (appeal overturned or error); owners undo it", payload: () => TrustEnforcementReversedEvent },
+      "trust.enforcement.reversed": { when: "An enforcement is reversed (appeal overturned or error); the executing module undoes it and the owner team gets a enforcement_reversal work item", payload: () => TrustEnforcementReversedEvent },
       "trust.appeal.submitted": { when: "A customer or seller appeals a trust enforcement", payload: () => TrustAppealSubmittedEvent },
-      "trust.appeal.decided": { when: "A trust appeal is decided", payload: () => TrustAppealDecidedEvent },
+      "trust.appeal.decided": { when: "A trust appeal is decided (notifications tells the appellant)", payload: () => TrustAppealDecidedEvent },
       "trust.assessment.completed": { when: "A seller application or account assessment is recorded", payload: () => TrustAssessmentCompletedEvent },
     },
     consumes: {
@@ -2195,20 +2400,23 @@ export const spec = defineModuleSpec({
       "payments.chargeback.opened": "Add a signal to suspicious-order detection and open reports for repeated chargebacks",
       "payments.payment.failed": "Signal for card-testing detection",
       "reviews.review.published": "Feed the review-burst detection rule",
-      "offers.offer.created": "Feed the price-far-below-authorized and restricted-brand rules",
-      "catalog.product.publication_changed": "Confirm execution of suspend_product enforcements. setPublication accepts trustReportId; until catalog's publication_changed payload carries it (request to the catalog owner), match by the enforcement reference in the reason",
-      "offers.offer.status_changed": "Confirm execution of suspend_offer enforcements",
+      "offers.offer.created": "Feed the price-far-below and restricted-brand rules. The price rule compares the offer's price with the median price of the other active offers on the product (offers.listActiveOffersForProduct), not an authorised price list (decision D7)",
+      "catalog.product.publication_changed": "Confirm execution of suspend_product enforcements by trustEnforcementId (or trustReportId) on the payload",
+      "offers.offer.status_changed": "Confirm execution of suspend_offer enforcements by trustEnforcementId on the payload",
       "sellers.seller.restricted": "Confirm restrict_seller enforcements (trustEnforcementId)",
-      "sellers.seller.suspended": "Confirm suspend_seller enforcements",
+      "sellers.seller.suspended": "Confirm suspend_seller enforcements (trustEnforcementId)",
+      "sellers.warning.issued": "Confirm warn_seller enforcements (trustEnforcementId)",
+      "reviews.moderation.decided": "Confirm remove_reviews enforcements once every named review, question or answer is removed (trustEnforcementId)",
+      "messaging.conversation.locked": "Confirm lock_conversation enforcements (trustEnforcementId)",
       "sellers.appeal.submitted": "Mirror appeals of restrictions that came from a trust report into the Appeals tab",
       "sellers.appeal.decided": "Update the mirrored appeal",
       "customers.account.restricted": "Confirm customer restriction enforcements",
       "customers.account.restriction_lifted": "Record that a customer restriction ended",
-      "finance.hold.placed": "Confirm hold_payout enforcements when the hold carries trustReportId",
+      "finance.hold.placed": "Confirm hold_payout enforcements of the report named by trustReportId for the same seller (also holds placed after an approval)",
       "orders.item.cancelled": "When trustReportId is set: record the staff cancellation on the report (confirms hold_dispatch, review_payments or other recommendations that ended in cancellation)",
       "returns.refund.approved": "When trustReportId is set: confirm refund_buyers enforcements",
-      "support.case.opened": "Confirm inform_customers outreach cases that reference the report",
-      "sellers.application.submitted": "Run application detection rules (duplicate tax id, bank token or address of a closed account) and add signals to any assessment"
+      "support.case.opened": "Confirm inform_customers enforcements of the report named by trustReportId; cases without trustReportId never confirm anything",
+      "sellers.application.submitted": "Run application detection rules (duplicate tax id, bank token or address of a closed account, from taxIdHash, bankTokenHash and addressKey on the payload) and add signals to any assessment"
     },
   },
   jobs: {
@@ -2335,6 +2543,10 @@ export const spec = defineModuleSpec({
     "RECOMMENDATIONS_OPEN": {
       "status": 409,
       "meaning": "Recommendations are still waiting for their owner teams"
+    },
+    "EXTERNAL_REF_REQUIRED": {
+      "status": 422,
+      "meaning": "No module executes this action: do it in the owning module's screen first and accept with externalRef (the hold, case, claim or approval reference)"
     }
   },
   tables: {

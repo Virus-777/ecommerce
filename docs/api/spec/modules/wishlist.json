@@ -27,7 +27,7 @@
     { "name": "listItems", "signature": "(customerId: uuid, opts: { listId?: uuid, paging: PageInput }) => Paged<SavedItem>", "desc": "Saved items of a list (default list when omitted) with price hints and alert toggles (GET /wishlist, GET /lists/{id}/items).", "usedBy": ["graphql"] },
     { "name": "listLists", "signature": "(customerId: uuid) => WishlistList[]", "desc": "The customer's lists with item counts and share state (GET /lists).", "usedBy": ["graphql"] },
     { "name": "listAlerts", "signature": "(customerId: uuid) => Alert[]", "desc": "The customer's price-drop and back-in-stock alerts (GET /alerts).", "usedBy": ["graphql"] },
-    { "name": "exportCustomerData", "signature": "(customerId: uuid) => { module: string, title: string, records: json[] }", "desc": "Customer data export hook (decision: every module that keeps customer data answers the customers data export): lists, saved items with notes and alerts as plain records. Called by customers when it builds a data export", "usedBy": ["customers"] }
+    { "name": "exportCustomerData", "signature": "(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]", "desc": "Customer data export hook (decision: every module that keeps customer data answers the customers data export): lists, saved items with notes and alerts as plain records. Called by customers when it builds a data export", "usedBy": ["customers"] }
   ],
   "types": {
     "WishlistList": { "id": "uuid", "name": "string", "isDefault": "bool", "itemCount": "int", "shared": "bool", "shareUrl": "string?", "createdAt": "datetime", "updatedAt": "datetime" },

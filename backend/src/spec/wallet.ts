@@ -371,13 +371,18 @@ export const WalletCreditUsedEvent: z.ZodType<WalletCreditUsedEvent> = z.object(
 /** wallet.credit.expired: A lot expires unused */
 export interface WalletCreditExpiredEvent {
   customerId: string;
+  /** The expiry ledger entry (finance keys on it) */
+  entryId: string;
   lotId: string;
+  source: "refund" | "goodwill" | "price_adjustment" | "gift_card" | "correction";
   amount: common.Money;
 }
 
 export const WalletCreditExpiredEvent: z.ZodType<WalletCreditExpiredEvent> = z.object({
   customerId: z.uuid(),
+  entryId: z.uuid().describe("The expiry ledger entry (finance keys on it)"),
   lotId: z.uuid(),
+  source: z.enum(["refund", "goodwill", "price_adjustment", "gift_card", "correction"]),
   get amount() {
     return common.Money;
   },
@@ -406,17 +411,32 @@ export const WalletCreditExpiringEvent: z.ZodType<WalletCreditExpiringEvent> = z
 /** wallet.credit.reversed: A goodwill grant is reversed */
 export interface WalletCreditReversedEvent {
   customerId: string;
+  /** The reversal ledger entry (finance keys on it) */
+  entryId: string;
   grantId: string;
+  /** The ledger entry that granted the credit (entryId of the original wallet.credit.granted); finance reverses what it booked for it */
+  grantEntryId: string;
   amount: common.Money;
+  chargedTo: "platform" | "seller";
+  /** Set when chargedTo is seller: finance credits the seller back */
+  sellerId?: string | null;
+  caseId?: string | null;
+  orderId?: string | null;
   reason: string;
 }
 
 export const WalletCreditReversedEvent: z.ZodType<WalletCreditReversedEvent> = z.object({
   customerId: z.uuid(),
+  entryId: z.uuid().describe("The reversal ledger entry (finance keys on it)"),
   grantId: z.uuid(),
+  grantEntryId: z.uuid().describe("The ledger entry that granted the credit (entryId of the original wallet.credit.granted); finance reverses what it booked for it"),
   get amount() {
     return common.Money;
   },
+  chargedTo: z.enum(["platform", "seller"]),
+  sellerId: z.uuid().describe("Set when chargedTo is seller: finance credits the seller back").nullish(),
+  caseId: z.uuid().nullish(),
+  orderId: z.uuid().nullish(),
   reason: z.string(),
 });
 
@@ -500,6 +520,10 @@ export interface WalletPublicApi {
   captureHold(holdId: string, orderId: string): Promise<CreditHold>;
   /** Release a hold on payment failure or quote expiry. Used by: payments, checkout. */
   releaseHold(holdId: string): Promise<CreditHold>;
+  /** Keep a held credit hold alive while its payment is pending check (payments calls it from the status-check job until the result is known), so the hold does not expire into INSUFFICIENT_CREDIT at capture. Never shortens a hold; capped at pendingHoldMaxHours after the hold was made; a captured or released hold is returned unchanged. Used by: payments, checkout. */
+  extendHold(holdId: string, until: string): Promise<CreditHold>;
+  /** Total store credit outstanding (available plus held) over all accounts, for finance's daily store_credit check against its liability Used by: finance. */
+  getLiabilityTotal(asOf?: string): Promise<{ available: common.Money, held: common.Money, accounts: number }>;
   /** Refund to store credit (customer's choice) or return the credit part of a refunded order. Called by returns for return refunds to store credit and by payments for the refunds it executes (other origins with destination store_credit, and the credit part of a mixed tender). Idempotent per refundId; the payment tender split decides how much goes back to credit. Used by: payments, returns. */
   creditRefund(input: { customerId: string, refundId: string, orderId: string, amount: common.Money, reason: string }, idempotencyKey: string): Promise<LedgerEntry>;
   /** Goodwill credit from a support case or order; above the actor's limit it becomes pending approval. Used by: support. */
@@ -559,6 +583,27 @@ export interface WalletDb {
     state: string;
     expires_at: Date;
     idempotency_key: string;
+  };
+  /** Issued batches. The plain codes are kept only encrypted (secret-store key) until the issuer downloads them once or giftCardCodesTtlHours pass, then cleared; cards keep only code hashes */
+  gift_card_batches: {
+    id: string;
+    count: number;
+    amount: number;
+    currency: string;
+    purpose: string;
+    expires_at: Date | null;
+    reason: string;
+    cost_center: string | null;
+    status: 'pending_approval' | 'issued' | 'rejected';
+    approval_request_id: string | null;
+    codes_ciphertext: string | null;
+    /** private media document, usage gift_card_codes, when media is enabled */
+    codes_file_id: string | null;
+    codes_delivered_at: Date | null;
+    codes_expire_at: Date | null;
+    created_by: string;
+    idempotency_key: string;
+    created_at: Date;
   };
   goodwill_grants: {
     id: string;
@@ -828,7 +873,7 @@ export const endpoints = defineEndpoints({
     permission: "wallet.gift_cards.manage",
     scope: "staff",
     summary: "Issue a batch of gift cards",
-    desc: "Codes are returned once in the response file reference and stored only as hashes.",
+    desc: "Cards store only code hashes. The plain codes are delivered to the issuer once: GET /gift-cards/batches/{id}/codes (always available), and, when media is enabled, also as a private media document (usage gift_card_codes) in codesFileId. Both expire after giftCardCodesTtlHours; after the first download the encrypted codes are deleted. A batch waiting for approval has no codes until it is approved.",
     body: () => GiftCardBatchInput,
     response: () => z.object({
       batchId: z.uuid(),
@@ -836,7 +881,9 @@ export const endpoints = defineEndpoints({
       get total() {
         return common.Money;
       },
-      codesFileId: z.uuid().describe("Media document with the codes, downloadable once"),
+      status: z.enum(["issued", "pending_approval"]),
+      codesFileId: z.uuid().describe("Private media document with the codes (media enabled only), downloadable by the issuer until giftCardCodesTtlHours").nullish(),
+      codesAvailableUntil: z.iso.datetime({ offset: true }).nullish(),
     }),
     status: 201,
     errors: ["APPROVAL_REQUIRED"],
@@ -844,6 +891,31 @@ export const endpoints = defineEndpoints({
     audited: true,
     approval: "Approval action wallet.gift-cards.issue. Batch total above the caller's limit needs Finance approval",
     events: ["wallet.gift_card.issued"],
+    screens: ["admin/finance"],
+    phase: 3,
+  },
+  getGiftCardCodes: {
+    area: "admin",
+    method: "GET",
+    path: "/gift-cards/batches/{id}/codes",
+    auth: "staff",
+    permission: "wallet.gift_cards.manage",
+    scope: "staff",
+    summary: "Download a batch's gift card codes once",
+    desc: "Only the staff member who issued the batch (or, for an approved batch, the issuer after approval), within giftCardCodesTtlHours. Returns the plain codes and deletes the encrypted copy, so a second call gets GIFT_CARD_CODES_UNAVAILABLE. Codes are never logged or put in the audit entry (only the batch id and count).",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    response: () => z.object({
+      batchId: z.uuid(),
+      codes: z.array(z.string()),
+      count: z.number().int(),
+      deliveredAt: z.iso.datetime({ offset: true }),
+    }),
+    status: 200,
+    errors: ["NOT_FOUND","FORBIDDEN","GIFT_CARD_CODES_UNAVAILABLE"],
+    audited: true,
     screens: ["admin/finance"],
     phase: 3,
   },
@@ -902,8 +974,8 @@ export const spec = defineModuleSpec({
   chapters: [15,7,13,6],
   summary: "Customer store credit with an auditable ledger (refunds to credit, goodwill credit within approval limits, price adjustments, use at checkout, expiry), gift cards, and a placeholder for loyalty rewards. Checkout and payments use the balance through the in-process public API.",
   dependsOn: ["customers","payments"],
-  optionalDeps: ["access","support","orders","notifications","finance","audit"],
-  publicApi: ["getBalance","holdCredit","captureHold","releaseHold","creditRefund","grantGoodwill","getCustomerWallet"],
+  optionalDeps: ["access","support","orders","notifications","finance","audit","media"],
+  publicApi: ["getBalance","holdCredit","captureHold","releaseHold","extendHold","getLiabilityTotal","creditRefund","grantGoodwill","getCustomerWallet"],
   permissions: [
     {
       "key": "wallet.credit.view",
@@ -968,6 +1040,11 @@ export const spec = defineModuleSpec({
           "held",
           "expire",
           "released"
+        ],
+        [
+          "held",
+          "extend",
+          "held"
         ]
       ]
     },
@@ -1050,11 +1127,11 @@ export const spec = defineModuleSpec({
     },
     "wallet.release-stale-holds": {
       "schedule": "every 1 min",
-      "does": "Release holds past expiresAt"
+      "does": "Release holds past expiresAt (an extended hold's expiresAt is the extended time); delete undelivered gift card codes past giftCardCodesTtlHours"
     },
     "wallet.balance-check": {
-      "schedule": "daily",
-      "does": "Verify every account balance equals the ledger sum; flag differences to Finance checks"
+      "schedule": "daily 05:00 market time",
+      "does": "Verify every account balance equals the ledger sum; report each difference to Finance's daily check with finance.recordExternalDifference (check store_credit, key = customer id + date; expected = ledger sum, actual = balance) when finance is enabled, otherwise log it"
     }
   },
   settings: {
@@ -1091,6 +1168,23 @@ export const spec = defineModuleSpec({
       "min": 1,
       "unit": "minutes"
     },
+    "pendingHoldMaxHours": {
+      "default": 48,
+      "desc": "Longest a hold can be extended while its payment is pending check (extendHold), counted from when it was made",
+      "type": "duration",
+      "min": 1,
+      "max": 168,
+      "unit": "hours"
+    },
+    "giftCardCodesTtlHours": {
+      "default": 24,
+      "desc": "How long the issuer can download a batch's plain gift card codes before they are deleted",
+      "type": "duration",
+      "min": 1,
+      "max": 168,
+      "unit": "hours",
+      "approval": "second_reviewer"
+    },
     "giftCardsEnabled": {
       "default": false,
       "desc": "Gift cards are a later service",
@@ -1120,6 +1214,10 @@ export const spec = defineModuleSpec({
     "GIFT_CARD_INVALID": {
       "status": 422,
       "meaning": "Unknown, voided, expired or already redeemed gift card."
+    },
+    "GIFT_CARD_CODES_UNAVAILABLE": {
+      "status": 410,
+      "meaning": "The batch's codes were already downloaded, have expired (giftCardCodesTtlHours) or the batch is not issued yet. Void the batch and issue a new one if the codes were lost."
     }
   },
   tables: {
@@ -1280,6 +1378,76 @@ export const spec = defineModuleSpec({
       },
       "idempotency_key": {
         "type": "text",
+        "nullable": false
+      }
+    },
+    "gift_card_batches": {
+      "id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "count": {
+        "type": "int",
+        "nullable": false
+      },
+      "amount": {
+        "type": "bigint",
+        "nullable": false
+      },
+      "currency": {
+        "type": "text",
+        "nullable": false
+      },
+      "purpose": {
+        "type": "text",
+        "nullable": false
+      },
+      "expires_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
+      "reason": {
+        "type": "text",
+        "nullable": false
+      },
+      "cost_center": {
+        "type": "text",
+        "nullable": true
+      },
+      "status": {
+        "type": "text",
+        "nullable": false
+      },
+      "approval_request_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "codes_ciphertext": {
+        "type": "text",
+        "nullable": true
+      },
+      "codes_file_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "codes_delivered_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
+      "codes_expire_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
+      "created_by": {
+        "type": "text",
+        "nullable": false
+      },
+      "idempotency_key": {
+        "type": "text",
+        "nullable": false
+      },
+      "created_at": {
+        "type": "timestamptz",
         "nullable": false
       }
     },

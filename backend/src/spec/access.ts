@@ -369,6 +369,8 @@ export interface AuthorityCheck {
   eligibleApproverRoles: RoleRef[];
   /** People who could approve now, backups included */
   eligibleApprovers: StaffRef[];
+  /** The amount is above stepUpAbove: whoever acts or approves must give a fresh 2-step code (X-Step-Up-Code). A module acting on an allowed decision asks the caller for it before acting (STEP_UP_REQUIRED); access asks approvers itself. */
+  stepUpRequired: boolean;
 }
 
 export const AuthorityCheck: z.ZodType<AuthorityCheck> = z.object({
@@ -386,6 +388,7 @@ export const AuthorityCheck: z.ZodType<AuthorityCheck> = z.object({
   get eligibleApprovers() {
     return z.array(StaffRef);
   },
+  stepUpRequired: z.boolean().describe("The amount is above stepUpAbove: whoever acts or approves must give a fresh 2-step code (X-Step-Up-Code). A module acting on an allowed decision asks the caller for it before acting (STEP_UP_REQUIRED); access asks approvers itself."),
 }).register(common.apiTypes, { id: "access.AuthorityCheck" });
 
 export interface ApprovalTarget {
@@ -1161,10 +1164,12 @@ export interface AccessPublicApi {
   approvalInfo(requestId: string): Promise<common.ApprovalInfo>;
   /** Who receives a role's work and notices right now: lead, or the covering backup while the lead is away (the lead keeps a copy) Used by: notifications, workqueues, support. */
   resolveRecipients(roleKey: string): Promise<RecipientResolution>;
-  /** Active roles of a staff member (audit stores them with each entry) Used by: audit, notifications, workqueues. */
+  /** Active roles of a staff member (audit stores them with each entry; advertising takes a reviewer's role from here, never from the request body) Used by: audit, notifications, workqueues, advertising. */
   rolesOf(accountId: string): Promise<RoleRef[]>;
   /** Everyone holding a role (assignment pickers in workqueues and support) Used by: workqueues, support, notifications. */
   membersOfRole(roleKey: string): Promise<StaffRef[]>;
+  /** Active staff members whose active role assignments grant the permission (same rule as hasPermission; disabled accounts left out, locked ones shown away). includeCovering adds people who hold it only as an away-period backup. For handler pickers and routing to whoever can act (support case handlers, notifications). Used by: support, workqueues, notifications, messaging. */
+  staffWithPermission(permissionKey: string, opts?: { includeCovering?: boolean }): Promise<StaffRef[]>;
   /** Requests the caller may decide now, oldest due first (same rules as GET /approval-requests?view=to_decide). canDecide and steps are computed for the caller. Used by: graphql. */
   listApprovalsToDecide(principal: identity.Principal, filter: { module?: string, actionKey?: string, overdue?: boolean }, page: common.PageInput): Promise<common.Page<ApprovalRequest>>;
   /** Approval counts for the admin dashboard and inbox Used by: graphql. */
@@ -2036,7 +2041,7 @@ export const spec = defineModuleSpec({
   summary: "What staff may do and how much they may approve: staff roles, the permission registry, role assignments, leads and backups per work area, approval limits per role, approval requests with a second reviewer, and cover while someone is away. Granting access never grants financial authority.",
   dependsOn: ["identity"],
   optionalDeps: ["audit","notifications","sellers","finance","returns"],
-  publicApi: ["hasPermission","permissionsOf","check","requestApproval","decide","cancelApproval","getApproval","approvalInfo","resolveRecipients","rolesOf","membersOfRole","listApprovalsToDecide","approvalSummaryFor","getApprovalForViewer","approvalForTargets","approvalsForSellers","coverageNow","myLimitFor","getStaffRef"],
+  publicApi: ["hasPermission","permissionsOf","check","requestApproval","decide","cancelApproval","getApproval","approvalInfo","resolveRecipients","rolesOf","membersOfRole","staffWithPermission","listApprovalsToDecide","approvalSummaryFor","getApprovalForViewer","approvalForTargets","approvalsForSellers","coverageNow","myLimitFor","getStaffRef"],
   permissions: [
     {
       "key": "access.roles.view",

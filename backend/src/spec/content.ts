@@ -204,6 +204,8 @@ export interface SourceRule {
   kind: "new_arrivals" | "best_sellers" | "top_sellers_in_category" | "official_store" | "deals";
   categoryId?: string | null;
   days?: number | null;
+  /** deals only: limit to one promotion (promotions.liveDeals({ campaignId })); the section or page then hides when that promotion ends, like linkedPromotionId */
+  campaignId?: string | null;
   /** Published selection rule, e.g. Ranked by units sold in the last 30 days across all sellers. Sponsored placements don't affect rank. */
   description: string;
 }
@@ -212,6 +214,7 @@ export const SourceRule: z.ZodType<SourceRule> = z.object({
   kind: z.enum(["new_arrivals", "best_sellers", "top_sellers_in_category", "official_store", "deals"]),
   categoryId: z.uuid().nullish(),
   days: z.number().int().nullish(),
+  campaignId: z.uuid().describe("deals only: limit to one promotion (promotions.liveDeals({ campaignId })); the section or page then hides when that promotion ends, like linkedPromotionId").nullish(),
   description: z.string().describe("Published selection rule, e.g. Ranked by units sold in the last 30 days across all sellers. Sponsored placements don't affect rank."),
 }).register(common.apiTypes, { id: "content.SourceRule" });
 
@@ -351,6 +354,8 @@ export interface HomepageAdmin {
   liveVersion: number;
   draftVersion?: number | null;
   hasDraft: boolean;
+  /** Review of the draft layout when content.reviewRequired.section is on */
+  draftReview: HomepageReview;
   sections: HomeSectionAdmin[];
   timeZone: string;
   owner: OwnerRef;
@@ -360,6 +365,9 @@ export const HomepageAdmin: z.ZodType<HomepageAdmin> = z.object({
   liveVersion: z.number().int(),
   draftVersion: z.number().int().nullish(),
   hasDraft: z.boolean(),
+  get draftReview() {
+    return HomepageReview;
+  },
   get sections() {
     return z.array(HomeSectionAdmin);
   },
@@ -463,6 +471,8 @@ export interface PageBlock {
   /** Terms lines, chip labels */
   items?: string[] | null;
   link?: LinkRef | null;
+  /** seller_feature blocks: the featured seller. Store reads leave the block out while the seller is suspended, restricted from sales or closed (sellers status at read time), and show it again after reinstatement */
+  sellerId?: string | null;
 }
 
 export const PageBlock: z.ZodType<PageBlock> = z.object({
@@ -485,7 +495,54 @@ export const PageBlock: z.ZodType<PageBlock> = z.object({
   get link() {
     return LinkRef.nullish();
   },
+  sellerId: z.uuid().describe("seller_feature blocks: the featured seller. Store reads leave the block out while the seller is suspended, restricted from sales or closed (sellers status at read time), and show it again after reinstatement").nullish(),
 }).register(common.apiTypes, { id: "content.PageBlock" });
+
+export interface SellerAnnouncement {
+  policyVersionId: string;
+  policyKey: string;
+  title: string;
+  version: string;
+  state: "scheduled" | "current";
+  effectiveAt: string;
+  changeSummary?: string | null;
+  /** Public version page, /policy-versions/{id} */
+  url: string;
+}
+
+export const SellerAnnouncement: z.ZodType<SellerAnnouncement> = z.object({
+  policyVersionId: z.uuid(),
+  policyKey: z.string(),
+  title: z.string(),
+  version: z.string(),
+  state: z.enum(["scheduled", "current"]),
+  effectiveAt: z.iso.datetime({ offset: true }),
+  changeSummary: z.string().nullish(),
+  url: z.string().describe("Public version page, /policy-versions/{id}"),
+}).register(common.apiTypes, { id: "content.SellerAnnouncement" });
+
+export interface HomepageReview {
+  /** not_required when reviewRequired.section is false. Any edit to the draft after submission returns it to not_submitted */
+  state: "not_required" | "not_submitted" | "in_review" | "approved" | "changes_requested";
+  submittedBy?: common.Actor | null;
+  submittedAt?: string | null;
+  reviewedBy?: common.Actor | null;
+  reviewedAt?: string | null;
+  note?: string | null;
+}
+
+export const HomepageReview: z.ZodType<HomepageReview> = z.object({
+  state: z.enum(["not_required", "not_submitted", "in_review", "approved", "changes_requested"]).describe("not_required when reviewRequired.section is false. Any edit to the draft after submission returns it to not_submitted"),
+  get submittedBy() {
+    return common.Actor.nullish();
+  },
+  submittedAt: z.iso.datetime({ offset: true }).nullish(),
+  get reviewedBy() {
+    return common.Actor.nullish();
+  },
+  reviewedAt: z.iso.datetime({ offset: true }).nullish(),
+  note: z.string().nullish(),
+}).register(common.apiTypes, { id: "content.HomepageReview" });
 
 export interface PageInput {
   kind: "campaign" | "collection" | "about" | "landing";
@@ -1449,6 +1506,10 @@ export interface ContentPublicApi {
   getHelpArticle(slug: string): Promise<HelpArticle | null>;
   /** Published Help articles whose policyKeys include the policy (e.g. returns), so a policy change preview can say how many need review. Used by: returns. */
   countHelpArticlesForPolicy(policyKey: string): Promise<{ count: number, articleIds: string[] }>;
+  /** Announcements for Seller Center, newest first: policy versions with notifySellers that are scheduled or current (audience seller or both), from policy_versions. No separate announcements table at launch. Used by: reports, graphql. */
+  sellerAnnouncements(opts: { since?: string, limit: number }): Promise<SellerAnnouncement[]>;
+  /** Homepage sections and pages linked to a promotion (linkedPromotionId, or a deals SourceRule with that campaignId), for the campaign detail in promotions and ad destination checks Used by: promotions, advertising, graphql. */
+  contentForCampaign(campaignId: string): Promise<{ sections: { id: string, kind: string, heading: string?: unknown, status: string }[], pages: { id: string, slug: string, title: string, status: string, url: string }[] }>;
 }
 
 /* ------------------------------------------------------------------ tables (Kysely row types) */
@@ -1508,6 +1569,12 @@ export interface ContentDb {
     author_kind: string;
     author_id: string | null;
     restored_from: number | null;
+    review_state: 'not_submitted' | 'in_review' | 'approved' | 'changes_requested' | null;
+    submitted_by: string | null;
+    submitted_at: Date | null;
+    reviewed_by: string | null;
+    reviewed_at: Date | null;
+    review_note: string | null;
     created_at: Date;
     published_at: Date | null;
   };
@@ -2004,6 +2071,45 @@ export const endpoints = defineEndpoints({
     screens: ["admin/content"],
     phase: 1,
   },
+  submitHomepageDraft: {
+    area: "admin",
+    method: "POST",
+    path: "/homepage/submit",
+    auth: "staff",
+    permission: "content.homepage.manage",
+    scope: "staff",
+    summary: "Send the draft layout for review",
+    desc: "Only when content.reviewRequired.section is on (otherwise ILLEGAL_TRANSITION: publish directly). Draft review not_submitted or changes_requested → in_review.",
+    body: () => z.object({
+      summary: z.string().nullish(),
+    }),
+    response: () => HomepageAdmin,
+    status: 200,
+    errors: ["ILLEGAL_TRANSITION","CONFLICT"],
+    audited: true,
+    screens: ["admin/content"],
+    phase: 1,
+  },
+  reviewHomepageDraft: {
+    area: "admin",
+    method: "POST",
+    path: "/homepage/review",
+    auth: "staff",
+    permission: "content.homepage.publish",
+    scope: "staff",
+    summary: "Approve the draft layout or request changes",
+    desc: "in_review → approved or changes_requested. The member who submitted the draft (or last edited it) cannot approve it (SAME_REVIEWER).",
+    body: () => z.object({
+      approve: z.boolean(),
+      note: z.string().nullish(),
+    }),
+    response: () => HomepageAdmin,
+    status: 200,
+    errors: ["ILLEGAL_TRANSITION","SAME_REVIEWER"],
+    audited: true,
+    screens: ["admin/content"],
+    phase: 1,
+  },
   publishHomepage: {
     area: "admin",
     method: "POST",
@@ -2012,12 +2118,13 @@ export const endpoints = defineEndpoints({
     permission: "content.homepage.publish",
     scope: "staff",
     summary: "Publish the draft layout as a new version",
+    desc: "With content.reviewRequired.section on, only an approved draft can be published (ILLEGAL_TRANSITION with details.reason review_required otherwise). Section schedules (showFrom / removeAt) of a published layout run without a new review.",
     body: () => z.object({
       summary: z.string(),
     }),
     response: () => HomepageAdmin,
     status: 200,
-    errors: ["CONFLICT"],
+    errors: ["CONFLICT","ILLEGAL_TRANSITION"],
     audited: true,
     events: ["content.page.published"],
     screens: ["admin/content"],
@@ -2227,6 +2334,29 @@ export const endpoints = defineEndpoints({
     response: () => PageAdmin,
     status: 200,
     errors: ["ILLEGAL_TRANSITION","VALIDATION_FAILED"],
+    audited: true,
+    screens: ["admin/content"],
+    phase: 1,
+  },
+  cancelPageSchedule: {
+    area: "admin",
+    method: "POST",
+    path: "/pages/{id}/cancel-schedule",
+    auth: "staff",
+    permission: "content.pages.publish",
+    scope: "staff",
+    summary: "Cancel a scheduled publication",
+    desc: "scheduled → draft (cancelSchedule): publishAt and unpublishAt are cleared and the draft version is kept. A page that is already live keeps its live version; only the scheduled draft is held back.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      reason: z.string().nullish(),
+    }),
+    response: () => PageAdmin,
+    status: 200,
+    errors: ["ILLEGAL_TRANSITION"],
     audited: true,
     screens: ["admin/content"],
     phase: 1,
@@ -2713,7 +2843,7 @@ export const endpoints = defineEndpoints({
     permission: "content.policies.approve",
     scope: "staff",
     summary: "Policy owner approval or changes requested",
-    desc: "After the owner approves, the Business Owner's final approval is raised as an access approval request.",
+    desc: "Owner step: needs the permission content.policies.approve and the caller must be the policy's owner (or hold content.policies.manage). access.check on the approval action content.policies.approve only decides who finishes: allowed (the caller is the Business Owner) approves in one step; approval_required or denied raises the Business Owner's final approval with access.requestApproval and the version stays in_review until access.approval.decided. An owner is never refused (FORBIDDEN) because of access limits. The response is 200 with the version and its pending approval.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -2816,7 +2946,7 @@ export const spec = defineModuleSpec({
   summary: "Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action.",
   dependsOn: ["media","access"],
   optionalDeps: ["catalog","offers","inventory","promotions","advertising","sellers","search","reports","notifications","audit","settings","shipping","wishlist","support"],
-  publicApi: ["currentPolicyVersions","getPolicyVersion","helpArticlesFor","pageLink","getHomePage","previewHomePage","getStorePage","previewPage","collectionProducts","getHelpCenter","getHelpArticle","countHelpArticlesForPolicy"],
+  publicApi: ["currentPolicyVersions","getPolicyVersion","helpArticlesFor","pageLink","getHomePage","previewHomePage","getStorePage","previewPage","collectionProducts","getHelpCenter","getHelpArticle","countHelpArticlesForPolicy","sellerAnnouncements","contentForCampaign"],
   permissions: [
     {
       "key": "content.homepage.manage",
@@ -3037,7 +3167,9 @@ export const spec = defineModuleSpec({
       "catalog.product.merged": "Replace the duplicate product id in sections and collections",
       "offers.offer.status_changed": "Invalidate cached product tiles",
       "inventory.stock.changed": "Invalidate availability on curated collections",
-      "sellers.seller.suspended": "Remove the seller from Featured sellers and seller features",
+      "sellers.seller.suspended": "Remove the seller from Featured sellers; seller_feature blocks naming the seller (PageBlock.sellerId) are hidden on store reads until reinstatement; refresh cached pages",
+      "sellers.seller.reinstated": "Refresh cached pages so seller_feature blocks of the seller show again",
+      "sellers.seller.closed": "Hide seller_feature blocks naming the seller for good and flag the pages for the owner to edit",
       "access.approval.decided": "Complete Business Owner approval of a policy version or a short-notice schedule"
     },
   },
@@ -3123,7 +3255,7 @@ export const spec = defineModuleSpec({
     },
     "SAME_REVIEWER": {
       "status": 409,
-      "meaning": "The author cannot approve their own article."
+      "meaning": "The author cannot approve their own article or homepage draft."
     }
   },
   tables: {
@@ -3310,6 +3442,30 @@ export const spec = defineModuleSpec({
       },
       "restored_from": {
         "type": "int",
+        "nullable": true
+      },
+      "review_state": {
+        "type": "text",
+        "nullable": true
+      },
+      "submitted_by": {
+        "type": "text",
+        "nullable": true
+      },
+      "submitted_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
+      "reviewed_by": {
+        "type": "text",
+        "nullable": true
+      },
+      "reviewed_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
+      "review_note": {
+        "type": "text",
         "nullable": true
       },
       "created_at": {

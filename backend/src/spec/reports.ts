@@ -47,7 +47,8 @@ export interface MetricDefinition {
   audience: "staff" | "seller" | "both";
   /** Part of the small launch set (plan ch. 19) */
   launchMeasure: boolean;
-  owner: StaffRef;
+  /** Named owner; null until someone is named (seeded metrics start without one). Publishing needs an owner (OWNER_REQUIRED) */
+  owner?: StaffRef | null;
   status: "draft" | "published" | "retired";
   version: number;
   effectiveFrom: string;
@@ -72,7 +73,7 @@ export const MetricDefinition: z.ZodType<MetricDefinition> = z.object({
   audience: z.enum(["staff", "seller", "both"]),
   launchMeasure: z.boolean().describe("Part of the small launch set (plan ch. 19)"),
   get owner() {
-    return StaffRef;
+    return StaffRef.nullish();
   },
   status: z.enum(["draft", "published", "retired"]),
   version: z.number().int(),
@@ -94,7 +95,8 @@ export interface MetricInput {
   relatedKeys?: string[] | null;
   audience: "staff" | "seller" | "both";
   launchMeasure?: boolean | null;
-  ownerId: string;
+  /** Staff member who owns the metric; may be named later (PUT /metrics/{key}/owner) */
+  ownerId?: string | null;
   effectiveFrom?: string | null;
   changeNote: string;
 }
@@ -112,7 +114,7 @@ export const MetricInput: z.ZodType<MetricInput> = z.object({
   relatedKeys: z.array(z.string()).nullish(),
   audience: z.enum(["staff", "seller", "both"]),
   launchMeasure: z.boolean().nullish(),
-  ownerId: z.uuid(),
+  ownerId: z.uuid().describe("Staff member who owns the metric; may be named later (PUT /metrics/{key}/owner)").nullish(),
   effectiveFrom: z.iso.date().nullish(),
   changeNote: z.string(),
 }).register(common.apiTypes, { id: "reports.MetricInput" });
@@ -200,7 +202,10 @@ export const ReportDefinition: z.ZodType<ReportDefinition> = z.object({
 export interface ReportGroup {
   key: string;
   label: string;
-  owner: StaffRef;
+  /** Named owner of the group; null until someone is named */
+  owner?: StaffRef | null;
+  /** Role expected to own it, e.g. Finance Manager (shown while no person is named) */
+  ownerRole: string;
   reports: ReportDefinition[];
 }
 
@@ -208,8 +213,9 @@ export const ReportGroup: z.ZodType<ReportGroup> = z.object({
   key: z.string(),
   label: z.string(),
   get owner() {
-    return StaffRef;
+    return StaffRef.nullish();
   },
+  ownerRole: z.string().describe("Role expected to own it, e.g. Finance Manager (shown while no person is named)"),
   get reports() {
     return z.array(ReportDefinition);
   },
@@ -348,11 +354,12 @@ export interface ReportSchedule {
   id: string;
   reportKey: string;
   savedViewId?: string | null;
-  recipients: string[];
+  /** Staff only (decision D2); each must hold the report's group permission */
+  recipients: StaffRef[];
   frequency: "daily" | "weekly" | "monthly";
   dayOfWeek?: number | null;
   time: string;
-  format: "pdf" | "csv";
+  format: "csv" | "xlsx";
   nextRunAt: string;
   owner: StaffRef;
   active: boolean;
@@ -362,11 +369,13 @@ export const ReportSchedule: z.ZodType<ReportSchedule> = z.object({
   id: z.uuid(),
   reportKey: z.string(),
   savedViewId: z.uuid().nullish(),
-  recipients: z.array(z.email()),
+  get recipients() {
+    return z.array(StaffRef);
+  },
   frequency: z.enum(["daily", "weekly", "monthly"]),
   dayOfWeek: z.number().int().nullish(),
   time: z.string(),
-  format: z.enum(["pdf", "csv"]),
+  format: z.enum(["csv", "xlsx"]),
   nextRunAt: z.iso.datetime({ offset: true }),
   get owner() {
     return StaffRef;
@@ -570,6 +579,10 @@ export interface ReadModelStatus {
   rows: number;
   state: "live" | "rebuilding" | "stale" | "failed";
   rebuildProgressPct?: number | null;
+  /** False for read models kept from events only (refunds, returns, service): there is no event log to replay yet, so rebuild is refused */
+  rebuildable: boolean;
+  /** What a rebuild reads, e.g. order facts from orders, or why it is unavailable */
+  rebuildNote?: string | null;
 }
 
 export const ReadModelStatus: z.ZodType<ReadModelStatus> = z.object({
@@ -581,6 +594,8 @@ export const ReadModelStatus: z.ZodType<ReadModelStatus> = z.object({
   rows: z.number().int(),
   state: z.enum(["live", "rebuilding", "stale", "failed"]),
   rebuildProgressPct: z.number().int().nullish(),
+  rebuildable: z.boolean().describe("False for read models kept from events only (refunds, returns, service): there is no event log to replay yet, so rebuild is refused"),
+  rebuildNote: z.string().describe("What a rebuild reads, e.g. order facts from orders, or why it is unavailable").nullish(),
 }).register(common.apiTypes, { id: "reports.ReadModelStatus" });
 
 /* ------------------------------------------------------------------ events */
@@ -630,16 +645,18 @@ export const ReportsExportReadyEvent: z.ZodType<ReportsExportReadyEvent> = z.obj
   expiresAt: z.iso.datetime({ offset: true }),
 });
 
-/** reports.scheduled_report.ready: Phase 2: a scheduled report file is ready (notifications emails the schedule's recipients) */
+/** reports.scheduled_report.ready: Phase 2: a scheduled report file is ready (notifications emails each staff recipient a link to their own export) */
 export interface ReportsScheduledReportReadyEvent {
   scheduleId: string;
   reportKey: string;
   reportTitle: string;
-  exportId: string;
-  format: "pdf" | "csv";
+  format: "csv" | "xlsx";
   /** e.g. Week of Oct 5, 2026 */
   periodLabel: string;
-  recipients: string[];
+  /** { staffId: uuid, exportId: uuid }: one export job per recipient, requested in the recipient's name so only they can download it (getExport is requester-only) */
+  deliveries: unknown[];
+  /** Recipients left out because they no longer hold the report's permission or are inactive */
+  skippedStaffIds: string[];
   expiresAt: string;
 }
 
@@ -647,10 +664,10 @@ export const ReportsScheduledReportReadyEvent: z.ZodType<ReportsScheduledReportR
   scheduleId: z.uuid(),
   reportKey: z.string(),
   reportTitle: z.string(),
-  exportId: z.uuid(),
-  format: z.enum(["pdf", "csv"]),
+  format: z.enum(["csv", "xlsx"]),
   periodLabel: z.string().describe("e.g. Week of Oct 5, 2026"),
-  recipients: z.array(z.email()),
+  deliveries: z.array(z.unknown()).describe("{ staffId: uuid, exportId: uuid }: one export job per recipient, requested in the recipient's name so only they can download it (getExport is requester-only)"),
+  skippedStaffIds: z.array(z.uuid()).describe("Recipients left out because they no longer hold the report's permission or are inactive"),
   expiresAt: z.iso.datetime({ offset: true }),
 });
 
@@ -696,7 +713,8 @@ export interface ReportsDb {
     related_keys: Json;
     audience: string;
     launch_measure: boolean;
-    owner_staff_id: string;
+    /** null until an owner is named */
+    owner_staff_id: string | null;
     status: string;
     version: number;
     effective_from: string;
@@ -742,7 +760,8 @@ export interface ReportsDb {
   report_groups: {
     key: string;
     label: string;
-    owner_staff_id: string;
+    /** null until an owner is named */
+    owner_staff_id: string | null;
     position: number;
   };
   saved_views: {
@@ -758,11 +777,12 @@ export interface ReportsDb {
     id: string;
     report_key: string;
     saved_view_id: string | null;
+    /** staff ids */
     recipients: Json;
     frequency: string;
     day_of_week: number | null;
     time: string;
-    format: string;
+    format: 'csv' | 'xlsx';
     next_run_at: Date;
     owner_staff_id: string;
     active: boolean;
@@ -832,14 +852,17 @@ export interface ReportsDb {
     /** Official Store, from inventory.getUnitCost */
     buying_cost_minor: number | null;
   };
+  /** One row per refund and seller share (decision D5): a refund over several sellers' items is split by the items it names (payments.refund.sent items), the rest (shipping, unnamed amounts) proportionally to each seller's item amounts on the order */
   fact_refunds: {
     refund_id: string;
+    /** OFFICIAL_STORE_ID for the Official Store */
+    seller_id: string;
     order_id: string;
     owner_type: 'official' | 'seller';
-    seller_id: string | null;
     amount_minor: number;
     currency: string;
     reason: string | null;
+    /** a payout to this seller was paid after the item's delivery and before the refund, so the sale may already have been paid out */
     after_payout: boolean;
     sent_at: Date;
   };
@@ -1144,6 +1167,53 @@ export const endpoints = defineEndpoints({
     screens: ["admin/reports"],
     phase: 1,
   },
+  setMetricOwner: {
+    area: "admin",
+    method: "PUT",
+    path: "/metrics/{key}/owner",
+    auth: "staff",
+    permission: "reports.definitions.manage",
+    scope: "staff",
+    summary: "Name (or change) the staff member who owns a metric",
+    desc: "The owner must be an active staff member. Does not create a new version; recorded in the metric history.",
+    params: () =>
+      z.object({
+        key: z.string(),
+      }),
+    body: () => z.object({
+      ownerId: z.uuid(),
+      reason: z.string(),
+    }),
+    response: () => MetricDefinition,
+    status: 200,
+    errors: ["VALIDATION_FAILED","NOT_FOUND"],
+    audited: true,
+    screens: ["admin/reports"],
+    phase: 1,
+  },
+  setGroupOwner: {
+    area: "admin",
+    method: "PUT",
+    path: "/groups/{key}/owner",
+    auth: "staff",
+    permission: "reports.definitions.manage",
+    scope: "staff",
+    summary: "Name (or change) the staff member who owns a report group",
+    params: () =>
+      z.object({
+        key: z.string(),
+      }),
+    body: () => z.object({
+      ownerId: z.uuid(),
+      reason: z.string(),
+    }),
+    response: () => ReportGroup,
+    status: 200,
+    errors: ["VALIDATION_FAILED","NOT_FOUND"],
+    audited: true,
+    screens: ["admin/reports"],
+    phase: 1,
+  },
   suggestMetricChange: {
     area: "admin",
     method: "POST",
@@ -1321,19 +1391,19 @@ export const endpoints = defineEndpoints({
     permission: "reports.schedules.manage",
     scope: "staff",
     summary: "Email a report on a schedule",
-    desc: "Recipients must be staff with the report's permission.",
+    desc: "Recipients are staff only (decision D2): each recipient id must be an active staff member holding the report's group permission (reports.<group>.view), otherwise RECIPIENT_NOT_PERMITTED lists them. Each run re-checks every recipient and skips those who lost the permission. CSV or XLSX (no PDF).",
     body: () => z.object({
       reportKey: z.string(),
       savedViewId: z.uuid().nullish(),
-      recipients: z.array(z.email()),
+      recipientStaffIds: z.array(z.uuid()),
       frequency: z.enum(["daily", "weekly", "monthly"]),
       dayOfWeek: z.number().int().nullish(),
       time: z.string(),
-      format: z.enum(["pdf", "csv"]),
+      format: z.enum(["csv", "xlsx"]),
     }),
     response: () => ReportSchedule,
     status: 201,
-    errors: ["VALIDATION_FAILED"],
+    errors: ["VALIDATION_FAILED","RECIPIENT_NOT_PERMITTED"],
     audited: true,
     screens: ["admin/reports"],
     phase: 2,
@@ -1389,7 +1459,8 @@ export const endpoints = defineEndpoints({
     auth: "staff",
     permission: "reports.readmodels.manage",
     scope: "staff",
-    summary: "Rebuild a read model from the event log or source snapshots",
+    summary: "Rebuild a read model from source snapshots",
+    desc: "Order facts are refreshed from orders, buyers recomputed and daily pulls repeated. Read models kept from events only (refunds, returns, service) cannot be rebuilt until the kernel keeps an event log: REBUILD_UNAVAILABLE (ReadModelStatus.rebuildable=false).",
     params: () =>
       z.object({
         key: z.string(),
@@ -1399,7 +1470,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => ReadModelStatus,
     status: 202,
-    errors: ["CONFLICT"],
+    errors: ["CONFLICT","NOT_FOUND","REBUILD_UNAVAILABLE"],
     audited: true,
     phase: 1,
   },
@@ -1680,7 +1751,7 @@ export const spec = defineModuleSpec({
       "reports.metric.published": { when: "A metric definition version is published", payload: () => ReportsMetricPublishedEvent },
       "reports.export.requested": { when: "An export job is created (audit and abuse monitoring)", payload: () => ReportsExportRequestedEvent },
       "reports.export.ready": { when: "An export file is ready (notifications tells the requester)", payload: () => ReportsExportReadyEvent },
-      "reports.scheduled_report.ready": { when: "Phase 2: a scheduled report file is ready (notifications emails the schedule's recipients)", payload: () => ReportsScheduledReportReadyEvent },
+      "reports.scheduled_report.ready": { when: "Phase 2: a scheduled report file is ready (notifications emails each staff recipient a link to their own export)", payload: () => ReportsScheduledReportReadyEvent },
     },
     consumes: {
       "orders.order.placed": "fact_order_items rows with placement date; fact_customers",
@@ -1692,7 +1763,7 @@ export const spec = defineModuleSpec({
       "orders.item.delivered": "Delivered date",
       "orders.order.completed": "Completion date basis",
       "orders.item.cancelled": "Cancellations (by customer or seller) and cancelled amounts",
-      "payments.refund.sent": "Refunds sent (refund date and amount); 'approved' refunds are never counted as sent",
+      "payments.refund.sent": "Refunds sent (refund date and amount); 'approved' refunds are never counted as sent. One fact_refunds row per seller: the named items' amounts go to their sellers, the rest is split proportionally to each seller's item amounts on the order (decision D5); after_payout from the seller's paid payouts",
       "returns.return.requested": "fact_returns with reason",
       "returns.return.inspected": "Return outcome",
       "inventory.stock.changed": "Stockout minutes per product",
@@ -1700,7 +1771,7 @@ export const spec = defineModuleSpec({
       "messaging.message.sent": "Response time per seller",
       "support.case.opened": "Case backlog and complaint patterns",
       "support.case.resolved": "Case backlog",
-      "finance.payout.paid": "Completed payouts",
+      "finance.payout.paid": "Completed payouts; also the paid-payout dates that decide fact_refunds.after_payout",
       "finance.payout.failed": "Failed payouts",
       "finance.hold.placed": "Held amounts",
       "finance.hold.released": "Held amounts",
@@ -1726,7 +1797,7 @@ export const spec = defineModuleSpec({
     },
     "reports.run-schedules": {
       "schedule": "every 15 min",
-      "does": "Phase 2: run due schedules into export files and publish reports.scheduled_report.ready (notifications sends the emails)"
+      "does": "Phase 2: run due schedules: re-check each staff recipient's permission, create one export job per remaining recipient (requested in their name) and publish reports.scheduled_report.ready (notifications sends the emails)"
     },
     "reports.check-lag": {
       "schedule": "every 5 min",
@@ -2077,6 +2148,14 @@ export const spec = defineModuleSpec({
     "DATASET_UNAVAILABLE": {
       "status": 409,
       "meaning": "The dataset is not in the export registry or its owner module is disabled"
+    },
+    "RECIPIENT_NOT_PERMITTED": {
+      "status": 422,
+      "meaning": "Scheduled report recipients must be active staff holding the report's permission. details.staffIds."
+    },
+    "REBUILD_UNAVAILABLE": {
+      "status": 409,
+      "meaning": "This read model is kept from events only and cannot be rebuilt until an event log exists"
     }
   },
   tables: {
@@ -2143,7 +2222,7 @@ export const spec = defineModuleSpec({
       },
       "owner_staff_id": {
         "type": "uuid",
-        "nullable": false
+        "nullable": true
       },
       "status": {
         "type": "text",
@@ -2295,7 +2374,7 @@ export const spec = defineModuleSpec({
       },
       "owner_staff_id": {
         "type": "uuid",
-        "nullable": false
+        "nullable": true
       },
       "position": {
         "type": "int",
@@ -2605,6 +2684,10 @@ export const spec = defineModuleSpec({
         "type": "uuid",
         "nullable": false
       },
+      "seller_id": {
+        "type": "uuid",
+        "nullable": false
+      },
       "order_id": {
         "type": "uuid",
         "nullable": false
@@ -2612,10 +2695,6 @@ export const spec = defineModuleSpec({
       "owner_type": {
         "type": "text",
         "nullable": false
-      },
-      "seller_id": {
-        "type": "uuid",
-        "nullable": true
       },
       "amount_minor": {
         "type": "bigint",

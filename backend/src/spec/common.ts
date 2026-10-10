@@ -181,6 +181,41 @@ export const Deadline: z.ZodType<Deadline> = z.object({
   state: z.enum(["on_time", "due_soon", "overdue"]),
 }).register(apiTypes, { id: "Deadline" });
 
+export interface PageInfo {
+  /** Cursor for the next batch; null on the last page */
+  nextCursor?: string | null;
+  page?: number | null;
+  totalPages?: number | null;
+  total?: number | null;
+}
+
+export const PageInfo: z.ZodType<PageInfo> = z.object({
+  nextCursor: z.string().describe("Cursor for the next batch; null on the last page").nullish(),
+  page: z.number().int().nullish(),
+  totalPages: z.number().int().nullish(),
+  total: z.number().int().nullish(),
+}).register(apiTypes, { id: "PageInfo" });
+
+export interface CustomerDataSection {
+  /** File name inside the export ZIP without extension, e.g. messages, reviews, store_credit */
+  key: string;
+  /** Heading in the export's index, e.g. Messages */
+  title: string;
+  module: string;
+  /** Plain records about the customer (their own words, choices and amounts). Other people's personal details are left out or masked; internal staff notes are never included. */
+  records: unknown[];
+  /** Media assets the customer uploaded that belong in the ZIP (message attachments, review photos) */
+  attachmentIds?: string[] | null;
+}
+
+export const CustomerDataSection: z.ZodType<CustomerDataSection> = z.object({
+  key: z.string().describe("File name inside the export ZIP without extension, e.g. messages, reviews, store_credit"),
+  title: z.string().describe("Heading in the export's index, e.g. Messages"),
+  module: z.string(),
+  records: z.array(z.unknown()).describe("Plain records about the customer (their own words, choices and amounts). Other people's personal details are left out or masked; internal staff notes are never included."),
+  attachmentIds: z.array(z.uuid()).describe("Media assets the customer uploaded that belong in the ZIP (message attachments, review photos)").nullish(),
+}).register(apiTypes, { id: "CustomerDataSection" });
+
 /** Error codes shared by every module (common.json "errors"). */
 export const commonErrors = {
   "VALIDATION_FAILED": {
@@ -205,7 +240,7 @@ export const commonErrors = {
   },
   "APPROVAL_REQUIRED": {
     "status": 409,
-    "meaning": "Above the caller's limit or needs a second reviewer. details.approvalRequestId tracks it."
+    "meaning": "Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses)."
   },
   "CONFLICT": {
     "status": 409,
@@ -313,3 +348,6 @@ export const headers = {
 
 /** Seller id of the Official Store, used wherever a seller id is required (feedback, reviews, returns terms, conversations, report facts, promotion lines). The sellers module never issues it. */
 export const OFFICIAL_STORE_ID = '00000000-0000-7000-8000-000000000001' as const;
+
+/** Display name of the Official Store wherever a seller name is shown (cart, checkout, orders, conversations, reviews, returns, notices). Use this constant instead of writing the label. */
+export const OFFICIAL_STORE_NAME = 'Marketly Official Store' as const;
