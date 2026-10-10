@@ -17,7 +17,7 @@ import { ReportsService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.2.0',
+  version: '1.3.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
@@ -55,6 +55,8 @@ export default defineModule({
     ctx.events.on("promotions.redemption.reversed", (e) => service.onRedemptionReversedFromPromotions(e.payload, e));
     ctx.events.on("advertising.charge.posted", (e) => service.onChargePostedFromAdvertising(e.payload, e));
     ctx.events.on("advertising.charge.credited", (e) => service.onChargeCreditedFromAdvertising(e.payload, e));
+    ctx.events.on("fulfillment-service.fee.charged", (e) => service.onFeeChargedFromFulfillmentService(e.payload, e));
+    ctx.events.on("fulfillment-service.fee.reversed", (e) => service.onFeeReversedFromFulfillmentService(e.payload, e));
 
     // Background jobs (spec jobs)
     ctx.jobs.handle("reports.run-exports", () => service.runExports());

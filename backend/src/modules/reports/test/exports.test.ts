@@ -25,7 +25,7 @@ describe('export dataset registry', () => {
   it('owners register their columns at boot; unknown keys and wrong owners are refused', async () => {
     const all = await h.call('GET', '/api/admin/reports/export-datasets?all=true', h.tokens.staff());
     expect(all.status).toBe(200);
-    expect(all.body).toHaveLength(24);
+    expect(all.body).toHaveLength(28);
     const wq = all.body.find((d: any) => d.key === DATASET);
     expect(wq).toMatchObject({ owner: 'workqueues', permission: 'workqueues.items.export', audience: 'staff', available: true });
     expect(wq.columns.length).toBeGreaterThan(0); // registered by workqueues at its boot

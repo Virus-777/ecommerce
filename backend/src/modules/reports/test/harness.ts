@@ -40,6 +40,8 @@ export interface OrderSpec {
   customerId?: string;
   items?: ItemSpec[];
   pending?: boolean;
+  /** The group's fulfilledBy (default: seller for a seller, official_warehouse for the Official Store) */
+  fulfilledBy?: 'official_warehouse' | 'seller' | 'marketly_service';
 }
 
 export async function harness() {
@@ -88,7 +90,7 @@ export async function harness() {
       settings: { get: async (key: string) => settings.get(key) as never },
       orders: {
         getOrder: async (id) => ordersById.get(id) ?? null,
-        countSellerOrders: async (sellerId) => sellerCounts.get(sellerId) ?? { new: 0, preparing: 0, shipped: 0, completed: 0, cancellationRequests: 0, overdue: 0, dueToday: 0 },
+        countSellerOrders: async (sellerId) => sellerCounts.get(sellerId) ?? { new: 0, preparing: 0, shipped: 0, completed: 0, cancellationRequests: 0, overdue: 0, dueToday: 0, fulfilledByMarketly: 0 },
         listOrdersForSeller: async () => ({ items: [], nextCursor: null }),
       },
       workqueues: {
@@ -173,7 +175,7 @@ export async function harness() {
       acceptedAt: o.pending ? null : (o.placedAt ?? clock.now().toISOString()),
       lifecycle: o.pending ? 'payment_pending' : 'open',
       contact: { kind: 'customer', customerId: o.customerId ?? null, name: 'Ben Ortiz', email: 'ben@example.com' },
-      groups: [{ id: newId(), seller: { ownerType: sellerId ? 'seller' : 'official', id: sellerId, name: 'Casa Verde', slug: 'casa-verde', verified: true }, items }],
+      groups: [{ id: newId(), seller: { ownerType: sellerId ? 'seller' : 'official', id: sellerId, name: 'Casa Verde', slug: 'casa-verde', verified: true }, fulfilledBy: o.fulfilledBy ?? (sellerId ? 'seller' : 'official_warehouse'), items }],
     } as unknown as orders.OrderDetail;
     ordersById.set(id, detail);
     return detail;
@@ -182,7 +184,7 @@ export async function harness() {
   /** orders.order.placed (+ accepted when paid) as orders publishes them */
   const placed = (d: orders.OrderDetail, paymentState: 'accepted' | 'pending_check' = 'accepted', customerId?: string) => {
     const g = d.groups[0]!;
-    const group = { groupId: g.id, ownerType: g.seller.ownerType, sellerId: g.seller.id ?? null, fulfilledBy: 'seller' as const, dispatchBy: clock.now().toISOString(), itemIds: g.items.map((i) => i.id), total: usd(1) };
+    const group = { groupId: g.id, ownerType: g.seller.ownerType, sellerId: g.seller.id ?? null, fulfilledBy: g.fulfilledBy, dispatchBy: clock.now().toISOString(), itemIds: g.items.map((i) => i.id), total: usd(1) };
     app.kernel.events.publish('orders', 'orders.order.placed', {
       orderId: d.id,
       ref: d.ref,

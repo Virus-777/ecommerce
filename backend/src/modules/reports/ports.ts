@@ -62,7 +62,7 @@ export interface DailyFilter {
 }
 
 /** Daily fact tables keyed by day */
-export type DailyTable = 'fact_marketplace_finance_daily' | 'fact_service_daily' | 'fact_discovery_daily' | 'fact_search_misses_daily' | 'fact_campaigns_daily';
+export type DailyTable = 'fact_marketplace_finance_daily' | 'fact_service_daily' | 'fact_marketly_fulfillment_daily' | 'fact_discovery_daily' | 'fact_search_misses_daily' | 'fact_campaigns_daily';
 
 /** Persistence for this module's own tables (reports schema). */
 export interface ReportsRepository {

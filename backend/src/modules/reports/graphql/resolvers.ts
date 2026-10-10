@@ -106,7 +106,7 @@ export const resolvers = (service: ReportsService): ModuleResolvers => ({
     sellerDashboard: async (_root: unknown, args: { period?: string | null }, ctx: GraphQLContext) => {
       const sellerId = ctx.principal?.kind === 'seller' ? ctx.principal.sellerId : null;
       if (!sellerId) return null;
-      const d = await service.queries.sellerDashboard(sellerId, args.period ? periodOf(args.period) : 'last_14_days', { canViewFinance: await ctx.can('finance.balances.view') });
+      const d = await service.queries.sellerDashboard(sellerId, args.period ? periodOf(args.period) : 'last_14_days', { canViewFinance: await ctx.can('finance.balances.view'), canViewServiceFees: await ctx.can('fulfillment-service.fees.view') });
       return {
         ...common(d, 'SELLER'),
         basisLabel: 'Item sales before fees, by order date',

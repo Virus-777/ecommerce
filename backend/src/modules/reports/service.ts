@@ -95,7 +95,7 @@ export class ReportsService implements ReportsPublicApi {
   }
 
   /** The seller's own dashboard figures and work tiles (same as GET /api/seller/reports/dashboard); sellerId always comes from the session */
-  async getSellerDashboard(sellerId: string, period: 'today' | 'last_7_days' | 'last_14_days' | 'last_30_days', opts: { canViewFinance?: boolean } = {}): Promise<SellerDashboard> {
+  async getSellerDashboard(sellerId: string, period: 'today' | 'last_7_days' | 'last_14_days' | 'last_30_days', opts: { canViewFinance?: boolean; canViewServiceFees?: boolean } = {}): Promise<SellerDashboard> {
     return this.queries.toSellerDashboard(await this.queries.sellerDashboard(sellerId, period as Period, opts));
   }
 
@@ -239,6 +239,16 @@ export class ReportsService implements ReportsPublicApi {
   /** advertising.charge.credited: Ad credits */
   async onChargeCreditedFromAdvertising(event: EventPayload<'advertising.charge.credited'>, env?: Partial<Env>): Promise<void> {
     return this.readModels.onChargeCredited(event, this.env(env));
+  }
+
+  /** fulfillment-service.fee.charged: Fulfilled by Marketly fees per seller and day (fact_marketplace_finance_daily.service_fees_minor, claimed per chargeId) */
+  async onFeeChargedFromFulfillmentService(event: EventPayload<'fulfillment-service.fee.charged'>, env?: Partial<Env>): Promise<void> {
+    return this.readModels.onServiceFeeCharged(event, this.env(env));
+  }
+
+  /** fulfillment-service.fee.reversed: Subtract reversed Fulfilled by Marketly fees from service_fees_minor on the reversal day */
+  async onFeeReversedFromFulfillmentService(event: EventPayload<'fulfillment-service.fee.reversed'>, env?: Partial<Env>): Promise<void> {
+    return this.readModels.onServiceFeeReversed(event, this.env(env));
   }
 
   /* ---------------------------------------------------------------- jobs */

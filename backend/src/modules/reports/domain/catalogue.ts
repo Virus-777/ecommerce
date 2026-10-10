@@ -179,6 +179,13 @@ export const METRICS: MetricSeed[] = [
     includes: [], excludes: ['Fee income'],
     dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: ['ads.spend'],
   },
+  {
+    key: 'marketplace.service_fees', name: 'Service fees', group: 'marketplace_finance', unit: 'money', audience: 'both',
+    definition: 'Fulfilled by Marketly fees charged to sellers (storage, pick and pack, order handling, returns processing, removals and other service fees), minus fees reversed, on the day they were charged or reversed.',
+    formula: 'Sum of fact_marketplace_finance_daily.service_fees_minor (fulfillment-service.fee.charged less fee.reversed)',
+    includes: ['Fulfilled by Marketly fees', 'Reversals'], excludes: ['Marketplace commission and fees (see Marketplace fee income)', 'Advertising charges'],
+    dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: ['marketplace.fee_income', 'service.marketly_on_time_dispatch'],
+  },
   /* ---------------------------------------------------------------- products and discovery */
   {
     key: 'discovery.product_views', name: 'Product views', group: 'products_discovery', unit: 'count', audience: 'both',
@@ -220,8 +227,15 @@ export const METRICS: MetricSeed[] = [
     key: 'service.on_time_dispatch', name: 'On-time dispatch', group: 'service_sellers', unit: 'percent', audience: 'both',
     definition: 'Share of packages dispatched by their dispatch deadline.',
     formula: 'Σ dispatched_on_time ÷ Σ dispatched × 100 (fact_service_daily)',
-    includes: [], excludes: ['Return shipments'],
-    dateBasisOptions: ['shipment'], defaultDateBasis: 'shipment', relatedKeys: ['service.overdue_dispatch'],
+    includes: [], excludes: ['Return shipments', 'Fulfilled by Marketly packages (see Fulfilled by Marketly on-time dispatch)'],
+    dateBasisOptions: ['shipment'], defaultDateBasis: 'shipment', relatedKeys: ['service.overdue_dispatch', 'service.marketly_on_time_dispatch'],
+  },
+  {
+    key: 'service.marketly_on_time_dispatch', name: 'Fulfilled by Marketly on-time dispatch', group: 'service_sellers', unit: 'percent', audience: 'staff',
+    definition: "Share of Fulfilled by Marketly packages Marketly's warehouse dispatched by their dispatch deadline. These never count toward the seller's own dispatch figures.",
+    formula: 'Σ dispatched_on_time ÷ Σ dispatched × 100 (fact_marketly_fulfillment_daily)',
+    includes: ['Packages Marketly ships for sellers'], excludes: ['Packages sellers ship themselves', 'Official Store packages', 'Return shipments'],
+    dateBasisOptions: ['shipment'], defaultDateBasis: 'shipment', relatedKeys: ['service.on_time_dispatch', 'marketplace.service_fees'],
   },
   {
     key: 'service.valid_tracking', name: 'Valid tracking', group: 'service_sellers', unit: 'percent', audience: 'both',
@@ -384,7 +398,7 @@ export const REPORTS: ReportSeed[] = [
   {
     key: 'marketplace.fees', title: 'Marketplace fees and payouts', group: 'marketplace_finance', audience: 'staff', permission: 'reports.marketplace-finance.view',
     description: 'Marketplace sales next to marketplace fee income, discount funding, holds, payouts and amounts owed, by seller.',
-    metrics: ['marketplace.seller_sales', 'marketplace.fee_income', 'marketplace.discount_funding', 'marketplace.held', 'marketplace.payouts_paid', 'marketplace.amounts_owed', 'marketplace.ad_income'],
+    metrics: ['marketplace.seller_sales', 'marketplace.fee_income', 'marketplace.discount_funding', 'marketplace.held', 'marketplace.payouts_paid', 'marketplace.amounts_owed', 'marketplace.ad_income', 'marketplace.service_fees'],
     dimensions: ['day', 'seller'], filters: [RANGE, SELLER],
     layout: ['kpis', 'series', 'table', 'definitions', 'callouts'],
   },
@@ -405,7 +419,7 @@ export const REPORTS: ReportSeed[] = [
   {
     key: 'service.sellers', title: 'Seller service', group: 'service_sellers', audience: 'staff', permission: 'reports.service.view',
     description: 'Dispatch on time, tracking, seller cancellations, delivery issues, cases and messages by seller.',
-    metrics: ['service.on_time_dispatch', 'service.valid_tracking', 'service.overdue_dispatch', 'service.seller_cancellations', 'service.delivery_exceptions', 'service.cases_opened', 'service.case_backlog', 'service.messages_received'],
+    metrics: ['service.on_time_dispatch', 'service.valid_tracking', 'service.overdue_dispatch', 'service.seller_cancellations', 'service.delivery_exceptions', 'service.cases_opened', 'service.case_backlog', 'service.messages_received', 'service.marketly_on_time_dispatch'],
     dimensions: ['day', 'seller'], filters: [RANGE, SELLER],
     layout: ['kpis', 'series', 'table', 'definitions'],
   },
@@ -479,8 +493,9 @@ export const READ_MODELS: ReadModelDef[] = [
   { key: 'order_items', table: 'fact_order_items', description: 'One row per accepted order item with the placement, payment, shipment, delivery and completion dates', sourceEvents: ['orders.order.placed', 'orders.order.accepted', 'payments.payment.captured', 'shipping.shipment.dispatched', 'orders.item.delivered', 'orders.order.completed', 'orders.item.cancelled', 'payments.refund.sent'] },
   { key: 'refunds', table: 'fact_refunds', description: 'Refunds sent to customers', sourceEvents: ['payments.refund.sent'] },
   { key: 'returns', table: 'fact_returns', description: 'Return requests with reason and inspection outcome', sourceEvents: ['returns.return.requested', 'returns.return.inspected'] },
-  { key: 'marketplace_finance', table: 'fact_marketplace_finance_daily', pulled: true, description: 'Per seller and day: marketplace sales, fee income, discount funding, holds, payouts, amounts owed, ad charges', sourceEvents: ['finance.payout.paid', 'finance.payout.failed', 'finance.hold.placed', 'finance.hold.released', 'finance.amount_owed.created', 'advertising.charge.posted', 'advertising.charge.credited'] },
-  { key: 'service', table: 'fact_service_daily', description: 'Per seller and day: dispatch, tracking, cancellations, delivery issues, messages and cases', sourceEvents: ['shipping.shipment.dispatched', 'shipping.dispatch.overdue', 'shipping.shipment.exception', 'orders.item.cancelled', 'messaging.message.sent', 'support.case.opened', 'support.case.resolved'] },
+  { key: 'marketplace_finance', table: 'fact_marketplace_finance_daily', pulled: true, description: 'Per seller and day: marketplace sales, fee income, discount funding, holds, payouts, amounts owed, ad charges', sourceEvents: ['finance.payout.paid', 'finance.payout.failed', 'finance.hold.placed', 'finance.hold.released', 'finance.amount_owed.created', 'advertising.charge.posted', 'advertising.charge.credited', 'fulfillment-service.fee.charged', 'fulfillment-service.fee.reversed'] },
+  { key: 'service', table: 'fact_service_daily', description: 'Per seller and day: dispatch, tracking, cancellations, delivery issues, messages and cases (dispatches the seller made)', sourceEvents: ['shipping.shipment.dispatched', 'shipping.dispatch.overdue', 'shipping.shipment.exception', 'orders.item.cancelled', 'messaging.message.sent', 'support.case.opened', 'support.case.resolved'] },
+  { key: 'marketly_fulfillment', table: 'fact_marketly_fulfillment_daily', description: "Per seller of record and day: dispatches and overdue packages of Marketly's warehouse for Fulfilled by Marketly groups", sourceEvents: ['shipping.shipment.dispatched', 'shipping.dispatch.overdue'] },
   { key: 'discovery', table: 'fact_discovery_daily', description: 'Per product and day: views, cart additions, units ordered and out-of-stock minutes', sourceEvents: ['cart.item.added', 'inventory.stock.changed', 'orders.order.accepted'] },
   { key: 'search_misses', table: 'fact_search_misses_daily', pulled: true, description: 'Searches without an available result per day (search.zeroResultStats)', sourceEvents: [] },
   { key: 'customers', table: 'fact_customers', description: 'First and last order, order count and net spend per buyer', sourceEvents: ['orders.order.placed', 'orders.order.accepted', 'payments.refund.sent'] },

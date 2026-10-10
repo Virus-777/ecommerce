@@ -434,7 +434,7 @@ export class Queries {
     const c = rq.currency;
     const sellerId = this.sellerOf(rq, scope);
     const marketplace = { ownerType: 'seller' as const };
-    const COLS = ['fee_income_minor', 'held_minor', 'payouts_paid_minor', 'payouts_failed', 'owed_minor', 'ad_charges_minor'];
+    const COLS = ['fee_income_minor', 'held_minor', 'payouts_paid_minor', 'payouts_failed', 'owed_minor', 'ad_charges_minor', 'service_fees_minor'];
     const daily = async (r: DayRange) => (await this.core.repo.dailySums('fact_marketplace_finance_daily', { from: r.from, to: r.to, ...(sellerId ? { sellerId } : {}) }, COLS, 'none'))[0] ?? zeros(COLS);
     const sales = await this.salesTotals(rq, scope, rq.range, marketplace);
     const prevSales = rq.compare ? await this.salesTotals(rq, scope, rq.compare, marketplace) : null;
@@ -447,7 +447,9 @@ export class Queries {
     const salesBySeller = await this.core.repo.salesAgg(this.salesFilter(rq, scope, rq.range, marketplace), 'seller_id');
     const ids = [...new Set([...finBySeller.map((r) => r.key!), ...salesBySeller.map((r) => r.key!)])].filter(Boolean);
     const names = await this.sellerNames(ids);
-    const unavailable = [...(this.core.running('finance') ? [] : ['marketplace.fee_income', 'marketplace.held', 'marketplace.payouts_paid', 'marketplace.amounts_owed']), ...(this.core.running('advertising') ? [] : ['marketplace.ad_income'])];
+    // Fulfilled by Marketly fees show while fulfillment-service runs, or when the range holds fees charged while it ran
+    const serviceFees = this.core.running('fulfillment-service') || Boolean(fin.service_fees_minor) || Boolean(prevFin?.service_fees_minor);
+    const unavailable = [...(this.core.running('finance') ? [] : ['marketplace.fee_income', 'marketplace.held', 'marketplace.payouts_paid', 'marketplace.amounts_owed']), ...(this.core.running('advertising') ? [] : ['marketplace.ad_income']), ...(serviceFees ? [] : ['marketplace.service_fees'])];
     const pulled = await this.core.repo.getCheckpoint('pull:marketplace_finance');
     const callouts: Callout[] = [MARKETPLACE_CALLOUT];
     const through = pulled?.last_event_id?.replace(/^pull:/, '');
@@ -461,21 +463,22 @@ export class Queries {
         this.kpi('marketplace.payouts_paid', fin.payouts_paid_minor!, c, prevFin?.payouts_paid_minor ?? null, fin.payouts_failed ? `${fin.payouts_failed} failed` : null),
         this.kpi('marketplace.amounts_owed', fin.owed_minor!, c, prevFin?.owed_minor ?? null),
         this.kpi('marketplace.ad_income', fin.ad_charges_minor!, c, prevFin?.ad_charges_minor ?? null),
+        ...(serviceFees ? [this.kpi('marketplace.service_fees', fin.service_fees_minor!, c, prevFin?.service_fees_minor ?? null, 'Fulfilled by Marketly')] : []),
       ],
       series: [
         this.series('seller_sales', 'Marketplace sales', buckets, rq.granularity, new Map(salesBuckets.map((b) => [b.key!, this.gross(b, cfg)]))),
         this.series('fee_income', 'Marketplace fee income', buckets, rq.granularity, new Map(finBuckets.map((b) => [b.key!, b.fee_income_minor!]))),
       ],
       table: {
-        columns: [col('seller', 'Seller'), col('sales', 'Marketplace sales', 'money'), col('feeIncome', 'Fee income', 'money'), col('platformDiscount', 'Platform-funded discounts', 'money'), col('held', 'Holds (net)', 'money'), col('payoutsPaid', 'Payouts paid', 'money'), col('owed', 'Amounts owed', 'money'), col('adCharges', 'Ad charges', 'money')],
+        columns: [col('seller', 'Seller'), col('sales', 'Marketplace sales', 'money'), col('feeIncome', 'Fee income', 'money'), col('platformDiscount', 'Platform-funded discounts', 'money'), col('held', 'Holds (net)', 'money'), col('payoutsPaid', 'Payouts paid', 'money'), col('owed', 'Amounts owed', 'money'), col('adCharges', 'Ad charges', 'money'), ...(serviceFees ? [col('serviceFees', 'Service fees', 'money')] : [])],
         rows: ids
           .map((id) => {
             const s = salesBySeller.find((x) => x.key === id) ?? emptyAgg();
             const fr = finBySeller.find((x) => x.key === id) ?? zeros(COLS);
-            return { sellerId: id, seller: names.get(id) ?? id, sales: this.money(this.gross(s, cfg), c), feeIncome: this.money(fr.fee_income_minor!, c), platformDiscount: this.money(s.platformDiscount, c), held: this.money(fr.held_minor!, c), payoutsPaid: this.money(fr.payouts_paid_minor!, c), owed: this.money(fr.owed_minor!, c), adCharges: this.money(fr.ad_charges_minor!, c) };
+            return { sellerId: id, seller: names.get(id) ?? id, sales: this.money(this.gross(s, cfg), c), feeIncome: this.money(fr.fee_income_minor!, c), platformDiscount: this.money(s.platformDiscount, c), held: this.money(fr.held_minor!, c), payoutsPaid: this.money(fr.payouts_paid_minor!, c), owed: this.money(fr.owed_minor!, c), adCharges: this.money(fr.ad_charges_minor!, c), ...(serviceFees ? { serviceFees: this.money(fr.service_fees_minor!, c) } : {}) };
           })
           .sort((a, b) => b.sales.amount - a.sales.amount),
-        totals: { sales: this.money(this.gross(sales, cfg), c), feeIncome: this.money(fin.fee_income_minor!, c), platformDiscount: this.money(sales.platformDiscount, c), held: this.money(fin.held_minor!, c), payoutsPaid: this.money(fin.payouts_paid_minor!, c), owed: this.money(fin.owed_minor!, c), adCharges: this.money(fin.ad_charges_minor!, c) },
+        totals: { sales: this.money(this.gross(sales, cfg), c), feeIncome: this.money(fin.fee_income_minor!, c), platformDiscount: this.money(sales.platformDiscount, c), held: this.money(fin.held_minor!, c), payoutsPaid: this.money(fin.payouts_paid_minor!, c), owed: this.money(fin.owed_minor!, c), adCharges: this.money(fin.ad_charges_minor!, c), ...(serviceFees ? { serviceFees: this.money(fin.service_fees_minor!, c) } : {}) },
       },
       callouts,
       unavailable,
@@ -567,6 +570,17 @@ export class Queries {
       unavailable: [],
       models: ['service'],
     };
+    // Fulfilled by Marketly: Marketly's own dispatches for sellers' groups, never in the seller rows above (staff only)
+    if (staff) {
+      const M_COLS = ['dispatched', 'dispatched_on_time', 'overdue'];
+      const mTotal = (await this.core.repo.dailySums('fact_marketly_fulfillment_daily', f(rq.range), M_COLS, 'none'))[0] ?? zeros(M_COLS);
+      const mPrev = rq.compare ? ((await this.core.repo.dailySums('fact_marketly_fulfillment_daily', f(rq.compare), M_COLS, 'none'))[0] ?? zeros(M_COLS)) : null;
+      if (this.core.running('fulfillment-service') || mTotal.dispatched || mTotal.overdue) {
+        kpis.push(this.kpi('service.marketly_on_time_dispatch', onTime(mTotal), c, mPrev?.dispatched ? onTime(mPrev) : null, `${mTotal.dispatched_on_time} of ${mTotal.dispatched} packages · ${mTotal.overdue} overdue`));
+        part.callouts.push({ kind: 'info', title: 'Fulfilled by Marketly is shown apart', body: "Packages Marketly's warehouse ships for sellers count in Fulfilled by Marketly on-time dispatch, never in the sellers' own dispatch figures." });
+        part.models.push('marketly_fulfillment');
+      } else part.unavailable.push('service.marketly_on_time_dispatch');
+    }
     if (staff) {
       const bySeller = await this.core.repo.dailySums('fact_service_daily', f(rq.range), COLS, 'seller_id');
       const names = await this.sellerNames(bySeller.map((s) => s.key!));
@@ -731,7 +745,7 @@ export class Queries {
     };
   }
 
-  async sellerDashboard(sellerId: string, period: Period, opts: { canViewFinance?: boolean } = {}): Promise<SellerDashboardData> {
+  async sellerDashboard(sellerId: string, period: Period, opts: { canViewFinance?: boolean; canViewServiceFees?: boolean } = {}): Promise<SellerDashboardData> {
     const cfg = await this.core.cfg();
     const c = cfg.currency;
     const tz = cfg.timeZone;
@@ -766,8 +780,21 @@ export class Queries {
         { ...this.kpi('commerce.orders', total.orders, c, prev.orders), unit: 'count' as const },
         { ...this.kpi('commerce.average_order_value', aov, c, prev.orders ? Math.round(prevGross / prev.orders) : 0), unit: 'money' as const },
         { ...this.kpi('commerce.gross_sales', this.gross(todayAgg, cfg), c, null, `${todayAgg.orders} orders today`), label: 'Today so far', unit: 'money' as const },
-      ],
+      ] as (KpiValue & { unit: MetricDefinition['unit'] })[],
+      serviceFees: null as { amount: Money; deltaPct: number | null; label: string; basis: string } | null,
     };
+
+    /* Fulfilled by Marketly: the service-fees line (fees charged less reversals in the range), for members who may view service fees */
+    const shownMetrics = ['commerce.gross_sales', 'commerce.orders', 'commerce.average_order_value'];
+    if (opts.canViewServiceFees !== false) {
+      const fees = async (r: DayRange) => (await this.core.repo.dailySums('fact_marketplace_finance_daily', { ...r, sellerId }, ['service_fees_minor'], 'none'))[0]?.service_fees_minor ?? 0;
+      const [feesNow, feesPrev] = await Promise.all([fees(range), fees(compare)]);
+      if (this.core.running('fulfillment-service') || feesNow || feesPrev) {
+        sales.serviceFees = { amount: this.money(feesNow, c), deltaPct: feesPrev ? Math.round(((feesNow - feesPrev) / feesPrev) * 1000) / 10 : null, label: 'Fulfilled by Marketly fees', basis: 'fees charged less reversals, by charge date' };
+        sales.kpis.push({ ...this.kpi('marketplace.service_fees', feesNow, c, feesPrev, 'Fulfilled by Marketly'), unit: 'money' as const });
+        shownMetrics.push('marketplace.service_fees');
+      }
+    }
 
     /* work for today: orders, inventory, returns, messaging and workqueues counts */
     const workToday: SellerWorkTile[] = [];
@@ -852,7 +879,7 @@ export class Queries {
     // content has no seller announcements function in its public API yet
     unavailable.push('announcements');
 
-    return { sellerId, period, date: today, asOf: now.toISOString(), range, compare, currency: c, timeZone: tz, taxIncluded: cfg.taxIncluded, workToday, dispatchDeadlines, sales, payouts, performance, announcements: [], unavailable, definitions: await this.defs.inUse(['commerce.gross_sales', 'commerce.orders', 'commerce.average_order_value']) };
+    return { sellerId, period, date: today, asOf: now.toISOString(), range, compare, currency: c, timeZone: tz, taxIncluded: cfg.taxIncluded, workToday, dispatchDeadlines, sales, payouts, performance, announcements: [], unavailable, definitions: await this.defs.inUse(shownMetrics) };
   }
 
   toSellerDashboard(d: SellerDashboardData): SellerDashboard {
