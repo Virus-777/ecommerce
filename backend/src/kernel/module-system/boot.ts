@@ -11,8 +11,10 @@ import { isAppError, isNotImplemented, moduleError, notImplemented } from '../er
 import { moduleInbox } from '../events/inbox.js';
 import { moduleEvents, type EventBus } from '../events/index.js';
 import type { ModuleResolvers } from '../graphql/index.js';
+import type { FileRoute, ModuleFileRoute } from '../http/files.js';
 import type { RouteSet } from '../http/index.js';
 import { registrationsOf, type EndpointRegistration, type WebhookVerifier } from '../http/register.js';
+import type { RateLimitStore } from '../auth/rate-limit.js';
 import type { JobScheduler } from '../jobs/index.js';
 import type { Clock } from '../lib/clock.js';
 import type { RefGenerator } from '../lib/refs.js';
@@ -29,6 +31,8 @@ export interface KernelServices {
   events: EventBus;
   jobs: JobScheduler;
   refs: RefGenerator;
+  /** Business rate limits (ctx.rateLimit), shared by every instance with the postgres store */
+  rateLimits: RateLimitStore;
   /** Permission check for an in-process principal (set by the app once the auth chain exists) */
   can(principal: Principal | null | undefined, permission: string): Promise<boolean>;
 }
@@ -37,6 +41,8 @@ export interface BootResult {
   endpoints: EndpointRegistration[];
   resolvers: Map<string, ModuleResolvers>;
   webhookVerifiers: Map<string, WebhookVerifier>;
+  /** Modules serving files at GET /files/… (at most one) */
+  fileRoutes: ModuleFileRoute[];
   /** Public APIs provided by enabled modules */
   apis: Map<string, object>;
   warnings: string[];
@@ -90,7 +96,7 @@ function checkRoutes(spec: ModuleSpecDef, sets: readonly RouteSet[]) {
 
 export async function bootModules(defs: ModuleDefinition[], k: KernelServices): Promise<BootResult> {
   const enabled = new Set(defs.map((d) => d.spec.name));
-  const result: BootResult = { endpoints: [], resolvers: new Map(), webhookVerifiers: new Map(), apis: new Map(), warnings: [], runAfterBoot: async () => {} };
+  const result: BootResult = { endpoints: [], resolvers: new Map(), webhookVerifiers: new Map(), fileRoutes: [], apis: new Map(), warnings: [], runAfterBoot: async () => {} };
   const { apis, resolvers, webhookVerifiers, warnings } = result;
   const proxies = new Map<string, object>();
   const afterBoot: { module: string; fn: () => unknown }[] = [];
@@ -154,6 +160,7 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
         },
       },
       refs: k.refs,
+      rateLimit: (key: string, l: { limit: number; windowMs: number; peek?: boolean }) => k.rateLimits.hit(name, key, l, { peek: l.peek }),
       inbox: moduleInbox(name),
       can: (principal, permission) => k.can(principal, permission),
       error: moduleError(name),
@@ -174,6 +181,11 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
       http: {
         routes: (...s: RouteSet[]) => sets.push(...s),
         webhookVerifier: (v: WebhookVerifier) => webhookVerifiers.set(name, v),
+        files: (route: FileRoute) => {
+          const other = result.fileRoutes.find((r) => r.module !== name);
+          if (other) throw new Error(`${name} serves /files, which ${other.module} already serves`);
+          result.fileRoutes = [{ ...route, module: name }];
+        },
       },
       graphql: {
         resolvers: (r: ModuleResolvers) => resolvers.set(name, { ...resolvers.get(name), ...r }),

@@ -842,6 +842,7 @@ Indexes: `pk (product_id, day)`, `(day)`
 - Recent searches are stored per customer or guest session and merged on sign-in when search consumes identity.guest_session.claimed. For a customer they are saved to the account only while customers.MarketingPreferences.recentSearches is on (customers.getMarketingConsent at save time). Turning it off deletes the saved history: customers publishes customers.marketing_preferences.changed and search deletes the rows. With customers disabled, nothing is saved to accounts.
 - Reports read unavailable searches through zeroResultStats; query logs are not exported directly.
 - Optional dependencies: inventory (stock flags), reviews (ratings), sellers (store suggestions), advertising (sponsored slots), promotions (deal badges), customers (recent-search preference), orders (sales counts), audit (synonym, reindex and ranking policy changes are written to the action history when audit is enabled). With any of them off, the related fields are simply empty.
+- Engines (docs/02-backend-architecture.md §9): the environment variable SEARCH_ENGINE picks PostgreSQL full-text + pg_trgm (default; development and tests) or OpenSearch (production) at startup; the API is the same with either. search_documents and search_offers stay the read model in PostgreSQL and feed the OpenSearch index after each commit; a full reindex builds a new versioned index and swaps the alias atomically while the live index keeps serving. GET /index reports the engine and its index (engine).
 
 ## GraphQL (read layer)
 

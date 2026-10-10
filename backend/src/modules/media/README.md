@@ -2,23 +2,23 @@
 
 # Media (`media`)
 
-Every uploaded or generated file: images, video and documents. Signed direct uploads, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted).
+Every uploaded or generated file: images, video and documents. Uploads and signed download links, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted).
 
 - **Group:** Platform · **Launch phase:** 1 · **Plan chapters:** 5, 8, 13, 16, 17
 - **Depends on:** nothing · **Optional:** [audit](../audit/README.md), [identity](../identity/README.md)
 - **Required by:** [advertising](../advertising/README.md), [catalog](../catalog/README.md), [content](../content/README.md), [sellers](../sellers/README.md)
 
 ## Owns
-- Upload sessions with signed, expiring upload URLs straight to storage (website and Android app)
+- Upload sessions with expiring upload tickets (website and Android app): the bytes go to the API's PUT /uploads/{id}/content, streamed to storage
 - Processing: malware scan, type sniffing, EXIF/GPS stripping, orientation, image renditions (thumb to zoom), video poster and transcode, document page count
-- Assets: kind, purpose, owner, visibility (public CDN or private), alt text and title, status
+- Assets: kind, purpose, owner, visibility (public or private), alt text and title, status
 - Image standard checks against rules supplied by the caller (catalog category rules, ad formats) plus platform baseline checks
 - Usage tracking: which product, offer, return, case, review, ad or page uses a file
 - Deletion rules: files in use cannot be deleted; evidence files are retained for the evidence period even after they stop being used
 - Staff takedown (remove with reason, placeholder shown) and restore
-- Signed download links for private files (verification documents, evidence, exports) with access checks
+- Signed download links (GET /files/{bucket}/{key}, served by the API): short-lived links for private files (verification documents, evidence, exports) after access checks, permanent links for public renditions
 - Generated files from other modules (exports, statements, correction reports, data exports) with expiry
-- Storage adapter: local disk in development, S3-compatible storage in production
+- Storage adapter (MEDIA_STORAGE): the server's local file system in production (MEDIA_STORAGE_DIR), memory in tests
 
 **Not here:**
 - Which images a product, offer or ad shows and in what order: catalog, offers, advertising, content (they attach assets by id)
@@ -32,7 +32,7 @@ Every uploaded or generated file: images, video and documents. Signed direct upl
 |---|---|---|---|---|
 | POST | `/api/store/media/uploads` | Start an upload (return photos, case evidence, review photos, message attachments, seller application documents) | shopper | `UploadRequest` → `UploadTicket` |
 | POST | `/api/store/media/uploads/{id}/complete` | Confirm the bytes are uploaded; processing starts | shopper | `MediaAsset` |
-| PUT | `/api/store/media/uploads/{id}/content` | Send the file bytes of an upload (development storage) | shopper | raw bytes → 204 No content |
+| PUT | `/api/store/media/uploads/{id}/content` | Send the file bytes of an upload | shopper | raw bytes → 204 No content |
 | GET | `/api/store/media/assets/{id}` | My upload (poll until ready) | shopper | `MediaAsset` |
 | PATCH | `/api/store/media/assets/{id}` | Describe my photo (alt text) | shopper | `AssetUpdate` → `MediaAsset` |
 | DELETE | `/api/store/media/assets/{id}` | Remove my upload before submitting | shopper | 204 No content |
@@ -44,7 +44,7 @@ Every uploaded or generated file: images, video and documents. Signed direct upl
 |---|---|---|---|---|
 | POST | `/api/seller/media/uploads` | Start an upload (product images and video, store logo and banner, ad creatives, documents, inspection photos, case evidence, bulk files) | seller<br>`media.assets.upload` | `UploadRequest` → `UploadTicket` |
 | POST | `/api/seller/media/uploads/{id}/complete` | Confirm the upload; processing starts | seller<br>`media.assets.upload` | `MediaAsset` |
-| PUT | `/api/seller/media/uploads/{id}/content` | Send the file bytes of an upload (development storage) | seller<br>`media.assets.upload` | raw bytes → 204 No content |
+| PUT | `/api/seller/media/uploads/{id}/content` | Send the file bytes of an upload | seller<br>`media.assets.upload` | raw bytes → 204 No content |
 | GET | `/api/seller/media/assets` | Seller media library | seller | Page<MediaAsset> |
 | GET | `/api/seller/media/assets/{id}` | One file with where it is used and whether it can be deleted | seller | `MediaAssetDetail` |
 | PATCH | `/api/seller/media/assets/{id}` | Edit alt text or title | seller<br>`media.assets.upload` | `AssetUpdate` → `MediaAsset` |
@@ -58,7 +58,7 @@ Every uploaded or generated file: images, video and documents. Signed direct upl
 |---|---|---|---|---|
 | POST | `/api/admin/media/uploads` | Start a staff upload (Official Store products, content, ad creatives, inspection photos, evidence) | staff<br>`media.assets.manage` | `{ upload: UploadRequest, ownerKind: enum(platform|staff)? }` → `UploadTicket` |
 | POST | `/api/admin/media/uploads/{id}/complete` | Confirm a staff upload | staff<br>`media.assets.manage` | `MediaAsset` |
-| PUT | `/api/admin/media/uploads/{id}/content` | Send the file bytes of a staff upload (development storage) | staff<br>`media.assets.manage` | raw bytes → 204 No content |
+| PUT | `/api/admin/media/uploads/{id}/content` | Send the file bytes of a staff upload | staff<br>`media.assets.manage` | raw bytes → 204 No content |
 | GET | `/api/admin/media/assets` | All files with filters | staff<br>`media.assets.view` | Page<MediaAsset> |
 | GET | `/api/admin/media/assets/{id}` | File detail with usages, checks and history | staff<br>`media.assets.view` | `MediaAssetDetail` |
 | PATCH | `/api/admin/media/assets/{id}` | Edit alt text or title of a platform file | staff<br>`media.assets.manage` | `AssetUpdate` → `MediaAsset` |
@@ -103,7 +103,7 @@ Every uploaded or generated file: images, video and documents. Signed direct upl
 | uploadId | `uuid` |
 | assetId | `uuid` |
 | method | `enum(PUT|POST)` |
-| url | `url` Signed storage URL; upload the bytes directly to it. With development storage it is this API's PUT /uploads/{id}/content in the same area |
+| url | `url` Where to send the bytes, with method and headers. With storage the API serves (local disk, memory) it is this API's PUT /uploads/{id}/content in the same area: send the caller's own Authorization header. With a direct-upload store it would be the store's signed URL |
 | headers | `map<string>` |
 | fields | `map<string>` Form fields for POST policy uploads |
 | maxBytes | `int` |
@@ -114,7 +114,7 @@ Every uploaded or generated file: images, video and documents. Signed direct upl
 | Field | Type |
 |---|---|
 | size | `enum(thumb|small|medium|large|zoom|poster|video_720|video_1080)` |
-| url | `url` |
+| url | `url` Signed link to GET /files/{bucket}/{key}: permanent for public files (usable as <img src>), short-lived for private ones |
 | width | `int` |
 | height | `int` |
 | format | `string` webp, avif, jpeg, mp4 |
@@ -139,7 +139,7 @@ Every uploaded or generated file: images, video and documents. Signed direct upl
 | title | `string?` |
 | owner | `MediaOwner` |
 | visibility | `enum(public|private)` |
-| url | `url?` Public: medium rendition (images) or poster (video). Private files have no URL; use the download endpoint. |
+| url | `url?` Public: permanent signed link to the medium rendition (images) or poster (video). Private files have no URL; use the download endpoint. |
 | renditions | `Rendition[]` |
 | check | `ImageCheckResult?` |
 | rejectionReason | `string?` Unsupported or corrupt file, malware found, size or dimensions outside limits |
@@ -242,7 +242,7 @@ Every uploaded or generated file: images, video and documents. Signed direct upl
 
 | Field | Type |
 |---|---|
-| url | `url` |
+| url | `url` Signed link to GET /files/{bucket}/{key}, bound to the file, content type, disposition and expiry; no Authorization header needed (the signature is the token, checked by the auth middleware). Range requests are supported |
 | expiresAt | `datetime` |
 | fileName | `string` |
 | contentType | `string` |
@@ -458,7 +458,7 @@ Indexes: `pk (owner_kind, owner_id, day)`
 | `ASSET_IN_USE` | 409 | The file is used by details.usages (product, offer, ad, page…); remove it there first. |
 | `ASSET_RETAINED` | 409 | The file is kept as evidence until details.retainUntil. |
 | `ASSET_NOT_OWNED` | 403 | The file belongs to another owner and cannot be attached here. |
-| `DEV_STORAGE_ONLY` | 409 | A real storage adapter is configured: upload the bytes to the ticket URL instead. |
+| `DIRECT_UPLOAD_ONLY` | 409 | Storage takes the bytes directly at its own ticket URL, not through this API: send them to the ticket URL. |
 
 ## Background jobs
 
@@ -478,8 +478,8 @@ Indexes: `pk (owner_kind, owner_id, day)`
 | limitsByPurpose | `{"product_image":{"maxMB":20,"types":["jpeg","png","webp","heic"]},"product_video":{"maxMB":500,"types":["mp4","mov"]},"ad_creative":{"maxMB":5,"types":["jpeg","png","webp"]},"verification_document":{"maxMB":10,"types":["pdf","jpeg","png"]},"return_evidence":{"maxMB":15,"types":["jpeg","png","webp","heic","mp4"]},"bulk_file":{"maxMB":25,"types":["csv","xlsx"]}}` | json, seller-visible | Size and type limits per purpose (others default to 20 MB images, 25 MB documents) |
 | renditionWidths | `{"thumb":160,"small":320,"medium":640,"large":1280,"zoom":2048}` | json | Image rendition widths (WebP plus JPEG fallback) |
 | baselineImageRules | `{"minShortSide":500,"formats":["jpeg","png","webp","heic"]}` | json, seller-visible | Checks applied to every image regardless of caller rules |
-| uploadUrlTtlMinutes | `15` | duration, minutes, 1–60 | Signed upload URL lifetime |
-| downloadUrlTtlMinutes | `10` | duration, minutes, 1–60 | Signed download URL lifetime |
+| uploadUrlTtlMinutes | `15` | duration, minutes, 1–60 | Upload ticket lifetime (the bytes must arrive before it ends) |
+| downloadUrlTtlMinutes | `10` | duration, minutes, 1–60 | Signed download link lifetime for private files (public renditions have permanent links) |
 | pendingUploadExpiryHours | `24` | duration, hours, 1–… | Pending uploads expire after this |
 | orphanGraceDays | `30` | duration, days, 1–… | Never-attached files are deleted after this |
 | evidenceRetentionDays | `730` | duration, days, 365–…, approval: business owner | Evidence files are kept at least this long after their last use (business decision to confirm) |
@@ -488,17 +488,19 @@ Indexes: `pk (owner_kind, owner_id, day)`
 | sellerStorageQuotaGB | `20` | int, GB, 1–…, seller-visible | Storage per seller (QUOTA_EXCEEDED above it) |
 
 ## Integrations
-- **S3-compatible storage**: Two buckets: public (renditions behind the CDN, immutable URLs) and private (originals, documents, evidence, generated files). Presigned PUT/POST for uploads, presigned GET for downloads, object-created notifications. Local disk adapter for development and tests.
+- **Local file system (owner decision: no S3)**: MEDIA_STORAGE=local: two buckets as folders under MEDIA_STORAGE_DIR, public (renditions) and private (originals, documents, evidence, generated files); metadata beside them, atomic writes (temp file + rename), streaming in both directions. Uploads arrive at PUT /api/{area}/media/uploads/{id}/content; downloads are served at GET /files/{bucket}/{key} by signed links the auth middleware verifies (docs/03-auth-middleware.md). MEDIA_STORAGE=memory (tests) behaves the same in memory. The folder must be backed up with the database, and shared between servers when there is more than one. An S3-compatible adapter (presigned uploads and downloads, object-created notifications at POST /webhooks/media/storage-events) can still be added behind the same port.
 - **Image processing (libvips / sharp)**: Decode (including HEIC from phones), auto-orient, strip EXIF and GPS, renditions in WebP and JPEG, perceptual hash, background and sharpness measurements
 - **Video transcoding service**: MP4 720p/1080p and poster frame for optional product and ad videos; results by webhook
 - **Malware scanning (ClamAV or provider)**: Scan every upload before it becomes ready; documents and spreadsheets are never served inline
-- **CDN**: Serves public renditions with long cache lifetimes; removed files are purged from the CDN
+- **CDN (optional)**: May cache GET /files/marketly-public/… (public renditions, permanent links, Cache-Control public for an hour); a takedown replaces the file at the same link, so cached copies follow within that hour unless purged
 
 ## Notes
-- Upload flow (website and Android): 1) POST /uploads with purpose, type, size → signed URL; 2) PUT the bytes straight to storage (no API bandwidth); 3) POST /uploads/{id}/complete → 202 processing; 4) poll GET /assets/{id} or just attach: attach waits for ready and returns ILLEGAL_TRANSITION if processing failed. The app can upload several files in parallel and resume after a network change by starting a new upload.
+- Upload flow (website and Android): 1) POST /uploads with purpose, type, size → upload ticket (URL, method, headers, maxBytes, expiresAt); 2) send the bytes to the ticket URL: PUT /api/{area}/media/uploads/{id}/content with the caller's Authorization header (local-disk storage; the API streams them to disk, refusing more than maxBytes); 3) POST /uploads/{id}/complete → 202 processing; 4) poll GET /assets/{id} or just attach: attach waits for ready and returns ILLEGAL_TRANSITION if processing failed. The app can upload several files in parallel and resume after a network change by starting a new upload.
 - Ownership: seller uploads belong to the seller account (any member with media.assets.upload), never to the person; staff uploads for Official Store, content and ads belong to the platform; customer uploads belong to the customer account, guest uploads to the guest session until attached to their return or case. A file can only be attached by its owner's module calls (attach checks expectedOwner), so a seller cannot reuse another seller's images.
 - Deletion rules: a file in use cannot be deleted (ASSET_IN_USE); files attached as evidence (return, case, order, inspection, verification, catalog correction, trust, payment dispute, supplier document) get retainUntil = last use + evidenceRetentionDays and cannot be deleted before that (ASSET_RETAINED) even if the record is closed. Past orders keep their product snapshot image URL; removing a product image does not break past orders because snapshot renditions are kept while referenced (usage kind order_evidence is attached by orders when a snapshot is taken).
 - Image standards: catalog owns per-category rules and passes them to checkImage when a seller submits; the result (measurements and plain-language issues) is stored on the asset and returned by catalog with the submission. media itself only enforces the platform baseline (minimum short side, formats).
 - Usage kinds and the upload purposes they accept: product_image and variant_image ← product_image; product_video ← product_video; offer_photo ← offer_photo, product_image; brand_logo ← brand_logo; brand_banner ← store_banner, content_image; category_image ← content_image, product_image; store_logo ← store_logo; store_banner ← store_banner; ad_creative ← ad_creative, ad_video; content_block ← content_image, product_image, product_video, ad_creative; help_article ← content_image; verification_document ← verification_document, other_document; return_evidence ← return_evidence; case_evidence ← case_evidence, return_evidence, inspection_photo, message_attachment, verification_document; order_evidence ← product_image, offer_photo, product_video; inspection_photo ← inspection_photo; correction_evidence ← product_image, other_document, verification_document, case_evidence; trust_evidence ← case_evidence, return_evidence, inspection_photo, message_attachment, verification_document, other_document, product_image; dispute_evidence ← case_evidence, return_evidence, inspection_photo, message_attachment, other_document; supplier_document ← other_document, inspection_photo, bulk_file; review_photo ← review_photo; message_attachment ← message_attachment; bulk_file ← bulk_file; generated ← generated purposes.
 - Who attaches what (every file a module keeps must be attached, or media.sweep-orphans deletes it after orphanGraceDays): catalog brand banners (brand_banner), category images (category_image), correction evidence (correction_evidence); trust report, appeal and proof files (trust_evidence; reporters and appellants upload them with purpose case_evidence, there is no trust upload purpose); payments dispute evidence (dispute_evidence); purchasing PO attachments (supplier_document) and receipt damage photos (inspection_photo); warehouse damage and return-parcel photos (inspection_photo); inventory discrepancy photos (inspection_photo); orders product snapshot images (order_evidence); wallet gift card code files are generated files (storeGeneratedFile, no usage needed).
 - Privacy: EXIF and GPS are stripped from every image before any rendition is public, which matters for customer return photos taken on phones.
+- Downloads (GET /files/{bucket}/{key}, served by the API, not a spec endpoint): an <img src> or a download link can't send an Authorization header, so the link's signature is its token: HMAC-SHA256 with secretFor(config, 'media.files') over the bucket, key, expiry (exp), content type (ct) and disposition (cd), verified by the auth middleware as its own auth kind (file-link) before media code runs. Missing or tampered signature → 401 UNAUTHORIZED (details.reason link_missing / link_invalid); expired → 403 FORBIDDEN (link_expired): ask the API for a new link. Private files: links from the download endpoints, refs and asset views, valid downloadUrlTtlMinutes. Public renditions: permanent links (no exp), accepted only for the public bucket, built from the key on every read. Range requests (206, 416), HEAD, ETag / If-None-Match and Last-Modified / If-Modified-Since (304) are supported. Cache-Control: public renditions public, max-age=3600; private inline files private, max-age up to the link's expiry (at most an hour); attachments private, no-store. Every file is served with nosniff and a sandboxing Content-Security-Policy, so an uploaded file never runs as a page. Rotating APP_SECRET changes the key: links already handed out, including public image URLs other modules stored (order snapshots), stop working.
+- Storage keys are '/'-separated segments of letters, digits, '.', '_' and '-' (no '..', no leading dot, no Windows device names); the storage adapters refuse any other key, so a key can never reach outside its bucket folder.

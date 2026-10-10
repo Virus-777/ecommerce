@@ -98,7 +98,7 @@ Used in `types`, `body`, `query`, event `payload` and inline objects.
   "query": { "q": "string?" },
   "paging": true,                          // adds cursor/page/limit and wraps response in Page<…>
   "body": { "note": "string?" },           // type name, inline object, "binary" (raw bytes, any content type; the handler
-                                           //   gets a Uint8Array, up to 512 MB, and enforces its own limit), or omitted
+                                           //   gets the request stream, never buffered, and enforces its own limit), or omitted
   "response": "Product",                   // type, "Product[]", inline object, or null for no body (204 unless status says otherwise, e.g. 202)
   "status": 200,                           // success status (default 200; 201 create; 202 accepted; 204 no content)
   "errors": ["ILLEGAL_TRANSITION"],        // codes from common.json or module-specific UPPER_SNAKE

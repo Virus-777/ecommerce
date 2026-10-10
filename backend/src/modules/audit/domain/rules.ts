@@ -15,6 +15,8 @@ export const PURGE_ACTION = 'audit.retention.purged';
 export const MAX_RETAIN_YEARS = 100;
 /** reports.maxExportRows default; audit cannot read another module's setting (spec gap) */
 export const DEFAULT_MAX_EXPORT_ROWS = 500_000;
+/** audit.prepare-partitions keeps the current market month and this many after it partitioned */
+export const PARTITION_MONTHS_AHEAD = 3;
 
 /** Projection of an access approval request (audit.approval_states). */
 export interface ApprovalProjection {

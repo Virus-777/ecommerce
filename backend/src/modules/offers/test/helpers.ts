@@ -29,6 +29,7 @@ import { auth, buildTestApp, movingClock, token } from '../../../testing/app.js'
 export const OFFER_EVENTS = [
   'offers.offer.created',
   'offers.offer.missing_items_stale',
+  'offers.offer.missing_items_reviewed',
   'offers.offer.updated',
   'offers.offer.price_changed',
   'offers.offer.status_changed',

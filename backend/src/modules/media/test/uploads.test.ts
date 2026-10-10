@@ -203,7 +203,7 @@ describe('processing', () => {
     const { asset } = await uploadFile(t, 'store', callers.customer(), { purpose: 'return_evidence', fileName: 'phone.jpg', contentType: 'image/jpeg', body: jpeg(4032, 3024, { orientation: 6 }) });
     expect(asset).toMatchObject({ status: 'ready', width: 3024, height: 4032, visibility: 'private', url: null });
     // private renditions are signed links, only through the owner's views
-    expect(asset.renditions[0]!.url).toMatch(/X-Signature=/);
+    expect(asset.renditions[0]!.url).toMatch(/\/files\/marketly-private\/.+[?&]exp=.+&sig=/);
   });
 
   it('rejects malware, corrupt files and files whose bytes are another type (media.asset.rejected)', async () => {
@@ -241,7 +241,7 @@ describe('processing', () => {
     res = await webhook('/processing-results', { providerJobId: job.providerJobId, status: 'failed', outputs: [], error: 'late duplicate' });
     expect(res.statusCode).toBe(204);
     const ready = (await t.media.getAsset(asset.id))!;
-    expect(ready).toMatchObject({ status: 'ready', width: 1920, height: 1080, durationSeconds: 12.4, url: outputs[0]!.url });
+    expect(ready).toMatchObject({ status: 'ready', width: 1920, height: 1080, durationSeconds: 12.4, url: t.storage.publicUrl(`renditions/${asset.id}/poster.jpeg`) });
     expect(ready.renditions).toHaveLength(3);
 
     const second = await uploadFile(t, 'seller', seller, { purpose: 'product_video', fileName: 'demo2.mp4', contentType: 'video/mp4', body: mp4(5) });

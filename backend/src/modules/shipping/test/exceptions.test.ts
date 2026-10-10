@@ -232,14 +232,14 @@ describe('events from other modules', () => {
     const e = (await h.call('POST', `${ADMIN}/exceptions`, tokens.staff(), { kind: 'missing_tracking', groupId: o.groupId, situation: 'No tracking' })).body;
     await h.publish('sellers', 'sellers.seller.restricted', { sellerId: o.sellerId, restrictionId: newId(), reasonCode: 'late_dispatch', reason: 'Too many late orders', affectedActivities: ['sales'], scope: { categoryIds: [] }, categoryIds: [], appealRoute: 'seller/appeals', appealDeadline: h.clock.now().toISOString(), reviewDate: h.clock.now().toISOString().slice(0, 10) });
     expect((await h.call('GET', `${ADMIN}/exceptions/${e.id}`, tokens.staff())).body).toMatchObject({ status: 'escalated', escalatedTo: 'seller_manager' });
-    await h.publish('support', 'support.case.opened', { caseId: newId(), ref: 'CS-261009-0001', kind: 'order_problem', category: 'package_not_received', priority: 'high', customerId: o.customerId, sellerId: o.sellerId, orderId: o.order.id, orderItemIds: [o.speaker.id], handler: 'support', nextResponseDueAt: null });
+    await h.publish('support', 'support.case.opened', { caseId: newId(), ref: 'CS-261009-0001', kind: 'order_problem', category: 'package_not_received', priority: 'high', customerId: o.customerId, sellerId: o.sellerId, orderId: o.order.id, orderItemIds: [o.speaker.id], handler: 'marketplace_support', nextResponseDueAt: null });
     const opened = h.named('shipping.shipment.exception').at(-1);
     // from a customer report support already holds as a case: support must not open a second case for it
     expect(opened).toMatchObject({ kind: 'lost_or_damaged', groupId: o.groupId, orderItemIds: [o.speaker.id], source: 'customer_report', caseRef: 'CS-261009-0001' });
     expect(h.named('shipping.shipment.exception').find((x) => x.exceptionId === e.id)).toMatchObject({ source: 'staff', caseRef: null });
     expect((await h.call('GET', `${ADMIN}/exceptions/${opened.exceptionId}`, tokens.staff())).body.caseRef).toBe('CS-261009-0001');
     // the same report twice does not open a second one
-    await h.publish('support', 'support.case.opened', { caseId: newId(), ref: 'CS-261009-0002', kind: 'order_problem', category: 'package_not_received', priority: 'high', customerId: o.customerId, sellerId: o.sellerId, orderId: o.order.id, orderItemIds: [o.speaker.id], handler: 'support', nextResponseDueAt: null });
+    await h.publish('support', 'support.case.opened', { caseId: newId(), ref: 'CS-261009-0002', kind: 'order_problem', category: 'package_not_received', priority: 'high', customerId: o.customerId, sellerId: o.sellerId, orderId: o.order.id, orderItemIds: [o.speaker.id], handler: 'marketplace_support', nextResponseDueAt: null });
     expect(await h.service.core.repo.count('exceptions', { group_id: o.groupId, kind: 'lost_or_damaged' })).toBe(1);
   });
 });

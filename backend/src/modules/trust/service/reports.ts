@@ -13,7 +13,7 @@ import type { EvidenceInput, EvidenceItem, EvidenceRequest, MyReport, ReportRepo
 import { trustReportMachine, evidenceRequestMachine } from '../domain/state-machines.js';
 import { ACTIVE, FORM_TYPES, humanize, OUTCOMES, REPORT_TYPES, riskLevel, SUBJECT_TYPES, TYPE_LABELS, type ReportStatus, type SubjectType } from '../domain/rules.js';
 import type { Assessment, EvidenceRec, ReportFilter, ReportRec, TrustRepository } from '../ports.js';
-import { Batch, illegal, invalid, invalidField, notFound, unavailable, type Agg, type By, type Core } from './core.js';
+import { Batch, illegal, invalid, invalidField, notFound, type Agg, type By, type Core } from './core.js';
 import type { Views } from './views.js';
 
 export const DATASET = 'trust.admin.reports';
@@ -1054,13 +1054,21 @@ export class Reports {
     const out = new Set<string>();
     if (filter.role !== 'filed_by') for (const id of await this.core.repo.subjectIdsAbout(subjectType, o)) out.add(id);
     if (filter.role !== 'against') {
-      const filers = await this.core.repo.reporterIdsFiling(subjectType, o);
+      // customer reporters may be stored under their account id: with an id list, look for both ids of each customer
+      const byAccount = new Map<string, string>();
+      if (subjectType === 'customer' && ids) {
+        for (const id of ids) {
+          const c = await this.core.soft('customers', 'getCustomer', (m) => m.getCustomer(id));
+          if (c?.userId && c.userId !== id) byAccount.set(c.userId, id);
+        }
+      }
+      const filers = await this.core.repo.reporterIdsFiling(subjectType, byAccount.size ? { ...o, ids: [...ids!, ...byAccount.keys()] } : o);
       for (const stored of filers) {
-        if (subjectType === 'seller' || out.has(stored)) {
+        if (subjectType === 'seller' || out.has(stored) || ids?.includes(stored)) {
           out.add(stored);
           continue;
         }
-        const customerId = await this.customerIdOf(stored);
+        const customerId = byAccount.get(stored) ?? (await this.customerIdOf(stored));
         if (customerId) out.add(customerId);
       }
     }
@@ -1138,7 +1146,8 @@ export class Reports {
 
   async requestExport(body: { filters: unknown; format?: 'csv' | 'xlsx' | null }, principal: identity.Principal, by: By): Promise<reports.ExportJob> {
     const api = this.core.ctx.tryUse('reports');
-    if (!api) throw unavailable('Exports');
+    // reports off: the dataset cannot be exported (same code reports answers when it refuses the dataset)
+    if (!api) throw this.core.ctx.error('DATASET_UNAVAILABLE', 'The trust queue cannot be exported while reports is switched off', { dataset: DATASET });
     await this.registerDataset();
     const filters = body.filters && typeof body.filters === 'object' && !Array.isArray(body.filters) ? body.filters : {};
     const job = await api.requestExport({ dataset: DATASET, filters, format: body.format ?? 'csv', principal });

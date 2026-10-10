@@ -135,6 +135,7 @@ export default defineModule({
     ctx.events.on("payments.refund.destination_requested", (e) => service.onRefundDestinationRequestedFromPayments(e.payload, e.id));
     ctx.events.on("customers.closure.delayed", (e) => service.onClosureDelayedFromCustomers(e.payload, e.id));
     ctx.events.on("offers.offer.missing_items_stale", (e) => service.onOfferMissingItemsStaleFromOffers(e.payload, e.id));
+    ctx.events.on("offers.offer.missing_items_reviewed", (e) => service.onOfferMissingItemsReviewedFromOffers(e.payload, e.id));
     ctx.events.on("inventory.stock.low_digest", (e) => service.onStockLowDigestFromInventory(e.payload, e.id));
     ctx.events.on("sellers.application.information_reminder", (e) => service.onApplicationInformationReminderFromSellers(e.payload, e.id));
     ctx.events.on("advertising.campaign.ending_soon", (e) => service.onCampaignEndingSoonFromAdvertising(e.payload, e.id));

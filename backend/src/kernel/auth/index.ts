@@ -7,6 +7,7 @@
 import type { Actor } from '../../spec/common.js';
 import { AppError } from '../errors/index.js';
 import type { Area, AuthKind } from '../spec/define.js';
+import type { FileLink } from './file-links.js';
 import type { AccessClaims, Audience, TokenFailure } from './tokens.js';
 
 /** The verified caller (mirrors identity.Principal). */
@@ -35,7 +36,7 @@ export interface SellerMemberAccess {
 
 /** What the middleware established about a request. */
 export interface RequestAuth {
-  via: 'token' | 'refresh' | 'provider' | 'bootstrap';
+  via: 'token' | 'refresh' | 'provider' | 'bootstrap' | 'file-link';
   principal: Principal | null;
   claims?: AccessClaims;
   sellerAccess?: SellerMemberAccess;
@@ -43,6 +44,8 @@ export interface RequestAuth {
   refreshSession?: { sessionId: string; accountId?: string | null; audience: string; kind: string };
   /** webhooks: verified provider and event */
   provider?: { name: string; eventId?: string };
+  /** GET /files/…: the file the verified link opens (serve this one, never a reading of the URL) */
+  file?: FileLink;
 }
 
 export const principalOf = (c: AccessClaims): Principal => ({

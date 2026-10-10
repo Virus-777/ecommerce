@@ -80,8 +80,6 @@ const invalid = (path: string, message: string) => new AppError('VALIDATION_FAIL
  */
 export class CartService implements CartPublicApi {
   readonly checker: CartChecker;
-  /** Coupon attempts per owner in the last hour (couponPreviewRateLimitPerHour); per process */
-  private readonly couponAttempts = new Map<string, number[]>();
 
   constructor(protected readonly deps: CartServiceDeps) {
     this.checker = new CartChecker(deps.ctx, deps.repo);
@@ -500,23 +498,18 @@ export class CartService implements CartPublicApi {
 
   /* ================================================================ coupons */
 
-  private rateLimitCoupons(s: Shopper, limit: number) {
-    const key = s.owner.kind === 'customer' ? `c:${s.owner.customerId}` : `g:${s.owner.guestSessionId}`;
-    const now = this.now().getTime();
-    const recent = (this.couponAttempts.get(key) ?? []).filter((t) => t > now - 3_600_000);
-    if (recent.length >= limit) {
-      const retryAfterSeconds = Math.max(1, Math.ceil((recent[0]! + 3_600_000 - now) / 1000));
-      throw new AppError('RATE_LIMITED', 'Too many coupon attempts. Try again later.', { retryAfterSeconds });
-    }
-    recent.push(now);
-    this.couponAttempts.set(key, recent);
+  /** Coupon attempts per owner per hour (couponPreviewRateLimitPerHour), counted across server instances */
+  private async rateLimitCoupons(s: Shopper, limit: number) {
+    const owner = s.owner.kind === 'customer' ? `c:${s.owner.customerId}` : `g:${s.owner.guestSessionId}`;
+    const r = await this.ctx.rateLimit(`coupon:${owner}`, { limit, windowMs: 3_600_000 });
+    if (!r.allowed) throw new AppError('RATE_LIMITED', 'Too many coupon attempts. Try again later.', { retryAfterSeconds: Math.max(1, Math.ceil(r.retryAfterMs / 1000)) });
   }
 
   async previewCoupon(scope: Scope, rawCode: string): Promise<{ cart: CartView; result: CouponPreview }> {
     const s = await this.shopperOf(scope);
     const code = normalizeCode(rawCode ?? '');
     if (!code || code.length > 40) throw invalid('code', 'Enter a coupon code');
-    this.rateLimitCoupons(s, await this.ctx.settings.get('couponPreviewRateLimitPerHour'));
+    await this.rateLimitCoupons(s, await this.ctx.settings.get('couponPreviewRateLimitPerHour'));
     const cart = await this.activeCart(s);
     if (!cart || !(await this.repo.countItems(cart.id))) {
       const view = await this.viewFor(s);

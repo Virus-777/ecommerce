@@ -1,8 +1,9 @@
 /**
  * What the search service needs from the outside world, database-agnostic.
- * The Postgres adapters live in infra/postgres/: the repository (this module's own tables) and the search
- * engine (full-text + trigram queries over the index). An external engine (OpenSearch, Meilisearch) would
- * implement SearchEngine behind the same port (setting searchEngine).
+ * The Postgres adapters live in infra/postgres/: the repository (this module's own tables, the read model of
+ * the index) and the search engine (full-text + trigram queries over those tables). infra/opensearch/ is the
+ * production engine: it keeps its own index, fed from the repository's writes (SearchIndexFeed). The engine is
+ * chosen by SEARCH_ENGINE (infra/config.ts).
  */
 import type { Json } from '../../kernel/db/types.js';
 import type { SearchDb } from '../../spec/search.js';
@@ -178,9 +179,36 @@ export interface FacetCounts {
   attributes: Map<string, Map<string, number>>;
 }
 
+/** A document as an engine with its own index stores it: the read-model row, its offer rows and (for a full write) the searchable texts */
+export interface IndexedDocument {
+  doc: DocRow;
+  offers: OfferRow[];
+  /** Present when the document was (re)built from the source modules: the engine replaces the whole document. Absent: every field but the texts is replaced. */
+  texts?: DocTexts;
+}
+
+/**
+ * How an engine that keeps its own index (OpenSearch) is fed. The repository stays the read model; every write
+ * to it is passed on after commit (infra/index-feed.ts). The Postgres engine reads the tables and has no feed.
+ */
+export interface SearchIndexFeed {
+  /** Writes and removes documents; answers the products that could not be written (they are marked dirty and rebuilt) */
+  write(upserts: IndexedDocument[], deletes: string[]): Promise<{ failed: string[] }>;
+  /** A key when the engine's index needs a full reindex (new and empty, or an older mapping), else null */
+  needsRebuild(): Promise<string | null>;
+  /** Full reindex: starts a new index; until finishRebuild every write goes to the live index and the new one */
+  beginRebuild(): Promise<void>;
+  /** ok: the new index becomes the live one atomically (carryOver: products the rebuild could not build, copied from the old index). Not ok: the new index is dropped. */
+  finishRebuild(ok: boolean, carryOver: string[]): Promise<void>;
+}
+
 export interface SearchEngine {
-  /** e.g. postgres-fts */
+  /** e.g. postgres-fts, opensearch */
   readonly name: string;
+  /** Engines with their own index are fed by the indexer; undefined for the Postgres engine */
+  readonly feed?: SearchIndexFeed;
+  /** Engine and index state for the index status screen, e.g. 'opensearch (green, index marketly-products-…)'; default: name */
+  describe?(): Promise<string>;
   search(q: EngineQuery, sort: SortKey, weights: Record<RankingFactorKey, number>, window: { offset: number; limit: number }): Promise<{ hits: EngineHit[]; total: number }>;
   count(q: EngineQuery): Promise<number>;
   /** Total, distinct sellers and whether the Official Store is among them */

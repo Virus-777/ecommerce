@@ -20,7 +20,7 @@
     "Cart lines: cart (move to cart calls its public API)"
   ],
   "dependsOn": ["catalog", "offers", "customers"],
-  "optionalDeps": ["inventory", "cart", "promotions", "notifications", "reports", "media", "search"],
+  "optionalDeps": ["inventory", "cart", "promotions", "notifications", "reports", "media", "search", "sellers"],
   "publicApi": [
     { "name": "savedCount", "signature": "(productId: uuid) => int", "desc": "How many customers saved a product (aggregate only, for reports and Official Store planning).", "usedBy": ["reports"] },
     { "name": "isSaved", "signature": "(customerId: uuid, productIds: uuid[]) => map<bool>", "desc": "Saved state for product cards rendered by other modules.", "usedBy": ["search", "content", "graphql"] },
@@ -158,7 +158,7 @@
     "Recently viewed belongs to customers (brief): the wishlist screen reads it from customers itself; WishlistPage does not carry it.",
     "Alerts are promotional: notifications delivers them only if the customer allows wishlist alerts (account/notifications) and never mixes them into essential order updates.",
     "Price hints are honest: 'Lowest in 30 days' only when the current price is the lowest in the window, from offers.priceRange(offerId, priceHintDays) (offers keeps the only price history); campaign was-prices come from promotions.referencePrice when enabled.",
-    "GraphQL: the store schema's WishlistAlert exposes sellerId (Alert.sellerId). WishlistAlert.seller resolves null until the sellers module provides a shared mapper for it (decision: GraphQL shared mappers per owning module); wishlist has no sellers dependency, so clients name the seller from sellerId (e.g. Query.sellerStorefront).",
+    "GraphQL: the store schema's WishlistAlert exposes sellerId (Alert.sellerId) and seller, the seller's public card (Seller) built with the shared mapper sellers exports from its contract (sellerCardOut: sellers.getStorefrontCard and getSellers, publicProfile from getStorefrontBySlug only when asked). seller is null when the alert names no seller, the seller has no public card or sellers is off (optional dependency).",
     "Fixed limits (not settings): list names up to 60 characters, item notes up to 500 characters, GET /saved checks at most 100 product ids per call, and a shared list shows its first 100 items (no paging). Lists, items per list and active alerts are settings (maxLists, maxItemsPerList, maxActiveAlerts); every call that adds an active alert (saveItem with an alert, updateItemAlerts, createAlert, changeAlert resume or rearm) answers ALERT_LIMIT_REACHED above maxActiveAlerts.",
     "Back-in-stock alerts fire only on a real restock: armed_at is set when the alert starts while the item is unavailable, and later whenever what it follows is seen unavailable (inventory.stock.changed to 0, an offer leaving active, or the evaluate-alerts job). An alert switched on while the item is in stock stays active but unarmed until then; rearming a triggered back-in-stock alert does the same check.",
     "Wishlist is for signed-in customers only (decision D3): every store endpoint except the shared-list view needs a customer token."

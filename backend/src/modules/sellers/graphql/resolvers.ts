@@ -6,6 +6,7 @@ import type { Appeal, ChangeRequest, PerformanceSummary, PerformanceTarget, Rest
 import * as map from '../mappers.js';
 import type { SellerRec } from '../ports.js';
 import type { SellersService } from '../service.js';
+import { sellerPublicProfileOut } from './cards.js';
 
 /* ---------------------------------------------------------------- REST shapes → GraphQL shapes (enums in capitals) */
 
@@ -127,18 +128,8 @@ export const resolvers = (service: SellersService): ModuleResolvers => {
       publicProfile: async () => {
         const p = await profile();
         const sf = PUBLIC.includes(s.status) && s.approved_at ? await storefront.storefront(s) : null;
-        return {
-          sellerId: s.id,
-          banner: sf?.banner ?? null,
-          tagline: p.tagline,
-          introduction: p.introduction,
-          verification: verification(map.verificationLabel(s)),
-          onTimeDispatchPct: (sf?.highlights as { onTimeDispatchPct?: number | null } | undefined)?.onTimeDispatchPct ?? null,
-          approvedClaims: ((sf?.approvedClaims ?? []) as { kind: string; text: string }[]).map((c) => ({ kind: upper(c.kind), text: c.text })),
-          contact: sf?.contact ?? { canMessage: true, productQuestions: true, replyTarget: 'within_24h', phone: null },
-          warranty: p.warranty,
-          collections: sf?.collections ?? [],
-        };
+        // the shared mapper other modules use too (contract.ts: sellerPublicProfileOut)
+        return sellerPublicProfileOut({ sellerId: s.id, storefront: sf, verification: map.verificationLabel(s), tagline: p.tagline, introduction: p.introduction, warranty: p.warranty });
       },
       legalName: s.legal_name,
       status: upper(s.status),

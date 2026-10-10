@@ -12,7 +12,8 @@ Status: **design**. This document defines the backend's structure; the API desig
 | Complex screen reads | **GraphQL** via **Mercurius** (Fastify plugin), read-only, three schemas (store, seller, admin) composed from module fragments | One round trip for screens that combine many modules; writes stay on REST |
 | Database | **PostgreSQL** through **Kysely** (typed SQL query builder) | No ORM magic; SQL stays portable; easy to replace per module |
 | Local / test database | **PGlite** (PostgreSQL compiled to WASM, in-process) | Real Postgres semantics with nothing to install |
-| Jobs / schedules | Kernel `JobScheduler` interface; in-memory runner now, Postgres-backed queue (pg-boss) later | Payout runs, ad schedules, SLA timers |
+| Product search | **OpenSearch** in production (`@opensearch-project/opensearch`); PostgreSQL full-text + `pg_trgm` in development and tests (`SEARCH_ENGINE`, §9) | Relevance, typo tolerance and facets at catalogue scale, off the primary database |
+| Jobs / schedules | Kernel `JobScheduler` interface: **pg-boss** queue in PostgreSQL in production (each scheduled run happens once across server instances, failed runs retried with backoff); in-process timers on PGlite (development, tests) | Payout runs, ad schedules, SLA timers |
 | Events | Kernel in-process typed event bus; outbox table later | Modules talk through events, not each other's tables |
 | Tests | Vitest + `app.inject()` + PGlite | Each module boots alone in a test |
 
@@ -46,6 +47,7 @@ backend/
 | `/api/seller/*` | Seller owners and seller staff (Seller Center, website + app) | Seller member session; seller-level permissions |
 | `/api/admin/*` | Internal staff (Admin Center + Operations) | Staff session; role permissions + approval limits |
 | `/webhooks/*` | Payment and carrier providers | Provider signatures |
+| `/files/*` | Anyone holding a link the API issued (`<img src>`, downloads) | The link's own signature (HMAC, expiring for private files, permanent for public renditions), verified by the auth middleware |
 | `/graphql/store`, `/graphql/seller`, `/graphql/admin` | Same audiences as the REST areas | Read-only GraphQL for complex screens; persisted queries in production (see [api/graphql/README.md](api/graphql/README.md)) |
 | `/docs` | Developers | OpenAPI generated from module schemas |
 
@@ -144,6 +146,46 @@ Generated from the module specs (`docs/api/spec/modules/`, `docs/api/graphql/mod
 | **Purchase snapshots** | Orders copy the product description, variation, condition, price, seller and terms accepted at purchase (plan ch. 8) |
 | **Errors** | `{ error: { code, message, details } }` with stable codes (`OFFER_CHANGED`, `ILLEGAL_TRANSITION`, `APPROVAL_REQUIRED` …) |
 | **Database portability** | Services depend on repository interfaces (`ports.ts`). Postgres adapters live in `infra/postgres/`. A MongoDB switch adds `infra/mongo/` per module; no cross-module joins or foreign keys exist to untangle |
+| **File storage** | Owner decision: files live on the server's **local file system** (no S3). media's storage port has two adapters, chosen by `MEDIA_STORAGE` (below); both stream bytes through the API: uploads to `PUT /api/{area}/media/uploads/{id}/content` (the caller's token), downloads from `GET /files/{bucket}/{key}` by signed links the auth middleware verifies ([03-auth-middleware.md](03-auth-middleware.md) §0 "File links") |
+
+### File storage configuration (media)
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `MEDIA_STORAGE` | `local`; `memory` when `NODE_ENV=test` | `local`: files on disk under `MEDIA_STORAGE_DIR` (`infra/storage/local.ts`). `memory`: kept in the process and lost on restart (`infra/storage/memory.ts`; refused in production). Both pass the same contract tests (`infra/storage/storage.test.ts`) |
+| `MEDIA_STORAGE_DIR` | `.data/media` (relative to the working directory) | `<dir>/<bucket>/<key>` holds the bytes (buckets `marketly-public`, `marketly-private` are folders), `<dir>/.meta/` content type, ETag and checksum per file, `<dir>/.tmp/` writes in progress (temp file, flushed, then renamed: atomic). Back it up with the database; with more than one API server it must be a shared volume |
+| `API_URL` | `http://localhost:<PORT>` | The API's public address: file links (`<API_URL>/files/…`) point here. Required in production |
+| `APP_SECRET` | dev value outside production | File links are signed with `secretFor(config, 'media.files')`, derived from it; rotating it invalidates links already handed out, including stored public image URLs |
+
+Limits: an upload is refused above the ticket's `maxBytes` while it streams (nothing is kept); public renditions are served `Cache-Control: public, max-age=3600`, private files `private` (attachments `no-store`); file requests have their own IP rate limit (3,000/min). Processing still reads each upload into memory once (scan, probe, renditions), as before.
+
+### Several server instances: jobs and rate limits
+
+Shared state lives in PostgreSQL only (no Redis), so any number of server instances can run on one database.
+
+**Jobs** (`kernel/jobs/`). Every job in a module spec is a [pg-boss](https://github.com/timgit/pg-boss) queue of the same name (pg-boss keeps its tables in the `pgboss` schema and migrates them itself when it starts):
+
+| Schedule phrase | Runs as |
+|---|---|
+| `every N min`, `hourly`, `every N hours` | pg-boss cron schedule (`*/N * * * *` …): one job per occurrence, whatever the number of instances |
+| `daily` / `nightly HH:MM`, `weekly` (Monday), `monthly` (the 1st) | pg-boss cron schedule in `MARKET_TIME_ZONE` |
+| `every N s` (and intervals cron can't express) | each working instance sends throttled: one job per N-second slot across instances |
+| `on boot` | sent once per deploy: the job id comes from `DEPLOY_ID` plus the enabled modules and their versions |
+
+A queue holds at most one waiting and one running job (policy `stately`), so a job never overlaps itself and missed ticks don't pile up. A failed run is retried 3 times with exponential backoff (30 s, doubling, at most 15 min); a run that takes over an hour counts as failed. `runNow` enqueues a run (not retried) and waits until whichever instance worked it is done; when a run is already waiting, it waits for that one.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `JOBS_BACKEND` | `pgboss` with `DATABASE_URL`, else `inprocess` | `inprocess` runs timers in each process (development and tests on PGlite; every instance runs every job) |
+| `JOBS_ENABLED` | `false` | This instance works the queues and keeps the schedules. Instances without it only enqueue (`runNow`), so web and worker instances can be split |
+| `DEPLOY_ID` | - | The deployment (image tag, commit); `on boot` jobs run once per value and module set |
+
+**Rate limits** (`kernel/auth/rate-limit.ts`). The middleware's limits ([03-auth-middleware.md §11](03-auth-middleware.md#11-rate-limits)) and modules' business limits (`ctx.rateLimit(key, { limit, windowMs, peek? })` → `{ allowed, retryAfterMs }`, e.g. coupon attempts in cart, gift card attempts in wallet) count in fixed windows aligned to the clock (an hour window runs :00 to :00), one row per scope (`http` or the module), key and window start in `kernel.rate_limits` (an unlogged table; one upsert per attempt). A refused attempt is not counted. The kernel job `kernel.purge-rate-limits` deletes ended windows every 10 minutes.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `RATE_LIMIT_STORE` | `postgres` with `DATABASE_URL`, else `memory` | `memory` counts per process (development and tests) |
+| `RATE_LIMITS` | `true` | Off only for contract and load tests (refused in production); modules' business limits apply either way |
 
 ## 6. Plan scenarios → modules (plan ch. 21)
 
@@ -190,3 +232,50 @@ src/modules/<module>/
 | Regenerate + validate | `node docs/api/tools/build.mjs` |
 
 The build validates that every type resolves, path parameters match, permissions and consumed events exist, each endpoint's prototype screens exist, and no two modules claim the same route.
+
+## 9. Search engine (OpenSearch)
+
+Search's public API and endpoints are the same with either engine; only the adapter behind the `SearchEngine` port changes (`backend/src/modules/search/infra/`).
+
+| `SEARCH_ENGINE` | Where | What answers queries |
+|---|---|---|
+| `postgres` (default) | development, tests | PostgreSQL full-text (`english`) and `pg_trgm` over the read-model tables `search_documents` / `search_offers` (`infra/postgres/engine.ts`) |
+| `opensearch` | production | An OpenSearch index fed from the same read model (`infra/opensearch/`) |
+
+**Read model and feed.** PostgreSQL stays the source of truth for the index: event consumers and jobs write `search_documents` and `search_offers` exactly as before. With OpenSearch the repository is wrapped (`infra/index-feed.ts`): after each commit the changed products are read back and sent as one `_bulk` request. A rebuilt document carries its searchable texts and replaces the indexed one; other changes replace every field but the texts. Each write is a Painless update that applies only if the read-model `version` is not older, so concurrent servers cannot put an older state back. Rejected (429) and failed (5xx) items are retried with backoff (`OPENSEARCH_BULK_ATTEMPTS`); whatever still fails — the cluster is down, or a change arrives for a document the index lacks — is marked dirty and rebuilt in full by `search.process-dirty`. Suggestion terms (popular queries, category, brand and store names), synonyms, recent searches, logs and jobs stay in PostgreSQL.
+
+**Index.** Queries and writes use the alias `<prefix>-products`, which points at one versioned index `<prefix>-products-<UTC timestamp>` (the first one is `…-00000000000000000`). Documents hold every read-model field (cards are built from hits), the texts (title and brand weighted highest, then category, attributes, description; English analysis with Porter stems like PostgreSQL's `english` configuration), live offers as `nested` documents (seller, condition, price, stock, delivery, featured flag and `card_rank`: featured first, then in stock, then cheapest), category attributes as nested key/value pairs, keyword facets, numeric prices, rating, popularity and `sales_30d`, dispatch days and same-day cutoffs for "ships today" and "arrives by". `MAPPING_VERSION` (`infra/opensearch/mapping.ts`) is stored in the index; bump it on any mapping change.
+
+**Queries** (`infra/opensearch/query.ts`, exact bodies unit-tested):
+- Text: every word (group) must match across the text fields (`cross_fields`, operator and), any synonym alternative of a group; phrases match as phrases; a full GTIN matches the `gtins` keyword. Synonyms come from search's synonym table and are expanded by the service before the engine sees the query, so a synonym change applies on the next query with no reindex.
+- The card offer is the matching offer with the lowest `card_rank` (inner hit `eo`, with the number of matching offers for "from" prices). Filters on sellers, condition, price, stock and delivery apply to offers.
+- Recommended ranking = text relevance (BM25 `s/(s+1)` × weight) + the published ranking policy's factors as scripts (in stock and delivery speed of the card offer, featured offer, rating with ≥ 3 reviews, conversion) + 1 for a GTIN match. Explain splits a hit's score into the same factors.
+- Price sorts use the card offer's price exactly: products are split into streams by where their card offer comes from (featured / in stock / any), each sorted by a nested minimum over that tier, and merged.
+- Facets: one aggregation per facet, counted against the other active filters (categories, active brands, sellers and the Official Store, conditions, ratings, availability by card offer, delivery, category attributes); the price range is the lowest and highest card-offer price.
+- Typo tolerance: a misspelled word is corrected ("Showing results for …") from candidates the term suggester finds within two edits in the index's title words plus the suggestion terms' words, ranked by trigram similarity like `pg_trgm`; suggestions while typing match title words as prefixes and with `fuzziness: AUTO`.
+- Paging keeps the API's cursors (an offset); pages beyond `max_result_window` (10,000) are empty.
+
+**Full reindex (blue/green).** `search.full-reindex` (nightly, or `POST /api/admin/search/reindex-jobs` with scope `all`) creates a new versioned index and points `<prefix>-products-building` at it; every server writes each change to both indices (servers re-check the building alias every `OPENSEARCH_ALIAS_CACHE_MS`, and the job waits that long before rebuilding). Every product is rebuilt from the source modules; products that cannot be rebuilt keep their current document (copied from the live index). Then one `_aliases` call moves `<prefix>-products` to the new index atomically. The previous index is kept for a manual rollback; older ones are deleted. A failed reindex drops the new index and the live one keeps serving. At startup a new (empty) index over a populated read model, or one built with an older `MAPPING_VERSION`, queues a full reindex automatically.
+
+**Health.** `GET /api/admin/search/index` reports the engine in `engine`, e.g. `opensearch (green, index marketly-products-20261010031500123)`, with `mapping vN < vM: full reindex needed`, `rebuilding into …` or `unreachable: …` when they apply (`postgres-fts` for PostgreSQL).
+
+**Configuration** (`backend/.env.example`):
+
+| Variable | Default | |
+|---|---|---|
+| `SEARCH_ENGINE` | `postgres` | `postgres` or `opensearch` |
+| `OPENSEARCH_URL` | — | Required for `opensearch`; one node or a comma-separated list |
+| `OPENSEARCH_USERNAME`, `OPENSEARCH_PASSWORD` | — | Basic authentication (together) |
+| `OPENSEARCH_API_KEY` | — | Instead of a username: sent as `Authorization: ApiKey <key>` |
+| `OPENSEARCH_INDEX_PREFIX` | `marketly` | Index and alias names |
+| `OPENSEARCH_SHARDS`, `OPENSEARCH_REPLICAS` | `1`, `1` | For new indices (a reindex applies a change) |
+| `OPENSEARCH_REFRESH` | `false` | `false` (near real time), `wait_for` or `true` after writes |
+| `OPENSEARCH_REQUEST_TIMEOUT_MS` | `10000` | Per request; the client retries connection errors and 502/503/504 twice |
+| `OPENSEARCH_BULK_ATTEMPTS` | `3` | Then products are queued for `search.process-dirty` |
+| `OPENSEARCH_ALIAS_CACHE_MS` | `5000` | How long a server trusts what it knows about a running reindex |
+
+**Tests.** No cluster is needed:
+- `test/opensearch-query.test.ts` checks the translation (exact request bodies), documents, the scripts' JavaScript twins and the configuration.
+- `test/opensearch-fake/` is an in-memory OpenSearch behind the real client (a `Connection` class, so request building, NDJSON, response parsing and errors are the client's own). `test/engine-contract.test.ts` runs the same scenarios on PostgreSQL and on the adapter with the fake; `SEARCH_TEST_ENGINE=opensearch npx vitest run src/modules/search` runs the whole search suite on the fake. `test/opensearch-index.test.ts` covers the index lifecycle, retries, the blue/green swap and the feed.
+- What the fake does not prove: Painless is not executed (each script is matched by its source to a JavaScript twin in `scripts.ts`, which must change with it); writes are visible at once (no refresh interval); one shard, so BM25 statistics and `cardinality` are exact; the standard tokenizer, fuzzy scoring and the term suggester's ranking are approximations; cluster behaviour (replicas, timeouts, partial failures) only as far as a test injects faults. Relevance order between products whose only difference is text relevance may differ between PostgreSQL and OpenSearch.
+- `test/opensearch.integration.test.ts` runs the contract and the index lifecycle on a real cluster, only when `OPENSEARCH_URL` is set, with throwaway indices (`it-<time>-<random>`, deleted afterwards): `OPENSEARCH_URL=http://localhost:9200 npx vitest run src/modules/search/test/opensearch.integration.test.ts` (e.g. `docker run -p 9200:9200 -e discovery.type=single-node -e DISABLE_SECURITY_PLUGIN=true opensearchproject/opensearch:2`). `SEARCH_TEST_ENGINE=opensearch-live` runs the whole search suite there.

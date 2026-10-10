@@ -610,6 +610,7 @@ export class StorefrontPart extends Part {
       seller: card!,
       banner,
       introduction: p.introduction,
+      warranty: p.warranty,
       sellingSince: this.core.today(s.approved_at ?? s.created_at),
       sellingNow: this.parts.accounts.canSellNew(s),
       highlights: {

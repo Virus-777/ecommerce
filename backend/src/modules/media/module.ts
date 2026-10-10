@@ -1,3 +1,4 @@
+import { fileLinkSecret } from '../../kernel/auth/file-links.js';
 import { hmacWebhookVerifier } from '../../kernel/http/webhooks.js';
 import { secretFor } from '../../kernel/lib/secrets.js';
 import { defineModule } from '../../kernel/module-system/index.js';
@@ -6,35 +7,42 @@ import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { webhooksRoutes } from './http/webhooks.js';
+import { fileServer } from './http/files.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresMediaRepository } from './infra/postgres/repository.js';
 import { createDevProcessor } from './infra/processing/dev.js';
 import { createDevScanner } from './infra/scanner/dev.js';
-import { createDevStorage } from './infra/storage/dev.js';
+import { createLocalStorage } from './infra/storage/local.js';
+import { createMemoryStorage } from './infra/storage/memory.js';
 import { MediaService } from './service.js';
 
 /**
- * Media: Every uploaded or generated file: images, video and documents. Signed direct uploads, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted).
+ * Media: Every uploaded or generated file: images, video and documents. Uploads and signed download links, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted).
  *
  * Name, launch phase, dependencies, permissions, events, jobs, settings and endpoints come from
  * docs/api/spec/modules/media.json through `spec`; the server refuses to start if they drift.
  */
 export default defineModule({
   spec,
-  version: '1.2.0',
+  version: '1.3.0',
   migrations,
   register(ctx) {
-    // Providers: deterministic dev adapters (no network). S3-compatible storage, ClamAV and an image /
-    // transcoding service replace them behind the same ports (ports.ts).
-    const providers = {
-      // upload tickets point at PUT /uploads/{id}/content; acceptSignedPut follows them to the signed storage URL
-      storage: createDevStorage({ secret: secretFor(ctx.config, 'media.storage'), clock: ctx.clock, resolveUploadUrl: (url) => service.signedStorageUrlFor(url) }),
-      scanner: createDevScanner(),
-      processor: createDevProcessor(),
-    };
+    // Storage (MEDIA_STORAGE): the server's disk (local, production) or memory (tests). Both take uploads
+    // through PUT /uploads/{id}/content and serve downloads at GET /files/{bucket}/{key}, signed with
+    // media's file-link key and verified by the auth middleware. Scanning and processing use deterministic
+    // dev adapters (no network); ClamAV and an image / transcoding service replace them behind the ports.
+    const links = { secret: fileLinkSecret(ctx.config, ctx.name), baseUrl: ctx.config.apiUrl };
+    const storage =
+      ctx.config.media.storage === 'local'
+        ? createLocalStorage({ dir: ctx.config.media.dir, links })
+        : // acceptSignedPut (tests and tools) follows an upload ticket's API URL to a signed upload URL
+          createMemoryStorage({ clock: ctx.clock, links, uploadSecret: secretFor(ctx.config, 'media.storage'), resolveUploadUrl: (url) => service.signedStorageUrlFor(url) });
+    const providers = { storage, scanner: createDevScanner(), processor: createDevProcessor() };
     const service = new MediaService({ repo: createPostgresMediaRepository(ctx.db), ctx, providers });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), webhooksRoutes(service));
+    // GET /files/{bucket}/{key}: the middleware verifies the signed link (auth kind file-link) before this streams the file
+    if (storage.viaApi) ctx.http.files(fileServer(service, ctx.clock));
     // storage notifications and transcoding results are signed with HMAC (WEBHOOK_SECRETS.media)
     ctx.http.webhookVerifier(hmacWebhookVerifier(ctx.config, ctx.name));
 

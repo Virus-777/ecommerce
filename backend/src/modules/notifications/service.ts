@@ -683,6 +683,11 @@ export class NotificationsService implements NotificationsPublicApi {
     await this.consumers.handle('offers.offer.missing_items_stale', event, eventId);
   }
 
+  /** offers.offer.missing_items_reviewed: resolves the missing-items review notice of the offer */
+  async onOfferMissingItemsReviewedFromOffers(event: EventPayload<'offers.offer.missing_items_reviewed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('offers.offer.missing_items_reviewed', event, eventId);
+  }
+
   /** inventory.stock.low_digest: Official Store items to the Inventory Manager role; a seller's own items to that seller */
   async onStockLowDigestFromInventory(event: EventPayload<'inventory.stock.low_digest'>, eventId?: string): Promise<void> {
     await this.consumers.handle('inventory.stock.low_digest', event, eventId);

@@ -300,7 +300,7 @@
       },
       "missingItemsStale": {
         "type": "bool",
-        "desc": "True when the product's box changed (catalog.product.updated) and missingItems names items no longer in it, or no longer lists everything absent. The seller is asked to review (offers.offer.missing_items_stale); cleared when the seller saves missingItems again. The offer stays on sale meanwhile."
+        "desc": "True when the product's box changed (catalog.product.updated) and missingItems names items no longer in it, or no longer lists everything absent. The seller is asked to review (offers.offer.missing_items_stale); cleared when the seller saves missingItems again, changed or confirmed as is (offers.offer.missing_items_reviewed). The offer stays on sale meanwhile."
       },
       "sellerSku": {
         "type": "string",
@@ -1738,7 +1738,7 @@
       "method": "PATCH",
       "path": "/offers/{id}",
       "summary": "Edit offer terms or price",
-      "desc": "Customer-visible changes bump termsVersion so carts show the change before checkout. Price changes go into price history. A price change above largeSellerPriceChangePct needs confirmLargeChange: true in the same body, otherwise LARGE_PRICE_CHANGE_UNCONFIRMED and nothing is saved. shippingProfileId must be one of the seller's own profiles (shipping.getProfileOwners), otherwise SHIPPING_PROFILE_INVALID. Saving missingItems clears missingItemsStale.",
+      "desc": "Customer-visible changes bump termsVersion so carts show the change before checkout. Price changes go into price history. A price change above largeSellerPriceChangePct needs confirmLargeChange: true in the same body, otherwise LARGE_PRICE_CHANGE_UNCONFIRMED and nothing is saved. shippingProfileId must be one of the seller's own profiles (shipping.getProfileOwners), otherwise SHIPPING_PROFILE_INVALID. Saving missingItems (changed or the same list, as a confirmation) clears missingItemsStale and publishes offers.offer.missing_items_reviewed.",
       "auth": "seller",
       "permission": "offers.offers.manage",
       "params": {
@@ -1757,7 +1757,8 @@
       ],
       "events": [
         "offers.offer.updated",
-        "offers.offer.price_changed"
+        "offers.offer.price_changed",
+        "offers.offer.missing_items_reviewed"
       ],
       "screens": [
         "seller/offer"
@@ -2346,7 +2347,8 @@
       ],
       "audited": true,
       "events": [
-        "offers.offer.updated"
+        "offers.offer.updated",
+        "offers.offer.missing_items_reviewed"
       ],
       "screens": [
         "admin/official"
@@ -2749,6 +2751,28 @@
             "type": "string[]",
             "desc": "Items added to the product's box that the offer does not say it includes or misses"
           }
+        }
+      },
+      {
+        "name": "offers.offer.missing_items_reviewed",
+        "when": "The seller (or Official Store staff) saves the missing-items list of an offer flagged missingItemsStale, changed or confirmed as is: the flag is cleared",
+        "payload": {
+          "offerId": "uuid",
+          "productId": "uuid",
+          "ownerType": "enum(official|seller)",
+          "sellerId": {
+            "type": "uuid?",
+            "desc": "null for the Official Store"
+          },
+          "missingItems": {
+            "type": "string[]",
+            "desc": "The list as saved"
+          },
+          "changed": {
+            "type": "bool",
+            "desc": "False when the list was confirmed unchanged"
+          },
+          "reviewedBy": "Actor"
         }
       },
       {

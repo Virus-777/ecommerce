@@ -118,6 +118,20 @@ describe('reporters and the customer and seller lists', () => {
     expect(await kit.svc.subjectIdsWithReports('seller', { openOnly: true, ids: [s2.sellerId] })).toEqual([]);
     expect(await kit.svc.subjectIdsWithReports('seller', { ids: [s2.sellerId] })).toEqual([s2.sellerId]);
   });
+
+  it('subjectIdsWithReports finds customer reporters stored under their account id (pass 5)', async () => {
+    const l = listing(kit);
+    const accountId = newId();
+    const customerId = newId();
+    // customers did not know the account when it reported: the report is stored under the account id
+    await customerReport(kit, l.offerId, customer(accountId));
+    kit.customers.set(customerId, { displayName: 'Late customer', userId: accountId });
+    // before pass 5 an id list only matched reporter ids equal to the customer id
+    expect(await kit.svc.subjectIdsWithReports('customer', { role: 'filed_by', ids: [customerId, newId()] })).toEqual([customerId]);
+    expect(await kit.svc.subjectIdsWithReports('customer', { ids: [customerId] })).toEqual([customerId]);
+    expect(await kit.svc.subjectIdsWithReports('customer', { role: 'filed_by' })).toContain(customerId);
+    expect(await kit.svc.subjectIdsWithReports('customer', { role: 'filed_by', ids: [newId()] })).toEqual([]);
+  });
 });
 
 describe('detection inputs', () => {

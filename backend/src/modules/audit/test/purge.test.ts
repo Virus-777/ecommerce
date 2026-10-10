@@ -49,7 +49,7 @@ describe('audit.purge-expired', () => {
     expect(await sql`select 1 from audit.entry_targets where entry_id = ${ids.old1}`.execute(app.kernel.database.kysely).then((r) => r.rows.length)).toBe(0);
 
     const purge = (await call('GET', '/entries?action=audit.retention.purged')).json().items[0];
-    expect(purge).toMatchObject({ actor: { kind: 'system' }, category: 'settings', after: { removedEntries: 2, retainYears: 7, checkpoint: { seq: expect.any(Number), hash: expect.stringMatching(/^[0-9a-f]{64}$/) } } });
+    expect(purge).toMatchObject({ actor: { kind: 'system' }, category: 'settings', after: { removedEntries: 2, droppedPartitions: 2, retainYears: 7, checkpoint: { seq: expect.any(Number), hash: expect.stringMatching(/^[0-9a-f]{64}$/) } } });
     // and a signed purge checkpoint at the last removed entry
     const cps = (await sql<{ seq: number; kind: string; hash: Uint8Array; key_id: string }>`select seq::int, kind, hash, key_id from audit.checkpoints`.execute(app.kernel.database.kysely)).rows;
     expect(cps).toEqual([expect.objectContaining({ seq: purge.after.checkpoint.seq, kind: 'purge', key_id: 'audit.checkpoint.v1' })]);

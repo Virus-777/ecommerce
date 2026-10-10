@@ -348,7 +348,7 @@ describe('GraphQL', () => {
   it("reads the customer's wishlist, lists and alerts", async () => {
     const query = `{ me { wishlist { total items { id list { name } product { id title } variant { id options { name value } } offer { id sellerName price { formatted } status }
       priceWhenSaved { amount formatted } priceHint { kind label } alerts { priceDrop backInStock } canMoveToCart addedAt } }
-      wishlistLists { name itemCount shared } wishlistAlerts { kind state condition product { title } seller { sellerId } } } }`;
+      wishlistLists { name itemCount shared } wishlistAlerts { kind state condition product { title } seller { id storeName } } } }`;
     const res = await app.inject({ method: 'POST', url: '/graphql/store', payload: { query }, headers: auth(bea.accessToken) });
     expect(res.json().errors, res.body).toBeUndefined();
     const me = res.json().data.me;

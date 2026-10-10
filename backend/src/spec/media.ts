@@ -6,7 +6,7 @@ import { defineEndpoints, defineModuleSpec } from '../kernel/spec/define.js';
 import * as common from './common.js';
 import * as identity from './identity.js';
 
-/** Media: Every uploaded or generated file: images, video and documents. Signed direct uploads, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted). */
+/** Media: Every uploaded or generated file: images, video and documents. Uploads and signed download links, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted). */
 
 /* ------------------------------------------------------------------ types */
 
@@ -48,7 +48,7 @@ export interface UploadTicket {
   uploadId: string;
   assetId: string;
   method: "PUT" | "POST";
-  /** Signed storage URL; upload the bytes directly to it. With development storage it is this API's PUT /uploads/{id}/content in the same area */
+  /** Where to send the bytes, with method and headers. With storage the API serves (local disk, memory) it is this API's PUT /uploads/{id}/content in the same area: send the caller's own Authorization header. With a direct-upload store it would be the store's signed URL */
   url: string;
   headers: Record<string, string>;
   /** Form fields for POST policy uploads */
@@ -61,7 +61,7 @@ export const UploadTicket: z.ZodType<UploadTicket> = z.object({
   uploadId: z.uuid(),
   assetId: z.uuid(),
   method: z.enum(["PUT", "POST"]),
-  url: z.url().describe("Signed storage URL; upload the bytes directly to it. With development storage it is this API's PUT /uploads/{id}/content in the same area"),
+  url: z.url().describe("Where to send the bytes, with method and headers. With storage the API serves (local disk, memory) it is this API's PUT /uploads/{id}/content in the same area: send the caller's own Authorization header. With a direct-upload store it would be the store's signed URL"),
   headers: z.record(z.string(), z.string()),
   fields: z.record(z.string(), z.string()).describe("Form fields for POST policy uploads"),
   maxBytes: z.number().int(),
@@ -70,6 +70,7 @@ export const UploadTicket: z.ZodType<UploadTicket> = z.object({
 
 export interface Rendition {
   size: "thumb" | "small" | "medium" | "large" | "zoom" | "poster" | "video_720" | "video_1080";
+  /** Signed link to GET /files/{bucket}/{key}: permanent for public files (usable as <img src>), short-lived for private ones */
   url: string;
   width: number;
   height: number;
@@ -80,7 +81,7 @@ export interface Rendition {
 
 export const Rendition: z.ZodType<Rendition> = z.object({
   size: z.enum(["thumb", "small", "medium", "large", "zoom", "poster", "video_720", "video_1080"]),
-  url: z.url(),
+  url: z.url().describe("Signed link to GET /files/{bucket}/{key}: permanent for public files (usable as <img src>), short-lived for private ones"),
   width: z.number().int(),
   height: z.number().int(),
   format: z.string().describe("webp, avif, jpeg, mp4"),
@@ -104,7 +105,7 @@ export interface MediaAsset {
   title?: string | null;
   owner: MediaOwner;
   visibility: "public" | "private";
-  /** Public: medium rendition (images) or poster (video). Private files have no URL; use the download endpoint. */
+  /** Public: permanent signed link to the medium rendition (images) or poster (video). Private files have no URL; use the download endpoint. */
   url?: string | null;
   renditions: Rendition[];
   check?: ImageCheckResult | null;
@@ -142,7 +143,7 @@ export const MediaAsset: z.ZodType<MediaAsset> = z.object({
     return MediaOwner;
   },
   visibility: z.enum(["public", "private"]),
-  url: z.url().describe("Public: medium rendition (images) or poster (video). Private files have no URL; use the download endpoint.").nullish(),
+  url: z.url().describe("Public: permanent signed link to the medium rendition (images) or poster (video). Private files have no URL; use the download endpoint.").nullish(),
   get renditions() {
     return z.array(Rendition);
   },
@@ -322,6 +323,7 @@ export const ImageCheckResult: z.ZodType<ImageCheckResult> = z.object({
 }).register(common.apiTypes, { id: "media.ImageCheckResult" });
 
 export interface DownloadLink {
+  /** Signed link to GET /files/{bucket}/{key}, bound to the file, content type, disposition and expiry; no Authorization header needed (the signature is the token, checked by the auth middleware). Range requests are supported */
   url: string;
   expiresAt: string;
   fileName: string;
@@ -330,7 +332,7 @@ export interface DownloadLink {
 }
 
 export const DownloadLink: z.ZodType<DownloadLink> = z.object({
-  url: z.url(),
+  url: z.url().describe("Signed link to GET /files/{bucket}/{key}, bound to the file, content type, disposition and expiry; no Authorization header needed (the signature is the token, checked by the auth middleware). Range requests are supported"),
   expiresAt: z.iso.datetime({ offset: true }),
   fileName: z.string(),
   contentType: z.string(),
@@ -617,8 +619,8 @@ export const endpoints = defineEndpoints({
     path: "/uploads/{id}/content",
     auth: "shopper",
     scope: "own-customer",
-    summary: "Send the file bytes of an upload (development storage)",
-    desc: "Development storage only: receives the file bytes for a signed upload ticket (real storage takes the bytes directly at the ticket URL). Answers 409 when a real storage adapter is configured. The body is the raw file (any content type), at most the ticket's maxBytes.",
+    summary: "Send the file bytes of an upload",
+    desc: "The ticket URL when storage takes uploads through the API (the server's disk; memory in tests). The body is the raw file (any content type), streamed to storage and never held in memory: at most the ticket's maxBytes, counted while it streams (a larger Content-Length is refused before reading; nothing is kept when the limit is passed). The write is atomic; sending again before complete replaces an earlier attempt. Answers DIRECT_UPLOAD_ONLY (409) when storage takes the bytes directly at its own ticket URL.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -627,7 +629,7 @@ export const endpoints = defineEndpoints({
     body: () => z.instanceof(Uint8Array),
     response: null,
     status: 204,
-    errors: ["DEV_STORAGE_ONLY","UPLOAD_EXPIRED","FILE_TOO_LARGE","ILLEGAL_TRANSITION"],
+    errors: ["DIRECT_UPLOAD_ONLY","UPLOAD_EXPIRED","FILE_TOO_LARGE","ILLEGAL_TRANSITION"],
     phase: 1,
   },
   getStoreAsset: {
@@ -737,8 +739,8 @@ export const endpoints = defineEndpoints({
     auth: "seller",
     permission: "media.assets.upload",
     scope: "own-seller",
-    summary: "Send the file bytes of an upload (development storage)",
-    desc: "Development storage only: receives the file bytes for a signed upload ticket (real storage takes the bytes directly at the ticket URL). Answers 409 when a real storage adapter is configured. The body is the raw file (any content type), at most the ticket's maxBytes.",
+    summary: "Send the file bytes of an upload",
+    desc: "The ticket URL when storage takes uploads through the API (the server's disk; memory in tests). The body is the raw file (any content type), streamed to storage and never held in memory: at most the ticket's maxBytes, counted while it streams (a larger Content-Length is refused before reading; nothing is kept when the limit is passed). The write is atomic; sending again before complete replaces an earlier attempt. Answers DIRECT_UPLOAD_ONLY (409) when storage takes the bytes directly at its own ticket URL.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -747,7 +749,7 @@ export const endpoints = defineEndpoints({
     body: () => z.instanceof(Uint8Array),
     response: null,
     status: 204,
-    errors: ["DEV_STORAGE_ONLY","UPLOAD_EXPIRED","FILE_TOO_LARGE","ILLEGAL_TRANSITION"],
+    errors: ["DIRECT_UPLOAD_ONLY","UPLOAD_EXPIRED","FILE_TOO_LARGE","ILLEGAL_TRANSITION"],
     phase: 1,
   },
   listSellerAssets: {
@@ -910,8 +912,8 @@ export const endpoints = defineEndpoints({
     auth: "staff",
     permission: "media.assets.manage",
     scope: "staff",
-    summary: "Send the file bytes of a staff upload (development storage)",
-    desc: "Development storage only: receives the file bytes for a signed upload ticket (real storage takes the bytes directly at the ticket URL). Answers 409 when a real storage adapter is configured. The body is the raw file (any content type), at most the ticket's maxBytes. Only the staff member who started the upload may send its bytes (NOT_FOUND otherwise).",
+    summary: "Send the file bytes of a staff upload",
+    desc: "The ticket URL when storage takes uploads through the API (the server's disk; memory in tests). The body is the raw file (any content type), streamed to storage and never held in memory: at most the ticket's maxBytes, counted while it streams (a larger Content-Length is refused before reading; nothing is kept when the limit is passed). The write is atomic; sending again before complete replaces an earlier attempt. Answers DIRECT_UPLOAD_ONLY (409) when storage takes the bytes directly at its own ticket URL. Only the staff member who started the upload may send its bytes (NOT_FOUND otherwise).",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -920,7 +922,7 @@ export const endpoints = defineEndpoints({
     body: () => z.instanceof(Uint8Array),
     response: null,
     status: 204,
-    errors: ["NOT_FOUND","DEV_STORAGE_ONLY","UPLOAD_EXPIRED","FILE_TOO_LARGE","ILLEGAL_TRANSITION"],
+    errors: ["NOT_FOUND","DIRECT_UPLOAD_ONLY","UPLOAD_EXPIRED","FILE_TOO_LARGE","ILLEGAL_TRANSITION"],
     phase: 1,
   },
   listAssetsAdmin: {
@@ -1143,7 +1145,7 @@ export const spec = defineModuleSpec({
   group: "Platform",
   phase: 1,
   chapters: [5,8,13,16,17],
-  summary: "Every uploaded or generated file: images, video and documents. Signed direct uploads, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted).",
+  summary: "Every uploaded or generated file: images, video and documents. Uploads and signed download links, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted).",
   dependsOn: [],
   optionalDeps: ["audit","identity"],
   publicApi: ["getAsset","refs","attach","detach","checkImage","storeGeneratedFile","signedDownload","remove","readFile","storeInboundFile","findSimilar"],
@@ -1351,7 +1353,7 @@ export const spec = defineModuleSpec({
     },
     "uploadUrlTtlMinutes": {
       "default": 15,
-      "desc": "Signed upload URL lifetime",
+      "desc": "Upload ticket lifetime (the bytes must arrive before it ends)",
       "type": "duration",
       "min": 1,
       "max": 60,
@@ -1359,7 +1361,7 @@ export const spec = defineModuleSpec({
     },
     "downloadUrlTtlMinutes": {
       "default": 10,
-      "desc": "Signed download URL lifetime",
+      "desc": "Signed download link lifetime for private files (public renditions have permanent links)",
       "type": "duration",
       "min": 1,
       "max": 60,
@@ -1450,9 +1452,9 @@ export const spec = defineModuleSpec({
       "status": 403,
       "meaning": "The file belongs to another owner and cannot be attached here."
     },
-    "DEV_STORAGE_ONLY": {
+    "DIRECT_UPLOAD_ONLY": {
       "status": 409,
-      "meaning": "A real storage adapter is configured: upload the bytes to the ticket URL instead."
+      "meaning": "Storage takes the bytes directly at its own ticket URL, not through this API: send them to the ticket URL."
     }
   },
   tables: {

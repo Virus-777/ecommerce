@@ -11,11 +11,13 @@ import type { Kysely } from 'kysely';
 import type { specs } from '../../spec/index.js';
 import type { Config } from '../config/index.js';
 import type { Principal } from '../auth/index.js';
+import type { RateLimitResult } from '../auth/rate-limit.js';
 import type { Database } from '../db/index.js';
 import type { Inbox } from '../events/inbox.js';
 import type { AppError } from '../errors/index.js';
 import type { ModuleEvents } from '../events/index.js';
 import type { ModuleResolvers } from '../graphql/index.js';
+import type { FileRoute } from '../http/files.js';
 import type { RouteSet } from '../http/index.js';
 import type { WebhookVerifier } from '../http/register.js';
 import type { Clock } from '../lib/clock.js';
@@ -76,6 +78,13 @@ export interface ModuleContext<N extends ModuleName> {
   can(principal: Principal | null | undefined, permission: string): Promise<boolean>;
   /** Human references (MK-YYMMDD-NNNNN …) */
   readonly refs: RefGenerator;
+  /**
+   * A business rate limit (wrong codes, attempts per hour), shared by every server instance: counts one
+   * attempt for `key` (scoped to this module) when the fixed window has room. `peek` only looks whether one
+   * more attempt would be allowed. Refused attempts are not counted. Throw RATE_LIMITED with
+   * retryAfterSeconds when not allowed.
+   */
+  rateLimit(key: string, limit: { limit: number; windowMs: number; peek?: boolean }): Promise<RateLimitResult>;
   /** Offer this module's public API to other modules (in-process) */
   provide(api: ApiOf<N>): void;
   /** Public API of a module listed in this module's dependsOn */
@@ -92,6 +101,12 @@ export interface ModuleContext<N extends ModuleName> {
     routes(...sets: RouteSet[]): void;
     /** Verifies provider signatures on this module's webhooks (required when it has webhook endpoints) */
     webhookVerifier(verify: WebhookVerifier): void;
+    /**
+     * Serves files this module keeps on the server at GET /files/{bucket}/{key} (one module per process).
+     * Links are signed with secretFor(config, '<module>.files') (kernel/auth/file-links.ts) and verified
+     * by the auth middleware before serve() runs.
+     */
+    files(route: FileRoute): void;
   };
   readonly graphql: {
     resolvers(resolvers: ModuleResolvers): void;

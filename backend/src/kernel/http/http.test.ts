@@ -9,6 +9,7 @@ import * as common from '../../spec/common.js';
 import { auth, callers, ISSUER, TEST_JWK, token } from '../../testing/app.js';
 import { devClaims } from '../auth/dev.js';
 import { moduleAuthorities } from '../auth/authorities.js';
+import { signFileLink } from '../auth/file-links.js';
 import { createAuthChain } from '../auth/setup.js';
 import { devSigner, newDevJwk, signAccessToken } from '../auth/tokens.js';
 import { loadConfig } from '../config/index.js';
@@ -16,6 +17,7 @@ import { createDatabase, type Database } from '../db/index.js';
 import { newId } from '../lib/ids.js';
 import { migrate } from '../migrations/index.js';
 import { defineEndpoints } from '../spec/define.js';
+import { registerFileRoute } from './files.js';
 import { postgresIdempotencyStore } from './idempotency.js';
 import { notImplemented, routes } from './index.js';
 import { registerEndpoints, registrationsOf } from './register.js';
@@ -55,7 +57,13 @@ const sets = [
     getItem: async ({ params }) => item(params.id),
     listItems: async ({ page }) => ({ items: [item(newId())], nextCursor: null, ...(page.mode === 'page' ? { page: page.page, totalPages: 1, total: 1 } : {}) }),
     placeOrder: async ({ body, scope }) => ({ orderId: `MK-${++placed}`, n: body.quantity, scope: scope.kind }),
-    upload: async ({ body, request }) => ({ bytes: body.length, first: body[0] ?? -1, type: String(request.headers['content-type']) }),
+    upload: async ({ body, request }) => {
+      // a stream, read by the handler (never buffered by the kernel)
+      const chunks: Buffer[] = [];
+      for await (const c of body ?? []) chunks.push(c as Buffer);
+      const all = Buffer.concat(chunks);
+      return { bytes: all.length, first: all[0] ?? -1, type: String(request.headers['content-type']) };
+    },
     broken: async () => ({ id: 'not-a-uuid' }) as never,
     unbuilt: notImplemented,
     later: notImplemented,
@@ -72,6 +80,7 @@ const sets = [
 const ackSets = [routes(ackEndpoints, 'webhooks', { ack: async () => (acked++, { received: true }) })];
 
 const REFRESH = 'refresh-token-ok';
+const FILES_SECRET = 'demo-files-secret';
 let app: FastifyInstance;
 let db: Database;
 
@@ -89,9 +98,12 @@ beforeAll(async () => {
     wrap: (a) => ({ ...a, verifyRefreshToken: async (t) => (t === REFRESH ? { sessionId: 'session-1', audience: 'store', kind: 'customer' } : null) }),
     webhookVerifiers: new Map([['acks', hmacWebhookVerifier(config, 'acks')]]),
     ownerOnly: new Set(['demo.payouts.manage']),
+    fileLinks: { secret: FILES_SECRET, permanentBuckets: new Set(['pub']) },
   });
   chain.install(app);
   registerEndpoints(app, [...registrationsOf('demo', 'Demo', sets), ...registrationsOf('acks', 'Acks', ackSets)], { config, auth: chain, idempotency: postgresIdempotencyStore(db.kysely) });
+  // the file the verified link names, as the serving module receives it
+  registerFileRoute(app, { module: 'demo', permanentBuckets: ['pub'], serve: async (file, request, reply) => reply.send({ ...file, method: request.method, via: request.auth?.via }) });
   await app.ready();
 });
 
@@ -207,7 +219,7 @@ describe('caller checks', () => {
     expect(res.json().scope).toBe('visitor');
   });
 
-  it('hands a binary body to the handler as raw bytes, whatever the content type', async () => {
+  it('hands a binary body to the handler as a stream, whatever the content type and size', async () => {
     const url = `/api/store/demo/uploads/${newId()}/content`;
     for (const [type, payload] of [['image/png', Buffer.from([137, 80, 78, 71, 13, 10])], ['application/json', Buffer.from('{"a":1}')], ['application/octet-stream', Buffer.alloc(3 * 1024 * 1024, 7)]] as const) {
       const res = await app.inject({ method: 'PUT', url, headers: { ...visitor, 'content-type': type }, payload });
@@ -215,6 +227,49 @@ describe('caller checks', () => {
       expect(res.json()).toEqual({ bytes: payload.length, first: payload[0], type });
     }
     expect((await app.inject({ method: 'PUT', url, payload: Buffer.from([1]) })).statusCode).toBe(401);
+  });
+});
+
+describe('signed file links (GET /files/…)', () => {
+  const link = (l: Partial<Parameters<typeof signFileLink>[1]> = {}, secret = FILES_SECRET) =>
+    signFileLink(secret, { bucket: 'priv', key: 'docs/a b.pdf', expiresAt: new Date(Date.now() + 60_000), contentType: 'application/pdf', disposition: 'attachment; filename="a.pdf"', ...l });
+
+  it('opens the exact file the signature names, without any Authorization header', async () => {
+    const res = await app.inject({ url: link() });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).toMatchObject({ bucket: 'priv', key: 'docs/a b.pdf', contentType: 'application/pdf', disposition: 'attachment; filename="a.pdf"', method: 'GET', via: 'file-link' });
+    expect((await app.inject({ method: 'HEAD', url: link() })).statusCode).toBe(200);
+    // permanent links, only for the public buckets
+    expect((await app.inject({ url: link({ bucket: 'pub', expiresAt: null }) })).json()).toMatchObject({ bucket: 'pub', expiresAt: null });
+  });
+
+  it('refuses a missing, tampered or foreign signature in the middleware (401, no Bearer challenge)', async () => {
+    const good = link();
+    const bad = [
+      good.replace(/sig=[^&]+/, ''), // no signature
+      good.replace('docs/a%20b.pdf', 'docs/other.pdf'), // another file
+      good.replace('priv/', 'pub/'), // another bucket
+      good.replace(/exp=\d+/, `exp=${Math.floor(Date.now() / 1000) + 86_400}`), // a longer life
+      good.replace('ct=application%2Fpdf', 'ct=text%2Fhtml'), // another content type
+      link({}, 'another-secret'),
+      link({ expiresAt: null }), // a permanent link to a private bucket
+      '/files/priv/docs/a%20b.pdf',
+    ];
+    for (const url of bad) {
+      const res = await app.inject({ url, headers: visitor }); // a valid Bearer token opens no file
+      expect(res.statusCode, url).toBe(401);
+      expect(res.json().error.code).toBe('UNAUTHORIZED');
+      expect(res.json().error.details.reason).toMatch(/^link_(missing|invalid)$/);
+      expect(res.headers['www-authenticate']).toBeUndefined();
+    }
+  });
+
+  it('refuses an expired link (403 link_expired) and needs a token for anything else under /files', async () => {
+    const res = await app.inject({ url: link({ expiresAt: new Date(Date.now() - 61_000) }) });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toMatchObject({ code: 'FORBIDDEN', details: { reason: 'link_expired' } });
+    expect((await app.inject({ url: '/files' })).json().error.details.reason).toBe('token_missing');
+    expect((await app.inject({ method: 'PUT', url: link() })).statusCode).toBe(401); // not a file route: 401 before 404
   });
 });
 

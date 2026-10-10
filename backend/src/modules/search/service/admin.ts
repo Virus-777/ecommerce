@@ -163,10 +163,16 @@ export class SearchAdmin extends SearchQueries {
   }
 
   async indexStatus(): Promise<IndexStatus> {
-    const [stats, dirty, last, running] = await Promise.all([this.repo.documentStats(), this.repo.dirtyStats(), this.repo.lastCompletedFullJob(), this.repo.activeFullJob()]);
+    const [stats, dirty, last, running, engine] = await Promise.all([
+      this.repo.documentStats(),
+      this.repo.dirtyStats(),
+      this.repo.lastCompletedFullJob(),
+      this.repo.activeFullJob(),
+      this.engine.describe ? this.engine.describe() : this.engine.name,
+    ]);
     const now = this.now();
     return {
-      engine: this.engine.name,
+      engine,
       documents: stats.documents,
       offerRows: stats.offerRows,
       staleDocuments: dirty.count,

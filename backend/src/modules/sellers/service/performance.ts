@@ -3,7 +3,7 @@ import { AppError } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type * as common from '../../../spec/common.js';
-import type { PerformanceMetric, PerformanceSummary, PerformanceTarget } from '../../../spec/sellers.js';
+import type { PerformanceMetric, PerformanceSummary, PerformanceTarget, PerformanceTargetsChange } from '../../../spec/sellers.js';
 import { METRIC_INFO, METRICS, targetDisplay, type MetricKey } from '../domain/catalogue.js';
 import { computeMetrics, emptyCounts, isMiss, overallOf, type PerformanceCounts } from '../domain/metrics.js';
 import { addDays, HOUR, isoDate } from '../domain/rules.js';
@@ -128,7 +128,7 @@ export class PerformancePart extends Part {
     return [...current, ...scheduled];
   }
 
-  async setPerformanceTargets(targets: PerformanceTarget[], reason: string, by: By): Promise<PerformanceTarget[]> {
+  async setPerformanceTargets(targets: PerformanceTarget[], reason: string, by: By): Promise<PerformanceTargetsChange> {
     const today = this.core.today();
     const issues: { path: string; message: string }[] = [];
     if (!reason?.trim()) issues.push({ path: 'reason', message: 'Say why the targets change' });
@@ -153,9 +153,22 @@ export class PerformancePart extends Part {
         requestedBy: this.core.principalOf(by),
       });
       const pending = await this.core.savePendingChange({ kind: 'performance_targets', approvalRequestId: req.id, payload: { targets, reason: reason.trim(), setBy: by.actor }, reason: reason.trim(), actor: by.actor });
-      throw new AppError('APPROVAL_REQUIRED', check.reason, { approvalRequestId: req.id, pendingChangeId: pending.id });
+      await this.core.audit(
+        {
+          action: 'sellers.performance_targets.request',
+          actionLabel: 'Proposed new seller performance targets',
+          category: 'settings',
+          target: { type: 'performance_targets', id: pending.id, label: 'Seller performance targets', screen: 'admin/seller-targets' },
+          reason: reason.trim(),
+          after: targets,
+          approvalRequestId: req.id,
+        },
+        by,
+      );
+      // saved, pending approval: the targets unchanged with the change and its approval (FORMAT.md, Approval responses)
+      return { targets: await this.listPerformanceTargets(), approval: await this.core.approvalInfo(req.id), pendingChange: map.pendingStaffChange(pending) };
     }
-    return this.applyTargets(targets, reason.trim(), by);
+    return { targets: await this.applyTargets(targets, reason.trim(), by), approval: null, pendingChange: null };
   }
 
   async applyTargets(targets: PerformanceTarget[], reason: string, by: By, approvalRequestId?: string): Promise<PerformanceTarget[]> {

@@ -20,3 +20,9 @@ const defs = await loadDefinitions(config.modules ?? enabledModules, moduleLoade
 const { applied } = await migrate(db, migrationUnits(defs), (m) => console.log(m));
 console.log(applied.length ? `Applied ${applied.length} migration(s).` : 'Database is up to date.');
 await db.close();
+if (config.jobsBackend === 'pgboss' && config.databaseUrl) {
+  // the job queue's own tables (schema pgboss), versioned by pg-boss
+  const { migrateJobQueue } = await import('../src/kernel/jobs/pgboss.js');
+  await migrateJobQueue(config.databaseUrl);
+  console.log('Job queue (pg-boss) is up to date.');
+}

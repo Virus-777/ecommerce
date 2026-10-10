@@ -4,8 +4,11 @@
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import type { FastifyInstance } from 'fastify';
+import { createHash } from 'node:crypto';
 import { moduleAuthorities, type Authorities } from './kernel/auth/authorities.js';
 import { REFRESH_COOKIE, type AuthChain, type WebhookVerifier } from './kernel/auth/chain.js';
+import { memoryRateLimitStore, postgresRateLimitStore, PURGE_RATE_LIMITS_JOB } from './kernel/auth/rate-limit.js';
+import { fileLinkSecret } from './kernel/auth/file-links.js';
 import { createAuthChain } from './kernel/auth/setup.js';
 import type { Principal } from './kernel/auth/index.js';
 import type { KeyRing } from './kernel/auth/tokens.js';
@@ -14,12 +17,13 @@ import { createDatabase, type Database } from './kernel/db/index.js';
 import { registerErrorCodes } from './kernel/errors/index.js';
 import { EventBus } from './kernel/events/index.js';
 import { registerGraphQL, unusablePersistedQueries } from './kernel/graphql/index.js';
+import { registerFileRoute } from './kernel/http/files.js';
 import { postgresIdempotencyStore } from './kernel/http/idempotency.js';
 import { createOpenApiObjectTransform, createOpenApiTransform } from './kernel/http/openapi.js';
 import { registerEndpoints } from './kernel/http/register.js';
 import { createServer } from './kernel/http/server.js';
 import type { PublicApiMap } from './kernel/module-system/public-apis.js';
-import { JobScheduler } from './kernel/jobs/index.js';
+import { createJobScheduler, type JobScheduler } from './kernel/jobs/index.js';
 import { systemClock, type Clock } from './kernel/lib/clock.js';
 import { createRefGenerator } from './kernel/lib/refs.js';
 import { migrate, migrationUnits } from './kernel/migrations/index.js';
@@ -119,8 +123,23 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
   /* ---------------------------------------------------------------- kernel services */
   const clock = opts.clock ?? systemClock;
   const events = new EventBus(app.log, { validatePayloads: config.env !== 'production', clock });
-  const jobs = new JobScheduler(app.log, config.market.timeZone, clock);
+  const jobs = await createJobScheduler(app.log, {
+    backend: config.jobsBackend,
+    timeZone: config.market.timeZone,
+    clock,
+    connectionString: config.databaseUrl,
+    workers: config.jobsEnabled,
+    // "on boot" jobs (registries synced from the enabled modules) run again when the deploy or the module set changes
+    deployId: createHash('sha256')
+      .update([config.deployId ?? '', ...defs.map((d) => `${d.spec.name}@${d.version}`)].join('\n'))
+      .digest('hex')
+      .slice(0, 16),
+  });
   const refs = createRefGenerator(database.kysely, clock, config.market.timeZone);
+  // rate-limit windows: in PostgreSQL every instance counts together; ended windows are purged by a kernel job
+  const rateLimits = config.rateLimitStore === 'postgres' ? postgresRateLimitStore(database.kysely, clock) : memoryRateLimitStore(clock);
+  jobs.declare(PURGE_RATE_LIMITS_JOB);
+  jobs.handle('kernel', PURGE_RATE_LIMITS_JOB.name, () => rateLimits.purge());
   for (const spec of Object.values(allSpecs)) registerErrorCodes(spec.name, spec.errorCodes);
   events.registerSpecs(Object.values(allSpecs));
 
@@ -129,14 +148,17 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
   // modules get permission checks before the auth chain exists (it needs their APIs): bind it late
   let authChain: AuthChain | undefined;
   const can = async (principal: Principal | null | undefined, permission: string) => (authChain ? authChain.canPrincipal(principal, permission) : false);
-  const boot = await bootModules(defs, { config, log: app.log, database, clock, events, jobs, refs, can });
+  const boot = await bootModules(defs, { config, log: app.log, database, clock, events, jobs, refs, rateLimits, can });
   for (const w of boot.warnings) app.log.debug(w);
   for (const [m, v] of Object.entries(opts.webhookVerifiers ?? {})) if (!boot.webhookVerifiers.has(m)) boot.webhookVerifiers.set(m, v);
   for (const [m, stub] of Object.entries(opts.apiStubs ?? {})) boot.apis.set(m, withStubs(boot.apis.get(m), stub as object));
   await boot.runAfterBoot();
 
   /* ---------------------------------------------------------------- authorization: a token on every request, verified here */
+  // GET /files/…: the token is the signed link, verified with the serving module's file-link key
+  const fileRoute = boot.fileRoutes[0];
   const { auth, revocations } = await createAuthChain({
+    fileLinks: fileRoute && { secret: fileLinkSecret(config, fileRoute.module), permanentBuckets: new Set(fileRoute.permanentBuckets) },
     config,
     clock,
     log: app.log,
@@ -145,6 +167,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
     wrap: opts.authorities,
     webhookVerifiers: boot.webhookVerifiers,
     ownerOnly: new Set(Object.values(allSpecs).flatMap((s) => s.permissions.filter((p) => p.ownerOnly).map((p) => p.key))),
+    limits: rateLimits,
   });
   authChain = auth;
   auth.install(app);
@@ -153,6 +176,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
   for (const name of ['sellers.member.permissions_changed', 'sellers.member.removed', 'sellers.seller.closed']) events.subscribe('kernel', name, () => auth.invalidate('members'));
 
   registerEndpoints(app, boot.endpoints, { config, auth, idempotency: postgresIdempotencyStore(database.kysely, clock) });
+  if (fileRoute) registerFileRoute(app, fileRoute);
   const graphql = await registerGraphQL(app, {
     config,
     baseTypeDefs,
@@ -178,11 +202,11 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
   });
   app.addHook('onReady', async () => {
     revocations.start();
-    if (config.jobsEnabled) jobs.start();
+    if (config.jobsEnabled) await jobs.start();
   });
   app.addHook('onClose', async () => {
     revocations.stop();
-    jobs.stop();
+    await jobs.stop();
     await events.drain();
     if (!opts.database) await database.close();
   });

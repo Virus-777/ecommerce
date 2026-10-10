@@ -1,5 +1,6 @@
 import { isIP } from 'node:net';
 import { createHash } from 'node:crypto';
+import type { Readable } from 'node:stream';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { SYSTEM_ACTOR } from '../../kernel/auth/index.js';
 import { AppError, isAppError, isNotImplemented } from '../../kernel/errors/index.js';
@@ -54,7 +55,7 @@ import {
 import { assetMachine } from './domain/state-machines.js';
 import { ERASED_BUCKET } from './infra/postgres/repository.js';
 import { checkOf, ownerOf, toAsset, toRendition, toUsage } from './mappers.js';
-import type { AssetFilter, AssetPatch, AssetRow, MediaProviders, MediaRepository, OwnerFilter, ProcessingJobRow, RenditionRow, UploadRow, UsageRow } from './ports.js';
+import { ObjectTooLargeError, type AssetFilter, type AssetPatch, type AssetRow, type MediaProviders, type MediaRepository, type OwnerFilter, type ProcessingJobRow, type RenditionRow, type UploadRow, type UsageRow } from './ports.js';
 
 export interface MediaServiceDeps {
   repo: MediaRepository;
@@ -70,7 +71,7 @@ export interface By {
   requestId?: string;
 }
 
-/** The API area an upload was started in, and the address the caller reached the API at (development upload URL) */
+/** The API area an upload was started in, and the address the caller reached the API at (the ticket URL when uploads go through the API) */
 export type UploadArea = 'store' | 'seller' | 'admin';
 export interface UploadTarget {
   area: UploadArea;
@@ -78,7 +79,7 @@ export interface UploadTarget {
   origin: string;
 }
 
-/** Development upload target: PUT /api/{area}/media/uploads/{id}/content */
+/** Upload target when storage takes uploads through the API: PUT /api/{area}/media/uploads/{id}/content */
 const CONTENT_PATH = /^\/api\/(store|seller|admin)\/media\/uploads\/([^/]+)\/content$/;
 const contentUrl = (target: UploadTarget, uploadId: string) => `${target.origin}/api/${target.area}/media/uploads/${uploadId}/content`;
 
@@ -140,10 +141,6 @@ export class MediaService implements MediaPublicApi {
   private get storage() {
     return this.deps.providers.storage;
   }
-  /** Development storage (infra/storage/dev.ts) takes the bytes through this API; a real adapter at its own signed URL */
-  private get devStorage(): boolean {
-    return typeof (this.storage as { acceptSignedPut?: unknown }).acceptSignedPut === 'function';
-  }
   private now() {
     return this.ctx.clock.now();
   }
@@ -180,7 +177,7 @@ export class MediaService implements MediaPublicApi {
       if (row.status !== 'ready') continue;
       const r = pickRendition(renditions.get(id) ?? [], row.kind === 'video' ? 'poster' : size);
       let url: string;
-      if (r && row.visibility === 'public') url = r.url;
+      if (r && row.visibility === 'public') url = this.storage.publicUrl(r.storage_key);
       else if (r) url = await this.sign(this.storage.buckets.private, r.storage_key, row, ttl, true);
       else url = await this.sign(row.storage_bucket, row.storage_key, row, ttl, false);
       out.push({ id, url, alt: row.alt, width: r?.width ?? row.width, height: r?.height ?? row.height, bytes: Number(row.size_bytes) });
@@ -472,7 +469,7 @@ export class MediaService implements MediaPublicApi {
 
   /**
    * POST /uploads (store, seller, admin): checks purpose, type, size and quotas, then issues a signed storage URL.
-   * With development storage the ticket URL is this API's PUT /uploads/{id}/content in the area of `target`.
+   * When storage takes uploads through the API (local disk, memory) the ticket URL is this API's PUT /uploads/{id}/content in the area of `target`.
    */
   async createUpload(input: {
     uploader: Uploader;
@@ -579,38 +576,53 @@ export class MediaService implements MediaPublicApi {
       });
       await tx.bumpUploadCounter(owner, day, req.sizeBytes);
     });
+    const ticket = { uploadId, assetId, maxBytes: req.sizeBytes, expiresAt: expiresAt.toISOString() };
+    // storage the API serves itself (local disk, memory) takes the bytes through PUT /uploads/{id}/content
+    if (this.storage.viaApi) {
+      const area = input.target?.area ?? (input.uploader === 'staff' ? 'admin' : input.uploader === 'seller' ? 'seller' : 'store');
+      const url = input.target ? contentUrl(input.target, uploadId) : `${this.ctx.config.apiUrl}/api/${area}/media/uploads/${uploadId}/content`;
+      return { ...ticket, method: 'PUT', url, headers: { 'content-type': req.contentType }, fields: {} };
+    }
+    if (!this.storage.presignUpload) throw new Error('This storage adapter takes neither API nor direct uploads');
     const signed = await this.storage.presignUpload({ bucket: this.storage.buckets.private, key, contentType: req.contentType, maxBytes: req.sizeBytes, expiresAt });
-    // development storage has no address a client can reach: the bytes come through this API instead
-    const url = this.devStorage && input.target ? contentUrl(input.target, uploadId) : signed.url;
-    return { uploadId, assetId, ...signed, url, maxBytes: req.sizeBytes, expiresAt: expiresAt.toISOString() };
+    return { ...ticket, ...signed };
   }
 
   /**
-   * PUT /uploads/{id}/content: development storage only. Receives the bytes of a pending upload the caller
-   * reaches (real storage takes them directly at the signed ticket URL), with the checks the signed URL makes:
-   * not expired, at most the ticket's maxBytes. Stored under the declared content type, as storage does. The
-   * client then completes the upload. Store and Seller Center reach their own uploads (owner); Admin Center only the
-   * uploads the calling staff member started (startedBy).
+   * PUT /uploads/{id}/content, when storage takes uploads through the API (local disk, memory). Streams the
+   * bytes of a pending upload the caller reaches into storage, with the checks a signed upload URL makes: not
+   * expired, at most the ticket's maxBytes, counted while streaming (a declared Content-Length above it is
+   * refused before reading; nothing is stored when the limit is passed). Stored atomically under the declared
+   * content type; a retry replaces an earlier attempt. The client then completes the upload. Store and Seller
+   * Center reach their own uploads (owner); Admin Center only the uploads the calling staff member started.
    */
-  async receiveUploadContent(uploadId: string, bytes: Uint8Array | undefined, opts: { area: UploadArea; owner?: OwnerFilter; startedBy?: { kind: string; id: string | null } }): Promise<void> {
-    if (!this.devStorage) throw this.ctx.error('DEV_STORAGE_ONLY', 'Upload the file to the storage URL in the upload ticket.');
+  async receiveUploadContent(
+    uploadId: string,
+    body: Readable | Uint8Array | undefined,
+    opts: { area: UploadArea; owner?: OwnerFilter; startedBy?: { kind: string; id: string | null }; declaredBytes?: number },
+  ): Promise<void> {
+    if (!this.storage.viaApi) throw this.ctx.error('DIRECT_UPLOAD_ONLY', 'Upload the file to the storage URL in the upload ticket.');
     const upload = await this.repo.getUpload(uploadId);
     const inArea = upload && (opts.area !== 'admin' || upload.created_by_kind === 'staff') && startedBy(upload, opts.startedBy);
     const asset = inArea ? await this.repo.getAsset(upload.asset_id, { owner: opts.owner }) : null;
     if (!upload || !asset) throw new AppError('NOT_FOUND', 'Upload not found');
     if (asset.status === 'expired' || this.now() > upload.url_expires_at) throw new AppError('UPLOAD_EXPIRED', 'The upload link expired; start a new upload.');
     if (asset.status !== 'pending_upload' || upload.completed_at) throw new AppError('ILLEGAL_TRANSITION', 'This upload is already complete.', { status: asset.status });
-    const body = bytes ?? new Uint8Array(0);
     const maxBytes = Number(upload.expected_bytes);
-    if (body.byteLength > maxBytes) {
-      throw new AppError('FILE_TOO_LARGE', `The file is ${mb(body.byteLength)}; this upload was started for at most ${mb(maxBytes)}.`, { maxBytes, receivedBytes: body.byteLength });
+    const tooLarge = (receivedBytes: number) =>
+      new AppError('FILE_TOO_LARGE', `The file is larger than this upload was started for (at most ${mb(maxBytes)}).`, { maxBytes, receivedBytes });
+    if (opts.declaredBytes !== undefined && opts.declaredBytes > maxBytes) throw tooLarge(opts.declaredBytes);
+    try {
+      await this.storage.putStream(asset.storage_bucket, asset.storage_key, chunksOf(body), asset.content_type, { maxBytes });
+    } catch (err) {
+      if (err instanceof ObjectTooLargeError) throw tooLarge(err.receivedBytes);
+      throw err;
     }
-    await this.storage.put(asset.storage_bucket, asset.storage_key, body, asset.content_type);
   }
 
   /**
-   * Development storage: the signed storage URL behind an upload ticket's API URL (…/uploads/{id}/content), so
-   * tools and tests that "upload" through DevStorage.acceptSignedPut keep working with the ticket URL. Null when
+   * Memory storage (tests and tools): the signed upload URL behind an upload ticket's API URL (…/uploads/{id}/content), so
+   * tools and tests that "upload" through MemoryStorage.acceptSignedPut keep working with the ticket URL. Null when
    * the URL isn't one, or the upload is unknown. No record scope: it only re-signs what the ticket already granted.
    */
   async signedStorageUrlFor(url: string): Promise<string | null> {
@@ -624,7 +636,7 @@ export class MediaService implements MediaPublicApi {
     if (!isUuid(id)) return null;
     const upload = await this.repo.getUpload(id);
     const asset = upload && (await this.repo.getAsset(upload.asset_id));
-    if (!upload || !asset) return null;
+    if (!upload || !asset || !this.storage.presignUpload) return null;
     const signed = await this.storage.presignUpload({
       bucket: asset.storage_bucket,
       key: asset.storage_key,
@@ -906,7 +918,7 @@ export class MediaService implements MediaPublicApi {
     return this.detailOf(after, { signPrivate: true, area: 'admin' });
   }
 
-  /** Public renditions move to a private quarantine copy; the CDN key serves the placeholder or nothing */
+  /** Public renditions move to a private quarantine copy; the public key serves the placeholder or nothing */
   private async takeDownPublic(row: AssetRow, showPlaceholder: boolean) {
     if (row.visibility !== 'public') return;
     const pub = this.storage.buckets.public;
@@ -1313,8 +1325,10 @@ export class MediaService implements MediaPublicApi {
         let url: string | null = null;
         if (row.visibility === 'public') {
           if (row.status === 'ready') {
-            list = rs.map((r) => toRendition(r));
-            url = pickRendition(rs, row.kind === 'video' ? 'poster' : 'medium')?.url ?? null;
+            // built from the key on every read (stored URLs keep working, and follow a new signing key)
+            list = rs.map((r) => toRendition(r, this.storage.publicUrl(r.storage_key)));
+            const main = pickRendition(rs, row.kind === 'video' ? 'poster' : 'medium');
+            url = main ? this.storage.publicUrl(main.storage_key) : null;
           } else if (row.status === 'removed' && row.show_placeholder !== false) {
             url = this.storage.publicUrl(PLACEHOLDER_KEY);
           }
@@ -1504,10 +1518,21 @@ const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
 /** The object key in a storage or CDN URL */
 function keyOfUrl(url: string): string | null {
   try {
-    return decodeURIComponent(new URL(url).pathname.replace(/^\//, '')) || null;
+    // a link the API serves (/files/{bucket}/{key}) or a CDN URL (/{key})
+    return decodeURIComponent(new URL(url).pathname.replace(/^\/files\/[^/]+\//, '/').replace(/^\//, '')) || null;
   } catch {
     return null;
   }
+}
+
+/**
+ * The chunks of an upload body. A request stream is read without destroying it when the reader stops early
+ * (too large): the server can still answer 413 on the same connection.
+ */
+function chunksOf(body: Readable | Uint8Array | undefined): AsyncIterable<Uint8Array> | Iterable<Uint8Array> {
+  if (!body) return [];
+  if (body instanceof Uint8Array) return [body];
+  return { [Symbol.asyncIterator]: () => body.iterator({ destroyOnReturn: false }) as AsyncIterator<Uint8Array> };
 }
 
 async function readBody(body: unknown): Promise<Uint8Array> {

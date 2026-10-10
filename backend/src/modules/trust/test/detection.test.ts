@@ -130,7 +130,7 @@ describe('referrals from other modules', () => {
     await kit.emit('orders', 'orders.order.placed', { orderId: newId(), ref: 'MK-1', checkoutSessionId: newId(), customerId: newId(), guestEmail: null, paymentIntentId: newId(), paymentState: 'accepted', total: { amount: 1000, currency: 'USD' }, couponCodes: [], groups: [], placedAt: new Date().toISOString(), attemptNo: 1, contactName: 'Ana' });
     await kit.emit('orders', 'orders.item.cancelled', { orderId: newId(), ref: 'MK-2', groupId: newId(), ownerType: 'seller', sellerId: newId(), itemId: newId(), offerId: newId(), stockItemId: newId(), quantity: 1, cancellationId: newId(), initiatedBy: 'staff', reasonCode: 'fraud', beforeDispatch: true, countsAgainstSeller: false, refund: { itemAmount: usd, discountShare: usd, shippingRefund: usd, taxRefund: usd, total: usd }, paymentIntentId: newId(), trustReportId: newId(), notifyCustomer: true });
     await kit.emit('finance', 'finance.hold.placed', { holdId: newId(), sellerId: newId(), amount: { amount: 100, currency: 'USD' }, reasonCode: 'trust', reason: 'x', reviewDate: '2030-01-01', trustReportId: newId() });
-    await kit.emit('support', 'support.case.opened', { caseId: newId(), ref: 'CS-1', kind: 'trust_outreach', category: 'trust', priority: 'normal', customerId: newId(), orderItemIds: [], handler: 'support' });
+    await kit.emit('support', 'support.case.opened', { caseId: newId(), ref: 'CS-1', kind: 'trust_outreach', category: 'trust', priority: 'normal', customerId: newId(), orderItemIds: [], handler: 'marketplace_support' });
     await kit.emit('customers', 'customers.account.restriction_lifted', { customerId: newId(), restrictionId: newId(), scope: 'messaging', trustEnforcementId: newId() });
     expect(true).toBe(true);
   });

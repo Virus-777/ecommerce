@@ -213,8 +213,9 @@ describe('warnings and closure', () => {
   it('staff closure needs a second reviewer; seller-requested closure closes at once', async () => {
     const s = await approvedSeller(kit);
     const res = await kit.call('POST', `${ADMIN}/sellers/${s.sellerId}/close`, staff(), { reason: 'Inactive for a year', reasonCode: 'inactive' });
-    expect(res.body.error.code).toBe('APPROVAL_REQUIRED');
-    await kit.decide(res.body.error.details.approvalRequestId, 'approved');
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ status: 'approved', pendingChange: { kind: 'closure' } });
+    await kit.decide(res.body.approval.approvalRequestId, 'approved');
     expect((await kit.svc.getSeller(s.sellerId))!.status).toBe('closed');
     expect(kit.last('sellers.seller.closed')).toMatchObject({ sellerId: s.sellerId, reasonCode: 'inactive' });
 

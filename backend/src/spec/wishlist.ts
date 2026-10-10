@@ -738,7 +738,7 @@ export const spec = defineModuleSpec({
   chapters: [3,7,19],
   summary: "Saved shopping for customers: saved items in one or more lists, price-drop and back-in-stock alerts, and shareable lists. Alerts are delivered through notifications under the customer's promotional preferences.",
   dependsOn: ["catalog","offers","customers"],
-  optionalDeps: ["inventory","cart","promotions","notifications","reports","media","search"],
+  optionalDeps: ["inventory","cart","promotions","notifications","reports","media","search","sellers"],
   publicApi: ["savedCount","isSaved","listItems","listLists","listAlerts","exportCustomerData"],
   permissions: [
     {

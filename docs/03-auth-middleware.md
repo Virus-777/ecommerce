@@ -13,7 +13,7 @@ v1 was reviewed twice: a fact-check against every spec, and a security review. v
 
 ## 0. Rule: every endpoint requires a token, verified in middleware
 
-**Every request to `/api/*`, `/graphql/*` and `/webhooks/*` must carry a token.** Token verification is middleware (M4, §3): it runs before validation and before any module code. Handlers and services never read headers or tokens; they receive a verified `principal`. A request with no token, or with a token that fails verification, is refused with 401, including requests to URLs that don't exist (401 before 404), so the API can't be explored without a token.
+**Every request to `/api/*`, `/graphql/*`, `/webhooks/*` and `/files/*` must carry a token.** Token verification is middleware (M4, §3): it runs before validation and before any module code. Handlers and services never read headers or tokens; they receive a verified `principal`. A request with no token, or with a token that fails verification, is refused with 401, including requests to URLs that don't exist (401 before 404), so the API can't be explored without a token.
 
 ### Token kinds
 
@@ -23,6 +23,7 @@ v1 was reviewed twice: a fact-check against every spec, and a security review. v
 | **Access token** | customers, seller owners and members, staff | sign-in | JWT: signature, `kid`, `iss`, `aud`, `typ`, expiry; revocation (§6) | 15 min |
 | **Refresh token** | the same callers (visitors included) | issued with the access token | hash lookup in `identity.sessions`; reuse rules (§5) | 24 h – 30 days |
 | **Provider signature** | payment, carrier, email, SMS, storage and verification providers | shared secret per provider | provider-specific HMAC or signature over the raw body, with a timestamp window | per request |
+| **Signed file link** (new) | whoever the API handed a file link to: an `<img src>` in the store, a download button, the Android app | from an API response that already passed the token checks (download endpoints, `refs`, asset views) | HMAC-SHA256 with `secretFor(config, 'media.files')` over the exact bucket, key, expiry, content type and disposition (§0 "File links") | private files: `downloadUrlTtlMinutes` (10 min); public renditions: permanent |
 
 The **visitor token replaces the guest header and guest token.** For the store, the visitor session *is* the guest session: it holds the cart, recently viewed items and guest order grants. The `X-Guest-Session` header is retired, so every caller sends `Authorization: Bearer …`. Signing in claims the visitor session into the account (§8).
 
@@ -39,6 +40,7 @@ The **visitor token replaces the guest header and guest token.** For the store, 
 | Public: start a guest session | 1 | `anyone` | **removed**, replaced by the bootstrap endpoint | – |
 | Public: refresh tokens, sign out | 2 | `anyone`, refresh token in the body | **`refresh`** | refresh token (cookie on the website, body on Android), verified in middleware |
 | Webhooks | 9 | `provider` | `provider` | provider signature, verified in middleware (M11) |
+| File downloads `GET`/`HEAD /files/{bucket}/{key}` (not a spec endpoint) | 1 route | – | **`file-link`** | the link's own signature, verified in middleware (M4) |
 | GraphQL store / seller / admin | 3 endpoints (not in the 1,269) | store open to anyone | same as the area | store: visitor or customer token; seller and admin: access token |
 | **Bootstrap:** `POST /api/public/identity/app-sessions` | 1 (new) | – | **`bootstrap`** | none: this endpoint issues the first token (below) |
 
@@ -51,6 +53,26 @@ Something has to hand out the first token, so the **bootstrap endpoint** is the 
 - **Strict rate limits:** per IP and per device installation (§11).
 - **Narrow output:** it issues only a visitor token, which can do no more than an anonymous visitor could in v2: read public data and keep a cart.
 
+### File links (files the API serves)
+
+Files are kept on the server's own disk (media, `MEDIA_STORAGE=local`; owner decision: no S3), so the API serves them: there is no storage host or CDN that could check a presigned URL for us. An `<img src>`, a `<video>` or a plain download link can't send an `Authorization` header, so **the link's signature is its token**, the same way a provider's signature is the token of a webhook.
+
+```
+GET /files/marketly-private/originals/<uuid>.pdf?exp=1791640800&ct=application%2Fpdf&cd=attachment%3B+filename%3D%22license.pdf%22&sig=<base64url HMAC>
+GET /files/marketly-public/renditions/<uuid>/medium.webp?sig=<base64url HMAC>
+```
+
+- **Issued** only inside responses that already passed the normal checks: `GET /assets/{id}/download` (store, seller, admin), `media.signedDownload` after the calling module checked access, private renditions in asset views, `media.refs`. Uploads don't use links: the bytes go to `PUT /api/{area}/media/uploads/{id}/content` with the caller's own token.
+- **Signed** with HMAC-SHA256 and the key `secretFor(config, 'media.files')` (HKDF from `APP_SECRET`) over `GET`, bucket, key, `exp`, `ct` (content type) and `cd` (content disposition). Changing any part (another file, a longer life, `text/html` instead of the stored type) breaks the signature.
+- **Verified in M4**, as auth kind **`file-link`** (`kernel/auth/file-links.ts`, `chain.ts`), before any module code: missing or wrong signature → **401** `UNAUTHORIZED` (`details.reason`: `link_missing` / `link_invalid`, no `WWW-Authenticate: Bearer`, since a token can't help); expired → **403** `FORBIDDEN` (`link_expired`): the app asks the API for a new link. A Bearer token does not open a file, and anything else under `/files` (another method, no key) is an unknown URL: 401 without a token, as everywhere. The route handler receives the file named by the verified link, never its own reading of the URL.
+- **Private files** (originals, documents, evidence, exports, private renditions): links expire after `downloadUrlTtlMinutes` (10 min). Attachments are served `Cache-Control: private, no-store`; inline private images `private, max-age` up to the link's expiry.
+- **Public renditions** (product images, store logos and banners, ad and content images): the **public-asset rule**: links without `exp` are accepted only for the public bucket, so stored URLs and `<img src>` keep working without a header. They are still signed per file, so the bucket can't be listed or guessed. Served `Cache-Control: public, max-age=3600`; a takedown replaces the file behind the same link (placeholder) and cached copies follow within the hour. Public URLs are rebuilt from the key on every read.
+- **Every file** is served with `X-Content-Type-Options: nosniff` and `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox`, so an uploaded file never runs as one of our pages; `Cross-Origin-Resource-Policy: cross-origin` lets the apps embed images; CORS allows the configured app origins (no credentials).
+- **Ranges and caching:** `Range` (one range: 206, 416), `If-Range`, `HEAD`, `ETag` / `If-None-Match` and `Last-Modified` / `If-Modified-Since` (304), so video seeking and resumed downloads work.
+- **Rate limit:** file requests count against their own IP bucket (3,000/min), not the API's 600/min, since a page of results loads many images.
+- **Key safety:** keys are `/`-separated safe segments (no `..`, no leading dot, no Windows device names); storage refuses any other key, and the local adapter confirms every path stays inside its folder, so even a link signed for a bad key serves nothing (404).
+- **Key rotation:** the key derives from `APP_SECRET`. Rotating it invalidates every link handed out, including public image URLs other modules stored (order snapshots); media's own asset views rebuild theirs.
+
 ### Other entry points
 
 | Entry | Rule |
@@ -59,7 +81,7 @@ Something has to hand out the first token, so the **bootstrap endpoint** is the 
 | `/docs` (Swagger UI and OpenAPI) | off in production; elsewhere it needs a staff token |
 | Email and SMS links (password reset, invitation, order link, unsubscribe) | the link opens an app page, which first gets a visitor token, then sends the link's one-time token in the request body |
 | Search engines and link previews | they can't call the API without a token. If the website is server-rendered for search engines, the render server uses its own **service token** (decision 9) |
-| Response caching | every request now carries a token, so public reads are cached inside the server (read models), not by a CDN keyed on the URL |
+| Response caching | every request now carries a token, so public reads are cached inside the server (read models), not by a CDN keyed on the URL. Exception: `/files` responses, whose token is part of the URL; public renditions are `Cache-Control: public, max-age=3600` (File links above) |
 
 ## 1. What every request must answer
 
@@ -110,7 +132,8 @@ request
   ├─ M1  requestContext      server request id (client X-Request-Id kept as clientRequestId); client kind and version for analytics and version gating only
   ├─ M2  ipRateLimit         per-IP bucket; client IP from TRUST_PROXY hops/CIDRs
   ├─ M4  authenticate        REQUIRED on every URL: verify the token the endpoint's kind needs (§0): JWT (alg allowlist, kid, iss,
-  │                          aud, typ, exp/iat ± 60 s) + revocation (§6), refresh-token lookup, or (webhooks) defer to M11;
+  │                          aud, typ, exp/iat ± 60 s) + revocation (§6), refresh-token lookup, file-link signature (/files),
+  │                          or (webhooks) defer to M11;
   │                          unknown URL without a valid token → 401 before 404; only `bootstrap` takes an app proof instead
   │ route onRequest
   ├─ M3  phaseGate           endpoint launch phase > LAUNCH_PHASE → 501
@@ -136,7 +159,7 @@ request
 |---|---|---|---|---|
 | M1 requestContext | app onRequest | partly | The server always generates the request id. A client `X-Request-Id` is kept as `clientRequestId`, so a client can't forge correlation in audit. `X-Client: web\|android/<version>` is used for analytics and "update required" (426) only, never for trust | 426 `UPGRADE_REQUIRED` (proposed) |
 | M2 ipRateLimit | app onRequest | – | Protects token verification and guest lookups, and also covers unknown routes (404 scanning). Shared store (§11) | 429 `RATE_LIMITED` + `Retry-After` |
-| M4 authenticate | **app onRequest** (every URL) | partly (optional on `anyone` today) | **Mandatory.** Picks the verifier from the route's auth kind: JWT for visitor and access tokens (local verification, §5, plus revocation, §6); hash lookup for `refresh`; handed to M11 for `provider`; app proof (Play Integrity / bot challenge) for `bootstrap`. Unmatched URLs need a valid visitor or access token, so 404 is only ever seen with a token | 401 + `WWW-Authenticate` |
+| M4 authenticate | **app onRequest** (every URL) | partly (optional on `anyone` today) | **Mandatory.** Picks the verifier from the route's auth kind: JWT for visitor and access tokens (local verification, §5, plus revocation, §6); hash lookup for `refresh`; handed to M11 for `provider`; app proof (Play Integrity / bot challenge) for `bootstrap`; the link's HMAC for `file-link` (§0 "File links": 401 bad, 403 expired). Unmatched URLs need a valid visitor or access token, so 404 is only ever seen with a token | 401 + `WWW-Authenticate` |
 | M3 phaseGate | route onRequest | built | unchanged; now runs after authentication, so the roadmap isn't visible without a token | 501 |
 | M5 principalRateLimit | route onRequest | – | Buckets per §11 | 429 |
 | M6 audience | route onRequest | built (401) | Becomes 403 `WRONG_AUDIENCE`, so clients don't loop on refresh. New auth kind `account` (any realm) for self-service security endpoints | 403 `WRONG_AUDIENCE` |
@@ -165,6 +188,7 @@ Two things stay out of middleware on purpose:
 | Seller member | token | seller | `seller`, `account` | yes, memberId match | template keys; owner-only refused (`OWNER_ONLY`) | – | as owner. Endpoints about *a member* (preferences, profile) also check `own-member` |
 | Staff | token | admin | `staff`, `account` | – | effective set; conditional permissions | M10 always; M14 for sensitive staff actions if decision 5 = yes | `{ staff }`: all records; sensitive fields masked by permission (§9) |
 | Provider | signature (M11) | – | `provider` | – | – | event-id de-duplication in the handler transaction | provider's records |
+| Holder of a file link | link signature (M4) | – | `file-link` | – | – | – | the one file the link names |
 
 ## 5. Tokens and sessions
 
@@ -250,7 +274,7 @@ v1 left scope to a helper that each handler would have to remember to call. Acro
 
 | Stage | Class | Key | Default | Store |
 |---|---|---|---|---|
-| M2 (before auth, all URLs) | IP | client IP (`TRUST_PROXY`) | 600/min | shared (Redis), in-process at first |
+| M2 (before auth, all URLs) | IP | client IP (`TRUST_PROXY`) | 600/min | shared (PostgreSQL `kernel.rate_limits`; per process with `RATE_LIMIT_STORE=memory`) |
 | M5 (after auth) | Visitor | visitor session (and IP) | 300/min reads, writes 30/min | shared |
 | M5 | Customer | account | 120/min, writes 30/min | shared |
 | M5 | Seller member | account + seller | 300/min | shared |
@@ -262,7 +286,7 @@ v1 left scope to a helper that each handler would have to remember to call. Acro
 | M4 | Refresh | session | 30/hour per session | shared |
 | M11 | Webhooks | provider | 1,000/min | shared |
 
-The identity limits come from the identity notes. The others are proposals.
+The identity limits come from the identity notes. The others are proposals. "Shared" is the PostgreSQL table `kernel.rate_limits`: every server instance counts in the same fixed windows (no Redis; see [02-backend-architecture.md](02-backend-architecture.md#several-server-instances-jobs-and-rate-limits)). Modules count their own business limits there too, with `ctx.rateLimit`.
 
 **Enumeration.** Unknown emails get the same lockout and limit responses as real ones (identity simulates them), so `ACCOUNT_LOCKED` and the per-email 429 reveal nothing.
 
@@ -407,6 +431,7 @@ Every staff role also gets `workqueues.items.view` and `workqueues.items.work` f
 - `tokens.ts`: EdDSA JWT verify/sign, `AUTH_JWKS`, per-machine dev key (`kid dev-…`, `dev` claims honoured only on dev keys);
 - `revocation.ts`, `rate-limit.ts`, `app-proof.ts` (dev, Turnstile; Play Integrity pluggable), `scope.ts` (`input.scope`, `scoped()`), `masking.ts`, `authorities.ts` (answers from identity/access/sellers/customers public APIs, fail closed), `setup.ts`;
 - `http/security.ts`: CORS per area, preflight before auth, no-store, WWW-Authenticate only for token problems; health check moved to an internal port (`HEALTH_PORT`);
+- `file-links.ts` + `http/files.ts`: signed file links for `GET`/`HEAD /files/{bucket}/{key}` (auth kind `file-link`), registered by the module that serves files (`ctx.http.files`, media) and verified in M4 with that module's key (`secretFor(config, '<module>.files')`); tested in `http/http.test.ts` (tampered, foreign key, longer life, other content type, private permanent link → 401; expired → 403) and over HTTP in `modules/media/test/files.test.ts`;
 - spec: the `auth`, `scope`, `stepUp`, `permissionWhen`, `sellerContext`, `rateLimit`, sensitive-field and tenant metadata, generated into `src/spec`.
 
 **Over real HTTP** (`npm run test:http`, part of `npm run check`): every endpoint is called on a listening server with spec-generated input, about 6,300 requests: no token → 401, invalid token / refresh token / signature / app proof → 401, another app's token → 403, wrong caller → 401, missing permission → 403, missing step-up proof → 403, right token → reaches the handler; plus unknown URLs, CORS preflight, GraphQL per area, /docs and the internal health port.

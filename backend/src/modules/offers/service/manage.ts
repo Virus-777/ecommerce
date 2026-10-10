@@ -8,7 +8,7 @@ import type * as catalog from '../../../spec/catalog.js';
 import type * as common from '../../../spec/common.js';
 import type { CompareAtInput, HoldOfferRequest, OfferInput, OfferUpdate, OfficialOfferInput, RemoveOfferRequest, ReturnTerms, ReturnTermsInput, StatusReason, WarrantyInput } from '../../../spec/offers.js';
 import { activityLabel, conditionLabel, needsConditionNotes, returnTermsOf, warrantyTerms, type Condition } from '../domain/rules.js';
-import { offerTitle, variantLabel } from '../mappers.js';
+import { offerTitle, strings, variantLabel } from '../mappers.js';
 import type { OfferRec } from '../ports.js';
 import { invalidField, notFound, Part, SYSTEM, type By } from './core.js';
 
@@ -716,6 +716,14 @@ export class ManagePart extends Part {
         }),
       );
       if (visible) this.core.publish('offers.offer.updated', { offerId: after.id, productId: after.product_id, termsVersion: after.terms_version, fields }, by);
+      // the box review is done (changed list or the same one confirmed): notifications resolves the review notice
+      if (patch.missing_items_stale === false) {
+        this.core.publish(
+          'offers.offer.missing_items_reviewed',
+          { offerId: after.id, productId: after.product_id, ownerType: after.owner_type as 'official' | 'seller', sellerId: after.seller_id, missingItems: strings(after.missing_items), changed: JSON.stringify(strings(after.missing_items)) !== JSON.stringify(strings(row.missing_items)), reviewedBy: by.actor },
+          by,
+        );
+      }
       if (fields.some((f) => ['dispatch', 'shippingProfileId', 'compareAt', 'condition', 'variantId'].includes(f))) await this.core.markDirty([row.variant_id, after.variant_id]);
       // the stock item follows a draft's new variant or condition (no stock left on the old variant)
       if (after.variant_id !== row.variant_id || after.condition !== row.condition) {

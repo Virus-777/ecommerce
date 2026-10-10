@@ -31,7 +31,7 @@ export function sellerCaller(sellerId: string, principal: Principal): Caller {
   return { uploader: 'seller', owner: { kind: 'seller', id: sellerId }, filter: { kind: 'seller', id: sellerId }, createdBy: { kind: 'seller', id: principal.accountId ?? null } };
 }
 
-/** Where a development upload ticket sends the bytes: this area's PUT /uploads/{id}/content, at the address the caller used */
+/** Where an upload ticket sends the bytes when storage is served by the API: this area's PUT /uploads/{id}/content, at the address the caller used */
 export function uploadTarget(area: UploadArea, request: FastifyRequest): UploadTarget {
   return { area, origin: `${request.protocol}://${request.host}` };
 }

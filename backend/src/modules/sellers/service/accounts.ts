@@ -128,8 +128,10 @@ export class AccountsPart extends Part {
     return { id: s.account_manager_id, name: name ?? 'Your account manager', replyTarget: 'Replies within 1 business day' };
   }
 
-  async account(s: SellerRec, me: unknown, unavailable: string[] = []): Promise<SellerAccount> {
+  /** The account view; staff views also show a closure waiting for a second reviewer and its approval */
+  async account(s: SellerRec, me: unknown, unavailable: string[] = [], o: { staff?: boolean } = {}): Promise<SellerAccount> {
     const app = await this.core.applicationOf(s);
+    const closure = o.staff ? (await this.core.pendingChangesFor('closure', [s.id])).get(s.id) : undefined;
     return {
       id: s.id,
       ref: s.ref,
@@ -147,6 +149,8 @@ export class AccountsPart extends Part {
       pendingAgreements: (await this.pendingAgreements(s.id)).length,
       accountManager: await this.accountManager(s),
       me: me ?? null,
+      approval: closure ? await this.core.approvalInfo(closure.approval_request_id) : null,
+      pendingChange: closure ? map.pendingStaffChange(closure) : null,
     };
   }
 
@@ -585,9 +589,11 @@ export class AccountsPart extends Part {
         },
         by,
       );
-      throw new AppError('APPROVAL_REQUIRED', check.reason || 'Closing a seller always needs a second reviewer', { approvalRequestId: req.id, pendingChangeId: pending.id });
+      // saved, pending approval: the account unchanged with the closure and its approval (FORMAT.md, Approval responses)
+      const view = await this.account(s, null, [], { staff: true });
+      return { ...view, pendingChange: view.pendingChange ?? map.pendingStaffChange(pending), approval: view.approval ?? (await this.core.approvalInfo(req.id)) };
     }
-    return this.account(await this.closeNow(sellerId, { reason: body.reason.trim(), reasonCode: body.reasonCode }, by), null);
+    return this.account(await this.closeNow(sellerId, { reason: body.reason.trim(), reasonCode: body.reasonCode }, by), null, [], { staff: true });
   }
 
   /** Close the account: new sales stop, open obligations stay accessible to members and staff */
@@ -824,7 +830,7 @@ export class AccountsPart extends Part {
     const crRefs = await this.core.mediaRefs(changeRows.flatMap((c) => map.strings(c.evidence_media_ids)));
     const notes = await this.repo.find('seller_notes', { seller_id: s.id }, { orderBy: [['created_at', 'desc']] });
     return {
-      account: await this.account(s, null, unavailable),
+      account: await this.account(s, null, unavailable, { staff: true }),
       business: await this.businessDetails(s),
       owner: { name: owner?.name ?? contact.name ?? '', email: owner?.email ?? contact.email ?? null, phone: contact.phone ?? null },
       restrictions: await this.parts.enforcement.restrictionsFor(s.id),
@@ -876,7 +882,7 @@ export class AccountsPart extends Part {
       { action: 'sellers.account_manager.assign', actionLabel: 'Assigned an account manager', category: 'other', target: { type: 'seller', id: s.id, ref: s.ref, label: s.store_name, sellerId: s.id, screen: 'admin/seller' }, before: { staffId: s.account_manager_id }, after: { staffId } },
       by,
     );
-    return this.account(after, null);
+    return this.account(after, null, [], { staff: true });
   }
 
   /* ---------------------------------------------------------------- exports */

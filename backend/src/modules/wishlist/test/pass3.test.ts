@@ -121,17 +121,16 @@ describe('back-in-stock alerts', () => {
     gia = { ...gia, accessToken: (await f.signIn({ email: gia.email, password: gia.password, audience: 'store' })).body.tokens.accessToken };
   });
 
-  it('shows the alert seller id in GraphQL', async () => {
+  it('shows the alert seller id and the seller card in GraphQL (sellers shared mapper)', async () => {
     const seller = await f.call('POST', `${S}/alerts`, { token: gia.accessToken, body: { productId: listing.productId, kind: 'price_drop', sellerId: listing.sellerId } });
     expect(seller.status, JSON.stringify(seller.body)).toBe(201);
-    const res = await app.inject({ method: 'POST', url: '/graphql/store', payload: { query: '{ me { wishlistAlerts { kind sellerId } } }' }, headers: auth(gia.accessToken) });
+    const res = await app.inject({ method: 'POST', url: '/graphql/store', payload: { query: '{ me { wishlistAlerts { kind sellerId seller { id ref slug storeName verified sellingNow sellingSince publicProfile { sellerId verification { state } contact { canMessage } } } } } }' }, headers: auth(gia.accessToken) });
     expect(res.json().errors, res.body).toBeUndefined();
-    expect(res.json().data.me.wishlistAlerts).toEqual(
-      expect.arrayContaining([
-        { kind: 'PRICE_DROP', sellerId: listing.sellerId },
-        { kind: 'BACK_IN_STOCK', sellerId: null },
-      ]),
-    );
+    const alerts = res.json().data.me.wishlistAlerts;
+    expect(alerts).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'PRICE_DROP', sellerId: listing.sellerId }), { kind: 'BACK_IN_STOCK', sellerId: null, seller: null }]));
+    const card = alerts.find((a: any) => a.kind === 'PRICE_DROP').seller;
+    expect(card).toMatchObject({ id: listing.sellerId, ref: expect.any(String), slug: expect.any(String), storeName: 'Northwind Audio', sellingNow: true, sellingSince: expect.any(String) });
+    expect(card.publicProfile).toMatchObject({ sellerId: listing.sellerId, verification: { state: expect.any(String) }, contact: { canMessage: expect.any(Boolean) } });
   });
 });
 

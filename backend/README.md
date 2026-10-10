@@ -42,7 +42,7 @@ src/
     graphql/               per-area schema composition, @source/@auth/@phase, Mercurius
     module-system/         defineModule, typed ctx, loader (dependency rules), boot (wiring checks)
     db/ migrations/        Kysely on PostgreSQL or PGlite · one schema per module
-    events/ jobs/          typed in-process bus · scheduler for the spec's schedule phrases
+    events/ jobs/          typed in-process bus · scheduler for the spec's schedule phrases (pg-boss or in process)
     lib/                   money, ids (UUIDv7), refs (MK-YYMMDD-NNNNN), pagination, state machines, clock
   modules/<module>/        one folder per business capability (below)
   testing/                 buildTestApp(), dev-token callers, the module contract suite

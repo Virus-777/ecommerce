@@ -20,7 +20,7 @@ import {
 } from '../domain/rules.js';
 import { appealMachine, restrictionMachine, sellerAccountStatusMachine, sellerWarningMachine, suspensionMachine } from '../domain/state-machines.js';
 import * as map from '../mappers.js';
-import type { AppealRec, RestrictionRec, SellerRec, SellersRepository, SuspensionRec } from '../ports.js';
+import type { AppealRec, PendingChangeRec, RestrictionRec, SellerRec, SellersRepository, SuspensionRec } from '../ports.js';
 import { invalid, notFound, Part, SYSTEM, TRUST_TEAM, type By } from './core.js';
 
 const ALL_SALES: Activity[] = ['new_listings', 'product_submissions', 'new_offers', 'offer_reactivation', 'sales', 'advertising', 'promotions'];
@@ -66,23 +66,20 @@ export class EnforcementPart extends Part {
     const evidence = rows.flatMap((r) => ((r.resolution_evidence ?? []) as { mediaId?: string }[]).map((e) => e.mediaId));
     const refs = await this.core.mediaRefs([...evidence, ...appeals.flatMap((a) => map.strings(a.evidence_media_ids))]);
     const appealViews = await this.appealViews(appeals, { refs, sellers, restrictions: rows });
+    // staff see a change waiting for a second reviewer, and its approval in place of the restriction's own
+    const changes = o.staff ? await this.core.pendingChangesFor('restriction_change', rows.map((r) => r.id)) : new Map<string, PendingChangeRec>();
     const out: Restriction[] = [];
     for (const r of rows) {
-      const approval = o.staff ? await this.approvalInfo(r.approval_request_id) : null;
+      const change = changes.get(r.id);
+      const approval = o.staff ? await this.approvalInfo(change?.approval_request_id ?? r.approval_request_id) : null;
       const v = map.restriction(r, { appeals: appealViews.filter((a) => a.subjectId === r.id), refs, approval });
-      out.push({ ...v, appealRoute: this.route(r.appeal_route) });
+      out.push({ ...v, appealRoute: this.route(r.appeal_route), pendingChange: change ? map.pendingStaffChange(change) : null });
     }
     return out;
   }
 
-  private async approvalInfo(id: string | null): Promise<common.ApprovalInfo | null> {
-    if (!id) return null;
-    try {
-      return await this.ctx.use('access').approvalInfo(id);
-    } catch (err) {
-      this.ctx.log.warn({ err, id }, 'sellers: approval info unavailable');
-      return null;
-    }
+  private approvalInfo(id: string | null): Promise<common.ApprovalInfo | null> {
+    return this.core.approvalInfo(id);
   }
 
   private async restrictionView(r: RestrictionRec, o: { staff?: boolean } = {}) {
@@ -327,8 +324,21 @@ export class EnforcementPart extends Part {
         reason: body.changeReason,
         requestedBy: this.core.principalOf(by),
       });
-      const pending = await this.core.savePendingChange({ kind: 'restriction_change', sellerId: seller.id, targetId: r.id, approvalRequestId: req.id, payload: { patch, changeReason: body.changeReason }, reason: body.changeReason, actor: by.actor });
-      throw new AppError('APPROVAL_REQUIRED', check.reason, { approvalRequestId: req.id, restrictionId: r.id, pendingChangeId: pending.id });
+      await this.core.savePendingChange({ kind: 'restriction_change', sellerId: seller.id, targetId: r.id, approvalRequestId: req.id, payload: { patch, changeReason: body.changeReason }, reason: body.changeReason, actor: by.actor });
+      await this.core.audit(
+        {
+          action: 'sellers.restriction.update_request',
+          actionLabel: 'Proposed a change to a seller restriction',
+          category: 'seller_enforcement',
+          target: this.target(seller, r),
+          reason: body.changeReason,
+          after: patch,
+          approvalRequestId: req.id,
+        },
+        by,
+      );
+      // saved, pending approval: the restriction unchanged with the change and its approval (FORMAT.md, Approval responses)
+      return this.restrictionView(r, { staff: true });
     }
     return this.restrictionView(await this.applyRestrictionChange(r.id, patch, body.changeReason, by), { staff: true });
   }

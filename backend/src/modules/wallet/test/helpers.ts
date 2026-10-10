@@ -19,6 +19,7 @@ import type * as audit from '../../../spec/audit.js';
 import type * as finance from '../../../spec/finance.js';
 import type * as notifications from '../../../spec/notifications.js';
 import type { OrderDetail } from '../../../spec/orders.js';
+import type { BuildOptions } from '../../../app.js';
 import { auth, buildTestApp, callers, movingClock, tokenClock } from '../../../testing/app.js';
 import type { WalletService } from '../service.js';
 
@@ -57,7 +58,7 @@ export interface Harness {
   staff(permissions?: string[], accountId?: string): string;
 }
 
-export async function harness(opts: { modules?: string[] } = {}): Promise<Harness> {
+export async function harness(opts: { modules?: string[]; config?: BuildOptions['config'] } = {}): Promise<Harness> {
   const clock = movingClock();
   tokenClock.now = () => clock.now();
   tokenClock.ttlSeconds = 400 * 86_400;
@@ -79,7 +80,7 @@ export async function harness(opts: { modules?: string[] } = {}): Promise<Harnes
   const app = await buildTestApp({
     only: ['wallet', 'settings', 'audit', 'notifications', ...(opts.modules ?? [])],
     clock,
-    config: { rateLimits: false, launchPhase: 4 },
+    config: { rateLimits: false, launchPhase: 4, ...opts.config },
     apiStubs: {
       customers: {
         getCustomer: async (id) => (h.customers.has(id) ? snapshot(id) : null),

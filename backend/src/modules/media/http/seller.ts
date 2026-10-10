@@ -2,6 +2,7 @@ import { routes } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/media.js';
 import type { MediaService } from '../service.js';
 import { sellerCaller, uploadTarget } from './callers.js';
+import { receiveContent } from './files.js';
 
 /**
  * Seller API: /api/seller/media/…  (docs/api/modules/media.md)
@@ -15,9 +16,9 @@ export const sellerRoutes = (service: MediaService) =>
       const c = sellerCaller(sellerId, principal);
       return service.createUpload({ uploader: c.uploader, owner: c.owner, request: body, createdBy: c.createdBy, clientIp: request.ip, target: uploadTarget('seller', request), by: { actor, requestId } });
     },
-    /** PUT /uploads/{id}/content: Development storage only: the file bytes for an upload ticket */
-    uploadSellerContent: async ({ params, body, sellerId, principal }) =>
-      service.receiveUploadContent(params.id, body, { area: 'seller', owner: sellerCaller(sellerId, principal).filter }),
+    /** PUT /uploads/{id}/content: the file bytes for an upload ticket, streamed into storage (storage served by the API) */
+    uploadSellerContent: async ({ params, body, sellerId, principal, request, reply }) =>
+      receiveContent(service, { id: params.id, body, request, reply }, { area: 'seller', owner: sellerCaller(sellerId, principal).filter }),
     /** POST /uploads/{id}/complete: Confirm the upload; processing starts */
     completeSellerUpload: async ({ params, sellerId, principal, actor, requestId }) =>
       service.completeUpload(params.id, { owner: sellerCaller(sellerId, principal).filter, by: { actor, requestId } }),

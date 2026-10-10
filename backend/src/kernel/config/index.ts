@@ -32,8 +32,12 @@ const schema = z.object({
   MARKET_DEFAULT_LOCATION_LABEL: z.string().default('Portland'),
   /** Validate every response against its spec schema (on by default outside production) */
   RESPONSE_VALIDATION: flag,
-  /** Run scheduled jobs in this process */
+  /** Work jobs and keep their schedules in this process */
   JOBS_ENABLED: flag,
+  /** pgboss: queue in PostgreSQL, each run once across instances; inprocess: timers in each process. Default pgboss with DATABASE_URL */
+  JOBS_BACKEND: z.enum(['inprocess', 'pgboss']).optional(),
+  /** Identifies a deployment (image tag, commit): "on boot" jobs run once per deploy and module set */
+  DEPLOY_ID: z.string().optional(),
   /** Store and seller GraphQL accept persisted query ids only (on in production) */
   GRAPHQL_PERSISTED_ONLY: flag,
   /** Public keys that verify access and visitor tokens: {"keys":[{kty:"OKP",crv:"Ed25519",x,kid}]} */
@@ -47,6 +51,11 @@ const schema = z.object({
   STORE_URL: z.url().optional(),
   SELLER_URL: z.url().optional(),
   ADMIN_URL: z.url().optional(),
+  /** Public address of this API, for links to files it serves (GET /files/…); default http://localhost:PORT */
+  API_URL: z.url().optional(),
+  /** Where media keeps files: local (the server's disk, MEDIA_STORAGE_DIR) or memory (lost on restart); default local, memory in tests */
+  MEDIA_STORAGE: z.enum(['local', 'memory']).optional(),
+  MEDIA_STORAGE_DIR: z.string().default('.data/media'),
   /** Webhook signing secrets per provider: {"stripe":"…","carrier":"…"} (development and tests default to "dev-webhook-secret") */
   WEBHOOK_SECRETS: z.string().optional(),
   /** How often each server pulls session revocations from identity */
@@ -56,6 +65,8 @@ const schema = z.object({
   DEV_SIGNING_KEY_FILE: z.string().default('.data/dev-signing-key.json'),
   /** Rate limits by IP, caller and sign-in style classes (off only for contract tests and load tests) */
   RATE_LIMITS: flag,
+  /** Where rate-limit windows are counted: postgres (shared by every instance) or memory (per process). Default postgres with DATABASE_URL */
+  RATE_LIMIT_STORE: z.enum(['memory', 'postgres']).optional(),
   /** Proxies in front of the server: a hop count, "true", or comma-separated addresses/CIDRs */
   TRUST_PROXY: z.string().optional(),
   /** Allowed browser origins per app (comma-separated) */
@@ -83,17 +94,24 @@ export interface Config {
   market: { timeZone: string; currency: string; defaultLocation: { postalCode: string; label: string } };
   responseValidation: boolean;
   jobsEnabled: boolean;
+  jobsBackend: 'inprocess' | 'pgboss';
+  deployId: string | undefined;
   graphqlPersistedOnly: boolean;
   auth: { jwks: string | undefined; issuer: string; revocationPollMs: number; signingJwk?: Jwk & { kid?: string } };
   /** Root secret for module-signed links and tokens (derive per purpose with secretFor) */
   appSecret: string;
   publicUrls: { store: string; seller: string; admin: string };
+  /** Public address of this API (no trailing slash): signed file links point here */
+  apiUrl: string;
+  /** File storage for media: the server's disk (local, under dir) or memory (tests) */
+  media: { storage: 'local' | 'memory'; dir: string };
   /** Webhook HMAC secrets per provider; `*` applies to any provider (development and tests only) */
   webhookSecrets: Record<string, string>;
   /** Development and tests: sign and accept dev-key tokens */
   devTokens: boolean;
   devSigning: { file: string; jwk?: Jwk };
   rateLimits: boolean;
+  rateLimitStore: 'memory' | 'postgres';
   trustProxy: boolean | number | string[];
   cors: { store: string[]; seller: string[]; admin: string[] };
   docsEnabled: boolean;
@@ -131,6 +149,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     },
     responseValidation: e.RESPONSE_VALIDATION ?? !prod,
     jobsEnabled: e.JOBS_ENABLED ?? false,
+    jobsBackend: e.JOBS_BACKEND ?? (e.DATABASE_URL ? 'pgboss' : 'inprocess'),
+    deployId: e.DEPLOY_ID || undefined,
     graphqlPersistedOnly: e.GRAPHQL_PERSISTED_ONLY ?? prod,
     auth: { jwks: e.AUTH_JWKS || undefined, issuer: e.AUTH_ISSUER, revocationPollMs: e.REVOCATION_POLL_MS, signingJwk: e.AUTH_SIGNING_JWK ? JSON.parse(e.AUTH_SIGNING_JWK) : undefined },
     appSecret: e.APP_SECRET ?? (devTokens ? 'dev-app-secret-not-for-production-use-0000' : ''),
@@ -139,10 +159,13 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       seller: (e.SELLER_URL ?? 'http://localhost:3001').replace(/\/$/, ''),
       admin: (e.ADMIN_URL ?? 'http://localhost:3002').replace(/\/$/, ''),
     },
+    apiUrl: (e.API_URL ?? `http://localhost:${e.PORT}`).replace(/\/$/, ''),
+    media: { storage: e.MEDIA_STORAGE ?? (e.NODE_ENV === 'test' ? 'memory' : 'local'), dir: e.MEDIA_STORAGE_DIR },
     webhookSecrets: { ...(devTokens ? { '*': 'dev-webhook-secret' } : {}), ...(e.WEBHOOK_SECRETS ? JSON.parse(e.WEBHOOK_SECRETS) : {}) },
     devTokens,
     devSigning: { file: e.DEV_SIGNING_KEY_FILE },
     rateLimits: e.RATE_LIMITS ?? true,
+    rateLimitStore: e.RATE_LIMIT_STORE ?? (e.DATABASE_URL ? 'postgres' : 'memory'),
     trustProxy: parseTrustProxy(e.TRUST_PROXY),
     cors: { store: e.CORS_STORE_ORIGINS, seller: e.CORS_SELLER_ORIGINS, admin: e.CORS_ADMIN_ORIGINS },
     docsEnabled: e.DOCS_ENABLED ?? e.NODE_ENV === 'development',
@@ -154,7 +177,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (prod && config.appProof.allowDev) throw new Error('The "dev" app proof cannot be accepted in production');
   if (prod && !config.appSecret) throw new Error('APP_SECRET is required in production (signs unsubscribe, reply and download links)');
   if (prod && !(e.STORE_URL && e.SELLER_URL && e.ADMIN_URL)) throw new Error('STORE_URL, SELLER_URL and ADMIN_URL are required in production (links in emails)');
+  if (prod && !e.API_URL) throw new Error('API_URL is required in production (links to the files the API serves)');
+  if (prod && config.media.storage === 'memory') throw new Error('MEDIA_STORAGE=memory loses every file on restart; use local in production');
   if (prod && !config.rateLimits) throw new Error('RATE_LIMITS cannot be turned off in production');
+  if (config.jobsBackend === 'pgboss' && !config.databaseUrl) throw new Error('JOBS_BACKEND=pgboss needs DATABASE_URL (on PGlite jobs run in process)');
   if (prod && !config.auth.jwks) throw new Error('AUTH_JWKS is required in production (the public keys that verify tokens)');
   return config;
 }

@@ -31,7 +31,7 @@ export interface Offer {
   missingItems: string[];
   /** True when nothing is missing */
   complete: boolean;
-  /** True when the product's box changed (catalog.product.updated) and missingItems names items no longer in it, or no longer lists everything absent. The seller is asked to review (offers.offer.missing_items_stale); cleared when the seller saves missingItems again. The offer stays on sale meanwhile. */
+  /** True when the product's box changed (catalog.product.updated) and missingItems names items no longer in it, or no longer lists everything absent. The seller is asked to review (offers.offer.missing_items_stale); cleared when the seller saves missingItems again, changed or confirmed as is (offers.offer.missing_items_reviewed). The offer stays on sale meanwhile. */
   missingItemsStale: boolean;
   /** Seller's own code; customers do not see it */
   sellerSku: string;
@@ -72,7 +72,7 @@ export const Offer: z.ZodType<Offer> = z.object({
   includedItems: z.array(z.string()).describe("What is in this seller's box (defaults to the product's included items)"),
   missingItems: z.array(z.string()).describe("Product's standard included items that this offer does not include. Must be stated; shown as 'Missing: …'"),
   complete: z.boolean().describe("True when nothing is missing"),
-  missingItemsStale: z.boolean().describe("True when the product's box changed (catalog.product.updated) and missingItems names items no longer in it, or no longer lists everything absent. The seller is asked to review (offers.offer.missing_items_stale); cleared when the seller saves missingItems again. The offer stays on sale meanwhile."),
+  missingItemsStale: z.boolean().describe("True when the product's box changed (catalog.product.updated) and missingItems names items no longer in it, or no longer lists everything absent. The seller is asked to review (offers.offer.missing_items_stale); cleared when the seller saves missingItems again, changed or confirmed as is (offers.offer.missing_items_reviewed). The offer stays on sale meanwhile."),
   sellerSku: z.string().describe("Seller's own code; customers do not see it"),
   stockItemId: z.uuid().describe("inventory stock item that holds this offer's quantities"),
   get price() {
@@ -1682,6 +1682,32 @@ export const OffersOfferMissingItemsStaleEvent: z.ZodType<OffersOfferMissingItem
   newBoxItems: z.array(z.string()).describe("Items added to the product's box that the offer does not say it includes or misses"),
 });
 
+/** offers.offer.missing_items_reviewed: The seller (or Official Store staff) saves the missing-items list of an offer flagged missingItemsStale, changed or confirmed as is: the flag is cleared */
+export interface OffersOfferMissingItemsReviewedEvent {
+  offerId: string;
+  productId: string;
+  ownerType: "official" | "seller";
+  /** null for the Official Store */
+  sellerId?: string | null;
+  /** The list as saved */
+  missingItems: string[];
+  /** False when the list was confirmed unchanged */
+  changed: boolean;
+  reviewedBy: common.Actor;
+}
+
+export const OffersOfferMissingItemsReviewedEvent: z.ZodType<OffersOfferMissingItemsReviewedEvent> = z.object({
+  offerId: z.uuid(),
+  productId: z.uuid(),
+  ownerType: z.enum(["official", "seller"]),
+  sellerId: z.uuid().describe("null for the Official Store").nullish(),
+  missingItems: z.array(z.string()).describe("The list as saved"),
+  changed: z.boolean().describe("False when the list was confirmed unchanged"),
+  get reviewedBy() {
+    return common.Actor;
+  },
+});
+
 /** offers.offer.eligibility_changed: An offer becomes eligible or ineligible to be featured */
 export interface OffersOfferEligibilityChangedEvent {
   offerId: string;
@@ -2164,7 +2190,7 @@ export const endpoints = defineEndpoints({
     permission: "offers.offers.manage",
     scope: "own-seller",
     summary: "Edit offer terms or price",
-    desc: "Customer-visible changes bump termsVersion so carts show the change before checkout. Price changes go into price history. A price change above largeSellerPriceChangePct needs confirmLargeChange: true in the same body, otherwise LARGE_PRICE_CHANGE_UNCONFIRMED and nothing is saved. shippingProfileId must be one of the seller's own profiles (shipping.getProfileOwners), otherwise SHIPPING_PROFILE_INVALID. Saving missingItems clears missingItemsStale.",
+    desc: "Customer-visible changes bump termsVersion so carts show the change before checkout. Price changes go into price history. A price change above largeSellerPriceChangePct needs confirmLargeChange: true in the same body, otherwise LARGE_PRICE_CHANGE_UNCONFIRMED and nothing is saved. shippingProfileId must be one of the seller's own profiles (shipping.getProfileOwners), otherwise SHIPPING_PROFILE_INVALID. Saving missingItems (changed or the same list, as a confirmation) clears missingItemsStale and publishes offers.offer.missing_items_reviewed.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -2173,7 +2199,7 @@ export const endpoints = defineEndpoints({
     response: () => SellerOfferDetail,
     status: 200,
     errors: ["ILLEGAL_TRANSITION","MISSING_ITEMS_REQUIRED","RETURN_TERMS_BELOW_BASELINE","PRICE_BELOW_MINIMUM","WAS_PRICE_NOT_VERIFIED","LARGE_PRICE_CHANGE_UNCONFIRMED","SHIPPING_PROFILE_INVALID"],
-    events: ["offers.offer.updated","offers.offer.price_changed"],
+    events: ["offers.offer.updated","offers.offer.price_changed","offers.offer.missing_items_reviewed"],
     screens: ["seller/offer"],
     phase: 1,
   },
@@ -2679,7 +2705,7 @@ export const endpoints = defineEndpoints({
     status: 200,
     errors: ["ILLEGAL_TRANSITION","MISSING_ITEMS_REQUIRED","RETURN_TERMS_BELOW_BASELINE"],
     audited: true,
-    events: ["offers.offer.updated"],
+    events: ["offers.offer.updated","offers.offer.missing_items_reviewed"],
     screens: ["admin/official"],
     phase: 1,
   },
@@ -3224,6 +3250,7 @@ export const spec = defineModuleSpec({
       "offers.offer.price_changed": { when: "A new price takes effect (direct, scheduled start, revert or bulk)", payload: () => OffersOfferPriceChangedEvent },
       "offers.offer.status_changed": { when: "Any offer status transition", payload: () => OffersOfferStatusChangedEvent },
       "offers.offer.missing_items_stale": { when: "catalog.product.updated changed the product's box so an offer's missingItems no longer matches it (flag set; not repeated while the flag stays set)", payload: () => OffersOfferMissingItemsStaleEvent },
+      "offers.offer.missing_items_reviewed": { when: "The seller (or Official Store staff) saves the missing-items list of an offer flagged missingItemsStale, changed or confirmed as is: the flag is cleared", payload: () => OffersOfferMissingItemsReviewedEvent },
       "offers.offer.eligibility_changed": { when: "An offer becomes eligible or ineligible to be featured", payload: () => OffersOfferEligibilityChangedEvent },
       "offers.featured.changed": { when: "The featured offer for a variant and zone changes", payload: () => OffersFeaturedChangedEvent },
       "offers.featured_rule.published": { when: "A new featured-offer rule version is published", payload: () => OffersFeaturedRulePublishedEvent },
@@ -3968,6 +3995,7 @@ declare module '../kernel/events/event-map.js' {
     "offers.offer.price_changed": OffersOfferPriceChangedEvent;
     "offers.offer.status_changed": OffersOfferStatusChangedEvent;
     "offers.offer.missing_items_stale": OffersOfferMissingItemsStaleEvent;
+    "offers.offer.missing_items_reviewed": OffersOfferMissingItemsReviewedEvent;
     "offers.offer.eligibility_changed": OffersOfferEligibilityChangedEvent;
     "offers.featured.changed": OffersFeaturedChangedEvent;
     "offers.featured_rule.published": OffersFeaturedRulePublishedEvent;

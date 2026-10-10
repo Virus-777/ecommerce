@@ -14,6 +14,7 @@
  *   official-store:<conversationId>       Official Store message notices to staff (resolved when the store replies)
  *   day-end:<reviewId>                    day-end review reminders (resolved by workqueues.day_end.completed)
  *   refund:<refundId>:destination         refund destination requests (resolved when the refund is sent)
+ *   offer-missing-items:<offerId>         missing-items review notices (resolved by offers.offer.missing_items_reviewed)
  */
 import type { EventName, EventPayload } from '../../../kernel/events/index.js';
 import { OFFICIAL_STORE_ID, OFFICIAL_STORE_NAME, type Money } from '../../../spec/common.js';
@@ -1410,7 +1411,8 @@ export const ROUTES: Routes = {
     sends: (p) => {
       const parts = [p.staleItems.length ? `no longer in the box: ${p.staleItems.join(', ')}` : '', p.newBoxItems.length ? `new in the box: ${p.newBoxItems.join(', ')}` : ''].filter(Boolean);
       const context = { product: { title: p.title }, offer: { items: parts.join('; ') || 'the box contents changed' } };
-      const dedupe = `offer-missing-items:${p.offerId}:${[...p.staleItems, '|', ...p.newBoxItems].join(',').slice(0, 200)}`;
+      // action notice per offer, resolved by offers.offer.missing_items_reviewed (offers flags an offer once until it is reviewed)
+      const dedupe = `offer-missing-items:${p.offerId}`;
       const official = p.ownerType === 'official' || !p.sellerId || p.sellerId === OFFICIAL_STORE_ID;
       return [
         official && { topic: 'staff.offer.missing_items_review', to: [role('catalog_manager')], link: L('offer', p.offerId, 'admin/official', 'Review offer'), context, dedupe },
@@ -1418,6 +1420,7 @@ export const ROUTES: Routes = {
       ];
     },
   },
+  'offers.offer.missing_items_reviewed': { resolve: (p) => [`offer-missing-items:${p.offerId}`] },
   'trust.rights_report.received': {
     sends: (p) => [
       {

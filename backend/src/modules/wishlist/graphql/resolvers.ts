@@ -7,6 +7,7 @@ import type * as catalog from '../../../spec/catalog.js';
 import type * as common from '../../../spec/common.js';
 import type * as offers from '../../../spec/offers.js';
 import type { Alert, WishlistList } from '../../../spec/wishlist.js';
+import { sellerCardOut } from '../../sellers/contract.js';
 import type { WishlistService } from '../service.js';
 import type { ItemDetail, Lookups } from '../views.js';
 
@@ -111,6 +112,18 @@ export const resolvers = (service: WishlistService): ModuleResolvers => {
     return c;
   };
 
+  /** The seller's public card (sellers' shared mapper), batched per request: one getStorefrontCard + getSellers call */
+  const sellerCard = async (ctx: GraphQLContext, sellerId: string) => {
+    const sellers = service.sellers();
+    if (!sellers || !isUuid(sellerId)) return null;
+    const found = await load(ctx, 'sellerCards', sellerId, async (ids) => {
+      const [cards, snapshots] = await Promise.all([sellers.getStorefrontCard(ids), sellers.getSellers(ids)]);
+      const snap = new Map(snapshots.map((s) => [s.id, s]));
+      return new Map(cards.filter((c) => snap.has(c.id)).map((c) => [c.id, { card: c, snapshot: snap.get(c.id)! }]));
+    });
+    return found ? sellerCardOut(found.card, found.snapshot, (slug) => sellers.getStorefrontBySlug(slug)) : null;
+  };
+
   const lists = (ctx: GraphQLContext, customerId: string) => load(ctx, 'lists', customerId, async (ids) => new Map(await Promise.all(ids.map(async (id) => [id, await service.listLists(id)] as const))));
 
   const itemOut = (d: ItemDetail, customerId: string, ctx: GraphQLContext) => ({
@@ -144,8 +157,8 @@ export const resolvers = (service: WishlistService): ModuleResolvers => {
       const v = (await lk(ctx).product(a.productId))?.variants.find((x) => x.id === a.variantId);
       return v ? variantOut(v) : null;
     },
-    // the seller's public profile belongs to sellers, which wishlist does not depend on: sellerId names the seller
-    seller: null,
+    // the seller's public card, built with the mapper sellers shares (null without a seller or with sellers off)
+    seller: async () => (a.sellerId ? sellerCard(ctx, a.sellerId) : null),
     kind: up(a.kind),
     state: up(a.state),
     targetPrice: money(a.targetPrice),

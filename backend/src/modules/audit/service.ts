@@ -33,6 +33,7 @@ import {
   decideRetention,
   DEFAULT_MAX_EXPORT_ROWS,
   nextPurgeAt,
+  PARTITION_MONTHS_AHEAD,
   PURGE_ACTION,
   purgeCutoff,
   RETENTION_ACTION,
@@ -732,8 +733,12 @@ export class AuditService implements AuditPublicApi {
     return this.integrity();
   }
 
-  /** Job audit.purge-expired (monthly): Drop month partitions entirely older than retainYears (never below minimumRetentionYears), keep a signed checkpoint hash so the chain still verifies, record the purge as an entry */
-  async purgeExpired(): Promise<{ removed: number; removedThrough: string }> {
+  /**
+   * Job audit.purge-expired (monthly): Write a signed checkpoint at the last entry before the cut-off, then drop the
+   * month partitions entirely older than the cut-off whose entries are all before it in the chain; entries before the
+   * cut-off in a partition that also holds kept entries are deleted row by row. Record the purge as an entry.
+   */
+  async purgeExpired(): Promise<{ removed: number; droppedPartitions: number; removedThrough: string }> {
     const now = this.now();
     const [minimum, defaultYears, redactKeys] = await Promise.all([
       this.ctx.settings.get('minimumRetentionYears'),
@@ -744,16 +749,19 @@ export class AuditService implements AuditPublicApi {
     const keepYears = Math.max(r.retainYears, minimum);
     const cutoff = purgeCutoff(now, keepYears, this.timeZone);
 
-    const removed = await this.repo.transaction(async (tx) => {
+    const { removed, droppedPartitions } = await this.repo.transaction(async (tx) => {
+      const none = { removed: 0, droppedPartitions: 0 };
       await tx.lockChain();
       const head = await tx.chainHead();
-      if (!head) return 0;
+      if (!head) return none;
       // a prefix of the chain by seq, so the kept part stays one unbroken chain (a backdated entry keeps what follows it)
       const keepFrom = await tx.firstSeqAtOrAfter(cutoff);
-      const purged = await tx.purgeEntries(keepFrom);
-      if (!purged.removed || !purged.last) return 0;
-      // a signed checkpoint at the last removed entry, in the same transaction: verification continues from it
-      await this.writeCheckpoint(tx, purged.last.seq, purged.last.hash, 'purge');
+      const last = await tx.lastEntryBefore(keepFrom);
+      if (!last) return none;
+      // first a signed checkpoint at the last entry that goes, in the same transaction: verification continues from it
+      await this.writeCheckpoint(tx, last.seq, last.hash, 'purge');
+      const purged = await tx.purgeEntries(keepFrom, cutoff);
+      if (!purged.removed) return none;
       const entry = await this.prepare(
         {
           actor: SYSTEM,
@@ -763,7 +771,13 @@ export class AuditService implements AuditPublicApi {
           category: 'settings',
           target: RETENTION_TARGET,
           reason: `Retention period of ${years(keepYears)}`,
-          after: { removedEntries: purged.removed, removedThrough: cutoff.toISOString(), retainYears: keepYears, checkpoint: { seq: purged.last.seq, hash: toHex(purged.last.hash) } },
+          after: {
+            removedEntries: purged.removed,
+            droppedPartitions: purged.droppedPartitions,
+            removedThrough: cutoff.toISOString(),
+            retainYears: keepYears,
+            checkpoint: { seq: last.seq, hash: toHex(last.hash) },
+          },
           afterText: `${purged.removed} entries before ${cutoff.toISOString().slice(0, 10)} removed`,
         },
         redactKeys,
@@ -771,10 +785,23 @@ export class AuditService implements AuditPublicApi {
       );
       // the purge entry links to the chain head as it was, so the chain still verifies through the checkpoint
       await this.append([entry], { tx, prevHash: head.hash });
-      return purged.removed;
+      return purged;
     });
     await this.repo.updateRetention({ lastPurgeAt: now, lastPurgeRemoved: removed, lastPurgeThrough: cutoff });
-    return { removed, removedThrough: cutoff.toISOString() };
+    return { removed, droppedPartitions, removedThrough: cutoff.toISOString() };
+  }
+
+  /**
+   * Job audit.prepare-partitions (daily): Create the entries and entry_targets partitions for the current market
+   * month and the next PARTITION_MONTHS_AHEAD (idempotent); record also creates a missing month on demand.
+   */
+  async preparePartitions(): Promise<{ created: number }> {
+    const created = await this.repo.transaction(async (tx) => {
+      await tx.lockChain(); // the same order as appends: chain, then partitions
+      return tx.preparePartitions(this.now(), PARTITION_MONTHS_AHEAD);
+    });
+    if (created) this.ctx.log.info({ created }, 'audit month partitions created');
+    return { created };
   }
 
   /* ================================================================ internals */

@@ -281,7 +281,7 @@ describe('moderation and trust outcomes', () => {
     await publish(app, 'trust.report.resolved', {
       reportId,
       ref: 'TR-261010-009',
-      outcome: 'enforced',
+      outcome: 'action_taken',
       reporterOutcome: 'We took action on the listing you reported.',
       reporters: [
         { kind: 'customer', customerId: customer.customerId },

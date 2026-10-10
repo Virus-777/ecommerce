@@ -746,7 +746,7 @@ Indexes: `(kind, at)`, `(subject_type, subject_id, at)`
 |---|---|---|---|
 | `trust.report.created` | A report is opened by a person, a detector or a referral | `{ reportId: uuid, ref: string, type: string, source: string, riskScore: int, subjects: json[] }` | notifications, workqueues |
 | `trust.report.escalated` | A report is escalated | `{ reportId: uuid, reason: text }` | - |
-| `trust.report.resolved` | A report is resolved or dismissed (reporters are told the outcome) | `{ reportId: uuid, ref: string, outcome: string, reporterOutcome: text?, reporters: ReportReporter[] }` | notifications, workqueues |
+| `trust.report.resolved` | A report is resolved or dismissed (reporters are told the outcome) | `{ reportId: uuid, ref: string, outcome: enum(action_taken|no_violation|insufficient_evidence|duplicate|referred|dismissed), reporterOutcome: text?, reporters: ReportReporter[] }` | notifications, workqueues |
 | `trust.rights_report.received` | A rights owner submits a report through the public form | `{ reportId: uuid, ref: string, brandName: string, contactName: string, contactEmail: email }` | notifications |
 | `trust.evidence.requested` | Proof is requested from a seller or customer (notifications tells them) | `{ requestId: uuid, reportId: uuid, reportRef: string, toType: string, toId: uuid, customerId: uuid?, sellerId: uuid?, question: text, dueAt: datetime }` | notifications |
 | `trust.evidence.received` | The reported party sends proof | `{ requestId: uuid, reportId: uuid }` | - |
@@ -834,6 +834,7 @@ Checked through the access module (limits per role, second reviewer).
 | `SAME_REVIEWER_NOT_ALLOWED` | 409 | The reviewer recommended or accepted the original action |
 | `SEPARATE_DUTIES` | 403 | Trust staff cannot accept their own recommendations; the owner team decides |
 | `RECOMMENDATIONS_OPEN` | 409 | Recommendations are still waiting for their owner teams |
+| `DATASET_UNAVAILABLE` | 409 | The trust queue cannot be exported: the reports module is off or refused the dataset |
 | `EXTERNAL_REF_REQUIRED` | 422 | No module executes this action: do it in the owning module's screen first and accept with externalRef (the hold, case, claim or approval reference) |
 
 ## Background jobs

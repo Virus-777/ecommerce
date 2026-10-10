@@ -2,7 +2,7 @@
  * The authorization middleware (docs/03-auth-middleware.md §3). Token verification is mandatory and
  * happens here, before any module code: handlers only ever see a verified `principal`.
  *
- *   every URL (app onRequest)   IP rate limit → authenticate (token / app proof / defer for refresh and webhooks)
+ *   every URL (app onRequest)   IP rate limit → authenticate (token / app proof / file-link signature / defer for refresh and webhooks)
  *   each endpoint (onRequest)   launch phase → caller rate limit → audience → caller kind → seller context → permission → staff 2-step
  *   (preValidation)             refresh token · webhook signature + replay check · rate-limit classes keyed by body
  *   (preHandler)                conditional permissions → [idempotency, in register.ts] → step-up
@@ -15,6 +15,7 @@ import { AppError } from '../errors/index.js';
 import type { Clock } from '../lib/clock.js';
 import type { Area, AuthKind, EndpointDef } from '../spec/define.js';
 import type { AppProofVerifier } from './app-proof.js';
+import { verifyFileLink } from './file-links.js';
 import { devSellerAccess, type Authorities } from './authorities.js';
 import {
   checkAudience,
@@ -27,7 +28,7 @@ import {
   type RequestAuth,
   type SellerMemberAccess,
 } from './index.js';
-import { CALLER_LIMITS, CLASS_LIMITS, enforce, IP_LIMIT, type RateLimitStore } from './rate-limit.js';
+import { CALLER_LIMITS, CLASS_LIMITS, enforce, FILES_IP_LIMIT, IP_LIMIT, type RateLimitStore } from './rate-limit.js';
 import type { RevocationList } from './revocation.js';
 import { TokenError, verifyAccessToken, type AccessClaims, type KeyRing } from './tokens.js';
 
@@ -51,12 +52,26 @@ export interface AuthKernel {
   db: Kysely<any>;
   /** Claims behind each verified principal (development authorities read dev claims from it) */
   claimsOf: WeakMap<Principal, AccessClaims>;
+  /** Signed file links (GET /files/…), when a module serves files */
+  fileLinks?: FileLinkAuth;
+}
+
+/**
+ * What a route authenticates with: a spec auth kind, or `file-link` for GET /files/{bucket}/{key}, whose
+ * token is the link's own signature (file-links.ts). Not a spec auth kind: no spec endpoint can take it.
+ */
+export type RouteAuth = AuthKind | 'file-link';
+
+/** File links: the key that signs them and the buckets whose links may be permanent */
+export interface FileLinkAuth {
+  secret: string;
+  permanentBuckets: ReadonlySet<string>;
 }
 
 declare module 'fastify' {
   interface FastifyContextConfig {
     operationId?: string;
-    auth?: AuthKind;
+    auth?: RouteAuth;
   }
   interface FastifyRequest {
     auth?: RequestAuth;
@@ -111,8 +126,11 @@ export class AuthChain {
   install(app: FastifyInstance) {
     app.addHook('onRequest', async (request) => {
       if (request.method === 'OPTIONS' || this.#exempt(request)) return;
-      enforce(this.k.limits, `ip:${request.ip}`, IP_LIMIT);
-      await this.authenticate(request, this.#kindOf(request));
+      const kind = this.#kindOf(request);
+      // a page of product images is many file requests: files have their own, larger IP budget
+      if (kind === 'file-link') await enforce(this.k.limits, `files-ip:${request.ip}`, FILES_IP_LIMIT);
+      else await enforce(this.k.limits, `ip:${request.ip}`, IP_LIMIT);
+      await this.authenticate(request, kind);
     });
   }
 
@@ -121,7 +139,7 @@ export class AuthChain {
     return this.k.config.docsEnabled && (request.url === '/docs' || request.url.startsWith('/docs/'));
   }
 
-  #kindOf(request: FastifyRequest): AuthKind {
+  #kindOf(request: FastifyRequest): RouteAuth {
     const configured = request.routeOptions.config?.auth;
     if (configured && !request.is404) return configured;
     if (request.url.startsWith('/graphql/seller')) return 'seller';
@@ -129,7 +147,19 @@ export class AuthChain {
     return 'visitor'; // GraphQL store, and any URL that doesn't exist: still needs a valid token (401 before 404)
   }
 
-  async authenticate(request: FastifyRequest, kind: AuthKind) {
+  async authenticate(request: FastifyRequest, kind: RouteAuth) {
+    if (kind === 'file-link') {
+      // the link's signature is the token: bound to the bucket, key, expiry, content type and disposition
+      const links = this.k.fileLinks;
+      if (!links) throw new AppError('UNAUTHORIZED', 'No file links are served here', { reason: 'link_invalid' });
+      const v = verifyFileLink(links.secret, request.url, this.k.clock.now(), { permanentBuckets: links.permanentBuckets });
+      if (!v.ok) {
+        if (v.reason === 'expired') throw new AppError('FORBIDDEN', 'This link has expired; open the file again to get a new one', { reason: 'link_expired' });
+        throw new AppError('UNAUTHORIZED', v.reason === 'missing' ? 'This file needs a signed link' : 'This file link is invalid', { reason: `link_${v.reason}` });
+      }
+      request.auth = { via: 'file-link', principal: null, file: v.link };
+      return;
+    }
     if (kind === 'bootstrap') {
       const proof = request.headers['x-app-proof'];
       if (!(await this.k.appProof.verify(typeof proof === 'string' ? proof : undefined, request.ip))) {
@@ -172,8 +202,8 @@ export class AuthChain {
     const limits = CALLER_LIMITS[p.kind];
     const who = `${p.kind}:${p.accountId ?? p.sessionId}`;
     if (limits) {
-      enforce(this.k.limits, `caller:${who}`, limits.all);
-      if (limits.writes && request.method !== 'GET') enforce(this.k.limits, `writes:${who}`, limits.writes);
+      await enforce(this.k.limits, `caller:${who}`, limits.all);
+      if (limits.writes && request.method !== 'GET') await enforce(this.k.limits, `writes:${who}`, limits.writes);
     }
     checkAudience(d.area, d.auth, p);
     checkCallerKind(d.auth, p);
@@ -252,7 +282,7 @@ export class AuthChain {
       if (d.auth === 'provider') await this.#verifyWebhook(module, request);
       for (const rule of CLASS_LIMITS[d.rateLimit ?? ''] ?? []) {
         const key = rule.key({ ip: request.ip, body: request.body });
-        if (key) enforce(k.limits, `${d.rateLimit}:${key}`, rule.limit);
+        if (key) await enforce(k.limits, `${d.rateLimit}:${key}`, rule.limit);
       }
     };
 
