@@ -346,7 +346,7 @@ export class AuditService implements AuditPublicApi {
   }
 
   /** Lengthening applies now (200). Shortening waits for Business Owner approval (202 with pendingChange). */
-  async updateRetention(body: { retainYears: number; reason: string }, by: Caller): Promise<{ policy: RetentionPolicy; status: 200 | 202 }> {
+  async updateRetention(body: { retainYears: number; reason: string }, by: Caller): Promise<RetentionPolicy> {
     const reason = body.reason?.trim();
     if (!reason) throw invalid('reason', 'Say why retention changes');
     const minimum = await this.ctx.settings.get('minimumRetentionYears');
@@ -359,10 +359,10 @@ export class AuditService implements AuditPublicApi {
       const after = await tx.updateRetention({ retainYears: body.retainYears, updatedBy: actorText(by.actor), updatedAt: this.now() });
       return { move, before, after };
     });
-    if (first.move.kind === 'unchanged') return { policy: await this.policyOf(first.after), status: 200 };
+    if (first.move.kind === 'unchanged') return this.policyOf(first.after);
     if (first.move.kind === 'lengthen') {
       await this.retentionApplied(first.before.retainYears, first.after.retainYears, by.actor, reason, { by, approvalNote: 'Lengthening needs no approval' });
-      return { policy: await this.policyOf(first.after), status: 200 };
+      return this.policyOf(first.after);
     }
 
     // shortening: Business Owner approval through access (secondReviewer: always)
@@ -379,7 +379,7 @@ export class AuditService implements AuditPublicApi {
         return tx.updateRetention({ retainYears: body.retainYears, updatedBy: actorText(by.actor), updatedAt: this.now() });
       });
       await this.retentionApplied(current, after.retainYears, by.actor, reason, { by, approvalNote: check.reason || null });
-      return { policy: await this.policyOf(after), status: 200 };
+      return this.policyOf(after);
     }
 
     const request = await access.requestApproval({
@@ -410,7 +410,8 @@ export class AuditService implements AuditPublicApi {
       },
       by,
     );
-    return { policy: await this.policyOf(pending), status: 202 };
+    // saved pending: the normal 200 with pendingChange.approval (FORMAT.md, Approval responses)
+    return this.policyOf(pending);
   }
 
   /** Publishes the change and writes its entry (lengthened now, or shortened after approval). */

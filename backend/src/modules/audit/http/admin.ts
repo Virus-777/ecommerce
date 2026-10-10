@@ -32,12 +32,7 @@ export const adminRoutes = (service: AuditService) =>
     /** GET /retention: Retention setting and last purge */
     getRetention: async () => service.getRetention(),
     /** PUT /retention: Change how long history is kept */
-    updateRetention: async (input) => {
-      const { policy, status } = await service.updateRetention(input.body, caller(input));
-      // shortening waits for approval: 202 with pendingChange (the spec's default status is 200)
-      if (status === 202) input.reply.code(202).send(policy);
-      return policy;
-    },
+    updateRetention: async (input) => service.updateRetention(input.body, caller(input)),
     /** GET /integrity: Hash-chain check result */
     getIntegrity: async () => service.integrity(),
   });
