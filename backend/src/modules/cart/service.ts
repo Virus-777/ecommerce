@@ -31,6 +31,7 @@ import { CartChecker, type CheckResult } from './checker.js';
 import { addBlock, currentPrice, evaluateLine, sellerLabelOf } from './domain/check.js';
 import {
   addDays,
+  conditionGroupOf,
   lineMaximum,
   minLimit,
   normalizeCode,
@@ -286,6 +287,7 @@ export class CartService implements CartPublicApi {
             variant_id: f.offer.variantId,
             stock_item_id: f.offer.stockItemId,
             ships_from: f.offer.dispatch.shipsFrom,
+            condition: f.offer.condition,
             quantity: target,
             price_at_add: f.unitPrice.amount,
             currency: f.unitPrice.currency,
@@ -433,6 +435,7 @@ export class CartService implements CartPublicApi {
           variant_id: f.offer.variantId,
           stock_item_id: f.offer.stockItemId,
           ships_from: f.offer.dispatch.shipsFrom,
+          condition: f.offer.condition,
           quantity,
           price_at_add: f.unitPrice.amount,
           accepted_price: f.unitPrice.amount,
@@ -899,6 +902,7 @@ export class CartService implements CartPublicApi {
           variant_id: offer.variantId,
           stock_item_id: offer.stockItemId,
           ships_from: offer.dispatch.shipsFrom,
+          condition: offer.condition,
           quantity: line.quantity,
           price_at_add: line.acceptedUnitPrice.amount,
           accepted_price: line.acceptedUnitPrice.amount,
@@ -1003,9 +1007,12 @@ export class CartService implements CartPublicApi {
     const items = await this.repo.findActiveItems({ sellerIds: [event.sellerId] });
     if (!items.length) return;
     const sc = event.scope ?? {};
-    // scopes by condition or category need the offer to decide: those lines are re-checked through offers
-    const precise = !(sc.conditions?.length || sc.categoryIds?.length || event.categoryIds?.length);
-    const hit = items.filter((i) => (!sc.offerIds?.length || sc.offerIds.includes(i.offer_id)) && (!sc.productIds?.length || sc.productIds.includes(i.product_id)));
+    // scopes by category need the offer to decide: those lines are re-checked through offers. A condition scope is
+    // decided here from the line's condition (cart_items.condition), unless a line does not know it yet.
+    const conditions = sc.conditions ?? [];
+    const conditionHit = (c: string | null) => !conditions.length || (c !== null && (conditions.includes(c) || conditions.includes(conditionGroupOf(c))));
+    const hit = items.filter((i) => (!sc.offerIds?.length || sc.offerIds.includes(i.offer_id)) && (!sc.productIds?.length || sc.productIds.includes(i.product_id)) && (i.condition === null || conditionHit(i.condition)));
+    const precise = !(sc.categoryIds?.length || event.categoryIds?.length) && (!conditions.length || hit.every((i) => i.condition !== null));
     if (precise) await this.flag(hit, 'seller_unavailable', { reason: event.reason });
     await this.queue(precise ? hit : items, 'seller_restricted');
   }

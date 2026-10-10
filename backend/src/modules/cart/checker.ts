@@ -354,6 +354,7 @@ export class CartChecker {
         }
         if (e.offer) {
           if (e.offer.dispatch.shipsFrom !== e.item.ships_from) patch.ships_from = e.offer.dispatch.shipsFrom;
+          if (e.offer.condition !== e.item.condition) patch.condition = e.offer.condition;
           if (e.offer.stockItemId !== e.item.stock_item_id) patch.stock_item_id = e.offer.stockItemId;
         }
         await tx.updateItem(e.item.id, patch);
@@ -670,7 +671,7 @@ export class CartChecker {
     const currency = this.ctx.config.market.currency;
     const zero = money(0, currency);
     return {
-      id: newId(),
+      id: null,
       owner: ownerKind,
       currency,
       itemCount: 0,

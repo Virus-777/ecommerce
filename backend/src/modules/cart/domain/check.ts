@@ -192,7 +192,7 @@ export function evaluateLine(item: ItemRow, facts: OfferFacts, product: ProductF
     packageKey: packageKey(item.owner_type, item.seller_id, shipsFrom),
     seller: sellerLabelOf(item, offer, facts.quote),
     returnTerms: offer?.returnTerms.summary ?? facts.quote?.returns.summary ?? '',
-    condition: offer?.condition ?? facts.quote?.condition ?? 'new',
+    condition: offer?.condition ?? facts.quote?.condition ?? (item.condition as offers.Offer['condition'] | null) ?? 'new',
     conditionNote: offer?.conditionNotes ?? null,
     notices,
     blocked,
