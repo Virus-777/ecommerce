@@ -1,5 +1,5 @@
 import type { Principal } from '../../../kernel/auth/index.js';
-import { routes } from '../../../kernel/http/index.js';
+import { routes, notImplemented } from '../../../kernel/http/index.js';
 import type { Actor } from '../../../spec/common.js';
 import { endpoints } from '../../../spec/catalog.js';
 import type { CatalogService } from '../service.js';
@@ -71,4 +71,6 @@ export const adminRoutes = (service: CatalogService) =>
     updateBrand: async (i) => service.updateBrand(i.params.id, i.body, by(i)),
     /** POST /brands/{id}/status: Activate, flag for review or block a brand (decides seller brand requests) */
     setBrandStatus: async (i) => service.setBrandStatus(i.params.id, i.body, by(i)),
+    /** PATCH /products/{id}/variants/{variantId}: Set a variant's shipping weight, dimensions and list price (TODO pass 3: implement) */
+    updateVariantDetails: notImplemented,
   });

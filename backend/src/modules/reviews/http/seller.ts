@@ -1,4 +1,4 @@
-import { routes } from '../../../kernel/http/index.js';
+import { routes, notImplemented } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/reviews.js';
 import type { ReviewsService } from '../service.js';
 
@@ -31,4 +31,6 @@ export const sellerRoutes = (service: ReviewsService) =>
     listSellerReports: async ({ sellerId, page }) => service.moderation.listReports({ kind: 'seller', id: sellerId }, page),
     /** POST /appeals: Appeal a moderation decision on the seller's answer or response */
     sellerAppeal: async ({ sellerId, body, actor, requestId }) => service.moderation.submitAppeal({ kind: 'seller', id: sellerId, actor, requestId }, body),
+    /** PATCH /answers/{id}: Edit the seller's answer, or fix and resubmit it after an edit request (TODO pass 3: implement) */
+    editSellerAnswer: notImplemented,
   });

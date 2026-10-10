@@ -1,5 +1,5 @@
 import type { Principal } from '../../../kernel/auth/index.js';
-import { routes } from '../../../kernel/http/index.js';
+import { routes, notImplemented } from '../../../kernel/http/index.js';
 import type * as common from '../../../spec/common.js';
 import { endpoints } from '../../../spec/support.js';
 import type { By } from '../service/core.js';
@@ -87,5 +87,7 @@ export const adminRoutes = (service: SupportService) => {
     listCategories: async () => [...(await service.core.categories()).values()].map((c) => service.core.categoryView(c)),
     /** PUT /categories/{key}: Create or change a category and its targets */
     updateCategory: async (i) => service.cases.updateCategory(i.params.key, i.body, by(i)),
+    /** POST /cases/{id}/remedies/{remedyId}/settle: Record that a remedy was completed or cancelled outside the system (TODO pass 3: implement) */
+    settleRemedy: notImplemented,
   });
 };

@@ -1,6 +1,6 @@
 import { AppError } from '../../../kernel/errors/index.js';
 import type { Scope } from '../../../kernel/auth/scope.js';
-import { routes } from '../../../kernel/http/index.js';
+import { routes, notImplemented } from '../../../kernel/http/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import type * as common from '../../../spec/common.js';
 import { endpoints } from '../../../spec/reviews.js';
@@ -92,4 +92,6 @@ export const storeRoutes = (service: ReviewsService) =>
     deleteFeedback: async (i) => service.feedback.remove(customerWho(i), i.params.id),
     /** POST /me/appeals: Appeal a moderation decision on my content */
     customerAppeal: async (i) => service.moderation.submitAppeal({ kind: 'customer', id: customerIdOf(i.scope), actor: i.actor, requestId: i.requestId }, i.body),
+    /** PATCH /me/answers/{id}: Edit my answer, or fix and resubmit it after an edit request (TODO pass 3: implement) */
+    editMyAnswer: notImplemented,
   });

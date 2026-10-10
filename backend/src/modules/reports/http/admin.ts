@@ -1,4 +1,4 @@
-import { routes } from '../../../kernel/http/index.js';
+import { routes, notImplemented } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/reports.js';
 import type { Caller, ReportsService } from '../service.js';
 
@@ -58,4 +58,8 @@ export const adminRoutes = (service: ReportsService) =>
     listReadModels: async () => service.readModels.status(),
     /** POST /read-models/{key}/rebuild: Rebuild a read model from the event log or source snapshots */
     rebuildReadModel: async (i) => service.readModels.requestRebuild(i.params.key, i.body.reason, by(i)),
+    /** PUT /metrics/{key}/owner: Name (or change) the staff member who owns a metric (TODO pass 3: implement) */
+    setMetricOwner: notImplemented,
+    /** PUT /groups/{key}/owner: Name (or change) the staff member who owns a report group (TODO pass 3: implement) */
+    setGroupOwner: notImplemented,
   });

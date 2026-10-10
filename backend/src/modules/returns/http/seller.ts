@@ -1,5 +1,5 @@
 import type { Principal } from '../../../kernel/auth/index.js';
-import { routes } from '../../../kernel/http/index.js';
+import { routes, notImplemented } from '../../../kernel/http/index.js';
 import type * as identity from '../../../spec/identity.js';
 import { endpoints } from '../../../spec/returns.js';
 import type { By } from '../service/core.js';
@@ -82,5 +82,7 @@ export const sellerRoutes = (service: ReturnsService) => {
     getSellerTerms: async ({ sellerId }) => service.policies.getSellerTerms(sellerId),
     /** PUT /terms: Change return terms or return address */
     updateSellerTerms: async (i) => service.policies.updateSellerTerms(i.sellerId, i.body, by(i)),
+    /** POST /replacements/{id}/cancel: Cancel a replacement or exchange not shipped yet (e.g. no stock) with a reason (TODO pass 3: implement) */
+    sellerCancelReplacement: notImplemented,
   });
 };

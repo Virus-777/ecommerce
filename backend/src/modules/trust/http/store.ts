@@ -1,4 +1,4 @@
-import { routes } from '../../../kernel/http/index.js';
+import { routes, notImplemented } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/trust.js';
 import type { TrustService } from '../service.js';
 import { appellantOf, byOf, customerOf } from './who.js';
@@ -26,4 +26,8 @@ export const storeRoutes = (service: TrustService) =>
     submitCustomerAppeal: async (i) => service.appeals.submit(i.body, appellantOf(await customerOf(service, i)), byOf(i)),
     /** GET /appeals: My appeals */
     listCustomerAppeals: async (i) => service.appeals.listMine('customer', (await customerOf(service, i)).ids),
+    /** GET /evidence-requests: Proof Trust and Risk asked me for (e.g. confirm an order or explain a message) (TODO pass 3: implement) */
+    listMyEvidenceRequests: notImplemented,
+    /** POST /evidence-requests/{id}/answer: Send the requested proof or explanation (TODO pass 3: implement) */
+    answerMyEvidenceRequest: notImplemented,
   });

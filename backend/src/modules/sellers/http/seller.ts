@@ -1,4 +1,4 @@
-import { routes } from '../../../kernel/http/index.js';
+import { routes, notImplemented } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/sellers.js';
 import type { SellersService } from '../service.js';
 
@@ -49,5 +49,7 @@ export const sellerRoutes = (service: SellersService) => {
     listAgreements: async ({ sellerId }) => accounts.listAgreements(sellerId),
     acceptAgreement: async ({ sellerId, params, body, actor, requestId }) => accounts.acceptAgreement(sellerId, params.key, body, { actor, requestId }),
     requestSellerClosure: async ({ sellerId, body, actor, requestId }) => accounts.requestSellerClosure(sellerId, body.reason, { actor, requestId }),
+    /** POST /members/{id}/reactivate: Lift a member's suspension (TODO pass 3: implement) */
+    reactivateMember: notImplemented,
   });
 };
