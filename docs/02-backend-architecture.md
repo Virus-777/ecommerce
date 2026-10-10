@@ -12,6 +12,7 @@ Status: **design**. This document defines the backend's structure; the API desig
 | Complex screen reads | **GraphQL** via **Mercurius** (Fastify plugin), read-only, three schemas (store, seller, admin) composed from module fragments | One round trip for screens that combine many modules; writes stay on REST |
 | Database | **PostgreSQL** through **Kysely** (typed SQL query builder) | No ORM magic; SQL stays portable; easy to replace per module |
 | Local / test database | **PGlite** (PostgreSQL compiled to WASM, in-process) | Real Postgres semantics with nothing to install |
+| Product search | **OpenSearch** in production (`@opensearch-project/opensearch`); PostgreSQL full-text + `pg_trgm` in development and tests (`SEARCH_ENGINE`, §9) | Relevance, typo tolerance and facets at catalogue scale, off the primary database |
 | Jobs / schedules | Kernel `JobScheduler` interface: **pg-boss** queue in PostgreSQL in production (each scheduled run happens once across server instances, failed runs retried with backoff); in-process timers on PGlite (development, tests) | Payout runs, ad schedules, SLA timers |
 | Events | Kernel in-process typed event bus; outbox table later | Modules talk through events, not each other's tables |
 | Tests | Vitest + `app.inject()` + PGlite | Each module boots alone in a test |
@@ -231,3 +232,50 @@ src/modules/<module>/
 | Regenerate + validate | `node docs/api/tools/build.mjs` |
 
 The build validates that every type resolves, path parameters match, permissions and consumed events exist, each endpoint's prototype screens exist, and no two modules claim the same route.
+
+## 9. Search engine (OpenSearch)
+
+Search's public API and endpoints are the same with either engine; only the adapter behind the `SearchEngine` port changes (`backend/src/modules/search/infra/`).
+
+| `SEARCH_ENGINE` | Where | What answers queries |
+|---|---|---|
+| `postgres` (default) | development, tests | PostgreSQL full-text (`english`) and `pg_trgm` over the read-model tables `search_documents` / `search_offers` (`infra/postgres/engine.ts`) |
+| `opensearch` | production | An OpenSearch index fed from the same read model (`infra/opensearch/`) |
+
+**Read model and feed.** PostgreSQL stays the source of truth for the index: event consumers and jobs write `search_documents` and `search_offers` exactly as before. With OpenSearch the repository is wrapped (`infra/index-feed.ts`): after each commit the changed products are read back and sent as one `_bulk` request. A rebuilt document carries its searchable texts and replaces the indexed one; other changes replace every field but the texts. Each write is a Painless update that applies only if the read-model `version` is not older, so concurrent servers cannot put an older state back. Rejected (429) and failed (5xx) items are retried with backoff (`OPENSEARCH_BULK_ATTEMPTS`); whatever still fails — the cluster is down, or a change arrives for a document the index lacks — is marked dirty and rebuilt in full by `search.process-dirty`. Suggestion terms (popular queries, category, brand and store names), synonyms, recent searches, logs and jobs stay in PostgreSQL.
+
+**Index.** Queries and writes use the alias `<prefix>-products`, which points at one versioned index `<prefix>-products-<UTC timestamp>` (the first one is `…-00000000000000000`). Documents hold every read-model field (cards are built from hits), the texts (title and brand weighted highest, then category, attributes, description; English analysis with Porter stems like PostgreSQL's `english` configuration), live offers as `nested` documents (seller, condition, price, stock, delivery, featured flag and `card_rank`: featured first, then in stock, then cheapest), category attributes as nested key/value pairs, keyword facets, numeric prices, rating, popularity and `sales_30d`, dispatch days and same-day cutoffs for "ships today" and "arrives by". `MAPPING_VERSION` (`infra/opensearch/mapping.ts`) is stored in the index; bump it on any mapping change.
+
+**Queries** (`infra/opensearch/query.ts`, exact bodies unit-tested):
+- Text: every word (group) must match across the text fields (`cross_fields`, operator and), any synonym alternative of a group; phrases match as phrases; a full GTIN matches the `gtins` keyword. Synonyms come from search's synonym table and are expanded by the service before the engine sees the query, so a synonym change applies on the next query with no reindex.
+- The card offer is the matching offer with the lowest `card_rank` (inner hit `eo`, with the number of matching offers for "from" prices). Filters on sellers, condition, price, stock and delivery apply to offers.
+- Recommended ranking = text relevance (BM25 `s/(s+1)` × weight) + the published ranking policy's factors as scripts (in stock and delivery speed of the card offer, featured offer, rating with ≥ 3 reviews, conversion) + 1 for a GTIN match. Explain splits a hit's score into the same factors.
+- Price sorts use the card offer's price exactly: products are split into streams by where their card offer comes from (featured / in stock / any), each sorted by a nested minimum over that tier, and merged.
+- Facets: one aggregation per facet, counted against the other active filters (categories, active brands, sellers and the Official Store, conditions, ratings, availability by card offer, delivery, category attributes); the price range is the lowest and highest card-offer price.
+- Typo tolerance: a misspelled word is corrected ("Showing results for …") from candidates the term suggester finds within two edits in the index's title words plus the suggestion terms' words, ranked by trigram similarity like `pg_trgm`; suggestions while typing match title words as prefixes and with `fuzziness: AUTO`.
+- Paging keeps the API's cursors (an offset); pages beyond `max_result_window` (10,000) are empty.
+
+**Full reindex (blue/green).** `search.full-reindex` (nightly, or `POST /api/admin/search/reindex-jobs` with scope `all`) creates a new versioned index and points `<prefix>-products-building` at it; every server writes each change to both indices (servers re-check the building alias every `OPENSEARCH_ALIAS_CACHE_MS`, and the job waits that long before rebuilding). Every product is rebuilt from the source modules; products that cannot be rebuilt keep their current document (copied from the live index). Then one `_aliases` call moves `<prefix>-products` to the new index atomically. The previous index is kept for a manual rollback; older ones are deleted. A failed reindex drops the new index and the live one keeps serving. At startup a new (empty) index over a populated read model, or one built with an older `MAPPING_VERSION`, queues a full reindex automatically.
+
+**Health.** `GET /api/admin/search/index` reports the engine in `engine`, e.g. `opensearch (green, index marketly-products-20261010031500123)`, with `mapping vN < vM: full reindex needed`, `rebuilding into …` or `unreachable: …` when they apply (`postgres-fts` for PostgreSQL).
+
+**Configuration** (`backend/.env.example`):
+
+| Variable | Default | |
+|---|---|---|
+| `SEARCH_ENGINE` | `postgres` | `postgres` or `opensearch` |
+| `OPENSEARCH_URL` | — | Required for `opensearch`; one node or a comma-separated list |
+| `OPENSEARCH_USERNAME`, `OPENSEARCH_PASSWORD` | — | Basic authentication (together) |
+| `OPENSEARCH_API_KEY` | — | Instead of a username: sent as `Authorization: ApiKey <key>` |
+| `OPENSEARCH_INDEX_PREFIX` | `marketly` | Index and alias names |
+| `OPENSEARCH_SHARDS`, `OPENSEARCH_REPLICAS` | `1`, `1` | For new indices (a reindex applies a change) |
+| `OPENSEARCH_REFRESH` | `false` | `false` (near real time), `wait_for` or `true` after writes |
+| `OPENSEARCH_REQUEST_TIMEOUT_MS` | `10000` | Per request; the client retries connection errors and 502/503/504 twice |
+| `OPENSEARCH_BULK_ATTEMPTS` | `3` | Then products are queued for `search.process-dirty` |
+| `OPENSEARCH_ALIAS_CACHE_MS` | `5000` | How long a server trusts what it knows about a running reindex |
+
+**Tests.** No cluster is needed:
+- `test/opensearch-query.test.ts` checks the translation (exact request bodies), documents, the scripts' JavaScript twins and the configuration.
+- `test/opensearch-fake/` is an in-memory OpenSearch behind the real client (a `Connection` class, so request building, NDJSON, response parsing and errors are the client's own). `test/engine-contract.test.ts` runs the same scenarios on PostgreSQL and on the adapter with the fake; `SEARCH_TEST_ENGINE=opensearch npx vitest run src/modules/search` runs the whole search suite on the fake. `test/opensearch-index.test.ts` covers the index lifecycle, retries, the blue/green swap and the feed.
+- What the fake does not prove: Painless is not executed (each script is matched by its source to a JavaScript twin in `scripts.ts`, which must change with it); writes are visible at once (no refresh interval); one shard, so BM25 statistics and `cardinality` are exact; the standard tokenizer, fuzzy scoring and the term suggester's ranking are approximations; cluster behaviour (replicas, timeouts, partial failures) only as far as a test injects faults. Relevance order between products whose only difference is text relevance may differ between PostgreSQL and OpenSearch.
+- `test/opensearch.integration.test.ts` runs the contract and the index lifecycle on a real cluster, only when `OPENSEARCH_URL` is set, with throwaway indices (`it-<time>-<random>`, deleted afterwards): `OPENSEARCH_URL=http://localhost:9200 npx vitest run src/modules/search/test/opensearch.integration.test.ts` (e.g. `docker run -p 9200:9200 -e discovery.type=single-node -e DISABLE_SECURITY_PLUGIN=true opensearchproject/opensearch:2`). `SEARCH_TEST_ENGINE=opensearch-live` runs the whole search suite there.
