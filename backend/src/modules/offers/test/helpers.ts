@@ -60,6 +60,8 @@ export interface Harness {
   exports: unknown[];
   /** inventory.updateStockItem calls */
   stockUpdates: { stockItemId: string; productId?: string; variantId?: string; condition?: string }[];
+  /** returns.resolveTerms answers source category_exception with this summary for these category ids */
+  returnExceptions: Map<string, string>;
 }
 
 const iso = (d: Date) => d.toISOString();
@@ -78,6 +80,7 @@ export async function harness(): Promise<Harness> {
     files: new Map<string, { name: string; owner: media.MediaOwner; text: string }>(),
     exports: [] as unknown[],
     stockUpdates: [] as { stockItemId: string; productId?: string; variantId?: string; condition?: string }[],
+    returnExceptions: new Map<string, string>(),
   };
   const seller = (id: string) => h.sellers.get(id);
   const snapshot = (id: string): sellers.SellerSnapshot | null => {
@@ -175,10 +178,10 @@ export async function harness(): Promise<Harness> {
           responsibilities: [],
           remedies: ['refund'],
           responseTargetBusinessDays: 2,
-          summary: '30-day returns',
+          summary: (categoryId && h.returnExceptions.get(categoryId)) || '30-day returns',
           policyVersion: 'v1',
           sellerTermsVersion: null,
-          source: 'baseline',
+          source: categoryId && h.returnExceptions.has(categoryId) ? ('category_exception' as const) : ('baseline' as const),
         }),
       },
       access: {

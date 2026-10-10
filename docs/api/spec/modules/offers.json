@@ -365,7 +365,7 @@
       },
       "shipsFrom": {
         "type": "string",
-        "desc": "City and region, e.g. 'Reno, NV'. Official Store offers: the inventory default location (inventory.getDefaultLocation), refreshed when that location changes; seller offers: the seller's ships-from address from shipping seller settings. Never empty: falls back to the market default location label (kernel config)."
+        "desc": "City and region, e.g. 'Reno, NV'. Official Store offers: the inventory default location (inventory.getDefaultLocation), set at save and refreshed by the hourly offers.reevaluate-eligibility job when that location changes (inventory publishes no location event; the refresh does not bump termsVersion); seller offers: the seller's ships-from address from shipping seller settings. Never empty: falls back to the market default location label (kernel config)."
       },
       "label": {
         "type": "string",
@@ -381,15 +381,15 @@
       "freeReturnShipping": "bool",
       "categoryException": {
         "type": "string?",
-        "desc": "Category exception text shown before purchase (from returns)"
+        "desc": "Category exception text shown before purchase: returns' summary when resolveTerms answered source category_exception at save (column return_category_exception); null otherwise"
       },
       "summary": {
         "type": "string",
         "desc": "e.g. '30-day returns. You pay return shipping unless the item is faulty.'"
       },
-      "policyId": {
-        "type": "uuid?",
-        "desc": "returns module policy version the terms were validated against"
+      "policyVersion": {
+        "type": "string?",
+        "desc": "returns policy version (EffectiveTerms.policyVersion, e.g. '1.0') the terms were validated against at save; null when returns was off"
       }
     },
     "WarrantyTerms": {
@@ -1062,7 +1062,10 @@
       "condition": "string",
       "conditionNotes": "text?",
       "missingItems": "string[]",
-      "price": "Money",
+      "price": {
+        "type": "Money",
+        "desc": "Offer (regular) price at purchase. Campaign markdowns, flash prices, coupons and automatic discounts are not in it: the price the customer paid per unit comes from checkout (promotions evaluation) on the order item."
+      },
       "compareAt": "Money?",
       "dispatch": "DispatchTerms",
       "returnTerms": "ReturnTerms",
@@ -1103,7 +1106,8 @@
         "return_kind": "text",
         "return_window_days": "int",
         "free_return_shipping": "bool",
-        "return_policy_id": "uuid?",
+        "return_policy_version": "text? (returns EffectiveTerms.policyVersion at save)",
+        "return_category_exception": "text? (returns category exception summary at save)",
         "warranty_kind": "text",
         "warranty_months": "int?",
         "warranty_handled_by": "text?",
@@ -2908,7 +2912,7 @@
     {
       "name": "offers.reevaluate-eligibility",
       "schedule": "hourly",
-      "does": "Read seller performance (on-time dispatch over the window, delivery reviews, open restrictions) from sellers and update offer_eligibility; publish offers.offer.eligibility_changed"
+      "does": "Read seller performance (on-time dispatch over the window, delivery reviews, open restrictions) from sellers and update offer_eligibility; publish offers.offer.eligibility_changed. Also: refresh Official Store ships-from from inventory.getDefaultLocation (no location event exists), fill titles of offers created before titles existed, and fill the return policy version and category exception of offers saved before those columns existed (only while returns is on; a bounded batch per run)"
     },
     {
       "name": "offers.verify-compare-at",
@@ -3049,7 +3053,7 @@
     "Exports: seller offer exports run through reports (registerDataset / requestExport) like every other module's exports. Offers registers dataset offers.seller.offers (seller audience; columns: product, variant, seller SKU, condition, price, compare-at, available, review state, publication, status, updated at) and serves it from POST /api/seller/offers/offers/exports. Bulk hide of selected rows (POST /offers/bulk-pause) is phase 1 like selected-row price changes.",
     "Uniqueness is enforced by the database for the Official Store too (seller_id null): unique nulls not distinct on (owner_type, seller_id, seller_sku) and on (owner_type, seller_id, variant_id) for live New offers, and one live offer per stock item (unique stock_item_id where status <> 'removed'). The service checks stay for friendly DUPLICATE_OFFER details; a 23505 from these indexes maps to DUPLICATE_OFFER too.",
     "Stock item follows the offer: a draft's variant change and a catalog merge move the stock item with inventory.updateStockItem(stockItemId, { productId, variantId }); removal archives and reinstatement unarchives it (inventory on offers.offer.status_changed). No stale stock item is left on the old variant.",
-    "Official Store ships-from (decision O3): DispatchTerms.shipsFrom of Official Store offers is the inventory default location (inventory.getDefaultLocation().label), not a constant.",
+    "Official Store ships-from (decision O3): DispatchTerms.shipsFrom of Official Store offers is the inventory default location (inventory.getDefaultLocation(): 'City, Region', else its name), not a constant. It is set when the offer is saved and refreshed on every Official Store offer by the hourly offers.reevaluate-eligibility job; inventory publishes no event when the default location changes, so a change shows within the hour.",
     "Offer title (decision O4): the title column of the offers table is denormalised from catalog so admin q search and shipping's profile usage lists need no catalog join.",
     "Trust enforcements on offers (decision D8): suspend_offer / remove_offer recommendations are owned by the Catalog Manager, who holds offers.offers.remove. Reversals arrive as trust.enforcement.reversed and are undone here (see consumes).",
     "Shipping profile ownership: create, update and bulk rows that set shippingProfileId check the owner with shipping.getProfileOwners([profileId]) (seller id, or official); a profile of another seller is SHIPPING_PROFILE_INVALID."

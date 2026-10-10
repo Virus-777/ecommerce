@@ -36,7 +36,7 @@ export interface Baseline {
   windowDays: number;
   freeReturnShipping: boolean;
   categoryException: string | null;
-  policyId: string | null;
+  policyVersion: string | null;
   summary: string;
 }
 
@@ -73,21 +73,21 @@ export class ManagePart extends Part {
   /** Category baseline from returns (30 days when returns is off) */
   async baseline(sellerId: string | null, categoryId: string | null, condition: string): Promise<Baseline> {
     const t = await this.core.optional('returns', 'resolveTerms', (r) => r.resolveTerms(sellerId, categoryId, condition));
-    if (!t) return { windowDays: DEFAULT_RETURN_DAYS, freeReturnShipping: false, categoryException: null, policyId: null, summary: `${DEFAULT_RETURN_DAYS}-day returns` };
+    if (!t) return { windowDays: DEFAULT_RETURN_DAYS, freeReturnShipping: false, categoryException: null, policyVersion: null, summary: `${DEFAULT_RETURN_DAYS}-day returns` };
     return {
       windowDays: t.windowDays,
       freeReturnShipping: false,
       categoryException: t.source === 'category_exception' ? t.summary : null,
-      policyId: isUuid(t.policyVersion) ? t.policyVersion : null,
+      policyVersion: t.policyVersion || null,
       summary: t.summary,
     };
   }
 
   baselineTerms(b: Baseline): ReturnTerms {
-    return returnTermsOf({ kind: 'baseline', windowDays: b.windowDays, freeReturnShipping: b.freeReturnShipping, categoryException: b.categoryException, policyId: b.policyId });
+    return returnTermsOf({ kind: 'baseline', windowDays: b.windowDays, freeReturnShipping: b.freeReturnShipping, categoryException: b.categoryException, policyVersion: b.policyVersion });
   }
 
-  returnTerms(input: ReturnTermsInput, b: Baseline): { kind: 'baseline' | 'extended'; windowDays: number; freeReturnShipping: boolean; policyId: string | null } {
+  returnTerms(input: ReturnTermsInput, b: Baseline): { kind: 'baseline' | 'extended'; windowDays: number; freeReturnShipping: boolean; policyVersion: string | null; categoryException: string | null } {
     const free = input.freeReturnShipping ?? b.freeReturnShipping;
     if (input.kind === 'extended') {
       if (input.windowDays === undefined || input.windowDays === null) throw invalidField('returnTerms.windowDays', 'Enter the return window for extended terms');
@@ -98,7 +98,7 @@ export class ManagePart extends Part {
       throw this.core.error('RETURN_TERMS_BELOW_BASELINE', `Returns must allow at least ${b.windowDays} days for this category`, { baseline: this.baselineTerms(b) });
     }
     const kind = input.kind === 'extended' || days > b.windowDays || (free && !b.freeReturnShipping) ? 'extended' : 'baseline';
-    return { kind, windowDays: days, freeReturnShipping: free, policyId: b.policyId };
+    return { kind, windowDays: days, freeReturnShipping: free, policyVersion: b.policyVersion, categoryException: b.categoryException };
   }
 
   warranty(input: WarrantyInput) {
@@ -367,7 +367,7 @@ export class ManagePart extends Part {
     title: string;
     stockItemId: string;
     items: { notes: string | null; missing: string[]; included: string[] };
-    returns: { kind: string; windowDays: number; freeReturnShipping: boolean; policyId: string | null };
+    returns: { kind: string; windowDays: number; freeReturnShipping: boolean; policyVersion: string | null; categoryException: string | null };
     warranty: { kind: string; months?: number | null; handledBy?: string | null };
     origin: { shipsFrom: string; sameDayCutoff: string | null };
     publishOnApproval: boolean;
@@ -406,7 +406,8 @@ export class ManagePart extends Part {
           return_kind: o.returns.kind,
           return_window_days: o.returns.windowDays,
           free_return_shipping: o.returns.freeReturnShipping,
-          return_policy_id: o.returns.policyId,
+          return_policy_version: o.returns.policyVersion,
+          return_category_exception: o.returns.categoryException,
           warranty_kind: o.warranty.kind,
           warranty_months: o.warranty.months ?? null,
           warranty_handled_by: o.warranty.handledBy ?? null,
@@ -675,7 +676,8 @@ export class ManagePart extends Part {
       set('return_kind', r.kind, 'returnTerms');
       set('return_window_days', r.windowDays, 'returnTerms');
       set('free_return_shipping', r.freeReturnShipping, 'returnTerms');
-      set('return_policy_id', r.policyId, 'returnTerms');
+      set('return_policy_version', r.policyVersion, 'returnTerms');
+      set('return_category_exception', r.categoryException, 'returnTerms');
     }
     if (body.warranty) {
       const w = warrantyTerms(this.warranty(body.warranty), row.owner_type);

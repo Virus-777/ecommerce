@@ -265,7 +265,47 @@ export class FeaturedPart extends Part {
       for (const id of chunk) await this.core.refreshEligibility(bySeller.get(id)!, standing);
     }
     await this.core.refreshEligibility(official);
+    await this.refreshOfficialShipsFrom();
     await this.backfillTitles();
+    await this.backfillReturnTerms();
+  }
+
+  /**
+   * Official Store ships-from follows the inventory default location (decision O3). Inventory publishes no event when
+   * the default location changes, so the hourly job rewrites every live Official Store offer whose label differs.
+   * Not a terms change (termsVersion stays): delivery estimates are computed live.
+   */
+  async refreshOfficialShipsFrom(): Promise<number> {
+    const label = await this.parts.manage.officialShipsFrom();
+    return this.repo.updateWhere('offers', { owner_type: 'official', status: { op: '<>', value: 'removed' }, ships_from: { op: '<>', value: label } }, { ships_from: label, updated_at: this.now() });
+  }
+
+  /**
+   * Offers saved before return_policy_version / return_category_exception existed get them from returns.resolveTerms
+   * (the version in force now). Only while returns is on: off, nothing can be filled and the rows wait. Walks the rows
+   * by id (keyset), at most `max` per run; rows returns cannot answer for stay null and are retried next run.
+   */
+  async backfillReturnTerms(max = 1000): Promise<number> {
+    if (!this.ctx.tryUse('returns')) return 0;
+    const cache: ProductCache = new Map();
+    let filled = 0;
+    let after: string | null = null;
+    for (let seen = 0; seen < max; ) {
+      const rows: OfferRec[] = await this.repo.find('offers', { return_policy_version: null, status: { op: '<>', value: 'removed' }, ...(after ? { id: { op: '>', value: after } } : {}) }, { orderBy: [['id', 'asc']], limit: 100 });
+      if (!rows.length) break;
+      for (const r of rows) {
+        const p = await this.core.productAdmin(r.product_id, cache).catch(() => null);
+        const b = await this.parts.manage.baseline(r.seller_id, p?.product.categoryId ?? null, r.condition);
+        if (b.policyVersion) {
+          await this.repo.update('offers', r.id, { return_policy_version: b.policyVersion, return_category_exception: b.categoryException });
+          filled++;
+        }
+      }
+      seen += rows.length;
+      after = rows[rows.length - 1]!.id;
+      if (rows.length < 100) break;
+    }
+    return filled;
   }
 
   /** Offers created before titles existed get theirs from catalog, a bounded batch per run */
