@@ -14,7 +14,10 @@ import type { EventEnvelope } from '../../../kernel/events/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type * as catalog from '../../../spec/catalog.js';
 import { auth, buildTestApp, callers, movingClock } from '../../../testing/app.js';
+import type { OpenSearchConfig } from '../infra/config.js';
+import { openSearchTesting } from '../infra/select.js';
 import type { SearchService } from '../service.js';
+import { fakeClientOptions, FakeOpenSearch } from './opensearch-fake/connection.js';
 
 export { auth, callers, newId };
 
@@ -377,18 +380,53 @@ export interface Kit {
   index(productId: string): Promise<void>;
   job(name: string): Promise<void>;
   close(): Promise<void>;
+  /** The engine under test, and the in-memory OpenSearch behind it (opensearch only) */
+  engine: Engine;
+  fake?: FakeOpenSearch;
 }
 
+/**
+ * Which engine the kit boots: postgres (default) or opensearch (the OpenSearch adapter on the in-memory fake).
+ * SEARCH_TEST_ENGINE=opensearch runs every search test file on the OpenSearch adapter.
+ */
+export type Engine = 'postgres' | 'opensearch';
+export const defaultEngine = (): Engine => (process.env.SEARCH_TEST_ENGINE === 'opensearch' ? 'opensearch' : 'postgres');
+
+/** OpenSearch settings for tests: no waiting on alias caches, writes visible at once */
+export const testOpenSearchConfig = (o: Partial<OpenSearchConfig> = {}): OpenSearchConfig => ({
+  nodes: ['http://opensearch.test:9200'],
+  auth: null,
+  indexPrefix: 'test',
+  shards: 1,
+  replicas: 0,
+  refresh: 'false',
+  requestTimeoutMs: 5_000,
+  bulkAttempts: 3,
+  aliasCacheMs: 0,
+  ...o,
+});
+
 /** `settings`: search setting overrides by key (e.g. { transitBusinessDays: 0 }); others keep their defaults */
-export async function boot(o: { settings?: Record<string, unknown> } = {}): Promise<Kit> {
+export async function boot(o: { settings?: Record<string, unknown>; engine?: Engine; fake?: FakeOpenSearch; opensearch?: Partial<OpenSearchConfig> } = {}): Promise<Kit> {
   const world = new World();
   const clock = movingClock();
   const overrides = o.settings ?? {};
+  const engine = o.engine ?? defaultEngine();
+  const fake = engine === 'opensearch' ? (o.fake ?? new FakeOpenSearch()) : undefined;
+  if (fake) {
+    openSearchTesting.config = { engine: 'opensearch', opensearch: testOpenSearchConfig(o.opensearch) };
+    openSearchTesting.clientOptions = fakeClientOptions(fake);
+    openSearchTesting.sleep = async () => {};
+  } else openSearchTesting.config = { engine: 'postgres' };
   const app = await buildTestApp({
     only: ['search', 'inventory', 'reviews', 'sellers', 'advertising', 'promotions', 'customers', 'orders', 'returns', 'audit'],
     clock,
     config: { rateLimits: false, launchPhase: 4 },
     apiStubs: { ...(world.stubs() as object), ...(o.settings ? { settings: { get: async (key: string) => (key.startsWith('search.') ? (overrides[key.slice(7)] ?? null) : null) } } : {}) } as never,
+  }).finally(() => {
+    delete openSearchTesting.config;
+    delete openSearchTesting.clientOptions;
+    delete openSearchTesting.sleep;
   });
   const events: EventEnvelope[] = [];
   for (const n of ['search.synonym.changed', 'search.index.rebuilt', 'search.ranking_policy.published']) app.kernel.events.subscribe('test', n, (e) => void events.push(e));
@@ -420,6 +458,8 @@ export async function boot(o: { settings?: Record<string, unknown> } = {}): Prom
       await app.kernel.events.drain();
     },
     close: () => app.close(),
+    engine,
+    ...(fake ? { fake } : {}),
   };
   return kit;
 }
