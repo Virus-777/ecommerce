@@ -112,7 +112,7 @@ export class Views {
     const ids = contents.map((c) => c.id);
     const repo = this.core.repo;
     const items = await repo.find('moderation_items', { content_type: contentType, content_id: ids }, { orderBy: [['first_reported_at', 'desc']] });
-    const decisions = (await repo.find('moderation_decisions', { moderation_item_id: items.map((i) => i.id) }, { orderBy: [['decided_at', 'desc']] })).filter((d) => d.decision !== 'refer');
+    const decisions = await repo.find('moderation_decisions', { moderation_item_id: items.map((i) => i.id) }, { orderBy: [['decided_at', 'desc']] });
     const appeals = await repo.find('appeals', { content_type: contentType, content_id: ids }, { orderBy: [['submitted_at', 'desc']] });
     const targetHours = await this.core.num('moderationTargetHours');
     const now = this.core.now();

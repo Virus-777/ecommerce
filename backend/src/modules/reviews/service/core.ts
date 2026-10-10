@@ -413,12 +413,12 @@ export class Core {
     }
     for (const [productId, r] of fx.productRatings) this.publish('reviews.rating.changed', { productId, sellerId: null, average: r.average, count: r.count }, by);
     if (fx.sellers.size) {
-      const since = fx.sellerSince ?? (await this.sellerPeriodStart());
       const ids = [...fx.sellers];
-      const [summaries, averages] = await Promise.all([this.repo.sellerSummaries(ids), this.repo.sellerAverages(ids, since)]);
+      const summaries = await this.repo.sellerSummaries(ids);
       for (const id of ids) {
-        const avg = averages.get(id);
-        this.publish('reviews.rating.changed', { productId: null, sellerId: id, average: avg != null ? Math.round(avg * 10) / 10 : null, count: summaries.find((s) => s.seller_id === id)?.count ?? 0 }, by);
+        const row = summaries.find((s) => s.seller_id === id);
+        const avg = row && row.count ? row.overall_sum / row.count : null;
+        this.publish('reviews.rating.changed', { productId: null, sellerId: id, average: avg != null ? Math.round(avg * 10) / 10 : null, count: row?.count ?? 0 }, by);
       }
     }
     const media = this.ctx.tryUse('media');

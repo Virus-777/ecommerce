@@ -49,7 +49,7 @@ enum ReviewAuthorKind {
 }
 
 type ReviewSoldBy {
-  "Null for the Official Store"
+  "OFFICIAL_STORE_ID for the Official Store"
   sellerId: UUID
   name: String!
 }
@@ -205,10 +205,10 @@ type SellerFeedbackPage implements Paged {
 
 """
 Seller feedback summary over the last 12 months, e.g. 98% positive · 4,812 ratings. Also given for the Official Store
-(official true, sellerId null), which collects the same package feedback.
+(official true, sellerId OFFICIAL_STORE_ID), which collects the same package feedback.
 """
 type SellerRating {
-  "Null for the Official Store"
+  "OFFICIAL_STORE_ID for the Official Store"
   sellerId: UUID
   "True for the Official Store"
   official: Boolean!

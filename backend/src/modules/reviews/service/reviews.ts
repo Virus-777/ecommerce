@@ -8,7 +8,7 @@ import { pageOf, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type * as orders from '../../../spec/orders.js';
 import type { AdminReviewRow, MyReview, PendingReviews, ProductReview, ReviewContext, ReviewInput, ReviewUpdateInput } from '../../../spec/reviews.js';
-import { addDays, REVIEW_GUIDELINES, REVIEW_STATUS_LABEL, reviewChecks } from '../domain/rules.js';
+import { addDays, OFFICIAL_STORE_ID, REVIEW_GUIDELINES, REVIEW_STATUS_LABEL, reviewChecks } from '../domain/rules.js';
 import { productReviewMachine } from '../domain/state-machines.js';
 import type { ReviewRec, ReviewsRepository } from '../ports.js';
 import { type Core, type CustomerWho, Effects, invalid, notFound, type Purchase } from './core.js';
@@ -398,7 +398,7 @@ export class ReviewsPart {
       },
       deliveredAt: item.deliveredAt!.toISOString(),
       verifiedPurchase: true,
-      seller: { ownerType: item.ownerType, id: item.ownerType === 'official' ? null : item.sellerId, name: item.sellerName },
+      seller: { ownerType: item.ownerType, id: item.ownerType === 'official' ? OFFICIAL_STORE_ID : (item.sellerId ?? OFFICIAL_STORE_ID), name: item.sellerName },
       existingReview: existing ? (await this.views.myReviews([existing], customerId))[0]! : null,
       existingFeedback: fb.feedback ? (await this.views.myFeedback([fb.feedback]))[0]! : null,
       feedbackEligible: fb.eligible,

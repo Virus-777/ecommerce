@@ -44,7 +44,7 @@ import {
 } from '../domain/rules.js';
 import { appealMachine, moderationItemMachine } from '../domain/state-machines.js';
 import { MODERATION_EVENTS, RESPONSE_MODERATION_EVENTS, RESTORE_EVENTS } from '../domain/transitions.js';
-import type { AppealRec, DecisionRec, ItemRec, ReportRec, ReviewsRepository } from '../ports.js';
+import type { AppealRec, DecisionRec, ItemRec, ReferralRec, ReportRec, ReviewsRepository } from '../ports.js';
 import { authorOf, type Content, findContent, isPublic, loadContent, machineOf, moveContent, productOf } from './content.js';
 import { type By, type Core, Effects, invalid, notFound, TRUST_ACTOR } from './core.js';
 import { appealView, type Views } from './views.js';
@@ -192,7 +192,7 @@ export class ModerationPart {
         if (last && recent && ((last.reasons as string[]) ?? []).includes(input.reason)) {
           // same complaint about content we decided recently: attach without reopening
           item = await tx.update('moderation_items', last.id, { report_count: last.report_count + 1 });
-          const d = (await tx.find('moderation_decisions', { moderation_item_id: last.id }, { orderBy: [['decided_at', 'desc']] })).find((x) => x.decision !== 'refer');
+          const d = (await tx.find('moderation_decisions', { moderation_item_id: last.id }, { orderBy: [['decided_at', 'desc']] }))[0];
           reportStatus = 'decided';
           outcome = d ? `We already reviewed this ${CONTENT_NOUN[c.type]}. ${d.message_to_reporter ?? reporterOutcomeText(d.decision, d.reason_code, CONTENT_NOUN[c.type])}` : `We already reviewed this ${CONTENT_NOUN[c.type]}.`;
         } else if (last && recent) {
@@ -504,7 +504,7 @@ export class ModerationPart {
     const allItems = c ? await repo.find('moderation_items', { content_type: item.content_type, content_id: item.content_id }) : [item];
     const decisions = await repo.find('moderation_decisions', { moderation_item_id: allItems.map((i) => i.id) }, { orderBy: [['decided_at', 'desc']] });
     const appeals = await repo.find('appeals', { content_type: item.content_type, content_id: item.content_id }, { orderBy: [['submitted_at', 'desc']] });
-    const latest = decisions.find((d) => d.decision !== 'refer');
+    const latest = decisions[0];
     const detail: ModerationDetail = {
       item: view[0]!,
       review: null,
@@ -520,7 +520,7 @@ export class ModerationPart {
       separationNote: null,
       previousDecision: latest ? this.outcomeOf(latest, appeals, c?.row.status ?? '') : null,
       appeal: appeals[0] ? appealView(appeals[0]) : null,
-      history: this.history(allItems, await repo.find('reports', { moderation_item_id: allItems.map((i) => i.id) }), decisions, appeals),
+      history: this.history(allItems, await repo.find('reports', { moderation_item_id: allItems.map((i) => i.id) }), decisions, appeals, await repo.find('referrals', { moderation_item_id: allItems.map((i) => i.id) })),
     };
     if (!c) return detail;
     switch (c.type) {
@@ -604,7 +604,7 @@ export class ModerationPart {
     return repo.count('reports', { target_id: others, reporter_kind: ['customer', 'seller', 'trust'] });
   }
 
-  private history(items: ItemRec[], reports: ReportRec[], decisions: DecisionRec[], appeals: AppealRec[]): common.TimelineEvent[] {
+  private history(items: ItemRec[], reports: ReportRec[], decisions: DecisionRec[], appeals: AppealRec[], referrals: ReferralRec[]): common.TimelineEvent[] {
     const out: common.TimelineEvent[] = [];
     for (const r of reports) {
       out.push({
@@ -616,9 +616,9 @@ export class ModerationPart {
     }
     for (const d of decisions) {
       const staff: common.Actor = d.moderator_id === SYSTEM_MODERATOR_ID ? { kind: 'system', id: null } : { kind: 'staff', id: d.moderator_id };
-      if (d.decision === 'refer') out.push({ at: d.decided_at.toISOString(), label: 'Referred to Trust and Risk', detail: d.message_to_reporter, actor: staff });
-      else out.push({ at: d.decided_at.toISOString(), label: `Decision: ${OUTCOME_OF[d.decision] ?? d.decision} (${reasonLabel(d.reason_code)})`, detail: d.edit_request ?? d.message_to_author, actor: staff });
+      out.push({ at: d.decided_at.toISOString(), label: `Decision: ${OUTCOME_OF[d.decision] ?? d.decision} (${reasonLabel(d.reason_code)})`, detail: d.edit_request ?? d.message_to_author, actor: staff });
     }
+    for (const r of referrals) out.push({ at: r.referred_at.toISOString(), label: 'Referred to Trust and Risk', detail: r.note, actor: r.referred_by === SYSTEM_MODERATOR_ID ? { kind: 'system', id: null } : { kind: 'staff', id: r.referred_by } });
     for (const a of appeals) {
       out.push({ at: a.submitted_at.toISOString(), label: 'Appeal submitted', detail: a.reason, actor: { kind: a.by_kind as common.Actor['kind'], id: a.by_id } });
       if (a.decided_at) out.push({ at: a.decided_at.toISOString(), label: a.status === 'overturned' ? 'Appeal: decision overturned' : 'Appeal: decision stands', detail: a.outcome, actor: { kind: 'staff', id: a.reviewer_id } });
@@ -726,20 +726,18 @@ export class ModerationPart {
     if (!note?.trim()) throw invalid([{ path: 'note', message: 'Say why Trust and Risk should look at this' }]);
     const c = await loadContent(repo, item.content_type, item.content_id);
     if (!c) throw notFound('Content');
-    await repo.insert('moderation_decisions', {
+    const author = authorOf(c);
+    // a referral, not a decision: the item stays open for keep / remove
+    await repo.insert('referrals', {
       id: newId(),
       moderation_item_id: item.id,
-      decision: 'refer',
-      reason_code: 'referred_to_trust',
-      message_to_reporter: note.trim(),
-      message_to_author: null,
-      edit_request: null,
-      moderator_id: actorId(by.actor),
-      decided_at: this.core.now(),
-      appeal_by: null,
-      trust_enforcement_id: null,
+      content_type: item.content_type,
+      content_id: item.content_id,
+      author_id: author.id,
+      note: note.trim(),
+      referred_by: actorId(by.actor),
+      referred_at: this.core.now(),
     });
-    const author = authorOf(c);
     this.core.publish('reviews.content.referred', { moderationItemId: item.id, contentType: item.content_type, contentId: item.content_id, authorId: author.id, note: note.trim() }, by);
     await this.core.audit(
       {
@@ -767,7 +765,7 @@ export class ModerationPart {
     const reason = input.reason?.trim();
     if (!reason) throw invalid([{ path: 'reason', message: 'Tell us why the decision should change' }]);
     const items = await repo.find('moderation_items', { content_type: c.type, content_id: c.row.id });
-    const decisions = (await repo.find('moderation_decisions', { moderation_item_id: items.map((i) => i.id) }, { orderBy: [['decided_at', 'desc']] })).filter((d) => d.decision !== 'refer');
+    const decisions = await repo.find('moderation_decisions', { moderation_item_id: items.map((i) => i.id) }, { orderBy: [['decided_at', 'desc']] });
     const decision = decisions[0];
     if (!decision || !ADVERSE.has(decision.decision) || !decision.appeal_by) throw new AppError('ILLEGAL_TRANSITION', 'There is no decision to appeal on this content', { machine: 'Appeal' });
     if (await repo.findOne('appeals', { decision_id: decision.id })) throw new AppError('ILLEGAL_TRANSITION', 'This decision has already been appealed', { machine: 'Appeal' });

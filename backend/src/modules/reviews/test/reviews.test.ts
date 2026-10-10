@@ -204,7 +204,7 @@ describe('pending reviews, context and item status', () => {
     expect(res.body.products).toEqual([expect.objectContaining({ orderItemId: o.itemIds[0], productId: p1.productId, title: 'Pellar skillet', sellerName: 'Casa Verde Home', reviewBy: expect.any(String) })]);
     expect(res.body.sellerFeedback).toEqual([
       expect.objectContaining({ orderId: o.orderId, ownerType: 'seller', sellerId: s, sellerName: 'Casa Verde Home', eligible: true, availableNote: null }),
-      expect.objectContaining({ ownerType: 'official', sellerId: null, eligible: false, availableNote: expect.stringContaining('Available after delivery') }),
+      expect.objectContaining({ ownerType: 'official', sellerId: OFFICIAL_STORE_ID, eligible: false, availableNote: expect.stringContaining('Available after delivery') }),
     ]);
   });
 
@@ -299,7 +299,7 @@ describe('GraphQL fields', () => {
     expect(await page.items[0].orderRef()).toBeNull();
     expect(await page.items[0].reportCount()).toBeNull();
     const rating = await gql.Offer.sellerRating({ id: newId(), ownerType: 'OFFICIAL', sellerId: null }, {}, ctx);
-    expect(rating).toMatchObject({ official: true, sellerId: null });
+    expect(rating).toMatchObject({ official: true, sellerId: OFFICIAL_STORE_ID });
     const status = await gql.OrderItem.reviewStatus({ id: b.itemId }, {}, ctx);
     expect(status).toMatchObject({ canReview: false, status: 'PUBLISHED', rating: 4, feedbackEligible: true });
     expect(await gql.OrderItem.reviewStatus({ id: b.itemId }, {}, { ...ctx, customerId: async () => null })).toBeNull();

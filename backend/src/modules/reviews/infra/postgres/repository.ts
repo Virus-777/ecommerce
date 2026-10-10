@@ -329,7 +329,7 @@ export function createPostgresReviewsRepository(db: Kysely<ReviewsDb>, inbox?: I
     },
 
     async recomputeSellerSummary(sellerId, since, positiveThreshold, now) {
-      const agg = await sql<{ n: number; pos: number; neu: number; neg: number; yes: number; ds: number; cs: number; cn: number }>`
+      const agg = await sql<{ n: number; pos: number; neu: number; neg: number; yes: number; ds: number; cs: number; cn: number; os: number }>`
         select count(*)::int as n,
           count(*) filter (where overall >= ${positiveThreshold})::int as pos,
           count(*) filter (where overall < ${positiveThreshold} and overall >= ${positiveThreshold - 1})::int as neu,
@@ -337,7 +337,8 @@ export function createPostgresReviewsRepository(db: Kysely<ReviewsDb>, inbox?: I
           count(*) filter (where as_described)::int as yes,
           coalesce(sum(dispatch_rating), 0)::int as ds,
           coalesce(sum(communication_rating), 0)::int as cs,
-          count(communication_rating)::int as cn
+          count(communication_rating)::int as cn,
+          coalesce(sum(overall), 0)::int as os
         from reviews.seller_feedback where seller_id = ${sellerId} and status = 'published' and visible and created_at >= ${since}`.execute(d);
       const a = agg.rows[0]!;
       const row = {
@@ -350,6 +351,7 @@ export function createPostgresReviewsRepository(db: Kysely<ReviewsDb>, inbox?: I
         dispatch_sum: a.ds,
         communication_sum: a.cs,
         communication_count: a.cn,
+        overall_sum: a.os,
         updated_at: now,
       };
       const { seller_id: _id, ...rest } = row;
@@ -364,18 +366,9 @@ export function createPostgresReviewsRepository(db: Kysely<ReviewsDb>, inbox?: I
       if (!sellerIds.length) return [];
       return d.selectFrom('seller_feedback_summaries').selectAll().where('seller_id', 'in', [...new Set(sellerIds)]).execute();
     },
-    async sellerAverages(sellerIds, since) {
-      if (!sellerIds.length) return new Map();
-      const rows = await d
-        .selectFrom('seller_feedback')
-        .select(['seller_id', sql<number>`avg(overall)::float`.as('avg')])
-        .where('seller_id', 'in', [...new Set(sellerIds)])
-        .where('status', '=', 'published')
-        .where('visible', '=', true)
-        .where('created_at', '>=', since)
-        .groupBy('seller_id')
-        .execute();
-      return new Map(rows.map((r: { seller_id: string; avg: number }) => [r.seller_id, Number(r.avg)]));
+    async anonymiseVotes(customerId) {
+      const r = await sql`update reviews.helpful_votes set customer_id = gen_random_uuid() where customer_id = ${customerId}`.execute(d);
+      return Number(r.numAffectedRows ?? 0);
     },
     async productIdsAfter(after, limit) {
       const r = await sql<{ product_id: string }>`

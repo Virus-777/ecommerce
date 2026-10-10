@@ -199,8 +199,8 @@ export class SummariesPart {
 
   /**
    * customers.account.closed: display names on the customer's reviews, feedback, questions and answers become
-   * Former customer (the content stays published); their reports stay counted without the customer id; pending
-   * invitations are cancelled.
+   * Former customer (the content stays published); their helpful votes stay counted under a random id each (no link
+   * to the customer); their reports stay counted without the customer id; pending invitations are cancelled.
    */
   async anonymise(customerId: string): Promise<void> {
     if (!isUuid(customerId)) return;
@@ -212,6 +212,7 @@ export class SummariesPart {
       await tx.updateWhere('answers', { author_kind: 'customer', author_id: customerId }, { display_name: FORMER_CUSTOMER });
       await tx.updateWhere('reports', { reporter_kind: 'customer', reporter_id: customerId }, { reporter_id: null });
       await tx.updateWhere('review_invites', { customer_id: customerId, state: 'pending' }, { state: 'cancelled', updated_at: now });
+      await tx.anonymiseVotes(customerId);
     });
   }
 
@@ -253,7 +254,7 @@ export class SummariesPart {
     if (!items.length) return out;
     const decisions = await this.core.repo.find('moderation_decisions', { moderation_item_id: items.map((i) => i.id) }, { orderBy: [['decided_at', 'asc']] });
     const contentOf = new Map(items.map((i) => [i.id, i.content_id]));
-    for (const d of decisions) if (d.decision !== 'refer') out.set(contentOf.get(d.moderation_item_id)!, `${d.decision}: ${d.reason_code}`);
+    for (const d of decisions) out.set(contentOf.get(d.moderation_item_id)!, `${d.decision}: ${d.reason_code}`);
     return out;
   }
 

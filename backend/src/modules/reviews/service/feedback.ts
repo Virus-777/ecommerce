@@ -68,7 +68,7 @@ export class FeedbackPart {
         orderId: p.orderId,
         orderRef: p.orderRef,
         ownerType: p.ownerType,
-        sellerId: p.ownerType === 'official' ? null : p.sellerId,
+        sellerId: p.ownerType === 'official' ? OFFICIAL_STORE_ID : (p.sellerId ?? OFFICIAL_STORE_ID),
         sellerName: p.sellerName,
         packageLabel: p.packageLabel,
         deliveredAt: p.deliveredAt?.toISOString() ?? null,
@@ -270,10 +270,13 @@ export class FeedbackPart {
     const out = new Map<string, SellerFeedbackSummary>();
     if (!keys.length) return out;
     const months = await this.core.num('sellerRatingPeriodMonths');
-    const since = await this.core.sellerPeriodStart();
-    const [rows, averages] = await Promise.all([this.core.repo.sellerSummaries(keys), this.core.repo.sellerAverages(keys, since)]);
+    const rows = await this.core.repo.sellerSummaries(keys);
     const dispatch = o.dispatch === false ? new Map<string, number | null>() : await this.onTime(keys);
-    for (const id of keys) out.set(id, this.summaryOut(id, rows.find((r) => r.seller_id === id), averages.get(id), months, dispatch.get(id) ?? null));
+    for (const id of keys) {
+      const row = rows.find((r) => r.seller_id === id);
+      // average overall rating from the summary row (overall_sum / count)
+      out.set(id, this.summaryOut(id, row, row && row.count ? row.overall_sum / row.count : undefined, months, dispatch.get(id) ?? null));
+    }
     return out;
   }
 
@@ -286,7 +289,7 @@ export class FeedbackPart {
     const count = r?.count ?? 0;
     const positivePct = r ? pct(r.positive, count) : null;
     return {
-      sellerId: isOfficial(sellerId) ? null : sellerId,
+      sellerId: isOfficial(sellerId) ? OFFICIAL_STORE_ID : sellerId,
       official: isOfficial(sellerId),
       periodMonths: months,
       count,
