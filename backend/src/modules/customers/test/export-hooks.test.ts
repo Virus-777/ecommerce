@@ -81,6 +81,7 @@ describe('data export hooks', () => {
     expect(consent.map((x) => x.channel)).toEqual(expect.arrayContaining(['email', 'personalization', 'recent_searches']));
     const readme = JSON.parse(files.get('README.json')!.toString());
     expect(readme.sections).toEqual([
+      { file: 'orders.json', title: 'Orders', module: 'orders' }, // orders declares the export hook (pass 4)
       { file: 'messages.json', title: 'Messages', module: 'messaging' },
       { file: 'reviews.json', title: 'Reviews', module: 'reviews' },
     ]);
