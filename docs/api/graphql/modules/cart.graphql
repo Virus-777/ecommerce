@@ -273,6 +273,8 @@ enum CartNoticeKind @areas(in: [STORE]) {
   NOT_SHIPPABLE
   DELIVERY_ESTIMATE_CHANGED
   COUPON_NO_LONGER_APPLIES
+  "The offer's return, warranty or dispatch terms changed; accepting moves the accepted terms version"
+  TERMS_CHANGED
 }
 
 enum CartNoticeSeverity @areas(in: [STORE]) {
