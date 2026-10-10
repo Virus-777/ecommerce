@@ -2,7 +2,7 @@ import { sql, type Kysely } from 'kysely';
 import type { Inbox } from '../../../../kernel/events/inbox.js';
 import { paginate } from '../../../../kernel/lib/pagination.js';
 import type { WalletDb } from '../../../../spec/wallet.js';
-import type { BalanceSnapshot, WalletRepository } from '../../ports.js';
+import type { BalanceSnapshot, CorrectionRow, WalletRepository } from '../../ports.js';
 
 const n = (v: unknown) => Number(v ?? 0);
 
@@ -210,6 +210,37 @@ export function createPostgresWalletRepository(db: Kysely<WalletDb>, inbox: Inbo
         .where('created_at', '>', since)
         .executeTakeFirst();
       return n(r?.total);
+    },
+
+    /* ---------------------------------------------------------------- corrections */
+    async insertCorrection(row) {
+      return db.insertInto('credit_corrections').values(row).onConflict((oc) => oc.column('idempotency_key').doNothing()).returningAll().executeTakeFirst();
+    },
+    async getCorrection(id, o) {
+      let q = db.selectFrom('credit_corrections').selectAll().where('id', '=', id);
+      if (o?.forUpdate) q = q.forUpdate();
+      return q.executeTakeFirst();
+    },
+    async correctionByKey(key) {
+      return db.selectFrom('credit_corrections').selectAll().where('idempotency_key', '=', key).executeTakeFirst();
+    },
+    async correctionByApproval(requestId) {
+      return db.selectFrom('credit_corrections').selectAll().where('approval_request_id', '=', requestId).executeTakeFirst();
+    },
+    async updateCorrection(id, patch) {
+      return db.updateTable('credit_corrections').set(patch).where('id', '=', id).returningAll().executeTakeFirstOrThrow();
+    },
+    async correctionsOfCustomer(customerId, states) {
+      if (!states.length) return [];
+      return db.selectFrom('credit_corrections').selectAll().where('customer_id', '=', customerId).where('state', 'in', [...states] as CorrectionRow['state'][]).orderBy('created_at', 'desc').orderBy('id', 'desc').execute();
+    },
+
+    /* ---------------------------------------------------------------- customer data export */
+    async allLotsOf(customerId) {
+      return db.selectFrom('lots').selectAll().where('customer_id', '=', customerId).orderBy('created_at').orderBy('id').execute();
+    },
+    async allEntriesOf(customerId) {
+      return db.selectFrom('ledger').selectAll().where('customer_id', '=', customerId).orderBy('at').orderBy('id').execute();
     },
 
     /* ---------------------------------------------------------------- gift cards */

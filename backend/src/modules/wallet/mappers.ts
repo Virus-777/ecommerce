@@ -1,8 +1,8 @@
 /** Rows (snake_case, minor units) → API types (camelCase, Money). One place per type. */
 import type * as common from '../../spec/common.js';
-import type { CreditHold, CreditLot, GiftCard, GoodwillGrant, LedgerEntry } from '../../spec/wallet.js';
+import type { CreditCorrection, CreditHold, CreditLot, GiftCard, GoodwillGrant, LedgerEntry } from '../../spec/wallet.js';
 import { actorFrom, allocated, caseRefOf, entryLabel, m, SYSTEM, type EntryKind, type LotSource } from './domain/rules.js';
-import type { EntryRow, GiftCardRow, GrantRow, HoldRow, LotAllocation, LotRow } from './ports.js';
+import type { CorrectionRow, EntryRow, GiftCardRow, GrantRow, HoldRow, LotAllocation, LotRow } from './ports.js';
 
 export const iso = (d: Date | null | undefined) => (d ? new Date(d).toISOString() : null);
 
@@ -93,7 +93,23 @@ export const toGrant = (g: GrantRow, f: GrantFacts): GoodwillGrant => ({
   ledgerEntryId: g.ledger_entry_id,
 });
 
-export const toGiftCard = (c: GiftCardRow): GiftCard => ({
+export const toCorrection = (c: CorrectionRow, f: { approvals: Map<string, common.ApprovalInfo>; entries: Map<string, LedgerEntry> }): CreditCorrection => ({
+  id: c.id,
+  customerId: c.customer_id,
+  amount: m(c.amount, c.currency),
+  reason: c.reason,
+  reference: c.reference,
+  state: c.state,
+  approval: c.approval_request_id ? (f.approvals.get(c.approval_request_id) ?? { required: true, approvalRequestId: c.approval_request_id, approvers: [] }) : null,
+  entry: c.ledger_entry_id ? (f.entries.get(c.ledger_entry_id) ?? null) : null,
+  failure: c.failure,
+  requestedBy: actorFrom(c.requested_by) ?? SYSTEM,
+  decidedBy: actorFrom(c.decided_by),
+  createdAt: iso(c.created_at)!,
+  decidedAt: iso(c.decided_at),
+});
+
+export const toGiftCard =(c: GiftCardRow): GiftCard => ({
   id: c.id,
   codeLast4: c.code_last4,
   batchId: c.batch_id,

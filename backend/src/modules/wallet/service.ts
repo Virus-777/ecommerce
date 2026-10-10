@@ -3,6 +3,8 @@ import type { EventPayload } from '../../kernel/events/index.js';
 import type { ModuleContext } from '../../kernel/module-system/index.js';
 import type * as common from '../../spec/common.js';
 import type { CreditBalance, CreditHold, CustomerWalletAdmin, GoodwillGrant, GoodwillInput, LedgerEntry, LoyaltyAccount, WalletPublicApi } from '../../spec/wallet.js';
+import { isUuid } from '../../kernel/lib/ids.js';
+import { toLot } from './mappers.js';
 import type { WalletRepository } from './ports.js';
 import { WalletCore } from './service/core.js';
 import { GiftCards } from './service/gift-cards.js';
@@ -82,6 +84,31 @@ export class WalletService implements WalletPublicApi {
   /** Staff view of a customer's credit: balance, lots, goodwill in the last 30 days against the per-customer limit, and pending grants. */
   async getCustomerWallet(customerId: string): Promise<CustomerWalletAdmin> {
     return this.staff.customerWallet(customerId);
+  }
+
+  /**
+   * Customer data export hook (FORMAT.md): the customer's credit lots and ledger entries as plain records (labels,
+   * amounts, dates). Staff names and internal reasons are left out (entries are shown as the customer sees them).
+   */
+  async exportCustomerData(input: { customerId: string; accountId: string }): Promise<common.CustomerDataSection[]> {
+    const ids = [...new Set([input.customerId, input.accountId].filter((v) => isUuid(v)))];
+    const lots: Record<string, unknown>[] = [];
+    const entries: Record<string, unknown>[] = [];
+    for (const id of ids) {
+      const [acct, lotRows, entryRows] = await Promise.all([this.deps.repo.getAccount(id), this.deps.repo.allLotsOf(id), this.deps.repo.allEntriesOf(id)]);
+      const currency = acct?.currency ?? this.core.currency;
+      for (const l of lotRows) {
+        const v = toLot(l, currency);
+        lots.push({ source: v.source, original: v.original, remaining: v.remaining, state: l.state, expiresAt: v.expiresAt, createdAt: v.createdAt, reference: v.reference });
+      }
+      for (const e of await this.ledger.entryViews(entryRows, { staff: false })) {
+        entries.push({ at: e.at, kind: e.kind, label: e.label, amount: e.amount, balanceAfter: e.balanceAfter, orderRef: e.orderRef, caseRef: e.caseRef });
+      }
+    }
+    return [
+      { key: 'store_credit_lots', title: 'Store credit', module: 'wallet', records: lots },
+      { key: 'store_credit_entries', title: 'Store credit history', module: 'wallet', records: entries },
+    ];
   }
 
   /* ---------------- loyalty (phase 4 experiment) */

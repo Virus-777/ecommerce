@@ -4,6 +4,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
+import { m0004CreditCorrections } from '../infra/postgres/migrations/0004_credit_corrections.js';
 import { harness, idem, USD, type Harness } from './helpers.js';
 
 let h: Harness;
@@ -179,12 +180,18 @@ describe('reversing goodwill', () => {
 describe('balance corrections', () => {
   it('corrects up and down with a reason; never below zero', async () => {
     const c = h.customer();
-    const up = await h.call('POST', `${ADMIN}/customers/${c.id}/corrections`, finance(), { amount: USD(1500), reason: 'Missed refund', reference: 'RC-1042' }, idem());
+    const upKey = idem();
+    const up = await h.call('POST', `${ADMIN}/customers/${c.id}/corrections`, finance(), { amount: USD(1500), reason: 'Missed refund', reference: 'RC-1042' }, upKey);
     expect(up.status, JSON.stringify(up.body)).toBe(201);
-    expect(up.body).toMatchObject({ kind: 'correction', amount: USD(1500), balanceAfter: USD(1500), label: 'Balance correction', reason: 'Missed refund' });
+    expect(up.body).toMatchObject({ customerId: c.id, amount: USD(1500), reason: 'Missed refund', reference: 'RC-1042', state: 'applied', approval: null, requestedBy: { kind: 'staff' }, decidedBy: { kind: 'staff' } });
+    expect(up.body.entry).toMatchObject({ kind: 'correction', amount: USD(1500), balanceAfter: USD(1500), label: 'Balance correction', reason: 'Missed refund' });
+    expect(up.body.decidedAt).toBeTruthy();
+    // a retry with the same key answers the same correction
+    const again = await h.call('POST', `${ADMIN}/customers/${c.id}/corrections`, finance(), { amount: USD(1500), reason: 'Missed refund', reference: 'RC-1042' }, upKey);
+    expect(again.body).toMatchObject({ id: up.body.id, entry: { id: up.body.entry.id } });
     const down = await h.call('POST', `${ADMIN}/customers/${c.id}/corrections`, finance(), { amount: USD(-400), reason: 'Duplicate credit', reference: null }, idem());
     expect(down.status).toBe(201);
-    expect(down.body).toMatchObject({ amount: USD(-400), balanceAfter: USD(1100) });
+    expect(down.body).toMatchObject({ amount: USD(-400), state: 'applied', entry: { amount: USD(-400), balanceAfter: USD(1100) } });
     const below = await h.call('POST', `${ADMIN}/customers/${c.id}/corrections`, finance(), { amount: USD(-1101), reason: 'Too much' }, idem());
     expect(below.body.error).toMatchObject({ code: 'INSUFFICIENT_CREDIT', details: { available: USD(1100) } });
     expect(h.named('wallet.credit.corrected').filter((e) => e.customerId === c.id).map((e) => e.amount)).toEqual([USD(1500), USD(-400)]);
@@ -198,17 +205,93 @@ describe('balance corrections', () => {
     h.authority['wallet.credit.correct'] = 'approval_required';
     const key = idem();
     const res = await h.call('POST', `${ADMIN}/customers/${c.id}/corrections`, finance(), { amount: USD(50000), reason: 'Migrated balance', reference: 'LEGACY-7' }, key);
-    expect(res.status).toBe(409);
-    expect(res.body.error.code).toBe('APPROVAL_REQUIRED');
+    // saved pending approval: 201 with `approval` (FORMAT.md, Approval responses)
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ customerId: c.id, amount: USD(50000), state: 'pending_approval', entry: null, approval: { required: true, approvalRequestId: expect.any(String) } });
+    const requestId = res.body.approval.approvalRequestId;
+    expect(h.approvals.find((a) => a.id === requestId)?.target).toMatchObject({ type: 'credit_correction', id: res.body.id });
     expect((await h.service.getBalance(c.id)).available).toEqual(USD(0));
-    await h.decide(res.body.error.details.approvalRequestId, 'approved');
-    await h.decide(res.body.error.details.approvalRequestId, 'approved');
+    // the staff view lists it as pending
+    const view = await h.call('GET', `${ADMIN}/customers/${c.id}`, finance());
+    expect(view.body.pendingCorrections).toEqual([expect.objectContaining({ id: res.body.id, state: 'pending_approval' })]);
+    await h.decide(requestId, 'approved');
+    await h.decide(requestId, 'approved');
     expect((await h.service.getBalance(c.id)).available).toEqual(USD(50000));
-    // the original request, retried after approval, answers with the applied entry
+    expect(h.named('wallet.credit.corrected').filter((e) => e.customerId === c.id)).toHaveLength(1);
+    // the original request, retried after approval, answers with the applied correction
     h.authority = {};
     const retried = await h.call('POST', `${ADMIN}/customers/${c.id}/corrections`, finance(), { amount: USD(50000), reason: 'Migrated balance', reference: 'LEGACY-7' }, key);
     expect(retried.status).toBe(201);
+    expect(retried.body).toMatchObject({ id: res.body.id, state: 'applied', entry: { kind: 'correction', amount: USD(50000) }, decidedBy: { name: 'Fiona Finance' } });
     expect((await h.service.getBalance(c.id)).available).toEqual(USD(50000));
+    expect((await h.call('GET', `${ADMIN}/customers/${c.id}`, finance())).body.pendingCorrections).toEqual([]);
+  });
+
+  it('a rejected correction changes nothing; an approved one that no longer finds the credit ends failed', async () => {
+    const c = h.customer();
+    await h.give(c.id, 1000);
+    h.authority['wallet.credit.correct'] = 'approval_required';
+    const rejected = await h.call('POST', `${ADMIN}/customers/${c.id}/corrections`, finance(), { amount: USD(-900), reason: 'Duplicate refund' }, idem());
+    const taken = await h.call('POST', `${ADMIN}/customers/${c.id}/corrections`, finance(), { amount: USD(-800), reason: 'Duplicate refund' }, idem());
+    expect([rejected.body.state, taken.body.state]).toEqual(['pending_approval', 'pending_approval']);
+    await h.decide(rejected.body.approval.approvalRequestId, 'rejected');
+    h.authority = {};
+    // the customer spends most of the credit before the second correction is approved
+    await h.call('POST', `${ADMIN}/customers/${c.id}/corrections`, finance(), { amount: USD(-500), reason: 'Other fix' }, idem());
+    await h.decide(taken.body.approval.approvalRequestId, 'approved');
+    const correction = async (id: string) => h.service.staff.correctionView((await h.service.core.repo.getCorrection(id))!);
+    expect(await correction(rejected.body.id)).toMatchObject({ state: 'rejected', entry: null, decidedBy: { name: 'Fiona Finance' } });
+    expect(await correction(taken.body.id)).toMatchObject({ state: 'failed', entry: null, failure: expect.any(String) });
+    expect((await h.service.getBalance(c.id)).available).toEqual(USD(500));
+    expect(h.audits.filter((a) => a.target.id === c.id).map((a) => a.action)).toEqual(expect.arrayContaining(['wallet.credit.reject_correction', 'wallet.credit.correction_failed']));
+  });
+
+  it('a correction sent for approval before the corrections table existed is finished from its approval details', async () => {
+    const c = h.customer();
+    const key = newId();
+    const requestId = newId();
+    h.approvals.push({
+      id: requestId,
+      action: 'wallet.credit.correct',
+      target: { type: 'credit_correction', id: newId(), ref: null, label: 'Store credit correction' },
+      amount: USD(700),
+      summary: 'Store credit correction',
+      details: { customerId: c.id, amount: USD(700), reason: 'Old pending fix', reference: 'OLD-1', requestedBy: { kind: 'staff', id: STAFF_ID }, key },
+      reason: 'Old pending fix',
+      requestedBy: { kind: 'staff', accountId: STAFF_ID } as never,
+    } as never);
+    await h.decide(requestId, 'approved');
+    expect((await h.service.getBalance(c.id)).available).toEqual(USD(700));
+    const row = await h.service.core.repo.correctionByKey(key);
+    expect(row).toMatchObject({ state: 'applied', approval_request_id: requestId, reference: 'OLD-1', customer_id: c.id });
+  });
+
+  it('migration 0004 backfills applied corrections from the ledger', async () => {
+    const c = h.customer();
+    const res = await h.call('POST', `${ADMIN}/customers/${c.id}/corrections`, finance(), { amount: USD(1200), reason: 'Backfill me', reference: 'BF-1' }, { 'idempotency-key': 'bf-key-1' });
+    expect(res.status).toBe(201);
+    await h.app.kernel.database.exec(`drop table wallet.credit_corrections`);
+    await h.app.kernel.database.exec(m0004CreditCorrections.sql);
+    const row = await h.service.core.repo.correctionByKey('bf-key-1');
+    expect(row).toMatchObject({ customer_id: c.id, amount: 1200, currency: 'USD', state: 'applied', ledger_entry_id: res.body.entry.id, reason: 'Backfill me' });
+    expect(JSON.parse(row!.requested_by)).toMatchObject({ kind: 'staff' });
+  });
+});
+
+describe('customer data export', () => {
+  it("exports the customer's lots and entries as the customer sees them (no staff names or reasons)", async () => {
+    const c = h.customer();
+    await h.give(c.id, 900);
+    await h.call('POST', `${ADMIN}/customers/${c.id}/corrections`, finance(), { amount: USD(-100), reason: 'Internal note' }, idem());
+    const sections = await h.service.exportCustomerData({ customerId: c.id, accountId: c.id });
+    expect(sections.map((s) => [s.key, s.module])).toEqual([
+      ['store_credit_lots', 'wallet'],
+      ['store_credit_entries', 'wallet'],
+    ]);
+    expect(sections[0]!.records).toEqual([expect.objectContaining({ source: 'refund', original: USD(900), remaining: USD(800), state: 'active' })]);
+    expect(sections[1]!.records).toEqual([expect.objectContaining({ kind: 'refund_to_credit', amount: USD(900) }), expect.objectContaining({ kind: 'correction', amount: USD(-100), balanceAfter: USD(800) })]);
+    expect(JSON.stringify(sections)).not.toContain('Internal note');
+    expect((await h.service.exportCustomerData({ customerId: newId(), accountId: newId() })).every((s) => s.records.length === 0)).toBe(true);
   });
 });
 

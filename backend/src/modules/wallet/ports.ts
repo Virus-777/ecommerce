@@ -13,6 +13,7 @@ export type HoldRow = WalletDb['holds'];
 export type GrantRow = WalletDb['goodwill_grants'];
 export type GiftCardRow = WalletDb['gift_cards'];
 export type GiftCardBatchRow = WalletDb['gift_card_batches'];
+export type CorrectionRow = WalletDb['credit_corrections'];
 
 /** Which lots an entry took credit from (or gave it to), stored on the ledger entry */
 export interface LotAllocation {
@@ -44,7 +45,7 @@ export interface GiftCardFilter {
   state?: string;
 }
 
-/** Persistence for this module's own tables: wallet.accounts, wallet.lots, wallet.ledger, wallet.holds, wallet.goodwill_grants, wallet.gift_cards, wallet.loyalty_entries. */
+/** Persistence for this module's own tables: wallet.accounts, wallet.lots, wallet.ledger, wallet.holds, wallet.goodwill_grants, wallet.credit_corrections, wallet.gift_cards, wallet.gift_card_batches, wallet.loyalty_entries. */
 export interface WalletRepository {
   /** Runs fn in one transaction (reuses the current one when already inside) */
   transaction<R>(fn: (tx: WalletRepository) => Promise<R>): Promise<R>;
@@ -104,6 +105,21 @@ export interface WalletRepository {
   grantsOfCustomer(customerId: string, states: readonly string[]): Promise<GrantRow[]>;
   /** Goodwill granted or waiting for approval since a time (per-customer 30-day limit) */
   goodwillSince(customerId: string, since: Date): Promise<number>;
+
+  /* balance corrections */
+  /** Inserts unless one with the same idempotency key exists (then undefined) */
+  insertCorrection(row: CorrectionRow): Promise<CorrectionRow | undefined>;
+  getCorrection(id: string, o?: { forUpdate?: boolean }): Promise<CorrectionRow | undefined>;
+  correctionByKey(idempotencyKey: string): Promise<CorrectionRow | undefined>;
+  correctionByApproval(requestId: string): Promise<CorrectionRow | undefined>;
+  updateCorrection(id: string, patch: Partial<Pick<CorrectionRow, 'state' | 'decided_by' | 'decided_at' | 'ledger_entry_id' | 'failure' | 'approval_request_id'>>): Promise<CorrectionRow>;
+  correctionsOfCustomer(customerId: string, states: readonly string[]): Promise<CorrectionRow[]>;
+
+  /* customer data export */
+  /** Every lot of a customer, oldest first */
+  allLotsOf(customerId: string): Promise<LotRow[]>;
+  /** Every ledger entry of a customer, oldest first */
+  allEntriesOf(customerId: string): Promise<EntryRow[]>;
 
   /* gift cards */
   insertGiftCards(rows: GiftCardRow[]): Promise<void>;
