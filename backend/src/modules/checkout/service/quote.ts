@@ -7,6 +7,7 @@
 import { AppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type * as common from '../../../spec/common.js';
+import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
 import type * as offers from '../../../spec/offers.js';
 import type * as promotions from '../../../spec/promotions.js';
 import type * as shipping from '../../../spec/shipping.js';
@@ -109,7 +110,9 @@ export class Quoter {
         if (!offer) return out.set(id, { offer: null, info: null, variantOffers: [] });
         const cmp = await compare(offer);
         const view = cmp?.offers.find((v) => v.offerId === offer.id) ?? null;
-        const categoryId = cmp?.product.categoryId ?? null;
+        // decision D-C1: catalog (optional) fills the category when the offer comparison has none
+        const catalogApi = this.ctx.tryUse('catalog');
+        const categoryId = cmp?.product.categoryId ?? (catalogApi ? ((await this.core.optional('catalog.getProduct', () => catalogApi.getProduct(offer.productId)))?.categoryId ?? null) : null);
         const terms = returnsApi ? await this.core.optional('returns.resolveTerms', () => returnsApi.resolveTerms(offer.ownerType === 'official' ? null : (offer.sellerId ?? null), categoryId, offer.condition)) : undefined;
         const seller =
           offer.ownerType === 'official'
@@ -274,6 +277,8 @@ export class Quoter {
             promo.evaluateCart({
               customerId: d.session.customer_id,
               guestSessionId: d.session.customer_id ? null : d.session.guest_session_id,
+              // guests: per-customer limits and new-customer eligibility key on the contact email
+              contactEmail: d.session.customer_id ? null : (this.core.account(d.session).email ?? null),
               region: d.address?.region ?? null,
               lines: lines.map((l) => {
                 const info = quote.lineInfo[l.id];
@@ -282,9 +287,10 @@ export class Quoter {
                   offerId: l.offer_id,
                   productId: l.product_id,
                   variantId: l.variant_id,
-                  sellerId: l.seller_id ?? '',
+                  // Official Store lines carry OFFICIAL_STORE_ID (redemption lines need a seller id), never ''
+                  sellerId: l.owner_type === 'official' ? OFFICIAL_STORE_ID : (l.seller_id ?? OFFICIAL_STORE_ID),
                   officialStore: l.owner_type === 'official',
-                  categoryId: info?.categoryId ?? '',
+                  categoryId: info?.categoryId || null,
                   brandId: info?.brandId ?? null,
                   quantity: l.quantity,
                   unitPrice: m(l.unit_price, cur),

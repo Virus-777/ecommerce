@@ -320,8 +320,8 @@ export class Views {
     return {
       id: row.id,
       status: row.status,
-      customerName: a.name ?? a.email ?? 'Guest',
-      email: a.email ?? '',
+      customerName: a.name ?? null,
+      email: a.email ?? null,
       guest: a.kind === 'guest',
       total: q.totals.total,
       packageCount: q.totals.shippingByPackage.length,

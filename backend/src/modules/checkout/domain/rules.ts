@@ -4,6 +4,7 @@
  */
 import { format as formatMoney } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
+import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type * as cart from '../../../spec/cart.js';
 import type * as orders from '../../../spec/orders.js';
 import type * as payments from '../../../spec/payments.js';
@@ -108,6 +109,8 @@ export interface StoredChange {
     options?: unknown[];
     optionId?: string | null;
     couponCode?: string;
+    /** terms_changed: the offer's current termsVersion, set on the line when the customer accepts */
+    termsVersion?: number;
   };
 }
 
@@ -130,7 +133,7 @@ export const plural = (n: number, word: string, many = `${word}s`) => `${n} ${n 
 
 export const packageKey = (ownerType: string, sellerId: string | null | undefined, shipsFrom: string) => `${ownerType}:${sellerId ?? 'official'}:${shipsFrom}`;
 
-export const OFFICIAL_SELLER: cart.SellerLabel = { ownerType: 'official', id: null, name: 'Marketly Official Store', slug: 'official-store', official: true, verified: true, logo: null };
+export const OFFICIAL_SELLER: cart.SellerLabel = { ownerType: 'official', id: null, name: OFFICIAL_STORE_NAME, slug: 'official-store', official: true, verified: true, logo: null };
 
 export const DOUBLE_SUBMIT_NOTE = "Tapping twice or refreshing won't create two orders or charge you twice.";
 export const LEGAL_TEXT = 'By placing your order you agree to the Purchase terms and the return terms shown for each package.';
@@ -215,6 +218,8 @@ export function choicesFor(kind: Change['kind'], o: { alternatives: boolean; oth
       return { choices: ['keep_without_discount'], defaultChoice: 'keep_without_discount' };
     case 'coupon_amount_changed':
       return { choices: ['accept', 'keep_without_discount'], defaultChoice: 'accept' };
+    case 'terms_changed':
+      return { choices: ['accept', 'remove', ...alt], defaultChoice: 'accept' };
   }
 }
 
@@ -231,6 +236,7 @@ export const HEADLINES: Record<Change['kind'], string> = {
   coupon_amount_changed: 'Coupon amount changed',
   not_shippable: "Can't ship to this address",
   purchase_limit: 'Purchase limit reached',
+  terms_changed: 'Return or delivery terms changed',
 };
 
 /* ================================================================ steps */

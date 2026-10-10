@@ -615,6 +615,12 @@ export class CheckoutService implements CheckoutPublicApi {
         const until = new Date(placed.getTime() + hours * 3600_000);
         if (until.getTime() <= this.now().getTime()) continue;
         await this.ctx.use('inventory').extendHold(fresh.stock_reservation_id, until.toISOString());
+        // the store credit hold too, so a long pending check does not end in INSUFFICIENT_CREDIT
+        const wallet = this.ctx.tryUse('wallet');
+        if (wallet && fresh.credit_hold_id) {
+          const holdId = fresh.credit_hold_id;
+          await this.core.optional('wallet.extendHold', () => wallet.extendHold(holdId, until.toISOString()));
+        }
       } catch (err) {
         if (isAppError(err) && err.status < 500) this.ctx.log.info({ err, sessionId: s.id }, 'checkout: pending hold could not be extended');
         else this.ctx.log.error({ err, sessionId: s.id }, 'checkout: pending hold could not be extended');

@@ -62,7 +62,8 @@ export function createPostgresCheckoutRepository(db: Kysely<CheckoutDb>): Checko
       return db.selectFrom('sessions').selectAll().where('status', 'in', statuses).orderBy('updated_at').limit(limit).execute();
     },
     async listSessionsAdmin(filter, page: PageRequest) {
-      let q = db.selectFrom('sessions').selectAll().where(sql<boolean>`account->>'email' is not null`);
+      // guests who have not reached the contact step are listed too (email null on the row)
+      let q = db.selectFrom('sessions').selectAll();
       if (filter.statuses?.length) q = q.where('status', 'in', filter.statuses);
       if (filter.from) q = q.where('created_at', '>=', filter.from);
       if (filter.to) q = q.where('created_at', '<', filter.to);

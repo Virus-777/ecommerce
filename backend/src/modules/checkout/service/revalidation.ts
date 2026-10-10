@@ -164,6 +164,28 @@ export class Revalidator {
           effectOnTotal: { amount: (offer.price.amount - l.unit_price) * qty, currency: cur },
         }, { unitPrice: offer.price.amount }, { alternatives: up ? alts() : [] });
       }
+      // return, warranty or dispatch terms changed since the line was quoted: the customer accepts the new terms
+      // (the line moves to the current termsVersion and the order snapshots them) or removes the line
+      // termsVersion moves on any customer-visible change, a price change included: a moved version is a terms change
+      // when the return or dispatch terms differ from what was quoted, or when no price change explains it
+      const termsChange = fromOffers.find((c) => c.kind === 'terms');
+      const versionMoved = Boolean(termsChange) || offer.termsVersion > l.terms_version;
+      const quoted = stored.quote.lineInfo[l.id];
+      const now = f?.info;
+      const termsDiffer =
+        Boolean(quoted && now) &&
+        (quoted!.returnTerms.summary !== now!.returnTerms.summary ||
+          quoted!.returnTerms.windowDays !== now!.returnTerms.windowDays ||
+          quoted!.returnTerms.returnShippingPaidBy !== now!.returnTerms.returnShippingPaidBy ||
+          quoted!.dispatch.businessDays !== now!.dispatch.businessDays ||
+          quoted!.dispatch.shipsFrom !== now!.dispatch.shipsFrom);
+      if (versionMoved && (termsDiffer || offer.price.amount === l.unit_price)) {
+        add('terms_changed', l, {
+          previous: termsChange?.before ?? `Terms version ${l.terms_version}`,
+          current: termsChange?.after ?? `Terms version ${offer.termsVersion}`,
+          detail: termsChange?.message ?? `${f?.info?.seller.name ?? 'The seller'} changed the return, warranty or dispatch terms for this item.`,
+        }, { termsVersion: Math.max(offer.termsVersion, l.terms_version) }, { alternatives: alts() });
+      }
     }
 
     // shippability and delivery options on the fresh draft
@@ -287,6 +309,7 @@ export class Revalidator {
             const offer = facts.get(line.offer_id)?.offer;
             if (offer) line.terms_version = offer.termsVersion;
           }
+          if (line && apply.termsVersion !== undefined) line.terms_version = Math.max(line.terms_version, apply.termsVersion);
           if (pkg && apply.optionId) pkg.selected_option_id = apply.optionId;
           break;
         case 'remove':

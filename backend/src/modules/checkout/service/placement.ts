@@ -95,6 +95,16 @@ export class Placement {
     });
   }
 
+  /** Drops the provider token from the stored payment method (after the authorize that used it) */
+  private async clearToken(id: string): Promise<SessionRow> {
+    return this.core.repo.transaction(async (tx) => {
+      const s = (await tx.getSession(id, { forUpdate: true }))!;
+      const p = this.core.payment(s);
+      if (!p.method?.providerToken) return s;
+      return tx.updateSession(id, { payment_selection: { ...p, method: { ...p.method, providerToken: null } } as never });
+    });
+  }
+
   private async savePayment(id: string, patch: Partial<StoredPayment>): Promise<SessionRow> {
     return this.core.repo.transaction(async (tx) => {
       const s = (await tx.getSession(id, { forUpdate: true }))!;
@@ -157,6 +167,14 @@ export class Placement {
     }
   }
 
+  /** PAYMENT_ATTEMPTS_EXCEEDED once the session used maxPaymentAttempts (sessions.attempt_count is never reset) */
+  private async checkAttempts(session: SessionRow) {
+    const max = Number(await this.ctx.settings.get('maxPaymentAttempts')) || 5;
+    if (session.attempt_count >= max) {
+      throw this.core.error('PAYMENT_ATTEMPTS_EXCEEDED', `You've reached the limit of ${max} payment attempts for this checkout. Start again from your cart; nothing was charged.`, { attempts: session.attempt_count, max });
+    }
+  }
+
   /** A saved card must still be on file; a new card or wallet needs the provider's single-use token */
   async validateMethod(session: SessionRow, method: payments.MethodSelection): Promise<Pick<StoredPayment, 'method' | 'view'>> {
     const invalid = (message: string) => this.core.error('PAYMENT_METHOD_INVALID', message, { kind: method.kind });
@@ -191,6 +209,8 @@ export class Placement {
     if (session.status !== 'open') checkoutSessionMachine.next(session.status as Status, 'place');
     if (!input.acceptTerms) throw this.core.error('TERMS_NOT_ACCEPTED', 'Accept the purchase terms to place your order');
     await this.checkReady(session, input.quoteVersion, input.expectedTotal);
+    // the attempt limit holds whatever happened in between (decline → edit → place never resets it)
+    await this.checkAttempts(session);
     const pay = this.core.payment(session);
     await this.validateMethod(session, pay.method!);
 
@@ -223,8 +243,7 @@ export class Placement {
     if (session.status === 'expired') throw this.core.error('RETRY_WINDOW_EXPIRED', 'The hold after your declined payment ended. Start checkout again from your cart.');
     if (session.status !== 'payment_failed') checkoutSessionMachine.next(session.status as Status, 'retry_payment');
     if (session.hold_until && session.hold_until.getTime() <= this.now().getTime()) throw this.core.error('RETRY_WINDOW_EXPIRED', 'The hold after your declined payment ended. Start checkout again from your cart.', { holdUntil: session.hold_until.toISOString() });
-    const max = Number(await this.ctx.settings.get('maxPaymentAttempts')) || 5;
-    if (session.attempt_count >= max) throw this.core.error('RETRY_WINDOW_EXPIRED', `You've reached the limit of ${max} payment attempts for this checkout. Start again from your cart.`, { attempts: session.attempt_count, max });
+    await this.checkAttempts(session);
     const total = this.core.quote(session).totals.total;
     if (input.quoteVersion !== session.quote_version || input.expectedTotal.amount !== total.amount || input.expectedTotal.currency !== total.currency) {
       throw this.core.error('QUOTE_OUTDATED', 'Your order total changed. Check the new total before paying.', { quoteVersion: session.quote_version, total });
@@ -339,6 +358,9 @@ export class Placement {
       } catch (err) {
         if (isAppError(err) && err.code === 'PAYMENT_METHOD_INVALID') throw this.core.error('PAYMENT_METHOD_INVALID', err.message, err.details);
         throw err;
+      } finally {
+        // a new card's or wallet's single-use token served this authorize only: never kept in payment_selection
+        if (o.method.providerToken) session = await this.clearToken(id);
       }
       await this.core.repo.updatePlaceRequest(req.id, { payment_intent_id: authorized.intentId });
       session = await this.savePayment(id, { intentId: authorized.intentId, intentState: authorized.state, methodLabel: authorized.methodLabel, decline: authorized.decline ?? null });
@@ -488,7 +510,7 @@ export class Placement {
 
   /* ================================================================ accepted or pending: the order */
 
-  orderInput(session: SessionRow, lines: LineRow[], packages: PackageRow[], intent: { intentId: string; methodLabel: string }, policyVersions: orders.AcceptedPolicyVersion[], orderKey: string): orders.OrderCreateInput {
+  orderInput(session: SessionRow, lines: LineRow[], packages: PackageRow[], intent: { intentId: string; state: 'accepted' | 'pending_check'; methodLabel: string }, policyVersions: orders.AcceptedPolicyVersion[]): orders.OrderCreateInput {
     const cur = session.currency;
     const q = this.core.quote(session);
     const account = this.core.account(session);
@@ -542,9 +564,14 @@ export class Placement {
     });
     const sum = (f: (g: orders.OrderGroupInput) => number) => m(groups.reduce((s, g) => s + f(g), 0), cur);
     return {
-      checkoutSessionId: orderKey,
+      checkoutSessionId: session.id,
+      // one order per payment attempt: a retry after a finally declined pending payment gets a new order
+      attemptNo: Math.max(1, session.attempt_count),
       // inventory allocates from this hold on orders.order.accepted even before attachOrder runs
       reservationId: session.stock_reservation_id,
+      deliveryAddressId: session.customer_id ? session.address_id : null,
+      // checkout does not know the shopper's personalization choice: no visitor id for ad attribution
+      visitorId: null,
       contact:{ kind: account.kind, customerId: session.customer_id, name: account.name ?? address.name, email: account.email!, phone: account.phone ?? address.phone ?? null },
       channel: (session.channel as 'web' | 'android' | null) ?? 'web',
       currency: cur,
@@ -554,7 +581,8 @@ export class Placement {
       policyVersions,
       couponCodes: q.coupons.filter((c) => c.status === 'applied').map((c) => c.code),
       paymentIntentId: intent.intentId,
-      paymentState: 'pending_check',
+      // the real authorize result: accepted creates the order open in one step
+      paymentState: intent.state,
       paymentMethodLabel: intent.methodLabel,
       groups,
       totals: { items: sum((g) => g.totals.items.amount), discounts: sum((g) => g.totals.discounts.amount), shipping: sum((g) => g.totals.shipping.amount), tax: sum((g) => g.totals.tax.amount), total: sum((g) => g.totals.total.amount) },
@@ -570,17 +598,15 @@ export class Placement {
     const [lines0, packages] = await Promise.all([this.core.repo.listLines(id), this.core.repo.listPackages(id)]);
     const lines = lines0.filter(included).sort(byLineOrder);
     const policyVersions = await this.views.policyVersions();
-    const pay = this.core.payment(session);
-    const orderKey = pay.cancelledOrders.length ? stableUuid(`${id}:order:${pay.cancelledOrders.length}`) : id;
-    const order = await this.ctx.use('orders').createOrder(this.orderInput(session, lines, packages, intent, policyVersions, orderKey));
+    const order = await this.ctx.use('orders').createOrder(this.orderInput(session, lines, packages, intent, policyVersions));
     session = await this.core.repo.updateSession(id, { order_id: order.id, order_ref: order.ref, updated_at: this.now() });
 
-    // order items per checkout line (one included line per offer)
+    // order items per checkout line (OrderItem.checkoutLineId; by offer for an order without it)
     const items = order.groups.flatMap((g) => g.items);
     const itemByLine: Record<string, string> = {};
     const used = new Set<string>();
     for (const l of lines) {
-      const it = items.find((i) => i.offer.offerId === l.offer_id && !used.has(i.id));
+      const it = items.find((i) => i.checkoutLineId === l.id && !used.has(i.id)) ?? items.find((i) => !i.checkoutLineId && i.offer.offerId === l.offer_id && !used.has(i.id));
       if (!it) continue;
       used.add(it.id);
       itemByLine[l.id] = it.id;
@@ -605,7 +631,7 @@ export class Placement {
       ),
     );
     if (intent.state === 'accepted') {
-      await soft('orders.acceptOrder', () => this.ctx.use('orders').acceptOrder(order.id, intent.intentId));
+      // the order was created accepted (open) in one step: no separate acceptOrder that could fail and leave it pending
       const wallet = this.ctx.tryUse('wallet');
       if (wallet && session.credit_hold_id) await soft('wallet.captureHold', () => wallet.captureHold(session.credit_hold_id!, order.id));
     } else if (session.stock_reservation_id) {
