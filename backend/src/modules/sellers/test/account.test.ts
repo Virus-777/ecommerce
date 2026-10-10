@@ -28,7 +28,7 @@ describe('account, setup and launch review', () => {
     expect(setup.body.unavailable).toEqual(expect.arrayContaining(['shipping_coverage', 'return_address']));
 
     await kit.emit('finance', 'finance.destination.verified', { sellerId: s.sellerId, reviewId: newId() });
-    await kit.emit('catalog', 'catalog.product.submitted', { productId: newId(), ownerSellerId: s.sellerId });
+    await kit.emit('catalog', 'catalog.product.submitted', { productId: newId(), ownerSellerId: s.sellerId, submissionId: newId(), ref: 'SUB-261010-0001', kind: 'new', title: 'Headphones', reviewDueAt: kit.clock.now().toISOString() });
     const after = await kit.call('GET', `${SELLER}/setup`, s.sellerToken);
     expect(after.body.payoutReadiness.state).toBe('verified');
     expect(after.body.steps.find((x: any) => x.key === 'first_submission').state).toBe('done');
@@ -264,7 +264,8 @@ describe('members', () => {
 
     await kit.emit('identity', 'identity.account.closed', { accountId: s.accountId, at: kit.clock.now().toISOString() });
     expect(await kit.svc.getMemberAccess(s.sellerId, s.accountId)).toBeNull();
-    expect(kit.work.some((w) => w.kind === 'seller_performance' && w.dedupeKey === `owner_account_closed:${s.sellerId}`)).toBe(true);
+    // an owner leaving raises seller_owner_missing in sellers.accounts (before pass 3: a seller_performance item)
+    expect(kit.work.find((w) => w.dedupeKey === `seller_owner_missing:${s.sellerId}`)).toMatchObject({ queueKey: 'sellers.accounts', kind: 'seller_owner_missing', sourceModule: 'sellers' });
   });
 });
 

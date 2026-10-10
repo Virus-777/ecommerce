@@ -12,6 +12,9 @@ import { invalid, notFound, Part, SYSTEM, type By } from './core.js';
 
 const OPEN = ['invited', 'active', 'suspended'];
 
+/** Dedupe key of the seller_owner_missing work item (resolved when the seller has an active owner again) */
+export const ownerMissingKey = (sellerId: string) => `seller_owner_missing:${sellerId}`;
+
 export class MembersPart extends Part {
   #catalogue?: PermissionEntry[];
 
@@ -133,6 +136,8 @@ export class MembersPart extends Part {
     const seller = await this.core.seller(sellerId);
     const m = await this.memberOf(sellerId, memberId);
     const status = this.core.step(sellerMemberMachine, m.status, 'revoke');
+    // the accept link stops working at once (identity publishes identity.invitation.revoked); our sellerId scopes it
+    if (m.invitation_id) await this.ctx.use('identity').revokeInvitation(m.invitation_id, { reason: 'revoked_by_owner', by: by.actor, contextRef: sellerId });
     const row = await this.repo.update('members', m.id, { status });
     await this.core.audit({ action: 'sellers.member.revoke_invitation', actionLabel: 'Cancelled a staff invitation', category: 'access', target: this.target(seller, row), visibleToSeller: true }, by);
     return map.member(row);
@@ -175,6 +180,23 @@ export class MembersPart extends Part {
     const row = await this.repo.update('members', m.id, { status });
     this.core.publish('sellers.member.removed', { sellerId, memberId: m.id, accountId: m.account_id }, by);
     await this.core.audit({ action: 'sellers.member.suspend', actionLabel: 'Suspended a staff member', category: 'access', target: this.target(seller, row), reason: reason ?? null, visibleToSeller: true }, by);
+    return map.member(row);
+  }
+
+  /** suspended → active with the role and permissions the member had; the seller context is granted again */
+  async reactivateMember(sellerId: string, memberId: string, reason: string | null | undefined, by: By): Promise<SellerMember> {
+    const seller = await this.core.seller(sellerId);
+    const m = await this.memberOf(sellerId, memberId);
+    if (m.is_owner) throw new AppError('OWNER_ONLY', 'The owner is never suspended');
+    const status = this.core.step(sellerMemberMachine, m.status, 'reactivate');
+    const row = await this.repo.update('members', m.id, { status });
+    await this.grant(seller, row);
+    const permissions = map.strings(row.permissions);
+    this.core.publish('sellers.member.reactivated', { sellerId, memberId: m.id, accountId: m.account_id, permissions }, by);
+    await this.core.audit(
+      { action: 'sellers.member.reactivate', actionLabel: 'Reactivated a staff member', category: 'access', target: this.target(seller, row), reason: reason?.trim() || null, before: { status: m.status }, after: { status: row.status, permissions }, visibleToSeller: true },
+      by,
+    );
     return map.member(row);
   }
 
@@ -263,7 +285,7 @@ export class MembersPart extends Part {
     await this.core.timeline(this.repo, seller.id, { kind: 'member_joined', title: `${row.name} joined the account`, visibility: 'seller' });
   }
 
-  /** identity.account.closed: end the account's memberships; an owner leaving needs the Seller Manager */
+  /** identity.account.closed: end the account's memberships; an owner leaving raises seller_owner_missing for the Seller Manager */
   async onAccountClosed(e: EventPayload<'identity.account.closed'>) {
     if (!isUuid(e.accountId)) return;
     const rows = await this.repo.find('members', { account_id: e.accountId, status: OPEN });
@@ -274,15 +296,15 @@ export class MembersPart extends Part {
         const seller = await this.repo.get('sellers', m.seller_id);
         await this.core.timeline(this.repo, m.seller_id, { kind: 'owner_account_closed', title: 'The owner’s Marketly account was closed', visibility: 'staff' });
         await this.core.raise({
-          queueKey: 'sellers.performance',
-          kind: 'seller_performance',
+          queueKey: 'sellers.accounts',
+          kind: 'seller_owner_missing',
           title: `Owner account closed: ${seller?.store_name ?? m.seller_id}`,
           summary: 'The seller has no active owner. Contact the business about an ownership change or closure.',
           subject: { type: 'seller', id: m.seller_id, ref: seller?.ref ?? null, label: seller?.store_name ?? null },
           sellerId: m.seller_id,
           sellerName: seller?.store_name ?? null,
           priority: 'high',
-          dedupeKey: `owner_account_closed:${m.seller_id}`,
+          dedupeKey: ownerMissingKey(m.seller_id),
         });
       }
     }

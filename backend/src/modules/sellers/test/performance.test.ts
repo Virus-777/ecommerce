@@ -42,16 +42,16 @@ describe('performance', () => {
     await kit.emit('orders', 'orders.item.cancelled', {
       orderId: newId(), ref: 'MK-1', groupId: groups[0], ownerType: 'seller', sellerId: s.sellerId, itemId: newId(), offerId: newId(), stockItemId: newId(), quantity: 1, cancellationId: newId(),
       initiatedBy: 'seller', reasonCode: 'out_of_stock', beforeDispatch: true, countsAgainstSeller: true,
-      refund: { itemAmount: money, discountShare: zero, shippingRefund: zero, taxRefund: zero, total: money }, paymentIntentId: newId(),
+      refund: { itemAmount: money, discountShare: zero, shippingRefund: zero, taxRefund: zero, total: money }, paymentIntentId: newId(), notifyCustomer: true,
     });
-    await kit.emit('returns', 'returns.return.requested', { returnId: newId(), ref: 'RT-1', orderId: newId(), ownerType: 'seller', sellerId: s.sellerId, orderItemIds: [newId()], reason: 'damaged', responseDueAt: kit.clock.now().toISOString() });
+    await kit.emit('returns', 'returns.return.requested', { returnId: newId(), ref: 'RT-1', orderId: newId(), orderRef: 'MK-1', ownerType: 'seller', sellerId: s.sellerId, orderItemIds: [newId()], reason: 'damaged', responseDueAt: kit.clock.now().toISOString() });
     const conversationId = newId();
-    await kit.emit('messaging', 'messaging.message.sent', { messageId: newId(), conversationId, authorKind: 'customer', recipientKinds: ['seller'], sellerId: s.sellerId });
+    await kit.emit('messaging', 'messaging.message.sent', { messageId: newId(), conversationId, conversationKind: 'order', authorKind: 'customer', recipientKinds: ['seller'], sellerId: s.sellerId, officialStore: false, staffIds: [] });
     kit.clock.advance(3 * 3_600_000);
-    await kit.emit('messaging', 'messaging.message.sent', { messageId: newId(), conversationId, authorKind: 'seller', recipientKinds: ['customer'], sellerId: s.sellerId });
+    await kit.emit('messaging', 'messaging.message.sent', { messageId: newId(), conversationId, conversationKind: 'order', authorKind: 'seller', recipientKinds: ['customer'], sellerId: s.sellerId, officialStore: false, staffIds: [] });
     await kit.emit('support', 'support.case.opened', { caseId: newId(), ref: 'CS-1', kind: 'order', category: 'not_received', priority: 'normal', sellerId: s.sellerId, orderItemIds: [], handler: 'seller', nextResponseDueAt: new Date(kit.clock.now().getTime() - 3_600_000).toISOString() });
     // facts for unknown sellers are ignored
-    await kit.emit('returns', 'returns.return.requested', { returnId: newId(), ref: 'RT-2', orderId: newId(), ownerType: 'seller', sellerId: newId(), orderItemIds: [], reason: 'x', responseDueAt: kit.clock.now().toISOString() });
+    await kit.emit('returns', 'returns.return.requested', { returnId: newId(), ref: 'RT-2', orderId: newId(), orderRef: 'MK-1', ownerType: 'seller', sellerId: newId(), orderItemIds: [], reason: 'x', responseDueAt: kit.clock.now().toISOString() });
 
     await kit.svc.computePerformance();
     await kit.app.kernel.events.drain();

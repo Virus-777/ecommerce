@@ -195,7 +195,9 @@ export function createPostgresSellersRepository(db: Kysely<SellersDb>): SellersR
       }
       for (const a of s.addresses) {
         conds.push(sql<boolean>`(lower(business->'address'->>'line1') = ${a.line1.toLowerCase().trim()} and business->'address'->>'postalCode' = ${a.postalCode.trim()})`);
+        conds.push(sql<boolean>`(lower(return_address->'address'->>'line1') = ${a.line1.toLowerCase().trim()} and return_address->'address'->>'postalCode' = ${a.postalCode.trim()})`);
       }
+      if (s.taxIdHashes?.length) conds.push(sql<boolean>`tax_id_hash in (${sql.join(s.taxIdHashes)})`);
       if (!conds.length) return [];
       return d
         .selectFrom('applications')

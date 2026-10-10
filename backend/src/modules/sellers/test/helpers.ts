@@ -64,6 +64,11 @@ export async function boot(): Promise<Kit> {
         },
         grantSellerContext: async (input: any) => rec('grantSellerContext', input),
         revokeSellerContext: async (...args: unknown[]) => rec('revokeSellerContext', ...args),
+        // identity.revokeInvitation is new in pass 3 (built in parallel): stubbed
+        revokeInvitation: async (invitationId: string, input: any) => {
+          rec('revokeInvitation', invitationId, input);
+          return { id: invitationId, status: 'revoked', contextRef: input.contextRef ?? null } as any;
+        },
       },
       media: {
         getAsset: async (id: string) => ({ id, kind: 'document', purpose: 'verification_document', status: 'ready', fileName: `${id.slice(0, 6)}.pdf`, contentType: 'application/pdf', sizeBytes: 2048, owner: { kind: 'customer' }, visibility: 'private', renditions: [], inUse: false, usageCount: 0, createdAt: clock.now().toISOString() }) as any,
@@ -100,6 +105,10 @@ export async function boot(): Promise<Kit> {
         requestAssessment: async (input: any) => {
           rec('trust.requestAssessment', input);
           return { reportId: newId(), ref: 'TR-1' };
+        },
+        raiseSignal: async (input: any) => {
+          rec('trust.raiseSignal', input);
+          return { id: newId(), ref: 'TR-2' } as any;
         },
       },
       workqueues: {
@@ -246,7 +255,7 @@ export async function approvedSeller(kit: Kit, o: { launch?: boolean; legalName?
   const sellerToken = owner(s.sellerId, s.accountId);
   if (o.launch) {
     await kit.emit('finance', 'finance.destination.verified', { sellerId: s.sellerId, reviewId: newId() });
-    await kit.emit('catalog', 'catalog.product.submitted', { productId: newId(), ownerSellerId: s.sellerId });
+    await kit.emit('catalog', 'catalog.product.submitted', { productId: newId(), ownerSellerId: s.sellerId, submissionId: newId(), ref: 'SUB-261010-0001', kind: 'new', title: 'Headphones', reviewDueAt: kit.clock.now().toISOString() });
     expect((await kit.call('POST', `${SELLER}/setup/launch-review`, sellerToken, {})).status).toBe(200);
     expect((await kit.call('POST', `${ADMIN}/sellers/${s.sellerId}/launch-review/decide`, staff(), { outcome: 'pass' })).status).toBe(200);
   }

@@ -3,6 +3,7 @@
  * optional modules, media references and small lookups. The use cases live in the part classes
  * (applications, accounts, storefront, members, enforcement, performance), which all get one Core.
  */
+import { createHash, createHmac } from 'node:crypto';
 import type { Principal } from '../../../kernel/auth/index.js';
 import { AppError, isNotImplemented } from '../../../kernel/errors/index.js';
 import type { EventMap } from '../../../kernel/events/index.js';
@@ -191,9 +192,19 @@ export class Core {
     });
   }
 
-  /** Raise a work item when workqueues is on (never fails the caller) */
-  async raise(input: workqueues.RaiseInput) {
-    await this.optional('workqueues', 'workqueues', null, (w) => w.raise(input));
+  /** Raise a work item when workqueues is on (never fails the caller); sellers names itself as the source */
+  async raise(input: Omit<workqueues.RaiseInput, 'sourceModule'>) {
+    await this.optional('workqueues', 'workqueues', null, (w) => w.raise({ ...input, sourceModule: 'sellers' }));
+  }
+
+  /** Keyed hash (HMAC-SHA256, platform key: purpose platform.tax-id-hash) of a normalised tax id: duplicate checks never see the tax id */
+  taxIdHash(digits: string): string {
+    return createHmac('sha256', secretFor(this.ctx.config, 'platform.tax-id-hash')).update(`tax:${digits.replace(/\D/g, '')}`).digest('hex');
+  }
+
+  /** Plain hash of a value shared with trust (payout token, address key) */
+  hash(value: string): string {
+    return createHash('sha256').update(value).digest('hex');
   }
 
   async resolveWork(dedupeKey: string, note: string, by: common.Actor) {

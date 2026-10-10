@@ -627,14 +627,20 @@ export class AccountsPart extends Part {
     return { blocking, checked };
   }
 
-  async grantLabel(tx: SellersRepository, s: SellerRec, by: By, reason?: string): Promise<SellerRec> {
+  /** How long a granted label lasts (setting verifiedLabelValidDays); read before a transaction */
+  async labelValidDays(): Promise<number> {
+    return Number(await this.core.setting('verifiedLabelValidDays')) || 365;
+  }
+
+  /** Grant the Verified label for `validDays` (read with labelValidDays() before the transaction) */
+  async grantLabel(tx: SellersRepository, s: SellerRec, by: By, validDays: number, reason?: string): Promise<SellerRec> {
     const { checked } = await this.labelChecks(s, tx);
     const now = this.now();
     return tx.update('sellers', s.id, {
       verification_state: this.core.step(verifiedSellerLabelMachine, s.verification_state, 'grant'),
       verification_checked: { checked, reason: reason ?? null } as never,
       verified_at: now,
-      verification_expires_at: addDays(now, 365),
+      verification_expires_at: addDays(now, validDays),
       updated_at: now,
     });
   }
@@ -646,7 +652,8 @@ export class AccountsPart extends Part {
     if (body.action === 'grant') {
       const { blocking } = await this.labelChecks(s);
       if (blocking.length) throw new AppError('CHECKS_UNRESOLVED', 'These checks must pass before the label is granted', { checks: blocking });
-      after = await this.repo.transaction((tx) => this.grantLabel(tx, s, by));
+      const days = await this.labelValidDays();
+      after = await this.repo.transaction((tx) => this.grantLabel(tx, s, by, days));
     } else {
       after = await this.repo.update('sellers', s.id, {
         verification_state: this.core.step(verifiedSellerLabelMachine, s.verification_state, 'revoke'),
@@ -687,7 +694,7 @@ export class AccountsPart extends Part {
   /** sellers.verification-lapse */
   async verificationLapse() {
     const rows = await this.repo.find('sellers', { verification_state: 'verified', verification_expires_at: { op: '<', value: this.now() } }, { limit: 500 });
-    for (const s of rows) await this.lapseLabel(s, 'Checked documents expired: renew your business registration and owner ID to get the label back');
+    for (const s of rows) await this.lapseLabel(s, 'The Verified label reached its renewal date: renew your business registration and owner ID checks to get it back');
   }
 
   /* ---------------------------------------------------------------- admin */

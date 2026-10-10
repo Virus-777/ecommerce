@@ -78,6 +78,11 @@ export class SellersService implements SellersPublicApi {
     return this.enforcement.createRestriction(sellerId, rest, { actor: requestedBy }, { recommendedBy: rest.trustReportId ? { kind: 'system', id: null, name: 'Trust and Risk' } : null });
   }
 
+  /** The applicant behind an application, so staff → applicant conversations can add them (messaging) */
+  getApplicationParticipant(applicationId: string) {
+    return this.applications.participant(applicationId);
+  }
+
   getStorefrontBySlug(slug: string): Promise<Storefront | null> {
     return this.storefront.getStorefrontBySlug(slug);
   }
@@ -110,6 +115,11 @@ export class SellersService implements SellersPublicApi {
 
   onEnforcementRecordedFromTrust(event: EventPayload<'trust.enforcement.recorded'>, envelope?: Pick<EventEnvelope, 'actor'>) {
     return this.enforcement.onEnforcementRecorded(event, envelope);
+  }
+
+  /** trust.enforcement.reversed: undo the restriction, suspension or warning the enforcement created */
+  onEnforcementReversedFromTrust(event: EventPayload<'trust.enforcement.reversed'>, eventId?: string) {
+    return this.enforcement.onEnforcementReversed(event, eventId);
   }
 
   onDestinationVerifiedFromFinance(event: EventPayload<'finance.destination.verified'>) {

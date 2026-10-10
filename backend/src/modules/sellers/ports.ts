@@ -101,7 +101,8 @@ export interface SellersRepository {
   /* applications */
   listApplications(filter: ApplicationListFilter, page: PageRequest): Promise<common.Page<ApplicationRec>>;
   latestApplicationOf(accountId: string): Promise<ApplicationRec | undefined>;
-  applicationsMatching(signals: { emails: string[]; tokens: string[]; addresses: { line1: string; postalCode: string }[] }, excludeId: string): Promise<ApplicationRec[]>;
+  /** Other applications (any state, so closed sellers too) sharing a work email, payout token, business or return address, or tax id hash */
+  applicationsMatching(signals: { emails: string[]; tokens: string[]; addresses: { line1: string; postalCode: string }[]; taxIdHashes?: string[] }, excludeId: string): Promise<ApplicationRec[]>;
 
   /* members */
   activeMember(sellerId: string, accountId: string): Promise<MemberRec | undefined>;

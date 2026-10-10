@@ -20,7 +20,7 @@ import { SellersService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.0.0',
+  version: '1.1.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
@@ -37,6 +37,7 @@ export default defineModule({
     ctx.events.on("access.approval.decided", (e) => service.onApprovalDecidedFromAccess(e.payload, e));
     ctx.events.on("trust.assessment.completed", (e) => service.onAssessmentCompletedFromTrust(e.payload));
     ctx.events.on("trust.enforcement.recorded", (e) => service.onEnforcementRecordedFromTrust(e.payload, e));
+    ctx.events.on("trust.enforcement.reversed", (e) => service.onEnforcementReversedFromTrust(e.payload, e.id));
     ctx.events.on("finance.destination.verified", (e) => service.onDestinationVerifiedFromFinance(e.payload));
     ctx.events.on("finance.destination.rejected", (e) => service.onDestinationRejectedFromFinance(e.payload));
     ctx.events.on("catalog.product.submitted", (e) => service.onProductSubmittedFromCatalog(e.payload));
