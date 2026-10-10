@@ -20,9 +20,9 @@
     "Email and push delivery of new-message notices: notifications (reads messaging.message.sent)"
   ],
   "dependsOn": ["orders"],
-  "optionalDeps": ["media", "sellers", "support", "returns", "notifications", "trust", "audit", "customers", "shipping"],
+  "optionalDeps": ["media", "sellers", "support", "returns", "notifications", "trust", "audit", "customers", "shipping", "identity", "workqueues", "settings"],
   "publicApi": [
-    { "name": "findOrStartForOrder", "signature": "(input: { orderId: uuid, sellerId: uuid, orderItemId?: uuid, returnId?: uuid }) => Conversation", "desc": "One conversation per customer, seller and subject; reused when it exists", "usedBy": ["orders", "returns"] },
+    { "name": "findOrStartForOrder", "signature": "(input: { orderId: uuid, sellerId: uuid, orderItemId?: uuid, returnId?: uuid }) => Conversation", "desc": "One conversation per customer, seller and subject; reused when it exists. sellerId is OFFICIAL_STORE_ID for the Official Store", "usedBy": ["orders", "returns"] },
     { "name": "postSystemNote", "signature": "(conversationId: uuid, text: string) => Message", "desc": "e.g. Marketly Support joined from case CS-261005-3381", "usedBy": ["support", "returns"] },
     { "name": "addStaffParticipant", "signature": "(conversationId: uuid, staff: Actor, caseId: uuid) => Conversation", "desc": "Support joins an order conversation when a case is opened", "usedBy": ["support"] },
     { "name": "sellerResponseStats", "signature": "(sellerId: uuid, range: DateRange) => ResponseStats", "desc": "Response time for seller performance and reports", "usedBy": ["sellers", "reports", "graphql"] },
@@ -33,7 +33,8 @@
     { "name": "sellerInboxSummary", "signature": "(sellerId: uuid) => { awaitingReply: int, overdue: int, oldestWaitingSince: datetime | null, unreadConversations: int, targetHours: int }", "desc": "Unanswered and overdue customer messages for the seller dashboard", "usedBy": ["graphql"] },
     { "name": "listInbox", "signature": "(participant: Actor, filter: { unreadOnly?: bool, replyState?: string }, page: PageInput) => Page<ConversationSummary>", "desc": "Inbox of a customer or seller; the seller inbox lists overdue first", "usedBy": ["graphql"] },
     { "name": "getConversation", "signature": "(participant: Actor, conversationId: uuid) => Conversation | null", "desc": "Conversation header and messages for a participant", "usedBy": ["graphql"] },
-    { "name": "customerConversationSummaries", "signature": "(customerIds: uuid[]) => map<CustomerConversationSummary>", "desc": "Counts, last message time and counterparties of each customer's conversations for the customer 360; never message content", "usedBy": ["customers", "graphql"] }
+    { "name": "customerConversationSummaries", "signature": "(customerIds: uuid[]) => map<CustomerConversationSummary>", "desc": "Counts, last message time and counterparties of each customer's conversations for the customer 360; never message content", "usedBy": ["customers", "graphql"] },
+    { "name": "exportForCustomer", "signature": "(customerId: uuid) => CustomerExportSection", "desc": "The customer's conversations and the messages they can see (no hidden messages, internal notes or other parties' contact details) for the personal data export. Export hook called by customers.build-data-exports", "usedBy": ["customers"] }
   ],
   "types": {
     "Subject": {
@@ -60,8 +61,8 @@
       "location": "string?"
     },
     "Participant": {
-      "kind": "enum(customer|seller|staff)",
-      "id": "string",
+      "kind": { "type": "enum(customer|guest|seller|staff)", "desc": "guest: the buyer of a guest order; any guest session with access to the order acts as this participant" },
+      "id": { "type": "string", "desc": "customer: customers-module id; guest: order:<orderId>; seller: seller id (OFFICIAL_STORE_ID for the Official Store); staff: staff account id" },
       "name": "string",
       "label": { "type": "string", "desc": "e.g. Marketly Support" },
       "joinedAt": "datetime",
@@ -120,9 +121,9 @@
       "clientMessageId": { "type": "string?", "desc": "App-generated id; a resend with the same id returns the first message instead of a duplicate" }
     },
     "StartConversationInput": {
-      "with": "enum(seller|marketplace_support)",
+      "with": { "type": "enum(seller|official_store|marketplace_support)", "desc": "official_store: about Official Store items in the order (answered by Marketly staff for the Official Store)" },
       "orderId": "uuid",
-      "sellerId": { "type": "uuid?", "desc": "Required for with = seller; must be a seller in the order" },
+      "sellerId": { "type": "uuid?", "desc": "Required for with = seller; must be a seller in the order. Ignored for official_store (OFFICIAL_STORE_ID is used)" },
       "orderItemId": "uuid?",
       "returnId": "uuid?",
       "caseId": "uuid?",
@@ -146,6 +147,7 @@
     "ResponseStats": {
       "targetHours": "int",
       "averageReplyMinutes": "int?",
+      "medianReplyMinutes": { "type": "int?", "desc": "Median first reply time in the period (reports' first_reply_minutes_p50, support's seller stats)" },
       "repliedWithinTargetPct": "number?",
       "awaitingReply": "int",
       "overdue": "int",
@@ -186,26 +188,32 @@
         "type": "json[]",
         "desc": "{ kind: seller|official_store, sellerId?, name, conversationCount, lastMessageAt }, most recent first"
       }
+    },
+    "CustomerExportSection": {
+      "module": { "type": "string", "desc": "messaging" },
+      "title": { "type": "string", "desc": "e.g. Messages" },
+      "records": { "type": "json[]", "desc": "One record per conversation: { subject, counterparty, startedAt, messages: [{ at, from, body, attachments: fileName[] }] }" }
     }
   },
   "tables": [
-    { "name": "conversations", "columns": { "id": "uuid pk", "kind": "text", "customer_id": "uuid?", "guest_session_id": "text?", "seller_id": "uuid?", "order_id": "uuid?", "order_item_id": "uuid?", "return_id": "uuid?", "case_id": "uuid?", "application_id": "uuid?", "started_by_staff_id": "uuid?", "subject": "jsonb", "status": "text", "locked_reason": "text?", "reply_state": "text", "reply_due_at": "timestamptz?", "awaiting_since": "timestamptz?", "created_at": "timestamptz", "last_message_at": "timestamptz", "archive_after": "timestamptz?" }, "indexes": ["(customer_id, last_message_at desc)", "(seller_id, reply_state, reply_due_at)", "(order_id)", "(case_id)", "unique nulls not distinct (kind, customer_id, seller_id, application_id, order_id, order_item_id, return_id, case_id)"] },
+    { "name": "conversations", "columns": { "id": "uuid pk", "kind": "text", "customer_id": "uuid?", "guest_session_id": "text?", "seller_id": "uuid?", "order_id": "uuid?", "order_item_id": "uuid?", "return_id": "uuid?", "case_id": "uuid?", "application_id": "uuid?", "started_by_staff_id": "uuid?", "subject": "jsonb", "status": "text", "locked_reason": "text?", "locked_by_enforcement_id": "uuid? (trust enforcement that locked it; unlocked when that enforcement is reversed)", "reply_state": "text", "reply_due_at": "timestamptz?", "awaiting_since": "timestamptz?", "created_at": "timestamptz", "last_message_at": "timestamptz", "archive_after": "timestamptz?" }, "indexes": ["(customer_id, last_message_at desc)", "(seller_id, reply_state, reply_due_at)", "(order_id)", "(case_id)", "unique nulls not distinct (kind, customer_id, seller_id, application_id, order_id, order_item_id, return_id) where kind <> 'support'", "unique nulls not distinct (kind, customer_id, order_id, case_id) where kind = 'support'"] },
     { "name": "participants", "columns": { "conversation_id": "uuid → conversations", "kind": "text", "participant_id": "text", "name": "text", "label": "text", "joined_at": "timestamptz", "joined_from_case_id": "uuid?", "last_read_message_id": "uuid?", "unread_count": "int" }, "indexes": ["(conversation_id, kind, participant_id) unique", "(kind, participant_id, unread_count)"] },
     { "name": "messages", "columns": { "id": "uuid pk", "conversation_id": "uuid → conversations", "kind": "text", "author_kind": "text?", "author_id": "text?", "author_label": "text", "body": "text", "original_body": "text? (staff only, before masking)", "media_ids": "jsonb", "redactions": "jsonb", "hidden": "bool", "hidden_reason": "text?", "client_message_id": "text?", "at": "timestamptz" }, "indexes": ["(conversation_id, at desc)", "(conversation_id, author_id, client_message_id) unique"] },
     { "name": "message_reports", "columns": { "id": "uuid pk", "message_id": "uuid → messages", "conversation_id": "uuid → conversations", "reporter_kind": "text", "reporter_id": "text", "reason": "text", "note": "text?", "status": "text", "outcome": "text?", "decided_by": "text?", "decided_at": "timestamptz?", "created_at": "timestamptz" }, "indexes": ["(status, created_at)"] },
     { "name": "reply_templates", "columns": { "id": "uuid pk", "seller_id": "uuid", "name": "text", "body": "text", "updated_at": "timestamptz" }, "indexes": ["(seller_id)"] },
+    { "name": "conversation_aliases", "desc": "Ids of duplicate conversations merged into another (dedupe migration); lookups by an old id (notifications links, support case links) resolve to the kept conversation", "columns": { "old_id": "uuid pk", "conversation_id": "uuid → conversations", "merged_at": "timestamptz" }, "indexes": ["(conversation_id)"] },
     { "name": "staff_access_log", "desc": "Each time staff open a private conversation, with the reason", "columns": { "id": "uuid pk", "conversation_id": "uuid → conversations", "staff_id": "uuid", "reason": "text", "case_id": "uuid?", "at": "timestamptz" }, "indexes": ["(conversation_id, at)"] }
   ],
   "stateMachines": [
     {
       "name": "Conversation", "field": "Conversation.status", "initial": "open",
       "transitions": [["open", "lock", "locked"], ["locked", "unlock", "open"], ["open", "archive", "archived"], ["archived", "reopen", "open"]],
-      "notes": "lock is a staff action with a reason (abuse, fraud); the thread stays readable. archive happens archiveAfterDays after the order completes; a new message about the same subject reopens it. A seller restriction never locks customer conversations about existing orders."
+      "notes": "lock is a staff action with a reason (abuse, fraud), or trust's lock_conversation enforcement (only that action; restrict_customer_messaging is executed by customers and checked when the customer writes); the thread stays readable. Reversing the enforcement unlocks the conversations it locked (locked_by_enforcement_id). archive happens archiveAfterDays after the order completes; a new message about the same subject reopens it. A seller restriction never locks customer conversations about existing orders."
     },
     {
       "name": "Seller reply", "field": "Conversation.replyState", "initial": "none",
       "transitions": [["none", "customerWrites", "awaiting_seller"], ["replied", "customerWrites", "awaiting_seller"], ["awaiting_seller", "sellerReplies", "replied"], ["awaiting_seller", "deadlinePasses", "overdue"], ["overdue", "sellerReplies", "replied"]],
-      "notes": "Only customer–seller conversations have a reply state. reply_due_at = first unanswered customer message + sellerReplyTargetHours. Overdue conversations are highlighted in Seller Center and count in seller performance."
+      "notes": "Customer–seller and customer–Official Store conversations have a reply state (decision D-M1). reply_due_at = first unanswered customer message + sellerReplyTargetHours. Overdue seller conversations are highlighted in Seller Center and count in seller performance. For the Official Store, sellerReplies is a staff message, and while a conversation is awaiting_seller or overdue messaging keeps an official_store_reply work item open in workqueues (dedupe official_store_reply:<conversationId>, due at reply_due_at), resolved with resolveBySource when staff reply."
     },
     {
       "name": "Message report", "field": "MessageReport.status", "initial": "open",
@@ -217,8 +225,8 @@
     { "id": "listCustomerConversations", "area": "store", "method": "GET", "path": "/conversations", "summary": "Inbox: conversations with sellers and Marketly support", "auth": "shopper", "paging": true, "query": { "q": "string?", "unreadOnly": "bool?", "orderId": "uuid?" }, "response": "ConversationSummary", "screens": ["account/messages", "account/overview"] },
     { "id": "getCustomerConversation", "area": "store", "method": "GET", "path": "/conversations/{id}", "summary": "Conversation header: counterparty, response time, linked order or item and its status", "auth": "shopper", "params": { "id": "uuid" }, "response": "Conversation", "errors": ["NOT_FOUND"], "screens": ["account/messages"] },
     { "id": "listCustomerMessages", "area": "store", "method": "GET", "path": "/conversations/{id}/messages", "summary": "Messages, newest first (cursor for older)", "auth": "shopper", "params": { "id": "uuid" }, "paging": true, "response": "Message", "screens": ["account/messages"] },
-    { "id": "startCustomerConversation", "area": "store", "method": "POST", "path": "/conversations", "summary": "Message a seller or Marketly support about an order, item or return", "desc": "Reuses the existing conversation for the same subject and appends the message.", "auth": "shopper", "body": "StartConversationInput", "response": { "conversation": "Conversation", "message": "Message" }, "status": 201, "errors": ["ORDER_NOT_ELIGIBLE", "NOT_FOUND"], "events": ["messaging.conversation.started", "messaging.message.sent"], "screens": ["account/order", "account/tracking", "account/messages", "account/return"] },
-    { "id": "sendCustomerMessage", "area": "store", "method": "POST", "path": "/conversations/{id}/messages", "summary": "Send a message with optional photos or files", "auth": "shopper", "params": { "id": "uuid" }, "body": "MessageInput", "response": "Message", "status": 201, "errors": ["CONVERSATION_LOCKED"], "events": ["messaging.message.sent"], "screens": ["account/messages"] },
+    { "id": "startCustomerConversation", "area": "store", "method": "POST", "path": "/conversations", "summary": "Message a seller, the Official Store or Marketly support about an order, item or return", "desc": "Reuses the existing conversation for the same subject and appends the message. A customer with an active messaging restriction (customers.canSendMessages) gets MESSAGING_RESTRICTED; replies inside a case conversation stay allowed. Guests write as the order's guest participant (any session with access to the order).", "auth": "shopper", "body": "StartConversationInput", "response": { "conversation": "Conversation", "message": "Message" }, "status": 201, "errors": ["ORDER_NOT_ELIGIBLE", "NOT_FOUND", "MESSAGING_RESTRICTED"], "events": ["messaging.conversation.started", "messaging.message.sent"], "screens": ["account/order", "account/tracking", "account/messages", "account/return"] },
+    { "id": "sendCustomerMessage", "area": "store", "method": "POST", "path": "/conversations/{id}/messages", "summary": "Send a message with optional photos or files", "auth": "shopper", "params": { "id": "uuid" }, "body": "MessageInput", "response": "Message", "status": 201, "errors": ["CONVERSATION_LOCKED", "MESSAGING_RESTRICTED"], "events": ["messaging.message.sent"], "screens": ["account/messages"] },
     { "id": "markCustomerRead", "area": "store", "method": "POST", "path": "/conversations/{id}/read", "summary": "Mark messages read up to a message", "auth": "shopper", "params": { "id": "uuid" }, "body": { "upToMessageId": "uuid" }, "response": null, "status": 204, "screens": ["account/messages"] },
     { "id": "customerUnreadCount", "area": "store", "method": "GET", "path": "/unread-count", "summary": "Unread conversations for the header and account menu", "auth": "shopper", "response": { "conversations": "int", "messages": "int" }, "screens": ["account/overview", "store/home"] },
     { "id": "customerReportMessage", "area": "store", "method": "POST", "path": "/messages/{id}/report", "summary": "Report an abusive, promotional or off-platform message", "auth": "shopper", "params": { "id": "uuid" }, "body": { "reason": "enum(abusive|spam_or_promotion|off_platform_contact|fraud|other)", "note": "text?" }, "response": { "reportId": "uuid", "status": "string" }, "status": 201, "events": ["messaging.message.reported"], "screens": ["account/messages"] },
@@ -236,28 +244,43 @@
     { "id": "updateTemplate", "area": "seller", "method": "PATCH", "path": "/templates/{id}", "summary": "Edit a reply template", "auth": "seller", "permission": "messaging.conversations.reply", "params": { "id": "uuid" }, "body": "ReplyTemplateInput", "response": "ReplyTemplate", "screens": ["seller/customers"], "phase": 2 },
     { "id": "deleteTemplate", "area": "seller", "method": "DELETE", "path": "/templates/{id}", "summary": "Delete a reply template", "auth": "seller", "permission": "messaging.conversations.reply", "params": { "id": "uuid" }, "response": null, "status": 204, "screens": ["seller/customers"], "phase": 2 },
 
-    { "id": "listAdminConversations", "area": "admin", "method": "GET", "path": "/conversations", "summary": "Find conversations by order, customer or seller", "desc": "Returns headers only; reading messages is a separate, logged call.", "auth": "staff", "permission": "messaging.conversations.read", "paging": true, "query": { "orderId": "uuid?", "customerId": "uuid?", "sellerId": "uuid?", "caseId": "uuid?", "filter": "enum(overdue|reported|locked)?" }, "response": "AdminConversationRow", "screens": ["admin/order", "admin/customers", "admin/case", "admin/seller"] },
+    { "id": "listAdminConversations", "area": "admin", "method": "GET", "path": "/conversations", "summary": "Find conversations by order, customer or seller", "desc": "Returns headers only; reading messages is a separate, logged call. filter=official_awaiting lists Official Store conversations waiting for a staff reply (awaiting or overdue), oldest due first.", "auth": "staff", "permission": "messaging.conversations.read", "paging": true, "query": { "orderId": "uuid?", "customerId": "uuid?", "sellerId": "uuid?", "caseId": "uuid?", "filter": "enum(overdue|reported|locked|official_awaiting)?" }, "response": "AdminConversationRow", "screens": ["admin/order", "admin/customers", "admin/case", "admin/seller"] },
     { "id": "readConversationAsStaff", "area": "admin", "method": "GET", "path": "/conversations/{id}/messages", "summary": "Read a private conversation (reason required, logged)", "auth": "staff", "permission": "messaging.conversations.read", "params": { "id": "uuid" }, "query": { "reason": "string", "caseId": "uuid?" }, "paging": true, "response": "Message", "audited": true, "screens": ["admin/case", "admin/order", "admin/customers"] },
-    { "id": "startStaffConversation", "area": "admin", "method": "POST", "path": "/conversations", "summary": "Start a Marketly staff conversation with a seller or seller applicant, optionally about an order, items or a return", "desc": "Used by Message seller (admin/seller), Message applicant (admin/seller-application) and Contact seller (admin/order). Creates a staff_seller conversation shown to the seller in Seller Center messages with counterparty Marketly Support, or to the applicant on their account (sell/status) before approval. One open conversation per seller + subject: starting again appends to it. The customer is never a participant.", "auth": "staff", "permission": "messaging.conversations.participate", "body": "StaffStartInput", "response": "Conversation", "status": 201, "audited": true, "errors": ["VALIDATION_FAILED", "NOT_FOUND"], "events": ["messaging.conversation.started", "messaging.message.sent"], "screens": ["admin/seller", "admin/seller-application", "admin/order"] },
-    { "id": "sendStaffMessage", "area": "admin", "method": "POST", "path": "/conversations/{id}/messages", "summary": "Post as Marketly Support (joins the conversation)", "auth": "staff", "permission": "messaging.conversations.participate", "params": { "id": "uuid" }, "body": { "body": "text", "mediaIds": "uuid[]?", "caseId": "uuid?" }, "response": "Message", "status": 201, "audited": true, "errors": ["CONVERSATION_LOCKED"], "events": ["messaging.message.sent"], "screens": ["admin/case"] },
+    { "id": "startStaffConversation", "area": "admin", "method": "POST", "path": "/conversations", "summary": "Start a Marketly staff conversation with a seller or seller applicant, optionally about an order, items or a return", "desc": "Used by Message seller (admin/seller), Message applicant (admin/seller-application) and Contact seller (admin/order). Creates a staff_seller conversation shown to the seller in Seller Center messages with counterparty Marketly Support, or to the applicant on their account (sell/status) before approval: the applicant's account is added as a participant when the conversation starts (sellers.getApplicationParticipant), not on their first action. One open conversation per seller + subject: starting again appends to it. The customer is never a participant.", "auth": "staff", "permission": "messaging.conversations.participate", "body": "StaffStartInput", "response": "Conversation", "status": 201, "audited": true, "errors": ["VALIDATION_FAILED", "NOT_FOUND"], "events": ["messaging.conversation.started", "messaging.message.sent"], "screens": ["admin/seller", "admin/seller-application", "admin/order"] },
+    { "id": "sendStaffMessage", "area": "admin", "method": "POST", "path": "/conversations/{id}/messages", "summary": "Post as Marketly Support (joins the conversation)", "desc": "In an Official Store conversation the message is the Official Store's reply: it moves the reply state to replied and resolves the official_store_reply work item.", "auth": "staff", "permission": "messaging.conversations.participate", "params": { "id": "uuid" }, "body": { "body": "text", "mediaIds": "uuid[]?", "caseId": "uuid?" }, "response": "Message", "status": 201, "audited": true, "errors": ["CONVERSATION_LOCKED"], "events": ["messaging.message.sent"], "screens": ["admin/case"] },
     { "id": "hideMessage", "area": "admin", "method": "POST", "path": "/messages/{id}/hide", "summary": "Hide a message that breaks the rules", "auth": "staff", "permission": "messaging.conversations.moderate", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "Message", "audited": true, "screens": ["admin/trust", "admin/customers"] },
-    { "id": "lockConversation", "area": "admin", "method": "POST", "path": "/conversations/{id}/lock", "summary": "Lock or unlock a conversation", "auth": "staff", "permission": "messaging.conversations.moderate", "params": { "id": "uuid" }, "body": { "locked": "bool", "reason": "text" }, "response": "Conversation", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["messaging.conversation.locked"], "screens": ["admin/trust", "admin/customers"] },
+    { "id": "lockConversation", "area": "admin", "method": "POST", "path": "/conversations/{id}/lock", "summary": "Lock or unlock a conversation", "auth": "staff", "permission": "messaging.conversations.moderate", "params": { "id": "uuid" }, "body": { "locked": "bool", "reason": "text" }, "response": "Conversation", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["messaging.conversation.locked", "messaging.conversation.unlocked"], "screens": ["admin/trust", "admin/customers"] },
     { "id": "listMessageReports", "area": "admin", "method": "GET", "path": "/reports", "summary": "Reported messages", "auth": "staff", "permission": "messaging.conversations.moderate", "paging": true, "query": { "status": "enum(open|actioned|dismissed)?" }, "response": "MessageReport", "screens": ["admin/trust", "admin/customers"] },
-    { "id": "decideMessageReport", "area": "admin", "method": "POST", "path": "/reports/{id}/decide", "summary": "Action or dismiss a report", "auth": "staff", "permission": "messaging.conversations.moderate", "params": { "id": "uuid" }, "body": { "action": "enum(hide_message|lock_conversation|refer_to_trust|dismiss)", "reason": "text" }, "response": "MessageReport", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "screens": ["admin/trust"] },
+    { "id": "decideMessageReport", "area": "admin", "method": "POST", "path": "/reports/{id}/decide", "summary": "Action or dismiss a report", "auth": "staff", "permission": "messaging.conversations.moderate", "params": { "id": "uuid" }, "body": { "action": "enum(hide_message|lock_conversation|refer_to_trust|dismiss)", "reason": "text" }, "response": "MessageReport", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["messaging.conversation.locked"], "screens": ["admin/trust"] },
     { "id": "getSellerResponseAdmin", "area": "admin", "method": "GET", "path": "/sellers/{sellerId}/response-stats", "summary": "A seller's reply performance", "auth": "staff", "permission": "messaging.conversations.read", "params": { "sellerId": "uuid" }, "query": { "from": "date?", "to": "date?" }, "response": "ResponseStats", "screens": ["admin/seller"] }
   ],
   "events": {
     "publishes": [
-      { "name": "messaging.message.sent", "when": "A participant sends a message (notifications sends the in-app and email notice)", "payload": { "messageId": "uuid", "conversationId": "uuid", "authorKind": "string", "recipientKinds": "string[]", "customerId": "uuid?", "sellerId": "uuid?", "orderId": "uuid?" } },
-      { "name": "messaging.conversation.started", "when": "A new conversation is created", "payload": { "conversationId": "uuid", "kind": "string", "orderId": "uuid?", "sellerId": "uuid?" } },
-      { "name": "messaging.reply.overdue", "when": "A seller misses the reply target", "payload": { "conversationId": "uuid", "sellerId": "uuid", "orderId": "uuid?", "dueAt": "datetime" } },
+      { "name": "messaging.message.sent", "when": "A participant sends a message (notifications sends the in-app and email notice)", "payload": {
+        "messageId": "uuid", "conversationId": "uuid", "conversationKind": "enum(order|support|staff_seller)",
+        "authorKind": "enum(customer|guest|seller|staff|system)",
+        "recipientKinds": { "type": "enum(customer|guest|seller|official_store|staff)[]", "desc": "official_store: the Official Store team (staff topic for Official Store messages)" },
+        "customerId": { "type": "uuid?", "desc": "Customers-module id of the customer participant; null for guests" },
+        "contactEmail": { "type": "email?", "desc": "Order contact email of a guest participant" },
+        "applicantAccountId": { "type": "uuid?", "desc": "Applicant account in a seller-application conversation" },
+        "sellerId": { "type": "uuid?", "desc": "Seller participant; OFFICIAL_STORE_ID for the Official Store" },
+        "officialStore": "bool",
+        "staffIds": { "type": "uuid[]", "desc": "Staff participants other than the author (e.g. the case owner who joined)" },
+        "orderId": "uuid?", "caseId": "uuid?"
+      } },
+      { "name": "messaging.conversation.started", "when": "A new conversation is created", "payload": { "conversationId": "uuid", "kind": "string", "orderId": "uuid?", "customerId": "uuid?", "sellerId": "uuid?", "officialStore": "bool", "applicationId": "uuid?" } },
+      { "name": "messaging.reply.overdue", "when": "A seller or the Official Store misses the reply target", "payload": { "conversationId": "uuid", "sellerId": { "type": "uuid", "desc": "OFFICIAL_STORE_ID for the Official Store" }, "officialStore": { "type": "bool", "desc": "True: staff owe the reply (official_store_reply work item), not a seller task" }, "orderId": "uuid?", "dueAt": "datetime" } },
       { "name": "messaging.message.reported", "when": "A message is reported", "payload": { "reportId": "uuid", "messageId": "uuid", "reason": "string" } },
-      { "name": "messaging.conversation.locked", "when": "Staff lock a conversation", "payload": { "conversationId": "uuid", "reason": "text" } }
+      { "name": "messaging.conversation.locked", "when": "Staff lock a conversation, a message report is actioned with a lock, or a trust lock_conversation enforcement is executed", "payload": { "conversationId": "uuid", "reason": "text", "lockedBy": "Actor", "trustEnforcementId": { "type": "uuid?", "desc": "Set when trust's lock_conversation enforcement locked it (trust confirms execution)" }, "customerId": "uuid?", "sellerId": "uuid?" } },
+      { "name": "messaging.conversation.unlocked", "when": "Staff unlock a conversation or the trust enforcement that locked it is reversed", "payload": { "conversationId": "uuid", "reason": "text", "unlockedBy": "Actor", "trustEnforcementId": "uuid?" } }
     ],
     "consumes": [
-      { "name": "support.case.opened", "does": "If the case concerns an order conversation, add Marketly Support as a participant and post a system note" },
+      { "name": "support.case.opened", "does": "If the case concerns an order conversation, add Marketly Support as a participant (the case owner, ownerStaffId, when set) and post a system note" },
       { "name": "orders.order.completed", "does": "Schedule archiving of the order's conversations after archiveAfterDays" },
-      { "name": "trust.enforcement.recorded", "does": "Lock conversations named in an abuse enforcement" }
+      { "name": "trust.enforcement.recorded", "does": "Only action lock_conversation: lock the conversations named in targets (conversation, or the conversation of a message), record the enforcement id and publish messaging.conversation.locked with trustEnforcementId. Other actions (restrict_customer_messaging is customers') are ignored" },
+      { "name": "trust.enforcement.reversed", "does": "Action lock_conversation: unlock the conversations that enforcement locked (locked_by_enforcement_id) unless staff locked them again since; publish messaging.conversation.unlocked" },
+      { "name": "notifications.email_reply.received", "does": "module messaging: append the reply to the conversation (refId = conversation id) as a message from the participant whose email matches fromEmail (customer, guest order contact or seller member); other senders are dropped. Attachments come as media assets. Locked conversations refuse it" },
+      { "name": "customers.account.closed", "does": "Anonymise the customer's side: participant name and message author labels become Former customer; message text stays for the seller's service record, contact details already masked; the customer's own attachments are released" }
     ]
   },
   "permissions": [
@@ -282,6 +305,7 @@
   "integrations": [],
   "errorCodes": {
     "CONVERSATION_LOCKED": { "status": 409, "meaning": "The conversation is locked or archived for new messages. details.reason." },
+    "MESSAGING_RESTRICTED": { "status": 403, "meaning": "The customer's account is restricted from messaging sellers (replies inside a case stay possible). details.reason, details.endsAt." },
     "ORDER_NOT_ELIGIBLE": { "status": 422, "meaning": "The caller cannot message about this order (not their order, or seller not in the order)." }
   },
   "notes": [
@@ -290,6 +314,9 @@
     "Promotional messages are not allowed here; marketing goes through notifications with separate preferences (plan ch. 15, 19).",
     "Product questions and answers are public and live in reviews; order-specific questions belong here.",
     "clientMessageId makes sends safe to retry from the Android app without duplicates.",
-    "Guests can message about orders reached through guest order access (auth shopper)."
+    "Guests can message about orders reached through guest order access (auth shopper). The key is the order, not the session (decision D-M2): a conversation on a guest order has customer_id null and a guest participant (id order:<orderId>) created with the conversation, so any later session with identity.hasGuestOrderAccess to the order sees it with its read state; guest_session_id only records the session that started it.",
+    "Official Store conversations (decision D-M1): customers reach the Official Store with with = official_store; seller_id is OFFICIAL_STORE_ID, the reply state and reply target apply as for sellers, staff answer from admin (sendStaffMessage, filter official_awaiting), messaging keeps an official_store_reply work item per waiting conversation, and messaging.message.sent with officialStore=true drives the staff notification topic for Official Store messages.",
+    "Personal data: exportForCustomer supplies the Messages section of the customer data export; customers.account.closed anonymises the customer's side of their conversations.",
+    "Conversation identity: case_id is a link, not part of the key, for order and staff conversations (a case can be opened on an existing conversation later); only support-kind conversations are keyed by case. Merging duplicates keeps the oldest conversation, moves messages and participants, recomputes reply_state, reply_due_at and unread counts from the merged messages, and records each removed id in conversation_aliases."
   ]
 }
