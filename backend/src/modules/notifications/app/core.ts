@@ -14,6 +14,7 @@ import type * as identity from '../../../spec/identity.js';
 import type * as access from '../../../spec/access.js';
 import type { NoticeLink, TemplateContent } from '../../../spec/notifications.js';
 import { defaultContent, templateChannels, TOPICS, topicDef, topicVariables, type Audience, type Channel, type TopicDef } from '../domain/catalog.js';
+import { templateVersionMachine } from '../domain/state-machines.js';
 import { channelLive, defaultGroups, defaultMemberChannel, parseReplyToken, replyToken, signToken, verifyToken, type ChannelMap, type MemberAccessLike } from '../domain/rules.js';
 import type { MemberPrefRow, NotificationsRepository, Providers, TemplateRow, TopicRow, VersionRow } from '../ports.js';
 
@@ -23,7 +24,12 @@ export const SYSTEM: Actor = { kind: 'system' };
 
 const TTL_MS = 30_000;
 
-export const actorText = (a: Actor) => JSON.stringify({ kind: a.kind, ...(a.id ? { id: a.id } : {}), ...(a.name ? { name: a.name } : {}) });
+/** Template content equality regardless of key order (jsonb reorders keys) */
+const canonical = (v: unknown): unknown =>
+  Array.isArray(v) ? v.map(canonical) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().filter((k) => (v as Record<string, unknown>)[k] !== undefined).map((k) => [k, canonical((v as Record<string, unknown>)[k])])) : v;
+const sameContent = (a: unknown, b: unknown) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+
+export const actorText =(a: Actor) => JSON.stringify({ kind: a.kind, ...(a.id ? { id: a.id } : {}), ...(a.name ? { name: a.name } : {}) });
 export function actorOfText(s: string | null | undefined): Actor {
   if (!s) return SYSTEM;
   try {
@@ -137,6 +143,61 @@ export class Core {
       }),
     );
     await this.repo.seedTemplates(items);
+    await this.refreshDefaultTemplates();
+  }
+
+  /**
+   * Templates nobody edited (every version written by the system) follow the current default content: when
+   * the default changed since they were seeded (e.g. the purchase order email's "Deliver to" line on installs
+   * seeded before it), a new published system version replaces the live one and the old one is superseded.
+   * A template with any staff version (draft, published or discarded) is left alone. Runs with the boot seed,
+   * idempotent: the defaults live in code and the senders setting, which a SQL migration cannot see.
+   */
+  async refreshDefaultTemplates(): Promise<number> {
+    const senders = (await this.setting('senders')) as Record<string, string>;
+    const by = actorText(SYSTEM);
+    const templates = (await this.repo.listTemplates()).filter((t) => t.language === LANGUAGE && t.live_version_id);
+    const versions = await this.repo.versionsOf(templates.map((t) => t.id));
+    const byTemplate = new Map<string, VersionRow[]>();
+    for (const v of versions) byTemplate.set(v.template_id, [...(byTemplate.get(v.template_id) ?? []), v]);
+    let refreshed = 0;
+    for (const t of templates) {
+      const def = topicDef(t.topic_key);
+      if (!def || !templateChannels(def).includes(t.channel as Channel)) continue;
+      const own = byTemplate.get(t.id) ?? [];
+      if (!own.length || own.some((v) => v.created_by !== by || (v.published_by != null && v.published_by !== by))) continue;
+      const live = own.find((v) => v.id === t.live_version_id);
+      const content = defaultContent(def, t.channel as Channel, senders);
+      if (!live || sameContent(live.content, content)) continue;
+      const done = await this.repo.transaction(async (tx) => {
+        const now = this.now();
+        const current = await tx.getTemplate(t.id);
+        if (current?.live_version_id !== live.id) return false; // changed meanwhile
+        const prev = await tx.getVersion(live.id, { forUpdate: true });
+        if (prev?.status === 'published') await tx.updateVersion(live.id, { status: templateVersionMachine.next('published', 'supersede') });
+        const version: VersionRow = {
+          id: newId(),
+          template_id: t.id,
+          version: Math.max(...own.map((v) => v.version)) + 1,
+          status: 'published',
+          content: content as never,
+          note: 'Default template updated',
+          created_by: by,
+          created_at: now,
+          published_by: by,
+          published_at: now,
+        };
+        await tx.insertVersion(version);
+        await tx.updateTemplate(t.id, { live_version_id: version.id, updated_at: now });
+        return true;
+      });
+      if (done) refreshed++;
+    }
+    if (refreshed) {
+      this.invalidateTemplates();
+      this.log.info({ refreshed }, 'notifications: never-edited templates moved to the current default content');
+    }
+    return refreshed;
   }
 
   /** Channel switches per topic (cached briefly) */

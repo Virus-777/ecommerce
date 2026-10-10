@@ -607,7 +607,7 @@ export class Admin {
       const segment = started.segment as unknown as { consentChannel: DeliveryChannel };
       const channel = segment.consentChannel;
       const targets = await this.broadcastTargets(started.audience as 'customers' | 'sellers', channel);
-      const link = { kind: 'campaign', id: started.campaign_id ?? started.id, screen: started.audience === 'customers' ? 'store/deals' : 'seller/campaigns', label: 'See more' };
+      const link = { kind: 'campaign', id: started.campaign_id ?? started.id, screen: started.audience === 'customers' ? 'store/deals' : 'seller/marketing', label: 'See more' };
       for (let i = 0; i < targets.length; i += 50) {
         await this.sender.send({
           topic: started.topic_key,

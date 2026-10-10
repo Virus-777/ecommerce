@@ -106,10 +106,17 @@ const L = (kind: string, id: string, screen: string, label?: string, ref?: strin
 
 const orderLink = (orderId: string, ref?: string | null) => L('order', orderId, 'account/order', 'View order', ref);
 const returnLink = (returnId: string, ref?: string | null, label = 'View return') => L('return', returnId, 'account/return', label, ref);
-const caseLink = (caseId: string, ref?: string | null) => L('case', caseId, 'account/case', 'View case', ref);
+const caseLink = (caseId: string, ref?: string | null) => L('case', caseId, 'help/case', 'View case', ref);
 const sellerOrderLink = (groupId: string, ref?: string | null, label = 'Open order') => L('seller_order', groupId, 'seller/order', label, ref);
 const sellerReturnLink = (returnId: string, ref?: string | null) => L('return', returnId, 'seller/return', 'Open return', ref);
-const accountHealth = (id: string) => L('restriction', id, 'seller/account-health', 'View account health');
+/** Where a verification code is entered, by identity's code purpose */
+const CODE_SCREENS: Record<EventPayload<'identity.verification.code_issued'>['purpose'], string> = {
+  email_verification: 'auth/register',
+  email_change: 'account/profile',
+  phone_verification: 'account/profile',
+  sign_in_second_factor: 'auth/sign-in',
+};
+const accountHealth = (id: string) =>L('restriction', id, 'seller/performance', 'View account health');
 
 const customer = (customerId: string | null | undefined): RouteTarget | null => (customerId ? { kind: 'customer', customerId } : null);
 const seller = (sellerId: string | null | undefined): RouteTarget | null => (sellerId ? { kind: 'seller', sellerId } : null);
@@ -194,11 +201,11 @@ export const ROUTES: Routes = {
   'identity.verification.code_issued': {
     sends: (p, f) => [
       p.existingAccount
-        ? { topic: 'customer.account.already_registered', to: [{ kind: 'email', email: p.to, accountId: p.accountId }], link: L('account', p.accountId ?? p.challengeId, 'account/sign-in', 'Sign in'), dedupe: `code:${p.challengeId}` }
+        ? { topic: 'customer.account.already_registered', to: [{ kind: 'email', email: p.to, accountId: p.accountId }], link: L('account', p.accountId ?? p.challengeId, 'auth/sign-in', 'Sign in'), dedupe: `code:${p.challengeId}` }
         : {
             topic: 'customer.account.verification_code',
             to: [p.channel === 'sms' ? { kind: 'phone', phone: p.to, accountId: p.accountId } : { kind: 'email', email: p.to, accountId: p.accountId }],
-            link: L('account', p.accountId ?? p.challengeId, 'account/verify', 'Enter code'),
+            link: L('account', p.accountId ?? p.challengeId, CODE_SCREENS[p.purpose], 'Enter code'),
             context: { code: { value: p.code, expires: f.until(p.expiresAt) } },
             dedupe: `code:${p.challengeId}`,
           },
@@ -209,7 +216,7 @@ export const ROUTES: Routes = {
       {
         topic: { member: 'customer.account.password_reset', staff: 'staff.account.password_reset', realmOf: p.accountId },
         to: [{ kind: 'email', email: p.email, accountId: p.accountId }],
-        link: L('account', p.accountId, 'account/reset-password', 'Reset password', null, p.resetUrl),
+        link: L('account', p.accountId, 'auth/recover', 'Reset password', null, p.resetUrl),
         context: { reset: { url: p.resetUrl } },
         dedupe: `reset:${p.accountId}:${p.expiresAt}`,
       },
@@ -220,7 +227,7 @@ export const ROUTES: Routes = {
       {
         topic: p.realm === 'staff' ? 'staff.account.password_changed' : 'customer.account.password_changed',
         to: [p.realm === 'staff' ? staff(p.accountId) : { kind: 'customer', accountId: p.accountId }],
-        link: L('account', p.accountId, p.realm === 'staff' ? 'admin/security' : 'account/security', 'Review security'),
+        link: L('account', p.accountId, p.realm === 'staff' ? 'admin/staff' : 'account/security', 'Review security'),
         dedupe: `password:${p.accountId}:${p.at}`,
       },
     ],
@@ -230,7 +237,7 @@ export const ROUTES: Routes = {
       {
         topic: p.realm === 'staff' ? 'staff.account.new_device' : 'customer.account.new_device',
         to: [p.realm === 'staff' ? staff(p.accountId) : { kind: 'customer', accountId: p.accountId }],
-        link: L('account', p.accountId, p.realm === 'staff' ? 'admin/security' : 'account/security', 'Review security'),
+        link: L('account', p.accountId, p.realm === 'staff' ? 'admin/staff' : 'account/security', 'Review security'),
         context: { device: { label: p.deviceLabel, location: p.location ?? 'unknown location' } },
         dedupe: `device:${p.accountId}:${p.at}`,
       },
@@ -263,7 +270,7 @@ export const ROUTES: Routes = {
       {
         topic: p.realm === 'staff' ? 'staff.account.locked' : 'customer.account.locked',
         to: [p.realm === 'staff' ? staff(p.accountId) : { kind: 'customer', accountId: p.accountId }],
-        link: L('account', p.accountId, p.realm === 'staff' ? 'admin/security' : 'account/security', 'Reset password'),
+        link: L('account', p.accountId, p.realm === 'staff' ? 'admin/staff' : 'account/security', 'Reset password'),
         context: { lock: { until: p.until ? f.dateTime(p.until) : 'you reset your password' } },
         dedupe: `locked:${p.accountId}:${p.until ?? p.cause}`,
       },
@@ -298,7 +305,7 @@ export const ROUTES: Routes = {
   'customers.account.closed': { effects: ['customerClosed'] },
   'customers.data_export.ready': {
     sends: (p, f) => [
-      { topic: 'customer.account.data_export_ready', to: [customer(p.customerId)], link: L('account', p.requestId, 'account/privacy', 'Download'), context: { export: { expires: f.date(p.expiresAt) } }, dedupe: `export:${p.requestId}` },
+      { topic: 'customer.account.data_export_ready', to: [customer(p.customerId)], link: L('account', p.requestId, 'account/profile', 'Download'), context: { export: { expires: f.date(p.expiresAt) } }, dedupe: `export:${p.requestId}` },
     ],
   },
   'customers.closure.delayed': {
@@ -306,7 +313,7 @@ export const ROUTES: Routes = {
       {
         topic: 'customer.account.closure_delayed',
         to: [customer(p.customerId)],
-        link: L('account', p.requestId, 'account/privacy', 'See what is open'),
+        link: L('account', p.requestId, 'account/profile', 'See what is open'),
         context: { closure: { blockers: p.blockers.map((b) => b.detail).join(', ') || 'open orders or requests', nextCheck: f.date(p.nextCheckAt) } },
         // customers publishes once per new set of blockers
         dedupe: `closure-delayed:${p.requestId}:${[...new Set(p.blockers.map((b) => b.kind))].sort().join(',')}`,
@@ -429,7 +436,7 @@ export const ROUTES: Routes = {
       {
         topic: 'customer.refund.destination_needed',
         to: shopper(p, byOrder(p.orderId)),
-        link: L('refund', p.refundId, 'account/refund', 'Choose where to receive it', p.ref),
+        link: L('refund', p.refundId, 'account/order', 'Choose where to receive it', p.ref),
         context: {
           order: { ref: p.orderRef },
           refund: { amount: f.money(p.amount), reason: p.failureReason?.trim() || 'the original payment method can no longer receive it' },
@@ -449,7 +456,7 @@ export const ROUTES: Routes = {
       {
         topic: 'customer.refund.sent',
         to: shopper(p, byOrder(p.orderId)),
-        link: L('refund', p.refundId, 'account/refund', 'Track refund', p.ref),
+        link: L('refund', p.refundId, 'account/order', 'Track refund', p.ref),
         context: { refund: { amount: f.money(p.amount), destination: p.destination } },
         subjects: { orderId: p.orderId },
         dedupe: `refund:${p.refundId}:sent`,
@@ -462,7 +469,7 @@ export const ROUTES: Routes = {
       p.finalAttempt && {
         topic: 'customer.refund.failed',
         to: shopper(p, byOrder(p.orderId)),
-        link: L('refund', p.refundId, 'account/refund', 'View refund', p.ref),
+        link: L('refund', p.refundId, 'account/order', 'View refund', p.ref),
         context: { refund: { amount: f.money(p.amount), reason: p.reason } },
         subjects: { orderId: p.orderId },
         dedupe: `refund:${p.refundId}:failed`,
@@ -471,7 +478,7 @@ export const ROUTES: Routes = {
       p.finalAttempt && {
         topic: 'staff.finance.refund_failed',
         to: [role('finance_manager')],
-        link: L('refund', p.refundId, 'admin/refunds', 'Open refund', p.ref),
+        link: L('refund', p.refundId, 'admin/finance', 'Open refund', p.ref),
         context: { refund: { amount: f.money(p.amount), reason: p.reason } },
         subjects: { orderId: p.orderId },
         dedupe: `refund:${p.refundId}`,
@@ -483,7 +490,7 @@ export const ROUTES: Routes = {
       {
         topic: 'staff.finance.chargeback_opened',
         to: [role('finance_manager')],
-        link: L('chargeback', p.disputeId, 'admin/disputes', 'Open dispute', p.ref),
+        link: L('chargeback', p.disputeId, 'admin/finance', 'Open dispute', p.ref),
         context: { chargeback: { ref: p.ref, amount: f.money(p.amount) } },
         subjects: { orderId: p.orderId },
         dedupe: `chargeback:${p.disputeId}`,
@@ -491,7 +498,7 @@ export const ROUTES: Routes = {
       p.sellerId && {
         topic: 'seller.order.dispute_opened',
         to: [seller(p.sellerId)],
-        link: p.groupId ? sellerOrderLink(p.groupId, p.ref, 'Add evidence') : L('chargeback', p.disputeId, 'seller/disputes', 'Add evidence', p.ref),
+        link: p.groupId ? sellerOrderLink(p.groupId, p.ref, 'Add evidence') : L('chargeback', p.disputeId, 'seller/finance', 'Add evidence', p.ref),
         context: { chargeback: { ref: p.ref, amount: f.money(p.amount) }, due: { date: f.dateTime(p.evidenceDueAt) } },
         subjects: { orderId: p.orderId, groupId: p.groupId },
         sellerId: p.sellerId,
@@ -661,7 +668,7 @@ export const ROUTES: Routes = {
       {
         topic: 'customer.refund.approved',
         to: shopper(p, p.returnId ? byReturn(p.returnId) : p.caseId ? byCase(p.caseId) : byOrder(p.orderId), byOrder(p.orderId)),
-        link: L('refund', p.refundRequestId, 'account/refund', 'Track refund'),
+        link: L('refund', p.refundRequestId, p.returnId ? 'account/return' : p.caseId ? 'help/case' : 'account/order', 'Track refund'),
         context: { refund: { amount: f.money(p.total) } },
         subjects: { orderId: p.orderId, returnId: p.returnId, caseId: p.caseId },
         dedupe: `refund-request:${p.refundRequestId}`,
@@ -697,7 +704,7 @@ export const ROUTES: Routes = {
         p.kind !== 'seller_request' && {
           topic: 'seller.case.opened',
           to: [seller(p.sellerId)],
-          link: L('case', p.caseId, 'seller/case', 'Respond', p.ref),
+          link: L('case', p.caseId, 'seller/help', 'Respond', p.ref),
           context: { case: { ref: p.ref }, due: { date: p.nextResponseDueAt ? f.dateTime(p.nextResponseDueAt) : 'as soon as possible' } },
           subjects: { caseId: p.caseId, orderId: p.orderId },
           sellerId: p.sellerId,
@@ -718,7 +725,7 @@ export const ROUTES: Routes = {
         p.authorRole !== 'seller' && {
           topic: 'seller.case.reply',
           to: [p.sellerId ? seller(p.sellerId) : sellerByCase(p.caseId)],
-          link: L('case', p.caseId, 'seller/case', 'View reply'),
+          link: L('case', p.caseId, 'seller/help', 'View reply'),
           subjects: { caseId: p.caseId },
           sellerId: p.sellerId ?? null,
           replyTo: { module: 'support', refId: p.caseId },
@@ -763,7 +770,7 @@ export const ROUTES: Routes = {
       p.sellerId && {
         topic: 'seller.case.decided',
         to: [seller(p.sellerId)],
-        link: L('case', p.caseId, 'seller/case', 'View decision', p.ref),
+        link: L('case', p.caseId, 'seller/help', 'View decision', p.ref),
         context: { case: { ref: p.ref, outcome: f.human(p.outcome) }, appeal: { deadline: p.appealDeadline ? f.date(p.appealDeadline) : 'the date shown in the case' } },
         subjects: { caseId: p.caseId, orderId: p.orderId },
         sellerId: p.sellerId,
@@ -788,7 +795,7 @@ export const ROUTES: Routes = {
         toOfficialStore && {
           topic: 'staff.official_store.message_received',
           to: [role('official_store_manager')],
-          link: L('conversation', p.conversationId, 'admin/messages', 'Reply'),
+          link: L('conversation', p.conversationId, 'admin/official', 'Reply'),
           context: { message: { from: p.authorKind === 'customer' || p.authorKind === 'guest' ? 'A customer' : from } },
           subjects: { conversationId: p.conversationId, orderId: p.orderId },
           dedupe: `official-store:${p.conversationId}`,
@@ -809,7 +816,7 @@ export const ROUTES: Routes = {
           !officialStoreConversation(p) && {
             topic: 'seller.message.new',
             to: [seller(p.sellerId)],
-            link: L('conversation', p.conversationId, 'seller/messages', 'Reply'),
+            link: L('conversation', p.conversationId, 'seller/customers', 'Reply'),
             context: { message: { from } },
             subjects: { conversationId: p.conversationId, orderId: p.orderId },
             sellerId: p.sellerId,
@@ -826,7 +833,7 @@ export const ROUTES: Routes = {
   },
   'sellers.application.information_requested': {
     sends: (p, f) => [
-      { topic: 'seller.application.information_requested', to: [seller(p.sellerId)], link: L('seller', p.applicationId, 'seller/application', 'Answer now'), context: { due: { date: f.dateTime(p.dueAt) } }, sellerId: p.sellerId, deadline: p.dueAt, dedupe: `seller-application:${p.applicationId}:info` },
+      { topic: 'seller.application.information_requested', to: [seller(p.sellerId)], link: L('seller', p.applicationId, 'sell/status', 'Answer now'), context: { due: { date: f.dateTime(p.dueAt) } }, sellerId: p.sellerId, deadline: p.dueAt, dedupe: `seller-application:${p.applicationId}:info` },
     ],
   },
   'sellers.application.information_reminder': {
@@ -835,7 +842,7 @@ export const ROUTES: Routes = {
       {
         topic: 'seller.application.information_reminder',
         to: [seller(p.sellerId)],
-        link: L('seller', p.applicationId, 'seller/application', 'Answer now', p.ref),
+        link: L('seller', p.applicationId, 'sell/status', 'Answer now', p.ref),
         context: { due: { date: f.dateTime(p.dueAt) }, application: { openItems: p.openItems } },
         sellerId: p.sellerId,
         deadline: p.dueAt,
@@ -846,7 +853,7 @@ export const ROUTES: Routes = {
   'sellers.application.decided': {
     resolve: (p) => [`seller-application:${p.applicationId}`, `seller-application:${p.applicationId}:info`],
     sends: (p) => [
-      { topic: 'seller.application.decided', to: [seller(p.sellerId)], link: L('seller', p.applicationId, 'seller/application', 'See next steps'), context: { change: { outcome: p.outcome } }, sellerId: p.sellerId, dedupe: `seller-application:${p.applicationId}:decided` },
+      { topic: 'seller.application.decided', to: [seller(p.sellerId)], link: L('seller', p.applicationId, 'sell/status', 'See next steps'), context: { change: { outcome: p.outcome } }, sellerId: p.sellerId, dedupe: `seller-application:${p.applicationId}:decided` },
     ],
   },
   'sellers.seller.restricted': {
@@ -875,11 +882,11 @@ export const ROUTES: Routes = {
     sends: (p) => [{ topic: 'seller.account.warning', to: [seller(p.sellerId)], link: accountHealth(p.warningId), context: { warning: { title: p.title } }, sellerId: p.sellerId, dedupe: `warning:${p.warningId}` }],
   },
   'sellers.appeal.decided': {
-    sends: (p, f) => [{ topic: 'seller.appeal.decided', to: [seller(p.sellerId)], link: L('appeal', p.appealId, 'seller/account-health', 'View appeal'), context: { appeal: { outcome: f.human(p.outcome) } }, sellerId: p.sellerId, dedupe: `appeal:${p.appealId}` }],
+    sends: (p, f) => [{ topic: 'seller.appeal.decided', to: [seller(p.sellerId)], link: L('appeal', p.appealId, 'seller/performance', 'View appeal'), context: { appeal: { outcome: f.human(p.outcome) } }, sellerId: p.sellerId, dedupe: `appeal:${p.appealId}` }],
   },
   'sellers.payout_account.changed': {
     sends: (p) => [
-      { topic: 'seller.payout_account.changed', to: [seller(p.sellerId)], link: L('payout_account', p.changeId, 'seller/payout-settings', 'Review payout settings'), context: { destination: { label: p.label } }, sellerId: p.sellerId, dedupe: `payout-account:${p.changeId}` },
+      { topic: 'seller.payout_account.changed', to: [seller(p.sellerId)], link: L('payout_account', p.changeId, 'seller/finance', 'Review payout settings'), context: { destination: { label: p.label } }, sellerId: p.sellerId, dedupe: `payout-account:${p.changeId}` },
     ],
   },
   'sellers.change_request.decided': {
@@ -887,7 +894,7 @@ export const ROUTES: Routes = {
       {
         topic: 'seller.change_request.decided',
         to: [seller(p.sellerId)],
-        link: L('change_request', p.changeRequestId, 'seller/settings', 'View request'),
+        link: L('change_request', p.changeRequestId, 'seller/store', 'View request'),
         context: { change: { kind: f.human(p.kind), outcome: p.approved ? 'approved' : 'rejected' } },
         sellerId: p.sellerId,
         dedupe: `change-request:${p.changeRequestId}`,
@@ -896,7 +903,7 @@ export const ROUTES: Routes = {
   },
   'sellers.verification.changed': {
     sends: (p, f) => [
-      { topic: 'seller.verification.changed', to: [seller(p.sellerId)], link: L('seller', p.sellerId, 'seller/account-health', 'View verification'), context: { verification: { state: f.human(p.state) } }, sellerId: p.sellerId, dedupe: `verification:${p.sellerId}:${p.state}` },
+      { topic: 'seller.verification.changed', to: [seller(p.sellerId)], link: L('seller', p.sellerId, 'seller/performance', 'View verification'), context: { verification: { state: f.human(p.state) } }, sellerId: p.sellerId, dedupe: `verification:${p.sellerId}:${p.state}` },
     ],
   },
   'sellers.launch_review.decided': {
@@ -904,7 +911,7 @@ export const ROUTES: Routes = {
       {
         topic: 'seller.launch_review.decided',
         to: [seller(p.sellerId)],
-        link: L('seller', p.sellerId, 'seller/launch', 'View launch checklist'),
+        link: L('seller', p.sellerId, 'seller/setup', 'View launch checklist'),
         context: { review: { outcome: p.outcome === 'passed' ? 'passed' : 'needs changes' } },
         sellerId: p.sellerId,
         dedupe: `launch-review:${p.sellerId}:${p.decidedAt}`,
@@ -917,7 +924,7 @@ export const ROUTES: Routes = {
       {
         topic: 'seller.application.invitation',
         to: [{ kind: 'email', email: p.email, recipientKind: 'guest_email' }],
-        link: L('seller_invitation', p.invitationId, 'seller/apply', 'Start your application'),
+        link: L('seller_invitation', p.invitationId, 'sell/apply', 'Start your application'),
         context: { invite: { business: p.businessName, code: p.code, expires: f.date(p.expiresAt) } },
         dedupe: `seller-invitation:${p.invitationId}`,
       },
@@ -926,11 +933,11 @@ export const ROUTES: Routes = {
 
   /* ---------------------------------------------------------------- finance (destinations), catalog, inventory */
   'finance.destination.verified': {
-    sends: (p) => [{ topic: 'seller.payout_destination.verified', to: [seller(p.sellerId)], link: L('payout_account', p.reviewId, 'seller/payout-settings', 'View payout settings'), sellerId: p.sellerId, dedupe: `destination:${p.reviewId}` }],
+    sends: (p) => [{ topic: 'seller.payout_destination.verified', to: [seller(p.sellerId)], link: L('payout_account', p.reviewId, 'seller/finance', 'View payout settings'), sellerId: p.sellerId, dedupe: `destination:${p.reviewId}` }],
   },
   'finance.destination.rejected': {
     sends: (p) => [
-      { topic: 'seller.payout_destination.rejected', to: [seller(p.sellerId)], link: L('payout_account', p.reviewId, 'seller/payout-settings', 'Update payout settings'), context: { destination: { reason: p.reason } }, sellerId: p.sellerId, dedupe: `destination:${p.reviewId}` },
+      { topic: 'seller.payout_destination.rejected', to: [seller(p.sellerId)], link: L('payout_account', p.reviewId, 'seller/finance', 'Update payout settings'), context: { destination: { reason: p.reason } }, sellerId: p.sellerId, dedupe: `destination:${p.reviewId}` },
     ],
   },
   'catalog.product.changes_requested': {
@@ -938,7 +945,7 @@ export const ROUTES: Routes = {
       p.ownerSellerId && {
         topic: 'seller.product.changes_requested',
         to: [seller(p.ownerSellerId)],
-        link: L('product', p.productId, 'seller/product', 'Fix product'),
+        link: L('product', p.productId, 'seller/product-new', 'Fix product'),
         context: { product: { reason: [p.reason, ...Object.entries(p.fields ?? {}).map(([k, v]) => `${k}: ${v}`)].filter(Boolean).join('; ') } },
         sellerId: p.ownerSellerId,
         dedupe: `product:${p.productId}:changes`,
@@ -947,12 +954,12 @@ export const ROUTES: Routes = {
   },
   'catalog.product.approved': {
     resolve: (p) => [`product:${p.productId}:changes`],
-    sends: (p) => [p.ownerSellerId && { topic: 'seller.product.approved', to: [seller(p.ownerSellerId)], link: L('product', p.productId, 'seller/product', 'View product'), sellerId: p.ownerSellerId, dedupe: `product:${p.productId}:approved` }],
+    sends: (p) => [p.ownerSellerId && { topic: 'seller.product.approved', to: [seller(p.ownerSellerId)], link: L('product', p.productId, 'seller/product-new', 'View product'), sellerId: p.ownerSellerId, dedupe: `product:${p.productId}:approved` }],
   },
   'catalog.product.rejected': {
     resolve: (p) => [`product:${p.productId}:changes`],
     sends: (p) => [
-      p.ownerSellerId && { topic: 'seller.product.rejected', to: [seller(p.ownerSellerId)], link: L('product', p.productId, 'seller/product', 'View product'), context: { product: { reason: p.reason } }, sellerId: p.ownerSellerId, dedupe: `product:${p.productId}:rejected` },
+      p.ownerSellerId && { topic: 'seller.product.rejected', to: [seller(p.ownerSellerId)], link: L('product', p.productId, 'seller/product-new', 'View product'), context: { product: { reason: p.reason } }, sellerId: p.ownerSellerId, dedupe: `product:${p.productId}:rejected` },
     ],
   },
   'inventory.stock.low_digest': {
@@ -961,17 +968,17 @@ export const ROUTES: Routes = {
       const more = p.items.length > shown.length ? `; and ${p.lowCount + p.outOfStockCount - shown.length} more` : '';
       const context = { digest: { low: p.lowCount, out: p.outOfStockCount, lines: `${shown.join('; ')}${more}`, date: f.date(`${p.date}T12:00:00Z`) } };
       return [
-        p.ownerType === 'official' && { topic: 'staff.inventory.low_stock_digest', to: [role('inventory_manager')], link: L('stock', p.date, 'ops/stock', 'Open stock'), context, dedupe: `stock-digest:official:${p.date}` },
+        p.ownerType === 'official' && { topic: 'staff.inventory.low_stock_digest', to: [role('inventory_manager')], link: L('stock', p.date, 'ops/inventory', 'Open stock'), context, dedupe: `stock-digest:official:${p.date}` },
         p.ownerType === 'seller' &&
-          p.sellerId && { topic: 'seller.stock.low_digest', to: [seller(p.sellerId)], link: L('stock', p.date, 'seller/stock', 'Review stock'), context, sellerId: p.sellerId, dedupe: `stock-digest:${p.sellerId}:${p.date}` },
+          p.sellerId && { topic: 'seller.stock.low_digest', to: [seller(p.sellerId)], link: L('stock', p.date, 'seller/inventory', 'Review stock'), context, sellerId: p.sellerId, dedupe: `stock-digest:${p.sellerId}:${p.date}` },
       ];
     },
   },
   'inventory.stock.low': {
     sends: (p) => [
       p.ownerType !== 'official' &&
-        p.sellerId && { topic: 'seller.stock.low', to: [seller(p.sellerId)], link: L('stock', p.stockItemId, 'seller/stock', 'Update stock', p.sku), context: { stock: { label: p.label, available: p.available } }, sellerId: p.sellerId, dedupe: `stock:${p.stockItemId}` },
-      p.ownerType === 'official' && { topic: 'staff.inventory.stock_shortage', to: [role('inventory_manager')], link: L('stock', p.stockItemId, 'ops/stock', 'Open stock', p.sku), context: { stock: { label: p.label, available: p.available } }, dedupe: `stock:${p.stockItemId}` },
+        p.sellerId && { topic: 'seller.stock.low', to: [seller(p.sellerId)], link: L('stock', p.stockItemId, 'seller/inventory', 'Update stock', p.sku), context: { stock: { label: p.label, available: p.available } }, sellerId: p.sellerId, dedupe: `stock:${p.stockItemId}` },
+      p.ownerType === 'official' && { topic: 'staff.inventory.stock_shortage', to: [role('inventory_manager')], link: L('stock', p.stockItemId, 'ops/inventory', 'Open stock', p.sku), context: { stock: { label: p.label, available: p.available } }, dedupe: `stock:${p.stockItemId}` },
     ],
   },
 
@@ -979,32 +986,32 @@ export const ROUTES: Routes = {
   'finance.payout.paid': {
     resolve: (p) => [`payout:${p.payoutId}`],
     sends: (p, f) => [
-      { topic: 'seller.payout.paid', to: [seller(p.sellerId)], link: L('payout', p.payoutId, 'seller/payouts', 'View payout', p.ref), context: { payout: { ref: p.ref, amount: f.money(p.amount) } }, sellerId: p.sellerId, dedupe: `payout:${p.payoutId}:paid` },
+      { topic: 'seller.payout.paid', to: [seller(p.sellerId)], link: L('payout', p.payoutId, 'seller/finance', 'View payout', p.ref), context: { payout: { ref: p.ref, amount: f.money(p.amount) } }, sellerId: p.sellerId, dedupe: `payout:${p.payoutId}:paid` },
     ],
   },
   'finance.payout.failed': {
     sends: (p, f) => [
-      { topic: 'seller.payout.failed', to: [seller(p.sellerId)], link: L('payout', p.payoutId, 'seller/payouts', 'Fix payout settings', p.ref), context: { payout: { ref: p.ref, amount: f.money(p.amount), reason: p.failureReason } }, sellerId: p.sellerId, dedupe: `payout:${p.payoutId}` },
+      { topic: 'seller.payout.failed', to: [seller(p.sellerId)], link: L('payout', p.payoutId, 'seller/finance', 'Fix payout settings', p.ref), context: { payout: { ref: p.ref, amount: f.money(p.amount), reason: p.failureReason } }, sellerId: p.sellerId, dedupe: `payout:${p.payoutId}` },
       { topic: 'staff.finance.payout_failed', to: [role('finance_manager')], link: L('payout', p.payoutId, 'admin/payouts', 'Open payout', p.ref), context: { payout: { ref: p.ref, amount: f.money(p.amount), reason: p.failureReason } }, dedupe: `payout:${p.payoutId}` },
     ],
   },
   'finance.hold.placed': {
     sends: (p, f) => [
-      { topic: 'seller.hold.placed', to: [seller(p.sellerId)], link: L('hold', p.holdId, 'seller/payouts', 'View hold'), context: { hold: { amount: f.money(p.amount), reason: p.reason, reviewDate: f.date(p.reviewDate) } }, sellerId: p.sellerId, dedupe: `hold:${p.holdId}:placed` },
+      { topic: 'seller.hold.placed', to: [seller(p.sellerId)], link: L('hold', p.holdId, 'seller/finance', 'View hold'), context: { hold: { amount: f.money(p.amount), reason: p.reason, reviewDate: f.date(p.reviewDate) } }, sellerId: p.sellerId, dedupe: `hold:${p.holdId}:placed` },
     ],
   },
   'finance.hold.released': {
-    sends: (p, f) => [{ topic: 'seller.hold.released', to: [seller(p.sellerId)], link: L('hold', p.holdId, 'seller/payouts', 'View balance'), context: { hold: { amount: f.money(p.amount) } }, sellerId: p.sellerId, dedupe: `hold:${p.holdId}:released` }],
+    sends: (p, f) => [{ topic: 'seller.hold.released', to: [seller(p.sellerId)], link: L('hold', p.holdId, 'seller/finance', 'View balance'), context: { hold: { amount: f.money(p.amount) } }, sellerId: p.sellerId, dedupe: `hold:${p.holdId}:released` }],
   },
   'finance.balance.negative': {
     sends: (p, f) => [
-      { topic: 'seller.balance.negative', to: [seller(p.sellerId)], link: L('balance', p.sellerId, 'seller/payouts', 'View balance', p.cause.ref), context: { balance: { amount: f.money(p.available) } }, sellerId: p.sellerId, dedupe: `balance:${p.sellerId}:${p.cause.id}` },
-      { topic: 'staff.finance.balance_negative', to: [role('finance_manager')], link: L('seller', p.sellerId, 'admin/seller-balance', 'Open balance', p.cause.ref), context: { balance: { amount: f.money(p.available) } }, dedupe: `balance:${p.sellerId}:${p.cause.id}` },
+      { topic: 'seller.balance.negative', to: [seller(p.sellerId)], link: L('balance', p.sellerId, 'seller/finance', 'View balance', p.cause.ref), context: { balance: { amount: f.money(p.available) } }, sellerId: p.sellerId, dedupe: `balance:${p.sellerId}:${p.cause.id}` },
+      { topic: 'staff.finance.balance_negative', to: [role('finance_manager')], link: L('seller', p.sellerId, 'admin/seller', 'Open balance', p.cause.ref), context: { balance: { amount: f.money(p.available) } }, dedupe: `balance:${p.sellerId}:${p.cause.id}` },
     ],
   },
   'finance.statement.issued': {
     sends: (p, f) => [
-      { topic: 'seller.statement.issued', to: [seller(p.sellerId)], link: L('statement', p.statementId, 'seller/statements', 'View statement'), context: { statement: { period: `${f.date(p.period.from)}–${f.date(p.period.to)}` } }, sellerId: p.sellerId, dedupe: `statement:${p.statementId}` },
+      { topic: 'seller.statement.issued', to: [seller(p.sellerId)], link: L('statement', p.statementId, 'seller/statement', 'View statement'), context: { statement: { period: `${f.date(p.period.from)}–${f.date(p.period.to)}` } }, sellerId: p.sellerId, dedupe: `statement:${p.statementId}` },
     ],
   },
   'finance.reconciliation.mismatch_found': {
@@ -1019,7 +1026,7 @@ export const ROUTES: Routes = {
       p.sellerIds.map((sellerId) => ({
         topic: 'seller.promotion.invited',
         to: [seller(sellerId)],
-        link: L('campaign', p.campaignId, 'seller/campaigns', 'Review invitation'),
+        link: L('campaign', p.campaignId, 'seller/marketing', 'Review invitation'),
         context: { campaign: { respondBy: f.date(p.respondBy) } },
         sellerId,
         deadline: p.respondBy,
@@ -1034,20 +1041,20 @@ export const ROUTES: Routes = {
         !REVIEW_STATES.has(p.to) && {
           topic: 'seller.advertising.campaign_status',
           to: [seller(p.sellerId)],
-          link: L('campaign', p.campaignId, 'seller/advertising', 'View campaign'),
+          link: L('campaign', p.campaignId, 'seller/marketing', 'View campaign'),
           context: { campaign: { status: f.human(p.to) } },
           sellerId: p.sellerId,
           dedupe: `ad-campaign:${p.campaignId}:${p.to}`,
         },
-      REVIEW_STATES.has(p.to) && { topic: 'staff.advertising.approval_waiting', to: [role('advertising_manager'), role('content_manager')], link: L('campaign', p.campaignId, 'admin/advertising', 'Review campaign'), dedupe: `ad-campaign:${p.campaignId}:review` },
+      REVIEW_STATES.has(p.to) && { topic: 'staff.advertising.approval_waiting', to: [role('advertising_manager'), role('content_manager')], link: L('campaign', p.campaignId, 'admin/ad-campaign', 'Review campaign'), dedupe: `ad-campaign:${p.campaignId}:review` },
     ],
   },
   'reviews.invite.due': {
-    sends: (p) => [{ topic: 'customer.review.invite', to: [customer(p.customerId)], link: L('product', p.productId, 'account/write-review', 'Write a review'), dedupe: `review-invite:${p.orderItemId}` }],
+    sends: (p) => [{ topic: 'customer.review.invite', to: [customer(p.customerId)], link: L('product', p.productId, 'account/review', 'Write a review'), dedupe: `review-invite:${p.orderItemId}` }],
   },
   'reviews.report.created': {
     sends: (p, f) => [
-      { topic: 'staff.moderation.report', to: [role('content_manager')], link: L('report', p.reportId, 'admin/moderation', 'Open moderation queue'), context: { report: { type: f.human(p.reason) } }, dedupe: `review-report:${p.reportId}` },
+      { topic: 'staff.moderation.report', to: [role('content_manager')], link: L('report', p.reportId, 'admin/reviews', 'Open moderation queue'), context: { report: { type: f.human(p.reason) } }, dedupe: `review-report:${p.reportId}` },
     ],
   },
   'trust.report.created': {
@@ -1076,7 +1083,7 @@ export const ROUTES: Routes = {
         {
           topic: 'staff.approval.waiting',
           to: approvers.length ? [...new Set(approvers)].map((id) => staff(id, 'approver')) : p.eligibleRoleKeys.map(role),
-          link: L('approval', p.requestId, 'admin/approvals', 'Review request', p.ref),
+          link: L('approval', p.requestId, 'admin/inbox', 'Review request', p.ref),
           context: { approval: { summary: p.summary, by: p.requestedBy.name ?? 'A colleague' }, due: { date: p.dueAt ? f.dateTime(p.dueAt) : 'soon' } },
           deadline: p.dueAt ?? null,
           dedupe: `approval:${p.requestId}`,
@@ -1089,7 +1096,7 @@ export const ROUTES: Routes = {
       {
         topic: 'staff.approval.second_needed',
         to: p.eligibleAccountIds.map((id) => staff(id, 'approver')),
-        link: L('approval', p.requestId, 'admin/approvals', 'Review request', p.target.ref),
+        link: L('approval', p.requestId, 'admin/inbox', 'Review request', p.target.ref),
         context: { approval: { summary: p.target.label ?? p.actionKey, by: p.approvedBy.name ?? 'An approver' } },
         dedupe: `approval:${p.requestId}`,
       },
@@ -1101,7 +1108,7 @@ export const ROUTES: Routes = {
       {
         topic: 'staff.approval.returned',
         to: [staff(p.requestedById, 'requester')],
-        link: L('approval', p.requestId, 'admin/approvals', 'Update request', p.target.ref),
+        link: L('approval', p.requestId, 'admin/inbox', 'Update request', p.target.ref),
         context: { approval: { by: p.by.name ?? 'An approver', comment: p.comment } },
         dedupe: `approval:${p.requestId}`,
       },
@@ -1114,7 +1121,7 @@ export const ROUTES: Routes = {
       {
         topic: 'staff.approval.decided',
         to: [staff(p.requestedById, 'requester')],
-        link: L('approval', p.requestId, 'admin/approvals', 'View request', p.ref),
+        link: L('approval', p.requestId, 'admin/inbox', 'View request', p.ref),
         context: { approval: { outcome: p.outcome } },
         dedupe: `approval:${p.requestId}:decided`,
       },
@@ -1122,7 +1129,7 @@ export const ROUTES: Routes = {
   },
   'access.approval.reminder_sent': {
     sends: (p) => [
-      { topic: 'staff.approval.reminder', to: p.toAccountIds.map((id) => staff(id, 'approver')), link: L('approval', p.requestId, 'admin/approvals', 'Review request'), context: { approval: { comment: p.message ?? '' } }, dedupe: `approval:${p.requestId}` },
+      { topic: 'staff.approval.reminder', to: p.toAccountIds.map((id) => staff(id, 'approver')), link: L('approval', p.requestId, 'admin/inbox', 'Review request'), context: { approval: { comment: p.message ?? '' } }, dedupe: `approval:${p.requestId}` },
     ],
   },
   'access.coverage.changed': { effects: ['reroute'] },
@@ -1162,7 +1169,7 @@ export const ROUTES: Routes = {
       p.sellerVisible && {
         topic: 'seller.platform.change_scheduled',
         to: [{ kind: 'all_sellers' }],
-        link: L('setting_change', p.changeId, 'seller/upcoming-changes', 'View change', p.ref),
+        link: L('setting_change', p.changeId, 'seller/help', 'View change', p.ref),
         context: { change: { summary: p.summary, effective: f.date(p.effectiveAt) } },
         dedupe: `setting-change:${p.changeId}`,
       },
@@ -1176,12 +1183,12 @@ export const ROUTES: Routes = {
   'reports.export.ready': {
     sends: (p, f) => [
       p.requestedBy.kind === 'staff' &&
-        p.requestedBy.id && { topic: 'staff.export.ready', to: [staff(p.requestedBy.id)], link: L('export', p.exportId, 'admin/exports', 'Download'), context: { export: { expires: f.date(p.expiresAt) } }, dedupe: `report-export:${p.exportId}` },
+        p.requestedBy.id && { topic: 'staff.export.ready', to: [staff(p.requestedBy.id)], link: L('export', p.exportId, 'admin/reports', 'Download'), context: { export: { expires: f.date(p.expiresAt) } }, dedupe: `report-export:${p.exportId}` },
       p.requestedBy.kind === 'seller' &&
         p.requestedBy.id && {
           topic: 'seller.export.ready',
           to: [{ kind: 'account_email', accountId: p.requestedBy.id, recipientKind: 'seller_member' }],
-          link: L('export', p.exportId, 'seller/exports', 'Download'),
+          link: L('export', p.exportId, 'seller/reports', 'Download'),
           context: { export: { expires: f.date(p.expiresAt) } },
           dedupe: `report-export:${p.exportId}`,
         },
@@ -1197,7 +1204,7 @@ export const ROUTES: Routes = {
         const exportId = typeof d?.exportId === 'string' ? d.exportId : null;
         if (!staffId || !exportId || seen.has(staffId)) return null;
         seen.add(staffId);
-        return { topic: 'staff.report.scheduled', to: [staff(staffId)], link: L('export', exportId, 'admin/exports', 'Download'), context, dedupe: `scheduled-report:${exportId}` };
+        return { topic: 'staff.report.scheduled', to: [staff(staffId)], link: L('export', exportId, 'admin/reports', 'Download'), context, dedupe: `scheduled-report:${exportId}` };
       });
     },
   },
@@ -1395,7 +1402,7 @@ export const ROUTES: Routes = {
       const dedupe = `trust-appeal:${p.appealId}`;
       return [
         p.customerId && { topic: 'customer.trust.appeal_decided', to: [customer(p.customerId)], link: L('appeal', p.appealId, 'help/case', 'View appeal', p.ref), context, dedupe },
-        !p.customerId && p.sellerId && { topic: 'seller.trust.appeal_decided', to: [seller(p.sellerId)], link: L('appeal', p.appealId, 'seller/account-health', 'View appeal', p.ref), context, sellerId: p.sellerId, dedupe },
+        !p.customerId && p.sellerId && { topic: 'seller.trust.appeal_decided', to: [seller(p.sellerId)], link: L('appeal', p.appealId, 'seller/performance', 'View appeal', p.ref), context, sellerId: p.sellerId, dedupe },
       ];
     },
   },
@@ -1436,6 +1443,8 @@ const DECISION_WORDS: Record<string, string> = {
   publish: 'published',
   published: 'published',
   hidden_pending_review: 'hidden while it is reviewed',
+  reinstate: 'reinstated',
+  reinstated: 'reinstated',
 };
 
 const CONTENT_WORDS: Record<string, string> = {

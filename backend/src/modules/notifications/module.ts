@@ -22,7 +22,7 @@ import { createDevPushProvider } from './infra/push/dev.js';
  */
 export default defineModule({
   spec,
-  version: '1.1.0',
+  version: '1.2.0',
   migrations,
   graphql: typeDefs,
   async register(ctx) {

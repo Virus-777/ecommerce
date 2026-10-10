@@ -105,7 +105,8 @@ export interface NotificationsRepository {
   findNotice(id: string): Promise<NoticeRow | undefined>;
   latestNotice(q: { linkedRef?: string; topicKey?: string; subject?: { key: SubjectKey; value: string } }): Promise<NoticeRow | undefined>;
   purgeNotices(before: Date): Promise<number>;
-  expireActionNotices(deadlineBefore: Date, at: Date): Promise<number>;
+  /** Open action notices whose deadline is before `cutoff`, or that have no deadline and were created before it, become expired */
+  expireActionNotices(cutoff: Date, at: Date): Promise<number>;
   unreadSince(accountId: string, since: Date): Promise<NoticeRow[]>;
 
   /* scheduled */
