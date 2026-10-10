@@ -2,26 +2,27 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { unzip, zip } from '../domain/zip.js';
 import { ADMIN, boot, STORE, type Kit } from './helpers.js';
 
-/** Stand-ins for modules not built yet (orders, support): what they answer is set per test */
-const world = { inProgress: 0, openCases: 0, ordersBroken: false };
+/** Stand-ins for orders and support (closure blockers) and an export hook (messaging): what they answer is set per test */
+const world = { inProgress: 0, openCases: 0, exportBroken: false };
 const closeAccount = vi.fn(async () => {});
 
 let kit: Kit;
 beforeAll(async () => {
   kit = await boot({
-    only: ['media', 'orders', 'support'],
+    only: ['media', 'orders', 'support', 'messaging'],
     apiStubs: {
       orders: {
         countInProgress: async () => ({ inProgress: world.inProgress, delayedPackages: 0 }),
-        listOrdersForCustomer: async () => {
-          if (world.ordersBroken) throw new Error('orders database unavailable');
-          return { items: [{ id: 'order-1' } as never], nextCursor: null };
-        },
         getOrder: async () => null,
       },
       support: {
         listOpenCasesForCustomer: async () => ({ items: [], total: world.openCases }),
-        listCasesForCustomer: async () => ({ items: [], nextCursor: null }),
+      },
+      messaging: {
+        exportCustomerData: async () => {
+          if (world.exportBroken) throw new Error('messaging database unavailable');
+          return [{ key: 'messages', title: 'Messages', module: 'messaging', records: [] }];
+        },
       },
       identity: { closeAccount },
     },
@@ -86,9 +87,9 @@ describe('data export', () => {
   it('failed exports show in the privacy queue and staff can retry them', async () => {
     const c = await kit.customer();
     const r = (await kit.call('POST', `${STORE}/data-requests/exports`, { token: c.token })).body;
-    world.ordersBroken = true;
+    world.exportBroken = true;
     expect(await kit.service.buildDataExports()).toMatchObject({ failed: 1 });
-    world.ordersBroken = false;
+    world.exportBroken = false;
     const queue = await kit.call('GET', `${ADMIN}/data-requests?kind=export&state=failed`, { token: kit.staff(['customers.data-requests.manage']) });
     expect(queue.status).toBe(200);
     expect(queue.body.items.find((x: any) => x.request.id === r.id)).toMatchObject({ customerId: c.customerId, customerName: 'Ana Lopez', request: { state: 'failed' } });

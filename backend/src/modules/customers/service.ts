@@ -2066,49 +2066,12 @@ export class CustomersService implements CustomersPublicApi {
       this.repo.listViews({ kind: 'customer', id: c.id }, 1000),
       this.repo.listDataRequests(c.id),
     ]);
-    const unavailable: string[] = [];
-    const pages = async <T>(key: string, fetch: ((p: common.PageInput) => Promise<common.Page<T>>) | undefined): Promise<T[] | null> => {
-      if (!fetch) {
-        unavailable.push(key);
-        return null;
-      }
-      const out: T[] = [];
-      let cursor: string | undefined;
-      try {
-        for (let i = 0; i < 50; i++) {
-          const p = await fetch({ limit: 100, ...(cursor ? { cursor } : {}) });
-          out.push(...p.items);
-          if (!p.nextCursor) break;
-          cursor = p.nextCursor;
-        }
-      } catch (err) {
-        if (!isNotImplemented(err)) throw err; // a module that answers wrongly fails the export (staff can retry)
-        unavailable.push(key);
-        return null;
-      }
-      return out;
-    };
-    // every enabled module that declares the export hook (FORMAT.md, Customer data export hook); one that throws fails the export (retried)
+    // every enabled module that declares the export hook (FORMAT.md, Customer data export hook); one that throws fails the export (retried).
+    // A module that declares it but is off has nothing to export here and is listed under notIncluded.
     const sections = await this.exportSections({ customerId: c.id, accountId: c.user_id });
-    const hooked = new Set(sections.map((s) => s.module));
-    const hookModules = new Set(EXPORT_HOOK_MODULES);
-    // modules without the hook yet: their customer lists, as before
-    const orders = hookModules.has('orders') ? undefined : this.ctx.tryUse('orders');
-    const returns = hookModules.has('returns') ? undefined : this.ctx.tryUse('returns');
-    const support = hookModules.has('support') ? undefined : this.ctx.tryUse('support');
-    const [orderList, returnList, caseList] = await Promise.all([
-      hookModules.has('orders') ? null : pages('orders', orders && ((p) => orders.listOrdersForCustomer(c.id, {}, p))),
-      hookModules.has('returns') ? null : pages('returns', returns && ((p) => returns.listForCustomer(c.id, { state: 'all' }, p))),
-      hookModules.has('support') ? null : pages('cases', support && ((p) => support.listCasesForCustomer(c.id, {}, p))),
-    ]);
-    for (const m of EXPORT_HOOK_MODULES) if (!this.ctx.modules.includes(m) && !hooked.has(m)) unavailable.push(m);
+    const unavailable: string[] = EXPORT_HOOK_MODULES.filter((m) => !this.ctx.modules.includes(m));
     const json = (v: unknown) => `${JSON.stringify(v, null, 2)}\n`;
-    const legacy = [
-      ...(orderList ? [{ name: 'orders.json', data: json(orderList) }] : []),
-      ...(returnList ? [{ name: 'returns.json', data: json(returnList) }] : []),
-      ...(caseList ? [{ name: 'cases.json', data: json(caseList) }] : []),
-    ];
-    const used = new Set(['readme', 'profile', 'addresses', 'marketing-preferences', 'consent-log', 'recently-viewed', 'restrictions', 'data-requests', 'orders', 'returns', 'cases']);
+    const used = new Set(['readme', 'profile', 'addresses', 'marketing-preferences', 'consent-log', 'recently-viewed', 'restrictions', 'data-requests']);
     const sectionFiles: { name: string; data: string; title: string; module: string }[] = [];
     for (const s of sections) {
       let key = safeName(s.key) || safeName(s.module) || 'section';
@@ -2132,7 +2095,6 @@ export class CustomersService implements CustomersPublicApi {
             'recently-viewed.json',
             'restrictions.json',
             'data-requests.json',
-            ...legacy.map((f) => f.name),
             ...sectionFiles.map((f) => f.name),
             ...attachments.map((a) => a.name),
           ],
@@ -2147,7 +2109,6 @@ export class CustomersService implements CustomersPublicApi {
       { name: 'recently-viewed.json', data: json(views.map((v) => ({ productId: v.product_id, variantId: v.variant_id, title: v.title, viewedAt: map.iso(v.viewed_at) }))) },
       { name: 'restrictions.json', data: json(restrictions.map(map.restriction)) },
       { name: 'data-requests.json', data: json(requests.map((x) => map.dataRequest(x))) },
-      ...legacy,
       ...sectionFiles.map(({ name, data }) => ({ name, data })),
       ...attachments,
     ];
