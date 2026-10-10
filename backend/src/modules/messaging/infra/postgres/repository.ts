@@ -1,5 +1,7 @@
 import { sql, type Kysely } from 'kysely';
 import { paginate } from '../../../../kernel/lib/pagination.js';
+import type { Inbox } from '../../../../kernel/events/inbox.js';
+import { OFFICIAL_STORE_ID } from '../../../../spec/common.js';
 import type { MessagingDb } from '../../../../spec/messaging.js';
 import type { ConversationRec, InboxOwner, MessageLine, MessagingRepository } from '../../ports.js';
 
@@ -42,14 +44,22 @@ function ownerParticipant(owner: InboxOwner): { kind: string; ids: string[] } {
 }
 
 /** Postgres adapter for MessagingRepository. `db` is scoped to the `messaging` schema. */
-export function createPostgresMessagingRepository(db: Kysely<MessagingDb>): MessagingRepository {
+export function createPostgresMessagingRepository(db: Kysely<MessagingDb>, inbox?: Inbox): MessagingRepository {
   // generic table access: the row types are checked at the MessagingRepository boundary
   const d: any = db;
 
   const repo: MessagingRepository = {
     async transaction(fn) {
       if (db.isTransaction) return fn(repo);
-      return db.transaction().execute((trx) => fn(createPostgresMessagingRepository(trx)));
+      return db.transaction().execute((trx) => fn(createPostgresMessagingRepository(trx, inbox)));
+    },
+    async claim(key) {
+      if (!inbox) throw new Error('messaging: no inbox wired');
+      return inbox.claim(db, key);
+    },
+    async aliasOf(id) {
+      const r = await d.selectFrom('conversation_aliases').select('conversation_id').where('old_id', '=', id).executeTakeFirst();
+      return (r as { conversation_id: string } | undefined)?.conversation_id;
     },
 
     /* ---------------------------------------------------------------- generic */
@@ -120,8 +130,23 @@ export function createPostgresMessagingRepository(db: Kysely<MessagingDb>): Mess
       let inner = d.selectFrom('conversations as c').selectAll('c');
       if (owner.kind === 'customer') {
         if (!me.ids.length) return { items: [], nextCursor: null, total: 0 };
-        inner = inner.where('c.kind', 'in', ['order', 'support']).where((eb: any) =>
-          eb.or([...(owner.customerId ? [eb('c.customer_id', '=', owner.customerId)] : []), ...(owner.guestSessionId ? [eb('c.guest_session_id', '=', owner.guestSessionId)] : [])]),
+        const guestOrders = (owner.orderIds ?? []).filter(Boolean);
+        inner = inner.where((eb: any) =>
+          eb.or([
+            eb.and([
+              eb('c.kind', 'in', ['order', 'support']),
+              eb.or([
+                ...(owner.customerId ? [eb('c.customer_id', '=', owner.customerId)] : []),
+                ...(owner.guestSessionId ? [eb('c.guest_session_id', '=', owner.guestSessionId)] : []),
+                // guest conversations are keyed by the order: any session with access to it
+                ...(!owner.customerId && guestOrders.length ? [eb.and([eb('c.customer_id', 'is', null), eb('c.order_id', 'in', guestOrders)])] : []),
+              ]),
+            ]),
+            // a seller applicant's conversations with Marketly staff (the applicant is a customer participant)
+            ...(owner.customerId
+              ? [sql<boolean>`(c.kind = 'staff_seller' and c.application_id is not null and exists (select 1 from messaging.participants p where p.conversation_id = c.id and p.kind = 'customer' and p.participant_id = ${owner.customerId}))`]
+              : []),
+          ]),
         );
       } else if (owner.kind === 'seller') {
         inner = inner.where('c.seller_id', '=', owner.sellerId).where('c.kind', 'in', ['order', 'staff_seller']);
@@ -132,9 +157,10 @@ export function createPostgresMessagingRepository(db: Kysely<MessagingDb>): Mess
       if (f.replyState === 'awaiting_reply') inner = inner.where('c.reply_state', 'in', ['awaiting_seller', 'overdue']);
       else if (f.replyState) inner = inner.where('c.reply_state', '=', f.replyState);
       if (f.unreadOnly) {
-        inner = inner.where(
-          sql<boolean>`exists (select 1 from messaging.participants p where p.conversation_id = c.id and p.kind = ${me.kind} and p.participant_id in (${sql.join(me.ids)}) and p.unread_count > 0)`,
-        );
+        inner =
+          owner.kind === 'customer' && !owner.customerId
+            ? inner.where(sql<boolean>`exists (select 1 from messaging.participants p where p.conversation_id = c.id and p.kind = 'guest' and p.participant_id = 'order:' || c.order_id::text and p.unread_count > 0)`)
+            : inner.where(sql<boolean>`exists (select 1 from messaging.participants p where p.conversation_id = c.id and p.kind = ${me.kind} and p.participant_id in (${sql.join(me.ids)}) and p.unread_count > 0)`);
       }
       if (f.q?.trim()) {
         const term = like(f.q);
@@ -160,6 +186,11 @@ export function createPostgresMessagingRepository(db: Kysely<MessagingDb>): Mess
       if (f.filter === 'overdue') q = q.where('c.reply_state', '=', 'overdue');
       if (f.filter === 'locked') q = q.where('c.status', '=', 'locked');
       if (f.filter === 'reported') q = q.where(sql<boolean>`exists (select 1 from messaging.message_reports r where r.conversation_id = c.id)`);
+      if (f.filter === 'official_awaiting') {
+        // Official Store conversations waiting for a staff reply, oldest due first
+        q = q.where('c.kind', '=', 'order').where('c.seller_id', '=', OFFICIAL_STORE_ID).where('c.reply_state', 'in', ['awaiting_seller', 'overdue']).where('c.reply_due_at', 'is not', null);
+        return paginate(q, page, { column: 'c.reply_due_at', direction: 'asc', id: 'c.id' });
+      }
       return paginate(q, page, { column: 'c.last_message_at', direction: 'desc', id: 'c.id' });
     },
 

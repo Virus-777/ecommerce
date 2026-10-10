@@ -41,6 +41,9 @@ export interface Harness {
   cases: { orderId: string; caseId: string; ref: string; status: string; orderItemIds: string[] }[];
   signals: any[];
   sellers: Map<string, { storeName: string; verified?: boolean }>;
+  /** workqueues.raise inputs and resolveBySource keys */
+  work: any[];
+  resolved: string[];
   call(method: string, url: string, token: string, body?: unknown, headers?: Record<string, string>): Promise<{ status: number; body: any }>;
   gql(area: 'store' | 'seller' | 'admin', token: string, query: string, variables?: Record<string, unknown>): Promise<any>;
   publish(source: string, name: string, payload: unknown): Promise<void>;
@@ -65,13 +68,15 @@ export async function harness(): Promise<Harness> {
     cases: [] as Harness['cases'],
     signals: [] as any[],
     sellers: new Map<string, { storeName: string; verified?: boolean }>(),
+    work: [] as any[],
+    resolved: [] as string[],
   };
   const sellerSnapshot = (id: string): sellers.SellerSnapshot | null => {
     const s = h.sellers.get(id);
     return s ? { id, ref: 'SL-20714', slug: s.storeName.toLowerCase().replace(/\W+/g, '-'), storeName: s.storeName, status: 'approved', verified: s.verified ?? true, canSellNew: true, activeRestrictionIds: [], launchReady: true } : null;
   };
   const app = await buildTestApp({
-    only: ['messaging', 'orders', 'customers', 'identity', 'media', 'audit', 'notifications', 'sellers', 'returns', 'support', 'trust'],
+    only: ['messaging', 'orders', 'customers', 'identity', 'media', 'audit', 'notifications', 'sellers', 'returns', 'support', 'trust', 'workqueues'],
     clock,
     config: { rateLimits: false, launchPhase: 4 },
     apiStubs: {
@@ -83,6 +88,7 @@ export async function harness(): Promise<Harness> {
       },
       customers: {
         getCustomerByUserId: async (userId) => ({ id: userId, userId, ref: 'CU-000001', displayName: 'Sam Rivera', email: 'sam@example.com', accountStatus: 'active', canOrder: true, canMessage: !h.restricted.has(userId) }) as never,
+        getCustomer: async (id) => ({ id, userId: id, ref: 'CU-000001', displayName: 'Sam Rivera', email: 'sam@example.com', accountStatus: 'active', canOrder: true, canMessage: true }) as never,
         canSendMessages: async (customerId) => (h.restricted.has(customerId) ? { allowed: false, reason: 'Messaging is paused on your account until Oct 20' } : { allowed: true }),
       },
       identity: {
@@ -106,11 +112,22 @@ export async function harness(): Promise<Harness> {
       sellers: {
         getSeller: async (id) => sellerSnapshot(id),
         getSellers: async (ids) => ids.map(sellerSnapshot).filter((s): s is sellers.SellerSnapshot => !!s),
+        getApplicationParticipant: async (applicationId) => ({ applicationId, ref: 'SA-261009-0001', state: 'submitted', applicantAccountId: `${applicationId.slice(0, -4)}acc1`, sellerId: null, name: 'Rae Applicant', email: 'rae@example.com', storeName: 'Rae Studio' }),
         getStorefrontCard: async (ids) =>
           ids.flatMap((id) => {
             const s = sellerSnapshot(id);
             return s ? [{ id, slug: s.slug, storeName: s.storeName, verified: s.verified, location: 'Portland, OR', logo: null }] : [];
           }),
+      },
+      workqueues: {
+        raise: async (input) => {
+          h.work.push(input);
+          return { id: newId() } as never;
+        },
+        resolveBySource: async (key) => {
+          h.resolved.push(key);
+          return 1;
+        },
       },
       audit: {
         record: async (entry) => {
@@ -122,7 +139,7 @@ export async function harness(): Promise<Harness> {
   });
   const service = app.kernel.boot.apis.get('messaging') as MessagingService;
   const ordersService = app.kernel.boot.apis.get('orders') as OrdersPublicApi;
-  for (const name of ['messaging.message.sent', 'messaging.conversation.started', 'messaging.reply.overdue', 'messaging.message.reported', 'messaging.conversation.locked']) {
+  for (const name of ['messaging.message.sent', 'messaging.conversation.started', 'messaging.reply.overdue', 'messaging.message.reported', 'messaging.conversation.locked', 'messaging.conversation.unlocked']) {
     app.kernel.events.subscribe('test', name, (e) => void h.events.push({ name: e.name, payload: e.payload }));
   }
   const call: Harness['call'] = async (method, url, token, body, headers = {}) => {
@@ -176,7 +193,7 @@ export function product(h: Harness, o: { title: string; price: number; ownerType
     warranty: { kind: 'manufacturer', months: 24, handledBy: 'manufacturer', summary: '2-year manufacturer warranty' },
     stockItemId,
     takenAt: new Date().toISOString(),
-  } as offers.OfferSnapshot);
+  } as unknown as offers.OfferSnapshot);
   return { offerId, productId, variantId, stockItemId, price: o.price };
 }
 

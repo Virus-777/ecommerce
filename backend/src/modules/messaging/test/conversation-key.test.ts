@@ -82,9 +82,19 @@ describe('conversation key', () => {
       .execute()
       .catch((e: unknown) => e);
     expect((err as { code?: string }).code).toBe('23505');
-    // another kind, application or case is another conversation
+    // another kind or application is another conversation
     await db().insertInto('conversations').values(conversation({ seller_id: sellerId, application_id: newId() })).execute();
-    await db().insertInto('conversations').values(conversation({ seller_id: sellerId, case_id: newId() })).execute();
+    // pass 3: the case is a link, not part of the key, except for support conversations
+    const sameWithCase = await db()
+      .insertInto('conversations')
+      .values(conversation({ seller_id: sellerId, case_id: newId() }))
+      .execute()
+      .catch((e: unknown) => e);
+    expect((sameWithCase as { code?: string }).code).toBe('23505');
+    const customerId = newId();
+    const orderId = newId();
+    await db().insertInto('conversations').values(conversation({ kind: 'support', customer_id: customerId, order_id: orderId, case_id: newId() })).execute();
+    await db().insertInto('conversations').values(conversation({ kind: 'support', customer_id: customerId, order_id: orderId, case_id: newId() })).execute();
   });
 
   it('migration 0003 folds existing duplicates into the oldest conversation of their key', async () => {
@@ -147,5 +157,46 @@ create unique index conversations_old_key_idx on messaging.conversations (custom
       .execute()
       .catch((e: unknown) => e);
     expect((err as { code?: string }).code).toBe('23505');
+  });
+
+  it('migration 0004 keys guests by order, merges case duplicates with aliases and recomputes reply state and unread', async () => {
+    const k = app.kernel.database;
+    // the state before 0004 (the 0003 test above left the 0003 key in place)
+    await k.exec(`alter table messaging.conversations drop column if exists locked_by_enforcement_id; drop table if exists messaging.conversation_aliases;`);
+    const sellerId = newId();
+    const customerId = newId();
+    const orderId = newId();
+    // the same order conversation twice, once linked to a case (the old key kept case_id)
+    const keeper = conversation({ kind: 'order', customer_id: customerId, seller_id: sellerId, order_id: orderId, created_at: at(1), last_message_at: at(2), reply_state: 'replied' });
+    const dup = conversation({ kind: 'order', customer_id: customerId, seller_id: sellerId, order_id: orderId, case_id: newId(), created_at: at(3), last_message_at: at(8), reply_state: 'awaiting_seller', awaiting_since: at(8), reply_due_at: at(8 + 60 * 24 * 365 * 10) });
+    await db().insertInto('conversations').values([keeper, dup]).execute();
+    await db().insertInto('participants').values([participant(keeper.id, 'customer', customerId, 0), participant(keeper.id, 'seller', sellerId, 0), participant(dup.id, 'seller', sellerId, 0)]).execute();
+    const custMsg = (cid: string, minute: number) => ({ ...message(cid, minute, null, customerId), author_kind: 'customer' });
+    const sellerMsg = (cid: string, minute: number) => ({ ...message(cid, minute, null, sellerId), author_kind: 'seller' });
+    await db().insertInto('messages').values([custMsg(keeper.id, 1), sellerMsg(keeper.id, 2), custMsg(dup.id, 8)]).execute();
+    // a guest conversation written before D-M2: the participant and messages are the session
+    const guestOrder = newId();
+    const guestConv = conversation({ kind: 'order', seller_id: sellerId, order_id: guestOrder, guest_session_id: 'sess-1', created_at: at(1) });
+    await db().insertInto('conversations').values(guestConv).execute();
+    await db().insertInto('participants').values([{ ...participant(guestConv.id, 'customer', 'sess-1', 0), name: 'Ana' }]).execute();
+    await db().insertInto('messages').values([{ ...message(guestConv.id, 1, 'g-1', 'sess-1'), author_kind: 'customer' }]).execute();
+
+    const { m0004Pass3KeysGuestsAliases } = await import('../infra/postgres/migrations/0004_pass3_keys_guests_aliases.js');
+    await k.exec(`begin;\n${m0004Pass3KeysGuestsAliases.sql}\ncommit;`);
+
+    const kept = await db().selectFrom('conversations').selectAll().where('order_id', '=', orderId).execute();
+    expect(kept.map((r: any) => r.id)).toEqual([keeper.id]);
+    // the case moved to the kept row as a link; the reply state follows the merged messages
+    expect(kept[0]).toMatchObject({ case_id: dup.case_id, reply_state: 'awaiting_seller' });
+    expect(new Date(kept[0].awaiting_since).toISOString()).toBe(at(8).toISOString());
+    expect(await db().selectFrom('conversation_aliases').select(['old_id', 'conversation_id']).execute()).toEqual([{ old_id: dup.id, conversation_id: keeper.id }]);
+    const seller = await db().selectFrom('participants').selectAll().where('conversation_id', '=', keeper.id).where('kind', '=', 'seller').executeTakeFirst();
+    expect(seller.unread_count).toBe(2);
+    const guestParts = await db().selectFrom('participants').select(['kind', 'participant_id', 'name']).where('conversation_id', '=', guestConv.id).execute();
+    expect(guestParts).toEqual([{ kind: 'guest', participant_id: `order:${guestOrder}`, name: 'Ana' }]);
+    const guestMsgs = await db().selectFrom('messages').select(['author_kind', 'author_id']).where('conversation_id', '=', guestConv.id).execute();
+    expect(guestMsgs).toEqual([{ author_kind: 'guest', author_id: `order:${guestOrder}` }]);
+    const indexes = (await k.kysely.selectFrom('pg_indexes').select('indexname').where('schemaname', '=', 'messaging').where('tablename', '=', 'conversations').execute()).map((i: any) => i.indexname);
+    expect(indexes).toEqual(expect.arrayContaining(['conversations_key_idx', 'conversations_support_key_idx']));
   });
 });

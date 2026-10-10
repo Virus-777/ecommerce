@@ -6,7 +6,7 @@
 import { AppError, isAppError, isNotImplemented } from '../../../kernel/errors/index.js';
 import type { EventMap } from '../../../kernel/events/index.js';
 import { dateInZone } from '../../../kernel/lib/clock.js';
-import { newId } from '../../../kernel/lib/ids.js';
+import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { ModuleContext, PublicApiMap } from '../../../kernel/module-system/index.js';
 import type * as audit from '../../../spec/audit.js';
 import type * as common from '../../../spec/common.js';
@@ -54,7 +54,7 @@ export type Viewer =
 
 /** Who writes a message */
 export interface Author {
-  kind: 'customer' | 'seller' | 'staff';
+  kind: 'customer' | 'guest' | 'seller' | 'staff';
   id: string;
   label: string;
   /** Media owner the attachments must belong to */
@@ -108,11 +108,19 @@ const hostOf = (url: string) => {
   }
 };
 
-/** The participant key of a viewer (messages are authored under the same key) */
-export function meOf(v: Viewer): { kind: string; id: string } {
+/** The guest participant of a guest order's conversations (decision D-M2: keyed by the order, not the session) */
+export const guestKey = (orderId: string) => `order:${orderId}`;
+
+/**
+ * The participant key of a viewer (messages are authored under the same key). A guest is the order's guest
+ * participant in a conversation about that order; without a conversation the session id stands in (legacy rows).
+ */
+export function meOf(v: Viewer, c?: { order_id: string | null } | null): { kind: string; id: string } {
   if (v.kind === 'seller') return { kind: 'seller', id: v.sellerId };
   if (v.kind === 'staff') return { kind: 'staff', id: v.accountId };
-  return { kind: 'customer', id: v.customerId ?? v.guestSessionId ?? '' };
+  if (v.customerId) return { kind: 'customer', id: v.customerId };
+  if (c?.order_id) return { kind: 'guest', id: guestKey(c.order_id) };
+  return { kind: 'customer', id: v.guestSessionId ?? '' };
 }
 
 /** Everything a conversation view needs, loaded for a set of conversations at once */
@@ -222,19 +230,32 @@ export class Core {
   async visible(v: Viewer, c: ConversationRec): Promise<boolean> {
     if (v.kind === 'seller') return c.seller_id === v.sellerId && (c.kind === 'order' || c.kind === 'staff_seller');
     if (v.kind === 'staff') return (await this.repo.count('participants', { conversation_id: c.id, kind: 'staff', participant_id: v.accountId })) > 0;
+    // a seller applicant's conversation with Marketly staff: the applicant takes part as a customer participant
+    if (c.kind === 'staff_seller') return !!(v.customerId && c.application_id && (await this.repo.count('participants', { conversation_id: c.id, kind: 'customer', participant_id: v.customerId })) > 0);
     if (c.kind !== 'order' && c.kind !== 'support') return false;
     if (v.customerId && c.customer_id === v.customerId) return true;
     if (v.guestSessionId && c.guest_session_id === v.guestSessionId) return true;
-    // a guest order reached through guest order access: conversations the seller started about it
-    if (v.guestSessionId && !c.customer_id && c.order_id) {
-      const seen = await this.ctx.use('orders').getOrdersByIds({ area: 'store', guestSessionId: v.guestSessionId }, [c.order_id]);
-      return !!seen[c.order_id];
-    }
+    // a guest order: any session with guest order access to it (the order is the key, decision D-M2)
+    if (v.guestSessionId && !c.customer_id && c.order_id) return this.guestReaches(v.guestSessionId, c.order_id);
     return false;
   }
 
-  async visibleConversation(v: Viewer, id: string, o: { forUpdate?: boolean } = {}): Promise<ConversationRec> {
+  /** Whether a guest session reaches an order (guest order access) */
+  async guestReaches(guestSessionId: string, orderId: string): Promise<boolean> {
+    const seen = await this.ctx.use('orders').getOrdersByIds({ area: 'store', guestSessionId }, [orderId]);
+    return !!seen[orderId];
+  }
+
+  /** A conversation by id; an id merged into another conversation resolves to the kept one (conversation_aliases) */
+  async conversation(id: string, o: { forUpdate?: boolean } = {}): Promise<ConversationRec | undefined> {
     const c = await this.repo.get('conversations', id, o);
+    if (c) return c;
+    const kept = await this.repo.aliasOf(id);
+    return kept ? this.repo.get('conversations', kept, o) : undefined;
+  }
+
+  async visibleConversation(v: Viewer, id: string, o: { forUpdate?: boolean } = {}): Promise<ConversationRec> {
+    const c = await this.conversation(id, o);
     if (!c || !(await this.visible(v, c))) throw notFound();
     return c;
   }
@@ -286,7 +307,7 @@ export class Core {
       const p = b.participants.find((x) => x.kind === 'customer');
       return { kind: 'customer', id: c.customer_id ?? null, name: p?.name ?? 'Buyer' };
     };
-    if (v.kind === 'customer') return c.kind === 'support' ? support : seller();
+    if (v.kind === 'customer') return c.kind === 'support' || c.kind === 'staff_seller' ? support : seller();
     if (v.kind === 'seller') return c.kind === 'staff_seller' ? support : customer();
     // staff: the business side of the conversation (the seller, the Official Store) or the customer of a support thread
     if (c.kind === 'support') return customer();
@@ -308,7 +329,7 @@ export class Core {
 
   privacyNote(v: Viewer, b: Bundle, cp: Counterparty): string {
     const c = b.conv;
-    if (c.kind === 'staff_seller') return v.kind === 'seller' ? 'Only your team and Marketly staff can see it' : 'Only the seller team and Marketly staff can see it';
+    if (c.kind === 'staff_seller') return v.kind === 'seller' ? 'Only your team and Marketly staff can see it' : v.kind === 'customer' ? 'Only you and Marketly staff can see it' : 'Only the seller team and Marketly staff can see it';
     if (c.kind === 'support') return v.kind === 'customer' ? 'Only you and Marketly support can see it' : 'Only the customer and Marketly support can see it';
     if (v.kind === 'customer') return `Only you, ${cp.name} and Marketly support can see it`;
     if (v.kind === 'seller') return 'Only you, the buyer and Marketly support can see it';
@@ -323,26 +344,26 @@ export class Core {
     for (let j = i + 1; j < recent.length; j++) {
       const m = recent[j]!;
       if (m.author_kind === 'seller') break;
-      if (m.author_kind === 'customer') start = m.at;
+      if (m.author_kind === 'customer' || m.author_kind === 'guest') start = m.at;
     }
     return start ? recent[i]!.at.getTime() - start.getTime() : null;
   }
 
   private mine(v: Viewer, b: Bundle) {
-    const me = meOf(v);
+    const me = meOf(v, b.conv);
     return b.participants.find((p) => p.kind === me.kind && p.participant_id === me.id);
   }
 
   /** Whether this kind of caller writes in this kind of conversation */
   writes(v: Viewer, c: ConversationRec): boolean {
-    if (v.kind === 'customer') return c.kind === 'order' || c.kind === 'support';
+    if (v.kind === 'customer') return c.kind === 'order' || c.kind === 'support' || (c.kind === 'staff_seller' && !!c.application_id);
     if (v.kind === 'seller') return c.kind === 'order' || c.kind === 'staff_seller';
     return true;
   }
 
   summaryOf(v: Viewer, b: Bundle, x: ViewExtras = {}): ConversationSummary {
     const c = b.conv;
-    const me = meOf(v);
+    const me = meOf(v, b.conv);
     const last = b.recent[0];
     const mine = this.mine(v, b);
     const unreadCount = mine?.unread_count ?? 0;
@@ -413,12 +434,18 @@ export class Core {
   }
 
   /** Customer messaging restriction (replies inside a case thread stay allowed) */
-  async customerMayWrite(v: Viewer, c: { case_id: string | null }): Promise<{ allowed: boolean; reason?: string }> {
+  async customerMayWrite(v: Viewer, c: { case_id: string | null }): Promise<{ allowed: boolean; reason?: string; until?: string | null }> {
     if (v.kind !== 'customer' || !v.customerId || c.case_id) return { allowed: true };
     const customers = this.ctx.tryUse('customers');
     if (!customers) return { allowed: true };
     const r = await customers.canSendMessages(v.customerId);
-    return r.allowed ? { allowed: true } : { allowed: false, reason: r.reason ?? 'Messaging is restricted on this account' };
+    return r.allowed ? { allowed: true } : { allowed: false, reason: r.reason ?? 'Messaging is restricted on this account', until: r.until ?? null };
+  }
+
+  /** MESSAGING_RESTRICTED (403) when the customer's account may not message sellers now */
+  async assertMayWrite(v: Viewer, c: { case_id: string | null }): Promise<void> {
+    const may = await this.customerMayWrite(v, c);
+    if (!may.allowed) throw this.error('MESSAGING_RESTRICTED', may.reason, { reason: may.reason, endsAt: may.until ?? null });
   }
 
   async mediaRefs(ids: readonly string[]): Promise<Map<string, common.MediaRef>> {
@@ -429,14 +456,17 @@ export class Core {
 
   messageOf(v: Viewer | null, m: MessageRec, refs: Map<string, common.MediaRef>, staffView = false): Message {
     const me = v ? meOf(v) : null;
-    const fromMe = !!me && m.author_kind === me.kind && m.author_id === me.id;
+    // a guest sees the guest participant's messages of the order conversation as their own
+    const guest = v?.kind === 'customer' && !v.customerId;
+    const fromMe = guest ? m.author_kind === 'guest' || (!!me && m.author_kind === me.kind && m.author_id === me.id) : !!me && m.author_kind === me.kind && m.author_id === me.id;
     const ids = (m.media_ids as string[] | null) ?? [];
     const showContent = staffView || !m.hidden;
     return {
       id: m.id,
       conversationId: m.conversation_id,
       kind: m.kind as Message['kind'],
-      author: m.author_kind ? { kind: m.author_kind as common.Actor['kind'], id: m.author_id, name: m.author_label } : null,
+      // a guest participant is a visitor as an Actor
+      author: m.author_kind ? { kind: (m.author_kind === 'guest' ? 'visitor' : m.author_kind) as common.Actor['kind'], id: m.author_id, name: m.author_label } : null,
       authorLabel: fromMe ? 'You' : m.author_label,
       fromMe,
       body: showContent ? (staffView ? (m.original_body ?? m.body) : m.body) : '',
@@ -458,11 +488,11 @@ export class Core {
 
   authorOf(v: Viewer, c: ConversationRec, participants: readonly ParticipantRec[], o: { caseId?: string | null } = {}): Author {
     if (v.kind === 'customer') {
-      const id = meOf(v).id;
-      const p = participants.find((x) => x.kind === 'customer' && x.participant_id === id) ?? participants.find((x) => x.kind === 'customer');
+      const me = meOf(v, c);
+      const p = participants.find((x) => x.kind === me.kind && x.participant_id === me.id) ?? participants.find((x) => x.kind === 'customer' || x.kind === 'guest');
       return {
-        kind: 'customer',
-        id,
+        kind: me.kind as 'customer' | 'guest',
+        id: me.id,
         label: p?.name ?? 'Buyer',
         mediaOwner: v.customerId && v.accountId ? { kind: 'customer', id: v.accountId } : { kind: 'guest', id: v.guestSessionId },
         participantName: p?.name ?? 'Buyer',
@@ -577,22 +607,29 @@ export class Core {
           at: now,
         });
         const patch: Partial<ConversationRec> = { last_message_at: now };
-        if (c.kind === 'order' && marketplaceSellerId(c.seller_id)) {
+        // customer–seller and customer–Official Store conversations have a reply state (D-M1); for the Official
+        // Store the reply is a staff message
+        let replyMove: 'awaiting' | 'replied' | null = null;
+        if (c.kind === 'order' && c.seller_id) {
+          const official = isOfficialConversation(c);
           const state = c.reply_state as 'none' | 'awaiting_seller' | 'replied' | 'overdue';
-          if (author.kind === 'customer' && sellerReplyMachine.can(state, 'customerWrites')) {
+          const replier = official ? 'staff' : 'seller';
+          if ((author.kind === 'customer' || author.kind === 'guest') && sellerReplyMachine.can(state, 'customerWrites')) {
             patch.reply_state = sellerReplyMachine.next(state, 'customerWrites');
             patch.awaiting_since = now;
             patch.reply_due_at = new Date(now.getTime() + cfg.targetHours * HOUR);
-          } else if (author.kind === 'seller' && sellerReplyMachine.can(state, 'sellerReplies')) {
+            replyMove = 'awaiting';
+          } else if (author.kind === replier && sellerReplyMachine.can(state, 'sellerReplies')) {
             patch.reply_state = sellerReplyMachine.next(state, 'sellerReplies');
             patch.awaiting_since = null;
             patch.reply_due_at = null;
+            replyMove = 'replied';
           }
         }
         const conv = await tx.update('conversations', c.id, patch);
         await tx.bumpUnread(c.id, { kind: author.kind, id: author.id });
         await tx.updateWhere('participants', { conversation_id: c.id, kind: author.kind, participant_id: author.id }, { last_read_message_id: message.id, unread_count: 0 });
-        return { message, conv };
+        return { message, conv, replyMove };
       })
       .catch(async (err) => {
         // a concurrent resend with the same clientMessageId lost the race: answer with the first message
@@ -611,17 +648,78 @@ export class Core {
           .catch((err) => this.ctx.log.warn({ err, assetId: id, messageId: out.message.id }, 'messaging: attachment usage not recorded'));
       }
     }
-    const parts = await this.repo.participantsOf([conversationId]);
-    const recipientKinds = [...new Set(parts.filter((x) => !(x.kind === author.kind && x.participant_id === author.id)).map((x) => x.kind))];
+    await this.publishSent(out.conv, out.message, author, by);
+    if (out.replyMove) await this.officialReplyItem(out.conv, out.replyMove);
+    if (joined && author.kind === 'staff') this.ctx.log.info({ conversationId, staffId: author.id }, 'messaging: staff joined a conversation');
+    return { message: out.message, conv: out.conv, created: true };
+  }
+
+  /**
+   * messaging.message.sent with who receives it: the other participant kinds (official_store for the Official Store
+   * team), the customer, a guest's order contact email, the applicant's account, the seller, staff participants.
+   */
+  async publishSent(c: ConversationRec, m: MessageRec, author: Author, by: By) {
+    const parts = await this.repo.participantsOf([c.id]);
+    const official = isOfficialConversation(c);
+    type Kind = 'customer' | 'guest' | 'seller' | 'official_store' | 'staff';
+    const kinds = new Set<Kind>(parts.filter((x) => !(x.kind === author.kind && x.participant_id === author.id)).map((x) => x.kind as Kind));
+    // the Official Store team answers Official Store conversations (staff topic), not the support staff in it
+    if (official && author.kind !== 'staff') kinds.add('official_store');
     // conversations without a seller side participant still reach the people who answer them
-    if (!recipientKinds.length) recipientKinds.push(author.kind === 'customer' ? 'staff' : 'customer');
+    if (!kinds.size) kinds.add(author.kind === 'customer' || author.kind === 'guest' ? 'staff' : 'customer');
+    const guest = parts.some((p) => p.kind === 'guest') && !c.customer_id;
+    const contactEmail = guest && c.order_id && author.kind !== 'guest' ? ((await this.orderOf(c.order_id))?.contact.email ?? null) : null;
+    const applicant = c.application_id ? await this.soft('sellers', 'application participant', (s) => s.getApplicationParticipant(c.application_id!)) : undefined;
+    const customerId = c.customer_id ?? parts.find((p) => p.kind === 'customer' && p.participant_id !== author.id && isUuid(p.participant_id))?.participant_id ?? null;
     this.publish(
       'messaging.message.sent',
-      { messageId: out.message.id, conversationId, authorKind: author.kind, recipientKinds, customerId: out.conv.customer_id, sellerId: marketplaceSellerId(out.conv.seller_id), orderId: out.conv.order_id },
+      {
+        messageId: m.id,
+        conversationId: c.id,
+        conversationKind: c.kind as 'order' | 'support' | 'staff_seller',
+        authorKind: author.kind,
+        recipientKinds: [...kinds],
+        customerId,
+        contactEmail: contactEmail && /@/.test(contactEmail) ? contactEmail : null,
+        applicantAccountId: applicant?.applicantAccountId ?? null,
+        sellerId: c.seller_id ?? null,
+        officialStore: official,
+        staffIds: [...new Set(parts.filter((p) => p.kind === 'staff' && !(author.kind === 'staff' && p.participant_id === author.id) && isUuid(p.participant_id)).map((p) => p.participant_id))],
+        orderId: c.order_id,
+        caseId: c.case_id,
+      },
       by,
     );
-    if (joined && author.kind === 'staff') this.ctx.log.info({ conversationId, staffId: author.id }, 'messaging: staff joined a conversation');
-    return { ...out, created: true };
+  }
+
+  /**
+   * Official Store conversations (D-M1): while staff owe a reply an official_store_reply work item is open in
+   * official_store.messages (dedupe official_store_reply:<conversationId>, due at reply_due_at); a staff reply
+   * resolves it.
+   */
+  async officialReplyItem(c: ConversationRec, move: 'awaiting' | 'replied') {
+    if (!isOfficialConversation(c)) return;
+    const key = `official_store_reply:${c.id}`;
+    if (move === 'replied') {
+      await this.soft('workqueues', 'resolve official reply', (w) => w.resolveBySource(key, { note: 'Official Store replied', by: SYSTEM }));
+      return;
+    }
+    const subject = this.subjectOf(c);
+    await this.soft('workqueues', 'raise official reply', (w) =>
+      w.raise({
+        queueKey: 'official_store.messages',
+        kind: 'official_store_reply',
+        sourceModule: 'messaging',
+        title: `Reply to the customer: ${subject.title}`,
+        summary: `${subject.orderRef ? `Order ${subject.orderRef}. ` : ''}The customer is waiting for the ${OFFICIAL_STORE_NAME}.`,
+        subject: { type: 'conversation', id: c.id, ref: subject.orderRef ?? null, label: subject.title },
+        ...(c.customer_id ? { customerId: c.customer_id } : {}),
+        ...(c.reply_due_at ? { dueAt: c.reply_due_at.toISOString() } : {}),
+        priority: 'normal',
+        dedupeKey: key,
+        links: [{ label: 'Open conversation', screen: 'admin/messages', id: c.id }],
+      }),
+    );
   }
 
   /** A system note (e.g. support joined from a case): unread for everyone, no reply-state change, no notice */

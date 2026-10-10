@@ -33,15 +33,21 @@ describe('store: starting conversations', () => {
     expect(c.replyDue.state).toBe('on_time');
     expect(new Date(c.replyDue.dueAt).getTime() - new Date(res.body.message.at).getTime()).toBe(24 * 3_600_000);
     expect(res.body.message).toMatchObject({ kind: 'text', fromMe: true, authorLabel: 'You', body: 'Hi, can you ship before Friday?', redactions: [], hidden: false, clientMessageId: 'c-1' });
-    expect(h.named('messaging.conversation.started').slice(before)).toEqual([{ conversationId: c.id, kind: 'order', orderId: o.order.id, sellerId: o.sellerA }]);
+    expect(h.named('messaging.conversation.started').slice(before)).toEqual([{ conversationId: c.id, kind: 'order', orderId: o.order.id, customerId: o.customerId, sellerId: o.sellerA, officialStore: false, applicationId: null }]);
     expect(h.named('messaging.message.sent').at(-1)).toEqual({
       messageId: res.body.message.id,
       conversationId: c.id,
+      conversationKind: 'order',
       authorKind: 'customer',
       recipientKinds: ['seller'],
       customerId: o.customerId,
+      contactEmail: null,
+      applicantAccountId: null,
       sellerId: o.sellerA,
+      officialStore: false,
+      staffIds: [],
       orderId: o.order.id,
+      caseId: null,
     });
 
     // same subject: the existing conversation is reused, no second "started"
@@ -86,13 +92,30 @@ describe('store: starting conversations', () => {
     expect(unknownReturn.status).toBe(404);
   });
 
-  it('messages the Official Store through one of its items (no seller reply state)', async () => {
+  it('messages the Official Store (with official_store): reply state, staff topic and a work item until staff reply (D-M1)', async () => {
     const o = await placeOrder(h);
     const me = tokens.customer(o.customerId!);
-    const res = await h.call('POST', `${STORE}/conversations`, me, { with: 'seller', orderId: o.order.id, orderItemId: o.itemO, body: 'Does the skillet come seasoned?' });
-    expect(res.status).toBe(201);
-    expect(res.body.conversation).toMatchObject({ counterparty: { kind: 'official_store', name: 'Marketly Official Store' }, replyState: 'none' });
-    expect(h.named('messaging.message.sent').at(-1)).toMatchObject({ authorKind: 'customer', recipientKinds: ['staff'], sellerId: null });
+    const res = await h.call('POST', `${STORE}/conversations`, me, { with: 'official_store', orderId: o.order.id, orderItemId: o.itemO, body: 'Does the skillet come seasoned?' });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const id = res.body.conversation.id;
+    // bug (pass 3): Official Store conversations had no reply state and alerted nobody
+    expect(res.body.conversation).toMatchObject({ counterparty: { kind: 'official_store', name: 'Marketly Official Store' }, replyState: 'awaiting_seller' });
+    expect(h.named('messaging.message.sent').at(-1)).toMatchObject({ authorKind: 'customer', recipientKinds: ['official_store'], sellerId: OFFICIAL_STORE_ID, officialStore: true });
+    expect(h.work.filter((w) => w.dedupeKey === `official_store_reply:${id}`)).toEqual([
+      expect.objectContaining({ queueKey: 'official_store.messages', kind: 'official_store_reply', sourceModule: 'messaging', subject: expect.objectContaining({ type: 'conversation', id }), dueAt: res.body.conversation.replyDue.dueAt }),
+    ]);
+    // admin: waiting for a staff reply
+    const waiting = await h.call('GET', `${ADMIN}/conversations?filter=official_awaiting`, tokens.staff());
+    expect(waiting.status, JSON.stringify(waiting.body)).toBe(200);
+    expect(waiting.body.items.map((x: any) => x.id)).toContain(id);
+    // a staff message is the Official Store's reply: replied, the work item resolves
+    const staffReply = await h.call('POST', `${ADMIN}/conversations/${id}/messages`, tokens.staff(), { body: 'Yes, pre-seasoned with flaxseed oil.' });
+    expect(staffReply.status, JSON.stringify(staffReply.body)).toBe(201);
+    expect(h.resolved).toContain(`official_store_reply:${id}`);
+    const after = await h.call('GET', `${STORE}/conversations/${id}`, me);
+    expect(after.body.replyState).toBe('replied');
+    expect(h.named('messaging.message.sent').at(-1)).toMatchObject({ authorKind: 'staff', recipientKinds: ['customer'], officialStore: true, customerId: o.customerId });
+    expect((await h.call('GET', `${ADMIN}/conversations?filter=official_awaiting`, tokens.staff())).body.items.map((x: any) => x.id)).not.toContain(id);
   });
 
   it('reaches the Official Store by its seller id (OFFICIAL_STORE_ID), one conversation per subject, also from other modules', async () => {
@@ -100,7 +123,7 @@ describe('store: starting conversations', () => {
     const me = tokens.customer(o.customerId!);
     const first = await h.call('POST', `${STORE}/conversations`, me, { with: 'seller', orderId: o.order.id, sellerId: OFFICIAL_STORE_ID, body: 'Is the skillet oven safe?' });
     expect(first.status, JSON.stringify(first.body)).toBe(201);
-    expect(first.body.conversation).toMatchObject({ kind: 'order', counterparty: { kind: 'official_store', name: 'Marketly Official Store' }, replyState: 'none' });
+    expect(first.body.conversation).toMatchObject({ kind: 'order', counterparty: { kind: 'official_store', name: 'Marketly Official Store' }, replyState: 'awaiting_seller' });
     const again = await h.call('POST', `${STORE}/conversations`, me, { with: 'seller', orderId: o.order.id, sellerId: OFFICIAL_STORE_ID, body: 'And dishwasher safe?' });
     expect(again.body.conversation.id).toBe(first.body.conversation.id);
     // returns and orders open the same conversation through the public API
@@ -138,7 +161,7 @@ describe('store: starting conversations', () => {
     expect(denied.status).toBe(422);
     h.guestGrants.add(`${sid}:${o.order.id}`);
     const res = await h.call('POST', `${STORE}/conversations`, guest, { with: 'seller', orderId: o.order.id, sellerId: o.sellerA, body: 'Hi, guest here' });
-    expect(res.status).toBe(201);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
     const inbox = await h.call('GET', `${STORE}/conversations`, guest);
     expect(inbox.body.items.map((c: any) => c.id)).toEqual([res.body.conversation.id]);
     expect(h.named('messaging.message.sent').at(-1)).toMatchObject({ customerId: null, sellerId: o.sellerA });
