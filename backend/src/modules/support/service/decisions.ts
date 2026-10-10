@@ -11,7 +11,7 @@ import { appealMachine, caseMachine, caseOfferMachine, remedyMachine } from '../
 import { human, overturnedOutcome, platformShare, UNRESOLVED_REMEDY, type CaseStatus, type RemedyStatus } from '../domain/rules.js';
 import type { OfferRec, PendingApproval, RemedyRec, StoredDecision, SupportRepository } from '../ports.js';
 import type { Cases } from './cases.js';
-import { actorText, DAY, illegal, invalid, invalidField, SYSTEM, type Agg, type Batch, type By, type Core } from './core.js';
+import { actorText, DAY, illegal, invalid, invalidField, notFound, SYSTEM, type Agg, type Batch, type By, type Core } from './core.js';
 import type { Views } from './views.js';
 
 export const APPROVE_ACTION = 'support.remedies.approve';
@@ -27,6 +27,8 @@ interface Planned {
   note: string | null;
   /** Value counted against the approval limit (replacements without an amount count the paid price) */
   value: number;
+  /** Goodwill of a guest turned into a platform-funded partial refund */
+  guestGoodwill?: boolean;
 }
 
 type NewRemedy = Omit<RemedyRec, 'id' | 'case_id'>;
@@ -76,9 +78,20 @@ export class Decisions {
     const official = agg.c.next_action.facts?.ownerType === 'official';
     const order = agg.c.order_id ? await this.core.quiet('order', () => this.core.ctx.use('orders').getOrder(agg.c.order_id!)) : null;
     const orderItems = new Set(order?.groups.flatMap((g) => g.items.map((i) => i.id)) ?? caseItems);
-    for (const [n, r] of (inputs ?? []).entries()) {
+    const wallet = this.core.ctx.modules.includes('wallet');
+    const guest = !agg.c.customer_id || !isUuid(agg.c.customer_id);
+    for (const [n, input] of (inputs ?? []).entries()) {
       const p = `${path}.${n}`;
+      let r = input;
       if (r.kind === 'none') continue;
+      if (r.kind === 'goodwill_credit') {
+        // a guest has no wallet: goodwill becomes a platform-funded partial refund of the case's items through returns
+        if (guest && agg.c.order_id) r = { ...r, kind: 'partial_refund', chargedTo: 'platform', note: r.note?.trim() || 'Goodwill refunded to the original payment method (guest order)' };
+        // goodwill is store credit (decision D-RT3): refused while wallet is off, never turned into a card refund
+        else if (!wallet || guest) throw this.core.error('GOODWILL_UNAVAILABLE', 'Goodwill credit needs Marketly store credit, which is not available; choose a refund or partial refund instead', { path: `${p}.kind` });
+      }
+      // decision D-S5: a replacement is created from the case's return until returns can create one without it
+      if (r.kind === 'replacement' && (!agg.c.return_id || !this.core.ctx.tryUse('returns'))) throw this.core.error('REPLACEMENT_NEEDS_RETURN', 'A replacement can only be promised on a case with a return; ask for a return or choose a refund', { path: `${p}.kind` });
       const ids = r.orderItemIds?.length ? [...new Set(r.orderItemIds)] : caseItems;
       if (ids.some((id) => !orderItems.has(id))) issues.push({ path: `${p}.orderItemIds`, message: 'Some items are not part of the order' });
       const needsOrder = r.kind === 'refund' || r.kind === 'partial_refund' || r.kind === 'replacement' || r.kind === 'return_label' || r.kind === 'ship_by_deadline';
@@ -91,7 +104,8 @@ export class Decisions {
       if (due && (Number.isNaN(due.getTime()) || due.getTime() <= this.core.now().getTime())) issues.push({ path: `${p}.dueAt`, message: 'Choose a date in the future' });
       if ((r.kind === 'refund' || r.kind === 'partial_refund' || r.kind === 'replacement' || r.kind === 'ship_by_deadline') && !ids.length) issues.push({ path: `${p}.orderItemIds`, message: 'Choose the items' });
       const chargedTo = r.chargedTo ?? (r.kind === 'goodwill_credit' || official ? 'platform' : r.kind === 'return_label' || r.kind === 'ship_by_deadline' ? null : 'seller');
-      out.push({ kind: r.kind, amount: r.amount?.amount ?? null, currency: this.core.currency, chargedTo, orderItemIds: r.kind === 'goodwill_credit' && !r.orderItemIds?.length ? [] : ids, dueAt: due, note: r.note?.trim() || null, value: 0 });
+      // remedies without items (goodwill, refunds) take the case's items
+      out.push({ kind: r.kind, amount: r.amount?.amount ?? null, currency: this.core.currency, chargedTo, orderItemIds: ids, dueAt: due, note: r.note?.trim() || null, value: 0, guestGoodwill: input.kind === 'goodwill_credit' && r.kind !== 'goodwill_credit' });
     }
     if (issues.length) throw invalid(issues);
     for (const p of out) {
@@ -108,10 +122,9 @@ export class Decisions {
     return out;
   }
 
-  /** Marketly's share of the money remedies (support.remedies.approve); goodwill is checked by wallet when it is on */
+  /** Marketly's share of the money remedies (support.remedies.approve); goodwill credit is checked by wallet */
   platformTotal(planned: Planned[]): number {
-    const wallet = this.core.ctx.modules.includes('wallet');
-    return planned.filter((p) => ['refund', 'partial_refund', 'replacement'].includes(p.kind) || (p.kind === 'goodwill_credit' && !wallet)).reduce((s, p) => s + platformShare(p.value, p.chargedTo), 0);
+    return planned.filter((p) => ['refund', 'partial_refund', 'replacement'].includes(p.kind)).reduce((s, p) => s + platformShare(p.value, p.chargedTo), 0);
   }
 
   /** Within the decider's limit, or sent for approval (APPROVAL_REQUIRED) with the decision kept pending */
@@ -160,9 +173,11 @@ export class Decisions {
     for (const [n, p] of planned.entries()) {
       let status: RemedyStatus = 'pending_approval';
       let refundRequestId: string | null = null;
+      let replacementId: string | null = null;
       let note = p.note;
-      const viaRefund = p.kind === 'refund' || p.kind === 'partial_refund' || (p.kind === 'goodwill_credit' && !wallet);
-      if (p.kind === 'goodwill_credit' && wallet && agg.c.customer_id && isUuid(agg.c.customer_id)) {
+      const viaRefund = p.kind === 'refund' || p.kind === 'partial_refund';
+      if (p.kind === 'goodwill_credit') {
+        if (!wallet || !agg.c.customer_id || !isUuid(agg.c.customer_id)) throw this.core.error('GOODWILL_UNAVAILABLE', 'Goodwill credit needs Marketly store credit, which is not available; choose a refund or partial refund instead');
         const grant = await wallet.grantGoodwill(
           { customerId: agg.c.customer_id, amount: { amount: p.amount!, currency: p.currency }, reason, reasonCode: 'service_failure', caseId: agg.c.id, orderId: agg.c.order_id, chargedTo: p.chargedTo === 'seller' ? 'seller' : 'platform', sellerId: agg.c.seller_id },
           by.actor,
@@ -170,7 +185,7 @@ export class Decisions {
         );
         status = grant.state === 'granted' ? 'completed' : grant.state === 'rejected' ? 'cancelled' : 'pending_approval';
         note = note ?? (grant.state === 'pending_approval' ? 'Waiting for approval of the credit' : null);
-      } else if (viaRefund && agg.c.return_id && returnsOn) {
+      } else if (viaRefund && agg.c.return_id && returnsOn && !p.guestGoodwill) {
         note = note ?? 'Refunded through the return';
       } else if (viaRefund && agg.c.order_id && returnsOn && p.orderItemIds.length) {
         const fundedBy = p.chargedTo ?? (official ? 'official_store' : 'seller');
@@ -182,6 +197,7 @@ export class Decisions {
           orderItemIds: p.orderItemIds,
           breakdown: { itemAmount: amount, discountShare: { amount: 0, currency: p.currency }, shippingRefund: { amount: 0, currency: p.currency }, returnShippingDeduction: { amount: 0, currency: p.currency }, deductions: [], total: amount, maxRefundable: amount, destination: 'Original payment method', isEstimate: false },
           fundedBy: official && fundedBy === 'platform' ? 'official_store' : fundedBy,
+          reasonCode: p.guestGoodwill ? 'guest_goodwill' : 'case_decision',
           reason: `Case ${agg.c.ref}: ${reason}`,
           proposedBy: by.actor,
         });
@@ -189,7 +205,17 @@ export class Decisions {
         status = rr.status === 'approved' ? 'approved' : rr.status === 'processing' ? 'in_progress' : rr.status === 'sent' ? 'completed' : rr.status === 'declined' || rr.status === 'cancelled' ? 'cancelled' : 'pending_approval';
       } else if (viaRefund) {
         note = note ?? 'Recorded as a refund request to Finance';
-      } else if (p.kind === 'replacement' || p.kind === 'return_label' || p.kind === 'ship_by_deadline') {
+      } else if (p.kind === 'replacement') {
+        // the case's return exists (plan refuses otherwise): returns allocates the stock and ships it
+        const returns = this.core.ctx.tryUse('returns');
+        if (!returns || !agg.c.order_id || !agg.c.return_id) throw this.core.error('REPLACEMENT_NEEDS_RETURN', 'A replacement can only be promised on a case with a return');
+        for (const [k, itemId] of p.orderItemIds.entries()) {
+          const quantity = agg.items.find((i) => i.order_item_id === itemId)?.snapshot.quantity ?? 1;
+          const rep = await returns.requestReplacement({ caseId: agg.c.id, orderId: agg.c.order_id, orderItemId: itemId, quantity, reason: `Case ${agg.c.ref}: ${reason}`, requestedBy: by.actor }, `case:${agg.c.id}:replacement:${agg.remedies.length + n}:${k}:${itemId}`);
+          replacementId ??= rep.id;
+        }
+        status = 'in_progress';
+      } else if (p.kind === 'return_label' || p.kind === 'ship_by_deadline') {
         status = 'in_progress';
       }
       out.push({
@@ -200,7 +226,7 @@ export class Decisions {
         order_item_ids: p.orderItemIds,
         status,
         refund_request_id: refundRequestId,
-        replacement_id: null,
+        replacement_id: replacementId,
         due_at: p.dueAt,
         note,
         created_by: actorText(by.actor),
@@ -249,14 +275,14 @@ export class Decisions {
       await this.core.save(tx, a, { status, decision, decision_draft: null, appeal_deadline: appealDeadline, next_response_due_at: null, waiting_on: null, handler_kind: 'marketplace_support', support_following: true, ...(a.c.first_replied_at ? {} : { first_replied_at: now }) }, { infoRequest: null, appealWindowClosed: false });
       await this.core.timeline(tx, a.c.id, [{ kind: 'decided', label: `Decision: ${human(input.outcome)}`, detail: input.reason.trim(), visibility: 'all', actor: by.actor }]);
       if (input.notifyParties) await this.decisionMessage(tx, a, batch, decision, inserted, by);
-      batch.push('support.case.decided', { caseId: a.c.id, ref: a.c.ref, outcome: input.outcome, orderId: a.c.order_id, ...this.core.recipient(a.c), returnId: a.c.return_id, sellerId: a.c.seller_id, remedies: a.remedies.map((r) => this.views.remedy(r, this.core.currency)), appealDeadline: appealDeadline.toISOString(), final: false });
+      batch.push('support.case.decided', { caseId: a.c.id, ref: a.c.ref, outcome: input.outcome, orderId: a.c.order_id, ...this.core.recipient(a.c), returnId: a.c.return_id, sellerId: a.c.seller_id, remedies: a.remedies.map((r) => this.views.remedy(r, this.core.currency)), appealDeadline: appealDeadline.toISOString(), final: false, notified: !!input.notifyParties });
       return inserted;
     });
     await this.core.audit(
       {
         action: 'support.case.decide',
         actionLabel: `Decided case ${agg.c.ref}: ${human(input.outcome)}`,
-        category: decided.some((r) => r.amount) ? 'financial' : 'customers',
+        category: decided.some((r) => r.amount) ? 'financial' : 'support',
         target: this.cases.target(agg),
         reason: input.reason,
         before: { status: agg.c.status },
@@ -349,7 +375,7 @@ export class Decisions {
     const planned = body.overturn ? await this.plan(agg, body.remedies ?? []) : [];
     if (!o.approved && planned.length) await this.authorize(agg, planned, { kind: 'appeal', appeal: { overturn: body.overturn, reason: body.reason, remedies: body.remedies ?? [] } }, body.reason.trim(), by);
     // the overturned decision's refund requests are cancelled first (new refunds for the same items would be duplicates)
-    const refunds = body.overturn ? await this.core.soft('returns', 'cancel case refunds', (r) => r.cancelRefundsForCase(c.id, `Case ${c.ref}: the appeal changed the decision`)) : undefined;
+    const refunds = body.overturn ? await this.core.soft('returns', 'cancel case refunds', (r) => r.cancelRefundsForCase(c.id, `Case ${c.ref}: the appeal changed the decision`, by.actor)) : undefined;
     const moving = new Set((refunds?.notCancellable ?? []).map((r) => r.id));
     const rows = await this.execute(agg, planned, body.reason.trim(), by);
     const now = this.core.now();
@@ -391,14 +417,14 @@ export class Decisions {
       const m = await this.core.message(tx, a.c.id, { author: by.actor, authorLabel: 'Marketly appeal review', role: 'system', audience: 'all', body: `${body.overturn ? `The appeal was accepted. New decision: ${human(decision.outcome)}` : 'The appeal was reviewed and the decision stands'}: ${body.reason.trim()}. This decision is final.` });
       batch.push('support.case.message_added', this.core.messageAdded(a.c, m.id, 'all', 'system'));
       batch.push('support.case.appeal_decided', { caseId: a.c.id, overturned: body.overturn });
-      batch.push('support.case.decided', { caseId: a.c.id, ref: a.c.ref, outcome: decision.outcome, orderId: a.c.order_id, ...this.core.recipient(a.c), returnId: a.c.return_id, sellerId: a.c.seller_id, remedies: a.remedies.map((r) => this.views.remedy(r, this.core.currency)), appealDeadline: null, final: true });
+      batch.push('support.case.decided', { caseId: a.c.id, ref: a.c.ref, outcome: decision.outcome, orderId: a.c.order_id, ...this.core.recipient(a.c), returnId: a.c.return_id, sellerId: a.c.seller_id, remedies: a.remedies.map((r) => this.views.remedy(r, this.core.currency)), appealDeadline: null, final: true, notified: true });
       return decision;
     });
     await this.core.audit(
       {
         action: 'support.appeal.decide',
         actionLabel: body.overturn ? `Overturned the decision on ${c.ref}` : `Kept the decision on ${c.ref}`,
-        category: rows.some((r) => r.amount) ? 'financial' : 'customers',
+        category: rows.some((r) => r.amount) ? 'financial' : 'support',
         target: this.cases.target(agg),
         reason: body.reason,
         before: { outcome: c.decision.outcome, decidedBy: c.decision.decidedBy },
@@ -432,7 +458,7 @@ export class Decisions {
       await this.core.timeline(tx, a.c.id, [{ kind: 'resolved', label: 'Case resolved', detail: body.summary.trim(), visibility: 'all', actor: by.actor }]);
       await this.core.save(tx, a, { status, resolved_at: now, reopen_until: reopenUntil, next_response_due_at: null, waiting_on: null, ...(a.c.first_replied_at ? {} : { first_replied_at: now }) });
       batch.push('support.case.message_added', this.core.messageAdded(a.c, m.id, 'all', 'marketly_staff'));
-      batch.push('support.case.resolved', { caseId: a.c.id, ref: a.c.ref, ...this.core.recipient(a.c), sellerId: a.c.seller_id, resolvedAt: now.toISOString() });
+      batch.push('support.case.resolved', { caseId: a.c.id, ref: a.c.ref, orderId: a.c.order_id, orderItemIds: a.items.map((i) => i.order_item_id), ...this.core.recipient(a.c), sellerId: a.c.seller_id, resolvedAt: now.toISOString() });
       return now;
     });
     await this.core.audit({ action: 'support.case.resolve', actionLabel: `Resolved case ${agg.c.ref}`, target: this.cases.target(agg), reason: body.summary, before: { status: agg.c.status }, after: { status: 'resolved', resolvedAt: resolvedAt.toISOString(), reopenUntil: reopenUntil.toISOString() } }, by);
@@ -453,7 +479,7 @@ export class Decisions {
       } else await this.core.message(tx, a.c.id, { author: by.actor, authorLabel: 'Reopened (internal note)', role: 'internal_note', audience: 'internal', body: body.reason.trim() });
       await this.core.timeline(tx, a.c.id, [{ kind: 'reopened', label: who === 'customer' ? 'You reopened the case' : 'Marketly reopened the case', detail: body.reason.trim(), visibility: 'all', actor: by.actor, reason: body.reason.trim() }]);
       await this.core.save(tx, a, { status, reopen_count: a.c.reopen_count + 1, reopen_until: null, closed_at: null, handler_kind: 'marketplace_support', support_following: true, next_response_due_at: due, waiting_on: 'marketplace' });
-      batch.push('support.case.reopened', { caseId: a.c.id, by: by.actor, reason: body.reason.trim() });
+      batch.push('support.case.reopened', { caseId: a.c.id, ref: a.c.ref, orderId: a.c.order_id, orderItemIds: a.items.map((i) => i.order_item_id), ...this.core.recipient(a.c), sellerId: a.c.seller_id, by: by.actor, reason: body.reason.trim() });
     });
     if (who === 'staff') await this.core.audit({ action: 'support.case.reopen', actionLabel: `Reopened case ${c.ref}`, target: this.cases.target(agg), reason: body.reason, before: { status: c.status }, after: { status: 'reopened' } }, by);
   }
@@ -496,6 +522,70 @@ export class Decisions {
     });
   }
 
+  /* ================================================================ settling remedies outside the system */
+
+  /**
+   * What still drives a remedy (a returns refund request in progress, a wallet grant waiting for approval, a
+   * replacement not cancelled), or null when only a person can finish it.
+   */
+  private async drivenBy(agg: Agg, r: RemedyRec): Promise<string | null> {
+    if (r.refund_request_id) {
+      const rr = (await this.core.soft('returns', 'case refunds', (x) => x.listRefundRequestsForCase(agg.c.id)))?.find((x) => x.id === r.refund_request_id);
+      if (!rr || ['requested', 'under_review', 'approved', 'processing'].includes(rr.status)) return 'refund_request';
+    }
+    if (r.kind === 'goodwill_credit' && r.status === 'pending_approval' && this.core.ctx.tryUse('wallet') && agg.c.customer_id) return 'wallet_grant';
+    if (r.kind === 'replacement' && r.replacement_id) {
+      const ret = agg.c.return_id ? await this.core.soft('returns', 'return', (x) => x.getReturn(agg.c.return_id!)) : undefined;
+      const rep = ret?.detail.replacement;
+      if (!rep || rep.id !== r.replacement_id || rep.status !== 'cancelled') return 'replacement';
+    }
+    return null;
+  }
+
+  /**
+   * POST /cases/{id}/remedies/{remedyId}/settle: staff record that a remedy nothing in the system can finish
+   * was completed or cancelled outside it (a refund recorded for Finance while returns is off, a guest without
+   * a refund path), so the case can be resolved. REMEDY_NOT_SETTLEABLE while a refund request, wallet grant or
+   * replacement still drives it, or once it is finished.
+   */
+  async settleRemedy(agg: Agg, remedyId: string, body: { outcome: 'completed' | 'cancelled'; note: string; externalRef?: string | null }, by: By): Promise<void> {
+    const r = agg.remedies.find((x) => x.id === remedyId);
+    if (!r) throw notFound('Remedy');
+    if (!['completed', 'cancelled'].includes(body.outcome)) throw invalidField('outcome', 'Choose completed or cancelled');
+    if (!body.note?.trim()) throw invalidField('note', 'Say how the remedy was settled');
+    if (r.status === 'completed' || r.status === 'cancelled') throw this.core.error('REMEDY_NOT_SETTLEABLE', 'This remedy is already finished', { status: r.status });
+    const driver = await this.drivenBy(agg, r);
+    if (driver) throw this.core.error('REMEDY_NOT_SETTLEABLE', driver === 'refund_request' ? 'The refund request in returns still drives this remedy' : driver === 'wallet_grant' ? 'The store credit grant is still waiting for approval' : 'The replacement still drives this remedy', { status: r.status, drivenBy: driver });
+    const event = body.outcome === 'completed' ? 'settle' : 'cancel';
+    remedyMachine.next(r.status as RemedyStatus, event as never);
+    const note = body.note.trim();
+    const ref = body.externalRef?.trim() || null;
+    const now = this.core.now();
+    const after = await this.core.write(agg.c.id, by, async (tx, a) => {
+      const fresh = a.remedies.find((x) => x.id === remedyId)!;
+      const status = remedyMachine.next(fresh.status as RemedyStatus, event as never) as RemedyStatus;
+      const updated = await tx.update('case_remedies', remedyId, { status, note: ref ? `${note} (${ref})` : note, updated_at: now });
+      Object.assign(fresh, updated);
+      await this.core.timeline(tx, a.c.id, [
+        { kind: `remedy_${status}`, label: `${human(fresh.kind)} ${status === 'completed' ? 'settled outside the system' : 'cancelled'}`, detail: ref ? `${note} (ref ${ref})` : note, visibility: 'staff', actor: by.actor, reason: note },
+      ]);
+      await this.core.save(tx, a, {});
+      return updated;
+    });
+    await this.core.audit(
+      {
+        action: 'support.remedy.settle',
+        actionLabel: `Settled a ${human(r.kind).toLowerCase()} remedy on ${agg.c.ref} as ${body.outcome}`,
+        category: r.amount ? 'financial' : 'support',
+        target: this.cases.target(agg),
+        reason: note,
+        before: { remedyId, status: r.status },
+        after: { remedyId, status: after.status, externalRef: ref },
+      },
+      by,
+    );
+  }
+
   /* ================================================================ remedy progress (consumers and jobs) */
 
   /** A missed ship-by date falls back to a seller-funded refund of the items */
@@ -518,7 +608,7 @@ export class Decisions {
   }
 
   /** Moves a remedy along the spec machine to `to` (no-op when it is already there or cannot get there) */
-  async moveRemedy(remedyId: string, to: RemedyStatus, o: { note?: string | null; refundRequestId?: string | null; replacementId?: string | null; label?: string; visibility?: 'all' | 'staff' } = {}): Promise<boolean> {
+  async moveRemedy(remedyId: string, to: RemedyStatus, o: { note?: string | null; refundRequestId?: string | null; replacementId?: string | null; label?: string; visibility?: 'all' | 'staff'; requeue?: boolean } = {}): Promise<boolean> {
     const r = await this.core.repo.get('case_remedies', remedyId);
     if (!r) return false;
     let moved = false;
@@ -533,7 +623,7 @@ export class Decisions {
       Object.assign(fresh, updated);
       if (o.label && path?.length) await this.core.timeline(tx, a.c.id, [{ kind: `remedy_${status}`, label: o.label, detail: o.note ?? null, visibility: o.visibility ?? 'all' }]);
       // a failed remedy goes back to the top of the owner's queue (due now; the SLA job flags it)
-      if (status === 'failed') await this.core.save(tx, a, { waiting_on: 'marketplace', next_response_due_at: this.core.now() });
+      if (status === 'failed' || (o.requeue && path?.length)) await this.core.save(tx, a, { waiting_on: 'marketplace', next_response_due_at: this.core.now() });
       else await this.core.save(tx, a, {});
       moved = true;
     });

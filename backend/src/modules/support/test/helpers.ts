@@ -46,6 +46,8 @@ const RECORDED = [
   'support.case.overdue',
   'returns.refund.requested',
   'returns.refund.approved',
+  'returns.refund.cancelled',
+  'returns.replacement.created',
 ];
 
 export interface Harness {
@@ -61,9 +63,13 @@ export interface Harness {
   authority: Record<string, 'allowed' | 'approval_required' | 'denied'>;
   unknownStaff: Set<string>;
   members: Record<string, access.StaffRef[]>;
+  /** access.staffWithPermission answers (case handlers) */
+  handlers: access.StaffRef[];
+  /** Stock inventory answers for replacements, by stock item id */
+  stock: Map<string, number>;
   lead: string;
   missingFiles: Set<string>;
-  calls: { refunds: payments.StartRefundInput[]; approvals: access.RequestApprovalInput[]; attached: { assetId: string; kind: string; refId: string; owner: string }[]; goodwill: wallet.GoodwillGrant[] };
+  calls: { refunds: payments.StartRefundInput[]; approvals: access.RequestApprovalInput[]; attached: { assetId: string; kind: string; refId: string; owner: string }[]; goodwill: wallet.GoodwillGrant[]; permissionLookups: string[]; allocations: unknown[] };
   call(method: string, url: string, token: string, body?: unknown, headers?: Record<string, string>): Promise<{ status: number; body: any }>;
   gql(area: 'store' | 'seller' | 'admin', token: string, query: string, variables?: Record<string, unknown>): Promise<any>;
   publish(source: string, name: string, payload: unknown): Promise<void>;
@@ -84,9 +90,11 @@ export async function harness(o: { wallet?: boolean } = {}): Promise<Harness> {
     authority: {} as Harness['authority'],
     unknownStaff: new Set<string>(),
     members: {} as Harness['members'],
+    handlers: [] as access.StaffRef[],
+    stock: new Map<string, number>(),
     lead: newId(),
     missingFiles: new Set<string>(),
-    calls: { refunds: [], approvals: [], attached: [], goodwill: [] } as Harness['calls'],
+    calls: { refunds: [], approvals: [], attached: [], goodwill: [], permissionLookups: [], allocations: [] } as Harness['calls'],
   };
   const refunded = new Map<string, number>();
   const refundsByKey = new Map<string, payments.Refund>();
@@ -155,7 +163,7 @@ export async function harness(o: { wallet?: boolean } = {}): Promise<Harness> {
       access: {
         check: async (_p, action) => {
           const decision = h.authority[action] ?? 'allowed';
-          return { decision, action, reason: decision === 'allowed' ? 'Within your limit' : decision === 'denied' ? 'Your role has no authority' : 'Above your limit: Finance approval', requiresSecondReviewer: false, approvalsNeeded: 1, eligibleApproverRoles: [], eligibleApprovers: [] };
+          return { decision, action, reason: decision === 'allowed' ? 'Within your limit' : decision === 'denied' ? 'Your role has no authority' : 'Above your limit: Finance approval', requiresSecondReviewer: false, approvalsNeeded: 1, eligibleApproverRoles: [], eligibleApprovers: [], stepUpRequired: false };
         },
         requestApproval: async (input) => {
           h.calls.approvals.push(input);
@@ -167,6 +175,10 @@ export async function harness(o: { wallet?: boolean } = {}): Promise<Harness> {
         approvalInfo: async (id) => ({ required: true, reason: 'Waiting for approval', approvalRequestId: id, approvers: [] }),
         getStaffRef: async (id) => (h.unknownStaff.has(id) ? null : { accountId: id, name: id === h.lead ? 'Lena Lead' : 'Isabel Cruz', away: false, roleLabel: 'Support Specialist' }),
         membersOfRole: async (role) => h.members[role] ?? [],
+        staffWithPermission: async (permission) => {
+          h.calls.permissionLookups.push(permission);
+          return h.handlers;
+        },
         resolveRecipients: async (roleKey) => ({ roleKey, leadAccountId: h.lead, accountIds: [h.lead], ccAccountIds: [], viaBackup: false, escalationRoleKey: 'business_owner' }),
       },
       ...(o.wallet
@@ -180,6 +192,15 @@ export async function harness(o: { wallet?: boolean } = {}): Promise<Harness> {
             },
           }
         : {}),
+      inventory: {
+        getAvailability: async (ids) => Object.fromEntries(ids.map((id) => [id, { available: h.stock.get(id) ?? 0, state: 'in_stock', lowStockThreshold: null, nextIncoming: null }])),
+        allocateForOrder: async (input) => {
+          h.calls.allocations.push(input);
+          for (const l of input.lines) if ((h.stock.get(l.stockItemId) ?? 0) < l.quantity) throw new AppError('INSUFFICIENT_STOCK', 'No stock', undefined, 409);
+          return { id: newId(), key: input.key, state: 'allocated', lines: [], createdAt: clock.now().toISOString() } as never;
+        },
+        releaseHold: async () => undefined,
+      },
       finance: {
         previewRefundImpact: async (_ids, refund) => ({ sellerEarningsChange: USD(-refund.amount), feeReturned: USD(Math.round(refund.amount / 10)), afterPayout: false, note: 'Deducted from the next payout' }),
       },
@@ -222,6 +243,8 @@ export function product(h: Harness, o: { title: string; price: number; ownerType
     ownerType,
     sellerId: ownerType === 'seller' ? (o.sellerId ?? null) : null,
     sellerName: ownerType === 'official' ? 'Marketly Official Store' : 'Casa Verde Home',
+    sellerSku: 'SKU-1',
+    title: o.title,
     condition: 'new',
     conditionNotes: null,
     missingItems: [],

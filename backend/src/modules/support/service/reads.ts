@@ -251,18 +251,25 @@ export class Reads {
     };
   }
 
+  /**
+   * Staff holding support.cases.handle (access.staffWithPermission, not a fixed list of roles), each with the
+   * team of the support role they hold (customer support when none), filtered by team and name.
+   */
   async assignees(q: { team?: string; q?: string }): Promise<CaseAssignee[]> {
     const access = this.core.ctx.use('access');
-    const teams = (Object.keys(TEAM_ROLES) as Team[]).filter((t) => !q.team || t === q.team);
-    const out = new Map<string, CaseAssignee>();
-    for (const team of teams) {
+    const handlers = (await this.core.quiet('case handlers', () => access.staffWithPermission('support.cases.handle'))) ?? [];
+    const teamOf = new Map<string, Team>();
+    for (const team of Object.keys(TEAM_ROLES) as Team[]) {
       for (const role of TEAM_ROLES[team]) {
-        const members = (await this.core.quiet('role members', () => access.membersOfRole(role))) ?? [];
-        for (const m of members) {
-          if (out.has(m.accountId)) continue;
-          out.set(m.accountId, { staffId: m.accountId, name: m.name, team, role: m.roleLabel ?? role.replace(/_/g, ' '), openCases: 0, overdueCases: 0, away: m.away, awayUntil: null });
-        }
+        for (const m of (await this.core.quiet('role members', () => access.membersOfRole(role))) ?? []) if (!teamOf.has(m.accountId)) teamOf.set(m.accountId, team);
       }
+    }
+    const out = new Map<string, CaseAssignee>();
+    for (const m of handlers) {
+      if (out.has(m.accountId)) continue;
+      const team = teamOf.get(m.accountId) ?? 'customer_support';
+      if (q.team && team !== q.team) continue;
+      out.set(m.accountId, { staffId: m.accountId, name: m.name, team, role: m.roleLabel ?? 'Staff', openCases: 0, overdueCases: 0, away: m.away, awayUntil: null });
     }
     const term = q.q?.trim().toLowerCase();
     const list = [...out.values()].filter((a) => !term || a.name.toLowerCase().includes(term));
@@ -278,6 +285,14 @@ export class Reads {
   }
 
   /* ================================================================ public API reads */
+
+  /** Customers-module ids with a case that is not resolved or closed (only the given ids when ids is set) */
+  async customerIdsWithOpenCases(filter: { ids?: string[] }): Promise<string[]> {
+    const ids = filter?.ids ? [...new Set(filter.ids.filter(isUuid))] : undefined;
+    if (ids && !ids.length) return [];
+    const rows = await this.core.repo.find('cases', { status: { op: 'not in', value: CLOSED }, ...(ids ? { customer_id: ids } : { customer_id: { op: 'is not', value: null } }) });
+    return [...new Set(rows.map((r) => r.customer_id).filter((x): x is string => !!x && isUuid(x)))];
+  }
 
   async casesForOrder(orderId: string): Promise<{ caseId: string; ref: string; status: string; orderItemIds: string[] }[]> {
     if (!isUuid(orderId)) return [];

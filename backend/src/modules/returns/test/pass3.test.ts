@@ -203,6 +203,27 @@ describe('replacements: allocated, cancelled with a release', () => {
   });
 });
 
+describe('case replacements on a case with a return', () => {
+  it("links the replacement to the case's return, which completes when it ships", async () => {
+    const { p, m, token } = await officialAwaitingRemedy();
+    const res = await h.call('POST', '/api/store/returns/requests', token, { orderId: m.order.id, items: [{ orderItemId: m.items[0]![0]!, quantity: 1 }], reason: 'defective', details: 'Dead', remedy: 'refund' }, idem());
+    const id = res.body.returns[0].id;
+    await h.service.recordWarehouseReceipt(id, now(), { kind: 'staff', id: newId() }, null);
+    await h.call('POST', `/api/admin/returns/requests/${id}/inspection`, staff(), { conditionOutcome: 'as_described', grade: 'like_new', proposedStockOutcome: 'restock' });
+    const caseId = newId();
+    await h.service.core.repo.update('returns', id, { case_id: caseId });
+    h.stock.set(p.stockItemId, 2);
+    const rep = await h.service.requestReplacement({ caseId, orderId: m.order.id, orderItemId: m.items[0]![0]!, quantity: 1, reason: 'Decided on the case', requestedBy: { kind: 'staff', id: newId() } }, `case:${caseId}`);
+    expect(rep).toMatchObject({ returnId: id, caseId, status: 'reserved' });
+    await h.app.kernel.events.drain();
+    expect(h.named('returns.replacement.created').find((e) => e.replacementId === rep.id)).toMatchObject({ returnId: id, caseId });
+    // the return cannot get a second remedy
+    expect((await h.call('POST', `/api/admin/returns/requests/${id}/remedy`, staff(), { kind: 'full_refund' }, idem())).status).toBe(409);
+    await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId: newId(), kind: 'replacement', orderId: m.order.id, groupId: m.order.groups[0]!.id, returnId: id, ownerType: 'official', sellerId: null, lines: [], shippedAt: now(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
+    expect((await h.call('GET', `/api/admin/returns/requests/${id}`, staff())).body.detail).toMatchObject({ status: 'completed', replacement: { id: rep.id, status: 'shipped' } });
+  });
+});
+
 describe('case refunds (requestRefund)', () => {
   it('takes one seller group at a time, the refunded quantities and refuses goodwill', async () => {
     const sellerA = newId();

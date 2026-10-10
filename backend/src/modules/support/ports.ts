@@ -35,6 +35,8 @@ export interface CaseFacts {
   overdueNotified?: string | null;
   /** Appeal and reopen windows already closed by the auto-close job */
   appealWindowClosed?: boolean;
+  /** Trust and Risk report the case acts on (inform_customers outreach; support.case.opened carries it) */
+  trustReportId?: string | null;
 }
 
 export interface StoredNext {

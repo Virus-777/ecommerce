@@ -343,6 +343,14 @@ export class Handling {
       stockItemId = offer.stockItemId;
       offerId = offer.id;
     }
+    // a return on the same case covering the item takes the replacement (it completes when the replacement ships)
+    const open = await this.core.repo.find('returns', { case_id: input.caseId, order_id: info.orderId, status: { op: 'not in', value: ['completed', 'cancelled', 'rejected'] } });
+    const covering = open.length ? await this.core.repo.find('return_items', { return_id: open.map((r) => r.id), order_item_id: info.id }) : [];
+    const ret = open.find((r) => covering.some((i) => i.return_id === r.id)) ?? null;
+    if (ret) {
+      const live = (await this.core.repo.find('replacements', { return_id: ret.id })).find((x) => x.status !== 'cancelled');
+      if (live) return this.replacementView(live);
+    }
     const replacementId = newId();
     const reservationId = await this.allocate({ key: `replacement:case:${key}`, orderId: info.orderId, orderRef: info.orderRef, kind, replacementId, stockItemId, quantity: input.quantity, orderItemId: info.id, actor: input.requestedBy });
     const now = this.core.now();
@@ -350,7 +358,7 @@ export class Handling {
     try {
       row = await this.core.repo.insert('replacements', {
         id: replacementId,
-        return_id: null,
+        return_id: ret?.id ?? null,
         case_id: input.caseId,
         order_id: info.orderId,
         kind,
@@ -374,11 +382,12 @@ export class Handling {
       await this.release(reservationId, 'The replacement could not be recorded');
       throw err;
     }
+    if (ret) await this.core.timeline(this.core.repo, ret.id, [{ kind: 'replacement', label: kind === 'exchange' ? 'Exchange on the way' : 'Replacement on the way', detail: `Decided on the support case, × ${input.quantity}, no charge`, visibility: 'customer', actor: input.requestedBy }]);
     this.core.publish(
       'returns.replacement.created',
       {
         replacementId,
-        returnId: null,
+        returnId: ret?.id ?? null,
         caseId: input.caseId,
         orderId: info.orderId,
         customerId: info.customerId ?? order?.contact.customerId ?? null,
