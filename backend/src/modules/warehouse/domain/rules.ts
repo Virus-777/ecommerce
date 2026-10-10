@@ -17,6 +17,26 @@ export const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 
 export const SYSTEM: common.Actor = { kind: 'system', id: null, name: 'Warehouse' };
 
+/* ---------------------------------------------------------------- scope */
+
+export type WarehouseFulfilledBy = 'official_warehouse' | 'marketly_service';
+
+/**
+ * Which order groups the warehouse picks and packs: Official Store groups and Fulfilled by Marketly groups
+ * (seller-owned stock at the service location). Groups sellers ship themselves → null.
+ */
+export function warehouseGroup(g: { ownerType: 'official' | 'seller'; fulfilledBy: 'official_warehouse' | 'seller' | 'marketly_service' }): WarehouseFulfilledBy | null {
+  if (g.fulfilledBy === 'marketly_service' && g.ownerType === 'seller') return 'marketly_service';
+  if (g.fulfilledBy === 'official_warehouse' && g.ownerType === 'official') return 'official_warehouse';
+  return null;
+}
+
+/** Return parcels the warehouse expects: Official Store returns and Fulfilled by Marketly returns come to a Marketly warehouse */
+export const comesToWarehouse = (r: { ownerType: 'official' | 'seller'; fulfilledBy?: 'official_warehouse' | 'seller' | 'marketly_service' | null }) => r.ownerType === 'official' || r.fulfilledBy === 'marketly_service';
+
+/** Packing slip seller line of a Fulfilled by Marketly package */
+export const soldByLine = (sellerName: string | null | undefined) => `Sold by ${sellerName?.trim() || 'the seller'} · Fulfilled by Marketly`;
+
 export const actorText = (a: common.Actor): string => JSON.stringify({ kind: a.kind, id: a.id ?? null, name: a.name ?? null });
 export function parseActor(text: string | null | undefined): common.Actor | null {
   if (!text) return null;

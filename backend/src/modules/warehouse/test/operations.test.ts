@@ -136,7 +136,7 @@ describe('return parcels', () => {
       shipment: { trackingNumber: '9400100000000000000001' },
     }) as unknown as returns.ReturnDetail;
 
-  const approved = (returnId: string, ref: string, o: { ownerType?: 'official' | 'seller'; dropOffBy?: string | null; trackingNumber?: string | null; orderId?: string } = {}) => ({
+  const approved = (returnId: string, ref: string, o: { ownerType?: 'official' | 'seller'; fulfilledBy?: 'official_warehouse' | 'seller' | 'marketly_service'; dropOffBy?: string | null; trackingNumber?: string | null; orderId?: string } = {}) => ({
     returnId,
     ref,
     orderId: o.orderId ?? newId(),
@@ -144,6 +144,7 @@ describe('return parcels', () => {
     customerId: newId(),
     ownerType: o.ownerType ?? 'official',
     sellerId: o.ownerType === 'seller' ? newId() : null,
+    fulfilledBy: o.fulfilledBy ?? (o.ownerType === 'seller' ? 'seller' : 'official_warehouse'),
     items: [{ orderItemId: newId(), quantity: 1 }],
     withoutReturn: false,
     platformDecision: false,

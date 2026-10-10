@@ -10,7 +10,7 @@ import type { Principal } from '../../../spec/identity.js';
 import type { FileLink, LabelResult, Package, PackageServiceOption, PackageUpdate } from '../../../spec/warehouse.js';
 import type { LabelQuote } from '../../../spec/shipping.js';
 import { renderPdf, type PdfLine } from '../domain/pdf.js';
-import { actorText, itemMatches, matchesChoice, missingForLabel, parcelOf, plural, shortDay, validDimensions } from '../domain/rules.js';
+import { actorText, itemMatches, matchesChoice, missingForLabel, parcelOf, plural, shortDay, soldByLine, validDimensions } from '../domain/rules.js';
 import { packageMachine, warehouseFulfillmentMachine } from '../domain/state-machines.js';
 import type { BoxRec, FulfillmentRec, LineRec, PackageItemRec, PackageRec, WarehouseRepository } from '../ports.js';
 import { Batch, invalid, invalidField, notFound, unavailable, type By, type Core } from './core.js';
@@ -237,7 +237,8 @@ export class Packing {
   private async quotes(p: PackageRec, f: FulfillmentRec, items: PackageItemRec[]): Promise<LabelQuote[]> {
     const shipping = this.shipping();
     const parcel = parcelOf(p.weight, await this.dims(p));
-    return shipping.quoteLabelOptions({ groupId: f.seller_group_id, kind: 'outbound', items: items.map((i) => ({ orderItemId: i.order_item_id, quantity: i.quantity })), parcel, keepPromise: false, to: f.ship_to });
+    const from = await this.core.labelOrigin(f);
+    return shipping.quoteLabelOptions({ groupId: f.seller_group_id, kind: 'outbound', items: items.map((i) => ({ orderItemId: i.order_item_id, quantity: i.quantity })), parcel, keepPromise: false, ...(from ? { from } : {}), to: f.ship_to });
   }
 
   async serviceOptions(id: string): Promise<PackageServiceOption[]> {
@@ -291,11 +292,14 @@ export class Packing {
       if (!q.keepsPromise) throw this.core.error('SERVICE_BREAKS_PROMISE', `${q.serviceName} would arrive after the date the customer was promised`, { serviceCode: q.carrierServiceId });
     } else q = quotes.find((x) => x.keepsPromise && matchesChoice(x, task.delivery)) ?? quotes.find((x) => x.keepsPromise);
     if (!q) throw this.core.error('SERVICE_BREAKS_PROMISE', 'No carrier service arrives by the date the customer was promised. Ask the Shipping Manager.', {});
+    // Fulfilled by Marketly: from the service location's address, billed to the seller (decision D1)
+    const from = await this.core.labelOrigin(f);
+    const service = f.fulfilled_by === 'marketly_service' ? { ...(from ? { from } : {}), billedTo: 'seller' as const } : {};
     let result;
     try {
       result = await shipping.createLabel(
         // format: zpl for thermal printers, pdf otherwise; the label file comes back in that format
-        { groupId: f.seller_group_id, kind: 'outbound', items: items.map((i) => ({ orderItemId: i.order_item_id, quantity: i.quantity })), parcel: parcelOf(p.weight, dims), carrierServiceId: q.carrierServiceId, keepPromise: true, to: f.ship_to, format: body.format ?? 'pdf' },
+        { groupId: f.seller_group_id, kind: 'outbound', items: items.map((i) => ({ orderItemId: i.order_item_id, quantity: i.quantity })), parcel: parcelOf(p.weight, dims), carrierServiceId: q.carrierServiceId, keepPromise: true, ...service, to: f.ship_to, format: body.format ?? 'pdf' },
         key,
       );
     } catch (err) {
@@ -369,10 +373,12 @@ export class Packing {
     const showPrices = cfg.packingSlipShowsPrices && !task?.hidePricesOnSlip && Boolean(order);
     const priceOf = (orderItemId: string) => order?.groups.flatMap((g) => g.items).find((i) => i.id === orderItemId)?.unitPrice;
     const a = f.ship_to;
+    const service = f.fulfilled_by === 'marketly_service';
     const fmt = (m: common.Money) => `$${(m.amount / 100).toFixed(2)}`;
     const body: PdfLine[] = [
       { text: 'Packing slip', bold: true, size: 14 },
       { text: `Order ${f.order_ref} - Package ${p.index_in_order} of ${p.of_in_order}` },
+      ...(service ? [{ text: soldByLine(f.seller_name ?? task?.seller.name) }] : []),
       { text: `Ship to ${a.name}, ${a.line1}${a.line2 ? `, ${a.line2}` : ''}, ${a.city}, ${a.region} ${a.postalCode}` },
       { text: 'Items in this package', bold: true, gap: 8 },
       ...items.map((it) => {
@@ -386,7 +392,7 @@ export class Packing {
     if (others > 0) body.push({ text: `This order has ${plural(others, 'other package')} from other sellers. They ship separately.`, gap: 8 });
     if (task?.giftNote) body.push({ text: `Gift note: ${task.giftNote}`, gap: 8 });
     body.push({ text: 'Returns: start a return from your Marketly account within the return window shown on your order.', gap: 8, size: 9 });
-    body.push({ text: 'Official Store items: Marketly handles the return and the refund.', size: 9 });
+    body.push({ text: service ? 'Fulfilled by Marketly items: Marketly handles the return; send them back to Marketly, not to the seller.' : 'Official Store items: Marketly handles the return and the refund.', size: 9 });
     return this.core.fileLink({ fileName: `packing-slip-${f.order_ref}-${p.index_in_order}.pdf`, contentType: 'application/pdf', bytes: renderPdf([body]), principal, reason: 'Packing slip' });
   }
 
@@ -424,6 +430,10 @@ export class Packing {
         fulfillmentId: f.id,
         orderId: f.order_id,
         sellerGroupId: f.seller_group_id,
+        // Fulfilled by Marketly: shipping records the shipment with the seller as owner
+        ownerType: f.fulfilled_by === 'marketly_service' ? 'seller' : 'official',
+        sellerId: f.seller_id,
+        fulfilledBy: f.fulfilled_by,
         items: pkgItems,
         carrier: packed.carrier ?? '',
         service: packed.service ?? '',
@@ -450,7 +460,8 @@ export class Packing {
 
   /** shipping.shipment.dispatched: the package left with the carrier; the order is dispatched with its last package */
   async onShipmentDispatched(e: EventPayload<'shipping.shipment.dispatched'>): Promise<void> {
-    if (e.kind === 'return' || e.ownerType !== 'official') return;
+    // found by shipment: only packages packed here (Official Store and Fulfilled by Marketly) have one
+    if (e.kind === 'return') return;
     const p = (await this.repo.find('packages', { shipment_id: e.shipmentId }))[0];
     if (!p) return;
     const batch = new Batch({ actor: { kind: 'system', id: null, name: 'Shipping' } });

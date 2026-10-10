@@ -156,6 +156,9 @@ export class Views {
       orderId: f.order_id,
       orderRef: f.order_ref,
       sellerGroupId: f.seller_group_id,
+      fulfilledBy: f.fulfilled_by,
+      sellerId: f.seller_id,
+      sellerName: f.seller_name,
       locationId: f.location_id,
       status: f.status as Fulfillment['status'],
       shipBy: f.ship_by.toISOString(),
@@ -196,6 +199,8 @@ export class Views {
       return {
         id: f.id,
         orderRef: f.order_ref,
+        fulfilledBy: f.fulfilled_by,
+        sellerName: f.seller_name,
         status: f.status as FulfillmentRow['status'],
         deadline: this.deadline(f, now, cfg.atRiskMinutes),
         shipBy: f.ship_by.toISOString(),

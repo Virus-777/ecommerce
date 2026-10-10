@@ -1,4 +1,4 @@
-/** Return parcels: expected from approved Official Store returns, scanned in at the dock, handed to inspection. */
+/** Return parcels: expected from approved Official Store and Fulfilled by Marketly returns, scanned in at the dock, handed to inspection. */
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
@@ -6,7 +6,7 @@ import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { ReturnDetail } from '../../../spec/returns.js';
 import type { ReceiveParcelInput, ReturnParcel } from '../../../spec/warehouse.js';
-import { actorText, addDays, looksLikeReturnRef, NIL_UUID, normalizeCode } from '../domain/rules.js';
+import { actorText, addDays, comesToWarehouse, looksLikeReturnRef, NIL_UUID, normalizeCode } from '../domain/rules.js';
 import { returnParcelMachine } from '../domain/state-machines.js';
 import type { ParcelRec, Where } from '../ports.js';
 import { invalidField, notFound, type By, type Core } from './core.js';
@@ -35,9 +35,12 @@ export class Parcels {
     return { ...result, items: await this.views.parcels(result.items) };
   }
 
-  /** returns.return.approved: an Official Store return that comes back to the warehouse is expected at the dock */
+  /**
+   * returns.return.approved: an Official Store or Fulfilled by Marketly return that comes back to the warehouse
+   * is expected at the dock (the Marketly returns address: the default location)
+   */
   async onReturnApproved(e: EventPayload<'returns.return.approved'>): Promise<void> {
-    if (e.ownerType !== 'official' || e.withoutReturn) return;
+    if (!comesToWarehouse(e) || e.withoutReturn) return;
     if ((await this.repo.count('return_parcels', { return_id: e.returnId })) > 0) return;
     const today = this.core.today();
     const expectedBy = e.dropOffBy ? addDays(this.core.today(new Date(e.dropOffBy)), TRANSIT_DAYS) : addDays(today, NO_DEADLINE_DAYS);
@@ -74,11 +77,11 @@ export class Parcels {
     });
   }
 
-  /** The return behind a scanned code, through returns (a return reference) */
-  private async returnFor(code: string): Promise<ReturnDetail | null> {
+  /** The return behind a scanned code, through returns (a return reference), and whether it comes to a Marketly warehouse */
+  private async returnFor(code: string): Promise<{ detail: ReturnDetail; ours: boolean } | null> {
     if (!looksLikeReturnRef(code)) return null;
     const found = await this.core.soft('returns', 'return by reference', (r) => r.getReturnAdmin(code.trim().toUpperCase()));
-    return found?.detail ?? null;
+    return found?.detail ? { detail: found.detail, ours: comesToWarehouse({ ownerType: found.detail.seller.ownerType, fulfilledBy: found.fulfilledBy }) } : null;
   }
 
   private async match(code: string): Promise<ParcelRec | undefined> {
@@ -98,12 +101,16 @@ export class Parcels {
     if (!['intact', 'damaged', 'opened'].includes(body.parcelCondition)) throw invalidField('parcelCondition', 'Choose intact, damaged or opened');
     let parcel = await this.match(code);
     let detail: ReturnDetail | null = null;
+    let ours = false;
     if (!parcel || !parcel.return_ref) {
-      detail = await this.returnFor(code);
+      const found = await this.returnFor(code);
+      detail = found?.detail ?? null;
+      ours = found?.ours ?? false;
       if (detail && !parcel) parcel = (await this.repo.find('return_parcels', { return_id: detail.id }))[0];
     }
     if (parcel && parcel.status !== 'expected') throw this.core.error('PARCEL_ALREADY_RECEIVED', `This parcel was already received${parcel.return_ref ? ` (${parcel.return_ref})` : ''}`, { parcelId: parcel.id });
-    const returnId = parcel?.return_id ?? (detail && detail.seller.ownerType === 'official' ? detail.id : null);
+    // an Official Store or Fulfilled by Marketly return: Marketly receives it even when it was not expected yet
+    const returnId = parcel?.return_id ?? (detail && ours ? detail.id : null);
     const photos = [...new Set(body.photoIds ?? [])];
     const now = this.core.now();
     const id = parcel?.id ?? newId();
@@ -163,7 +170,7 @@ export class Parcels {
           queueKey: 'warehouse.return_parcels',
           kind: 'unexpected_return_parcel',
           title: `Unexpected return parcel ${row.tracking_number ?? row.return_ref ?? code}`,
-          summary: 'A parcel arrived at the warehouse with no approved Official Store return. Find the customer and the order.',
+          summary: 'A parcel arrived at the warehouse with no approved Official Store or Fulfilled by Marketly return. Find the customer and the order.',
           subject: { type: 'return_parcel', id: row.id, ref: row.tracking_number ?? row.return_ref ?? null, label: 'Return parcel' },
           priority: body.parcelCondition === 'intact' ? 'normal' : 'high',
           dedupeKey: `return_parcel:${row.id}`,

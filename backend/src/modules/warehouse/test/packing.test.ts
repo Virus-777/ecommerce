@@ -170,6 +170,9 @@ describe('packing station', () => {
       fulfillmentId: o.fulfillment.id,
       orderId: o.orderId,
       sellerGroupId: o.groupId,
+      ownerType: 'official',
+      sellerId: null,
+      fulfilledBy: 'official_warehouse',
       items: [{ orderItemId: o.itemIds[0], stockItemId: a.id, sku: 'PK-BOOK', label: 'Book, Hardcover', image: null, quantity: 1, scanned: 1, serialNumbers: ['ISBN-1'] }],
       carrier: 'UPS',
       service: 'UPS Ground',
@@ -182,7 +185,7 @@ describe('packing station', () => {
     expect((await h.call('GET', `/waves/${o.waveId}`)).body).toMatchObject({ status: 'completed', packedOrderCount: 1 });
     expect((await h.call('POST', `/packages/${pkg.id}/pack`)).body.error.code).toBe('ILLEGAL_TRANSITION');
     const shipmentId = h.labels.at(-1)!.shipmentId;
-    const dispatched = { shipmentId, kind: 'outbound', orderId: o.orderId, groupId: o.groupId, returnId: null, ownerType: 'official', sellerId: null, lines: [{ orderItemId: o.itemIds[0], title: 'Book', variantLabel: 'Hardcover', quantity: 1 }], shippedAt: h.clock.now().toISOString(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null };
+    const dispatched = { shipmentId, kind: 'outbound', orderId: o.orderId, groupId: o.groupId, returnId: null, ownerType: 'official', sellerId: null, fulfilledBy: 'official_warehouse', lines: [{ orderItemId: o.itemIds[0], title: 'Book', variantLabel: 'Hardcover', quantity: 1 }], shippedAt: h.clock.now().toISOString(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null };
     await h.publish('shipping', 'shipping.shipment.dispatched', dispatched);
     await h.publish('shipping', 'shipping.shipment.dispatched', dispatched);
     const f = (await h.call('GET', `/fulfillments/${o.fulfillment.id}`)).body;
@@ -200,7 +203,7 @@ describe('packing station', () => {
     await h.call('PATCH', `/packages/${pkg.id}`, { boxTypeId: mailer.id, weight: { value: 0.1, unit: 'lb' } });
     await h.call('POST', `/packages/${pkg.id}/label`, {}, { headers: idem() });
     const zero = { amount: 0, currency: 'USD' };
-    await h.publish('orders', 'orders.item.cancelled', { orderId: o.orderId, ref: o.ref, groupId: o.groupId, ownerType: 'official', sellerId: null, itemId: o.itemIds[0], offerId: newId(), stockItemId: a.id, quantity: 1, cancellationId: newId(), initiatedBy: 'staff', reasonCode: 'out_of_stock', beforeDispatch: true, countsAgainstSeller: false, refund: { itemAmount: zero, discountShare: zero, shippingRefund: zero, taxRefund: zero, total: zero }, paymentIntentId: newId(), notifyCustomer: true });
+    await h.publish('orders', 'orders.item.cancelled', { orderId: o.orderId, ref: o.ref, groupId: o.groupId, ownerType: 'official', sellerId: null, fulfilledBy: 'official_warehouse', itemId: o.itemIds[0], offerId: newId(), stockItemId: a.id, quantity: 1, cancellationId: newId(), initiatedBy: 'staff', reasonCode: 'out_of_stock', beforeDispatch: true, countsAgainstSeller: false, refund: { itemAmount: zero, discountShare: zero, shippingRefund: zero, taxRefund: zero, total: zero }, paymentIntentId: newId(), notifyCustomer: true });
     const f = (await h.call('GET', `/fulfillments/${o.fulfillment.id}`)).body;
     expect(f.status).toBe('packing');
     expect(f.lines[0].state).toBe('cancelled');

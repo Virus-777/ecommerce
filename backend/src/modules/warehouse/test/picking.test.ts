@@ -29,7 +29,7 @@ describe('fulfillments from accepted orders', () => {
     expect(f.lines).toEqual([expect.objectContaining({ orderItemId: o.itemIds[0], stockItemId: head.id, sku: 'HAL-AU-100-WH', label: 'Aurora headphones, White', quantity: 2, binCode: 'A-10-1', picked: 0, short: 0, state: 'pending' })]);
     expect(f.deliveryChoice).toMatch(/^UPS Ground · arrives /);
     expect(f.mixedOrderNote).toMatch(/1 other package/);
-    expect(h.events.slice(before).filter((e) => e.name === 'warehouse.fulfillment.created')).toEqual([{ name: 'warehouse.fulfillment.created', payload: { fulfillmentId: f.id, orderId: o.orderId, sellerGroupId: o.groupId, shipBy: f.shipBy } }]);
+    expect(h.events.slice(before).filter((e) => e.name === 'warehouse.fulfillment.created')).toEqual([{ name: 'warehouse.fulfillment.created', payload: { fulfillmentId: f.id, orderId: o.orderId, sellerGroupId: o.groupId, fulfilledBy: 'official_warehouse', sellerId: null, shipBy: f.shipBy } }]);
     // the detail names the other seller of a mixed order
     const detail = await h.call('GET', `/fulfillments/${f.id}`);
     expect(detail.body.mixedOrderNote).toBe('This order also has 1 other package from Pixel & Port. They ship it separately.');
@@ -75,7 +75,7 @@ describe('waves and picking', () => {
     const started = await h.call('POST', `/waves/${wave.body.id}/start`);
     expect(started.status).toBe(200);
     expect(started.body.status).toBe('picking');
-    expect(h.events.slice(before).filter((e) => e.name === 'warehouse.fulfillment.status_changed').map((e) => e.payload)).toEqual([{ fulfillmentId: o.fulfillment.id, orderId: o.orderId, sellerGroupId: o.groupId, from: 'awaiting_pick', to: 'picking', reason: `${wave.body.ref} started` }]);
+    expect(h.events.slice(before).filter((e) => e.name === 'warehouse.fulfillment.status_changed').map((e) => e.payload)).toEqual([{ fulfillmentId: o.fulfillment.id, orderId: o.orderId, sellerGroupId: o.groupId, fulfilledBy: 'official_warehouse', sellerId: null, from: 'awaiting_pick', to: 'picking', reason: `${wave.body.ref} started` }]);
     expect((await h.call('POST', `/waves/${wave.body.id}/start`)).status).toBe(409);
   });
 
@@ -206,6 +206,7 @@ describe('waves and picking', () => {
         groupId: o.groupId,
         ownerType: 'official',
         sellerId: null,
+        fulfilledBy: 'official_warehouse',
         itemId,
         offerId: newId(),
         stockItemId,
@@ -239,7 +240,7 @@ describe('waves and picking', () => {
     const a = h.item('LATE-A', 'Rug, Wool');
     const o = await h.order([{ item: a, quantity: 1 }], { dispatchInHours: 72 });
     const dueAt = new Date(h.clock.now().getTime() - 3_600_000).toISOString();
-    await h.publish('shipping', 'shipping.dispatch.overdue', { orderId: o.orderId, orderRef: o.ref, groupId: o.groupId, ownerType: 'official', sellerId: null, orderItemIds: o.itemIds, dueAt, exceptionId: newId() });
+    await h.publish('shipping', 'shipping.dispatch.overdue', { orderId: o.orderId, orderRef: o.ref, groupId: o.groupId, ownerType: 'official', sellerId: null, fulfilledBy: 'official_warehouse', orderItemIds: o.itemIds, dueAt, exceptionId: newId() });
     const list = await h.call('GET', '/fulfillments?status=awaiting_pick');
     expect(list.body.items[0]).toMatchObject({ id: o.fulfillment.id, shipBy: dueAt, deadline: { state: 'overdue' } });
   });
