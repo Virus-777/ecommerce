@@ -60,6 +60,27 @@ export function createPostgresInventoryRepository(db: Kysely<InventoryDb>, inbox
       if (!inbox) throw new Error('inventory: the repository was created without the kernel inbox');
       return inbox.claim(anyDb, key);
     },
+    async seenEvent(key) {
+      if (!inbox) throw new Error('inventory: the repository was created without the kernel inbox');
+      return inbox.seen(anyDb, key);
+    },
+    async saveValuationSnapshot(rows) {
+      if (!rows.length) return;
+      await db
+        .insertInto('valuation_snapshots')
+        .values(rows)
+        .onConflict((oc) =>
+          oc.columns(['snapshot_date', 'stock_group']).doUpdateSet((eb) => ({
+            units: eb.ref('excluded.units'),
+            value_at_cost_amount: eb.ref('excluded.value_at_cost_amount'),
+            currency: eb.ref('excluded.currency'),
+            sku_count: eb.ref('excluded.sku_count'),
+            taken_at: eb.ref('excluded.taken_at'),
+          })),
+        )
+        .execute();
+    },
+    valuationSnapshots: (from, to) => db.selectFrom('valuation_snapshots').selectAll().where('snapshot_date', '>=', from).where('snapshot_date', '<=', to).orderBy('snapshot_date').orderBy('stock_group').execute(),
 
     /* ---------------------------------------------------------------- generic */
     async get<T extends IdTable>(table: T, id: string, lock?: Lock) {
@@ -193,8 +214,8 @@ export function createPostgresInventoryRepository(db: Kysely<InventoryDb>, inbox
       for (const r of rows) out.set(r.stock_item_id, Number(r.n));
       return out;
     },
-    async reservationsByKeyPrefix(orderId, prefix) {
-      return db.selectFrom('reservations').selectAll().where('order_id', '=', orderId).where('key', 'like', `${prefix.replace(/[\\%_]/g, (c) => `\\${c}`)}%`).orderBy('created_at').execute();
+    async allocationsForShipments(orderId) {
+      return db.selectFrom('reservations').selectAll().where('order_id', '=', orderId).where('source', '!=', 'checkout').orderBy('created_at').execute();
     },
     async dispatchedSince(itemIds, since) {
       const out = new Map<string, number>();
@@ -224,7 +245,7 @@ export function createPostgresInventoryRepository(db: Kysely<InventoryDb>, inbox
     },
 
     /* ---------------------------------------------------------------- reservations */
-    reservationByKey: (key) => db.selectFrom('reservations').selectAll().where('key', '=', key).executeTakeFirst(),
+    reservationByKey: (source, key) => db.selectFrom('reservations').selectAll().where('source', '=', source).where('key', '=', key).executeTakeFirst(),
     async reservationsByOrder(orderId, lock) {
       let q = db.selectFrom('reservations').selectAll().where('order_id', '=', orderId).orderBy('created_at').orderBy('id');
       if (lock?.forUpdate) q = q.forUpdate();

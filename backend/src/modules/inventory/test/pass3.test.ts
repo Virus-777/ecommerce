@@ -322,7 +322,7 @@ describe('stock items follow their offers and catalog records', () => {
     await h.app.kernel.events.drain();
     const refs = await h.api.getStockItems([a.id]);
     expect(refs[0]).toMatchObject({ productId: kept, variantId: keptVariant });
-    expect(h.raised).toEqual([expect.objectContaining({ queueKey: 'inventory.low_stock', kind: 'manual_task', sourceModule: 'inventory', subject: expect.objectContaining({ type: 'stock_item', id: a.id }), dedupeKey: `inventory.merge_candidate:${a.id}:${twin.id}` })]);
+    expect(h.raised).toEqual([expect.objectContaining({ queueKey: 'inventory.merge_candidates', kind: 'manual_task', sourceModule: 'inventory', subject: expect.objectContaining({ type: 'stock_item', id: a.id }), dedupeKey: `inventory.merge_candidate:${a.id}:${twin.id}` })]);
     h.app.kernel.events.publish('catalog', 'catalog.product.merged', merged); // redelivered: nothing left on the duplicate
     await h.app.kernel.events.drain();
     expect(h.raised).toHaveLength(1);

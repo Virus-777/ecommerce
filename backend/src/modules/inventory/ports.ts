@@ -58,7 +58,7 @@ export interface MovementFilter {
   to?: string;
 }
 
-/** Persistence for this module's own tables: inventory.locations, inventory.stock_items, inventory.stock_levels, inventory.stock_movements, inventory.incoming_expectations, inventory.reservations, inventory.reservation_lines, inventory.adjustments, inventory.held_stock, inventory.inbound_receipts, inventory.inbound_lines, inventory.return_outcomes, inventory.discrepancies, inventory.transfers, inventory.transfer_lines, inventory.stock_counts, inventory.count_lines. */
+/** Persistence for this module's own tables: inventory.locations, inventory.stock_items, inventory.stock_levels, inventory.stock_movements, inventory.incoming_expectations, inventory.reservations, inventory.reservation_lines, inventory.adjustments, inventory.held_stock, inventory.inbound_receipts, inventory.inbound_lines, inventory.return_outcomes, inventory.discrepancies, inventory.transfers, inventory.transfer_lines, inventory.stock_counts, inventory.count_lines, inventory.valuation_snapshots. */
 export interface InventoryRepository {
   /** Runs fn in one database transaction with a repository bound to it */
   transaction<T>(fn: (tx: InventoryRepository) => Promise<T>): Promise<T>;
@@ -67,6 +67,11 @@ export interface InventoryRepository {
    * claim commits with the effects. false when the key was already handled.
    */
   claimEvent(key: string): Promise<boolean>;
+  /** Whether an event consumer's key was already claimed (read-only) */
+  seenEvent(key: string): Promise<boolean>;
+  /** Writes one market day's valuation per stock group (a second run that day replaces it) */
+  saveValuationSnapshot(rows: Row<'valuation_snapshots'>[]): Promise<void>;
+  valuationSnapshots(fromDate: string, toDate: string): Promise<Row<'valuation_snapshots'>[]>;
 
   /* ---------------------------------------------------------------- rows by id (tables with an id column) */
   get<T extends IdTable>(table: T, id: string, lock?: Lock): Promise<Row<T> | undefined>;
@@ -112,12 +117,13 @@ export interface InventoryRepository {
   expectations(filter: { sourceKind?: string; sourceId?: string; itemIds?: string[]; openOnly?: boolean }, lock?: Lock): Promise<Row<'incoming_expectations'>[]>;
 
   /* ---------------------------------------------------------------- reservations */
-  reservationByKey(key: string): Promise<Row<'reservations'> | undefined>;
+  /** A reservation by its idempotency key within its source (checkout holds, replacement or exchange allocations) */
+  reservationByKey(source: Row<'reservations'>['source'], key: string): Promise<Row<'reservations'> | undefined>;
   reservationsByOrder(orderId: string, lock?: Lock): Promise<Row<'reservations'>[]>;
   lines(reservationIds: string[], lock?: Lock): Promise<Row<'reservation_lines'>[]>;
   linesWhere(filter: { orderItemIds?: string[]; itemIds?: string[]; states?: string[] }, lock?: Lock): Promise<Row<'reservation_lines'>[]>;
-  /** Reservations whose key starts with a prefix (allocations made with allocateForOrder) for an order */
-  reservationsByKeyPrefix(orderId: string, prefix: string): Promise<Row<'reservations'>[]>;
+  /** An order's replacement and exchange allocations (allocateForOrder: source other than checkout) */
+  allocationsForShipments(orderId: string): Promise<Row<'reservations'>[]>;
   pageReservations(filter: { orderId?: string; stockItemId?: string; state?: string }, page: PageRequest): Promise<Page<Row<'reservations'>>>;
   /** Held reservations past their expiry */
   dueHolds(now: Date, limit: number): Promise<Row<'reservations'>[]>;

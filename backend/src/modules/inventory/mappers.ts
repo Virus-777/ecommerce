@@ -70,6 +70,8 @@ export interface ItemContext {
   defaultSellerThreshold: number;
   /** Quantities at this location only */
   locationId?: string;
+  /** From catalog: the variant's first image, else the product's */
+  image?: MediaRef | null;
 }
 
 /** Available units at sellable, active locations */
@@ -96,7 +98,7 @@ export function toStockItem(item: Row<'stock_items'>, c: ItemContext): StockItem
     variantId: item.variant_id,
     condition: item.condition,
     label: item.label,
-    image: null,
+    image: c.image ?? null,
     quantities,
     state: item.archived ? 'out_of_stock' : stockState(available, threshold),
     lowStockThreshold: threshold,
@@ -149,6 +151,7 @@ export function toReservation(r: Row<'reservations'>, lines: ReservationLine[]):
   return {
     id: r.id,
     key: r.key,
+    source: r.source,
     state: r.state as Reservation['state'],
     orderId: r.order_id,
     orderRef: r.order_ref,
@@ -261,6 +264,7 @@ export function toTransfer(t: Row<'transfers'>, lines: Row<'transfer_lines'>[], 
     state: t.state as Transfer['state'],
     lines: lines.map((l) => ({ stockItemId: l.stock_item_id, sku: skus.get(l.stock_item_id) ?? '', quantity: l.quantity, receivedQuantity: l.received_quantity })),
     createdBy: actorOf(t.created_by) ?? SYSTEM_ACTOR,
+    note: t.note,
     shippedAt: isoOrNull(t.shipped_at),
     receivedAt: isoOrNull(t.received_at),
   };
