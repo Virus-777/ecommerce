@@ -113,13 +113,65 @@ export class AlertEngine {
     return this.fire(hits, { change, price, recheck: met });
   }
 
-  /** Stock came back or an offer went live again: back-in-stock alerts the change concerns */
+  /** Stock came back or an offer went live again: armed back-in-stock alerts the change concerns */
   async backInStock(change: Change, price: common.Money | null): Promise<number> {
     const all = await this.repo.candidates(change.productId, 'back_in_stock', ['active']);
     return this.fire(
-      all.filter((a) => concerns(a, change)),
-      { change, price, recheck: () => true },
+      all.filter((a) => a.armed_at && concerns(a, change)),
+      { change, price, recheck: (a) => a.armed_at !== null },
     );
+  }
+
+  /**
+   * The offers customers can buy now for a product (active, not out of stock, product purchasable); null when it
+   * can't be told (offers unreachable).
+   */
+  async buyableNow(productId: string, lk: Lookups = new Lookups(this.ctx)): Promise<{ change: Change; price: common.Money }[] | null> {
+    try {
+      if (!(await lk.purchasable(productId))) return [];
+      const out: { change: Change; price: common.Money }[] = [];
+      for (const s of await this.ctx.use('offers').listActiveOffersForProduct(productId)) {
+        const [offer, quote] = await Promise.all([lk.offer(s.id), lk.quote(s.id)]);
+        if (!offer || offer.status !== 'active' || !quote || quote.status !== 'active' || quote.availability.state === 'out_of_stock') continue;
+        out.push({ change: { productId, variantId: offer.variantId, offerId: offer.id, sellerId: offer.sellerId ?? null }, price: quote.price });
+      }
+      return out;
+    } catch (err) {
+      this.ctx.log.warn({ err, productId }, 'wishlist: availability of a watched product could not be read');
+      return null;
+    }
+  }
+
+  /**
+   * armed_at for a back-in-stock alert starting now: null while what it follows can be bought (it waits for a
+   * stock-out first), else now. Unknown availability arms it (a missed notice is worse than an early one).
+   */
+  async armedAtFor(a: Pick<AlertCandidate, 'product_id' | 'variant_id' | 'seller_id' | 'item_offer_id'>): Promise<Date | null> {
+    const buyable = await this.buyableNow(a.product_id);
+    return buyable && buyable.some((b) => concerns(a as AlertCandidate, b.change)) ? null : this.now();
+  }
+
+  /** Something went unavailable: unarmed back-in-stock alerts it concerns are armed once nothing they follow can be bought */
+  async armUnavailable(change: Change): Promise<number> {
+    const waiting = (await this.repo.candidates(change.productId, 'back_in_stock', ['active'])).filter((a) => !a.armed_at && concerns(a, change));
+    if (!waiting.length) return 0;
+    const buyable = await this.buyableNow(change.productId);
+    if (buyable === null) return 0;
+    return this.arm(waiting.filter((a) => !buyable.some((b) => concerns(a, b.change))));
+  }
+
+  private async arm(alerts: AlertRow[]): Promise<number> {
+    let n = 0;
+    for (const a of alerts) {
+      const done = await this.repo.transaction(async (tx) => {
+        const locked = await tx.getAlertById(a.id, { forUpdate: true });
+        if (!locked || locked.state !== 'active' || locked.armed_at) return false;
+        await tx.updateAlert(a.id, { armed_at: this.now() });
+        return true;
+      });
+      if (done) n++;
+    }
+    return n;
   }
 
   /* ---------------------------------------------------------------- the job */
@@ -212,11 +264,11 @@ export class AlertEngine {
 
   /**
    * Every active back-in-stock alert against what customers can buy now: catches a restock whose event was missed
-   * or arrived inside the cooldown (fire() skips alerts still in cooldown, so they trigger on a later run). An offer
-   * counts when it is active and its availability is not out of stock. Batches by product.
+   * or arrived inside the cooldown (fire() skips alerts still in cooldown, so they trigger on a later run), and arms
+   * alerts whose item is unavailable now (a stock-out whose event was missed). An offer counts when it is active and
+   * its availability is not out of stock. Batches by product.
    */
   async evaluateRestocks(): Promise<number> {
-    const offersApi = this.ctx.use('offers');
     let fired = 0;
     let after: string | null = null;
     for (;;) {
@@ -226,27 +278,19 @@ export class AlertEngine {
       const byProduct = new Map<string, AlertCandidate[]>();
       for (const a of batch) byProduct.set(a.product_id, [...(byProduct.get(a.product_id) ?? []), a]);
       for (const [productId, alerts] of byProduct) {
-        const lk = new Lookups(this.ctx);
-        if (!(await lk.purchasable(productId))) continue;
-        let summaries: { id: string }[] = [];
-        try {
-          summaries = await offersApi.listActiveOffersForProduct(productId);
-        } catch (err) {
-          this.ctx.log.warn({ err, productId }, 'wishlist: offers of a watched product could not be read');
-          continue;
-        }
-        const inStock: { change: Change; price: common.Money }[] = [];
-        for (const s of summaries) {
-          const [offer, quote] = await Promise.all([lk.offer(s.id), lk.quote(s.id)]);
-          if (!offer || offer.status !== 'active' || !quote || quote.status !== 'active' || quote.availability.state === 'out_of_stock') continue;
-          inStock.push({ change: { productId, variantId: offer.variantId, offerId: offer.id, sellerId: offer.sellerId ?? null }, price: quote.price });
-        }
-        if (!inStock.length) continue;
+        const inStock = await this.buyableNow(productId);
+        if (inStock === null) continue;
+        const unarmed: AlertRow[] = [];
         for (const a of alerts) {
           const best = inStock.filter((c) => concerns(a, c.change)).sort((x, y) => x.price.amount - y.price.amount)[0];
-          if (!best) continue;
-          fired += await this.fire([a], { change: best.change, price: best.price, recheck: () => true });
+          if (!best) {
+            if (!a.armed_at) unarmed.push(a);
+            continue;
+          }
+          if (!a.armed_at) continue; // still in stock since it was switched on: nothing came back
+          fired += await this.fire([a], { change: best.change, price: best.price, recheck: (r) => r.armed_at !== null });
         }
+        await this.arm(unarmed);
       }
       if (batch.length < BATCH) break;
     }

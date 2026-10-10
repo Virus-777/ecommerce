@@ -49,6 +49,8 @@ afterAll(async () => {
 
 let itemId: string;
 let alertId: string;
+/** As if what the alert follows was seen out of stock (the listing stays in stock in these tests) */
+const armed = (id: string) => sql`update wishlist.alerts set armed_at = now() where id = ${id}`.execute(app.kernel.database.kysely);
 /** The customer id wishlist keeps for gia (customers' id of the signed-in account) */
 const wishlistCustomerId = async () => (await sql<{ customer_id: string }>`select customer_id from wishlist.items where id = ${itemId}`.execute(app.kernel.database.kysely)).rows[0]!.customer_id;
 
@@ -73,8 +75,10 @@ describe('back-in-stock alerts', () => {
   it('fires a whole-product alert from a company stock change that names the product (no offer, no matching variant row)', async () => {
     const created = await f.call('POST', `${S}/alerts`, { token: gia.accessToken, body: { productId: listing.productId, kind: 'back_in_stock' } });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
-    expect(created.body).toMatchObject({ variantId: null, sellerId: null, state: 'active' });
+    // switched on while the listing is in stock: it waits for a stock-out (pass 4, armed_at)
+    expect(created.body).toMatchObject({ variantId: null, sellerId: null, state: 'active', armedAt: null });
     alertId = created.body.id;
+    await armed(alertId);
 
     events.length = 0;
     app.kernel.events.publish('inventory', 'inventory.stock.changed', {
@@ -97,7 +101,9 @@ describe('back-in-stock alerts', () => {
 
   it('the evaluate-alerts job re-checks back-in-stock alerts: nothing inside the cooldown, fires once it has passed', async () => {
     const rearm = await f.call('POST', `${S}/alerts/${alertId}/transition`, { token: gia.accessToken, body: { action: 'rearm' } });
-    expect(rearm.body).toMatchObject({ state: 'active' });
+    // rearmed while in stock: unarmed until a stock-out is seen; here the item went out of stock and came back
+    expect(rearm.body).toMatchObject({ state: 'active', armedAt: null });
+    await armed(alertId);
 
     events.length = 0;
     await app.kernel.jobs.runNow('wishlist.evaluate-alerts');

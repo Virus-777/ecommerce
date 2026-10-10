@@ -283,7 +283,8 @@ export class WishlistService implements WishlistPublicApi {
     if ((await this.repo.countActiveAlerts(customerId)) + adding > max) throw this.ctx.error('ALERT_LIMIT_REACHED', `You can have up to ${max} active alerts.`, { max });
   }
 
-  private alertRow(customerId: string, a: { itemId: string | null; productId: string; variantId: string | null; sellerId: string | null; kind: AlertKind; targetPrice: number | null; referencePrice: number | null }): AlertRow {
+  /** `armedAt`: back-in-stock alerts, from engine.armedAtFor (read before the transaction); price-drop alerts are armed at once */
+  private alertRow(customerId: string, a: { itemId: string | null; productId: string; variantId: string | null; sellerId: string | null; kind: AlertKind; targetPrice: number | null; referencePrice: number | null; armedAt?: Date | null }): AlertRow {
     return {
       id: newId(),
       customer_id: customerId,
@@ -299,6 +300,7 @@ export class WishlistService implements WishlistPublicApi {
       triggered_price: null,
       paused_reason: null,
       last_notified_at: null,
+      armed_at: a.kind === 'back_in_stock' ? (a.armedAt ?? null) : this.now(),
       created_at: this.now(),
     };
   }
@@ -320,6 +322,7 @@ export class WishlistService implements WishlistPublicApi {
     const now = this.now();
     const price = shown?.price ?? null;
     const sellerId = offer ? (offer.sellerId ?? null) : null;
+    const armedAt = kinds.includes('back_in_stock') ? await this.engine.armedAtFor({ product_id: product.id, variant_id: variantId, seller_id: sellerId, item_offer_id: offer?.id ?? null }) : null;
     const { row, created } = await this.repo.transaction(async (tx) => {
       await tx.getList(customerId, list.id, { forUpdate: true });
       const again = await tx.findItem(list.id, product.id, variantId);
@@ -338,7 +341,7 @@ export class WishlistService implements WishlistPublicApi {
         added_at: now,
       });
       for (const kind of kinds) {
-        await tx.insertAlert(this.alertRow(customerId, { itemId: row.id, productId: product.id, variantId, sellerId, kind, targetPrice: null, referencePrice: price?.amount ?? null }));
+        await tx.insertAlert(this.alertRow(customerId, { itemId: row.id, productId: product.id, variantId, sellerId, kind, targetPrice: null, referencePrice: price?.amount ?? null, armedAt }));
       }
       await tx.updateList(list.id, { updated_at: now });
       return { row, created: true };
@@ -402,12 +405,14 @@ export class WishlistService implements WishlistPublicApi {
     await this.checkAlertRoom(customerId, adding.length);
     let reference: number | null = null;
     let sellerId: string | null = null;
+    let armedAt: Date | null = null;
     if (adding.length) {
       const lk = new Lookups(this.ctx);
       const product = await lk.product(item.product_id);
       const shown = await lk.shownOffer(item.offer_id, item.variant_id ?? product?.variants[0]?.id ?? null);
       reference = shown?.price.amount ?? item.price_when_saved;
       sellerId = item.offer_id ? ((await lk.offer(item.offer_id))?.sellerId ?? null) : null;
+      if (adding.includes('back_in_stock')) armedAt = await this.engine.armedAtFor({ product_id: item.product_id, variant_id: item.variant_id, seller_id: sellerId, item_offer_id: item.offer_id });
     }
     await this.repo.transaction(async (tx) => {
       const locked = await tx.getItem(customerId, item.id, { forUpdate: true });
@@ -419,7 +424,7 @@ export class WishlistService implements WishlistPublicApi {
       const live = await tx.alertsOfItems([item.id]);
       for (const kind of adding) {
         if (live.some((a) => a.kind === kind)) continue;
-        await tx.insertAlert(this.alertRow(customerId, { itemId: item.id, productId: item.product_id, variantId: item.variant_id, sellerId, kind, targetPrice: null, referencePrice: reference }));
+        await tx.insertAlert(this.alertRow(customerId, { itemId: item.id, productId: item.product_id, variantId: item.variant_id, sellerId, kind, targetPrice: null, referencePrice: reference, armedAt }));
       }
     });
   }
@@ -531,8 +536,9 @@ export class WishlistService implements WishlistPublicApi {
       body.kind === 'price_drop'
         ? await this.referencePrice(lk, { productId: product.id, variantId, sellerId, itemOfferId: item?.offer_id ?? null, firstVariantId: product.variants[0]?.id ?? null })
         : null;
+    const armedAt = body.kind === 'back_in_stock' ? await this.engine.armedAtFor({ product_id: product.id, variant_id: variantId, seller_id: sellerId, item_offer_id: item?.offer_id ?? null }) : null;
     const row = await this.repo.insertAlert(
-      this.alertRow(customerId, { itemId: item?.id ?? null, productId: product.id, variantId, sellerId, kind: body.kind, targetPrice: target?.amount ?? null, referencePrice: reference?.amount ?? null }),
+      this.alertRow(customerId, { itemId: item?.id ?? null, productId: product.id, variantId, sellerId, kind: body.kind, targetPrice: target?.amount ?? null, referencePrice: reference?.amount ?? null, armedAt }),
     );
     return (await this.views.alerts([row], lk))[0]!;
   }
@@ -548,12 +554,16 @@ export class WishlistService implements WishlistPublicApi {
     const a = await this.ownAlert(customerId, id);
     if (action === 'resume' && a.state === 'active') return (await this.views.alerts([a]))[0]!;
     if (action === 'resume' || (action === 'rearm' && a.state === 'triggered')) await this.checkAlertRoom(customerId, 1);
+    // a rearmed back-in-stock alert waits for a stock-out first when the item can be bought now
+    const item = action === 'rearm' && a.kind === 'back_in_stock' && a.item_id ? await this.repo.getItem(customerId, a.item_id) : undefined;
+    const armedAt = action === 'rearm' && a.kind === 'back_in_stock' ? await this.engine.armedAtFor({ product_id: a.product_id, variant_id: a.variant_id, seller_id: a.seller_id, item_offer_id: item?.offer_id ?? null }) : undefined;
     const row = await this.repo.transaction(async (tx) => {
       const locked = await tx.getAlert(customerId, a.id, { forUpdate: true });
       if (!locked || locked.state === 'removed') throw notFound('Alert');
       const state = wishlistAlertMachine.next(locked.state as AlertState, action);
       const patch: Partial<AlertRow> = { state, paused_reason: action === 'pause' ? PAUSED.byCustomer : null };
       if (action === 'rearm' && locked.kind === 'price_drop') patch.reference_price = locked.triggered_price ?? locked.reference_price;
+      if (armedAt !== undefined && locked.state === 'triggered') patch.armed_at = armedAt;
       return tx.updateAlert(locked.id, patch);
     });
     return (await this.views.alerts([row]))[0]!;
@@ -623,6 +633,12 @@ export class WishlistService implements WishlistPublicApi {
    * offer, for the variant and whole-product alerts (productId on the payload), narrowed by the alert's seller.
    */
   async onStockChangedFromInventory(event: EventPayload<'inventory.stock.changed'>): Promise<void> {
+    if ((event.available <= 0 && event.previousAvailable > 0) || (event.archived && event.previousAvailable > 0)) {
+      // out of stock: back-in-stock alerts switched on while it was in stock are armed (once nothing they follow is buyable)
+      const productIds = event.productId ? [event.productId] : await this.repo.productIdsForVariant(event.variantId);
+      for (const productId of productIds) await this.engine.armUnavailable({ productId, variantId: event.variantId, offerId: event.offerId ?? '', sellerId: event.sellerId ?? null });
+      return;
+    }
     if (!(event.previousAvailable <= 0 && event.available > 0) || event.archived) return;
     if (event.offerId) {
       const offer = await this.ctx.use('offers').getOffer(event.offerId).catch(() => null);
@@ -644,6 +660,9 @@ export class WishlistService implements WishlistPublicApi {
 
   /** offers.offer.status_changed: Evaluate back-in-stock alerts for reactivated offers; clear saved offer ids of closed offers */
   async onOfferStatusChangedFromOffers(event: EventPayload<'offers.offer.status_changed'>): Promise<void> {
+    if (event.from === 'active' && event.to !== 'active') {
+      await this.engine.armUnavailable({ productId: event.productId, variantId: event.variantId, offerId: event.offerId, sellerId: event.sellerId ?? null });
+    }
     if (CLOSED_OFFER.has(event.to)) {
       const n = await this.repo.clearOffer(event.offerId);
       if (n) this.ctx.log.info({ offerId: event.offerId, items: n }, 'wishlist: saved offer closed; items show the featured offer');

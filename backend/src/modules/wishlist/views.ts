@@ -212,6 +212,7 @@ export class Views {
           triggeredAt: a.triggered_at ? iso(a.triggered_at) : null,
           triggeredPrice: m(a.triggered_price),
           pausedReason: a.state === 'paused' ? a.paused_reason : null,
+          armedAt: a.armed_at ? a.armed_at.toISOString() : null,
           createdAt: iso(a.created_at),
         };
       }),

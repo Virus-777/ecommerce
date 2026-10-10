@@ -1,6 +1,7 @@
 import type { Migration } from '../../../../../kernel/migrations/index.js';
 import { m0001Init } from './0001_init.js';
 import { m0002ItemKeyNullsNotDistinct } from './0002_item_key_nulls_not_distinct.js';
+import { m0003AlertArmedAt } from './0003_alert_armed_at.js';
 
 /** In order. Never edit an applied migration: add the next file and bump the module version. */
-export const migrations: Migration[] = [m0001Init, m0002ItemKeyNullsNotDistinct];
+export const migrations: Migration[] = [m0001Init, m0002ItemKeyNullsNotDistinct, m0003AlertArmedAt];
