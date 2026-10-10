@@ -770,7 +770,7 @@ export class SearchQueries extends SearchIndexer {
     return { items, ...info };
   }
 
-  protected pageTypeOf(p: Prepared): string {
+  protected pageTypeOf(p: Prepared): 'search' | 'category' | 'brand' | 'seller_store' | 'official_store' | 'deals' | 'collection' {
     if (p.mode.kind === 'search') return 'search';
     if (p.mode.kind === 'seller') return 'seller_store';
     if (p.mode.kind === 'category') return p.engineQuery.filters.onSale ? 'deals' : 'category';
@@ -802,7 +802,7 @@ export class SearchQueries extends SearchIndexer {
       a.sponsoredForResults({
         personalizationAllowed: privacy.personalizationAllowed,
         ...(privacy.customerId ? { customerId: privacy.customerId } : {}),
-        page: { page: this.pageTypeOf(p) as never },
+        page: this.pageTypeOf(p),
         ...(p.text.normalized ? { query: p.text.correctedTo ?? p.text.normalized } : {}),
         ...(p.category ? { categoryId: p.category.node.id } : {}),
         visitorId: principal?.sessionId ?? 'anonymous',

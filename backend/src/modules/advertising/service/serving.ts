@@ -12,9 +12,9 @@ import type { Principal } from '../../../kernel/auth/index.js';
 import type { Scope } from '../../../kernel/auth/scope.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
-import type { AdImpression, AdPreview, PageType, PopupTrigger, PromotedOfferCard, RotationRule, ServeDecision, ServeRequest, SponsoredProductSlot, TrackEvent } from '../../../spec/advertising.js';
+import type { AdImpression, AdPreview, PopupTrigger, PromotedOfferCard, RotationRule, ServeDecision, ServeRequest, SponsoredProductSlot, TrackEvent } from '../../../spec/advertising.js';
 import type * as common from '../../../spec/common.js';
-import { advertiserIsOwn, footnoteFor, frequencyBlock, isLayoutPosition, isPageType, OVERLAY_KEYS, ownAdvertiserName, rank, suppressionUntil, windowDaysOf } from '../domain/rules.js';
+import { advertiserIsOwn, footnoteFor, frequencyBlock, isLayoutPosition, isPageType, OVERLAY_KEYS, ownAdvertiserName, rank, suppressionUntil, windowDaysOf, type PageTypeName } from '../domain/rules.js';
 import { eventId, signImpression, verifyImpression, visitorKey, type ImpressionClaims } from '../domain/token.js';
 import type { CampaignRec, CreativeRec, PlacementRec } from '../ports.js';
 import { Part, SYSTEM, type OfferInfo } from './core.js';
@@ -116,16 +116,16 @@ export class ServingPart extends Part {
 
   /* ---------------------------------------------------------------- positions and blocked pages */
 
-  async adPositionsFor(page: PageType): Promise<{ placementKey: string; name: string; enabled: boolean }[]> {
-    const p = page?.page;
+  async adPositionsFor(page: PageTypeName): Promise<{ placementKey: string; name: string; enabled: boolean }[]> {
+    const p: unknown = page;
     if (!isPageType(p) || (await this.core.rules()).blockedPages.includes(p)) return [];
     const rows = (await this.core.placementRows()).filter((x) => ((x.eligible_pages ?? []) as string[]).includes(p) && isLayoutPosition(x.key));
     const order = (k: string) => (k === 'opening_fullscreen' ? 0 : 1);
     return rows.sort((a, b) => order(a.key) - order(b.key) || (a.id < b.id ? -1 : 1)).map((x) => ({ placementKey: x.key, name: x.name, enabled: x.enabled }));
   }
 
-  async isAdBlockedPage(page: PageType): Promise<boolean> {
-    return (await this.core.rules()).blockedPages.includes(page?.page);
+  async isAdBlockedPage(page: PageTypeName): Promise<boolean> {
+    return (await this.core.rules()).blockedPages.includes(page);
   }
 
   /* ---------------------------------------------------------------- the decision */
@@ -210,8 +210,8 @@ export class ServingPart extends Part {
   }
 
   /** Sponsored product cards for a results list (search, catalog); first page only is the caller's job */
-  async sponsoredForResults(ctx: { page: PageType; query?: string; categoryId?: string; productId?: string; visitorId: string; sessionId: string; device: string; organicOfferIds: string[]; personalizationAllowed?: boolean; customerId?: string }): Promise<SponsoredProductSlot[]> {
-    const page = ctx.page?.page;
+  async sponsoredForResults(ctx: { page: PageTypeName; query?: string; categoryId?: string; productId?: string; visitorId: string; sessionId: string; device: string; organicOfferIds: string[]; personalizationAllowed?: boolean; customerId?: string }): Promise<SponsoredProductSlot[]> {
+    const page: unknown = ctx.page;
     const rules = await this.core.rules();
     if (!isPageType(page) || rules.blockedPages.includes(page)) return [];
     const placement = (await this.core.placementRows()).find((p) => p.key === 'sponsored_product');
@@ -269,8 +269,21 @@ export class ServingPart extends Part {
     const rows = await this.repo.frequencyRows(v.keys, ids);
     const needToday = list.filter((e) => e.m.cap?.perDay && e.m.cap?.perWindow).map((e) => e.m.row.id);
     const needTotal = list.filter((e) => e.m.cap?.perCampaign).map((e) => e.m.row.id);
-    const today = needToday.length ? await this.repo.displayCounts(v.keys, needToday, this.core.dayStart(this.core.today(now))) : new Map<string, number>();
-    const total = needTotal.length ? await this.repo.displayCounts(v.keys, needTotal, null) : new Map<string, number>();
+    // counters on frequency_state (one row per key; the keys count the same displays, so the largest counts).
+    // Rows from before display_day was kept that displayed today count today's displays from ad_events, once.
+    const day = this.core.today(now);
+    const dayStart = this.core.dayStart(day);
+    const today = new Map<string, number>();
+    const total = new Map<string, number>();
+    const legacyToday: string[] = [];
+    for (const r of rows) {
+      if (needToday.includes(r.campaign_id)) {
+        if (r.display_day === day) today.set(r.campaign_id, Math.max(today.get(r.campaign_id) ?? 0, r.day_displays ?? 0));
+        else if (r.display_day == null && r.last_display_at && r.last_display_at.getTime() >= dayStart.getTime()) legacyToday.push(r.campaign_id);
+      }
+      if (needTotal.includes(r.campaign_id)) total.set(r.campaign_id, Math.max(total.get(r.campaign_id) ?? 0, r.total_displays ?? 0));
+    }
+    if (legacyToday.length) for (const [id, n] of await this.repo.displayCounts(v.keys, legacyToday, dayStart)) today.set(id, Math.max(today.get(id) ?? 0, n));
     const rules = await this.core.rules();
     let out = list.filter((e) => {
       if (e.m.row.delivery_cap !== null && e.displays >= e.m.row.delivery_cap) return false;
@@ -495,7 +508,8 @@ export class ServingPart extends Part {
       }
       accepted++;
       if (kind === 'display') {
-        await this.repo.recordDisplay(c.v, c.c, c.s, now, windowDaysOf(campaign.frequency_cap as never));
+        const day = this.core.today(now);
+        await this.repo.recordDisplay(c.v, c.c, c.s, now, windowDaysOf(campaign.frequency_cap as never), { day, start: this.core.dayStart(day) });
         this.countDisplay(c.c);
       } else if (kind === 'dismiss' || kind === 'close') {
         const rules = await this.core.rules();

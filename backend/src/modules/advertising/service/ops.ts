@@ -17,7 +17,6 @@ type CreativeStatus = Parameters<typeof creativeReviewMachine.next>[0];
 export const enforcementMarker = (enforcementId: string) => `(enforcement ${enforcementId})`;
 import { CHARGE_TARGET, VOID_ACTION } from './billing.js';
 import { RULES_ACTION, RULES_TARGET } from './setup.js';
-import { OFFER_PRODUCT, PAUSE_ACTIONS } from './views.js';
 
 /** Automatic pauses the sweep may lift when the cause is gone (seller and trust pauses stay for staff) */
 const SWEEP_RESUMABLE = ['offer', 'stock', 'product', 'availability', 'promotion'];
@@ -35,6 +34,13 @@ export class OpsPart extends Part {
     return this.repo.getMany('campaigns', [...new Set(items.map((i) => i.campaign_id))]);
   }
 
+  /** Campaigns promoting these products, directly or through an offer of them (campaign_items.product_id) */
+  private async campaignsForProducts(productIds: string[]): Promise<CampaignRec[]> {
+    if (!productIds.length) return [];
+    const items = await this.repo.find('campaign_items', { product_id: productIds });
+    return this.repo.getMany('campaigns', [...new Set(items.map((i) => i.campaign_id))]);
+  }
+
   async autoPause(rows: readonly CampaignRec[], cause: string, reason: string): Promise<number> {
     let n = 0;
     for (const r of rows.filter((x) => x.status === 'live' || x.status === 'scheduled')) {
@@ -48,18 +54,13 @@ export class OpsPart extends Part {
     return n;
   }
 
-  /** Resumes campaigns whose latest pause was automatic for one of the causes, when they can run again */
+  /** Resumes campaigns paused automatically for one of the causes (pause_cause), when they can run again */
   async autoResume(rows: readonly CampaignRec[], causes: readonly string[]): Promise<number> {
     const paused = rows.filter((x) => x.status === 'paused');
     if (!paused.length) return 0;
-    const last = await this.repo.lastLogs(
-      paused.map((r) => r.id),
-      PAUSE_ACTIONS,
-    );
     let n = 0;
     for (const r of paused) {
-      const action = last.get(r.id)?.action ?? '';
-      const cause = action.startsWith('auto_pause:') ? action.slice('auto_pause:'.length) : null;
+      const cause = r.pause_cause;
       if (!cause || !causes.includes(cause)) continue;
       if (await this.parts.campaigns.unavailability(r)) continue;
       try {
@@ -122,7 +123,7 @@ export class OpsPart extends Part {
 
   async onProductPublicationChanged(e: EventPayload<'catalog.product.publication_changed'>) {
     if (!isUuid(e.productId)) return;
-    const rows = await this.campaignsFor(['product', OFFER_PRODUCT], [e.productId]);
+    const rows = await this.campaignsForProducts([e.productId]);
     if (!rows.length) return;
     this.core.forgetOffers();
     if (e.to === 'hidden' || e.to === 'suspended') await this.autoPause(rows, 'product', `Promoted product is ${e.to}`);
@@ -152,7 +153,7 @@ export class OpsPart extends Part {
     const offerIds = targets.filter((t) => t.type === 'offer' && isUuid(t.id)).map((t) => t.id!);
     const productIds = targets.filter((t) => t.type === 'product' && isUuid(t.id)).map((t) => t.id!);
     if (!offerIds.length && !productIds.length) return;
-    const rows = [...(await this.campaignsFor(['offer'], offerIds)), ...(await this.campaignsFor(['product', OFFER_PRODUCT], productIds))];
+    const rows = [...(await this.campaignsFor(['offer'], offerIds)), ...(await this.campaignsForProducts(productIds))];
     const seen = new Set<string>();
     // the enforcement id stays with the revoke or reject reason, so trust.enforcement.reversed can find them
     const reason = `Trust enforcement: ${e.reason} ${enforcementMarker(e.enforcementId)}`;
@@ -193,7 +194,7 @@ export class OpsPart extends Part {
         const c = await tx.get('campaigns', id, { forUpdate: true });
         if (!c || !adCampaignMachine.can(c.status as CampaignStatus, 'reopen')) continue;
         const to = adCampaignMachine.next(c.status as CampaignStatus, 'reopen');
-        const row = await tx.update('campaigns', id, { status: to, paused_reason: null, updated_at: now, version: c.version + 1 });
+        const row = await tx.update('campaigns', id, { status: to, paused_reason: null, paused_by: null, paused_at: null, pause_cause: null, rejected_reason: null, updated_at: now, version: c.version + 1 });
         await this.core.log(tx, id, 'reopen', by, { from: c.status, to, reason: note });
         reopened.push({ row, from: c.status });
       }
@@ -262,11 +263,12 @@ export class OpsPart extends Part {
   /** Repoint ads, requests and creatives from the duplicate product to the kept one; history stays on the ad */
   async onProductMerged(e: EventPayload<'catalog.product.merged'>) {
     if (!isUuid(e.duplicateProductId) || !isUuid(e.keptProductId)) return;
-    const items = await this.repo.campaignsPromoting(['product', OFFER_PRODUCT], [e.duplicateProductId]);
+    const items = await this.repo.find('campaign_items', { product_id: [e.duplicateProductId] });
     const campaignIds = [...new Set(items.map((i) => i.campaign_id))];
     for (const id of campaignIds) {
       await this.repo.transaction(async (tx) => {
-        await tx.updateWhere('campaign_items', { campaign_id: id, kind: ['product', OFFER_PRODUCT], target_id: e.duplicateProductId }, { target_id: e.keptProductId });
+        await tx.updateWhere('campaign_items', { campaign_id: id, kind: 'product', target_id: e.duplicateProductId }, { target_id: e.keptProductId });
+        await tx.updateWhere('campaign_items', { campaign_id: id, product_id: e.duplicateProductId }, { product_id: e.keptProductId });
         const c = await tx.get('campaigns', id, { forUpdate: true });
         const dest = (c?.destination ?? null) as { kind?: string; targetId?: string | null; url?: string } | null;
         if (c && dest && (dest.targetId === e.duplicateProductId || dest.url?.includes(e.duplicateProductId))) {
@@ -342,10 +344,14 @@ export class OpsPart extends Part {
   async expireFrequencyState(): Promise<void> {
     const now = this.now();
     const ended = await this.repo.find('campaigns', { status: ['finished', 'archived', 'rejected'] }, { orderBy: [['updated_at', 'desc']], limit: 1000 });
+    // a running campaign with a total cap (perCampaign) keeps its counters until it ends
+    const running = await this.repo.find('campaigns', { status: ['scheduled', 'live', 'paused'] });
+    const keep = running.filter((c) => (c.frequency_cap as { perCampaign?: number | null } | null)?.perCampaign).map((c) => c.id);
     await this.repo.expireFrequency(
       now,
       new Date(now.getTime() - 31 * 86_400_000),
       ended.map((c) => c.id),
+      keep,
     );
   }
 

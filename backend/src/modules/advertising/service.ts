@@ -1,7 +1,8 @@
 import type { EventPayload } from '../../kernel/events/index.js';
 import { isUuid } from '../../kernel/lib/ids.js';
 import type * as common from '../../spec/common.js';
-import type { AdCampaignSummary, AdsDashboard, AdvertisingPublicApi, CampaignDayPerformance, PageType, SponsoredProductSlot } from '../../spec/advertising.js';
+import type { AdCampaignSummary, AdsDashboard, AdvertisingPublicApi, CampaignDayPerformance, SponsoredProductSlot } from '../../spec/advertising.js';
+import type { PageTypeName } from './domain/rules.js';
 import { BillingPart } from './service/billing.js';
 import { CampaignsPart } from './service/campaigns.js';
 import { Core, type AdvertisingServiceDeps } from './service/core.js';
@@ -48,12 +49,12 @@ export class AdvertisingService implements AdvertisingPublicApi {
   /* ---------------- public API (in-process) */
 
   /** Sponsored product cards and their positions for a results list (max per page from the placement; relevance first, then priority). Only eligible, in-stock offers are returned. */
-  sponsoredForResults(ctx: { page: PageType; query?: string; categoryId?: string; productId?: string; visitorId: string; sessionId: string; device: string; organicOfferIds: string[]; personalizationAllowed: boolean; customerId?: string }): Promise<SponsoredProductSlot[]> {
+  sponsoredForResults(ctx: { page: PageTypeName; query?: string; categoryId?: string; productId?: string; visitorId: string; sessionId: string; device: string; organicOfferIds: string[]; personalizationAllowed: boolean; customerId?: string }): Promise<SponsoredProductSlot[]> {
     return this.serving.sponsoredForResults(ctx);
   }
 
   /** Ad positions on a page, so content can show them as locked markers in homepage sections. */
-  adPositionsFor(page: PageType): Promise<{ placementKey: string; name: string; enabled: boolean }[]> {
+  adPositionsFor(page: PageTypeName): Promise<{ placementKey: string; name: string; enabled: boolean }[]> {
     return this.serving.adPositionsFor(page);
   }
 
@@ -65,7 +66,7 @@ export class AdvertisingService implements AdvertisingPublicApi {
   }
 
   /** True for checkout, payment results, order tracking and returns; used by front-end shells to skip the serve call. */
-  isAdBlockedPage(page: PageType): Promise<boolean> {
+  isAdBlockedPage(page: PageTypeName): Promise<boolean> {
     return this.serving.isAdBlockedPage(page);
   }
 

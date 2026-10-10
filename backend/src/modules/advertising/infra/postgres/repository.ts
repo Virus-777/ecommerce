@@ -189,13 +189,20 @@ export function createPostgresAdvertisingRepository(db: Kysely<AdvertisingDb>, i
       const r = await d.selectFrom('frequency_state').select('campaign_id').where('visitor_key', 'in', uniq(visitorKeys)).limit(1).executeTakeFirst();
       return Boolean(r);
     },
-    async recordDisplay(visitorKeys, campaignId, sessionId, now, windowDays) {
+    async recordDisplay(visitorKeys, campaignId, sessionId, now, windowDays, day) {
       const cutoff = windowDays ? new Date(now.getTime() - windowDays * 86_400_000) : null;
       for (const key of uniq(visitorKeys)) {
+        // a row from before display_day was kept starts the day from the day's display events (ad_events, this event included)
         await sql`
-          insert into advertising.frequency_state (visitor_key, campaign_id, session_id, session_displays, window_displays, window_started_at, last_display_at, suppressed_until)
-          values (${key}, ${campaignId}, ${sessionId}, 1, 1, ${now}, ${now}, null)
+          insert into advertising.frequency_state (visitor_key, campaign_id, session_id, session_displays, window_displays, window_started_at, display_day, day_displays, total_displays, last_display_at, suppressed_until)
+          values (${key}, ${campaignId}, ${sessionId}, 1, 1, ${now}, ${day.day}, 1, 1, ${now}, null)
           on conflict (visitor_key, campaign_id) do update set
+            day_displays = case
+              when frequency_state.display_day = excluded.display_day then frequency_state.day_displays + 1
+              when frequency_state.display_day is null and frequency_state.last_display_at >= ${day.start}::timestamptz then greatest(1, (select count(*)::int from advertising.ad_events e where e.visitor_key = frequency_state.visitor_key and e.campaign_id = frequency_state.campaign_id and e.kind = 'display' and e.at >= ${day.start}::timestamptz))
+              else 1 end,
+            display_day = excluded.display_day,
+            total_displays = frequency_state.total_displays + 1,
             session_displays = case when frequency_state.session_id = excluded.session_id then frequency_state.session_displays + 1 else 1 end,
             session_id = excluded.session_id,
             window_displays = case when ${cutoff}::timestamptz is null or frequency_state.window_started_at > ${cutoff}::timestamptz then frequency_state.window_displays + 1 else 1 end,
@@ -206,8 +213,8 @@ export function createPostgresAdvertisingRepository(db: Kysely<AdvertisingDb>, i
     async recordDismissal(visitorKeys, campaignId, sessionId, until, now) {
       for (const key of uniq(visitorKeys)) {
         await sql`
-          insert into advertising.frequency_state (visitor_key, campaign_id, session_id, session_displays, window_displays, window_started_at, last_display_at, suppressed_until)
-          values (${key}, ${campaignId}, ${sessionId}, 0, 0, ${now}, null, ${until})
+          insert into advertising.frequency_state (visitor_key, campaign_id, session_id, session_displays, window_displays, window_started_at, display_day, day_displays, total_displays, last_display_at, suppressed_until)
+          values (${key}, ${campaignId}, ${sessionId}, 0, 0, ${now}, null, 0, 0, null, ${until})
           on conflict (visitor_key, campaign_id) do update set
             session_displays = case when frequency_state.session_id = excluded.session_id then frequency_state.session_displays else 0 end,
             session_id = excluded.session_id,
@@ -227,11 +234,12 @@ export function createPostgresAdvertisingRepository(db: Kysely<AdvertisingDb>, i
       for (const r of await q.groupBy('campaign_id').execute()) out.set(r.campaign_id, r.n);
       return out;
     },
-    async expireFrequency(now, oldestWindowStart, endedCampaignIds) {
+    async expireFrequency(now, oldestWindowStart, endedCampaignIds, keepCampaignIds = []) {
       let n = 0;
       if (endedCampaignIds.length) n += Number((await d.deleteFrom('frequency_state').where('campaign_id', 'in', uniq(endedCampaignIds)).executeTakeFirst())?.numDeletedRows ?? 0);
-      const r = await d
-        .deleteFrom('frequency_state')
+      let q = d.deleteFrom('frequency_state');
+      if (keepCampaignIds.length) q = q.where('campaign_id', 'not in', uniq(keepCampaignIds));
+      const r = await q
         .where((eb: any) => eb.or([eb('suppressed_until', 'is', null), eb('suppressed_until', '<', now)]))
         .where('window_started_at', '<', oldestWindowStart)
         .where((eb: any) => eb.or([eb('last_display_at', 'is', null), eb('last_display_at', '<', oldestWindowStart)]))

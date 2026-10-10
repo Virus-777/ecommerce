@@ -81,9 +81,9 @@ describe('scenario 8: opening advertisement', () => {
     for (const page of ['checkout', 'payment_result', 'order_tracking', 'returns']) {
       const d = await serve(k, { page, visitorId: visitor() });
       expect(d).toMatchObject({ overlay: null, slots: {}, sponsoredProducts: [] });
-      expect(await k.svc.isAdBlockedPage({ page: page as never })).toBe(true);
+      expect(await k.svc.isAdBlockedPage(page as never)).toBe(true);
     }
-    expect(await k.svc.isAdBlockedPage({ page: 'home' })).toBe(false);
+    expect(await k.svc.isAdBlockedPage('home')).toBe(false);
   });
 
   it('one overlay per page view: the higher priority shows; a pop-up is skipped when an overlay already showed', async () => {
@@ -170,12 +170,12 @@ describe('tracking', () => {
 
 describe('positions for content and sponsored products for search', () => {
   it('adPositionsFor lists the layout positions of a page, the opening ad first', async () => {
-    expect(await k.svc.adPositionsFor({ page: 'home' })).toEqual([
+    expect(await k.svc.adPositionsFor('home')).toEqual([
       { placementKey: 'opening_fullscreen', name: 'Opening full-screen ad', enabled: true },
       { placementKey: 'home_banner', name: 'Sponsored brand banner', enabled: true },
       { placementKey: 'sponsored_store', name: 'Sponsored store or brand', enabled: false },
     ]);
-    expect(await k.svc.adPositionsFor({ page: 'checkout' })).toEqual([]);
+    expect(await k.svc.adPositionsFor('checkout')).toEqual([]);
   });
 
   it('sponsoredForResults returns labelled, relevant, in-stock promoted offers at the placement positions', async () => {
@@ -196,12 +196,12 @@ describe('positions for content and sponsored products for search', () => {
       dismissal: null,
       frequencyCap: null,
     });
-    const slots = await k.svc.sponsoredForResults({ page: { page: 'search' }, query: 'brass lamp', visitorId: 'v1', sessionId: 's1', device: 'web', organicOfferIds: [], personalizationAllowed: false });
+    const slots = await k.svc.sponsoredForResults({ page: 'search', query: 'brass lamp', visitorId: 'v1', sessionId: 's1', device: 'web', organicOfferIds: [], personalizationAllowed: false });
     expect(slots).toHaveLength(1);
     expect(slots[0]).toMatchObject({ position: 3, impression: { campaignId: c.id, label: 'Sponsored', promotedOffer: { offerId: lamp.id, title: 'Brass desk lamp', price: { amount: 4900 }, wasPrice: { amount: 5900 }, sellerName: 'Marketly Official Store' } } });
     expect(low.stock).toBe(3);
     // nothing on blocked pages
-    expect(await k.svc.sponsoredForResults({ page: { page: 'checkout' }, visitorId: 'v1', sessionId: 's1', device: 'web', organicOfferIds: [], personalizationAllowed: false })).toEqual([]);
+    expect(await k.svc.sponsoredForResults({ page: 'checkout', visitorId: 'v1', sessionId: 's1', device: 'web', organicOfferIds: [], personalizationAllowed: false })).toEqual([]);
     // the serve decision fills sponsored products too
     const d = await serve(k, { page: 'search', slots: ['sponsored_product'], context: { query: 'towels' } });
     expect(d.sponsoredProducts.map((s: any) => s.impression.promotedOffer.offerId)).toEqual([other.id]);

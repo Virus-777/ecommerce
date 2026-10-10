@@ -91,7 +91,7 @@ describe('a sponsored product campaign, end to end', () => {
     expect(seen.filter((e) => e.name === 'advertising.campaign.status_changed' && (e.payload as any).campaignId === campaignId).map((e) => (e.payload as any).to)).toEqual(['in_review', 'approved', 'scheduled', 'live']);
 
     const api = app.kernel.boot.apis.get('advertising') as any;
-    const slots = await api.sponsoredForResults({ page: { page: 'search' }, query: 'aurora headphones', visitorId: 'v1', sessionId: 's1', device: 'web', organicOfferIds: [] });
+    const slots = await api.sponsoredForResults({ page: 'search', query: 'aurora headphones', visitorId: 'v1', sessionId: 's1', device: 'web', organicOfferIds: [] });
     expect(slots).toEqual([expect.objectContaining({ position: 3, impression: expect.objectContaining({ campaignId, label: 'Sponsored', sellerName: 'Northwind Audio', promotedOffer: expect.objectContaining({ offerId: listing.offerId, price: { amount: 18900, currency: 'USD' } }) }) })]);
 
     // a visitor clicks the card: $0.35 is charged within the limits
