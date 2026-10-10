@@ -162,10 +162,10 @@ export class Packing {
     if (p.status !== 'open') throw this.illegal(p.status === 'labelled' ? 'The package is labelled; void the label to change its contents' : `The package is ${p.status}`, p.status, 'scan');
     const code = body.code?.trim() ?? '';
     const lineOf = (orderItemId: string) => lines.find((l) => l.order_item_id === orderItemId);
-    const matching = items.filter((it) => {
-      const l = lineOf(it.order_item_id);
-      return itemMatches(code, { sku: l?.sku ?? '', stockItemId: it.stock_item_id });
-    });
+    const bySku = (it: (typeof items)[number], gtin?: string) => itemMatches(code, { sku: lineOf(it.order_item_id)?.sku ?? '', stockItemId: it.stock_item_id, extraCodes: [gtin] });
+    // the SKU label, else the variant GTIN (the manufacturer barcode)
+    const gtins = items.some((it) => bySku(it)) ? new Map<string, string>() : await this.core.gtins(items.map((it) => it.stock_item_id));
+    const matching = items.filter((it) => bySku(it, gtins.get(it.stock_item_id)));
     const target = matching.find((it) => it.scanned < it.quantity);
     const refuse = async (result: string, message: string, expected: unknown) => {
       await this.core.logScan({ context: 'pack', contextId: id, code, result, actor: by.actor, station: p.station });
@@ -290,7 +290,8 @@ export class Packing {
     let result;
     try {
       result = await shipping.createLabel(
-        { groupId: f.seller_group_id, kind: 'outbound', items: items.map((i) => ({ orderItemId: i.order_item_id, quantity: i.quantity })), parcel: parcelOf(p.weight, dims), carrierServiceId: q.carrierServiceId, keepPromise: true, to: f.ship_to },
+        // format: zpl for thermal printers, pdf otherwise; the label file comes back in that format
+        { groupId: f.seller_group_id, kind: 'outbound', items: items.map((i) => ({ orderItemId: i.order_item_id, quantity: i.quantity })), parcel: parcelOf(p.weight, dims), carrierServiceId: q.carrierServiceId, keepPromise: true, to: f.ship_to, format: body.format ?? 'pdf' },
         key,
       );
     } catch (err) {

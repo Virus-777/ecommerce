@@ -158,8 +158,7 @@ describe('waves and picking', () => {
     const o = await h.picking([{ item: a, quantity: 1 }]);
     const line = o.fulfillment.lines[0];
     await h.pickAll(o.fulfillment.id);
-    // picked (between pick and pack) cannot hold: the packer reports damage once packing started
-    expect((await h.call('POST', `/fulfillments/${o.fulfillment.id}/report-damage`, { lineId: line.id, quantity: 1, note: 'Cracked', photoIds: [newId()] })).status).toBe(409);
+    // damage found once every line is picked (before packing) is covered in test/pass3.test.ts
     const pkg = await h.call('POST', `/fulfillments/${o.fulfillment.id}/packages`, { station: 'Pack 2' });
     expect(pkg.status, JSON.stringify(pkg.body)).toBe(201);
     expect((await h.call('POST', `/packages/${pkg.body.id}/scan`, { code: 'DMG-A' })).status).toBe(200);
@@ -218,6 +217,7 @@ describe('waves and picking', () => {
         countsAgainstSeller: false,
         refund: { itemAmount: { amount: 0, currency: 'USD' }, discountShare: { amount: 0, currency: 'USD' }, shippingRefund: { amount: 0, currency: 'USD' }, taxRefund: { amount: 0, currency: 'USD' }, total: { amount: 0, currency: 'USD' } },
         paymentIntentId: newId(),
+        notifyCustomer: true,
       });
     const partial = newId();
     await cancel(newId(), a.id, 1, partial); // a split part of the line (another order item id), matched by stock item

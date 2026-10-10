@@ -159,11 +159,12 @@ export class Parcels {
     if (unexpected) {
       await this.core.soft('workqueues', 'unexpected parcel', (w) =>
         w.raise({
+          sourceModule: 'warehouse',
           queueKey: 'warehouse.return_parcels',
           kind: 'unexpected_return_parcel',
           title: `Unexpected return parcel ${row.tracking_number ?? row.return_ref ?? code}`,
           summary: 'A parcel arrived at the warehouse with no approved Official Store return. Find the customer and the order.',
-          subject: { type: 'other', id: row.id, ref: row.tracking_number ?? row.return_ref ?? null, label: 'Return parcel' },
+          subject: { type: 'return_parcel', id: row.id, ref: row.tracking_number ?? row.return_ref ?? null, label: 'Return parcel' },
           priority: body.parcelCondition === 'intact' ? 'normal' : 'high',
           dedupeKey: `return_parcel:${row.id}`,
         }),
@@ -194,12 +195,13 @@ export class Parcels {
     for (const p of late) {
       await this.core.soft('workqueues', 'overdue return parcel', (w) =>
         w.raise({
+          sourceModule: 'warehouse',
           queueKey: 'warehouse.return_parcels',
           kind: 'return_parcel_overdue',
           title: `Return parcel not received${p.return_ref ? `: ${p.return_ref}` : ''}`,
           summary: `Expected at the warehouse by ${p.expected_by}. Check the return shipment's tracking with the customer.`,
           // the parcel is the subject: workqueues closes the item on warehouse.return_parcel.received for this parcel
-          subject: { type: 'other', id: p.id, ref: p.return_ref ?? p.tracking_number ?? null, label: 'Return parcel' },
+          subject: { type: 'return_parcel', id: p.id, ref: p.return_ref ?? p.tracking_number ?? null, label: 'Return parcel' },
           relatedSubjects: p.return_id ? [{ type: 'return', id: p.return_id, ref: p.return_ref }] : null,
           dedupeKey: `return_parcel_overdue:${p.id}`,
         }),
