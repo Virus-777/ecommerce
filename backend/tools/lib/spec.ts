@@ -138,9 +138,12 @@ export function loadModules(): ModuleSpec[] {
     .map((f) => JSON.parse(readFileSync(join(specDir, 'modules', f), 'utf8')) as ModuleSpec);
 }
 
+/** A text source with LF line endings, whatever the checkout (core.autocrlf) wrote: generated code must not depend on it */
+export const readText = (p: string): string => readFileSync(p, 'utf8').replace(/\r\n/g, '\n');
+
 export function loadFragment(module: string): string | null {
   const p = join(gqlDir, 'modules', `${module}.graphql`);
-  return existsSync(p) ? readFileSync(p, 'utf8') : null;
+  return existsSync(p) ? readText(p) : null;
 }
 
 /** kebab-case module name → identifiers */
