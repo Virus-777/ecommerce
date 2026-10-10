@@ -18,7 +18,7 @@ import { TrustService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.0.1',
+  version: '1.1.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
@@ -42,6 +42,9 @@ export default defineModule({
     ctx.events.on("offers.offer.status_changed", (e) => service.onOfferStatusChangedFromOffers(e.payload));
     ctx.events.on("sellers.seller.restricted", (e) => service.onSellerRestrictedFromSellers(e.payload));
     ctx.events.on("sellers.seller.suspended", (e) => service.onSellerSuspendedFromSellers(e.payload));
+    ctx.events.on("sellers.warning.issued", (e) => service.onWarningIssuedFromSellers(e.payload));
+    ctx.events.on("reviews.moderation.decided", (e) => service.onModerationDecidedFromReviews(e.payload));
+    ctx.events.on("messaging.conversation.locked", (e) => service.onConversationLockedFromMessaging(e.payload));
     ctx.events.on("sellers.appeal.submitted", (e) => service.onAppealSubmittedFromSellers(e.payload));
     ctx.events.on("sellers.appeal.decided", (e) => service.onAppealDecidedFromSellers(e.payload));
     ctx.events.on("customers.account.restricted", (e) => service.onAccountRestrictedFromCustomers(e.payload));

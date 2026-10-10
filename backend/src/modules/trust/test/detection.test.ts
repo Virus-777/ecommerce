@@ -64,7 +64,7 @@ describe('detection rules', () => {
     const offerId = newId();
     kit.products.set(productId, { title: 'Brightline S2', brandId: newId() });
     kit.offers.set(offerId, { sellerId, sellerName: 'Cheap Deals', productId, price: 4900 });
-    kit.stats.set(productId, { lowest: 18900, highest: 21900 });
+    for (const price of [18900, 19900, 21900]) kit.offers.set(newId(), { sellerId: newId(), sellerName: 'Peer', productId, price });
     await kit.emit('offers', 'offers.offer.created', { offerId, productId, variantId: newId(), ownerType: 'seller', sellerId, condition: 'new', stockItemId: newId() });
     await kit.job('trust.run-detection');
     expect(await reportsBy('payments.card_testing')).toHaveLength(1);
@@ -118,7 +118,7 @@ describe('referrals from other modules', () => {
     const applicationId = newId();
     const sellerId = newId();
     const { reportId } = await kit.svc.requestAssessment({ subjectType: 'seller_application', subjectId: applicationId, sellerId, question: 'Check the address', requestedBy: { kind: 'staff', id: newId() } });
-    const event = { applicationId, sellerId, categoryIds: [newId()], sellerType: 'business', invited: true };
+    const event = { applicationId, ref: 'SA-1', sellerId, categoryIds: [newId()], sellerType: 'business', invited: true, decisionTargetAt: new Date().toISOString(), duplicateCount: 0 };
     await kit.emit('sellers', 'sellers.application.submitted', event);
     await kit.emit('sellers', 'sellers.application.submitted', event);
     const full = (await kit.call('GET', `${ADMIN}/reports/${reportId}`, staff())).body;
@@ -127,8 +127,8 @@ describe('referrals from other modules', () => {
 
   it('order and lifecycle events are recorded without failing for unknown records', async () => {
     const usd = { amount: 0, currency: 'USD' };
-    await kit.emit('orders', 'orders.order.placed', { orderId: newId(), ref: 'MK-1', checkoutSessionId: newId(), customerId: newId(), guestEmail: null, paymentIntentId: newId(), paymentState: 'accepted', total: { amount: 1000, currency: 'USD' }, couponCodes: [], groups: [], placedAt: new Date().toISOString() });
-    await kit.emit('orders', 'orders.item.cancelled', { orderId: newId(), ref: 'MK-2', groupId: newId(), ownerType: 'seller', sellerId: newId(), itemId: newId(), offerId: newId(), stockItemId: newId(), quantity: 1, cancellationId: newId(), initiatedBy: 'staff', reasonCode: 'fraud', beforeDispatch: true, countsAgainstSeller: false, refund: { itemAmount: usd, discountShare: usd, shippingRefund: usd, taxRefund: usd, total: usd }, paymentIntentId: newId(), trustReportId: newId() });
+    await kit.emit('orders', 'orders.order.placed', { orderId: newId(), ref: 'MK-1', checkoutSessionId: newId(), customerId: newId(), guestEmail: null, paymentIntentId: newId(), paymentState: 'accepted', total: { amount: 1000, currency: 'USD' }, couponCodes: [], groups: [], placedAt: new Date().toISOString(), attemptNo: 1, contactName: 'Ana' });
+    await kit.emit('orders', 'orders.item.cancelled', { orderId: newId(), ref: 'MK-2', groupId: newId(), ownerType: 'seller', sellerId: newId(), itemId: newId(), offerId: newId(), stockItemId: newId(), quantity: 1, cancellationId: newId(), initiatedBy: 'staff', reasonCode: 'fraud', beforeDispatch: true, countsAgainstSeller: false, refund: { itemAmount: usd, discountShare: usd, shippingRefund: usd, taxRefund: usd, total: usd }, paymentIntentId: newId(), trustReportId: newId(), notifyCustomer: true });
     await kit.emit('finance', 'finance.hold.placed', { holdId: newId(), sellerId: newId(), amount: { amount: 100, currency: 'USD' }, reasonCode: 'trust', reason: 'x', reviewDate: '2030-01-01', trustReportId: newId() });
     await kit.emit('support', 'support.case.opened', { caseId: newId(), ref: 'CS-1', kind: 'trust_outreach', category: 'trust', priority: 'normal', customerId: newId(), orderItemIds: [], handler: 'support' });
     await kit.emit('customers', 'customers.account.restriction_lifted', { customerId: newId(), restrictionId: newId(), scope: 'messaging', trustEnforcementId: newId() });

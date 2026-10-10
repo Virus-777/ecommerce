@@ -21,7 +21,7 @@ describe('reports from customers and sellers', () => {
     const created = kit.last('trust.report.created');
     expect(created).toMatchObject({ reportId: res.body.id, type: 'counterfeit', source: 'customer' });
     expect(created.subjects.map((s: any) => s.type).sort()).toEqual(['offer', 'seller']);
-    expect(kit.callsOf('media.attach').at(-1)).toEqual([media, expect.objectContaining({ module: 'trust', kind: 'case_evidence' }), { kind: 'customer', id: me }]);
+    expect(kit.callsOf('media.attach').at(-1)).toEqual([media, expect.objectContaining({ module: 'trust', kind: 'trust_evidence' }), { kind: 'customer', id: me }]);
 
     // staff see the reporter; another customer does not see the report at all
     const full = await kit.call('GET', `${ADMIN}/reports/${res.body.id}`, staff());
@@ -99,7 +99,7 @@ describe('reports from customers and sellers', () => {
     expect(done.status, JSON.stringify(done.body)).toBe(200);
     // the reporter is named by the customer id (stored under the account id or the customer id)
     expect(kit.of('trust.report.resolved').filter((e) => e.reportId === id)).toEqual([
-      { reportId: id, ref: expect.stringMatching(/^TR-/), outcome: 'action_taken', reporterOutcome: 'We removed the listing. Thank you.', reporters: [{ kind: 'customer', customerId, contactName: expect.toBeOneOf([null, 'Ana Buyer']), contactEmail: null }] },
+      { reportId: id, ref: expect.stringMatching(/^TR-/), outcome: 'action_taken', reporterOutcome: 'We removed the listing. Thank you.', reporters: [{ kind: 'customer', customerId, contactName: expect.toBeOneOf([null, 'Ana Buyer']), contactEmail: expect.stringMatching(/@example.com$/) }] },
     ]);
     const mine = (await kit.call('GET', `${STORE}/reports/${id}`, me)).body;
     expect(mine).toMatchObject({ statusLabel: 'action_taken', outcome: 'We removed the listing. Thank you.', expectedBy: null });

@@ -28,9 +28,10 @@ export const SYSTEM: common.Actor = { kind: 'system', id: null, name: 'Trust and
 /**
  * How an enforcement is confirmed:
  *  event      the owning module executes it on trust.enforcement.recorded (or in its own screen) and one of its events
- *             that trust consumes confirms it; execution-check flags it failed after executionGraceMinutes
- *  on_record  nothing trust consumes can confirm it (owner acts in its screen, or the executing module publishes no
- *             event trust consumes): the owner's acceptance is the confirmation, so it is applied when recorded
+ *             that trust consumes confirms it (it stays pending until then, even when accepted with externalRef);
+ *             execution-check flags it failed after executionGraceMinutes
+ *  on_record  nothing trust consumes can confirm it (keep_reviews, revoke_claim, request_identity_confirmation,
+ *             other): the owner's acceptance is the confirmation, so it is applied when recorded
  */
 export type Confirmation = 'event' | 'on_record';
 
@@ -49,6 +50,8 @@ export interface ActionDef {
   confirmation: Confirmation;
   /** Who executes it automatically on trust.enforcement.recorded (null: the owner acts in its own screen) */
   executor: string | null;
+  /** No module executes it: the owner does it in its own screen first and accepts with externalRef (decision D4) */
+  externalRefRequired?: boolean;
   /** Where it is appealed (null: not appealable) */
   appeal: 'trust' | 'sellers' | null;
   /** What the affected party sees */
@@ -62,7 +65,7 @@ export const ACTIONS: Record<Action, ActionDef> = {
   suspend_offer: {
     team: 'catalog',
     role: 'catalog_manager',
-    permissions: ['offers.offers.remove', 'catalog.products.publish'],
+    permissions: ['offers.offers.remove'],
     targets: ['offer'],
     confirmation: 'event',
     executor: 'offers',
@@ -86,7 +89,7 @@ export const ACTIONS: Record<Action, ActionDef> = {
     role: 'trust_and_risk_manager',
     permissions: ['reviews.moderation.decide'],
     targets: ['review', 'question', 'answer'],
-    confirmation: 'on_record',
+    confirmation: 'event',
     executor: 'reviews',
     appeal: 'trust',
     title: 'Reviews removed',
@@ -133,7 +136,7 @@ export const ACTIONS: Record<Action, ActionDef> = {
     role: 'seller_manager',
     permissions: ['sellers.accounts.restrict', 'sellers.accounts.manage'],
     targets: ['seller'],
-    confirmation: 'on_record',
+    confirmation: 'event',
     executor: 'sellers',
     appeal: 'sellers',
     title: 'Warning',
@@ -146,6 +149,7 @@ export const ACTIONS: Record<Action, ActionDef> = {
     targets: ['storefront_claim', 'seller'],
     confirmation: 'on_record',
     executor: null,
+    externalRefRequired: true,
     appeal: 'trust',
     title: 'Storefront claim removed',
     effects: ['The claim is removed from the storefront', 'Selling is not affected', KEEPS],
@@ -158,6 +162,7 @@ export const ACTIONS: Record<Action, ActionDef> = {
     targets: ['seller'],
     confirmation: 'event',
     executor: null,
+    externalRefRequired: true,
     appeal: null,
     title: 'Payout held',
     effects: ['The held amount is kept out of payouts until the review date', 'Sales, orders and the rest of the balance are not affected', KEEPS],
@@ -169,6 +174,7 @@ export const ACTIONS: Record<Action, ActionDef> = {
     targets: ['order'],
     confirmation: 'event',
     executor: null,
+    externalRefRequired: true,
     appeal: null,
     title: 'Dispatch held',
     effects: ['The named orders are held or cancelled before dispatch', KEEPS],
@@ -180,6 +186,7 @@ export const ACTIONS: Record<Action, ActionDef> = {
     targets: ['order', 'payment', 'customer'],
     confirmation: 'event',
     executor: null,
+    externalRefRequired: true,
     appeal: null,
     title: 'Payments reviewed',
     effects: ['Finance reviews the payments; orders it cancels are refunded', KEEPS],
@@ -192,6 +199,7 @@ export const ACTIONS: Record<Action, ActionDef> = {
     targets: ['order'],
     confirmation: 'event',
     executor: null,
+    externalRefRequired: true,
     appeal: null,
     title: 'Buyers refunded',
     effects: ['Buyers of the named orders are refunded', KEEPS],
@@ -203,6 +211,7 @@ export const ACTIONS: Record<Action, ActionDef> = {
     targets: ['customer', 'order'],
     confirmation: 'event',
     executor: null,
+    externalRefRequired: true,
     appeal: null,
     title: 'Customers informed',
     effects: ['Support contacts the affected customers', KEEPS],
@@ -214,6 +223,7 @@ export const ACTIONS: Record<Action, ActionDef> = {
     targets: ['customer', 'seller'],
     confirmation: 'on_record',
     executor: null,
+    externalRefRequired: true,
     appeal: null,
     title: 'Identity confirmation requested',
     effects: ['The account holder is asked to confirm their identity', KEEPS],
@@ -245,7 +255,7 @@ export const ACTIONS: Record<Action, ActionDef> = {
     role: 'customer_support_manager',
     permissions: ['messaging.conversations.moderate'],
     targets: ['conversation', 'message'],
-    confirmation: 'on_record',
+    confirmation: 'event',
     executor: 'messaging',
     appeal: 'trust',
     title: 'Conversation locked',
@@ -258,6 +268,7 @@ export const ACTIONS: Record<Action, ActionDef> = {
     targets: [],
     confirmation: 'on_record',
     executor: null,
+    externalRefRequired: true,
     appeal: null,
     title: 'Trust and Risk action',
     effects: [KEEPS],

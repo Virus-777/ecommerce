@@ -18,9 +18,18 @@ const finance = (id = newId()) => staff(id, ['trust.recommendations.decide', 'fi
 describe('recommendations', () => {
   it('validates what is recommended', async () => {
     const r = await staffReport(kit, [{ type: 'seller', id: newId() }]);
-    const bad = await kit.call('POST', `${ADMIN}/reports/${r.id}/recommendations`, staff(), { action: 'ban_forever', label: '', ownerTeam: 'legal', targets: [], rationale: '' });
+    // action and ownerTeam are typed enums: refused by the request schema
+    const badEnums = await kit.call('POST', `${ADMIN}/reports/${r.id}/recommendations`, staff(), { action: 'ban_forever', label: 'x', ownerTeam: 'legal', targets: [{ type: 'seller', id: r.subjects[0].id, label: 'Seller' }], rationale: 'x' });
+    expect(badEnums.status).toBe(400);
+    expect(badEnums.body.error.details.issues.map((i: any) => i.path).sort()).toEqual(['body.action', 'body.ownerTeam']);
+    const bad = await kit.call('POST', `${ADMIN}/reports/${r.id}/recommendations`, staff(), { action: 'warn_seller', label: '', targets: [], rationale: '' });
     expect(bad.status).toBe(400);
-    expect(bad.body.error.details.issues.map((i: any) => i.path).sort()).toEqual(['action', 'label', 'ownerTeam', 'rationale', 'targets']);
+    expect(bad.body.error.details.issues.map((i: any) => i.path).sort()).toEqual(['label', 'rationale', 'targets']);
+    // ownerTeam left out: the action's owner team (suspend_offer belongs to catalog, decision D8)
+    const l = listing(kit);
+    const dflt = await kit.call('POST', `${ADMIN}/reports/${r.id}/recommendations`, staff(), { action: 'suspend_offer', label: 'Suspend', targets: [{ type: 'offer', id: l.offerId, label: 'Offer' }], rationale: 'Counterfeit' });
+    expect(dflt.status, JSON.stringify(dflt.body)).toBe(201);
+    expect(dflt.body).toMatchObject({ ownerTeam: 'catalog', ownerRole: 'catalog_manager' });
     const wrongTarget = await kit.call('POST', `${ADMIN}/reports/${r.id}/recommendations`, staff(), { action: 'restrict_seller', label: 'Restrict', ownerTeam: 'sellers', targets: [{ type: 'offer', id: newId(), label: 'x' }], rationale: 'x' });
     expect(wrongTarget.status).toBe(400);
     const badParams = await kit.call('POST', `${ADMIN}/reports/${r.id}/recommendations`, staff(), { action: 'restrict_customer_messaging', label: 'Mute', ownerTeam: 'customers', targets: [{ type: 'customer', id: newId(), label: 'x' }], rationale: 'x', params: { endsAt: '2020-01-01T00:00:00Z' } });
@@ -134,18 +143,36 @@ describe('recommendations', () => {
     expect((await kit.svc.enforcementsFor('seller', sellerId))[0]).toMatchObject({ action: 'suspend_seller', executionState: 'applied' });
   });
 
-  it('an owner who acted in its own screen records the reference: applied, alreadyApplied', async () => {
+  it('actions no module executes need externalRef; event-confirmed ones stay pending until the owner event (D4)', async () => {
     const sellerId = newId();
     const r = await staffReport(kit, [{ type: 'seller', id: sellerId, label: 'Gadget Grove' }]);
     const rec = await routed(kit, r.id, { action: 'hold_payout', ownerTeam: 'finance', targets: [{ type: 'seller', id: sellerId, label: 'Gadget Grove' }], params: { amount: { amount: 250000, currency: 'USD' } } });
+    const noRef = await kit.call('POST', `${ADMIN}/recommendations/${rec.id}/decide`, finance(), { accept: true, reason: 'Hold' });
+    expect(noRef.status).toBe(422);
+    expect(noRef.body.error.code).toBe('EXTERNAL_REF_REQUIRED');
     kit.authority.set('finance.holds.place', { decision: 'denied' });
-    expect((await kit.call('POST', `${ADMIN}/recommendations/${rec.id}/decide`, finance(), { accept: true, reason: 'Hold' })).status).toBe(403);
+    expect((await kit.call('POST', `${ADMIN}/recommendations/${rec.id}/decide`, finance(), { accept: true, reason: 'Hold', externalRef: 'HD-261006-0004' })).status).toBe(403);
     kit.authority.delete('finance.holds.place');
     const ok = await kit.call('POST', `${ADMIN}/recommendations/${rec.id}/decide`, finance(), { accept: true, reason: 'Hold until the brand review ends', externalRef: 'HD-261006-0004' });
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
-    expect(ok.body.enforcement).toMatchObject({ executionState: 'applied', appliedRef: 'HD-261006-0004', appealable: false });
+    // finance.hold.placed confirms it: still pending although the owner named the hold
+    expect(ok.body.enforcement).toMatchObject({ executionState: 'pending', appliedRef: 'HD-261006-0004', appealable: false });
     expect(kit.last('trust.enforcement.recorded')).toMatchObject({ action: 'hold_payout', alreadyApplied: true, appealDeadline: null, params: { amount: { amount: 250000, currency: 'USD' }, reviewDate: expect.any(String) } });
     expect(kit.callsOf('access.check').at(-1)).toEqual(['finance.holds.place']);
+    // a hold for another seller on the same report does not confirm it
+    const usd = { amount: 250000, currency: 'USD' };
+    await kit.emit('finance', 'finance.hold.placed', { holdId: newId(), sellerId: newId(), amount: usd, reasonCode: 'trust', reason: 'Other seller', reviewDate: '2030-01-01', trustReportId: r.id });
+    expect((await kit.svc.enforcementsFor('seller', sellerId))[0]).toMatchObject({ executionState: 'pending' });
+    const holdId = newId();
+    await kit.emit('finance', 'finance.hold.placed', { holdId, sellerId, amount: usd, reasonCode: 'trust', reason: 'Trust hold', reviewDate: '2030-01-01', trustReportId: r.id });
+    expect((await kit.svc.enforcementsFor('seller', sellerId))[0]).toMatchObject({ executionState: 'applied', appliedRef: holdId });
+
+    // keep_reviews needs no externalRef and is applied on record
+    const rv = await staffReport(kit, [{ type: 'review', id: newId(), label: 'Review' }], { type: 'fake_reviews' });
+    const keep = await routed(kit, rv.id, { action: 'keep_reviews', targets: [{ type: 'review', id: rv.subjects[0].id, label: 'Review' }] });
+    const kept = await kit.call('POST', `${ADMIN}/recommendations/${keep.id}/decide`, staff(newId(), ['trust.recommendations.decide', 'reviews.moderation.decide']), { accept: true, reason: 'Genuine reviews' });
+    expect(kept.status, JSON.stringify(kept.body)).toBe(200);
+    expect(kept.body.enforcement.executionState).toBe('applied');
   });
 
   it('owner modules confirm holds, cancellations, refunds and outreach that carry the report', async () => {
@@ -155,7 +182,7 @@ describe('recommendations', () => {
     const r = await staffReport(kit, [{ type: 'seller', id: sellerId }, { type: 'order', id: orderId }, { type: 'customer', id: buyer }]);
     const decide = async (body: Record<string, unknown>, perm: string) => {
       const rec = await routed(kit, r.id, body);
-      const ok = await kit.call('POST', `${ADMIN}/recommendations/${rec.id}/decide`, staff(newId(), ['trust.recommendations.decide', perm]), { accept: true, reason: 'Go ahead' });
+      const ok = await kit.call('POST', `${ADMIN}/recommendations/${rec.id}/decide`, staff(newId(), ['trust.recommendations.decide', perm]), { accept: true, reason: 'Go ahead', externalRef: `REF-${body.action}` });
       expect(ok.status, JSON.stringify(ok.body)).toBe(200);
       expect(ok.body.enforcement.executionState).toBe('pending');
       return ok.body.enforcement.id as string;
@@ -167,9 +194,12 @@ describe('recommendations', () => {
     const usd = { amount: 5000, currency: 'USD' };
     const zero = { amount: 0, currency: 'USD' };
     await kit.emit('finance', 'finance.hold.placed', { holdId: newId(), sellerId, amount: usd, reasonCode: 'trust', reason: 'Trust hold', reviewDate: '2030-01-01', trustReportId: r.id });
-    await kit.emit('orders', 'orders.item.cancelled', { orderId, ref: 'MK-261006-00001', groupId: newId(), ownerType: 'seller', sellerId, itemId: newId(), offerId: newId(), stockItemId: newId(), quantity: 1, cancellationId: newId(), initiatedBy: 'staff', reasonCode: 'fraud_review', beforeDispatch: true, countsAgainstSeller: false, refund: { itemAmount: zero, discountShare: zero, shippingRefund: zero, taxRefund: zero, total: zero }, paymentIntentId: newId(), trustReportId: r.id });
-    await kit.emit('returns', 'returns.refund.approved', { refundRequestId: newId(), returnId: null, caseId: null, orderId, orderItemIds: [newId()], ownerType: 'seller', sellerId, source: 'exception', trustReportId: r.id, total: usd, breakdown: { itemAmount: usd, discountShare: zero, shippingRefund: zero, returnShippingDeduction: zero, deductions: [], total: usd, maxRefundable: usd, destination: 'original_method', isEstimate: false }, fundedBy: 'seller', approvedBy: { kind: 'staff', id: newId() } });
-    await kit.emit('support', 'support.case.opened', { caseId: newId(), ref: 'CS-104933', kind: 'outreach', category: 'trust', priority: 'normal', customerId: buyer, orderItemIds: [], handler: 'support' });
+    await kit.emit('orders', 'orders.item.cancelled', { orderId, ref: 'MK-261006-00001', groupId: newId(), ownerType: 'seller', sellerId, itemId: newId(), offerId: newId(), stockItemId: newId(), quantity: 1, cancellationId: newId(), initiatedBy: 'staff', reasonCode: 'fraud_review', beforeDispatch: true, countsAgainstSeller: false, refund: { itemAmount: zero, discountShare: zero, shippingRefund: zero, taxRefund: zero, total: zero }, paymentIntentId: newId(), trustReportId: r.id, notifyCustomer: true });
+    await kit.emit('returns', 'returns.refund.approved', { refundRequestId: newId(), returnId: null, caseId: null, orderId, orderItemIds: [newId()], ownerType: 'seller', sellerId, source: 'exception', trustReportId: r.id, items: [], total: usd, breakdown: { itemAmount: usd, discountShare: zero, shippingRefund: zero, returnShippingDeduction: zero, deductions: [], total: usd, maxRefundable: usd, destination: 'original_method', isEstimate: false }, fundedBy: 'seller', approvedBy: { kind: 'staff', id: newId() } });
+    // bug (pass 3): any case for the customer confirmed inform_customers; only a case naming the report does
+    await kit.emit('support', 'support.case.opened', { caseId: newId(), ref: 'CS-104900', kind: 'customer', category: 'delivery', priority: 'normal', customerId: buyer, orderItemIds: [], handler: 'support' });
+    expect((await kit.call('GET', `${ADMIN}/reports/${r.id}`, staff())).body.enforcements.find((e: any) => e.id === inform).executionState).toBe('pending');
+    await kit.emit('support', 'support.case.opened', { caseId: newId(), ref: 'CS-104933', kind: 'outreach', category: 'trust', priority: 'normal', customerId: buyer, orderItemIds: [], handler: 'support', trustReportId: r.id });
     const full = (await kit.call('GET', `${ADMIN}/reports/${r.id}`, staff())).body;
     for (const id of [hold, dispatch, refund, inform]) expect(full.enforcements.find((e: any) => e.id === id).executionState).toBe('applied');
     expect(full.linkedCaseRefs).toContain('CS-104933');
@@ -192,7 +222,7 @@ describe('recommendations', () => {
     const mine = await kit.call('GET', '/api/seller/trust/enforcements', (await import('./helpers.js')).seller(l.sellerId));
     expect(mine.body).toEqual([]);
     kit.offers.get(l.offerId)!.status = 'ineligible';
-    await kit.emit('offers', 'offers.offer.status_changed', { offerId: l.offerId, productId: l.productId, variantId: newId(), sellerId: l.sellerId, ownerType: 'seller', from: 'active', to: 'ineligible', reasonCode: 'enforcement', reason: 'Held while the brand checks' });
+    await kit.emit('offers', 'offers.offer.status_changed', { offerId: l.offerId, productId: l.productId, variantId: newId(), sellerId: l.sellerId, ownerType: 'seller', from: 'active', to: 'ineligible', reasonCode: 'enforcement', reason: 'Held while the brand checks', stockItemId: newId(), trustEnforcementId: ok.body.enforcement.id });
     const e = (await kit.call('GET', `${ADMIN}/enforcements?targetType=offer&targetId=${l.offerId}`, staff())).body.items[0];
     expect(e).toMatchObject({ executionState: 'applied', appliedRef: l.offerId, failure: null });
     expect(kit.callsOf('workqueues.resolveBySource').at(-1)).toEqual([`trust_enforcement:${e.id}:unconfirmed`]);
@@ -201,11 +231,19 @@ describe('recommendations', () => {
   });
 
   it('reverses applied enforcement with authority from access', async () => {
-    const r = await staffReport(kit, [{ type: 'review', id: newId(), label: 'Review' }], { type: 'fake_reviews' });
-    const rec = await routed(kit, r.id, { action: 'remove_reviews', ownerTeam: 'reviews', targets: [{ type: 'review', id: r.subjects[0].id, label: 'Review' }] });
+    const r = await staffReport(kit, [{ type: 'review', id: newId(), label: 'Review' }, { type: 'review', id: newId(), label: 'Review 2' }], { type: 'fake_reviews' });
+    const [rv1, rv2] = [r.subjects[0].id, r.subjects[1].id];
+    const rec = await routed(kit, r.id, { action: 'remove_reviews', ownerTeam: 'reviews', targets: [{ type: 'review', id: rv1, label: 'Review' }, { type: 'review', id: rv2, label: 'Review 2' }] });
     const ok = await kit.call('POST', `${ADMIN}/recommendations/${rec.id}/decide`, staff(newId(), ['trust.recommendations.decide', 'reviews.moderation.decide']), { accept: true, reason: 'Paid review ring' });
     const id = ok.body.enforcement.id;
-    expect(ok.body.enforcement.executionState).toBe('applied');
+    // remove_reviews is confirmed by reviews.moderation.decided (trustEnforcementId) once every named review is removed
+    expect(ok.body.enforcement.executionState).toBe('pending');
+    const removed = (contentId: string) => ({ moderationItemId: newId(), contentType: 'review', contentId, decision: 'remove', reasonCode: 'fake_or_incentivised', reporters: [], trustEnforcementId: id });
+    await kit.emit('reviews', 'reviews.moderation.decided', removed(rv1));
+    await kit.emit('reviews', 'reviews.moderation.decided', removed(rv1));
+    expect((await kit.call('GET', `${ADMIN}/enforcements?targetType=review&targetId=${rv1}`, staff())).body.items[0].executionState).toBe('pending');
+    await kit.emit('reviews', 'reviews.moderation.decided', removed(rv2));
+    expect((await kit.call('GET', `${ADMIN}/enforcements?targetType=review&targetId=${rv1}`, staff())).body.items[0].executionState).toBe('applied');
     kit.authority.set('trust.enforcements.reverse', { decision: 'denied' });
     expect((await kit.call('POST', `${ADMIN}/enforcements/${id}/reverse`, staff(), { reason: 'Error' })).status).toBe(403);
     kit.authority.set('trust.enforcements.reverse', { decision: 'approval_required' });
@@ -228,7 +266,26 @@ describe('recommendations', () => {
     await kit.emit('access', 'access.approval.decided', decided(requestId, 'approved'));
     const rev = { body: (await kit.call('GET', `${ADMIN}/enforcements?targetType=review&targetId=${r.subjects[0].id}`, staff())).body.items.find((x: any) => x.id === id) };
     expect(rev.body).toMatchObject({ executionState: 'reversed', reversalReason: 'Reviews were genuine', reversedAt: expect.any(String) });
-    expect(kit.of('trust.enforcement.reversed').filter((x) => x.enforcementId === id)).toEqual([{ enforcementId: id, action: 'remove_reviews', targets: [expect.objectContaining({ type: 'review' })], reason: 'Reviews were genuine' }]);
+    expect(kit.of('trust.enforcement.reversed').filter((x) => x.enforcementId === id)).toEqual([
+      {
+        enforcementId: id,
+        ref: ok.body.enforcement.ref,
+        reportId: r.id,
+        reportRef: r.ref,
+        action: 'remove_reviews',
+        ownerTeam: 'reviews',
+        targets: [expect.objectContaining({ type: 'review', id: rv1 }), expect.objectContaining({ type: 'review', id: rv2 })],
+        params: {},
+        appliedRef: expect.any(String),
+        executionState: 'applied',
+        reason: 'Reviews were genuine',
+        appealId: null,
+        reversedBy: { kind: 'staff', id: reverser },
+        reversedAt: expect.any(String),
+      },
+    ]);
+    // the owner team checks the undo (stopgap, decision D9): one enforcement_reversal item in its queue
+    expect(kit.work.filter((w) => w.dedupeKey === `trust_reversal:${id}`)).toEqual([expect.objectContaining({ queueKey: 'trust.reports', kind: 'enforcement_reversal', sourceModule: 'trust', priority: 'high' })]);
     expect(kit.audits.filter((a) => a.action === 'trust.enforcement.reverse' && a.target?.id === id)).toEqual([expect.objectContaining({ approvalRequestId: requestId, actor: { kind: 'staff', id: reverser } })]);
     expect((await kit.call('POST', `${ADMIN}/enforcements/${id}/reverse`, staff(), { reason: 'again' })).status).toBe(409);
     expect((await kit.call('POST', `${ADMIN}/enforcements/${newId()}/reverse`, staff(), { reason: 'x' })).status).toBe(404);

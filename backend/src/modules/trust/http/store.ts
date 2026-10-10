@@ -1,4 +1,4 @@
-import { routes, notImplemented } from '../../../kernel/http/index.js';
+import { routes } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/trust.js';
 import type { TrustService } from '../service.js';
 import { appellantOf, byOf, customerOf } from './who.js';
@@ -26,8 +26,11 @@ export const storeRoutes = (service: TrustService) =>
     submitCustomerAppeal: async (i) => service.appeals.submit(i.body, appellantOf(await customerOf(service, i)), byOf(i)),
     /** GET /appeals: My appeals */
     listCustomerAppeals: async (i) => service.appeals.listMine('customer', (await customerOf(service, i)).ids),
-    /** GET /evidence-requests: Proof Trust and Risk asked me for (e.g. confirm an order or explain a message) (TODO pass 3: implement) */
-    listMyEvidenceRequests: notImplemented,
-    /** POST /evidence-requests/{id}/answer: Send the requested proof or explanation (TODO pass 3: implement) */
-    answerMyEvidenceRequest: notImplemented,
+    /** GET /evidence-requests: Proof Trust and Risk asked me for (e.g. confirm an order or explain a message) */
+    listMyEvidenceRequests: async (i) => service.reports.listRequestsFor('customer', (await customerOf(service, i)).ids, i.query.state),
+    /** POST /evidence-requests/{id}/answer: Send the requested proof or explanation */
+    answerMyEvidenceRequest: async (i) => {
+      const me = await customerOf(service, i);
+      return service.reports.answerRequest(i.params.id, i.body, { type: 'customer', ids: me.ids, actor: i.actor, mediaOwner: me.mediaOwner }, byOf(i));
+    },
   });

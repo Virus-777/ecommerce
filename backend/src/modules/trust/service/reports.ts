@@ -30,6 +30,8 @@ export interface Reporter {
   /** For order and conversation ownership checks */
   customerId?: string | null;
   sellerId?: string | null;
+  /** The signed-in account (its email is stored as the reporter contact so the outcome reaches them) */
+  accountId?: string | null;
   actor: common.Actor;
 }
 
@@ -389,6 +391,7 @@ export class Reports {
     }
     const id = newId();
     await this.core.attach(input.evidenceIds, id, 'Trust report', who.mediaOwner);
+    const contact = await this.accountEmail(who.accountId);
     const main = subjects[0]!;
     const agg = await this.open(
       {
@@ -397,7 +400,7 @@ export class Reports {
         title: `${TYPE_LABELS[input.type] ?? humanize(input.type)}: ${main.label}`,
         description: text(input.details) || humanize(input.reason),
         source: who.kind,
-        reporter: { kind: who.kind, id: who.id, name: who.name },
+        reporter: { kind: who.kind, id: who.id, name: who.name, contact },
         subjects,
         evidence: [this.evidenceRow(id, { kind: 'statement', text: this.said(input), mediaIds: input.evidenceIds ?? [] }, 'reporter', who.actor)],
         createdLabel: who.kind === 'seller' ? 'Reported by a seller' : 'Reported by a customer',
@@ -405,6 +408,13 @@ export class Reports {
       by,
     );
     return this.views.myReport(agg, null, who.ids);
+  }
+
+  /** The signed-in account's email (identity), kept with the report so the outcome reaches the reporter later */
+  private async accountEmail(accountId: string | null | undefined): Promise<string | null> {
+    if (!accountId || !isUuid(accountId)) return null;
+    const account = await this.core.soft('identity', 'getAccount', (m) => m.getAccount(accountId));
+    return account?.email?.toLowerCase() ?? null;
   }
 
   private said(input: StoreReportInput) {
@@ -508,7 +518,7 @@ export class Reports {
     for (const r of rows) {
       const name = r.reporter_name?.trim() || null;
       if (r.reporter_kind === 'seller' && r.reporter_id && isUuid(r.reporter_id)) {
-        if (!out.has(`seller:${r.reporter_id}`)) out.set(`seller:${r.reporter_id}`, { kind: 'seller', sellerId: r.reporter_id, contactName: name });
+        if (!out.has(`seller:${r.reporter_id}`)) out.set(`seller:${r.reporter_id}`, { kind: 'seller', sellerId: r.reporter_id, contactName: name, contactEmail: r.reporter_contact ?? null });
       } else if (r.reporter_kind === 'customer' && r.reporter_id && isUuid(r.reporter_id)) {
         const customerId = await this.customerIdOf(r.reporter_id);
         const key = customerId ? `customer:${customerId}` : `customer-contact:${r.reporter_contact ?? ''}`;
@@ -523,7 +533,9 @@ export class Reports {
   }
 
   /** The customer id of a stored customer reporter (stored under the account id when customers did not know them) */
-  private async customerIdOf(storedId: string): Promise<string | null> {
+  /** The customers-module id for a stored customer or account id */
+  async customerIdOf(storedId: string): Promise<string | null> {
+    if (!isUuid(storedId)) return null;
     const c = await this.core.soft('customers', 'getCustomer', (m) => m.getCustomer(storedId));
     if (c) return c.id;
     if (c === undefined) return storedId; // customers is off or failing: the stored id is the best we have
@@ -729,6 +741,8 @@ export class Reports {
     if (!text(body.question)) issues.push({ path: 'question', message: 'What proof is needed?' });
     if (!(Date.parse(body.dueAt) > this.core.now().getTime())) issues.push({ path: 'dueAt', message: 'A deadline in the future' });
     if (issues.length) throw invalid(issues);
+    // the customers-module id when proof is asked from a customer (requests may name the account id)
+    const customerId = body.to.type === 'customer' ? await this.customerIdOf(body.to.id) : null;
     const row = await this.core.write(id, by, async (tx, agg, batch) => {
       if (!this.core.isActive(agg.report.status)) throw illegal('Trust report', agg.report.status, 'requestEvidence', 'Reopen the report before asking for proof');
       await tx.insertIgnore('report_subjects', this.core.subjectRows(id, [{ ...body.to, label: body.to.label || humanize(body.to.type) }]));
@@ -746,18 +760,32 @@ export class Reports {
       });
       await this.core.timeline(tx, id, [{ kind: 'evidence_requested', label: `Proof requested from the ${body.to.type}`, text: row.question, actor: by.actor, meta: { requestId: row.id } }]);
       await tx.update('reports', id, { updated_at: this.core.now() });
-      batch.push('trust.evidence.requested', { requestId: row.id, reportId: id, toType: row.to_type, toId: row.to_id, dueAt: row.due_at.toISOString() });
+      batch.push('trust.evidence.requested', {
+        requestId: row.id,
+        reportId: id,
+        reportRef: agg.report.ref,
+        toType: row.to_type,
+        toId: row.to_id,
+        customerId: row.to_type === 'customer' ? customerId : null,
+        sellerId: row.to_type === 'seller' ? row.to_id : null,
+        question: row.question,
+        dueAt: row.due_at.toISOString(),
+      });
       return row;
     });
     const agg = (await this.core.load(id))!;
     await this.core.audit({ action: 'trust.evidence.request', actionLabel: 'Asked for proof', target: this.target(agg.report), after: { to: body.to, question: row.question, dueAt: row.due_at } }, by);
-    return this.views.request(row, agg.subjects, new Map(), this.core.now());
+    return this.views.request(row, agg.subjects, new Map(), this.core.now(), agg.report.ref);
   }
 
-  /** The seller sends the requested proof */
-  async answerRequest(requestId: string, body: { answer: string; mediaIds: string[] }, who: { type: 'seller' | 'customer'; id: string; actor: common.Actor; mediaOwner: Reporter['mediaOwner'] }, by: By): Promise<EvidenceRequest> {
+  /**
+   * The seller or customer sends the requested proof (only while open and before dueAt); the files are attached
+   * to the report as evidence from the reported party (media usage trust_evidence).
+   */
+  async answerRequest(requestId: string, body: { answer: string; mediaIds?: string[] | null }, who: { type: 'seller' | 'customer'; ids: string[]; actor: common.Actor; mediaOwner: Reporter['mediaOwner'] }, by: By): Promise<EvidenceRequest> {
     const req = isUuid(requestId) ? await this.core.repo.get('evidence_requests', requestId) : undefined;
-    if (!req || req.to_type !== who.type || req.to_id !== who.id) throw notFound('Evidence request');
+    if (!req || req.to_type !== who.type || !who.ids.includes(req.to_id)) throw notFound('Evidence request');
+    if (req.state === 'open' && req.due_at.getTime() < this.core.now().getTime()) throw illegal('Evidence request', 'expired', 'answer', `The deadline for this proof was ${req.due_at.toISOString().slice(0, 10)}`);
     if (!text(body.answer)) throw invalidField('answer', 'Answer the question');
     evidenceRequestMachine.next(req.state as 'open', 'answer');
     await this.core.attach(body.mediaIds, req.report_id, 'Proof for Trust and Risk', who.mediaOwner);
@@ -772,15 +800,18 @@ export class Reports {
       return row;
     });
     const agg = (await this.core.load(req.report_id))!;
-    return this.views.request(row, agg.subjects, await this.core.mediaRefs(row.answer_media_ids), this.core.now());
+    return this.views.request(row, agg.subjects, await this.core.mediaRefs(row.answer_media_ids), this.core.now(), agg.report.ref);
   }
 
-  async listRequestsFor(type: 'seller' | 'customer', id: string, state?: string): Promise<EvidenceRequest[]> {
-    const rows = await this.core.repo.find('evidence_requests', { to_type: type, to_id: id, ...(state ? { state } : {}) }, { orderBy: [['due_at', 'desc']], limit: 200 });
+  /** Requests addressed to a seller or customer (any id it may be stored under); the reporter is never named */
+  async listRequestsFor(type: 'seller' | 'customer', ids: string | string[], state?: string): Promise<EvidenceRequest[]> {
+    const list = (Array.isArray(ids) ? ids : [ids]).filter(isUuid);
+    if (!list.length) return [];
+    const rows = await this.core.repo.find('evidence_requests', { to_type: type, to_id: list, ...(state ? { state } : {}) }, { orderBy: [['due_at', 'desc']], limit: 200 });
     const aggs = await this.core.loadMany(rows.map((r) => r.report_id));
     const media = await this.core.mediaRefs(rows.flatMap((r) => r.answer_media_ids));
     const now = this.core.now();
-    return rows.map((r) => this.views.request(r, aggs.get(r.report_id)?.subjects ?? [], media, now));
+    return rows.map((r) => this.views.request(r, aggs.get(r.report_id)?.subjects ?? [], media, now, aggs.get(r.report_id)?.report.ref ?? null));
   }
 
   async link(id: string, body: { subjects?: TrustSubject[] | null; caseRefs?: string[] | null }, by: By): Promise<TrustReport> {
@@ -1005,6 +1036,33 @@ export class Reports {
     const filed = ['customer', 'seller'].includes(subjectType) ? await this.core.repo.find('reports', { reporter_kind: subjectType, reporter_id: await this.reporterIdsOf(subjectType, subjectId), status: { op: '<>', value: 'merged' } }) : [];
     const all = [...new Map([...againstRows, ...filed].map((r) => [r.id, r])).values()].sort((a, b) => b.created_at.getTime() - a.created_at.getTime());
     return { filedBy: filed.length, against: againstRows.length, open: againstRows.filter((r) => this.core.isActive(r.status)).length, reportIds: all.map((r) => r.id) };
+  }
+
+  /**
+   * Ids of customers or sellers with reports filed by them or about them (their offers and products name the seller
+   * as a subject too); openOnly keeps open, under review and escalated reports. Used by the customer and seller lists
+   * to filter hasAbuseReports before paging. Customer reporters stored under their account id (customers did not
+   * know them when they reported) are mapped to their customer id.
+   */
+  async subjectIdsWithReports(subjectType: 'customer' | 'seller', filter: { role?: 'filed_by' | 'against'; openOnly?: boolean; ids?: string[] }): Promise<string[]> {
+    if (subjectType !== 'customer' && subjectType !== 'seller') return [];
+    const ids = filter.ids ? filter.ids.filter(isUuid) : undefined;
+    if (ids && !ids.length) return [];
+    const o = { ...(filter.openOnly ? { statuses: [...ACTIVE] } : {}), ...(ids ? { ids } : {}) };
+    const out = new Set<string>();
+    if (filter.role !== 'filed_by') for (const id of await this.core.repo.subjectIdsAbout(subjectType, o)) out.add(id);
+    if (filter.role !== 'against') {
+      const filers = await this.core.repo.reporterIdsFiling(subjectType, o);
+      for (const stored of filers) {
+        if (subjectType === 'seller' || out.has(stored)) {
+          out.add(stored);
+          continue;
+        }
+        const customerId = await this.customerIdOf(stored);
+        if (customerId) out.add(customerId);
+      }
+    }
+    return [...out].filter((id) => !ids || ids.includes(id));
   }
 
   async listAbout(subjectType: 'customer' | 'seller', subjectId: string, filter: { role?: 'filed_by' | 'against'; statuses?: string[] }, pageInput: common.PageInput): Promise<Page<TrustReport>> {

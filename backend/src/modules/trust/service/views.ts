@@ -59,7 +59,7 @@ export class Views {
     };
   }
 
-  request(r: RequestRec, subjects: SubjectRec[], media: Map<string, common.MediaRef>, now: Date): EvidenceRequest {
+  request(r: RequestRec, subjects: SubjectRec[], media: Map<string, common.MediaRef>, now: Date, reportRef: string | null = null): EvidenceRequest {
     const s = subjects.find((x) => x.subject_type === r.to_type && x.subject_id === r.to_id);
     return {
       id: r.id,
@@ -72,6 +72,7 @@ export class Views {
       answer: r.answer ?? null,
       answerMedia: r.answer_media_ids.map((id) => media.get(id)).filter((m): m is common.MediaRef => !!m),
       answeredAt: iso(r.answered_at),
+      reportRef,
     };
   }
 
@@ -103,8 +104,8 @@ export class Views {
       reportId: e.report_id,
       reportRef,
       recommendationId: e.recommendation_id ?? null,
-      action: e.action,
-      ownerTeam: e.owner_team,
+      action: e.action as Enforcement['action'],
+      ownerTeam: e.owner_team as Enforcement['ownerTeam'],
       targets: e.targets,
       reason: e.reason,
       params: e.params ?? {},
@@ -171,7 +172,7 @@ export class Views {
       assignee: r.assignee_staff_id ? (c.staff.get(r.assignee_staff_id) ?? { staffId: r.assignee_staff_id, name: 'Staff member' }) : null,
       deadline: r.due_at && this.core.isActive(r.status) ? deadline(r.due_at, c.now, Math.max(3_600_000, r.due_at.getTime() - r.created_at.getTime())) : null,
       evidence: summary ? [] : agg.evidence.map((e) => this.evidence(e, c.media)),
-      evidenceRequests: summary ? [] : agg.requests.map((x) => this.request(x, agg.subjects, c.media, c.now)),
+      evidenceRequests: summary ? [] : agg.requests.map((x) => this.request(x, agg.subjects, c.media, c.now, r.ref)),
       recommendations: agg.recommendations.map((x) => this.recommendation(x, c.staff)),
       enforcements: agg.enforcements.map((x) => this.enforcement(x, r.ref)),
       linkedCaseRefs: [...new Set(casesLinked)],

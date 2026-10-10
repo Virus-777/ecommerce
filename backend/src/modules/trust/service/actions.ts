@@ -58,7 +58,7 @@ export class Actions {
   async add(reportId: string, body: RecommendationInput, by: By): Promise<Recommendation> {
     const issues: { path: string; message: string }[] = [];
     if (!isAction(body.action)) issues.push({ path: 'action', message: 'Choose an enforcement action' });
-    if (!isTeam(body.ownerTeam)) issues.push({ path: 'ownerTeam', message: `One of ${OWNER_TEAMS.join(', ')}` });
+    if (body.ownerTeam !== undefined && body.ownerTeam !== null && !isTeam(body.ownerTeam)) issues.push({ path: 'ownerTeam', message: `One of ${OWNER_TEAMS.join(', ')}` });
     if (!text(body.label)) issues.push({ path: 'label', message: 'Name the action, e.g. Suspend the offer for BRL-S2' });
     if (!text(body.rationale)) issues.push({ path: 'rationale', message: 'Why do you recommend it?' });
     if (!body.targets?.length) issues.push({ path: 'targets', message: 'Name what the action applies to' });
@@ -79,7 +79,8 @@ export class Actions {
     }
     if (issues.length) throw invalid(issues);
     const action = body.action as Action;
-    const team = body.ownerTeam as OwnerTeam;
+    // default: the action's owner team (suspend_offer and suspend_product belong to catalog, decision D8)
+    const team = (body.ownerTeam ?? ACTIONS[action].team) as OwnerTeam;
     const role = text(body.ownerRole) || (ACTIONS[action].team === team ? ACTIONS[action].role : TEAM_ROLES[team]);
     const row = await this.core.write(reportId, by, async (tx, agg) => {
       if (!this.core.isActive(agg.report.status)) throw invalidField('reportId', 'Reopen the report before recommending an action');
@@ -204,11 +205,15 @@ export class Actions {
     if (n.issues.length) throw invalid(n.issues);
     const params = n.params;
     if (action === 'suspend_seller' && params.secondReviewerId && params.secondReviewerId === by.actor.id) throw invalidField('params.secondReviewerId', 'The second reviewer must be someone else');
+    const externalRef = text(body.externalRef) || null;
+    // no module executes it: the owner does it in its own screen first and names the record it created (decision D4)
+    if (def.externalRefRequired && !externalRef)
+      throw this.core.error('EXTERNAL_REF_REQUIRED', `Nobody executes ${humanize(action).toLowerCase()} automatically: do it in your own screen first, then accept with its reference (hold, case, claim or approval)`, { action });
 
     // authority (access): denied → FORBIDDEN; above the limit → APPROVAL_REQUIRED, and the recommendation stays with
-    // the owner until the request is decided (approved: accepted by onApprovalDecided, otherwise it stays sent_to_owner)
+    // the owner until the request is decided (approved: accepted by onApprovalDecided, otherwise it stays sent_to_owner).
+    // Nothing is recorded before the approval (the enforcement is created on approval), so the answer is 409.
     let approvalNote: string | null = null;
-    const externalRef = text(body.externalRef) || null;
     if (def.authority) {
       const access = this.core.ctx.use('access');
       const principal = this.principalOf(by);
@@ -266,8 +271,9 @@ export class Actions {
       const enforcementId = newId();
       const appealable = def.appeal !== null;
       const appealDeadline = appealable ? new Date(now.getTime() + windowDays * 86_400_000) : null;
+      // event-confirmed actions stay pending until the owning module's event arrives, even with externalRef
       let exec: ExecState = enforcementExecutionMachine.initial as ExecState;
-      if (externalRef || def.confirmation === 'on_record') exec = enforcementExecutionMachine.next('pending', 'confirm') as ExecState;
+      if (def.confirmation === 'on_record') exec = enforcementExecutionMachine.next('pending', 'confirm') as ExecState;
       const enforcement = await tx.insert('enforcements', {
         id: enforcementId,
         ref,
@@ -309,7 +315,7 @@ export class Actions {
         enforcementId,
         reportId: cur.report_id,
         action,
-        ownerTeam: cur.owner_team,
+        ownerTeam: cur.owner_team as OwnerTeam,
         targets: cur.targets,
         reason: body.reason.trim(),
         params,
@@ -449,8 +455,34 @@ export class Actions {
     }
     const after = await this.reverseNow(id, body.reason.trim(), by);
     const reportRef = (await this.core.repo.get('reports', e.report_id))!.ref;
+    await this.raiseReversal(after, reportRef, body.reason.trim());
     await this.reverseAudit(e, after, body.reason, by, { approvalRequestId: null, approvalNote: check.reason });
     return this.views.enforcement(after, reportRef);
+  }
+
+  /**
+   * Stopgap until every owner confirms its undo (decision D9): an enforcement_reversal work item in the owner team's
+   * queue so a person checks the undo, especially for actions done in the owner's own screen. Closed by hand.
+   */
+  async raiseReversal(e: EnforcementRec, reportRef: string, reason: string) {
+    const team = (isTeam(e.owner_team) ? e.owner_team : 'support') as OwnerTeam;
+    const sellerId = e.targets.find((t) => t.type === 'seller')?.id;
+    const customerId = e.targets.find((t) => t.type === 'customer')?.id;
+    await this.core.soft('workqueues', 'raise', (w) =>
+      w.raise({
+        queueKey: TEAM_QUEUES[team],
+        kind: 'enforcement_reversal',
+        sourceModule: 'trust',
+        title: `Undo enforcement ${e.ref}: ${humanize(e.action)}`,
+        summary: `Trust and Risk reversed ${e.ref} (${reportRef}): ${reason}. Check that the action is undone${e.applied_ref ? ` (record ${e.applied_ref})` : ''}.`,
+        subject: { type: 'trust_report', id: e.report_id, ref: reportRef, label: humanize(e.action) },
+        ...(sellerId ? { sellerId } : {}),
+        ...(customerId ? { customerId } : {}),
+        priority: 'high',
+        dedupeKey: `trust_reversal:${e.id}`,
+        links: [{ label: 'Open report', screen: 'admin/trust', id: e.report_id }],
+      }),
+    );
   }
 
   private async reverseAudit(e: EnforcementRec, after: EnforcementRec, reason: string, by: By, o: { approvalRequestId: string | null; approvalNote: string | null }) {
@@ -531,18 +563,42 @@ export class Actions {
       if (!(await tx.claim(key))) return null;
       return this.reverseNow(enf!.id, reason, by, tx, batch);
     });
-    if (after) await this.reverseAudit(enf!, after, reason, by, { approvalRequestId: e.requestId, approvalNote: null });
+    if (after) {
+      await this.raiseReversal(after, reportRef, reason);
+      await this.reverseAudit(enf!, after, reason, by, { approvalRequestId: e.requestId, approvalNote: null });
+    }
   }
 
-  /** The reversal itself (also used when an appeal is overturned) */
-  async reverseNow(id: string, reason: string, by: By, tx?: TrustRepository, batch?: { push: (name: 'trust.enforcement.reversed', p: EventPayload<'trust.enforcement.reversed'>) => void }): Promise<EnforcementRec> {
+  /**
+   * The reversal itself (also used when an appeal is overturned). trust.enforcement.reversed carries everything the
+   * executing module needs to undo exactly what it did (action, typed params, targets, appliedRef, the state before).
+   * The caller raises the owner's work item (raiseReversal) after the commit.
+   */
+  async reverseNow(id: string, reason: string, by: By, tx?: TrustRepository, batch?: { push: (name: 'trust.enforcement.reversed', p: EventPayload<'trust.enforcement.reversed'>) => void }, appealId?: string | null): Promise<EnforcementRec> {
     const run = async (t: TrustRepository, b: NonNullable<typeof batch>) => {
       const cur = (await t.get('enforcements', id, { forUpdate: true }))!;
+      const before = cur.execution_state as 'pending' | 'applied' | 'failed';
       const state = enforcementExecutionMachine.next(cur.execution_state as 'applied', 'reverse');
       const now = this.core.now();
+      const report = (await t.get('reports', cur.report_id))!;
       const after = await t.update('enforcements', id, { execution_state: state, reversed_at: now, reversal_reason: reason });
-      await this.core.timeline(t, cur.report_id, [{ kind: 'enforcement_reversed', label: `Enforcement ${cur.ref} reversed`, text: reason, actor: by.actor, meta: { enforcementId: id } }]);
-      b.push('trust.enforcement.reversed', { enforcementId: id, action: cur.action, targets: cur.targets, reason });
+      await this.core.timeline(t, cur.report_id, [{ kind: 'enforcement_reversed', label: `Enforcement ${cur.ref} reversed`, text: reason, actor: by.actor, meta: { enforcementId: id, ...(appealId ? { appealId } : {}) } }]);
+      b.push('trust.enforcement.reversed', {
+        enforcementId: id,
+        ref: cur.ref,
+        reportId: cur.report_id,
+        reportRef: report.ref,
+        action: (isAction(cur.action) ? cur.action : 'other') as Action,
+        ownerTeam: (isTeam(cur.owner_team) ? cur.owner_team : 'support') as OwnerTeam,
+        targets: cur.targets,
+        params: cur.params ?? {},
+        appliedRef: cur.applied_ref ?? null,
+        executionState: before,
+        reason,
+        appealId: appealId ?? null,
+        reversedBy: by.actor,
+        reversedAt: now.toISOString(),
+      });
       return after;
     };
     if (tx && batch) return run(tx, batch);
@@ -585,14 +641,27 @@ export class Actions {
     });
   }
 
+  /** An event names the enforcement it executed: confirm it when it is of the expected action */
+  private async confirmNamed(enforcementId: string | null | undefined, actions: string[], appliedRef: string | null, label: string): Promise<boolean> {
+    if (!enforcementId || !isUuid(enforcementId)) return false;
+    const x = await this.core.repo.get('enforcements', enforcementId);
+    if (!x || !actions.includes(x.action)) return false;
+    await this.confirm(x.id, appliedRef, label);
+    return true;
+  }
+
   async onProductPublicationChanged(e: EventPayload<'catalog.product.publication_changed'>) {
     if (e.to !== 'suspended') return;
-    const list = (await this.waiting(['suspend_product'], { type: 'product', id: e.productId }, e.trustReportId ?? null)).filter((x) => e.trustReportId || e.reason.includes(x.ref) || e.reason.includes(x.reason));
+    if (await this.confirmNamed(e.trustEnforcementId, ['suspend_product'], e.productId, `Catalog suspended the product: ${e.reason}`)) return;
+    const list =(await this.waiting(['suspend_product'], { type: 'product', id: e.productId }, e.trustReportId ?? null)).filter((x) => e.trustReportId || e.reason.includes(x.ref) || e.reason.includes(x.reason));
     for (const x of list) if (await this.allApplied(x)) await this.confirm(x.id, e.productId, `Catalog suspended the product: ${e.reason}`);
   }
 
   async onOfferStatusChanged(e: EventPayload<'offers.offer.status_changed'>) {
-    if (e.reasonCode !== 'enforcement' || !['removed', 'ineligible'].includes(e.to)) return;
+    // a reversal reinstating the offer also carries the enforcement id: only removed / held confirms
+    if (!['removed', 'ineligible'].includes(e.to)) return;
+    if (await this.confirmNamed(e.trustEnforcementId, ['suspend_offer'], e.offerId, `Offer ${e.to === 'removed' ? 'removed' : 'held'} by offers`)) return;
+    if (e.reasonCode !== 'enforcement') return;
     for (const x of await this.waiting(['suspend_offer'], { type: 'offer', id: e.offerId })) if (await this.allApplied(x)) await this.confirm(x.id, e.offerId, `Offer ${e.to === 'removed' ? 'removed' : 'held'} by offers`);
   }
 
@@ -618,6 +687,7 @@ export class Actions {
   }
 
   async onSellerSuspended(e: EventPayload<'sellers.seller.suspended'>) {
+    if (await this.confirmNamed(e.trustEnforcementId, ['suspend_seller'], e.suspensionId, `Suspension in effect after second review: ${e.reason}`)) return;
     if (!e.trustReportId) return;
     for (const x of await this.waiting(['suspend_seller'], { type: 'seller', id: e.sellerId }, e.trustReportId)) await this.confirm(x.id, e.suspensionId, `Suspension in effect after second review: ${e.reason}`);
   }
@@ -639,7 +709,8 @@ export class Actions {
   async onHoldPlaced(e: EventPayload<'finance.hold.placed'>) {
     if (!e.trustReportId) return;
     const list = await this.waiting(['hold_payout'], null, e.trustReportId);
-    const mine = list.filter((x) => !x.targets.some((t) => t.type === 'seller') || x.targets.some((t) => t.type === 'seller' && t.id === e.sellerId));
+    // the report's hold_payout for the same seller (also holds placed after an approval)
+    const mine = list.filter((x) => x.targets.some((t) => t.type === 'seller' && t.id === e.sellerId));
     for (const x of mine) await this.confirm(x.id, e.holdId, `Finance placed a hold: ${e.reason}`);
     if (!mine.length) await this.note(e.trustReportId, `finance.hold:${e.holdId}`, 'Finance placed a payout hold', e.reason);
   }
@@ -664,13 +735,15 @@ export class Actions {
     }
   }
 
-  /** support.case.opened carries no report id: an outreach case to a customer or order named by a waiting inform_customers enforcement confirms it */
+  /**
+   * support.case.opened confirms the inform_customers enforcements of the report named by trustReportId (for the
+   * case's customer or order when the enforcement names any); cases without trustReportId never confirm anything.
+   */
   async onCaseOpened(e: EventPayload<'support.case.opened'>) {
-    const targets = [...(e.customerId ? [{ type: 'customer', id: e.customerId }] : []), ...(e.orderId ? [{ type: 'order', id: e.orderId }] : [])];
-    if (!targets.length) return;
-    const ids = await this.core.repo.enforcementIdsFor(targets);
-    if (!ids.length) return;
-    for (const x of await this.core.repo.find('enforcements', { id: ids, action: 'inform_customers', execution_state: ['pending', 'failed'] })) {
+    if (!e.trustReportId || !isUuid(e.trustReportId)) return;
+    for (const x of await this.waiting(['inform_customers'], null, e.trustReportId)) {
+      const named = x.targets.filter((t) => t.type === 'customer' || t.type === 'order');
+      if (named.length && !named.some((t) => (t.type === 'customer' && t.id === e.customerId) || (t.type === 'order' && t.id === e.orderId))) continue;
       await this.confirm(x.id, e.ref, `Support opened case ${e.ref}`);
       const report = await this.core.repo.get('reports', x.report_id);
       const linked = report ? await this.core.repo.eventsFor('caseRef', e.ref, ['case_linked']) : [];
@@ -680,6 +753,31 @@ export class Actions {
         });
       }
     }
+  }
+
+  /** sellers.warning.issued: confirms the warn_seller enforcement it executed */
+  async onWarningIssued(e: EventPayload<'sellers.warning.issued'>) {
+    await this.confirmNamed(e.trustEnforcementId, ['warn_seller'], e.warningId, `Seller Manager issued the warning: ${e.title}`);
+  }
+
+  /** messaging.conversation.locked: confirms the lock_conversation enforcement it executed */
+  async onConversationLocked(e: EventPayload<'messaging.conversation.locked'>) {
+    await this.confirmNamed(e.trustEnforcementId, ['lock_conversation'], e.conversationId, 'Messaging locked the conversation');
+  }
+
+  /**
+   * reviews.moderation.decided: a removal that executes a remove_reviews enforcement is noted on the report; the
+   * enforcement is applied once every named review, question or answer is removed.
+   */
+  async onModerationDecided(e: EventPayload<'reviews.moderation.decided'>) {
+    if (!e.trustEnforcementId || !isUuid(e.trustEnforcementId) || e.decision !== 'remove') return;
+    const x = await this.core.repo.get('enforcements', e.trustEnforcementId);
+    if (!x || x.action !== 'remove_reviews') return;
+    const keyOf = (contentId: string) => `reviews.removed:${x.id}:${contentId}`;
+    await this.note(x.report_id, keyOf(e.contentId), `Reviews removed the ${humanize(e.contentType).toLowerCase()} named by ${x.ref}`, null);
+    const content = x.targets.filter((t) => ['review', 'question', 'answer'].includes(t.type));
+    for (const t of content) if (t.id !== e.contentId && !(await this.core.repo.eventsByKey(keyOf(t.id))).length) return;
+    await this.confirm(x.id, e.moderationItemId, `Reviews removed ${content.length === 1 ? 'the named content' : `all ${content.length} named items`}`);
   }
 
   /* ================================================================ job */
@@ -704,6 +802,7 @@ export class Actions {
         w.raise({
           queueKey: TEAM_QUEUES[team],
           kind: 'trust_recommendation',
+          sourceModule: 'trust',
           title: `Confirm enforcement ${e.ref}: ${humanize(e.action)}`,
           summary: `${failure}. Apply it in your screen, or record the reference on the recommendation.`,
           subject: { type: 'trust_report', id: e.report_id, ref: done.ref, label: humanize(e.action) },

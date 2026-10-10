@@ -71,7 +71,7 @@ export async function boot(): Promise<Kit> {
     return p ? ({ id, ref: `PRD-${id.slice(-5)}`, title: p.title, brand: p.brandId ? { id: p.brandId, name: 'Brightline' } : null } as any) : null;
   };
   const app = await buildTestApp({
-    modules: withDependencies(['trust', 'audit', 'workqueues', 'media', 'offers', 'catalog', 'sellers', 'customers', 'reports']),
+    modules: withDependencies(['trust', 'audit', 'workqueues', 'media', 'offers', 'catalog', 'sellers', 'customers', 'reports', 'identity']),
     clock,
     config: { rateLimits: false, launchPhase: 4 },
     apiStubs: {
@@ -118,6 +118,7 @@ export async function boot(): Promise<Kit> {
       offers: {
         getOfferAdmin: async (id: string) => offerOf(id),
         getOffer: async (id: string) => offerOf(id),
+        listActiveOffersForProduct: async (productId: string) => [...offers.keys()].filter((id) => offers.get(id)!.productId === productId && (offers.get(id)!.status ?? 'active') === 'active').map(offerOf),
         getOfferStats: async (ids: string[]) => Object.fromEntries(ids.map((id) => [id, stats.has(id) ? { count: 2, lowest: { amount: stats.get(id)!.lowest, currency: 'USD' }, highest: { amount: stats.get(id)!.highest, currency: 'USD' }, lowestOfferId: newId(), lowestSellerName: 'x' } : null])) as any,
       },
       catalog: {
@@ -137,6 +138,9 @@ export async function boot(): Promise<Kit> {
           const [id, c] = [...customers].find(([, x]) => x.userId === userId) ?? [];
           return id && c ? ({ id, userId, ref: `CU-${id.slice(-6)}`, displayName: c.displayName, email: 'c@example.com', accountStatus: 'active', canOrder: true, canMessage: true } as any) : null;
         },
+      },
+      identity: {
+        getAccount: async (id: string) => ({ id, realm: 'member', email: `Account.${id.slice(-6)}@Example.com`, displayName: 'Account', status: 'active', emailVerified: true, twoStepEnabled: false }) as any,
       },
       reports: {
         registerDataset: async (d: any) => rec('reports.registerDataset', d),

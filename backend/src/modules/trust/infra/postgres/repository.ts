@@ -158,6 +158,24 @@ export function createPostgresTrustRepository(db: Kysely<TrustDb>, inbox: Inbox)
       const r = await reportQuery(d, f).select(sql<number>`count(*)::int`.as('n')).executeTakeFirst();
       return (r as { n: number } | undefined)?.n ?? 0;
     },
+    async subjectIdsAbout(type, o) {
+      let q = d
+        .selectFrom('report_subjects as s')
+        .innerJoin('reports as r', 'r.id', 's.report_id')
+        .select('s.subject_id as id')
+        .distinct()
+        .where('s.subject_type', '=', type)
+        .where('r.status', '<>', 'merged');
+      if (o.statuses) q = q.where('r.status', 'in', o.statuses);
+      if (o.ids) q = q.where('s.subject_id', 'in', o.ids);
+      return (await q.execute()).map((r: { id: string }) => r.id);
+    },
+    async reporterIdsFiling(kind, o) {
+      let q = d.selectFrom('reports').select('reporter_id as id').distinct().where('reporter_kind', '=', kind).where('reporter_id', 'is not', null).where('status', '<>', 'merged');
+      if (o.statuses) q = q.where('status', 'in', o.statuses);
+      if (o.ids) q = q.where('reporter_id', 'in', o.ids);
+      return (await q.execute()).map((r: { id: string }) => r.id);
+    },
     async reportIdsAbout(types, id) {
       if (!types.length) return [];
       const rows = await d.selectFrom('report_subjects').select('report_id').where('subject_type', 'in', types).where('subject_id', '=', id).execute();

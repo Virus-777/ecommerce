@@ -54,6 +54,11 @@ export class TrustService implements TrustPublicApi {
     return this.actions.enforcementsFor(subjectType, subjectId);
   }
 
+  /** Ids of customers or sellers with reports filed by them or about them (filters hasAbuseReports before paging) */
+  subjectIdsWithReports(subjectType: 'customer' | 'seller', filter: { role?: 'filed_by' | 'against'; openOnly?: boolean; ids?: string[] }): Promise<string[]> {
+    return this.reports.subjectIdsWithReports(subjectType, filter);
+  }
+
   /** Reports filed by or about a customer or seller for the admin 360 views; reporter identity, evidence and internal notes are left out */
   listReportsAbout(subjectType: 'customer' | 'seller', subjectId: string, filter: { role?: 'filed_by' | 'against'; statuses?: string[] }, page: common.PageInput): Promise<common.Page<TrustReport>> {
     return this.reports.listAbout(subjectType, subjectId, filter, page);
@@ -118,6 +123,18 @@ export class TrustService implements TrustPublicApi {
 
   onSellerSuspendedFromSellers(event: EventPayload<'sellers.seller.suspended'>): Promise<void> {
     return this.actions.onSellerSuspended(event);
+  }
+
+  onWarningIssuedFromSellers(event: EventPayload<'sellers.warning.issued'>): Promise<void> {
+    return this.actions.onWarningIssued(event);
+  }
+
+  onModerationDecidedFromReviews(event: EventPayload<'reviews.moderation.decided'>): Promise<void> {
+    return this.actions.onModerationDecided(event);
+  }
+
+  onConversationLockedFromMessaging(event: EventPayload<'messaging.conversation.locked'>): Promise<void> {
+    return this.actions.onConversationLocked(event);
   }
 
   onAppealSubmittedFromSellers(event: EventPayload<'sellers.appeal.submitted'>): Promise<void> {
