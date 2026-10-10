@@ -20,6 +20,8 @@ import type { Views } from './views.js';
 const text = (s: unknown) => (typeof s === 'string' ? s.trim() : '');
 type Page<T> = common.Page<T>;
 type ExecState = 'pending' | 'applied' | 'failed' | 'reversed';
+/** States trust.recommendation.decided reports */
+type Decided = 'completed' | 'declined' | 'withdrawn';
 /** Approval request targets trust opens (access.approval.decided is filtered on them) */
 const REC_TARGET = 'trust_recommendation';
 const ENF_TARGET = 'trust_enforcement';
@@ -32,7 +34,7 @@ export class Actions {
   ) {}
 
   private async recWithStaff(r: RecommendationRec): Promise<Recommendation> {
-    return this.views.recommendation(r, await this.core.staffRefs([r.owner_staff_id, r.decided_by]));
+    return this.views.recommendation(r, await this.core.staffRefs([r.owner_staff_id, r.decided_by, r.created_by, r.routed_by]));
   }
 
   private async loadRec(id: string): Promise<RecommendationRec> {
@@ -96,11 +98,14 @@ export class Actions {
         params,
         rationale: body.rationale.trim(),
         state: recommendationMachine.initial,
+        created_by: by.actor.id ?? null,
         routed_at: null,
+        routed_by: null,
         decided_at: null,
         decided_by: null,
         decision_reason: null,
         enforcement_id: null,
+        approval_request_id: null,
       });
       await this.core.timeline(tx, reportId, [{ kind: 'recommendation_drafted', label: `Recommendation drafted: ${row.label}`, text: row.rationale, actor: by.actor, meta: { recommendationId: row.id } }]);
       await tx.update('reports', reportId, { updated_at: this.core.now() });
@@ -121,9 +126,9 @@ export class Actions {
       const cur = (await tx.get('recommendations', id, { forUpdate: true }))!;
       if (!this.core.isActive(agg.report.status)) throw illegal('Recommendation', cur.state, 'route', 'Reopen the report before routing');
       const state = recommendationMachine.next(cur.state as 'pending', 'route');
-      const after = await tx.update('recommendations', id, { state, routed_at: this.core.now() });
+      const after = await tx.update('recommendations', id, { state, routed_at: this.core.now(), routed_by: by.actor.id ?? null });
       await this.core.timeline(tx, cur.report_id, [{ kind: 'recommendation_routed', label: `Sent to ${humanize(cur.owner_team)}: ${cur.label}`, actor: by.actor, meta: { recommendationId: id } }]);
-      batch.push('trust.recommendation.routed', { recommendationId: id, reportId: cur.report_id, action: cur.action, ownerTeam: cur.owner_team, ownerRole: cur.owner_role, targets: cur.targets });
+      batch.push('trust.recommendation.routed', { recommendationId: id, reportId: cur.report_id, action: (isAction(cur.action) ? cur.action : 'other') as Action, ownerTeam: (isTeam(cur.owner_team) ? cur.owner_team : 'support') as OwnerTeam, ownerRole: cur.owner_role, targets: cur.targets });
       return { before: cur, after, ref: agg.report.ref };
     });
     await this.core.audit({ action: 'trust.recommendation.route', actionLabel: 'Routed a recommendation to its owner team', target: this.recTarget(after, ref), before: { state: before.state }, after: { state: after.state, ownerTeam: after.owner_team } }, by);
@@ -138,7 +143,7 @@ export class Actions {
       const state = recommendationMachine.next(cur.state as 'pending', 'withdraw');
       const after = await tx.update('recommendations', id, { state, decided_at: this.core.now(), decided_by: by.actor.id ?? null, decision_reason: body.reason.trim() });
       await this.core.timeline(tx, cur.report_id, [{ kind: 'recommendation_withdrawn', label: `Recommendation withdrawn: ${cur.label}`, text: body.reason.trim(), actor: by.actor, meta: { recommendationId: id } }]);
-      batch.push('trust.recommendation.decided', { recommendationId: id, reportId: cur.report_id, state, reason: body.reason.trim() });
+      batch.push('trust.recommendation.decided', { recommendationId: id, reportId: cur.report_id, state: state as Decided, reason: body.reason.trim() });
       return { before: cur, after, ref: agg.report.ref };
     });
     await this.core.audit({ action: 'trust.recommendation.withdraw', actionLabel: 'Withdrew a recommendation', target: this.recTarget(after, ref), reason: body.reason, before: { state: before.state }, after: { state: after.state } }, by);
@@ -169,7 +174,7 @@ export class Actions {
     const teams = q.ownerTeam ? [q.ownerTeam] : await this.myTeams(by);
     const where = { owner_team: teams, state: q.state ?? 'sent_to_owner' };
     const [rows, total] = await Promise.all([this.core.repo.find('recommendations', where, { orderBy: [['routed_at', 'asc'], ['id', 'asc']], offset: offsetOf(page), limit: page.limit }), this.core.repo.count('recommendations', where)]);
-    const staff = await this.core.staffRefs(rows.flatMap((r) => [r.owner_staff_id, r.decided_by]));
+    const staff = await this.core.staffRefs(rows.flatMap((r) => [r.owner_staff_id, r.decided_by, r.created_by, r.routed_by]));
     return pageFrom(
       rows.map((r) => this.views.recommendation(r, staff)),
       total,
@@ -182,7 +187,7 @@ export class Actions {
    * person who drafted or routed it cannot decide it; the decider needs the owner's own permission for the action
    * and, for actions with an approval limit, authority from access (above it: APPROVAL_REQUIRED with the request).
    */
-  async decide(id: string, body: { accept: boolean; reason: string; params?: unknown; externalRef?: string | null }, by: By): Promise<{ recommendation: Recommendation; enforcement?: Enforcement | null }> {
+  async decide(id: string, body: { accept: boolean; reason: string; params?: unknown; externalRef?: string | null }, by: By): Promise<{ recommendation: Recommendation; enforcement?: Enforcement | null; approval?: common.ApprovalInfo | null }> {
     const rec = await this.loadRec(id);
     recommendationMachine.next(rec.state as 'sent_to_owner', body.accept ? 'accept' : 'decline');
     if (!text(body.reason)) throw invalidField('reason', body.accept ? 'Record the reason for the action' : 'Why is it declined?');
@@ -210,9 +215,9 @@ export class Actions {
     if (def.externalRefRequired && !externalRef)
       throw this.core.error('EXTERNAL_REF_REQUIRED', `Nobody executes ${humanize(action).toLowerCase()} automatically: do it in your own screen first, then accept with its reference (hold, case, claim or approval)`, { action });
 
-    // authority (access): denied → FORBIDDEN; above the limit → APPROVAL_REQUIRED, and the recommendation stays with
-    // the owner until the request is decided (approved: accepted by onApprovalDecided, otherwise it stays sent_to_owner).
-    // Nothing is recorded before the approval (the enforcement is created on approval), so the answer is 409.
+    // authority (access): denied → FORBIDDEN; above the limit the accept is sent for approval: the recommendation
+    // stays with the owner (sent_to_owner) with approval_request_id, and the call answers 200 with `approval`
+    // (FORMAT.md, Approval responses). Approved: accepted by onApprovalDecided; otherwise the request id is cleared.
     let approvalNote: string | null = null;
     if (def.authority) {
       const access = this.core.ctx.use('access');
@@ -233,10 +238,15 @@ export class Actions {
             reason: body.reason.trim(),
             requestedBy: principal,
           });
-          await this.core.write(rec.report_id, by, async (tx) => {
+          const pending = await this.core.write(rec.report_id, by, async (tx) => {
+            const cur = (await tx.get('recommendations', id, { forUpdate: true }))!;
+            recommendationMachine.next(cur.state as 'sent_to_owner', 'accept');
+            const saved = await tx.update('recommendations', id, { approval_request_id: req.id });
             await this.core.timeline(tx, rec.report_id, [{ kind: 'approval_requested', label: `Approval requested to accept: ${rec.label}`, text: check.reason, actor: by.actor, meta: { recommendationId: id, approvalRequestId: req.id } }]);
+            return saved;
           });
-          throw new AppError('APPROVAL_REQUIRED', check.reason, { approvalRequestId: req.id, eligibleApprovers: check.eligibleApprovers, approvalsNeeded: check.approvalsNeeded });
+          await this.core.audit({ action: 'trust.recommendation.request_approval', actionLabel: 'Sent the accept of a Trust and Risk recommendation for approval', target: this.recTarget(pending, report.ref), reason: body.reason.trim(), after: { action, params, externalRef }, approvalRequestId: req.id }, by);
+          return { recommendation: await this.recWithStaff(pending), enforcement: null, approval: await this.approvalInfo(req.id, check) };
         } else approvalNote = 'Second reviewer requested by the owning module';
       } else approvalNote = check.reason;
     }
@@ -295,6 +305,7 @@ export class Actions {
         appeal_deadline: appealDeadline,
         reversed_at: null,
         reversal_reason: null,
+        reversal_request_id: null,
       });
       const lookup: TargetRec[] = [...cur.targets.map((t) => ({ enforcement_id: enforcementId, target_type: t.type, target_id: t.id })), ...parties.map((p) => ({ enforcement_id: enforcementId, target_type: p.type, target_id: p.id }))];
       const seen = new Set<string>();
@@ -304,13 +315,13 @@ export class Actions {
         seen.add(k);
         await tx.insert('enforcement_targets', l);
       }
-      const recommendation = await tx.update('recommendations', id, { state, decided_at: now, decided_by: by.actor.id ?? null, decision_reason: body.reason.trim(), enforcement_id: enforcementId, params });
+      const recommendation = await tx.update('recommendations', id, { state, decided_at: now, decided_by: by.actor.id ?? null, decision_reason: body.reason.trim(), enforcement_id: enforcementId, params, approval_request_id: null });
       await this.core.timeline(tx, cur.report_id, [
         { kind: 'recommendation_decided', label: `${humanize(cur.owner_team)} accepted: ${cur.label}`, text: body.reason.trim(), actor: by.actor, meta: { recommendationId: id, enforcementId } },
         { kind: 'enforcement_recorded', label: `Enforcement ${ref} recorded${exec === 'applied' ? ' and applied' : ''}`, text: externalRef ? `Done in the owning module: ${externalRef}` : null, actor: by.actor, meta: { enforcementId } },
       ]);
       await tx.update('reports', cur.report_id, { updated_at: now });
-      batch.push('trust.recommendation.decided', { recommendationId: id, reportId: cur.report_id, state, reason: body.reason.trim() });
+      batch.push('trust.recommendation.decided', { recommendationId: id, reportId: cur.report_id, state: state as Decided, reason: body.reason.trim() });
       const recorded = {
         enforcementId,
         reportId: cur.report_id,
@@ -354,11 +365,20 @@ export class Actions {
       const after = await tx.update('recommendations', rec.id, { state, decided_at: this.core.now(), decided_by: by.actor.id ?? null, decision_reason: reason });
       await this.core.timeline(tx, cur.report_id, [{ kind: 'recommendation_decided', label: `${humanize(cur.owner_team)} declined: ${cur.label}`, text: reason, actor: by.actor, meta: { recommendationId: rec.id } }]);
       await tx.update('reports', cur.report_id, { updated_at: this.core.now() });
-      batch.push('trust.recommendation.decided', { recommendationId: rec.id, reportId: cur.report_id, state, reason });
+      batch.push('trust.recommendation.decided', { recommendationId: rec.id, reportId: cur.report_id, state: state as Decided, reason });
       return after;
     });
     await this.core.audit({ action: 'trust.recommendation.decline', actionLabel: 'Declined a Trust and Risk recommendation', target: this.recTarget(after, reportRef), reason, before: { state: rec.state }, after: { state: after.state } }, by);
     return { recommendation: await this.recWithStaff(after), enforcement: null };
+  }
+
+  /** The pending approval as the caller sees it (access.approvalInfo; the check's own answer when access cannot tell) */
+  private async approvalInfo(requestId: string, check: { reason: string; eligibleApproverRoles?: { name: string }[] | null }): Promise<common.ApprovalInfo> {
+    const info = await this.core.ctx
+      .use('access')
+      .approvalInfo(requestId)
+      .catch(() => null);
+    return info ?? { required: true, reason: check.reason, approvalRequestId: requestId, approvers: (check.eligibleApproverRoles ?? []).map((r) => r.name) };
   }
 
   private sellerOf(targets: TrustSubject[]): string | null {
@@ -448,10 +468,15 @@ export class Actions {
         reason: body.reason.trim(),
         requestedBy: principal,
       });
-      await this.core.write(e.report_id, by, async (tx) => {
+      const pending = await this.core.write(e.report_id, by, async (tx) => {
+        const cur = (await tx.get('enforcements', id, { forUpdate: true }))!;
+        enforcementExecutionMachine.next(cur.execution_state as 'applied', 'reverse');
+        const saved = await tx.update('enforcements', id, { reversal_request_id: req.id });
         await this.core.timeline(tx, e.report_id, [{ kind: 'approval_requested', label: `Approval requested to reverse ${e.ref}`, text: check.reason, actor: by.actor, meta: { enforcementId: id, approvalRequestId: req.id } }]);
+        return saved;
       });
-      throw new AppError('APPROVAL_REQUIRED', check.reason, { approvalRequestId: req.id, eligibleApprovers: check.eligibleApprovers, approvalsNeeded: check.approvalsNeeded });
+      await this.core.audit({ action: 'trust.enforcement.request_reversal', actionLabel: 'Sent the reversal of a trust enforcement for approval', target: { type: ENF_TARGET, id, ref: e.ref, label: humanize(e.action), screen: 'admin/trust' }, reason: body.reason.trim(), approvalRequestId: req.id }, by);
+      return { ...this.views.enforcement(pending, report.ref), approval: await this.approvalInfo(req.id, check) };
     }
     const after = await this.reverseNow(id, body.reason.trim(), by);
     const reportRef = (await this.core.repo.get('reports', e.report_id))!.ref;
@@ -523,7 +548,8 @@ export class Actions {
       return;
     }
     const system: By = { actor: { kind: 'system', id: null, name: 'Trust and Risk' } };
-    const latest = await this.core.approvalFor(kind === 'recommendation' ? 'recommendationId' : 'enforcementId', e.target.id);
+    // only the request trust last opened for the record counts (approval_request_id / reversal_request_id)
+    const latest = rec ? rec.approval_request_id : (enf?.reversal_request_id ?? null);
     const applies =
       latest === e.requestId && (rec ? recommendationMachine.can(rec.state as 'sent_to_owner', 'accept') : enforcementExecutionMachine.can(enf!.execution_state as 'applied', 'reverse'));
     if (e.outcome !== 'approved' || !applies) {
@@ -532,6 +558,8 @@ export class Actions {
       await this.core.write(reportId, system, async (tx) => {
         if (!(await tx.claim(key))) return;
         if (e.outcome !== 'approved' && latest === e.requestId) {
+          if (rec) await tx.update('recommendations', rec.id, { approval_request_id: null });
+          else await tx.update('enforcements', enf!.id, { reversal_request_id: null });
           await this.core.timeline(tx, reportId, [
             {
               kind: 'approval_decided',
@@ -581,7 +609,7 @@ export class Actions {
       const state = enforcementExecutionMachine.next(cur.execution_state as 'applied', 'reverse');
       const now = this.core.now();
       const report = (await t.get('reports', cur.report_id))!;
-      const after = await t.update('enforcements', id, { execution_state: state, reversed_at: now, reversal_reason: reason });
+      const after = await t.update('enforcements', id, { execution_state: state, reversed_at: now, reversal_reason: reason, reversal_request_id: null });
       await this.core.timeline(t, cur.report_id, [{ kind: 'enforcement_reversed', label: `Enforcement ${cur.ref} reversed`, text: reason, actor: by.actor, meta: { enforcementId: id, ...(appealId ? { appealId } : {}) } }]);
       b.push('trust.enforcement.reversed', {
         enforcementId: id,

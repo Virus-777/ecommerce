@@ -27,7 +27,7 @@ export class Views {
   async context(aggs: Agg[], o: { media?: boolean; extraStaff?: string[]; extraMedia?: string[] } = {}): Promise<ViewCtx> {
     const staffIds = [
       ...(o.extraStaff ?? []),
-      ...aggs.flatMap((a) => [a.report.assignee_staff_id, ...a.recommendations.flatMap((r) => [r.owner_staff_id, r.decided_by])]),
+      ...aggs.flatMap((a) => [a.report.assignee_staff_id, ...a.recommendations.flatMap((r) => [r.owner_staff_id, r.decided_by, r.created_by, r.routed_by])]),
     ];
     const mediaIds = o.media === false ? [] : [...(o.extraMedia ?? []), ...aggs.flatMap((a) => [...a.evidence.flatMap((e) => e.media_ids), ...a.requests.flatMap((r) => r.answer_media_ids)])];
     const [staff, media, thresholds] = await Promise.all([this.core.staffRefs(staffIds), this.core.mediaRefs(mediaIds), this.core.thresholds()]);
@@ -89,11 +89,14 @@ export class Views {
       params: r.params ?? {},
       rationale: r.rationale,
       state: r.state as Recommendation['state'],
+      createdBy: r.created_by ? (staff.get(r.created_by) ?? { staffId: r.created_by, name: 'Staff member' }) : null,
       routedAt: iso(r.routed_at),
+      routedBy: r.routed_by ? (staff.get(r.routed_by) ?? { staffId: r.routed_by, name: 'Staff member' }) : null,
       decidedAt: iso(r.decided_at),
       decidedBy: r.decided_by ? (staff.get(r.decided_by) ?? { staffId: r.decided_by, name: 'Staff member' }) : null,
       decisionReason: r.decision_reason ?? null,
       enforcementId: r.enforcement_id ?? null,
+      approvalRequestId: r.approval_request_id ?? null,
     };
   }
 
@@ -120,6 +123,8 @@ export class Views {
       appealDeadline: iso(e.appeal_deadline),
       reversedAt: iso(e.reversed_at),
       reversalReason: e.reversal_reason ?? null,
+      reversalRequestId: e.reversal_request_id ?? null,
+      approval: null,
     };
   }
 
@@ -160,7 +165,7 @@ export class Views {
       title: r.title,
       description: r.description,
       source: r.source as TrustReport['source'],
-      reporter: summary ? null : { actor: { kind: r.reporter_kind, id: r.reporter_id ?? null }, name: r.reporter_name ?? null, contactEmail: r.reporter_contact ?? null },
+      reporter: summary ? null : { actor: { kind: r.reporter_kind, id: r.reporter_id ?? null }, name: r.reporter_name ?? null, organization: r.reporter_org ?? null, contactEmail: r.reporter_contact ?? null },
       reporterCount: r.reporter_count,
       detector: r.detector ?? null,
       subjects: agg.subjects.map((s) => this.subject(s, c.statusLabels)),
@@ -201,7 +206,7 @@ export class Views {
       case 'automated':
         return `Automated: ${r.detector ?? 'detector'}`;
       case 'brand_owner':
-        return `Brand owner: ${r.reporter_name ?? 'rights owner'}${more}`;
+        return `Brand owner: ${r.reporter_org ? `${r.reporter_org}${r.reporter_name ? ` (${r.reporter_name})` : ''}` : (r.reporter_name ?? 'rights owner')}${more}`;
       case 'seller':
         return `Seller${r.reporter_name ? `: ${r.reporter_name}` : ''}${more}`;
       case 'customer':
