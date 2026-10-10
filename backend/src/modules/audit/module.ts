@@ -16,11 +16,12 @@ import { AuditService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.2.0',
+  version: '1.3.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const service = new AuditService({ repo: createPostgresAuditRepository(ctx.db), ctx });
+    const repo = createPostgresAuditRepository(ctx.db, { timeZone: ctx.config.market.timeZone, now: () => ctx.clock.now() });
+    const service = new AuditService({ repo, ctx });
     ctx.provide(service);
     ctx.http.routes(sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
@@ -34,5 +35,6 @@ export default defineModule({
     // Background jobs (spec jobs)
     ctx.jobs.handle("audit.verify-chain", () => service.verifyChain());
     ctx.jobs.handle("audit.purge-expired", () => service.purgeExpired());
+    ctx.jobs.handle("audit.prepare-partitions", () => service.preparePartitions());
   },
 });

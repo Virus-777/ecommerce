@@ -180,9 +180,46 @@ function applyFilters(qb: EntriesQuery, q: EntryQuery | null): EntriesQuery {
   return qb;
 }
 
+export interface PostgresAuditRepositoryOptions {
+  /** Market time zone: month partitions start at 00:00 on the 1st there */
+  timeZone: string;
+  /** The app clock (which months are recent enough to trust the partition cache) */
+  now: () => Date;
+}
+
+/**
+ * Month partitions known to exist, so appends at about now skip the ensure call. Learned and reset only
+ * when the transaction that saw them commits (a rolled-back partition must not be trusted). Purges in
+ * other processes only drop months older than the shortest retention (a year), so the cache is trusted
+ * for entries within PARTITION_CACHE_WINDOW_MS of now; older (backdated) entries always ensure.
+ */
+interface PartitionCache {
+  ranges: { from: number; to: number }[];
+}
+const PARTITION_CACHE_WINDOW_MS = 180 * 86_400_000;
+
+/** Work to run once the outermost transaction committed */
+type OnCommit = (() => void)[];
+
 /** Postgres adapter for AuditRepository. `db` is scoped to the `audit` schema. */
-export function createPostgresAuditRepository(db: Db, inTransaction = false): AuditRepository {
+export function createPostgresAuditRepository(db: Db, opts: PostgresAuditRepositoryOptions, cache: PartitionCache = { ranges: [] }, onCommit?: OnCommit): AuditRepository {
   const entries = () => db.selectFrom('entries').select(ENTRY_COLUMNS);
+  const inTransaction = onCommit !== undefined;
+
+  const known = (at: Date) => {
+    const t = at.getTime();
+    return t >= opts.now().getTime() - PARTITION_CACHE_WINDOW_MS && cache.ranges.some((r) => r.from <= t && t < r.to);
+  };
+
+  /** Creates the month partitions missing for these instants; the cache learns the list on commit */
+  async function ensurePartitions(ats: readonly Date[]): Promise<number> {
+    const r = await sql<{ made: number }>`
+      select audit.ensure_entry_partitions(array(select jsonb_array_elements_text(${JSON.stringify(ats.map((a) => a.toISOString()))}::jsonb)::timestamptz), ${opts.timeZone}) as made`.execute(db);
+    const ranges = (await repo.partitions()).map((p) => ({ from: p.from.getTime(), to: p.to.getTime() }));
+    if (onCommit) onCommit.push(() => void (cache.ranges = ranges));
+    else cache.ranges = ranges;
+    return Number(r.rows[0]?.made ?? 0);
+  }
 
   async function relatedOf(ids: readonly string[]): Promise<Map<string, ChainTarget[]>> {
     const out = new Map<string, ChainTarget[]>();
@@ -249,7 +286,10 @@ export function createPostgresAuditRepository(db: Db, inTransaction = false): Au
   const repo: AuditRepository = {
     async transaction(fn) {
       if (inTransaction) return fn(repo);
-      return db.transaction().execute((trx) => fn(createPostgresAuditRepository(trx, true)));
+      const committed: OnCommit = [];
+      const out = await db.transaction().execute((trx) => fn(createPostgresAuditRepository(trx, opts, cache, committed)));
+      for (const f of committed) f();
+      return out;
     },
 
     /* ---------------------------------------------------------------- chain */
@@ -270,6 +310,9 @@ export function createPostgresAuditRepository(db: Db, inTransaction = false): Au
     },
 
     async insertEntries(all) {
+      // the month partitions first: the current month usually exists already, a backdated entry may need one
+      const missing = all.filter((r) => !known(r.at)).map((r) => r.at);
+      if (missing.length) await ensurePartitions(missing);
       const out: { id: string; seq: number }[] = [];
       // chunks keep each statement under PostgreSQL's 65,535 parameters; order (and so seq) is kept
       for (let i = 0; i < all.length; i += INSERT_CHUNK) out.push(...(await insertChunk(all.slice(i, i + INSERT_CHUNK))));
@@ -423,20 +466,72 @@ export function createPostgresAuditRepository(db: Db, inTransaction = false): Au
       return r?.m === null || r?.m === undefined ? null : Number(r.m);
     },
 
-    async purgeEntries(beforeSeq) {
+    async lastEntryBefore(beforeSeq) {
+      let q = db.selectFrom('entries').select(['seq', 'hash', 'at']).orderBy('seq', 'desc').limit(1);
+      if (beforeSeq !== null) q = q.where('seq', '<', beforeSeq);
+      const last = await q.executeTakeFirst();
+      return last ? { seq: Number(last.seq), hash: bytes(last.hash), at: last.at } : null;
+    },
+
+    async purgeEntries(beforeSeq, cutoff) {
+      // the append-only triggers (row, truncate and drop) let this transaction through
       await sql`select set_config('audit.purging', 'on', true)`.execute(db);
-      let lastQ = db.selectFrom('entries').select(['seq', 'hash', 'at']).orderBy('seq', 'desc').limit(1);
-      if (beforeSeq !== null) lastQ = lastQ.where('seq', '<', beforeSeq);
-      const last = await lastQ.executeTakeFirst();
-      if (!last) return { removed: 0, last: null };
-      let doomed = db.selectFrom('entries').select('id');
+      // whole months: entirely before the cut-off and holding no entry that stays (a backdated one keeps its month)
+      const keepsSome =
+        beforeSeq === null ? sql`false` : sql`exists (select 1 from audit.entries e where e.at >= p.from_at and e.at < p.to_at and e.seq >= ${beforeSeq})`;
+      const whole = (
+        await sql<{ name: string; from_at: Date; to_at: Date }>`
+          select p.name, p.from_at, p.to_at from audit.entry_partitions p
+          where p.to_at <= ${cutoff} and not ${keepsSome}
+          order by p.from_at`.execute(db)
+      ).rows;
+      let removed = 0;
+      for (const p of whole) {
+        const n = await db.selectFrom('entries').select(sql<number>`count(*)::int`.as('n')).where('at', '>=', p.from_at).where('at', '<', p.to_at).executeTakeFirst();
+        removed += Number(n?.n ?? 0);
+        await sql`drop table ${sql.id('audit_partitions', `entry_targets_${p.name}`)}`.execute(db);
+        await sql`drop table ${sql.id('audit_partitions', `entries_${p.name}`)}`.execute(db);
+        await db.deleteFrom('entry_partitions').where('name', '=', p.name).execute();
+      }
+      // the rest (a month that also holds kept entries, or one the partitioning migration split): row by row
+      let doomed = db.selectFrom('entries').select('id').where('at', '<', cutoff);
       if (beforeSeq !== null) doomed = doomed.where('seq', '<', beforeSeq);
-      await db.deleteFrom('entry_targets').where('entry_id', 'in', doomed).execute();
-      let del = db.deleteFrom('entries');
+      await db.deleteFrom('entry_targets').where('at', '<', cutoff).where('entry_id', 'in', doomed).execute();
+      let del = db.deleteFrom('entries').where('at', '<', cutoff);
       if (beforeSeq !== null) del = del.where('seq', '<', beforeSeq);
-      const res = await del.executeTakeFirst();
+      removed += Number((await del.executeTakeFirst()).numDeletedRows);
       await sql`select set_config('audit.purging', 'off', true)`.execute(db);
-      return { removed: Number(res.numDeletedRows), last: { seq: Number(last.seq), hash: bytes(last.hash), at: last.at } };
+      // dropped months leave the cache once this commits
+      if (whole.length) {
+        if (onCommit) onCommit.push(() => void (cache.ranges = []));
+        else cache.ranges = [];
+      }
+      return { removed, droppedPartitions: whole.length };
+    },
+
+    /* ---------------------------------------------------------------- month partitions */
+
+    async preparePartitions(from, monthsAhead) {
+      const range = await sql<{ lo: Date; hi: Date }>`
+        select date_trunc('month', ${from}::timestamptz at time zone ${opts.timeZone}) at time zone ${opts.timeZone} as lo,
+          (date_trunc('month', ${from}::timestamptz at time zone ${opts.timeZone}) + make_interval(months => ${monthsAhead + 1}::int)) at time zone ${opts.timeZone} as hi`.execute(db);
+      const lo = new Date(range.rows[0]!.lo).getTime();
+      const hi = new Date(range.rows[0]!.hi).getTime();
+      // every instant of [lo, hi) covered: walk the partitions and fill the first gap until none is left
+      // (next to the UTC months of the partitioning migration a market month may come in two pieces)
+      let made = 0;
+      for (let guard = 0; guard < 4 * (monthsAhead + 1); guard++) {
+        let at = lo;
+        for (const p of await repo.partitions()) if (p.from.getTime() <= at && at < p.to.getTime()) at = p.to.getTime();
+        if (at >= hi) break;
+        made += await ensurePartitions([new Date(at)]);
+      }
+      return made;
+    },
+
+    async partitions() {
+      const rows = await db.selectFrom('entry_partitions').select(['name', 'from_at', 'to_at']).orderBy('from_at').execute();
+      return rows.map((r) => ({ name: r.name, from: r.from_at, to: r.to_at }));
     },
 
     /* ---------------------------------------------------------------- integrity checks */

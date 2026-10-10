@@ -67,7 +67,7 @@ export interface SummaryCounts {
   byActor: { name: string; n: number }[];
 }
 
-/** Persistence for this module's own tables: audit.entries, audit.entry_targets, audit.approval_states, audit.retention, audit.integrity_checks. */
+/** Persistence for this module's own tables: audit.entries, audit.entry_targets (and their month partitions, audit.entry_partitions), audit.approval_states, audit.retention, audit.integrity_checks, audit.checkpoints. */
 export interface AuditRepository {
   /** Runs fn with a repository bound to one transaction. */
   transaction<T>(fn: (tx: AuditRepository) => Promise<T>): Promise<T>;
@@ -107,8 +107,20 @@ export interface AuditRepository {
   updateRetention(patch: Partial<RetentionRow>): Promise<RetentionRow>;
   /** First seq that is kept when entries before `cutoff` are purged; null when every entry is older */
   firstSeqAtOrAfter(cutoff: Date): Promise<number | null>;
-  /** Removes entries with seq < `beforeSeq` (or all when null) and their related targets */
-  purgeEntries(beforeSeq: number | null): Promise<{ removed: number; last: { seq: number; hash: Uint8Array; at: Date } | null }>;
+  /** The last entry with seq < `beforeSeq` (the newest when null): where a purge up to `beforeSeq` stops */
+  lastEntryBefore(beforeSeq: number | null): Promise<{ seq: number; hash: Uint8Array; at: Date } | null>;
+  /**
+   * Removes entries with seq < `beforeSeq` (or all when null; all of them are before `cutoff`) and their
+   * related targets: month partitions entirely before `cutoff` holding only such entries are dropped whole,
+   * the rest of them are deleted row by row.
+   */
+  purgeEntries(beforeSeq: number | null, cutoff: Date): Promise<{ removed: number; droppedPartitions: number }>;
+
+  /* ---- month partitions (call inside a transaction holding the chain lock) */
+  /** Creates the market-month partitions of the month of `from` and the `monthsAhead` after it; the number created */
+  preparePartitions(from: Date, monthsAhead: number): Promise<number>;
+  /** The month partitions, oldest first */
+  partitions(): Promise<{ name: string; from: Date; to: Date }[]>;
 
   /* ---- integrity checks */
   lastIntegrityCheck(): Promise<IntegrityCheckRow | null>;
