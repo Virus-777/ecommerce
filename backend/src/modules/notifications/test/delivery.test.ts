@@ -203,7 +203,7 @@ describe('inbound replies', () => {
     const order = orderFor(c);
     await publish(app, 'orders.order.accepted', order);
     const caseId = newId();
-    await publish(app, 'support.case.opened', { caseId, ref: 'CS-261009-0042', kind: 'customer_help', category: 'delivery', priority: 'low', customerId: c.customerId, sellerId: null, orderId: order.orderId, orderItemIds: [], handler: 'platform', nextResponseDueAt: null });
+    await publish(app, 'support.case.opened', { caseId, ref: 'CS-261009-0042', kind: 'customer_help', category: 'delivery', priority: 'low', customerId: c.customerId, sellerId: null, orderId: order.orderId, orderItemIds: [], handler: 'marketplace_support', nextResponseDueAt: null });
     await publish(app, 'support.case.message_added', { caseId, messageId: newId(), audience: 'customer', authorRole: 'staff' });
     const replyTo = emailsTo(c.email).find((e) => e.message.replyTo)!.message.replyTo!;
     const ok = await webhook('inbound-email', { providerEventId: newId(), to: replyTo, from: c.email, subject: 'Re: reply', text: 'Thanks, that works.\n\nOn Oct 9 Marketly wrote:\n> old text', attachments: [], receivedAt: clock.now().toISOString() });

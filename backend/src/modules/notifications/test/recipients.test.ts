@@ -122,7 +122,7 @@ describe('customers named by the event', () => {
     const sellerId = newId();
     const owner = world.member(sellerId, { isOwner: true });
     const caseId = newId();
-    await publish(app, 'support.case.opened', { caseId, ref: 'CS-261010-0007', kind: 'order_problem', category: 'damaged', priority: 'medium', customerId: null, contactEmail: email, sellerId, orderId: newId(), orderItemIds: [], handler: 'platform', nextResponseDueAt: null });
+    await publish(app, 'support.case.opened', { caseId, ref: 'CS-261010-0007', kind: 'order_problem', category: 'damaged', priority: 'medium', customerId: null, contactEmail: email, sellerId, orderId: newId(), orderItemIds: [], handler: 'marketplace_support', nextResponseDueAt: null });
     expect(emailsTo(email).map((m) => m.message.subject)).toEqual(['We received your request CS-261010-0007']);
 
     const messageId = newId();
