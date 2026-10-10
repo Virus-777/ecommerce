@@ -71,7 +71,7 @@ export async function boot(): Promise<Kit> {
     return p ? ({ id, ref: `PRD-${id.slice(-5)}`, title: p.title, brand: p.brandId ? { id: p.brandId, name: 'Brightline' } : null } as any) : null;
   };
   const app = await buildTestApp({
-    modules: withDependencies(['trust', 'audit', 'workqueues', 'media', 'offers', 'catalog', 'sellers', 'customers', 'reports', 'identity']),
+    modules: withDependencies(['trust', 'audit', 'workqueues', 'media', 'offers', 'catalog', 'sellers', 'customers', 'reports', 'identity', 'notifications']),
     clock,
     config: { rateLimits: false, launchPhase: 4 },
     apiStubs: {
@@ -137,6 +137,12 @@ export async function boot(): Promise<Kit> {
         getCustomerByUserId: async (userId: string) => {
           const [id, c] = [...customers].find(([, x]) => x.userId === userId) ?? [];
           return id && c ? ({ id, userId, ref: `CU-${id.slice(-6)}`, displayName: c.displayName, email: 'c@example.com', accountStatus: 'active', canOrder: true, canMessage: true } as any) : null;
+        },
+      },
+      notifications: {
+        resolve: async (key: string) => {
+          rec('notifications.resolve', key);
+          return 1;
         },
       },
       identity: {

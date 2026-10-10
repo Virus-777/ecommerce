@@ -799,6 +799,8 @@ export class Reports {
       batch.push('trust.evidence.received', { requestId, reportId: req.report_id });
       return row;
     });
+    // the "send proof" action notice notifications raised for trust.evidence.requested closes once answered
+    await this.core.soft('notifications', 'resolve evidence notice', (n) => n.resolve(`trust-evidence:${requestId}`, 'Proof sent'));
     const agg = (await this.core.load(req.report_id))!;
     return this.views.request(row, agg.subjects, await this.core.mediaRefs(row.answer_media_ids), this.core.now(), agg.report.ref);
   }

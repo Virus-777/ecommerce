@@ -77,6 +77,8 @@ describe('proof asked from a customer (store)', () => {
     expect(ans.body).toMatchObject({ state: 'answered', answer: 'Yes, it was me', reportRef: r.ref });
     expect(kit.callsOf('media.attach').at(-1)).toEqual([media, expect.objectContaining({ module: 'trust', kind: 'trust_evidence', refId: r.id }), { kind: 'customer', id: accountId }]);
     expect(kit.last('trust.evidence.received')).toEqual({ requestId: q.body.id, reportId: r.id });
+    // the customer's "send proof" notice closes
+    expect(kit.callsOf('notifications.resolve')).toContainEqual([`trust-evidence:${q.body.id}`]);
     const full = (await kit.call('GET', `${ADMIN}/reports/${r.id}`, staff())).body;
     expect(full.evidence.find((e: any) => e.source === 'reported_party')).toMatchObject({ kind: 'document', text: expect.stringContaining('Yes, it was me') });
 
