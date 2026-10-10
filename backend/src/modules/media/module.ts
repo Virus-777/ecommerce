@@ -1,3 +1,4 @@
+import { fileLinkSecret } from '../../kernel/auth/file-links.js';
 import { hmacWebhookVerifier } from '../../kernel/http/webhooks.js';
 import { secretFor } from '../../kernel/lib/secrets.js';
 import { defineModule } from '../../kernel/module-system/index.js';
@@ -10,7 +11,8 @@ import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresMediaRepository } from './infra/postgres/repository.js';
 import { createDevProcessor } from './infra/processing/dev.js';
 import { createDevScanner } from './infra/scanner/dev.js';
-import { createDevStorage } from './infra/storage/dev.js';
+import { createLocalStorage } from './infra/storage/local.js';
+import { createMemoryStorage } from './infra/storage/memory.js';
 import { MediaService } from './service.js';
 
 /**
@@ -24,14 +26,17 @@ export default defineModule({
   version: '1.2.0',
   migrations,
   register(ctx) {
-    // Providers: deterministic dev adapters (no network). S3-compatible storage, ClamAV and an image /
-    // transcoding service replace them behind the same ports (ports.ts).
-    const providers = {
-      // upload tickets point at PUT /uploads/{id}/content; acceptSignedPut follows them to the signed storage URL
-      storage: createDevStorage({ secret: secretFor(ctx.config, 'media.storage'), clock: ctx.clock, resolveUploadUrl: (url) => service.signedStorageUrlFor(url) }),
-      scanner: createDevScanner(),
-      processor: createDevProcessor(),
-    };
+    // Storage (MEDIA_STORAGE): the server's disk (local, production) or memory (tests). Both take uploads
+    // through PUT /uploads/{id}/content and serve downloads at GET /files/{bucket}/{key}, signed with
+    // media's file-link key and verified by the auth middleware. Scanning and processing use deterministic
+    // dev adapters (no network); ClamAV and an image / transcoding service replace them behind the ports.
+    const links = { secret: fileLinkSecret(ctx.config, ctx.name), baseUrl: ctx.config.apiUrl };
+    const storage =
+      ctx.config.media.storage === 'local'
+        ? createLocalStorage({ dir: ctx.config.media.dir, links })
+        : // acceptSignedPut (tests and tools) follows an upload ticket's API URL to a signed upload URL
+          createMemoryStorage({ clock: ctx.clock, links, uploadSecret: secretFor(ctx.config, 'media.storage'), resolveUploadUrl: (url) => service.signedStorageUrlFor(url) });
+    const providers = { storage, scanner: createDevScanner(), processor: createDevProcessor() };
     const service = new MediaService({ repo: createPostgresMediaRepository(ctx.db), ctx, providers });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), webhooksRoutes(service));

@@ -73,19 +73,19 @@ describe('refs', () => {
     const busy = await uploadFile(t, 'seller', seller, { purpose: 'product_image', body: png(900, 900, { seed: 'not-yet' }) }, { process: false });
     let refs = await t.media.refs([b.asset.id, a.asset.id, busy.asset.id, newId()], 'thumb');
     expect(refs.map((r) => r.id)).toEqual([b.asset.id, a.asset.id]);
-    expect(refs[1]).toMatchObject({ alt: 'Front', width: 160, height: 107, url: expect.stringMatching(/thumb\.webp$/) });
+    expect(refs[1]).toMatchObject({ alt: 'Front', width: 160, height: 107, url: expect.stringMatching(/\/files\/marketly-public\/renditions\/.+\/thumb\.webp\?sig=/) });
     // a 300 px image has no medium rendition: the largest smaller one is used
     refs = await t.media.refs([b.asset.id]);
-    expect(refs[0]).toMatchObject({ width: 300, url: expect.stringMatching(/small\.webp$/) });
+    expect(refs[0]).toMatchObject({ width: 300, url: expect.stringMatching(/\/small\.webp\?sig=/) });
     await t.media.remove(a.asset.id, { reason: 'Counterfeit', by: { kind: 'staff', id: newId() } });
     refs = await t.media.refs([a.asset.id]);
-    expect(refs[0]).toMatchObject({ id: a.asset.id, url: expect.stringMatching(/placeholders\/removed\.png$/), width: null });
+    expect(refs[0]).toMatchObject({ id: a.asset.id, url: expect.stringMatching(/\/files\/marketly-public\/placeholders\/removed\.png\?sig=/), width: null });
   });
 
   it('private files get short-lived signed URLs', async () => {
     const { asset } = await uploadFile(t, 'store', callers.customer(), { purpose: 'return_evidence', body: png(800, 800, { seed: 'private-ref' }) });
     const [ref] = await t.media.refs([asset.id]);
-    expect(ref!.url).toMatch(/X-Signature=/);
+    expect(ref!.url).toMatch(/\/files\/marketly-private\/.+[?&]exp=.+&sig=/);
     expect((await t.storage.fetch(ref!.url))?.disposition).toMatch(/^inline/);
   });
 });

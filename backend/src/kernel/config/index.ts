@@ -51,6 +51,11 @@ const schema = z.object({
   STORE_URL: z.url().optional(),
   SELLER_URL: z.url().optional(),
   ADMIN_URL: z.url().optional(),
+  /** Public address of this API, for links to files it serves (GET /files/…); default http://localhost:PORT */
+  API_URL: z.url().optional(),
+  /** Where media keeps files: local (the server's disk, MEDIA_STORAGE_DIR) or memory (lost on restart); default local, memory in tests */
+  MEDIA_STORAGE: z.enum(['local', 'memory']).optional(),
+  MEDIA_STORAGE_DIR: z.string().default('.data/media'),
   /** Webhook signing secrets per provider: {"stripe":"…","carrier":"…"} (development and tests default to "dev-webhook-secret") */
   WEBHOOK_SECRETS: z.string().optional(),
   /** How often each server pulls session revocations from identity */
@@ -96,6 +101,10 @@ export interface Config {
   /** Root secret for module-signed links and tokens (derive per purpose with secretFor) */
   appSecret: string;
   publicUrls: { store: string; seller: string; admin: string };
+  /** Public address of this API (no trailing slash): signed file links point here */
+  apiUrl: string;
+  /** File storage for media: the server's disk (local, under dir) or memory (tests) */
+  media: { storage: 'local' | 'memory'; dir: string };
   /** Webhook HMAC secrets per provider; `*` applies to any provider (development and tests only) */
   webhookSecrets: Record<string, string>;
   /** Development and tests: sign and accept dev-key tokens */
@@ -150,6 +159,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       seller: (e.SELLER_URL ?? 'http://localhost:3001').replace(/\/$/, ''),
       admin: (e.ADMIN_URL ?? 'http://localhost:3002').replace(/\/$/, ''),
     },
+    apiUrl: (e.API_URL ?? `http://localhost:${e.PORT}`).replace(/\/$/, ''),
+    media: { storage: e.MEDIA_STORAGE ?? (e.NODE_ENV === 'test' ? 'memory' : 'local'), dir: e.MEDIA_STORAGE_DIR },
     webhookSecrets: { ...(devTokens ? { '*': 'dev-webhook-secret' } : {}), ...(e.WEBHOOK_SECRETS ? JSON.parse(e.WEBHOOK_SECRETS) : {}) },
     devTokens,
     devSigning: { file: e.DEV_SIGNING_KEY_FILE },
@@ -166,6 +177,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (prod && config.appProof.allowDev) throw new Error('The "dev" app proof cannot be accepted in production');
   if (prod && !config.appSecret) throw new Error('APP_SECRET is required in production (signs unsubscribe, reply and download links)');
   if (prod && !(e.STORE_URL && e.SELLER_URL && e.ADMIN_URL)) throw new Error('STORE_URL, SELLER_URL and ADMIN_URL are required in production (links in emails)');
+  if (prod && !e.API_URL) throw new Error('API_URL is required in production (links to the files the API serves)');
+  if (prod && config.media.storage === 'memory') throw new Error('MEDIA_STORAGE=memory loses every file on restart; use local in production');
   if (prod && !config.rateLimits) throw new Error('RATE_LIMITS cannot be turned off in production');
   if (config.jobsBackend === 'pgboss' && !config.databaseUrl) throw new Error('JOBS_BACKEND=pgboss needs DATABASE_URL (on PGlite jobs run in process)');
   if (prod && !config.auth.jwks) throw new Error('AUTH_JWKS is required in production (the public keys that verify tokens)');

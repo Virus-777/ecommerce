@@ -140,10 +140,6 @@ export class MediaService implements MediaPublicApi {
   private get storage() {
     return this.deps.providers.storage;
   }
-  /** Development storage (infra/storage/dev.ts) takes the bytes through this API; a real adapter at its own signed URL */
-  private get devStorage(): boolean {
-    return typeof (this.storage as { acceptSignedPut?: unknown }).acceptSignedPut === 'function';
-  }
   private now() {
     return this.ctx.clock.now();
   }
@@ -180,7 +176,7 @@ export class MediaService implements MediaPublicApi {
       if (row.status !== 'ready') continue;
       const r = pickRendition(renditions.get(id) ?? [], row.kind === 'video' ? 'poster' : size);
       let url: string;
-      if (r && row.visibility === 'public') url = r.url;
+      if (r && row.visibility === 'public') url = this.storage.publicUrl(r.storage_key);
       else if (r) url = await this.sign(this.storage.buckets.private, r.storage_key, row, ttl, true);
       else url = await this.sign(row.storage_bucket, row.storage_key, row, ttl, false);
       out.push({ id, url, alt: row.alt, width: r?.width ?? row.width, height: r?.height ?? row.height, bytes: Number(row.size_bytes) });
@@ -579,10 +575,16 @@ export class MediaService implements MediaPublicApi {
       });
       await tx.bumpUploadCounter(owner, day, req.sizeBytes);
     });
+    const ticket = { uploadId, assetId, maxBytes: req.sizeBytes, expiresAt: expiresAt.toISOString() };
+    // storage the API serves itself (local disk, memory) takes the bytes through PUT /uploads/{id}/content
+    if (this.storage.viaApi) {
+      const area = input.target?.area ?? (input.uploader === 'staff' ? 'admin' : input.uploader === 'seller' ? 'seller' : 'store');
+      const url = input.target ? contentUrl(input.target, uploadId) : `${this.ctx.config.apiUrl}/api/${area}/media/uploads/${uploadId}/content`;
+      return { ...ticket, method: 'PUT', url, headers: { 'content-type': req.contentType }, fields: {} };
+    }
+    if (!this.storage.presignUpload) throw new Error('This storage adapter takes neither API nor direct uploads');
     const signed = await this.storage.presignUpload({ bucket: this.storage.buckets.private, key, contentType: req.contentType, maxBytes: req.sizeBytes, expiresAt });
-    // development storage has no address a client can reach: the bytes come through this API instead
-    const url = this.devStorage && input.target ? contentUrl(input.target, uploadId) : signed.url;
-    return { uploadId, assetId, ...signed, url, maxBytes: req.sizeBytes, expiresAt: expiresAt.toISOString() };
+    return { ...ticket, ...signed };
   }
 
   /**
@@ -593,7 +595,7 @@ export class MediaService implements MediaPublicApi {
    * uploads the calling staff member started (startedBy).
    */
   async receiveUploadContent(uploadId: string, bytes: Uint8Array | undefined, opts: { area: UploadArea; owner?: OwnerFilter; startedBy?: { kind: string; id: string | null } }): Promise<void> {
-    if (!this.devStorage) throw this.ctx.error('DEV_STORAGE_ONLY', 'Upload the file to the storage URL in the upload ticket.');
+    if (!this.storage.viaApi) throw this.ctx.error('DEV_STORAGE_ONLY', 'Upload the file to the storage URL in the upload ticket.');
     const upload = await this.repo.getUpload(uploadId);
     const inArea = upload && (opts.area !== 'admin' || upload.created_by_kind === 'staff') && startedBy(upload, opts.startedBy);
     const asset = inArea ? await this.repo.getAsset(upload.asset_id, { owner: opts.owner }) : null;
@@ -610,7 +612,7 @@ export class MediaService implements MediaPublicApi {
 
   /**
    * Development storage: the signed storage URL behind an upload ticket's API URL (…/uploads/{id}/content), so
-   * tools and tests that "upload" through DevStorage.acceptSignedPut keep working with the ticket URL. Null when
+   * tools and tests that "upload" through MemoryStorage.acceptSignedPut keep working with the ticket URL. Null when
    * the URL isn't one, or the upload is unknown. No record scope: it only re-signs what the ticket already granted.
    */
   async signedStorageUrlFor(url: string): Promise<string | null> {
@@ -624,7 +626,7 @@ export class MediaService implements MediaPublicApi {
     if (!isUuid(id)) return null;
     const upload = await this.repo.getUpload(id);
     const asset = upload && (await this.repo.getAsset(upload.asset_id));
-    if (!upload || !asset) return null;
+    if (!upload || !asset || !this.storage.presignUpload) return null;
     const signed = await this.storage.presignUpload({
       bucket: asset.storage_bucket,
       key: asset.storage_key,
@@ -1313,8 +1315,10 @@ export class MediaService implements MediaPublicApi {
         let url: string | null = null;
         if (row.visibility === 'public') {
           if (row.status === 'ready') {
-            list = rs.map((r) => toRendition(r));
-            url = pickRendition(rs, row.kind === 'video' ? 'poster' : 'medium')?.url ?? null;
+            // built from the key on every read (stored URLs keep working, and follow a new signing key)
+            list = rs.map((r) => toRendition(r, this.storage.publicUrl(r.storage_key)));
+            const main = pickRendition(rs, row.kind === 'video' ? 'poster' : 'medium');
+            url = main ? this.storage.publicUrl(main.storage_key) : null;
           } else if (row.status === 'removed' && row.show_placeholder !== false) {
             url = this.storage.publicUrl(PLACEHOLDER_KEY);
           }
@@ -1504,7 +1508,8 @@ const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
 /** The object key in a storage or CDN URL */
 function keyOfUrl(url: string): string | null {
   try {
-    return decodeURIComponent(new URL(url).pathname.replace(/^\//, '')) || null;
+    // a link the API serves (/files/{bucket}/{key}) or a CDN URL (/{key})
+    return decodeURIComponent(new URL(url).pathname.replace(/^\/files\/[^/]+\//, '/').replace(/^\//, '')) || null;
   } catch {
     return null;
   }

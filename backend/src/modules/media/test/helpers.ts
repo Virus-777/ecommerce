@@ -8,7 +8,7 @@ import type * as audit from '../../../spec/audit.js';
 import type { MediaAsset, UploadRequest, UploadTicket } from '../../../spec/media.js';
 import { auth, buildTestApp, callers } from '../../../testing/app.js';
 import type { DevProcessor } from '../infra/processing/dev.js';
-import type { DevStorage } from '../infra/storage/dev.js';
+import type { MemoryStorage } from '../infra/storage/memory.js';
 import type { MediaService } from '../service.js';
 
 export { auth, callers };
@@ -16,7 +16,7 @@ export { auth, callers };
 export interface MediaTestApp {
   app: FastifyInstance;
   media: MediaService;
-  storage: DevStorage;
+  storage: MemoryStorage;
   processor: DevProcessor;
   clock: ReturnType<typeof fixedClock>;
   audits: audit.RecordInput[];
@@ -70,7 +70,7 @@ export async function mediaApp(): Promise<MediaTestApp> {
   return {
     app,
     media,
-    storage: media.providers.storage as DevStorage,
+    storage: media.providers.storage as MemoryStorage,
     processor: media.providers.processor as DevProcessor,
     clock,
     audits,

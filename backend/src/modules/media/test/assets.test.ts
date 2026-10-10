@@ -251,7 +251,7 @@ describe('downloads', () => {
     const accountId = newId();
     const { asset } = await uploadFile(t, 'store', callers.customer({ accountId }), { purpose: 'verification_document', fileName: 'id.pdf', contentType: 'application/pdf', body: pdf(1) });
     const link = await t.media.signedDownload(asset.id, { kind: 'staff', accountId: newId() }, 'Seller application review');
-    expect(link.url).toMatch(/X-Signature=/);
+    expect(link.url).toMatch(/\/files\/marketly-private\/.+[?&]exp=.+&sig=/);
     expect(t.audits.find((a) => a.action === 'media.asset.download' && a.target.id === asset.id)).toMatchObject({ reason: 'Seller application review', actor: { kind: 'staff' } });
   });
 });
@@ -273,7 +273,7 @@ describe('takedown and restore', () => {
     expect(served?.contentType).toBe('image/png');
     expect(Buffer.from(served!.body).equals(photo)).toBe(false); // the placeholder, not the photo
     const [ref] = await t.media.refs([asset.id]);
-    expect(ref!.url).toMatch(/placeholders\/removed\.png$/);
+    expect(ref!.url).toMatch(/\/files\/marketly-public\/placeholders\/removed\.png\?sig=/);
     await t.app.kernel.events.drain();
     expect(t.eventsNamed('media.asset.removed').at(-1)!.payload).toMatchObject({ assetId: asset.id, reason: 'Rights complaint', usages: [expect.objectContaining({ refId: 'p1' })], by: { kind: 'staff' } });
     expect(t.audits.find((a) => a.action === 'media.asset.remove' && a.target.id === asset.id)).toMatchObject({ reason: 'Rights complaint', visibleToSeller: true });
@@ -348,6 +348,6 @@ describe('admin library', () => {
     const plain = (await get(`/api/admin/media/assets/${evidence.asset.id}`, viewer)).json();
     expect(plain.asset.renditions).toEqual([]);
     const full = (await get(`/api/admin/media/assets/${evidence.asset.id}`, callers.staff())).json();
-    expect(full.asset.renditions[0].url).toMatch(/X-Signature=/);
+    expect(full.asset.renditions[0].url).toMatch(/\/files\/marketly-private\/.+[?&]exp=.+&sig=/);
   });
 });

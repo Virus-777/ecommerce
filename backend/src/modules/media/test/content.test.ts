@@ -114,7 +114,7 @@ describe('PUT /uploads/{id}/content (development storage)', () => {
     expect((await t.storage.head('marketly-private', `originals/${ticket.assetId}.png`))?.sha256).toBe(sha256(body));
   });
 
-  it('keeps DevStorage.acceptSignedPut working with the ticket URL (tests and tools)', async () => {
+  it('keeps MemoryStorage.acceptSignedPut working with the ticket URL (tests and tools)', async () => {
     const seller = callers.seller();
     const body = png(700, 700, { seed: 'direct' });
     const ticket = await ticketFor('seller', seller, body);
@@ -130,10 +130,11 @@ describe('with a real storage adapter', () => {
   it('hands out the storage URL and the endpoint answers DEV_STORAGE_ONLY (409)', async () => {
     const providers = t.media.providers as { storage: StorageProvider };
     const dev = providers.storage;
-    // a non-development adapter: no acceptSignedPut, its own signed URLs
+    // a direct-upload adapter (S3-compatible): its own signed URLs, the API never carries the bytes
     const { acceptSignedPut: _a, fetch: _f, size: _s, ...rest } = t.storage;
     const real: StorageProvider = {
       ...rest,
+      viaApi: false,
       presignUpload: async ({ bucket, key, contentType }) => ({ method: 'PUT', url: `https://s3.example.test/${bucket}/${key}?X-Amz-Signature=abc`, headers: { 'content-type': contentType }, fields: {} }),
     };
     providers.storage = real;

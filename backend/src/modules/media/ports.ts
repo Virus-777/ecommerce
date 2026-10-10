@@ -3,6 +3,7 @@
  * The Postgres adapter lives in infra/postgres/; providers (storage, malware scanning, image and
  * video processing) have deterministic dev adapters in infra/<provider>/dev.ts.
  */
+import type { Readable } from 'node:stream';
 import type { Selectable } from 'kysely';
 import type { Page } from '../../spec/common.js';
 import type { ImageMeasurements, MediaDb } from '../../spec/media.js';
@@ -127,24 +128,66 @@ export interface PresignedUpload {
   fields: Record<string, string>;
 }
 
+/** An object opened for reading (downloads over GET /files/{bucket}/{key}) */
+export interface OpenedObject extends StoredObject {
+  lastModified: Date;
+  /** The bytes from start to end (inclusive), or all of them; the object is closed when the stream ends */
+  stream(range?: { start: number; end: number }): Readable;
+  /** Releases the object without reading it (HEAD, 304, 416) */
+  close(): Promise<void>;
+}
+
+/** putStream refused the bytes: more than maxBytes arrived. Nothing was stored. */
+export class ObjectTooLargeError extends Error {
+  constructor(
+    readonly maxBytes: number,
+    /** bytes read before the write stopped (at least maxBytes + 1) */
+    readonly receivedBytes: number,
+  ) {
+    super(`EntityTooLarge: more than ${maxBytes} bytes`);
+    this.name = 'ObjectTooLargeError';
+  }
+}
+
+/** A bucket or key that isn't safe to store under (empty, '..', path separators, control characters …) */
+export class InvalidObjectKeyError extends Error {
+  constructor(readonly bucket: string, readonly key: string) {
+    super(`Invalid storage key: ${JSON.stringify(bucket)}/${JSON.stringify(key)}`);
+    this.name = 'InvalidObjectKeyError';
+  }
+}
+
 /**
- * Object storage: two buckets (public renditions behind the CDN, private originals, documents,
- * evidence and generated files). Clients upload straight to presigned URLs; the API never carries bytes.
+ * Object storage: two buckets (public renditions, private originals, documents, evidence and generated
+ * files). Keys are '/'-separated paths of safe segments (infra/storage/keys.ts); every adapter refuses
+ * others with InvalidObjectKeyError. Writes are atomic: a reader sees the old object or the new one.
+ *
+ * viaApi: the bytes travel through this API (memory and local-disk storage): clients PUT uploads to
+ * PUT /api/{area}/media/uploads/{id}/content and download from GET /files/{bucket}/{key}, whose signed
+ * link is verified by the auth middleware. Otherwise (an S3-compatible store) clients use the store's
+ * own presigned URLs and the API never carries the bytes.
  */
 export interface StorageProvider {
   readonly buckets: { public: string; private: string };
-  presignUpload(input: { bucket: string; key: string; contentType: string; maxBytes: number; expiresAt: Date }): Promise<PresignedUpload>;
+  readonly viaApi: boolean;
+  /** Direct-upload stores only: the presigned URL a client PUTs (or POSTs) the bytes to */
+  presignUpload?(input: { bucket: string; key: string; contentType: string; maxBytes: number; expiresAt: Date }): Promise<PresignedUpload>;
+  /** A link that downloads one object until expiresAt, served with this content type and disposition */
   presignDownload(input: { bucket: string; key: string; expiresAt: Date; fileName: string; contentType: string; inline?: boolean }): Promise<string>;
-  /** CDN URL of a public object (immutable) */
+  /** Permanent URL of a public object (embedded in pages: <img src>) */
   publicUrl(key: string): string;
   /** Location of a private object (not usable without a signature) */
   objectUrl(bucket: string, key: string): string;
   head(bucket: string, key: string): Promise<StoredObject | null>;
   get(bucket: string, key: string): Promise<Uint8Array | null>;
   put(bucket: string, key: string, body: Uint8Array, contentType: string): Promise<StoredObject>;
+  /** Writes a stream without holding it in memory; above maxBytes it stops reading, stores nothing and throws ObjectTooLargeError */
+  putStream(bucket: string, key: string, body: AsyncIterable<Uint8Array>, contentType: string, opts?: { maxBytes?: number }): Promise<StoredObject>;
+  /** Opens an object for streaming; null when it doesn't exist */
+  open(bucket: string, key: string): Promise<OpenedObject | null>;
   copy(from: { bucket: string; key: string }, to: { bucket: string; key: string }): Promise<boolean>;
   delete(bucket: string, key: string): Promise<void>;
-  /** Keys in a bucket, in pages */
+  /** Keys in a bucket in ascending order, in pages (after: the last key of the previous page) */
   list(bucket: string, opts?: { prefix?: string; after?: string; limit?: number }): Promise<string[]>;
 }
 
