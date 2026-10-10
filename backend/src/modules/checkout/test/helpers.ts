@@ -10,7 +10,11 @@
  *   payments.listOptions: one saved Visa for customers, wallets available.
  *   shipping.quoteOptions: Standard ($5.99, free from $50 per package) and Express ($14.99) with arrival dates;
  *     destinations in Alaska are not served. shipping.checkCoverage: Alaska → outside_seller_coverage.
- *     `ship.shiftDays` moves arrival dates, `ship.standardPrice` changes the Standard price.
+ *     `ship.shiftDays` moves arrival dates, `ship.standardPrice` changes the Standard price; `ship.knobs.quotes` keeps every input.
+ *
+ * Fulfilled by Marketly: offers resolves the effective Offer.shipping (fulfilledBy, profile, dispatch) in a batch built in
+ * parallel; until it does, the world gives offers' Offer reads their shipping here (the offer's own terms), and
+ * `w.marketly.enroll(offerId)` makes an offer Marketly-fulfilled (Marketly's service profile, dispatch and ships-from).
  */
 import type { FastifyInstance } from 'fastify';
 import { expect } from 'vitest';
@@ -18,6 +22,7 @@ import { AppError } from '../../../kernel/errors/index.js';
 import type { EventEnvelope } from '../../../kernel/events/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { withDependencies } from '../../../kernel/module-system/loader.js';
+import type * as offers from '../../../spec/offers.js';
 import type * as payments from '../../../spec/payments.js';
 import type * as shipping from '../../../spec/shipping.js';
 import { auth, buildTestApp, callers, movingClock } from '../../../testing/app.js';
@@ -135,7 +140,7 @@ export function fakePayments(clock: { now(): Date }) {
 /* ================================================================ shipping stub */
 
 export function fakeShipping(clock: { now(): Date }) {
-  const knobs = { shiftDays: 0, standardPrice: 599, calls: { quoteOptions: 0, checkCoverage: 0 } };
+  const knobs = { shiftDays: 0, standardPrice: 599, calls: { quoteOptions: 0, checkCoverage: 0 }, quotes: [] as shipping.PackageQuoteInput[] };
   /** Profiles the kit created, by owner: offers checks a profile belongs to the offer's owner (shipping.getProfileOwners) */
   const owners = new Map<string, { ownerType: 'official' | 'seller'; sellerId: string | null; status: string }>();
   const profileFor = (owner: { ownerType: 'official' | 'seller'; sellerId: string | null }) => {
@@ -156,6 +161,7 @@ export function fakeShipping(clock: { now(): Date }) {
     },
     quoteOptions: async (input) => {
       knobs.calls.quoteOptions++;
+      knobs.quotes.push(input);
       if (input.destination.region === 'AK') return { shipsToLocation: false, notShippableLineIds: input.items.map((i) => i.lineId), reason: "The seller doesn't ship to Alaska.", options: [], default: null };
       const value = input.items.reduce((s, i) => s + i.value.amount, 0);
       const free = value >= 5000;
@@ -200,6 +206,8 @@ export interface World {
   offers: { black: string; white: string; officialWhite: string };
   stock: { black: string; white: string; officialWhite: string };
   service: CheckoutService;
+  /** Fulfilled by Marketly: Marketly's service terms, and offers moved onto (or off) the service */
+  marketly: { terms: offers.OfferShipping; enroll(offerId: string): void; leave(offerId: string): void };
   call(method: string, url: string, token?: string, body?: unknown, headers?: Record<string, string>): Promise<{ status: number; body: any }>;
   named(name: string): any[];
   api<T = any>(module: string): T;
@@ -208,17 +216,23 @@ export interface World {
   sid(token: string): string;
 }
 
-/** o.wallet: also run the real wallet (phase 3, off at launch) with the launch phase that opens the credit step */
-export async function world(o: { wallet?: boolean } = {}): Promise<World> {
+/**
+ * o.wallet: also run the real wallet (phase 3, off at launch) with the launch phase that opens the credit step.
+ * o.fulfillment: also run fulfillment-service (phase 4), so orders can check Marketly-fulfilled groups; its
+ * isServiceOffer answers for the offers enrolled with w.marketly.enroll.
+ */
+export async function world(o: { wallet?: boolean; fulfillment?: boolean } = {}): Promise<World> {
   const clock = movingClock();
   const pay = fakePayments(clock);
   const ship = fakeShipping(clock);
+  const enrolled = new Set<string>();
   const app = await buildTestApp({
-    only: withDependencies(['identity', 'access', 'audit', 'media', 'notifications', 'settings', 'customers', 'sellers', 'catalog', 'inventory', 'offers', 'cart', 'orders', 'promotions', 'content', 'checkout', ...(o.wallet ? ['wallet'] : [])]),
+    only: withDependencies(['identity', 'access', 'audit', 'media', 'notifications', 'settings', 'customers', 'sellers', 'catalog', 'inventory', 'offers', 'cart', 'orders', 'promotions', 'content', 'checkout', ...(o.wallet ? ['wallet'] : []), ...(o.fulfillment ? ['fulfillment-service'] : [])]),
     clock,
-    config: { rateLimits: false, ...(o.wallet ? { launchPhase: 3 } : {}) },
-    apiStubs: { payments: pay.api, shipping: ship.api },
+    config: { rateLimits: false, ...(o.wallet ? { launchPhase: 3 } : {}), ...(o.fulfillment ? { launchPhase: 4 } : {}) },
+    apiStubs: { payments: pay.api, shipping: ship.api, ...(o.fulfillment ? { 'fulfillment-service': { isServiceOffer: async (offerId: string) => enrolled.has(offerId) } } : {}) },
   });
+  const marketly = shimOfferShipping(app, ship.profileFor({ ownerType: 'official', sellerId: null }), enrolled);
   if (o.wallet) pay.hooks.releaseCredit = (holdId) => (app.kernel.boot.apis.get('wallet') as { releaseHold(id: string): Promise<unknown> }).releaseHold(holdId);
   const f = flows(app, clock);
   const events: EventEnvelope[] = [];
@@ -303,6 +317,7 @@ export async function world(o: { wallet?: boolean } = {}): Promise<World> {
     offers: { black: ob.id, white: ow.id, officialWhite: official.body.offer.id },
     stock: { black: ob.stockItemId, white: ow.stockItemId, officialWhite: officialStock.id },
     service: app.kernel.boot.apis.get('checkout') as CheckoutService,
+    marketly,
     async call(method, url, token, body, headers) {
       const res = await app.inject({ method: method as never, url, headers: { ...(token ? auth(token) : {}), ...headers }, ...(body !== undefined ? { payload: body as never } : {}) });
       await app.kernel.events.drain();
@@ -318,6 +333,29 @@ export async function world(o: { wallet?: boolean } = {}): Promise<World> {
     sid: (token) => JSON.parse(Buffer.from(token.split('.')[1]!, 'base64url').toString('utf8')).sid,
   };
   return w;
+}
+
+/**
+ * Offer.shipping for the real offers module until it resolves it itself (Fulfilled by Marketly is built in parallel):
+ * every Offer read gets its own terms as its effective shipping, and enrolled offers Marketly's service terms (a
+ * fulfilledBy change bumps termsVersion in offers; checkout compares fulfilledBy itself).
+ */
+function shimOfferShipping(app: FastifyInstance, serviceProfileId: string, enrolled: Set<string>): World['marketly'] {
+  const terms: offers.OfferShipping = {
+    fulfilledBy: 'marketly_service',
+    profileId: serviceProfileId,
+    dispatch: { businessDays: 0, sameDayCutoff: '14:00', shipsFrom: 'Reno, NV (Marketly warehouse)', label: 'Ships today' },
+  };
+  const core = (app.kernel.boot.apis.get('offers') as { core: { toOffers(rows: readonly unknown[]): Promise<offers.Offer[]> } }).core;
+  const toOffers = core.toOffers.bind(core);
+  core.toOffers = async (rows) =>
+    (await toOffers(rows)).map((o) => {
+      if (enrolled.has(o.id)) return { ...o, fulfilledBy: 'marketly_service', shipping: structuredClone(terms) };
+      if (o.shipping && o.fulfilledBy !== 'marketly_service') return o;
+      const own = o.ownerType === 'official' ? 'official_warehouse' : 'seller';
+      return { ...o, fulfilledBy: own, shipping: { fulfilledBy: own, profileId: o.shippingProfileId, dispatch: o.dispatch } };
+    });
+  return { terms, enroll: (id) => void enrolled.add(id), leave: (id) => void enrolled.delete(id) };
 }
 
 /** Adds offers to the shopper's cart */

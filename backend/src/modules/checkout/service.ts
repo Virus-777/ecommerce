@@ -133,7 +133,7 @@ export class CheckoutService implements CheckoutPublicApi {
         const f = facts.get(e.offerId);
         if (!f?.offer || !f.info) continue;
         await checkLimit(e.offerId, e.quantity, f.offer.purchaseLimit);
-        const line = this.quoter.lineFrom(id, f.offer, e.quantity, e.itemId, e.packageKey);
+        const line = this.quoter.lineFrom(id, f.offer, e.quantity, e.itemId);
         lines.push(line);
         lineInfo[line.id] = f.info;
       }
