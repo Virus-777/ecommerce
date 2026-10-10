@@ -1,0 +1,98 @@
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useSearchParams } from 'react-router';
+
+/**
+ * The screen's current view (the design's "state"): `?view=<slug>`, '' for the default.
+ * Every design file `<screen>--<slug>.html` maps to `<path>?view=<slug>`, so tabs, wizard
+ * steps and open dialogs are linkable and the back button works.
+ */
+export function useView<T extends string = string>(): [T | '', (next: T | '', opts?: { replace?: boolean }) => void] {
+  const [params, setParams] = useSearchParams();
+  const view = (params.get('view') ?? '') as T | '';
+  const setView = useCallback(
+    (next: T | '', opts?: { replace?: boolean }) => {
+      setParams(
+        (prev) => {
+          const p = new URLSearchParams(prev);
+          if (next) p.set('view', next);
+          else p.delete('view');
+          return p;
+        },
+        { replace: opts?.replace, preventScrollReset: true },
+      );
+    },
+    [setParams],
+  );
+  return [view, setView];
+}
+
+/** Width of the .app container in the design's breakpoints: phone < 768 <= tablet < 1024 <= desktop. */
+export function useMediaQuery(query: string): boolean {
+  const get = () => typeof window !== 'undefined' && window.matchMedia(query).matches;
+  const [matches, setMatches] = useState(get);
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const on = () => setMatches(mq.matches);
+    on();
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, [query]);
+  return matches;
+}
+export const useIsPhone = () => useMediaQuery('(max-width: 767.98px)');
+
+/**
+ * Horizontal scroll region (.table-wrap, .steps): toggles .is-scrollable / .at-start / .at-end,
+ * which drive the CSS edge fade and the pinned column's shadow. It is a Tab stop only while it scrolls.
+ */
+export function useScrollRegion<T extends HTMLElement>(): RefObject<T | null> {
+  const ref = useRef<T>(null);
+  useLayoutEffect(() => {
+    const w = ref.current;
+    if (!w) return;
+    const update = () => {
+      const max = w.scrollWidth - w.clientWidth;
+      const on = max > 1;
+      w.classList.toggle('is-scrollable', on);
+      w.classList.toggle('at-start', !on || w.scrollLeft <= 1);
+      w.classList.toggle('at-end', !on || w.scrollLeft >= max - 1);
+      if (on) w.setAttribute('tabindex', '0');
+      else if (w !== document.activeElement) w.removeAttribute('tabindex');
+    };
+    update();
+    w.addEventListener('scroll', update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(w);
+    return () => {
+      w.removeEventListener('scroll', update);
+      ro.disconnect();
+    };
+  }, []);
+  return ref;
+}
+
+/** Locks page scroll while a modal is open (body.is-locked, as in the design). */
+let locks = 0;
+export function useBodyLock(active: boolean) {
+  useEffect(() => {
+    if (!active) return;
+    locks++;
+    document.body.classList.add('is-locked');
+    return () => {
+      locks--;
+      if (!locks) document.body.classList.remove('is-locked');
+    };
+  }, [active]);
+}
+
+/** Live countdown from a number of seconds; returns [hh, mm, ss] as zero-padded strings. */
+export function useCountdown(totalSeconds: number): [string, string, string] {
+  const [left, setLeft] = useState(totalSeconds);
+  useEffect(() => {
+    setLeft(totalSeconds);
+    const t = setInterval(() => setLeft((s) => (s > 0 ? s - 1 : 0)), 1000);
+    return () => clearInterval(t);
+  }, [totalSeconds]);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return [pad(Math.floor(left / 3600)), pad(Math.floor((left % 3600) / 60)), pad(left % 60)];
+}

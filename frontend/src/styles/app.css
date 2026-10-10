@@ -1,0 +1,17 @@
+/* React-app additions on top of marketly.css (the design export's stylesheet, kept verbatim).
+   Keep this file small: page styles belong in marketly.css' classes. */
+
+/* Buttons that replace the design's link-styled controls (<a> -> <button>). */
+.app button.chip,
+.app button.tab { font: inherit; }
+.app button.chip { font-size: var(--fs-sm); }
+.app .fav.is-active { color: var(--danger); }
+
+/* Lazy route chunk loading. */
+.route-loading { min-height: 60vh; }
+
+/* Cards used as buttons (design used <a> for actions such as "Add a new address"). */
+.app button.card { font: inherit; color: inherit; width: 100%; cursor: pointer; }
+
+/* Non-modal toast overlay (announcement after closing an ad pop-up) stays in the viewport. */
+.app .overlay.shop-clear { position: fixed; }

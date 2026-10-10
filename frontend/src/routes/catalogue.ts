@@ -1,0 +1,157 @@
+// Screen catalogue: every screen in the design (design/marketly-ui-final-complete.zip), its route and its views.
+// Generated once from the design export's index; edit by hand when screens are added.
+// A design file `<file>--<view>.html` is the route `<path>?view=<view>` (see useView in lib/hooks.ts).
+
+export type Area = 'theme' | 'store' | 'seller' | 'admin' | 'ops';
+export interface ScreenView { slug: string; name: string }
+export interface Screen {
+  id: string;
+  area: Area;
+  group: string;
+  title: string;
+  /** Route pattern (react-router). */
+  path: string;
+  /** Example values for the path params, used by href() and the design index. */
+  sample?: Record<string, string>;
+  /** Design export file name (pages/<area>/<file>.html), for side-by-side review. */
+  file: string;
+  /** Views (design states). The first is the default ('' slug). Empty when the screen has one view. */
+  views: readonly ScreenView[];
+}
+
+export const AREAS: Array<{ id: Area; name: string }> = [
+  { id: 'theme', name: 'Theme' },
+  { id: 'store', name: 'Customer Store' },
+  { id: 'seller', name: 'Seller Center' },
+  { id: 'admin', name: 'Admin Center' },
+  { id: 'ops', name: 'Operations' },
+];
+
+export const SCREENS = [
+  { id: 'theme/foundations', area: 'theme', group: "Design system", title: "Foundations", path: '/design/foundations', file: 'theme-foundations', views: [] },
+  { id: 'theme/components', area: 'theme', group: "Design system", title: "Components", path: '/design/components', file: 'theme-components', views: [] },
+  { id: 'theme/patterns', area: 'theme', group: "Design system", title: "Patterns and layouts", path: '/design/patterns', file: 'theme-patterns', views: [] },
+  { id: 'store/home', area: 'store', group: "Shopping", title: "Home", path: '/', file: 'store-home', views: [] },
+  { id: 'store/categories', area: 'store', group: "Shopping", title: "All categories", path: '/categories', file: 'store-categories', views: [] },
+  { id: 'store/category', area: 'store', group: "Shopping", title: "Category page", path: '/c/:slug', sample: { slug: 'headphones' }, file: 'store-category', views: [{ slug: '', name: "Default" }, { slug: 'filters-phone-sheet', name: "Filters (phone sheet)" }] },
+  { id: 'store/search', area: 'store', group: "Shopping", title: "Search results", path: '/search', file: 'store-search', views: [{ slug: '', name: "Results" }, { slug: 'suggestions-open', name: "Suggestions open" }] },
+  { id: 'store/search-empty', area: 'store', group: "Shopping", title: "No results and unavailable", path: '/search/empty', file: 'store-search-empty', views: [{ slug: '', name: "No results" }, { slug: 'product-unavailable', name: "Product unavailable" }] },
+  { id: 'store/product', area: 'store', group: "Shopping", title: "Product detail", path: '/p/:slug', sample: { slug: 'halden-aurora-anc' }, file: 'store-product', views: [{ slug: '', name: "Official Store offer" }, { slug: 'seller-offer-selected', name: "Seller offer selected" }, { slug: 'no-reviews-yet', name: "No reviews yet" }] },
+  { id: 'store/offers', area: 'store', group: "Shopping", title: "All offers", path: '/p/:slug/offers', sample: { slug: 'halden-aurora-anc' }, file: 'store-offers', views: [{ slug: '', name: "Total cost" }, { slug: 'fastest-delivery', name: "Fastest delivery" }] },
+  { id: 'store/brand', area: 'store', group: "Shopping", title: "Brand page", path: '/brand/:slug', sample: { slug: 'halden' }, file: 'store-brand', views: [] },
+  { id: 'store/seller', area: 'store', group: "Shopping", title: "Seller storefront", path: '/shop/:slug', sample: { slug: 'northwind-audio' }, file: 'store-seller', views: [] },
+  { id: 'store/official', area: 'store', group: "Shopping", title: "Official Store", path: '/official', file: 'store-official', views: [] },
+  { id: 'store/deals', area: 'store', group: "Shopping", title: "Deals", path: '/deals', file: 'store-deals', views: [] },
+  { id: 'store/collection', area: 'store', group: "Shopping", title: "Campaign and collection", path: '/collection/:slug', sample: { slug: 'new-arrivals' }, file: 'store-collection', views: [{ slug: '', name: "New arrivals" }, { slug: 'best-sellers', name: "Best sellers" }, { slug: 'seasonal', name: "Seasonal" }, { slug: 'curated-collection', name: "Curated collection" }] },
+  { id: 'store/not-found', area: 'store', group: "Shopping", title: "Page not found and error", path: '/404', file: 'store-not-found', views: [{ slug: '', name: "404" }, { slug: 'something-went-wrong', name: "Something went wrong" }] },
+  { id: 'store/cart', area: 'store', group: "Purchase", title: "Cart", path: '/cart', file: 'store-cart', views: [{ slug: '', name: "Default" }, { slug: 'empty', name: "Empty" }] },
+  { id: 'store/checkout', area: 'store', group: "Purchase", title: "Checkout", path: '/checkout', file: 'store-checkout', views: [{ slug: '', name: "Signed in" }, { slug: 'guest-checkout', name: "Guest checkout" }, { slug: 'coupon-rejected', name: "Coupon rejected" }] },
+  { id: 'store/checkout-review-changes', area: 'store', group: "Purchase", title: "Checkout: review changes", path: '/checkout/review-changes', file: 'store-checkout-review-changes', views: [] },
+  { id: 'store/payment-result', area: 'store', group: "Purchase", title: "Payment result", path: '/checkout/payment', file: 'store-payment-result', views: [{ slug: '', name: "Payment failed" }, { slug: 'checking-payment', name: "Checking payment" }] },
+  { id: 'store/confirmation', area: 'store', group: "Purchase", title: "Order confirmation", path: '/checkout/confirmation', file: 'store-confirmation', views: [] },
+  { id: 'auth/sign-in', area: 'store', group: "Sign in", title: "Sign in", path: '/sign-in', file: 'auth-sign-in', views: [{ slug: '', name: "Sign in" }, { slug: 'wrong-password', name: "Wrong password" }, { slug: 'two-step-code', name: "Two-step code" }] },
+  { id: 'auth/register', area: 'store', group: "Sign in", title: "Create account", path: '/register', file: 'auth-register', views: [{ slug: '', name: "Create account" }, { slug: 'verify-email', name: "Verify email" }] },
+  { id: 'auth/recover', area: 'store', group: "Sign in", title: "Reset password", path: '/recover', file: 'auth-recover', views: [{ slug: '', name: "Request link" }, { slug: 'check-your-email', name: "Check your email" }, { slug: 'set-new-password', name: "Set new password" }] },
+  { id: 'auth/guest-orders', area: 'store', group: "Sign in", title: "Guest order lookup", path: '/guest-orders', file: 'auth-guest-orders', views: [{ slug: '', name: "Look up" }, { slug: 'found', name: "Found" }] },
+  { id: 'account/overview', area: 'store', group: "My account", title: "Account overview", path: '/account', file: 'account-overview', views: [] },
+  { id: 'account/orders', area: 'store', group: "My account", title: "Orders", path: '/account/orders', file: 'account-orders', views: [{ slug: '', name: "Orders" }, { slug: 'no-matches', name: "No matches" }] },
+  { id: 'account/order', area: 'store', group: "My account", title: "Order details", path: '/account/orders/:ref', sample: { ref: 'MK-260914-48213' }, file: 'account-order', views: [] },
+  { id: 'account/tracking', area: 'store', group: "My account", title: "Track package", path: '/account/orders/:ref/tracking', sample: { ref: 'MK-260914-48213' }, file: 'account-tracking', views: [{ slug: '', name: "In transit" }, { slug: 'delivery-failed', name: "Delivery failed" }] },
+  { id: 'account/cancel', area: 'store', group: "My account", title: "Cancel items", path: '/account/orders/:ref/cancel', sample: { ref: 'MK-260914-48213' }, file: 'account-cancel', views: [{ slug: '', name: "Select items" }, { slug: 'cancellation-requested', name: "Cancellation requested" }] },
+  { id: 'account/returns', area: 'store', group: "My account", title: "Returns and refunds", path: '/account/returns', file: 'account-returns', views: [] },
+  { id: 'account/return-new', area: 'store', group: "My account", title: "Request a return", path: '/account/orders/:ref/return', sample: { ref: 'MK-260914-48213' }, file: 'account-return-new', views: [{ slug: '', name: "Choose items" }, { slug: 'reason-and-remedy', name: "Reason and remedy" }, { slug: 'review', name: "Review" }] },
+  { id: 'account/return', area: 'store', group: "My account", title: "Return details", path: '/account/returns/:ref', sample: { ref: 'RT-260921-0457' }, file: 'account-return', views: [{ slug: '', name: "Approved: send it back" }, { slug: 'refund-sent', name: "Refund sent" }, { slug: 'replacement-on-the-way', name: "Replacement on the way" }] },
+  { id: 'account/messages', area: 'store', group: "My account", title: "Messages", path: '/account/messages', file: 'account-messages', views: [] },
+  { id: 'account/notifications', area: 'store', group: "My account", title: "Notifications", path: '/account/notifications', file: 'account-notifications', views: [] },
+  { id: 'account/addresses', area: 'store', group: "My account", title: "Addresses", path: '/account/addresses', file: 'account-addresses', views: [{ slug: '', name: "Addresses" }, { slug: 'edit-address', name: "Edit address" }] },
+  { id: 'account/profile', area: 'store', group: "My account", title: "Profile", path: '/account/profile', file: 'account-profile', views: [] },
+  { id: 'account/security', area: 'store', group: "My account", title: "Sign-in and security", path: '/account/security', file: 'account-security', views: [] },
+  { id: 'account/payment-methods', area: 'store', group: "My account", title: "Payment methods", path: '/account/payment-methods', file: 'account-payment-methods', views: [] },
+  { id: 'account/review', area: 'store', group: "My account", title: "Write a review", path: '/account/reviews/new', file: 'account-review', views: [] },
+  { id: 'account/reviews', area: 'store', group: "My account", title: "Reviews and feedback", path: '/account/reviews', file: 'account-reviews', views: [{ slug: '', name: "Product reviews" }, { slug: 'seller-feedback', name: "Seller feedback" }, { slug: 'reports-you-made', name: "Reports you made" }] },
+  { id: 'account/wishlist', area: 'store', group: "My account", title: "Wishlist and alerts", path: '/account/wishlist', file: 'account-wishlist', views: [] },
+  { id: 'account/coupons', area: 'store', group: "My account", title: "Coupons and credit", path: '/account/coupons', file: 'account-coupons', views: [] },
+  { id: 'help/center', area: 'store', group: "Help and policies", title: "Help Center", path: '/help', file: 'help-center', views: [] },
+  { id: 'help/article', area: 'store', group: "Help and policies", title: "Help article", path: '/help/articles/:slug', sample: { slug: 'track-a-package' }, file: 'help-article', views: [] },
+  { id: 'help/contact', area: 'store', group: "Help and policies", title: "Contact support", path: '/help/contact', file: 'help-contact', views: [] },
+  { id: 'help/order-problem', area: 'store', group: "Help and policies", title: "Report an order problem", path: '/help/order-problem', file: 'help-order-problem', views: [] },
+  { id: 'help/cases', area: 'store', group: "Help and policies", title: "Support cases", path: '/help/cases', file: 'help-cases', views: [] },
+  { id: 'help/case', area: 'store', group: "Help and policies", title: "Support case", path: '/help/cases/:ref', sample: { ref: 'CS-261007-0412' }, file: 'help-case', views: [{ slug: '', name: "Open" }, { slug: 'decision-made', name: "Decision made" }] },
+  { id: 'info/policy', area: 'store', group: "Help and policies", title: "Policies", path: '/policies', file: 'info-policy', views: [{ slug: '', name: "Returns" }, { slug: 'shipping', name: "Shipping" }, { slug: 'seller-rules', name: "Seller rules" }, { slug: 'privacy', name: "Privacy" }, { slug: 'purchase-terms', name: "Purchase terms" }] },
+  { id: 'info/about', area: 'store', group: "Help and policies", title: "About us", path: '/about', file: 'info-about', views: [] },
+  { id: 'sell/landing', area: 'store', group: "Seller entry", title: "Sell on Marketly", path: '/sell', file: 'sell-landing', views: [] },
+  { id: 'sell/apply', area: 'store', group: "Seller entry", title: "Seller application", path: '/sell/apply', file: 'sell-apply', views: [{ slug: '', name: "Seller account" }, { slug: 'business-details', name: "Business details" }, { slug: 'verification', name: "Verification" }, { slug: 'payout-and-return-address', name: "Payout and return address" }, { slug: 'agreement', name: "Agreement" }] },
+  { id: 'sell/status', area: 'store', group: "Seller entry", title: "Application status", path: '/sell/status', file: 'sell-status', views: [{ slug: '', name: "Information required" }, { slug: 'approved', name: "Approved" }, { slug: 'rejected', name: "Rejected" }] },
+  { id: 'ads/opening', area: 'store', group: "Advertising", title: "Opening full-screen ad", path: '/ads/opening', file: 'ads-opening', views: [{ slug: '', name: "Platform campaign" }, { slug: 'sponsored-brand', name: "Sponsored brand" }] },
+  { id: 'ads/popup', area: 'store', group: "Advertising", title: "Promotional pop-up", path: '/ads/popup', file: 'ads-popup', views: [{ slug: '', name: "Coupon" }, { slug: 'announcement', name: "Announcement" }] },
+  { id: 'ads/formats', area: 'store', group: "Advertising", title: "Ad placements", path: '/ads/formats', file: 'ads-formats', views: [{ slug: '', name: "All placements" }, { slug: 'sticky-ad', name: "Sticky ad" }, { slug: 'interstitial', name: "Interstitial" }] },
+  { id: 'seller/setup', area: 'seller', group: "Getting started", title: "Setup guide", path: '/seller/setup', file: 'seller-setup', views: [] },
+  { id: 'seller/dashboard', area: 'seller', group: "Seller Center", title: "Seller dashboard", path: '/seller', file: 'seller-dashboard', views: [] },
+  { id: 'seller/products', area: 'seller', group: "Seller Center", title: "Products and offers", path: '/seller/products', file: 'seller-products', views: [{ slug: '', name: "All products" }, { slug: 'rows-selected', name: "Rows selected" }, { slug: 'add-product', name: "Add product" }] },
+  { id: 'seller/catalog-match', area: 'seller', group: "Seller Center", title: "Find the product in the catalog", path: '/seller/products/match', file: 'seller-catalog-match', views: [{ slug: '', name: "Results" }, { slug: 'no-match', name: "No match" }] },
+  { id: 'seller/product-new', area: 'seller', group: "Seller Center", title: "New product submission", path: '/seller/products/new', file: 'seller-product-new', views: [{ slug: '', name: "Draft" }, { slug: 'changes-requested', name: "Changes requested" }] },
+  { id: 'seller/offer', area: 'seller', group: "Seller Center", title: "Create offer", path: '/seller/offers/new', file: 'seller-offer', views: [{ slug: '', name: "New condition" }, { slug: 'used-condition', name: "Used condition" }] },
+  { id: 'seller/inventory', area: 'seller', group: "Seller Center", title: "Inventory", path: '/seller/inventory', file: 'seller-inventory', views: [{ slug: '', name: "Stock list" }, { slug: 'adjust-stock', name: "Adjust stock" }] },
+  { id: 'seller/bulk-update', area: 'seller', group: "Seller Center", title: "Bulk price and stock update", path: '/seller/inventory/bulk-update', file: 'seller-bulk-update', views: [{ slug: '', name: "Preview" }, { slug: 'applied', name: "Applied" }] },
+  { id: 'seller/orders', area: 'seller', group: "Seller Center", title: "Orders", path: '/seller/orders', file: 'seller-orders', views: [{ slug: '', name: "New" }, { slug: 'preparing', name: "Preparing" }, { slug: 'shipped', name: "Shipped" }, { slug: 'completed', name: "Completed" }, { slug: 'cancellation-requests', name: "Cancellation requests" }] },
+  { id: 'seller/order', area: 'seller', group: "Seller Center", title: "Order detail", path: '/seller/orders/:ref', sample: { ref: 'MK-261008-12077' }, file: 'seller-order', views: [{ slug: '', name: "To ship" }, { slug: 'shipped', name: "Shipped" }] },
+  { id: 'seller/shipping', area: 'seller', group: "Seller Center", title: "Shipping settings", path: '/seller/shipping', file: 'seller-shipping', views: [] },
+  { id: 'seller/returns', area: 'seller', group: "Seller Center", title: "Returns and cases", path: '/seller/returns', file: 'seller-returns', views: [{ slug: '', name: "Return requests" }, { slug: 'received-to-inspect', name: "Received, to inspect" }, { slug: 'disputes', name: "Disputes" }, { slug: 'closed', name: "Closed" }] },
+  { id: 'seller/return', area: 'seller', group: "Seller Center", title: "Return case", path: '/seller/returns/:ref', sample: { ref: 'RT-261005-0212' }, file: 'seller-return', views: [{ slug: '', name: "Respond" }, { slug: 'inspect-and-refund', name: "Inspect and refund" }] },
+  { id: 'seller/finance', area: 'seller', group: "Seller Center", title: "Finance", path: '/seller/finance', file: 'seller-finance', views: [] },
+  { id: 'seller/statement', area: 'seller', group: "Seller Center", title: "Payout statement", path: '/seller/finance/statements/:ref', sample: { ref: 'PO-261001' }, file: 'seller-statement', views: [] },
+  { id: 'seller/marketing', area: 'seller', group: "Seller Center", title: "Marketing and ads", path: '/seller/marketing', file: 'seller-marketing', views: [{ slug: '', name: "Discounts" }, { slug: 'platform-campaigns', name: "Platform campaigns" }, { slug: 'sponsored-ads', name: "Sponsored ads" }] },
+  { id: 'seller/ad-request', area: 'seller', group: "Seller Center", title: "Request a sponsored campaign", path: '/seller/marketing/ad-request', file: 'seller-ad-request', views: [{ slug: '', name: "Set up" }, { slug: 'in-review', name: "In review" }] },
+  { id: 'seller/customers', area: 'seller', group: "Seller Center", title: "Customers", path: '/seller/customers', file: 'seller-customers', views: [{ slug: '', name: "Order messages" }, { slug: 'product-questions', name: "Product questions" }, { slug: 'feedback', name: "Feedback" }] },
+  { id: 'seller/reports', area: 'seller', group: "Seller Center", title: "Seller reports", path: '/seller/reports', file: 'seller-reports', views: [] },
+  { id: 'seller/performance', area: 'seller', group: "Seller Center", title: "Account health", path: '/seller/performance', file: 'seller-performance', views: [] },
+  { id: 'seller/store', area: 'seller', group: "Seller Center", title: "Store profile", path: '/seller/store', file: 'seller-store', views: [] },
+  { id: 'seller/staff', area: 'seller', group: "Seller Center", title: "Staff and permissions", path: '/seller/staff', file: 'seller-staff', views: [{ slug: '', name: "Staff" }, { slug: 'invite-staff', name: "Invite staff" }] },
+  { id: 'seller/notifications', area: 'seller', group: "Seller Center", title: "Notifications", path: '/seller/notifications', file: 'seller-notifications', views: [] },
+  { id: 'seller/help', area: 'seller', group: "Seller Center", title: "Help and support", path: '/seller/help', file: 'seller-help', views: [{ slug: '', name: "Help" }, { slug: 'contact-seller-support', name: "Contact seller support" }] },
+  { id: 'admin/dashboard', area: 'admin', group: "Overview", title: "Admin dashboard", path: '/admin', file: 'admin-dashboard', views: [] },
+  { id: 'admin/inbox', area: 'admin', group: "Overview", title: "Notifications", path: '/admin/inbox', file: 'admin-inbox', views: [{ slug: '', name: "All" }, { slug: 'needs-my-action', name: "Needs my action" }] },
+  { id: 'admin/orders', area: 'admin', group: "Commerce", title: "All orders", path: '/admin/orders', file: 'admin-orders', views: [{ slug: '', name: "All orders" }, { slug: 'overdue-dispatch', name: "Overdue dispatch" }] },
+  { id: 'admin/order', area: 'admin', group: "Commerce", title: "Order detail (admin)", path: '/admin/orders/:ref', sample: { ref: 'MK-260914-48213' }, file: 'admin-order', views: [{ slug: '', name: "Overview" }, { slug: 'issue-refund', name: "Issue refund" }] },
+  { id: 'admin/returns', area: 'admin', group: "Commerce", title: "Returns and refunds queue", path: '/admin/returns', file: 'admin-returns', views: [{ slug: '', name: "Queue" }, { slug: 'exception-review', name: "Exception review" }] },
+  { id: 'admin/catalog', area: 'admin', group: "Catalog", title: "Catalog products", path: '/admin/catalog', file: 'admin-catalog', views: [{ slug: '', name: "Products" }, { slug: 'bulk-selection', name: "Bulk selection" }] },
+  { id: 'admin/product-review', area: 'admin', group: "Catalog", title: "Product review queue", path: '/admin/catalog/review', file: 'admin-product-review', views: [{ slug: '', name: "Submission" }, { slug: 'merge-duplicate', name: "Merge duplicate" }] },
+  { id: 'admin/categories', area: 'admin', group: "Catalog", title: "Categories and brands", path: '/admin/categories', file: 'admin-categories', views: [{ slug: '', name: "Categories" }, { slug: 'brands', name: "Brands" }] },
+  { id: 'admin/reviews', area: 'admin', group: "Catalog", title: "Reviews and Q&A moderation", path: '/admin/reviews', file: 'admin-reviews', views: [{ slug: '', name: "Reported content" }, { slug: 'q-a-and-seller-responses', name: "Q&A and seller responses" }] },
+  { id: 'admin/official', area: 'admin', group: "Official store", title: "Official Store offers and trading", path: '/admin/official', file: 'admin-official', views: [{ slug: '', name: "Trading" }, { slug: 'price-change', name: "Price change" }] },
+  { id: 'admin/purchasing', area: 'admin', group: "Official store", title: "Suppliers and purchasing", path: '/admin/purchasing', file: 'admin-purchasing', views: [{ slug: '', name: "Purchase orders" }, { slug: 'purchase-order', name: "Purchase order" }] },
+  { id: 'admin/sellers', area: 'admin', group: "Sellers", title: "Sellers", path: '/admin/sellers', file: 'admin-sellers', views: [] },
+  { id: 'admin/seller-application', area: 'admin', group: "Sellers", title: "Seller application review", path: '/admin/sellers/applications/:ref', sample: { ref: 'APP-2610-0031' }, file: 'admin-seller-application', views: [{ slug: '', name: "Review" }, { slug: 'request-information', name: "Request information" }, { slug: 'reject', name: "Reject" }] },
+  { id: 'admin/seller', area: 'admin', group: "Sellers", title: "Seller detail", path: '/admin/sellers/:slug', sample: { slug: 'northwind-audio' }, file: 'admin-seller', views: [{ slug: '', name: "Profile" }, { slug: 'suspend-seller', name: "Suspend seller" }] },
+  { id: 'admin/shipping', area: 'admin', group: "Shipping", title: "Shipping settings", path: '/admin/shipping', file: 'admin-shipping', views: [{ slug: '', name: "Settings" }, { slug: 'add-service-notice', name: "Add service notice" }] },
+  { id: 'admin/finance', area: 'admin', group: "Finance", title: "Payments and fees", path: '/admin/finance', file: 'admin-finance', views: [{ slug: '', name: "Unexplained amounts" }, { slug: 'disputes-and-chargebacks', name: "Disputes and chargebacks" }, { slug: 'refunds-failing', name: "Refunds failing" }] },
+  { id: 'admin/payouts', area: 'admin', group: "Finance", title: "Payout run", path: '/admin/payouts', file: 'admin-payouts', views: [{ slug: '', name: "Run review" }, { slug: 'approve-run', name: "Approve run" }] },
+  { id: 'admin/customers', area: 'admin', group: "Customers and service", title: "Customers", path: '/admin/customers', file: 'admin-customers', views: [{ slug: '', name: "List" }, { slug: 'customer-detail', name: "Customer detail" }] },
+  { id: 'admin/cases', area: 'admin', group: "Customers and service", title: "Cases and disputes", path: '/admin/cases', file: 'admin-cases', views: [{ slug: '', name: "Queue" }, { slug: 'bulk-assign', name: "Bulk assign" }] },
+  { id: 'admin/case', area: 'admin', group: "Customers and service", title: "Dispute CS-104882", path: '/admin/cases/:ref', sample: { ref: 'CS-104882' }, file: 'admin-case', views: [{ slug: '', name: "Investigating" }, { slug: 'decision-recorded', name: "Decision recorded" }] },
+  { id: 'admin/trust', area: 'admin', group: "Customers and service", title: "Trust and risk", path: '/admin/trust', file: 'admin-trust', views: [] },
+  { id: 'admin/promotions', area: 'admin', group: "Marketing and content", title: "Promotions and coupons", path: '/admin/promotions', file: 'admin-promotions', views: [] },
+  { id: 'admin/promotion-new', area: 'admin', group: "Marketing and content", title: "Create promotion campaign", path: '/admin/promotions/new', file: 'admin-promotion-new', views: [{ slug: '', name: "Setup" }, { slug: 'finance-confirmation', name: "Finance confirmation" }] },
+  { id: 'admin/content', area: 'admin', group: "Marketing and content", title: "Homepage and pages", path: '/admin/content', file: 'admin-content', views: [{ slug: '', name: "Sections" }, { slug: 'edit-section', name: "Edit section" }] },
+  { id: 'admin/help-content', area: 'admin', group: "Marketing and content", title: "Help articles and policies", path: '/admin/help-content', file: 'admin-help-content', views: [{ slug: '', name: "Articles" }, { slug: 'edit-policy', name: "Edit policy" }] },
+  { id: 'admin/ads', area: 'admin', group: "Advertisements", title: "Advertisement Management", path: '/admin/ads', file: 'admin-ads', views: [] },
+  { id: 'admin/ad-campaign', area: 'admin', group: "Advertisements", title: "Create ad campaign", path: '/admin/ads/new', file: 'admin-ad-campaign', views: [{ slug: '', name: "Goal & advertiser" }, { slug: 'placement-audience', name: "Placement & audience" }, { slug: 'schedule-limits', name: "Schedule & limits" }, { slug: 'creative-preview', name: "Creative & preview" }, { slug: 'approval', name: "Approval" }] },
+  { id: 'admin/ad-assets', area: 'admin', group: "Advertisements", title: "Ad creative library", path: '/admin/ads/assets', file: 'admin-ad-assets', views: [{ slug: '', name: "Library" }, { slug: 'review-creative', name: "Review creative" }] },
+  { id: 'admin/ad-placements', area: 'admin', group: "Advertisements", title: "Ad placements and rules", path: '/admin/ads/placements', file: 'admin-ad-placements', views: [] },
+  { id: 'admin/reports', area: 'admin', group: "Reports and settings", title: "Reports", path: '/admin/reports', file: 'admin-reports', views: [] },
+  { id: 'admin/staff', area: 'admin', group: "Reports and settings", title: "Staff and roles", path: '/admin/staff', file: 'admin-staff', views: [{ slug: '', name: "Roles and people" }, { slug: 'edit-role', name: "Edit role" }] },
+  { id: 'admin/settings', area: 'admin', group: "Reports and settings", title: "Settings", path: '/admin/settings', file: 'admin-settings', views: [{ slug: '', name: "All settings" }, { slug: 'review-change', name: "Review change" }] },
+  { id: 'admin/notifications', area: 'admin', group: "Reports and settings", title: "Notifications", path: '/admin/notifications', file: 'admin-notifications', views: [{ slug: '', name: "Matrix" }, { slug: 'edit-template', name: "Edit template" }] },
+  { id: 'admin/audit', area: 'admin', group: "Reports and settings", title: "Action history", path: '/admin/audit', file: 'admin-audit', views: [] },
+  { id: 'ops/queues', area: 'ops', group: "Work queues", title: "My work queues", path: '/ops', file: 'ops-queues', views: [] },
+  { id: 'ops/inventory', area: 'ops', group: "Work queues", title: "Official Store stock", path: '/ops/inventory', file: 'ops-inventory', views: [{ slug: '', name: "Stock" }, { slug: 'adjust-stock', name: "Adjust stock" }] },
+  { id: 'ops/receiving', area: 'ops', group: "Work queues", title: "Receiving", path: '/ops/receiving', file: 'ops-receiving', views: [{ slug: '', name: "Expected" }, { slug: 'receiving-pur-2610-0042', name: "Receiving PUR-2610-0042" }] },
+  { id: 'ops/pick-pack', area: 'ops', group: "Work queues", title: "Pick and pack", path: '/ops/pick-pack', file: 'ops-pick-pack', views: [{ slug: '', name: "Pick list" }, { slug: 'packing-station', name: "Packing station" }] },
+  { id: 'ops/dispatch', area: 'ops', group: "Work queues", title: "Dispatch and delivery exceptions", path: '/ops/dispatch', file: 'ops-dispatch', views: [{ slug: '', name: "Late dispatch" }, { slug: 'seller-cannot-fulfill', name: "Seller cannot fulfill" }, { slug: 'missing-tracking', name: "Missing tracking" }, { slug: 'lost-or-damaged', name: "Lost or damaged" }, { slug: 'delivery-failed', name: "Delivery failed" }] },
+  { id: 'ops/return-inspection', area: 'ops', group: "Work queues", title: "Return inspection", path: '/ops/return-inspection', file: 'ops-return-inspection', views: [{ slug: '', name: "Queue" }, { slug: 'inspecting-rt-261005-0212', name: "Inspecting RT-261005-0212" }] },
+  { id: 'ops/finance-checks', area: 'ops', group: "Work queues", title: "Daily finance checks", path: '/ops/finance-checks', file: 'ops-finance-checks', views: [] },
+] as const satisfies readonly Screen[];
+
+export type ScreenId = (typeof SCREENS)[number]['id'];
+
+export const SCREEN_BY_ID = Object.fromEntries(SCREENS.map((s) => [s.id, s])) as unknown as Record<ScreenId, Screen>;
