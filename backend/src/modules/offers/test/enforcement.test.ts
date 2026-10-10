@@ -136,9 +136,31 @@ describe('catalog changes', () => {
     expect(detail.offer.missingItemsStale).toBe(true);
     expect(eventsNamed(h, 'offers.offer.missing_items_stale').filter((e) => e.offerId === o.id)).toEqual([expect.objectContaining({ productId: p.id, ownerType: 'seller', sellerId, title: 'Halden Aurora ANC Headphones – Black', staleItems: ['Carry case'], newBoxItems: [] })]);
     expect(detail.offer.status).toBe('active');
+    expect(eventsNamed(h, 'offers.offer.missing_items_reviewed').filter((e) => e.offerId === o.id)).toEqual([]);
     const saved = await asSeller(h, sellerId, 'PATCH', `/offers/${o.id}`, { missingItems: [] });
     expect(saved.statusCode, saved.body).toBe(200);
     expect((await h.api.getOffer(o.id))!.missingItemsStale).toBe(false);
+    // the review is done: notifications resolves the review notice (pass 5)
+    expect(eventsNamed(h, 'offers.offer.missing_items_reviewed').filter((e) => e.offerId === o.id)).toEqual([
+      { offerId: o.id, productId: p.id, ownerType: 'seller', sellerId, missingItems: [], changed: true, reviewedBy: expect.objectContaining({ kind: 'seller' }) },
+    ]);
+    // saving again without the flag publishes nothing more
+    await asSeller(h, sellerId, 'PATCH', `/offers/${o.id}`, { missingItems: [] });
+    expect(eventsNamed(h, 'offers.offer.missing_items_reviewed').filter((e) => e.offerId === o.id)).toHaveLength(1);
+  });
+
+  it('confirming the same missing-items list after the stale flag clears it and publishes missing_items_reviewed (changed: false)', async () => {
+    const p = addProduct(h);
+    const sellerId = addSeller(h);
+    const o = await sellerOffer(h, sellerId, p.id, p.variants[0]!, { condition: 'used_good', conditionNotes: 'Works', missingItems: ['Carry case'] });
+    // a new box item the offer says nothing about: the list is still right, the seller confirms it
+    p.product.product.includedItems = [...p.product.product.includedItems, 'Travel adapter'];
+    await emit(h, 'catalog.product.updated', { productId: p.id, version: 3, title: p.product.product.title });
+    expect((await h.api.getOffer(o.id))!.missingItemsStale).toBe(true);
+    const same = await asSeller(h, sellerId, 'PATCH', `/offers/${o.id}`, { missingItems: ['Carry case'] });
+    expect(same.statusCode, same.body).toBe(200);
+    expect((await h.api.getOffer(o.id))!.missingItemsStale).toBe(false);
+    expect(eventsNamed(h, 'offers.offer.missing_items_reviewed').filter((e) => e.offerId === o.id)).toEqual([expect.objectContaining({ missingItems: ['Carry case'], changed: false })]);
   });
 });
 

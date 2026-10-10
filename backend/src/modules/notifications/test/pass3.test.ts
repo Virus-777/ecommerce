@@ -252,6 +252,30 @@ describe('new topics', () => {
     expect(n.body).toContain('no longer in the box: USB cable');
   });
 
+  it('missing-items reviews are action notices resolved by offers.offer.missing_items_reviewed (pass 5)', async () => {
+    const sellerId = newId();
+    const manager = world.member(sellerId, { permissions: ['offers.offers.manage'] });
+    await app.inject({ method: 'GET', url: '/api/seller/notifications/inbox', headers: as.seller(manager) });
+    const offerId = newId();
+    const productId = newId();
+    await publish(app, 'offers.offer.missing_items_stale', { offerId, productId, variantId: newId(), ownerType: 'seller', sellerId, title: 'Aurora Desk Lamp', staleItems: ['USB cable'], newBoxItems: [] });
+    const states = async () => (await inbox(as.seller(manager), 'seller')).map((n) => [n.topicKey, n.actionRequired, n.state]);
+    expect(await states()).toEqual([['seller.offer.missing_items_review', true, 'open']]);
+    // another offer's review leaves it open
+    await publish(app, 'offers.offer.missing_items_reviewed', { offerId: newId(), productId, ownerType: 'seller', sellerId, missingItems: [], changed: true, reviewedBy: { kind: 'seller', id: manager.accountId } });
+    expect(await states()).toEqual([['seller.offer.missing_items_review', true, 'open']]);
+    await publish(app, 'offers.offer.missing_items_reviewed', { offerId, productId, ownerType: 'seller', sellerId, missingItems: [], changed: false, reviewedBy: { kind: 'seller', id: manager.accountId } });
+    expect(await states()).toEqual([['seller.offer.missing_items_review', true, 'resolved']]);
+
+    const catalogLead = world.staff();
+    world.role('catalog_manager', { leadAccountId: catalogLead.accountId, accountIds: [catalogLead.accountId] });
+    const official = newId();
+    await publish(app, 'offers.offer.missing_items_stale', { offerId: official, productId, variantId: newId(), ownerType: 'official', sellerId: null, title: 'Aurora Desk Lamp', staleItems: [], newBoxItems: ['Travel case'] });
+    expect((await inbox(as.staff(catalogLead), 'admin', '?view=needs_my_action')).map((n) => n.topicKey)).toEqual(['staff.offer.missing_items_review']);
+    await publish(app, 'offers.offer.missing_items_reviewed', { offerId: official, productId, ownerType: 'official', sellerId: null, missingItems: [], changed: false, reviewedBy: { kind: 'staff', id: catalogLead.accountId } });
+    expect(await inbox(as.staff(catalogLead), 'admin', '?view=needs_my_action')).toHaveLength(0);
+  });
+
   it('the day-end summary resolves the day-end reminders and lists the notes', async () => {
     const lead = world.staff();
     world.role('shipping_manager', { leadAccountId: lead.accountId, accountIds: [lead.accountId] });
