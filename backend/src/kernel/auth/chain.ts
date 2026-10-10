@@ -111,7 +111,7 @@ export class AuthChain {
   install(app: FastifyInstance) {
     app.addHook('onRequest', async (request) => {
       if (request.method === 'OPTIONS' || this.#exempt(request)) return;
-      enforce(this.k.limits, `ip:${request.ip}`, IP_LIMIT);
+      await enforce(this.k.limits, `ip:${request.ip}`, IP_LIMIT);
       await this.authenticate(request, this.#kindOf(request));
     });
   }
@@ -172,8 +172,8 @@ export class AuthChain {
     const limits = CALLER_LIMITS[p.kind];
     const who = `${p.kind}:${p.accountId ?? p.sessionId}`;
     if (limits) {
-      enforce(this.k.limits, `caller:${who}`, limits.all);
-      if (limits.writes && request.method !== 'GET') enforce(this.k.limits, `writes:${who}`, limits.writes);
+      await enforce(this.k.limits, `caller:${who}`, limits.all);
+      if (limits.writes && request.method !== 'GET') await enforce(this.k.limits, `writes:${who}`, limits.writes);
     }
     checkAudience(d.area, d.auth, p);
     checkCallerKind(d.auth, p);
@@ -252,7 +252,7 @@ export class AuthChain {
       if (d.auth === 'provider') await this.#verifyWebhook(module, request);
       for (const rule of CLASS_LIMITS[d.rateLimit ?? ''] ?? []) {
         const key = rule.key({ ip: request.ip, body: request.body });
-        if (key) enforce(k.limits, `${d.rateLimit}:${key}`, rule.limit);
+        if (key) await enforce(k.limits, `${d.rateLimit}:${key}`, rule.limit);
       }
     };
 

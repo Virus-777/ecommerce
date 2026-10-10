@@ -13,6 +13,7 @@ import { moduleEvents, type EventBus } from '../events/index.js';
 import type { ModuleResolvers } from '../graphql/index.js';
 import type { RouteSet } from '../http/index.js';
 import { registrationsOf, type EndpointRegistration, type WebhookVerifier } from '../http/register.js';
+import type { RateLimitStore } from '../auth/rate-limit.js';
 import type { JobScheduler } from '../jobs/index.js';
 import type { Clock } from '../lib/clock.js';
 import type { RefGenerator } from '../lib/refs.js';
@@ -29,6 +30,8 @@ export interface KernelServices {
   events: EventBus;
   jobs: JobScheduler;
   refs: RefGenerator;
+  /** Business rate limits (ctx.rateLimit), shared by every instance with the postgres store */
+  rateLimits: RateLimitStore;
   /** Permission check for an in-process principal (set by the app once the auth chain exists) */
   can(principal: Principal | null | undefined, permission: string): Promise<boolean>;
 }
@@ -154,6 +157,7 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
         },
       },
       refs: k.refs,
+      rateLimit: (key: string, l: { limit: number; windowMs: number; peek?: boolean }) => k.rateLimits.hit(name, key, l, { peek: l.peek }),
       inbox: moduleInbox(name),
       can: (principal, permission) => k.can(principal, permission),
       error: moduleError(name),

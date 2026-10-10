@@ -145,7 +145,7 @@ Generated from the module specs (`docs/api/spec/modules/`, `docs/api/graphql/mod
 | **Errors** | `{ error: { code, message, details } }` with stable codes (`OFFER_CHANGED`, `ILLEGAL_TRANSITION`, `APPROVAL_REQUIRED` …) |
 | **Database portability** | Services depend on repository interfaces (`ports.ts`). Postgres adapters live in `infra/postgres/`. A MongoDB switch adds `infra/mongo/` per module; no cross-module joins or foreign keys exist to untangle |
 
-### Several server instances: jobs
+### Several server instances: jobs and rate limits
 
 Shared state lives in PostgreSQL only (no Redis), so any number of server instances can run on one database.
 
@@ -165,6 +165,13 @@ A queue holds at most one waiting and one running job (policy `stately`), so a j
 | `JOBS_BACKEND` | `pgboss` with `DATABASE_URL`, else `inprocess` | `inprocess` runs timers in each process (development and tests on PGlite; every instance runs every job) |
 | `JOBS_ENABLED` | `false` | This instance works the queues and keeps the schedules. Instances without it only enqueue (`runNow`), so web and worker instances can be split |
 | `DEPLOY_ID` | - | The deployment (image tag, commit); `on boot` jobs run once per value and module set |
+
+**Rate limits** (`kernel/auth/rate-limit.ts`). The middleware's limits ([03-auth-middleware.md §11](03-auth-middleware.md#11-rate-limits)) and modules' business limits (`ctx.rateLimit(key, { limit, windowMs, peek? })` → `{ allowed, retryAfterMs }`, e.g. coupon attempts in cart, gift card attempts in wallet) count in fixed windows aligned to the clock (an hour window runs :00 to :00), one row per scope (`http` or the module), key and window start in `kernel.rate_limits` (an unlogged table; one upsert per attempt). A refused attempt is not counted. The kernel job `kernel.purge-rate-limits` deletes ended windows every 10 minutes.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `RATE_LIMIT_STORE` | `postgres` with `DATABASE_URL`, else `memory` | `memory` counts per process (development and tests) |
+| `RATE_LIMITS` | `true` | Off only for contract and load tests (refused in production); modules' business limits apply either way |
 
 ## 6. Plan scenarios → modules (plan ch. 21)
 

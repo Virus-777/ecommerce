@@ -250,7 +250,7 @@ v1 left scope to a helper that each handler would have to remember to call. Acro
 
 | Stage | Class | Key | Default | Store |
 |---|---|---|---|---|
-| M2 (before auth, all URLs) | IP | client IP (`TRUST_PROXY`) | 600/min | shared (Redis), in-process at first |
+| M2 (before auth, all URLs) | IP | client IP (`TRUST_PROXY`) | 600/min | shared (PostgreSQL `kernel.rate_limits`; per process with `RATE_LIMIT_STORE=memory`) |
 | M5 (after auth) | Visitor | visitor session (and IP) | 300/min reads, writes 30/min | shared |
 | M5 | Customer | account | 120/min, writes 30/min | shared |
 | M5 | Seller member | account + seller | 300/min | shared |
@@ -262,7 +262,7 @@ v1 left scope to a helper that each handler would have to remember to call. Acro
 | M4 | Refresh | session | 30/hour per session | shared |
 | M11 | Webhooks | provider | 1,000/min | shared |
 
-The identity limits come from the identity notes. The others are proposals.
+The identity limits come from the identity notes. The others are proposals. "Shared" is the PostgreSQL table `kernel.rate_limits`: every server instance counts in the same fixed windows (no Redis; see [02-backend-architecture.md](02-backend-architecture.md#several-server-instances-jobs-and-rate-limits)). Modules count their own business limits there too, with `ctx.rateLimit`.
 
 **Enumeration.** Unknown emails get the same lockout and limit responses as real ones (identity simulates them), so `ACCOUNT_LOCKED` and the per-email 429 reveal nothing.
 

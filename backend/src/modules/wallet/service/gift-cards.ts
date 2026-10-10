@@ -55,37 +55,17 @@ export interface BatchCodes {
   deliveredAt: string;
 }
 
-/** Fixed windows in memory, per process (like the kernel's rate limits) */
-class Limiter {
-  #w = new Map<string, { start: number; count: number }>();
-  constructor(private readonly now: () => number) {}
-  private window(key: string, windowMs: number) {
-    const now = this.now();
-    let w = this.#w.get(key);
-    if (!w || now - w.start >= windowMs) {
-      w = { start: now, count: 0 };
-      this.#w.set(key, w);
-      if (this.#w.size > 50_000) for (const [k, v] of this.#w) if (now - v.start >= windowMs) this.#w.delete(k);
-    }
-    return w;
-  }
-  blocked(key: string, l: { limit: number; windowMs: number }) {
-    const w = this.window(key, l.windowMs);
-    return w.count >= l.limit ? Math.ceil((w.start + l.windowMs - this.now()) / 1000) : 0;
-  }
-  hit(key: string, l: { limit: number; windowMs: number }) {
-    this.window(key, l.windowMs).count++;
-  }
-}
+const paused = (retryAfterMs: number) => new AppError('RATE_LIMITED', 'Too many gift card attempts. Try again later.', { retryAfterSeconds: Math.max(1, Math.ceil(retryAfterMs / 1000)) });
 
 export class GiftCards {
-  readonly #limiter: Limiter;
-
   constructor(
     private readonly core: WalletCore,
     private readonly ledger: Ledger,
-  ) {
-    this.#limiter = new Limiter(() => this.core.now().getTime());
+  ) {}
+
+  /** Counts a wrong or unusable code for the caller (kernel rate limits, shared by every server instance) */
+  private async countFailure(caller: string) {
+    await this.core.ctx.rateLimit(`gift-card-fail:${caller}`, GIFT_CARD_FAILURES);
   }
 
   private get repo() {
@@ -327,13 +307,15 @@ export class GiftCards {
   /** The card for a code, counting wrong codes per caller; RATE_LIMITED after too many */
   private async lookup(code: string, caller: string): Promise<GiftCardRow> {
     if (!(await this.core.ctx.settings.get('giftCardsEnabled'))) throw this.core.error('GIFT_CARD_INVALID', "Gift cards can't be used yet");
-    const wait = Math.max(this.#limiter.blocked(`fail:${caller}`, GIFT_CARD_FAILURES), this.#limiter.blocked(`all:${caller}`, GIFT_CARD_LOOKUPS));
-    if (wait) throw new AppError('RATE_LIMITED', 'Too many gift card attempts. Try again later.', { retryAfterSeconds: wait });
-    this.#limiter.hit(`all:${caller}`, GIFT_CARD_LOOKUPS);
+    // too many wrong codes pause every lookup; a paused lookup doesn't count against the lookup limit
+    const failures = await this.core.ctx.rateLimit(`gift-card-fail:${caller}`, { ...GIFT_CARD_FAILURES, peek: true });
+    if (!failures.allowed) throw paused(failures.retryAfterMs);
+    const lookups = await this.core.ctx.rateLimit(`gift-card-lookup:${caller}`, GIFT_CARD_LOOKUPS);
+    if (!lookups.allowed) throw paused(lookups.retryAfterMs);
     const normalized = normalizeCode(code ?? '');
     const card = normalized ? await this.repo.giftCardByHash(this.hash(normalized)) : undefined;
     if (!card) {
-      this.#limiter.hit(`fail:${caller}`, GIFT_CARD_FAILURES);
+      await this.countFailure(caller);
       throw this.core.error('GIFT_CARD_INVALID', 'Check the gift card code');
     }
     return card;
@@ -366,7 +348,7 @@ export class GiftCards {
       return 'redeemed' as const;
     });
     if (result === 'invalid') {
-      this.#limiter.hit(`fail:customer:${customerId}`, GIFT_CARD_FAILURES);
+      await this.countFailure(`customer:${customerId}`);
       throw this.core.error('GIFT_CARD_INVALID', 'This gift card was already used, voided or has expired');
     }
     this.core.flush(out, by);

@@ -11,6 +11,7 @@ import type { Kysely } from 'kysely';
 import type { specs } from '../../spec/index.js';
 import type { Config } from '../config/index.js';
 import type { Principal } from '../auth/index.js';
+import type { RateLimitResult } from '../auth/rate-limit.js';
 import type { Database } from '../db/index.js';
 import type { Inbox } from '../events/inbox.js';
 import type { AppError } from '../errors/index.js';
@@ -76,6 +77,13 @@ export interface ModuleContext<N extends ModuleName> {
   can(principal: Principal | null | undefined, permission: string): Promise<boolean>;
   /** Human references (MK-YYMMDD-NNNNN …) */
   readonly refs: RefGenerator;
+  /**
+   * A business rate limit (wrong codes, attempts per hour), shared by every server instance: counts one
+   * attempt for `key` (scoped to this module) when the fixed window has room. `peek` only looks whether one
+   * more attempt would be allowed. Refused attempts are not counted. Throw RATE_LIMITED with
+   * retryAfterSeconds when not allowed.
+   */
+  rateLimit(key: string, limit: { limit: number; windowMs: number; peek?: boolean }): Promise<RateLimitResult>;
   /** Offer this module's public API to other modules (in-process) */
   provide(api: ApiOf<N>): void;
   /** Public API of a module listed in this module's dependsOn */

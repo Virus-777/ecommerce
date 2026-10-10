@@ -7,6 +7,7 @@ import type { FastifyInstance } from 'fastify';
 import { createHash } from 'node:crypto';
 import { moduleAuthorities, type Authorities } from './kernel/auth/authorities.js';
 import { REFRESH_COOKIE, type AuthChain, type WebhookVerifier } from './kernel/auth/chain.js';
+import { memoryRateLimitStore, postgresRateLimitStore, PURGE_RATE_LIMITS_JOB } from './kernel/auth/rate-limit.js';
 import { createAuthChain } from './kernel/auth/setup.js';
 import type { Principal } from './kernel/auth/index.js';
 import type { KeyRing } from './kernel/auth/tokens.js';
@@ -133,6 +134,10 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
       .slice(0, 16),
   });
   const refs = createRefGenerator(database.kysely, clock, config.market.timeZone);
+  // rate-limit windows: in PostgreSQL every instance counts together; ended windows are purged by a kernel job
+  const rateLimits = config.rateLimitStore === 'postgres' ? postgresRateLimitStore(database.kysely, clock) : memoryRateLimitStore(clock);
+  jobs.declare(PURGE_RATE_LIMITS_JOB);
+  jobs.handle('kernel', PURGE_RATE_LIMITS_JOB.name, () => rateLimits.purge());
   for (const spec of Object.values(allSpecs)) registerErrorCodes(spec.name, spec.errorCodes);
   events.registerSpecs(Object.values(allSpecs));
 
@@ -141,7 +146,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
   // modules get permission checks before the auth chain exists (it needs their APIs): bind it late
   let authChain: AuthChain | undefined;
   const can = async (principal: Principal | null | undefined, permission: string) => (authChain ? authChain.canPrincipal(principal, permission) : false);
-  const boot = await bootModules(defs, { config, log: app.log, database, clock, events, jobs, refs, can });
+  const boot = await bootModules(defs, { config, log: app.log, database, clock, events, jobs, refs, rateLimits, can });
   for (const w of boot.warnings) app.log.debug(w);
   for (const [m, v] of Object.entries(opts.webhookVerifiers ?? {})) if (!boot.webhookVerifiers.has(m)) boot.webhookVerifiers.set(m, v);
   for (const [m, stub] of Object.entries(opts.apiStubs ?? {})) boot.apis.set(m, withStubs(boot.apis.get(m), stub as object));
@@ -157,6 +162,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
     wrap: opts.authorities,
     webhookVerifiers: boot.webhookVerifiers,
     ownerOnly: new Set(Object.values(allSpecs).flatMap((s) => s.permissions.filter((p) => p.ownerOnly).map((p) => p.key))),
+    limits: rateLimits,
   });
   authChain = auth;
   auth.install(app);

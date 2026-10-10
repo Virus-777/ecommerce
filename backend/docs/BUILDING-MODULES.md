@@ -36,6 +36,7 @@ infra/<provider>/   provider adapters (email, payments, carriers, storage) behin
 - Map DB rows (snake_case) to API types (camelCase) in the repository or a `mappers.ts`; keep the mapping in one place per type.
 - Time comes from `ctx.clock.now()`, never `new Date()` in services (tests move the clock). IDs from `newId()` (`kernel/lib/ids`). Human references from `ctx.refs` (`MK-…`, `RT-…`). Money from `kernel/lib/money` (integer minor units, never floats).
 - Runtime settings: `await ctx.settings.get('key')` (spec `settings`; the settings module overrides the default). Another module's setting, read-only: `await ctx.settings.read('reports.maxExportRows')` (its value in force, else its spec default) — never duplicate a setting to keep two equal.
+- Business rate limits (wrong codes, attempts per hour): `await ctx.rateLimit(key, { limit, windowMs })` → `{ allowed, retryAfterMs }`, counted in the kernel's shared windows (every server instance counts together; `peek: true` only looks). Never keep counters in memory: production runs several instances. Refuse with `RATE_LIMITED` and `retryAfterSeconds`.
 - The Official Store's display name is `OFFICIAL_STORE_NAME` and its seller id `OFFICIAL_STORE_ID` (`src/spec/common.ts`); never hardcode either.
 
 ## 3. What the middleware already did (don't repeat it)

@@ -11,7 +11,7 @@ import { appProofVerifier } from './app-proof.js';
 import { devAuthorities, type Authorities } from './authorities.js';
 import { AuthChain, type WebhookVerifier } from './chain.js';
 import type { Principal } from './index.js';
-import { memoryRateLimitStore, type RateLimitStore } from './rate-limit.js';
+import { memoryRateLimitStore, UNLIMITED, type RateLimitStore } from './rate-limit.js';
 import { RevocationList } from './revocation.js';
 import { devSigner, parseJwks, type AccessClaims, type KeyRing } from './tokens.js';
 
@@ -26,9 +26,10 @@ export interface AuthSetup {
   wrap?: (a: Authorities) => Authorities;
   webhookVerifiers: Map<string, WebhookVerifier>;
   ownerOnly: ReadonlySet<string>;
+  /** Where the middleware counts (RATE_LIMIT_STORE); default memory */
+  limits?: RateLimitStore;
 }
 
-const UNLIMITED: RateLimitStore = { hit: () => ({ ok: true, retryAfterSeconds: 0 }) };
 
 /**
  * The key identity signs access and visitor tokens with: AUTH_SIGNING_JWK, else (development and
@@ -80,7 +81,7 @@ export async function createAuthChain(s: AuthSetup): Promise<{ auth: AuthChain; 
     revocations,
     authorities,
     appProof: appProofVerifier(config.appProof),
-    limits: config.rateLimits ? memoryRateLimitStore(clock) : UNLIMITED,
+    limits: config.rateLimits ? (s.limits ?? memoryRateLimitStore(clock)) : UNLIMITED,
     webhookVerifiers: s.webhookVerifiers,
     ownerOnly: s.ownerOnly,
     db: s.db,

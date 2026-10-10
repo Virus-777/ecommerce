@@ -81,6 +81,21 @@ comment on table kernel.processed_events is 'Inbox: what each module already han
 create index on kernel.processed_events (processed_at);
 `,
     },
+    {
+      id: '0004_rate_limits',
+      sql: /* sql */ `
+create unlogged table kernel.rate_limits (
+  scope text not null,
+  key text not null,
+  window_start timestamptz not null,
+  window_end timestamptz not null,
+  count int not null,
+  primary key (scope, key, window_start)
+);
+comment on table kernel.rate_limits is 'Rate-limit counters shared by every server instance: fixed windows per scope (http, or the module of ctx.rateLimit) and key; unlogged, ended windows purged by kernel.purge-rate-limits';
+create index on kernel.rate_limits (window_end);
+`,
+    },
   ],
 };
 

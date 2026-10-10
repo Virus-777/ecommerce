@@ -11,7 +11,8 @@ import { DAY, harness, idem, USD, type Harness } from './helpers.js';
 
 let h: Harness;
 beforeAll(async () => {
-  h = await harness();
+  // gift card attempts counted in kernel.rate_limits, as in production
+  h = await harness({ config: { rateLimitStore: 'postgres' } });
   h.settings['wallet.giftCardsEnabled'] = true;
 });
 afterAll(async () => {
