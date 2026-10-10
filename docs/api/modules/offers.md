@@ -1272,7 +1272,10 @@ type Offer {
   saleEndsAt: DateTime
   "Maximum units per customer"
   purchaseLimit: Int
+  "Dispatch customers get (REST Offer.shipping.dispatch): Marketly's dispatch and ships-from for Fulfilled by Marketly offers"
   dispatch: OfferDispatch!
+  "Who ships it; MARKETLY_SERVICE shows 'Ships from Marketly' (the seller stays named)"
+  fulfilledBy: OfferFulfilledBy!
   "Offer-level view of returns.resolveTerms (seller, category, condition); returns owns the terms. Storefront: Seller.returnTerms."
   returnTerms: OfferReturnTerms!
   warranty: OfferWarranty!
@@ -1314,6 +1317,13 @@ type Offer {
 enum OfferOwnerType {
   OFFICIAL
   SELLER
+}
+
+enum OfferFulfilledBy {
+  OFFICIAL_WAREHOUSE
+  SELLER
+  "Fulfilled by Marketly (fulfillment-service)"
+  MARKETLY_SERVICE
 }
 
 enum OfferCondition {
@@ -1560,6 +1570,8 @@ enum OfferStatusReasonCode @areas(in: [SELLER, ADMIN]) {
   REMOVED_BY_STAFF
   ENDED_BY_SELLER
   ENFORCEMENT
+  "The seller's Fulfilled by Marketly enrollment is suspended or offboarding (never switched to seller shipping)"
+  FULFILLMENT_SERVICE_SUSPENDED
 }
 
 "Market price context for one variant, shown on the seller offer form"

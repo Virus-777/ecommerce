@@ -1989,7 +1989,10 @@ type Offer {
   saleEndsAt: DateTime
   "Maximum units per customer"
   purchaseLimit: Int
+  "Dispatch customers get (REST Offer.shipping.dispatch): Marketly's dispatch and ships-from for Fulfilled by Marketly offers"
   dispatch: OfferDispatch!
+  "Who ships it; MARKETLY_SERVICE shows 'Ships from Marketly' (the seller stays named)"
+  fulfilledBy: OfferFulfilledBy!
   "Offer-level view of returns.resolveTerms (seller, category, condition); returns owns the terms. Storefront: Seller.returnTerms."
   returnTerms: OfferReturnTerms!
   warranty: OfferWarranty!
@@ -2008,6 +2011,13 @@ type Offer {
 enum OfferOwnerType {
   OFFICIAL
   SELLER
+}
+
+enum OfferFulfilledBy {
+  OFFICIAL_WAREHOUSE
+  SELLER
+  "Fulfilled by Marketly (fulfillment-service)"
+  MARKETLY_SERVICE
 }
 
 enum OfferCondition {
