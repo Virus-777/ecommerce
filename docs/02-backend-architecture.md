@@ -46,6 +46,7 @@ backend/
 | `/api/seller/*` | Seller owners and seller staff (Seller Center, website + app) | Seller member session; seller-level permissions |
 | `/api/admin/*` | Internal staff (Admin Center + Operations) | Staff session; role permissions + approval limits |
 | `/webhooks/*` | Payment and carrier providers | Provider signatures |
+| `/files/*` | Anyone holding a link the API issued (`<img src>`, downloads) | The link's own signature (HMAC, expiring for private files, permanent for public renditions), verified by the auth middleware |
 | `/graphql/store`, `/graphql/seller`, `/graphql/admin` | Same audiences as the REST areas | Read-only GraphQL for complex screens; persisted queries in production (see [api/graphql/README.md](api/graphql/README.md)) |
 | `/docs` | Developers | OpenAPI generated from module schemas |
 
@@ -144,6 +145,18 @@ Generated from the module specs (`docs/api/spec/modules/`, `docs/api/graphql/mod
 | **Purchase snapshots** | Orders copy the product description, variation, condition, price, seller and terms accepted at purchase (plan ch. 8) |
 | **Errors** | `{ error: { code, message, details } }` with stable codes (`OFFER_CHANGED`, `ILLEGAL_TRANSITION`, `APPROVAL_REQUIRED` …) |
 | **Database portability** | Services depend on repository interfaces (`ports.ts`). Postgres adapters live in `infra/postgres/`. A MongoDB switch adds `infra/mongo/` per module; no cross-module joins or foreign keys exist to untangle |
+| **File storage** | Owner decision: files live on the server's **local file system** (no S3). media's storage port has two adapters, chosen by `MEDIA_STORAGE` (below); both stream bytes through the API: uploads to `PUT /api/{area}/media/uploads/{id}/content` (the caller's token), downloads from `GET /files/{bucket}/{key}` by signed links the auth middleware verifies ([03-auth-middleware.md](03-auth-middleware.md) §0 "File links") |
+
+### File storage configuration (media)
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `MEDIA_STORAGE` | `local`; `memory` when `NODE_ENV=test` | `local`: files on disk under `MEDIA_STORAGE_DIR` (`infra/storage/local.ts`). `memory`: kept in the process and lost on restart (`infra/storage/memory.ts`; refused in production). Both pass the same contract tests (`infra/storage/storage.test.ts`) |
+| `MEDIA_STORAGE_DIR` | `.data/media` (relative to the working directory) | `<dir>/<bucket>/<key>` holds the bytes (buckets `marketly-public`, `marketly-private` are folders), `<dir>/.meta/` content type, ETag and checksum per file, `<dir>/.tmp/` writes in progress (temp file, flushed, then renamed: atomic). Back it up with the database; with more than one API server it must be a shared volume |
+| `API_URL` | `http://localhost:<PORT>` | The API's public address: file links (`<API_URL>/files/…`) point here. Required in production |
+| `APP_SECRET` | dev value outside production | File links are signed with `secretFor(config, 'media.files')`, derived from it; rotating it invalidates links already handed out, including stored public image URLs |
+
+Limits: an upload is refused above the ticket's `maxBytes` while it streams (nothing is kept); public renditions are served `Cache-Control: public, max-age=3600`, private files `private` (attachments `no-store`); file requests have their own IP rate limit (3,000/min). Processing still reads each upload into memory once (scan, probe, renditions), as before.
 
 ### Several server instances: jobs and rate limits
 
