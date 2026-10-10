@@ -191,6 +191,8 @@ export interface CarrierPort {
     to: Partial<common.Address>;
     reference: string;
     qr: boolean;
+    /** Label file format (default pdf; warehouse thermal printers ask for zpl) */
+    format?: 'pdf' | 'zpl';
   }): Promise<{ trackingNumber: string; pdf: Uint8Array; qrCode: string | null }>;
   /** Voids an unused label (the carrier refunds it) */
   voidLabel(input: { carrierCode: string; trackingNumber: string }): Promise<{ refunded: boolean }>;

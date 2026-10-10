@@ -263,18 +263,26 @@ describe('labels', () => {
     const o = await sellerOrder(h);
     const returnId = newId();
     const to = { name: 'Casa Verde Returns', line1: '9 Dock Rd', city: 'Reno', region: 'NV', postalCode: '89502', country: 'US' };
-    const r = await h.service.createLabel({ groupId: o.groupId, kind: 'return', items: [{ orderItemId: o.lamp.id, quantity: 1 }], parcel: { weightGrams: 1200 }, keepPromise: false, to, returnId, labelMethod: 'prepaid_qr', billedTo: 'customer' }, `ret-${returnId}`);
+    // the drop-off deadline is the one returns decided (approval + policy dropOffDays), never one shipping invents
+    const dropOffBy = new Date(h.clock.now().getTime() + 10 * 86_400_000).toISOString();
+    const r = await h.service.createLabel({ groupId: o.groupId, kind: 'return', items: [{ orderItemId: o.lamp.id, quantity: 1 }], parcel: { weightGrams: 1200 }, keepPromise: false, to, returnId, labelMethod: 'prepaid_qr', billedTo: 'customer', dropOffBy }, `ret-${returnId}`);
     expect(r.shipment).toMatchObject({ kind: 'return', returnId, status: 'label_created' });
     expect(r.label.qrCodeUrl).toMatch(/^http/);
-    expect(r.label.dropOffBy).toBeTruthy();
+    expect(r.label).toMatchObject({ dropOffBy, format: 'pdf', carrierServiceId: expect.any(String) });
+    const row = (await h.service.core.repo.get('labels', r.label.id))!;
+    expect(row).toMatchObject({ billed_to: 'customer', drop_off_by: new Date(dropOffBy), carrier_service_id: r.label.carrierServiceId });
+    expect((await h.call('GET', `${ADMIN}/shipments/${r.shipment.id}`, tokens.staff())).body.events.map((e: any) => [e.code, e.source])).toEqual([['label_created', 'system']]);
     await h.app.kernel.events.drain();
     expect(h.named('shipping.label.purchased').at(-1)).toMatchObject({ kind: 'return', returnId, billedTo: 'customer' });
+    const noDeadline = await h.service.createLabel({ groupId: o.groupId, kind: 'return', items: [{ orderItemId: o.lamp.id, quantity: 1 }], parcel: { weightGrams: 1200 }, keepPromise: false, to, returnId: newId(), billedTo: 'seller' }, `ret-${newId()}`);
+    expect(noDeadline.label.dropOffBy).toBeNull();
     const same = await h.service.createLabel({ groupId: o.groupId, kind: 'return', items: [], parcel: { weightGrams: 1200 }, keepPromise: false, to, returnId }, `ret-${returnId}`);
     expect(same.label.id).toBe(r.label.id);
     const points = await h.service.findDropOffPoints((await h.service.core.repo.get('labels', r.label.id))!.carrier_service_id, '97205', 3);
     expect(points).toHaveLength(3);
     const own = await h.service.registerReturnTracking({ returnId: newId(), orderId: o.order.id, groupId: o.groupId, carrierCode: 'usps', trackingNumber: usps(), to });
     expect(own).toMatchObject({ kind: 'return', status: 'shipped', trackingState: 'pending' });
+    expect((await h.call('GET', `${ADMIN}/shipments/${own.id}`, tokens.staff())).body.events.map((e: any) => [e.code, e.source])).toEqual([['info', 'customer']]);
     await h.app.kernel.events.drain();
     expect(h.named('shipping.shipment.dispatched').at(-1)).toMatchObject({ kind: 'return', shipmentId: own.id });
     await expect(h.service.registerReturnTracking({ returnId: newId(), orderId: o.order.id, groupId: o.groupId, carrierCode: 'usps', trackingNumber: '42', to })).rejects.toMatchObject({ code: 'TRACKING_FORMAT_INVALID' });
@@ -282,7 +290,9 @@ describe('labels', () => {
 
   it('hands over warehouse-packed Official Store packages', async () => {
     const o = await sellerOrder(h, { ownerType: 'official' });
-    const label = await h.service.createLabel({ groupId: o.groupId, kind: 'outbound', items: [{ orderItemId: o.speaker.id, quantity: 2 }, { orderItemId: o.lamp.id, quantity: 1 }], parcel: { weightGrams: 2500 }, keepPromise: true }, `wh-${o.groupId}`);
+    // warehouse thermal printers ask for zpl
+    const label = await h.service.createLabel({ groupId: o.groupId, kind: 'outbound', items: [{ orderItemId: o.speaker.id, quantity: 2 }, { orderItemId: o.lamp.id, quantity: 1 }], parcel: { weightGrams: 2500 }, keepPromise: true, format: 'zpl' }, `wh-${o.groupId}`);
+    expect(label.label).toMatchObject({ format: 'zpl', dropOffBy: null });
     await h.app.kernel.events.drain();
     expect(h.named('shipping.label.purchased').at(-1)).toMatchObject({ billedTo: 'company', sellerId: null });
     await h.publish('warehouse', 'warehouse.package.packed', { packageId: newId(), fulfillmentId: newId(), orderId: o.order.id, sellerGroupId: o.groupId, items: [], carrier: 'ups', service: 'Ground', trackingNumber: label.label.trackingNumber, weight: { value: 2.5, unit: 'kg' }, dimensions: null });

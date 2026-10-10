@@ -118,6 +118,7 @@ export class Estimates {
       updated_by: SYSTEM,
       updated_at: new Date(0),
       default_parcel: null,
+      ships_from: null,
     };
   }
 

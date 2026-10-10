@@ -9,7 +9,10 @@ import { format, money } from '../../../kernel/lib/money.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type * as identity from '../../../spec/identity.js';
-import type { CarrierClaim, ClaimInput, DeliveryException, ExceptionCounts, OpenExceptionInput } from '../../../spec/shipping.js';
+import type { CarrierClaim, ClaimInput, DeliveryException, ExceptionCounts, OpenExceptionInput, ShippingShipmentExceptionEvent } from '../../../spec/shipping.js';
+
+/** What opened an exception (shipping.shipment.exception source) */
+type ExceptionSource = ShippingShipmentExceptionEvent['source'];
 import { DAY_MS, HOUR_MS, instantLabel } from '../domain/calendar.js';
 import { CUSTOMER_ACTION, DEFAULT_NEXT_STEP, FIRST_DEADLINE_HOURS, KIND_LABEL, OPEN_STATUSES, type ExceptionKind } from '../domain/exceptions.js';
 import { carrierClaimMachine, deliveryExceptionMachine } from '../domain/state-machines.js';
@@ -71,6 +74,8 @@ export class Exceptions {
     caseRef?: string | null;
     sellerNotified?: boolean;
     publish?: boolean;
+    /** What opened it; support opens a case only for carrier, system and staff sources (never customer_report) */
+    source: ExceptionSource;
   }): Promise<{ row: ExceptionRec; created: boolean }> {
     const now = this.core.now();
     const id = newId();
@@ -106,7 +111,8 @@ export class Exceptions {
       return ok;
     });
     if (!created) {
-      const existing = (await this.repo.find('exceptions', { group_id: o.group.groupId, kind: o.kind, status: OPEN_STATUSES }))[0];
+      // one open exception per (group, kind, package) (decision D-S3): another package of the group gets its own
+      const existing = await this.openFor(o.group.groupId, o.kind, o.shipmentId ?? null);
       if (existing) return { row: existing, created: false };
       throw new AppError('CONFLICT', 'The exception could not be opened; try again');
     }
@@ -114,11 +120,16 @@ export class Exceptions {
     if (o.publish !== false) {
       this.core.publish(
         'shipping.shipment.exception',
-        { exceptionId: id, kind: o.kind, orderId: row.order_id, ...(await this.core.recipientOf(row.order_id)), groupId: row.group_id, shipmentId: row.shipment_id, sellerId: row.seller_id, orderItemIds: o.itemIds, dueAt: row.due_at.toISOString(), customerAction: CUSTOMER_ACTION[o.kind] },
+        { exceptionId: id, kind: o.kind, orderId: row.order_id, ...(await this.core.recipientOf(row.order_id)), groupId: row.group_id, shipmentId: row.shipment_id, sellerId: row.seller_id, orderItemIds: o.itemIds, dueAt: row.due_at.toISOString(), customerAction: CUSTOMER_ACTION[o.kind], source: o.source, caseRef: row.case_ref },
         o.by,
       );
     }
     return { row, created: true };
+  }
+
+  /** The open exception of a kind for a group and package (no package: the group's one without a package) */
+  private async openFor(groupId: string, kind: ExceptionKind, shipmentId: string | null): Promise<ExceptionRec | undefined> {
+    return (await this.repo.find('exceptions', { group_id: groupId, kind, shipment_id: shipmentId, status: OPEN_STATUSES }))[0];
   }
 
   private async log(exceptionId: string, action: string, detail: string | null, actor: common.Actor) {
@@ -158,14 +169,14 @@ export class Exceptions {
   async openMissingTracking(s: ShipmentRec, situation: string, by: By) {
     const cfg = await this.core.cfg();
     const lines = await this.linesOf(s.id);
-    await this.open({ kind: 'missing_tracking', group: this.factsOf(s), shipmentId: s.id, itemIds: lines.ids, itemsSummary: lines.summary, situation, dueAt: new Date(this.core.now().getTime() + cfg.validTrackingWithinHours * HOUR_MS), by });
+    await this.open({ kind: 'missing_tracking', group: this.factsOf(s), shipmentId: s.id, itemIds: lines.ids, itemsSummary: lines.summary, situation, dueAt: new Date(this.core.now().getTime() + cfg.validTrackingWithinHours * HOUR_MS), by, source: by.actor.kind === 'staff' ? 'staff' : 'system' });
   }
 
   async openFailedDelivery(s: ShipmentRec, detail: string | null) {
     const lines = await this.linesOf(s.id);
     const chooseBy = s.failed_delivery ? new Date(s.failed_delivery.chooseBy) : new Date(this.core.now().getTime() + FIRST_DEADLINE_HOURS.failed_delivery * HOUR_MS);
     const situation = `Delivery attempt failed${detail ? `: ${detail}` : ''}`;
-    const { row, created } = await this.open({ kind: 'failed_delivery', group: this.factsOf(s), shipmentId: s.id, itemIds: lines.ids, itemsSummary: lines.summary, situation, dueAt: chooseBy, by: { actor: SYSTEM } });
+    const { row, created } = await this.open({ kind: 'failed_delivery', group: this.factsOf(s), shipmentId: s.id, itemIds: lines.ids, itemsSummary: lines.summary, situation, dueAt: chooseBy, by: { actor: SYSTEM }, source: 'carrier' });
     if (!created && row.shipment_id !== s.id) await this.log(row.id, 'opened', `Another package failed: ${situation}`, SYSTEM);
   }
 
@@ -261,7 +272,7 @@ export class Exceptions {
     const dueAt = input.dueAt ? new Date(input.dueAt) : new Date(this.core.now().getTime() + FIRST_DEADLINE_HOURS[kind] * HOUR_MS);
     if (Number.isNaN(dueAt.getTime())) throw invalid([{ path: 'dueAt', message: 'Not a date-time' }]);
     const owner = input.ownerStaffId ? { staffId: input.ownerStaffId, name: await this.staffName(input.ownerStaffId) } : null;
-    const existing = (await this.repo.find('exceptions', { group_id: input.groupId, kind, status: OPEN_STATUSES }))[0];
+    const existing = await this.openFor(input.groupId, kind, shipmentId);
     if (existing) throw this.core.error('EXCEPTION_ALREADY_OPEN', `An open ${KIND_LABEL[kind].toLowerCase()} exception exists for this package`, { exceptionId: existing.id });
     const { row, created } = await this.open({
       kind,
@@ -273,6 +284,7 @@ export class Exceptions {
       dueAt,
       by,
       owner,
+      source: 'staff',
     });
     if (!created) throw this.core.error('EXCEPTION_ALREADY_OPEN', `An open ${KIND_LABEL[kind].toLowerCase()} exception exists for this package`, { exceptionId: row.id });
     const view = await this.view(row.id);
@@ -334,7 +346,8 @@ export class Exceptions {
     await this.core.soft('notifications', 'notify customer', (n) =>
       n.notify({
         topic: 'customer.shipment.exception',
-        recipients: [{ kind: 'guest_email', email: order.contact.email }],
+        // the order's customer (customers-module id) when there is one; the contact email only for guests
+        recipients: [order.contact.customerId ? { kind: 'customer', customerId: order.contact.customerId } : { kind: 'guest_email', email: order.contact.email }],
         context: { order: { ref: order.ref }, exception: { kind: KIND_LABEL[kind as ExceptionKind] ?? kind, action }, due: { date: instantLabel(due, this.core.tz) } },
         link: { kind: 'shipment', id: subjectId, ref: order.ref, label: 'See next steps', screen: 'account/tracking' },
         dedupeKey: `shipping.exception.customer:${subjectId}:${this.core.now().getTime()}`,
@@ -473,6 +486,7 @@ export class Exceptions {
         situation: `Seller cannot fulfill: ${body.note!.trim()}`,
         dueAt: new Date(this.core.now().getTime() + FIRST_DEADLINE_HOURS.seller_cannot_fulfill * HOUR_MS),
         by,
+        source: 'seller',
       });
     }
     return this.view(id);
@@ -567,6 +581,7 @@ export class Exceptions {
         sellerNotified: w.owner_type === 'seller',
         // shipping.dispatch.overdue carries the exception to orders, notifications, sellers and workqueues
         publish: false,
+        source: 'system',
       });
       exceptionId = row.id;
     }
@@ -621,6 +636,7 @@ export class Exceptions {
         nextStep: 'Check with the carrier; agree a remedy with the customer if the package is lost',
         dueAt: new Date(now.getTime() + FIRST_DEADLINE_HOURS.lost_or_damaged * HOUR_MS),
         by: { actor: SYSTEM },
+        source: 'system',
       });
     }
   }
@@ -645,6 +661,7 @@ export class Exceptions {
         nextStep: refund ? `Cancel item, refund ${refund}` : DEFAULT_NEXT_STEP.seller_cannot_fulfill,
         dueAt: new Date(this.core.now().getTime() + FIRST_DEADLINE_HOURS.seller_cannot_fulfill * HOUR_MS),
         by: { actor: SYSTEM },
+        source: 'seller',
       });
       if (!created && !row.items_summary.includes(summary)) {
         await this.repo.update('exceptions', row.id, { items_summary: `${row.items_summary}; ${summary}`, situation: `${row.situation}; ${situation}` });
@@ -702,6 +719,8 @@ export class Exceptions {
         dueAt: new Date(this.core.now().getTime() + FIRST_DEADLINE_HOURS.lost_or_damaged * HOUR_MS),
         by: { actor: SYSTEM },
         caseRef: e.ref,
+        // support already holds the report as a case: it must not open a second case for it
+        source: 'customer_report',
       });
       if (!created && !row.case_ref) await this.repo.update('exceptions', row.id, { case_ref: e.ref });
     }

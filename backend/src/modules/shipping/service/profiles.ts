@@ -4,7 +4,7 @@
  * the storefront shipping section and the record-shipment setup.
  */
 import { AppError } from '../../../kernel/errors/index.js';
-import { newId } from '../../../kernel/lib/ids.js';
+import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import { money } from '../../../kernel/lib/money.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import { pageOf } from '../../../kernel/lib/pagination.js';
@@ -28,7 +28,7 @@ import type {
 } from '../../../spec/shipping.js';
 import { businessDaysLabel, clockLabel, dayLabel, handlingLabel, isDate, isTime, WEEKDAYS } from '../domain/calendar.js';
 import { destinationOf, locationLabel } from '../domain/geo.js';
-import { formatShort, methodIssues, priceLabel } from '../domain/rates.js';
+import { formatShort, methodIssues, priceLabel, ruleStatus } from '../domain/rates.js';
 import { shippingProfileVersionMachine } from '../domain/state-machines.js';
 import type { ProfileRec } from '../ports.js';
 import { invalid, notFound, type By, type Core } from './core.js';
@@ -78,22 +78,25 @@ export class Profiles {
 
   /* ---------------------------------------------------------------- profiles */
 
-  /** Active offers per profile lineage of an owner (offers is optional: 0 without it) */
+  /**
+   * Active offers per profile lineage of an owner, for the profile lists (offers is optional: 0 without it). Each
+   * count is exact (offers.countActiveOffersByProfile), never a paged listing with a cap.
+   */
   async offersUsing(owner: Owner): Promise<Map<string, number>> {
     const counts = new Map<string, number>();
     const offers = this.core.ctx.tryUse('offers');
     if (!offers) return counts;
-    let cursor: string | null | undefined;
-    for (let i = 0; i < 50; i++) {
-      const page = await this.core.soft('offers', 'listOffersAdmin', (o) =>
-        o.listOffersAdmin({ ...(owner.ownerType === 'official' ? { official: true } : { sellerId: owner.sellerId! }), status: ['active'] }, { limit: 100, ...(cursor ? { cursor } : {}) }),
-      );
-      if (!page) break;
-      for (const o of page.items) counts.set(o.shippingProfileId, (counts.get(o.shippingProfileId) ?? 0) + 1);
-      cursor = page.nextCursor;
-      if (!cursor) break;
+    for (const { current } of await this.lineages(owner, { includeArchived: true })) {
+      const n = await this.core.soft('offers', 'countActiveOffersByProfile', (o) => o.countActiveOffersByProfile(current.lineage_id));
+      if (n) counts.set(current.lineage_id, n);
     }
     return counts;
+  }
+
+  /** Active offers using one profile: an exact count from offers (PROFILE_IN_USE); an offers failure is not taken as 0 */
+  async offersUsingProfile(profileId: string): Promise<number> {
+    const offers = this.core.ctx.tryUse('offers');
+    return offers ? offers.countActiveOffersByProfile(profileId) : 0;
   }
 
   async lineages(owner: Owner, o: { includeArchived?: boolean } = {}): Promise<{ current: ProfileRec; versions: ProfileRec[] }[]> {
@@ -265,7 +268,7 @@ export class Profiles {
       });
     });
     this.core.publish('shipping.profile.changed', { profileId, sellerId: current.seller_id, effectiveFrom: eff.at.toISOString() }, by);
-    const using = (await this.offersUsing(owner)).get(profileId) ?? 0;
+    const using = (await this.core.soft('offers', 'countActiveOffersByProfile', (o) => o.countActiveOffersByProfile(profileId))) ?? 0;
     const view = this.views.profile(row, using);
     await this.core.audit(
       {
@@ -287,7 +290,7 @@ export class Profiles {
     const active = versions.find((v) => v.status === 'active');
     const current = currentOf(versions)!;
     const status = shippingProfileVersionMachine.next((active?.status ?? current.status) as never, 'archive');
-    const using = (await this.offersUsing(owner)).get(profileId) ?? 0;
+    const using = await this.offersUsingProfile(profileId);
     if (using > 0) throw this.core.error('PROFILE_IN_USE', `${using} active offer${using === 1 ? ' uses' : 's use'} this profile. Move them to another profile first.`, { offerCount: using });
     const row = await this.repo.transaction(async (tx) => {
       for (const v of versions.filter((x) => x.status === 'scheduled')) await tx.update('profiles', v.id, { status: shippingProfileVersionMachine.next('scheduled', 'cancel') });
@@ -300,10 +303,9 @@ export class Profiles {
 
   /* ---------------------------------------------------------------- seller settings */
 
+  /** Allowed seller handling days: the sellerHandlingRange setting is the only source (decision D-S2) */
   async handlingRange(): Promise<[number, number]> {
-    const cfg = await this.core.cfg();
-    const rows = await this.repo.find('dispatch_targets', { effective_from: { op: '<=', value: this.core.now() } }, { orderBy: [['effective_from', 'desc']], limit: 1 });
-    return rows[0] ? [rows[0].seller_default.allowedMinDays, rows[0].seller_default.allowedMaxDays] : cfg.sellerHandlingRange;
+    return (await this.core.cfg()).sellerHandlingRange;
   }
 
   async settingsRows(owner: Owner) {
@@ -346,6 +348,7 @@ export class Profiles {
     const def = profiles.find((p) => p.isDefault) ?? profiles[0];
     const cfg = await this.core.cfg();
     return {
+      shipsFrom: settings.ships_from ?? null,
       coverage: settings.coverage,
       dispatch,
       labels: { buyLabelsInSellerCenter: settings.buy_labels, services: lines, defaultParcel: settings.default_parcel },
@@ -378,6 +381,16 @@ export class Profiles {
       });
     }
     if (input.effectiveFrom && Number.isNaN(new Date(input.effectiveFrom).getTime())) issues.push({ path: 'effectiveFrom', message: 'Not a date-time' });
+    const shipsFrom = input.shipsFrom == null ? undefined : input.shipsFrom.trim();
+    if (shipsFrom !== undefined && (!shipsFrom || shipsFrom.length > 80)) issues.push({ path: 'shipsFrom', message: 'Enter the city and state you ship from, e.g. Portland, OR' });
+    const parcel = input.defaultParcel ?? undefined;
+    if (parcel) {
+      for (const k of ['weightGrams', 'lengthCm', 'widthCm', 'heightCm'] as const) {
+        const v = parcel[k];
+        if (v != null && (!Number.isFinite(v) || v <= 0)) issues.push({ path: `defaultParcel.${k}`, message: 'Enter a positive number' });
+      }
+      if (parcel.weightGrams == null) issues.push({ path: 'defaultParcel.weightGrams', message: 'Enter the weight' });
+    }
     if (issues.length) throw invalid(issues);
     const eff = this.effective(input);
     const before = await this.estimates.settingsFor(owner);
@@ -400,7 +413,9 @@ export class Profiles {
         effective_from: eff.at,
         updated_by: by.actor,
         updated_at: now,
-        default_parcel: before.default_parcel,
+        // null in the input keeps the current value
+        default_parcel: parcel ?? before.default_parcel,
+        ships_from: shipsFrom ?? before.ships_from ?? null,
       });
     });
     this.core.publish('shipping.profile.changed', { profileId: null, sellerId, effectiveFrom: eff.at.toISOString() }, by);
@@ -411,8 +426,8 @@ export class Profiles {
         actionLabel: eff.scheduled ? `Scheduled shipping settings from ${dayLabel(this.core.today(eff.at))}` : 'Changed shipping settings',
         category: 'settings',
         target: { type: 'seller_shipping_settings', id: sellerId, label: 'Shipping settings' },
-        before: { coverage: before.coverage, handlingDays: before.handling_days, sameDayCutoff: before.same_day_cutoff, businessDays: before.business_days, buyLabels: before.buy_labels },
-        after: { coverage: input.coverage, handlingDays: d.handlingDays, sameDayCutoff: d.sameDayCutoff, businessDays: d.businessDays, buyLabels: input.buyLabelsInSellerCenter, effectiveFrom: eff.at.toISOString() },
+        before: { coverage: before.coverage, handlingDays: before.handling_days, sameDayCutoff: before.same_day_cutoff, businessDays: before.business_days, buyLabels: before.buy_labels, shipsFrom: before.ships_from ?? null, defaultParcel: before.default_parcel },
+        after: { coverage: input.coverage, handlingDays: d.handlingDays, sameDayCutoff: d.sameDayCutoff, businessDays: d.businessDays, buyLabels: input.buyLabelsInSellerCenter, shipsFrom: shipsFrom ?? before.ships_from ?? null, defaultParcel: parcel ?? before.default_parcel, effectiveFrom: eff.at.toISOString() },
       },
       by,
     );
@@ -489,13 +504,61 @@ export class Profiles {
   }
 
   /** Storefront shipping section per seller (null without an active profile) */
+  /**
+   * getProfileOwners: owner of each profile, by lineage id or version id (offers checks a seller only uses its own
+   * profiles, the Official Store only official ones). Unknown ids map to null. status is the lineage's state now.
+   */
+  async profileOwners(profileIds: string[]): Promise<Record<string, { ownerType: 'official' | 'seller'; sellerId: string | null; status: string } | null>> {
+    const out: Record<string, { ownerType: 'official' | 'seller'; sellerId: string | null; status: string } | null> = {};
+    for (const id of profileIds) out[id] = null;
+    const ids = [...new Set(profileIds.filter(isUuid))];
+    if (!ids.length) return out;
+    const direct = await this.repo.find('profiles', { id: ids });
+    const lineageOf = new Map<string, string>(direct.map((v) => [v.id, v.lineage_id]));
+    const lineageIds = [...new Set([...ids, ...direct.map((v) => v.lineage_id)])];
+    const versions = await this.repo.find('profiles', { lineage_id: lineageIds }, { orderBy: [['version', 'asc']] });
+    for (const id of ids) {
+      const lineage = versions.some((v) => v.lineage_id === id) ? id : lineageOf.get(id);
+      const own = versions.filter((v) => v.lineage_id === lineage);
+      const current = currentOf(own);
+      if (!current) continue;
+      out[id] = { ownerType: current.owner_type as 'official' | 'seller', sellerId: current.owner_type === 'official' ? null : current.seller_id, status: own.some((v) => v.status === 'archived') ? 'archived' : current.status };
+    }
+    return out;
+  }
+
+  /**
+   * getOfficialFreeShipping: the Official Store's standing free-shipping offer in force now: an active official_store
+   * free-shipping rule (lowest minimum first), else the default official profile's threshold.
+   */
+  async officialFreeShipping(): Promise<{ threshold: common.Money | null; methodCode: string | null; active: boolean; label: string | null }> {
+    await this.core.ensureSeeded();
+    const today = this.core.today();
+    const methods = await this.repo.find('methods', {});
+    const nameOf = (code: string) => methods.find((m) => m.code === code)?.name ?? 'Standard';
+    const rule = (await this.repo.find('free_shipping_rules', { scope: 'official_store' })).filter((r) => ruleStatus(r, today) === 'active').sort((a, b) => (a.min_order_value ?? 0) - (b.min_order_value ?? 0))[0];
+    if (rule) {
+      const threshold = rule.min_order_value != null ? money(rule.min_order_value, this.core.currency) : null;
+      return { threshold, methodCode: rule.method_code, active: true, label: threshold ? `Free ${nameOf(rule.method_code)} shipping on Official Store orders over ${formatShort(threshold)}` : `Free ${nameOf(rule.method_code)} shipping on every Official Store order` };
+    }
+    const official = await this.repo.find('profiles', { owner_type: 'official', status: 'active' });
+    const p = official.find((x) => x.is_default) ?? official.sort((a, b) => a.name.localeCompare(b.name))[0];
+    if (p && p.free_threshold != null) {
+      const threshold = money(p.free_threshold, p.currency);
+      const code = p.free_method_code ?? 'standard';
+      return { threshold, methodCode: code, active: true, label: `Free ${nameOf(code)} shipping on Official Store orders over ${formatShort(threshold)}` };
+    }
+    return { threshold: null, methodCode: null, active: false, label: null };
+  }
+
   async summaries(sellerIds: string[]): Promise<Record<string, SellerSummary | null>> {
     const out: Record<string, SellerSummary | null> = {};
     const ids = [...new Set(sellerIds)];
     if (!ids.length) return out;
     const w = await this.estimates.world();
     const profiles = await this.repo.find('profiles', { owner_type: 'seller', seller_id: ids, status: 'active' });
-    const recent = await this.repo.find('shipments', { seller_id: ids }, { orderBy: [['created_at', 'desc']], limit: 200 });
+    // ships from: each seller's own settings, one query for the whole batch (never recent shipments, which one busy seller crowds out)
+    const active = await this.repo.find('seller_settings', { owner_type: 'seller', seller_id: ids, status: 'active' });
     for (const sellerId of ids) {
       const own = profiles.filter((p) => p.seller_id === sellerId);
       const p = own.find((x) => x.is_default) ?? own.sort((a, b) => a.name.localeCompare(b.name))[0];
@@ -516,7 +579,7 @@ export class Profiles {
       const threshold = p.free_threshold != null ? money(p.free_threshold, p.currency) : null;
       const dispatchLabel = `${handlingLabel(settings.handling_days)} · order by ${clockLabel(settings.same_day_cutoff)} PT to count from that day`;
       out[sellerId] = {
-        shipsFrom: recent.find((s) => s.seller_id === sellerId)?.ship_from || null,
+        shipsFrom: active.find((s) => s.seller_id === sellerId)?.ships_from || null,
         coverage: settings.coverage,
         coverageLabel: coverageLabel(settings.coverage),
         excluded: settings.coverage.excluded.map((e) => EXCLUDED_LABEL[e] ?? e),

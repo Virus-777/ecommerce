@@ -191,8 +191,18 @@ export class ShippingService implements ShippingPublicApi {
     return this.profiles.summaries(sellerIds);
   }
 
-  shipmentsForReplacements(replacements: { replacementId: string; returnId: string }[]): Promise<Record<string, Shipment | null>> {
+  shipmentsForReplacements(replacements: { replacementId: string; returnId: string | null; orderItemIds?: string[] }[]): Promise<Record<string, Shipment | null>> {
     return this.shipments.forReplacements(replacements);
+  }
+
+  /** Owner of each shipping profile (lineage or version id); null when unknown. offers checks profile ownership with it */
+  getProfileOwners(profileIds: string[]): Promise<Record<string, { ownerType: 'official' | 'seller'; sellerId: string | null; status: string } | null>> {
+    return this.profiles.profileOwners(profileIds);
+  }
+
+  /** The Official Store's free-shipping threshold in force now (content's service strip warns when its text disagrees) */
+  getOfficialFreeShipping(): Promise<{ threshold: common.Money | null; methodCode: string | null; active: boolean; label: string | null }> {
+    return this.profiles.officialFreeShipping();
   }
 
   getSellerShippingSetup(sellerId: string): Promise<SellerShippingSetup> {

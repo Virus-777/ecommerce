@@ -70,7 +70,13 @@ export function devCarrierAdapter(): CarrierPort {
         { text: `Weight: ${(input.parcel.weightGrams / 1000).toFixed(2)} kg   Ref: ${input.reference}`, size: 8 },
         { text: 'DEVELOPMENT LABEL - NOT VALID FOR SHIPPING', size: 8 },
       ]);
-      return { trackingNumber, pdf, qrCode: input.qr ? `QR-${alnum(`${input.reference}:qr`, 12)}` : null };
+      const qrCode = input.qr ? `QR-${alnum(`${input.reference}:qr`, 12)}` : null;
+      if (input.format === 'zpl') {
+        // thermal printers: a minimal ZPL label with the same facts
+        const zpl = `^XA^CF0,40^FO40,40^FD${input.serviceName.toUpperCase()}^FS^CF0,30^FO40,100^FDTRACKING # ${trackingNumber}^FS^FO40,150^FDREF ${input.reference}^FS^FO40,200^FDDEVELOPMENT LABEL^FS^XZ`;
+        return { trackingNumber, pdf: new TextEncoder().encode(zpl), qrCode };
+      }
+      return { trackingNumber, pdf, qrCode };
     },
 
     async voidLabel() {
