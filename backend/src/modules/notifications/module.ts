@@ -22,7 +22,7 @@ import { createDevPushProvider } from './infra/push/dev.js';
  */
 export default defineModule({
   spec,
-  version: '1.0.0',
+  version: '1.1.0',
   migrations,
   graphql: typeDefs,
   async register(ctx) {
@@ -129,6 +129,14 @@ export default defineModule({
     ctx.events.on("purchasing.purchase_order.sent", (e) => service.onPurchaseOrderSentFromPurchasing(e.payload, e.id));
     ctx.events.on("wallet.credit.expiring", (e) => service.onCreditExpiringFromWallet(e.payload, e.id));
     ctx.events.on("workqueues.day_end.prepared", (e) => service.onDayEndPreparedFromWorkqueues(e.payload, e.id));
+    ctx.events.on("workqueues.day_end.completed", (e) => service.onDayEndCompletedFromWorkqueues(e.payload, e.id));
+    ctx.events.on("trust.evidence.requested", (e) => service.onEvidenceRequestedFromTrust(e.payload, e.id));
+    ctx.events.on("trust.appeal.decided", (e) => service.onAppealDecidedFromTrust(e.payload, e.id));
+    ctx.events.on("payments.refund.destination_requested", (e) => service.onRefundDestinationRequestedFromPayments(e.payload, e.id));
+    ctx.events.on("customers.closure.delayed", (e) => service.onClosureDelayedFromCustomers(e.payload, e.id));
+    ctx.events.on("offers.offer.missing_items_stale", (e) => service.onOfferMissingItemsStaleFromOffers(e.payload, e.id));
+    ctx.events.on("inventory.stock.low_digest", (e) => service.onStockLowDigestFromInventory(e.payload, e.id));
+    ctx.events.on("sellers.application.information_reminder", (e) => service.onApplicationInformationReminderFromSellers(e.payload, e.id));
     ctx.events.on("advertising.campaign.ending_soon", (e) => service.onCampaignEndingSoonFromAdvertising(e.payload, e.id));
     ctx.events.on("content.article.review_due", (e) => service.onArticleReviewDueFromContent(e.payload, e.id));
     ctx.events.on("reviews.moderation.decided", (e) => service.onModerationDecidedFromReviews(e.payload, e.id));

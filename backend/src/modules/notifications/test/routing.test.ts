@@ -48,7 +48,7 @@ function orderAccepted(o: { orderId?: string; customerId?: string | null; email:
 describe('catalogue', () => {
   it('routes every consumed event and seeds valid default templates', () => {
     expect(Object.keys(ROUTES).sort()).toEqual(Object.keys(spec.events.consumes).sort());
-    expect(Object.keys(spec.events.consumes)).toHaveLength(97);
+    expect(Object.keys(spec.events.consumes)).toHaveLength(105);
     for (const t of TOPICS) {
       for (const channel of templateChannels(t)) {
         const v = validateContent(t, channel, defaultContent(t, channel, {}));
@@ -59,7 +59,26 @@ describe('catalogue', () => {
     const named = JSON.stringify(Object.values(ROUTES).map((r) => String((r as { sends?: unknown }).sends ?? '')));
     // the compiled source may quote with ' or " (escaped in the JSON)
     const keys = [...named.matchAll(/(?:'|\\")((?:customer|seller|staff|supplier|rights_owner|trust)\.[a-z_.]+)(?:'|\\")/g)].map((m) => m[1]!);
-    for (const k of ['supplier.purchase_order.sent', 'rights_owner.report.received', 'trust.report.resolved', 'staff.day_end.summary']) expect(keys).toContain(k);
+    for (const k of [
+      'supplier.purchase_order.sent',
+      'rights_owner.report.received',
+      'trust.report.resolved',
+      'staff.day_end.summary',
+      'staff.day_end.completed',
+      'staff.official_store.message_received',
+      'customer.trust.evidence_requested',
+      'seller.trust.evidence_requested',
+      'customer.trust.appeal_decided',
+      'seller.trust.appeal_decided',
+      'customer.refund.destination_needed',
+      'customer.account.closure_delayed',
+      'staff.inventory.low_stock_digest',
+      'seller.stock.low_digest',
+      'seller.application.information_reminder',
+      'seller.offer.missing_items_review',
+      'staff.offer.missing_items_review',
+    ])
+      expect(keys).toContain(k);
     for (const k of keys) expect(topicDef(k), k).toBeDefined();
     // external topics: essential, email only, no inbox
     for (const t of TOPICS.filter((x) => x.audience === 'external')) {
@@ -184,9 +203,9 @@ describe('order notices', () => {
     const { payload, orderId } = orderAccepted({ customerId: c.customerId, email: c.email, sellerId });
     await publish(app, 'orders.order.accepted', payload);
     const returnId = newId();
-    await publish(app, 'returns.return.requested', { returnId, ref: 'RT-261009-0001', orderId, ownerType: 'seller', sellerId, orderItemIds: [newId()], reason: 'arrived_damaged', responseDueAt: new Date(Date.now() + 2 * 86_400_000).toISOString() });
-    await publish(app, 'returns.return.info_requested', { returnId, replyDueAt: new Date(Date.now() + 86_400_000).toISOString() });
-    await publish(app, 'returns.return.approved', { returnId, ref: 'RT-261009-0001', orderId, ownerType: 'seller', sellerId, items: [{ orderItemId: newId(), quantity: 1 }], withoutReturn: false, platformDecision: false, dropOffBy: new Date(Date.now() + 7 * 86_400_000).toISOString() });
+    await publish(app, 'returns.return.requested', { returnId, ref: 'RT-261009-0001', orderId, orderRef: payload.ref, ownerType: 'seller', sellerId, orderItemIds: [newId()], reason: 'arrived_damaged', responseDueAt: new Date(Date.now() + 2 * 86_400_000).toISOString() });
+    await publish(app, 'returns.return.info_requested', { returnId, ref: 'RT-261009-0001', orderId, orderRef: payload.ref, replyDueAt: new Date(Date.now() + 86_400_000).toISOString() });
+    await publish(app, 'returns.return.approved', { returnId, ref: 'RT-261009-0001', orderId, orderRef: payload.ref, ownerType: 'seller', sellerId, items: [{ orderItemId: newId(), quantity: 1 }], withoutReturn: false, platformDecision: false, dropOffBy: new Date(Date.now() + 7 * 86_400_000).toISOString() });
     const notices = await inbox(as.customer(c), 'store', '?group=returns_refunds');
     expect(notices.map((n) => n.topicKey)).toEqual(['customer.return.approved', 'customer.return.info_requested']);
     expect(notices[1].actionRequired).toBe(true);
@@ -195,10 +214,10 @@ describe('order notices', () => {
     expect(sellerSide[0].resolvedAt).toBeTruthy(); // approved resolves "respond by"
 
     // label → drop-off reminder scheduled (1 day before drop-off), cancelled when received
-    await publish(app, 'returns.label.created', { returnId, ownerType: 'seller', sellerId, labelId: newId(), orderId, cost: money(599), paidBy: 'seller' });
+    await publish(app, 'returns.label.created', { returnId, ref: 'RT-261009-0001', orderRef: payload.ref, ownerType: 'seller', sellerId, labelId: newId(), orderId, cost: money(599), paidBy: 'seller' });
     const scheduled = await service.core.repo.dueScheduled(new Date(Date.now() + 30 * 86_400_000), 100);
     expect(scheduled.filter((s) => s.dedupe_key === `return-dropoff:${returnId}`)).toHaveLength(1);
-    await publish(app, 'returns.return.received', { returnId, ownerType: 'seller', sellerId, items: [], receivedAt: new Date().toISOString() });
+    await publish(app, 'returns.return.received', { returnId, ref: 'RT-261009-0001', orderId, orderRef: payload.ref, ownerType: 'seller', sellerId, items: [], receivedAt: new Date().toISOString() });
     const left = await service.core.repo.dueScheduled(new Date(Date.now() + 30 * 86_400_000), 100);
     expect(left.filter((s) => s.dedupe_key === `return-dropoff:${returnId}`)).toHaveLength(0);
 
@@ -209,7 +228,7 @@ describe('order notices', () => {
     const caseMail = emailsTo(c.email).filter((e) => e.message.subject.includes('New reply'));
     expect(caseMail).toHaveLength(1);
     expect(caseMail[0]!.message.replyTo).toMatch(/^reply\+s[0-9a-f]{32}[0-9a-z]+\.[A-Za-z0-9]{16}@reply\.marketly\.example$/);
-    await publish(app, 'support.case.decided', { caseId, ref: 'CS-261009-0001', outcome: 'refund_full', orderId, returnId: null, sellerId, remedies: [], appealDeadline: new Date(Date.now() + 7 * 86_400_000).toISOString(), final: false });
+    await publish(app, 'support.case.decided', { caseId, ref: 'CS-261009-0001', outcome: 'refund_full', orderId, returnId: null, sellerId, remedies: [], appealDeadline: new Date(Date.now() + 7 * 86_400_000).toISOString(), final: false, notified: true });
     const sellerCase = (await inbox(as.seller(owner), 'seller')).find((n) => n.topicKey === 'seller.case.opened');
     expect(sellerCase.resolvedAt).toBeTruthy();
   });

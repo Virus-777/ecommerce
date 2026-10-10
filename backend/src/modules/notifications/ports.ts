@@ -218,6 +218,8 @@ export interface OutboundPush {
 export interface EmailProvider {
   readonly name: string;
   send(message: OutboundEmail): Promise<ProviderResult>;
+  /** The bytes of an inbound email attachment (InboundAttachment.downloadUrl, authenticated with the provider); fails above maxBytes */
+  fetchAttachment?(downloadUrl: string, opts: { maxBytes: number }): Promise<Uint8Array>;
 }
 
 export interface SmsProvider {

@@ -218,7 +218,7 @@ describe('seller preferences', () => {
     expect(world.audits.find((a) => a.action === 'notifications.member_preferences.update')).toMatchObject({ visibleToSeller: true });
 
     // the agent no longer sees customer messages; the owner does
-    await publish(app, 'messaging.message.sent', { messageId: newId(), conversationId: newId(), authorKind: 'customer', recipientKinds: ['seller'], customerId: null, sellerId, orderId: null });
+    await publish(app, 'messaging.message.sent', { messageId: newId(), conversationId: newId(), conversationKind: 'order', authorKind: 'customer', recipientKinds: ['seller'], customerId: null, sellerId, officialStore: false, staffIds: [], orderId: null });
     const agentInbox = (await get('/api/seller/notifications/inbox', as.seller(agent))).items;
     expect(agentInbox.map((n: any) => n.topicKey)).not.toContain('seller.message.new');
     expect((await get('/api/seller/notifications/inbox', as.seller(owner))).items.map((n: any) => n.topicKey)).toContain('seller.message.new');

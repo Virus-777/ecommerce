@@ -13,8 +13,7 @@ export function deliveryOf(r: DeliveryRow): Delivery {
     noticeId: r.notice_id,
     topicKey: r.topic_key,
     channel: r.channel as Delivery['channel'],
-    // Delivery.recipientKind has no external_email: suppliers, rights owners and report addresses show as bare addresses
-    recipientKind: (r.recipient_kind === 'external_email' ? 'guest_email' : r.recipient_kind) as Delivery['recipientKind'],
+    recipientKind: r.recipient_kind as Delivery['recipientKind'],
     accountId: r.account_id,
     addressMasked: r.address_masked,
     status: r.status as Delivery['status'],
@@ -81,8 +80,7 @@ export function templateOf(t: TemplateRow, versions: VersionRow[]): Template {
   return {
     id: t.id,
     topicKey: t.topic_key,
-    // Template.audience has no external: staff manage the supplier and rights-owner emails
-    audience: ((a) => (a === 'external' ? 'staff' : a))(topicDef(t.topic_key)?.audience ?? 'customer'),
+    audience: topicDef(t.topic_key)?.audience ?? 'customer',
     channel: t.channel as Template['channel'],
     language: t.language,
     live: live ? versionSummaryOf(live) : null,
