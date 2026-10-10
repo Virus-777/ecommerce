@@ -109,7 +109,7 @@ export function createPostgresSearchRepository(db: Db, inbox: Inbox): SearchRepo
       if (f.sellerIds) q = q.where(sql<boolean>`seller_ids && ${f.sellerIds}::uuid[]`);
       if (f.onSale !== undefined) q = q.where('on_sale', '=', f.onSale);
       if (f.productIds) q = q.where('product_id', 'in', f.productIds.length ? f.productIds : ['00000000-0000-0000-0000-000000000000']);
-      return (await q.execute()).map((r) => r.product_id);
+      return (await q.orderBy('product_id').execute()).map((r) => r.product_id);
     },
     async productIdsForOffers(offerIds) {
       if (!offerIds.length) return [];

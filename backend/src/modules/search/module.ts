@@ -5,9 +5,8 @@ import { typeDefs } from './graphql/schema.js';
 import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
-import { createPostgresSearchEngine } from './infra/postgres/engine.js';
 import { migrations } from './infra/postgres/migrations/index.js';
-import { createPostgresSearchRepository } from './infra/postgres/repository.js';
+import { createSearchAdapters } from './infra/select.js';
 import { SearchService } from './service.js';
 
 /**
@@ -18,12 +17,14 @@ import { SearchService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.2.0',
+  version: '1.3.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    // PostgreSQL full-text + trigram engine; an external engine (setting searchEngine = external) plugs in behind the same port later
-    const service = new SearchService({ repo: createPostgresSearchRepository(ctx.db, ctx.inbox), engine: createPostgresSearchEngine(ctx.db), ctx });
+    // SEARCH_ENGINE: postgres (full-text + trigram over the read model; development and tests) or opensearch (production)
+    const { repo, engine } = createSearchAdapters(ctx);
+    ctx.log.debug({ engine: engine.name }, 'search: engine');
+    const service = new SearchService({ repo, engine, ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

@@ -534,13 +534,21 @@ export class SearchIndexer extends SearchBase {
       current = await this.repo.updateJob(current.id, { state: reindexJobMachine.next('queued', 'start'), started_at: this.now() });
     }
     if (current.state !== 'running') return;
+    // an engine with its own index (OpenSearch) rebuilds into a new index and swaps it in when done (blue/green)
+    const feed = current.scope === 'all' ? this.engine.feed : undefined;
+    let building = false;
     try {
       let documents = 0;
       if (current.scope === 'all') {
+        if (feed) {
+          await feed.beginRebuild();
+          building = true;
+        }
         const ids = await this.allProductIds();
         await this.repo.updateJob(current.id, { total: ids.length });
         const tree = await this.categoryTree();
         let processed = 0;
+        const failed: string[] = [];
         for (const id of ids) {
           // the live index keeps serving: each product's new rows swap in on their own
           try {
@@ -548,11 +556,17 @@ export class SearchIndexer extends SearchBase {
           } catch (err) {
             this.ctx.log.warn({ err, productId: id }, 'search: full reindex could not rebuild a product; queued for process-dirty');
             await this.markDirty([id], 'full_reindex');
+            failed.push(id);
           }
           processed++;
           if (processed % 50 === 0) await this.repo.updateJob(current.id, { processed });
         }
         await this.repo.updateJob(current.id, { processed });
+        if (feed) {
+          // products that could not be rebuilt keep their current document
+          await feed.finishRebuild(true, failed);
+          building = false;
+        }
       } else {
         // scoped jobs only mark documents dirty
         documents = (await this.repo.getJob(current.id))?.total ?? 0;
@@ -561,6 +575,7 @@ export class SearchIndexer extends SearchBase {
       this.ctx.events.publish('search.index.rebuilt', { jobId: done.id, scope: done.scope, documents });
     } catch (err) {
       this.ctx.log.error({ err, jobId: current.id }, 'search: reindex job failed');
+      if (building) await feed!.finishRebuild(false, []).catch((e) => this.ctx.log.error({ err: e }, 'search: could not drop the half-built index'));
       await this.repo.updateJob(current.id, { state: reindexJobMachine.next('running', 'fail'), finished_at: this.now(), error: err instanceof Error ? err.message.slice(0, 500) : 'Reindex failed' });
     }
   }
