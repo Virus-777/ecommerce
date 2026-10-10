@@ -4,6 +4,7 @@
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import type { FastifyInstance } from 'fastify';
+import { createHash } from 'node:crypto';
 import { moduleAuthorities, type Authorities } from './kernel/auth/authorities.js';
 import { REFRESH_COOKIE, type AuthChain, type WebhookVerifier } from './kernel/auth/chain.js';
 import { createAuthChain } from './kernel/auth/setup.js';
@@ -19,7 +20,7 @@ import { createOpenApiObjectTransform, createOpenApiTransform } from './kernel/h
 import { registerEndpoints } from './kernel/http/register.js';
 import { createServer } from './kernel/http/server.js';
 import type { PublicApiMap } from './kernel/module-system/public-apis.js';
-import { JobScheduler } from './kernel/jobs/index.js';
+import { createJobScheduler, type JobScheduler } from './kernel/jobs/index.js';
 import { systemClock, type Clock } from './kernel/lib/clock.js';
 import { createRefGenerator } from './kernel/lib/refs.js';
 import { migrate, migrationUnits } from './kernel/migrations/index.js';
@@ -119,7 +120,18 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
   /* ---------------------------------------------------------------- kernel services */
   const clock = opts.clock ?? systemClock;
   const events = new EventBus(app.log, { validatePayloads: config.env !== 'production', clock });
-  const jobs = new JobScheduler(app.log, config.market.timeZone, clock);
+  const jobs = await createJobScheduler(app.log, {
+    backend: config.jobsBackend,
+    timeZone: config.market.timeZone,
+    clock,
+    connectionString: config.databaseUrl,
+    workers: config.jobsEnabled,
+    // "on boot" jobs (registries synced from the enabled modules) run again when the deploy or the module set changes
+    deployId: createHash('sha256')
+      .update([config.deployId ?? '', ...defs.map((d) => `${d.spec.name}@${d.version}`)].join('\n'))
+      .digest('hex')
+      .slice(0, 16),
+  });
   const refs = createRefGenerator(database.kysely, clock, config.market.timeZone);
   for (const spec of Object.values(allSpecs)) registerErrorCodes(spec.name, spec.errorCodes);
   events.registerSpecs(Object.values(allSpecs));
@@ -178,11 +190,11 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
   });
   app.addHook('onReady', async () => {
     revocations.start();
-    if (config.jobsEnabled) jobs.start();
+    if (config.jobsEnabled) await jobs.start();
   });
   app.addHook('onClose', async () => {
     revocations.stop();
-    jobs.stop();
+    await jobs.stop();
     await events.drain();
     if (!opts.database) await database.close();
   });

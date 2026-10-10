@@ -12,7 +12,7 @@ Status: **design**. This document defines the backend's structure; the API desig
 | Complex screen reads | **GraphQL** via **Mercurius** (Fastify plugin), read-only, three schemas (store, seller, admin) composed from module fragments | One round trip for screens that combine many modules; writes stay on REST |
 | Database | **PostgreSQL** through **Kysely** (typed SQL query builder) | No ORM magic; SQL stays portable; easy to replace per module |
 | Local / test database | **PGlite** (PostgreSQL compiled to WASM, in-process) | Real Postgres semantics with nothing to install |
-| Jobs / schedules | Kernel `JobScheduler` interface; in-memory runner now, Postgres-backed queue (pg-boss) later | Payout runs, ad schedules, SLA timers |
+| Jobs / schedules | Kernel `JobScheduler` interface: **pg-boss** queue in PostgreSQL in production (each scheduled run happens once across server instances, failed runs retried with backoff); in-process timers on PGlite (development, tests) | Payout runs, ad schedules, SLA timers |
 | Events | Kernel in-process typed event bus; outbox table later | Modules talk through events, not each other's tables |
 | Tests | Vitest + `app.inject()` + PGlite | Each module boots alone in a test |
 
@@ -144,6 +144,27 @@ Generated from the module specs (`docs/api/spec/modules/`, `docs/api/graphql/mod
 | **Purchase snapshots** | Orders copy the product description, variation, condition, price, seller and terms accepted at purchase (plan ch. 8) |
 | **Errors** | `{ error: { code, message, details } }` with stable codes (`OFFER_CHANGED`, `ILLEGAL_TRANSITION`, `APPROVAL_REQUIRED` …) |
 | **Database portability** | Services depend on repository interfaces (`ports.ts`). Postgres adapters live in `infra/postgres/`. A MongoDB switch adds `infra/mongo/` per module; no cross-module joins or foreign keys exist to untangle |
+
+### Several server instances: jobs
+
+Shared state lives in PostgreSQL only (no Redis), so any number of server instances can run on one database.
+
+**Jobs** (`kernel/jobs/`). Every job in a module spec is a [pg-boss](https://github.com/timgit/pg-boss) queue of the same name (pg-boss keeps its tables in the `pgboss` schema and migrates them itself when it starts):
+
+| Schedule phrase | Runs as |
+|---|---|
+| `every N min`, `hourly`, `every N hours` | pg-boss cron schedule (`*/N * * * *` …): one job per occurrence, whatever the number of instances |
+| `daily` / `nightly HH:MM`, `weekly` (Monday), `monthly` (the 1st) | pg-boss cron schedule in `MARKET_TIME_ZONE` |
+| `every N s` (and intervals cron can't express) | each working instance sends throttled: one job per N-second slot across instances |
+| `on boot` | sent once per deploy: the job id comes from `DEPLOY_ID` plus the enabled modules and their versions |
+
+A queue holds at most one waiting and one running job (policy `stately`), so a job never overlaps itself and missed ticks don't pile up. A failed run is retried 3 times with exponential backoff (30 s, doubling, at most 15 min); a run that takes over an hour counts as failed. `runNow` enqueues a run (not retried) and waits until whichever instance worked it is done; when a run is already waiting, it waits for that one.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `JOBS_BACKEND` | `pgboss` with `DATABASE_URL`, else `inprocess` | `inprocess` runs timers in each process (development and tests on PGlite; every instance runs every job) |
+| `JOBS_ENABLED` | `false` | This instance works the queues and keeps the schedules. Instances without it only enqueue (`runNow`), so web and worker instances can be split |
+| `DEPLOY_ID` | - | The deployment (image tag, commit); `on boot` jobs run once per value and module set |
 
 ## 6. Plan scenarios → modules (plan ch. 21)
 

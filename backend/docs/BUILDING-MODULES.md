@@ -132,7 +132,8 @@ Granting a permission never grants financial authority: `check` is the only sour
   validation): define a port in `ports.ts`, put a **deterministic dev adapter** in `infra/<provider>/dev.ts`
   (no network; e.g. payments: amounts ending in `02` decline, `03` time out; storage: local `.data/` or memory;
   email: recorded as sent). Wire the dev adapter in `module.ts`; real adapters come later behind the same port.
-- **Jobs** (`spec.jobs`): implement every handler wired in `module.ts`. Make them restartable and idempotent;
+- **Jobs** (`spec.jobs`): implement every handler wired in `module.ts`. Make them restartable and idempotent (in production a failed
+  run is retried with backoff, and a run can be cut off by a deploy and run again);
   process in bounded batches (walk all rows with a keyset cursor; never re-read the same first page each run); use `ctx.clock`.
   The schedule must be a phrase the scheduler times (FORMAT.md); any other phrase fails boot. A job that acts "at a cutoff"
   runs on an interval and checks the cutoff itself, idempotent per cutoff.
