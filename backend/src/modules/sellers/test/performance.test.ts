@@ -35,23 +35,23 @@ describe('performance', () => {
     const s = await approvedSeller(kit);
     const groups = await orders(kit, s.sellerId, 10);
     for (const [i, groupId] of groups.entries()) {
-      const shipment = { shipmentId: newId(), kind: 'outbound', orderId: newId(), groupId, ownerType: 'seller', sellerId: s.sellerId, lines: [], shippedAt: kit.clock.now().toISOString(), onTime: i >= 3, trackingValid: i !== 0 };
+      const shipment = { shipmentId: newId(), kind: 'outbound', orderId: newId(), groupId, ownerType: 'seller', sellerId: s.sellerId, fulfilledBy: 'seller', lines: [], shippedAt: kit.clock.now().toISOString(), onTime: i >= 3, trackingValid: i !== 0 };
       await kit.emit('shipping', 'shipping.shipment.dispatched', shipment);
       await kit.emit('shipping', 'shipping.shipment.dispatched', shipment); // same fact twice
     }
     await kit.emit('orders', 'orders.item.cancelled', {
-      orderId: newId(), ref: 'MK-1', groupId: groups[0], ownerType: 'seller', sellerId: s.sellerId, itemId: newId(), offerId: newId(), stockItemId: newId(), quantity: 1, cancellationId: newId(),
+      orderId: newId(), ref: 'MK-1', groupId: groups[0], ownerType: 'seller', sellerId: s.sellerId, fulfilledBy: 'seller', itemId: newId(), offerId: newId(), stockItemId: newId(), quantity: 1, cancellationId: newId(),
       initiatedBy: 'seller', reasonCode: 'out_of_stock', beforeDispatch: true, countsAgainstSeller: true,
       refund: { itemAmount: money, discountShare: zero, shippingRefund: zero, taxRefund: zero, total: money }, paymentIntentId: newId(), notifyCustomer: true,
     });
-    await kit.emit('returns', 'returns.return.requested', { returnId: newId(), ref: 'RT-1', orderId: newId(), orderRef: 'MK-1', ownerType: 'seller', sellerId: s.sellerId, orderItemIds: [newId()], reason: 'damaged', responseDueAt: kit.clock.now().toISOString() });
+    await kit.emit('returns', 'returns.return.requested', { returnId: newId(), ref: 'RT-1', orderId: newId(), orderRef: 'MK-1', ownerType: 'seller', sellerId: s.sellerId, fulfilledBy: 'seller', orderItemIds: [newId()], reason: 'damaged', responseDueAt: kit.clock.now().toISOString() });
     const conversationId = newId();
     await kit.emit('messaging', 'messaging.message.sent', { messageId: newId(), conversationId, conversationKind: 'order', authorKind: 'customer', recipientKinds: ['seller'], sellerId: s.sellerId, officialStore: false, staffIds: [] });
     kit.clock.advance(3 * 3_600_000);
     await kit.emit('messaging', 'messaging.message.sent', { messageId: newId(), conversationId, conversationKind: 'order', authorKind: 'seller', recipientKinds: ['customer'], sellerId: s.sellerId, officialStore: false, staffIds: [] });
     await kit.emit('support', 'support.case.opened', { caseId: newId(), ref: 'CS-1', kind: 'order', category: 'not_received', priority: 'normal', sellerId: s.sellerId, orderItemIds: [], handler: 'seller', nextResponseDueAt: new Date(kit.clock.now().getTime() - 3_600_000).toISOString() });
     // facts for unknown sellers are ignored
-    await kit.emit('returns', 'returns.return.requested', { returnId: newId(), ref: 'RT-2', orderId: newId(), orderRef: 'MK-1', ownerType: 'seller', sellerId: newId(), orderItemIds: [], reason: 'x', responseDueAt: kit.clock.now().toISOString() });
+    await kit.emit('returns', 'returns.return.requested', { returnId: newId(), ref: 'RT-2', orderId: newId(), orderRef: 'MK-1', ownerType: 'seller', sellerId: newId(), fulfilledBy: 'seller', orderItemIds: [], reason: 'x', responseDueAt: kit.clock.now().toISOString() });
 
     await kit.svc.computePerformance();
     await kit.app.kernel.events.drain();
@@ -82,7 +82,7 @@ describe('performance', () => {
   it('automatic warnings for repeated misses and restriction proposals, never restrictions', async () => {
     const s = await approvedSeller(kit);
     const groups = await orders(kit, s.sellerId, 4);
-    for (const groupId of groups) await kit.emit('shipping', 'shipping.dispatch.overdue', { orderId: newId(), orderRef: 'MK-1', groupId, ownerType: 'seller', sellerId: s.sellerId, orderItemIds: [], dueAt: kit.clock.now().toISOString(), exceptionId: newId() });
+    for (const groupId of groups) await kit.emit('shipping', 'shipping.dispatch.overdue', { orderId: newId(), orderRef: 'MK-1', groupId, ownerType: 'seller', sellerId: s.sellerId, fulfilledBy: 'seller', orderItemIds: [], dueAt: kit.clock.now().toISOString(), exceptionId: newId() });
     for (let i = 0; i < 3; i++) {
       await kit.svc.computePerformance();
       kit.clock.advance(1000);

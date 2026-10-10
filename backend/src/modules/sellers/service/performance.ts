@@ -44,19 +44,27 @@ export class PerformancePart extends Part {
     await this.fact(e.sellerId, 'seller_cancelled', e.groupId);
   }
 
+  /** Fulfilled by Marketly: Marketly's warehouse dispatched the group, so it is never the seller's dispatch fact (sellers spec notes) */
   async onShipmentDispatched(e: EventPayload<'shipping.shipment.dispatched'>) {
-    if (e.ownerType !== 'seller' || e.kind !== 'outbound') return;
+    if (e.ownerType !== 'seller' || e.kind !== 'outbound' || e.fulfilledBy === 'marketly_service') return;
     await this.fact(e.sellerId, e.onTime === false ? 'dispatched_late' : 'dispatched', e.groupId, e.shippedAt);
     await this.fact(e.sellerId, e.trackingValid ? 'tracking_valid' : 'tracking_missing', e.shipmentId, e.shippedAt);
   }
 
   async onDispatchOverdue(e: EventPayload<'shipping.dispatch.overdue'>) {
-    if (e.ownerType !== 'seller') return;
+    if (e.ownerType !== 'seller' || e.fulfilledBy === 'marketly_service') return;
     await this.fact(e.sellerId, 'dispatched_late', e.groupId, e.dueAt);
   }
 
+  /**
+   * Confirms carrier-scanned tracking of a shipment the seller dispatched (one with a tracking fact from its
+   * dispatch). The delivered event carries no fulfilledBy, so a Fulfilled by Marketly shipment, which has no
+   * dispatch fact, is left out this way.
+   */
   async onShipmentDelivered(e: EventPayload<'shipping.shipment.delivered'>) {
-    if (e.kind !== 'outbound') return;
+    if (e.kind !== 'outbound' || !e.sellerId || !isUuid(e.shipmentId)) return;
+    const dispatched = await this.repo.findOne('performance_events', { seller_id: e.sellerId, subject_id: e.shipmentId, kind: ['tracking_valid', 'tracking_missing'] });
+    if (!dispatched) return;
     await this.fact(e.sellerId, 'tracking_valid', e.shipmentId, e.deliveredAt);
   }
 
