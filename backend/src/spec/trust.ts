@@ -760,8 +760,8 @@ export const TrustReportEscalatedEvent: z.ZodType<TrustReportEscalatedEvent> = z
 export interface TrustReportResolvedEvent {
   reportId: string;
   ref: string;
-  /** TrustReport.resolution.outcome: action_taken, no_violation, insufficient_evidence, duplicate (merged), referred or dismissed */
-  outcome: string;
+  /** TrustReport.resolution.outcome: duplicate when merged into another report, dismissed by dismissReport, referred by recordAssessment */
+  outcome: "action_taken" | "no_violation" | "insufficient_evidence" | "duplicate" | "referred" | "dismissed";
   reporterOutcome?: string | null;
   /** Reporters to tell (customers, sellers, rights owners; not staff or detectors) */
   reporters: ReportReporter[];
@@ -770,7 +770,7 @@ export interface TrustReportResolvedEvent {
 export const TrustReportResolvedEvent: z.ZodType<TrustReportResolvedEvent> = z.object({
   reportId: z.uuid(),
   ref: z.string(),
-  outcome: z.string().describe("TrustReport.resolution.outcome: action_taken, no_violation, insufficient_evidence, duplicate (merged), referred or dismissed"),
+  outcome: z.enum(["action_taken", "no_violation", "insufficient_evidence", "duplicate", "referred", "dismissed"]).describe("TrustReport.resolution.outcome: duplicate when merged into another report, dismissed by dismissReport, referred by recordAssessment"),
   reporterOutcome: z.string().nullish(),
   get reporters() {
     return z.array(ReportReporter);
@@ -2094,13 +2094,14 @@ export const endpoints = defineEndpoints({
     permission: "trust.reports.export",
     scope: "staff",
     summary: "Export the filtered trust queue",
-    desc: "Creates an authorized export job through reports.requestExport (dataset trust.admin.reports). Reporter identities are excluded unless the caller has trust.reports.export-identities.",
+    desc: "Creates an authorized export job through reports.requestExport (dataset trust.admin.reports). Reporter identities are excluded unless the caller has trust.reports.export-identities. 409 DATASET_UNAVAILABLE while the reports module is off or when reports refuses the dataset (not in the export registry).",
     body: () => z.object({
       filters: z.unknown(),
       format: z.enum(["csv", "xlsx"]).nullish(),
     }),
     response: () => reports.ExportJob,
     status: 202,
+    errors: ["DATASET_UNAVAILABLE"],
     audited: true,
     screens: ["admin/trust"],
     phase: 1,
@@ -2581,6 +2582,10 @@ export const spec = defineModuleSpec({
     "RECOMMENDATIONS_OPEN": {
       "status": 409,
       "meaning": "Recommendations are still waiting for their owner teams"
+    },
+    "DATASET_UNAVAILABLE": {
+      "status": 409,
+      "meaning": "The trust queue cannot be exported: the reports module is off or refused the dataset"
     },
     "EXTERNAL_REF_REQUIRED": {
       "status": 422,

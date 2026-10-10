@@ -1084,8 +1084,8 @@ export interface SupportCaseOpenedEvent {
   sellerId?: string | null;
   orderId?: string | null;
   orderItemIds: string[];
-  /** Who handles the case first, one of Handler.kind: seller, official_store or marketplace_support; not a staff id (ownerStaffId is the staff owner) */
-  handler: string;
+  /** Who handles the case first (Handler.kind); not a staff id (ownerStaffId is the staff owner) */
+  handler: "seller" | "official_store" | "marketplace_support";
   /** Staff owner when one is assigned at opening (messaging adds them to the order conversation) */
   ownerStaffId?: string | null;
   /** Trust and Risk report the case acts on (inform_customers outreach) */
@@ -1104,7 +1104,7 @@ export const SupportCaseOpenedEvent: z.ZodType<SupportCaseOpenedEvent> = z.objec
   sellerId: z.uuid().nullish(),
   orderId: z.uuid().nullish(),
   orderItemIds: z.array(z.uuid()),
-  handler: z.string().describe("Who handles the case first, one of Handler.kind: seller, official_store or marketplace_support; not a staff id (ownerStaffId is the staff owner)"),
+  handler: z.enum(["seller", "official_store", "marketplace_support"]).describe("Who handles the case first (Handler.kind); not a staff id (ownerStaffId is the staff owner)"),
   ownerStaffId: z.uuid().describe("Staff owner when one is assigned at opening (messaging adds them to the order conversation)").nullish(),
   trustReportId: z.uuid().describe("Trust and Risk report the case acts on (inform_customers outreach)").nullish(),
   nextResponseDueAt: z.iso.datetime({ offset: true }).nullish(),

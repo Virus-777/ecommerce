@@ -162,6 +162,10 @@ export interface SellerAccount {
   accountManager?: unknown | null;
   /** The calling member: { memberId, role, permissions, isOwner } */
   me?: unknown;
+  /** Staff answers only: the approval request of a closure waiting for a second reviewer (pendingChange); null for sellers */
+  approval?: common.ApprovalInfo | null;
+  /** Staff answers only: a closure waiting for a second reviewer; null for sellers */
+  pendingChange?: PendingStaffChange | null;
 }
 
 export const SellerAccount: z.ZodType<SellerAccount> = z.object({
@@ -191,7 +195,62 @@ export const SellerAccount: z.ZodType<SellerAccount> = z.object({
   pendingAgreements: z.number().int().describe("New agreement versions waiting for the owner's acceptance"),
   accountManager: z.unknown().describe("{ name, replyTarget }").nullish(),
   me: z.unknown().describe("The calling member: { memberId, role, permissions, isOwner }"),
+  get approval() {
+    return common.ApprovalInfo.nullish();
+  },
+  get pendingChange() {
+    return PendingStaffChange.nullish();
+  },
 }).register(common.apiTypes, { id: "sellers.SellerAccount" });
+
+export interface PendingStaffChange {
+  /** The pending_changes row */
+  id: string;
+  kind: "closure" | "restriction_change" | "performance_targets";
+  state: "pending" | "applied" | "declined";
+  approvalRequestId: string;
+  /** closure: { reason, reasonCode }; restriction_change: { patch, changeReason }; performance_targets: { targets, reason, setBy } */
+  proposed?: unknown;
+  reason: string;
+  requestedBy: common.Actor;
+  requestedAt: string;
+  decidedAt?: string | null;
+}
+
+export const PendingStaffChange: z.ZodType<PendingStaffChange> = z.object({
+  id: z.uuid().describe("The pending_changes row"),
+  kind: z.enum(["closure", "restriction_change", "performance_targets"]),
+  state: z.enum(["pending", "applied", "declined"]),
+  approvalRequestId: z.uuid(),
+  proposed: z.unknown().describe("closure: { reason, reasonCode }; restriction_change: { patch, changeReason }; performance_targets: { targets, reason, setBy }"),
+  reason: z.string(),
+  get requestedBy() {
+    return common.Actor;
+  },
+  requestedAt: z.iso.datetime({ offset: true }),
+  decidedAt: z.iso.datetime({ offset: true }).nullish(),
+}).register(common.apiTypes, { id: "sellers.PendingStaffChange" });
+
+export interface PerformanceTargetsChange {
+  /** The targets saved by this call; while a change waits for approval, the current and scheduled targets (unchanged) */
+  targets: PerformanceTarget[];
+  /** Set when the change waits for a second reviewer */
+  approval?: common.ApprovalInfo | null;
+  /** The change waiting for a second reviewer; applied on access.approval.decided (approved) */
+  pendingChange?: PendingStaffChange | null;
+}
+
+export const PerformanceTargetsChange: z.ZodType<PerformanceTargetsChange> = z.object({
+  get targets() {
+    return z.array(PerformanceTarget);
+  },
+  get approval() {
+    return common.ApprovalInfo.nullish();
+  },
+  get pendingChange() {
+    return PendingStaffChange.nullish();
+  },
+}).register(common.apiTypes, { id: "sellers.PerformanceTargetsChange" });
 
 export interface AgreementDocument {
   key: "seller_agreement" | "product_rules" | "fee_schedule" | "service_standards";
@@ -1145,6 +1204,8 @@ export interface Storefront {
   seller: SellerSummary;
   banner?: common.MediaRef | null;
   introduction?: string | null;
+  /** The seller's warranty statement (store profile) */
+  warranty?: string | null;
   sellingSince: string;
   /** False while suspended; the page explains that existing orders are still looked after */
   sellingNow: boolean;
@@ -1179,6 +1240,7 @@ export const Storefront: z.ZodType<Storefront> = z.object({
     return common.MediaRef.nullish();
   },
   introduction: z.string().nullish(),
+  warranty: z.string().describe("The seller's warranty statement (store profile)").nullish(),
   sellingSince: z.iso.date(),
   sellingNow: z.boolean().describe("False while suspended; the page explains that existing orders are still looked after"),
   highlights: z.unknown().describe("{ positivePct, ratingCount, onTimeDispatchPct, repliesWithin24hPct, medianReplyHours }"),
@@ -1424,7 +1486,10 @@ export interface Restriction {
   recommendedBy?: common.Actor | null;
   trustReportId?: string | null;
   trustEnforcementId?: string | null;
+  /** Staff answers only: the approval request of a change waiting for a second reviewer (pendingChange), else of the restriction itself (pending_approval or decided) */
   approval?: common.ApprovalInfo | null;
+  /** Staff answers only: a change to this restriction waiting for a second reviewer; null for sellers */
+  pendingChange?: PendingStaffChange | null;
   appeals: Appeal[];
   resolutionEvidence: common.MediaRef[];
   liftedAt?: string | null;
@@ -1463,6 +1528,9 @@ export const Restriction: z.ZodType<Restriction> = z.object({
   trustEnforcementId: z.uuid().nullish(),
   get approval() {
     return common.ApprovalInfo.nullish();
+  },
+  get pendingChange() {
+    return PendingStaffChange.nullish();
   },
   get appeals() {
     return z.array(Appeal);
@@ -2362,7 +2430,7 @@ export const SellersInvitationSentEvent: z.ZodType<SellersInvitationSentEvent> =
 export interface SellersPublicApi {
   /** Store name, slug, status, verified label and whether new sales are allowed (marketplace sellers only; the Official Store is ownerType official with sellerId null and has no seller record) Used by: offers, orders, catalog, search, finance, returns, support, reviews, promotions, advertising, trust, reports, graphql. */
   getSeller(sellerId: string): Promise<SellerSnapshot | null>;
-  /** Batch version for lists Used by: offers, search, orders, reports, graphql. */
+  /** Batch version for lists Used by: offers, search, orders, reports, wishlist, graphql. */
   getSellers(sellerIds: string[]): Promise<SellerSnapshot[]>;
   /** Single answer to 'does any active restriction or suspension block this?'. Offers, catalog, promotions and advertising call it before accepting new work. Used by: offers, catalog, promotions, advertising. */
   canSell(sellerId: string, check: { activity: 'new_offers' | 'new_listings' | 'product_submissions' | 'offer_reactivation' | 'sales' | 'advertising' | 'promotions', categoryId?: string, condition?: string, offerId?: string }): Promise<{ allowed: boolean, restrictionId?: string, reason?: string, appealRoute?: string }>;
@@ -2374,13 +2442,13 @@ export interface SellersPublicApi {
   ownerOf(sellerId: string): Promise<{ accountId: string, memberId: string } | null>;
   /** Latest metrics vs targets; offers uses it for main-offer eligibility, reports for seller dashboards Used by: offers, reports, search. */
   getPerformance(sellerId: string): Promise<PerformanceSummary>;
-  /** Name, logo, verified label, rating and slug for product pages and offer lists Used by: offers, search, content, orders, graphql. */
+  /** Name, logo, verified label, rating and slug for product pages and offer lists Used by: offers, search, content, orders, wishlist, graphql. */
   getStorefrontCard(sellerIds: string[]): Promise<SellerSummary[]>;
   /** Used by trust when a Seller Manager accepts a restriction recommendation in the trust screen; follows the same approval rules as the admin endpoint Used by: trust. */
   requestRestriction(input: RestrictionInput & { sellerId: string, requestedBy: common.Actor }): Promise<Restriction>;
   /** The applicant behind a seller application (identity account id, contact name and work email), so staff → applicant conversations can add the applicant as a participant (messaging maps the account to its customer id). Null for an unknown application Used by: messaging, notifications. */
   getApplicationParticipant(applicationId: string): Promise<{ applicationId: string, ref: string, state: string, applicantAccountId: string, sellerId: string | null, name: string, email: string, storeName: string | null } | null>;
-  /** Public storefront by slug, same data as GET /api/store/sellers/stores/{slug}; null for unknown, unapproved or closed stores Used by: graphql. */
+  /** Public storefront by slug, same data as GET /api/store/sellers/stores/{slug}; null for unknown, unapproved or closed stores Used by: wishlist, graphql. */
   getStorefrontBySlug(slug: string): Promise<Storefront | null>;
   /** Admin seller list with the same filters as GET /api/admin/sellers/sellers Used by: graphql, search. */
   searchSellers(filter: { search?: string, statuses?: string[], verified?: boolean, dispatchBelowPct?: number, mainCategoryId?: string }, page: common.PageInput): Promise<common.Page<SellerSnapshot>>;
@@ -3866,7 +3934,7 @@ export const endpoints = defineEndpoints({
     permission: "sellers.accounts.restrict",
     scope: "staff",
     summary: "Edit an active restriction (scope, reason, resolution steps, review date)",
-    desc: "Audited and republished as sellers.restriction.updated. Above the caller's authority the change is kept in pending_changes with an access approval request and the call answers 409 APPROVAL_REQUIRED with details.approvalRequestId and details.pendingChangeId; access.approval.decided (approved) applies it, so the caller does not send it again.",
+    desc: "Audited and republished as sellers.restriction.updated. Above the caller's authority the change is kept in pending_changes with an access approval request and the call answers 200 with the Restriction unchanged, its pendingChange and approval (FORMAT.md, Approval responses); access.approval.decided (approved) applies it, so the caller does not send it again. It never answers APPROVAL_REQUIRED.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -3883,8 +3951,9 @@ export const endpoints = defineEndpoints({
     }),
     response: () => Restriction,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","APPROVAL_REQUIRED"],
+    errors: ["ILLEGAL_TRANSITION"],
     audited: true,
+    approval: "Approval action sellers.sellers.restrict. Second reviewer when the caller's role is 'Permitted with second review' for seller restrictions",
     events: ["sellers.restriction.updated"],
     screens: ["admin/seller"],
     phase: 1,
@@ -3979,7 +4048,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => SellerAccount,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","APPROVAL_REQUIRED"],
+    errors: ["ILLEGAL_TRANSITION"],
     audited: true,
     events: ["sellers.seller.reinstated"],
     screens: ["admin/seller"],
@@ -3993,7 +4062,7 @@ export const endpoints = defineEndpoints({
     permission: "sellers.accounts.close",
     scope: "staff",
     summary: "Close a seller account",
-    desc: "New sales stop; open obligations stay accessible until settled; finance issues the final statement. A closure for another reason than the seller's request always needs a second reviewer: the closure is kept in pending_changes with an access approval request and the call answers 409 APPROVAL_REQUIRED with details.approvalRequestId and details.pendingChangeId; access.approval.decided (approved) applies it, so the caller does not send it again.",
+    desc: "New sales stop; open obligations stay accessible until settled; finance issues the final statement. A closure for another reason than the seller's request always needs a second reviewer: the closure is kept in pending_changes with an access approval request and the call answers 200 with the SellerAccount unchanged, its pendingChange and approval (FORMAT.md, Approval responses); access.approval.decided (approved) applies it, so the caller does not send it again. It never answers APPROVAL_REQUIRED.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -4004,7 +4073,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => SellerAccount,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","APPROVAL_REQUIRED"],
+    errors: ["ILLEGAL_TRANSITION"],
     audited: true,
     approval: "Approval action sellers.sellers.close. Second reviewer unless the seller requested closure",
     events: ["sellers.seller.closed"],
@@ -4508,16 +4577,16 @@ export const endpoints = defineEndpoints({
     permission: "sellers.performance.manage",
     scope: "staff",
     summary: "Change targets with an effective date",
-    desc: "Changes state their effective date; metrics already computed are not re-graded. Above the caller's authority the change is kept in pending_changes with an access approval request and the call answers 409 APPROVAL_REQUIRED with details.approvalRequestId and details.pendingChangeId; access.approval.decided (approved) applies it, so the caller does not send it again.",
+    desc: "Changes state their effective date; metrics already computed are not re-graded. Answers the saved targets. Above the caller's authority the change is kept in pending_changes with an access approval request and the call answers 200 with the current targets (unchanged), the pendingChange and approval (FORMAT.md, Approval responses); access.approval.decided (approved) applies it, so the caller does not send it again. It never answers APPROVAL_REQUIRED.",
     body: () => z.object({
       get targets() {
         return z.array(PerformanceTarget);
       },
       reason: z.string(),
     }),
-    response: () => z.array(PerformanceTarget),
+    response: () => PerformanceTargetsChange,
     status: 200,
-    errors: ["APPROVAL_REQUIRED"],
+    errors: ["VALIDATION_FAILED"],
     audited: true,
     approval: "Approval action sellers.performance.targets. Per role authority; Permitted with second review needs the Business Owner",
     screens: ["admin/settings"],

@@ -46,7 +46,7 @@
     },
     {
       "name": "Store API · Media",
-      "description": "Every uploaded or generated file: images, video and documents. Signed direct uploads, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted)."
+      "description": "Every uploaded or generated file: images, video and documents. Uploads and signed download links, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted)."
     },
     {
       "name": "Store API · Messaging",
@@ -142,7 +142,7 @@
     },
     {
       "name": "Seller API · Media",
-      "description": "Every uploaded or generated file: images, video and documents. Signed direct uploads, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted)."
+      "description": "Every uploaded or generated file: images, video and documents. Uploads and signed download links, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted)."
     },
     {
       "name": "Seller API · Messaging",
@@ -254,7 +254,7 @@
     },
     {
       "name": "Admin API · Media",
-      "description": "Every uploaded or generated file: images, video and documents. Signed direct uploads, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted)."
+      "description": "Every uploaded or generated file: images, video and documents. Uploads and signed download links, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted)."
     },
     {
       "name": "Admin API · Messaging",
@@ -362,7 +362,7 @@
     },
     {
       "name": "Webhooks · Media",
-      "description": "Every uploaded or generated file: images, video and documents. Signed direct uploads, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted)."
+      "description": "Every uploaded or generated file: images, video and documents. Uploads and signed download links, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted)."
     },
     {
       "name": "Webhooks · Notifications",
@@ -52330,8 +52330,8 @@
         "tags": [
           "Store API · Media"
         ],
-        "summary": "Send the file bytes of an upload (development storage)",
-        "description": "Development storage only: receives the file bytes for a signed upload ticket (real storage takes the bytes directly at the ticket URL). Answers 409 when a real storage adapter is configured. The body is the raw file (any content type), at most the ticket's maxBytes.",
+        "summary": "Send the file bytes of an upload",
+        "description": "The ticket URL when storage takes uploads through the API (the server's disk; memory in tests). The body is the raw file (any content type), streamed to storage and never held in memory: at most the ticket's maxBytes, counted while it streams (a larger Content-Length is refused before reading; nothing is kept when the limit is passed). The write is atomic; sending again before complete replaces an earlier attempt. Answers DIRECT_UPLOAD_ONLY (409) when storage takes the bytes directly at its own ticket URL.",
         "security": [
           {
             "bearer": []
@@ -52405,7 +52405,7 @@
             }
           },
           "409": {
-            "description": "DEV_STORAGE_ONLY: A real storage adapter is configured: upload the bytes to the ticket URL instead.\nILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "description": "DIRECT_UPLOAD_ONLY: Storage takes the bytes directly at its own ticket URL, not through this API: send them to the ticket URL.\nILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
             "content": {
               "application/json": {
                 "schema": {
@@ -53031,8 +53031,8 @@
         "tags": [
           "Seller API · Media"
         ],
-        "summary": "Send the file bytes of an upload (development storage)",
-        "description": "Development storage only: receives the file bytes for a signed upload ticket (real storage takes the bytes directly at the ticket URL). Answers 409 when a real storage adapter is configured. The body is the raw file (any content type), at most the ticket's maxBytes.\n\n**Permission:** `media.assets.upload`",
+        "summary": "Send the file bytes of an upload",
+        "description": "The ticket URL when storage takes uploads through the API (the server's disk; memory in tests). The body is the raw file (any content type), streamed to storage and never held in memory: at most the ticket's maxBytes, counted while it streams (a larger Content-Length is refused before reading; nothing is kept when the limit is passed). The write is atomic; sending again before complete replaces an earlier attempt. Answers DIRECT_UPLOAD_ONLY (409) when storage takes the bytes directly at its own ticket URL.\n\n**Permission:** `media.assets.upload`",
         "security": [
           {
             "bearer": []
@@ -53106,7 +53106,7 @@
             }
           },
           "409": {
-            "description": "DEV_STORAGE_ONLY: A real storage adapter is configured: upload the bytes to the ticket URL instead.\nILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "description": "DIRECT_UPLOAD_ONLY: Storage takes the bytes directly at its own ticket URL, not through this API: send them to the ticket URL.\nILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
             "content": {
               "application/json": {
                 "schema": {
@@ -54065,8 +54065,8 @@
         "tags": [
           "Admin API · Media"
         ],
-        "summary": "Send the file bytes of a staff upload (development storage)",
-        "description": "Development storage only: receives the file bytes for a signed upload ticket (real storage takes the bytes directly at the ticket URL). Answers 409 when a real storage adapter is configured. The body is the raw file (any content type), at most the ticket's maxBytes. Only the staff member who started the upload may send its bytes (NOT_FOUND otherwise).\n\n**Permission:** `media.assets.manage`",
+        "summary": "Send the file bytes of a staff upload",
+        "description": "The ticket URL when storage takes uploads through the API (the server's disk; memory in tests). The body is the raw file (any content type), streamed to storage and never held in memory: at most the ticket's maxBytes, counted while it streams (a larger Content-Length is refused before reading; nothing is kept when the limit is passed). The write is atomic; sending again before complete replaces an earlier attempt. Answers DIRECT_UPLOAD_ONLY (409) when storage takes the bytes directly at its own ticket URL. Only the staff member who started the upload may send its bytes (NOT_FOUND otherwise).\n\n**Permission:** `media.assets.manage`",
         "security": [
           {
             "bearer": []
@@ -54140,7 +54140,7 @@
             }
           },
           "409": {
-            "description": "DEV_STORAGE_ONLY: A real storage adapter is configured: upload the bytes to the ticket URL instead.\nILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "description": "DIRECT_UPLOAD_ONLY: Storage takes the bytes directly at its own ticket URL, not through this API: send them to the ticket URL.\nILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
             "content": {
               "application/json": {
                 "schema": {
@@ -64438,7 +64438,7 @@
           "Seller API · Offers"
         ],
         "summary": "Edit offer terms or price",
-        "description": "Customer-visible changes bump termsVersion so carts show the change before checkout. Price changes go into price history. A price change above largeSellerPriceChangePct needs confirmLargeChange: true in the same body, otherwise LARGE_PRICE_CHANGE_UNCONFIRMED and nothing is saved. shippingProfileId must be one of the seller's own profiles (shipping.getProfileOwners), otherwise SHIPPING_PROFILE_INVALID. Saving missingItems clears missingItemsStale.\n\n**Permission:** `offers.offers.manage`\n\n**Publishes:** `offers.offer.updated`, `offers.offer.price_changed`\n\n**Screens:** seller/offer",
+        "description": "Customer-visible changes bump termsVersion so carts show the change before checkout. Price changes go into price history. A price change above largeSellerPriceChangePct needs confirmLargeChange: true in the same body, otherwise LARGE_PRICE_CHANGE_UNCONFIRMED and nothing is saved. shippingProfileId must be one of the seller's own profiles (shipping.getProfileOwners), otherwise SHIPPING_PROFILE_INVALID. Saving missingItems (changed or the same list, as a confirmation) clears missingItemsStale and publishes offers.offer.missing_items_reviewed.\n\n**Permission:** `offers.offers.manage`\n\n**Publishes:** `offers.offer.updated`, `offers.offer.price_changed`, `offers.offer.missing_items_reviewed`\n\n**Screens:** seller/offer",
         "security": [
           {
             "bearer": []
@@ -64536,7 +64536,8 @@
         ],
         "x-events": [
           "offers.offer.updated",
-          "offers.offer.price_changed"
+          "offers.offer.price_changed",
+          "offers.offer.missing_items_reviewed"
         ],
         "x-phase": 1
       },
@@ -67391,7 +67392,7 @@
           "Admin API · Offers"
         ],
         "summary": "Edit Official Store offer terms (not price; use price changes)",
-        "description": "**Permission:** `offers.official.manage`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `offers.offer.updated`\n\n**Screens:** admin/official",
+        "description": "**Permission:** `offers.official.manage`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `offers.offer.updated`, `offers.offer.missing_items_reviewed`\n\n**Screens:** admin/official",
         "security": [
           {
             "bearer": []
@@ -67488,7 +67489,8 @@
           "admin/official"
         ],
         "x-events": [
-          "offers.offer.updated"
+          "offers.offer.updated",
+          "offers.offer.missing_items_reviewed"
         ],
         "x-audited": true,
         "x-phase": 1
@@ -111312,7 +111314,7 @@
           "Admin API · Sellers"
         ],
         "summary": "Edit an active restriction (scope, reason, resolution steps, review date)",
-        "description": "Audited and republished as sellers.restriction.updated. Above the caller's authority the change is kept in pending_changes with an access approval request and the call answers 409 APPROVAL_REQUIRED with details.approvalRequestId and details.pendingChangeId; access.approval.decided (approved) applies it, so the caller does not send it again.\n\n**Permission:** `sellers.accounts.restrict`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `sellers.restriction.updated`\n\n**Screens:** admin/seller",
+        "description": "Audited and republished as sellers.restriction.updated. Above the caller's authority the change is kept in pending_changes with an access approval request and the call answers 200 with the Restriction unchanged, its pendingChange and approval (FORMAT.md, Approval responses); access.approval.decided (approved) applies it, so the caller does not send it again. It never answers APPROVAL_REQUIRED.\n\n**Permission:** `sellers.accounts.restrict`\n\n**Approval:** Approval action sellers.sellers.restrict. Second reviewer when the caller's role is 'Permitted with second review' for seller restrictions\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `sellers.restriction.updated`\n\n**Screens:** admin/seller",
         "security": [
           {
             "bearer": []
@@ -111447,7 +111449,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nAPPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
             "content": {
               "application/json": {
                 "schema": {
@@ -111915,7 +111917,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nAPPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
             "content": {
               "application/json": {
                 "schema": {
@@ -111946,7 +111948,7 @@
           "Admin API · Sellers"
         ],
         "summary": "Close a seller account",
-        "description": "New sales stop; open obligations stay accessible until settled; finance issues the final statement. A closure for another reason than the seller's request always needs a second reviewer: the closure is kept in pending_changes with an access approval request and the call answers 409 APPROVAL_REQUIRED with details.approvalRequestId and details.pendingChangeId; access.approval.decided (approved) applies it, so the caller does not send it again.\n\n**Permission:** `sellers.accounts.close`\n\n**Approval:** Approval action sellers.sellers.close. Second reviewer unless the seller requested closure\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `sellers.seller.closed`\n\n**Screens:** admin/seller",
+        "description": "New sales stop; open obligations stay accessible until settled; finance issues the final statement. A closure for another reason than the seller's request always needs a second reviewer: the closure is kept in pending_changes with an access approval request and the call answers 200 with the SellerAccount unchanged, its pendingChange and approval (FORMAT.md, Approval responses); access.approval.decided (approved) applies it, so the caller does not send it again. It never answers APPROVAL_REQUIRED.\n\n**Permission:** `sellers.accounts.close`\n\n**Approval:** Approval action sellers.sellers.close. Second reviewer unless the seller requested closure\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `sellers.seller.closed`\n\n**Screens:** admin/seller",
         "security": [
           {
             "bearer": []
@@ -112044,7 +112046,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nAPPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
             "content": {
               "application/json": {
                 "schema": {
@@ -114854,7 +114856,7 @@
           "Admin API · Sellers"
         ],
         "summary": "Change targets with an effective date",
-        "description": "Changes state their effective date; metrics already computed are not re-graded. Above the caller's authority the change is kept in pending_changes with an access approval request and the call answers 409 APPROVAL_REQUIRED with details.approvalRequestId and details.pendingChangeId; access.approval.decided (approved) applies it, so the caller does not send it again.\n\n**Permission:** `sellers.performance.manage`\n\n**Approval:** Approval action sellers.performance.targets. Per role authority; Permitted with second review needs the Business Owner\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/settings",
+        "description": "Changes state their effective date; metrics already computed are not re-graded. Answers the saved targets. Above the caller's authority the change is kept in pending_changes with an access approval request and the call answers 200 with the current targets (unchanged), the pendingChange and approval (FORMAT.md, Approval responses); access.approval.decided (approved) applies it, so the caller does not send it again. It never answers APPROVAL_REQUIRED.\n\n**Permission:** `sellers.performance.manage`\n\n**Approval:** Approval action sellers.performance.targets. Per role authority; Permitted with second review needs the Business Owner\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/settings",
         "security": [
           {
             "bearer": []
@@ -114891,10 +114893,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/sellers.PerformanceTarget"
-                  }
+                  "$ref": "#/components/schemas/sellers.PerformanceTargetsChange"
                 }
               }
             }
@@ -114921,16 +114920,6 @@
           },
           "403": {
             "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "APPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).",
             "content": {
               "application/json": {
                 "schema": {
@@ -134375,7 +134364,7 @@
           "Admin API · Trust and risk"
         ],
         "summary": "Export the filtered trust queue",
-        "description": "Creates an authorized export job through reports.requestExport (dataset trust.admin.reports). Reporter identities are excluded unless the caller has trust.reports.export-identities.\n\n**Permission:** `trust.reports.export`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/trust",
+        "description": "Creates an authorized export job through reports.requestExport (dataset trust.admin.reports). Reporter identities are excluded unless the caller has trust.reports.export-identities. 409 DATASET_UNAVAILABLE while the reports module is off or when reports refuses the dataset (not in the export registry).\n\n**Permission:** `trust.reports.export`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/trust",
         "security": [
           {
             "bearer": []
@@ -134440,6 +134429,16 @@
           },
           "403": {
             "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "DATASET_UNAVAILABLE: The trust queue cannot be exported: the reports module is off or refused the dataset",
             "content": {
               "application/json": {
                 "schema": {
@@ -170137,7 +170136,7 @@
           "url": {
             "type": "string",
             "format": "uri",
-            "description": "Signed storage URL; upload the bytes directly to it. With development storage it is this API's PUT /uploads/{id}/content in the same area"
+            "description": "Where to send the bytes, with method and headers. With storage the API serves (local disk, memory) it is this API's PUT /uploads/{id}/content in the same area: send the caller's own Authorization header. With a direct-upload store it would be the store's signed URL"
           },
           "headers": {
             "type": "object",
@@ -170189,7 +170188,8 @@
           },
           "url": {
             "type": "string",
-            "format": "uri"
+            "format": "uri",
+            "description": "Signed link to GET /files/{bucket}/{key}: permanent for public files (usable as <img src>), short-lived for private ones"
           },
           "width": {
             "type": "integer"
@@ -170307,7 +170307,7 @@
               "null"
             ],
             "format": "uri",
-            "description": "Public: medium rendition (images) or poster (video). Private files have no URL; use the download endpoint."
+            "description": "Public: permanent signed link to the medium rendition (images) or poster (video). Private files have no URL; use the download endpoint."
           },
           "renditions": {
             "type": "array",
@@ -170757,7 +170757,8 @@
         "properties": {
           "url": {
             "type": "string",
-            "format": "uri"
+            "format": "uri",
+            "description": "Signed link to GET /files/{bucket}/{key}, bound to the file, content type, disposition and expiry; no Authorization header needed (the signature is the token, checked by the auth middleware). Range requests are supported"
           },
           "expiresAt": {
             "type": "string",
@@ -173808,7 +173809,7 @@
           },
           "missingItemsStale": {
             "type": "boolean",
-            "description": "True when the product's box changed (catalog.product.updated) and missingItems names items no longer in it, or no longer lists everything absent. The seller is asked to review (offers.offer.missing_items_stale); cleared when the seller saves missingItems again. The offer stays on sale meanwhile."
+            "description": "True when the product's box changed (catalog.product.updated) and missingItems names items no longer in it, or no longer lists everything absent. The seller is asked to review (offers.offer.missing_items_stale); cleared when the seller saves missingItems again, changed or confirmed as is (offers.offer.missing_items_reviewed). The offer stays on sale meanwhile."
           },
           "sellerSku": {
             "type": "string",
@@ -196771,6 +196772,28 @@
           },
           "me": {
             "description": "The calling member: { memberId, role, permissions, isOwner }"
+          },
+          "approval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApprovalInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Staff answers only: the approval request of a closure waiting for a second reviewer (pendingChange); null for sellers"
+          },
+          "pendingChange": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/sellers.PendingStaffChange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Staff answers only: a closure waiting for a second reviewer; null for sellers"
           }
         },
         "required": [
@@ -196787,6 +196810,103 @@
           "launchReview",
           "pendingAgreements",
           "me"
+        ]
+      },
+      "sellers.PendingStaffChange": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The pending_changes row"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "closure",
+              "restriction_change",
+              "performance_targets"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "applied",
+              "declined"
+            ]
+          },
+          "approvalRequestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "proposed": {
+            "description": "closure: { reason, reasonCode }; restriction_change: { patch, changeReason }; performance_targets: { targets, reason, setBy }"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "requestedBy": {
+            "$ref": "#/components/schemas/Actor"
+          },
+          "requestedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decidedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "state",
+          "approvalRequestId",
+          "proposed",
+          "reason",
+          "requestedBy",
+          "requestedAt"
+        ]
+      },
+      "sellers.PerformanceTargetsChange": {
+        "type": "object",
+        "properties": {
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/sellers.PerformanceTarget"
+            },
+            "description": "The targets saved by this call; while a change waits for approval, the current and scheduled targets (unchanged)"
+          },
+          "approval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApprovalInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when the change waits for a second reviewer"
+          },
+          "pendingChange": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/sellers.PendingStaffChange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The change waiting for a second reviewer; applied on access.approval.decided (approved)"
+          }
+        },
+        "required": [
+          "targets"
         ]
       },
       "sellers.AgreementDocument": {
@@ -198901,6 +199021,13 @@
               "null"
             ]
           },
+          "warranty": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The seller's warranty statement (store profile)"
+          },
           "sellingSince": {
             "type": "string",
             "format": "date"
@@ -199581,7 +199708,19 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Staff answers only: the approval request of a change waiting for a second reviewer (pendingChange), else of the restriction itself (pending_approval or decided)"
+          },
+          "pendingChange": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/sellers.PendingStaffChange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Staff answers only: a change to this restriction waiting for a second reviewer; null for sellers"
           },
           "appeals": {
             "type": "array",

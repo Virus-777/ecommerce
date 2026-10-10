@@ -412,7 +412,7 @@ export interface AuditPublicApi {
 
 /** Tables in the `audit` schema. Use with `ctx.db` (already scoped to the schema). */
 export interface AuditDb {
-  /** Append-only (no UPDATE/DELETE grants for the app role). Partitioned by month on at. hash = sha256(prev_hash || canonical row). */
+  /** Append-only (no UPDATE/DELETE grants for the app role; triggers refuse UPDATE, DELETE, TRUNCATE and dropping a partition outside a purge). Partitioned by range on at, one partition per market month (audit_partitions.entries_<entry_partitions.name>), so the key is (id, at) and seq is unique per (seq, at) (identity: unique in practice). hash = sha256(prev_hash || canonical row). */
   entries: {
     id: string;
     seq: Generated<number>;
@@ -447,12 +447,21 @@ export interface AuditDb {
     prev_hash: Uint8Array;
     hash: Uint8Array;
   };
-  /** Related targets for history lookups (an order item entry also appears under its order and seller) */
+  /** Related targets for history lookups (an order item entry also appears under its order and seller). Partitioned like entries (at is the entry's at, so a target row lives in the same month as its entry and its partition is dropped with the entry's); written in the same transaction as the entry, without a foreign key so dropping a month needs no reference check. */
   entry_targets: {
+    /** entries.id */
     entry_id: string;
     target_type: string;
     target_id: string;
     at: Date;
+  };
+  /** The month partitions of entries and entry_targets ([from_at, to_at), one market month; the first month after the partitioning migration may be shorter where it meets the UTC months of older rows). Created ahead by audit.prepare-partitions and on demand by record; dropped by audit.purge-expired. */
+  entry_partitions: {
+    /** lower bound in UTC as YYYYMMDD_HH24MI: tables audit_partitions.entries_<name> and entry_targets_<name> */
+    name: string;
+    from_at: Date;
+    to_at: Date;
+    created_at: Date;
   };
   /** Projection of access approval requests referenced by entries; updated from access events, so entries stay immutable */
   approval_states: {
@@ -817,7 +826,11 @@ export const spec = defineModuleSpec({
     },
     "audit.purge-expired": {
       "schedule": "monthly",
-      "does": "Drop month partitions entirely older than retainYears (never below minimumRetentionYears), keep a signed checkpoint hash so the chain still verifies, record the purge as an entry"
+      "does": "Write a signed checkpoint at the last entry before the cut-off (retainYears, never below minimumRetentionYears, at a market month start), then drop the month partitions entirely older than the cut-off whose entries are all before it in the chain; entries before the cut-off in a partition that also holds kept entries are deleted row by row. Record the purge as an entry (removedEntries, droppedPartitions, checkpoint) so the chain still verifies"
+    },
+    "audit.prepare-partitions": {
+      "schedule": "daily 02:30 market time",
+      "does": "Create the entries and entry_targets partitions for the current market month and the next 3 (idempotent); record also creates a missing month on demand (backdated entries)"
     }
   },
   settings: {
@@ -1001,6 +1014,24 @@ export const spec = defineModuleSpec({
         "nullable": false
       },
       "at": {
+        "type": "timestamptz",
+        "nullable": false
+      }
+    },
+    "entry_partitions": {
+      "name": {
+        "type": "text",
+        "nullable": false
+      },
+      "from_at": {
+        "type": "timestamptz",
+        "nullable": false
+      },
+      "to_at": {
+        "type": "timestamptz",
+        "nullable": false
+      },
+      "created_at": {
         "type": "timestamptz",
         "nullable": false
       }

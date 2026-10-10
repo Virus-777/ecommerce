@@ -130,7 +130,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | POST | `/api/admin/sellers/change-requests/{id}/decide` | Approve or reject a change request or public claim _(audited)_ | staff<br>`sellers.storefronts.review` | `{ approve: bool, reason: text, claimExpiresAt: datetime? }` → `ChangeRequest` |
 | POST | `/api/admin/sellers/claims/{id}/revoke` | Remove an approved claim found to be false _(audited)_ | staff<br>`sellers.storefronts.review` | `{ reason: text, recordViolation: bool }` → `PublicClaim` |
 | GET | `/api/admin/sellers/performance-targets` | Current and scheduled performance targets | staff<br>`sellers.accounts.view` | `PerformanceTarget[]` |
-| PUT | `/api/admin/sellers/performance-targets` | Change targets with an effective date _(audited)_ | staff<br>`sellers.performance.manage` | `{ targets: PerformanceTarget[], reason: text }` → `PerformanceTarget[]` |
+| PUT | `/api/admin/sellers/performance-targets` | Change targets with an effective date _(audited)_ | staff<br>`sellers.performance.manage` | `{ targets: PerformanceTarget[], reason: text }` → `PerformanceTargetsChange` |
 | POST | `/api/admin/sellers/seller-invitations` | Invite a business to apply (invite-only launch) _(audited)_ | staff<br>`sellers.invitations.manage` | `{ email: email, businessName: string, message: text? }` → `SellerInvitation` |
 | GET | `/api/admin/sellers/seller-invitations` | Invitations sent and whether they applied | staff<br>`sellers.invitations.manage` | Page<SellerInvitation> |
 | POST | `/api/admin/sellers/seller-invitations/{id}/revoke` | Revoke an unused invitation _(audited)_ | staff<br>`sellers.invitations.manage` | `SellerInvitation` |
@@ -236,6 +236,30 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | pendingAgreements | `int` New agreement versions waiting for the owner's acceptance |
 | accountManager | `json?` { name, replyTarget } |
 | me | `json` The calling member: { memberId, role, permissions, isOwner } |
+| approval | `ApprovalInfo?` Staff answers only: the approval request of a closure waiting for a second reviewer (pendingChange); null for sellers |
+| pendingChange | `PendingStaffChange?` Staff answers only: a closure waiting for a second reviewer; null for sellers |
+
+### PendingStaffChange
+
+| Field | Type |
+|---|---|
+| id | `uuid` The pending_changes row |
+| kind | `enum(closure|restriction_change|performance_targets)` |
+| state | `enum(pending|applied|declined)` |
+| approvalRequestId | `uuid` |
+| proposed | `json` closure: { reason, reasonCode }; restriction_change: { patch, changeReason }; performance_targets: { targets, reason, setBy } |
+| reason | `text` |
+| requestedBy | `Actor` |
+| requestedAt | `datetime` |
+| decidedAt | `datetime?` |
+
+### PerformanceTargetsChange
+
+| Field | Type |
+|---|---|
+| targets | `PerformanceTarget[]` The targets saved by this call; while a change waits for approval, the current and scheduled targets (unchanged) |
+| approval | `ApprovalInfo?` Set when the change waits for a second reviewer |
+| pendingChange | `PendingStaffChange?` The change waiting for a second reviewer; applied on access.approval.decided (approved) |
 
 ### AgreementDocument
 
@@ -704,6 +728,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | seller | `SellerSummary` |
 | banner | `MediaRef?` |
 | introduction | `text?` |
+| warranty | `text?` The seller's warranty statement (store profile) |
 | sellingSince | `date` |
 | sellingNow | `bool` False while suspended; the page explains that existing orders are still looked after |
 | highlights | `json` { positivePct, ratingCount, onTimeDispatchPct, repliesWithin24hPct, medianReplyHours } |
@@ -850,7 +875,8 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | recommendedBy | `Actor?` |
 | trustReportId | `uuid?` |
 | trustEnforcementId | `uuid?` |
-| approval | `ApprovalInfo?` |
+| approval | `ApprovalInfo?` Staff answers only: the approval request of a change waiting for a second reviewer (pendingChange), else of the restriction itself (pending_approval or decided) |
+| pendingChange | `PendingStaffChange?` Staff answers only: a change to this restriction waiting for a second reviewer; null for sellers |
 | appeals | `Appeal[]` |
 | resolutionEvidence | `MediaRef[]` |
 | liftedAt | `datetime?` |
@@ -1747,16 +1773,16 @@ Indexes: `(email)`, `(state, expires_at)`
 | Function | Signature | Used by |
 |---|---|---|
 | getSeller | `(sellerId: uuid) => SellerSnapshot | null`<br>Store name, slug, status, verified label and whether new sales are allowed (marketplace sellers only; the Official Store is ownerType official with sellerId null and has no seller record) | offers, orders, catalog, search, finance, returns, support, reviews, promotions, advertising, trust, reports, graphql |
-| getSellers | `(sellerIds: uuid[]) => SellerSnapshot[]`<br>Batch version for lists | offers, search, orders, reports, graphql |
+| getSellers | `(sellerIds: uuid[]) => SellerSnapshot[]`<br>Batch version for lists | offers, search, orders, reports, wishlist, graphql |
 | canSell | `(sellerId: uuid, check: { activity: 'new_offers' | 'new_listings' | 'product_submissions' | 'offer_reactivation' | 'sales' | 'advertising' | 'promotions', categoryId?: uuid, condition?: string, offerId?: uuid }) => { allowed: bool, restrictionId?: uuid, reason?: string, appealRoute?: string }`<br>Single answer to 'does any active restriction or suspension block this?'. Offers, catalog, promotions and advertising call it before accepting new work. | offers, catalog, promotions, advertising |
 | getMemberAccess | `(sellerId: uuid, accountId: uuid) => { memberId: uuid, role: string, permissions: string[], isOwner: bool } | null`<br>Seller-area permission check used by the kernel auth guard for every seller endpoint | identity, access |
 | listMembers | `(sellerId: uuid) => { memberId: uuid, accountId: uuid, role: string, isOwner: bool }[]`<br>Active members of the seller with their identity account id, role and whether they are the owner | notifications |
 | ownerOf | `(sellerId: uuid) => { accountId: uuid, memberId: uuid } | null`<br>The seller owner's identity account (null for an unknown seller) | notifications |
 | getPerformance | `(sellerId: uuid) => PerformanceSummary`<br>Latest metrics vs targets; offers uses it for main-offer eligibility, reports for seller dashboards | offers, reports, search |
-| getStorefrontCard | `(sellerIds: uuid[]) => SellerSummary[]`<br>Name, logo, verified label, rating and slug for product pages and offer lists | offers, search, content, orders, graphql |
+| getStorefrontCard | `(sellerIds: uuid[]) => SellerSummary[]`<br>Name, logo, verified label, rating and slug for product pages and offer lists | offers, search, content, orders, wishlist, graphql |
 | requestRestriction | `(input: RestrictionInput & { sellerId: uuid, requestedBy: Actor }) => Restriction`<br>Used by trust when a Seller Manager accepts a restriction recommendation in the trust screen; follows the same approval rules as the admin endpoint | trust |
 | getApplicationParticipant | `(applicationId: uuid) => { applicationId: uuid, ref: string, state: string, applicantAccountId: uuid, sellerId: uuid | null, name: string, email: email, storeName: string | null } | null`<br>The applicant behind a seller application (identity account id, contact name and work email), so staff → applicant conversations can add the applicant as a participant (messaging maps the account to its customer id). Null for an unknown application | messaging, notifications |
-| getStorefrontBySlug | `(slug: string) => Storefront | null`<br>Public storefront by slug, same data as GET /api/store/sellers/stores/{slug}; null for unknown, unapproved or closed stores | graphql |
+| getStorefrontBySlug | `(slug: string) => Storefront | null`<br>Public storefront by slug, same data as GET /api/store/sellers/stores/{slug}; null for unknown, unapproved or closed stores | wishlist, graphql |
 | searchSellers | `(filter: { search?: string, statuses?: string[], verified?: bool, dispatchBelowPct?: number, mainCategoryId?: uuid }, page: PageInput) => Page<SellerSnapshot>`<br>Admin seller list with the same filters as GET /api/admin/sellers/sellers | graphql, search |
 | exportRows | `(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }`<br>Export rows for reports dataset sellers.admin.accounts (the filtered seller list) | reports |
 
@@ -1864,7 +1890,7 @@ Checked through the access module (limits per role, second reviewer).
 ## Notes
 - Principals from actors: access.check and access.requestApproval take an identity.Principal. Endpoints pass the caller's principal; event consumers and jobs that act for a staff member (e.g. trust.enforcement.recorded carrying the Seller Manager who accepted the recommendation) build one from the event's Actor: kind staff, audience admin, accountId = actor.id, sessionId sellers:<actor kind>. Its permissions are what access holds for that account, so authority is checked against the person, never widened.
 - Payout account changes: every destination handed to finance (the initial one at approval and each owner change) is a payout_changes row (id = changeId in sellers.payout_account.changed): pending until finance.destination.verified (verified: it becomes the current destination and the one it replaces becomes replaced) or finance.destination.rejected (rejected with the reason; payouts keep going to the current destination). At most one row per seller is pending and one is verified (the current destination). Blocked reasons live in sellers.payout_blocked_reasons.
-- Pending staff changes: a seller closure (sellers.sellers.close), a change to an active restriction and a performance target change that need a second reviewer are kept in pending_changes with the access approval request id; access.approval.decided applies (approved) or drops them. The call answers 409 APPROVAL_REQUIRED with details.approvalRequestId and details.pendingChangeId; the change is applied on approval and is not sent again.
+- Pending staff changes: a seller closure (sellers.sellers.close), a change to an active restriction and a performance target change that need a second reviewer are kept in pending_changes with the access approval request id; access.approval.decided applies (approved) or drops them. The call answers its normal status with the record unchanged, pendingChange (PendingStaffChange) and approval (ApprovalInfo) in the body (FORMAT.md, Approval responses), never APPROVAL_REQUIRED; the change is applied on approval and is not sent again. Staff views of a seller account (closure) and of a restriction (restriction change) show the pending change until it is decided.
 - Seller-area endpoints act on the seller in the caller's identity seller context; no seller id appears in seller paths. The kernel guard checks the member's permissions with getMemberAccess on every request.
 - Seller permissions for other areas (catalog.products.submit, orders, returns, finance view and so on) are declared by their owning modules with audience seller; sellers only assigns them through role templates. sellers.staff.manage, sellers.payout-account.manage, sellers.business.change, sellers.agreements.accept and sellers.account.close are owner-only; payout changes are never delegable (plan ch. 11).
 - Phase: seller staff invitations and permission edits are phase 2 ('staff access' in plan ch. 20 phase 2); at launch each seller has its owner only. Automatic performance warnings (sellers.auto-warnings) are phase 2 'performance controls'; the metrics, targets, manual warnings, restrictions and appeals are phase 1 because scenario 7 needs them.

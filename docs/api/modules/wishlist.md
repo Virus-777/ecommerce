@@ -3,7 +3,7 @@
 Saved shopping for customers: saved items in one or more lists, price-drop and back-in-stock alerts, and shareable lists. Alerts are delivered through notifications under the customer's promotional preferences.
 
 - **Group:** Later phases · **Launch phase:** 3 · **Plan chapters:** 3, 7, 19
-- **Depends on:** [catalog](catalog.md), [offers](offers.md), [customers](customers.md) · **Optional:** [inventory](inventory.md), [cart](cart.md), [promotions](promotions.md), [notifications](notifications.md), [reports](reports.md), [media](media.md), [search](search.md)
+- **Depends on:** [catalog](catalog.md), [offers](offers.md), [customers](customers.md) · **Optional:** [inventory](inventory.md), [cart](cart.md), [promotions](promotions.md), [notifications](notifications.md), [reports](reports.md), [media](media.md), [search](search.md), [sellers](sellers.md)
 
 ## Owns
 - Wishlists: a default list plus named lists, saved products with the variant and preferred offer
@@ -310,7 +310,7 @@ Indexes: `(product_id, kind, state)`, `(customer_id, state)`
 - Recently viewed belongs to customers (brief): the wishlist screen reads it from customers itself; WishlistPage does not carry it.
 - Alerts are promotional: notifications delivers them only if the customer allows wishlist alerts (account/notifications) and never mixes them into essential order updates.
 - Price hints are honest: 'Lowest in 30 days' only when the current price is the lowest in the window, from offers.priceRange(offerId, priceHintDays) (offers keeps the only price history); campaign was-prices come from promotions.referencePrice when enabled.
-- GraphQL: the store schema's WishlistAlert exposes sellerId (Alert.sellerId). WishlistAlert.seller resolves null until the sellers module provides a shared mapper for it (decision: GraphQL shared mappers per owning module); wishlist has no sellers dependency, so clients name the seller from sellerId (e.g. Query.sellerStorefront).
+- GraphQL: the store schema's WishlistAlert exposes sellerId (Alert.sellerId) and seller, the seller's public card (Seller) built with the shared mapper sellers exports from its contract (sellerCardOut: sellers.getStorefrontCard and getSellers, publicProfile from getStorefrontBySlug only when asked). seller is null when the alert names no seller, the seller has no public card or sellers is off (optional dependency).
 - Fixed limits (not settings): list names up to 60 characters, item notes up to 500 characters, GET /saved checks at most 100 product ids per call, and a shared list shows its first 100 items (no paging). Lists, items per list and active alerts are settings (maxLists, maxItemsPerList, maxActiveAlerts); every call that adds an active alert (saveItem with an alert, updateItemAlerts, createAlert, changeAlert resume or rearm) answers ALERT_LIMIT_REACHED above maxActiveAlerts.
 - Back-in-stock alerts fire only on a real restock: armed_at is set when the alert starts while the item is unavailable, and later whenever what it follows is seen unavailable (inventory.stock.changed to 0, an offer leaving active, or the evaluate-alerts job). An alert switched on while the item is in stock stays active but unarmed until then; rearming a triggered back-in-stock alert does the same check.
 - Wishlist is for signed-in customers only (decision D3): every store endpoint except the shared-list view needs a customer token.
@@ -404,8 +404,8 @@ type WishlistAlert @areas(in: [STORE]) @phase(n: 3) {
   variant: Variant
   "Seller the alert is limited to, if any (Alert.sellerId)"
   sellerId: UUID
-  "Seller the alert is limited to. Null until the sellers module provides a shared mapper (wishlist has no sellers dependency): use sellerId"
-  seller: SellerPublicProfile
+  "Seller the alert is limited to (public card fields). Null when the alert names no seller or sellers is off"
+  seller: Seller
   kind: WishlistAlertKind!
   "e.g. Any drop below $329.00; Olive, from Trailhead Outfitters"
   condition: String!

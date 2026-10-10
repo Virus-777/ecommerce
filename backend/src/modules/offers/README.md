@@ -111,7 +111,7 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | includedItems | `string[]` What is in this seller's box (defaults to the product's included items) |
 | missingItems | `string[]` Product's standard included items that this offer does not include. Must be stated; shown as 'Missing: …' |
 | complete | `bool` True when nothing is missing |
-| missingItemsStale | `bool` True when the product's box changed (catalog.product.updated) and missingItems names items no longer in it, or no longer lists everything absent. The seller is asked to review (offers.offer.missing_items_stale); cleared when the seller saves missingItems again. The offer stays on sale meanwhile. |
+| missingItemsStale | `bool` True when the product's box changed (catalog.product.updated) and missingItems names items no longer in it, or no longer lists everything absent. The seller is asked to review (offers.offer.missing_items_stale); cleared when the seller saves missingItems again, changed or confirmed as is (offers.offer.missing_items_reviewed). The offer stays on sale meanwhile. |
 | sellerSku | `string` Seller's own code; customers do not see it |
 | stockItemId | `uuid` inventory stock item that holds this offer's quantities |
 | price | `Money` |
@@ -1067,6 +1067,7 @@ Indexes: `pk (job_id, row_no)`, `(job_id, result)`
 | `offers.offer.price_changed` | A new price takes effect (direct, scheduled start, revert or bulk) | `{ offerId: uuid, productId: uuid, variantId: uuid, sellerId: uuid?, ownerType: string, from: Money, to: Money, compareAt: Money?, priceChangeId: uuid?, termsVersion: int }` | cart, catalog, promotions, search, wishlist |
 | `offers.offer.status_changed` | Any offer status transition | `{ offerId: uuid, productId: uuid, variantId: uuid, sellerId: uuid?, ownerType: string, from: string, to: string, reasonCode: string?, reason: text?, stockItemId: uuid, trustEnforcementId: uuid? }` | advertising, cart, catalog, content, inventory, promotions, search, trust, wishlist |
 | `offers.offer.missing_items_stale` | catalog.product.updated changed the product's box so an offer's missingItems no longer matches it (flag set; not repeated while the flag stays set) | `{ offerId: uuid, productId: uuid, variantId: uuid, ownerType: enum(official|seller), sellerId: uuid?, title: string, staleItems: string[], newBoxItems: string[] }` | notifications |
+| `offers.offer.missing_items_reviewed` | The seller (or Official Store staff) saves the missing-items list of an offer flagged missingItemsStale, changed or confirmed as is: the flag is cleared | `{ offerId: uuid, productId: uuid, ownerType: enum(official|seller), sellerId: uuid?, missingItems: string[], changed: bool, reviewedBy: Actor }` | notifications |
 | `offers.offer.eligibility_changed` | An offer becomes eligible or ineligible to be featured | `{ offerId: uuid, sellerId: uuid?, eligible: bool, reasons: string[] }` | - |
 | `offers.featured.changed` | The featured offer for a variant and zone changes | `{ productId: uuid, variantId: uuid, conditionGroup: string, zoneKey: string, fromOfferId: uuid?, toOfferId: uuid? }` | search |
 | `offers.featured_rule.published` | A new featured-offer rule version is published | `{ version: int, effectiveFrom: datetime }` | - |
