@@ -223,12 +223,12 @@ describe('GraphQL', () => {
       method: 'POST',
       url: '/graphql/store',
       headers: visitor(),
-      payload: { query: '{ storeInfo { market { country currency } support { phone openNow hoursLabel } closures { date kind } guestCheckoutEnabled features { key enabled } configVersion } }' },
+      payload: { query: '{ storeInfo { market { country currency legalName companyLine } support { phone openNow hoursLabel } closures { date kind } guestCheckoutEnabled features { key enabled } configVersion } }' },
     });
     expect(res.statusCode, res.body).toBe(200);
     const body = res.json();
     expect(body.errors).toBeUndefined();
-    expect(body.data.storeInfo).toMatchObject({ market: { country: 'US', currency: 'USD' }, guestCheckoutEnabled: true, configVersion: expect.any(String) });
+    expect(body.data.storeInfo).toMatchObject({ market: { country: 'US', currency: 'USD', legalName: expect.any(String), companyLine: expect.any(String) }, guestCheckoutEnabled: true, configVersion: expect.any(String) });
   });
 
   it('upcomingChanges answers sellers', async () => {
