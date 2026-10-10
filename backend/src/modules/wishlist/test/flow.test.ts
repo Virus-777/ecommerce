@@ -384,7 +384,7 @@ describe('aggregates, catalog changes and offers closing', () => {
   });
 
   it('clears saved offers that close and moves items and alerts of a merged product', async () => {
-    app.kernel.events.publish('offers', 'offers.offer.status_changed', { offerId: listing.offerId, productId: listing.productId, variantId: listing.variantId, sellerId: listing.sellerId, ownerType: 'seller', from: 'active', to: 'removed' });
+    app.kernel.events.publish('offers', 'offers.offer.status_changed', { offerId: listing.offerId, productId: listing.productId, variantId: listing.variantId, sellerId: listing.sellerId, ownerType: 'seller', from: 'active', to: 'removed', stockItemId: ((await (app.kernel.boot.apis.get('offers') as any).getOffer(listing.offerId)) as { stockItemId: string }).stockItemId });
     await app.kernel.events.drain();
     const res = await app.inject({ method: 'POST', url: '/graphql/store', payload: { query: '{ me { wishlist { items { id offer { id } } } } }' }, headers: auth(bea.accessToken) });
     expect(res.json().data.me.wishlist.items).toEqual([{ id: beaItemId, offer: null }]); // the card falls back to the featured offer

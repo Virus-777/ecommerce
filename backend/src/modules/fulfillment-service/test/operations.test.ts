@@ -33,6 +33,8 @@ function placed(orderId: string, groupId: string, sellerId: string, itemIds: str
     couponCodes: [],
     groups: [{ groupId, ownerType: 'seller', sellerId, fulfilledBy: 'seller', dispatchBy: new Date(Date.now() + 86_400_000).toISOString(), itemIds, total: USD(5000) }],
     placedAt: new Date().toISOString(),
+    attemptNo: 1,
+    contactName: 'Sam Lee',
   };
 }
 
@@ -102,7 +104,7 @@ describe('fulfillment requests', () => {
     let sku = (await k.call('GET', S('/skus'), { token: s.token })).body.items[0];
     expect(sku.stock).toMatchObject({ available: 0, reserved: 3 });
 
-    const cancelled = { orderId, ref: 'MK-261010-00077', groupId, ownerType: 'seller', sellerId: s.sellerId, itemId: b, offerId: s.offerId, stockItemId: s.stockItemId, quantity: 2, cancellationId: newId(), initiatedBy: 'customer', reasonCode: 'changed_mind', beforeDispatch: true, countsAgainstSeller: false, refund: { itemAmount: USD(2000), discountShare: USD(0), shippingRefund: USD(0), taxRefund: USD(0), total: USD(2000) }, paymentIntentId: newId(), trustReportId: null };
+    const cancelled = { orderId, ref: 'MK-261010-00077', groupId, ownerType: 'seller', sellerId: s.sellerId, itemId: b, offerId: s.offerId, stockItemId: s.stockItemId, quantity: 2, cancellationId: newId(), initiatedBy: 'customer', reasonCode: 'changed_mind', beforeDispatch: true, countsAgainstSeller: false, refund: { itemAmount: USD(2000), discountShare: USD(0), shippingRefund: USD(0), taxRefund: USD(0), total: USD(2000) }, paymentIntentId: newId(), trustReportId: null, notifyCustomer: true };
     await k.publish('orders', 'orders.item.cancelled', cancelled);
     await k.publish('orders', 'orders.item.cancelled', cancelled);
     sku = (await k.call('GET', S('/skus'), { token: s.token })).body.items[0];
@@ -133,7 +135,7 @@ describe('service returns', () => {
     await k.publish('shipping', 'shipping.shipment.dispatched', dispatched(orderId, groupId, s.sellerId, [{ orderItemId: a, quantity: 1 }, { orderItemId: b, quantity: 2 }]));
     const returnId = newId();
     k.returns.set(returnId, { ref: 'RT-261010-0001', sellerId: s.sellerId, items: new Map([[b, 2]]) });
-    const received = { returnId, ownerType: 'seller', sellerId: s.sellerId, items: [{ orderItemId: b, quantity: 2, variantId: newId() }], receivedAt: new Date().toISOString() };
+    const received = { returnId, ref: 'RT-261010-0001', orderId, orderRef: 'MK-261010-00077', ownerType: 'seller', sellerId: s.sellerId, items: [{ orderItemId: b, quantity: 2, variantId: newId() }], receivedAt: new Date().toISOString() };
     await k.publish('returns', 'returns.return.received', received);
     await k.publish('returns', 'returns.return.received', received);
     const list = await k.call('GET', S('/returns'), { token: s.token });
@@ -144,7 +146,7 @@ describe('service returns', () => {
     expect((await k.call('GET', S('/fees?type=returns_processing'), { token: s.token })).body.items.map((f: any) => [f.units, f.amount.amount, f.reference])).toEqual([[2, 500, 'RT-261010-0001']]);
     // another seller's view and an Official Store return are ignored
     expect((await k.call('GET', S('/returns'), { token: (await k.seller()).token })).body.items).toHaveLength(0);
-    await k.publish('returns', 'returns.return.received', { returnId: newId(), ownerType: 'official', sellerId: null, items: [], receivedAt: new Date().toISOString() });
+    await k.publish('returns', 'returns.return.received', { returnId: newId(), ref: 'RT-261010-0002', orderId: newId(), orderRef: 'MK-261010-00078', ownerType: 'official', sellerId: null, items: [], receivedAt: new Date().toISOString() });
 
     const before = (await k.inventory.getAvailability([s.stockItemId]))[s.stockItemId]!.available;
     expect((await k.call('POST', A(`/returns/${ret.id}/outcome`), { body: { outcome: 'restocked', note: '' } })).status).toBe(400);

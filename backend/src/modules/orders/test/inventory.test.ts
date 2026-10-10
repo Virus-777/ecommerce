@@ -19,12 +19,13 @@ describe('stock through the real inventory module', () => {
     const stock = await inv.createStockItem({ ownerType: 'seller', sellerId, offerId: p.offerId, sku: 'PP-SPK-1', productId: p.productId, variantId: p.variantId, condition: 'new', label: 'Speaker', initialAvailable: 5 });
     p.stockItemId = stock.id;
     h.offers.get(p.offerId)!.stockItemId = stock.id;
+    h.offers.get(p.offerId)!.sellerSku = 'PP-SPK-1'; // the offer and its stock item share the seller SKU
 
     const input = checkout([group(h, [line(p, 2)], { sellerId })], { customerId: newId(), paymentState: 'pending_check' });
     const hold = await inv.hold(input.checkoutSessionId, [{ stockItemId: stock.id, quantity: 2 }]);
     const order = await h.service.createOrder(input);
     const item = order.groups[0]!.items[0]!;
-    expect(item.offer.sellerSku).toBe('PP-SPK-1'); // seller SKU frozen from inventory
+    expect(item.offer.sellerSku).toBe('PP-SPK-1'); // seller SKU frozen from the offer snapshot
     await inv.attachOrder(hold.id, order.id, [{ stockItemId: stock.id, orderItemId: item.id }]);
     expect((await inv.getAvailability([stock.id]))[stock.id]!.available).toBe(3);
 
@@ -45,6 +46,7 @@ describe('stock through the real inventory module', () => {
     const stock = await inv.createStockItem({ ownerType: 'seller', sellerId, offerId: p.offerId, sku: 'PP-LMP-1', productId: p.productId, variantId: p.variantId, condition: 'new', label: 'Lamp', initialAvailable: 5 });
     p.stockItemId = stock.id;
     h.offers.get(p.offerId)!.stockItemId = stock.id;
+    h.offers.get(p.offerId)!.sellerSku = 'PP-SPK-1'; // the offer and its stock item share the seller SKU
 
     const input = checkout([group(h, [line(p, 2)], { sellerId })], { customerId: newId() });
     const hold = await inv.hold(input.checkoutSessionId, [{ stockItemId: stock.id, quantity: 2 }]);

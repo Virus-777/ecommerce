@@ -196,7 +196,7 @@ describe('a mixed purchase (scenario 1)', () => {
     const v = await readyCheckout(w, mo.token, { source: 'cart' }, { address: SEATTLE });
     expect(v.packages.map((p: any) => [p.label, p.seller.name, p.seller.official])).toEqual([
       ['Package 1 of 2', 'Northwind Audio', false],
-      ['Package 2 of 2', 'Official Store', true],
+      ['Package 2 of 2', 'Marketly Official Store', true],
     ]);
     expect(v.packagesNote).toBe('Your items ship in 2 packages from different places, so each has its own options and arrival date.');
     expect(v.packages[1].sellerSupport).toBe('Marketly support replies within 1 business day');

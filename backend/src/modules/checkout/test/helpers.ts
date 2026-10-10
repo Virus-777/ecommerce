@@ -136,10 +136,18 @@ export function fakePayments(clock: { now(): Date }) {
 
 export function fakeShipping(clock: { now(): Date }) {
   const knobs = { shiftDays: 0, standardPrice: 599, calls: { quoteOptions: 0, checkCoverage: 0 } };
+  /** Profiles the kit created, by owner: offers checks a profile belongs to the offer's owner (shipping.getProfileOwners) */
+  const owners = new Map<string, { ownerType: 'official' | 'seller'; sellerId: string | null; status: string }>();
+  const profileFor = (owner: { ownerType: 'official' | 'seller'; sellerId: string | null }) => {
+    const id = newId();
+    owners.set(id, { ...owner, status: 'active' });
+    return id;
+  };
   const day = (n: number) => new Date(clock.now().getTime() + (n + knobs.shiftDays) * 86_400_000).toISOString().slice(0, 10);
   const api: Partial<shipping.ShippingPublicApi> = {
     // offers validates a seller's shipping profile through quote(); every profile id quotes in these tests
     quote: async () => ({ shipsToLocation: true, reason: null, options: [], default: null }),
+    getProfileOwners: async (profileIds) => Object.fromEntries(profileIds.map((id) => [id, owners.get(id) ?? null])),
     checkCoverage: async (profileIds, destination) => {
       knobs.calls.checkCoverage++;
       return profileIds.map((profileId) =>
@@ -173,7 +181,7 @@ export function fakeShipping(clock: { now(): Date }) {
       return { shipsToLocation: true, notShippableLineIds: [], reason: null, options: [std, exp], default: std };
     },
   };
-  return { api, knobs };
+  return { api, knobs, profileFor };
 }
 
 /* ================================================================ the world */
@@ -256,7 +264,7 @@ export async function world(o: { wallet?: boolean } = {}): Promise<World> {
   const offerFor = async (variantId: string, price: number, sku: string) => {
     const r = await f.call('POST', '/api/seller/offers/offers', {
       token: seller.sellerToken,
-      body: { productId, variantId, condition: 'new', price: USD(price), sellerSku: sku, quantity: 40, dispatchBusinessDays: 1, shippingProfileId: newId(), returnTerms: { kind: 'baseline' }, warranty: { kind: 'manufacturer', months: 24 }, publish: true },
+      body: { productId, variantId, condition: 'new', price: USD(price), sellerSku: sku, quantity: 40, dispatchBusinessDays: 1, shippingProfileId: ship.profileFor({ ownerType: 'seller', sellerId: seller.sellerId }), returnTerms: { kind: 'baseline' }, warranty: { kind: 'manufacturer', months: 24 }, publish: true },
     });
     expect(r.status, JSON.stringify(r.body)).toBe(201);
     return r.body.offer as { id: string; stockItemId: string };
@@ -276,7 +284,7 @@ export async function world(o: { wallet?: boolean } = {}): Promise<World> {
   const officialStock = await (app.kernel.boot.apis.get('inventory') as any).createStockItem({ ownerType: 'official', sku: 'HAL-AU-100-WH', productId, variantId: white!.id, condition: 'new', label: 'Aurora headphones, White', initialAvailable: 30 });
   const official = await f.call('POST', '/api/admin/offers/official/offers', {
     token: callers.staff(),
-    body: { productId, variantId: white!.id, condition: 'new', price: USD(2300), purchaseLimit: 3, sku: 'HAL-AU-100-WH', stockItemId: officialStock.id, dispatchBusinessDays: 0, shippingProfileId: newId(), returnTerms: { kind: 'baseline' }, warranty: { kind: 'manufacturer', months: 24 }, publish: true },
+    body: { productId, variantId: white!.id, condition: 'new', price: USD(2300), purchaseLimit: 3, sku: 'HAL-AU-100-WH', stockItemId: officialStock.id, dispatchBusinessDays: 0, shippingProfileId: ship.profileFor({ ownerType: 'official', sellerId: null }), returnTerms: { kind: 'baseline' }, warranty: { kind: 'manufacturer', months: 24 }, publish: true },
   });
   expect(official.status, JSON.stringify(official.body)).toBe(201);
   await app.kernel.events.drain();
