@@ -7,6 +7,7 @@ import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { webhooksRoutes } from './http/webhooks.js';
+import { fileServer } from './http/files.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresMediaRepository } from './infra/postgres/repository.js';
 import { createDevProcessor } from './infra/processing/dev.js';
@@ -16,14 +17,14 @@ import { createMemoryStorage } from './infra/storage/memory.js';
 import { MediaService } from './service.js';
 
 /**
- * Media: Every uploaded or generated file: images, video and documents. Signed direct uploads, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted).
+ * Media: Every uploaded or generated file: images, video and documents. Uploads and signed download links, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted).
  *
  * Name, launch phase, dependencies, permissions, events, jobs, settings and endpoints come from
  * docs/api/spec/modules/media.json through `spec`; the server refuses to start if they drift.
  */
 export default defineModule({
   spec,
-  version: '1.2.0',
+  version: '1.3.0',
   migrations,
   register(ctx) {
     // Storage (MEDIA_STORAGE): the server's disk (local, production) or memory (tests). Both take uploads
@@ -40,6 +41,8 @@ export default defineModule({
     const service = new MediaService({ repo: createPostgresMediaRepository(ctx.db), ctx, providers });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), webhooksRoutes(service));
+    // GET /files/{bucket}/{key}: the middleware verifies the signed link (auth kind file-link) before this streams the file
+    if (storage.viaApi) ctx.http.files(fileServer(service, ctx.clock));
     // storage notifications and transcoding results are signed with HMAC (WEBHOOK_SECRETS.media)
     ctx.http.webhookVerifier(hmacWebhookVerifier(ctx.config, ctx.name));
 

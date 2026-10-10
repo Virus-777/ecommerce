@@ -6,6 +6,7 @@
  * and the compiler checks there is exactly one handler per endpoint of that area, that params,
  * query and body have the spec's types, and that the handler returns the spec's response type.
  */
+import type { Readable } from 'node:stream';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { z } from 'zod';
 import type { Actor, Page } from '../../spec/common.js';
@@ -19,7 +20,8 @@ type Out<F> = F extends () => infer S ? (S extends z.ZodType ? z.output<S> : nev
 
 export type ParamsOf<E extends EndpointDef> = E['params'] extends () => z.ZodType ? Out<E['params']> : Record<string, never>;
 export type QueryOf<E extends EndpointDef> = E['query'] extends () => z.ZodType ? Out<E['query']> : Record<string, never>;
-export type BodyOf<E extends EndpointDef> = E['body'] extends () => z.ZodType ? Out<E['body']> : undefined;
+/** binary bodies arrive as a stream (undefined when the request has none); the handler reads them */
+export type BodyOf<E extends EndpointDef> = E['bodyFormat'] extends 'binary' ? Readable | undefined : E['body'] extends () => z.ZodType ? Out<E['body']> : undefined;
 export type ResponseOf<E extends EndpointDef> = E['response'] extends () => z.ZodType
   ? E['paging'] extends true
     ? Page<Out<E['response']>>

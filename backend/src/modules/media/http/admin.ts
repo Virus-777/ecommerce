@@ -3,6 +3,7 @@ import { endpoints, type MediaOwner } from '../../../spec/media.js';
 import { defaultStaffOwnerKind } from '../domain/rules.js';
 import type { MediaService } from '../service.js';
 import { uploadTarget } from './callers.js';
+import { receiveContent } from './files.js';
 
 /**
  * Admin API: /api/admin/media/…  (docs/api/modules/media.md)
@@ -25,8 +26,9 @@ export const adminRoutes = (service: MediaService) =>
         by: { actor, requestId },
       });
     },
-    /** PUT /uploads/{id}/content: Development storage only: the file bytes for an upload ticket (only the staff member who started it) */
-    uploadAdminContent: async ({ params, body, principal }) => service.receiveUploadContent(params.id, body, { area: 'admin', startedBy: { kind: 'staff', id: principal.accountId ?? null } }),
+    /** PUT /uploads/{id}/content: the file bytes for an upload ticket, streamed into storage (only the staff member who started it) */
+    uploadAdminContent: async ({ params, body, principal, request, reply }) =>
+      receiveContent(service, { id: params.id, body, request, reply }, { area: 'admin', startedBy: { kind: 'staff', id: principal.accountId ?? null } }),
     /** POST /uploads/{id}/complete: Confirm a staff upload (only the staff member who started it: the response carries the asset) */
     completeAdminUpload: async ({ params, principal, actor, requestId }) =>
       service.completeUpload(params.id, { startedBy: { kind: 'staff', id: principal.accountId ?? null }, by: { actor, requestId } }),

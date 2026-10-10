@@ -17,6 +17,7 @@ import type { Inbox } from '../events/inbox.js';
 import type { AppError } from '../errors/index.js';
 import type { ModuleEvents } from '../events/index.js';
 import type { ModuleResolvers } from '../graphql/index.js';
+import type { FileRoute } from '../http/files.js';
 import type { RouteSet } from '../http/index.js';
 import type { WebhookVerifier } from '../http/register.js';
 import type { Clock } from '../lib/clock.js';
@@ -100,6 +101,12 @@ export interface ModuleContext<N extends ModuleName> {
     routes(...sets: RouteSet[]): void;
     /** Verifies provider signatures on this module's webhooks (required when it has webhook endpoints) */
     webhookVerifier(verify: WebhookVerifier): void;
+    /**
+     * Serves files this module keeps on the server at GET /files/{bucket}/{key} (one module per process).
+     * Links are signed with secretFor(config, '<module>.files') (kernel/auth/file-links.ts) and verified
+     * by the auth middleware before serve() runs.
+     */
+    files(route: FileRoute): void;
   };
   readonly graphql: {
     resolvers(resolvers: ModuleResolvers): void;

@@ -1,4 +1,4 @@
-/** Development upload target: PUT /api/{area}/media/uploads/{id}/content receives the bytes the ticket allows. */
+/** Upload target when storage is served by the API: PUT /api/{area}/media/uploads/{id}/content streams the bytes the ticket allows. */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { devClaims } from '../../../kernel/auth/dev.js';
 import { token } from '../../../testing/app.js';
@@ -21,7 +21,7 @@ async function ticketFor(area: Area, who: string, body: Buffer, extra: { sha256?
   return res.json();
 }
 
-describe('PUT /uploads/{id}/content (development storage)', () => {
+describe('PUT /uploads/{id}/content (storage served by the API)', () => {
   it('points each area’s tickets at its own content endpoint, with the headers to send', async () => {
     const body = png(800, 800);
     for (const [area, who] of [['store', callers.customer()], ['seller', callers.seller()], ['admin', callers.staff()]] as const) {
@@ -126,8 +126,8 @@ describe('PUT /uploads/{id}/content (development storage)', () => {
   });
 });
 
-describe('with a real storage adapter', () => {
-  it('hands out the storage URL and the endpoint answers DEV_STORAGE_ONLY (409)', async () => {
+describe('with a direct-upload storage adapter', () => {
+  it('hands out the storage URL and the endpoint answers DIRECT_UPLOAD_ONLY (409)', async () => {
     const providers = t.media.providers as { storage: StorageProvider };
     const dev = providers.storage;
     // a direct-upload adapter (S3-compatible): its own signed URLs, the API never carries the bytes
@@ -144,7 +144,7 @@ describe('with a real storage adapter', () => {
       expect(ticket.url).toBe(`https://s3.example.test/marketly-private/originals/${ticket.assetId}.png?X-Amz-Signature=abc`);
       const res = await t.app.inject({ method: 'PUT', url: `/api/seller/media/uploads/${ticket.uploadId}/content`, headers: { ...auth(seller), 'content-type': 'image/png' }, payload: Buffer.alloc(100) });
       expect(res.statusCode).toBe(409);
-      expect(res.json().error.code).toBe('DEV_STORAGE_ONLY');
+      expect(res.json().error.code).toBe('DIRECT_UPLOAD_ONLY');
     } finally {
       providers.storage = dev;
     }

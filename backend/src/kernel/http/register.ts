@@ -146,23 +146,22 @@ export function registerEndpoints(app: FastifyInstance, regs: EndpointRegistrati
     if (k.config.responseValidation) scope.setSerializerCompiler(serializerCompiler);
     else scope.setSerializerCompiler(() => (data) => JSON.stringify(data));
     for (const r of regs) if (r.def.bodyFormat !== 'binary') registerEndpoint(scope, r, k);
-    // Raw-bytes endpoints (e.g. media's development upload target) in their own scope: any content type
-    // is read as a Buffer, up to BINARY_BODY_LIMIT; the handler enforces its own, smaller limit
+    // Raw-bytes endpoints (media's upload target) in their own scope: whatever the content type, the
+    // request body is handed to the handler as a stream, never buffered; the handler reads it and enforces
+    // its own size limit while it streams (the body is not validated: it is a stream by construction)
     const binary = regs.filter((r) => r.def.bodyFormat === 'binary');
     if (binary.length) {
       await scope.register(async (raw) => {
         raw.removeAllContentTypeParsers();
-        raw.addContentTypeParser('*', { parseAs: 'buffer', bodyLimit: BINARY_BODY_LIMIT }, (_request, body, done) => done(null, body));
-        for (const r of binary) registerEndpoint(raw, r, k, { bodyLimit: BINARY_BODY_LIMIT });
+        raw.addContentTypeParser('*', (_request, payload, done) => done(null, payload));
+        raw.setValidatorCompiler((req) => (req.httpPart === 'body' ? (data: unknown) => ({ value: data }) : validatorCompiler(req as never)));
+        for (const r of binary) registerEndpoint(raw, r, k);
       });
     }
   });
 }
 
-/** Upper bound for raw-bytes request bodies (the largest media upload purpose is 500 MB) */
-export const BINARY_BODY_LIMIT = 512 * 1024 * 1024;
-
-function registerEndpoint(app: FastifyInstance, r: EndpointRegistration, k: HttpKernel, opts: { bodyLimit?: number } = {}) {
+function registerEndpoint(app: FastifyInstance, r: EndpointRegistration, k: HttpKernel) {
   const { module, id, def: d, handler } = r;
   const operationId = `${module}.${id}`;
   const { idempotency, auth } = k;
@@ -184,7 +183,6 @@ function registerEndpoint(app: FastifyInstance, r: EndpointRegistration, k: Http
     url: routeUrlOf(module, d),
     schema: buildRouteSchema(r),
     config: { operationId, auth: d.auth },
-    ...(opts.bodyLimit ? { bodyLimit: opts.bodyLimit } : {}),
     onRequest: hooks.onRequest,
     preValidation: hooks.preValidation,
     // conditional permissions → Idempotency-Key replay → step-up (a replay never spends a re-auth token)

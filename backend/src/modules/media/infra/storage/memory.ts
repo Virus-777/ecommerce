@@ -38,7 +38,7 @@ const encodeKey = (key: string) => key.split('/').map(encodeURIComponent).join('
 const decodeKey = (path: string) => path.split('/').map(decodeURIComponent).join('/');
 
 /** Reads a stream into memory, refusing more than maxBytes */
-export async function collect(body: AsyncIterable<Uint8Array>, maxBytes = Infinity): Promise<Uint8Array> {
+export async function collect(body: AsyncIterable<Uint8Array> | Iterable<Uint8Array>, maxBytes = Infinity): Promise<Uint8Array> {
   const chunks: Uint8Array[] = [];
   let n = 0;
   for await (const chunk of body) {

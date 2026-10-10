@@ -6,6 +6,7 @@
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { REFRESH_COOKIE_PATH } from '../auth/chain.js';
+import { FILES_PREFIX } from '../auth/file-links.js';
 import type { Config } from '../config/index.js';
 
 /** Refresh and sign-out: the only paths the refresh cookie is sent to, so the only ones with credentialed CORS */
@@ -21,7 +22,9 @@ function allowedOrigin(config: Config, request: FastifyRequest): string | undefi
   if (!origin) return undefined;
   const area = areaOf(request.url);
   const o = config.cors;
-  const allowed = area === 'public' ? [...o.store, ...o.seller, ...o.admin] : area ? o[area] : [];
+  // signed file links are opened by every app (no credentials: the link is the token)
+  const anyApp = area === 'public' || request.url.startsWith(FILES_PREFIX);
+  const allowed = anyApp ? [...o.store, ...o.seller, ...o.admin] : area ? o[area] : [];
   return allowed.includes(origin) ? origin : undefined;
 }
 
@@ -49,8 +52,9 @@ export function installSecurity(app: FastifyInstance, config: Config) {
       reply.header('cache-control', 'private, no-store').header('x-content-type-options', 'nosniff').header('referrer-policy', 'no-referrer');
       if (config.env === 'production') reply.header('strict-transport-security', 'max-age=31536000; includeSubDomains');
     }
-    // only the middleware's UNAUTHORIZED is about the token; business 401s (INVALID_CREDENTIALS …) are not
-    if (reply.statusCode === 401 && typeof payload === 'string' && payload.includes('"code":"UNAUTHORIZED"')) {
+    // only the middleware's UNAUTHORIZED is about the token; business 401s (INVALID_CREDENTIALS …) are not,
+    // nor is a bad file link (no Bearer token can help: the app asks for a new link)
+    if (reply.statusCode === 401 && !request.url.startsWith(FILES_PREFIX) && typeof payload === 'string' && payload.includes('"code":"UNAUTHORIZED"')) {
       const m = /"reason":"token_(\w+)"/.exec(payload);
       reply.header('www-authenticate', m && m[1] !== 'missing' ? 'Bearer error="invalid_token"' : 'Bearer');
     }

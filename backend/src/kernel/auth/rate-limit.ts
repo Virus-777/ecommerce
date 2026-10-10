@@ -112,6 +112,8 @@ export const CALLER_LIMITS: Record<string, { all: Limit; writes?: Limit }> = {
 };
 
 export const IP_LIMIT: Limit = { limit: 600, windowMs: MIN };
+/** Signed file links (GET /files/…): images on a page come many at a time, so they don't spend the API budget */
+export const FILES_IP_LIMIT: Limit = { limit: 3000, windowMs: MIN };
 
 /** Named classes (spec `rateLimit`), keyed by request fields */
 export const CLASS_LIMITS: Record<string, { key: (r: { ip: string; body: any }) => string | undefined; limit: Limit }[]> = {

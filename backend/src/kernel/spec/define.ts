@@ -37,7 +37,7 @@ export interface EndpointDef {
   /** Adds cursor/page/limit to the query and wraps the response in Page<…> */
   readonly paging?: boolean;
   readonly body?: () => z.ZodType;
-  /** binary: the body is the raw request bytes (any content type), handed to the handler as a Uint8Array */
+  /** binary: the body is the raw request bytes (any content type), handed to the handler as a stream (never buffered) */
   readonly bodyFormat?: 'binary';
   /** null → no content */
   readonly response: (() => z.ZodType) | null;

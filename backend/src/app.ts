@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { moduleAuthorities, type Authorities } from './kernel/auth/authorities.js';
 import { REFRESH_COOKIE, type AuthChain, type WebhookVerifier } from './kernel/auth/chain.js';
 import { memoryRateLimitStore, postgresRateLimitStore, PURGE_RATE_LIMITS_JOB } from './kernel/auth/rate-limit.js';
+import { fileLinkSecret } from './kernel/auth/file-links.js';
 import { createAuthChain } from './kernel/auth/setup.js';
 import type { Principal } from './kernel/auth/index.js';
 import type { KeyRing } from './kernel/auth/tokens.js';
@@ -16,6 +17,7 @@ import { createDatabase, type Database } from './kernel/db/index.js';
 import { registerErrorCodes } from './kernel/errors/index.js';
 import { EventBus } from './kernel/events/index.js';
 import { registerGraphQL, unusablePersistedQueries } from './kernel/graphql/index.js';
+import { registerFileRoute } from './kernel/http/files.js';
 import { postgresIdempotencyStore } from './kernel/http/idempotency.js';
 import { createOpenApiObjectTransform, createOpenApiTransform } from './kernel/http/openapi.js';
 import { registerEndpoints } from './kernel/http/register.js';
@@ -153,7 +155,10 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
   await boot.runAfterBoot();
 
   /* ---------------------------------------------------------------- authorization: a token on every request, verified here */
+  // GET /files/…: the token is the signed link, verified with the serving module's file-link key
+  const fileRoute = boot.fileRoutes[0];
   const { auth, revocations } = await createAuthChain({
+    fileLinks: fileRoute && { secret: fileLinkSecret(config, fileRoute.module), permanentBuckets: new Set(fileRoute.permanentBuckets) },
     config,
     clock,
     log: app.log,
@@ -171,6 +176,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
   for (const name of ['sellers.member.permissions_changed', 'sellers.member.removed', 'sellers.seller.closed']) events.subscribe('kernel', name, () => auth.invalidate('members'));
 
   registerEndpoints(app, boot.endpoints, { config, auth, idempotency: postgresIdempotencyStore(database.kysely, clock) });
+  if (fileRoute) registerFileRoute(app, fileRoute);
   const graphql = await registerGraphQL(app, {
     config,
     baseTypeDefs,

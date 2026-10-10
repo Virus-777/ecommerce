@@ -16,6 +16,7 @@ export { auth, callers };
 export interface MediaTestApp {
   app: FastifyInstance;
   media: MediaService;
+  /** The memory adapter's test helpers (acceptSignedPut, fetch, size) exist only with memory storage */
   storage: MemoryStorage;
   processor: DevProcessor;
   clock: ReturnType<typeof fixedClock>;
@@ -24,14 +25,17 @@ export interface MediaTestApp {
   eventsNamed(name: string): EventEnvelope[];
 }
 
-/** media plus audit, whose record/historyOf are stubbed (audit is built in another tranche) */
-export async function mediaApp(): Promise<MediaTestApp> {
+/**
+ * media plus audit, whose record/historyOf are stubbed (audit is built in another tranche). Storage is memory
+ * (the test default) unless `storage` says local, in `dir`.
+ */
+export async function mediaApp(opts: { storage?: 'memory' | 'local'; dir?: string } = {}): Promise<MediaTestApp> {
   const clock = fixedClock(new Date());
   const audits: audit.RecordInput[] = [];
   const app = await buildTestApp({
     only: ['media', 'audit'],
     clock,
-    config: { rateLimits: false },
+    config: { rateLimits: false, ...(opts.storage ? { media: { storage: opts.storage, dir: opts.dir ?? '.data/test-media' } } : {}) },
     apiStubs: {
       audit: {
         record: async (entry) => {

@@ -9,7 +9,7 @@ import type { Config } from '../config/index.js';
 import type { Clock } from '../lib/clock.js';
 import { appProofVerifier } from './app-proof.js';
 import { devAuthorities, type Authorities } from './authorities.js';
-import { AuthChain, type WebhookVerifier } from './chain.js';
+import { AuthChain, type FileLinkAuth, type WebhookVerifier } from './chain.js';
 import type { Principal } from './index.js';
 import { memoryRateLimitStore, UNLIMITED, type RateLimitStore } from './rate-limit.js';
 import { RevocationList } from './revocation.js';
@@ -28,6 +28,8 @@ export interface AuthSetup {
   ownerOnly: ReadonlySet<string>;
   /** Where the middleware counts (RATE_LIMIT_STORE); default memory */
   limits?: RateLimitStore;
+  /** Signed file links (GET /files/…), when a module serves files */
+  fileLinks?: FileLinkAuth;
 }
 
 
@@ -86,6 +88,7 @@ export async function createAuthChain(s: AuthSetup): Promise<{ auth: AuthChain; 
     ownerOnly: s.ownerOnly,
     db: s.db,
     claimsOf,
+    fileLinks: s.fileLinks,
   });
   return { auth, revocations };
 }

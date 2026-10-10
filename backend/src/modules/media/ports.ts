@@ -182,7 +182,7 @@ export interface StorageProvider {
   get(bucket: string, key: string): Promise<Uint8Array | null>;
   put(bucket: string, key: string, body: Uint8Array, contentType: string): Promise<StoredObject>;
   /** Writes a stream without holding it in memory; above maxBytes it stops reading, stores nothing and throws ObjectTooLargeError */
-  putStream(bucket: string, key: string, body: AsyncIterable<Uint8Array>, contentType: string, opts?: { maxBytes?: number }): Promise<StoredObject>;
+  putStream(bucket: string, key: string, body: AsyncIterable<Uint8Array> | Iterable<Uint8Array>, contentType: string, opts?: { maxBytes?: number }): Promise<StoredObject>;
   /** Opens an object for streaming; null when it doesn't exist */
   open(bucket: string, key: string): Promise<OpenedObject | null>;
   copy(from: { bucket: string; key: string }, to: { bucket: string; key: string }): Promise<boolean>;
