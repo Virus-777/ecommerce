@@ -313,12 +313,15 @@ describe('takedown and restore', () => {
     await send('POST', `/api/admin/media/assets/${asset.id}/remove`, callers.staff(), { reason: 'Privacy', showPlaceholder: false });
     await send('POST', `/api/admin/media/assets/${plain.id}/remove`, callers.staff(), { reason: 'Rights', showPlaceholder: false });
     const db = t.app.kernel.database.kysely;
-    // the state before the columns existed: the choice lived in the takedown's audit entry only (audit's record is stubbed here)
+    // the state before the columns existed: the choice lived in the takedown's audit entry only (audit's record is stubbed here).
+    // audit.entries is partitioned by month and audit is stubbed here, so the test gives the entry's month a partition
+    const at = new Date('2026-01-02T03:04:05Z');
+    await sql`create table if not exists audit_partitions.entries_media_test partition of audit.entries for values from ('2026-01-01') to ('2026-02-01')`.execute(db);
     await sql`insert into audit.entries (id, at, actor_kind, actor_roles, action, action_label, module, category, target_type, target_id, evidence, visible_to_seller, after, prev_hash, hash)
-      values (${newId()}, '2026-01-02T03:04:05Z', 'staff', '[]', 'media.asset.remove', 'Took down file', 'media', 'catalog', 'media_asset', ${asset.id}, '[]', true, '{"showPlaceholder": false}', '\\x00', '\\x00')`.execute(db);
+      values (${newId()}, ${at}, 'staff', '[]', 'media.asset.remove', 'Took down file', 'media', 'catalog', 'media_asset', ${asset.id}, '[]', true, '{"showPlaceholder": false}', '\\x00', '\\x00')`.execute(db);
     await sql`alter table media.assets drop column removed_at, drop column show_placeholder`.execute(db);
     await t.app.kernel.database.exec(m0002TakedownColumns.sql);
-    expect(await t.media.getAsset(asset.id)).toMatchObject({ showPlaceholder: false, removedAt: '2026-01-02T03:04:05.000Z' });
+    expect(await t.media.getAsset(asset.id)).toMatchObject({ showPlaceholder: false, removedAt: new Date(at).toISOString() });
     expect(await t.media.getAsset(plain.id)).toMatchObject({ showPlaceholder: true, removedAt: null }); // no entry: the old behaviour
   });
 
