@@ -104,9 +104,9 @@ describe('carts and orders', () => {
     const r = await h.api.revalidate([lineA, lineB, { ...lineB, offerId: m.oc.id, quantity: 50, price: { amount: 9900, currency: 'USD' } }], '97205');
     expect(r.ok).toBe(false);
     expect(r.changes).toEqual([
-      expect.objectContaining({ offerId: m.oa.id, kind: 'price', before: '$179.00', after: '$184.00', alternatives: [] }),
-      expect.objectContaining({ offerId: m.ob.id, kind: 'terms' }),
-      expect.objectContaining({ offerId: m.oc.id, kind: 'availability', after: '10' }),
+      expect.objectContaining({ offerId: m.oa.id, kind: 'price', before: '$179.00', after: '$184.00', previous: { price: { amount: 17900, currency: 'USD' } }, current: { price: { amount: 18400, currency: 'USD' } }, alternatives: [] }),
+      expect.objectContaining({ offerId: m.ob.id, kind: 'terms', previous: { termsVersion: 1 }, current: { termsVersion: 2 } }),
+      expect.objectContaining({ offerId: m.oc.id, kind: 'availability', after: '10', previous: { quantity: 50 }, current: { quantity: 10 } }),
     ]);
 
     await asSeller(h, m.a, 'POST', `/offers/${m.oa.id}/end`, {});

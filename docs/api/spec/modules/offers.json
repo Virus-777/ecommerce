@@ -1033,9 +1033,26 @@
     },
     "OfferChange": {
       "offerId": "uuid",
-      "kind": "enum(price|availability|delivery|terms|removed|seller_restricted)",
-      "before": "string?",
-      "after": "string?",
+      "kind": {
+        "type": "enum(price|availability|delivery|terms|removed|seller_restricted)",
+        "desc": "One change per line, checked in this order: removed, seller_restricted, availability, delivery, price, terms (terms only when the price did not change)"
+      },
+      "before": {
+        "type": "string?",
+        "desc": "Display text of the old value: price '$94.99', availability the quantity asked for ('3'), terms 'v2'; null for delivery, removed and seller_restricted. Read previous for the typed value."
+      },
+      "after": {
+        "type": "string?",
+        "desc": "Display text of the new value: price '$99.99', availability the units that can be bought now ('1', '0'), delivery the location label that is not served, terms 'v3'; null for removed and seller_restricted. Read current for the typed value."
+      },
+      "previous": {
+        "type": "OfferChangeValues?",
+        "desc": "Typed old value, by kind: price → price (the line's price), availability → quantity (asked for), terms → termsVersion (the line's). Null for delivery, removed and seller_restricted"
+      },
+      "current": {
+        "type": "OfferChangeValues?",
+        "desc": "Typed new value, by kind: price → price (now), availability → quantity (units that can be bought now, 0 when the offer is not active), delivery → postalCode (the location not served), terms → termsVersion (now). Null for removed and seller_restricted"
+      },
       "message": {
         "type": "string",
         "desc": "Customer-facing explanation"
@@ -1044,6 +1061,12 @@
         "type": "OfferView[]",
         "desc": "Other offers for the same variant the customer may choose explicitly"
       }
+    },
+    "OfferChangeValues": {
+      "price": "Money?",
+      "quantity": "int?",
+      "termsVersion": "int?",
+      "postalCode": "string?"
     },
     "OfferSnapshot": {
       "offerId": "uuid",
