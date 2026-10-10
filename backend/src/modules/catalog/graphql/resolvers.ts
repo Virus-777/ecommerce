@@ -1,7 +1,8 @@
 import { isAppError } from '../../../kernel/errors/index.js';
 import type { GraphQLContext, ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { format } from '../../../kernel/lib/money.js';
 import { toPageRequest } from '../../../kernel/lib/pagination.js';
-import type { Actor, PageInput } from '../../../spec/common.js';
+import type { Actor, Money, PageInput } from '../../../spec/common.js';
 import type { Attribute, Category, Product, ProductAdmin, ProductCheck } from '../../../spec/catalog.js';
 import type { CatalogService } from '../service.js';
 
@@ -10,6 +11,7 @@ const up = (s: string | null | undefined) => (s ? s.toUpperCase() : null);
 const ACTOR_KIND: Record<Actor['kind'], string> = { customer: 'CUSTOMER', visitor: 'GUEST', anonymous: 'GUEST', seller: 'SELLER', staff: 'STAFF', provider: 'SYSTEM', system: 'SYSTEM' };
 const actorOut = (a: Actor | null | undefined) => (a ? { id: a.id ?? null, name: a.name ?? null, kind: ACTOR_KIND[a.kind] ?? 'SYSTEM' } : null);
 const pairs = (m: Record<string, string> | null | undefined) => Object.entries(m ?? {}).map(([name, value]) => ({ name, value }));
+const money = (m: Money | null | undefined) => (m ? { ...m, formatted: format(m) } : null);
 const nullOnNotFound = async <T>(p: Promise<T>): Promise<T | null> => {
   try {
     return await p;
@@ -59,7 +61,7 @@ export function graphqlMappers(service: CatalogService) {
     ...p,
     category: () => categoryById(p.categoryId),
     specs: pairs(p.specs),
-    variants: p.variants.map((v) => ({ ...v, options: pairs(v.options) })),
+    variants: p.variants.map((v) => ({ ...v, options: pairs(v.options), listPrice: money(v.listPrice) })),
   });
 
   const checkOut = (c: ProductCheck) => ({

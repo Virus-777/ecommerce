@@ -4,9 +4,11 @@ import type { EventPayload } from '../../kernel/events/index.js';
 import { toPageRequest } from '../../kernel/lib/pagination.js';
 import type * as common from '../../spec/common.js';
 import type * as identity from '../../spec/identity.js';
-import type { Attribute, Brand, CatalogPublicApi, Category, Product, ProductAdmin, ProductSnapshot } from '../../spec/catalog.js';
-import { addBusinessDays, REVIEW_TARGET_BUSINESS_DAYS } from './domain/rules.js';
+import type { Attribute, Brand, CatalogPublicApi, Category, CategoryPath, Product, ProductAdmin, ProductRecord, ProductSnapshot, ProductSummary, VariantParcel, VariantRef } from '../../spec/catalog.js';
+import { isUuid } from '../../kernel/lib/ids.js';
+import { addBusinessDays } from './domain/rules.js';
 import { stringMap, strings } from './mappers.js';
+import { currentListPrice } from './service/products.js';
 import type { OfferIndexRow } from './ports.js';
 import { CatalogAdmin } from './service/admin.js';
 import type { By } from './service/base.js';
@@ -15,6 +17,8 @@ import { OVERRIDE_ACTION } from './service/review.js';
 export type { CatalogServiceDeps } from './service/base.js';
 
 const SYSTEM: By = { actor: SYSTEM_ACTOR };
+const MAX_BATCH = 200;
+const invalid = (path: string, message: string) => new AppError('VALIDATION_FAILED', message, { issues: [{ path, message }] });
 
 /**
  * Catalog use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
@@ -54,8 +58,124 @@ export class CatalogService extends CatalogAdmin implements CatalogPublicApi {
       options: stringMap(variant.options),
       modelNumber: product.model_number,
       imageUrl: image?.url ?? null,
+      imageId: imageId ?? null,
+      image: image ?? null,
       takenAt: this.now().toISOString(),
     };
+  }
+
+  /** Batch read in any review state or publication; merged records carry mergedIntoId. Unknown ids are left out (200 at most). */
+  async getProducts(productIds: string[]): Promise<ProductRecord[]> {
+    const ids = [...new Set((productIds ?? []).filter(isUuid))];
+    if (ids.length > MAX_BATCH) throw invalid('productIds', `Ask for at most ${MAX_BATCH} products at a time`);
+    const rows = await this.repo.getProducts(ids);
+    const views = await this.productViews(rows);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    return ids.flatMap((id) => {
+      const r = byId.get(id);
+      if (!r) return [];
+      return [
+        {
+          product: views.get(id)!,
+          reviewState: r.review_state as ProductRecord['reviewState'],
+          publication: r.publication as ProductRecord['publication'],
+          purchasable: !r.merged_into_id && r.review_state === 'approved' && r.publication === 'active',
+          ownerSellerId: r.owner_seller_id,
+          mergedIntoId: r.merged_into_id,
+        },
+      ];
+    });
+  }
+
+  /** Product pickers in other modules' admin screens: q matches title, PRD- ref, model number, MPN and GTIN */
+  async searchProducts(
+    filter: { q?: string; categoryId?: string; brandId?: string; ownerSellerId?: string; purchasableOnly?: boolean; reviewStates?: string[] },
+    page: common.PageInput,
+  ): Promise<common.Page<ProductSummary>> {
+    const tax = filter?.categoryId ? await this.taxonomy() : null;
+    const p = await this.repo.listProducts(
+      {
+        q: filter?.q,
+        matchGtin: true,
+        ...(tax && filter.categoryId ? { categoryIds: tax.subtree(filter.categoryId) } : {}),
+        ...(filter?.brandId ? { brandId: filter.brandId } : {}),
+        ...(filter?.ownerSellerId ? { ownerSellerId: filter.ownerSellerId } : {}),
+        ...(filter?.reviewStates?.length ? { reviewStates: filter.reviewStates } : {}),
+        purchasableOnly: Boolean(filter?.purchasableOnly),
+      },
+      toPageRequest(page),
+    );
+    const s = await this.summaries(p.items);
+    return { ...p, items: p.items.map((r) => s.get(r.id)!) };
+  }
+
+  /** Keyset walk over product ids (by id, 1–1000 per call) for index rebuilds */
+  async listProductIds(opts: { after?: string; limit: number; purchasableOnly?: boolean; updatedSince?: string }): Promise<{ ids: string[]; nextAfter: string | null }> {
+    const limit = Math.min(1000, Math.max(1, Math.floor(Number(opts?.limit) || 0)));
+    if (opts?.after && !isUuid(opts.after)) throw invalid('after', 'Not a product id');
+    const since = opts?.updatedSince ? new Date(opts.updatedSince) : undefined;
+    if (since && Number.isNaN(since.getTime())) throw invalid('updatedSince', 'Not a date and time');
+    const ids = await this.repo.productIdsAfter({ includeMerged: true, purchasableOnly: Boolean(opts?.purchasableOnly), ...(since ? { updatedSince: since } : {}) }, opts?.after ?? null, limit);
+    return { ids, nextAfter: ids.length === limit ? ids.at(-1)! : null };
+  }
+
+  /** Brands by id with status (any status). Unknown ids are left out. */
+  async getBrands(brandIds: string[]): Promise<Brand[]> {
+    const ids = [...new Set((brandIds ?? []).filter(isUuid))];
+    const rows = await this.repo.getBrands(ids);
+    const views = await this.brandViews(rows);
+    return ids.flatMap((id) => (views.has(id) ? [views.get(id)!] : []));
+  }
+
+  /** Variants by id with product id and title, options, GTIN, parcel data and list price. Unknown ids are left out. */
+  async getVariants(variantIds: string[]): Promise<VariantRef[]> {
+    const ids = [...new Set((variantIds ?? []).filter(isUuid))];
+    const variants = await this.repo.getVariants(ids);
+    const products = new Map((await this.repo.getProducts([...new Set(variants.map((v) => v.product_id))])).map((p) => [p.id, p]));
+    const byId = new Map(variants.map((v) => [v.id, v]));
+    return ids.flatMap((id) => {
+      const v = byId.get(id);
+      const p = v && products.get(v.product_id);
+      if (!v || !p) return [];
+      return [
+        {
+          id: v.id,
+          productId: p.id,
+          productTitle: p.title,
+          options: stringMap(v.options),
+          gtin: v.gtin,
+          weightGrams: v.weight_grams,
+          lengthCm: v.length_cm,
+          widthCm: v.width_cm,
+          heightCm: v.height_cm,
+          listPrice: currentListPrice(v),
+        },
+      ];
+    });
+  }
+
+  /** Shipping weight and dimensions of one unit per variant; null when the variant has no weight yet (callers use their default parcel) */
+  async getParcels(variantIds: string[]): Promise<Record<string, VariantParcel | null>> {
+    const ids = [...new Set((variantIds ?? []).filter(isUuid))];
+    const byId = new Map((await this.repo.getVariants(ids)).map((v) => [v.id, v]));
+    const out: Record<string, VariantParcel | null> = {};
+    for (const id of variantIds ?? []) {
+      const v = byId.get(id);
+      out[id] = v && v.weight_grams ? { weightGrams: v.weight_grams, lengthCm: v.length_cm, widthCm: v.width_cm, heightCm: v.height_cm } : null;
+    }
+    return out;
+  }
+
+  /** Root-first category names and ids per category (unknown ids are left out) */
+  async getCategoryPaths(categoryIds: string[]): Promise<Record<string, CategoryPath>> {
+    const tax = await this.taxonomy();
+    const out: Record<string, CategoryPath> = {};
+    for (const id of new Set(categoryIds ?? [])) {
+      if (!tax.byId.has(id)) continue;
+      const path = tax.path(id);
+      out[id] = { categoryId: id, names: path.map((c) => c.name), ids: path.map((c) => c.id) };
+    }
+    return out;
   }
 
   /** Category tree for menus and the Categories tab, with in-stock product counts and category images */
@@ -172,6 +292,7 @@ export class CatalogService extends CatalogAdmin implements CatalogPublicApi {
   async onSellerReinstatedFromSellers(event: EventPayload<'sellers.seller.reinstated'>): Promise<void> {
     const paused = await this.repo.openSubmissionsOfSeller(event.sellerId, { paused: true });
     if (!paused.length) return;
+    const targetDays = await this.reviewTargetDays();
     const sellers = this.ctx.tryUse('sellers');
     const products = new Map((await this.repo.getProducts(paused.map((s) => s.product_id))).map((p) => [p.id, p]));
     for (const s of paused) {
@@ -180,7 +301,7 @@ export class CatalogService extends CatalogAdmin implements CatalogPublicApi {
         if (!can.allowed) continue;
       }
       // back in its original place: the target counted from when it was submitted
-      await this.repo.updateSubmission(s.id, { review_due_at: addBusinessDays(s.submitted_at, REVIEW_TARGET_BUSINESS_DAYS) });
+      await this.repo.updateSubmission(s.id, { review_due_at: addBusinessDays(s.submitted_at, targetDays) });
     }
   }
 
@@ -222,19 +343,53 @@ export class CatalogService extends CatalogAdmin implements CatalogPublicApi {
     });
   }
 
-  /** trust.enforcement.recorded: suspend products named in a suspend_product enforcement */
+  /**
+   * trust.enforcement.recorded: suspend products named in a suspend_product enforcement. The review-log entry keeps
+   * enforcementId and trustReportId, and catalog.product.publication_changed carries both (trust confirms with it).
+   */
   async onEnforcementRecordedFromTrust(event: EventPayload<'trust.enforcement.recorded'>): Promise<void> {
     if (event.action !== 'suspend_product' || event.alreadyApplied) return;
-    const targets = (event.targets ?? []) as { type?: string; id?: string }[];
-    for (const t of targets) {
-      if (t?.type !== 'product' || !t.id) continue;
-      const p = await this.repo.getProduct(t.id);
+    for (const t of productTargets(event.targets)) {
+      const p = await this.repo.getProduct(t);
       if (!p) {
-        this.ctx.log.info({ productId: t.id, enforcementId: event.enforcementId }, 'catalog: enforcement names an unknown product');
+        this.ctx.log.info({ productId: t, enforcementId: event.enforcementId }, 'catalog: enforcement names an unknown product');
         continue;
       }
       if (p.publication === 'suspended') continue; // already applied
-      await this.changePublication(p.id, { to: 'suspended', reason: `Trust and Risk enforcement: ${event.reason}`, trustReportId: event.reportId }, SYSTEM, { system: true });
+      await this.changePublication(
+        p.id,
+        { to: 'suspended', reason: `Trust and Risk enforcement: ${event.reason}`, trustReportId: event.reportId, trustEnforcementId: event.enforcementId },
+        SYSTEM,
+        { system: true, claim: `enforcement-recorded:${event.enforcementId}:${p.id}` },
+      );
+    }
+  }
+
+  /**
+   * trust.enforcement.reversed: action suspend_product reactivates each target product whose current suspension came
+   * from that enforcement (enforcementId on its latest publication_changed log entry). Products suspended again since,
+   * or merged, are left alone. No publication-override approval: the reversal was approved in trust.
+   */
+  async onEnforcementReversedFromTrust(event: EventPayload<'trust.enforcement.reversed'>): Promise<void> {
+    if (event.action !== 'suspend_product') return;
+    for (const t of productTargets(event.targets)) {
+      const p = await this.repo.getProduct(t);
+      if (!p || p.merged_into_id || p.publication !== 'suspended') {
+        this.ctx.log.info({ productId: t, enforcementId: event.enforcementId, publication: p?.publication ?? null }, 'catalog: reversed enforcement leaves the product as it is');
+        continue;
+      }
+      const last = await this.repo.latestLog(p.id, 'publication_changed');
+      const f = stringMap(last?.fields);
+      if (f.to !== 'suspended' || f.enforcementId !== event.enforcementId) {
+        this.ctx.log.info({ productId: p.id, enforcementId: event.enforcementId }, 'catalog: the current suspension is not from the reversed enforcement');
+        continue;
+      }
+      await this.changePublication(
+        p.id,
+        { to: 'active', reason: `Trust and Risk enforcement ${event.ref} reversed: ${event.reason}`, trustReportId: event.reportId, trustEnforcementId: event.enforcementId },
+        SYSTEM,
+        { system: true, claim: `enforcement-reversed:${event.enforcementId}:${p.id}`, approvalNote: 'Reversal approved in Trust and Risk' },
+      );
     }
   }
 
@@ -332,4 +487,10 @@ export class CatalogService extends CatalogAdmin implements CatalogPublicApi {
       return null; // the name only decorates offer notes
     }
   }
+}
+
+/** Product ids named by an enforcement's targets */
+function productTargets(targets: unknown): string[] {
+  const list = (Array.isArray(targets) ? targets : []) as { type?: string; id?: string }[];
+  return [...new Set(list.filter((t) => t?.type === 'product' && typeof t.id === 'string' && isUuid(t.id)).map((t) => t.id!))];
 }

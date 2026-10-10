@@ -35,6 +35,11 @@ export interface ProductFilter {
   duplicateSuspected?: boolean;
   /** Merged duplicates are left out unless asked */
   includeMerged?: boolean;
+  /** q also matches a variant GTIN exactly (product pickers) */
+  matchGtin?: boolean;
+  /** Approved and active only */
+  purchasableOnly?: boolean;
+  updatedSince?: Date;
 }
 
 export interface BrandFilter {
@@ -114,6 +119,8 @@ export interface CatalogRepository {
   insertProduct(row: ProductRow): Promise<ProductRow>;
   updateProduct(id: string, patch: Partial<ProductRow>): Promise<ProductRow>;
   listProducts(filter: ProductFilter, page: PageRequest): Promise<common.Page<ProductRow>>;
+  /** Keyset walk over product ids (index rebuilds) */
+  productIdsAfter(filter: ProductFilter, afterId: string | null, limit: number): Promise<string[]>;
   /** Keyset batches by id for exports */
   productBatch(filter: ProductFilter, afterId: string | null, limit: number): Promise<ProductRow[]>;
   productStats(): Promise<ProductStatsCounts>;
@@ -131,6 +138,7 @@ export interface CatalogRepository {
   /* variants */
   variantsOf(productIds: string[]): Promise<VariantRow[]>;
   getVariant(id: string): Promise<VariantRow | undefined>;
+  getVariants(ids: string[]): Promise<VariantRow[]>;
   insertVariant(row: VariantRow): Promise<VariantRow>;
   updateVariant(id: string, patch: Partial<VariantRow>): Promise<void>;
   deleteVariants(ids: string[]): Promise<void>;

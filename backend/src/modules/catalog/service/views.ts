@@ -106,7 +106,17 @@ export class CatalogViews extends CatalogBase {
       rows.map((r) => {
         const vs: Variant[] = variants
           .filter((v) => v.product_id === r.id)
-          .map((v) => ({ id: v.id, options: stringMap(v.options), gtin: v.gtin, images: pick(strings(v.media_ids)) }));
+          .map((v) => ({
+            id: v.id,
+            options: stringMap(v.options),
+            gtin: v.gtin,
+            images: pick(strings(v.media_ids)),
+            weightGrams: v.weight_grams ?? null,
+            lengthCm: v.length_cm ?? null,
+            widthCm: v.width_cm ?? null,
+            heightCm: v.height_cm ?? null,
+            listPrice: v.list_price_amount !== null && v.list_price_amount !== undefined && v.list_price_currency ? { amount: Number(v.list_price_amount), currency: v.list_price_currency.trim() } : null,
+          }));
         const product: Product = {
           id: r.id,
           ref: r.ref,

@@ -56,6 +56,10 @@ function enc(table: keyof CatalogDb, row: object): any {
   return out;
 }
 
+/** bigint list prices may come back as strings; money amounts are safe integers */
+const variantOut = <T extends VariantRow | undefined>(r: T): T =>
+  r ? ({ ...r, list_price_amount: r.list_price_amount === null || r.list_price_amount === undefined ? null : Number(r.list_price_amount) } as T) : r;
+
 /** ILIKE pattern with the user's text taken literally */
 const contains = (q: string) => `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 
@@ -270,8 +274,18 @@ class PgCatalogRepository implements CatalogRepository {
     if (!f.includeMerged) q = q.where('p.merged_into_id', 'is', null);
     if (f.q?.trim()) {
       const text = f.q.trim();
-      q = q.where((eb) => eb.or([eb('p.title', 'ilike', contains(text)), eb('p.ref', '=', text.toUpperCase()), eb('p.model_number', 'ilike', contains(text)), eb('p.mpn', 'ilike', contains(text))]));
+      q = q.where((eb) =>
+        eb.or([
+          eb('p.title', 'ilike', contains(text)),
+          eb('p.ref', '=', text.toUpperCase()),
+          eb('p.model_number', 'ilike', contains(text)),
+          eb('p.mpn', 'ilike', contains(text)),
+          ...(f.matchGtin ? [eb.exists(eb.selectFrom('variants as gv').select('gv.id').whereRef('gv.product_id', '=', 'p.id').where('gv.gtin', '=', text.replace(/\s+/g, '')))] : []),
+        ]),
+      );
     }
+    if (f.purchasableOnly) q = q.where('p.review_state', '=', 'approved').where('p.publication', '=', 'active');
+    if (f.updatedSince) q = q.where('p.updated_at', '>=', f.updatedSince);
     if (f.categoryIds) q = f.categoryIds.length ? q.where('p.category_id', 'in', f.categoryIds) : q.where(sql<boolean>`false`);
     if (f.brandId) q = q.where('p.brand_id', '=', f.brandId);
     if (f.ownerSellerId) q = q.where('p.owner_seller_id', '=', f.ownerSellerId);
@@ -285,6 +299,11 @@ class PgCatalogRepository implements CatalogRepository {
   }
   listProducts(filter: ProductFilter, page: PageRequest) {
     return paginate(this.productQuery(filter), page, { column: 'p.updated_at', direction: 'desc', id: 'p.id' });
+  }
+  async productIdsAfter(filter: ProductFilter, afterId: string | null, limit: number) {
+    let q = this.productQuery(filter).clearSelect().select('p.id');
+    if (afterId) q = q.where('p.id', '>', afterId);
+    return (await q.orderBy('p.id').limit(limit).execute()).map((r) => r.id);
   }
   async productBatch(filter: ProductFilter, afterId: string | null, limit: number) {
     let q = this.productQuery(filter);
@@ -404,13 +423,17 @@ class PgCatalogRepository implements CatalogRepository {
 
   async variantsOf(productIds: string[]) {
     if (!productIds.length) return [];
-    return this.db.selectFrom('variants').selectAll().where('product_id', 'in', [...new Set(productIds)]).orderBy('position').execute();
+    return (await this.db.selectFrom('variants').selectAll().where('product_id', 'in', [...new Set(productIds)]).orderBy('position').execute()).map(variantOut);
   }
-  getVariant(id: string) {
-    return this.db.selectFrom('variants').selectAll().where('id', '=', id).executeTakeFirst();
+  async getVariant(id: string) {
+    return variantOut(await this.db.selectFrom('variants').selectAll().where('id', '=', id).executeTakeFirst());
+  }
+  async getVariants(ids: string[]) {
+    if (!ids.length) return [];
+    return (await this.db.selectFrom('variants').selectAll().where('id', 'in', [...new Set(ids)]).execute()).map(variantOut);
   }
   async insertVariant(row: VariantRow) {
-    return this.db.insertInto('variants').values(enc('variants', row)).returningAll().executeTakeFirstOrThrow();
+    return variantOut(await this.db.insertInto('variants').values(enc('variants', row)).returningAll().executeTakeFirstOrThrow());
   }
   async updateVariant(id: string, patch: Partial<VariantRow>) {
     if (Object.keys(patch).length) await this.db.updateTable('variants').set(enc('variants', patch)).where('id', '=', id).execute();

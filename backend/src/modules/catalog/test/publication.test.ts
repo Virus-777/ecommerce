@@ -26,8 +26,8 @@ const offer = async (productId: string, variantId: string, sellerId: string | nu
   const offerId = newId();
   const base = { offerId, productId, variantId, ownerType: sellerId ? 'seller' : 'official', sellerId };
   t.app.kernel.events.publish('offers', 'offers.offer.created', { ...base, condition: 'new', stockItemId: newId() });
-  t.app.kernel.events.publish('offers', 'offers.offer.status_changed', { ...base, from: 'draft', to: status });
-  t.app.kernel.events.publish('inventory', 'inventory.stock.changed', { stockItemId: newId(), offerId, ownerType: base.ownerType, sellerId, variantId, available: 5, reserved: 0, previousAvailable: 0, state: 'in_stock', cause: 'receipt' });
+  t.app.kernel.events.publish('offers', 'offers.offer.status_changed', { ...base, from: 'draft', to: status, stockItemId: newId() });
+  t.app.kernel.events.publish('inventory', 'inventory.stock.changed', { stockItemId: newId(), offerId, ownerType: base.ownerType, sellerId, variantId, available: 5, reserved: 0, previousAvailable: 0, state: 'in_stock', cause: 'receipt', productId, archived: false });
   await t.app.kernel.events.drain();
   return offerId;
 };
@@ -48,9 +48,9 @@ describe('publication', () => {
     expect(back.statusCode, back.body).toBe(200); // no trust report: no second reviewer needed
     expect(t.stubs.access.check).not.toHaveBeenCalled();
     expect(t.eventsNamed('catalog.product.publication_changed').map((e) => e.payload)).toEqual([
-      { productId: id, from: 'active', to: 'hidden', reason: 'Recall check', trustReportId: null },
-      { productId: id, from: 'hidden', to: 'suspended', reason: 'Safety review', trustReportId: null },
-      { productId: id, from: 'suspended', to: 'active', reason: 'Cleared', trustReportId: null },
+      { productId: id, from: 'active', to: 'hidden', reason: 'Recall check', trustReportId: null, trustEnforcementId: null },
+      { productId: id, from: 'hidden', to: 'suspended', reason: 'Safety review', trustReportId: null, trustEnforcementId: null },
+      { productId: id, from: 'suspended', to: 'active', reason: 'Cleared', trustReportId: null, trustEnforcementId: null },
     ]);
     expect(back.json().reviewLog.filter((l: { action: string }) => l.action === 'publication_changed')).toHaveLength(3);
     expect(t.stubs.audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'catalog.product.hide', reason: 'Recall check', visibleToSeller: true }));
@@ -77,7 +77,7 @@ describe('publication', () => {
       openReturns: null,
       openCases: null,
       approvalNeeded: false,
-      sellersAffected: expect.arrayContaining([{ sellerId, name: 'Gadget Grove', offers: 1 }, { sellerId: null, name: 'Official Store', offers: 1 }]),
+      sellersAffected: expect.arrayContaining([{ sellerId, name: 'Gadget Grove', offers: 1 }, { sellerId: null, name: 'Marketly Official Store', offers: 1 }]),
     });
     expect(res.json().effects).toEqual(expect.arrayContaining(['2 offers stop showing', '3 open orders continue with their purchase snapshots']));
   });
@@ -91,7 +91,9 @@ describe('publication', () => {
     t.app.kernel.events.publish('trust', 'trust.enforcement.recorded', { ...enforcement, enforcementId: newId(), alreadyApplied: true });
     await t.app.kernel.events.drain();
     const changes = t.eventsNamed('catalog.product.publication_changed');
-    expect(changes.map((e) => e.payload)).toEqual([{ productId: id, from: 'active', to: 'suspended', reason: 'Trust and Risk enforcement: Counterfeit confirmed', trustReportId: reportId }]);
+    expect(changes.map((e) => e.payload)).toEqual([
+      { productId: id, from: 'active', to: 'suspended', reason: 'Trust and Risk enforcement: Counterfeit confirmed', trustReportId: reportId, trustEnforcementId: enforcement.enforcementId },
+    ]);
     expect(changes[0]!.actor).toEqual({ kind: 'system' });
 
     expect((await a.admin('GET', `/products/${id}/publication-impact?publication=active`)).json().approvalNeeded).toBe(true);
@@ -132,7 +134,7 @@ describe('publication', () => {
     await t.app.kernel.events.drain();
     expect((await a.admin('GET', `/products/${id}`)).json().publication).toBe('active');
     const reactivated = t.eventsNamed('catalog.product.publication_changed').filter((e) => (e.payload as { to: string }).to === 'active');
-    expect(reactivated.map((e) => e.payload)).toEqual([{ productId: id, from: 'suspended', to: 'active', reason: 'Seller proved authenticity', trustReportId: null }]);
+    expect(reactivated.map((e) => e.payload)).toEqual([{ productId: id, from: 'suspended', to: 'active', reason: 'Seller proved authenticity', trustReportId: null, trustEnforcementId: null }]);
     expect(reactivated[0]!.actor).toEqual({ kind: 'staff', id: requesterId, name: 'Riley Chen' });
     const audits = t.stubs.audit.record.mock.calls.map((c) => c[0]).filter((e) => e.action === 'catalog.product.activate');
     expect(audits).toEqual([expect.objectContaining({ approvalRequestId: approvalId, approvalNote: 'Second reviewer approved the reactivation' })]);

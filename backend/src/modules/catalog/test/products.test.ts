@@ -117,8 +117,10 @@ describe('submission', () => {
   it('creates a submission (SUB ref, kind new, deadlines), runs the checks and publishes catalog.product.submitted', async () => {
     const sellerId = newId();
     const { id } = await sellerProduct(t, sellerId, { brandId, categoryId: cat.id });
-    expect(t.eventsNamed('catalog.product.submitted').map((e) => e.payload)).toEqual([{ productId: id, ownerSellerId: sellerId }]);
     const admin = (await a.admin('GET', `/products/${id}`)).json();
+    expect(t.eventsNamed('catalog.product.submitted').map((e) => e.payload)).toEqual([
+      { productId: id, ownerSellerId: sellerId, submissionId: admin.submission.id, ref: admin.submission.ref, kind: 'new', title: admin.product.title, reviewDueAt: admin.submission.reviewDeadline.dueAt },
+    ]);
     expect(admin.submission).toMatchObject({ ref: expect.stringMatching(/^SUB-\d{6}-\d{4}$/), kind: 'new', state: 'open', note: 'First submission', submittedBy: { kind: 'seller' } });
     expect(admin.submission.reviewDeadline.state).toBe('on_time');
     expect(admin.checks.map((c: { kind: string }) => c.kind)).toEqual(['duplicate', 'image_standard', 'category_fit', 'prohibited_claim', 'brand_authorization', 'restricted_item', 'identifier']);
@@ -290,7 +292,7 @@ describe('Official Store products', () => {
     expect((await a.seller(newId(), 'GET', `/products/${id}`)).statusCode).toBe(404);
     const sub = await a.admin('POST', `/products/${id}/submit`);
     expect(sub.statusCode, sub.body).toBe(200);
-    expect(t.eventsNamed('catalog.product.submitted').map((e) => e.payload)).toContainEqual({ productId: id, ownerSellerId: null });
+    expect(t.eventsNamed('catalog.product.submitted').map((e) => e.payload)).toContainEqual(expect.objectContaining({ productId: id, ownerSellerId: null, kind: 'new' }));
     await a.admin('POST', `/products/${id}/approve`, {});
     t.events.length = 0;
     const edit = await a.admin('PATCH', `/products/${id}`, { title: 'Aurora wireless headphones, 2nd gen' });

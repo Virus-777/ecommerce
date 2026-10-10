@@ -4,9 +4,11 @@ import { AppError, isNotImplemented } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { decodeCursor, encodeCursor, pageOf, toPageRequest, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
+import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type { AffectedSeller, CatalogMatch, CorrectionSuggestion, MergedRecord, MergePreview, MergePreviewRecord, MergeRequest, MergeResult, ProductAdmin, ProductStats, ProductSummary } from '../../../spec/catalog.js';
 import type { ExportJob } from '../../../spec/reports.js';
-import { IDENTITY_FIELDS, isCorrectableField, linesOf, matchQuality, sameOptions, variantLabel } from '../domain/rules.js';
+import { IDENTITY_FIELDS, isCorrectableField, linesOf, matchQuality, PARCEL_COLUMNS, PARCEL_FIELDS, sameOptions, variantLabel } from '../domain/rules.js';
+import { checkListPrice, checkParcelValue, currentListPrice } from './products.js';
 import { stringMap, strings, toCorrection } from '../mappers.js';
 import type { CorrectionRow, OfferIndexRow, ProductFilter, ProductRow, VariantRow } from '../ports.js';
 import { invalid, notFound, requireReason, type By, type Viewer } from './base.js';
@@ -212,12 +214,12 @@ export class CatalogAdmin extends CatalogReview {
     const evidenceIds = [...new Set(body.evidenceIds ?? [])];
     if (evidenceIds.length > 10) throw invalid('evidenceIds', 'Up to 10 evidence files');
     const suggestionId = newId();
-    // evidence: product photos stay product images; documents (invoices, brand letters) are kept as verification evidence
+    // evidence (photos, invoices, brand letters) is kept as correction evidence so the orphan sweep never deletes it
     const items = [];
     for (const [i, assetId] of evidenceIds.entries()) {
       const asset = await this.media.getAsset(assetId);
       if (!asset) throw invalid(`evidenceIds[${i}]`, 'File not found; upload it again');
-      items.push({ assetId, kind: asset.purpose === 'product_image' ? ('product_image' as const) : ('verification_document' as const), path: `evidenceIds[${i}]` });
+      items.push({ assetId, kind: 'correction_evidence' as const, path: `evidenceIds[${i}]` });
     }
     const undo = await this.attachAll(items, { refId: suggestionId, refLabel: `Correction to ${p.ref}` }, { kind: 'seller', id: sellerId });
     let row: CorrectionRow;
@@ -264,6 +266,7 @@ export class CatalogAdmin extends CatalogReview {
     if (body.accept && !current) throw notFound();
     const patch = current ? await this.correctionPatch(current, before.field, before.proposed) : {};
     const ref = current && IDENTITY_FIELDS.includes(before.field) && current.review_state === 'approved' ? await this.submissionRef() : null;
+    const targetDays = ref ? await this.reviewTargetDays() : 1;
     let product: ProductRow | null = null;
     let reopened: Awaited<ReturnType<typeof this.reopenTx>> | null = null;
     const after = await this.repo.transaction(async (tx) => {
@@ -275,7 +278,7 @@ export class CatalogAdmin extends CatalogReview {
         product = await tx.updateProduct(p.id, { ...patch, version: p.version + 1, updated_at: now });
         await tx.insertLog({ id: newId(), product_id: p.id, action: 'correction_accepted', reason, fields: { field: locked.field, proposed: locked.proposed.slice(0, 500) } as never, actor_kind: by.actor.kind, actor_id: by.actor.id ?? null, at: now });
         if (ref && product.review_state === 'approved') {
-          reopened = await this.reopenTx(tx, product, by, `Accepted correction to ${locked.field}: ${locked.proposed.slice(0, 200)}`, ref);
+          reopened = await this.reopenTx(tx, product, by, `Accepted correction to ${locked.field}: ${locked.proposed.slice(0, 200)}`, ref, targetDays);
           product = reopened.product;
         }
       }
@@ -285,7 +288,7 @@ export class CatalogAdmin extends CatalogReview {
     if (product) {
       const p = product as ProductRow;
       await this.recomputeScores([p]);
-      this.ctx.events.publish('catalog.product.updated', { productId: p.id, version: p.version }, meta);
+      this.ctx.events.publish('catalog.product.updated', { productId: p.id, version: p.version, title: p.title }, meta);
     }
     if (reopened) {
       const r = reopened as Awaited<ReturnType<typeof this.reopenTx>>;
@@ -420,12 +423,12 @@ export class CatalogAdmin extends CatalogReview {
     const sellers = new Map<string, AffectedSeller>();
     for (const o of moved) {
       const key = o.seller_id ?? 'official';
-      const s = sellers.get(key) ?? { sellerId: o.seller_id, name: o.seller_id ? (o.seller_name ?? 'Seller') : 'Official Store', offers: 0 };
+      const s = sellers.get(key) ?? { sellerId: o.seller_id, name: o.seller_id ? (o.seller_name ?? 'Seller') : OFFICIAL_STORE_NAME, offers: 0 };
       s.offers++;
       sellers.set(key, s);
     }
     const notes = [
-      ...moved.filter((o) => !o.eligible).map((o) => `${o.seller_id ? (o.seller_name ?? 'A seller') : 'Official Store'} offer moves to ${keep.ref} and stays ${NOT_LIVE[o.status] ?? o.status}`),
+      ...moved.filter((o) => !o.eligible).map((o) => `${o.seller_id ? (o.seller_name ?? 'A seller') : OFFICIAL_STORE_NAME} offer moves to ${keep.ref} and stays ${NOT_LIVE[o.status] ?? o.status}`),
       'Old URLs, ads and coupons now point to the kept product',
       'Past orders keep their purchase snapshots',
     ];
@@ -466,7 +469,21 @@ export class CatalogAdmin extends CatalogReview {
           const single = from.length === 1 ? from[0]! : null;
           const gtin = single?.gtin ?? null;
           if (gtin) await tx.updateVariant(single!.id, { gtin: null }); // the GTIN moves with the variation
-          const v = await tx.insertVariant({ id: newId(), product_id: kept.id, options: options as never, gtin, media_ids: (single ? strings(single.media_ids) : []) as never, position: position++ });
+          const v = await tx.insertVariant({
+            id: newId(),
+            product_id: kept.id,
+            options: options as never,
+            gtin,
+            media_ids: (single ? strings(single.media_ids) : []) as never,
+            position: position++,
+            // parcel data and list price describe the same unit, so they move with it
+            weight_grams: single?.weight_grams ?? null,
+            length_cm: single?.length_cm ?? null,
+            width_cm: single?.width_cm ?? null,
+            height_cm: single?.height_cm ?? null,
+            list_price_amount: single?.list_price_amount ?? null,
+            list_price_currency: single?.list_price_currency ?? null,
+          });
           keptVariants = [...keptVariants, v];
           return v.id;
         };
@@ -525,6 +542,77 @@ export class CatalogAdmin extends CatalogReview {
     return { keptProductId: keep.id, movedOffers: merged.reduce((a, m) => a + m.movedOffers, 0), movedReviews: merged.reduce((a, m) => a + m.movedReviews, 0), merged };
   }
 
+  /* ================================================================ variant parcel data and list price (staff) */
+
+  /**
+   * PATCH /products/{id}/variants/{variantId}: weight, packaged dimensions and list price on any product, approved
+   * ones included (they do not change what the product is: no correction or re-review). Omitted fields stay; null
+   * clears. Logged (variant_details_changed), versioned, audited and published as catalog.product.updated.
+   */
+  async updateVariantDetails(
+    id: string,
+    variantId: string,
+    body: { weightGrams?: number | null; lengthCm?: number | null; widthCm?: number | null; heightCm?: number | null; listPrice?: common.Money | null; reason: string },
+    by: By,
+  ): Promise<ProductAdmin> {
+    const reason = requireReason(body.reason);
+    const product = await this.repo.getProduct(id);
+    const variant = product ? await this.repo.getVariant(variantId) : undefined;
+    if (!product || !variant || variant.product_id !== product.id) throw notFound('Variant');
+    const patch: Partial<VariantRow> = {};
+    for (const field of PARCEL_FIELDS) {
+      if (body[field] !== undefined) patch[PARCEL_COLUMNS[field]] = checkParcelValue(body[field], field, field);
+    }
+    if (body.listPrice !== undefined) {
+      const price = checkListPrice(body.listPrice, 'listPrice', this.ctx.config.market.currency);
+      patch.list_price_amount = price?.amount ?? null;
+      patch.list_price_currency = price?.currency ?? null;
+    }
+    const changed = Object.entries(patch).filter(([k, v]) => {
+      const cur = variant[k as keyof VariantRow];
+      return (typeof cur === 'string' ? cur.trim() : cur === null ? null : Number(cur)) !== v;
+    });
+    if (!changed.length) return this.adminView(product, this.staffViewer(by));
+
+    const describe = (v: Pick<VariantRow, 'weight_grams' | 'length_cm' | 'width_cm' | 'height_cm' | 'list_price_amount' | 'list_price_currency'>) => ({
+      weightGrams: v.weight_grams ?? null,
+      lengthCm: v.length_cm ?? null,
+      widthCm: v.width_cm ?? null,
+      heightCm: v.height_cm ?? null,
+      listPrice: currentListPrice(v as VariantRow),
+    });
+    const now = this.now();
+    const { after, saved } = await this.repo.transaction(async (tx) => {
+      const locked = await tx.getProduct(id, { forUpdate: true });
+      if (!locked) throw notFound();
+      await tx.updateVariant(variantId, patch);
+      const after = await tx.updateProduct(id, { version: locked.version + 1, updated_at: now });
+      const saved = (await tx.getVariant(variantId))!;
+      const d = describe(saved);
+      const fields: Record<string, string> = { variantId, variant: variantLabel(stringMap(saved.options)) };
+      for (const field of PARCEL_FIELDS) if (patch[PARCEL_COLUMNS[field]] !== undefined) fields[field] = d[field] === null ? 'cleared' : String(d[field]);
+      if (patch.list_price_amount !== undefined) fields.listPrice = d.listPrice ? `${d.listPrice.amount} ${d.listPrice.currency}` : 'cleared';
+      await tx.insertLog({ id: newId(), product_id: id, action: 'variant_details_changed', reason, fields: fields as never, actor_kind: by.actor.kind, actor_id: by.actor.id ?? null, at: now });
+      return { after, saved };
+    });
+    this.ctx.events.publish('catalog.product.updated', { productId: id, version: after.version, title: after.title }, { actor: by.actor, requestId: by.requestId });
+    await this.audit(
+      {
+        action: 'catalog.variant.details_update',
+        actionLabel: 'Changed variant weight, size or list price',
+        category: 'catalog',
+        target: this.productTarget(after),
+        relatedTargets: [{ type: 'variant', id: variantId, label: variantLabel(stringMap(saved.options)) }],
+        reason,
+        before: describe(variant),
+        after: describe(saved),
+        visibleToSeller: Boolean(after.owner_seller_id),
+      },
+      by,
+    );
+    return this.adminView(after, this.staffViewer(by));
+  }
+
   /* ================================================================ bulk edits (phase 2) */
 
   async bulkUpdate(body: { productIds: string[]; change: unknown; reason: string; dryRun: boolean }, by: By): Promise<{ affected: number; preview: ProductSummary[]; errors: unknown[] }> {
@@ -573,7 +661,7 @@ export class CatalogAdmin extends CatalogReview {
     for (const r of ok) {
       if (categoryId || brandId) {
         const after = await this.repo.updateProduct(r.id, { ...(categoryId ? { category_id: categoryId } : {}), ...(brandId ? { brand_id: brandId } : {}), version: r.version + 1, updated_at: now });
-        if (after.listed_at) this.ctx.events.publish('catalog.product.updated', { productId: r.id, version: after.version }, { actor: by.actor, requestId: by.requestId });
+        if (after.listed_at) this.ctx.events.publish('catalog.product.updated', { productId: r.id, version: after.version, title: after.title }, { actor: by.actor, requestId: by.requestId });
       }
       if (publication && publication !== r.publication) await this.changePublication(r.id, { to: publication, reason, trustReportId: null }, by, { system: false });
     }
@@ -654,7 +742,7 @@ export class CatalogAdmin extends CatalogReview {
     let note: string | null = null;
     if (notLive.length) {
       const first = notLive[0]!;
-      const who = first.seller_id ? (first.seller_name ?? 'A seller') : 'Official Store';
+      const who = first.seller_id ? (first.seller_name ?? 'A seller') : OFFICIAL_STORE_NAME;
       const state = first.eligible && !first.in_stock ? 'out of stock' : (NOT_LIVE[first.status] ?? first.status.replace(/_/g, ' '));
       const more = notLive.length > 1 ? ` (+${notLive.length - 1} more not live)` : '';
       note = `${who} offer ${state}${more} · ${live.length} other offer${live.length === 1 ? '' : 's'} live`;
