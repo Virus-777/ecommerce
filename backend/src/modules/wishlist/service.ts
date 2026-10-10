@@ -66,6 +66,11 @@ export class WishlistService implements WishlistPublicApi {
     return this.ctx.clock.now();
   }
 
+  /** The sellers public API when sellers is on (GraphQL WishlistAlert.seller) */
+  sellers() {
+    return this.ctx.tryUse('sellers');
+  }
+
   /* ================================================================ public API (in-process) */
 
   /** How many customers saved a product (aggregate only, for reports and Official Store planning). */
