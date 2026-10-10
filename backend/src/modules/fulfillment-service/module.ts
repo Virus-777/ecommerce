@@ -14,20 +14,29 @@ import { FulfillmentServiceService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.1.1',
+  version: '1.2.0',
   migrations,
   register(ctx) {
     const service = new FulfillmentServiceService({ repo: createPostgresFulfillmentServiceRepository(ctx.db, ctx.inbox), ctx });
     ctx.provide(service);
     ctx.http.routes(sellerRoutes(service), adminRoutes(service));
+    // the report datasets (K16), once every module has registered
+    ctx.afterBoot(() => service.parts.exports.registerDatasets());
 
     // Events this module reacts to (spec events.consumes)
-    ctx.events.on("orders.order.placed", (e) => service.onOrderPlacedFromOrders(e.payload));
+    ctx.events.on("orders.order.accepted", (e) => service.onOrderAcceptedFromOrders(e.payload));
+    ctx.events.on("orders.order.cancelled", (e) => service.onOrderCancelledFromOrders(e.payload));
     ctx.events.on("orders.item.cancelled", (e) => service.onItemCancelledFromOrders(e.payload));
+    ctx.events.on("orders.item.split", (e) => service.onItemSplitFromOrders(e.payload));
     ctx.events.on("shipping.shipment.dispatched", (e) => service.onShipmentDispatchedFromShipping(e.payload));
+    ctx.events.on("warehouse.fulfillment.status_changed", (e) => service.onFulfillmentStatusChangedFromWarehouse(e.payload));
     ctx.events.on("returns.return.received", (e) => service.onReturnReceivedFromReturns(e.payload));
+    ctx.events.on("returns.return.inspected", (e) => service.onReturnInspectedFromReturns(e.payload));
+    ctx.events.on("inventory.receipt.confirmed", (e) => service.onReceiptConfirmedFromInventory(e.payload));
+    ctx.events.on("inventory.adjustment.recorded", (e) => service.onAdjustmentRecordedFromInventory(e.payload));
     ctx.events.on("inventory.stock.low", (e) => service.onStockLowFromInventory(e.payload));
     ctx.events.on("sellers.seller.suspended", (e) => service.onSellerSuspendedFromSellers(e.payload));
+    ctx.events.on("sellers.seller.reinstated", (e) => service.onSellerReinstatedFromSellers(e.payload));
     ctx.events.on("sellers.seller.closed", (e) => service.onSellerClosedFromSellers(e.payload));
     ctx.events.on("access.approval.decided", (e) => service.onApprovalDecidedFromAccess(e.payload, e.id));
 

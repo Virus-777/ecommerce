@@ -1,7 +1,11 @@
 import type { EventPayload } from '../../kernel/events/index.js';
-import type { FulfillmentServicePublicApi, FulfillmentRequest } from '../../spec/fulfillment-service.js';
+import type * as common from '../../spec/common.js';
+import type { FulfillmentRequest, FulfillmentServicePublicApi, ServiceTerms } from '../../spec/fulfillment-service.js';
+import type { Principal } from '../../spec/identity.js';
 import { Core, type FulfillmentServiceServiceDeps, type Parts } from './service/core.js';
+import { DIFFERENCE_TARGET, DifferencesPart } from './service/differences.js';
 import { EnrollmentPart } from './service/enrollment.js';
+import { ExportsPart } from './service/exports.js';
 import { FEES_ACTION, FeesPart, REVERSE_ACTION, SCHEDULE_TARGET, CHARGE_TARGET } from './service/fees.js';
 import { DISCREPANCY_TARGET, InboundPart, REIMBURSE_ACTION } from './service/inbound.js';
 import { RemovalsPart } from './service/removals.js';
@@ -16,7 +20,8 @@ export type { FulfillmentServiceServiceDeps } from './service/core.js';
 /**
  * Fulfillment service use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
  * Each method maps to a publicApi function, a consumed event or a job in docs/api/spec/modules/fulfillment-service.json;
- * the HTTP handlers call the use-case groups (enrollment, skus, inbound, requests, returns, removals, fees, stock).
+ * the HTTP handlers call the use-case groups (enrollment, skus, inbound, requests, returns, removals, fees, stock,
+ * differences, exports).
  */
 export class FulfillmentServiceService implements FulfillmentServicePublicApi {
   readonly core: Core;
@@ -34,14 +39,26 @@ export class FulfillmentServiceService implements FulfillmentServicePublicApi {
     parts.returns = new ReturnsPart(this.core, parts);
     parts.removals = new RemovalsPart(this.core, parts);
     parts.fees = new FeesPart(this.core, parts);
+    parts.differences = new DifferencesPart(this.core, parts);
+    parts.exports = new ExportsPart(this.core, parts);
     this.parts = parts;
   }
 
-  /* ---------------- public API (in-process) */
+  /* ---------------------------------------------------------------- public API (in-process) */
 
-  /** True when the offer is fulfilled by Marketly. Offers shows 'Ships from Marketly' while the seller stays named; orders route the seller group's fulfillment to our warehouse. */
+  /** True when Marketly fulfils the offer, sellable or not (the rule of getServiceTerms) */
   isServiceOffer(offerId: string): Promise<boolean> {
     return this.parts.skus.isServiceOffer(offerId);
+  }
+
+  /** Customer-facing fulfilment terms of Marketly-fulfilled offers; null when not Marketly-fulfilled */
+  getServiceTerms(offerIds: string[]): Promise<Record<string, ServiceTerms | null>> {
+    return this.parts.skus.serviceTerms(offerIds);
+  }
+
+  /** The company warehouse that holds and ships seller stock; null when no company location exists */
+  getServiceLocation(): Promise<{ locationId: string; address: common.Address; shipsFrom: string } | null> {
+    return this.parts.skus.serviceLocation();
   }
 
   /** Owner of stock in our warehouse; reports and inventory use it to keep seller stock separate from company stock (plan ch. 9). */
@@ -49,94 +66,106 @@ export class FulfillmentServiceService implements FulfillmentServicePublicApi {
     return this.parts.skus.stockOwner(stockItemId);
   }
 
-  /** Called when a seller group contains service offers; creates the warehouse pick task. Also triggered by orders.order.placed. */
-  createFulfillmentRequest(orderId: string, sellerGroupId: string, items: { orderItemId: string; offerId: string; quantity: number }[]): Promise<FulfillmentRequest> {
-    return this.parts.requests.create(orderId, sellerGroupId, items);
+  /** Kept for staff tooling and tests: requests come from orders.order.accepted */
+  async createFulfillmentRequest(orderId: string, sellerGroupId: string, items: { orderItemId: string; offerId: string; quantity: number }[]): Promise<FulfillmentRequest> {
+    return (await this.parts.requests.create(orderId, sellerGroupId, items)).request;
   }
 
-  /* ---------------- events consumed */
-
-  /** orders.order.placed: Create fulfillment requests for seller groups with service offers */
-  onOrderPlacedFromOrders(event: EventPayload<'orders.order.placed'>): Promise<void> {
-    return this.parts.requests.onOrderPlaced(event);
+  /** Rows of the report datasets this module registers */
+  exportRows(dataset: string, filters: unknown, principal: Principal, cursor?: string): Promise<{ rows: unknown[]; nextCursor?: string }> {
+    return this.parts.exports.exportRows(dataset, filters, principal, cursor);
   }
 
-  /** orders.item.cancelled: Cancel or shorten open fulfillment requests and release seller-owned reservations */
+  /* ---------------------------------------------------------------- events consumed */
+
+  onOrderAcceptedFromOrders(event: EventPayload<'orders.order.accepted'>): Promise<void> {
+    return this.parts.requests.onOrderAccepted(event);
+  }
+
+  onOrderCancelledFromOrders(event: EventPayload<'orders.order.cancelled'>): Promise<void> {
+    return this.parts.requests.onOrderCancelled(event);
+  }
+
   onItemCancelledFromOrders(event: EventPayload<'orders.item.cancelled'>): Promise<void> {
     return this.parts.requests.onItemCancelled(event);
   }
 
-  /** shipping.shipment.dispatched: Mark requests shipped; accrue pick-and-pack and order handling fees */
+  onItemSplitFromOrders(event: EventPayload<'orders.item.split'>): Promise<void> {
+    return this.parts.requests.onItemSplit(event);
+  }
+
   onShipmentDispatchedFromShipping(event: EventPayload<'shipping.shipment.dispatched'>): Promise<void> {
     return this.parts.requests.onShipmentDispatched(event);
   }
 
-  /** returns.return.received: Create a service return for units returned to our warehouse; accrue the returns processing fee */
+  onFulfillmentStatusChangedFromWarehouse(event: EventPayload<'warehouse.fulfillment.status_changed'>): Promise<void> {
+    return this.parts.requests.onWarehouseStatus(event);
+  }
+
   onReturnReceivedFromReturns(event: EventPayload<'returns.return.received'>): Promise<void> {
     return this.parts.returns.onReturnReceived(event);
   }
 
-  /** inventory.stock.low: Notify the seller to send more stock for service SKUs */
-  async onStockLowFromInventory(event: EventPayload<'inventory.stock.low'>): Promise<void> {
-    if (event.ownerType !== 'seller' || !event.sellerId || !event.offerId) return;
-    const sku = await this.core.repo.findOne('sku_enrollments', { offer_id: event.offerId, state: 'active' });
-    if (!sku || sku.seller_id !== event.sellerId) return;
-    await this.core.notifySeller(
-      sku.seller_id,
-      'seller.stock.low',
-      { stock: { label: `${event.label} at Marketly's warehouse: send more in an inbound shipment`, available: String(event.available) } },
-      { kind: 'queue', id: sku.id, label: 'Plan an inbound shipment', screen: 'seller/inventory' },
-      `fulfillment-service:low:${sku.id}:${this.core.today()}`,
-    );
+  onReturnInspectedFromReturns(event: EventPayload<'returns.return.inspected'>): Promise<void> {
+    return this.parts.returns.onReturnInspected(event);
   }
 
-  /** sellers.seller.suspended: Suspend the enrollment for new inbound; keep fulfilling accepted orders */
+  onReceiptConfirmedFromInventory(event: EventPayload<'inventory.receipt.confirmed'>): Promise<void> {
+    return this.parts.inbound.onReceiptConfirmed(event);
+  }
+
+  onAdjustmentRecordedFromInventory(event: EventPayload<'inventory.adjustment.recorded'>): Promise<void> {
+    return this.parts.differences.onAdjustmentRecorded(event);
+  }
+
+  onStockLowFromInventory(event: EventPayload<'inventory.stock.low'>): Promise<void> {
+    return this.parts.stock.onStockLow(event);
+  }
+
   onSellerSuspendedFromSellers(event: EventPayload<'sellers.seller.suspended'>): Promise<void> {
     return this.parts.enrollment.onSellerSuspended(event);
   }
 
-  /** sellers.seller.closed: Start offboarding; ask the seller to remove stock */
+  onSellerReinstatedFromSellers(event: EventPayload<'sellers.seller.reinstated'>): Promise<void> {
+    return this.parts.enrollment.onSellerReinstated(event);
+  }
+
   onSellerClosedFromSellers(event: EventPayload<'sellers.seller.closed'>): Promise<void> {
     return this.parts.enrollment.onSellerClosed(event);
   }
 
-  /** access.approval.decided: Apply approved fee schedules, reimbursements and fee reversals */
+  /** access.approval.decided: approved fee schedules, reimbursements (discrepancies, stock differences) and fee reversals */
   async onApprovalDecidedFromAccess(event: EventPayload<'access.approval.decided'>, eventId?: string): Promise<void> {
     if (event.actionKey === FEES_ACTION && event.target?.type === SCHEDULE_TARGET) await this.parts.fees.onScheduleDecided(event);
     else if (event.actionKey === REVERSE_ACTION && event.target?.type === CHARGE_TARGET) await this.parts.fees.onReverseDecided(event, eventId);
     else if (event.actionKey === REIMBURSE_ACTION && event.target?.type === DISCREPANCY_TARGET) await this.parts.inbound.onReimbursementDecided(event);
+    else if (event.actionKey === REIMBURSE_ACTION && event.target?.type === DIFFERENCE_TARGET) await this.parts.differences.onReimbursementDecided(event);
   }
 
-  /* ---------------- jobs */
+  /* ---------------------------------------------------------------- jobs */
 
-  /** Job fulfillment-service.storage-snapshot (daily 23:55 market time): Record units and volume per seller SKU with age buckets */
   async storageSnapshot(): Promise<void> {
     await this.parts.stock.snapshot();
   }
 
-  /** Job fulfillment-service.monthly-storage-fees (monthly, 1st 03:00 market time): Accrue storage and long-term storage fees from the month's snapshots */
   async monthlyStorageFees(): Promise<void> {
     await this.parts.fees.monthlyStorage();
   }
 
-  /** Job fulfillment-service.post-fees (daily 02:30 market time): Post accrued fees to finance (fee.charged) */
   async postFees(): Promise<void> {
     await this.core.syncSchedules();
     await this.parts.fees.postAll();
   }
 
-  /** Job fulfillment-service.inbound-overdue (daily): Flag inbound shipments past expected arrival; close discrepancies without a seller response after discrepancyResponseDays */
   async inboundOverdue(): Promise<void> {
     await this.parts.inbound.overdue();
   }
 
-  /** Job fulfillment-service.aged-stock-notice (weekly): Warn sellers about units approaching long-term storage */
   async agedStockNotice(): Promise<void> {
     await this.parts.stock.agedNotice();
   }
 
-  /** Job fulfillment-service.reconcile (daily): Compare the ownership ledger with inventory quantities per seller SKU; open a work item for differences */
   async reconcile(): Promise<void> {
-    await this.parts.stock.reconcile();
+    await this.parts.differences.reconcile();
   }
 }

@@ -6,15 +6,17 @@ import type { Balances, FulfillmentServiceRepository, LedgerRec, StockGroup, Tab
 
 /** jsonb columns per table: values are sent as JSON text (pg would turn JS arrays into PG arrays) */
 const JSON_COLUMNS: Record<Table, readonly string[]> = {
-  enrollments: [],
+  enrollments: ['categories'],
   sku_enrollments: ['dimensions'],
   inbound_shipments: ['ship_from', 'destination'],
   inbound_lines: [],
+  inbound_receipts: ['lines'],
   discrepancies: ['evidence_media_ids'],
   ownership_ledger: [],
   fulfillment_requests: ['items'],
   service_returns: ['evidence_media_ids'],
   removal_orders: ['lines', 'ship_to'],
+  stock_differences: ['ledger', 'inventory'],
   fee_schedules: ['rates'],
   fee_charges: [],
   storage_snapshots: ['aged_units'],

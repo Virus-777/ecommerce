@@ -1,7 +1,9 @@
 /**
  * Removal and disposal orders: the seller asks for stock back (or to dispose of it); staff approve (units move
- * to Removal pending and leave the sellable quantity in inventory), process, ship and complete them, with the
- * removal or disposal fee. Offboarding removes everything; unsellable units left too long are disposed.
+ * to Removal pending; in inventory available → damaged_held, service_removal_reserved), process, ship and complete
+ * them (inventory damaged_held → out, service_removal_completed) with the removal or disposal fee. Return-to-seller
+ * removals are worked by staff with tracking typed in (decision D9). Offboarding removes everything; unsellable
+ * units left too long are disposed.
  */
 import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
@@ -9,7 +11,7 @@ import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { RemovalInput, RemovalOrder } from '../../../spec/fulfillment-service.js';
 import { removalOrderMachine } from '../domain/state-machines.js';
-import { addDays, plural, qty } from '../domain/rules.js';
+import { addDays, qty } from '../domain/rules.js';
 import type { Balances, FulfillmentServiceRepository, RemovalLineRec, RemovalRec, SkuRec } from '../ports.js';
 import { invalid, notFound, Part, type By } from './core.js';
 
@@ -17,6 +19,7 @@ type State = RemovalOrder['state'];
 type Action = 'approve' | 'startProcessing' | 'ship' | 'complete' | 'cancel';
 
 const ENROLLED = ['approved', 'active', 'suspended', 'offboarding'];
+const ACTION_LABEL: Record<Action, string> = { approve: 'Approved', startProcessing: 'Started processing', ship: 'Shipped', complete: 'Completed', cancel: 'Cancelled' };
 
 export class RemovalsPart extends Part {
   async list(sellerId: string, page: PageRequest) {
@@ -60,12 +63,23 @@ export class RemovalsPart extends Part {
     if (issues.length) throw invalid(issues);
     const lines: RemovalLineRec[] = input.lines.map((l) => ({ skuEnrollmentId: l.skuEnrollmentId, quantity: l.quantity, fromGroup: input.fromGroup }));
     const ref = await this.ctx.refs.next('RM', { digits: 4 });
-    const row = await this.create(sellerId, input.kind, lines, input.kind === 'return_to_seller' ? (input.shipTo ?? null) : null, ref, skus);
-    void by;
+    const row = await this.create(sellerId, input.kind, lines, input.kind === 'return_to_seller' ? (input.shipTo ?? null) : null, ref, skus, input.reason?.trim() || null);
+    await this.core.audit(
+      {
+        action: 'fulfillment-service.removal.request',
+        actionLabel: input.kind === 'dispose' ? 'Asked Marketly to dispose of stock' : 'Asked for stock back from Marketly',
+        category: 'inventory',
+        target: { type: 'removal_order', id: row.id, ref: row.ref, label: `Removal ${row.ref}`, sellerId, screen: 'seller/inventory' },
+        after: { kind: row.kind, lines: row.lines, shipTo: row.ship_to },
+        reason: row.reason,
+        visibleToSeller: true,
+      },
+      by,
+    );
     return (await this.parts.views.removals([row]))[0]!;
   }
 
-  private async create(sellerId: string, kind: 'return_to_seller' | 'dispose', lines: RemovalLineRec[], shipTo: common.Address | null, ref: string, skus: Map<string, SkuRec>): Promise<RemovalRec> {
+  private async create(sellerId: string, kind: 'return_to_seller' | 'dispose', lines: RemovalLineRec[], shipTo: common.Address | null, ref: string, skus: Map<string, SkuRec>, reason: string | null): Promise<RemovalRec> {
     return this.repo.transaction(async (tx) => {
       await tx.lockSkus(lines.map((l) => l.skuEnrollmentId));
       const balances = await tx.balances(lines.map((l) => l.skuEnrollmentId));
@@ -76,7 +90,7 @@ export class RemovalsPart extends Part {
           lines: short.map((l) => ({ skuEnrollmentId: l.skuEnrollmentId, requested: l.quantity, available: Math.max(0, free(l.skuEnrollmentId, l.fromGroup)) })),
         });
       }
-      return tx.insert('removal_orders', { id: newId(), ref, seller_id: sellerId, kind, state: removalOrderMachine.initial, lines, ship_to: shipTo, tracking: null, created_at: this.now() });
+      return tx.insert('removal_orders', { id: newId(), ref, seller_id: sellerId, kind, state: removalOrderMachine.initial, lines, ship_to: shipTo, tracking: null, reason, fee_amount: null, created_at: this.now(), approved_at: null, completed_at: null });
     });
   }
 
@@ -95,12 +109,11 @@ export class RemovalsPart extends Part {
       if (!lines.length) continue;
       const ref = await this.ctx.refs.next('RM', { digits: 4 });
       try {
-        out.push(await this.create(sellerId, kind, lines, shipTo, ref, map));
+        out.push(await this.create(sellerId, kind, lines, shipTo, ref, map, `Leaving the service: ${reason}`));
       } catch (err) {
         this.ctx.log.warn({ err, sellerId, group }, 'fulfillment-service: offboarding removal not created');
       }
     }
-    void reason;
     void by;
     return out;
   }
@@ -119,46 +132,82 @@ export class RemovalsPart extends Part {
     if (body.action === 'complete' && before.kind === 'return_to_seller' && before.state === 'processing') {
       throw new AppError('ILLEGAL_TRANSITION', 'Ship the units back to the seller before completing', { machine: 'Removal order', from: before.state, event: 'complete' });
     }
-    return (await this.parts.views.removals([await this.transition(id, body.action, { tracking: body.tracking ?? null, reason: body.reason ?? null }, by)]))[0]!;
+    const after = await this.transition(id, body.action, { tracking: body.tracking ?? null, reason: body.reason ?? null }, by);
+    await this.core.audit(
+      {
+        action: `fulfillment-service.removal.${body.action}`,
+        actionLabel: `${ACTION_LABEL[body.action]} a removal order`,
+        category: 'inventory',
+        target: { type: 'removal_order', id, ref: after.ref, label: `Removal ${after.ref}`, sellerId: after.seller_id, screen: 'ops/inventory' },
+        before: { state: before.state },
+        after: { state: after.state, tracking: after.tracking, fee: after.fee_amount },
+        reason: body.reason?.trim() || null,
+        visibleToSeller: true,
+      },
+      by,
+    );
+    return (await this.parts.views.removals([after]))[0]!;
   }
 
   private async transition(id: string, action: Action, o: { tracking?: string | null; reason?: string | null }, by: By): Promise<RemovalRec> {
     const before = (await this.repo.get('removal_orders', id))!;
+    removalOrderMachine.next(before.state as State, action);
     const skus = new Map((await this.repo.find('sku_enrollments', { id: before.lines.map((l) => l.skuEnrollmentId) })).map((s) => [s.id, s]));
     const schedule = await this.core.currentSchedule();
+    const ref = { kind: 'service_removal' as const, id, label: `Removal ${before.ref}` };
+    // inventory first, so a refusal stops the step: approve takes available units out of sale, complete takes the units out of stock
+    if (action === 'approve') {
+      const balances = await this.repo.balances(before.lines.map((l) => l.skuEnrollmentId));
+      const short = before.lines.filter((l) => qty(balances, l.skuEnrollmentId, l.fromGroup) < l.quantity);
+      if (short.length) throw this.core.error('INSUFFICIENT_STOCK', 'Some units are no longer in that stock group', { lines: short.map((l) => ({ skuEnrollmentId: l.skuEnrollmentId, requested: l.quantity, available: qty(balances, l.skuEnrollmentId, l.fromGroup) })) });
+      const location = await this.core.requireLocation();
+      for (const l of before.lines.filter((x) => x.fromGroup === 'available')) {
+        await this.core.moveStock({ key: `fs:removal-approve:${id}:${l.skuEnrollmentId}`, sku: skus.get(l.skuEnrollmentId)!, from: 'available', to: 'damaged_held', quantity: l.quantity, reasonCode: 'service_removal_reserved', ref, actor: by.actor }, { strict: true, location });
+      }
+    }
+    if (action === 'complete') {
+      const location = await this.core.requireLocation();
+      for (const l of before.lines) {
+        await this.core.moveStock({ key: `fs:removal-complete:${id}:${l.skuEnrollmentId}`, sku: skus.get(l.skuEnrollmentId)!, from: 'damaged_held', to: null, quantity: l.quantity, reasonCode: 'service_removal_completed', ref, actor: by.actor }, { strict: true, location });
+      }
+    }
     const result = await this.repo.transaction(async (tx) => {
       const locked = (await tx.get('removal_orders', id, { forUpdate: true }))!;
       const state = removalOrderMachine.next(locked.state as State, action);
       const mv = { sellerId: locked.seller_id, reference: locked.ref, actor: by.actor, reason: o.reason?.trim() || null };
+      const patch: Partial<RemovalRec> = { state };
       if (action === 'approve') {
         await tx.lockSkus(locked.lines.map((l) => l.skuEnrollmentId));
         const balances = await tx.balances(locked.lines.map((l) => l.skuEnrollmentId));
         const short = locked.lines.filter((l) => qty(balances, l.skuEnrollmentId, l.fromGroup) < l.quantity);
         if (short.length) throw this.core.error('INSUFFICIENT_STOCK', 'Some units are no longer in that stock group', { lines: short.map((l) => ({ skuEnrollmentId: l.skuEnrollmentId, requested: l.quantity, available: qty(balances, l.skuEnrollmentId, l.fromGroup) })) });
         for (const l of locked.lines) await this.core.move(tx, { ...mv, skuEnrollmentId: l.skuEnrollmentId, movement: 'removal_reserved', quantity: l.quantity, from: l.fromGroup, to: 'removal_pending' });
+        patch.approved_at = this.now();
       }
       let units = 0;
       if (action === 'complete') {
+        let fee = 0;
         for (const l of locked.lines) {
           await this.core.move(tx, { ...mv, skuEnrollmentId: l.skuEnrollmentId, movement: locked.kind === 'dispose' ? 'disposed' : 'removed', quantity: l.quantity, from: 'removal_pending', to: null });
           units += l.quantity;
-          await this.core.accrue(
+          const charge = await this.core.accrue(
             tx,
             { sellerId: locked.seller_id, rateType: locked.kind === 'dispose' ? 'disposal_per_unit' : 'removal_per_unit', sizeTier: skus.get(l.skuEnrollmentId)?.size_tier ?? 'any', units: l.quantity, reference: locked.ref, key: `removal:${locked.id}:${l.skuEnrollmentId}` },
             schedule.rates,
           );
+          fee += charge?.amount ?? 0;
         }
+        patch.completed_at = this.now();
+        patch.fee_amount = fee;
       }
-      const row = await tx.update('removal_orders', id, { state, ...(action === 'ship' ? { tracking: o.tracking!.trim() } : {}) });
+      if (action === 'ship') patch.tracking = o.tracking!.trim();
+      const row = await tx.update('removal_orders', id, patch);
       return { row, units };
     });
-    if (action === 'approve') {
-      // available units leave the seller's sellable quantity in inventory
-      for (const l of result.row.lines.filter((x) => x.fromGroup === 'available')) {
-        await this.core.adjustInventory(result.row.seller_id, skus.get(l.skuEnrollmentId)?.inventory_item_id ?? null, -l.quantity, id, by.actor).catch((err) => this.ctx.log.warn({ err, removalId: id }, 'fulfillment-service: removed units not taken out of inventory'));
-      }
+    if (action === 'complete') {
+      this.core.publish('fulfillment-service.removal.completed', { removalId: id, sellerId: result.row.seller_id, units: result.units }, by);
+      await this.core.notifySeller(result.row.seller_id, 'seller.fulfillment.removal_completed', { removal: { ref: result.row.ref }, units: result.units }, { kind: 'queue', id, ref: result.row.ref, label: 'View removal', screen: 'seller/inventory' }, `fs:removal:${id}`);
     }
-    if (action === 'complete') this.core.publish('fulfillment-service.removal.completed', { removalId: id, sellerId: result.row.seller_id, units: result.units }, by);
     return result.row;
   }
 
@@ -184,16 +233,10 @@ export class RemovalsPart extends Part {
       if (!lines.length) continue;
       const ref = await this.ctx.refs.next('RM', { digits: 4 });
       try {
-        const row = await this.create(sellerId, 'dispose', lines, null, ref, new Map(list.map((s) => [s.id, s])));
+        const row = await this.create(sellerId, 'dispose', lines, null, ref, new Map(list.map((s) => [s.id, s])), `Unsellable units left over ${days} days`);
         created += 1;
         const units = lines.reduce((n, l) => n + l.quantity, 0);
-        await this.core.notifySeller(
-          sellerId,
-          'seller.platform.change_scheduled',
-          { change: { summary: `${plural(units, 'unsellable unit')} left at Marketly's warehouse for over ${days} days will be disposed of (${row.ref}); ask for them back to keep them`, effective: 'when staff approve the disposal' } },
-          { kind: 'queue', id: row.id, ref: row.ref, label: 'View removal', screen: 'seller/inventory' },
-          `fulfillment-service:dispose:${row.id}`,
-        );
+        await this.core.notifySeller(sellerId, 'seller.fulfillment.disposal_scheduled', { units, days, removal: { ref: row.ref } }, { kind: 'queue', id: row.id, ref: row.ref, label: 'View removal', screen: 'seller/inventory' }, `fs:dispose:${row.id}`);
       } catch (err) {
         this.ctx.log.warn({ err, sellerId }, 'fulfillment-service: disposal order not created');
       }

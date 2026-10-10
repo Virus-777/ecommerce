@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { EXAMPLE_SCHEDULE } from '../domain/rules.js';
-import { A, arrivedInbound, boot, receiveAll, S, type Kit } from './helpers.js';
+import { A, arrivedInbound, boot, receiveAll, S, stocked, type Kit } from './helpers.js';
 
 let k: Kit;
 beforeAll(async () => {
@@ -63,7 +63,10 @@ describe('fee schedules', () => {
     const id = await arrivedInbound(k, s, 2);
     await receiveAll(k, id, s.skuId, 2);
     await k.api.createFulfillmentRequest(orderId, groupId, [{ orderItemId: newId(), offerId: s.offerId, quantity: 1 }]);
-    await k.publish('shipping', 'shipping.shipment.dispatched', { shipmentId: newId(), kind: 'outbound', orderId, groupId, returnId: null, ownerType: 'seller', sellerId: s.sellerId, lines: [], shippedAt: new Date().toISOString(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
+    await k.publish('shipping', 'shipping.shipment.dispatched', { shipmentId: newId(), kind: 'outbound', orderId, customerId: null, contactEmail: null, groupId, returnId: null, ownerType: 'seller', sellerId: s.sellerId, fulfilledBy: 'marketly_service', lines: [], shippedAt: new Date().toISOString(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
+    // the seller heard of the schedule (K13 topic)
+    expect(k.notices.find((n) => n.dedupeKey === `fs:schedule:${proposed.body.id}` && n.recipients[0].sellerId === s.sellerId)).toMatchObject({ topic: 'seller.fulfillment.fee_schedule_changed', context: { version: 'FS-2027-1' } });
+    expect(k.audits.find((x) => x.action === 'fulfillment-service.fee_schedule.create' && x.target.id === proposed.body.id)).toMatchObject({ approvalRequestId: expect.any(String) });
     expect((await k.call('GET', S('/fees?type=order_handling'), { token: s.token })).body.items[0].amount.amount).toBe(150);
   });
 });
@@ -101,7 +104,7 @@ describe('fee charges', () => {
     const reversed = await k.call('POST', A(`/fees/${receiving.id}/reverse`), { body: { reason: 'Receiving waived for the launch' }, headers: key() });
     expect(reversed.status, JSON.stringify(reversed.body)).toBe(200);
     expect(reversed.body).toMatchObject({ state: 'reversed', reason: 'Receiving waived for the launch' });
-    expect(k.events('fulfillment-service.fee.reversed').at(-1)).toEqual({ chargeId: receiving.id, sellerId: s.sellerId, amount: receiving.amount, reason: 'Receiving waived for the launch' });
+    expect(k.events('fulfillment-service.fee.reversed').at(-1)).toEqual({ chargeId: receiving.id, sellerId: s.sellerId, amount: receiving.amount, reason: 'Receiving waived for the launch', period: receiving.period });
     // the posted fee is credited back on the seller ledger against its entry
     const credits = () => k.financeLedger.filter((e) => e.sellerId === s.sellerId && e.type === 'charge_credit');
     expect(credits()).toEqual([expect.objectContaining({ amount: receiving.amount, originalEntryId: entryOf(receiving.id), reason: 'Receiving waived for the launch', idempotencyKey: `fulfillment-service:fee-reversal:${receiving.id}` })]);
@@ -152,13 +155,6 @@ describe('stock jobs', () => {
     expect(overview.body.feesThisMonth.amount).toBe(250 + 550);
     expect(overview.body.stockTotals.volumeCubicFeet).toBeCloseTo(10 * 0.2119, 3);
 
-    // reconciled: the ledger matches inventory; a change made outside the service shows up
-    let rec = await k.api.parts.stock.reconcile();
-    expect(rec.differences.filter((d: any) => d.sellerId === s.sellerId)).toEqual([]);
-    await k.inventory.applyBulkQuantities(s.sellerId, [{ stockItemId: s.stockItemId, newAvailable: 7 }], newId(), { kind: 'seller', id: s.sellerId });
-    rec = await k.api.parts.stock.reconcile();
-    expect(rec.differences.filter((d: any) => d.sellerId === s.sellerId)).toEqual([{ skuEnrollmentId: s.skuId, sellerId: s.sellerId, ledger: 10, inventory: 7 }]);
-    await k.app.kernel.jobs.runNow('fulfillment-service.reconcile');
 
     await k.app.kernel.jobs.runNow('fulfillment-service.storage-snapshot');
     await k.app.kernel.jobs.runNow('fulfillment-service.storage-snapshot');
@@ -200,6 +196,7 @@ describe('stock jobs', () => {
     const s = await k.enrolledSeller();
     const id = await arrivedInbound(k, s, 3);
     await k.call('POST', A(`/inbound/${id}/receive`), { body: { lines: [{ skuEnrollmentId: s.skuId, received: 3, damaged: 2 }], complete: true }, headers: key() });
+    await k.inv.confirmAll(id);
     await k.app.kernel.jobs.runNow('fulfillment-service.aged-stock-notice');
     expect((await k.call('GET', S('/removals'), { token: s.token })).body.items).toHaveLength(0);
     k.clock.advance(61 * 86_400_000);
@@ -208,5 +205,100 @@ describe('stock jobs', () => {
     const removals = (await k.call('GET', S('/removals'), { token: s.token })).body.items;
     expect(removals).toHaveLength(1);
     expect(removals[0]).toMatchObject({ kind: 'dispose', state: 'requested', lines: [{ expected: 2, damaged: 2 }] });
+    expect(k.notices.find((n) => n.dedupeKey === `fs:dispose:${removals[0].id}`)).toMatchObject({ topic: 'seller.fulfillment.disposal_scheduled', context: { units: 2, days: 60, removal: { ref: removals[0].ref } } });
+  });
+});
+
+describe('reconciliation with inventory', () => {
+  it('finds differences per SKU, raises a work item, and resolves them by adjusting the ledger, reimbursing (with approval) or leaving them', async () => {
+    const s = await stocked(k, 6);
+    const other = await stocked(k, 2);
+    const mine = async () => (await k.call('GET', A(`/stock-differences?sellerId=${s.sellerId}`))).body.items;
+    await k.app.kernel.jobs.runNow('fulfillment-service.reconcile');
+    expect(await mine()).toEqual([]);
+
+    // two units go missing in inventory (a staff count elsewhere), one returned unit appears
+    k.inv.level(s.stockItemId).available -= 2;
+    k.inv.level(s.stockItemId).returned += 1;
+    await k.app.kernel.jobs.runNow('fulfillment-service.reconcile');
+    await k.app.kernel.jobs.runNow('fulfillment-service.reconcile'); // same day: one row
+    let list = await mine();
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ skuEnrollmentId: s.skuId, sku: s.sku, sellerId: s.sellerId, state: 'open', ledger: { incoming: 0, available: 6, reserved: 0, damagedHeld: 0, returned: 0 }, inventory: { incoming: 0, available: 4, reserved: 0, damagedHeld: 0, returned: 1 }, decision: null, approval: null });
+    expect(k.work.filter((w) => w.dedupeKey === `fs_stock_difference:${s.skuId}`).at(-1)).toMatchObject({ queueKey: 'fulfillment.reconciliation', kind: 'manual_task', subject: { type: 'stock_item', id: s.stockItemId } });
+    expect((await k.call('GET', A(`/stock-differences?sellerId=${other.sellerId}`))).body.items).toEqual([]);
+    expect((await k.call('GET', A('/stock-differences?state=resolved'))).body.items.some((d: any) => d.id === list[0].id)).toBe(false);
+
+    // reimbursing above the limit waits for approval; a second decision meanwhile is refused
+    expect((await k.call('POST', A(`/stock-differences/${list[0].id}/resolve`), { body: { decision: 'reimburse', reason: 'Lost' }, headers: key() })).status).toBe(400);
+    k.authority.set('fulfillment-service.reimbursements.approve', 'approval_required');
+    const pending = await k.call('POST', A(`/stock-differences/${list[0].id}/resolve`), { body: { decision: 'reimburse', amount: { amount: 4_000, currency: 'USD' }, reason: 'Two units lost in a re-slot' }, headers: key() });
+    k.authority.delete('fulfillment-service.reimbursements.approve');
+    expect(pending.status, JSON.stringify(pending.body)).toBe(200);
+    expect(pending.body).toMatchObject({ state: 'open', decision: 'reimburse', amount: { amount: 4_000 }, approval: { required: true, approvalRequestId: expect.any(String) } });
+    const req = k.approvals.at(-1)!;
+    expect(req).toMatchObject({ action: 'fulfillment-service.reimbursements.approve', target: { type: 'stock_difference', id: list[0].id, sellerId: s.sellerId }, amount: { amount: 4_000 } });
+    expect((await k.call('POST', A(`/stock-differences/${list[0].id}/resolve`), { body: { decision: 'no_change', reason: 'x' }, headers: key() })).status).toBe(409);
+    await k.publish('access', 'access.approval.decided', decided(req, pending.body.approval.approvalRequestId));
+    await k.publish('access', 'access.approval.decided', decided(req, pending.body.approval.approvalRequestId));
+    list = await mine();
+    expect(list[0]).toMatchObject({ state: 'resolved', decision: 'reimburse', amount: { amount: 4_000 }, approval: null, decidedBy: { kind: 'staff' } });
+    expect((await k.call('GET', S('/fees?type=reimbursement'), { token: s.token })).body.items.map((f: any) => [f.amount.amount, f.reference])).toEqual([[-4_000, s.sku]]);
+    expect(k.resolved).toContain(`fs_stock_difference:${s.skuId}`);
+    expect((await k.call('POST', A(`/stock-differences/${list[0].id}/resolve`), { body: { decision: 'no_change', reason: 'again' }, headers: key() })).status).toBe(409);
+
+    // the next day it still differs: adjust the ledger to inventory
+    k.clock.advance(86_400_000);
+    await k.app.kernel.jobs.runNow('fulfillment-service.reconcile');
+    const open = (await mine()).find((d: any) => d.state === 'open');
+    const adjusted = await k.call('POST', A(`/stock-differences/${open.id}/resolve`), { body: { decision: 'adjust_ledger', reason: 'Counted twice' }, headers: key() });
+    expect(adjusted.status, JSON.stringify(adjusted.body)).toBe(200);
+    expect(adjusted.body).toMatchObject({ state: 'resolved', decision: 'adjust_ledger', reason: 'Counted twice' });
+    expect((await k.call('GET', S('/skus'), { token: s.token })).body.items[0].stock).toMatchObject({ available: 4, returned: 1 });
+    expect(k.audits.filter((x) => x.action === 'fulfillment-service.stock_difference.resolve').length).toBeGreaterThanOrEqual(2);
+    k.clock.advance(86_400_000);
+    await k.app.kernel.jobs.runNow('fulfillment-service.reconcile');
+    expect((await mine()).filter((d: any) => d.state === 'open')).toEqual([]);
+  });
+
+  it("follows inventory's own adjustments of Marketly-held units and tells the seller of low stock", async () => {
+    const s = await stocked(k, 5);
+    const adjustment = { adjustmentId: null, movementId: newId(), stockItemId: s.stockItemId, locationId: k.locationId, ownerType: 'seller', sellerId: s.sellerId, serviceManaged: true, fromGroup: 'available', toGroup: 'damaged_held', quantity: 2, reasonCode: 'damage_found', actor: { kind: 'staff', id: newId(), name: 'Packer' } };
+    await k.publish('inventory', 'inventory.adjustment.recorded', adjustment);
+    await k.publish('inventory', 'inventory.adjustment.recorded', adjustment); // once per movement
+    await k.publish('inventory', 'inventory.adjustment.recorded', { ...adjustment, movementId: newId(), serviceManaged: false });
+    expect((await k.call('GET', S('/skus'), { token: s.token })).body.items[0].stock).toMatchObject({ available: 3, unsellable: 2 });
+    const moves = (await k.call('GET', S(`/skus/${s.skuId}/movements`), { token: s.token })).body.items;
+    expect(moves[0]).toMatchObject({ movement: 'adjusted', quantity: 2, fromGroup: 'available', toGroup: 'unsellable', reference: adjustment.movementId, reason: 'damage_found' });
+
+    const low = { stockItemId: s.stockItemId, offerId: s.offerId, ownerType: 'seller', sellerId: s.sellerId, productId: newId(), variantId: newId(), sku: s.sku, label: 'Linen throw', available: 3, threshold: 5, serviceManaged: true };
+    await k.publish('inventory', 'inventory.stock.low', low);
+    await k.publish('inventory', 'inventory.stock.low', { ...low, serviceManaged: false, sellerId: (await k.seller()).sellerId });
+    expect(k.notices.filter((n) => n.topic === 'seller.fulfillment.stock_low' && n.recipients[0].sellerId === s.sellerId)).toEqual([expect.objectContaining({ context: { stock: { label: 'Linen throw', sku: s.sku }, available: 3 }, dedupeKey: expect.stringMatching(new RegExp(`^fs:low:${s.skuId}:`)) })]);
+  });
+});
+
+describe('report datasets', () => {
+  it('registers the four datasets at boot and serves own rows to sellers and permitted staff', async () => {
+    expect(k.datasets.filter((d) => d.owner === 'fulfillment-service').map((d) => [d.key, d.audience, d.permission, d.owner]).sort()).toEqual([
+      ['fulfillment-service.admin.fees', 'staff', 'fulfillment-service.fees.manage', 'fulfillment-service'],
+      ['fulfillment-service.admin.stock_by_owner', 'staff', 'fulfillment-service.operations.view', 'fulfillment-service'],
+      ['fulfillment-service.seller.fees', 'seller', 'fulfillment-service.fees.view', 'fulfillment-service'],
+      ['fulfillment-service.seller.stock', 'seller', 'fulfillment-service.inbound.manage', 'fulfillment-service'],
+    ]);
+    const s = await stocked(k, 3);
+    const other = await stocked(k, 1);
+    const seller = { kind: 'seller' as const, accountId: newId(), sellerId: s.sellerId };
+    const fees = await k.api.exportRows('fulfillment-service.seller.fees', {}, seller);
+    expect(fees.rows.map((r: any) => r.type).sort()).toEqual(['Labelling', 'Receiving']);
+    const stock = await k.api.exportRows('fulfillment-service.seller.stock', {}, seller);
+    expect(stock.rows).toEqual([expect.objectContaining({ sku: s.sku, available: 3, state: 'active' })]);
+    await expect(k.api.exportRows('fulfillment-service.admin.fees', {}, seller)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(k.api.exportRows('fulfillment-service.nope', {}, seller)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const staff = { kind: 'staff' as const, accountId: newId() };
+    const byOwner = await k.api.exportRows('fulfillment-service.admin.stock_by_owner', { sellerId: other.sellerId }, staff);
+    expect(byOwner.rows).toEqual([expect.objectContaining({ sellerId: other.sellerId, sku: other.sku, available: 1 })]);
+    const all = await k.api.exportRows('fulfillment-service.admin.fees', { sellerId: s.sellerId, type: 'receiving' }, staff);
+    expect(all.rows).toEqual([expect.objectContaining({ sellerId: s.sellerId, type: 'Receiving', units: 3, amount: '0.75' })]);
   });
 });
