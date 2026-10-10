@@ -192,8 +192,8 @@ export class Exports {
       reportKey = report.key;
       const schedule: ScheduledRun | null = o.scheduleId ? { id: o.scheduleId, periodLabel: periodLabel(resolved.range) } : null;
       filters = { reportKey: report.key, query: input.query ?? {}, ...(schedule ? { schedule } : {}) };
-    } else if (via !== 'api' && !(await this.core.principalCan(p, e.permission, by.can))) {
-      // module export endpoints carry the dataset permission themselves; here the dataset is chosen in the body
+    } else if (!(await this.core.principalCan(p, e.permission, by.can))) {
+      // every request, including other modules' export endpoints (requestExport), needs the dataset's own permission
       throw new AppError('FORBIDDEN', `Exporting ${e.title} needs ${e.permission}`, { permission: e.permission, dataset });
     }
 
@@ -385,7 +385,7 @@ export class Exports {
       const rq = await this.queries.resolve(f.query, { seller: Boolean(job.seller_id) });
       const result = await this.queries.run(report, rq, seller);
       const out = this.queries.exportRowsOf(result);
-      if (out.rows.length > maxRows) throw this.tooLarge(maxRows);
+      if (out.rows.length > maxRows) throw this.tooLarge(maxRows, out.rows.length);
       return out;
     }
     const e = await this.entry(job.dataset);
@@ -399,7 +399,7 @@ export class Exports {
     for (let page = 0; page < MAX_PAGES; page++) {
       const res = await api.exportRows(job.dataset, job.filters ?? {}, principal, cursor);
       rows.push(...(res.rows ?? []));
-      if (rows.length > maxRows) throw this.tooLarge(maxRows);
+      if (rows.length > maxRows) throw this.tooLarge(maxRows, rows.length);
       cursor = res.nextCursor ?? undefined;
       if (!cursor || seen.has(cursor)) break;
       seen.add(cursor);
@@ -408,8 +408,9 @@ export class Exports {
     return { columns: registered.length ? registered : columnsFromRows(rows), rows };
   }
 
-  private tooLarge(maxRows: number) {
-    return this.core.ctx.error('EXPORT_TOO_LARGE', `More than ${maxRows.toLocaleString('en-US')} rows; narrow the filters`, { maxRows });
+  /** The export matched more rows than maxExportRows: the job fails with this (matchedRows: rows read before stopping) */
+  private tooLarge(maxRows: number, matchedRows: number) {
+    return this.core.ctx.error('EXPORT_TOO_LARGE', `More than ${maxRows.toLocaleString('en-US')} rows matched; narrow the filters`, { maxRows, matchedRows });
   }
 
   /** Job reports.expire-exports: ready exports past their link lifetime (media deletes the file at the same time) */

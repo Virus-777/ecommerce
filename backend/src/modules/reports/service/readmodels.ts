@@ -136,6 +136,8 @@ export class ReadModels {
           tax_minor: i.taxShare.amount,
           currency: i.lineSubtotal.currency,
           placed_at: new Date(order.placedAt),
+          accepted_at: order.acceptedAt ? new Date(order.acceptedAt) : null,
+          group_id: g.id,
           paid_at: null,
           shipped_at: null,
           delivered_at: i.deliveredAt ? new Date(i.deliveredAt) : null,
@@ -165,8 +167,15 @@ export class ReadModels {
   async onPaymentCaptured(p: EventPayload<'payments.payment.captured'>, env: Env) {
     await this.ensureOrder(p.orderId, { accepted: true });
     const at = new Date(p.capturedAt);
-    if (!p.allocations.length) await this.repo.updateOrderItems({ orderId: p.orderId, nullColumn: 'paid_at' }, { paid_at: at });
-    for (const a of p.allocations) await this.repo.updateOrderItems({ orderId: p.orderId, ownerType: a.ownerType, sellerId: a.ownerType === 'seller' ? (a.sellerId ?? null) : null, nullColumn: 'paid_at' }, { paid_at: at });
+    // captured groups: the event's group (per-group capture) or its allocations; rows recorded before group_id
+    // existed (null) fall back to the group's owner
+    const groups = p.groupId ? p.allocations.filter((a) => a.groupId === p.groupId) : p.allocations;
+    if (!groups.length && !p.groupId) await this.repo.updateOrderItems({ orderId: p.orderId, nullColumn: 'paid_at' }, { paid_at: at });
+    if (!groups.length && p.groupId) await this.repo.updateOrderItems({ orderId: p.orderId, groupId: p.groupId, nullColumn: 'paid_at' }, { paid_at: at });
+    for (const a of groups) {
+      await this.repo.updateOrderItems({ orderId: p.orderId, groupId: a.groupId, nullColumn: 'paid_at' }, { paid_at: at });
+      await this.repo.updateOrderItems({ orderId: p.orderId, groupId: null, ownerType: a.ownerType, sellerId: a.ownerType === 'seller' ? (a.sellerId ?? null) : null, nullColumn: 'paid_at' }, { paid_at: at });
+    }
     await this.touch(['order_items'], env);
   }
 
@@ -316,22 +325,21 @@ export class ReadModels {
   async onStockChanged(p: EventPayload<'inventory.stock.changed'>, env: Env) {
     const productId = await this.productOf(p.offerId ?? null);
     if (!productId) return this.touch(['discovery'], env);
-    const key = `stockout:${p.stockItemId}`;
     if (p.state === 'out_of_stock') {
-      // the first out-of-stock time of an open interval stays; a redelivered event changes nothing
+      // the first out-of-stock time of an open interval stays (open_stockouts); a redelivered event changes nothing
       await this.repo.transaction(async (tx) => {
-        if (await tx.claim(`stock:${env.id}`)) await tx.remember(key, `${productId}|${env.at}`);
+        if (await tx.claim(`stock:${env.id}`)) await tx.openStockout(p.stockItemId, productId, new Date(env.at));
       });
     } else {
-      const open = await this.repo.recall(key);
+      const open = await this.repo.getStockout(p.stockItemId);
       if (open) {
-        const [pid, since] = open.split('|') as [string, string];
-        const days = await this.minutesByDay(new Date(since), new Date(env.at));
+        const days = await this.minutesByDay(open.since, new Date(env.at));
         await this.repo.transaction(async (tx) => {
           if (!(await tx.claim(`stock:${env.id}`))) return;
-          if ((await tx.recall(key)) !== open) return; // closed meanwhile
-          await tx.forget(key);
-          for (const [day, minutes] of days) await tx.bumpDaily('fact_discovery_daily', { product_id: pid, day }, { stockout_minutes: minutes });
+          const still = await tx.getStockout(p.stockItemId, { forUpdate: true });
+          if (!still || still.since.getTime() !== open.since.getTime()) return; // closed meanwhile
+          await tx.closeStockout(p.stockItemId);
+          for (const [day, minutes] of days) await tx.bumpDaily('fact_discovery_daily', { product_id: open.product_id, day }, { stockout_minutes: minutes });
         });
       }
     }
@@ -478,14 +486,14 @@ export class ReadModels {
     const sales = (await this.repo.getOrderItems(p.orderId)).reduce((n, r) => n + r.item_minor, 0);
     await this.repo.transaction(async (tx) => {
       if (!(await tx.claim(`redemption:${p.redemptionId}`))) return;
-      await tx.remember(`redemption:${p.redemptionId}`, p.campaignId);
+      await tx.rememberCampaign('redemption', p.redemptionId, p.campaignId, new Date(env.at));
       await tx.bumpDaily('fact_campaigns_daily', { campaign_kind: 'promotion', campaign_id: p.campaignId, day }, { discount_cost_minor: p.amount.amount, redemptions: 1, sales_minor: sales }, {}, { column: 'funded_by', add: { platform: p.platformPart.amount, seller: p.sellerPart.amount } });
     });
     await this.touch(['campaigns'], env);
   }
 
   async onRedemptionReversed(p: EventPayload<'promotions.redemption.reversed'>, env: Env) {
-    const campaignId = await this.repo.recall(`redemption:${p.redemptionId}`);
+    const campaignId = await this.repo.campaignOf('redemption', p.redemptionId);
     if (campaignId) {
       const day = await this.day(env.at);
       await this.repo.transaction(async (tx) => {
@@ -500,7 +508,7 @@ export class ReadModels {
     const day = /^\d{4}-\d{2}-\d{2}$/.test(p.day) ? p.day : await this.day(env.at);
     await this.repo.transaction(async (tx) => {
       if (!(await tx.claim(`charge:${p.chargeId}`))) return;
-      await tx.remember(`charge:${p.chargeId}`, p.campaignId);
+      await tx.rememberCampaign('charge', p.chargeId, p.campaignId, new Date(env.at));
       await tx.bumpDaily('fact_campaigns_daily', { campaign_kind: 'ad', campaign_id: p.campaignId, day }, { spend_minor: p.amount.amount });
       await tx.bumpDaily('fact_marketplace_finance_daily', { seller_id: p.sellerId, day }, { ad_charges_minor: p.amount.amount });
     });
@@ -509,7 +517,7 @@ export class ReadModels {
 
   async onChargeCredited(p: EventPayload<'advertising.charge.credited'>, env: Env) {
     const day = await this.day(env.at);
-    const campaignId = await this.repo.recall(`charge:${p.chargeId}`);
+    const campaignId = await this.repo.campaignOf('charge', p.chargeId);
     await this.repo.transaction(async (tx) => {
       if (!(await tx.claim(`credit:${p.chargeId}`))) return;
       if (campaignId) await tx.bumpDaily('fact_campaigns_daily', { campaign_kind: 'ad', campaign_id: campaignId, day }, { spend_minor: -p.amount.amount });

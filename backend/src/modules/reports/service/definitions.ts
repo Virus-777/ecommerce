@@ -4,14 +4,26 @@
  */
 import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
-import type { MetricDefinition, MetricInput, MetricSuggestion, ReportDefinition, ReportGroup, ReportQuery, ReportSchedule, SavedView, StaffRef } from '../../../spec/reports.js';
+import type * as common from '../../../spec/common.js';
+import type { MetricDefinition, MetricInput, MetricOwnerChange, MetricSuggestion, ReportDefinition, ReportGroup, ReportQuery, ReportSchedule, SavedView, StaffRef } from '../../../spec/reports.js';
 import { GROUPS, METRICS, REPORTS, SELLER_GROUP, UNASSIGNED_OWNER, groupOf } from '../domain/catalogue.js';
+
+/** An actor stored as JSON text (metric_owner_changes.changed_by) */
+function actorFromText(text: string): common.Actor {
+  try {
+    const a = JSON.parse(text) as common.Actor;
+    if (a && typeof a.kind === 'string') return a;
+  } catch {
+    /* plain id */
+  }
+  return { kind: 'staff', id: text };
+}
 
 /** A named owner (the legacy placeholder id counts as nobody) */
 const ownerOf = (id: string | null | undefined): string | null => (id && id !== UNASSIGNED_OWNER ? id : null);
 import { TIME_OF_DAY, metricIssues, nextRun } from '../domain/rules.js';
 import { metricDefinitionMachine, metricSuggestionMachine } from '../domain/state-machines.js';
-import type { MetricRow, ReportRow, SavedViewRow, ScheduleRow, SuggestionRow, VersionRow } from '../ports.js';
+import type { MetricRow, OwnerChangeRow, ReportRow, SavedViewRow, ScheduleRow, SuggestionRow, VersionRow } from '../ports.js';
 import { invalid, notFound, type Caller, type ReportsCore } from './core.js';
 
 /** Seeded definitions take effect from the start of the launch year */
@@ -54,6 +66,7 @@ export class Definitions {
         version: 1,
         effective_from: SEED_EFFECTIVE_FROM,
         reviewed_at: null,
+        change_note: 'First published definition (launch set)',
       };
       await this.core.repo.seedMetric(row, { id: newId(), metric_key: m.key, version: 1, snapshot: snapshotOf(row, 'First published definition (launch set)') as never, change_note: 'First published definition (launch set)', changed_by: 'system', effective_from: SEED_EFFECTIVE_FROM, created_at: now });
     }
@@ -82,12 +95,7 @@ export class Definitions {
       rows.map((r) => ownerOf(r.owner_staff_id)),
       (id) => this.core.groupRole(rows.find((r) => r.owner_staff_id === id)?.group_key ?? ''),
     );
-    const notes = new Map<string, string>();
-    for (const r of rows.filter((x) => x.status === 'published')) {
-      const v = (await this.core.repo.listVersions(r.key)).find((x) => x.version === r.version);
-      if (v) notes.set(r.key, v.change_note);
-    }
-    return rows.map((r) => ({ ...rowView(r), owner: ownerOf(r.owner_staff_id) ? (refs.get(r.owner_staff_id!) ?? null) : null, changeNote: notes.get(r.key) ?? null }));
+    return rows.map((r) => ({ ...rowView(r), owner: ownerOf(r.owner_staff_id) ? (refs.get(r.owner_staff_id!) ?? null) : null, changeNote: r.change_note ?? null }));
   }
 
   async versionViews(rows: VersionRow[]): Promise<MetricDefinition[]> {
@@ -122,13 +130,21 @@ export class Definitions {
     return this.metricViews(rows);
   }
 
-  async getMetric(key: string): Promise<{ metric: MetricDefinition; versions: MetricDefinition[]; suggestions: MetricSuggestion[] }> {
+  async getMetric(key: string): Promise<{ metric: MetricDefinition; versions: MetricDefinition[]; suggestions: MetricSuggestion[]; ownerChanges: MetricOwnerChange[] }> {
     const row = await this.core.repo.getMetric(key);
     if (!row) throw notFound('Metric');
     const [metric] = await this.metricViews([row]);
     const versions = await this.versionViews(await this.core.repo.listVersions(key));
     const suggestions = await this.suggestionViews(await this.core.repo.listSuggestions(key));
-    return { metric: metric!, versions, suggestions };
+    const ownerChanges = await this.ownerChangeViews(await this.core.repo.listOwnerChanges(key));
+    return { metric: metric!, versions, suggestions, ownerChanges };
+  }
+
+  /** Owner history of a metric, newest first */
+  async ownerChangeViews(rows: OwnerChangeRow[]): Promise<MetricOwnerChange[]> {
+    const refs = await this.core.staffRefs(rows.flatMap((r) => [r.from_staff_id, r.to_staff_id]).filter((x): x is string => !!x));
+    const ref = (id: string): StaffRef => refs.get(id) ?? { staffId: id, name: 'Staff member', role: 'Staff' };
+    return rows.map((r) => ({ from: r.from_staff_id ? ref(r.from_staff_id) : null, to: ref(r.to_staff_id), reason: r.reason, changedBy: actorFromText(r.changed_by), changedAt: r.changed_at.toISOString() }));
   }
 
   async suggestionViews(rows: SuggestionRow[]): Promise<MetricSuggestion[]> {
@@ -172,6 +188,7 @@ export class Definitions {
       currency_rule: currencyRule(cfg.currency),
       time_zone: cfg.timeZone,
       launch_measure: m.launchMeasure ?? cfg.launchMetrics.includes(key),
+      change_note: m.changeNote?.trim() || null,
       status: 'draft',
       version: 1,
       effective_from: m.effectiveFrom ?? today,
@@ -196,7 +213,7 @@ export class Definitions {
       // a published metric gets a new draft version; a draft is edited in place; retired cannot change
       const status = before.status === 'draft' ? 'draft' : metricDefinitionMachine.next(before.status as never, 'revise');
       const version = before.status === 'published' ? before.version + 1 : before.version;
-      const after = await tx.updateMetric(key, { ...inputColumns(m), owner_staff_id: m.ownerId ?? before.owner_staff_id, launch_measure: m.launchMeasure ?? before.launch_measure, status, version, effective_from: m.effectiveFrom ?? (before.status === 'published' ? today : before.effective_from) });
+      const after = await tx.updateMetric(key, { ...inputColumns(m), owner_staff_id: m.ownerId ?? before.owner_staff_id, launch_measure: m.launchMeasure ?? before.launch_measure, change_note: m.changeNote?.trim() || null, status, version, effective_from: m.effectiveFrom ?? (before.status === 'published' ? today : before.effective_from) });
       return { before, after };
     });
     await this.core.audit({ action: 'reports.metric.revise', actionLabel: `Revised metric definition (draft v${after.version})`, category: 'other', target: { type: 'metric', id: key, label: after.name, screen: 'admin/reports' }, before: rowView(before), after: rowView(after), reason: m.changeNote }, by);
@@ -217,7 +234,7 @@ export class Definitions {
       const before = await tx.getMetric(key, { forUpdate: true });
       if (!before) throw notFound('Metric');
       const status = metricDefinitionMachine.next(before.status as never, 'publish');
-      const after = await tx.updateMetric(key, { status, effective_from: body.effectiveFrom, reviewed_at: today });
+      const after = await tx.updateMetric(key, { status, effective_from: body.effectiveFrom, reviewed_at: today, change_note: changeNote });
       await tx.insertVersion({ id: newId(), metric_key: key, version: after.version, snapshot: snapshotOf(after, changeNote) as never, change_note: changeNote, changed_by: by.actor.id ?? by.actor.kind, effective_from: body.effectiveFrom, created_at: this.core.now() });
       return { before, after };
     });
@@ -263,7 +280,7 @@ export class Definitions {
       let opened: MetricRow | undefined;
       if (body.accept) {
         const metric = await tx.getMetric(before.metric_key, { forUpdate: true });
-        if (metric?.status === 'published') opened = await tx.updateMetric(metric.key, { status: metricDefinitionMachine.next(metric.status as never, 'revise'), version: metric.version + 1, effective_from: today });
+        if (metric?.status === 'published') opened = await tx.updateMetric(metric.key, { status: metricDefinitionMachine.next(metric.status as never, 'revise'), version: metric.version + 1, effective_from: today, change_note: `Suggested change: ${before.proposed}` });
       }
       return { before, after, opened };
     });
@@ -296,7 +313,7 @@ export class Definitions {
     return ref!;
   }
 
-  /** Names (or changes) the owner of a metric; not a new version; recorded in the audit history */
+  /** Names (or changes) the owner of a metric; not a new version; recorded in metric_owner_changes and the audit history */
   async setMetricOwner(key: string, body: { ownerId: string; reason: string }, by: Caller): Promise<MetricDefinition> {
     const current = await this.core.repo.getMetric(key);
     if (!current) throw notFound('Metric');
@@ -304,7 +321,9 @@ export class Definitions {
     const after = await this.core.repo.transaction(async (tx) => {
       const before = await tx.getMetric(key, { forUpdate: true });
       if (!before) throw notFound('Metric');
-      return tx.updateMetric(key, { owner_staff_id: body.ownerId });
+      const updated = await tx.updateMetric(key, { owner_staff_id: body.ownerId });
+      await tx.insertOwnerChange({ id: newId(), metric_key: key, from_staff_id: ownerOf(before.owner_staff_id), to_staff_id: body.ownerId, reason: body.reason.trim(), changed_by: JSON.stringify({ kind: by.actor.kind, id: by.actor.id ?? null, ...(by.actor.name ? { name: by.actor.name } : {}) }), changed_at: this.core.now() });
+      return updated;
     });
     await this.core.audit(
       { action: 'reports.metric.owner', actionLabel: `Named ${ref.name} owner of the metric`, category: 'other', target: { type: 'metric', id: key, label: after.name, screen: 'admin/reports' }, before: { ownerId: ownerOf(current.owner_staff_id) }, after: { ownerId: body.ownerId }, reason: body.reason.trim() },

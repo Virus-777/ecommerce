@@ -57,9 +57,6 @@ function jsonAddExpr(table: string, column: string, add: Record<string, number>)
   return expr;
 }
 
-/** Lookups kept between events (open stock-out intervals, redemption and charge campaigns) */
-const LOOKUP = 'lookup:';
-
 /**
  * Postgres adapter for ReportsRepository. `db` is scoped to the `reports` schema; `inbox` (ctx.inbox) records
  * the natural keys idempotent consumers handled, in the same transaction as their effects.
@@ -107,6 +104,12 @@ export function createPostgresReportsRepository(db: Kysely<ReportsDb>, inbox: In
     },
     async insertVersion(row) {
       await d.insertInto('metric_versions').values(encode('metric_versions', row as never)).execute();
+    },
+    async insertOwnerChange(row) {
+      await db.insertInto('metric_owner_changes').values(row).execute();
+    },
+    async listOwnerChanges(key) {
+      return db.selectFrom('metric_owner_changes').selectAll().where('metric_key', '=', key).orderBy('changed_at', 'desc').orderBy('id', 'desc').execute();
     },
     async listVersions(key) {
       return db.selectFrom('metric_versions').selectAll().where('metric_key', '=', key).orderBy('version', 'desc').execute();
@@ -251,6 +254,7 @@ export function createPostgresReportsRepository(db: Kysely<ReportsDb>, inbox: In
       let q = db.updateTable('fact_order_items').set(patch);
       if (w.orderId) q = q.where('order_id', '=', w.orderId);
       if (w.itemIds) q = w.itemIds.length ? q.where('order_item_id', 'in', w.itemIds) : q.where(sql<boolean>`false`);
+      if (w.groupId !== undefined) q = w.groupId === null ? q.where('group_id', 'is', null) : q.where('group_id', '=', w.groupId);
       if (w.ownerType) q = q.where('owner_type', '=', w.ownerType as 'official' | 'seller');
       if (w.sellerId !== undefined) q = w.sellerId === null ? q.where('seller_id', 'is', null) : q.where('seller_id', '=', w.sellerId);
       if (w.nullColumn) q = q.where(w.nullColumn, 'is', null);
@@ -517,16 +521,24 @@ export function createPostgresReportsRepository(db: Kysely<ReportsDb>, inbox: In
     async claim(key) {
       return inbox.claim(db, key);
     },
-    async remember(key, value) {
-      const r = await db.insertInto('read_model_checkpoints').values({ key: `${LOOKUP}${key}`, state: 'lookup', last_event_id: value, last_event_at: null, rebuild_started_at: null, rebuild_progress: null }).onConflict((oc) => oc.column('key').doNothing()).returning('key').execute();
+    async openStockout(stockItemId, productId, since) {
+      const r = await db.insertInto('open_stockouts').values({ stock_item_id: stockItemId, product_id: productId, since }).onConflict((oc) => oc.column('stock_item_id').doNothing()).returning('stock_item_id').execute();
       return r.length > 0;
     },
-    async recall(key) {
-      const r = await db.selectFrom('read_model_checkpoints').select('last_event_id').where('key', '=', `${LOOKUP}${key}`).executeTakeFirst();
-      return r?.last_event_id ?? null;
+    async getStockout(stockItemId, opts) {
+      let q = db.selectFrom('open_stockouts').selectAll().where('stock_item_id', '=', stockItemId);
+      if (opts?.forUpdate) q = q.forUpdate();
+      return q.executeTakeFirst();
     },
-    async forget(key) {
-      await db.deleteFrom('read_model_checkpoints').where('key', '=', `${LOOKUP}${key}`).execute();
+    async closeStockout(stockItemId) {
+      await db.deleteFrom('open_stockouts').where('stock_item_id', '=', stockItemId).execute();
+    },
+    async rememberCampaign(kind, refId, campaignId, at) {
+      await db.insertInto('campaign_refs').values({ kind, ref_id: refId, campaign_id: campaignId, created_at: at }).onConflict((oc) => oc.columns(['kind', 'ref_id']).doNothing()).execute();
+    },
+    async campaignOf(kind, refId) {
+      const r = await db.selectFrom('campaign_refs').select('campaign_id').where('kind', '=', kind).where('ref_id', '=', refId).executeTakeFirst();
+      return r?.campaign_id ?? null;
     },
     async countRows(table) {
       const r = await d.selectFrom(table).select(sql<number>`count(*)::int`.as('n')).executeTakeFirst();
