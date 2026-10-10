@@ -40,6 +40,46 @@
     { "name": "bestSellerRanks", "signature": "(productIds: uuid[]) => map<{ rank: int, categoryId: uuid, categoryName: string, label: string, updatedAt: datetime } | null>", "desc": "Best-seller rank of products in their category by 30-day units sold; null when not ranked (outside the top 100 or below bestSellingMinOrders)", "usedBy": ["graphql", "content"] }
   ],
   "types": {
+    "SearchFilters": {
+      "categoryIds": { "type": "uuid[]?", "desc": "Category ids (GraphQL); REST category is a slug resolved to its id" },
+      "categorySlug": { "type": "string?", "desc": "REST category" },
+      "priceMin": { "type": "int?", "desc": "Minor units" },
+      "priceMax": { "type": "int?", "desc": "Minor units" },
+      "brandIds": "uuid[]?",
+      "brandSlugs": { "type": "string[]?", "desc": "REST brand: brand slugs (ids are accepted too)" },
+      "sellerIds": "uuid[]?",
+      "sellerSlugs": { "type": "string[]?", "desc": "REST seller: seller slugs; 'official' is the Official Store" },
+      "official": { "type": "bool?", "desc": "Official Store offers only" },
+      "minRating": { "type": "int?", "desc": "'N stars and up', 1–5" },
+      "conditions": "enum(new|used|refurbished)[]?",
+      "inStockOnly": { "type": "bool?", "desc": "Default from the setting excludeOutOfStockByDefault (true): in stock now" },
+      "freeDelivery": "bool?",
+      "shipsToday": "bool?",
+      "arrivesBy": "date?",
+      "onSale": "bool?",
+      "listedWithinDays": { "type": "int?", "desc": "New arrivals" },
+      "attributes": { "type": "AttributeFilter[]?", "desc": "Category attribute filters, e.g. noise_cancelling = [active]" }
+    },
+    "AttributeFilter": { "key": "string", "values": "string[]" },
+    "SearchQuery": {
+      "q": { "type": "string?", "desc": "Free text; without it this is a listing (category, brand, seller, collection)" },
+      "filters": { "type": "SearchFilters?", "desc": "Same meaning as the REST query parameters of GET /products and GraphQL SearchFilterInput" },
+      "sort": "enum(recommended|price_asc|price_desc|newest|rating|best_selling)?"
+    },
+    "SearchMatch": {
+      "position": { "type": "int", "desc": "1-based position among organic results" },
+      "variantId": { "type": "uuid?", "desc": "The variant the card shows for the active filters" },
+      "variantCue": { "type": "string?", "desc": "e.g. 'Black · 2 more colors'" },
+      "offerId": { "type": "uuid?", "desc": "The offer whose price the card shows (the seller's offer under a seller filter)" },
+      "priceIsFrom": { "type": "bool", "desc": "True when the price is the lowest of several ('From $…')" },
+      "badges": "string[]"
+    },
+    "SponsoredSlot": {
+      "placement": { "type": "string", "desc": "Advertising placement key: search_top_row, category_inline, category_banner" },
+      "kind": "enum(top_row|inline|banner)",
+      "positions": { "type": "int[]", "desc": "Inline only: 1-based grid positions where a labelled sponsored card may be inserted" },
+      "maxItems": "int"
+    },
     "ProductCard": {
       "productId": "uuid",
       "slug": "string",
@@ -300,7 +340,7 @@
     {
       "id": "searchProducts", "area": "store", "method": "GET", "path": "/products",
       "summary": "Search results or category listing (product cards with sponsored slots marked)",
-      "desc": "Without q this is a category, brand, seller or collection listing. Out-of-stock products are excluded unless availability=include_out_of_stock. Seller and condition filters show the matching seller's offer price. Sponsored hits come from advertising.sponsoredForResults on the first page only and always carry a visible label; when advertising is off there are none.",
+      "desc": "Without q this is a category, brand, seller or collection listing. Out-of-stock products are excluded unless availability=include_out_of_stock. Seller and condition filters show the matching seller's offer price. Sponsored hits come from advertising.sponsoredForResults on the first page only and always carry a visible label; when advertising is off there are none. Ad personalization: personalizationAllowed is true only for a signed-in customer whose marketing preferences allow personalized recommendations (customers.getMarketingConsent), with their customerId; visitors always get false (visitor sessions carry no privacy choice), so their ads use page context only (query, category).",
       "auth": "visitor", "paging": true,
       "query": {
         "q": { "type": "string?", "desc": "Names, brands, keywords and seller names; a full GTIN/UPC also matches the product carrying it" },
@@ -363,8 +403,8 @@
     { "id": "lookupBarcode", "area": "store", "method": "GET", "path": "/barcodes/{code}", "summary": "Resolve a scanned GTIN/UPC/EAN to a listed product and variant", "desc": "The app's 'Scan a barcode' reads the code on the device and sends it here. Matches search_documents.gtins (only purchasable, listed products). No match returns match=false with fallbackQuery so the app can show search results with empty guidance; it is logged as an unavailable search.", "auth": "visitor", "params": { "code": "string" }, "query": { "postalCode": "string?" }, "response": "BarcodeMatch", "errors": ["VALIDATION_FAILED"], "screens": ["store/search", "store/home"] },
     { "id": "getRankingPolicy", "area": "store", "method": "GET", "path": "/ranking-policy", "summary": "Published 'How results are ranked'", "auth": "visitor", "response": "RankingPolicy", "screens": ["store/category", "store/search", "help/article"] },
 
-    { "id": "sellerQuickSearch", "area": "seller", "method": "GET", "path": "/quick", "summary": "Seller Center top-bar search across own orders, offers/SKUs and returns", "desc": "Fan-out over enabled modules' public APIs with the seller from the session: orders.listOrdersForSeller (order ref, buyer name, product), offers.searchOwnOffers (title, seller SKU, GTIN) and returns.listForSeller with q (return ref, order ref). Groups the member's role cannot see are left out (e.g. orders without orders.fulfillment.view). Nothing is indexed here; each group comes from its owning module.", "auth": "seller", "query": { "q": "string", "limit": { "type": "int?", "desc": "Per group, default 5, max 10" } }, "response": "LookupResult", "errors": ["VALIDATION_FAILED"], "screens": ["seller/dashboard"] },
-    { "id": "adminLookup", "area": "admin", "method": "GET", "path": "/lookup", "summary": "Back-office top-bar quick search across orders, sellers, products and customers", "desc": "Matches by reference, name, email, SKU or GTIN. Fan-out over enabled modules' public APIs, each group only when the caller holds that module's view permission: orders.listOrdersAdmin (orders.orders.view), sellers.searchSellers (sellers.accounts.view), customers.searchCustomers (customers.accounts.view; email masked without contact permission), products from this module's index plus offers.listOffersAdmin for seller SKUs (offers.offers.view). The lookup itself is not audited; opening a record is.", "auth": "staff", "query": { "q": "string", "limit": { "type": "int?", "desc": "Per group, default 5, max 10" } }, "response": "LookupResult", "errors": ["VALIDATION_FAILED"], "screens": ["admin/dashboard"] },
+    { "id": "sellerQuickSearch", "area": "seller", "method": "GET", "path": "/quick", "summary": "Seller Center top-bar search across own orders, offers/SKUs and returns", "desc": "Fan-out over enabled modules' public APIs with the seller from the session: orders.listOrdersForSeller (order ref, buyer name, product), offers.searchOwnOffers (title, seller SKU, GTIN) and returns.listForSeller with q (return ref, order ref). Each group only when the member may see it (owners see every group): Orders when the member holds any orders.fulfillment.* permission; Offers and SKUs with any offers.* permission (e.g. offers.offers.manage, offers.prices.manage, offers.bulk.update, offers.offers.export); Returns with any returns.* permission (e.g. returns.requests.respond, returns.refunds.issue). A disabled module's group disappears. Nothing is indexed here; each group comes from its owning module.", "auth": "seller", "query": { "q": "string", "limit": { "type": "int?", "desc": "Per group, default 5, max 10" } }, "response": "LookupResult", "errors": ["VALIDATION_FAILED"], "screens": ["seller/dashboard"] },
+    { "id": "adminLookup", "area": "admin", "method": "GET", "path": "/lookup", "summary": "Back-office top-bar quick search across orders, sellers, products and customers", "desc": "Matches by reference, name, email, SKU or GTIN. Fan-out over enabled modules' public APIs, each group only when the caller holds its permission: Orders through orders.listOrdersAdmin (orders.orders.view); Sellers through sellers.searchSellers (sellers.accounts.view); Customers through customers.searchCustomers (customers.accounts.view; the email is masked without orders.customers.view-contact); Offers and SKUs through offers.listOffersAdmin (offers.offers.view); Products from this module's index (listed products, also by GTIN) for every staff member, no permission needed (it is the public catalog). The lookup itself is not audited; opening a record is.", "auth": "staff", "query": { "q": "string", "limit": { "type": "int?", "desc": "Per group, default 5, max 10" } }, "response": "LookupResult", "errors": ["VALIDATION_FAILED"], "screens": ["admin/dashboard"] },
     { "id": "listSynonyms", "area": "admin", "method": "GET", "path": "/synonyms", "summary": "Search synonyms", "auth": "staff", "permission": "search.synonyms.manage", "paging": true, "query": { "q": "string?", "active": "bool?" }, "response": "Synonym" },
     { "id": "createSynonym", "area": "admin", "method": "POST", "path": "/synonyms", "summary": "Add a synonym set (takes effect on the next query; no reindex needed)", "auth": "staff", "permission": "search.synonyms.manage", "body": "SynonymInput", "response": "Synonym", "status": 201, "errors": ["SYNONYM_CONFLICT"], "audited": true, "events": ["search.synonym.changed"] },
     { "id": "updateSynonym", "area": "admin", "method": "PATCH", "path": "/synonyms/{id}", "summary": "Edit or deactivate a synonym set", "auth": "staff", "permission": "search.synonyms.manage", "params": { "id": "uuid" }, "body": "SynonymInput", "response": "Synonym", "errors": ["SYNONYM_CONFLICT"], "audited": true, "events": ["search.synonym.changed"] },
