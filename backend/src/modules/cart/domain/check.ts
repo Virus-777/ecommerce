@@ -10,7 +10,7 @@ import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type * as offers from '../../../spec/offers.js';
 import type * as promotions from '../../../spec/promotions.js';
 import type { ItemRow } from '../ports.js';
-import { desired, lineMaximum, minLimit, offerBlock, packageKey, SEVERITY, type DesiredNotice, type JsonObject, type LimitKind } from './rules.js';
+import { defaultFulfilledBy, desired, lineMaximum, minLimit, offerBlock, packageKey, SEVERITY, shippingOf, type DesiredNotice, type FulfilledBy, type JsonObject, type LimitKind } from './rules.js';
 
 /** What other modules say about one offer right now */
 export interface OfferFacts {
@@ -56,6 +56,9 @@ export interface LineEval {
   maxQuantity: number;
   limitKind: LimitKind;
   shownAvailable: number | null;
+  /** Effective fulfilment of the offer (Offer.shipping); null when the offer is gone */
+  shipping: offers.OfferShipping | null;
+  fulfilledBy: FulfilledBy;
   shipsFrom: string;
   packageKey: string;
   seller: SellerLabel;
@@ -114,7 +117,9 @@ export function evaluateLine(item: ItemRow, facts: OfferFacts, product: ProductF
   const { max, limitKind } = lineMaximum(purchaseLimit, available, s.maxQuantityPerLine);
   const low = facts.stockState === 'low_stock' || (facts.lowStockThreshold !== null && available !== null && available <= facts.lowStockThreshold);
   const shownAvailable = available !== null && (available < item.quantity || low) ? Math.max(available, 0) : null;
-  const shipsFrom = offer?.dispatch.shipsFrom ?? item.ships_from;
+  const shipping = offer ? shippingOf(offer) : null;
+  const shipsFrom = shipping?.dispatch.shipsFrom ?? item.ships_from;
+  const fulfilledBy = shipping?.fulfilledBy ?? item.fulfilled_by ?? defaultFulfilledBy(item.owner_type);
   const alternatives = alternativesOf(item.offer_id, facts.changes);
   const altJson: JsonObject = alternatives ? { alternatives: { count: alternatives.count, lowestPrice: alternatives.lowestPrice ? { ...alternatives.lowestPrice } : null } } : {};
 
@@ -188,8 +193,10 @@ export function evaluateLine(item: ItemRow, facts: OfferFacts, product: ProductF
     maxQuantity: max,
     limitKind,
     shownAvailable,
+    shipping,
+    fulfilledBy,
     shipsFrom,
-    packageKey: packageKey(item.owner_type, item.seller_id, shipsFrom),
+    packageKey: packageKey(item.owner_type, item.seller_id, fulfilledBy, shipsFrom),
     seller: sellerLabelOf(item, offer, facts.quote),
     returnTerms: offer?.returnTerms.summary ?? facts.quote?.returns.summary ?? '',
     condition: offer?.condition ?? facts.quote?.condition ?? (item.condition as offers.Offer['condition'] | null) ?? 'new',

@@ -4,7 +4,8 @@
  */
 import type { Json } from '../../../kernel/db/types.js';
 import { format as formatMoney, money, type Money } from '../../../kernel/lib/money.js';
-import type { CartItem, CartNotice } from '../../../spec/cart.js';
+import type { CartItem, CartNotice, CartPackage } from '../../../spec/cart.js';
+import type * as offers from '../../../spec/offers.js';
 import type { NoticeRow } from '../ports.js';
 
 export type NoticeKind = CartNotice['kind'];
@@ -157,8 +158,25 @@ export const minLimit = (...limits: (number | null | undefined)[]): number | nul
   return l.length ? Math.min(...l) : null;
 };
 
-/** Stable grouping key: owner type + seller id + ship-from */
-export const packageKey = (ownerType: string, sellerId: string | null, shipsFrom: string) => `${ownerType}:${sellerId ?? 'official'}:${shipsFrom}`;
+export type FulfilledBy = CartPackage['fulfilledBy'];
+
+/** Who ships a line when nothing else says so: the Official Store's warehouse, or the seller */
+export const defaultFulfilledBy = (ownerType: string): FulfilledBy => (ownerType === 'official' ? 'official_warehouse' : 'seller');
+
+/**
+ * The offer's effective customer-facing fulfilment (Offer.shipping: who ships it, the profile it is quoted with, its
+ * dispatch and ships-from). Cart never reads shippingProfileId and dispatch directly; the fallback only covers an offer
+ * read without shipping resolved (offers always resolves it).
+ */
+export function shippingOf(offer: offers.Offer): offers.OfferShipping {
+  return offer.shipping ?? { fulfilledBy: offer.fulfilledBy ?? defaultFulfilledBy(offer.ownerType), profileId: offer.shippingProfileId, dispatch: offer.dispatch };
+}
+
+/**
+ * Stable grouping key: owner type + seller id + fulfilledBy + ship-from (the same function as checkout), so a seller's
+ * Marketly-fulfilled and self-shipped items are separate packages
+ */
+export const packageKey = (ownerType: string, sellerId: string | null, fulfilledBy: string, shipsFrom: string) => `${ownerType}:${sellerId ?? 'official'}:${fulfilledBy}:${shipsFrom}`;
 
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
