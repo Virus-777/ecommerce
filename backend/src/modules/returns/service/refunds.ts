@@ -85,7 +85,7 @@ export class Refunds {
   /* ---------------------------------------------------------------- creating */
 
   private extras(p: RefundPlan, x: Partial<RefundExtras> = {}): RefundExtras {
-    return { list: p.deductions, destination: p.destination, destinationLabel: p.destinationLabel, maxRefundable: p.b.maxRefundable, kind: p.kind, perItem: p.b.perItem, history: [], ...x };
+    return { list: p.deductions, destination: p.destination, destinationLabel: p.destinationLabel, maxRefundable: p.b.maxRefundable, kind: p.kind, perItem: p.b.perItem, taxRefund: p.b.taxRefund || null, history: [], ...x };
   }
 
   /** Inserts the refund request of a return (inside the caller's transaction) */
@@ -108,7 +108,7 @@ export class Refunds {
       discount_share: p.b.discountShare,
       shipping_refund: p.b.shippingRefund,
       return_shipping_deduction: p.b.returnShippingDeduction,
-      deductions: this.extras(p, { customerId: ret.customer_id, contactEmail: ret.terms_snapshot.meta.contactEmail ?? null, customerName: ret.terms_snapshot.meta.customerName, sellerName: ret.terms_snapshot.meta.sellerName, orderRef: ret.order_ref }),
+      deductions: this.extras(p, { items: agg.items.map((i) => ({ orderItemId: i.order_item_id, quantity: i.quantity })), customerId: ret.customer_id, contactEmail: ret.terms_snapshot.meta.contactEmail ?? null, customerName: ret.terms_snapshot.meta.customerName, sellerName: ret.terms_snapshot.meta.sellerName, orderRef: ret.order_ref }),
       total: p.b.total,
       currency: p.currency,
       funded_by: seller ? 'seller' : 'official_store',
@@ -203,6 +203,7 @@ export class Refunds {
         maxRefundable: cap,
         kind: 'exception',
         perItem,
+        items: input.items.map((l) => ({ orderItemId: l.orderItemId, quantity: l.quantity })),
         customerId: order.contact.customerId ?? null,
         contactEmail: order.contact.email ?? null,
         customerName: order.contact.name,
@@ -249,19 +250,53 @@ export class Refunds {
    * Refund requests from case decisions (support): Finance approval queue. Not tied to a return; when a
    * return carries the same case, the return completes once the refund is sent.
    */
-  async requestRefund(input: { source: 'case' | 'exception'; caseId?: string; orderId: string; orderItemIds: string[]; breakdown: RefundBreakdown; fundedBy: string; reason: string; proposedBy: common.Actor }): Promise<RefundRequest> {
-    if (!input.orderItemIds.length) throw invalidField('orderItemIds', 'Choose the items to refund');
+  async requestRefund(input: {
+    source: 'case' | 'exception';
+    caseId?: string;
+    orderId: string;
+    orderItemIds: string[];
+    items?: { orderItemId: string; quantity: number }[];
+    breakdown: RefundBreakdown;
+    fundedBy: string;
+    reasonCode?: string;
+    reason: string;
+    proposedBy: common.Actor;
+  }): Promise<RefundRequest> {
+    // goodwill is store credit through wallet (decision D-RT3): never a card refund
+    if (input.reasonCode === 'customer_goodwill') throw this.core.error('REMEDY_NOT_AVAILABLE', 'Goodwill is given as store credit, not as a refund', { remedy: 'goodwill_credit', reasonCode: input.reasonCode });
+    const ids = [...new Set([...input.orderItemIds, ...(input.items ?? []).map((i) => i.orderItemId)])];
+    if (!ids.length) throw invalidField('orderItemIds', 'Choose the items to refund');
+    const b = input.breakdown;
     if (input.caseId) {
-      const same = (await this.repo.find('refund_requests', { case_id: input.caseId, status: LIVE_REFUND })).find((r) => r.order_item_ids.length === input.orderItemIds.length && r.order_item_ids.every((id) => input.orderItemIds.includes(id)));
+      // the same case decision asked again (retry): the request it already made
+      const same = (await this.repo.find('refund_requests', { case_id: input.caseId, status: { op: 'not in', value: ['cancelled', 'declined'] } })).find(
+        (r) => r.total === b.total.amount && r.order_item_ids.length === ids.length && r.order_item_ids.every((id) => ids.includes(id)),
+      );
       if (same) return this.views.refundRequest(same);
     }
-    const live = await this.liveFor(input.orderId, input.orderItemIds);
+    const live = await this.liveFor(input.orderId, ids);
     if (live) throw this.duplicate(live);
     const order = await this.core.ctx.use('orders').getOrder(input.orderId);
     if (!order) throw notFound('Order');
-    const group = order.groups.find((g) => g.items.some((i) => input.orderItemIds.includes(i.id))) ?? order.groups[0];
-    if (!group) throw notFound('Order items');
-    const b = input.breakdown;
+    const all = order.groups.flatMap((g) => g.items.map((i) => ({ i, g })));
+    const missing = ids.filter((id) => !all.some((x) => x.i.id === id));
+    if (missing.length) throw invalid(missing.map((id) => ({ path: 'orderItemIds', message: `Item ${id} is not part of the order` })), 'These items are not part of the order');
+    const groups = order.groups.filter((g) => g.items.some((i) => ids.includes(i.id)));
+    if (groups.length !== 1) {
+      throw new AppError('VALIDATION_FAILED', 'Refund the items of one seller at a time: make one request per seller group', {
+        issues: [{ path: 'orderItemIds', message: 'The items belong to more than one seller group' }],
+        groups: groups.map((g) => ({ groupId: g.id, ownerType: g.seller.ownerType, sellerId: g.seller.ownerType === 'seller' ? (g.seller.id ?? null) : null, orderItemIds: g.items.filter((i) => ids.includes(i.id)).map((i) => i.id) })),
+      });
+    }
+    const group = groups[0]!;
+    const quantities = ids.map((id) => {
+      const item = all.find((x) => x.i.id === id)!.i;
+      const asked = input.items?.find((x) => x.orderItemId === id)?.quantity;
+      const quantity = asked ?? item.quantity;
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > item.quantity) throw invalidField('items', `Refund 1 to ${item.quantity} units of ${item.title}`);
+      return { orderItemId: id, quantity };
+    });
+    input = { ...input, orderItemIds: ids };
     const remaining = await this.views.amounts.remaining(order.id, input.orderItemIds, true);
     const cap = input.orderItemIds.reduce((s, id) => s + (remaining?.items.get(id)?.remaining ?? 0), 0);
     if (b.total.amount > cap) throw this.core.error('REFUND_EXCEEDS_REFUNDABLE', 'The amount is above what can still be refunded for these items', { maxRefundable: money(cap, b.total.currency) });
@@ -299,6 +334,8 @@ export class Refunds {
         maxRefundable: cap,
         kind: input.source,
         perItem,
+        items: quantities,
+        taxRefund: b.taxRefund?.amount ?? null,
         customerId: order.contact.customerId ?? null,
         contactEmail: order.contact.email ?? null,
         customerName: order.contact.name,
@@ -311,7 +348,7 @@ export class Refunds {
       funded_by: fundedBy,
       seller_share: fundedBy === 'seller' ? b.total.amount : fundedBy === 'shared' ? Math.floor(b.total.amount / 2) : null,
       platform_share: fundedBy === 'platform' || fundedBy === 'official_store' ? b.total.amount : fundedBy === 'shared' ? b.total.amount - Math.floor(b.total.amount / 2) : null,
-      reason_code: null,
+      reason_code: input.reasonCode ?? null,
       reason: input.reason,
       trust_report_id: null,
       approval_request_id: null,
@@ -388,11 +425,14 @@ export class Refunds {
           await this.auditApproval(rr, by, rr.approval_request_id, body.note ?? null);
           return this.viewOf(id);
         }
-        throw new AppError('APPROVAL_REQUIRED', 'Your approval is recorded; another approver must also approve this refund', { approvalRequestId: rr.approval_request_id, refundRequestId: rr.id });
+        // the approval is recorded on the pending request: answer with the request and its approval (FORMAT.md, Approval responses)
+        return this.viewOf(id);
       }
     }
     const check = await access.check(by.principal, APPROVE_ACTION, { money: money(rr.total, rr.currency) });
     if (check.decision === 'denied') throw new AppError('FORBIDDEN', check.reason || 'You cannot approve refunds');
+    // above access stepUpAbove whoever approves gives a fresh 2-step code (verified above when given)
+    if (check.decision === 'allowed' && check.stepUpRequired && !body.stepUpCode) throw new AppError('STEP_UP_REQUIRED', 'Enter your current 2-step code to approve this refund', { kind: 'code', purpose: APPROVE_ACTION });
     if (check.decision === 'approval_required') {
       const req = await access.requestApproval({
         action: APPROVE_ACTION,
@@ -404,7 +444,8 @@ export class Refunds {
         requestedBy: by.principal,
       });
       await this.repo.update('refund_requests', rr.id, { approval_request_id: req.id, updated_at: this.core.now() });
-      throw new AppError('APPROVAL_REQUIRED', check.reason || 'Above your refund limit: another approver must approve it', { approvalRequestId: req.id, refundRequestId: rr.id });
+      // saved pending approval: the request stays under review with approval in the body (FORMAT.md, Approval responses)
+      return this.viewOf(id);
     }
     await this.approveAndHandOver(rr.id, by.actor, by, { note: body.note ?? check.reason });
     await this.auditApproval(rr, by, null, check.reason);
@@ -502,6 +543,7 @@ export class Refunds {
         orderId: after.order_id,
         ...recipient,
         orderItemIds: after.order_item_ids,
+        items: await this.itemsOf(after),
         ownerType: after.owner_type,
         sellerId: after.seller_id,
         source: after.source as RefundRequest['source'],
@@ -517,6 +559,13 @@ export class Refunds {
     );
     if (after.return_id) await this.approveException(after.return_id, approver, by);
     this.core.flush(batch);
+  }
+
+  /** Refunded quantity per item: stored on the request, else the return's units, else one unit per item */
+  async itemsOf(rr: RefundRec): Promise<{ orderItemId: string; quantity: number }[]> {
+    if (rr.deductions.items?.length) return rr.deductions.items;
+    const returned = rr.return_id ? await this.repo.find('return_items', { return_id: rr.return_id }) : [];
+    return rr.order_item_ids.map((id) => ({ orderItemId: id, quantity: returned.find((i) => i.order_item_id === id)?.quantity ?? 1 }));
   }
 
   /** A proposed refund-without-return is approved together with its refund */
@@ -538,7 +587,7 @@ export class Refunds {
     const now = this.core.now();
     await tx.update('returns', ret.id, { status: returnMachine.next(ret.status as ReturnStatus, 'complete'), completed_at: now, updated_at: now, terms_snapshot: { ...ret.terms_snapshot, meta: { ...ret.terms_snapshot.meta, outcome } } });
     await this.core.timeline(tx, ret.id, [{ kind: 'completed', label: outcome === 'partly_refunded' ? 'Partly refunded' : outcome === 'credited' ? 'Refunded as store credit' : 'Refunded', visibility: 'customer' }]);
-    batch.push('returns.return.completed', { returnId: ret.id, outcome });
+    batch.push('returns.return.completed', { returnId: ret.id, ...this.core.refs(ret), outcome });
   }
 
   /* ---------------------------------------------------------------- cancelling (appeal overturned the case decision) */
@@ -548,10 +597,10 @@ export class Refunds {
    * Approved, processing, sent and failed ones are money already moving: they come back in notCancellable.
    * Already cancelled ones are left out, so a second call changes nothing.
    */
-  async cancelForCase(caseId: string, reason: string): Promise<{ cancelled: RefundRequest[]; notCancellable: RefundRequest[] }> {
+  async cancelForCase(caseId: string, reason: string, actor: common.Actor = SYSTEM): Promise<{ cancelled: RefundRequest[]; notCancellable: RefundRequest[] }> {
     if (!isUuid(caseId)) return { cancelled: [], notCancellable: [] };
     const why = reason?.trim() || 'The case decision was overturned on appeal';
-    const by: By = { actor: SYSTEM };
+    const by: By = { actor: actor ?? SYSTEM };
     const now = this.core.now();
     const { cancelled, kept } = await this.repo.transaction(async (tx) => {
       const rows = await tx.find('refund_requests', { case_id: caseId }, { orderBy: [['created_at', 'asc']], forUpdate: true });
@@ -567,15 +616,20 @@ export class Refunds {
           status: refundRequestMachine.next(rr.status as RefundStatus, 'cancel'),
           approval_request_id: null,
           updated_at: now,
-          deductions: { ...rr.deductions, history: [...rr.deductions.history, { at: now.toISOString(), label: 'Refund cancelled', detail: why, actor: SYSTEM }] },
+          deductions: { ...rr.deductions, history: [...rr.deductions.history, { at: now.toISOString(), label: 'Refund cancelled', detail: why, actor: by.actor }] },
         });
-        if (after.return_id) await this.core.timeline(tx, after.return_id, [{ kind: 'refund_cancelled', label: `Refund ${after.ref} cancelled`, detail: why, visibility: 'staff' }]);
+        if (after.return_id) await this.core.timeline(tx, after.return_id, [{ kind: 'refund_cancelled', label: `Refund ${after.ref} cancelled`, detail: why, visibility: 'staff', actor: by.actor }]);
         cancelled.push({ before: rr, after });
       }
       return { cancelled, kept };
     });
     for (const { before, after } of cancelled) {
-      if (before.approval_request_id) await this.core.soft('access', 'cancel approval', (a) => a.cancelApproval(before.approval_request_id!, SYSTEM, 'Refund cancelled: case decision overturned'));
+      if (before.approval_request_id) await this.core.soft('access', 'cancel approval', (a) => a.cancelApproval(before.approval_request_id!, by.actor, 'Refund cancelled: case decision overturned'));
+      this.core.publish(
+        'returns.refund.cancelled',
+        { refundRequestId: after.id, ref: after.ref, orderId: after.order_id, caseId: after.case_id, returnId: after.return_id, total: money(after.total, after.currency), reason: why, by: by.actor },
+        by,
+      );
       await this.core.audit(
         { action: 'returns.refund.cancel', actionLabel: `Cancelled refund ${after.ref}`, category: 'financial', target: { type: 'refund_request', id: after.id, ref: after.ref, label: `Refund ${after.ref}` }, before: { status: before.status }, after: { status: after.status }, reason: why },
         by,

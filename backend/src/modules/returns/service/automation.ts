@@ -71,19 +71,23 @@ export class Automation {
       await this.core.timeline(tx, ret.id, [{ kind: 'shipment_dropped_off', label: 'Return dropped off', detail: at ? `Scanned by the carrier` : null, visibility: 'customer' }]);
       if (returnMachine.can(a.ret.status as ReturnStatus, 'dropOff')) {
         await tx.update('returns', ret.id, { status: returnMachine.next(a.ret.status as ReturnStatus, 'dropOff'), updated_at: this.core.now() });
-        batch.push('returns.return.shipped', { returnId: ret.id, trackingNumber: sh.tracking_number });
+        batch.push('returns.return.shipped', { returnId: ret.id, ...this.core.refs(a.ret), trackingNumber: sh.tracking_number });
       }
     });
   }
 
   async onShipmentDispatched(e: EventPayload<'shipping.shipment.dispatched'>): Promise<void> {
     if (e.kind === 'return') return this.dropOff(e.shipmentId, e.returnId, e.shippedAt);
-    if (e.kind === 'replacement' && isUuid(e.returnId) && (await this.repo.get('returns', e.returnId))) return this.handling.replacementShipped(e.returnId, e.shipmentId, e.shippedAt);
+    if (e.kind !== 'replacement') return;
+    // replacements of a return by return id; case replacements (no return) by order and items
+    const rep = await this.handling.replacementFor(e);
+    if (rep) await this.handling.replacementShipped(rep, e.shipmentId, e.shippedAt);
   }
 
   async onShipmentDelivered(e: EventPayload<'shipping.shipment.delivered'>): Promise<void> {
     if (e.kind === 'replacement') {
-      if (isUuid(e.returnId) && (await this.repo.get('returns', e.returnId))) await this.handling.replacementDelivered(e.returnId, e.shipmentId, e.deliveredAt);
+      const rep = await this.handling.replacementFor(e);
+      if (rep) await this.handling.replacementDelivered(rep, e.shipmentId, e.deliveredAt);
       return;
     }
     if (e.kind !== 'return') return;
@@ -94,7 +98,7 @@ export class Automation {
       if (!sh || sh.status === 'delivered') return;
       if (sh.status === 'label_issued' && returnMachine.can(a.ret.status as ReturnStatus, 'dropOff')) {
         await tx.update('returns', a.ret.id, { status: returnMachine.next(a.ret.status as ReturnStatus, 'dropOff'), updated_at: this.core.now() });
-        batch.push('returns.return.shipped', { returnId: a.ret.id, trackingNumber: sh.tracking_number });
+        batch.push('returns.return.shipped', { returnId: a.ret.id, ...this.core.refs(a.ret), trackingNumber: sh.tracking_number });
       }
       if (!returnShipmentMachine.can(sh.status as never, 'deliver')) return;
       await tx.update('return_shipments', sh.id, { status: returnShipmentMachine.next(sh.status as never, 'deliver'), delivered_at: new Date(e.deliveredAt) });
@@ -118,7 +122,7 @@ export class Automation {
       return;
     }
     const rep = isUuid(e.shipmentId) ? (await this.repo.find('replacements', { shipping_shipment_id: e.shipmentId }))[0] : undefined;
-    if (rep) await this.core.timeline(this.repo, rep.return_id, [{ kind: 'replacement_exception', label: 'Delay with your replacement', detail: e.kind.replace(/_/g, ' '), visibility: 'customer' }]);
+    if (rep?.return_id) await this.core.timeline(this.repo, rep.return_id, [{ kind: 'replacement_exception', label: 'Delay with your replacement', detail: e.kind.replace(/_/g, ' '), visibility: 'customer' }]);
   }
 
   async onShipmentStatusChanged(e: EventPayload<'shipping.shipment.status_changed'>): Promise<void> {
@@ -150,7 +154,7 @@ export class Automation {
         const now = this.core.now();
         await tx.update('returns', r.id, { platform_handling: true, handled_by: 'marketplace_support', escalation: a.ret.escalation ?? { at: now.toISOString(), by: SYSTEM, reason: 'other', note: 'Seller suspended', caseId: a.ret.case_id, caseRef: null }, updated_at: now });
         await this.core.timeline(tx, r.id, [{ kind: 'taken_over', label: 'Marketly support is handling your return', visibility: 'customer' }]);
-        batch.push('returns.return.escalated', { returnId: r.id, ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, orderId: a.ret.order_id, reason: 'other', by: SYSTEM });
+        batch.push('returns.return.escalated', { returnId: r.id, ...this.core.refs(a.ret), ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, reason: 'other', by: SYSTEM });
       });
     }
   }
@@ -220,7 +224,7 @@ export class Automation {
           { kind: 'taken_over', label: 'Marketly support is handling your return', detail: 'The seller did not respond in time.', visibility: 'customer' },
           { kind: 'deadline_missed', label: 'Response deadline missed: Marketly took over', visibility: 'seller' },
         ]);
-        batch.push('returns.return.escalated', { returnId: r.id, ownerType: 'seller', sellerId: a.ret.seller_id, orderId: a.ret.order_id, reason: 'seller_no_response', by: SYSTEM });
+        batch.push('returns.return.escalated', { returnId: r.id, ...this.core.refs(a.ret), ownerType: 'seller', sellerId: a.ret.seller_id, reason: 'seller_no_response', by: SYSTEM });
       });
     }
     // reminders for responses due within a day (once per return)
@@ -277,7 +281,7 @@ export class Automation {
         updated_at: now,
       });
       await this.core.timeline(tx, a.ret.id, [{ kind: 'deadline_missed', label: reason === 'refund_late' ? 'Refund target missed: Marketly took over' : 'Inspection target missed: Marketly took over', visibility: 'seller' }]);
-      batch.push('returns.return.escalated', { returnId: a.ret.id, ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, orderId: a.ret.order_id, reason, by: SYSTEM });
+      batch.push('returns.return.escalated', { returnId: a.ret.id, ...this.core.refs(a.ret), ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, reason, by: SYSTEM });
     });
   }
 

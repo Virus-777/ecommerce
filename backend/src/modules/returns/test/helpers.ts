@@ -23,6 +23,7 @@ import { newId } from '../../../kernel/lib/ids.js';
 import type * as access from '../../../spec/access.js';
 import type * as audit from '../../../spec/audit.js';
 import type * as catalog from '../../../spec/catalog.js';
+import type * as inventory from '../../../spec/inventory.js';
 import type * as notifications from '../../../spec/notifications.js';
 import type * as offers from '../../../spec/offers.js';
 import type { OrderDetail, OrderGroupInput, OrderItemInput } from '../../../spec/orders.js';
@@ -46,13 +47,21 @@ export interface Harness {
   products: Map<string, catalog.ProductSnapshot & { categoryId?: string | null }>;
   guestGrants: Set<string>;
   stock: Map<string, number>;
-  authority: { decision: 'allowed' | 'approval_required' | 'denied'; decideStatus: access.ApprovalRequest['status'] };
+  authority: { decision: 'allowed' | 'approval_required' | 'denied'; decideStatus: access.ApprovalRequest['status']; stepUp?: boolean };
+  /** Carrier service of every return label */
+  carrierServiceId: string;
+  /** Offers listOwnOffersForProduct answers from (exchanges), by product id */
+  ownOffers: Map<string, offers.Offer[]>;
+  /** Category paths catalog.getCategoryPaths answers with */
+  categoryPaths: Map<string, catalog.CategoryPath>;
   calls: {
     labels: shipping.LabelRequest[];
     voided: string[];
     tracking: unknown[];
     refunds: payments.StartRefundInput[];
     holds: { key: string; lines: unknown[] }[];
+    allocations: Parameters<inventory.InventoryPublicApi['allocateForOrder']>[0][];
+    released: { reservationId: string; reason: string }[];
     approvals: access.RequestApprovalInput[];
     decided: string[];
     cancelledApprovals: string[];
@@ -81,6 +90,8 @@ const RETURN_EVENTS = [
   'returns.refund.requested',
   'returns.refund.approved',
   'returns.refund.declined',
+  'returns.refund.cancelled',
+  'returns.replacement.cancelled',
   'returns.exception.proposed',
   'returns.exception.approved',
   'returns.replacement.created',
@@ -102,8 +113,11 @@ export async function harness(o: { only?: string[] } = {}): Promise<Harness> {
     products: new Map<string, catalog.ProductSnapshot & { categoryId?: string | null }>(),
     guestGrants: new Set<string>(),
     stock: new Map<string, number>(),
-    authority: { decision: 'allowed' as Harness['authority']['decision'], decideStatus: 'approved' as access.ApprovalRequest['status'] },
-    calls: { labels: [], voided: [], tracking: [], refunds: [], holds: [], approvals: [], decided: [], cancelledApprovals: [], cases: [], notices: [], exports: [] } as Harness['calls'],
+    authority: { decision: 'allowed' as Harness['authority']['decision'], decideStatus: 'approved' as access.ApprovalRequest['status'], stepUp: false } as Harness['authority'],
+    carrierServiceId: newId(),
+    ownOffers: new Map<string, offers.Offer[]>(),
+    categoryPaths: new Map<string, catalog.CategoryPath>(),
+    calls: { labels: [], voided: [], tracking: [], refunds: [], holds: [], allocations: [], released: [], approvals: [], decided: [], cancelledApprovals: [], cases: [], notices: [], exports: [] } as Harness['calls'],
   };
   const refunded = new Map<string, number>();
   const refundsByKey = new Map<string, payments.Refund>();
@@ -119,9 +133,11 @@ export async function harness(o: { only?: string[] } = {}): Promise<Harness> {
           if (!s) throw Object.assign(new Error('offer not found'), { statusCode: 404 });
           return structuredClone(s);
         },
+        listOwnOffersForProduct: async (_sellerId, productIds) => Object.fromEntries(productIds.map((p) => [p, h.ownOffers.get(p) ?? []])),
       },
       catalog: {
         snapshotForOrder: async (variantId) => ({ ...structuredClone(h.products.get(variantId)!), takenAt: clock.now().toISOString() }),
+        getCategoryPaths: async (ids) => Object.fromEntries(ids.filter((id) => h.categoryPaths.has(id)).map((id) => [id, h.categoryPaths.get(id)!])),
       },
       customers: {
         getCustomerByUserId: async (userId) => ({ id: userId, userId, ref: 'CU-000001', displayName: 'Sam Rivera', email: 'sam@example.com', accountStatus: 'active', canOrder: true, canMessage: true }),
@@ -157,6 +173,7 @@ export async function harness(o: { only?: string[] } = {}): Promise<Harness> {
             qrCodeUrl: input.labelMethod === 'prepaid_qr' ? 'https://labels.example/return-qr.png' : null,
             dropOffBy: new Date(clock.now().getTime() + 7 * 86_400_000).toISOString(),
             format: 'pdf',
+            carrierServiceId: h.carrierServiceId,
             status: 'purchased',
             purchasedBy: { kind: 'system' },
             purchasedAt: clock.now().toISOString(),
@@ -205,9 +222,17 @@ export async function harness(o: { only?: string[] } = {}): Promise<Harness> {
           return { id: newId(), key, state: 'held', lines: [], createdAt: clock.now().toISOString() } as never;
         },
         attachOrder: async (id) => ({ id }) as never,
+        allocateForOrder: async (input) => {
+          h.calls.allocations.push(input);
+          for (const l of input.lines) if ((h.stock.get(l.stockItemId) ?? 0) < l.quantity) throw new AppError('INSUFFICIENT_STOCK', 'No stock', undefined, 409);
+          return { id: newId(), key: input.key, state: 'allocated', lines: [], createdAt: clock.now().toISOString() } as never;
+        },
+        releaseHold: async (reservationId, reason) => {
+          h.calls.released.push({ reservationId, reason });
+        },
       },
       access: {
-        check: async (_p, action) => ({ decision: h.authority.decision, action, reason: h.authority.decision === 'allowed' ? 'Within your limit' : 'Above your limit: Business Owner approval', requiresSecondReviewer: false, approvalsNeeded: 1, eligibleApproverRoles: [], eligibleApprovers: [{ accountId: newId(), name: 'Olivia Owner', away: false }] }),
+        check: async (_p, action) => ({ decision: h.authority.decision, action, reason: h.authority.decision === 'allowed' ? 'Within your limit' : 'Above your limit: Business Owner approval', requiresSecondReviewer: false, approvalsNeeded: 1, eligibleApproverRoles: [], eligibleApprovers: [{ accountId: newId(), name: 'Olivia Owner', away: false }], stepUpRequired: h.authority.stepUp ?? false }),
         requestApproval: async (input) => {
           h.calls.approvals.push(input);
           return { id: newId(), ref: 'AP-1', status: 'pending' } as access.ApprovalRequest;
@@ -280,6 +305,8 @@ export function product(h: Harness, o: { title: string; price: number; ownerType
     ownerType,
     sellerId: ownerType === 'seller' ? (o.sellerId ?? null) : null,
     sellerName: ownerType === 'official' ? 'Marketly Official Store' : 'Casa Verde Home',
+    sellerSku: 'SKU-1',
+    title: o.title,
     condition: 'new',
     conditionNotes: null,
     missingItems: [],

@@ -8,6 +8,7 @@ import type { EventPayload } from '../../../kernel/events/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
 import type * as common from '../../../spec/common.js';
+import type * as catalog from '../../../spec/catalog.js';
 import type * as settings from '../../../spec/settings.js';
 import type {
   CategoryException,
@@ -34,7 +35,7 @@ const FAULT_GROUPS = ['damaged', 'incorrect', 'defective', 'not_as_described', '
 type PolicyStatus = PolicyVersion['status'];
 type ExceptionStatus = CategoryException['status'];
 
-/** No catalog dependency: the category is shown by id (spec gap) */
+/** Without catalog the category is shown by id */
 export const categoryName = (id: string) => `Category ${id.slice(0, 8)}`;
 
 export class Policies {
@@ -44,13 +45,39 @@ export class Policies {
     return this.core.repo;
   }
 
+  /* ---------------------------------------------------------------- categories (catalog, optional) */
+
+  /** Category paths from catalog (names and ancestors); empty without catalog */
+  async categoryPaths(categoryIds: string[]): Promise<Record<string, catalog.CategoryPath>> {
+    const ids = [...new Set(categoryIds.filter(isUuid))];
+    if (!ids.length) return {};
+    return (await this.core.soft('catalog', 'category paths', (c) => c.getCategoryPaths(ids))) ?? {};
+  }
+
+  /** The category's name (its path from catalog, e.g. Electronics › Audio › Headphones), or a short id without catalog */
+  async categoryLabel(categoryId: string): Promise<string> {
+    const path = (await this.categoryPaths([categoryId]))[categoryId];
+    return path?.names.length ? path.names.join(' › ') : categoryName(categoryId);
+  }
+
   /* ---------------------------------------------------------------- effective terms */
 
-  /** The active exception of a category now */
+  /**
+   * The active exception of a category now. With catalog an exception set on a parent category applies to
+   * its subcategories (nearest exception wins); without catalog only the exact category matches.
+   */
   async activeException(categoryId: string | null, at: Date = this.core.now()): Promise<CategoryExceptionRec | null> {
     if (!categoryId) return null;
-    const rows = await this.repo.find('category_exceptions', { category_id: categoryId, status: 'active', effective_from: { op: '<=', value: at } }, { orderBy: [['effective_from', 'desc']] });
-    return rows.find((r) => !r.effective_to || r.effective_to.getTime() > at.getTime()) ?? null;
+    const path = (await this.categoryPaths([categoryId]))[categoryId];
+    const chain = path?.ids.length ? [...path.ids].reverse() : [categoryId];
+    if (!chain.includes(categoryId)) chain.unshift(categoryId);
+    const rows = await this.repo.find('category_exceptions', { category_id: chain, status: 'active', effective_from: { op: '<=', value: at } }, { orderBy: [['effective_from', 'desc']] });
+    const live = rows.filter((r) => !r.effective_to || r.effective_to.getTime() > at.getTime());
+    for (const id of chain) {
+      const hit = live.find((r) => r.category_id === id);
+      if (hit) return hit;
+    }
+    return null;
   }
 
   /** Who pays return shipping per reason group, for a seller (null = Official Store) and its terms */
@@ -62,8 +89,11 @@ export class Policies {
     });
   }
 
-  async resolveTerms(sellerId: string | null, categoryId: string | null, condition: string | null, o: { baseline?: Baseline; terms?: TermsRec | null; at?: Date } = {}): Promise<EffectiveTerms> {
+  async resolveTerms(sellerIdIn: string | null, categoryId: string | null, condition: string | null, o: { baseline?: Baseline; terms?: TermsRec | null; at?: Date } = {}): Promise<EffectiveTerms> {
     void condition; // the offer's condition does not change the platform rules; category conditions come from the exception
+    // OFFICIAL_STORE_ID is the Official Store like null: its terms are the baseline and category exceptions, never seller_terms
+    const sellerId = sellerIdIn === OFFICIAL_STORE_ID ? null : sellerIdIn;
+    if (!sellerId) o = { ...o, terms: null };
     const at = o.at ?? this.core.now();
     const [baseline, exception, terms] = await Promise.all([
       o.baseline ?? this.core.baseline(),
@@ -88,9 +118,16 @@ export class Policies {
       responseTargetBusinessDays: sellerId && terms ? Math.min(terms.response_target_business_days, baseline.sellerResponseBusinessDays) : baseline.sellerResponseBusinessDays,
       summary: termsSummary(windowDays, changeOfMindAllowed, free),
       policyVersion: baseline.version,
+      policyVersionId: baseline.rec?.id ?? null,
       sellerTermsVersion: terms?.version ?? null,
       source: exception ? 'category_exception' : terms ? 'seller_terms' : 'baseline',
     };
+  }
+
+  /** Baseline window in force now: the active version, else the baselineWindowDays fallback (policyVersion null) */
+  async defaultWindowDays(): Promise<{ windowDays: number; policyVersion: string | null }> {
+    const b = await this.core.baseline();
+    return { windowDays: b.windowDays, policyVersion: b.rec ? b.version : null };
   }
 
   async sellerReturnTermsFor(sellerIds: string[]): Promise<Record<string, EffectiveTerms>> {
@@ -112,7 +149,7 @@ export class Policies {
     return {
       id: r.id,
       categoryId: r.category_id,
-      categoryName: categoryName(r.category_id),
+      categoryName: await this.categoryLabel(r.category_id),
       windowDays: r.window_days,
       changeOfMindAllowed: r.change_of_mind_allowed,
       condition: r.condition,
@@ -168,7 +205,7 @@ export class Policies {
       nextBaseline?.effective_from && { at: nextBaseline.effective_from, text: `${nextBaseline.window_days}-day returns from ${shortDate(nextBaseline.effective_from, this.core.tz)}` },
       nextException && {
         at: nextException.effective_from,
-        text: `${categoryName(nextException.category_id)} ${nextException.change_of_mind_allowed && nextException.window_days ? `${nextException.window_days} days` : 'final sale'} from ${shortDate(nextException.effective_from, this.core.tz)}`,
+        text: `${await this.categoryLabel(nextException.category_id)} ${nextException.change_of_mind_allowed && nextException.window_days ? `${nextException.window_days} days` : 'final sale'} from ${shortDate(nextException.effective_from, this.core.tz)}`,
       },
     ].filter(Boolean) as { at: Date; text: string }[];
     upcoming.sort((a, c) => a.at.getTime() - c.at.getTime());
@@ -349,8 +386,8 @@ export class Policies {
     const from = new Date(input.effectiveFrom);
     const decision = shortens
       ? await this.authority(SHORTEN_ACTION, by, {
-          target: { type: 'category_exception', id, label: `${categoryName(input.categoryId)} return exception`, screen: 'admin/returns-policy' },
-          summary: `${categoryName(input.categoryId)}: ${input.changeOfMindAllowed ? `${input.windowDays}-day returns` : 'final sale'} from ${shortDate(from, this.core.tz)}`,
+          target: { type: 'category_exception', id, label: `${await this.categoryLabel(input.categoryId)} return exception`, screen: 'admin/returns-policy' },
+          summary: `${await this.categoryLabel(input.categoryId)}: ${input.changeOfMindAllowed ? `${input.windowDays}-day returns` : 'final sale'} from ${shortDate(from, this.core.tz)}`,
           reason: input.reason,
           details: { ...input },
           dueAt: from.toISOString(),
@@ -378,9 +415,9 @@ export class Policies {
     await this.core.audit(
       {
         action: 'returns.category_exception.create',
-        actionLabel: status === 'pending_approval' ? `Sent a ${categoryName(input.categoryId)} return exception for approval` : `Scheduled a ${categoryName(input.categoryId)} return exception`,
+        actionLabel: status === 'pending_approval' ? `Sent a ${await this.categoryLabel(input.categoryId)} return exception for approval` : `Scheduled a ${await this.categoryLabel(input.categoryId)} return exception`,
         category: 'settings',
-        target: { type: 'category_exception', id, label: `${categoryName(input.categoryId)} return exception`, screen: 'admin/returns-policy' },
+        target: { type: 'category_exception', id, label: `${await this.categoryLabel(input.categoryId)} return exception`, screen: 'admin/returns-policy' },
         after: input,
         reason: input.reason,
         approvalRequestId: decision.requestId,
@@ -420,7 +457,7 @@ export class Policies {
         const after = await this.repo.update('category_exceptions', id, { effective_to: to, shown_on: input.shownOn, reason: input.reason.trim() });
         if (to && to.getTime() <= this.core.now().getTime()) await this.retireDue();
         await this.core.audit(
-          { action: 'returns.category_exception.update', actionLabel: to ? `Retires the ${categoryName(current.category_id)} return exception` : `Changed the ${categoryName(current.category_id)} return exception`, category: 'settings', target: { type: 'category_exception', id, label: `${categoryName(current.category_id)} return exception` }, before, after: input, reason: input.reason },
+          { action: 'returns.category_exception.update', actionLabel: to ? `Retires the ${await this.categoryLabel(current.category_id)} return exception` : `Changed the ${await this.categoryLabel(current.category_id)} return exception`, category: 'settings', target: { type: 'category_exception', id, label: `${await this.categoryLabel(current.category_id)} return exception` }, before, after: input, reason: input.reason },
           by,
         );
         return this.exceptionView((await this.repo.get('category_exceptions', after.id))!);
@@ -439,8 +476,8 @@ export class Policies {
     if (shortens && scope === 'undelivered_orders') throw invalidField('applyScope', 'A change that shortens a window applies to new orders only; open orders keep what they accepted');
     const decision = shortens
       ? await this.authority(SHORTEN_ACTION, by, {
-          target: { type: 'category_exception', id, label: `${categoryName(current.category_id)} return exception`, screen: 'admin/returns-policy' },
-          summary: `${categoryName(current.category_id)}: ${input.changeOfMindAllowed ? `${input.windowDays}-day returns` : 'final sale'} from ${shortDate(from, this.core.tz)}`,
+          target: { type: 'category_exception', id, label: `${await this.categoryLabel(current.category_id)} return exception`, screen: 'admin/returns-policy' },
+          summary: `${await this.categoryLabel(current.category_id)}: ${input.changeOfMindAllowed ? `${input.windowDays}-day returns` : 'final sale'} from ${shortDate(from, this.core.tz)}`,
           reason: input.reason,
           details: { ...input },
           dueAt: from.toISOString(),
@@ -463,7 +500,7 @@ export class Policies {
     });
     this.core.publish('returns.policy.proposed', { policyVersionId: null, categoryExceptionId: id, effectiveFrom: from.toISOString() }, by);
     await this.core.audit(
-      { action: 'returns.category_exception.update', actionLabel: `Changed the ${categoryName(current.category_id)} return exception`, category: 'settings', target: { type: 'category_exception', id, label: `${categoryName(current.category_id)} return exception` }, before, after: input, reason: input.reason, approvalRequestId: decision.requestId },
+      { action: 'returns.category_exception.update', actionLabel: `Changed the ${await this.categoryLabel(current.category_id)} return exception`, category: 'settings', target: { type: 'category_exception', id, label: `${await this.categoryLabel(current.category_id)} return exception` }, before, after: input, reason: input.reason, approvalRequestId: decision.requestId },
       by,
     );
     if (status === 'scheduled' && from.getTime() <= this.core.now().getTime()) await this.activateDue();
@@ -477,7 +514,7 @@ export class Policies {
     const from = new Date(e.effectiveFrom);
     const scope = e.applyScope ?? 'new_orders';
     const shortens = shortensWindow(await this.currentWindows(e.categoryId, baseline, input.exceptionId ?? undefined), this.facts(e));
-    const name = categoryName(e.categoryId);
+    const name = await this.categoryLabel(e.categoryId);
     const items: settings.ImpactItem[] = [];
     const open = await this.core.quiet('open orders in category', () => this.core.ctx.use('orders').countOpenOrdersInCategory(e.categoryId, from.toISOString()));
     if (open) {

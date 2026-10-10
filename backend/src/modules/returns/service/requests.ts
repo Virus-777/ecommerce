@@ -3,6 +3,7 @@
  * return per seller), and what the customer does afterwards: answer a question, withdraw, get or email
  * the label, add tracking, ask Marketly to step in.
  */
+import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { money } from '../../../kernel/lib/money.js';
 import type { OrderDetail, OrderItem, SellerGroup } from '../../../spec/orders.js';
@@ -25,7 +26,6 @@ import {
   computeBreakdown,
   is,
   itemVerdict,
-  OFFICIAL_RETURN_ADDRESS,
   reasonGroupOf,
   reasonVerdict,
   type ItemVerdict,
@@ -176,7 +176,10 @@ export class Requests {
   /* ---------------------------------------------------------------- eligibility */
 
   private async destination(sellerId: string | null, sellerName: string): Promise<ReturnDestination> {
-    if (!sellerId) return { kind: 'marketly_warehouse', name: OFFICIAL_RETURN_ADDRESS.name, address: OFFICIAL_RETURN_ADDRESS };
+    if (!sellerId) {
+      const address = await this.core.officialReturnAddress();
+      return { kind: 'marketly_warehouse', name: address.name, address };
+    }
     const terms = await this.core.sellerTerms(sellerId);
     return { kind: 'seller_address', name: sellerName, address: terms?.return_address ?? { name: sellerName, line1: 'Return address on file with the seller', city: '', region: '', postalCode: '', country: 'US' } };
   }
@@ -250,7 +253,7 @@ export class Requests {
     for (const lines of byGroup.values()) {
       const group = lines[0]!.ctx.group;
       const sellerId = group.seller.ownerType === 'seller' ? (group.seller.id ?? null) : null;
-      const sellerName = group.seller.ownerType === 'official' ? 'Marketly Official Store' : group.seller.name;
+      const sellerName = group.seller.ownerType === 'official' ? OFFICIAL_STORE_NAME : group.seller.name;
       const terms = await this.termsAtPurchase(order, group, lines.map((l) => l.ctx.item));
       const destination = await this.destination(sellerId, sellerName);
       const reason = req.reason ?? 'changed_mind';
@@ -301,7 +304,7 @@ export class Requests {
           returnShippingCost: payer.paidBy === 'customer' ? money(payer.customerFee, currency) : null,
           labelMethod: 'prepaid_qr',
           remedies,
-          responseBy: group.seller.ownerType === 'official' ? 'Marketly Official' : sellerName,
+          responseBy: group.seller.ownerType === 'official' ? OFFICIAL_STORE_NAME : sellerName,
           responseDueBusinessDays: terms.responseTargetBusinessDays,
           estimate: this.views.amounts.breakdown(b, currency, [], destinationLabel, true),
           terms,
@@ -337,6 +340,11 @@ export class Requests {
     for (const g of groups) {
       const option = g.remedies.find((r) => r.kind === body.remedy);
       if (!option?.available) throw this.core.error('REMEDY_NOT_AVAILABLE', option?.unavailableReason ?? `${body.remedy} is not offered`, { remedy: body.remedy, sellerId: g.sellerId });
+      // an exchange: another variant of the same product, same seller, same price (offers)
+      if (body.remedy === 'exchange' && body.exchangeVariantId) {
+        const first = g.lines[0]!.ctx.item;
+        await this.handling.exchangeOffer({ ownerType: g.group.seller.ownerType, sellerId: g.sellerId, productId: first.product.productId, unitPrice: first.unitPrice.amount, variantId: body.exchangeVariantId });
+      }
     }
     const baseline = await this.core.baseline();
     const now = this.core.now();
@@ -441,7 +449,7 @@ export class Requests {
     for (const p of prepared) {
       this.core.publish(
         'returns.return.requested',
-        { returnId: p.ret.id, ref: p.ret.ref, orderId: p.ret.order_id, ownerType: p.ret.owner_type, sellerId: p.ret.seller_id, orderItemIds: p.items.map((i) => i.order_item_id), reason: p.ret.reason, responseDueAt: p.ret.response_due_at!.toISOString() },
+        { returnId: p.ret.id, ...this.core.refs(p.ret), ownerType: p.ret.owner_type, sellerId: p.ret.seller_id, orderItemIds: p.items.map((i) => i.order_item_id), reason: p.ret.reason, responseDueAt: p.ret.response_due_at!.toISOString() },
         by,
       );
     }
@@ -502,10 +510,10 @@ export class Requests {
       let label: string | null = null;
       if (sh && sh.status === 'label_issued') {
         await tx.update('return_shipments', sh.id, { status: returnShipmentMachine.next('label_issued', 'expire') });
-        if (sh.method !== 'customer_arranged') label = sh.id;
+        if (sh.method !== 'customer_arranged') label = sh.label_id ?? sh.id;
       }
       await this.core.timeline(tx, id, [{ kind: 'cancelled', label: 'Return cancelled', detail: reason, visibility: 'customer', actor: by.actor }]);
-      batch.push('returns.return.cancelled', { returnId: id, by: by.actor, reason });
+      batch.push('returns.return.cancelled', { returnId: id, ...this.core.refs(a.ret), by: by.actor, reason });
       return label;
     });
     if (labelToVoid) await this.core.quiet('void label', () => this.core.ctx.use('shipping').voidLabel(labelToVoid, reason));
@@ -518,8 +526,9 @@ export class Requests {
     const meta = r.terms_snapshot.meta;
     const zip = near?.trim() || meta.deliveryAddress?.postalCode || this.core.ctx.config.market.defaultLocation.postalCode;
     let points: ReturnShipment['dropOffPoints'] = [];
-    if (s.method !== 'customer_arranged' && s.status === 'label_issued' && meta.carrierServiceId) {
-      const found = await this.core.quiet('drop-off points', () => this.core.ctx.use('shipping').findDropOffPoints(meta.carrierServiceId!, zip, 5));
+    const carrierServiceId = s.carrier_service_id ?? meta.carrierServiceId ?? null;
+    if (s.method !== 'customer_arranged' && s.status === 'label_issued' && carrierServiceId) {
+      const found = await this.core.quiet('drop-off points', () => this.core.ctx.use('shipping').findDropOffPoints(carrierServiceId, zip, 5));
       points = (found ?? []).map((p) => ({ name: p.name, address: [p.address.line1, p.address.city, p.address.region].filter(Boolean).join(', '), distanceMiles: p.distanceMiles, hours: p.hours }));
     }
     return this.views.shipment(s, agg, points);
@@ -556,7 +565,7 @@ export class Requests {
       await tx.update('returns', r.id, { status, updated_at: this.core.now() });
       await tx.update('return_shipments', sh.id, { status: returnShipmentMachine.next(sh.status as never, 'dropOff'), carrier: tracked.carrierName ?? body.carrier.trim(), tracking_number: body.trackingNumber.trim(), shipping_shipment_id: tracked.id });
       await this.core.timeline(tx, r.id, [{ kind: 'shipment_dropped_off', label: 'You sent the return', detail: `${body.carrier.trim()} ${body.trackingNumber.trim()}`, visibility: 'customer', actor: by.actor }]);
-      batch.push('returns.return.shipped', { returnId: r.id, trackingNumber: body.trackingNumber.trim() });
+      batch.push('returns.return.shipped', { returnId: r.id, ...this.core.refs(a.ret), trackingNumber: body.trackingNumber.trim() });
     });
   }
 
@@ -592,7 +601,7 @@ export class Requests {
         updated_at: now,
       });
       await this.core.timeline(tx, r.id, [{ kind: 'escalated', label: 'You asked Marketly to step in', detail: opened ? `Case ${opened.ref}` : null, visibility: 'customer', actor: by.actor }]);
-      batch.push('returns.return.escalated', { returnId: r.id, ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, orderId: a.ret.order_id, reason, by: by.actor });
+      batch.push('returns.return.escalated', { returnId: r.id, ...this.core.refs(a.ret), ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, reason, by: by.actor });
     });
     if (opened) await this.core.repo.find('return_evidence', { return_id: r.id, case_id: null }).then((rows) => Promise.all(rows.map((e) => this.core.repo.update('return_evidence', e.id, { case_id: opened.id }))));
     void who;

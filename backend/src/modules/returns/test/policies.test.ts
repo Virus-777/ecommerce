@@ -4,6 +4,8 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
+import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
+import { SEEDED_POLICY_ID } from '../domain/rules.js';
 import { group, harness, idem, line, placeOrder, product, tokens, type Harness } from './helpers.js';
 
 let h: Harness;
@@ -22,15 +24,21 @@ const address = { name: 'Casa Verde Returns', line1: '200 Pine St', city: 'Reno'
 const day = 86_400_000;
 
 describe('baseline and effective terms', () => {
-  it('serves the settings baseline until a version is active', async () => {
+  it('serves the seeded baseline version 1.0 (decision D-RT2)', async () => {
     const res = await h.call('GET', '/api/store/returns/policy', tokens.visitor());
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ windowDays: 30, version: 'default' });
+    expect(res.body).toMatchObject({ windowDays: 30, version: '1.0' });
+    const admin = await h.call('GET', '/api/admin/returns/policies', staff());
+    expect(admin.body.active).toMatchObject({ id: SEEDED_POLICY_ID, version: '1.0', status: 'active', windowDays: 30, sellerResponseBusinessDays: 2, infoReplyDays: 7, dropOffDays: 7 });
+    expect(await h.service.defaultWindowDays()).toEqual({ windowDays: 30, policyVersion: '1.0' });
     expect(res.body.responsibilities.find((r: any) => r.reasonGroup === 'change_of_mind')).toMatchObject({ paidBy: 'customer', customerFee: { amount: 799 } });
     expect(res.body.responsibilities.find((r: any) => r.reasonGroup === 'damaged')).toMatchObject({ paidBy: 'seller', originalShippingRefunded: true });
     const official = await h.service.resolveTerms(null, null, null);
-    expect(official).toMatchObject({ windowDays: 30, source: 'baseline', remedies: ['refund', 'replacement', 'exchange'] });
+    expect(official).toMatchObject({ sellerId: OFFICIAL_STORE_ID, windowDays: 30, source: 'baseline', remedies: ['refund', 'replacement', 'exchange'], policyVersion: '1.0', policyVersionId: SEEDED_POLICY_ID });
     expect(official.responsibilities.every((r) => r.paidBy === 'platform')).toBe(true);
+    // OFFICIAL_STORE_ID resolves the Official Store terms too, never a seller without terms
+    expect(await h.service.resolveTerms(OFFICIAL_STORE_ID, null, null)).toEqual(official);
+    expect((await h.service.sellerReturnTermsFor([OFFICIAL_STORE_ID]))[OFFICIAL_STORE_ID]).toEqual(official);
   });
 
   it('creates version 1 of seller terms on approval and keeps changes at or above the baseline', async () => {
@@ -146,25 +154,26 @@ describe('baseline versions', () => {
     h.authority.decision = 'approval_required';
     const res = await h.call('POST', '/api/admin/returns/policies', staff(), version());
     expect(res.status, JSON.stringify(res.body)).toBe(201);
-    expect(res.body).toMatchObject({ status: 'pending_approval', version: '1.0', approval: { required: true } });
+    expect(res.body).toMatchObject({ status: 'pending_approval', version: '1.1', approval: { required: true } });
     expect(h.calls.approvals.at(-1)).toMatchObject({ action: 'returns.baseline.change', target: { id: res.body.id } });
     expect((await h.call('POST', `/api/admin/returns/policies/${res.body.id}/withdraw`, staff(), { reason: 'x' })).status).toBe(409);
     await h.publish('access', 'access.approval.decided', { requestId: res.body.approval.approvalRequestId, ref: 'AP-3', actionKey: 'returns.baseline.change', module: 'returns', target: { type: 'return_policy', id: res.body.id }, outcome: 'approved', decidedBy: { kind: 'staff', id: newId() }, reason: null, amount: null, approverIds: [], requestedById: newId() });
     let admin = await h.call('GET', '/api/admin/returns/policies', staff());
     expect(admin.body.upcoming.find((v: any) => v.id === res.body.id)).toMatchObject({ status: 'scheduled' });
-    expect(admin.body.active.version).toBe('default');
+    expect(admin.body.active.version).toBe('1.0');
     h.clock.advance(3 * day);
     try {
       await h.app.kernel.jobs.runNow('returns.policy-activation');
       admin = await h.call('GET', '/api/admin/returns/policies', staff());
-      expect(admin.body.active).toMatchObject({ id: res.body.id, status: 'active', version: '1.0' });
+      expect(admin.body.active).toMatchObject({ id: res.body.id, status: 'active', version: '1.1' });
+      expect(admin.body.history.find((v: any) => v.id === SEEDED_POLICY_ID)).toMatchObject({ status: 'superseded' });
       expect(h.named('returns.policy.changed').find((e) => e.policyVersionId === res.body.id)).toBeTruthy();
       const pub = await h.call('GET', '/api/store/returns/policy', tokens.visitor());
       expect(pub.body.responsibilities.find((r: any) => r.reasonGroup === 'change_of_mind').customerFee.amount).toBe(599);
       // a second version supersedes it; a scheduled one can be withdrawn
       h.authority.decision = 'allowed';
       const next = await h.call('POST', '/api/admin/returns/policies', staff(), version({ effectiveFrom: new Date(h.clock.now().getTime() + 5 * day).toISOString() }));
-      expect(next.body).toMatchObject({ status: 'scheduled', version: '1.1' });
+      expect(next.body).toMatchObject({ status: 'scheduled', version: '1.2' });
       const withdrawn = await h.call('POST', `/api/admin/returns/policies/${next.body.id}/withdraw`, staff(), { reason: 'Not now' });
       expect(withdrawn.body.status).toBe('withdrawn');
     } finally {
