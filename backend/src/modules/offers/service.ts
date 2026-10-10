@@ -47,6 +47,21 @@ export class OffersService implements OffersPublicApi {
     return row ? this.core.toOffer(row) : null;
   }
 
+  /** Batch read in any status; unknown ids map to null */
+  async getOffers(offerIds: string[]): Promise<Record<string, Offer | null>> {
+    const ids = [...new Set((offerIds ?? []).filter(isUuid))];
+    const out: Record<string, Offer | null> = Object.fromEntries((offerIds ?? []).map((id) => [id, null]));
+    if (!ids.length) return out;
+    for (const o of await this.core.toOffers(await this.core.repo.getMany('offers', ids))) out[o.id] = o;
+    return out;
+  }
+
+  /** Offers that still use a shipping profile: every status except removed (one count query) */
+  async countActiveOffersByProfile(shippingProfileId: string): Promise<number> {
+    if (!isUuid(shippingProfileId)) return 0;
+    return this.core.repo.count('offers', { shipping_profile_id: shippingProfileId, status: { op: '<>', value: 'removed' } });
+  }
+
   quoteOffer(offerId: string, quantity: number, postalCode?: string): Promise<OfferView> {
     return this.storefront.quoteOffer(offerId, quantity, postalCode);
   }
@@ -188,6 +203,10 @@ export class OffersService implements OffersPublicApi {
 
   onEnforcementRecordedFromTrust(event: EventPayload<'trust.enforcement.recorded'>, envelope?: Pick<EventEnvelope, 'actor'>) {
     return this.enforcement.onEnforcementRecorded(event, envelope?.actor);
+  }
+
+  onEnforcementReversedFromTrust(event: EventPayload<'trust.enforcement.reversed'>, envelope?: Pick<EventEnvelope, 'actor' | 'id'>) {
+    return this.enforcement.onEnforcementReversed(event, envelope?.id, envelope?.actor);
   }
 
   onCampaignStartedFromPromotions(event: EventPayload<'promotions.campaign.started'>) {

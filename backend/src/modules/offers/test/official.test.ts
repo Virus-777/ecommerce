@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
+import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import { addProduct, addSeller, asStaff, call, DAY, emit, eventsNamed, harness, profile, sellerOffer, sku, staffHeaders, warehouse, type Harness } from './helpers.js';
 
 let h: Harness;
@@ -18,7 +19,7 @@ const officialInput = (productId: string, variantId: string, over: Record<string
   price: { amount: 19900, currency: 'USD' },
   sku: sku('HAL'),
   dispatchBusinessDays: 0,
-  shippingProfileId: profile(h, 0, 2),
+  shippingProfileId: profile(h, 0, 2, null),
   returnTerms: { kind: 'extended', windowDays: 60, freeReturnShipping: true },
   warranty: { kind: 'manufacturer', months: 24 },
   ...over,
@@ -34,8 +35,11 @@ async function official(over: Record<string, unknown> = {}) {
 describe('Official Store offers', () => {
   it('creates an offer with a company stock item, publishes it and audits both', async () => {
     const { id, body } = await official();
-    expect(body.offer).toMatchObject({ ownerType: 'official', sellerId: null, sellerName: 'Official Store', status: 'draft', returnTerms: { kind: 'extended', windowDays: 60, freeReturnShipping: true }, warranty: { handledBy: 'manufacturer' } });
-    expect(body.seller).toMatchObject({ official: true, name: 'Official Store' });
+    expect(body.offer).toMatchObject({ ownerType: 'official', sellerId: null, sellerName: OFFICIAL_STORE_NAME, status: 'draft', returnTerms: { kind: 'extended', windowDays: 60, freeReturnShipping: true }, warranty: { handledBy: 'manufacturer' } });
+    expect(body.seller).toMatchObject({ official: true, name: OFFICIAL_STORE_NAME });
+    // ships from the inventory default location (decision O3); the title is denormalised from catalog
+    expect(body.offer.dispatch.shipsFrom).toBe('Reno, NV');
+    expect(body.offer.title).toBe('Halden Aurora ANC Headphones – Black');
     const pub = await asStaff(h, 'POST', `/official/offers/${id}/publish`);
     expect(pub.statusCode, pub.body).toBe(200);
     expect(pub.json().offer.status).toBe('out_of_stock'); // company stock starts at 0

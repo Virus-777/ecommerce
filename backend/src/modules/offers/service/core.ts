@@ -16,7 +16,7 @@ import type { IneligibilityReason, Offer, StatusReason } from '../../../spec/off
 import type * as sellers from '../../../spec/sellers.js';
 import { reason, type IneligibilityCode, type OfferStatus } from '../domain/rules.js';
 import { offerStatusMachine } from '../domain/state-machines.js';
-import { OFFICIAL_NAME, isoReq, money, toOffer } from '../mappers.js';
+import { OFFICIAL_NAME, isoReq, money, offerTitle, toOffer } from '../mappers.js';
 import type { BulkFileReader, EligibilityRec, OfferRec, OffersRepository } from '../ports.js';
 import type { BulkPart } from './bulk.js';
 import type { EnforcementPart } from './enforcement.js';
@@ -66,7 +66,7 @@ export interface TransitionSpec {
   guard?: (r: OfferRec) => void;
   /** New status reason; undefined keeps it, null clears it */
   reason?: StatusReason | null;
-  log?: { reasonCode?: string | null; reason?: string | null; affectedActivity?: string | null; appealRoute?: string | null; reviewDate?: string | null };
+  log?: { reasonCode?: string | null; reason?: string | null; affectedActivity?: string | null; appealRoute?: string | null; reviewDate?: string | null; trustEnforcementId?: string | null };
   patch?: Partial<OfferRec>;
   /** Sellable quantity read before the transaction: publish / resume / restore land on out_of_stock when 0 */
   available?: number;
@@ -172,6 +172,16 @@ export class Core {
     return out;
   }
 
+  /** The offer's title; rows created before titles existed get theirs from catalog now (and keep it) */
+  async ensureTitle(r: OfferRec, cache?: ProductCache): Promise<string> {
+    if (r.title) return r.title;
+    const p = await this.productAdmin(r.product_id, cache).catch(() => null);
+    if (!p) return '';
+    const title = offerTitle(p.product.title, p.product.variants.find((v) => v.id === r.variant_id)?.options);
+    await this.repo.update('offers', r.id, { title });
+    return title;
+  }
+
   /* ---------------------------------------------------------------- sellers */
 
   async sellerSnapshots(ids: readonly (string | null | undefined)[]): Promise<Map<string, sellers.SellerSnapshot>> {
@@ -238,6 +248,34 @@ export class Core {
    * featured bookkeeping run after the commit (afterTransition).
    */
   async transition(offerId: string, spec: TransitionSpec, repo: OffersRepository = this.repo): Promise<Transitioned> {
+    // a reinstated offer can collide with a live offer that took its stock item or New-variant slot meanwhile
+    return this.unique(() => this.transitionTx(offerId, spec, repo));
+  }
+
+  /**
+   * Runs a write; a unique violation of the offers indexes (SKU per owner, one live New offer per owner and
+   * variant, one live offer per stock item; NULLS NOT DISTINCT covers the Official Store) is DUPLICATE_OFFER.
+   */
+  async unique<R>(fn: () => Promise<R>, details: Record<string, unknown> = {}): Promise<R> {
+    try {
+      return await fn();
+    } catch (err) {
+      if ((err as { code?: string }).code !== '23505') throw err;
+      const constraint = String((err as { constraint?: string }).constraint ?? '');
+      const reason = constraint.includes('stock_item') ? 'stock_item_in_use' : constraint.includes('sku') ? 'sku_in_use' : constraint.includes('variant') ? 'new_offer_exists' : 'duplicate';
+      const message =
+        reason === 'stock_item_in_use'
+          ? 'Another live offer already sells this stock item'
+          : reason === 'sku_in_use'
+            ? 'This SKU is already used by another offer'
+            : reason === 'new_offer_exists'
+              ? 'There is already a live New offer for this variant'
+              : 'An offer with this SKU or variant already exists';
+      throw this.error('DUPLICATE_OFFER', message, { reason, ...details });
+    }
+  }
+
+  private async transitionTx(offerId: string, spec: TransitionSpec, repo: OffersRepository): Promise<Transitioned> {
     return repo.transaction(async (tx) => {
       const before = await this.offerRow(offerId, { repo: tx, forUpdate: true });
       spec.guard?.(before);
@@ -309,6 +347,8 @@ export class Core {
           to: s.to,
           reasonCode: i === 0 ? (log?.reasonCode ?? null) : null,
           reason: i === 0 ? (log?.reason ?? null) : null,
+          stockItemId: t.after.stock_item_id,
+          trustEnforcementId: log?.trustEnforcementId ?? null,
         },
         by,
       );

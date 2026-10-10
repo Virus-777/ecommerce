@@ -17,8 +17,8 @@ async function market() {
   const a = addSeller(h, { name: 'Northwind Audio' });
   const b = addSeller(h, { name: 'Gadget Grove' });
   const c = addSeller(h, { name: 'Second Life' });
-  const oa = await sellerOffer(h, a, p.id, v, { price: { amount: 17900, currency: 'USD' }, shippingProfileId: profile(h, 1999, 3) }); // total 19899
-  const ob = await sellerOffer(h, b, p.id, v, { price: { amount: 18900, currency: 'USD' }, shippingProfileId: profile(h, 0, 3) }); // total 18900
+  const oa = await sellerOffer(h, a, p.id, v, { price: { amount: 17900, currency: 'USD' }, shippingProfileId: profile(h, 1999, 3, a) }); // total 19899
+  const ob = await sellerOffer(h, b, p.id, v, { price: { amount: 18900, currency: 'USD' }, shippingProfileId: profile(h, 0, 3, b) }); // total 18900
   const oc = await sellerOffer(h, c, p.id, v, { condition: 'used_good', conditionNotes: 'Scuffed', price: { amount: 9900, currency: 'USD' } });
   return { p, v, a, b, c, oa, ob, oc };
 }

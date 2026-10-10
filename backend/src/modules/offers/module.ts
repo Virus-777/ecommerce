@@ -18,11 +18,11 @@ import { OffersService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.0.0',
+  version: '1.1.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const service = new OffersService({ repo: createPostgresOffersRepository(ctx.db), ctx, files: mediaBulkFileReader(ctx) });
+    const service = new OffersService({ repo: createPostgresOffersRepository(ctx.db, ctx.inbox), ctx, files: mediaBulkFileReader(ctx) });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
@@ -43,6 +43,7 @@ export default defineModule({
     ctx.events.on("inventory.stock.changed", (e) => service.onStockChangedFromInventory(e.payload));
     ctx.events.on("access.approval.decided", (e) => service.onApprovalDecidedFromAccess(e.payload));
     ctx.events.on("trust.enforcement.recorded", (e) => service.onEnforcementRecordedFromTrust(e.payload, e));
+    ctx.events.on("trust.enforcement.reversed", (e) => service.onEnforcementReversedFromTrust(e.payload, e));
     ctx.events.on("promotions.campaign.started", (e) => service.onCampaignStartedFromPromotions(e.payload));
     ctx.events.on("promotions.campaign.ended", (e) => service.onCampaignEndedFromPromotions(e.payload));
 

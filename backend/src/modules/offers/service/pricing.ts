@@ -154,6 +154,16 @@ export class PricingPart extends Part {
    * was-price is checked against the history before now; a new price without one drops the old was-price
    * (every was-price claim is checked against the price it is shown with).
    */
+  /** LARGE_PRICE_CHANGE_UNCONFIRMED when a published offer's price moves more than largeSellerPriceChangePct (checked before anything is saved) */
+  async assertLargeChangeConfirmed(row: OfferRec, price: common.Money) {
+    if (!row.published_at) return;
+    const from = Number(row.price_amount);
+    const pct = changePct(from, price.amount);
+    if (Math.abs(pct) > (await this.largeThreshold())) {
+      throw this.core.error('LARGE_PRICE_CHANGE_UNCONFIRMED', `This changes the price by ${pct}%. Confirm large price changes to apply it.`, { offers: [{ offerId: row.id, from: money(from, row.currency), to: price, changePct: pct }] });
+    }
+  }
+
   async changeSellerPrice(
     row: OfferRec,
     item: { price: common.Money; compareAt?: CompareAtInput | null; saleEndsAt?: string | null },

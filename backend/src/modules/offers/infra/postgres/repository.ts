@@ -1,4 +1,5 @@
 import { sql, type Kysely } from 'kysely';
+import type { Inbox } from '../../../../kernel/events/inbox.js';
 import { paginate } from '../../../../kernel/lib/pagination.js';
 import type { OffersDb } from '../../../../spec/offers.js';
 import type { OfferListFilter, OffersRepository } from '../../ports.js';
@@ -53,9 +54,11 @@ function offerFilters(q: any, f: OfferListFilter): any {
   if (f.excludeStatuses?.length) q = q.where('status', 'not in', f.excludeStatuses);
   if (f.conditions?.length) q = q.where('condition', 'in', f.conditions);
   if (f.contentGap) q = q.where(sql<boolean>`${f.contentGap} = any(content_gaps)`);
+  if (f.shippingProfileId) q = q.where('shipping_profile_id', '=', f.shippingProfileId);
   if (f.q?.trim()) {
     const term = like(f.q);
-    q = q.where((eb: any) => eb.or([eb(sql`lower(seller_sku)`, 'like', term), eb(sql`id::text`, '=', f.q!.trim().toLowerCase())]));
+    // title: substring or trigram similarity (gin title index); seller SKU; exact offer id
+    q = q.where((eb: any) => eb.or([eb(sql`lower(title)`, 'like', term), sql<boolean>`title % ${f.q!.trim()}`, eb(sql`lower(seller_sku)`, 'like', term), eb(sql`id::text`, '=', f.q!.trim().toLowerCase())]));
   }
   if (f.featuredEligible !== undefined) {
     q = f.featuredEligible
@@ -69,14 +72,18 @@ function offerFilters(q: any, f: OfferListFilter): any {
 }
 
 /** Postgres adapter for OffersRepository. `db` is scoped to the `offers` schema. */
-export function createPostgresOffersRepository(db: Kysely<OffersDb>): OffersRepository {
+export function createPostgresOffersRepository(db: Kysely<OffersDb>, inbox?: Inbox): OffersRepository {
   // generic table access: the row types are checked at the OffersRepository boundary
   const d: any = db;
 
   const repo: OffersRepository = {
     async transaction(fn) {
       if (db.isTransaction) return fn(repo);
-      return db.transaction().execute((trx) => fn(createPostgresOffersRepository(trx)));
+      return db.transaction().execute((trx) => fn(createPostgresOffersRepository(trx, inbox)));
+    },
+    async claim(key) {
+      if (!inbox) throw new Error('offers repository: no inbox');
+      return inbox.claim(db, key);
     },
 
     /* ---------------------------------------------------------------- generic */

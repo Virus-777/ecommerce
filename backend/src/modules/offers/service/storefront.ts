@@ -531,6 +531,8 @@ export class StorefrontPart extends Part {
       ownerType: r.owner_type,
       sellerId: r.seller_id,
       sellerName: this.core.nameOf(r, names),
+      sellerSku: r.seller_sku,
+      title: await this.core.ensureTitle(r),
       condition: r.condition,
       conditionNotes: r.condition_notes,
       missingItems: strings(r.missing_items),

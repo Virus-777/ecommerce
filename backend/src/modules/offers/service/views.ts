@@ -297,7 +297,7 @@ export class ViewsPart extends Part {
 
   /* ================================================================ admin */
 
-  async adminList(q: { q?: string; ownerType?: 'official' | 'seller'; sellerId?: string; productId?: string; status?: string; condition?: string; featuredEligible?: boolean; ineligibleReason?: string }, page: PageRequest): Promise<common.Page<OfferAdminRow>> {
+  async adminList(q: { q?: string; ownerType?: 'official' | 'seller'; sellerId?: string; productId?: string; status?: string; condition?: string; featuredEligible?: boolean; ineligibleReason?: string; shippingProfileId?: string }, page: PageRequest): Promise<common.Page<OfferAdminRow>> {
     const p = await this.repo.listOffers(
       {
         ...(q.ownerType ? { ownerType: q.ownerType } : {}),
@@ -307,6 +307,7 @@ export class ViewsPart extends Part {
         ...(q.condition ? { conditions: [q.condition] } : {}),
         ...(q.featuredEligible !== undefined ? { featuredEligible: q.featuredEligible } : {}),
         ...(q.ineligibleReason ? { ineligibilityCode: q.ineligibleReason } : {}),
+        ...(q.shippingProfileId ? { shippingProfileId: q.shippingProfileId } : {}),
         ...(q.q ? { q: q.q } : {}),
       },
       page,

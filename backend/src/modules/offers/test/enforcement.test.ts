@@ -117,6 +117,9 @@ describe('catalog changes', () => {
     await emit(h, 'catalog.product.merged', { keptProductId: kept.id, duplicateProductId: dup.id, reason: 'Duplicate listing' });
     expect(await h.api.getOffer(black.id)).toMatchObject({ productId: kept.id, variantId: kept.variants[0], status: 'active' });
     expect(await h.api.getOffer(silver.id)).toMatchObject({ productId: dup.id, status: 'paused', statusReason: { code: 'product_merged' } });
+    // the moved offer's stock item follows it, and its title is the kept product's
+    expect(h.stockUpdates).toContainEqual({ stockItemId: black.stockItemId, productId: kept.id, variantId: kept.variants[0] });
+    expect((await h.api.getOffer(black.id))!.title).toBe('Halden Aurora ANC Headphones – Black');
   });
 
   it('flags missing items that are no longer in the box', async () => {
@@ -124,11 +127,18 @@ describe('catalog changes', () => {
     const sellerId = addSeller(h);
     const o = await sellerOffer(h, sellerId, p.id, p.variants[0]!, { condition: 'used_good', conditionNotes: 'Works', missingItems: ['Carry case'] });
     p.product.product.includedItems = ['Headphones', 'USB-C cable'];
-    await emit(h, 'catalog.product.updated', { productId: p.id, version: 2 });
-    await emit(h, 'catalog.product.updated', { productId: p.id, version: 2 });
+    await emit(h, 'catalog.product.updated', { productId: p.id, version: 2, title: p.product.product.title });
+    await emit(h, 'catalog.product.updated', { productId: p.id, version: 2, title: p.product.product.title });
     const detail = (await asSeller(h, sellerId, 'GET', `/offers/${o.id}`)).json();
     expect(detail.statusLog.filter((l: { event: string }) => l.event === 'review_missing_items')).toHaveLength(1);
     expect(detail.offer.includedItems).toEqual(['Headphones', 'USB-C cable']);
+    // flagged once for the seller to review; the offer stays on sale; saving missingItems clears it
+    expect(detail.offer.missingItemsStale).toBe(true);
+    expect(eventsNamed(h, 'offers.offer.missing_items_stale').filter((e) => e.offerId === o.id)).toEqual([expect.objectContaining({ productId: p.id, ownerType: 'seller', sellerId, title: 'Halden Aurora ANC Headphones – Black', staleItems: ['Carry case'], newBoxItems: [] })]);
+    expect(detail.offer.status).toBe('active');
+    const saved = await asSeller(h, sellerId, 'PATCH', `/offers/${o.id}`, { missingItems: [] });
+    expect(saved.statusCode, saved.body).toBe(200);
+    expect((await h.api.getOffer(o.id))!.missingItemsStale).toBe(false);
   });
 });
 
@@ -145,7 +155,7 @@ describe('trust and campaigns', () => {
   });
 
   it('ignores events about records it does not know', async () => {
-    await emit(h, 'inventory.stock.changed', { stockItemId: newId(), offerId: newId(), ownerType: 'seller', sellerId: newId(), variantId: newId(), available: 0, reserved: 0, previousAvailable: 3, state: 'out_of_stock', cause: 'adjustment' });
+    await emit(h, 'inventory.stock.changed', { stockItemId: newId(), offerId: newId(), ownerType: 'seller', sellerId: newId(), productId: newId(), variantId: newId(), available: 0, reserved: 0, previousAvailable: 3, state: 'out_of_stock', archived: false, cause: 'adjustment' });
     await emit(h, 'sellers.restriction.lifted', { sellerId: newId(), restrictionId: newId(), reason: 'x' });
     await emit(h, 'access.approval.decided', { requestId: newId(), ref: 'AP', actionKey: 'offers.prices.change', module: 'offers', target: { type: 'price_change', id: newId() }, outcome: 'approved', approverIds: [], requestedById: newId() });
     await emit(h, 'promotions.campaign.started', { campaignId: newId(), kind: 'markdown', offerIds: [newId()], endsAt: new Date().toISOString() });
@@ -158,7 +168,7 @@ describe('jobs', () => {
   it('re-evaluates featured eligibility from seller performance', async () => {
     const p = addProduct(h);
     const sellerId = addSeller(h, { onTimePct: 97 });
-    const o = await sellerOffer(h, sellerId, p.id, p.variants[0]!, { shippingProfileId: profile(h) });
+    const o = await sellerOffer(h, sellerId, p.id, p.variants[0]!, { shippingProfileId: profile(h, 599, 3, sellerId) });
     expect((await h.api.getOffer(o.id))?.featuredEligibility.eligible).toBe(true);
     h.sellers.get(sellerId)!.onTimePct = 72;
     await h.app.kernel.jobs.runNow('offers.reevaluate-eligibility');

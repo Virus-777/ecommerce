@@ -14,7 +14,7 @@ describe('creating and publishing seller offers', () => {
   it('creates a draft with its stock item, then publishes it; other sellers do not see it', async () => {
     const sellerId = addSeller(h);
     const p = addProduct(h);
-    const res = await asSeller(h, sellerId, 'POST', '/offers', offerInput(p.id, p.variants[0]!, profile(h), { quantity: 7 }));
+    const res = await asSeller(h, sellerId, 'POST', '/offers', offerInput(p.id, p.variants[0]!, profile(h, 599, 3, sellerId), { quantity: 7 }));
     expect(res.statusCode, res.body).toBe(201);
     const detail = res.json();
     expect(detail.offer).toMatchObject({ status: 'draft', ownerType: 'seller', sellerId, condition: 'new', complete: true, termsVersion: 1 });
@@ -47,7 +47,7 @@ describe('creating and publishing seller offers', () => {
   it('checks the offer form: condition notes, missing items, return baseline, variant, duplicates and was-price', async () => {
     const sellerId = addSeller(h);
     const p = addProduct(h);
-    const prof = profile(h);
+    const prof = profile(h, 599, 3, sellerId);
     const post = (over: Record<string, unknown>) => asSeller(h, sellerId, 'POST', '/offers', offerInput(p.id, p.variants[0]!, prof, over));
     expect((await post({ condition: 'used_good' })).json().error.code).toBe('MISSING_ITEMS_REQUIRED');
     expect((await post({ condition: 'used_good', conditionNotes: 'Light scuffs', missingItems: ['Remote'] })).json().error.code).toBe('MISSING_ITEMS_REQUIRED');
@@ -81,20 +81,20 @@ describe('creating and publishing seller offers', () => {
   it('refuses restricted sellers and products that cannot be sold', async () => {
     const restricted = addSeller(h, { status: 'restricted', restrictions: [{ id: newId(), activities: ['new_offers'], scope: { conditions: ['refurbished'] } }] });
     const p = addProduct(h);
-    const refurb = await asSeller(h, restricted, 'POST', '/offers', offerInput(p.id, p.variants[0]!, profile(h), { condition: 'refurbished', conditionNotes: 'Grade A' }));
+    const refurb = await asSeller(h, restricted, 'POST', '/offers', offerInput(p.id, p.variants[0]!, profile(h, 599, 3, restricted), { condition: 'refurbished', conditionNotes: 'Grade A' }));
     expect(refurb.statusCode).toBe(409);
     expect(refurb.json().error).toMatchObject({ code: 'SELLER_RESTRICTED', details: { appealRoute: 'Appeal in Seller Center' } });
     // the restriction covers refurbished only
-    expect((await asSeller(h, restricted, 'POST', '/offers', offerInput(p.id, p.variants[0]!, profile(h)))).statusCode).toBe(201);
+    expect((await asSeller(h, restricted, 'POST', '/offers', offerInput(p.id, p.variants[0]!, profile(h, 599, 3, restricted)))).statusCode).toBe(201);
 
     const rejected = addProduct(h, { reviewState: 'rejected', ownerSellerId: restricted });
-    expect((await asSeller(h, restricted, 'POST', '/offers', offerInput(rejected.id, rejected.variants[0]!, profile(h)))).json().error.code).toBe('PRODUCT_NOT_PURCHASABLE');
+    expect((await asSeller(h, restricted, 'POST', '/offers', offerInput(rejected.id, rejected.variants[0]!, profile(h, 599, 3, restricted)))).json().error.code).toBe('PRODUCT_NOT_PURCHASABLE');
   });
 
   it('keeps drafts on products in review and publishes them when the product is approved', async () => {
     const sellerId = addSeller(h);
     const p = addProduct(h, { reviewState: 'submitted', ownerSellerId: sellerId });
-    const res = await asSeller(h, sellerId, 'POST', '/offers', offerInput(p.id, p.variants[0]!, profile(h), { publish: true }));
+    const res = await asSeller(h, sellerId, 'POST', '/offers', offerInput(p.id, p.variants[0]!, profile(h, 599, 3, sellerId), { publish: true }));
     expect(res.statusCode, res.body).toBe(201);
     expect(res.json().offer).toMatchObject({ status: 'draft', publishOnApproval: true });
     expect((await asSeller(h, sellerId, 'POST', `/offers/${res.json().offer.id}/publish`)).json().error.code).toBe('PRODUCT_NOT_PURCHASABLE');
@@ -135,7 +135,7 @@ describe('the offer lifecycle', () => {
   it('deletes drafts that were never published', async () => {
     const sellerId = addSeller(h);
     const p = addProduct(h);
-    const res = await asSeller(h, sellerId, 'POST', '/offers', offerInput(p.id, p.variants[0]!, profile(h)));
+    const res = await asSeller(h, sellerId, 'POST', '/offers', offerInput(p.id, p.variants[0]!, profile(h, 599, 3, sellerId)));
     const id = res.json().offer.id;
     expect((await asSeller(h, addSeller(h), 'DELETE', `/offers/${id}`)).statusCode).toBe(404);
     expect((await asSeller(h, sellerId, 'DELETE', `/offers/${id}`)).statusCode).toBe(204);
@@ -146,7 +146,7 @@ describe('the offer lifecycle', () => {
     const sellerId = addSeller(h);
     const p = addProduct(h, { variants: 2 });
     const a = await sellerOffer(h, sellerId, p.id, p.variants[0]!);
-    const draft = await asSeller(h, sellerId, 'POST', '/offers', offerInput(p.id, p.variants[1]!, profile(h)));
+    const draft = await asSeller(h, sellerId, 'POST', '/offers', offerInput(p.id, p.variants[1]!, profile(h, 599, 3, sellerId)));
     const res = await asSeller(h, sellerId, 'POST', '/offers/bulk-pause', { offerIds: [a.id, draft.json().offer.id, newId()] });
     expect(res.statusCode, res.body).toBe(200);
     expect(res.json().results).toEqual([
@@ -171,7 +171,7 @@ describe('the offer lifecycle', () => {
     const p = addProduct(h, { variants: 3 });
     const a = await sellerOffer(h, sellerId, p.id, p.variants[0]!, { sellerSku: 'LIST-A' });
     await sellerOffer(h, sellerId, p.id, p.variants[1]!, { quantity: 0 });
-    await asSeller(h, sellerId, 'POST', '/offers', offerInput(p.id, p.variants[2]!, profile(h)));
+    await asSeller(h, sellerId, 'POST', '/offers', offerInput(p.id, p.variants[2]!, profile(h, 599, 3, sellerId)));
     const list = await asSeller(h, sellerId, 'GET', '/offers?limit=10');
     expect(list.statusCode, list.body).toBe(200);
     expect(list.json().items).toHaveLength(3);
