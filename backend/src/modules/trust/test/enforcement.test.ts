@@ -307,6 +307,12 @@ describe('with the real customers module', () => {
   });
   afterAll(() => app.close());
 
+  it('the queue export answers 409 DATASET_UNAVAILABLE while reports is off (pass 5; was 503)', async () => {
+    const res = await call('POST', `${ADMIN}/reports/exports`, staff(newId(), TRUST_PERMS), { filters: {}, format: 'csv' });
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(res.body.error).toMatchObject({ code: 'DATASET_UNAVAILABLE', details: { dataset: 'trust.admin.reports' } });
+  });
+
   it('restrict_customer_messaging is executed by customers, confirmed back, listed for the customer and appealable', async () => {
     const accountId = newId();
     app.kernel.events.publish('identity', 'identity.user.registered', { accountId, email: `ana.${accountId.slice(-6)}@example.com`, firstName: 'Ana', lastName: 'Lopez', marketingOptIn: false, acceptedTermsVersion: '1', at: new Date().toISOString() });

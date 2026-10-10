@@ -57,7 +57,6 @@ export const invalid = (issues: { path: string; message: string }[], message = '
 export const invalidField = (path: string, message: string) => invalid([{ path, message }], message);
 export const notFound = (what = 'Report') => new AppError('NOT_FOUND', `${what} not found`);
 export const illegal = (machine: string, from: string, event: string, message?: string) => new AppError('ILLEGAL_TRANSITION', message ?? `Cannot ${event} when the ${machine.toLowerCase()} is ${from.replace(/_/g, ' ')}`, { machine, from, event });
-export const unavailable = (what: string) => new AppError('SERVICE_UNAVAILABLE', `${what} is unavailable right now`, undefined, 503);
 
 export interface TimelineEntry {
   kind: string;
