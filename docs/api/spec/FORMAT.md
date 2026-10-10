@@ -88,7 +88,8 @@ Used in `types`, `body`, `query`, event `payload` and inline objects.
   "permissionWhen": [                      // optional: an extra permission when the request is about someone else
     { "if": { "query.view": "all" }, "permission": "access.approvals.view-all" }   // value, or "!self" / "!self-member"
   ],
-  "stepUp": { "kind": "reauth", "purpose": "payout-account" },  // optional: reauth = reauthToken in the body; code = X-Step-Up-Code header
+  "stepUp": { "kind": "reauth", "purpose": "payout-account" },  // optional: reauth = reauthToken in the body; code = X-Step-Up-Code header.
+                                           //   A reauth purpose must be listed in identity ReauthRequest.purpose (the build checks it)
   "sellerContext": "optional",             // seller area only: works before a seller is chosen
   "scope": "own-member",                   // optional override of the derived record scope:
                                            //   public | own-customer | own-seller | own-member | guest-order | staff
@@ -98,7 +99,7 @@ Used in `types`, `body`, `query`, event `payload` and inline objects.
   "paging": true,                          // adds cursor/page/limit and wraps response in Page<…>
   "body": { "note": "string?" },           // type name, inline object, "binary" (raw bytes, any content type; the handler
                                            //   gets a Uint8Array, up to 512 MB, and enforces its own limit), or omitted
-  "response": "Product",                   // type, "Product[]", inline object, or null for 204
+  "response": "Product",                   // type, "Product[]", inline object, or null for no body (204 unless status says otherwise, e.g. 202)
   "status": 200,                           // success status (default 200; 201 create; 202 accepted; 204 no content)
   "errors": ["ILLEGAL_TRANSITION"],        // codes from common.json or module-specific UPPER_SNAKE
   "idempotent": false,                     // true → Idempotency-Key header required
