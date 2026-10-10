@@ -209,7 +209,7 @@ describe('capture', () => {
     const placed = await placeOrder(h, { products: [[{ price: 12000 }], [{ price: 8000 }]] });
     expect(h.named('payments.payment.captured')).toHaveLength(0);
     const [g1, g2] = placed.order.groups;
-    const dispatched = (groupId: string) => ({ shipmentId: newId(), kind: 'outbound', orderId: placed.order.id, groupId, ownerType: 'seller', sellerId: null, lines: [], shippedAt: new Date().toISOString(), trackingValid: true });
+    const dispatched = (groupId: string) => ({ shipmentId: newId(), kind: 'outbound', orderId: placed.order.id, groupId, ownerType: 'seller', sellerId: null, fulfilledBy: 'seller', lines: [], shippedAt: new Date().toISOString(), trackingValid: true });
     await h.publish('shipping', 'shipping.shipment.dispatched', dispatched(g1!.id));
     await h.publish('shipping', 'shipping.shipment.dispatched', dispatched(g1!.id)); // replay
     let detail = await h.service.getPaymentForOrder(placed.order.id);

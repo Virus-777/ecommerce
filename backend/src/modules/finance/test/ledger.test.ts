@@ -79,7 +79,7 @@ describe('sales at order acceptance', () => {
 describe('a cancellation before dispatch (scenario 4: only the selected item changes)', () => {
   it('reverses the cancelled item and returns its fee; the other item is untouched', async () => {
     const item = orderA.groups[0]!.items[1]!;
-    const cancel = { orderId: orderA.id, ref: orderA.ref, groupId: orderA.groups[0]!.id, ownerType: 'seller', sellerId: S, itemId: item.id, offerId: newId(), stockItemId: newId(), quantity: 1, cancellationId: newId(), initiatedBy: 'customer', reasonCode: 'changed_mind', beforeDispatch: true, countsAgainstSeller: false, refund: { itemAmount: USD(2400), discountShare: USD(0), shippingRefund: USD(0), taxRefund: USD(0), total: USD(2400) }, paymentIntentId: newId(), trustReportId: null, notifyCustomer: true };
+    const cancel = { orderId: orderA.id, ref: orderA.ref, groupId: orderA.groups[0]!.id, ownerType: 'seller', sellerId: S, fulfilledBy: 'seller', itemId: item.id, offerId: newId(), stockItemId: newId(), quantity: 1, cancellationId: newId(), initiatedBy: 'customer', reasonCode: 'changed_mind', beforeDispatch: true, countsAgainstSeller: false, refund: { itemAmount: USD(2400), discountShare: USD(0), shippingRefund: USD(0), taxRefund: USD(0), total: USD(2400) }, paymentIntentId: newId(), trustReportId: null, notifyCustomer: true };
     await k.emit('orders.item.cancelled', cancel);
     await k.emit('orders.item.cancelled', cancel); // redelivered
     const t = await expectLedgerMatches(k, S);

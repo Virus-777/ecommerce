@@ -81,7 +81,7 @@ describe('reactions to other modules', () => {
     await k.emit('offers.offer.status_changed', { ...status, from: 'paused', to: 'active' });
     expect((await get(c.id)).status).toBe('live');
 
-    await k.emit('inventory.stock.low', { stockItemId: offer.stockItemId, offerId: offer.id, ownerType: 'official', sellerId: null, productId: offer.productId, variantId: offer.variantId, sku: 'S', label: 'Vase', available: 4, threshold: 5 });
+    await k.emit('inventory.stock.low', { stockItemId: offer.stockItemId, offerId: offer.id, ownerType: 'official', sellerId: null, productId: offer.productId, variantId: offer.variantId, sku: 'S', label: 'Vase', available: 4, threshold: 5, serviceManaged: false });
     expect((await get(c.id)).status).toBe('paused');
     k.offers.get(offer.id)!.stock = 30;
     await k.emit('inventory.stock.changed', { stockItemId: offer.stockItemId, offerId: offer.id, ownerType: 'official', sellerId: null, productId: offer.productId, variantId: offer.variantId, archived: false, available: 30, reserved: 0, previousAvailable: 4, state: 'in_stock', cause: 'receipt' });

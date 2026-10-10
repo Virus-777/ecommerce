@@ -238,7 +238,7 @@ async function mixedGroups(credit: number, groupPrices: number[][], o: { capture
 }
 
 const dispatch = (orderId: string, groupId: string) =>
-  h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId: newId(), kind: 'outbound', orderId, groupId, ownerType: 'seller', sellerId: null, lines: [], shippedAt: new Date().toISOString(), trackingValid: true });
+  h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId: newId(), kind: 'outbound', orderId, groupId, ownerType: 'seller', sellerId: null, fulfilledBy: 'seller', lines: [], shippedAt: new Date().toISOString(), trackingValid: true });
 
 /** Staff cancel unshipped items through orders (orders.item.cancelled follows, with the order's real item states) */
 async function cancelItems(orderId: string, itemIds: string[]) {

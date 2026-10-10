@@ -137,7 +137,7 @@ describe('consumers', () => {
   it('a dispatch overdue warning opens the customer escalation route', async () => {
     const c = await sellerCase({ deliver: false });
     expect((await h.call('POST', `/api/store/support/cases/${c.caseId}/escalate`, tokens.customer(c.customerId), { reason: 'other' })).status).toBe(409);
-    await h.publish('shipping', 'shipping.dispatch.overdue', { orderId: c.order.id, orderRef: c.order.ref, groupId: c.order.groups[0]!.id, ownerType: 'seller', sellerId: c.sellerId, orderItemIds: [c.itemId], dueAt: h.clock.now().toISOString(), exceptionId: newId() });
+    await h.publish('shipping', 'shipping.dispatch.overdue', { orderId: c.order.id, orderRef: c.order.ref, groupId: c.order.groups[0]!.id, ownerType: 'seller', sellerId: c.sellerId, fulfilledBy: 'seller', orderItemIds: [c.itemId], dueAt: h.clock.now().toISOString(), exceptionId: newId() });
     const view = await h.call('GET', `/api/store/support/cases/${c.caseId}`, tokens.customer(c.customerId));
     expect(view.body.can.escalate).toBe(true);
     expect(view.body.timeline.some((t: { label: string }) => t.label === 'The seller missed the dispatch deadline')).toBe(true);
@@ -149,18 +149,18 @@ describe('consumers', () => {
   it('a lost package opens a case when the customer has none (shipping.shipment.exception)', async () => {
     const o = await sellerOrder(h, { deliver: false });
     // an exception raised from a customer's report (it already has its case) opens nothing, even with a package
-    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'lost_or_damaged', orderId: o.order.id, groupId: o.order.groups[0]!.id, shipmentId: newId(), sellerId: o.sellerId, orderItemIds: [o.itemId], dueAt: h.clock.now().toISOString(), customerAction: null, source: 'customer_report', caseRef: 'CS-000999' });
+    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'lost_or_damaged', orderId: o.order.id, groupId: o.order.groups[0]!.id, shipmentId: newId(), sellerId: o.sellerId, fulfilledBy: 'seller', orderItemIds: [o.itemId], dueAt: h.clock.now().toISOString(), customerAction: null, source: 'customer_report', caseRef: 'CS-000999' });
     expect(await h.service.casesForOrder(o.order.id)).toHaveLength(0);
     // nor one opened from a case (caseRef) or reported by the seller
-    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'lost_or_damaged', orderId: o.order.id, groupId: o.order.groups[0]!.id, shipmentId: newId(), sellerId: o.sellerId, orderItemIds: [o.itemId], dueAt: h.clock.now().toISOString(), customerAction: null, source: 'staff', caseRef: 'CS-000998' });
-    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'lost_or_damaged', orderId: o.order.id, groupId: o.order.groups[0]!.id, shipmentId: newId(), sellerId: o.sellerId, orderItemIds: [o.itemId], dueAt: h.clock.now().toISOString(), customerAction: null, source: 'seller', caseRef: null });
+    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'lost_or_damaged', orderId: o.order.id, groupId: o.order.groups[0]!.id, shipmentId: newId(), sellerId: o.sellerId, fulfilledBy: 'seller', orderItemIds: [o.itemId], dueAt: h.clock.now().toISOString(), customerAction: null, source: 'staff', caseRef: 'CS-000998' });
+    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'lost_or_damaged', orderId: o.order.id, groupId: o.order.groups[0]!.id, shipmentId: newId(), sellerId: o.sellerId, fulfilledBy: 'seller', orderItemIds: [o.itemId], dueAt: h.clock.now().toISOString(), customerAction: null, source: 'seller', caseRef: null });
     expect(await h.service.casesForOrder(o.order.id)).toHaveLength(0);
-    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'lost_or_damaged', orderId: o.order.id, groupId: o.order.groups[0]!.id, shipmentId: newId(), sellerId: o.sellerId, orderItemIds: [o.itemId], dueAt: h.clock.now().toISOString(), customerAction: null, source: 'carrier', caseRef: null });
+    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'lost_or_damaged', orderId: o.order.id, groupId: o.order.groups[0]!.id, shipmentId: newId(), sellerId: o.sellerId, fulfilledBy: 'seller', orderItemIds: [o.itemId], dueAt: h.clock.now().toISOString(), customerAction: null, source: 'carrier', caseRef: null });
     const cases = await h.service.casesForOrder(o.order.id);
     expect(cases).toHaveLength(1);
     const opened = h.named('support.case.opened').find((e) => e.caseId === cases[0]!.caseId);
     expect(opened).toMatchObject({ kind: 'order_problem', category: 'item_damaged', customerId: o.customerId, orderItemIds: [o.itemId] });
-    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'lost_or_damaged', orderId: o.order.id, groupId: o.order.groups[0]!.id, shipmentId: newId(), sellerId: o.sellerId, orderItemIds: [o.itemId], dueAt: h.clock.now().toISOString(), customerAction: null, source: 'system', caseRef: null });
+    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'lost_or_damaged', orderId: o.order.id, groupId: o.order.groups[0]!.id, shipmentId: newId(), sellerId: o.sellerId, fulfilledBy: 'seller', orderItemIds: [o.itemId], dueAt: h.clock.now().toISOString(), customerAction: null, source: 'system', caseRef: null });
     expect(await h.service.casesForOrder(o.order.id)).toHaveLength(1);
   });
 
