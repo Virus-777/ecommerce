@@ -62,6 +62,8 @@ export const SYSTEM_ROLES: SeedRole[] = [
       'settings.flags.manage',
       'notifications.templates.*',
       'notifications.routing.manage',
+      // reads the action history: told when the hash-chain check fails, and proposes retention changes
+      'audit.entries.view',
       // may propose shortening the retention period (the Business Owner approves audit.retention.change)
       'audit.retention.manage',
       ...QUEUES,

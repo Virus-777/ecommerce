@@ -5,7 +5,7 @@ import type { PaymentsRepository, Recs, Table, WebhookRec } from '../../ports.js
 
 /** jsonb columns per table: values are sent as JSON text (pg would turn JS arrays into PG arrays) */
 const JSON_COLUMNS: Record<Table, readonly string[]> = {
-  intents: ['tenders', 'method', 'decline'],
+  intents: ['tenders', 'method', 'decline', 'next_action'],
   allocations: [],
   captures: [],
   provider_calls: [],
@@ -13,6 +13,7 @@ const JSON_COLUMNS: Record<Table, readonly string[]> = {
   refund_items: [],
   refund_log: ['actor'],
   disputes: ['evidence'],
+  dispute_log: ['actor'],
   saved_methods: ['billing_address'],
   webhook_events: ['payload'],
 };
@@ -196,7 +197,8 @@ export function createPostgresPaymentsRepository(db: Kysely<PaymentsDb>): Paymen
       if (f.status) q = q.where('status', '=', f.status);
       if (f.failing) q = q.where(sql<boolean>`(status = 'failed' or (status = 'processing' and outcome_unknown))`);
       if (f.origin) q = q.where('origin', '=', f.origin);
-      if (f.orderId) q = q.where('order_id', '=', f.orderId);
+      // an orphan payment refund has no order: its checkout session stands in (Refund.orderId)
+      if (f.orderId) q = q.where(sql<boolean>`(order_id = ${f.orderId} or (order_id is null and checkout_session_id = ${f.orderId}))`);
       if (f.customerId) q = q.where(sql<boolean>`exists (select 1 from payments.intents i where i.id = refunds.intent_id and i.customer_id = ${f.customerId})`);
       if (f.q?.trim()) {
         const term = like(f.q);
@@ -214,14 +216,11 @@ export function createPostgresPaymentsRepository(db: Kysely<PaymentsDb>): Paymen
       const res = await paginate(q, page, { column: 'sort_due', direction: 'asc' });
       return { ...res, items: (res.items as unknown as (Recs["disputes"] & { sort_due?: unknown })[]).map(({ sort_due: _s, ...r }) => r) } as never;
     },
-    async webhooksFor(provider, refs) {
-      const list = refs.filter(Boolean);
-      if (!list.length) return [];
+    async webhooksFor(intentId) {
       return d
         .selectFrom('webhook_events')
         .selectAll()
-        .where('provider', '=', provider)
-        .where(sql<boolean>`(payload->'data'->>'paymentRef' in (${sql.join(list.map((r) => sql`${r}`))}) or payload->'data'->>'intentId' in (${sql.join(list.map((r) => sql`${r}`))}))`)
+        .where((eb: any) => eb.or([eb('intent_id', '=', intentId), eb('refund_id', 'in', eb.selectFrom('refunds').select('id').where('intent_id', '=', intentId))]))
         .orderBy('received_at', 'asc')
         .limit(200)
         .execute();

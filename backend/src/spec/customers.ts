@@ -213,14 +213,15 @@ export const MarketingPreferencesInput: z.ZodType<MarketingPreferencesInput> = z
 }).register(common.apiTypes, { id: "customers.MarketingPreferencesInput" });
 
 export interface ConsentRecord {
-  channel: "email" | "sms" | "push" | "wishlist" | "personalization";
+  /** personalization is personalizedRecommendations, recent_searches is recentSearches; the others are the promotional channels */
+  channel: "email" | "sms" | "push" | "wishlist" | "personalization" | "recent_searches";
   granted: boolean;
   source: "profile" | "app_settings" | "checkout" | "registration" | "unsubscribe_link" | "staff";
   at: string;
 }
 
 export const ConsentRecord: z.ZodType<ConsentRecord> = z.object({
-  channel: z.enum(["email", "sms", "push", "wishlist", "personalization"]),
+  channel: z.enum(["email", "sms", "push", "wishlist", "personalization", "recent_searches"]).describe("personalization is personalizedRecommendations, recent_searches is recentSearches; the others are the promotional channels"),
   granted: z.boolean(),
   source: z.enum(["profile", "app_settings", "checkout", "registration", "unsubscribe_link", "staff"]),
   at: z.iso.datetime({ offset: true }),
@@ -949,7 +950,7 @@ export interface CustomersPublicApi {
   canPlaceOrders(customerId: string): Promise<{ allowed: boolean, reason?: string }>;
   /** False during an active messaging restriction. Replies inside open cases stay allowed (support decides). Used by: messaging, reviews. */
   canSendMessages(customerId: string): Promise<{ allowed: boolean, reason?: string, until?: string }>;
-  /** Promotional consent per channel plus the personalisation switches (recommendations, recent searches). Essential order messages ignore it. search reads recentSearches before saving a search to the account. Used by: notifications, promotions, advertising, search. */
+  /** Promotional consent per channel plus the personalisation switches (recommendations, recent searches). Essential order messages ignore it. search reads recentSearches before saving a search to the account. Used by: notifications, promotions, advertising, search, checkout. */
   getMarketingConsent(customerId: string): Promise<MarketingPreferences>;
   /** Same checks as POST /addresses/validate (provider when configured): issues, deliverability and a suggested correction. Used for addresses typed at checkout that are not saved. Used by: checkout. */
   validateAddress(address: common.Address): Promise<AddressValidation>;
@@ -1541,7 +1542,7 @@ export const endpoints = defineEndpoints({
     permission: "customers.accounts.view",
     scope: "staff",
     summary: "Customer detail: profile, orders, cases, messages, notes, abuse reports, restrictions",
-    desc: "Aggregates in-process: identity (sign-in summary), orders (count, spend, recent), support (open cases), messaging (conversation summary), trust (reports filed by and against). Missing sources are listed in `unavailable`. Viewing is logged in the action history.",
+    desc: "Aggregates in-process: identity (sign-in summary), orders (count, spend, recent), support (open cases), messaging (conversation summary), trust (reports filed by and against). Missing sources are listed in `unavailable`. Each view writes an audit entry (customers.customer.view, shown in the audit log); it is not an AccountActionRecord: recentActions lists only actions that change the account.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1916,7 +1917,7 @@ export const spec = defineModuleSpec({
     },
     "customers.build-data-exports": {
       "schedule": "every 5 min",
-      "does": "Process requested exports: call exportCustomerData on every enabled module that declares it (orders, returns, support, messaging, reviews, wishlist, wallet, payments…) with the customerId and accountId, write one file per section plus the customer's attachments into a ZIP in media, mark ready, publish customers.data_export.ready. A module that throws fails the export (retried), never silently left out"
+      "does": "Process requested exports: call exportCustomerData on every enabled module that declares it (orders, returns, support, messaging, reviews, wishlist, wallet, payments…) with the customerId and accountId, write one file per section plus the customer's attachments into a ZIP in media, mark ready, publish customers.data_export.ready. A module that throws fails the export (retried), never silently left out; one that declares the hook but is off is listed in the README under notIncluded. There is no list-based fallback: a module holding customer data must declare the hook"
     },
     "customers.expire-export-links": {
       "schedule": "hourly",

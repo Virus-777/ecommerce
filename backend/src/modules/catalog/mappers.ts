@@ -13,7 +13,7 @@ import type {
   Submission,
 } from '../../spec/catalog.js';
 import { deadlineState } from './domain/rules.js';
-import type { AttributeRow, AuthorizedSellerRow, BrandRow, CheckRow, CorrectionRow, ReviewDraftRow, ReviewLogRow, SubmissionRow } from './ports.js';
+import type { AttributeRow, AuthorizedSellerRow, BrandRow, CheckDismissalRow, CheckRow, CorrectionRow, ReviewDraftRow, ReviewLogRow, SubmissionRow } from './ports.js';
 
 export const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 
@@ -127,25 +127,26 @@ export function toSubmission(r: SubmissionRow, now: Date, opts: { staff: boolean
     lastSavedBy: r.last_saved_by ? actorOf(r.last_saved_by) : null,
     expectedReviewBy: iso(r.expected_review_by),
     reviewDeadline: r.review_due_at && r.state === 'open' ? { dueAt: r.review_due_at.toISOString(), state: deadlineState(r.review_due_at, now) } : null,
+    pausedAt: r.state === 'open' ? iso(r.paused_at) : null,
     assignee: opts.staff && r.assignee_staff_id ? { kind: 'staff', id: r.assignee_staff_id, ...(r.assignee_name ? { name: r.assignee_name } : {}) } : null,
     decidedAt: iso(r.decided_at),
     note: r.note,
   };
 }
 
-/** Evidence items carry an internal dismissedAt for duplicate candidates a reviewer dismissed */
-export type StoredEvidence = ProductCheckEvidence & { dismissedAt?: string | null };
+/** Evidence as stored on the check (per-candidate dismissals live in check_dismissals) */
+export const evidenceOf = (v: unknown): ProductCheckEvidence[] => (Array.isArray(v) ? (v as ProductCheckEvidence[]) : []);
 
-export const evidenceOf = (v: unknown): StoredEvidence[] => (Array.isArray(v) ? (v as StoredEvidence[]) : []);
-
-export function toCheck(r: CheckRow): ProductCheck {
+/** `dismissals`: the check's check_dismissals rows (duplicate candidates marked not a duplicate) */
+export function toCheck(r: CheckRow, dismissals: CheckDismissalRow[] = []): ProductCheck {
   const dismissedBy = r.dismissed_by ? actorOf(r.dismissed_by) : null;
+  const dismissedAt = new Map(dismissals.filter((d) => d.check_id === r.id).map((d) => [d.matched_product_id, d.dismissed_at.toISOString()]));
   return {
     kind: r.kind as ProductCheck['kind'],
     result: r.result,
     message: r.message,
     details: strings(r.details),
-    evidence: evidenceOf(r.evidence).map(({ dismissedAt: _d, ...e }) => ({
+    evidence: evidenceOf(r.evidence).map((e) => ({
       label: e.label,
       field: e.field ?? null,
       text: e.text ?? null,
@@ -153,6 +154,7 @@ export function toCheck(r: CheckRow): ProductCheck {
       matchedProductId: e.matchedProductId ?? null,
       mediaId: e.mediaId ?? null,
       suggestedCategoryId: e.suggestedCategoryId ?? null,
+      dismissedAt: e.matchedProductId ? (dismissedAt.get(e.matchedProductId) ?? null) : null,
     })),
     ranAt: r.ran_at.toISOString(),
     dismissal:

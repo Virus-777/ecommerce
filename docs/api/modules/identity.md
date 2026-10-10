@@ -476,7 +476,7 @@ Who someone is and how they prove it: accounts for customers, seller members and
 
 | Field | Type |
 |---|---|
-| purpose | `string` Step-up purpose of the endpoint that will consume the token, e.g. payout-account |
+| purpose | `enum(account-closure|email-change|two-step-removal|recovery-codes|business-change|payout-account|seller-closure)` The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers). A token works only for that purpose. Code step-ups (role-grant, staff-account, payout-destination) take an X-Step-Up-Code header instead and need no token. |
 | password | `string?` |
 | code | `string?` 2-step code instead of the password |
 
@@ -880,7 +880,7 @@ Indexes: `(expires_at)`
 | inviteStaff | `(input: { email: string, name: string, invitedBy: Actor }) => Invitation`<br>Create an invited staff account and send the accept link (event identity.invitation.created). access assigns the roles. | access |
 | inviteSellerMember | `(input: { email: string, name: string, sellerId: uuid, sellerName: string, invitedBy: Actor }) => Invitation`<br>Invite a person to act for a seller. Reuses an existing member account when the email has one. | sellers |
 | revokeInvitation | `(invitationId: uuid, input: { reason: string, by: Actor, contextRef?: string }) => Invitation`<br>Cancel a pending invitation (the accept link stops working at once) and publish identity.invitation.revoked. contextRef, when given, must match the invitation's (sellers passes its sellerId so a seller can only revoke its own member invitations; NOT_FOUND otherwise). Revoking an invitation that is already revoked returns it unchanged; an accepted or expired one fails with ILLEGAL_TRANSITION. | sellers, access |
-| grantSellerContext | `(input: { accountId: uuid, sellerId: uuid, memberId: uuid, sellerName: string, roleLabel: string, isOwner: bool }) => void`<br>Allow an account to sign in to Seller Center for this seller. Called again to refresh the label. | sellers |
+| grantSellerContext | `(input: { accountId: uuid, sellerId: uuid, memberId: uuid, sellerName: string, roleLabel: string, isOwner: bool }) => void`<br>Allow a member account to sign in to Seller Center for this seller (NOT_FOUND for other accounts). Idempotent: called again to refresh the seller name, role label or owner flag, and to grant access again after revokeSellerContext (a reactivated member). A different memberId (a re-invited member) ends the sessions bound to the old membership. Only sellers writes these grants. | sellers |
 | revokeSellerContext | `(accountId: uuid, sellerId: uuid, reason: string) => void`<br>Remove seller access and revoke sessions bound to that seller | sellers |
 | revokeSessions | `(accountId: uuid, reason: string, audience?: 'store' | 'seller' | 'admin') => int`<br>Sign an account out everywhere (or in one area). Returns the number of sessions revoked. | access, sellers, trust |
 | verifyStepUp | `(accountId: uuid, proof: { password?: string, code?: string }) => bool`<br>Re-check the password or a 2-step code before a sensitive action (payout destination change, approval of a large payout) | finance, access |

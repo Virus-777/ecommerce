@@ -83,6 +83,12 @@ export class Core {
   today = (at: Date = this.now()) => dateInZone(at, this.ctx.config.market.timeZone);
   setting = <K extends SettingKey>(key: K) => this.ctx.settings.get(key);
 
+  /** Was-price look-back window: offers owns it (decision O5), promotions reads offers.wasPriceLookbackDays */
+  async lookbackDays(): Promise<number> {
+    const v = Number(await this.ctx.settings.read('offers.wasPriceLookbackDays'));
+    return Number.isFinite(v) && v > 0 ? v : 30;
+  }
+
   async ttlMinutes(): Promise<number> {
     const v = Number(await this.setting('reservationTtlMinutes'));
     return Number.isFinite(v) && v > 0 ? v : 30;

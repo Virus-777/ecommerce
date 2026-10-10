@@ -5,7 +5,6 @@ import type * as common from '../../../spec/common.js';
 import type { MediaOwner } from '../../../spec/media.js';
 import type { ProductCheck, ProductCheckEvidence, ProductInput, RequestedBrand, VariantInput } from '../../../spec/catalog.js';
 import {
-  addBusinessDays,
   attributeFilled,
   EXPECTED_REVIEW_MARGIN_BUSINESS_DAYS,
   findClaims,
@@ -25,7 +24,7 @@ import {
 import { productReviewMachine, publicationMachine } from '../domain/state-machines.js';
 import { imageRulesOfRow, stringMap, strings } from '../mappers.js';
 import type { BrandRow, CatalogRepository, CheckRow, ProductRow, SubmissionRow, VariantRow } from '../ports.js';
-import { invalid, notFound, type By } from './base.js';
+import { invalid, notFound, type By, type ReviewClock } from './base.js';
 import { CatalogTaxonomy } from './taxonomy.js';
 
 export type Owner = { type: 'official'; sellerId: null } | { type: 'seller'; sellerId: string };
@@ -98,10 +97,10 @@ export class CatalogProducts extends CatalogTaxonomy {
     const row = await this.saveProduct({ existing, owner: { type: 'official', sellerId: null }, body, by });
     if (existing.review_state !== 'approved') return this.adminView(row, this.staffViewer(by));
     const ref = await this.submissionRef();
-    const targetDays = await this.reviewTargetDays();
+    const clock = await this.reviewClock();
     const { product, submission } = await this.repo.transaction(async (tx) => {
       const locked = (await tx.getProduct(id, { forUpdate: true }))!;
-      return this.reopenTx(tx, locked, by, 'Official Store edit', ref, targetDays);
+      return this.reopenTx(tx, locked, by, 'Official Store edit', ref, clock);
     });
     await this.afterSubmit(product, submission, by, null);
     return this.adminView(product, this.staffViewer(by));
@@ -339,7 +338,7 @@ export class CatalogProducts extends CatalogTaxonomy {
     const note = opts.note?.trim() || null;
     const now = this.now();
     const ref = await this.submissionRef();
-    const targetDays = await this.reviewTargetDays();
+    const clock = await this.reviewClock();
     const result = await this.repo.transaction(async (tx) => {
       const locked = await tx.getProduct(row.id, { forUpdate: true });
       if (!locked) throw notFound();
@@ -371,7 +370,7 @@ export class CatalogProducts extends CatalogTaxonomy {
         }
       }
       const kind: SubmissionRow['kind'] = locked.review_state === 'changes_requested' || (await tx.submissionCount(locked.id)) > 0 ? 'resubmitted' : 'new';
-      const submission = await this.insertSubmissionTx(tx, locked, kind, by, note, now, ref, targetDays);
+      const submission = await this.insertSubmissionTx(tx, locked, kind, by, note, now, ref, clock);
       const product = await tx.updateProduct(locked.id, { review_state: state, brand_id: brandId, updated_at: now });
       await tx.insertLog({ id: newId(), product_id: locked.id, action: 'submitted', reason: note, fields: {} as never, actor_kind: by.actor.kind, actor_id: by.actor.id ?? null, at: now });
       return { product, submission, createdBrand };
@@ -393,8 +392,8 @@ export class CatalogProducts extends CatalogTaxonomy {
     return this.ctx.refs.next('SUB', { digits: 4 });
   }
 
-  /** `targetDays`: setting reviewTargetBusinessDays, read before the transaction */
-  protected async insertSubmissionTx(tx: CatalogRepository, product: ProductRow, kind: SubmissionRow['kind'], by: By, note: string | null, now: Date, ref: string, targetDays: number) {
+  /** `clock`: review target and business calendar, read before the transaction (reviewClock) */
+  protected async insertSubmissionTx(tx: CatalogRepository, product: ProductRow, kind: SubmissionRow['kind'], by: By, note: string | null, now: Date, ref: string, clock: ReviewClock) {
     return tx.insertSubmission({
       id: newId(),
       ref,
@@ -406,8 +405,9 @@ export class CatalogProducts extends CatalogTaxonomy {
       submitted_by: by.actor as never,
       last_saved_at: null,
       last_saved_by: null,
-      expected_review_by: addBusinessDays(now, targetDays + EXPECTED_REVIEW_MARGIN_BUSINESS_DAYS),
-      review_due_at: addBusinessDays(now, targetDays),
+      expected_review_by: clock.addBusinessDays(now, clock.targetDays + EXPECTED_REVIEW_MARGIN_BUSINESS_DAYS),
+      review_due_at: clock.addBusinessDays(now, clock.targetDays),
+      paused_at: null,
       assignee_staff_id: null,
       assignee_name: null,
       decided_at: null,
@@ -416,10 +416,10 @@ export class CatalogProducts extends CatalogTaxonomy {
   }
 
   /** approved → submitted (reopen): an accepted correction or an Official Store edit changed what the product is */
-  protected async reopenTx(tx: CatalogRepository, locked: ProductRow, by: By, note: string | null, ref: string, targetDays: number) {
+  protected async reopenTx(tx: CatalogRepository, locked: ProductRow, by: By, note: string | null, ref: string, clock: ReviewClock) {
     const now = this.now();
     const state = productReviewMachine.next(locked.review_state as never, 'reopen');
-    const submission = await this.insertSubmissionTx(tx, locked, 'content_change', by, note, now, ref, targetDays);
+    const submission = await this.insertSubmissionTx(tx, locked, 'content_change', by, note, now, ref, clock);
     const product = await tx.updateProduct(locked.id, { review_state: state, updated_at: now });
     await tx.insertLog({ id: newId(), product_id: locked.id, action: 'submitted', reason: note, fields: {} as never, actor_kind: by.actor.kind, actor_id: by.actor.id ?? null, at: now });
     return { product, submission };

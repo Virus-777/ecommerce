@@ -1,7 +1,9 @@
 import { sql, type Kysely } from 'kysely';
 import { paginate } from '../../../../kernel/lib/pagination.js';
 import type { ReturnsDb } from '../../../../spec/returns.js';
-import type { DraftRec, RefundFilter, ReturnFilter, ReturnsRepository, Table } from '../../ports.js';
+import { newId } from '../../../../kernel/lib/ids.js';
+import type * as common from '../../../../spec/common.js';
+import type { DraftRec, RefundFilter, RefundItem, RefundRec, ReturnFilter, ReturnsRepository, Table } from '../../ports.js';
 
 /** jsonb columns per table: values are sent as JSON text (pg would turn JS arrays into PG arrays) */
 const JSON_COLUMNS: Record<Table, readonly string[]> = {
@@ -14,7 +16,7 @@ const JSON_COLUMNS: Record<Table, readonly string[]> = {
   inspection_drafts: ['inspection', 'remedy', 'saved_by'],
   return_evidence: ['media_ids', 'added_by'],
   inspections: ['checks', 'missing_parts', 'media_ids'],
-  refund_requests: ['order_item_ids', 'deductions'],
+  refund_requests: ['deductions'],
   replacements: [],
   return_events: [],
 };
@@ -99,10 +101,44 @@ function returnQuery(d: any, f: ReturnFilter): any {
   return q;
 }
 
+/** Refund request fields that live in refund_request_items / refund_request_events, not in the row */
+const REFUND_CHILDREN = ['items', 'order_item_ids', 'history'];
+const withoutChildren = (table: Table, row: Record<string, unknown>) => (table === 'refund_requests' ? Object.fromEntries(Object.entries(row).filter(([k]) => !REFUND_CHILDREN.includes(k))) : row);
+
 /** Postgres adapter for ReturnsRepository. `db` is scoped to the `returns` schema. */
 export function createPostgresReturnsRepository(db: Kysely<ReturnsDb>): ReturnsRepository {
   // generic table access: the row types are checked at the ReturnsRepository boundary
   const d: any = db;
+
+  /** Refund request rows with their items and history */
+  async function hydrate(rows: any[]): Promise<RefundRec[]> {
+    if (!rows.length) return rows;
+    const ids = rows.map((r) => r.id);
+    const [items, events] = await Promise.all([
+      d.selectFrom('refund_request_items').selectAll().where('refund_request_id', 'in', ids).orderBy('refund_request_id').orderBy('position').execute(),
+      d.selectFrom('refund_request_events').selectAll().where('refund_request_id', 'in', ids).orderBy('at').orderBy('id').execute(),
+    ]);
+    return rows.map((r) => {
+      const mine: RefundItem[] = items.filter((i: any) => i.refund_request_id === r.id).map((i: any) => ({ orderItemId: i.order_item_id, quantity: i.quantity, amount: Number(i.amount) }));
+      const history: common.TimelineEvent[] = events
+        .filter((e: any) => e.refund_request_id === r.id)
+        .map((e: any) => ({ at: new Date(e.at).toISOString(), label: e.label, detail: e.detail, actor: e.actor_kind ? { kind: e.actor_kind, id: e.actor_id, ...(e.actor_name ? { name: e.actor_name } : {}) } : null }));
+      return { ...r, items: mine, order_item_ids: mine.map((i) => i.orderItemId), history };
+    });
+  }
+  const hydrated = async (table: Table, rows: any[]) => (table === 'refund_requests' ? hydrate(rows) : rows);
+
+  async function writeItems(id: string, items: RefundItem[]) {
+    await d.deleteFrom('refund_request_items').where('refund_request_id', '=', id).execute();
+    if (items.length) await d.insertInto('refund_request_items').values(items.map((i, n) => ({ refund_request_id: id, order_item_id: i.orderItemId, position: n, quantity: i.quantity, amount: i.amount }))).execute();
+  }
+  async function writeEvents(id: string, events: common.TimelineEvent[]) {
+    if (!events.length) return;
+    await d
+      .insertInto('refund_request_events')
+      .values(events.map((e) => ({ id: newId(), refund_request_id: id, at: new Date(e.at), label: e.label, detail: e.detail ?? null, actor_kind: e.actor?.kind ?? null, actor_id: e.actor?.id ?? null, actor_name: e.actor?.name ?? null })))
+      .execute();
+  }
 
   const repo: ReturnsRepository = {
     async transaction(fn) {
@@ -113,33 +149,50 @@ export function createPostgresReturnsRepository(db: Kysely<ReturnsDb>): ReturnsR
     async get(table, id, o) {
       let q = d.selectFrom(table).selectAll().where(keyOf(table), '=', id);
       if (o?.forUpdate) q = q.forUpdate();
-      return q.executeTakeFirst();
+      const row = await q.executeTakeFirst();
+      return row ? (await hydrated(table, [row]))[0] : undefined;
     },
     async find(table, where, o) {
       let q = applyWhere(d.selectFrom(table).selectAll(), where as Record<string, unknown>);
       for (const [c, dir] of o?.orderBy ?? []) q = q.orderBy(c, dir);
       if (o?.limit) q = q.limit(o.limit);
       if (o?.forUpdate) q = q.forUpdate();
-      return q.execute();
+      return hydrated(table, await q.execute()) as never;
     },
     async count(table, where) {
       const r = await applyWhere(d.selectFrom(table).select(sql<number>`count(*)::int`.as('n')), where as Record<string, unknown>).executeTakeFirst();
       return (r as { n: number } | undefined)?.n ?? 0;
     },
     async insert(table, row) {
-      return d.insertInto(table).values(encode(table, row as Record<string, unknown>)).returningAll().executeTakeFirstOrThrow();
+      const inserted = await d.insertInto(table).values(encode(table, withoutChildren(table, row as Record<string, unknown>))).returningAll().executeTakeFirstOrThrow();
+      if (table !== 'refund_requests') return inserted;
+      const rr = row as unknown as RefundRec;
+      await writeItems(rr.id, rr.items ?? []);
+      await writeEvents(rr.id, rr.history ?? []);
+      return (await hydrate([inserted]))[0] as never;
     },
     async insertMany(table, rows) {
       if (!rows.length) return;
+      if (table === 'refund_requests') {
+        for (const r of rows) await repo.insert(table, r);
+        return;
+      }
       await d
         .insertInto(table)
         .values(rows.map((r) => encode(table, r as Record<string, unknown>)))
         .execute();
     },
     async update(table, id, patch) {
-      const values = encode(table, patch as Record<string, unknown>);
+      const values = encode(table, withoutChildren(table, patch as Record<string, unknown>));
       if (!Object.keys(values).length) return (await repo.get(table, id))!;
-      return d.updateTable(table).set(values).where(keyOf(table), '=', id).returningAll().executeTakeFirstOrThrow();
+      const row = await d.updateTable(table).set(values).where(keyOf(table), '=', id).returningAll().executeTakeFirstOrThrow();
+      return (await hydrated(table, [row]))[0];
+    },
+    async setRefundItems(id, items) {
+      await writeItems(id, items);
+    },
+    async addRefundEvents(id, events) {
+      await writeEvents(id, events);
     },
     async remove(table, id) {
       await d.deleteFrom(table).where(keyOf(table), '=', id).execute();
@@ -172,7 +225,9 @@ export function createPostgresReturnsRepository(db: Kysely<ReturnsDb>): ReturnsR
       if (f.orderId) q = q.where('order_id', '=', f.orderId);
       if (f.caseId) q = q.where('case_id', '=', f.caseId);
       if (f.returnIds) q = f.returnIds.length ? q.where('return_id', 'in', f.returnIds) : q.where(sql<boolean>`false`);
-      return paginate(q, page, { column: 'created_at', direction: 'desc' }) as never;
+      if (f.customerIds) q = f.customerIds.length ? q.where('customer_id', 'in', f.customerIds) : q.where(sql<boolean>`false`);
+      const p = await paginate(q, page, { column: 'created_at', direction: 'desc' });
+      return { ...p, items: await hydrate(p.items) } as never;
     },
     async usedQuantities(orderItemIds) {
       const out = new Map<string, number>();

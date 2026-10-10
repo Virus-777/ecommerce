@@ -33,7 +33,10 @@ afterAll(async () => {
   await k?.close();
 });
 
-const sumTrading = (refKind: string, refIds: string[]) => k.svc.core.repo.sum('trading_entries', 'amount', { ref_kind: refKind, ref_id: refIds });
+/** The marketplace fact tables (pass 4), by the ref_kind names these rows had in trading_entries before */
+const COST_KIND = { wallet_credit: 'goodwill_credit', wallet_breakage: 'credit_breakage', wallet_correction: 'credit_correction' } as const;
+const sumTrading = (refKind: 'wallet_liability' | keyof typeof COST_KIND, refIds: string[]) =>
+  refKind === 'wallet_liability' ? k.svc.core.repo.sum('store_credit_liability', 'amount', { wallet_entry_id: refIds }) : k.svc.core.repo.sum('platform_costs', 'amount', { kind: COST_KIND[refKind], ref_id: refIds });
 
 describe('store credit from wallet events', () => {
   it('a reversed seller-charged goodwill grant credits the seller back exactly the charge, once, and lowers the liability', async () => {
@@ -112,20 +115,21 @@ describe('credit-only captures in the payments check', () => {
     const captureId = newId();
     await k.emit('payments.payment.captured', { intentId: newId(), captureId, orderId: ord.id, groupId: null, amount: USD(0), creditAmount: USD(5_000), allocations: [], providerRef: null, capturedAt: k.clock.now().toISOString() });
     const item = (await k.svc.core.repo.get('recon_items', detId(`capture:${captureId}`)))!;
-    expect(item).toMatchObject({ check: 'payments_vs_orders', expected: 0, actual: 0, difference: 0, status: 'matched' });
+    expect(item).toMatchObject({ check: 'payments_vs_orders', expected: 5_000, actual: 0, credit: 5_000, difference: 0, status: 'matched' });
+    expect(await k.svc.core.repo.get('captures', captureId)).toMatchObject({ order_id: ord.id, card_amount: 0, credit_amount: 5_000, recon_item_id: item.id });
     expect(k.of('finance.reconciliation.mismatch_found').filter((e) => e.itemId === item.id)).toEqual([]);
 
     // a group paid entirely by credit in a mixed order: card 0 for that group
     const mixed = k.order(newId(), [{ title: 'Chair', quantity: 2, price: 3_000 }]);
     const groupCapture = newId();
     await k.emit('payments.payment.captured', { intentId: newId(), captureId: groupCapture, orderId: mixed.id, groupId: mixed.groups[0]!.id, amount: USD(0), creditAmount: USD(6_000), allocations: [], providerRef: null, capturedAt: k.clock.now().toISOString() });
-    expect(await k.svc.core.repo.get('recon_items', detId(`capture:${groupCapture}`))).toMatchObject({ expected: 0, actual: 0, difference: 0, status: 'matched' });
+    expect(await k.svc.core.repo.get('recon_items', detId(`capture:${groupCapture}`))).toMatchObject({ expected: 6_000, actual: 0, credit: 6_000, difference: 0, status: 'matched' });
 
     // credit short of the total is still a mismatch of the exact difference
     const short = k.order(newId(), [{ title: 'Desk', quantity: 1, price: 8_000 }]);
     const shortCapture = newId();
     await k.emit('payments.payment.captured', { intentId: newId(), captureId: shortCapture, orderId: short.id, groupId: null, amount: USD(0), creditAmount: USD(7_500), allocations: [], providerRef: null, capturedAt: k.clock.now().toISOString() });
-    expect(await k.svc.core.repo.get('recon_items', detId(`capture:${shortCapture}`))).toMatchObject({ expected: 500, actual: 0, difference: -500, status: 'open' });
+    expect(await k.svc.core.repo.get('recon_items', detId(`capture:${shortCapture}`))).toMatchObject({ expected: 8_000, actual: 0, credit: 7_500, difference: -500, status: 'open' });
   });
 });
 

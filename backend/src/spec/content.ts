@@ -544,7 +544,7 @@ export const HomepageReview: z.ZodType<HomepageReview> = z.object({
   note: z.string().nullish(),
 }).register(common.apiTypes, { id: "content.HomepageReview" });
 
-export interface PageInput {
+export interface PageDraftInput {
   kind: "campaign" | "collection" | "about" | "landing";
   collectionKind?: "curated" | "new_arrivals" | "best_sellers" | "seasonal" | "brand" | "official" | null;
   /** Required when collectionKind is brand: the brand page lists the collection */
@@ -566,7 +566,7 @@ export interface PageInput {
   changeNote?: string | null;
 }
 
-export const PageInput: z.ZodType<PageInput> = z.object({
+export const PageDraftInput: z.ZodType<PageDraftInput> = z.object({
   kind: z.enum(["campaign", "collection", "about", "landing"]),
   collectionKind: z.enum(["curated", "new_arrivals", "best_sellers", "seasonal", "brand", "official"]).nullish(),
   brandId: z.uuid().describe("Required when collectionKind is brand: the brand page lists the collection").nullish(),
@@ -589,7 +589,7 @@ export const PageInput: z.ZodType<PageInput> = z.object({
   seoDescription: z.string().nullish(),
   ownerStaffId: z.uuid().nullish(),
   changeNote: z.string().nullish(),
-}).register(common.apiTypes, { id: "content.PageInput" });
+}).register(common.apiTypes, { id: "content.PageDraftInput" });
 
 export interface DateTimeRange {
   from: string;
@@ -641,8 +641,8 @@ export const PageSummary: z.ZodType<PageSummary> = z.object({
 
 export interface PageAdmin {
   summary: PageSummary;
-  draft?: PageInput | null;
-  live?: PageInput | null;
+  draft?: PageDraftInput | null;
+  live?: PageDraftInput | null;
   linkedPromotion?: LinkedPromotion | null;
   /** e.g. unavailable products hidden, campaign starts at the same time as the page, missing images */
   checks: Check[];
@@ -654,10 +654,10 @@ export const PageAdmin: z.ZodType<PageAdmin> = z.object({
     return PageSummary;
   },
   get draft() {
-    return PageInput.nullish();
+    return PageDraftInput.nullish();
   },
   get live() {
-    return PageInput.nullish();
+    return PageDraftInput.nullish();
   },
   get linkedPromotion() {
     return LinkedPromotion.nullish();
@@ -1111,7 +1111,10 @@ export const PolicyVersionRef: z.ZodType<PolicyVersionRef> = z.object({
 
 export interface PolicySummary {
   id: string;
-  key: "returns" | "shipping" | "privacy" | "purchase_terms" | "seller_rules" | "advertising" | "cookies" | "other";
+  /** Slug in the policy URL (/policies/{key}), unique, lowercase letters, digits, - and _, e.g. returns, gift-cards */
+  key: string;
+  /** What the policy governs; several policies may share other */
+  kind: "returns" | "shipping" | "privacy" | "purchase_terms" | "seller_rules" | "advertising" | "cookies" | "other";
   title: string;
   owner: OwnerRef;
   editor?: OwnerRef | null;
@@ -1122,7 +1125,8 @@ export interface PolicySummary {
 
 export const PolicySummary: z.ZodType<PolicySummary> = z.object({
   id: z.uuid(),
-  key: z.enum(["returns", "shipping", "privacy", "purchase_terms", "seller_rules", "advertising", "cookies", "other"]),
+  key: z.string().describe("Slug in the policy URL (/policies/{key}), unique, lowercase letters, digits, - and _, e.g. returns, gift-cards"),
+  kind: z.enum(["returns", "shipping", "privacy", "purchase_terms", "seller_rules", "advertising", "cookies", "other"]).describe("What the policy governs; several policies may share other"),
   title: z.string(),
   get owner() {
     return OwnerRef;
@@ -1288,7 +1292,12 @@ export interface SiteNavigation {
   header: LinkRef[];
   footer: FooterGroup[];
   contact: ContactChannel[];
+  /** settings.storeInfo market.companyLine (footer line, e.g. Marketly, Inc. · 500 Market St …); when settings is off: '© <year> Marketly' */
   companyLine: string;
+  /** settings.storeInfo market.legalName; 'Marketly' when settings is off */
+  legalName: string;
+  /** Admin only (PUT /navigation answer; null on store reads): warnings when the service strip text disagrees with the facts in force, e.g. a free-shipping amount other than shipping.getOfficialFreeShipping or a return window other than returns.defaultWindowDays. Warnings never block saving (decision: warn only) */
+  checks?: Check[] | null;
   /** Service message above the store header; null when none is active */
   serviceStrip?: ServiceStrip | null;
 }
@@ -1303,7 +1312,11 @@ export const SiteNavigation: z.ZodType<SiteNavigation> = z.object({
   get contact() {
     return z.array(ContactChannel);
   },
-  companyLine: z.string(),
+  companyLine: z.string().describe("settings.storeInfo market.companyLine (footer line, e.g. Marketly, Inc. · 500 Market St …); when settings is off: '© <year> Marketly'"),
+  legalName: z.string().describe("settings.storeInfo market.legalName; 'Marketly' when settings is off"),
+  get checks() {
+    return z.array(Check).nullish();
+  },
   get serviceStrip() {
     return ServiceStrip.nullish();
   },
@@ -1499,7 +1512,7 @@ export interface ContentPublicApi {
   /** The draft of a page as customers will see it (POST /pages/{id}/preview, a read). Used by: graphql. */
   previewPage(pageId: string): Promise<StorePage>;
   /** Products of a collection page by its selection rule or manual list, page by page, optionally limited to a category tab (GET /pages/{slug}/products). Used by: graphql. */
-  collectionProducts(pageId: string, opts: { categoryId?: string, paging: PageInput }): Promise<common.Page<ProductTile>>;
+  collectionProducts(pageId: string, opts: { categoryId?: string, paging: common.PageInput }): Promise<common.Page<ProductTile>>;
   /** Help Center home: topics, popular articles, popular searches, contact channels and the seller-first note (GET /help). Used by: graphql. */
   getHelpCenter(audience: 'customer' | 'seller'): Promise<HelpHome>;
   /** A published help article with effective and updated dates, related articles and actions (GET /help/articles/{slug}). Used by: graphql. */
@@ -1624,7 +1637,9 @@ export interface ContentDb {
   };
   policies: {
     id: string;
+    /** URL slug */
     key: string;
+    kind: 'returns' | 'shipping' | 'privacy' | 'purchase_terms' | 'seller_rules' | 'advertising' | 'cookies' | 'other';
     title: string;
     owner_staff_id: string;
     editor_staff_id: string | null;
@@ -2209,7 +2224,7 @@ export const endpoints = defineEndpoints({
     permission: "content.pages.manage",
     scope: "staff",
     summary: "Create a page or collection draft",
-    body: () => PageInput,
+    body: () => PageDraftInput,
     response: () => PageAdmin,
     status: 201,
     errors: ["SLUG_TAKEN"],
@@ -2246,7 +2261,7 @@ export const endpoints = defineEndpoints({
       z.object({
         id: z.uuid(),
       }),
-    body: () => PageInput,
+    body: () => PageDraftInput,
     response: () => PageAdmin,
     status: 200,
     errors: ["SLUG_TAKEN","CONFLICT"],
@@ -2709,7 +2724,8 @@ export const endpoints = defineEndpoints({
     scope: "staff",
     summary: "Create a new policy with its business owner",
     body: () => z.object({
-      key: z.string(),
+      key: z.string().describe("URL slug: lowercase letters, digits, - and _ (2–60 characters); unique (CONFLICT when taken)"),
+      kind: z.enum(["returns", "shipping", "privacy", "purchase_terms", "seller_rules", "advertising", "cookies", "other"]).describe("Default: the key when it is one of the kinds, else other").nullish(),
       title: z.string(),
       ownerStaffId: z.uuid(),
       editorStaffId: z.uuid().nullish(),
@@ -2717,6 +2733,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => PolicySummary,
     status: 201,
+    errors: ["VALIDATION_FAILED","CONFLICT"],
     audited: true,
     screens: ["admin/help-content"],
     phase: 1,
@@ -2915,6 +2932,7 @@ export const endpoints = defineEndpoints({
     permission: "content.pages.publish",
     scope: "staff",
     summary: "Replace header and footer links",
+    desc: "Saves the links and the service strip. The answer carries checks: the strip text is compared with the Official Store free-shipping threshold (shipping.getOfficialFreeShipping) and the baseline return window (returns.defaultWindowDays) when those modules are on; a mismatch is a warn check, never a refusal.",
     body: () => z.object({
       get header() {
         return z.array(LinkRef);
@@ -2945,7 +2963,7 @@ export const spec = defineModuleSpec({
   chapters: [19,15,4,3,17],
   summary: "Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action.",
   dependsOn: ["media","access"],
-  optionalDeps: ["catalog","offers","inventory","promotions","advertising","sellers","search","reports","notifications","audit","settings","shipping","wishlist","support"],
+  optionalDeps: ["catalog","offers","inventory","promotions","advertising","sellers","search","reports","notifications","audit","settings","shipping","wishlist","support","returns"],
   publicApi: ["currentPolicyVersions","getPolicyVersion","helpArticlesFor","pageLink","getHomePage","previewHomePage","getStorePage","previewPage","collectionProducts","getHelpCenter","getHelpArticle","countHelpArticlesForPolicy","sellerAnnouncements","contentForCampaign"],
   permissions: [
     {
@@ -3064,6 +3082,16 @@ export const spec = defineModuleSpec({
           "published",
           "unpublish",
           "unpublished"
+        ],
+        [
+          "draft",
+          "remove",
+          "removed"
+        ],
+        [
+          "scheduled",
+          "remove",
+          "removed"
         ],
         [
           "published",
@@ -3637,6 +3665,10 @@ export const spec = defineModuleSpec({
         "nullable": false
       },
       "key": {
+        "type": "text",
+        "nullable": false
+      },
+      "kind": {
         "type": "text",
         "nullable": false
       },

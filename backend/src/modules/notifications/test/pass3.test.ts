@@ -295,7 +295,7 @@ describe('Notice.state', () => {
     const summary = await app.inject({ method: 'GET', url: '/api/store/notifications/inbox/summary', headers: as.customer(c) });
     expect(summary.json()).toMatchObject({ actionRequired: 0, needsAction: [] });
     // information notices have no state
-    await service.notify({ topic: 'customer.case.resolved', recipients: [{ kind: 'customer', customerId: c.customerId }], link: { kind: 'case', id: newId(), screen: 'account/case' } });
+    await service.notify({ topic: 'customer.case.resolved', recipients: [{ kind: 'customer', customerId: c.customerId }], link: { kind: 'case', id: newId(), screen: 'help/case' } });
     expect((await inbox(as.customer(c), 'store'))[0]).toMatchObject({ topicKey: 'customer.case.resolved', state: null });
   });
 });
@@ -303,11 +303,11 @@ describe('Notice.state', () => {
 describe('Recipient.customerId', () => {
   it('addresses a customer by the customers-module id (account and email resolved through customers)', async () => {
     const c = world.customer();
-    const res = await service.notify({ topic: 'customer.case.resolved', recipients: [{ kind: 'customer', customerId: c.customerId }], link: { kind: 'case', id: newId(), screen: 'account/case' }, context: { case: { ref: 'CS-261010-0500' } } });
+    const res = await service.notify({ topic: 'customer.case.resolved', recipients: [{ kind: 'customer', customerId: c.customerId }], link: { kind: 'case', id: newId(), screen: 'help/case' }, context: { case: { ref: 'CS-261010-0500' } } });
     expect(res.noticeIds).toHaveLength(1);
     expect((await inbox(as.customer(c), 'store')).map((n) => n.topicKey)).toEqual(['customer.case.resolved']);
     expect(emailsTo(c.email)).toHaveLength(1);
-    await expect(service.notify({ topic: 'customer.case.resolved', recipients: [{ kind: 'customer' }], link: { kind: 'case', id: newId(), screen: 'account/case' } })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    await expect(service.notify({ topic: 'customer.case.resolved', recipients: [{ kind: 'customer' }], link: { kind: 'case', id: newId(), screen: 'help/case' } })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
     expect(await service.canSendPromotional({ kind: 'customer', customerId: c.customerId }, 'email')).toBe(false); // no consent
   });
 });

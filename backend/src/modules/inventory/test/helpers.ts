@@ -48,10 +48,11 @@ export interface Harness {
   raised: unknown[];
   costs: unknown[];
   /** catalog.getProduct answers from here */
-  products: Map<string, { id: string; title: string; categoryId?: string | null; variants: { id: string; options: Record<string, string>; images: []; gtin?: string | null }[] }>;
+  products: Map<string, { id: string; title: string; categoryId?: string | null; images?: { id: string; url: string }[]; variants: { id: string; options: Record<string, string>; images: { id: string; url: string }[]; gtin?: string | null }[] }>;
 }
 
-export async function harness(opts: { launchPhase?: number } = {}): Promise<Harness> {
+/** `withCatalog`: run catalog too (stubbed from h.products), so inventory reads product data through it */
+export async function harness(opts: { launchPhase?: number; withCatalog?: boolean } = {}): Promise<Harness> {
   const clock = fixedClock(new Date());
   const h = {
     clock,
@@ -76,7 +77,7 @@ export async function harness(opts: { launchPhase?: number } = {}): Promise<Harn
     ...over,
   });
   const app = await buildTestApp({
-    only: ['inventory', 'access', 'audit', 'reports', 'workqueues', 'finance'],
+    only: ['inventory', 'access', 'audit', 'reports', 'workqueues', 'finance', ...(opts.withCatalog ? ['catalog'] : [])],
     clock,
     config: { rateLimits: false, launchPhase: opts.launchPhase ?? 4 },
     apiStubs: {
@@ -126,6 +127,7 @@ export async function harness(opts: { launchPhase?: number } = {}): Promise<Harn
       },
       catalog: {
         getProduct: async (id) => (h.products.get(id) as never) ?? null,
+        getProducts: async (ids) => ids.flatMap((id) => (h.products.has(id) ? [{ product: { images: [], ...h.products.get(id)! } }] : [])) as never,
         getVariants: async (ids) =>
           [...h.products.values()].flatMap((p) => p.variants.filter((v) => ids.includes(v.id)).map((v) => ({ id: v.id, productId: p.id, productTitle: p.title, options: v.options, gtin: v.gtin ?? null }))),
       },

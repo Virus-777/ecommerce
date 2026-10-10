@@ -409,7 +409,7 @@ export class ContentHelp extends ContentHomepage {
       case 'remove': {
         if (!body.kind) throw invalid('kind', 'Say whether this is a correction or a removal');
         const reason = requireText(body.reason, 'reason', 'A reason is required');
-        await this.repo.updateArticle(id, { status: contentPublicationMachine.next(status, 'remove'), featured: false, updated_at: now });
+        await this.repo.updateArticle(id, { status: contentPublicationMachine.next(status, 'remove'), featured: false, ...(status === 'scheduled' ? { publish_at: null, unpublish_at: null } : {}), updated_at: now });
         this.ctx.events.publish('content.page.removed', { entity: 'article', entityId: id, kind: body.kind, reason }, { actor: by.actor, requestId: by.requestId });
         event = body.kind;
         break;

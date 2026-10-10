@@ -849,6 +849,8 @@ export interface FreeShippingRuleInput {
   methodCode: string;
   fundedBy: "company" | "seller";
   window?: common.DateRange | null;
+  /** false switches the rule off (status inactive) without ending its window; true switches it back on (scheduled, active or ended by its window). Omitted: a new rule starts on, a change keeps the current state */
+  active?: boolean | null;
   reason: string;
 }
 
@@ -863,6 +865,7 @@ export const FreeShippingRuleInput: z.ZodType<FreeShippingRuleInput> = z.object(
   get window() {
     return common.DateRange.nullish();
   },
+  active: z.boolean().describe("false switches the rule off (status inactive) without ending its window; true switches it back on (scheduled, active or ended by its window). Omitted: a new rule starts on, a change keeps the current state").nullish(),
   reason: z.string(),
 }).register(common.apiTypes, { id: "shipping.FreeShippingRuleInput" });
 
@@ -1584,6 +1587,8 @@ export interface DeliveryException {
   sellerId?: string | null;
   sellerName: string;
   itemsSummary: string;
+  /** The order items the exception is about (empty when it covers the whole group) */
+  orderItemIds: string[];
   /** e.g. 'USPS number not recognized' or 'Label created, no scan 36 h' */
   situation: string;
   /** The plan's required response for the kind */
@@ -1617,6 +1622,7 @@ export const DeliveryException: z.ZodType<DeliveryException> = z.object({
   sellerId: z.uuid().nullish(),
   sellerName: z.string(),
   itemsSummary: z.string(),
+  orderItemIds: z.array(z.uuid()).describe("The order items the exception is about (empty when it covers the whole group)"),
   situation: z.string().describe("e.g. 'USPS number not recognized' or 'Label created, no scan 36 h'"),
   requiredResponse: z.string().describe("The plan's required response for the kind"),
   nextStep: z.string().describe("e.g. 'Cancel item, refund $112.00'"),
@@ -2233,33 +2239,33 @@ export interface ShippingPublicApi {
   quote(profileId: string, postalCode: string, parcel: Parcel, dispatch: DispatchInput): Promise<DeliveryQuote>;
   /** Options for a package of several items from one seller and ship-from location: methods common to every item's profile, combined weight, free-shipping threshold on the package subtotal, arrival per option Used by: cart, checkout. */
   quoteOptions(input: PackageQuoteInput): Promise<PackageQuote>;
-  /** Per profile: ships to this address or why not (excluded area, PO box, outside seller coverage) Used by: checkout, cart. */
+  /** Per profile: ships to this address or why not (excluded area, PO box, outside seller coverage) Used by: checkout. */
   checkCoverage(profileIds: string[], destination: common.Address): Promise<CoverageCheck[]>;
   /** Seller has an active profile with coverage and a dispatch schedule (setup checklist) Used by: sellers. */
   hasCoverage(sellerId: string): Promise<boolean>;
-  /** Dispatch deadline from acceptance time, handling days, same-day cutoff, business days and closures Used by: checkout. */
+  /** Dispatch deadline from acceptance time, handling days, same-day cutoff, business days and closures. No module calls it at launch: checkout takes each option's dispatchBy from quoteOptions. */
   dispatchDeadline(ownerType: 'official'|'seller', sellerId: string | null, from: string, dispatch: DispatchInput): Promise<string>;
-  /** Live service notices for a location Used by: offers, checkout, content. */
+  /** Live service notices for a location. offers, checkout and content show notices through the GraphQL field; none calls it in-process at launch. Used by: graphql. */
   activeNotices(postalCode?: string, carrierCodes?: string[], surface?: string): Promise<CustomerNotice[]>;
   /** Carrier services that can carry this parcel to the destination, with cost, estimated arrival and keepsPromise against the customer's promised range (same rule createLabel enforces with keepPromise) Used by: warehouse. */
   quoteLabelOptions(input: LabelRequest): Promise<LabelQuote[]>;
-  /** Buy a carrier label and create the shipment (label_created). kind = return creates the return parcel for returns (labelMethod prepaid_qr adds a QR drop-off code; LabelRequest.dropOffBy from the return is stored and returned on the label); format pdf (default) or zpl; its tracking events carry kind = return and returnId. Same key returns the same label. Used by: warehouse, returns, fulfillment-service. */
+  /** Buy a carrier label and create the shipment (label_created). kind = return creates the return parcel for returns (labelMethod prepaid_qr adds a QR drop-off code; LabelRequest.dropOffBy from the return is stored and returned on the label); format pdf (default) or zpl; its tracking events carry kind = return and returnId. Same key returns the same label. fulfillment-service (phase 4) will call it when its label flow is wired. Used by: warehouse, returns. */
   createLabel(input: LabelRequest, idempotencyKey: string): Promise<LabelResult>;
   /** Void an unused label (before the first carrier scan) Used by: warehouse, returns. */
   voidLabel(labelId: string, reason: string): Promise<Label>;
-  /** Package handed to the carrier (label_created → shipped). Publishes shipping.shipment.dispatched. Used by: warehouse, fulfillment-service. */
+  /** Package handed to the carrier (label_created → shipped). Publishes shipping.shipment.dispatched. No module calls it at launch (warehouse records hand-over on its own parcels); kept for fulfillment-service (phase 4). */
   handOver(shipmentId: string, at: string, actor: common.Actor): Promise<Shipment>;
-  /** Shipments of an order with status and contents Used by: support, returns, messaging. */
+  /** Shipments of an order with status and contents Used by: support. */
   getShipmentsForOrder(orderId: string): Promise<ShipmentSummary[]>;
-  /** On-time dispatch, valid tracking and late counts Used by: sellers, reports. */
+  /** On-time dispatch, valid tracking and late counts. reviews shows the seller dispatch facts on seller ratings; sellers and reports compute their own figures. Used by: reviews. */
   dispatchMetrics(sellerId: string | null, range: common.DateRange): Promise<DispatchMetrics>;
   /** Customer-arranged return: create a kind = return shipment for a tracking number the customer entered (format-checked) so carrier events for it are tracked and published like a prepaid return label. Used by: returns. */
   registerReturnTracking(input: { returnId: string, orderId: string, groupId: string, carrierCode: string, trackingNumber: string, to: common.Address }): Promise<Shipment>;
   /** Carrier drop-off locations near a ZIP code for return labels. Used by: returns. */
   findDropOffPoints(carrierServiceId: string, postalCode: string, limit?: number): Promise<{ name: string, address: common.Address, hours: string, distanceMiles: number, acceptsQr: boolean }[]>;
-  /** Shipments per seller group with contents, tracking events and failed-delivery options (batched per request). Default kinds: outbound and replacement. Used by: graphql. */
+  /** Shipments per seller group with contents, tracking events and failed-delivery options (batched per request). Default kinds: outbound and replacement. Used by: graphql, warehouse. */
   listShipmentsForGroups(groupIds: string[], kinds?: ('outbound'|'replacement'|'return')[]): Promise<Map<string, Shipment[]>>;
-  /** One package with tracking view fields (headline, steps, estimate note, notices). Store: the customer's or guest's own order; seller: own shipments; staff: any (shipping.shipments.view). Otherwise null. Used by: graphql. */
+  /** One package with tracking view fields (headline, steps, estimate note, notices). Store: the customer's or guest's own order; seller: own shipments; staff: any (shipping.shipments.view). Otherwise null. Used by: graphql, warehouse. */
   getShipment(viewer: { customerId?: string, guestSessionId?: string, sellerId?: string, staff?: boolean }, shipmentId: string): Promise<Shipment | null>;
   /** Default delivery option per offer at a location (resolves offer → profile and dispatch through offers). Without a postal code uses the shopper's saved or cart location, else the market default; batched per request. Used by: graphql. */
   estimateOffers(offerIds: string[], postalCode?: string, viewer?: { customerId?: string, guestSessionId?: string }): Promise<OfferEstimate[]>;
@@ -2267,15 +2273,15 @@ export interface ShippingPublicApi {
   listExceptionsForOrder(orderId: string, sellerId?: string): Promise<DeliveryException[]>;
   /** Dispatch and delivery exceptions for staff (same filters as admin GET /exceptions) Used by: graphql. */
   listExceptions(filter: { kind?: string, status?: string, sellerType?: string, ownerStaffId?: string, customerNotNotified?: boolean, q?: string }, page: common.PageInput): Promise<common.Page<DeliveryException>>;
-  /** Open exceptions per kind and not-yet-notified customers (queue tiles) Used by: graphql. */
+  /** Open exceptions per kind and not-yet-notified customers (queue tiles) Used by: graphql, workqueues. */
   countOpenExceptions(): Promise<ExceptionCounts>;
-  /** Storefront shipping section from the seller's active shipping settings and default profile (the REST storefront's shipping block): ships from (seller_settings.ships_from, one query for the whole batch), coverage and exclusions, dispatch time and same-day cutoff, carriers, methods with transit, free-shipping threshold, upcoming closures and live notices. Null when the seller has no active profile. Used by: sellers, graphql. */
+  /** Storefront shipping section from the seller's active shipping settings and default profile (the REST storefront's shipping block): ships from (seller_settings.ships_from, one query for the whole batch), coverage and exclusions, dispatch time and same-day cutoff, carriers, methods with transit, free-shipping threshold, upcoming closures and live notices. Null when the seller has no active profile. Used by: sellers, offers, graphql. */
   getSellerShippingSummaries(sellerIds: string[]): Promise<Record<string, { shipsFrom: string | null, coverage: Coverage, coverageLabel: string, excluded: string[], handlingDays: number, sameDayCutoff: string | null, dispatchLabel: string, businessDays: string[], closures: Closure[], carriers: string[], methods: { name: string, transit: TransitRange, priceLabel: string }[], freeShippingThreshold: common.Money | null, freeShippingLabel: string | null, notices: CustomerNotice[] } | null>>;
-  /** The REPLACEMENT shipment sent for a replacement or exchange (shipments.kind = replacement), matched by return id, or by the replacement's order item ids when it has no return (replacement decided on a case) Used by: returns, graphql. */
+  /** The REPLACEMENT shipment sent for a replacement or exchange (shipments.kind = replacement), matched by return id, or by the replacement's order item ids when it has no return (replacement decided on a case). returns reads replacement shipments through the GraphQL field. Used by: graphql. */
   shipmentsForReplacements(replacements: { replacementId: string, returnId: string | null, orderItemIds?: string[] }[]): Promise<Record<string, Shipment | null>>;
   /** Owner of each shipping profile (by lineage id or version id); null when unknown. offers checks that a seller only uses its own profiles (and the Official Store only official ones) Used by: offers. */
   getProfileOwners(profileIds: string[]): Promise<Record<string, { ownerType: 'official' | 'seller', sellerId: string | null, status: string } | null>>;
-  /** The Official Store's standing free-shipping threshold in force now (default profile threshold or an active official_store free-shipping rule), e.g. for the content service strip to warn when its text disagrees Used by: content. */
+  /** The Official Store's standing free-shipping threshold in force now (default profile threshold or an active official_store free-shipping rule), e.g. for the content service strip to warn when its text disagrees. For content's service strip check; content does not call it yet (integration item). Used by: content. */
   getOfficialFreeShipping(): Promise<{ threshold: common.Money | null, methodCode: string | null, active: boolean, label: string | null }>;
   /** Carriers and services the seller can use, whether labels can be bought and the default package, for the record-shipment form Used by: graphql. */
   getSellerShippingSetup(sellerId: string): Promise<SellerShippingSetup>;
@@ -2481,7 +2487,13 @@ export interface ShippingDb {
     currency: string;
     billed_to: 'seller' | 'company' | 'platform' | 'customer';
     tracking_number: string;
-    storage_key: string;
+    /** media asset id of the label file; null when it could not be stored, the label link then points to the seller center */
+    storage_key: string | null;
+    kind: 'outbound' | 'replacement' | 'return';
+    /** return labels */
+    return_id: string | null;
+    /** return labels with labelMethod prepaid_qr: the code scanned at drop-off, Label.qrCodeUrl */
+    qr_code: string | null;
     format: string;
     drop_off_by: Date | null;
     status: string;
@@ -2520,11 +2532,15 @@ export interface ShippingDb {
     owner_type: string;
     seller_id: string | null;
     items_summary: string;
+    /** the order items the exception is about, as on shipping.shipment.exception */
+    order_item_ids: string[];
     situation: string;
     next_step: string;
     status: string;
     owner_staff_id: string | null;
     owner_name: string | null;
+    /** the owner's primary role label from access, ExceptionOwner.role */
+    owner_role: string | null;
     due_at: Date;
     customer_notified_at: Date | null;
     seller_notified_at: Date | null;
@@ -5185,7 +5201,19 @@ export const spec = defineModuleSpec({
       },
       "storage_key": {
         "type": "text",
+        "nullable": true
+      },
+      "kind": {
+        "type": "text",
         "nullable": false
+      },
+      "return_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "qr_code": {
+        "type": "text",
+        "nullable": true
       },
       "format": {
         "type": "text",
@@ -5317,6 +5345,10 @@ export const spec = defineModuleSpec({
         "type": "text",
         "nullable": false
       },
+      "order_item_ids": {
+        "type": "uuid[]",
+        "nullable": false
+      },
       "situation": {
         "type": "text",
         "nullable": false
@@ -5334,6 +5366,10 @@ export const spec = defineModuleSpec({
         "nullable": true
       },
       "owner_name": {
+        "type": "text",
+        "nullable": true
+      },
+      "owner_role": {
         "type": "text",
         "nullable": true
       },

@@ -55,6 +55,7 @@ function task(f: Fulfillment, l: Lookups) {
       shipmentId: p.shipmentId ?? null,
     })),
     holdReason: f.holdReason ?? null,
+    dispatchOverdueAt: f.dispatchOverdueAt ?? null,
     mixedOrderNote: f.mixedOrderNote ?? null,
     totalPackagesInOrder: f.totalPackagesInOrder,
     createdAt: f.createdAt,

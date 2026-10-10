@@ -127,13 +127,8 @@ const STALE_ALLOCATION_DAYS = 14;
 /** Review date of units moved into Damaged or held without one (damage at packing, damaged on receipt) */
 const DEFAULT_HOLD_REVIEW_DAYS = 14;
 
-/** Reservations made by allocateForOrder carry this key prefix (then source kind): they never expire and releaseHold may release them */
-const ORDER_ALLOCATION_PREFIX = 'order-allocation:';
-type AllocationSource = 'checkout' | 'replacement' | 'exchange';
-const allocationSourceOf = (r: Pick<Row<'reservations'>, 'key'>): AllocationSource => {
-  if (!r.key.startsWith(ORDER_ALLOCATION_PREFIX)) return 'checkout';
-  return r.key.slice(ORDER_ALLOCATION_PREFIX.length).startsWith('exchange:') ? 'exchange' : 'replacement';
-};
+/** reservations.source: checkout holds (and the order's own allocation), or allocateForOrder for a replacement or exchange (never expire; releaseHold may release them) */
+type AllocationSource = Row<'reservations'>['source'];
 /** Movements that put sold units back on the shelf (net of dispatches in getSalesRate) */
 const RESTOCK_REASONS = ['return_restock', 'return_different_condition', 'returned_item_restocked'];
 const DIGEST_ITEMS = 50;
@@ -205,6 +200,7 @@ export class InventoryService implements InventoryPublicApi {
     const ids = rows.map((r) => r.id);
     const [levels, expectations, def] = await Promise.all([this.repo.levels(ids), this.repo.expectations({ itemIds: ids, openOnly: true }), this.#defaultThreshold()]);
     const locations = new Map((await this.repo.locations({ ids: [...new Set(levels.map((l) => l.location_id))] })).map((l) => [l.id, l]));
+    const images = await this.#images(rows);
     return rows.map((item) =>
       toStockItem(item, {
         levels: levels.filter((l) => l.stock_item_id === item.id),
@@ -212,8 +208,27 @@ export class InventoryService implements InventoryPublicApi {
         expectations: expectations.filter((e) => e.stock_item_id === item.id),
         defaultSellerThreshold: def,
         locationId: opts.locationId,
+        image: images.get(item.id) ?? null,
       }),
     );
+  }
+
+  /** StockItem.image: the variant's first image, else the product's (catalog, batched; none while catalog is off) */
+  async #images(rows: Row<'stock_items'>[]): Promise<Map<string, common.MediaRef>> {
+    const out = new Map<string, common.MediaRef>();
+    const catalog = this.ctx.tryUse('catalog');
+    if (!catalog || !rows.length) return out;
+    try {
+      const products = new Map((await catalog.getProducts([...new Set(rows.map((r) => r.product_id))])).map((rec) => [rec.product.id, rec.product]));
+      for (const r of rows) {
+        const p = products.get(r.product_id);
+        const image = p?.variants.find((v) => v.id === r.variant_id)?.images?.[0] ?? p?.images?.[0];
+        if (image) out.set(r.id, image);
+      }
+    } catch (err) {
+      this.ctx.log.warn({ err }, 'inventory: product images unavailable');
+    }
+    return out;
   }
 
   async #itemApi(row: Row<'stock_items'>): Promise<StockItem> {
@@ -491,14 +506,14 @@ export class InventoryService implements InventoryPublicApi {
       if (!Number.isInteger(l.quantity) || l.quantity <= 0) throw invalid(`lines[${i}].quantity`, 'Quantity must be at least 1');
       wanted.set(l.stockItemId, (wanted.get(l.stockItemId) ?? 0) + l.quantity);
     }
-    const existing = await this.repo.reservationByKey(key);
+    const existing = await this.repo.reservationByKey('checkout', key);
     if (existing) return this.#existingHold(existing);
     const ttl = ttlMinutes ?? Number(await this.ctx.settings.get('holdMinutes'));
     if (!(ttl > 0)) throw invalid('ttlMinutes', 'The hold lifetime must be above zero');
     const id = newId();
     const created = await this.#stock('checkout_hold', async (st) => {
       const now = st.now;
-      const inserted = await st.tx.insert('reservations', { id, key, order_id: null, order_ref: null, state: 'held', expires_at: new Date(now.getTime() + ttl * 60_000), released_reason: null, created_at: now, updated_at: now }, { ignoreConflict: true });
+      const inserted = await st.tx.insert('reservations', { id, source: 'checkout', key, order_id: null, order_ref: null, state: 'held', expires_at: new Date(now.getTime() + ttl * 60_000), released_reason: null, created_at: now, updated_at: now }, { ignoreConflict: true });
       if (!inserted) return false; // the same key won a race: answer with that hold
       await st.lock([...wanted.keys()]);
       const short: { stockItemId: string; requested: number; available: number }[] = [];
@@ -526,7 +541,7 @@ export class InventoryService implements InventoryPublicApi {
       }
       return true;
     });
-    if (!created) return this.#existingHold((await this.repo.reservationByKey(key))!);
+    if (!created) return this.#existingHold((await this.repo.reservationByKey('checkout', key))!);
     return this.#reservationApi(id);
   }
 
@@ -589,7 +604,7 @@ export class InventoryService implements InventoryPublicApi {
     const r = await this.repo.get('reservations', reservationId);
     if (!r) throw notFound('Reservation');
     if (r.state === 'released' || r.state === 'expired') return; // already done (idempotent)
-    const source = allocationSourceOf(r);
+    const source: AllocationSource = r.source;
     const releasable = (state: string) => state === 'held' || (source !== 'checkout' && state === 'allocated');
     if (!releasable(r.state)) {
       throw new AppError('ILLEGAL_TRANSITION', 'The order was accepted: its units are released by cancelling order items', { machine: 'Reservation', from: r.state, event: 'release', allowed: reservationMachine.eventsFrom(r.state as ReservationState) });
@@ -634,8 +649,9 @@ export class InventoryService implements InventoryPublicApi {
       if (l.orderItemId != null && !isUuid(l.orderItemId)) throw invalid(`lines[${i}].orderItemId`, 'Not an order item id');
       wanted.set(l.stockItemId, (wanted.get(l.stockItemId) ?? 0) + l.quantity);
     }
-    const key = `${ORDER_ALLOCATION_PREFIX}${input.source.kind}:${input.key.trim()}`;
-    const existing = await this.repo.reservationByKey(key);
+    const key = input.key.trim();
+    const source: AllocationSource = input.source.kind;
+    const existing = await this.repo.reservationByKey(source, key);
     if (existing) return (await this.#reservationsApi([existing]))[0]!;
     const what = input.source.kind === 'exchange' ? 'Exchange' : 'Replacement';
     const ref: MovementRef = { kind: 'order', id: input.orderId, label: `${what}${input.source.ref ? ` ${input.source.ref}` : ''}${input.orderRef ? `, order ${input.orderRef}` : ''}` };
@@ -644,7 +660,7 @@ export class InventoryService implements InventoryPublicApi {
       'order_allocated',
       async (st) => {
         const now = st.now;
-        const inserted = await st.tx.insert('reservations', { id, key, order_id: input.orderId, order_ref: input.orderRef ?? null, state: 'allocated', expires_at: null, released_reason: null, created_at: now, updated_at: now }, { ignoreConflict: true });
+        const inserted = await st.tx.insert('reservations', { id, source, key, order_id: input.orderId, order_ref: input.orderRef ?? null, state: 'allocated', expires_at: null, released_reason: null, created_at: now, updated_at: now }, { ignoreConflict: true });
         if (!inserted) return false; // the same key won a race
         await st.lock([...wanted.keys()]);
         const short: { stockItemId: string; requested: number; available: number }[] = [];
@@ -668,7 +684,7 @@ export class InventoryService implements InventoryPublicApi {
       },
       { actor: input.actor },
     );
-    const row = created ? (await this.repo.get('reservations', id))! : (await this.repo.reservationByKey(key))!;
+    const row = created ? (await this.repo.get('reservations', id))! : (await this.repo.reservationByKey(source, key))!;
     if (created) await this.#publishAllocated(id, input.orderId, await this.repo.lines([id]), input.source.kind, { actor: input.actor });
     return (await this.#reservationsApi([row]))[0]!;
   }
@@ -1478,7 +1494,7 @@ export class InventoryService implements InventoryPublicApi {
       {
         action: 'inventory.stock.export',
         actionLabel: 'Exported stock list',
-        category: 'other',
+        category: 'inventory',
         target: { type: 'export', id: job.id, ref: job.ref, label: 'Stock export', sellerId: by.sellerId, screen: 'seller/inventory' },
         after: { filters, format: job.format },
         visibleToSeller: true,
@@ -1633,7 +1649,7 @@ export class InventoryService implements InventoryPublicApi {
     let row = await this.#item(created.id);
     if (body.reorderQuantity != null) row = await this.repo.update('stock_items', row.id, { reorder_quantity: body.reorderQuantity });
     const item = await this.#itemApi(row);
-    await this.#audit({ action: 'inventory.stock_item.create', actionLabel: 'Created company stock item', category: 'other', target: { type: 'stock_item', id: item.id, ref: item.sku, label: item.label, screen: 'ops/inventory' }, after: item }, by);
+    await this.#audit({ action: 'inventory.stock_item.create', actionLabel: 'Created company stock item', category: 'inventory', target: { type: 'stock_item', id: item.id, ref: item.sku, label: item.label, screen: 'ops/inventory' }, after: item }, by);
     return item;
   }
 
@@ -1653,7 +1669,7 @@ export class InventoryService implements InventoryPublicApi {
     const after = await this.#itemApi(row);
     const action = archive === true ? 'archive' : archive === false ? 'unarchive' : 'update';
     const label = { archive: 'Archived company SKU', unarchive: 'Unarchived company SKU', update: 'Changed reorder point' }[action];
-    await this.#audit({ action: `inventory.stock_item.${action}`, actionLabel: label, category: 'other', target: { type: 'stock_item', id, ref: after.sku, label: after.label, screen: 'ops/inventory' }, before: beforeApi, after }, by);
+    await this.#audit({ action: `inventory.stock_item.${action}`, actionLabel: label, category: 'inventory', target: { type: 'stock_item', id, ref: after.sku, label: after.label, screen: 'ops/inventory' }, before: beforeApi, after }, by);
     return after;
   }
 
@@ -1666,7 +1682,7 @@ export class InventoryService implements InventoryPublicApi {
       {
         action: 'inventory.stock_item.merge',
         actionLabel: 'Merged company SKU into another',
-        category: 'other',
+        category: 'inventory',
         target: { type: 'stock_item', id: after.id, ref: after.sku, label: after.label, screen: 'ops/inventory' },
         relatedTargets: [{ type: 'stock_item', id: from.id, ref: from.sku, label: from.label }],
         reason: body.reason?.trim() || null,
@@ -1750,7 +1766,7 @@ export class InventoryService implements InventoryPublicApi {
         throw err;
       }
       const api = (await this.#adjustmentsApi([saved]))[0]!;
-      await this.#audit({ action: 'inventory.adjustment.request', actionLabel: 'Sent stock adjustment for second review', category: 'other', target: { ...target, screen: 'ops/inventory' }, after: api, reason: body.note ?? reasonLabel(body.reasonCode), approvalRequestId: request.id }, by);
+      await this.#audit({ action: 'inventory.adjustment.request', actionLabel: 'Sent stock adjustment for second review', category: 'inventory', target: { ...target, screen: 'ops/inventory' }, after: api, reason: body.note ?? reasonLabel(body.reasonCode), approvalRequestId: request.id }, by);
       return api;
     }
 
@@ -1771,7 +1787,7 @@ export class InventoryService implements InventoryPublicApi {
     const api = (await this.#adjustmentsApi([applied!]))[0]!;
     this.#publishAdjustmentRecorded(applied!, item, by.actor, by);
     await this.#reportWriteOff(item, body.toGroup, body.quantity, { kind: 'adjustment', id }, by);
-    await this.#audit({ action: 'inventory.adjustment.apply', actionLabel: 'Adjusted company stock', category: 'other', target: { ...target, screen: 'ops/inventory' }, before: api.before, after: api.after, reason: body.note ?? reasonLabel(body.reasonCode), approvalNote: check?.reason ?? null }, by);
+    await this.#audit({ action: 'inventory.adjustment.apply', actionLabel: 'Adjusted company stock', category: 'inventory', target: { ...target, screen: 'ops/inventory' }, before: api.before, after: api.after, reason: body.note ?? reasonLabel(body.reasonCode), approvalNote: check?.reason ?? null }, by);
     return api;
   }
 
@@ -1818,7 +1834,7 @@ export class InventoryService implements InventoryPublicApi {
         .catch((err) => this.ctx.log.warn({ err }, 'inventory: could not withdraw approval request'));
     }
     const api = (await this.#adjustmentsApi([after]))[0]!;
-    await this.#audit({ action: 'inventory.adjustment.cancel', actionLabel: 'Withdrew stock adjustment', category: 'other', target: { type: 'stock_adjustment', id, ref: api.sku, label: api.label, screen: 'ops/inventory' }, reason, before: { state: a.state }, after: { state: api.state } }, by);
+    await this.#audit({ action: 'inventory.adjustment.cancel', actionLabel: 'Withdrew stock adjustment', category: 'inventory', target: { type: 'stock_adjustment', id, ref: api.sku, label: api.label, screen: 'ops/inventory' }, reason, before: { state: a.state }, after: { state: api.state } }, by);
     return api;
   }
 
@@ -1921,7 +1937,7 @@ export class InventoryService implements InventoryPublicApi {
     );
     const api = await this.getInbound(id);
     this.ctx.events.publish('inventory.receipt.confirmed', { inboundId: id, receiptId: receipt.receipt_id, purchaseOrderId: receipt.purchase_order_id, lines: api.lines, confirmedBy: by.actor }, this.#meta(by));
-    await this.#audit({ action: 'inventory.inbound.confirm', actionLabel: 'Confirmed received stock', category: 'other', target: { type: 'receipt', id: receipt.receipt_id, ref: receipt.receipt_ref, label: `${receipt.supplier_name} · ${receipt.purchase_order_ref}`, screen: 'ops/receiving' }, after: api.totals, reason: body.note ?? null }, by);
+    await this.#audit({ action: 'inventory.inbound.confirm', actionLabel: 'Confirmed received stock', category: 'inventory', target: { type: 'receipt', id: receipt.receipt_id, ref: receipt.receipt_ref, label: `${receipt.supplier_name} · ${receipt.purchase_order_ref}`, screen: 'ops/receiving' }, after: api.totals, reason: body.note ?? null }, by);
     return api;
   }
 
@@ -2064,7 +2080,7 @@ export class InventoryService implements InventoryPublicApi {
     );
     this.ctx.events.publish('inventory.discrepancy.resolved', { discrepancyId: id, resolution: body.resolution, orderId: d.order_id }, this.#meta(by));
     const api = (await this.#discrepanciesApi([(await this.repo.get('discrepancies', id))!]))[0]!;
-    await this.#audit({ action: 'inventory.discrepancy.resolve', actionLabel: 'Resolved warehouse discrepancy', category: 'other', target: { type: 'discrepancy', id, ref: d.order_ref, label: `${api.sku} · ${d.kind.replace('_', ' ')}`, screen: 'ops/inventory' }, after: { resolution: body.resolution, adjustQuantity: body.adjustQuantity ?? null, sourceGroup: body.sourceGroup ?? null }, reason: body.note }, by);
+    await this.#audit({ action: 'inventory.discrepancy.resolve', actionLabel: 'Resolved warehouse discrepancy', category: 'inventory', target: { type: 'discrepancy', id, ref: d.order_ref, label: `${api.sku} · ${d.kind.replace('_', ' ')}`, screen: 'ops/inventory' }, after: { resolution: body.resolution, adjustQuantity: body.adjustQuantity ?? null, sourceGroup: body.sourceGroup ?? null }, reason: body.note }, by);
     return api;
   }
 
@@ -2129,7 +2145,7 @@ export class InventoryService implements InventoryPublicApi {
     );
     if (!row) throw new AppError('CONFLICT', `A location with code ${code} already exists`, { code });
     const api = toLocation(row);
-    await this.#audit({ action: 'inventory.location.create', actionLabel: 'Added stock location', category: 'other', target: { type: 'location', id: api.id, ref: api.code, label: api.name, screen: 'ops/inventory' }, after: api }, by);
+    await this.#audit({ action: 'inventory.location.create', actionLabel: 'Added stock location', category: 'inventory', target: { type: 'location', id: api.id, ref: api.code, label: api.name, screen: 'ops/inventory' }, after: api }, by);
     return api;
   }
 
@@ -2163,7 +2179,7 @@ export class InventoryService implements InventoryPublicApi {
       return row;
     });
     const api = toLocation(after);
-    await this.#audit({ action: 'inventory.location.update', actionLabel: 'Changed stock location', category: 'other', target: { type: 'location', id, ref: api.code, label: api.name, screen: 'ops/inventory' }, before: toLocation(before), after: api }, by);
+    await this.#audit({ action: 'inventory.location.update', actionLabel: 'Changed stock location', category: 'inventory', target: { type: 'location', id, ref: api.code, label: api.name, screen: 'ops/inventory' }, before: toLocation(before), after: api }, by);
     return api;
   }
 
@@ -2186,12 +2202,12 @@ export class InventoryService implements InventoryPublicApi {
     const id = newId();
     const ref = await this.ctx.refs.next('TRF', { digits: 4 });
     const row = await this.repo.transaction(async (tx) => {
-      const t = await tx.insert('transfers', { id, ref, from_location_id: from.id, to_location_id: to.id, state: 'draft', created_by: actorText(by.actor), shipped_at: null, received_at: null });
+      const t = await tx.insert('transfers', { id, ref, from_location_id: from.id, to_location_id: to.id, state: 'draft', created_by: actorText(by.actor), note: body.note?.trim() || null, shipped_at: null, received_at: null });
       await tx.insertTransferLines(body.lines.map((l) => ({ transfer_id: id, stock_item_id: l.stockItemId, quantity: l.quantity, received_quantity: null })));
       return t!;
     });
     const api = await this.#transferApi(row);
-    await this.#audit({ action: 'inventory.transfer.create', actionLabel: 'Planned stock transfer', category: 'other', target: { type: 'transfer', id, ref, label: `${from.code} → ${to.code}`, screen: 'ops/inventory' }, after: api, reason: body.note ?? null }, by);
+    await this.#audit({ action: 'inventory.transfer.create', actionLabel: 'Planned stock transfer', category: 'inventory', target: { type: 'transfer', id, ref, label: `${from.code} → ${to.code}`, screen: 'ops/inventory' }, after: api, reason: body.note ?? null }, by);
     return api;
   }
 
@@ -2227,7 +2243,7 @@ export class InventoryService implements InventoryPublicApi {
       this.#meta(by),
     );
     const api = await this.#transferApi((await this.repo.get('transfers', id))!);
-    await this.#audit({ action: 'inventory.transfer.ship', actionLabel: 'Sent stock transfer', category: 'other', target: { type: 'transfer', id, ref: t.ref, screen: 'ops/inventory' }, before: { state: t.state }, after: { state: api.state } }, by);
+    await this.#audit({ action: 'inventory.transfer.ship', actionLabel: 'Sent stock transfer', category: 'inventory', target: { type: 'transfer', id, ref: t.ref, screen: 'ops/inventory' }, before: { state: t.state }, after: { state: api.state } }, by);
     return api;
   }
 
@@ -2264,7 +2280,7 @@ export class InventoryService implements InventoryPublicApi {
     );
     this.ctx.events.publish('inventory.transfer.received', { transferId: id, toLocationId: t.to_location_id }, this.#meta(by));
     const api = await this.#transferApi((await this.repo.get('transfers', id))!);
-    await this.#audit({ action: 'inventory.transfer.receive', actionLabel: 'Received stock transfer', category: 'other', target: { type: 'transfer', id, ref: t.ref, screen: 'ops/inventory' }, before: { state: t.state }, after: { state: api.state, lines: api.lines }, reason: body.note ?? null }, by);
+    await this.#audit({ action: 'inventory.transfer.receive', actionLabel: 'Received stock transfer', category: 'inventory', target: { type: 'transfer', id, ref: t.ref, screen: 'ops/inventory' }, before: { state: t.state }, after: { state: api.state, lines: api.lines }, reason: body.note ?? null }, by);
     return api;
   }
 
@@ -2274,7 +2290,7 @@ export class InventoryService implements InventoryPublicApi {
     const state = transferMachine.next(t.state as 'draft', 'cancel');
     const after = await this.repo.update('transfers', id, { state });
     const api = await this.#transferApi(after);
-    await this.#audit({ action: 'inventory.transfer.cancel', actionLabel: 'Cancelled stock transfer', category: 'other', target: { type: 'transfer', id, ref: t.ref, screen: 'ops/inventory' }, before: { state: t.state }, after: { state }, reason }, by);
+    await this.#audit({ action: 'inventory.transfer.cancel', actionLabel: 'Cancelled stock transfer', category: 'inventory', target: { type: 'transfer', id, ref: t.ref, screen: 'ops/inventory' }, before: { state: t.state }, after: { state }, reason }, by);
     return api;
   }
 
@@ -2344,7 +2360,7 @@ export class InventoryService implements InventoryPublicApi {
     }
     const after = await this.repo.update('stock_counts', id, { state: stockCountMachine.next(submitted, 'apply') });
     const api = await this.#countApi(after);
-    await this.#audit({ action: 'inventory.count.submit', actionLabel: 'Submitted stock count', category: 'other', target: { type: 'stock_count', id, ref: c.scope, screen: 'ops/inventory' }, after: { differences: diffs.map((d) => ({ sku: d.item.sku, difference: d.diff })) } }, by);
+    await this.#audit({ action: 'inventory.count.submit', actionLabel: 'Submitted stock count', category: 'inventory', target: { type: 'stock_count', id, ref: c.scope, screen: 'ops/inventory' }, after: { differences: diffs.map((d) => ({ sku: d.item.sku, difference: d.diff })) } }, by);
     return api;
   }
 
@@ -2458,13 +2474,13 @@ export class InventoryService implements InventoryPublicApi {
   /** The hold expired before payment was accepted: reserve the units again if they are still there */
   async #reallocateExpired(r: Row<'reservations'>, event: EventPayload<'orders.order.accepted'>) {
     const key = `order:${event.orderId}`;
-    if (await this.repo.reservationByKey(key)) return;
+    if (await this.repo.reservationByKey('checkout', key)) return;
     const old = await this.repo.lines([r.id]);
     const id = newId();
     try {
       const lines = await this.#stock('order_allocated', async (st) => {
         if (!(await st.tx.claimEvent(`order-accepted:${event.orderId}:${r.id}`))) return null;
-        await st.tx.insert('reservations', { id, key, order_id: event.orderId, order_ref: event.ref, state: 'allocated', expires_at: null, released_reason: null, created_at: st.now, updated_at: st.now });
+        await st.tx.insert('reservations', { id, source: 'checkout', key, order_id: event.orderId, order_ref: event.ref, state: 'allocated', expires_at: null, released_reason: null, created_at: st.now, updated_at: st.now });
         await st.lock(old.map((l) => l.stock_item_id));
         const out: Row<'reservation_lines'>[] = [];
         for (const l of old) {
@@ -2530,22 +2546,22 @@ export class InventoryService implements InventoryPublicApi {
 
   /** orders.item.cancelled: Release that item's held or allocated units back to Available (matched by itemId, so a split-off item releases only its own units) */
   async onItemCancelledFromOrders(event: EventPayload<'orders.item.cancelled'>): Promise<void> {
-    const dedupe = `Cancellation ${event.cancellationId}`;
+    const note = `Cancellation ${event.cancellationId}`;
     const lines = (await this.repo.linesWhere({ orderItemIds: [event.itemId] })).filter((l) => l.state === 'held' || l.state === 'allocated');
     if (!lines.length) return;
-    const done = (await this.repo.movementsByRef('order', [event.orderId])).some((m) => m.note === dedupe && m.reason_code === 'order_cancelled');
-    if (done) return;
     const byReservation = new Map<string, Row<'reservation_lines'>[]>();
     for (const l of lines) byReservation.set(l.reservation_id, [...(byReservation.get(l.reservation_id) ?? []), l]);
     for (const [rid] of byReservation) {
       const result = await this.#stock('order_cancelled', async (st) => {
+        // one claim per cancellation, item and reservation (kernel inbox), committed with the release
+        if (!(await st.tx.claimEvent(`item-cancelled:${event.cancellationId}:${event.itemId}:${rid}`))) return null;
         const r = (await st.tx.get('reservations', rid, { forUpdate: true }))!;
         if (r.state !== 'held' && r.state !== 'allocated') return null;
         const own = (await st.tx.lines([rid], { forUpdate: true })).filter((l) => l.order_item_id === event.itemId && (l.state === 'held' || l.state === 'allocated'));
         let left = event.quantity;
         return this.#releaseLines(st, r, own, {
           reason: 'order_cancelled',
-          note: dedupe,
+          note,
           releasedReason: `Cancelled: ${event.reasonCode}`,
           ref: { kind: 'order', id: event.orderId, label: `Order ${event.ref}` },
           actor: SYSTEM_ACTOR,
@@ -2563,21 +2579,23 @@ export class InventoryService implements InventoryPublicApi {
   /** shipping.shipment.dispatched: Fulfil the allocated lines in the shipment (Reserved → leaves stock) */
   async onShipmentDispatchedFromShipping(event: EventPayload<'shipping.shipment.dispatched'>): Promise<void> {
     if (event.kind === 'return') return;
-    const dedupe = `Shipment ${event.shipmentId}`;
-    if ((await this.repo.movementsByRef('order', [event.orderId])).some((m) => m.note === dedupe && m.reason_code === 'dispatched')) return;
+    const note = `Shipment ${event.shipmentId}`;
+    const claim = `shipment-dispatched:${event.shipmentId}`;
+    if (await this.repo.seenEvent(claim)) return;
     const wanted = new Map<string, number>();
     for (const l of event.lines) wanted.set(l.orderItemId, (wanted.get(l.orderItemId) ?? 0) + l.quantity);
     // replacement shipments use the order's allocateForOrder reservations; normal shipments never touch them
     const replacement = event.kind === 'replacement';
-    const allocations = replacement ? await this.repo.reservationsByKeyPrefix(event.orderId, ORDER_ALLOCATION_PREFIX) : [];
+    const allocations = replacement ? await this.repo.allocationsForShipments(event.orderId) : [];
     const allocationIds = new Set(allocations.map((r) => r.id));
     const byItem = (await this.repo.linesWhere({ orderItemIds: [...wanted.keys()] })).filter((l) => l.state === 'allocated' || l.state === 'held');
-    const keys = new Map((await this.#reservationKeys([...new Set(byItem.map((l) => l.reservation_id))])).map((r) => [r.id, r.key]));
-    const lines = byItem.filter((l) => (replacement ? allocationIds.has(l.reservation_id) : !(keys.get(l.reservation_id) ?? '').startsWith(ORDER_ALLOCATION_PREFIX)));
+    const sources = new Map((await this.#reservationKeys([...new Set(byItem.map((l) => l.reservation_id))])).map((r) => [r.id, r.source]));
+    const lines = byItem.filter((l) => (replacement ? allocationIds.has(l.reservation_id) : (sources.get(l.reservation_id) ?? 'checkout') === 'checkout'));
     // allocations made without order items are matched in order for what is left
     const free = replacement ? (await this.repo.lines([...allocationIds])).filter((l) => !l.order_item_id && (l.state === 'allocated' || l.state === 'held')) : [];
     if (!lines.length && !free.length) return;
     await this.#stock('dispatched', async (st) => {
+      if (!(await st.tx.claimEvent(claim))) return;
       await st.lock([...lines, ...free].map((l) => l.stock_item_id));
       const touched = new Set<string>();
       const locked = await st.tx.lines([...new Set([...lines, ...free].map((x) => x.reservation_id))], { forUpdate: true });
@@ -2593,7 +2611,7 @@ export class InventoryService implements InventoryPublicApi {
         if (n <= 0) continue;
         wanted.set(itemId, wanted.get(itemId)! - n);
         const r = await st.tx.get('reservations', l.reservation_id);
-        await st.move(l.stock_item_id, l.location_id, 'reserved', 'outside', n, { reason: 'dispatched', note: dedupe, ref: { kind: 'order', id: event.orderId, label: `Order ${r?.order_ref ?? ''}`.trim() }, actor: SYSTEM_ACTOR });
+        await st.move(l.stock_item_id, l.location_id, 'reserved', 'outside', n, { reason: 'dispatched', note, ref: { kind: 'order', id: event.orderId, label: `Order ${r?.order_ref ?? ''}`.trim() }, actor: SYSTEM_ACTOR });
         const fulfilled = l.fulfilled_qty + n;
         // a hold dispatched before acceptance was recorded is treated as allocated
         await st.tx.update('reservation_lines', l.id, { fulfilled_qty: fulfilled, state: lineStateAfter({ quantity: l.quantity, fulfilled, released: l.released_qty, state: 'allocated' }) });
@@ -2778,7 +2796,7 @@ export class InventoryService implements InventoryPublicApi {
       const twin = (await this.repo.items({ ownerType: 'official', variantIds: [variantId] })).find((i) => i.id !== item.id && i.condition === item.condition);
       if (twin) {
         await this.#raise({
-          queueKey: 'inventory.low_stock',
+          queueKey: 'inventory.merge_candidates',
           kind: 'manual_task',
           title: `Merge ${updated.sku} into ${twin.sku}`,
           summary: `Products were merged in the catalog, so ${updated.sku} and ${twin.sku} now hold the same variant in the same condition. Merge them on the stock item page.`,
@@ -2836,7 +2854,7 @@ export class InventoryService implements InventoryPublicApi {
       if (!applied) return;
       this.#publishAdjustmentRecorded(applied, item, requester, by);
       await this.#reportWriteOff(item, applied.to_group as GroupOrOutside, applied.quantity, { kind: 'adjustment', id: applied.id }, by);
-      await this.#audit({ action: 'inventory.adjustment.apply', actionLabel: 'Applied stock adjustment after second review', category: 'other', target: { type: 'stock_adjustment', id: a.id, ref: item.sku, label: item.label, screen: 'ops/inventory' }, after: { state: 'applied', quantity: a.quantity, fromGroup: a.from_group, toGroup: a.to_group }, reason: event.reason ?? null, approvalRequestId: event.requestId }, by);
+      await this.#audit({ action: 'inventory.adjustment.apply', actionLabel: 'Applied stock adjustment after second review', category: 'inventory', target: { type: 'stock_adjustment', id: a.id, ref: item.sku, label: item.label, screen: 'ops/inventory' }, after: { state: 'applied', quantity: a.quantity, fromGroup: a.from_group, toGroup: a.to_group }, reason: event.reason ?? null, approvalRequestId: event.requestId }, by);
     } catch (err) {
       if (!isAppError(err) || err.code !== 'GROUP_QUANTITY_EXCEEDED') throw err;
       // the units moved elsewhere while the adjustment waited: it cannot apply any more
@@ -2951,7 +2969,18 @@ export class InventoryService implements InventoryPublicApi {
   /** Job inventory.valuation-snapshot (daily 23:59 market time): Snapshot units and value at cost per group for company trading reports */
   async valuationSnapshot(): Promise<StockSummary> {
     const summary = await this.getStockSummary();
-    // no snapshot table in the spec: the snapshot goes to the log for the trading reports to pick up
+    const takenAt = this.now();
+    await this.repo.saveValuationSnapshot(
+      summary.groups.map((g) => ({
+        snapshot_date: this.today(),
+        stock_group: g.group,
+        units: g.units,
+        value_at_cost_amount: g.valueAtCost?.amount ?? 0,
+        currency: g.valueAtCost?.currency ?? this.currency,
+        sku_count: summary.skuCount,
+        taken_at: takenAt,
+      })),
+    );
     this.ctx.log.info({ snapshot: { at: this.now().toISOString(), date: this.today(), skuCount: summary.skuCount, groups: summary.groups.map((g) => ({ group: g.group, units: g.units, valueAtCost: g.valueAtCost?.amount ?? 0 })) } }, 'inventory: valuation snapshot');
     return summary;
   }

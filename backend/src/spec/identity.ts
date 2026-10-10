@@ -726,15 +726,15 @@ export const LockRequest: z.ZodType<LockRequest> = z.object({
 }).register(common.apiTypes, { id: "identity.LockRequest" });
 
 export interface ReauthRequest {
-  /** Step-up purpose of the endpoint that will consume the token, e.g. payout-account */
-  purpose: string;
+  /** The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers). A token works only for that purpose. Code step-ups (role-grant, staff-account, payout-destination) take an X-Step-Up-Code header instead and need no token. */
+  purpose: "account-closure" | "email-change" | "two-step-removal" | "recovery-codes" | "business-change" | "payout-account" | "seller-closure";
   password?: string | null;
   /** 2-step code instead of the password */
   code?: string | null;
 }
 
 export const ReauthRequest: z.ZodType<ReauthRequest> = z.object({
-  purpose: z.string().describe("Step-up purpose of the endpoint that will consume the token, e.g. payout-account"),
+  purpose: z.enum(["account-closure", "email-change", "two-step-removal", "recovery-codes", "business-change", "payout-account", "seller-closure"]).describe("The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers). A token works only for that purpose. Code step-ups (role-grant, staff-account, payout-destination) take an X-Step-Up-Code header instead and need no token."),
   password: z.string().nullish(),
   code: z.string().describe("2-step code instead of the password").nullish(),
 }).register(common.apiTypes, { id: "identity.ReauthRequest" });
@@ -1075,7 +1075,7 @@ export interface IdentityPublicApi {
   inviteSellerMember(input: { email: string, name: string, sellerId: string, sellerName: string, invitedBy: common.Actor }): Promise<Invitation>;
   /** Cancel a pending invitation (the accept link stops working at once) and publish identity.invitation.revoked. contextRef, when given, must match the invitation's (sellers passes its sellerId so a seller can only revoke its own member invitations; NOT_FOUND otherwise). Revoking an invitation that is already revoked returns it unchanged; an accepted or expired one fails with ILLEGAL_TRANSITION. Used by: sellers, access. */
   revokeInvitation(invitationId: string, input: { reason: string, by: common.Actor, contextRef?: string }): Promise<Invitation>;
-  /** Allow an account to sign in to Seller Center for this seller. Called again to refresh the label. Used by: sellers. */
+  /** Allow a member account to sign in to Seller Center for this seller (NOT_FOUND for other accounts). Idempotent: called again to refresh the seller name, role label or owner flag, and to grant access again after revokeSellerContext (a reactivated member). A different memberId (a re-invited member) ends the sessions bound to the old membership. Only sellers writes these grants. Used by: sellers. */
   grantSellerContext(input: { accountId: string, sellerId: string, memberId: string, sellerName: string, roleLabel: string, isOwner: boolean }): Promise<void>;
   /** Remove seller access and revoke sessions bound to that seller Used by: sellers. */
   revokeSellerContext(accountId: string, sellerId: string, reason: string): Promise<void>;
@@ -1721,7 +1721,7 @@ export const endpoints = defineEndpoints({
     auth: "customer",
     scope: "own-customer",
     summary: "Confirm it's you before a sensitive action",
-    desc: "Returns a single-use re-auth token valid 5 minutes for the requested purpose, required by account closure (customers). Seller Center uses POST /api/seller/identity/reauth for payout account and business changes.",
+    desc: "Returns a single-use re-auth token valid reauthTokenMinutes for the requested purpose, bound to the account and session: account-closure (customers), email-change, two-step-removal and recovery-codes. Seller Center uses POST /api/seller/identity/reauth for payout-account, business-change and seller-closure.",
     body: () => ReauthRequest,
     response: () => ReauthToken,
     status: 200,
@@ -1737,7 +1737,7 @@ export const endpoints = defineEndpoints({
     sellerContext: "optional",
     scope: "own-seller",
     summary: "Confirm it is you before a sensitive Seller Center action",
-    desc: "Same check as the store re-auth (password or 2-step code) on the seller session. Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account, the purpose and the current seller context (if one is chosen); required by payout account changes, business change requests and account close (sellers).",
+    desc: "Same check as the store re-auth (password or 2-step code) on the seller session. Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account, the purpose and the current seller context (if one is chosen); purposes payout-account, business-change and seller-closure (sellers). A token taken before a seller is chosen does not work once one is.",
     body: () => ReauthRequest,
     response: () => ReauthToken,
     status: 200,
@@ -1753,7 +1753,7 @@ export const endpoints = defineEndpoints({
     auth: "staff",
     scope: "staff",
     summary: "Confirm it is you before a sensitive Admin Center action",
-    desc: "Same check as the store re-auth (password or 2-step code) on the staff session. Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account, session and purpose.",
+    desc: "Same check as the store re-auth (password or 2-step code) on the staff session. Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account, session and purpose (two-step-removal and recovery-codes for the staff member's own 2-step settings).",
     body: () => ReauthRequest,
     response: () => ReauthToken,
     status: 200,

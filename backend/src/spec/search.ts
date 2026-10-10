@@ -9,6 +9,126 @@ import * as common from './common.js';
 
 /* ------------------------------------------------------------------ types */
 
+export interface SearchFilters {
+  /** Category ids (GraphQL); REST category is a slug resolved to its id */
+  categoryIds?: string[] | null;
+  /** REST category */
+  categorySlug?: string | null;
+  /** Minor units */
+  priceMin?: number | null;
+  /** Minor units */
+  priceMax?: number | null;
+  brandIds?: string[] | null;
+  /** REST brand: brand slugs (ids are accepted too) */
+  brandSlugs?: string[] | null;
+  sellerIds?: string[] | null;
+  /** REST seller: seller slugs; 'official' is the Official Store */
+  sellerSlugs?: string[] | null;
+  /** Official Store offers only */
+  official?: boolean | null;
+  /** 'N stars and up', 1–5 */
+  minRating?: number | null;
+  conditions?: ("new" | "used" | "refurbished")[] | null;
+  /** Default from the setting excludeOutOfStockByDefault (true): in stock now */
+  inStockOnly?: boolean | null;
+  freeDelivery?: boolean | null;
+  shipsToday?: boolean | null;
+  arrivesBy?: string | null;
+  onSale?: boolean | null;
+  /** New arrivals */
+  listedWithinDays?: number | null;
+  /** Category attribute filters, e.g. noise_cancelling = [active] */
+  attributes?: AttributeFilter[] | null;
+}
+
+export const SearchFilters: z.ZodType<SearchFilters> = z.object({
+  categoryIds: z.array(z.uuid()).describe("Category ids (GraphQL); REST category is a slug resolved to its id").nullish(),
+  categorySlug: z.string().describe("REST category").nullish(),
+  priceMin: z.number().int().describe("Minor units").nullish(),
+  priceMax: z.number().int().describe("Minor units").nullish(),
+  brandIds: z.array(z.uuid()).nullish(),
+  brandSlugs: z.array(z.string()).describe("REST brand: brand slugs (ids are accepted too)").nullish(),
+  sellerIds: z.array(z.uuid()).nullish(),
+  sellerSlugs: z.array(z.string()).describe("REST seller: seller slugs; 'official' is the Official Store").nullish(),
+  official: z.boolean().describe("Official Store offers only").nullish(),
+  minRating: z.number().int().describe("'N stars and up', 1–5").nullish(),
+  conditions: z.array(z.enum(["new", "used", "refurbished"])).nullish(),
+  inStockOnly: z.boolean().describe("Default from the setting excludeOutOfStockByDefault (true): in stock now").nullish(),
+  freeDelivery: z.boolean().nullish(),
+  shipsToday: z.boolean().nullish(),
+  arrivesBy: z.iso.date().nullish(),
+  onSale: z.boolean().nullish(),
+  listedWithinDays: z.number().int().describe("New arrivals").nullish(),
+  get attributes() {
+    return z.array(AttributeFilter).nullish();
+  },
+}).register(common.apiTypes, { id: "search.SearchFilters" });
+
+export interface AttributeFilter {
+  key: string;
+  values: string[];
+}
+
+export const AttributeFilter: z.ZodType<AttributeFilter> = z.object({
+  key: z.string(),
+  values: z.array(z.string()),
+}).register(common.apiTypes, { id: "search.AttributeFilter" });
+
+export interface SearchQuery {
+  /** Free text; without it this is a listing (category, brand, seller, collection) */
+  q?: string | null;
+  /** Same meaning as the REST query parameters of GET /products and GraphQL SearchFilterInput */
+  filters?: SearchFilters | null;
+  sort?: "recommended" | "price_asc" | "price_desc" | "newest" | "rating" | "best_selling" | null;
+}
+
+export const SearchQuery: z.ZodType<SearchQuery> = z.object({
+  q: z.string().describe("Free text; without it this is a listing (category, brand, seller, collection)").nullish(),
+  get filters() {
+    return SearchFilters.nullish();
+  },
+  sort: z.enum(["recommended", "price_asc", "price_desc", "newest", "rating", "best_selling"]).nullish(),
+}).register(common.apiTypes, { id: "search.SearchQuery" });
+
+export interface SearchMatch {
+  /** 1-based position among organic results */
+  position: number;
+  /** The variant the card shows for the active filters */
+  variantId?: string | null;
+  /** e.g. 'Black · 2 more colors' */
+  variantCue?: string | null;
+  /** The offer whose price the card shows (the seller's offer under a seller filter) */
+  offerId?: string | null;
+  /** True when the price is the lowest of several ('From $…') */
+  priceIsFrom: boolean;
+  badges: string[];
+}
+
+export const SearchMatch: z.ZodType<SearchMatch> = z.object({
+  position: z.number().int().describe("1-based position among organic results"),
+  variantId: z.uuid().describe("The variant the card shows for the active filters").nullish(),
+  variantCue: z.string().describe("e.g. 'Black · 2 more colors'").nullish(),
+  offerId: z.uuid().describe("The offer whose price the card shows (the seller's offer under a seller filter)").nullish(),
+  priceIsFrom: z.boolean().describe("True when the price is the lowest of several ('From $…')"),
+  badges: z.array(z.string()),
+}).register(common.apiTypes, { id: "search.SearchMatch" });
+
+export interface SponsoredSlot {
+  /** Advertising placement key: search_top_row, category_inline, category_banner */
+  placement: string;
+  kind: "top_row" | "inline" | "banner";
+  /** Inline only: 1-based grid positions where a labelled sponsored card may be inserted */
+  positions: number[];
+  maxItems: number;
+}
+
+export const SponsoredSlot: z.ZodType<SponsoredSlot> = z.object({
+  placement: z.string().describe("Advertising placement key: search_top_row, category_inline, category_banner"),
+  kind: z.enum(["top_row", "inline", "banner"]),
+  positions: z.array(z.number().int()).describe("Inline only: 1-based grid positions where a labelled sponsored card may be inserted"),
+  maxItems: z.number().int(),
+}).register(common.apiTypes, { id: "search.SponsoredSlot" });
+
 export interface ProductCard {
   productId: string;
   slug: string;
@@ -858,21 +978,21 @@ export const SearchRankingPolicyPublishedEvent: z.ZodType<SearchRankingPolicyPub
 /** What other modules may call in-process: `ctx.use('search')` (or `ctx.tryUse` for an optional dependency). */
 export interface SearchPublicApi {
   /** Same engine as the store endpoint, without sponsored slots. Used for collections (new arrivals, best sellers, category picks). Used by: content, promotions. */
-  searchProducts(query: unknown): Promise<{ items: ProductCard[], total: number, nextCursor: string|null }>;
+  searchProducts(query: SearchQuery): Promise<{ items: ProductCard[], total: number, nextCursor: string|null }>;
   /** Cards for any product list (home sections, recently viewed, related products), same shape everywhere Used by: content, wishlist, reviews, advertising. */
   getProductCards(productIds: string[], opts?: { postalCode?: string, sellerId?: string }): Promise<ProductCard[]>;
   /** Unavailable searches for the products and discovery report Used by: reports. */
   zeroResultStats(from: string, to: string): Promise<ZeroResultQuery[]>;
   /** Store search with spelling correction, facets, store match, empty guidance and sponsored placeholders (ads are filled by advertising) Used by: graphql. */
-  runSearch(query: unknown & { exact?: boolean, postalCode?: string, searchId?: string }, page: common.PageInput): Promise<{ context: SearchContext, items: { productId: string, match: unknown }[], sponsoredSlots: unknown[], page: common.PageInfo }>;
+  runSearch(query: SearchQuery & { exact?: boolean, postalCode?: string, searchId?: string }, page: common.PageInput): Promise<{ context: SearchContext, items: { productId: string, match: SearchMatch }[], sponsoredSlots: SponsoredSlot[], page: common.PageInfo }>;
   /** Category page listing with category attribute facets and category context Used by: graphql. */
-  listCategoryProducts(slug: string, query: unknown & { postalCode?: string, searchId?: string }, page: common.PageInput): Promise<{ context: SearchContext, items: { productId: string, match: unknown }[], sponsoredSlots: unknown[], page: common.PageInfo } | null>;
+  listCategoryProducts(slug: string, query: SearchQuery & { postalCode?: string, searchId?: string }, page: common.PageInput): Promise<{ context: SearchContext, items: { productId: string, match: SearchMatch }[], sponsoredSlots: SponsoredSlot[], page: common.PageInfo } | null>;
   /** Suggestions while typing: queries, categories, brands, stores, products and recent searches Used by: graphql. */
   getSuggestions(prefix: string, session?: { customerId?: string, guestSessionId?: string }): Promise<Suggestions>;
   /** Similar in-stock products per product (related products, alternatives for unavailable products) Used by: graphql. */
   similarProducts(productIds: string[], limit: number): Promise<Record<string, string[]>>;
   /** Storefront product grid: products with a live offer from this seller, with the same filters, facets and sorts as search (query.filters.sellerIds is replaced by the seller). Each result's match.offer is this seller's offer. No store match and no sponsored slots. Used by: graphql. */
-  listSellerProducts(sellerId: string, query: unknown & { postalCode?: string, searchId?: string }, page: common.PageInput): Promise<{ context: SearchContext, items: { productId: string, match: unknown }[], sponsoredSlots: unknown[], page: common.PageInfo }>;
+  listSellerProducts(sellerId: string, query: SearchQuery & { postalCode?: string, searchId?: string }, page: common.PageInput): Promise<{ context: SearchContext, items: { productId: string, match: SearchMatch }[], sponsoredSlots: SponsoredSlot[], page: common.PageInfo }>;
   /** Storefront category chips: categories in which the seller has live offers, with product counts from the search index (the REST storefront's categories) Used by: sellers, graphql. */
   sellerCategoryCounts(sellerIds: string[]): Promise<Record<string, { categoryId: string, name: string, slug: string, count: number, comingSoon: boolean }[]>>;
   /** Best-seller rank of products in their category by 30-day units sold; null when not ranked (outside the top 100 or below bestSellingMinOrders) Used by: graphql, content. */
@@ -1047,7 +1167,7 @@ export const endpoints = defineEndpoints({
     auth: "visitor",
     scope: "public",
     summary: "Search results or category listing (product cards with sponsored slots marked)",
-    desc: "Without q this is a category, brand, seller or collection listing. Out-of-stock products are excluded unless availability=include_out_of_stock. Seller and condition filters show the matching seller's offer price. Sponsored hits come from advertising.sponsoredForResults on the first page only and always carry a visible label; when advertising is off there are none.",
+    desc: "Without q this is a category, brand, seller or collection listing. Out-of-stock products are excluded unless availability=include_out_of_stock. Seller and condition filters show the matching seller's offer price. Sponsored hits come from advertising.sponsoredForResults on the first page only and always carry a visible label; when advertising is off there are none. Ad personalization: personalizationAllowed is true only for a signed-in customer whose marketing preferences allow personalized recommendations (customers.getMarketingConsent), with their customerId; visitors always get false (visitor sessions carry no privacy choice), so their ads use page context only (query, category).",
     query: () =>
       z.object({
         q: z.string().describe("Names, brands, keywords and seller names; a full GTIN/UPC also matches the product carrying it").optional(),
@@ -1268,7 +1388,7 @@ export const endpoints = defineEndpoints({
     auth: "seller",
     scope: "own-seller",
     summary: "Seller Center top-bar search across own orders, offers/SKUs and returns",
-    desc: "Fan-out over enabled modules' public APIs with the seller from the session: orders.listOrdersForSeller (order ref, buyer name, product), offers.searchOwnOffers (title, seller SKU, GTIN) and returns.listForSeller with q (return ref, order ref). Groups the member's role cannot see are left out (e.g. orders without orders.fulfillment.view). Nothing is indexed here; each group comes from its owning module.",
+    desc: "Fan-out over enabled modules' public APIs with the seller from the session: orders.listOrdersForSeller (order ref, buyer name, product), offers.searchOwnOffers (title, seller SKU, GTIN) and returns.listForSeller with q (return ref, order ref). Each group only when the member may see it (owners see every group): Orders when the member holds any orders.fulfillment.* permission; Offers and SKUs with any offers.* permission (e.g. offers.offers.manage, offers.prices.manage, offers.bulk.update, offers.offers.export); Returns with any returns.* permission (e.g. returns.requests.respond, returns.refunds.issue). A disabled module's group disappears. Nothing is indexed here; each group comes from its owning module.",
     query: () =>
       z.object({
         q: z.string(),
@@ -1287,7 +1407,7 @@ export const endpoints = defineEndpoints({
     auth: "staff",
     scope: "staff",
     summary: "Back-office top-bar quick search across orders, sellers, products and customers",
-    desc: "Matches by reference, name, email, SKU or GTIN. Fan-out over enabled modules' public APIs, each group only when the caller holds that module's view permission: orders.listOrdersAdmin (orders.orders.view), sellers.searchSellers (sellers.accounts.view), customers.searchCustomers (customers.accounts.view; email masked without contact permission), products from this module's index plus offers.listOffersAdmin for seller SKUs (offers.offers.view). The lookup itself is not audited; opening a record is.",
+    desc: "Matches by reference, name, email, SKU or GTIN. Fan-out over enabled modules' public APIs, each group only when the caller holds its permission: Orders through orders.listOrdersAdmin (orders.orders.view); Sellers through sellers.searchSellers (sellers.accounts.view); Customers through customers.searchCustomers (customers.accounts.view; the email is masked without orders.customers.view-contact); Offers and SKUs through offers.listOffersAdmin (offers.offers.view); Products from this module's index (listed products, also by GTIN) for every staff member, no permission needed (it is the public catalog). The lookup itself is not audited; opening a record is.",
     query: () =>
       z.object({
         q: z.string(),

@@ -20,7 +20,7 @@ describe('bins', () => {
       expect.objectContaining({ locationId: h.locationId, code: 'D-03-2', zone: 'D', kind: 'pick', active: true, assignedItems: 0, barcode: expect.stringMatching(/^BIN-.*-D-03-2$/) }),
       expect.objectContaining({ code: 'D-10-1', zone: 'D' }),
     ]);
-    expect(h.audits.at(-1)).toMatchObject({ action: 'warehouse.bins.create', category: 'other', after: { codes: ['D-03-2', 'D-10-1'] } });
+    expect(h.audits.at(-1)).toMatchObject({ action: 'warehouse.bins.create', category: 'inventory', after: { codes: ['D-03-2', 'D-10-1'] } });
     const taken = await h.call('POST', '/bins', { locationId: h.locationId, codes: ['D-03-2', 'D-04-1'], kind: 'bulk' });
     expect(taken.status).toBe(409);
     expect(taken.body.error).toMatchObject({ code: 'BIN_CODE_TAKEN', details: { codes: ['D-03-2'] } });

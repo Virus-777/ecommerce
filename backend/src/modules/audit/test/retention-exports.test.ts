@@ -97,9 +97,9 @@ describe('retention', () => {
     expect(e).toMatchObject({ reason: 'Tax authority asked for 10 years', change: { before: '7 years', after: '10 years' }, category: 'settings', target: { type: 'setting', id: 'audit.retention' } });
   });
 
-  it('shortening waits for Business Owner approval (202), then applies on access.approval.decided', async () => {
+  it('shortening is saved pending Business Owner approval (200 with pendingChange), then applies on access.approval.decided', async () => {
     const res = await call('PUT', '/retention', { retainYears: 8, reason: 'Storage cost' });
-    expect(res.statusCode, res.body).toBe(202);
+    expect(res.statusCode, res.body).toBe(200);
     const requestId = res.json().pendingChange.approval.approvalRequestId;
     expect(res.json()).toMatchObject({
       retainYears: 10,
@@ -132,7 +132,7 @@ describe('retention', () => {
 
   it('a rejected shortening is dropped and recorded', async () => {
     const res = await call('PUT', '/retention', { retainYears: 7, reason: 'Minimum is enough' });
-    expect(res.statusCode).toBe(202);
+    expect(res.statusCode).toBe(200);
     const requestId = res.json().pendingChange.approval.approvalRequestId;
     await decide(requestId, 'rejected');
     expect((await call('GET', '/retention')).json()).toMatchObject({ retainYears: 8, pendingChange: null });

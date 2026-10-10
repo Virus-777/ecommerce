@@ -46,7 +46,7 @@ export class Admin {
     if (agg.order.lifecycle === 'payment_pending' || agg.order.lifecycle === 'cancelled') throw new AppError('ILLEGAL_TRANSITION', 'Only confirmed orders have a confirmation to resend.', { from: agg.order.lifecycle });
     const to = email?.trim() || agg.order.contact_email;
     await this.core.repo.transaction(async (tx) => {
-      await this.core.setFlags(tx, agg.order, (f) => ({ ...f, confirmationsResent: (f.confirmationsResent ?? 0) + 1 }));
+      await this.core.addFact(tx, orderId, { kind: 'confirmation_resent', source_id: newId() });
       await this.core.timeline(tx, orderId, [{ visibility: 'staff', label: 'Confirmation resent', detail: to === agg.order.contact_email ? 'To the checkout email' : `To ${to}`, actor: by.actor }]);
     });
     this.core.publish('orders.confirmation.requested', { orderId, email: to }, by);

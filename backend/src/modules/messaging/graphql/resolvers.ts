@@ -91,8 +91,7 @@ export const resolvers = (service: MessagingService): ModuleResolvers => {
       id: c.id,
       kind: upper(c.kind),
       counterparty: { ...c.counterparty, kind: upper(c.counterparty.kind), id: c.counterparty.id ?? null },
-      // the GraphQL enum has no GUEST (schema owned by the spec): a guest order's buyer shows as CUSTOMER
-      participants: c.participants.map((p) => ({ kind: p.kind === 'guest' ? 'CUSTOMER' : upper(p.kind), id: p.id, name: p.name, label: p.label, joinedAt: p.joinedAt, joinedFromCaseId: p.joinedFromCaseId ?? null })),
+      participants: c.participants.map((p) => ({ kind: upper(p.kind), id: p.id, name: p.name, label: p.label, joinedAt: p.joinedAt, joinedFromCaseId: p.joinedFromCaseId ?? null })),
       subject: { ...c.subject, kind: upper(c.subject.kind) },
       status: upper(c.status),
       lockedReason: c.lockedReason ?? null,

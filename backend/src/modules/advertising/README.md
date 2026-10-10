@@ -91,12 +91,6 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 
 ## Types
 
-### PageType
-
-| Field | Type |
-|---|---|
-| page | `enum(home|category|search|product|campaign|collection|deals|brand|seller_store|official_store|cart|checkout|payment_result|order_tracking|returns|account|help)` Page types used for eligibility and blocking |
-
 ### CreativeFormat
 
 | Field | Type |
@@ -162,7 +156,7 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 | kind | `enum(overlay|inline|card|strip)` |
 | enabled | `bool` |
 | availability | `enum(launch|pilot|later)` Plan ch. 16/20: launch = full-screen, banners, pop-ups |
-| eligiblePages | `string[]` PageType values, e.g. home, category, campaign |
+| eligiblePages | `string[]` Page types (see notes), e.g. home, category, campaign |
 | pagesLabel | `string` |
 | formats | `CreativeFormat[]` |
 | frequencyCap | `FrequencyCap?` |
@@ -258,7 +252,7 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 |---|---|
 | billing | `enum(none|cpc|cpm|fixed_daily)` |
 | rate | `Money?` |
-| dailyLimit | `Money?` |
+| dailyLimit | `Money?` Spending limit per market day: midnight to midnight in the market time zone (kernel config), whatever the campaign's publication timeZone; charges accrue per market day (ad_charges.day) |
 | totalLimit | `Money?` |
 | deliveryCap | `int?` Maximum displays (own promotions have no budget charge) |
 | spent | `Money` |
@@ -284,7 +278,7 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 | ownerStaffId | `uuid?` |
 | linkedPromotionId | `uuid?` |
 | placementKey | `string` |
-| pages | `string[]` PageType values within the placement's eligible pages |
+| pages | `string[]` Page types (see notes) within the placement's eligible pages |
 | pageCategoryIds | `uuid[]?` Limit category pages, e.g. Home & Kitchen |
 | audience | `Audience` |
 | destination | `Destination` |
@@ -400,6 +394,8 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 | status | `enum(draft|in_review|approved|scheduled|live|paused|finished|archived|rejected)` |
 | pausedReason | `text?` |
 | pausedBy | `Actor?` |
+| pauseCause | `enum(promotion|offer|stock|product|availability|seller|trust)?` Set when the system paused the campaign automatically (the matching event or sweep resumes promotion, offer, stock, product and availability pauses; seller and trust pauses stay for staff); null for a staff or seller pause |
+| rejectedReason | `text?` Why the campaign was rejected (status rejected) |
 | finishedReason | `enum(ended|budget_reached|delivery_cap_reached|promotion_ended|offer_unavailable|stopped_early|seller_restricted)?` |
 | approvals | `ApprovalStep[]` |
 | checks | `ReviewCheck[]` |
@@ -581,7 +577,7 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 
 | Field | Type |
 |---|---|
-| page | `string` PageType value |
+| page | `string` Page type (see notes); an unknown or blocked page gets an empty decision |
 | context | `ServeContext` |
 | device | `enum(desktop|phone|app)` |
 | visitorId | `string` First-party visitor id (cookie or app install id) |
@@ -622,7 +618,7 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 |---|---|
 | impressionToken | `string` |
 | kind | `enum(display|click|dismiss|close|video_play)` |
-| at | `datetime` |
+| at | `datetime?` Client time, informational only: the server records its own time for frequency, attribution and charges |
 | visibleMs | `int?` |
 
 ### DailyAdPoint
@@ -917,6 +913,10 @@ Charges accrue per day from billable clicks/displays or the fixed daily fee and 
 | after_approval | text (schedule|activate) |
 | status | text |
 | paused_reason | text? |
+| paused_by | text? (Actor kind:id of the last pause) |
+| paused_at | timestamptz? |
+| pause_cause | text? (promotion|offer|stock|product|availability|seller|trust) (automatic pauses only) |
+| rejected_reason | text? |
 | finished_reason | text? |
 | note_to_reviewers | text? |
 | created_by | text |
@@ -931,11 +931,12 @@ Indexes: `(status, starts_at)`, `(status, ends_at)`, `(placement_id, status)`, `
 | Column | Type |
 |---|---|
 | campaign_id | uuid → campaigns |
-| kind | text |
+| kind | text (offer|product|seller_store|brand) |
 | target_id | uuid |
 | label | text? |
+| product_id | uuid? (the product: target_id for kind product, the offer's product for kind offer; null for stores and brands) |
 
-Indexes: `(kind, target_id)`
+Indexes: `(kind, target_id)`, `(product_id)`, `(campaign_id)`
 
 **campaign_creatives**
 
@@ -1046,6 +1047,9 @@ Indexes: `(campaign_id, at)`, `(visitor_key, campaign_id, kind, at)`
 | session_displays | int |
 | window_displays | int |
 | window_started_at | timestamptz |
+| display_day | date? (market day day_displays counts; null for rows written before it was kept) |
+| day_displays | int |
+| total_displays | int |
 | last_display_at | timestamptz? |
 | suppressed_until | timestamptz? |
 
@@ -1137,10 +1141,10 @@ Indexes: `unique (campaign_id, day)`, `(seller_id, state)`
 
 | Function | Signature | Used by |
 |---|---|---|
-| sponsoredForResults | `(ctx: { page: PageType, query?: string, categoryId?: uuid, productId?: uuid, visitorId: string, sessionId: string, device: string, organicOfferIds: uuid[], personalizationAllowed: bool, customerId?: uuid }) => SponsoredProductSlot[]`<br>Sponsored product cards and their positions for a results list (max per page from the placement; relevance first, then priority). Only eligible, in-stock offers are returned. personalizationAllowed false: only page context (query, category, product) is used, frequency state is kept per session only and clicks are not kept for attribution by visitor; customerId (signed-in shopper) lets frequency caps and attribution follow the customer across devices when personalization is allowed. | search, catalog |
-| adPositionsFor | `(page: PageType) => { placementKey: string, name: string, enabled: bool }[]`<br>Ad positions on a page, so content can show them as locked markers in homepage sections. | content |
+| sponsoredForResults | `(ctx: { page: 'home' | 'category' | 'search' | 'product' | 'campaign' | 'collection' | 'deals' | 'brand' | 'seller_store' | 'official_store' | 'cart' | 'checkout' | 'payment_result' | 'order_tracking' | 'returns' | 'account' | 'help', query?: string, categoryId?: uuid, productId?: uuid, visitorId: string, sessionId: string, device: string, organicOfferIds: uuid[], personalizationAllowed: bool, customerId?: uuid }) => SponsoredProductSlot[]`<br>Sponsored product cards and their positions for a results list (max per page from the placement; relevance first, then priority). Only eligible, in-stock offers are returned. personalizationAllowed false: only page context (query, category, product) is used, frequency state is kept per session only and clicks are not kept for attribution by visitor; customerId (signed-in shopper) lets frequency caps and attribution follow the customer across devices when personalization is allowed. | search, catalog |
+| adPositionsFor | `(page: 'home' | 'category' | 'search' | 'product' | 'campaign' | 'collection' | 'deals' | 'brand' | 'seller_store' | 'official_store' | 'cart' | 'checkout' | 'payment_result' | 'order_tracking' | 'returns' | 'account' | 'help') => { placementKey: string, name: string, enabled: bool }[]`<br>Ad positions on a page, so content can show them as locked markers in homepage sections. | content |
 | campaignsForPromotion | `(promotionId: uuid) => AdCampaignSummary[]`<br>Ads linked to a promotion (shown on the promotion detail). | promotions, graphql |
-| isAdBlockedPage | `(page: PageType) => bool`<br>True for checkout, payment results, order tracking and returns; used by front-end shells to skip the serve call. | content |
+| isAdBlockedPage | `(page: 'home' | 'category' | 'search' | 'product' | 'campaign' | 'collection' | 'deals' | 'brand' | 'seller_store' | 'official_store' | 'cart' | 'checkout' | 'payment_result' | 'order_tracking' | 'returns' | 'account' | 'help') => bool`<br>True for checkout, payment results, order tracking and returns; used by front-end shells to skip the serve call. | content |
 | dailyPerformance | `(range: DateRange, filter?: { campaignId?: uuid, sellerId?: uuid }) => CampaignDayPerformance[]`<br>Displays, clicks, dismissals, attributed purchases and spend per campaign and day, from the daily_stats read model (days still open are marked partial). | reports |
 | dashboardSummary | `(opts?: { listLimit?: int }) => AdsDashboard`<br>Read-only advertising summary for the Admin dashboard tile: live now (own and paid), starting in 7 days, ending soon, waiting approval, spend this month and short campaign lists. Records nothing; ad serving stays on POST /api/store/advertising/decisions. | graphql, reports |
 
@@ -1210,6 +1214,8 @@ Checked through the access module (limits per role, second reviewer).
 | headlineMaxChars | `60` | int, characters, 1–… | Overlay headline limit (seller card headline 40) |
 
 ## Notes
+- Page types (a plain string everywhere: public API page arguments, ServeRequest.page, placement eligiblePages, campaign pages): home, category, search, product, campaign, collection, deals, brand, seller_store, official_store, cart, checkout, payment_result, order_tracking, returns, account, help. checkout, payment_result, order_tracking and returns are always blocked; global rules may block more.
+- Frequency counters live on frequency_state per visitor key and campaign: session_displays (this session), window_displays from window_started_at (perWindow, or a rolling day for perDay alone), day_displays for the market day display_day (perDay together with perWindow) and total_displays (perCampaign). Rows of a live campaign with a perCampaign cap are kept until the campaign ends, so the total never resets.
 - Promotions change the offer; ads bring attention to it (plan ch. 16). An ad may link a promotion; claims in creatives are checked against it.
 - Serving order per page view: drop blocked pages → candidate campaigns live now for this placement, page and audience → drop suppressed (dismissed) and frequency-capped → drop unavailable promoted offers → pick by priority, equal priority rotates evenly (sponsored products: relevance first). Overlays: at most overlaysPerPageView, and a pop-up is skipped in a session where an opening ad showed.
 - Opening full-screen ads: separate desktop and phone creatives, entry pages only, default once per session and configurable per campaign; closing returns the visitor to the page they opened (acceptance scenario 8).

@@ -134,6 +134,9 @@ export function lineState(open: readonly { severity: string }[]): LineState {
   return 'ok';
 }
 
+/** Condition group of an offer condition (new, used, refurbished), as offers compares them */
+export const conditionGroupOf = (c: string): string => (c === 'new' || c === 'refurbished' ? c : 'used');
+
 /** min(offer purchase limit, available stock, platform line maximum), with what sets it */
 export function lineMaximum(purchaseLimit: number | null, available: number | null, lineMax: number): { max: number; limitKind: LimitKind } {
   let max = lineMax;

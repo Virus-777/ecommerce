@@ -188,7 +188,7 @@ export class Placement {
       channel: input.channel,
       lifecycle,
       display_status: accepted ? 'confirmed' : 'payment_pending',
-      flags: { kinds: accepted ? [] : ['payment_checking'] },
+      flag_kinds: accepted ? [] : ['payment_checking'],
       currency: input.currency,
       items_total: input.totals.items.amount,
       discount_total: input.totals.discounts.amount,
@@ -378,11 +378,10 @@ export class Placement {
   async onPaymentCaptured(e: EventPayload<'payments.payment.captured'>) {
     const o = await this.core.repo.get('orders', e.orderId);
     if (!o) return;
-    if ((o.flags?.captures ?? []).some((c) => c.captureId === e.captureId)) return;
+    if (await this.core.hasFact(o.id, 'capture', e.captureId)) return;
     await this.core.write(o.id, { actor: SYSTEM }, async (tx, agg) => {
-      if ((agg.order.flags?.captures ?? []).some((c) => c.captureId === e.captureId)) return;
-      const fresh = await this.core.setFlags(tx, agg.order, (f) => ({ ...f, captures: [...(f.captures ?? []), { captureId: e.captureId, amount: e.amount.amount, at: e.capturedAt }] }));
-      await tx.update('orders', o.id, { captured_total: fresh.captured_total + e.amount.amount });
+      if (!(await this.core.addFact(tx, o.id, { kind: 'capture', source_id: e.captureId, amount: e.amount.amount, at: new Date(e.capturedAt) }))) return;
+      await tx.update('orders', o.id, { captured_total: agg.order.captured_total + e.amount.amount });
     });
   }
 }

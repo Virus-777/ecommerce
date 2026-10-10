@@ -1,5 +1,6 @@
 import { sql, type Kysely } from 'kysely';
 import { paginate } from '../../../../kernel/lib/pagination.js';
+import type { Inbox } from '../../../../kernel/events/inbox.js';
 import type { WarehouseDb } from '../../../../spec/warehouse.js';
 import type { Table, WarehouseRepository } from '../../ports.js';
 
@@ -45,14 +46,19 @@ function applyWhere(q: any, where: Record<string, unknown>): any {
 const like = (s: string) => `%${s.trim().toLowerCase().replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 
 /** Postgres adapter for WarehouseRepository. `db` is scoped to the `warehouse` schema. */
-export function createPostgresWarehouseRepository(db: Kysely<WarehouseDb>): WarehouseRepository {
+export function createPostgresWarehouseRepository(db: Kysely<WarehouseDb>, inbox?: Inbox): WarehouseRepository {
   // generic table access: the row types are checked at the WarehouseRepository boundary
   const d: any = db;
 
   const repo: WarehouseRepository = {
     async transaction(fn) {
       if (db.isTransaction) return fn(repo);
-      return db.transaction().execute((trx) => fn(createPostgresWarehouseRepository(trx)));
+      return db.transaction().execute((trx) => fn(createPostgresWarehouseRepository(trx, inbox)));
+    },
+
+    async claim(key) {
+      if (!inbox) throw new Error('warehouse: the repository was created without the kernel inbox');
+      return inbox.claim(db, key);
     },
 
     async get(table, id, o) {

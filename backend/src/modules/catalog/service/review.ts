@@ -125,19 +125,16 @@ export class CatalogReview extends CatalogProducts {
     const check = sub ? (await this.repo.checksOf([sub.id])).find((c) => c.kind === kind) : undefined;
     if (!sub || !check) throw new AppError('NOT_FOUND', 'No such check on the latest submission');
     const now = this.now();
-    const evidence = evidenceOf(check.evidence);
-    let matched: string | null = null;
-    if (body.matchedProductId) {
-      const hit = evidence.filter((e) => e.matchedProductId === body.matchedProductId);
-      if (!hit.length) throw new AppError('NOT_FOUND', 'That product is not one of the check findings');
-      for (const e of hit) e.dismissedAt = now.toISOString();
-      // once every candidate is dismissed, the whole finding is
-      matched = evidence.some((e) => e.matchedProductId && !e.dismissedAt) ? body.matchedProductId : null;
-    } else {
-      for (const e of evidence) if (e.matchedProductId && !e.dismissedAt) e.dismissedAt = now.toISOString();
-    }
+    const candidates = [...new Set(evidenceOf(check.evidence).flatMap((e) => (e.matchedProductId ? [e.matchedProductId] : [])))];
+    if (body.matchedProductId && !candidates.includes(body.matchedProductId)) throw new AppError('NOT_FOUND', 'That product is not one of the check findings');
     await this.repo.transaction(async (tx) => {
-      await tx.updateCheck(check.id, { evidence: evidence as never, dismissed_at: now, dismissed_by: by.actor as never, dismiss_reason: reason, dismissed_matched_product_id: matched });
+      const already = new Set((await tx.dismissalsOf([check.id])).map((d) => d.matched_product_id));
+      const dismiss = (body.matchedProductId ? [body.matchedProductId] : candidates).filter((p) => !already.has(p));
+      await tx.insertDismissals(dismiss.map((p) => ({ check_id: check.id, matched_product_id: p, dismissed_at: now, dismissed_by: by.actor as never, reason })));
+      // once every candidate is dismissed, the whole finding is
+      const open = candidates.filter((p) => !already.has(p) && !dismiss.includes(p));
+      const matched = body.matchedProductId && open.length ? body.matchedProductId : null;
+      await tx.updateCheck(check.id, { dismissed_at: now, dismissed_by: by.actor as never, dismiss_reason: reason, dismissed_matched_product_id: matched });
       await tx.insertLog({
         id: newId(),
         product_id: id,

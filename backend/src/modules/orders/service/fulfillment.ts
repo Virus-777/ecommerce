@@ -319,11 +319,16 @@ export class Fulfillment {
   async onShipmentException(e: EventPayload<'shipping.shipment.exception'>) {
     if (!(await this.known(e.orderId, e.groupId))) return;
     await this.core.write(e.orderId, { actor: SYSTEM }, async (tx, agg) => {
-      if ((agg.order.flags?.deliveryIssues ?? []).some((d) => d.exceptionId === e.exceptionId)) return;
-      await this.core.setFlags(tx, agg.order, (f) => ({
-        ...f,
-        deliveryIssues: [...(f.deliveryIssues ?? []), { exceptionId: e.exceptionId, kind: e.kind, groupId: e.groupId, shipmentId: e.shipmentId ?? null, dueAt: e.dueAt, customerAction: e.customerAction ?? null, at: this.core.now().toISOString() }],
-      }));
+      const added = await this.core.addFact(tx, agg.order.id, {
+        kind: 'delivery_issue',
+        source_id: e.exceptionId,
+        subkind: e.kind,
+        group_id: e.groupId,
+        shipment_id: e.shipmentId ?? null,
+        due_at: new Date(e.dueAt),
+        customer_action: e.customerAction ?? null,
+      });
+      if (!added) return;
       await this.core.timeline(tx, agg.order.id, [{ group_id: e.groupId, visibility: 'staff', label: 'Delivery exception opened', detail: e.kind }]);
     });
   }

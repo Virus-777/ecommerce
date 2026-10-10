@@ -560,6 +560,7 @@ How things get delivered: carriers and services, destinations and excluded areas
 | methodCode | `string` |
 | fundedBy | `enum(company|seller)` |
 | window | `DateRange?` |
+| active | `bool?` false switches the rule off (status inactive) without ending its window; true switches it back on (scheduled, active or ended by its window). Omitted: a new rule starts on, a change keeps the current state |
 | reason | `text` |
 
 ### DeliveryOption
@@ -922,6 +923,7 @@ How things get delivered: carriers and services, destinations and excluded areas
 | sellerId | `uuid?` |
 | sellerName | `string` |
 | itemsSummary | `string` |
+| orderItemIds | `uuid[]` The order items the exception is about (empty when it covers the whole group) |
 | situation | `string` e.g. 'USPS number not recognized' or 'Label created, no scan 36 h' |
 | requiredResponse | `string` The plan's required response for the kind |
 | nextStep | `string` e.g. 'Cancel item, refund $112.00' |
@@ -1396,7 +1398,10 @@ Indexes: `(shipment_id, at)`, `unique (shipment_id, carrier_event_id)`
 | currency | text |
 | billed_to | text (seller|company|platform|customer) |
 | tracking_number | text |
-| storage_key | text |
+| storage_key | text? (media asset id of the label file; null when it could not be stored, the label link then points to the seller center) |
+| kind | text (outbound|replacement|return) |
+| return_id | uuid? (return labels) |
+| qr_code | text? (return labels with labelMethod prepaid_qr: the code scanned at drop-off, Label.qrCodeUrl) |
 | format | text |
 | drop_off_by | timestamptz? |
 | status | text |
@@ -1445,11 +1450,13 @@ Indexes: `(due_at) where overdue_since is null`
 | owner_type | text |
 | seller_id | uuid? |
 | items_summary | text |
+| order_item_ids | uuid[] (the order items the exception is about, as on shipping.shipment.exception) |
 | situation | text |
 | next_step | text |
 | status | text |
 | owner_staff_id | uuid? |
 | owner_name | text? |
+| owner_role | text? (the owner's primary role label from access, ExceptionOwner.role) |
 | due_at | timestamptz |
 | customer_notified_at | timestamptz? |
 | seller_notified_at | timestamptz? |
@@ -1551,28 +1558,28 @@ Indexes: `unique (carrier_code, external_id)`
 |---|---|---|
 | quote | `(profileId: uuid, postalCode: string, parcel: Parcel, dispatch: DispatchInput) => DeliveryQuote`<br>Delivery options for one offer at a location: ships-to check, price per method, arrival range, dispatch label, cutoff countdown and service notices | offers |
 | quoteOptions | `(input: PackageQuoteInput) => PackageQuote`<br>Options for a package of several items from one seller and ship-from location: methods common to every item's profile, combined weight, free-shipping threshold on the package subtotal, arrival per option | cart, checkout |
-| checkCoverage | `(profileIds: uuid[], destination: Address) => CoverageCheck[]`<br>Per profile: ships to this address or why not (excluded area, PO box, outside seller coverage) | checkout, cart |
+| checkCoverage | `(profileIds: uuid[], destination: Address) => CoverageCheck[]`<br>Per profile: ships to this address or why not (excluded area, PO box, outside seller coverage) | checkout |
 | hasCoverage | `(sellerId: uuid) => bool`<br>Seller has an active profile with coverage and a dispatch schedule (setup checklist) | sellers |
-| dispatchDeadline | `(ownerType: 'official'|'seller', sellerId: uuid | null, from: datetime, dispatch: DispatchInput) => datetime`<br>Dispatch deadline from acceptance time, handling days, same-day cutoff, business days and closures | checkout |
-| activeNotices | `(postalCode?: string, carrierCodes?: string[], surface?: string) => CustomerNotice[]`<br>Live service notices for a location | offers, checkout, content |
+| dispatchDeadline | `(ownerType: 'official'|'seller', sellerId: uuid | null, from: datetime, dispatch: DispatchInput) => datetime`<br>Dispatch deadline from acceptance time, handling days, same-day cutoff, business days and closures. No module calls it at launch: checkout takes each option's dispatchBy from quoteOptions. |  |
+| activeNotices | `(postalCode?: string, carrierCodes?: string[], surface?: string) => CustomerNotice[]`<br>Live service notices for a location. offers, checkout and content show notices through the GraphQL field; none calls it in-process at launch. | graphql |
 | quoteLabelOptions | `(input: LabelRequest) => LabelQuote[]`<br>Carrier services that can carry this parcel to the destination, with cost, estimated arrival and keepsPromise against the customer's promised range (same rule createLabel enforces with keepPromise) | warehouse |
-| createLabel | `(input: LabelRequest, idempotencyKey: string) => LabelResult`<br>Buy a carrier label and create the shipment (label_created). kind = return creates the return parcel for returns (labelMethod prepaid_qr adds a QR drop-off code; LabelRequest.dropOffBy from the return is stored and returned on the label); format pdf (default) or zpl; its tracking events carry kind = return and returnId. Same key returns the same label. | warehouse, returns, fulfillment-service |
+| createLabel | `(input: LabelRequest, idempotencyKey: string) => LabelResult`<br>Buy a carrier label and create the shipment (label_created). kind = return creates the return parcel for returns (labelMethod prepaid_qr adds a QR drop-off code; LabelRequest.dropOffBy from the return is stored and returned on the label); format pdf (default) or zpl; its tracking events carry kind = return and returnId. Same key returns the same label. fulfillment-service (phase 4) will call it when its label flow is wired. | warehouse, returns |
 | voidLabel | `(labelId: uuid, reason: string) => Label`<br>Void an unused label (before the first carrier scan) | warehouse, returns |
-| handOver | `(shipmentId: uuid, at: datetime, actor: Actor) => Shipment`<br>Package handed to the carrier (label_created → shipped). Publishes shipping.shipment.dispatched. | warehouse, fulfillment-service |
-| getShipmentsForOrder | `(orderId: uuid) => ShipmentSummary[]`<br>Shipments of an order with status and contents | support, returns, messaging |
-| dispatchMetrics | `(sellerId: uuid | null, range: DateRange) => DispatchMetrics`<br>On-time dispatch, valid tracking and late counts | sellers, reports |
+| handOver | `(shipmentId: uuid, at: datetime, actor: Actor) => Shipment`<br>Package handed to the carrier (label_created → shipped). Publishes shipping.shipment.dispatched. No module calls it at launch (warehouse records hand-over on its own parcels); kept for fulfillment-service (phase 4). |  |
+| getShipmentsForOrder | `(orderId: uuid) => ShipmentSummary[]`<br>Shipments of an order with status and contents | support |
+| dispatchMetrics | `(sellerId: uuid | null, range: DateRange) => DispatchMetrics`<br>On-time dispatch, valid tracking and late counts. reviews shows the seller dispatch facts on seller ratings; sellers and reports compute their own figures. | reviews |
 | registerReturnTracking | `(input: { returnId: uuid, orderId: uuid, groupId: uuid, carrierCode: string, trackingNumber: string, to: Address }) => Shipment`<br>Customer-arranged return: create a kind = return shipment for a tracking number the customer entered (format-checked) so carrier events for it are tracked and published like a prepaid return label. | returns |
 | findDropOffPoints | `(carrierServiceId: uuid, postalCode: string, limit?: int) => { name: string, address: Address, hours: string, distanceMiles: number, acceptsQr: bool }[]`<br>Carrier drop-off locations near a ZIP code for return labels. | returns |
-| listShipmentsForGroups | `(groupIds: uuid[], kinds?: ('outbound'|'replacement'|'return')[]) => Map<uuid, Shipment[]>`<br>Shipments per seller group with contents, tracking events and failed-delivery options (batched per request). Default kinds: outbound and replacement. | graphql |
-| getShipment | `(viewer: { customerId?: uuid, guestSessionId?: uuid, sellerId?: uuid, staff?: bool }, shipmentId: uuid) => Shipment | null`<br>One package with tracking view fields (headline, steps, estimate note, notices). Store: the customer's or guest's own order; seller: own shipments; staff: any (shipping.shipments.view). Otherwise null. | graphql |
+| listShipmentsForGroups | `(groupIds: uuid[], kinds?: ('outbound'|'replacement'|'return')[]) => Map<uuid, Shipment[]>`<br>Shipments per seller group with contents, tracking events and failed-delivery options (batched per request). Default kinds: outbound and replacement. | graphql, warehouse |
+| getShipment | `(viewer: { customerId?: uuid, guestSessionId?: uuid, sellerId?: uuid, staff?: bool }, shipmentId: uuid) => Shipment | null`<br>One package with tracking view fields (headline, steps, estimate note, notices). Store: the customer's or guest's own order; seller: own shipments; staff: any (shipping.shipments.view). Otherwise null. | graphql, warehouse |
 | estimateOffers | `(offerIds: uuid[], postalCode?: string, viewer?: { customerId?: uuid, guestSessionId?: uuid }) => OfferEstimate[]`<br>Default delivery option per offer at a location (resolves offer → profile and dispatch through offers). Without a postal code uses the shopper's saved or cart location, else the market default; batched per request. | graphql |
 | listExceptionsForOrder | `(orderId: uuid, sellerId?: uuid) => DeliveryException[]`<br>Delivery exceptions on an order; with sellerId only that seller's groups | graphql |
 | listExceptions | `(filter: { kind?: string, status?: string, sellerType?: string, ownerStaffId?: uuid, customerNotNotified?: bool, q?: string }, page: PageInput) => Page<DeliveryException>`<br>Dispatch and delivery exceptions for staff (same filters as admin GET /exceptions) | graphql |
-| countOpenExceptions | `() => ExceptionCounts`<br>Open exceptions per kind and not-yet-notified customers (queue tiles) | graphql |
-| getSellerShippingSummaries | `(sellerIds: uuid[]) => map<{ shipsFrom: string | null, coverage: Coverage, coverageLabel: string, excluded: string[], handlingDays: int, sameDayCutoff: string | null, dispatchLabel: string, businessDays: string[], closures: Closure[], carriers: string[], methods: { name: string, transit: TransitRange, priceLabel: string }[], freeShippingThreshold: Money | null, freeShippingLabel: string | null, notices: CustomerNotice[] } | null>`<br>Storefront shipping section from the seller's active shipping settings and default profile (the REST storefront's shipping block): ships from (seller_settings.ships_from, one query for the whole batch), coverage and exclusions, dispatch time and same-day cutoff, carriers, methods with transit, free-shipping threshold, upcoming closures and live notices. Null when the seller has no active profile. | sellers, graphql |
-| shipmentsForReplacements | `(replacements: { replacementId: uuid, returnId: uuid | null, orderItemIds?: uuid[] }[]) => map<Shipment | null>`<br>The REPLACEMENT shipment sent for a replacement or exchange (shipments.kind = replacement), matched by return id, or by the replacement's order item ids when it has no return (replacement decided on a case) | returns, graphql |
+| countOpenExceptions | `() => ExceptionCounts`<br>Open exceptions per kind and not-yet-notified customers (queue tiles) | graphql, workqueues |
+| getSellerShippingSummaries | `(sellerIds: uuid[]) => map<{ shipsFrom: string | null, coverage: Coverage, coverageLabel: string, excluded: string[], handlingDays: int, sameDayCutoff: string | null, dispatchLabel: string, businessDays: string[], closures: Closure[], carriers: string[], methods: { name: string, transit: TransitRange, priceLabel: string }[], freeShippingThreshold: Money | null, freeShippingLabel: string | null, notices: CustomerNotice[] } | null>`<br>Storefront shipping section from the seller's active shipping settings and default profile (the REST storefront's shipping block): ships from (seller_settings.ships_from, one query for the whole batch), coverage and exclusions, dispatch time and same-day cutoff, carriers, methods with transit, free-shipping threshold, upcoming closures and live notices. Null when the seller has no active profile. | sellers, offers, graphql |
+| shipmentsForReplacements | `(replacements: { replacementId: uuid, returnId: uuid | null, orderItemIds?: uuid[] }[]) => map<Shipment | null>`<br>The REPLACEMENT shipment sent for a replacement or exchange (shipments.kind = replacement), matched by return id, or by the replacement's order item ids when it has no return (replacement decided on a case). returns reads replacement shipments through the GraphQL field. | graphql |
 | getProfileOwners | `(profileIds: uuid[]) => map<{ ownerType: 'official' | 'seller', sellerId: uuid | null, status: string } | null>`<br>Owner of each shipping profile (by lineage id or version id); null when unknown. offers checks that a seller only uses its own profiles (and the Official Store only official ones) | offers |
-| getOfficialFreeShipping | `() => { threshold: Money | null, methodCode: string | null, active: bool, label: string | null }`<br>The Official Store's standing free-shipping threshold in force now (default profile threshold or an active official_store free-shipping rule), e.g. for the content service strip to warn when its text disagrees | content |
+| getOfficialFreeShipping | `() => { threshold: Money | null, methodCode: string | null, active: bool, label: string | null }`<br>The Official Store's standing free-shipping threshold in force now (default profile threshold or an active official_store free-shipping rule), e.g. for the content service strip to warn when its text disagrees. For content's service strip check; content does not call it yet (integration item). | content |
 | getSellerShippingSetup | `(sellerId: uuid) => SellerShippingSetup`<br>Carriers and services the seller can use, whether labels can be bought and the default package, for the record-shipment form | graphql |
 | exportRows | `(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }`<br>Export rows for reports dataset shipping.admin.exceptions (delivery exceptions) | reports |
 
@@ -1871,6 +1878,8 @@ type DeliveryException @areas(in: [SELLER, ADMIN]) {
   shipmentId: UUID
   sellerName: String!
   itemsSummary: String!
+  "The order items the exception is about (empty when it covers the whole group)"
+  orderItemIds: [UUID!]!
   "e.g. 'USPS number not recognized' or 'Label created, no scan 36 h'"
   situation: String!
   "The plan's required response for the kind"

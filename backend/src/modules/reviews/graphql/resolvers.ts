@@ -61,7 +61,7 @@ export const resolvers = (service: ReviewsService): ModuleResolvers => {
   const review = (r: ProductReview, ctx: GraphQLContext) => ({
     ...r,
     author: author(r.author),
-    soldBy: { sellerId: isOfficial(r.soldBy.sellerId) ? null : r.soldBy.sellerId, name: r.soldBy.name },
+    soldBy: { sellerId: r.soldBy.sellerId, name: r.soldBy.name },
     response: response(r.response),
     orderRef: async () => {
       const row = await reviewRow(ctx, r.id);

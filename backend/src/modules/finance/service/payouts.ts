@@ -292,7 +292,10 @@ export class PayoutsPart extends Part {
       return payoutId ?? retries[0]?.id ?? null;
     });
     this.core.flush(out);
-    if (prepared) this.core.publish('finance.statement.issued', { statementId: prepared.id, sellerId, period: prepared.period, payoutId: payoutIdOut });
+    if (prepared) {
+      this.core.publish('finance.statement.issued', { statementId: prepared.id, sellerId, period: prepared.period, payoutId: payoutIdOut });
+      await this.parts.statements.openStatement(sellerId); // the next period's statement opens at issue
+    }
   }
 
   async refreshTotals(runId: string) {
@@ -594,12 +597,22 @@ export class PayoutsPart extends Part {
    */
   async createDue() {
     const slot = lastSlot(this.now(), String(await this.core.setting('payoutSchedule')), String(await this.core.setting('payoutReleaseTime')), this.core.tz());
-    if (await this.repo.findOne('payout_runs', { cutoff_at: slot.cutoffAt })) return;
+    if (await this.repo.findOne('payout_runs', { cutoff_at: slot.cutoffAt })) return this.openMissingStatements(false);
     try {
       await this.createRun({ cutoffAt: slot.cutoffAt.toISOString(), scheduledRelease: slot.releaseAt.toISOString() }, { actor: SYSTEM });
     } catch (err) {
       if (!(err instanceof AppError && err.code === 'RUN_ALREADY_EXISTS')) throw err;
     }
+    await this.openMissingStatements(true);
+  }
+
+  #statementsSwept = false;
+  /** Seller accounts without an open statement get one: on the first run of the job in this process and after each new run */
+  private async openMissingStatements(afterRun: boolean) {
+    if (this.#statementsSwept && !afterRun) return;
+    this.#statementsSwept = true;
+    const opened = await this.parts.statements.openMissing();
+    if (opened) this.ctx.log.info({ opened }, 'finance: opened statements for the current period');
   }
 
   /** Job finance.payout-run.release: approved runs go out at their scheduled time */

@@ -42,13 +42,20 @@ async function approveAndSchedule(versionId: string, effectiveAt: string) {
 }
 
 describe('policies', () => {
-  it('creates a policy with its owner; keys follow the policy list', async () => {
+  it('creates a policy with its owner; the key is a unique URL slug and the kind says what it governs', async () => {
     const res = await h.admin('POST', '/policies', { key: 'returns', title: 'Returns policy', ownerStaffId: owner, editorStaffId: editor, audience: 'customer' });
     expect(res.statusCode).toBe(201);
     policyId = res.json().id;
-    expect(res.json()).toMatchObject({ key: 'returns', owner: { staffId: owner, name: 'Dana Content' }, editor: { staffId: editor }, current: null, draft: null });
+    expect(res.json()).toMatchObject({ key: 'returns', kind: 'returns', owner: { staffId: owner, name: 'Dana Content' }, editor: { staffId: editor }, current: null, draft: null });
     expect((await h.admin('POST', '/policies', { key: 'returns', title: 'x', ownerStaffId: owner, audience: 'customer' })).statusCode).toBe(409);
-    expect((await h.admin('POST', '/policies', { key: 'gift-cards', title: 'x', ownerStaffId: owner, audience: 'customer' })).statusCode).toBe(400);
+    // any slug: kind defaults to other, and several policies may be of kind other
+    const gift = await h.admin('POST', '/policies', { key: 'gift-cards', title: 'Gift card terms', ownerStaffId: owner, audience: 'customer' });
+    expect(gift.statusCode, gift.body).toBe(201);
+    expect(gift.json()).toMatchObject({ key: 'gift-cards', kind: 'other' });
+    const loyalty = await h.admin('POST', '/policies', { key: 'loyalty_terms', kind: 'purchase_terms', title: 'Loyalty terms', ownerStaffId: owner, audience: 'customer' });
+    expect(loyalty.json()).toMatchObject({ key: 'loyalty_terms', kind: 'purchase_terms' });
+    expect((await h.admin('POST', '/policies', { key: 'Gift Cards!', title: 'x', ownerStaffId: owner, audience: 'customer' })).statusCode).toBe(400);
+    expect((await h.admin('POST', '/policies', { key: 'warranty', kind: 'warranties', title: 'x', ownerStaffId: owner, audience: 'customer' })).statusCode).toBe(400);
   });
 
   it('runs version 1.0 through drafting, approvals, scheduling and taking effect', async () => {
@@ -155,7 +162,7 @@ describe('policies', () => {
       ['1.0', 'superseded'],
     ]);
     const list = (await h.admin('GET', '/policies')).json();
-    expect(list[0]).toMatchObject({ current: { version: '1.1' }, scheduled: null, draft: null });
+    expect(list.find((x: any) => x.key === 'returns')).toMatchObject({ current: { version: '1.1' }, scheduled: null, draft: null });
     expect(h.audits.some((a) => a.action === 'content.policy.version.withdraw' && a.reason === 'Legal review pending')).toBe(true);
   });
 

@@ -73,9 +73,9 @@ describe('leaving feedback', () => {
     expect(res.status).toBe(201);
     expect(res.body.feedback).toMatchObject({ sellerId: OFFICIAL_STORE_ID, sellerName: 'Marketly Official Store' });
     const summary = await k.call('GET', `${STORE}/sellers/${OFFICIAL_STORE_ID}/feedback-summary`, tokens.visitor());
-    expect(summary.body).toMatchObject({ sellerId: null, official: true, count: expect.any(Number) });
+    expect(summary.body).toMatchObject({ sellerId: OFFICIAL_STORE_ID, official: true, count: expect.any(Number) });
     const ratings = await k.svc.getOfferSellerRatings([{ offerId: 'o1', ownerType: 'official', sellerId: null }]);
-    expect(ratings.o1).toMatchObject({ official: true, sellerId: null });
+    expect(ratings.o1).toMatchObject({ official: true, sellerId: OFFICIAL_STORE_ID });
   });
 
   it('saves a draft, checks the ratings on submit, edits and deletes', async () => {

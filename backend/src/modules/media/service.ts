@@ -173,7 +173,8 @@ export class MediaService implements MediaPublicApi {
       const row = rows.get(id);
       if (!row) continue;
       if (row.status === 'removed') {
-        out.push({ id, url: this.storage.publicUrl(PLACEHOLDER_KEY), alt: null, width: null, height: null, bytes: null });
+        // taken down without a placeholder: the public URLs stop serving, so there is nothing to embed
+        if (row.show_placeholder !== false) out.push({ id, url: this.storage.publicUrl(PLACEHOLDER_KEY), alt: null, width: null, height: null, bytes: null });
         continue;
       }
       if (row.status !== 'ready') continue;
@@ -295,6 +296,8 @@ export class MediaService implements MediaPublicApi {
       rejection_reason: null,
       removed_reason: null,
       removed_by: null,
+      removed_at: null,
+      show_placeholder: null,
       retain_until: null,
       expires_at: input.ttlHours ? new Date(now.getTime() + input.ttlHours * 3_600_000) : null,
       created_at: now,
@@ -413,6 +416,8 @@ export class MediaService implements MediaPublicApi {
         rejection_reason: null,
         removed_reason: null,
         removed_by: null,
+        removed_at: null,
+        show_placeholder: null,
         retain_until: null,
         expires_at: null,
         created_at: now,
@@ -553,6 +558,8 @@ export class MediaService implements MediaPublicApi {
         rejection_reason: null,
         removed_reason: null,
         removed_by: null,
+        removed_at: null,
+        show_placeholder: null,
         retain_until: null,
         expires_at: null,
         created_at: now,
@@ -860,7 +867,7 @@ export class MediaService implements MediaPublicApi {
       const before = await tx.getAsset(id, { forUpdate: true });
       if (!before) throw notFound();
       const status = this.next(before.status, 'remove');
-      const after = await tx.updateAsset(id, { status, removed_reason: reason, removed_by: by.actor.id ?? by.actor.name ?? by.actor.kind });
+      const after = await tx.updateAsset(id, { status, removed_reason: reason, removed_by: by.actor.id ?? by.actor.name ?? by.actor.kind, removed_at: this.now(), show_placeholder: input.showPlaceholder });
       return { before, after, usages: await tx.usagesOf([id], { activeOnly: true }) };
     });
     await this.safely('take down public files', () => this.takeDownPublic(after, input.showPlaceholder));
@@ -873,7 +880,7 @@ export class MediaService implements MediaPublicApi {
         target: this.target(after),
         reason,
         before: snapshot(before),
-        after: { ...snapshot(after), showPlaceholder: input.showPlaceholder },
+        after: snapshot(after),
         visibleToSeller: after.owner_kind === 'seller',
       },
       by,
@@ -887,7 +894,7 @@ export class MediaService implements MediaPublicApi {
       const before = await tx.getAsset(id, { forUpdate: true });
       if (!before) throw notFound();
       const status = this.next(before.status, 'restore');
-      const after = await tx.updateAsset(id, { status, removed_reason: null, removed_by: null });
+      const after = await tx.updateAsset(id, { status, removed_reason: null, removed_by: null, removed_at: null, show_placeholder: null });
       return { before, after, usages: await tx.usagesOf([id], { activeOnly: true }) };
     });
     await this.safely('restore public files', () => this.restorePublic(after));
@@ -1308,7 +1315,7 @@ export class MediaService implements MediaPublicApi {
           if (row.status === 'ready') {
             list = rs.map((r) => toRendition(r));
             url = pickRendition(rs, row.kind === 'video' ? 'poster' : 'medium')?.url ?? null;
-          } else if (row.status === 'removed') {
+          } else if (row.status === 'removed' && row.show_placeholder !== false) {
             url = this.storage.publicUrl(PLACEHOLDER_KEY);
           }
         } else if (opts.signPrivate && (row.status === 'ready' || row.status === 'removed')) {
@@ -1458,7 +1465,7 @@ function categoryOf(row: AssetRow): audit.RecordInput['category'] {
   return 'content';
 }
 
-const snapshot = (r: AssetRow) => ({ status: r.status, purpose: r.purpose, owner: { kind: r.owner_kind, id: r.owner_id }, removedReason: r.removed_reason });
+const snapshot = (r: AssetRow) => ({ status: r.status, purpose: r.purpose, owner: { kind: r.owner_kind, id: r.owner_id }, removedReason: r.removed_reason, showPlaceholder: r.show_placeholder });
 
 function actorOfPrincipal(p: identity.Principal): common.Actor {
   if (p.kind === 'visitor') return { kind: 'visitor', id: p.guestSessionId ?? p.sessionId ?? null };

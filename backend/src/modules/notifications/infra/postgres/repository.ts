@@ -300,7 +300,7 @@ function repo(db: Db, inTx: boolean): NotificationsRepository {
       const r = await db.deleteFrom('notices').where('expires_at', '<', before).executeTakeFirst();
       return Number(r.numDeletedRows);
     },
-    async expireActionNotices(deadlineBefore, at) {
+    async expireActionNotices(cutoff, at) {
       const r = await db
         .updateTable('notices')
         // expired, never resolved: shown as "No longer needed"
@@ -308,7 +308,7 @@ function repo(db: Db, inTx: boolean): NotificationsRepository {
         .where('action_required', '=', true)
         .where('resolved_at', 'is', null)
         .where('expired_at', 'is', null)
-        .where('deadline_at', '<', deadlineBefore)
+        .where((eb) => eb.or([eb('deadline_at', '<', cutoff), eb.and([eb('deadline_at', 'is', null), eb('created_at', '<', cutoff)])]))
         .executeTakeFirst();
       return Number(r.numUpdatedRows);
     },

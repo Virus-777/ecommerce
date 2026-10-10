@@ -148,6 +148,12 @@ for (const m of modules) {
   for (const p of m.permissions ?? []) allPermissions.set(p.key, m.name);
   for (const e of m.events?.publishes ?? []) allPublished.set(e.name, m.name);
 }
+/** Reauth step-up purposes identity issues tokens for (identity ReauthRequest.purpose enum); null when identity is absent */
+const reauthPurposes = (() => {
+  const t = modules.find((x) => x.name === 'identity')?.types?.ReauthRequest?.purpose;
+  const enumOf = /^enum\((.*)\)\??$/.exec(typeof t === 'string' ? t : (t?.type ?? ''));
+  return enumOf ? enumOf[1].split('|') : null;
+})();
 const SETTING_FIELDS = new Set(['key', 'default', 'desc', 'type', 'min', 'max', 'choices', 'unit', 'approval', 'sellerVisible', 'minLeadDays', 'editable']);
 const SETTING_TYPES = ['int', 'number', 'bool', 'string', 'money', 'duration', 'time', 'enum', 'json'];
 const SETTING_APPROVALS = ['none', 'second_reviewer', 'business_owner'];
@@ -234,6 +240,7 @@ for (const m of modules) {
     if (ep.stepUp !== undefined) {
       if (!['reauth', 'code'].includes(ep.stepUp?.kind) || typeof ep.stepUp?.purpose !== 'string') err(E, 'stepUp must be { kind: "reauth" | "code", purpose: string }');
       if (ep.stepUp?.kind === 'reauth' && !(typeof ep.body === 'object' && ep.body && 'reauthToken' in ep.body)) err(E, 'stepUp kind "reauth" needs a reauthToken field in the body');
+      if (ep.stepUp?.kind === 'reauth' && reauthPurposes && !reauthPurposes.includes(ep.stepUp.purpose)) err(E, `reauth purpose "${ep.stepUp.purpose}" must be one of identity ReauthRequest.purpose (${reauthPurposes.join(', ')}): add it there`);
       if (!(ep.errors ?? []).includes('STEP_UP_REQUIRED')) err(E, 'endpoints with stepUp must list STEP_UP_REQUIRED in errors');
     }
     if (ep.sellerContext !== undefined && (ep.sellerContext !== 'optional' || ep.area !== 'seller')) err(E, 'sellerContext can only be "optional", on seller-area endpoints');
@@ -353,7 +360,7 @@ writeFileSync(join(apiDir, 'openapi.json'), JSON.stringify(clean(openapi), null,
 
 /* ------------------------------------------------------------------ Markdown */
 const fmtType = (t) => (typeof t === 'string' ? `\`${t}\`` : isDescriptor(t) ?`\`${t.type}\`${t.desc ? ` ${t.desc}` : ''}` : `\`${JSON.stringify(t)}\``);
-const fmtShape = (t) => (t === undefined ? '' : t === null ? '204 No content' : t === BINARY_BODY ? 'raw bytes' : typeof t === 'string' ? `\`${t}\`` : `\`{ ${Object.entries(t).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : v.type ?? 'object'}`).join(', ')} }\``);
+const fmtShape = (t, status) => (t === undefined ? '' : t === null ? `${status ?? 204} No content` : t === BINARY_BODY ? 'raw bytes' : typeof t === 'string' ? `\`${t}\`` : `\`{ ${Object.entries(t).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : v.type ?? 'object'}`).join(', ')} }\``);
 mkdirSync(join(apiDir, 'modules'), { recursive: true });
 const consumersOf = (event) => modules.filter((x) => x.events?.consumes?.some((c) => c.name === event)).map((x) => x.name);
 
@@ -372,7 +379,7 @@ for (const m of modules) {
     lines.push('', `## ${common.areas[area].title}`, '', '| Method | Path | Purpose | Auth | Body → Response |', '|---|---|---|---|---|');
     for (const e of eps) {
       const flags = [e.idempotent && 'idempotent', e.audited && 'audited', e.stepUp && `step-up: ${e.stepUp.kind}`, e.permissionWhen?.length && `also ${e.permissionWhen.map((r) => r.permission).join(', ')} when not own`, e.sellerContext === 'optional' && 'before seller is chosen', (e.phase ?? m.phase) > m.phase && `phase ${e.phase}`].filter(Boolean).join(', ');
-      lines.push(`| ${e.method} | \`${fullPath(m, e)}\` | ${e.summary}${flags ? ` _(${flags})_` : ''} | ${e.auth}${e.permission ? `<br>\`${e.permission}\`` : ''} | ${[e.body !== undefined && fmtShape(e.body), (e.paging ? `Page<${typeof e.response === 'string' ? e.response : 'item'}>` : fmtShape(e.response))].filter(Boolean).join(' → ')} |`);
+      lines.push(`| ${e.method} | \`${fullPath(m, e)}\` | ${e.summary}${flags ? ` _(${flags})_` : ''} | ${e.auth}${e.permission ? `<br>\`${e.permission}\`` : ''} | ${[e.body !== undefined && fmtShape(e.body), (e.paging ? `Page<${typeof e.response === 'string' ? e.response : 'item'}>` : fmtShape(e.response, e.status))].filter(Boolean).join(' → ')} |`);
     }
   }
   if (Object.keys(m.types ?? {}).length) {

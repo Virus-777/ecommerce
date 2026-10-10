@@ -293,19 +293,10 @@ export class Core {
     return out;
   }
 
-  /** Who drafted and who routed a recommendation (separate duties) */
+  /** Who drafted and who last routed a recommendation (separate duties): recommendations.created_by / routed_by */
   async recommendationPeople(recommendationId: string): Promise<{ drafter: string | null; router: string | null }> {
-    const events = await this.repo.eventsFor('recommendationId', recommendationId, ['recommendation_drafted', 'recommendation_routed']);
-    return {
-      drafter: events.find((e) => e.kind === 'recommendation_drafted')?.actor_id ?? null,
-      router: events.filter((e) => e.kind === 'recommendation_routed').at(-1)?.actor_id ?? null,
-    };
-  }
-
-  /** Last approval request trust opened for a record (re-submitting after approval proceeds) */
-  async approvalFor(field: 'recommendationId' | 'enforcementId', id: string): Promise<string | null> {
-    const events = await this.repo.eventsFor(field, id, ['approval_requested']);
-    return (events.at(-1)?.detail.approvalRequestId as string | undefined) ?? null;
+    const r = await this.repo.get('recommendations', recommendationId);
+    return { drafter: r?.created_by ?? null, router: r?.routed_by ?? null };
   }
 }
 

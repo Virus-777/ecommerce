@@ -791,14 +791,16 @@ export class NotificationsService implements NotificationsPublicApi {
     }
   }
 
-  /** Job notifications.purge (daily): Delete notices older than noticeRetentionMonths and delivery rows older than deliveryLogRetentionDays; unresolved action notices whose records closed are marked expired (expired_at, never resolved_at) */
+  /** Job notifications.purge (daily): Delete notices older than noticeRetentionMonths and delivery rows older than deliveryLogRetentionDays; unresolved action notices are marked expired (expired_at, never resolved_at) actionNoticeExpiryDays after their deadline, or after they were created when they have no deadline */
   async purge(): Promise<void> {
     const now = this.core.now();
     const days = Number(await this.core.setting('deliveryLogRetentionDays'));
     await this.core.repo.purgeDeliveries(new Date(now.getTime() - days * 86_400_000));
     await this.core.repo.purgeNotices(now);
-    // action notices whose deadline passed 30 days ago belong to records that closed without a resolve
-    await this.core.repo.expireActionNotices(new Date(now.getTime() - 30 * 86_400_000), now);
+    // open action notices past their deadline (or, without one, their creation) by actionNoticeExpiryDays belong to
+    // records that closed without a resolve: expired, never resolved
+    const expiryDays = Number(await this.core.setting('actionNoticeExpiryDays'));
+    await this.core.repo.expireActionNotices(new Date(now.getTime() - expiryDays * 86_400_000), now);
   }
 
   async #safe(fn: () => Promise<unknown>, id: string) {

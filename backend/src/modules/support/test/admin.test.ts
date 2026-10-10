@@ -238,24 +238,34 @@ describe('decisions, drafts and appeals', () => {
     expect(res.body.error).toMatchObject({ code: 'APPEAL_WINDOW_CLOSED', details: { appealDeadline: expect.any(String) } });
   });
 
-  it('a platform-funded remedy above the limit waits for approval and is published once approved', async () => {
+  it('a platform-funded remedy above the limit is saved pending (200 with pendingApproval) and published once approved', async () => {
     const x = await disputeCase({ price: 9000 });
     h.authority['support.remedies.approve'] = 'approval_required';
     const res = await h.call('POST', `/api/admin/support/cases/${x.caseId}/decide`, tokens.staff(undefined, DECIDER), { outcome: 'customer_favored', remedies: [{ kind: 'partial_refund', amount: USD(7000), chargedTo: 'platform' }], reason: 'Goodwill for a lost parcel', notifyParties: true }, idem());
     h.authority['support.remedies.approve'] = 'allowed';
-    expect(res.status).toBe(409);
-    expect(res.body.error.code).toBe('APPROVAL_REQUIRED');
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const requestId = res.body.pendingApproval.approvalRequestId;
+    expect(res.body.pendingApproval).toMatchObject({ required: true, approvalRequestId: expect.any(String) });
+    expect(res.body.case.status).toBe('escalated');
+    expect(res.body.case.decision).toBeNull();
     const request = h.calls.approvals.at(-1)!;
     expect(request).toMatchObject({ action: 'support.remedies.approve', amount: USD(7000), target: { type: 'case', id: x.caseId } });
+    const row = (await (h.app.kernel.database.kysely.withSchema('support') as any).selectFrom('cases').selectAll().where('id', '=', x.caseId).executeTakeFirst()) as any;
+    expect(row).toMatchObject({ approval_request_id: requestId, pending_decision: { kind: 'decision', decision: { outcome: 'customer_favored' } } });
+    // another decision while this one waits: nothing is saved (409)
+    const again = await h.call('POST', `/api/admin/support/cases/${x.caseId}/decide`, tokens.staff(), { outcome: 'seller_favored', remedies: [], reason: 'Changed my mind', notifyParties: true }, idem());
+    expect(again.status).toBe(409);
+    expect(again.body.error).toMatchObject({ code: 'APPROVAL_REQUIRED', details: { approvalRequestId: requestId } });
     let detail = await h.call('GET', `/api/admin/support/cases/${x.caseId}`, tokens.staff());
     expect(detail.body.case.status).toBe('escalated');
-    expect(detail.body.decisionDraft.draft.outcome).toBe('customer_favored');
-    await h.publish('access', 'access.approval.decided', { requestId: res.body.error.details.approvalRequestId, ref: 'AP-9', actionKey: 'support.remedies.approve', module: 'support', target: { type: 'case', id: x.caseId }, outcome: 'approved', decidedBy: { kind: 'staff', id: newId() }, reason: 'OK', amount: USD(7000), approverIds: [], requestedById: DECIDER });
+    expect(detail.body.pendingApproval).toMatchObject({ approvalRequestId: requestId });
+    await h.publish('access', 'access.approval.decided', { requestId, ref: 'AP-9', actionKey: 'support.remedies.approve', module: 'support', target: { type: 'case', id: x.caseId }, outcome: 'approved', decidedBy: { kind: 'staff', id: newId() }, reason: 'OK', amount: USD(7000), approverIds: [], requestedById: DECIDER });
     detail = await h.call('GET', `/api/admin/support/cases/${x.caseId}`, tokens.staff());
     expect(detail.body.case.status).toBe('decision_made');
     expect(detail.body.case.decision.decidedBy.id).toBe(DECIDER);
     expect(detail.body.case.remedies[0]).toMatchObject({ kind: 'partial_refund', chargedTo: 'platform', amount: USD(7000) });
     expect(detail.body.decisionDraft).toBeNull();
+    expect(detail.body.pendingApproval).toBeNull();
   });
 
   it('a rejected approval keeps the decision as a draft', async () => {
@@ -263,11 +273,13 @@ describe('decisions, drafts and appeals', () => {
     h.authority['support.remedies.approve'] = 'approval_required';
     const res = await h.call('POST', `/api/admin/support/cases/${x.caseId}/decide`, tokens.staff(), { outcome: 'customer_favored', remedies: [{ kind: 'refund', chargedTo: 'platform' }], reason: 'Platform pays', notifyParties: true }, idem());
     h.authority['support.remedies.approve'] = 'allowed';
-    expect(res.status).toBe(409);
-    await h.publish('access', 'access.approval.decided', { requestId: res.body.error.details.approvalRequestId, ref: 'AP-10', actionKey: 'support.remedies.approve', module: 'support', target: { type: 'case', id: x.caseId }, outcome: 'rejected', decidedBy: { kind: 'staff', id: newId() }, reason: 'Seller should pay', amount: USD(9000), approverIds: [], requestedById: newId() });
+    expect(res.status).toBe(200);
+    expect(res.body.decisionDraft).toBeNull();
+    await h.publish('access', 'access.approval.decided', { requestId: res.body.pendingApproval.approvalRequestId, ref: 'AP-10', actionKey: 'support.remedies.approve', module: 'support', target: { type: 'case', id: x.caseId }, outcome: 'rejected', decidedBy: { kind: 'staff', id: newId() }, reason: 'Seller should pay', amount: USD(9000), approverIds: [], requestedById: newId() });
     const detail = await h.call('GET', `/api/admin/support/cases/${x.caseId}`, tokens.staff());
     expect(detail.body.case.status).toBe('escalated');
     expect(detail.body.decisionDraft.draft.reason).toBe('Platform pays');
+    expect(detail.body.pendingApproval).toBeNull();
     expect(detail.body.history.some((e: { label: string }) => /rejected/.test(e.label))).toBe(true);
   });
 

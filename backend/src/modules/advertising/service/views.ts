@@ -5,7 +5,7 @@
 import type { AdCampaign, AdCampaignSummary, ApprovalStep, Audience, CampaignMetrics, Creative, CreativeReview, CreativeUse, Destination, DismissalRule, FrequencyCap, LinkedPromotion, PromotedItem, ReviewCheck } from '../../../spec/advertising.js';
 import type * as common from '../../../spec/common.js';
 import { advertiserRef, allowedActions, budgetLabel, budgetOf, deliveryLabel, isPaid, pagesLabel, pct, periodLabel, shortDate, STEP_SCOPE } from '../domain/rules.js';
-import type { CampaignRec, CreativeRec, ItemRec, LogRec, PlacementRec, StatTotals, StepRec } from '../ports.js';
+import type { CampaignRec, CreativeRec, ItemRec, PlacementRec, StatTotals, StepRec } from '../ports.js';
 import { decodeActor, notFound, Part } from './core.js';
 
 /** A campaign row with its placement, promoted items and creatives */
@@ -22,8 +22,6 @@ export interface Model {
   dismissal: DismissalRule;
 }
 
-/** Internal campaign_items kinds (not shown as promoted items) */
-export const OFFER_PRODUCT = 'offer_product';
 const PUBLIC_ITEM_KINDS = ['offer', 'product', 'seller_store', 'brand'];
 
 const TIMELINE_LABEL: Record<string, string> = {
@@ -48,7 +46,6 @@ const TIMELINE_LABEL: Record<string, string> = {
   after_approval_fallback: 'Scheduled instead of activated',
 };
 
-export const PAUSE_ACTIONS = ['pause', 'auto_pause:promotion', 'auto_pause:offer', 'auto_pause:stock', 'auto_pause:product', 'auto_pause:seller', 'auto_pause:trust', 'auto_pause:availability'];
 
 export class ViewsPart extends Part {
   /* ---------------------------------------------------------------- models */
@@ -118,13 +115,9 @@ export class ViewsPart extends Part {
     const now = this.now();
     const tz = this.core.tz();
     const endingSoonDays = await this.core.num('endingSoonDays', 3);
-    const [totals, sellers, pauses, steps, models] = await Promise.all([
+    const [totals, sellers, steps, models] = await Promise.all([
       this.repo.totals(ids),
       this.core.sellerNames(rows.map((r) => r.seller_id)),
-      this.repo.lastLogs(
-        rows.filter((r) => r.status === 'paused').map((r) => r.id),
-        PAUSE_ACTIONS,
-      ),
       this.repo.find('approval_steps', { campaign_id: rows.filter((r) => r.status === 'in_review').map((r) => r.id) }),
       this.models(rows),
     ]);
@@ -133,7 +126,6 @@ export class ViewsPart extends Part {
       const m = byId.get(r.id);
       const placement = m?.placement;
       const t = totals.get(r.id);
-      const pause = pauses.get(r.id);
       const endingSoon = r.ends_at ? r.ends_at.getTime() - now.getTime() < endingSoonDays * 86_400_000 : false;
       return {
         id: r.id,
@@ -151,8 +143,8 @@ export class ViewsPart extends Part {
         displays: t?.displays ?? 0,
         clicks: t?.clicks ?? 0,
         status: r.status as AdCampaignSummary['status'],
-        statusNote: this.statusNote(r, pause, steps.filter((s) => s.campaign_id === r.id), area, tz),
-        allowedActions: allowedActions(r.status, { origin: r.origin, area, pausedBySeller: pause?.actor_kind === 'seller', endingSoon }),
+        statusNote: this.statusNote(r, steps.filter((s) => s.campaign_id === r.id), area, tz),
+        allowedActions: allowedActions(r.status, { origin: r.origin, area, pausedBySeller: decodeActor(r.paused_by)?.kind === 'seller', endingSoon }),
       };
     });
   }
@@ -161,12 +153,13 @@ export class ViewsPart extends Part {
     return items.find((i) => i.kind === 'brand')?.label ?? null;
   }
 
-  private statusNote(r: CampaignRec, pause: LogRec | undefined, steps: StepRec[], area: 'admin' | 'seller', tz: string): string | null {
+  private statusNote(r: CampaignRec, steps: StepRec[], area: 'admin' | 'seller', tz: string): string | null {
     switch (r.status) {
       case 'paused': {
-        if (!pause) return r.paused_reason;
-        const who = pause.actor_kind === 'seller' ? (area === 'seller' ? 'you' : 'the seller') : pause.actor_kind === 'system' ? 'Marketly (automatic)' : 'Marketly';
-        return `Paused by ${who} ${shortDate(pause.at, tz)}${r.paused_reason ? ` · ${r.paused_reason}` : ''}`;
+        const by = decodeActor(r.paused_by);
+        if (!by || !r.paused_at) return r.paused_reason;
+        const who = by.kind === 'seller' ? (area === 'seller' ? 'you' : 'the seller') : by.kind === 'system' ? 'Marketly (automatic)' : 'Marketly';
+        return `Paused by ${who} ${shortDate(r.paused_at, tz)}${r.paused_reason ? ` · ${r.paused_reason}` : ''}`;
       }
       case 'in_review': {
         const latest = Math.max(0, ...steps.map((s) => s.submission));
@@ -176,7 +169,7 @@ export class ViewsPart extends Part {
       case 'finished':
         return r.finished_reason ? FINISHED_NOTE[r.finished_reason] ?? r.finished_reason : null;
       case 'rejected':
-        return r.paused_reason;
+        return r.rejected_reason;
       default:
         return null;
     }
@@ -187,7 +180,7 @@ export class ViewsPart extends Part {
   async campaign(m: Model): Promise<AdCampaign> {
     const r = m.row;
     const rules = await this.core.rules();
-    const [totals, sellers, creatives, approvals, timeline, linked, checks, pause] = await Promise.all([
+    const [totals, sellers, creatives, approvals, timeline, linked, checks] = await Promise.all([
       this.repo.totals([r.id]),
       this.core.sellerNames([r.seller_id]),
       this.creativesOf(m),
@@ -195,11 +188,10 @@ export class ViewsPart extends Part {
       this.timeline(r.id),
       this.linkedPromotion(r),
       this.parts.campaigns.checksFor(m),
-      r.status === 'paused' ? this.repo.lastLogs([r.id], PAUSE_ACTIONS).then((x) => x.get(r.id)) : Promise.resolve(undefined),
     ]);
     const activate = this.activateInfo(r, linked);
     const [owner] = await this.core.named([r.owner_staff_id ? { kind: 'staff', id: r.owner_staff_id } : null]);
-    const [createdBy, pausedBy] = await this.core.named([decodeActor(r.created_by), pause ? { kind: pause.actor_kind as common.Actor['kind'], id: pause.actor_id } : null]);
+    const [createdBy, pausedBy] = await this.core.named([decodeActor(r.created_by), r.status === 'paused' ? decodeActor(r.paused_by) : null]);
     return {
       id: r.id,
       ref: r.ref,
@@ -230,6 +222,8 @@ export class ViewsPart extends Part {
       status: r.status as AdCampaign['status'],
       pausedReason: r.status === 'paused' ? r.paused_reason : null,
       pausedBy: r.status === 'paused' ? (pausedBy ?? null) : null,
+      pauseCause: (r.status === 'paused' ? r.pause_cause : null) as AdCampaign['pauseCause'],
+      rejectedReason: r.status === 'rejected' || r.status === 'archived' ? r.rejected_reason : null,
       finishedReason: (r.status === 'finished' || r.status === 'archived' ? r.finished_reason : null) as AdCampaign['finishedReason'],
       approvals,
       checks: checks.checks,

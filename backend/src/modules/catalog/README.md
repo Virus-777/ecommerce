@@ -5,7 +5,7 @@
 What a product is: categories, attributes, brands, products, variants, and the review workflow that decides whether a product may be sold. How a seller sells it (price, stock, condition) belongs to offers.
 
 - **Group:** Catalog and stock · **Launch phase:** 1 · **Plan chapters:** 5, 8
-- **Depends on:** [media](../media/README.md) · **Optional:** [search](../search/README.md), [sellers](../sellers/README.md), [access](../access/README.md), [audit](../audit/README.md), [offers](../offers/README.md), [cart](../cart/README.md), [reviews](../reviews/README.md), [inventory](../inventory/README.md), [reports](../reports/README.md), [orders](../orders/README.md), [returns](../returns/README.md), [support](../support/README.md)
+- **Depends on:** [media](../media/README.md) · **Optional:** [search](../search/README.md), [sellers](../sellers/README.md), [access](../access/README.md), [audit](../audit/README.md), [offers](../offers/README.md), [cart](../cart/README.md), [reviews](../reviews/README.md), [inventory](../inventory/README.md), [reports](../reports/README.md), [orders](../orders/README.md), [returns](../returns/README.md), [support](../support/README.md), [settings](../settings/README.md)
 - **Required by:** [offers](../offers/README.md), [orders](../orders/README.md), [promotions](../promotions/README.md), [reviews](../reviews/README.md), [search](../search/README.md), [wishlist](../wishlist/README.md)
 
 ## Owns
@@ -382,6 +382,7 @@ What a product is: categories, attributes, brands, products, variants, and the r
 | lastSavedBy | `Actor?` |
 | expectedReviewBy | `datetime?` Shown to the submitter |
 | reviewDeadline | `Deadline?` Internal review target that orders the queue (setting reviewTargetBusinessDays) |
+| pausedAt | `datetime?` Set while a restriction or suspension of the seller pauses the review: the submission is left out of the review queue until the seller is reinstated |
 | assignee | `Actor?` Reviewer who picked it up (staff only) |
 | decidedAt | `datetime?` |
 | note | `text?` Submitter's note to the reviewer, e.g. what changed on resubmission |
@@ -409,6 +410,7 @@ What a product is: categories, attributes, brands, products, variants, and the r
 | matchedProductId | `uuid?` |
 | mediaId | `uuid?` |
 | suggestedCategoryId | `uuid?` |
+| dismissedAt | `datetime?` Duplicate candidates: when a reviewer marked this matched product not a duplicate (check_dismissals) |
 
 ### ImageRule
 
@@ -791,6 +793,7 @@ Indexes: `(review_state, id)`, `(category_id, id)`, `(owner_seller_id, id)`, `gi
 | last_saved_by | jsonb? |
 | expected_review_by | timestamptz? |
 | review_due_at | timestamptz? |
+| paused_at | timestamptz? (set while a seller restriction or suspension pauses the review; the queue leaves paused rows out) |
 | assignee_staff_id | uuid? |
 | assignee_name | text? |
 | decided_at | timestamptz? |
@@ -816,6 +819,18 @@ Indexes: `(state, review_due_at)`, `(product_id, submitted_at desc)`
 | dismissed_matched_product_id | uuid? |
 
 Indexes: `(submission_id)`, `(kind, result)`
+
+**check_dismissals**: Per-candidate dismissals of a duplicate check: one row per matched product a reviewer marked not a duplicate. The check row's dismissed_* columns record the latest dismissal; the finding counts as dismissed once every candidate has a row here
+
+| Column | Type |
+|---|---|
+| check_id | uuid → submission_checks |
+| matched_product_id | uuid |
+| dismissed_at | timestamptz |
+| dismissed_by | jsonb |
+| reason | text |
+
+Indexes: `pk (check_id, matched_product_id)`
 
 **review_drafts**: A reviewer's unsent decision per open submission; deleted when the decision is sent
 
@@ -974,6 +989,7 @@ Checked through the access module (limits per role, second reviewer).
 | Code | Status | Meaning |
 |---|---|---|
 | `BRAND_NOT_ACTIVE` | 409 | The product's brand is under review or blocked; decide the brand first |
+| `DATASET_UNAVAILABLE` | 409 | reports refused the export dataset: it is not in the export registry or catalog exports are switched off (raised by reports.requestExport) |
 
 ## Background jobs
 
@@ -994,6 +1010,8 @@ Checked through the access module (limits per role, second reviewer).
 - Variants are replaced as a set while a product is a draft; after approval, variant changes go through corrections so existing offers keep their variant ids.
 - Automated submission checks (plan ch. 8: review for duplicates, misleading claims, poor imagery and incorrect categories) run when a product is submitted and are stored per submission in submission_checks: duplicate (title, brand, model number, GTIN and image similarity against existing products), image_standard (media.checkImage against the category image_standards), category_fit (attributes and title against the chosen category), prohibited_claim (medical, safety and superlative claims in title, features and description), brand_authorization (protected brands need an approved brand claim), restricted_item (restricted categories and keywords) and identifier (GTIN format and reuse). Results are pass, warn or fail with evidence; they are shown to the reviewer in the review queue and never approve or reject on their own. Fail results are listed to the submitter only through the reviewer's request-changes reasons.
 - Each submit creates a submissions row (SUB-YYMMDD-NNNN): kind new for a first submission, resubmitted after changes were requested, content_change when an approved product is reopened. Draft saves update last_saved_at and last_saved_by; the review queue is ordered by review_due_at.
+- Review dates: review_due_at (submitted + reviewTargetBusinessDays) and expected_review_by (one business day later) count business days on the settings business calendar (settings.businessCalendar: opening days and closures in the market time zone); while settings is off, Monday to Friday in UTC.
+- Paused submissions: sellers.seller.restricted (product submissions) and sellers.seller.suspended set paused_at on the seller's open submissions (in the restricted categories) and the review queue leaves them out; sellers.seller.reinstated clears paused_at on those no remaining restriction covers. A paused submission keeps its review_due_at, so it returns to its original place in the queue.
 - Product references: every product gets ref PRD-NNNNN at creation; it is shown on duplicates, merges and admin lists and accepted by admin search.
 - Content score (0–100) is recomputed on every save from required attributes filled, images meeting the category standard, description length, key features and identifiers; missing[] lists what lowers it.
 - Listing counts: catalog keeps offer_index from offers and inventory events (offers.getOfferStats on rebuild) so admin lists, CatalogMatch, category and brand counts need no per-row calls to offers. Counts may lag by the job interval.
@@ -1202,6 +1220,8 @@ type ProductSubmission @areas(in: [SELLER, ADMIN]) {
   expectedReviewBy: DateTime
   "Internal review target that orders the queue"
   reviewDeadline: Deadline
+  "Set while a restriction or suspension of the seller pauses the review (left out of the review queue until reinstated)"
+  pausedAt: DateTime @areas(in: [ADMIN])
   "Reviewer who picked up the submission"
   assignee: Actor @areas(in: [ADMIN])
   decidedAt: DateTime
@@ -1296,6 +1316,8 @@ type ProductCheckEvidence @areas(in: [ADMIN]) {
   media: MediaRef
   "Category the CATEGORY_FIT check suggests instead"
   suggestedCategory: Category
+  "DUPLICATE candidates: when a reviewer marked this matched product not a duplicate"
+  dismissedAt: DateTime
 }
 
 type ReviewLogEntry @areas(in: [SELLER, ADMIN]) {
@@ -1336,7 +1358,7 @@ extend type Query {
   myProduct(id: UUID!): Product @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "catalog", fn: "getProductForSeller")
 
   "Submissions waiting for review, by review deadline (Product.submission carries kind, submittedAt and reviewDeadline)"
-  productReviewQueue(kind: String, categoryId: UUID, paging: PageInput): ProductPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "catalog.products.review") @source(module: "catalog", fn: "listReviewQueue")
+  productReviewQueue(kind: ProductSubmissionKind, categoryId: UUID, paging: PageInput): ProductPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "catalog.products.review") @source(module: "catalog", fn: "listReviewQueue")
 
   "Any product with review history (staff)"
   productAdmin(id: UUID!): Product @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "catalog", fn: "getProductAdmin")

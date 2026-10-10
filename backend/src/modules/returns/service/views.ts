@@ -278,18 +278,18 @@ export class Views {
       discountShare: m(rr.discount_share),
       shippingRefund: m(rr.shipping_refund),
       returnShippingDeduction: m(rr.return_shipping_deduction),
-      deductions: rr.deductions.list,
-      taxRefund: rr.deductions.taxRefund ? m(rr.deductions.taxRefund) : null,
+      deductions: rr.deductions,
+      taxRefund: rr.tax_refund ? m(rr.tax_refund) : null,
       total: m(rr.total),
-      maxRefundable: m(rr.deductions.maxRefundable),
-      destination: rr.deductions.destinationLabel,
+      maxRefundable: m(rr.max_refundable),
+      destination: rr.destination_label,
       isEstimate,
     };
   }
 
   refundView(rr: RefundRec, agg: Agg): RefundView {
     const status = rr.status as RefundStatus;
-    const approvedAt = rr.deductions.approvedAt ?? null;
+    const approvedAt = rr.approved_at?.toISOString() ?? null;
     return {
       id: rr.id,
       ref: rr.ref,
@@ -299,7 +299,7 @@ export class Views {
       track: refundTrack(status),
       breakdown: this.breakdown(rr, is(['requested', 'under_review', 'declined'], status)),
       approvedAt,
-      sentAt: rr.deductions.sentAt ?? null,
+      sentAt: rr.sent_at?.toISOString() ?? null,
       failedReason: rr.failed_reason,
       expectedBy: approvedAt && status !== 'sent' ? addBusinessDays(new Date(approvedAt), agg.ret.terms_snapshot.meta.targets.refundBusinessDays + 3, this.core.tz).toISOString() : null,
       bankReference: null,
@@ -564,7 +564,7 @@ export class Views {
     let impact: EarningsImpact | null = null;
     if (rr.owner_type === 'seller' && agg) impact = await this.earningsImpact(agg, rr);
     const ret = agg?.ret;
-    const history = ret ? agg!.events.filter((e) => e.kind.startsWith('refund') && VISIBLE[area].includes(e.visibility)).map((e) => this.event(e)) : x.history;
+    const history = ret ? agg!.events.filter((e) => e.kind.startsWith('refund') && VISIBLE[area].includes(e.visibility)).map((e) => this.event(e)) : rr.history;
     return {
       id: rr.id,
       ref: rr.ref,
@@ -573,12 +573,12 @@ export class Views {
       returnRef: ret?.ref ?? null,
       caseId: rr.case_id,
       orderId: rr.order_id,
-      orderRef: ret?.order_ref ?? x.orderRef ?? '',
+      orderRef: ret?.order_ref ?? rr.order_ref ?? '',
       orderItemIds: rr.order_item_ids,
       ownerType: rr.owner_type,
       sellerId: rr.seller_id,
-      sellerName: rr.owner_type === 'official' ? OFFICIAL_STORE_NAME : (ret?.terms_snapshot.meta.sellerName ?? x.sellerName ?? 'Seller'),
-      customerName: ret?.terms_snapshot.meta.customerName ?? x.customerName ?? 'Customer',
+      sellerName: rr.owner_type === 'official' ? OFFICIAL_STORE_NAME : (ret?.terms_snapshot.meta.sellerName ?? rr.seller_name ?? 'Seller'),
+      customerName: ret?.terms_snapshot.meta.customerName ?? rr.customer_name ?? 'Customer',
       status: rr.status as RefundRequest['status'],
       breakdown: this.breakdown(rr, is(['requested', 'under_review', 'declined'], rr.status)),
       fundedBy: rr.funded_by as RefundRequest['fundedBy'],

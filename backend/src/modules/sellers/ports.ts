@@ -34,6 +34,8 @@ export type AppealRec = Db['appeals'];
 export type NoteRec = Db['seller_notes'];
 export type AccountEventRec = Db['account_events'];
 export type InvitationRec = Db['seller_invitations'];
+export type PayoutChangeRec = Db['payout_changes'];
+export type PendingChangeRec = Db['pending_changes'];
 
 /** A column condition: a value (=), a list (in), null (is null) or an operator */
 export type Cond<V> = V | readonly V[] | { op: '<' | '<=' | '>' | '>=' | '<>' | 'is not'; value: V | null };

@@ -145,12 +145,12 @@ describe('external recipients', () => {
     });
     for (const [p, exportId] of [[a, exportA], [b, exportB]] as const) {
       const [n] = await inbox(as.staff(p), 'admin');
-      expect(n).toMatchObject({ topicKey: 'staff.report.scheduled', group: 'Reports', link: { kind: 'export', id: exportId, screen: 'admin/exports' } });
+      expect(n).toMatchObject({ topicKey: 'staff.report.scheduled', group: 'Reports', link: { kind: 'export', id: exportId, screen: 'admin/reports' } });
       const mail = emailsTo(p.email);
       expect(mail).toHaveLength(1);
       expect(mail[0]!.message.subject).toBe('Weekly sales: Week of Oct 5, 2026');
       expect(mail[0]!.message.text).toContain('(CSV)');
-      expect(mail[0]!.message.text).toContain(`/admin/exports/${exportId}`);
+      expect(mail[0]!.message.text).toContain(`/admin/reports/${exportId}`);
     }
     const log = await deliveries('topicKey=staff.report.scheduled');
     expect(log.every((d) => d.recipientKind === 'staff_member')).toBe(true);

@@ -267,8 +267,8 @@ export const SellerFeedback: z.ZodType<SellerFeedback> = z.object({
 }).register(common.apiTypes, { id: "reviews.SellerFeedback" });
 
 export interface SellerFeedbackSummary {
-  /** Null for the Official Store */
-  sellerId?: string | null;
+  /** OFFICIAL_STORE_ID for the Official Store (official = true) */
+  sellerId: string;
   official: boolean;
   periodMonths: number;
   count: number;
@@ -287,7 +287,7 @@ export interface SellerFeedbackSummary {
 }
 
 export const SellerFeedbackSummary: z.ZodType<SellerFeedbackSummary> = z.object({
-  sellerId: z.uuid().describe("Null for the Official Store").nullish(),
+  sellerId: z.uuid().describe("OFFICIAL_STORE_ID for the Official Store (official = true)"),
   official: z.boolean(),
   periodMonths: z.number().int(),
   count: z.number().int(),
@@ -429,8 +429,8 @@ export interface PendingSellerFeedback {
   orderId: string;
   orderRef: string;
   ownerType: "official" | "seller";
-  /** Null for the Official Store */
-  sellerId?: string | null;
+  /** OFFICIAL_STORE_ID for the Official Store */
+  sellerId: string;
   sellerName: string;
   packageLabel: string;
   deliveredAt?: string | null;
@@ -443,7 +443,7 @@ export const PendingSellerFeedback: z.ZodType<PendingSellerFeedback> = z.object(
   orderId: z.uuid(),
   orderRef: z.string(),
   ownerType: z.enum(["official", "seller"]),
-  sellerId: z.uuid().describe("Null for the Official Store").nullish(),
+  sellerId: z.uuid().describe("OFFICIAL_STORE_ID for the Official Store"),
   sellerName: z.string(),
   packageLabel: z.string(),
   deliveredAt: z.iso.datetime({ offset: true }).nullish(),
@@ -479,8 +479,8 @@ export interface ReviewContext {
   verifiedPurchase: boolean;
   seller: {
     ownerType: "official" | "seller";
-    /** Null for the Official Store */
-    id?: string | null;
+    /** OFFICIAL_STORE_ID for the Official Store */
+    id: string;
     name: string;
   };
   existingReview?: MyReview | null;
@@ -505,7 +505,7 @@ export const ReviewContext: z.ZodType<ReviewContext> = z.object({
   verifiedPurchase: z.boolean(),
   seller: z.object({
     ownerType: z.enum(["official", "seller"]),
-    id: z.uuid().describe("Null for the Official Store").nullish(),
+    id: z.uuid().describe("OFFICIAL_STORE_ID for the Official Store"),
     name: z.string(),
   }),
   get existingReview() {
@@ -1464,6 +1464,18 @@ export interface ReviewsDb {
     /** trust enforcement this decision executed; reversed with it */
     trust_enforcement_id: string | null;
   };
+  /** Content referred to Trust and Risk from moderation (referToTrust; reviews.content.referred). Not a moderation decision: the item stays open */
+  referrals: {
+    id: string;
+    moderation_item_id: string;
+    content_type: string;
+    content_id: string;
+    author_id: string;
+    note: string;
+    /** staff id */
+    referred_by: string;
+    referred_at: Date;
+  };
   appeals: {
     id: string;
     decision_id: string;
@@ -1514,6 +1526,8 @@ export interface ReviewsDb {
     dispatch_sum: number;
     communication_sum: number;
     communication_count: number;
+    /** sum of overall ratings in the period: average = overall_sum / count */
+    overall_sum: number;
     updated_at: Date;
   };
 }
@@ -2199,6 +2213,7 @@ export const endpoints = defineEndpoints({
     permission: "reviews.moderation.decide",
     scope: "staff",
     summary: "Send to Trust and Risk (suspected fake or paid reviews, payment offers)",
+    desc: "Recorded in referrals (shown in the item's history) and announced with reviews.content.referred; the moderation item stays open for a decision.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -2843,7 +2858,7 @@ export const spec = defineModuleSpec({
       "catalog.product.merged": "Move reviews, questions and the rating summary to the kept product",
       "trust.enforcement.recorded": "remove_reviews: remove the reviews, questions and answers named in targets with a moderation decision (reason proven_fake, trust_enforcement_id recorded), tell the authors, recalculate ratings, publish reviews.moderation.decided with trustEnforcementId (trust confirms) and reviews.review.removed for reviews. keep_reviews: decide open moderation items on the named content as kept (reason legitimate_experience) so held content is published again. Other actions are ignored",
       "trust.enforcement.reversed": "remove_reviews: reinstate the content that enforcement removed (decisions with its trust_enforcement_id) unless the author deleted it since, recalculate ratings, publish reviews.review.published and reviews.rating.changed, tell the authors",
-      "customers.account.closed": "Anonymise the customer's content: display names become Former customer on reviews, feedback, questions and answers (content stays published as the honest record of a purchase); their votes and reports stay counted without the customer id; pending invites are cancelled",
+      "customers.account.closed": "Anonymise the customer's content: display names become Former customer on reviews, feedback, questions and answers (content stays published as the honest record of a purchase); their helpful votes stay counted under a random id (no link to the customer) and their reports without the reporter id; pending invites are cancelled",
       "sellers.seller.closed": "Keep feedback published; stop new responses from the closed seller"
     },
   },
@@ -3440,6 +3455,40 @@ export const spec = defineModuleSpec({
         "nullable": true
       }
     },
+    "referrals": {
+      "id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "moderation_item_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "content_type": {
+        "type": "text",
+        "nullable": false
+      },
+      "content_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "author_id": {
+        "type": "text",
+        "nullable": false
+      },
+      "note": {
+        "type": "text",
+        "nullable": false
+      },
+      "referred_by": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "referred_at": {
+        "type": "timestamptz",
+        "nullable": false
+      }
+    },
     "appeals": {
       "id": {
         "type": "uuid",
@@ -3600,6 +3649,10 @@ export const spec = defineModuleSpec({
         "nullable": false
       },
       "communication_count": {
+        "type": "int",
+        "nullable": false
+      },
+      "overall_sum": {
         "type": "int",
         "nullable": false
       },

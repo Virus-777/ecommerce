@@ -13,7 +13,7 @@ import type { Change, CheckoutLine, CouponResult, DiscountLine, QuoteTotals, Ste
 
 /* ================================================================ stored shapes (jsonb columns) */
 
-/** sessions.account. Customers are pre-filled; a guest has no email until the contact step. */
+/** The contact (sessions.account jsonb plus the email and contact_name columns). Customers are pre-filled; a guest has no email until the contact step. */
 export interface StoredAccount {
   kind: 'customer' | 'guest';
   customerId: string | null;
@@ -26,7 +26,7 @@ export interface StoredAccount {
   hidePricesOnSlip: boolean;
 }
 
-/** sessions.payment_selection: the chosen method and the latest payment attempt */
+/** The chosen method and the latest payment attempt (sessions.payment_selection jsonb plus the payment_intent_id and payment_state columns) */
 export interface StoredPayment {
   method: payments.MethodSelection | null;
   view: { kind: 'saved_card' | 'new_card' | 'digital_wallet'; label: string; savedMethodId: string | null; billingSummary: string | null } | null;

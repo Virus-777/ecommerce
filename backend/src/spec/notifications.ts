@@ -44,7 +44,7 @@ export interface NoticeLink {
   ref?: string | null;
   /** Button text, e.g. Open dispatch queue */
   label?: string | null;
-  /** App route / prototype screen id, e.g. account/tracking, seller/order, ops/dispatch */
+  /** App route / prototype screen id (design/prototype catalogue), the screen where the publishing module shows the record (its endpoint screens), e.g. account/tracking, seller/order, ops/dispatch. Invitation emails carry url and use accept-invitation (identity lists no screen for it) */
   screen: string;
   url?: string | null;
 }
@@ -54,7 +54,7 @@ export const NoticeLink: z.ZodType<NoticeLink> = z.object({
   id: z.string(),
   ref: z.string().describe("MK-260914-48213, RT-261002-0520, CS-261005-3381, PO-261005-3381").nullish(),
   label: z.string().describe("Button text, e.g. Open dispatch queue").nullish(),
-  screen: z.string().describe("App route / prototype screen id, e.g. account/tracking, seller/order, ops/dispatch"),
+  screen: z.string().describe("App route / prototype screen id (design/prototype catalogue), the screen where the publishing module shows the record (its endpoint screens), e.g. account/tracking, seller/order, ops/dispatch. Invitation emails carry url and use accept-invitation (identity lists no screen for it)"),
   url: z.url().nullish(),
 }).register(common.apiTypes, { id: "notifications.NoticeLink" });
 
@@ -2458,7 +2458,7 @@ export const spec = defineModuleSpec({
       "trust.appeal.decided": "The appellant: customer (topic customer.trust.appeal_decided) or seller owner (topic seller.trust.appeal_decided): the appeal outcome and what changes (restriction lifted or kept)",
       "payments.refund.destination_requested": "Customer (by the payload's customerId, else the order email; topic customer.refund.destination_needed, returns_refunds group): the refund could not go back to the original payment method; choose where to receive it, with the deadline; action required",
       "customers.closure.delayed": "Customer (topic customer.account.closure_delayed, account group): the account closure is waiting because new obligations appeared (blockers listed), and when it is checked again",
-      "offers.offer.missing_items_stale": "Ask the seller to review the offer's missing-items list after the product's box contents changed (topic seller.offer.missing_items_review, members with offers.offers.manage); Official Store offers go to staff (topic staff.offer.missing_items_review, Catalog Manager role)",
+      "offers.offer.missing_items_stale": "Ask the seller to review the offer's missing-items list after the product's box contents changed (topic seller.offer.missing_items_review, members with offers.offers.manage); Official Store offers go to staff (topic staff.offer.missing_items_review, Catalog Manager role). Information notices, not action notices: offers publishes nothing when the seller confirms the list unchanged, so an action could never be resolved",
       "inventory.stock.low_digest": "Daily digest of items at or below their reorder point: Official Store items to staff (topic staff.inventory.low_stock_digest, Inventory Manager role); each seller's own items to that seller (topic seller.stock.low_digest, members with the stock permission). Replaces one notice per item for non-urgent low stock",
       "sellers.application.information_reminder": "Applicant (topic seller.application.information_reminder, owner only): reminder that requested information is still missing, with the deadline; same action notice as the original request",
       "workqueues.day_end.completed": "Staff (topic staff.day_end.completed, to the payload's roleKeys): the day-end summary (who completed it, open and overdue counts, items with notes); resolves the staff.day_end.summary action notices"
@@ -2487,10 +2487,18 @@ export const spec = defineModuleSpec({
     },
     "notifications.purge": {
       "schedule": "daily",
-      "does": "Delete notices older than noticeRetentionMonths and delivery rows older than deliveryLogRetentionDays; mark unresolved action notices whose records closed as expired (expired_at, not resolved_at)"
+      "does": "Delete notices older than noticeRetentionMonths and delivery rows older than deliveryLogRetentionDays; mark unresolved action notices expired (expired_at, not resolved_at) actionNoticeExpiryDays after their deadline, or after they were created when they have no deadline"
     }
   },
   settings: {
+    "actionNoticeExpiryDays": {
+      "default": 30,
+      "desc": "An unresolved action notice is marked expired (No longer needed) this many days after its deadline, or after it was created when it has no deadline",
+      "type": "duration",
+      "min": 1,
+      "max": 365,
+      "unit": "days"
+    },
     "noticeRetentionMonths": {
       "default": 12,
       "desc": "Notices are kept for 12 months (seller inbox copy)",

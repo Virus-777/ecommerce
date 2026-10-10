@@ -77,7 +77,7 @@
       "variantId": "uuid",
       "condition": "string",
       "label": { "type": "string", "desc": "Product title and variant, e.g. 'Halden Aurora ANC Headphones, Black'" },
-      "image": "MediaRef?",
+      "image": { "type": "MediaRef?", "desc": "The variant's first image, else the product's (read from catalog.getProducts; null while catalog is off)" },
       "quantities": "StockQuantities",
       "state": "enum(in_stock|low_stock|out_of_stock)",
       "lowStockThreshold": { "type": "int?", "desc": "Low-stock alert at / reorder point" },
@@ -240,7 +240,8 @@
     },
     "Reservation": {
       "id": "uuid",
-      "key": { "type": "string", "desc": "Checkout session key (idempotency)" },
+      "key": { "type": "string", "desc": "Idempotency key within its source: the checkout session key (holds), order:<orderId> (an order re-allocated after its hold expired), or the caller's key for allocateForOrder" },
+      "source": { "type": "enum(checkout|replacement|exchange)", "desc": "checkout: a checkout hold and the order's own allocation; replacement or exchange: allocateForOrder for a replacement or exchange shipment (no expiry; releaseHold may release it)" },
       "state": "enum(held|allocated|fulfilled|released|expired)",
       "orderId": "uuid?",
       "orderRef": "string?",
@@ -359,7 +360,8 @@
     },
     "Transfer": {
       "id": "uuid",
-      "ref": "string",
+      "ref": { "type": "string", "desc": "TRF-YYMMDD-NNNN (numbered per market day)" },
+      "note": { "type": "text?", "desc": "Planner's note from createTransfer" },
       "fromLocationId": "uuid",
       "toLocationId": "uuid",
       "state": "enum(draft|in_transit|received|cancelled)",
@@ -386,7 +388,7 @@
     { "name": "stock_levels", "desc": "Current quantities per item and location; changed only together with a movement row", "columns": { "stock_item_id": "uuid → stock_items", "location_id": "uuid → locations", "available": "int check >= 0", "reserved": "int check >= 0", "incoming": "int check >= 0", "damaged_held": "int check >= 0", "returned": "int check >= 0", "version": "int (optimistic lock)", "updated_at": "timestamptz" }, "indexes": ["pk (stock_item_id, location_id)", "(location_id)"] },
     { "name": "stock_movements", "desc": "Append-only ledger; never updated or deleted", "columns": { "id": "uuid pk", "stock_item_id": "uuid → stock_items", "location_id": "uuid → locations", "from_group": "text", "to_group": "text", "quantity": "int check > 0", "reason_code": "text", "note": "text?", "ref_kind": "text?", "ref_id": "text?", "ref_label": "text?", "actor_kind": "text", "actor_id": "text?", "actor_name": "text?", "approved_by": "text?", "after": "jsonb", "at": "timestamptz" }, "indexes": ["(stock_item_id, at)", "(ref_kind, ref_id)", "(reason_code, at)"] },
     { "name": "incoming_expectations", "desc": "Open incoming quantities from purchase orders (and transfers)", "columns": { "id": "uuid pk", "stock_item_id": "uuid → stock_items", "location_id": "uuid → locations", "source_kind": "text (purchase_order|transfer)", "source_id": "uuid", "source_ref": "text", "quantity_open": "int", "expected_date": "date?" }, "indexes": ["(stock_item_id, expected_date)", "(source_kind, source_id)"] },
-    { "name": "reservations", "columns": { "id": "uuid pk", "key": "text unique", "order_id": "uuid?", "order_ref": "text?", "state": "text", "expires_at": "timestamptz?", "released_reason": "text?", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(state, expires_at)", "(order_id)"] },
+    { "name": "reservations", "columns": { "id": "uuid pk", "source": "text (checkout|replacement|exchange)", "key": "text", "order_id": "uuid?", "order_ref": "text?", "state": "text", "expires_at": "timestamptz?", "released_reason": "text?", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(source, key) unique", "(state, expires_at)", "(order_id)"] },
     { "name": "reservation_lines", "columns": { "id": "uuid pk", "reservation_id": "uuid → reservations", "stock_item_id": "uuid → stock_items", "location_id": "uuid → locations", "order_item_id": "uuid?", "quantity": "int", "fulfilled_qty": "int", "released_qty": "int", "state": "text" }, "indexes": ["(reservation_id)", "(stock_item_id, state)", "(order_item_id)"] },
     { "name": "adjustments", "desc": "Staff adjustment requests incl. those waiting for a second reviewer", "columns": { "id": "uuid pk", "stock_item_id": "uuid → stock_items", "location_id": "uuid → locations", "from_group": "text", "to_group": "text", "quantity": "int", "reason_code": "text", "note": "text?", "review_date": "date?", "state": "text", "approval_request_id": "uuid?", "requested_by": "text", "decided_by": "text?", "movement_id": "uuid? → stock_movements", "created_at": "timestamptz", "applied_at": "timestamptz?" }, "indexes": ["(state, created_at)", "(stock_item_id)", "(approval_request_id)"] },
     { "name": "held_stock", "desc": "Units in Damaged or held with reason and review date", "columns": { "id": "uuid pk", "stock_item_id": "uuid → stock_items", "location_id": "uuid → locations", "quantity": "int", "reason_code": "text", "reason": "text?", "review_date": "date", "source_ref": "text?", "released_at": "timestamptz?" }, "indexes": ["(review_date) where released_at is null"] },
@@ -394,8 +396,9 @@
     { "name": "inbound_lines", "columns": { "inbound_id": "uuid → inbound_receipts", "stock_item_id": "uuid → stock_items", "expected": "int", "received": "int", "damaged": "int", "bin_code": "text?", "unit_cost_amount": "bigint", "sellable": "int?", "reason": "text?" }, "indexes": ["pk (inbound_id, stock_item_id)"] },
     { "name": "return_outcomes", "columns": { "id": "uuid pk", "return_id": "uuid", "return_ref": "text", "order_ref": "text", "stock_item_id": "uuid → stock_items", "quantity": "int", "inspected_condition": "text", "proposed_outcome": "text", "proposed_target_sku": "text?", "state": "text", "recorded_outcome": "text?", "target_stock_item_id": "uuid?", "recorded_by": "text?", "recorded_at": "timestamptz?", "inspected_at": "timestamptz" }, "indexes": ["unique (return_id, stock_item_id)", "(state)"] },
     { "name": "discrepancies", "columns": { "id": "uuid pk", "kind": "text", "stock_item_id": "uuid → stock_items", "location_id": "uuid → locations", "bin_code": "text?", "quantity": "int", "order_id": "uuid?", "order_ref": "text?", "note": "text?", "photo_media_ids": "jsonb", "state": "text", "resolution": "text?", "resolution_note": "text?", "reported_by": "text", "reported_at": "timestamptz", "resolved_by": "text?", "resolved_at": "timestamptz?" }, "indexes": ["(state, reported_at)", "(order_id)"] },
-    { "name": "transfers", "desc": "Phase 4", "columns": { "id": "uuid pk", "ref": "text unique", "from_location_id": "uuid → locations", "to_location_id": "uuid → locations", "state": "text", "created_by": "text", "shipped_at": "timestamptz?", "received_at": "timestamptz?" } },
+    { "name": "transfers", "desc": "Phase 4", "columns": { "id": "uuid pk", "ref": "text unique", "from_location_id": "uuid → locations", "to_location_id": "uuid → locations", "state": "text", "created_by": "text", "note": "text?", "shipped_at": "timestamptz?", "received_at": "timestamptz?" } },
     { "name": "transfer_lines", "desc": "Phase 4", "columns": { "transfer_id": "uuid → transfers", "stock_item_id": "uuid → stock_items", "quantity": "int", "received_quantity": "int?" }, "indexes": ["pk (transfer_id, stock_item_id)"] },
+    { "name": "valuation_snapshots", "desc": "Daily company stock valuation per stock group (job inventory.valuation-snapshot) for trading reports; one row per market day and group, rewritten if the job runs again that day", "tenant": false, "columns": { "snapshot_date": "date", "stock_group": "text (available|reserved|incoming|damaged_held|returned)", "units": "int", "value_at_cost_amount": "bigint", "currency": "char(3)", "sku_count": "int", "taken_at": "timestamptz" }, "indexes": ["pk (snapshot_date, stock_group)"] },
     { "name": "stock_counts", "desc": "Phase 4", "columns": { "id": "uuid pk", "location_id": "uuid → locations", "scope": "text", "state": "text", "created_by": "text", "submitted_at": "timestamptz?" } },
     { "name": "count_lines", "desc": "Phase 4", "columns": { "count_id": "uuid → stock_counts", "stock_item_id": "uuid → stock_items", "bin_code": "text?", "expected": "int", "counted": "int?" }, "indexes": ["pk (count_id, stock_item_id)"] }
   ],
@@ -543,7 +546,7 @@
     { "name": "inventory.reconcile-reservations", "schedule": "every 15 min", "does": "Find allocations whose order items are cancelled, completed or delivered without a matching event and raise them for review (no automatic release of allocated units)" },
     { "name": "inventory.low-stock-digest", "schedule": "daily 07:00 market time", "does": "Low and out-of-stock summary per seller and for the Official Store: publish inventory.stock.low_digest (notifications emails it)" },
     { "name": "inventory.held-stock-review", "schedule": "daily 07:00 market time", "does": "Publish inventory.hold.review_due for Damaged or held stock past its review date (work queue for the Inventory Manager)" },
-    { "name": "inventory.valuation-snapshot", "schedule": "daily 23:59 market time", "does": "Snapshot units and value at cost per group for company trading reports" }
+    { "name": "inventory.valuation-snapshot", "schedule": "daily 23:59 market time", "does": "Snapshot units and value at cost per group of company stock into valuation_snapshots (one row per market day and group) for company trading reports" }
   ],
   "settings": [
     { "key": "holdMinutes", "type": "duration", "default": 15, "desc": "Checkout hold lifetime", "unit": "minutes", "min": 1, "max": 60, "sellerVisible": false },
@@ -564,6 +567,9 @@
     "STOCK_ITEM_ARCHIVED": { "status": 409, "meaning": "The stock item is archived (its offer was removed)" }
   },
   "notes": [
+    "References: transfers are TRF-YYMMDD-NNNN (ctx.refs, numbered per market day).",
+    "Event consumers are idempotent through the kernel inbox, never through movement notes: orders.item.cancelled claims item-cancelled:<cancellationId>:<itemId>:<reservationId> and shipping.shipment.dispatched claims shipment-dispatched:<shipmentId> in the transaction that moves the units.",
+    "Work items: merge candidates after catalog.product.merged (two company stock items now hold the same variant and condition) are raised as manual_task items in the inventory.merge_candidates queue (owner Inventory Manager); order allocation problems go to inventory.reservations.",
     "Stock groups are quantities, not statuses: each stock item carries all five numbers per location. Every change writes one stock_movements row and updates stock_levels in the same transaction with an optimistic version check (CONFLICT on race).",
     "Sellable quantity = Available at sellable locations. Checkout cannot hold more than Available (plan ch. 9: prevent selling beyond eligible available quantities).",
     "Seller stock and company stock are separate stock items with ownerType; summaries never add them together. The future fulfillment service keeps ownerType = seller at a company warehouse location, so reports can name the stock owner.",

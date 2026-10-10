@@ -413,6 +413,7 @@ export class Requests {
           inspector: null,
           inspection_started_at: null,
           requested_at: now,
+          received_at: null,
           completed_at: null,
           updated_at: now,
         },

@@ -593,6 +593,10 @@ enum AuditCategory @areas(in: [ADMIN]) {
   SECURITY
   CONTENT
   ADVERTISING
+  SUPPORT
+  TRUST
+  INVENTORY
+  SHIPPING
   OTHER
 }
 
@@ -722,6 +726,14 @@ type Variant {
   options: [VariantOption!]!
   gtin: String
   images: [MediaRef!]!
+  "Shipping weight of one unit in its retail packaging, in grams (parcel data for shipping quotes and labels)"
+  weightGrams: Int
+  "Packaged length of one unit, in centimetres"
+  lengthCm: Int
+  widthCm: Int
+  heightCm: Int
+  "Manufacturer list price (MSRP) set by Marketly staff; offers may show it as a reference price"
+  listPrice: Money
 }
 
 type VariantOption {
@@ -789,6 +801,8 @@ type Brand {
   banner: MediaRef
   description: String
   productCount: Int!
+  "active, under_review or blocked. Store lists only show active brands; admin reads and catalog.getBrands return any status"
+  status: String! @areas(in: [SELLER, ADMIN])
 }
 
 enum ProductReviewState @areas(in: [SELLER, ADMIN]) {
@@ -832,6 +846,8 @@ type ProductSubmission @areas(in: [SELLER, ADMIN]) {
   expectedReviewBy: DateTime
   "Internal review target that orders the queue"
   reviewDeadline: Deadline
+  "Set while a restriction or suspension of the seller pauses the review (left out of the review queue until reinstated)"
+  pausedAt: DateTime @areas(in: [ADMIN])
   "Reviewer who picked up the submission"
   assignee: Actor @areas(in: [ADMIN])
   decidedAt: DateTime
@@ -926,6 +942,8 @@ type ProductCheckEvidence @areas(in: [ADMIN]) {
   media: MediaRef
   "Category the CATEGORY_FIT check suggests instead"
   suggestedCategory: Category
+  "DUPLICATE candidates: when a reviewer marked this matched product not a duplicate"
+  dismissedAt: DateTime
 }
 
 type ReviewLogEntry @areas(in: [SELLER, ADMIN]) {
@@ -949,7 +967,7 @@ extend type Query {
   "Product detail. In the store, only approved and active products resolve."
   product(id: UUID!): Product @source(module: "catalog", fn: "getProduct")
   "Submissions waiting for review, by review deadline (Product.submission carries kind, submittedAt and reviewDeadline)"
-  productReviewQueue(kind: String, categoryId: UUID, paging: PageInput): ProductPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "catalog.products.review") @source(module: "catalog", fn: "listReviewQueue")
+  productReviewQueue(kind: ProductSubmissionKind, categoryId: UUID, paging: PageInput): ProductPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "catalog.products.review") @source(module: "catalog", fn: "listReviewQueue")
   "Any product with review history (staff)"
   productAdmin(id: UUID!): Product @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "catalog", fn: "getProductAdmin")
 }
@@ -1539,7 +1557,10 @@ type FinanceSettlementRules @areas(in: [SELLER, ADMIN]) {
   schedule: String!
   availableAfterDeliveryDays: Int!
   minimumPayout: Money!
+  "Extra days before earnings become available while in the new-seller period; null after it"
   newSellerHoldDays: Int
+  "Last day of the new-seller period"
+  newSellerUntil: Date
   "Deducted from later earnings; if none, the balance shows the amount owed"
   refundAfterPayout: String!
   text: String!
@@ -1827,6 +1848,10 @@ type FinanceAmountOwed @areas(in: [SELLER, ADMIN]) {
   status: FinanceAmountOwedStatus!
   origin: [FinanceReference!]!
   note: String
+  "A write-off waiting for a second Finance reviewer"
+  pendingWriteOff: Money
+  "Approval request of the pending write-off"
+  approval: ApprovalInfo @areas(in: [ADMIN])
 }
 
 enum FinanceAmountOwedStatus @areas(in: [SELLER, ADMIN]) {
@@ -2249,7 +2274,8 @@ enum StockState {
 
 """
 One stock item: one per seller offer, or one per Official Store SKU. Seller stock and company stock are never added together.
-In the Seller Center only the caller's own items resolve; in the Admin Center reading needs inventory.stock.view.
+In the Seller Center only the caller's own items resolve; in the Admin Center reading needs inventory.stock.view
+(Offer.stock and Variant.stock check it for staff; customers see stock only through Offer.availability).
 """
 type StockItem @areas(in: [SELLER, ADMIN]) {
   id: UUID!
@@ -2353,12 +2379,12 @@ extend type Offer {
   "Stock state, low-stock count and quantity limit as the customer sees them"
   availability: Availability! @source(module: "inventory", fn: "getOfferAvailability")
   "The stock item holding this offer's quantities (seller: own offers only)"
-  stock: StockItem @areas(in: [SELLER, ADMIN]) @source(module: "inventory", fn: "getStockForOffers")
+  stock: StockItem @areas(in: [SELLER, ADMIN]) @auth(requires: SELLER) @source(module: "inventory", fn: "getStockForOffers")
 }
 
 extend type Variant {
   "Stock items for this variant. Seller Center: the caller's own items; Admin Center: company and seller items, never summed"
-  stock: [StockItem!]! @areas(in: [SELLER, ADMIN]) @source(module: "inventory", fn: "listStockForVariants")
+  stock: [StockItem!]! @areas(in: [SELLER, ADMIN]) @auth(requires: SELLER) @source(module: "inventory", fn: "listStockForVariants")
 }
 
 extend type Query {
@@ -5249,7 +5275,7 @@ enum ReviewAuthorKind {
 }
 
 type ReviewSoldBy {
-  "Null for the Official Store"
+  "OFFICIAL_STORE_ID for the Official Store"
   sellerId: UUID
   name: String!
 }
@@ -5405,10 +5431,10 @@ type SellerFeedbackPage implements Paged {
 
 """
 Seller feedback summary over the last 12 months, e.g. 98% positive · 4,812 ratings. Also given for the Official Store
-(official true, sellerId null), which collects the same package feedback.
+(official true, sellerId OFFICIAL_STORE_ID), which collects the same package feedback.
 """
 type SellerRating {
-  "Null for the Official Store"
+  "OFFICIAL_STORE_ID for the Official Store"
   sellerId: UUID
   "True for the Official Store"
   official: Boolean!
@@ -5873,7 +5899,7 @@ type SellerAppealDecision @areas(in: [SELLER, ADMIN]) {
 "A seller's appeal. Decided by someone other than the original decider; level 2 goes to the next reviewer."
 type SellerAppeal @areas(in: [SELLER, ADMIN]) {
   id: UUID!
-  "e.g. AP-261004-021"
+  "e.g. SAP-261004-021 (appeals filed before pass 4 keep their AP- reference)"
   ref: String!
   subject: SellerAppealSubject!
   subjectId: UUID!
@@ -5985,6 +6011,10 @@ type StoreInfoMarket {
   timeZone: String!
   locale: String!
   serviceRegionLabel: String!
+  "Legal name of the operating company, e.g. Marketly, Inc. (footer, policies, receipts)"
+  legalName: String!
+  "One-line company details for the footer and emails, e.g. Marketly, Inc. · 500 Market St, San Francisco, CA"
+  companyLine: String!
 }
 
 type StoreInfoSupport {
@@ -6183,6 +6213,8 @@ type DeliveryException @areas(in: [SELLER, ADMIN]) {
   shipmentId: UUID
   sellerName: String!
   itemsSummary: String!
+  "The order items the exception is about (empty when it covers the whole group)"
+  orderItemIds: [UUID!]!
   "e.g. 'USPS number not recognized' or 'Label created, no scan 36 h'"
   situation: String!
   "The plan's required response for the kind"
@@ -6403,7 +6435,7 @@ evidence files, deadlines and history (dispute review).
 """
 type Case {
   id: UUID!
-  "CS-NNNNNN"
+  "CS-YYMMDD-NNNN"
   ref: String!
   kind: CaseKind!
   subject: String!
@@ -6459,6 +6491,8 @@ type Case {
   reopened: Boolean! @areas(in: [ADMIN])
   "Saved, unpublished decision (Save decision draft); never shown to the parties"
   decisionDraft: CaseDecisionDraft @areas(in: [ADMIN])
+  "A decision above the decider's limit waiting for approval (support.remedies.approve); published once approved"
+  pendingApproval: ApprovalInfo @areas(in: [ADMIN])
 }
 
 "An unpublished decision draft saved by staff"
@@ -6951,7 +6985,7 @@ type TrustEnforcement @areas(in: [ADMIN]) {
 }
 
 type TrustReportResolution @areas(in: [ADMIN]) {
-  "action_taken, no_violation, insufficient_evidence, duplicate or referred"
+  "action_taken, no_violation, insufficient_evidence, duplicate (merged), referred or dismissed"
   outcome: String!
   summary: String!
   decidedBy: Actor!
@@ -7156,6 +7190,8 @@ type WarehouseTask @areas(in: [ADMIN]) {
   packages: [WarehousePackage!]!
   "e.g. 'Shortage reported: bin F-12-3 empty. Inventory is checking.'"
   holdReason: String
+  "When shipping reported the dispatch deadline missed; the order then leads the pick list"
+  dispatchOverdueAt: DateTime
   "e.g. 'This order also has Package 2 of 2 from Pixel & Port. They ship it separately.'"
   mixedOrderNote: String
   totalPackagesInOrder: Int!

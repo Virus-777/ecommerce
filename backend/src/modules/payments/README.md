@@ -124,10 +124,10 @@ Charging customers through provider adapters (card, digital wallet): payment int
 | attemptNo | `int` |
 | customerId | `uuid?` |
 | guestEmail | `email?` |
-| amount | `Money` |
+| amount | `Money` The whole order total, store-credit share included. The card is authorized for amount − creditAmount |
 | method | `MethodSelection` |
-| creditHoldId | `uuid?` |
-| creditAmount | `Money?` |
+| creditHoldId | `uuid?` wallet hold of the store-credit share (checkout holds it before authorizing) |
+| creditAmount | `Money?` Store-credit share of amount (the wallet hold); null or absent when no credit is used. Must not exceed amount; when it equals amount nothing is authorized on the card |
 | description | `string` |
 | returnUrl | `url` Where the provider sends the customer back after a bank challenge |
 
@@ -327,7 +327,7 @@ Charging customers through provider adapters (card, digital wallet): payment int
 | sellerName | `string` |
 | paid | `Money` |
 | refunded | `Money` |
-| inFlight | `Money` Requested or processing refunds |
+| inFlight | `Money` Requested, processing and failed refunds: a failed refund keeps reserving its amount (it may still be retried or sent to a new destination) until it is sent or cancelled, so no second refund can take the same money |
 | remaining | `Money` |
 | blockedReason | `string?` e.g. 'In transit: refund after delivery or a confirmed loss' |
 
@@ -338,8 +338,8 @@ Charging customers through provider adapters (card, digital wallet): payment int
 | orderId | `uuid` |
 | captured | `Money` |
 | refunded | `Money` |
-| inFlight | `Money` |
-| remaining | `Money` |
+| inFlight | `Money` Requested, processing and failed refunds (a failed refund reserves its amount until sent or cancelled) |
+| remaining | `Money` Captured less refunded and in flight |
 | items | `RefundableItem[]` |
 
 ### RefundItem
@@ -358,7 +358,8 @@ Charging customers through provider adapters (card, digital wallet): payment int
 |---|---|
 | id | `uuid` |
 | ref | `string` RF-YYMMDD-NNNN (the returns request reference when handed over by returns) |
-| orderId | `uuid` |
+| orderId | `uuid` The order refunded; for an orphan payment refund (money without an order) the checkout session id, as on the refund events (refunds.order_id is null then) |
+| checkoutSessionId | `uuid` Checkout session of the payment refunded |
 | orderRef | `string` |
 | paymentIntentId | `uuid` |
 | customerName | `string` Customer on the payment (customers profile name, or the guest email for guest orders); shown in the admin failing-refunds table |
@@ -466,7 +467,7 @@ Charging customers through provider adapters (card, digital wallet): payment int
 | evidenceDue | `Deadline?` |
 | status | `enum(opened|under_review|won|lost)` |
 | statusLabel | `string` |
-| sellerBalanceEffect | `string` From finance, e.g. 'Held $480.00' or 'Company sale. A loss is recorded in company trading.' |
+| sellerBalanceEffect | `string` What the dispute does to the seller balance, worded by payments from the dispute status and the group owner (finance applies it on payments.chargeback.opened and decided; payments does not read finance): seller group open 'Held $480.00', won 'Hold of $480.00 released', lost '$480.00 deducted from the seller balance'; Official Store 'Company sale. A loss is recorded in company trading.'; no single group 'Not linked to one seller. Finance decides who carries the loss.' |
 | evidence | `DisputeEvidence` |
 | owner | `string?` |
 | history | `TimelineEvent[]` |
@@ -553,6 +554,7 @@ The provider takes the money back when a chargeback opens; finance holds the sel
 | provider_ref | text? |
 | status | text |
 | decline | jsonb? |
+| next_action | jsonb? (NextAction: the bank challenge waiting for the customer while the intent is requires_action; cleared when it ends) |
 | authorized_amount | int |
 | captured_amount | int |
 | refunded_amount | int |
@@ -617,7 +619,8 @@ Indexes: `(intent_id, at)`, `(refund_id, at)`
 |---|---|
 | id | uuid pk |
 | ref | text unique |
-| order_id | uuid |
+| order_id | uuid? (null for an orphan payment refund: money without an order) |
+| checkout_session_id | uuid (checkout session of the payment; what an orphan payment refund is found by) |
 | intent_id | uuid → intents |
 | origin | text |
 | origin_id | uuid? |
@@ -643,7 +646,7 @@ Indexes: `(intent_id, at)`, `(refund_id, at)`
 | created_at | timestamptz |
 | updated_at | timestamptz |
 
-Indexes: `(order_id)`, `(status, next_attempt_at)`, `unique (origin, origin_id) where origin_id is not null and origin <> 'cancellation' and status <> 'cancelled'`, `(origin, origin_id)`
+Indexes: `(order_id)`, `(checkout_session_id)`, `(status, next_attempt_at)`, `unique (origin, origin_id) where origin_id is not null and origin <> 'cancellation' and status <> 'cancelled'`, `(origin, origin_id)`
 
 **refund_items**: Refund amount per order item; the cap check sums these
 
@@ -687,13 +690,29 @@ Indexes: `(order_item_id)`
 | amount | int |
 | currency | text |
 | evidence_due_at | timestamptz? |
+| due_soon_flagged_at | timestamptz? (when payments.dispute-deadlines flagged the evidence due within 48 h; once per dispute) |
 | status | text |
-| evidence | jsonb |
+| evidence | jsonb (DisputeEvidence: text, file ids and refs, submitted at and by) |
+| approval_request_id | uuid? (a concession waiting for approval: the access approval request; cleared when decided) |
+| concession_reason | text? (reason given with the concession waiting for approval) |
 | owner_staff_id | uuid? |
 | opened_at | timestamptz |
 | decided_at | timestamptz? |
 
-Indexes: `unique (provider, provider_case_id)`, `(status, evidence_due_at)`
+Indexes: `unique (provider, provider_case_id)`, `(status, evidence_due_at)`, `(approval_request_id) where approval_request_id is not null`
+
+**dispute_log**: Dispute history: opened, owner set, evidence saved and submitted, concession asked and decided, deadlines, outcome (Dispute.history)
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| dispute_id | uuid → disputes |
+| label | text |
+| detail | text? |
+| actor | jsonb (Actor) |
+| at | timestamptz |
+
+Indexes: `(dispute_id, at)`
 
 **saved_methods**: Provider tokens only: brand, last 4, expiry, label
 
@@ -725,11 +744,13 @@ Indexes: `(customer_id) where removed_at is null`
 | external_id | text |
 | type | text |
 | payload | jsonb |
+| intent_id | uuid? (the payment the event was applied to) |
+| refund_id | uuid? (the refund the event was applied to) |
 | received_at | timestamptz |
 | processed_at | timestamptz? |
 | outcome | text? |
 
-Indexes: `unique (provider, external_id)`
+Indexes: `unique (provider, external_id)`, `(intent_id, received_at)`, `(refund_id, received_at)`
 
 **ref_sequences**: Daily counters for RF- and CB- references
 
@@ -780,7 +801,7 @@ Indexes: `unique (kind, day)`
 | completeAction | `(intentId: uuid, resultToken: string, idempotencyKey: string) => AuthorizeResult`<br>Finish an authorization after a bank challenge or wallet confirmation (checkout calls it from POST /sessions/{id}/complete-action) | checkout |
 | getIntentStatus | `(intentId: uuid, refresh?: bool) => PaymentStatusView`<br>Current customer-facing state; refresh asks the provider first | checkout |
 | voidIntent | `(intentId: uuid, reason: string) => void`<br>Release an authorization (abandoned checkout, order cancelled before capture) | checkout |
-| remainingRefundable | `(orderId: uuid, orderItemIds?: uuid[]) => RefundableSummary`<br>Per item: paid, refunded, in flight and remaining. The cap for every refund. | returns, orders, support, finance |
+| remainingRefundable | `(orderId: uuid, orderItemIds?: uuid[]) => RefundableSummary`<br>Per item: paid, refunded, in flight (requested, processing and failed refunds) and remaining. The cap for every refund. | returns, orders, support, finance |
 | startRefund | `(input: StartRefundInput, idempotencyKey: string) => Refund`<br>Hand over an approved refund for execution. Fails with REFUND_EXCEEDS_REFUNDABLE or DUPLICATE_REFUND. Returns the existing refund for the same key or origin. | returns, finance, support |
 | getRefund | `(refundId: uuid) => Refund | null`<br>Execution status for mirrors in returns, support and orders | returns, support, orders |
 | methodLabel | `(intentId: uuid) => string`<br>e.g. 'Visa •••• 4417', from the snapshot (stays after the saved card is removed) | orders, returns |
@@ -788,6 +809,7 @@ Indexes: `unique (kind, day)`
 | listRefundsForOrder | `(orderId: uuid) => Refund[]`<br>Refund executions of an order, newest first, with items and status (Requested, Processing, Sent, Failed, Cancelled) | graphql |
 | listDisputesForOrder | `(orderId: uuid) => Dispute[]`<br>Chargebacks and payment disputes on an order (order 360, dispute case) | graphql |
 | listSavedMethods | `(customerId: uuid) => SavedPaymentMethod[]`<br>The customer's saved cards and wallets, default first | graphql |
+| exportCustomerData | `(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]`<br>The customer's payment data for the personal data export: saved payment methods masked (brand, last 4, expiry, label, billing city and postal code; never a provider token), payments (reference, order, amount, method label, status, dates; declines with their plain reason) and refunds (reference, order, amount, destination label, status, dates). No provider references, card fingerprints or staff notes. Export hook called by customers.build-data-exports | customers |
 
 ## Permissions
 
@@ -860,7 +882,7 @@ Checked through the access module (limits per role, second reviewer).
 - Capture with store credit (mixed tender): each group's allocation is split into a card share and a store-credit share in proportion to the tenders. A capture charges the card only the card share and reports the credit share as creditAmount on payments.payment.captured. When items are cancelled before capture, their credit share goes back to the wallet and their card share comes off the authorization; an authorization whose card amount drops to 0 is voided. Finance's daily check compares card captures plus creditAmount with the order total.
 - Credit-only captures: when store credit alone pays the order (card share 0) or a seller group (its card share is 0), the capture still happens: payments writes a succeeded capture row with amount 0 and credit_amount, captures the wallet hold share, and publishes payments.payment.captured with amount 0 and creditAmount, keyed like any capture so it happens once. Such groups count as charged everywhere (card amount left, expiry sweep, release of an authorization with nothing left).
 - Partial reversal (decision D-P1): the provider port has an optional partial reversal (lower an authorization by an amount). When the adapter supports it, cancelling items before capture lowers the authorization by their card share (ProviderCall partial_void, intent transition reduce); when it does not, the authorized amount stays, the card share is tracked in the allocations and the remainder is released at the final capture (close_remainder) or voided when nothing is left.
-- Refund caps: remaining = paid per item (orders.getPaidAmounts) − sent − in flight (requested, processing). Every refund names its items, so a partial refund never marks other items refunded. Destination is the original method by default; card refunds show the timing note; a failed card refund asks the customer for a new destination. The credit part of a mixed tender goes back to store credit first (wallet, phase 3).
+- Refund caps: remaining = paid per item (orders.getPaidAmounts) − sent − in flight (requested, processing and failed: a failed refund keeps reserving its amount until it is sent, retried to a new destination or cancelled; cancelRefund releases it). Every refund names its items, so a partial refund never marks other items refunded. Destination is the original method by default; card refunds show the timing note; a failed card refund asks the customer for a new destination. The credit part of a mixed tender goes back to store credit first (wallet, phase 3).
 - Approval split: returns approves refund requests (Finance limits from access) and hands them over with startRefund; cancellation refunds follow the cancellation policy and start from orders.item.cancelled; finance starts correction refunds. Payments never shows Approved; its customer states are Requested, Processing, Sent and Failed.
 - Saved methods: only provider tokens and display data are stored. Removing a method detaches it at the provider; payments keep their MethodSnapshot so receipts and refunds are unaffected.
 - Daily reconciliation (payments vs orders, provider deposits, unexplained amounts) is finance's ops/finance-checks; finance reads payments.payment.captured, payments.refund.sent and payments.payment.orphaned and corrects through startRefund.

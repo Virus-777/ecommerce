@@ -375,27 +375,45 @@ export class Ledger {
   /* ================================================================ staff corrections */
 
   /** Positive: a new lot (source correction). Negative: drawn from lots like a use; INSUFFICIENT_CREDIT below zero */
-  async applyCorrection(customerId: string, amount: common.Money, reason: string, reference: string | null, key: string, by: By): Promise<EntryRow> {
+  /**
+   * Applies a correction to the ledger (idempotent per key). `withEntry` runs in the same transaction once the
+   * entry exists (the correction row is written with it, so the two never disagree).
+   */
+  async applyCorrection(
+    customerId: string,
+    amount: common.Money,
+    reason: string,
+    reference: string | null,
+    key: string,
+    by: By,
+    withEntry?: (tx: WalletRepository, entry: EntryRow) => Promise<void>,
+  ): Promise<EntryRow> {
     const known = await this.repo.entryByKey(key);
-    if (known) return known;
+    if (known && !withEntry) return known;
     const out = new Outbox();
     let created = false;
     const entry = await this.repo.transaction(async (tx) => {
       const again = await tx.entryByKey(key);
-      if (again) return again;
+      if (again) {
+        await withEntry?.(tx, again);
+        return again;
+      }
       created = true;
+      let made: EntryRow;
       if (amount.amount > 0) {
         const acct = await tx.lockOrCreateAccount(customerId, amount.currency, this.core.now());
-        const r = await this.addCredit(tx, acct, { kind: 'correction', source: 'correction', amount: amount.amount, expiresAt: null, reference, key, actor: by.actor, reason });
-        return r.entry;
+        made = (await this.addCredit(tx, acct, { kind: 'correction', source: 'correction', amount: amount.amount, expiresAt: null, reference, key, actor: by.actor, reason })).entry;
+      } else {
+        const acct = await tx.lockAccount(customerId);
+        if (!acct) throw this.core.insufficient(0, amount.currency);
+        let a = await this.expireDue(tx, acct, out);
+        const take = -amount.amount;
+        const allocations = await this.drawLots(tx, a, take);
+        a = await tx.updateAccount(customerId, { available: a.available - take, held: a.held, updated_at: this.core.now() });
+        made = await tx.insertEntry(this.entryRow(a, { kind: 'correction', amount: amount.amount, allocations, key, actor: by.actor, reason: reference ? `${reason} (${reference})` : reason }));
       }
-      const acct = await tx.lockAccount(customerId);
-      if (!acct) throw this.core.insufficient(0, amount.currency);
-      let a = await this.expireDue(tx, acct, out);
-      const take = -amount.amount;
-      const allocations = await this.drawLots(tx, a, take);
-      a = await tx.updateAccount(customerId, { available: a.available - take, held: a.held, updated_at: this.core.now() });
-      return tx.insertEntry(this.entryRow(a, { kind: 'correction', amount: amount.amount, allocations, key, actor: by.actor, reason: reference ? `${reason} (${reference})` : reason }));
+      await withEntry?.(tx, made);
+      return made;
     });
     if (created) out.push('wallet.credit.corrected', { customerId, entryId: entry.id, amount: m(entry.amount, amount.currency), reason });
     this.core.flush(out, by);

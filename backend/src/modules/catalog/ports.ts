@@ -16,6 +16,7 @@ export type ReviewLogRow = CatalogDb['review_log'];
 export type CorrectionRow = CatalogDb['correction_suggestions'];
 export type SubmissionRow = CatalogDb['submissions'];
 export type CheckRow = CatalogDb['submission_checks'];
+export type CheckDismissalRow = CatalogDb['check_dismissals'];
 export type ReviewDraftRow = CatalogDb['review_drafts'];
 export type AuthorizedSellerRow = CatalogDb['brand_authorized_sellers'];
 export type OfferIndexRow = CatalogDb['offer_index'];
@@ -158,12 +159,15 @@ export interface CatalogRepository {
   latestSubmissions(productIds: string[]): Promise<SubmissionRow[]>;
   submissionCount(productId: string): Promise<number>;
   reviewQueue(filter: QueueFilter, page: PageRequest): Promise<common.Page<SubmissionRow>>;
-  /** Open submissions of a seller's products (optionally only in some categories) */
+  /** Open submissions of a seller's products (optionally only in some categories, or only paused / not paused ones: paused_at) */
   openSubmissionsOfSeller(sellerId: string, opts?: { categoryIds?: string[]; paused?: boolean }): Promise<SubmissionRow[]>;
   pausedCounts(sellerIds: string[]): Promise<Map<string, number>>;
   insertChecks(rows: CheckRow[]): Promise<void>;
   checksOf(submissionIds: string[]): Promise<CheckRow[]>;
   updateCheck(id: string, patch: Partial<CheckRow>): Promise<void>;
+  /** Per-candidate duplicate dismissals (an existing row for the same candidate is kept) */
+  insertDismissals(rows: CheckDismissalRow[]): Promise<void>;
+  dismissalsOf(checkIds: string[]): Promise<CheckDismissalRow[]>;
   saveDraft(row: ReviewDraftRow): Promise<ReviewDraftRow>;
   draftsOf(submissionIds: string[], staffId: string): Promise<ReviewDraftRow[]>;
   deleteDrafts(submissionId: string): Promise<void>;

@@ -71,7 +71,7 @@ The accepted purchase: one order per checkout, one seller group per seller packa
 | POST | `/api/admin/orders/orders/{id}/cancel-items` | Cancel unshipped items as staff, with a reason _(idempotent, audited)_ | staff<br>`orders.orders.cancel` | `{ items: CancellationLineInput[], reasonCode: enum(seller_cannot_fulfill|overdue_dispatch|customer_request|risk_review|address_problem|other), reason: text, notifyCustomer: bool, trustReportId: uuid? }` → `{ requests: CancellationRequest[] }` |
 | POST | `/api/admin/orders/orders/{id}/cancellation-requests/{requestId}/decide` | Decide a customer's cancellation request for the seller (or override a decline) _(idempotent, audited)_ | staff<br>`orders.cancellations.decide` | `{ accept: bool, reason: text }` → `CancellationRequest` |
 | POST | `/api/admin/orders/orders/{id}/groups/{groupId}/dispatch-deadline` | Set a final dispatch date for an overdue group _(audited)_ | staff<br>`orders.orders.manage` | `{ dueAt: datetime, reason: text, notifyCustomer: bool }` → `AdminOrderDetail` |
-| POST | `/api/admin/orders/orders/{id}/resend-confirmation` | Send the order confirmation again _(audited)_ | staff<br>`orders.orders.manage` | `{ email: email? }` → 204 No content |
+| POST | `/api/admin/orders/orders/{id}/resend-confirmation` | Send the order confirmation again _(audited)_ | staff<br>`orders.orders.manage` | `{ email: email? }` → 202 No content |
 | GET | `/api/admin/orders/saved-filters` | My and shared saved filters with current counts | staff<br>`orders.orders.view` | `SavedFilter[]` |
 | POST | `/api/admin/orders/saved-filters` | Save the current filters | staff<br>`orders.orders.view` | `{ name: string, query: json, shared: bool? }` → `SavedFilter` |
 | DELETE | `/api/admin/orders/saved-filters/{id}` | Delete a saved filter (own, or shared with orders.orders.manage) | staff<br>`orders.orders.view` | 204 No content |
@@ -98,7 +98,7 @@ The accepted purchase: one order per checkout, one seller group per seller packa
 | kind | `enum(customer|guest)` |
 | customerId | `uuid?` |
 | name | `string` |
-| email | `email` |
+| email | `string` Contact email (a valid address on createOrder). Order reads for staff without orders.customers.view-contact show it masked (a***@example.com), so it is a plain string; sellers never see it |
 | phone | `string?` |
 
 ### DiscountAllocation
@@ -970,7 +970,7 @@ Customer requests start as requested; the seller confirms by respondBy (end of t
 | channel | text |
 | lifecycle | text (payment_pending|open|completed|cancelled) |
 | display_status | text |
-| flags | jsonb |
+| flag_kinds | text[] (OrderFlag kinds in force, recomputed on every change and by orders.refresh-flags) |
 | currency | text |
 | items_total | int |
 | discount_total | int |
@@ -991,7 +991,28 @@ Customer requests start as requested; the seller confirms by respondBy (end of t
 | accepted_at | timestamptz? |
 | completed_at | timestamptz? |
 
-Indexes: `unique (checkout_session_id, attempt_no)`, `(customer_id, placed_at desc)`, `(lower(contact_email)) where customer_id is null`, `(display_status, placed_at desc)`, `(lifecycle)`, `gin(contact_name gin_trgm_ops)`, `gin(contact_email gin_trgm_ops)`
+Indexes: `unique (checkout_session_id, attempt_no)`, `(customer_id, placed_at desc)`, `(lower(contact_email)) where customer_id is null`, `(display_status, placed_at desc)`, `(lifecycle)`, `gin(contact_name gin_trgm_ops)`, `gin(contact_email gin_trgm_ops)`, `gin(flag_kinds)`
+
+**order_facts**: Event-fed facts about an order, one row per source record: payment captures, chargebacks, support cases, refunds sent, approved return refunds not sent yet, delivery exceptions, seller restrictions and resent confirmations. The flags, alerts, expected refunds and case references are derived from them
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| order_id | uuid → orders |
+| kind | text (capture|chargeback|case|refund_sent|refund_approval|delivery_issue|seller_restricted|confirmation_resent) |
+| source_id | uuid (the capture, dispute, case, refund, refund request, exception or seller group id; a new id for a resent confirmation) |
+| group_id | uuid? |
+| shipment_id | uuid? |
+| ref | text? (case ref, return ref, dispute ref) |
+| status | text? (case: open|resolved|closed…; refund_approval: approved|sent) |
+| subkind | text? (dispute kind, exception kind) |
+| customer_action | text? (delivery issue: what the customer is asked to do) |
+| amount | int? (capture, approved refund) |
+| item_ids | uuid[]? (case and approved refund items) |
+| due_at | timestamptz? (delivery issue due, case next update) |
+| at | timestamptz |
+
+Indexes: `unique (order_id, kind, source_id)`, `(kind, source_id)`
 
 **seller_groups**: One per seller package; the seller's fulfillment task
 
@@ -1249,7 +1270,7 @@ Indexes: `(order_id, at desc)`
 | getOrderForSeller | `(sellerId: uuid, ref: string) => { order: OrderDetail, groups: SellerOrderDetail[] } | null`<br>One order as a seller sees it: only the seller's own groups (items, money, ship-to while needed, cancellations, timeline) and seller-safe order fields. Null (NOT_FOUND) when the order has no group of this seller. | graphql |
 | listOrdersForSeller | `(sellerId: uuid, filter: { tab?: string, tabs?: string[], q?: string, placedFrom?: date, placedTo?: date, overdueOnly?: bool, sort?: string }, page: PageInput) => Page<{ order: OrderDetail, groups: SellerOrderDetail[] }>`<br>The seller's orders by stage with dispatch deadlines (same filters as seller GET /orders); own groups only | graphql, search |
 | countSellerOrders | `(sellerId: uuid) => SellerOrderCounts`<br>Seller tab counts plus overdue and due today | graphql |
-| getOrderAdmin | `(ref: string) => AdminOrderDetail | null`<br>Order 360 across sellers for staff: groups, items, money by seller, after-sales, flags, notes and staff history. Contact details masked unless orders.customers.view-contact. | graphql |
+| getOrderAdmin | `(ref: string, principal?: identity.Principal) => AdminOrderDetail | null`<br>Order 360 across sellers for staff: groups, items, money by seller, after-sales, flags, notes and staff history. Contact details masked unless the principal holds orders.customers.view-contact (masked when no principal is given). | graphql |
 | listOrdersAdmin | `(filter: { q?: string, sellerType?: string, sellerId?: uuid, customerId?: uuid, fulfillmentStatus?: string, paymentState?: string, placedFrom?: date, placedTo?: date, flag?: string, savedFilterId?: uuid }, page: PageInput) => Page<AdminOrderDetail>`<br>Staff order list (same filters as admin GET /orders plus customerId) for the customer and seller 360 views | graphql, search |
 | getOrdersByIds | `(viewer: { area: 'store'|'seller'|'admin', customerId?: uuid, guestSessionId?: uuid, sellerId?: uuid }, orderIds: uuid[]) => map<OrderDetail | { order: OrderDetail, groups: SellerOrderDetail[] } | AdminOrderDetail | null>`<br>Batched order lookup for order fields on other modules' records (Case.order, Return.order, RefundRequest.order). Same visibility as order / sellerOrder / orderAdmin: store → only orders of the signed-in customer or a guest session with access; seller → only the caller's own groups and seller-safe fields (null when the order has no group of this seller); admin → order 360 (contact masked unless orders.customers.view-contact). Not visible → null (never an error that reveals the order exists). | graphql |
 | countOrdersForSellers | `(sellerIds: uuid[]) => map<{ open: int, overdueDispatch: int, dueToday: int, cancellationRequests: int, cancellations30d: int }>`<br>Seller 360 order tiles (staff): open orders (a group of the seller not yet delivered or cancelled), groups past their dispatch deadline, due today, pending customer cancellation requests and cancellations in the last 30 days. Recent orders use listOrdersAdmin with filter.sellerId. | graphql |
@@ -1258,6 +1279,7 @@ Indexes: `(order_id, at desc)`
 | getOrderItem | `(orderItemId: uuid) => OrderItemInfo | null`<br>One order item with its order, seller group, owner, customer, state and delivery time (no access check) | reviews |
 | listDeliveredItems | `(customerId: uuid, since?: datetime) => OrderItemInfo[]`<br>Items delivered to the customer (optionally since a time), for review eligibility | reviews |
 | countOpenOrdersInCategory | `(categoryId: uuid, placedBefore: datetime) => { orders: int, items: int }`<br>Orders placed before the date with at least one item in the category (snapshot category, subcategories included) that is not yet delivered, cancelled or refunded. Returns category-exception preview. | returns |
+| exportCustomerData | `(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]`<br>The customer's orders for the personal data export: one record per order with its ref, dates, status, contact and delivery details they gave, items (title, options, seller, quantity, price paid, state, refunds), totals, the payment method label and the customer-visible timeline. No staff notes, staff-only timeline entries or seller internals. Export hook called by customers.build-data-exports | customers |
 
 ## Permissions
 

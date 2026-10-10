@@ -223,7 +223,7 @@ Product reviews (Verified Purchase), seller feedback kept separate from product 
 
 | Field | Type |
 |---|---|
-| sellerId | `uuid?` Null for the Official Store |
+| sellerId | `uuid` OFFICIAL_STORE_ID for the Official Store (official = true) |
 | official | `bool` |
 | periodMonths | `int` |
 | count | `int` |
@@ -309,7 +309,7 @@ Product reviews (Verified Purchase), seller feedback kept separate from product 
 | orderId | `uuid` |
 | orderRef | `string` |
 | ownerType | `enum(official|seller)` |
-| sellerId | `uuid?` Null for the Official Store |
+| sellerId | `uuid` OFFICIAL_STORE_ID for the Official Store |
 | sellerName | `string` |
 | packageLabel | `string` |
 | deliveredAt | `datetime?` |
@@ -333,7 +333,7 @@ Product reviews (Verified Purchase), seller feedback kept separate from product 
 | product | `{"id":"uuid","title":"string","imageUrl":"url?","variantLabel":"string?"}` |
 | deliveredAt | `datetime` |
 | verifiedPurchase | `bool` |
-| seller | `{"ownerType":"enum(official|seller)","id":{"type":"uuid?","desc":"Null for the Official Store"},"name":"string"}` |
+| seller | `{"ownerType":"enum(official|seller)","id":{"type":"uuid","desc":"OFFICIAL_STORE_ID for the Official Store"},"name":"string"}` |
 | existingReview | `MyReview?` |
 | existingFeedback | `MyFeedback?` |
 | feedbackEligible | `bool` |
@@ -903,6 +903,21 @@ Indexes: `(status, queue, first_reported_at)`, `(content_type, content_id)`
 
 Indexes: `(moderation_item_id)`, `(trust_enforcement_id)`
 
+**referrals**: Content referred to Trust and Risk from moderation (referToTrust; reviews.content.referred). Not a moderation decision: the item stays open
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| moderation_item_id | uuid → moderation_items |
+| content_type | text |
+| content_id | uuid |
+| author_id | text |
+| note | text |
+| referred_by | uuid (staff id) |
+| referred_at | timestamptz |
+
+Indexes: `(moderation_item_id)`, `(content_type, content_id)`
+
 **appeals**
 
 | Column | Type |
@@ -965,6 +980,7 @@ Indexes: `(state, due_at)`, `(customer_id)`
 | dispatch_sum | int |
 | communication_sum | int |
 | communication_count | int |
+| overall_sum | int (sum of overall ratings in the period: average = overall_sum / count) |
 | updated_at | timestamptz |
 
 ## Events
@@ -994,7 +1010,7 @@ Indexes: `(state, due_at)`, `(customer_id)`
 | `catalog.product.merged` | catalog | Move reviews, questions and the rating summary to the kept product |
 | `trust.enforcement.recorded` | trust | remove_reviews: remove the reviews, questions and answers named in targets with a moderation decision (reason proven_fake, trust_enforcement_id recorded), tell the authors, recalculate ratings, publish reviews.moderation.decided with trustEnforcementId (trust confirms) and reviews.review.removed for reviews. keep_reviews: decide open moderation items on the named content as kept (reason legitimate_experience) so held content is published again. Other actions are ignored |
 | `trust.enforcement.reversed` | trust | remove_reviews: reinstate the content that enforcement removed (decisions with its trust_enforcement_id) unless the author deleted it since, recalculate ratings, publish reviews.review.published and reviews.rating.changed, tell the authors |
-| `customers.account.closed` | customers | Anonymise the customer's content: display names become Former customer on reviews, feedback, questions and answers (content stays published as the honest record of a purchase); their votes and reports stay counted without the customer id; pending invites are cancelled |
+| `customers.account.closed` | customers | Anonymise the customer's content: display names become Former customer on reviews, feedback, questions and answers (content stays published as the honest record of a purchase); their helpful votes stay counted under a random id (no link to the customer) and their reports without the reporter id; pending invites are cancelled |
 | `sellers.seller.closed` | sellers | Keep feedback published; stop new responses from the closed seller |
 
 ## In-process API (for other modules)
@@ -1132,7 +1148,7 @@ enum ReviewAuthorKind {
 }
 
 type ReviewSoldBy {
-  "Null for the Official Store"
+  "OFFICIAL_STORE_ID for the Official Store"
   sellerId: UUID
   name: String!
 }
@@ -1288,10 +1304,10 @@ type SellerFeedbackPage implements Paged {
 
 """
 Seller feedback summary over the last 12 months, e.g. 98% positive · 4,812 ratings. Also given for the Official Store
-(official true, sellerId null), which collects the same package feedback.
+(official true, sellerId OFFICIAL_STORE_ID), which collects the same package feedback.
 """
 type SellerRating {
-  "Null for the Official Store"
+  "OFFICIAL_STORE_ID for the Official Store"
   sellerId: UUID
   "True for the Official Store"
   official: Boolean!

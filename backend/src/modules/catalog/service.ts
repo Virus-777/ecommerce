@@ -6,7 +6,6 @@ import type * as common from '../../spec/common.js';
 import type * as identity from '../../spec/identity.js';
 import type { Attribute, Brand, CatalogPublicApi, Category, CategoryPath, Product, ProductAdmin, ProductRecord, ProductSnapshot, ProductSummary, VariantParcel, VariantRef } from '../../spec/catalog.js';
 import { isUuid } from '../../kernel/lib/ids.js';
-import { addBusinessDays } from './domain/rules.js';
 import { stringMap, strings } from './mappers.js';
 import { currentListPrice } from './service/products.js';
 import type { OfferIndexRow } from './ports.js';
@@ -292,7 +291,7 @@ export class CatalogService extends CatalogAdmin implements CatalogPublicApi {
   async onSellerReinstatedFromSellers(event: EventPayload<'sellers.seller.reinstated'>): Promise<void> {
     const paused = await this.repo.openSubmissionsOfSeller(event.sellerId, { paused: true });
     if (!paused.length) return;
-    const targetDays = await this.reviewTargetDays();
+    const clock = await this.reviewClock();
     const sellers = this.ctx.tryUse('sellers');
     const products = new Map((await this.repo.getProducts(paused.map((s) => s.product_id))).map((p) => [p.id, p]));
     for (const s of paused) {
@@ -300,14 +299,15 @@ export class CatalogService extends CatalogAdmin implements CatalogPublicApi {
         const can = await sellers.canSell(event.sellerId, { activity: 'product_submissions', ...(products.get(s.product_id)?.category_id ? { categoryId: products.get(s.product_id)!.category_id! } : {}) });
         if (!can.allowed) continue;
       }
-      // back in its original place: the target counted from when it was submitted
-      await this.repo.updateSubmission(s.id, { review_due_at: addBusinessDays(s.submitted_at, targetDays) });
+      // back in its original place: the deadline it kept while paused (rows paused before paused_at existed have none:
+      // the target counted from when it was submitted)
+      await this.repo.updateSubmission(s.id, { paused_at: null, ...(s.review_due_at ? {} : { review_due_at: clock.addBusinessDays(s.submitted_at, clock.targetDays) }) });
     }
   }
 
   private async pauseSubmissions(sellerId: string, categoryIds?: string[]) {
     for (const s of await this.repo.openSubmissionsOfSeller(sellerId, { categoryIds, paused: false })) {
-      await this.repo.updateSubmission(s.id, { review_due_at: null });
+      await this.repo.updateSubmission(s.id, { paused_at: this.now() });
     }
   }
 

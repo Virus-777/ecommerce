@@ -61,9 +61,9 @@ export function returnTermsOf(r: OfferRec): ReturnTerms {
     kind: r.return_kind as ReturnTerms['kind'],
     windowDays: r.return_window_days,
     freeReturnShipping: r.free_return_shipping,
-    categoryException: null,
+    categoryException: r.return_category_exception,
     summary: returnSummary(r.return_window_days, r.free_return_shipping),
-    policyId: r.return_policy_id,
+    policyVersion: r.return_policy_version,
   };
 }
 

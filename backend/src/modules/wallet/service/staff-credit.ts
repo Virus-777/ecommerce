@@ -5,14 +5,14 @@
  */
 import { AppError } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
-import { newId } from '../../../kernel/lib/ids.js';
+import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
-import type { CustomerWalletAdmin, GoodwillGrant, GoodwillInput, LedgerEntry } from '../../../spec/wallet.js';
-import { goodwillGrantMachine } from '../domain/state-machines.js';
-import { actorFrom, actorText, detId, goodwillExpiry, m, SYSTEM } from '../domain/rules.js';
-import { allocationsOf, toGrant } from '../mappers.js';
-import type { AccountRow, GrantRow, WalletRepository } from '../ports.js';
+import type { CreditCorrection, CustomerWalletAdmin, GoodwillGrant, GoodwillInput } from '../../../spec/wallet.js';
+import { creditCorrectionMachine, goodwillGrantMachine } from '../domain/state-machines.js';
+import { actorFrom, actorText, goodwillExpiry, m, SYSTEM } from '../domain/rules.js';
+import { allocationsOf, toCorrection, toGrant } from '../mappers.js';
+import type { AccountRow, CorrectionRow, GrantRow, WalletRepository } from '../ports.js';
 import { invalid, notFound, Outbox, type By, type Issue, type WalletCore } from './core.js';
 import type { Ledger } from './ledger.js';
 
@@ -21,14 +21,18 @@ export const GOODWILL_ACTION = 'wallet.goodwill.grant';
 export const CORRECT_ACTION = 'wallet.credit.correct';
 const REASON_CODES = ['late_delivery', 'service_failure', 'price_adjustment', 'damaged_item', 'other'];
 
-/** What a correction waiting for approval carries in the approval request (wallet has no table for it) */
-interface PendingCorrection {
+/**
+ * What a correction sent for approval before pass 4 carried in its approval request (there was no table for
+ * it). Newer requests carry correctionId and live in credit_corrections.
+ */
+interface LegacyPendingCorrection {
   customerId: string;
   amount: common.Money;
   reason: string;
   reference: string | null;
   requestedBy: common.Actor;
   key: string;
+  correctionId?: string;
 }
 
 export class StaffCredit {
@@ -228,40 +232,87 @@ export class StaffCredit {
 
   /* ================================================================ corrections */
 
-  async correct(customerId: string, body: { amount: common.Money; reason: string; reference?: string | null }, by: By, key: string): Promise<LedgerEntry> {
+  /**
+   * Within the caller's adjustment limit the correction is applied now (row applied with its ledger entry, in one
+   * transaction). Above it the correction is saved pending_approval with its access approval request and answered
+   * like any correction (REST 201 with `approval`; FORMAT.md, Approval responses); access.approval.decided applies,
+   * rejects or fails it.
+   */
+  async correct(customerId: string, body: { amount: common.Money; reason: string; reference?: string | null }, by: By, key: string): Promise<CreditCorrection> {
     const issues = this.core.checkMoney(body.amount, 'amount', { signed: true });
     if (!body.reason?.trim()) issues.push({ path: 'reason', message: 'Give a reason' });
+    if (!key?.trim()) issues.push({ path: 'idempotencyKey', message: 'Required' });
     if (issues.length) throw invalid(issues);
-    const entryKey = `correction:${key}`;
-    const known = await this.repo.entryByKey(entryKey);
-    if (known) return this.ledger.entryView(known);
+    const known = await this.repo.correctionByKey(key);
+    if (known) return this.correctionView(known);
     const customer = await this.core.customer(customerId);
     if (!customer) throw notFound('Customer');
     const size = m(Math.abs(body.amount.amount), body.amount.currency);
     const decision = await this.core.authority(by, CORRECT_ACTION, size);
     const reference = body.reference?.trim() || null;
+    const reason = body.reason.trim();
+    const row: CorrectionRow = {
+      id: newId(),
+      customer_id: customerId,
+      amount: body.amount.amount,
+      currency: body.amount.currency,
+      reason,
+      reference,
+      state: creditCorrectionMachine.initial,
+      approval_request_id: null,
+      requested_by: actorText(by.actor),
+      decided_by: null,
+      decided_at: null,
+      ledger_entry_id: null,
+      failure: null,
+      idempotency_key: key,
+      created_at: this.core.now(),
+    };
+    const target = { type: 'wallet_account', id: customerId, label: customer.displayName };
     if (decision.decision === 'approval_required') {
-      const pending: PendingCorrection = { customerId, amount: body.amount, reason: body.reason.trim(), reference, requestedBy: by.actor, key };
       const req = await this.core.requestApproval(by, {
         action: CORRECT_ACTION,
-        target: { type: 'credit_correction', id: detId(`wallet:correction:${key}`), ref: reference, label: `Store credit correction for ${customer.displayName}`, screen: 'admin/customers' },
+        target: { type: 'credit_correction', id: row.id, ref: reference, label: `Store credit correction for ${customer.displayName}`, screen: 'admin/customers' },
         amount: size,
         summary: `Store credit correction of ${body.amount.amount > 0 ? '+' : '−'}${this.core.fmt(size.amount)} for ${customer.displayName}`,
-        details: pending,
-        reason: body.reason.trim(),
+        details: { customerId, correctionId: row.id, amount: body.amount, reference },
+        reason,
       });
+      const saved = (await this.repo.insertCorrection({ ...row, approval_request_id: req.id })) ?? (await this.repo.correctionByKey(key))!;
+      if (saved.id === row.id) {
+        await this.core.audit(
+          { action: 'wallet.credit.request_correction', actionLabel: 'Sent a store credit correction for approval', category: 'financial', target, reason, after: { amount: body.amount, reference, correctionId: saved.id }, approvalRequestId: req.id },
+          by,
+        );
+      }
+      return this.correctionView(saved);
+    }
+    let saved: CorrectionRow | undefined;
+    const entry = await this.ledger.applyCorrection(customerId, body.amount, reason, reference, `correction:${key}`, by, async (tx, e) => {
+      const state = creditCorrectionMachine.next('pending_approval', 'apply');
+      saved = (await tx.insertCorrection({ ...row, state, ledger_entry_id: e.id, decided_by: actorText(by.actor), decided_at: this.core.now() })) ?? (await tx.correctionByKey(key))!;
+    });
+    if (saved?.id === row.id) {
       await this.core.audit(
-        { action: 'wallet.credit.request_correction', actionLabel: 'Sent a store credit correction for approval', category: 'financial', target: { type: 'wallet_account', id: customerId, label: customer.displayName }, reason: body.reason.trim(), after: { amount: body.amount, reference }, approvalRequestId: req.id },
+        { action: 'wallet.credit.correct', actionLabel: 'Corrected store credit', category: 'financial', target, reason, after: { amount: body.amount, reference, entryId: entry.id, balanceAfter: entry.balance_after, correctionId: row.id }, approvalNote: decision.reason },
         by,
       );
-      throw this.core.approvalRequired(req, {}, 'Above your adjustment limit: a second Finance reviewer must approve this correction');
     }
-    const entry = await this.ledger.applyCorrection(customerId, body.amount, body.reason.trim(), reference, entryKey, by);
-    await this.core.audit(
-      { action: 'wallet.credit.correct', actionLabel: 'Corrected store credit', category: 'financial', target: { type: 'wallet_account', id: customerId, label: customer.displayName }, reason: body.reason.trim(), after: { amount: body.amount, reference, entryId: entry.id, balanceAfter: entry.balance_after }, approvalNote: decision.reason },
-      by,
-    );
-    return this.ledger.entryView(entry);
+    return this.correctionView(saved!);
+  }
+
+  async correctionView(c: CorrectionRow): Promise<CreditCorrection> {
+    return (await this.correctionViews([c]))[0]!;
+  }
+
+  async correctionViews(rows: readonly CorrectionRow[]): Promise<CreditCorrection[]> {
+    if (!rows.length) return [];
+    const [approvals, entries] = await Promise.all([
+      this.core.approvalInfos(rows.map((r) => r.approval_request_id)),
+      this.repo.getEntries(rows.map((r) => r.ledger_entry_id).filter((x): x is string => Boolean(x))),
+    ]);
+    const views = new Map((await Promise.all(entries.map((e) => this.ledger.entryView(e)))).map((v) => [v.id, v]));
+    return rows.map((c) => toCorrection(c, { approvals, entries: views }));
   }
 
   /* ================================================================ approvals decided (access) */
@@ -313,21 +364,77 @@ export class StaffCredit {
   }
 
   private async correctionDecided(e: EventPayload<'access.approval.decided'>) {
-    if (e.outcome !== 'approved') return void this.core.ctx.log.info({ requestId: e.requestId, outcome: e.outcome }, 'wallet: store credit correction not approved');
-    const req = await this.core.ctx.tryUse('access')?.getApproval(e.requestId);
-    const p = req?.details as PendingCorrection | undefined;
-    if (!p?.customerId || !p.amount || !p.key) return void this.core.ctx.log.warn({ requestId: e.requestId }, 'wallet: approved correction without its details');
-    const by: By = { actor: p.requestedBy ?? SYSTEM };
+    const c0 = (await this.repo.correctionByApproval(e.requestId)) ?? (e.target.type === 'credit_correction' ? await this.repo.getCorrection(e.target.id) : undefined) ?? (await this.legacyCorrection(e));
+    if (!c0 || c0.state !== 'pending_approval') return void this.core.ctx.log.info({ requestId: e.requestId }, 'wallet: approval for no pending store credit correction');
+    const decider: common.Actor = e.decidedBy ?? SYSTEM;
+    const target = { type: 'wallet_account', id: c0.customer_id, label: 'Store credit account' };
+    const amount = m(c0.amount, c0.currency);
+    if (e.outcome !== 'approved') {
+      const after = await this.repo.transaction(async (tx) => {
+        const c = (await tx.getCorrection(c0.id, { forUpdate: true }))!;
+        if (c.state !== 'pending_approval') return null;
+        return tx.updateCorrection(c.id, { state: creditCorrectionMachine.next('pending_approval', 'reject'), decided_by: actorText(decider), decided_at: this.core.now() });
+      });
+      if (after) await this.core.audit({ action: 'wallet.credit.reject_correction', actionLabel: 'Store credit correction not approved', category: 'financial', target, reason: e.reason ?? `Approval ${e.outcome}`, after: { amount, correctionId: after.id }, approvalRequestId: e.requestId }, { actor: decider });
+      return;
+    }
+    // the ledger write is idempotent per correction key, so a redelivered decision never applies it twice
+    const by: By = { actor: actorFrom(c0.requested_by) ?? SYSTEM };
+    let applied = null as CorrectionRow | null;
     try {
-      const entry = await this.ledger.applyCorrection(p.customerId, p.amount, p.reason, p.reference, `correction:${p.key}`, by);
-      await this.core.audit(
-        { action: 'wallet.credit.correct', actionLabel: 'Corrected store credit after approval', category: 'financial', target: { type: 'wallet_account', id: p.customerId, label: 'Store credit account' }, reason: p.reason, after: { amount: p.amount, reference: p.reference, entryId: entry.id, approvedBy: e.decidedBy ?? null }, approvalRequestId: e.requestId },
-        by,
-      );
+      const entry = await this.ledger.applyCorrection(c0.customer_id, amount, c0.reason, c0.reference, `correction:${c0.idempotency_key}`, by, async (tx, entryRow) => {
+        const c = (await tx.getCorrection(c0.id, { forUpdate: true }))!;
+        if (c.state !== 'pending_approval') return;
+        applied = await tx.updateCorrection(c.id, { state: creditCorrectionMachine.next('pending_approval', 'apply'), ledger_entry_id: entryRow.id, decided_by: actorText(decider), decided_at: this.core.now() });
+      });
+      if (applied) {
+        await this.core.audit(
+          { action: 'wallet.credit.correct', actionLabel: 'Corrected store credit after approval', category: 'financial', target, reason: c0.reason, after: { amount, reference: c0.reference, entryId: entry.id, correctionId: c0.id, approvedBy: e.decidedBy ?? null }, approvalRequestId: e.requestId },
+          by,
+        );
+      }
     } catch (err) {
       if (!(err instanceof AppError)) throw err;
+      // e.g. a negative correction that no longer finds the credit: the correction ends failed, with why
+      const failed = await this.repo.transaction(async (tx) => {
+        const c = (await tx.getCorrection(c0.id, { forUpdate: true }))!;
+        if (c.state !== 'pending_approval') return null;
+        return tx.updateCorrection(c.id, { state: creditCorrectionMachine.next('pending_approval', 'fail'), failure: err.message, decided_by: actorText(decider), decided_at: this.core.now() });
+      });
       this.core.ctx.log.warn({ err, requestId: e.requestId }, 'wallet: approved store credit correction could not be applied');
+      if (failed) await this.core.audit({ action: 'wallet.credit.correction_failed', actionLabel: 'Approved store credit correction could not be applied', category: 'financial', target, reason: err.message, after: { amount, correctionId: failed.id }, approvalRequestId: e.requestId }, { actor: decider });
     }
+  }
+
+  /**
+   * A correction sent for approval before credit_corrections existed (pass 4) kept its details only in the
+   * approval request: its row is created here, pending, so the decision finishes it like any other.
+   */
+  private async legacyCorrection(e: EventPayload<'access.approval.decided'>): Promise<CorrectionRow | undefined> {
+    const req = await this.core.soft('access.getApproval', async () => this.core.ctx.tryUse('access')?.getApproval(e.requestId));
+    const p = req?.details as LegacyPendingCorrection | undefined;
+    if (!p?.customerId || !p.amount || !p.key || p.correctionId) return undefined;
+    const known = await this.repo.correctionByKey(p.key);
+    if (known) return known;
+    return (
+      (await this.repo.insertCorrection({
+        id: e.target.type === 'credit_correction' && isUuid(e.target.id) ? e.target.id : newId(),
+        customer_id: p.customerId,
+        amount: p.amount.amount,
+        currency: p.amount.currency,
+        reason: p.reason || 'Balance correction',
+        reference: p.reference ?? null,
+        state: 'pending_approval',
+        approval_request_id: e.requestId,
+        requested_by: actorText(p.requestedBy ?? SYSTEM),
+        decided_by: null,
+        decided_at: null,
+        ledger_entry_id: null,
+        failure: null,
+        idempotency_key: p.key,
+        created_at: this.core.now(),
+      })) ?? (await this.repo.correctionByKey(p.key))
+    );
   }
 
   /* ================================================================ reads */
@@ -353,13 +460,15 @@ export class StaffCredit {
 
   /** Staff view: balance, lots, goodwill in the last 30 days against the per-customer limit, pending grants */
   async customerWallet(customerId: string): Promise<CustomerWalletAdmin> {
-    const [balance, lots, limit, last30, pending] = await Promise.all([
+    const [balance, lots, limit, last30, pending, corrections] = await Promise.all([
       this.ledger.balance(customerId),
       this.ledger.lots(customerId),
       this.core.ctx.settings.get('goodwillMaxPerCustomer30Days') as Promise<common.Money>,
       this.repo.goodwillSince(customerId, new Date(this.core.now().getTime() - 30 * DAY)),
       this.repo.grantsOfCustomer(customerId, ['pending_approval']),
+      this.repo.correctionsOfCustomer(customerId, ['pending_approval']),
     ]);
-    return { balance, lots, goodwillLast30Days: m(last30, limit.currency), goodwillLimitPerCustomer: limit, pendingGrants: await this.grantViews(pending) };
+    const [pendingGrants, pendingCorrections] = await Promise.all([this.grantViews(pending), this.correctionViews(corrections)]);
+    return { balance, lots, goodwillLast30Days: m(last30, limit.currency), goodwillLimitPerCustomer: limit, pendingGrants, pendingCorrections };
   }
 }

@@ -3,6 +3,7 @@
  * here every event is stored once per (provider, event id) and applied idempotently. Payment and refund
  * events only trigger a retrieve from the provider, so out-of-order or replayed events can never move a
  * record backwards. Dispute events carry the case and are applied through the dispute state machine.
+ * The stored event keeps the payment and refund it was applied to (webhook_events.intent_id / refund_id).
  */
 import { createHash } from 'node:crypto';
 import { AppError } from '../../../kernel/errors/index.js';
@@ -18,6 +19,13 @@ const BY: By = { actor: PROVIDER_ACTOR };
 const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : null);
 
+/** What an event did, and the payment or refund it was applied to */
+interface Applied {
+  outcome: string;
+  intentId?: string | null;
+  refundId?: string | null;
+}
+
 export class Webhooks {
   constructor(
     private readonly core: Core,
@@ -32,64 +40,68 @@ export class Webhooks {
     const event = (body && typeof body === 'object' && !Array.isArray(body) ? body : {}) as { id?: unknown; type?: unknown; data?: unknown };
     const type = str(event.type) ?? 'unknown';
     // the provider event id: from the signed body when it has one, else the X-Event-Id header
-    const externalId = str(event.id) ?? eventId ??`sha256:${createHash('sha256').update(JSON.stringify(body ?? null)).digest('hex').slice(0, 40)}`;
-    const row: WebhookRec = { id: newId(), provider, external_id: externalId, type, payload: body ?? null, received_at: this.core.now(), processed_at: null, outcome: null };
+    const externalId = str(event.id) ?? eventId ?? `sha256:${createHash('sha256').update(JSON.stringify(body ?? null)).digest('hex').slice(0, 40)}`;
+    const row: WebhookRec = { id: newId(), provider, external_id: externalId, type, payload: body ?? null, intent_id: null, refund_id: null, received_at: this.core.now(), processed_at: null, outcome: null };
     let stored = await this.core.repo.insertWebhookIfNew(row);
     if (!stored) {
       const known = (await this.core.repo.find('webhook_events', { provider, external_id: externalId }))[0];
       if (!known || known.processed_at) return { received: true }; // replay of an applied event
       stored = known; // an earlier delivery stopped half-way: apply again (every step is idempotent)
     }
-    let outcome: string;
+    let applied: Applied;
     try {
-      outcome = await this.apply(provider, type, (event.data && typeof event.data === 'object' ? event.data : {}) as Record<string, unknown>);
+      applied = await this.apply(provider, type, (event.data && typeof event.data === 'object' ? event.data : {}) as Record<string, unknown>);
     } catch (err) {
       await this.core.repo.update('webhook_events', stored.id, { outcome: `error: ${(err as Error).message}`.slice(0, 200) });
       if (err instanceof AppError && err.status < 500) return { received: true }; // nothing to retry
       throw err; // the provider retries the delivery
     }
-    await this.core.repo.update('webhook_events', stored.id, { processed_at: this.core.now(), outcome });
+    await this.core.repo.update('webhook_events', stored.id, { processed_at: this.core.now(), outcome: applied.outcome, intent_id: applied.intentId ?? null, refund_id: applied.refundId ?? null });
     return { received: true };
   }
 
-  private async apply(provider: string, type: string, data: Record<string, unknown>): Promise<string> {
+  private async apply(provider: string, type: string, data: Record<string, unknown>): Promise<Applied> {
     const [kind] = type.split('.');
     switch (kind) {
       case 'payment': {
         const intentId = str(data.intentId);
         const ref = str(data.paymentRef);
         const intent = (intentId ? await this.core.repo.get('intents', intentId).catch(() => undefined) : undefined) ?? (ref ? (await this.core.repo.find('intents', { provider, provider_ref: ref }))[0] : undefined);
-        if (!intent) return 'unknown_payment';
+        if (!intent) return { outcome: 'unknown_payment' };
         const after = await this.intents.reconcile(intent.id, BY);
-        return `payment ${after.status}`;
+        return { outcome: `payment ${after.status}`, intentId: intent.id };
       }
       case 'refund': {
         const refundId = str(data.refundId);
         const ref = str(data.refundRef);
         const refund = (refundId ? await this.core.repo.get('refunds', refundId).catch(() => undefined) : undefined) ?? (ref ? (await this.core.repo.find('refunds', { provider_ref: ref }))[0] : undefined);
-        if (!refund) return 'unknown_refund';
+        if (!refund) return { outcome: 'unknown_refund' };
         const after = await this.refunds.check(refund.id, BY);
-        return `refund ${after.status}`;
+        return { outcome: `refund ${after.status}`, intentId: refund.intent_id, refundId: refund.id };
       }
       case 'dispute': {
         const caseId = str(data.caseId);
-        if (!caseId) return 'ignored: no case id';
+        if (!caseId) return { outcome: 'ignored: no case id' };
         if (type === 'dispute.created') {
           const paymentRef = str(data.paymentRef);
-          if (!paymentRef) return 'ignored: no payment reference';
-          return `dispute ${await this.disputes.open(provider, { caseId, paymentRef, kind: str(data.kind), amount: num(data.amount), currency: str(data.currency), reasonCode: str(data.reasonCode), reason: str(data.reason), evidenceDueBy: str(data.evidenceDueBy) })}`;
+          if (!paymentRef) return { outcome: 'ignored: no payment reference' };
+          const outcome = await this.disputes.open(provider, { caseId, paymentRef, kind: str(data.kind), amount: num(data.amount), currency: str(data.currency), reasonCode: str(data.reasonCode), reason: str(data.reason), evidenceDueBy: str(data.evidenceDueBy) });
+          const intent = (await this.core.repo.find('intents', { provider, provider_ref: paymentRef }))[0];
+          return { outcome: `dispute ${outcome}`, intentId: intent?.id ?? null };
         }
-        return `dispute ${await this.disputes.providerUpdate(provider, caseId, { status: str(data.status), outcome: type === 'dispute.closed' ? str(data.outcome) : null })}`;
+        const outcome = await this.disputes.providerUpdate(provider, caseId, { status: str(data.status), outcome: type === 'dispute.closed' ? str(data.outcome) : null });
+        const dispute = (await this.core.repo.find('disputes', { provider, provider_case_id: caseId }))[0];
+        return { outcome: `dispute ${outcome}`, intentId: dispute?.intent_id ?? null };
       }
       case 'method': {
         const methodId = str(data.methodRef);
         const expMonth = num(data.expMonth);
         const expYear = num(data.expYear);
-        if (!methodId || expMonth === null || expYear === null) return 'ignored: incomplete card update';
-        return (await this.methods.applyCardUpdate(provider, { methodId, expMonth, expYear, last4: str(data.last4) })) ? 'card updated' : 'unknown_method';
+        if (!methodId || expMonth === null || expYear === null) return { outcome: 'ignored: incomplete card update' };
+        return { outcome: (await this.methods.applyCardUpdate(provider, { methodId, expMonth, expYear, last4: str(data.last4) })) ? 'card updated' : 'unknown_method' };
       }
       default:
-        return 'ignored';
+        return { outcome: 'ignored' };
     }
   }
 }

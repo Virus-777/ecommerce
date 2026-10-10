@@ -20,6 +20,7 @@ export type DatasetRow = Row<'export_datasets'>;
 export type JobRow = Row<'export_jobs'>;
 export type OrderItemFact = Row<'fact_order_items'>;
 export type CheckpointRow = Row<'read_model_checkpoints'>;
+export type OwnerChangeRow = Row<'metric_owner_changes'>;
 
 /** Filters shared by the sales facts (fact_order_items) */
 export interface SalesFilter {
@@ -79,6 +80,9 @@ export interface ReportsRepository {
   updateMetric(key: string, patch: Partial<MetricRow>): Promise<MetricRow>;
   insertVersion(row: VersionRow): Promise<void>;
   listVersions(key: string): Promise<VersionRow[]>;
+  insertOwnerChange(row: OwnerChangeRow): Promise<void>;
+  /** Owner history of a metric, newest first */
+  listOwnerChanges(key: string): Promise<OwnerChangeRow[]>;
   /** Latest published version of each metric in effect on `day` */
   versionsInEffect(keys: string[] | null, day: string): Promise<VersionRow[]>;
   insertSuggestion(row: SuggestionRow): Promise<SuggestionRow>;
@@ -119,7 +123,7 @@ export interface ReportsRepository {
   insertOrderItems(rows: OrderItemFact[]): Promise<string[]>;
   getOrderItems(orderId: string): Promise<OrderItemFact[]>;
   getOrderItemsByIds(ids: string[]): Promise<OrderItemFact[]>;
-  updateOrderItems(where: { orderId?: string; itemIds?: string[]; ownerType?: string; sellerId?: string | null; nullColumn?: keyof OrderItemFact }, patch: Partial<OrderItemFact>): Promise<number>;
+  updateOrderItems(where: { orderId?: string; itemIds?: string[]; groupId?: string | null; ownerType?: string; sellerId?: string | null; nullColumn?: keyof OrderItemFact }, patch: Partial<OrderItemFact>): Promise<number>;
   addToOrderItem(itemId: string, add: { cancelled_minor?: number; refunded_minor?: number }, patch: Partial<OrderItemFact>): Promise<OrderItemFact | undefined>;
   orderIdsWithFacts(afterOrderId: string | null, limit: number): Promise<string[]>;
   officialItemsWithoutCost(since: Date, limit: number): Promise<OrderItemFact[]>;
@@ -158,9 +162,12 @@ export interface ReportsRepository {
   upsertCheckpoint(key: string, patch: Partial<CheckpointRow>): Promise<void>;
   /** Claims a natural key in the inbox (ctx.inbox) within this repository's transaction; false when it was already handled */
   claim(key: string): Promise<boolean>;
-  /** Keeps a value for a later event (open stock-out since, campaign of a redemption or charge); the first value stays */
-  remember(key: string, value: string): Promise<boolean>;
-  recall(key: string): Promise<string | null>;
-  forget(key: string): Promise<void>;
+  /** Opens an out-of-stock interval for a stock item (open_stockouts); an open one stays as it is */
+  openStockout(stockItemId: string, productId: string, since: Date): Promise<boolean>;
+  getStockout(stockItemId: string, opts?: { forUpdate?: boolean }): Promise<Row<'open_stockouts'> | undefined>;
+  closeStockout(stockItemId: string): Promise<void>;
+  /** The campaign behind a coupon redemption or ad charge (campaign_refs); the first value stays */
+  rememberCampaign(kind: 'redemption' | 'charge', refId: string, campaignId: string, at: Date): Promise<void>;
+  campaignOf(kind: 'redemption' | 'charge', refId: string): Promise<string | null>;
   countRows(table: Table): Promise<number>;
 }

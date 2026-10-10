@@ -60,7 +60,7 @@ export function windowOf(page: PageRequest): { offset: number; limit: number } {
   return { offset, limit: page.limit };
 }
 
-export function pageInfoOf(page: PageRequest, offset: number, limit: number, total: number): PageInfo {
+export function pageInfoOf(page: PageRequest, offset: number, limit: number, total: number): { nextCursor: string | null; page?: number; totalPages?: number; total?: number } {
   const next = offset + limit < total ? encodeCursor([offset + limit]) : null;
   if (page.mode === 'page') return { nextCursor: next, page: page.page, totalPages: Math.max(1, Math.ceil(total / limit)), total };
   return { nextCursor: next, total };
@@ -107,7 +107,7 @@ export class SearchQueries extends SearchIndexer {
   async prepare(query: SearchQuery & { exact?: boolean; postalCode?: string }, mode: Mode, opts: { strictSort: boolean }): Promise<Prepared> {
     const f: SearchFilters = { ...(query.filters ?? {}) };
     try {
-      validateFilters(f, query.sort);
+      validateFilters(f, query.sort ?? undefined);
     } catch (err) {
       this.filterError(err);
     }
@@ -190,9 +190,9 @@ export class SearchQueries extends SearchIndexer {
       ef.attributes = f.attributes.map((a) => ({ key: attrKey(a.key), values: a.values }));
     }
 
-    if (f.priceMin !== undefined) ef.priceMin = f.priceMin;
-    if (f.priceMax !== undefined) ef.priceMax = f.priceMax;
-    if (f.minRating !== undefined) ef.minRating = f.minRating;
+    if (f.priceMin != null) ef.priceMin = f.priceMin;
+    if (f.priceMax != null) ef.priceMax = f.priceMax;
+    if (f.minRating != null) ef.minRating = f.minRating;
     if (f.conditions?.length) ef.conditions = f.conditions;
     if (f.freeDelivery) ef.freeDelivery = true;
     if (f.shipsToday) ef.shipsToday = true;
@@ -257,9 +257,9 @@ export class SearchQueries extends SearchIndexer {
       delivery: [...(f.freeDelivery ? ['free'] : []), ...(f.shipsToday ? ['ships_today'] : []), ...(f.arrivesBy ? ['arrives_by'] : [])],
       attrs: (ef.attributes ?? []).map((a) => ({ key: a.key, values: [...a.values] })),
       sort,
-      ...(f.priceMin !== undefined ? { priceMin: f.priceMin } : {}),
-      ...(f.priceMax !== undefined ? { priceMax: f.priceMax } : {}),
-      ...(f.minRating !== undefined ? { rating: f.minRating } : {}),
+      ...(f.priceMin != null ? { priceMin: f.priceMin } : {}),
+      ...(f.priceMax != null ? { priceMax: f.priceMax } : {}),
+      ...(f.minRating != null ? { rating: f.minRating } : {}),
       ...(f.inStockOnly === false ? { availability: 'include_out_of_stock' as const } : {}),
       ...(f.arrivesBy ? { arrivesBy: f.arrivesBy } : {}),
       ...(f.listedWithinDays ? { listedWithinDays: f.listedWithinDays } : {}),
@@ -466,8 +466,8 @@ export class SearchQueries extends SearchIndexer {
       range: {
         min: counts.price.min !== null ? money(counts.price.min, currency) : null,
         max: counts.price.max !== null ? money(counts.price.max, currency) : null,
-        selectedMin: f.priceMin !== undefined ? money(f.priceMin, currency) : null,
-        selectedMax: f.priceMax !== undefined ? money(f.priceMax, currency) : null,
+        selectedMin: f.priceMin != null ? money(f.priceMin, currency) : null,
+        selectedMax: f.priceMax != null ? money(f.priceMax, currency) : null,
       },
       collapsed: false,
     });
@@ -770,7 +770,7 @@ export class SearchQueries extends SearchIndexer {
     return { items, ...info };
   }
 
-  protected pageTypeOf(p: Prepared): string {
+  protected pageTypeOf(p: Prepared): 'search' | 'category' | 'brand' | 'seller_store' | 'official_store' | 'deals' | 'collection' {
     if (p.mode.kind === 'search') return 'search';
     if (p.mode.kind === 'seller') return 'seller_store';
     if (p.mode.kind === 'category') return p.engineQuery.filters.onSale ? 'deals' : 'category';
@@ -802,7 +802,7 @@ export class SearchQueries extends SearchIndexer {
       a.sponsoredForResults({
         personalizationAllowed: privacy.personalizationAllowed,
         ...(privacy.customerId ? { customerId: privacy.customerId } : {}),
-        page: { page: this.pageTypeOf(p) as never },
+        page: this.pageTypeOf(p),
         ...(p.text.normalized ? { query: p.text.correctedTo ?? p.text.normalized } : {}),
         ...(p.category ? { categoryId: p.category.node.id } : {}),
         visitorId: principal?.sessionId ?? 'anonymous',

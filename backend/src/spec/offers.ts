@@ -131,7 +131,7 @@ export interface DispatchTerms {
   businessDays: number;
   /** Local cutoff HH:mm for same-day dispatch, market time zone */
   sameDayCutoff?: string | null;
-  /** City and region, e.g. 'Reno, NV'. Official Store offers: the inventory default location (inventory.getDefaultLocation), refreshed when that location changes; seller offers: the seller's ships-from address from shipping seller settings. Never empty: falls back to the market default location label (kernel config). */
+  /** City and region, e.g. 'Reno, NV'. Official Store offers: the inventory default location (inventory.getDefaultLocation), set at save and refreshed by the hourly offers.reevaluate-eligibility job when that location changes (inventory publishes no location event; the refresh does not bump termsVersion); seller offers: the seller's ships-from address from shipping seller settings. Never empty: falls back to the market default location label (kernel config). */
   shipsFrom: string;
   /** e.g. 'Ships today', 'Ships in 1 business day' */
   label: string;
@@ -140,7 +140,7 @@ export interface DispatchTerms {
 export const DispatchTerms: z.ZodType<DispatchTerms> = z.object({
   businessDays: z.number().int().describe("0 = same business day"),
   sameDayCutoff: z.string().describe("Local cutoff HH:mm for same-day dispatch, market time zone").nullish(),
-  shipsFrom: z.string().describe("City and region, e.g. 'Reno, NV'. Official Store offers: the inventory default location (inventory.getDefaultLocation), refreshed when that location changes; seller offers: the seller's ships-from address from shipping seller settings. Never empty: falls back to the market default location label (kernel config)."),
+  shipsFrom: z.string().describe("City and region, e.g. 'Reno, NV'. Official Store offers: the inventory default location (inventory.getDefaultLocation), set at save and refreshed by the hourly offers.reevaluate-eligibility job when that location changes (inventory publishes no location event; the refresh does not bump termsVersion); seller offers: the seller's ships-from address from shipping seller settings. Never empty: falls back to the market default location label (kernel config)."),
   label: z.string().describe("e.g. 'Ships today', 'Ships in 1 business day'"),
 }).register(common.apiTypes, { id: "offers.DispatchTerms" });
 
@@ -149,21 +149,21 @@ export interface ReturnTerms {
   kind: "baseline" | "extended";
   windowDays: number;
   freeReturnShipping: boolean;
-  /** Category exception text shown before purchase (from returns) */
+  /** Category exception text shown before purchase: returns' summary when resolveTerms answered source category_exception at save (column return_category_exception); null otherwise */
   categoryException?: string | null;
   /** e.g. '30-day returns. You pay return shipping unless the item is faulty.' */
   summary: string;
-  /** returns module policy version the terms were validated against */
-  policyId?: string | null;
+  /** returns policy version (EffectiveTerms.policyVersion, e.g. '1.0') the terms were validated against at save; null when returns was off */
+  policyVersion?: string | null;
 }
 
 export const ReturnTerms: z.ZodType<ReturnTerms> = z.object({
   kind: z.enum(["baseline", "extended"]).describe("extended = more generous than the platform baseline for the category"),
   windowDays: z.number().int(),
   freeReturnShipping: z.boolean(),
-  categoryException: z.string().describe("Category exception text shown before purchase (from returns)").nullish(),
+  categoryException: z.string().describe("Category exception text shown before purchase: returns' summary when resolveTerms answered source category_exception at save (column return_category_exception); null otherwise").nullish(),
   summary: z.string().describe("e.g. '30-day returns. You pay return shipping unless the item is faulty.'"),
-  policyId: z.uuid().describe("returns module policy version the terms were validated against").nullish(),
+  policyVersion: z.string().describe("returns policy version (EffectiveTerms.policyVersion, e.g. '1.0') the terms were validated against at save; null when returns was off").nullish(),
 }).register(common.apiTypes, { id: "offers.ReturnTerms" });
 
 export interface WarrantyTerms {
@@ -1452,9 +1452,16 @@ export const FeaturedCandidate: z.ZodType<FeaturedCandidate> = z.object({
 
 export interface OfferChange {
   offerId: string;
+  /** One change per line, checked in this order: removed, seller_restricted, availability, delivery, price, terms (terms only when the price did not change) */
   kind: "price" | "availability" | "delivery" | "terms" | "removed" | "seller_restricted";
+  /** Display text of the old value: price '$94.99', availability the quantity asked for ('3'), terms 'v2'; null for delivery, removed and seller_restricted. Read previous for the typed value. */
   before?: string | null;
+  /** Display text of the new value: price '$99.99', availability the units that can be bought now ('1', '0'), delivery the location label that is not served, terms 'v3'; null for removed and seller_restricted. Read current for the typed value. */
   after?: string | null;
+  /** Typed old value, by kind: price → price (the line's price), availability → quantity (asked for), terms → termsVersion (the line's). Null for delivery, removed and seller_restricted */
+  previous?: OfferChangeValues | null;
+  /** Typed new value, by kind: price → price (now), availability → quantity (units that can be bought now, 0 when the offer is not active), delivery → postalCode (the location not served), terms → termsVersion (now). Null for removed and seller_restricted */
+  current?: OfferChangeValues | null;
   /** Customer-facing explanation */
   message: string;
   /** Other offers for the same variant the customer may choose explicitly */
@@ -1463,14 +1470,36 @@ export interface OfferChange {
 
 export const OfferChange: z.ZodType<OfferChange> = z.object({
   offerId: z.uuid(),
-  kind: z.enum(["price", "availability", "delivery", "terms", "removed", "seller_restricted"]),
-  before: z.string().nullish(),
-  after: z.string().nullish(),
+  kind: z.enum(["price", "availability", "delivery", "terms", "removed", "seller_restricted"]).describe("One change per line, checked in this order: removed, seller_restricted, availability, delivery, price, terms (terms only when the price did not change)"),
+  before: z.string().describe("Display text of the old value: price '$94.99', availability the quantity asked for ('3'), terms 'v2'; null for delivery, removed and seller_restricted. Read previous for the typed value.").nullish(),
+  after: z.string().describe("Display text of the new value: price '$99.99', availability the units that can be bought now ('1', '0'), delivery the location label that is not served, terms 'v3'; null for removed and seller_restricted. Read current for the typed value.").nullish(),
+  get previous() {
+    return OfferChangeValues.nullish();
+  },
+  get current() {
+    return OfferChangeValues.nullish();
+  },
   message: z.string().describe("Customer-facing explanation"),
   get alternatives() {
     return z.array(OfferView);
   },
 }).register(common.apiTypes, { id: "offers.OfferChange" });
+
+export interface OfferChangeValues {
+  price?: common.Money | null;
+  quantity?: number | null;
+  termsVersion?: number | null;
+  postalCode?: string | null;
+}
+
+export const OfferChangeValues: z.ZodType<OfferChangeValues> = z.object({
+  get price() {
+    return common.Money.nullish();
+  },
+  quantity: z.number().int().nullish(),
+  termsVersion: z.number().int().nullish(),
+  postalCode: z.string().nullish(),
+}).register(common.apiTypes, { id: "offers.OfferChangeValues" });
 
 export interface OfferSnapshot {
   offerId: string;
@@ -1485,6 +1514,7 @@ export interface OfferSnapshot {
   condition: string;
   conditionNotes?: string | null;
   missingItems: string[];
+  /** Offer (regular) price at purchase. Campaign markdowns, flash prices, coupons and automatic discounts are not in it: the price the customer paid per unit comes from checkout (promotions evaluation) on the order item. */
   price: common.Money;
   compareAt?: common.Money | null;
   dispatch: DispatchTerms;
@@ -1805,7 +1835,10 @@ export interface OffersDb {
     return_kind: string;
     return_window_days: number;
     free_return_shipping: boolean;
-    return_policy_id: string | null;
+    /** returns EffectiveTerms.policyVersion at save */
+    return_policy_version: string | null;
+    /** returns category exception summary at save */
+    return_category_exception: string | null;
     warranty_kind: string;
     warranty_months: number | null;
     warranty_handled_by: string | null;
@@ -3227,7 +3260,7 @@ export const spec = defineModuleSpec({
     },
     "offers.reevaluate-eligibility": {
       "schedule": "hourly",
-      "does": "Read seller performance (on-time dispatch over the window, delivery reviews, open restrictions) from sellers and update offer_eligibility; publish offers.offer.eligibility_changed"
+      "does": "Read seller performance (on-time dispatch over the window, delivery reviews, open restrictions) from sellers and update offer_eligibility; publish offers.offer.eligibility_changed. Also: refresh Official Store ships-from from inventory.getDefaultLocation (no location event exists), fill titles of offers created before titles existed, and fill the return policy version and category exception of offers saved before those columns existed (only while returns is on; a bounded batch per run)"
     },
     "offers.verify-compare-at": {
       "schedule": "daily 02:00 market time",
@@ -3475,8 +3508,12 @@ export const spec = defineModuleSpec({
         "type": "bool",
         "nullable": false
       },
-      "return_policy_id": {
-        "type": "uuid",
+      "return_policy_version": {
+        "type": "text",
+        "nullable": true
+      },
+      "return_category_exception": {
+        "type": "text",
         "nullable": true
       },
       "warranty_kind": {

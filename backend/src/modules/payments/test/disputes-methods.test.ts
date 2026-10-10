@@ -120,7 +120,7 @@ describe('disputes', () => {
     const { dispute } = await openDispute({ dueInDays: 1 });
     await h.run('payments.dispute-deadlines');
     let d = await h.service.disputes.get(dispute.id);
-    expect(d.evidence.dueSoonFlagged).toBe(true);
+    expect(d.due_soon_flagged_at).not.toBeNull();
     expect(d.status).toBe('opened');
     h.clock.advance(2 * 86_400_000);
     const closed = await h.call('POST', `/api/admin/payments/disputes/${dispute.id}/evidence`, staff(), { text: 'Late', submit: true });
@@ -178,11 +178,11 @@ describe('disputes', () => {
     await h.call('POST', `/api/admin/payments/disputes/${rejected.dispute.id}/accept`, staff(), { reason: 'r' });
     const req = h.access.requests.at(-1)!;
     void req;
-    const reqId = (await h.service.disputes.get(rejected.dispute.id)).evidence.pendingConcession!.approvalRequestId;
+    const reqId = (await h.service.disputes.get(rejected.dispute.id)).approval_request_id!;
     await h.publish('access', 'access.approval.decided', { ...decided('rejected', reqId), target: { type: 'payment_dispute', id: rejected.dispute.id } });
     const after = await h.service.disputes.get(rejected.dispute.id);
     expect(after.status).toBe('opened');
-    expect(after.evidence.pendingConcession).toBeNull();
+    expect(after.approval_request_id).toBeNull();
   });
 });
 

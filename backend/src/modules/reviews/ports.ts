@@ -21,6 +21,7 @@ export type VoteRec = Db['helpful_votes'];
 export type ReportRec = Db['reports'];
 export type ItemRec = Db['moderation_items'];
 export type DecisionRec = Db['moderation_decisions'];
+export type ReferralRec = Db['referrals'];
 export type AppealRec = Db['appeals'];
 export type ProductSummaryRec = Db['product_rating_summaries'];
 export type SellerSummaryRec = Db['seller_feedback_summaries'];
@@ -125,8 +126,8 @@ export interface ReviewsRepository {
   recomputeSellerSummary(sellerId: string, since: Date, positiveThreshold: number, now: Date): Promise<SellerSummaryRec>;
   productSummaries(productIds: readonly string[]): Promise<ProductSummaryRec[]>;
   sellerSummaries(sellerIds: readonly string[]): Promise<SellerSummaryRec[]>;
-  /** Average overall feedback score per seller over the period (the summary table has no overall sum) */
-  sellerAverages(sellerIds: readonly string[], since: Date): Promise<Map<string, number>>;
+  /** customers.account.closed: the customer's helpful votes move to a random id each (still counted, no longer linked) */
+  anonymiseVotes(customerId: string): Promise<number>;
   /** Product ids with reviews or questions, in batches (summaries job) */
   productIdsAfter(after: string | null, limit: number): Promise<string[]>;
   sellerIdsAfter(after: string | null, limit: number): Promise<string[]>;

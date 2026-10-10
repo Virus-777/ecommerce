@@ -12,15 +12,19 @@ import type { LedgerEntry, Reference, RefundImpactPreview, SellerBalances } from
 import type * as orders from '../../../spec/orders.js';
 import { addDays, calculate, DAY, dayStart, detId, fmt, nextSlot, prorate, scheduleLabel, shortDate, TYPE_GROUPS, TYPE_LABELS, type EntryType } from '../domain/rules.js';
 import { toEntry, toHold } from '../mappers.js';
-import type { FeeChargeRec, FinanceRepository, LotRec, TradingRec } from '../ports.js';
+import type { FeeChargeRec, FinanceRepository, FundingRec, LiabilityRec, LotRec, PlatformCostRec, TradingRec } from '../ports.js';
 import { invalid, notFound, Outbox, Part, type NewEntry } from './core.js';
 
 type Item = orders.OrderItem;
 
 const REFERENCE_KINDS: readonly Reference['kind'][] = ['order', 'order_item', 'return', 'refund', 'case', 'chargeback', 'payout', 'adjustment', 'ad_campaign', 'fulfillment_service', 'statement', 'seller', 'reconciliation'];
 
-/** Kinds of trading_entries rows that are platform (marketplace) facts, never Official Store trading */
-export const PLATFORM_KINDS = ['platform_label', 'platform_refund', 'platform_claim', 'coupon_redemption', 'coupon_seller_part', 'wallet_credit', 'wallet_credit_used', 'wallet_liability', 'wallet_breakage', 'wallet_correction'];
+/**
+ * Row ids of the trading and marketplace fact tables: detId('trading:<key>'), the same scheme the facts had while
+ * they all lived in trading_entries (migration 0004 kept the ids), so a redelivered event adds nothing.
+ */
+const factId = (key: string) => detId(`trading:${key}`);
+const walletEntry = (id: string) => (isUuid(id) ? id : null);
 
 export class LedgerPart extends Part {
   /* ---------------------------------------------------------------- lookups */
@@ -66,9 +70,28 @@ export class LedgerPart extends Part {
     return { seller, platform };
   }
 
+  /** Official Store (company) trading only; marketplace facts go to the tables below */
   async trading(tx: FinanceRepository, key: string, row: Omit<TradingRec, 'id' | 'currency'> & { currency?: string }) {
     if (!row.amount) return;
-    await tx.insertIgnore('trading_entries', { ...row, id: detId(`trading:${key}`), currency: row.currency ?? this.core.currency() });
+    await tx.insertIgnore('trading_entries', { ...row, id: factId(key), currency: row.currency ?? this.core.currency() });
+  }
+
+  /** A marketplace cost (positive) or recovery (negative) that is not Official Store trading */
+  async platformCost(tx: FinanceRepository, key: string, row: Omit<PlatformCostRec, 'id' | 'currency' | 'order_item_id'> & { currency?: string; order_item_id?: string | null }) {
+    if (!row.amount) return;
+    await tx.insertIgnore('platform_costs', { order_item_id: null, ...row, id: factId(key), currency: row.currency ?? this.core.currency() });
+  }
+
+  /** One funder's part of a coupon discount (reversals negative) */
+  async funding(tx: FinanceRepository, key: string, row: Omit<FundingRec, 'id' | 'currency'> & { currency?: string }) {
+    if (!row.amount) return;
+    await tx.insertIgnore('discount_funding', { ...row, id: factId(key), currency: row.currency ?? this.core.currency() });
+  }
+
+  /** A movement of the store credit liability */
+  async liability(tx: FinanceRepository, key: string, row: Omit<LiabilityRec, 'id' | 'at'>) {
+    if (!row.amount) return;
+    await tx.insertIgnore('store_credit_liability', { ...row, id: factId(key), at: this.now() });
   }
 
   /* ---------------------------------------------------------------- orders.order.accepted */
@@ -204,12 +227,11 @@ export class LedgerPart extends Part {
     await this.repo.updateWhere('earnings_lots', { id: lot.id, delivered_at: null }, { delivered_at: deliveredAt, available_at: new Date(deliveredAt.getTime() + days * DAY) });
   }
 
-  /** Extra hold days while the seller is in its new-seller period (rule hold placed at approval) */
+  /** Extra hold days for an item delivered at `at` while the seller is in its new-seller period (seller account, set at approval) */
   async newSellerExtraDays(sellerId: string, at: Date): Promise<number> {
-    const rule = await this.repo.findOne('holds', { seller_id: sellerId, reason_code: 'new_seller', status: 'active', amount: 0 });
-    if (!rule || rule.review_date < this.core.today(at)) return 0;
-    const days = /(\d+) extra days/.exec(rule.reason)?.[1];
-    return days ? Number(days) : await this.core.num('newSellerHoldDays', 14);
+    const acct = await this.repo.findOne('seller_accounts', { seller_id: sellerId });
+    if (!acct?.new_seller_until || !acct.new_seller_extra_days || acct.new_seller_until < this.core.today(at)) return 0;
+    return acct.new_seller_extra_days;
   }
 
   /** Job finance.release-pending: lots past delivery + hold window become available (bounded batches, restartable) */
@@ -275,7 +297,7 @@ export class LedgerPart extends Part {
       const platformCharge = item.amount.amount - sellerCharge;
       const lot = await this.lotOf(item.orderItemId, order);
       await this.repo.transaction(async (tx) => {
-        if (platformCharge > 0) await this.trading(tx, `platform_refund:${e.refundId}:${item.orderItemId}`, { at: new Date(e.sentAt), kind: 'return', amount: platformCharge, order_id: e.orderId, order_item_id: item.orderItemId, variant_id: null, ref_kind: 'platform_refund', ref_id: e.refundId });
+        if (platformCharge > 0) await this.platformCost(tx, `platform_refund:${e.refundId}:${item.orderItemId}`, { at: new Date(e.sentAt), kind: 'refund', amount: platformCharge, order_id: e.orderId, order_item_id: item.orderItemId, ref_kind: 'refund', ref_id: e.refundId });
         const l = lot ? await tx.get('earnings_lots', lot.id, { forUpdate: true }) : undefined;
         const ref: NewEntry['ref'] = breakdown?.returnId ? { kind: 'return', id: breakdown.returnId, label } : { kind: 'refund', id: e.refundId, label };
         if (!l) {
@@ -349,14 +371,16 @@ export class LedgerPart extends Part {
     const at = this.now();
     if (e.paidBy === 'customer') return; // deducted from the refund by returns
     if (e.paidBy === 'seller' && e.sellerId) return this.chargeLabel({ labelId: e.labelId, sellerId: e.sellerId, cost: e.cost.amount, ref: { kind: 'return', id: e.returnId }, description: 'Prepaid return label' });
-    const kind = e.ownerType === 'official' ? 'return_label' : 'platform_label';
-    await this.repo.transaction((tx) => this.trading(tx, `label:${e.labelId}`, { at, kind: 'shipping_expense', amount: e.cost.amount, order_id: e.orderId, order_item_id: null, variant_id: null, ref_kind: kind, ref_id: e.labelId }));
+    // an Official Store return label is company trading; one the platform pays on a seller's order is a platform cost
+    if (e.ownerType === 'official') await this.repo.transaction((tx) => this.trading(tx, `label:${e.labelId}`, { at, kind: 'shipping_expense', amount: e.cost.amount, order_id: e.orderId, order_item_id: null, variant_id: null, ref_kind: 'return_label', ref_id: e.labelId }));
+    else await this.repo.transaction((tx) => this.platformCost(tx, `label:${e.labelId}`, { at, kind: 'label', amount: e.cost.amount, order_id: e.orderId, ref_kind: 'label', ref_id: e.labelId }));
   }
 
   async onLabelPurchased(e: EventPayload<'shipping.label.purchased'>) {
     if (e.kind === 'return' || e.billedTo === 'customer') return; // return labels are booked from returns.label.created
     if (e.billedTo === 'seller' && e.sellerId) return this.chargeLabel({ labelId: e.labelId, sellerId: e.sellerId, cost: e.cost.amount, ref: { kind: 'order', id: e.orderId }, description: `${e.kind === 'replacement' ? 'Replacement' : 'Shipping'} label bought through Marketly` });
-    await this.repo.transaction((tx) => this.trading(tx, `label:${e.labelId}`, { at: this.now(), kind: 'shipping_expense', amount: e.cost.amount, order_id: e.orderId, order_item_id: null, variant_id: null, ref_kind: e.billedTo === 'company' ? 'label' : 'platform_label', ref_id: e.labelId }));
+    if (e.billedTo === 'company') await this.repo.transaction((tx) => this.trading(tx, `label:${e.labelId}`, { at: this.now(), kind: 'shipping_expense', amount: e.cost.amount, order_id: e.orderId, order_item_id: null, variant_id: null, ref_kind: 'label', ref_id: e.labelId }));
+    else await this.repo.transaction((tx) => this.platformCost(tx, `label:${e.labelId}`, { at: this.now(), kind: 'label', amount: e.cost.amount, order_id: e.orderId, ref_kind: 'label', ref_id: e.labelId }));
   }
 
   async onLabelVoided(e: EventPayload<'shipping.label.voided'>) {
@@ -367,8 +391,10 @@ export class LedgerPart extends Part {
       this.core.flush(out);
       return;
     }
-    const booked = await this.repo.get('trading_entries', detId(`trading:label:${e.labelId}`));
-    if (booked) await this.repo.transaction((tx) => this.trading(tx, `label_void:${e.labelId}`, { at: this.now(), kind: 'shipping_expense', amount: -booked.amount, order_id: booked.order_id, order_item_id: null, variant_id: null, ref_kind: booked.ref_kind, ref_id: e.labelId }));
+    const booked = await this.repo.get('trading_entries', factId(`label:${e.labelId}`));
+    if (booked) return void (await this.repo.transaction((tx) => this.trading(tx, `label_void:${e.labelId}`, { at: this.now(), kind: 'shipping_expense', amount: -booked.amount, order_id: booked.order_id, order_item_id: null, variant_id: null, ref_kind: booked.ref_kind, ref_id: e.labelId })));
+    const cost = await this.repo.get('platform_costs', factId(`label:${e.labelId}`));
+    if (cost) await this.repo.transaction((tx) => this.platformCost(tx, `label_void:${e.labelId}`, { at: this.now(), kind: 'label', amount: -cost.amount, order_id: cost.order_id, ref_kind: 'label', ref_id: e.labelId }));
   }
 
   async onClaimStatusChanged(e: EventPayload<'shipping.claim.status_changed'>) {
@@ -377,16 +403,18 @@ export class LedgerPart extends Part {
       await this.parts.holds.recordSystemAdjustment({ key: `claim:${e.claimId}`, sellerId: e.sellerId, direction: 'credit', amount: e.paidAmount.amount, reasonCode: 'carrier_claim', reason: 'Carrier claim paid for a lost or damaged parcel', reference: { kind: 'order', id: e.orderId, ref: null } });
       return;
     }
-    await this.repo.transaction((tx) => this.trading(tx, `claim:${e.claimId}`, { at: this.now(), kind: 'supplier_credit', amount: e.paidAmount!.amount, order_id: e.orderId, order_item_id: null, variant_id: null, ref_kind: e.sellerId ? 'platform_claim' : 'claim', ref_id: e.claimId }));
+    // paid to the platform on a seller's order: a platform recovery; on an Official Store order: company trading
+    if (e.sellerId) await this.repo.transaction((tx) => this.platformCost(tx, `claim:${e.claimId}`, { at: this.now(), kind: 'carrier_claim', amount: -e.paidAmount!.amount, order_id: e.orderId, ref_kind: 'claim', ref_id: e.claimId }));
+    else await this.repo.transaction((tx) => this.trading(tx, `claim:${e.claimId}`, { at: this.now(), kind: 'supplier_credit', amount: e.paidAmount!.amount, order_id: e.orderId, order_item_id: null, variant_id: null, ref_kind: 'claim', ref_id: e.claimId }));
   }
 
   /* ---------------------------------------------------------------- discount funding, wallet */
 
   async onCouponRedeemed(e: EventPayload<'promotions.coupon.redeemed'>) {
     await this.repo.transaction(async (tx) => {
-      const base = { at: this.now(), order_id: e.orderId, order_item_id: null, variant_id: null, ref_id: e.redemptionId };
-      await this.trading(tx, `coupon:${e.redemptionId}`, { ...base, kind: 'discount', amount: e.platformPart.amount, ref_kind: 'coupon_redemption' });
-      await this.trading(tx, `coupon_seller:${e.redemptionId}`, { ...base, kind: 'discount', amount: e.sellerPart.amount, ref_kind: 'coupon_seller_part' });
+      const base = { at: this.now(), redemption_id: e.redemptionId, kind: 'redeemed' as const, order_id: e.orderId, order_item_id: null, currency: e.platformPart.currency };
+      await this.funding(tx, `coupon:${e.redemptionId}`, { ...base, funded_by: 'platform', amount: e.platformPart.amount });
+      await this.funding(tx, `coupon_seller:${e.redemptionId}`, { ...base, funded_by: 'seller', amount: e.sellerPart.amount });
     });
   }
 
@@ -396,12 +424,12 @@ export class LedgerPart extends Part {
    * refund. Seller earnings were already corrected by the cancellation or refund itself.
    */
   async onRedemptionReversed(e: EventPayload<'promotions.redemption.reversed'>, eventId: string) {
-    const redeemed = await this.repo.get('trading_entries', detId(`trading:coupon:${e.redemptionId}`));
+    const redeemed = (await this.repo.get('discount_funding', factId(`coupon:${e.redemptionId}`))) ?? (await this.repo.get('discount_funding', factId(`coupon_seller:${e.redemptionId}`)));
     await this.repo.transaction(async (tx) => {
       if (!(await tx.claim(`promotions.redemption.reversed:${eventId}`))) return;
-      const base = { at: this.now(), order_id: redeemed?.order_id ?? null, order_item_id: isUuid(e.orderItemId) ? e.orderItemId : null, variant_id: null, ref_id: e.redemptionId };
-      await this.trading(tx, `coupon_reversed:${eventId}`, { ...base, kind: 'discount', amount: -e.platformPart.amount, ref_kind: 'coupon_redemption' });
-      await this.trading(tx, `coupon_seller_reversed:${eventId}`, { ...base, kind: 'discount', amount: -e.sellerPart.amount, ref_kind: 'coupon_seller_part' });
+      const base = { at: this.now(), redemption_id: e.redemptionId, kind: 'reversed' as const, order_id: redeemed?.order_id ?? null, order_item_id: isUuid(e.orderItemId) ? e.orderItemId : null, currency: e.platformPart.currency };
+      await this.funding(tx, `coupon_reversed:${eventId}`, { ...base, funded_by: 'platform', amount: -e.platformPart.amount });
+      await this.funding(tx, `coupon_seller_reversed:${eventId}`, { ...base, funded_by: 'seller', amount: -e.sellerPart.amount });
     });
   }
 
@@ -412,11 +440,10 @@ export class LedgerPart extends Part {
    * costs: the refund was already booked from payments.refund.sent, the gift card when it was sold.
    */
   async onCreditGranted(e: EventPayload<'wallet.credit.granted'>) {
-    const at = this.now();
-    const base = { at, order_id: e.orderId ?? null, order_item_id: null, variant_id: null, ref_id: e.entryId };
+    const orderId = e.orderId && isUuid(e.orderId) ? e.orderId : null;
     await this.repo.transaction(async (tx) => {
-      await this.trading(tx, `wallet_liability:${e.entryId}`, { ...base, kind: 'discount', amount: e.amount.amount, currency: e.amount.currency, ref_kind: 'wallet_liability' });
-      if (e.kind === 'goodwill' && e.chargedTo === 'platform') await this.trading(tx, `wallet:${e.entryId}`, { ...base, kind: 'discount', amount: e.amount.amount, currency: e.amount.currency, ref_kind: 'wallet_credit' });
+      await this.liability(tx, `wallet_liability:${e.entryId}`, { kind: 'granted', amount: e.amount.amount, currency: e.amount.currency, wallet_entry_id: walletEntry(e.entryId), order_id: orderId });
+      if (e.kind === 'goodwill' && e.chargedTo === 'platform') await this.platformCost(tx, `wallet:${e.entryId}`, { at: this.now(), kind: 'goodwill_credit', amount: e.amount.amount, currency: e.amount.currency, order_id: orderId, ref_kind: 'wallet_entry', ref_id: e.entryId });
     });
     if (e.chargedTo !== 'seller' || (e.kind !== 'goodwill' && e.kind !== 'price_adjustment')) return;
     if (!e.sellerId || !isUuid(e.sellerId)) return void this.ctx.log.warn({ entryId: e.entryId }, 'finance: seller-funded store credit without a seller');
@@ -434,7 +461,7 @@ export class LedgerPart extends Part {
 
   /** wallet.credit.used: store credit paying for an order reduces the liability */
   async onCreditUsed(e: EventPayload<'wallet.credit.used'>) {
-    await this.repo.transaction((tx) => this.trading(tx, `wallet_used:${e.orderId}`, { at: this.now(), kind: 'discount', amount: -e.amount.amount, currency: e.amount.currency, order_id: e.orderId, order_item_id: null, variant_id: null, ref_kind: 'wallet_liability', ref_id: e.orderId }));
+    await this.repo.transaction((tx) => this.liability(tx, `wallet_used:${e.orderId}`, { kind: 'used', amount: -e.amount.amount, currency: e.amount.currency, wallet_entry_id: null, order_id: isUuid(e.orderId) ? e.orderId : null }));
   }
 
   /**
@@ -443,11 +470,11 @@ export class LedgerPart extends Part {
    * for the grant (keyed by grantEntryId, never more than was charged). Once per reversal entry (inbox).
    */
   async onCreditReversed(e: EventPayload<'wallet.credit.reversed'>) {
-    const base = { at: this.now(), order_id: e.orderId ?? null, order_item_id: null, variant_id: null, ref_id: e.entryId };
+    const orderId = e.orderId && isUuid(e.orderId) ? e.orderId : null;
     await this.repo.transaction(async (tx) => {
       if (!(await tx.claim(`wallet.credit.reversed:${e.entryId}`))) return;
-      await this.trading(tx, `wallet_liability_reversed:${e.entryId}`, { ...base, kind: 'discount', amount: -e.amount.amount, currency: e.amount.currency, ref_kind: 'wallet_liability' });
-      if (e.chargedTo === 'platform') await this.trading(tx, `wallet_reversed:${e.entryId}`, { ...base, kind: 'discount', amount: -e.amount.amount, currency: e.amount.currency, ref_kind: 'wallet_credit' });
+      await this.liability(tx, `wallet_liability_reversed:${e.entryId}`, { kind: 'reversed', amount: -e.amount.amount, currency: e.amount.currency, wallet_entry_id: walletEntry(e.entryId), order_id: orderId });
+      if (e.chargedTo === 'platform') await this.platformCost(tx, `wallet_reversed:${e.entryId}`, { at: this.now(), kind: 'goodwill_credit', amount: -e.amount.amount, currency: e.amount.currency, order_id: orderId, ref_kind: 'wallet_entry', ref_id: e.entryId });
     });
     if (e.chargedTo !== 'seller') return;
     if (!e.sellerId || !isUuid(e.sellerId)) return void this.ctx.log.warn({ entryId: e.entryId, grantEntryId: e.grantEntryId }, 'finance: reversed seller-funded store credit without a seller');
@@ -469,27 +496,25 @@ export class LedgerPart extends Part {
 
   /** wallet.credit.expired: unused credit expired; the liability goes down and the platform records breakage (never seller money) */
   async onCreditExpired(e: EventPayload<'wallet.credit.expired'>) {
-    const base = { at: this.now(), order_id: null, order_item_id: null, variant_id: null, ref_id: e.entryId };
     await this.repo.transaction(async (tx) => {
       if (!(await tx.claim(`wallet.credit.expired:${e.entryId}`))) return;
-      await this.trading(tx, `wallet_liability_expired:${e.entryId}`, { ...base, kind: 'discount', amount: -e.amount.amount, currency: e.amount.currency, ref_kind: 'wallet_liability' });
-      await this.trading(tx, `wallet_breakage:${e.entryId}`, { ...base, kind: 'discount', amount: -e.amount.amount, currency: e.amount.currency, ref_kind: 'wallet_breakage' });
+      await this.liability(tx, `wallet_liability_expired:${e.entryId}`, { kind: 'expired', amount: -e.amount.amount, currency: e.amount.currency, wallet_entry_id: walletEntry(e.entryId), order_id: null });
+      await this.platformCost(tx, `wallet_breakage:${e.entryId}`, { at: this.now(), kind: 'credit_breakage', amount: -e.amount.amount, currency: e.amount.currency, order_id: null, ref_kind: 'wallet_entry', ref_id: e.entryId });
     });
   }
 
   /** wallet.credit.corrected: a staff balance correction raises (positive) or lowers (negative) the liability; booked as a platform credit correction */
   async onCreditCorrected(e: EventPayload<'wallet.credit.corrected'>) {
-    const base = { at: this.now(), order_id: null, order_item_id: null, variant_id: null, ref_id: e.entryId };
     await this.repo.transaction(async (tx) => {
       if (!(await tx.claim(`wallet.credit.corrected:${e.entryId}`))) return;
-      await this.trading(tx, `wallet_liability_corrected:${e.entryId}`, { ...base, kind: 'discount', amount: e.amount.amount, currency: e.amount.currency, ref_kind: 'wallet_liability' });
-      await this.trading(tx, `wallet_correction:${e.entryId}`, { ...base, kind: 'discount', amount: e.amount.amount, currency: e.amount.currency, ref_kind: 'wallet_correction' });
+      await this.liability(tx, `wallet_liability_corrected:${e.entryId}`, { kind: 'corrected', amount: e.amount.amount, currency: e.amount.currency, wallet_entry_id: walletEntry(e.entryId), order_id: null });
+      await this.platformCost(tx, `wallet_correction:${e.entryId}`, { at: this.now(), kind: 'credit_correction', amount: e.amount.amount, currency: e.amount.currency, order_id: null, ref_kind: 'wallet_entry', ref_id: e.entryId });
     });
   }
 
-  /** Finance's store-credit liability (wallet_liability entries) up to a time */
+  /** Finance's store-credit liability (store_credit_liability) up to a time */
   async storeCreditLiability(before: Date): Promise<number> {
-    return this.repo.sum('trading_entries', 'amount', { ref_kind: 'wallet_liability', at: { op: '<', value: before } });
+    return this.repo.sum('store_credit_liability', 'amount', { at: { op: '<', value: before } });
   }
 
   /* ---------------------------------------------------------------- public API: ad charges, company costs */
@@ -605,7 +630,8 @@ export class LedgerPart extends Part {
     const slot = nextSlot(this.now(), schedule, String(await this.core.setting('payoutReleaseTime')), tz);
     const minimum = await this.core.num('minimumPayout', 2500);
     const days = await this.core.num('availableAfterDeliveryDays', 7);
-    const newSellerDays = await this.core.num('newSellerHoldDays', 14);
+    const inNewSellerPeriod = Boolean(acct?.new_seller_until && acct.new_seller_extra_days && acct.new_seller_until >= today);
+    const newSellerDays = inNewSellerPeriod ? acct!.new_seller_extra_days : null;
     const estimate = Math.max(0, available);
     const blocked = await this.payoutBlock(sellerId);
     return {
@@ -636,8 +662,9 @@ export class LedgerPart extends Part {
         availableAfterDeliveryDays: days,
         minimumPayout: this.money(minimum),
         newSellerHoldDays: newSellerDays,
+        newSellerUntil: inNewSellerPeriod ? acct!.new_seller_until : null,
         refundAfterPayout: 'Deducted from later earnings; if none, the balance shows the amount owed',
-        text: `Earnings become available ${days} days after delivery and are paid ${scheduleLabel(schedule).toLowerCase()} to a verified account. Balances under ${fmt(minimum, this.core.currency())} roll to the next payout.`,
+        text: `Earnings become available ${days} days after delivery${newSellerDays ? ` (${days + newSellerDays} days for items delivered until ${acct!.new_seller_until}, your new-seller period)` : ''} and are paid ${scheduleLabel(schedule).toLowerCase()} to a verified account. Balances under ${fmt(minimum, this.core.currency())} roll to the next payout.`,
       },
       destination: dest.status,
     };

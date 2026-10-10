@@ -569,16 +569,24 @@ placing is held under a row lock; a second Place order (any key) while placing, 
 | cart_id | uuid? |
 | customer_id | uuid? |
 | guest_session_id | uuid? |
-| account | jsonb |
+| account | jsonb (kind, phone, createAccountAfter, marketingOptIn, hidePricesOnSlip; email and name are columns) |
+| email | text? (contact email: the customer's, or the guest's from the contact step; null until known) |
+| contact_name | text? (customer name, or the guest's delivery address name) |
+| visitor_key | text? (the shopper's app session id when the checkout started: the visitor id advertising keys ad clicks by) |
+| personalization_allowed | bool (the shopper allowed personalization: a signed-in customer's personalizedRecommendations preference read at start; false for visitors, whose sessions carry no privacy choice) |
 | address | jsonb? |
 | address_id | uuid? |
 | status | text |
 | quote_version | int |
+| quote_total | int (payable total of the quote at quote_version, minor units; Place order compares expectedTotal with it) |
 | currency | text |
 | totals | jsonb |
 | coupon_codes | jsonb |
 | credit | jsonb? |
-| payment_selection | jsonb? |
+| payment_selection | jsonb? (method kind, label, saved method id, decline, cancelled orders; the intent and its state are columns) |
+| payment_intent_id | uuid? (intent of the latest payment attempt) |
+| payment_state | text? (accepted|pending_check|failed|requires_action) |
+| order_attempt | int? (payment attempt that order_id belongs to: the attemptNo passed to orders.createOrder) |
 | gift_note | text? |
 | promotion_evaluation_id | uuid? |
 | redemption_reservation_id | uuid? |
@@ -593,7 +601,7 @@ placing is held under a row lock; a second Place order (any key) while placing, 
 | created_at | timestamptz |
 | updated_at | timestamptz |
 
-Indexes: `(customer_id, status)`, `(guest_session_id, status)`, `(status, expires_at)`, `unique (order_id)`
+Indexes: `(customer_id, status)`, `(guest_session_id, status)`, `(status, expires_at)`, `unique (order_id)`, `(payment_intent_id)`, `gin(email gin_trgm_ops)`, `gin(contact_name gin_trgm_ops)`
 
 **session_lines**
 
@@ -758,7 +766,7 @@ Indexes: `unique (session_id, idempotency_key)`
 | idempotencyRetentionDays | `7` | duration, days, 1–… | How long Place order keys are kept |
 
 ## Integrations
-- **Sales tax rates**: Tax per item and shipping by destination state; a rate table in settings at launch, a tax service adapter later
+- **Sales tax rates**: Sales tax per item (on the item amount after discounts) by destination state; shipping is not taxed at launch. A rate table at launch, a tax service adapter later (behind the TaxProvider port). Before an address is chosen the quote shows no tax and taxNote 'Tax is calculated once you enter a delivery address.'
 
 ## Notes
 - Dependencies: architecture lists cart, orders, payments, shipping and customers. offers (revalidate, snapshots, alternatives) and inventory (stock holds) are added because Place order calls them directly; both are already required by cart, so this adds no new load-time constraint. Optional: promotions (coupons, markdown allocation), wallet (credit, phase 3), returns (resolveTerms for return terms per package), content (purchase terms version), identity (guest order access grant).
@@ -767,12 +775,13 @@ Indexes: `unique (session_id, idempotency_key)`
 - Revalidation sources: offers.revalidate (price, availability, terms version, seller restriction; never substitutes a seller), inventory.getAvailability, shipping.quoteOptions for the selected options (date moved, option gone, shipping cost), shipping.checkCoverage, promotions.evaluateCart (coupon ended or changed, budget, limits), tax. Each difference becomes one Change with choices; alternatives come from offers for the same variant and are applied only when chosen.
 - Partial orders: removing items or unavailable items leaves a smaller order; acceptChanges requires acceptPartialOrder=true and the review step shows the revised packages and total before Place order.
 - Idempotency (scenario 3): place_requests stores each Idempotency-Key with a hash of the body; the same key and body return the stored result (refreshed with the current status), a different body returns IDEMPOTENCY_KEY_REUSED. The session lock and status guard mean even a new key cannot start a second order or charge while placing, pending or completed. payments.authorize uses sessionId + attempt number as its key.
-- Accepted path: payments.authorize → orders.createOrder with paymentState accepted (order created and accepted in one step; never created pending_check and accepted afterwards, so a failed acceptOrder cannot leave it payment_pending; dispatch deadlines from the selected options; policyVersions from content.currentPolicyVersions read at placement) → payments.linkOrder → inventory.attachOrder → promotions.commitRedemption → cart.removePurchasedItems (other cart lines stay) → identity grants the guest session access to the order → confirmation.
+- Accepted path: payments.authorize → orders.createOrder with paymentState accepted (order created and accepted in one step; never created pending_check and accepted afterwards, so a failed acceptOrder cannot leave it payment_pending; dispatch deadlines from the selected options; policyVersions from content.currentPolicyVersions read at placement; visitorId only when the session's personalization_allowed is true) → promotions.commitRedemption → inventory.attachOrder → payments.linkOrder → wallet.captureHold (store credit) → cart.removePurchasedItems (other cart lines stay) → identity.grantGuestOrderAccess (guests) → completed (checkout.session.completed) → confirmation. Steps after createOrder are idempotent and do not undo the order when one fails (logged).
 - Failed path: no order; status payment_failed; the decline reason and retry choices are shown; lines, delivery choices, coupons, the stock hold and the promotion reservation are kept until holdUntil; the customer can retry with the same card, another card or a wallet, or go back to checkout.
 - Pending path: the order is created with payment checking and its reference is shown; the customer is told not to pay again and is directed to the order status; payments' check job resolves it, and the session completes or returns to payment_failed (lines restored to the cart).
 - Buy now creates a session from one offer; it never changes the cart and still requires the review and Place order steps (plan ch. 5).
 - Per-customer purchase limits count units in this checkout plus orders.countPurchased within purchaseLimitWindowDays.
-- Order attempts: sessions.attempt_count is the payment attempt number. createOrder is called with attemptNo = attempt_count, so a retry after a pending payment was finally declined (and its order cancelled) creates a new order instead of returning the cancelled one; sessions.order_id points to the latest order. orders maps lines back by OrderItem.checkoutLineId.
+- Order attempts: sessions.attempt_count is the payment attempt number. createOrder is called with attemptNo = attempt_count, so a retry after a pending payment was finally declined (and its order cancelled) creates a new order instead of returning the cancelled one; sessions.order_id points to the latest order and sessions.order_attempt to its attempt number. orders maps lines back by OrderItem.checkoutLineId.
+- Guest ad attribution (advertising decision: guest attribution only with personalizationAllowed): startCheckout keeps the caller's app session id as visitor_key and the shopper's personalization choice as personalization_allowed (a signed-in customer's personalizedRecommendations preference; visitors carry no privacy choice, so false). createOrder gets visitorId = visitor_key only when personalization_allowed is true, otherwise null. A guest who signs in during checkout keeps the session's choice.
 - Promotions input: evaluateCart lines carry the seller id, or OFFICIAL_STORE_ID for Official Store lines (never '' or null), categoryId when known, and contactEmail for guests (per-customer limits by email hash).
 - Payment method tokens: payment_selection stores the method kind, label and saved method id. A new card or wallet providerToken lives only until the authorize call of the place or retry request that uses it, then it is cleared; a later attempt with a new card needs a new token (PAYMENT_METHOD_INVALID otherwise).
 - catalog is optional (decision D-C1): when enabled, review lines and admin rows read product titles, images and category from catalog; otherwise from the offer title and snapshot.

@@ -10,9 +10,10 @@ import type { DecisionInput, RemedyInput, SupportDb } from '../../spec/support.j
 type Db = SupportDb;
 
 /**
- * Facts about a case the table has no column for (kept in cases.next_action next to the stored next action):
- * names and references for search and lists, what the customer asked for, the open information request,
- * the escalation and the dispatch warning.
+ * Facts about a case, each kept in its own column of cases (order_ref, customer_name, problem_type, desired_remedy,
+ * info_request_*, escalated_*, seller_replied_at, dispatch_overdue_*, overdue_notified_for, appeal_window_closed…).
+ * The repository maps the columns to this object so the rules read one shape: names and references for search and
+ * lists, what the customer asked for, the open information request, the last escalation and the dispatch warning.
  */
 export interface CaseFacts {
   orderRef?: string | null;
@@ -39,11 +40,11 @@ export interface CaseFacts {
   trustReportId?: string | null;
 }
 
+/** cases.next_action: the stored next action (recomputed on every save) */
 export interface StoredNext {
   label: string;
   whoMustAct: 'customer' | 'seller' | 'marketplace' | 'none';
   note?: string | null;
-  facts: CaseFacts;
 }
 
 export interface StoredDecision {
@@ -59,7 +60,7 @@ export interface StoredDecision {
   previous?: { outcome: string; reason: string; decidedBy: common.Actor; decidedAt: string }[];
 }
 
-/** A decision (or appeal decision) waiting for support.remedies.approve */
+/** A decision (or appeal decision) waiting for support.remedies.approve: cases.approval_request_id + cases.pending_decision */
 export interface PendingApproval {
   kind: 'decision' | 'appeal';
   requestId: string;
@@ -71,17 +72,58 @@ export interface PendingApproval {
   requestedAt: string;
 }
 
+/** cases.pending_decision: the pending approval without its request id (cases.approval_request_id) */
+export type StoredPending = Omit<PendingApproval, 'requestId'>;
+
 export interface StoredDraft {
-  draft: DecisionInput | null;
+  draft: DecisionInput;
   savedAt: string;
   savedBy: common.Actor;
-  pending?: PendingApproval | null;
 }
 
-export interface CaseRec extends Omit<Db['cases'], 'next_action' | 'decision' | 'decision_draft'> {
+/** The columns of cases that hold CaseFacts (mapped to and from CaseRec.facts by the repository) */
+export const FACT_COLUMNS = [
+  'order_ref',
+  'placed_at',
+  'return_ref',
+  'customer_name',
+  'contact_email',
+  'city',
+  'seller_name',
+  'owner_type',
+  'reference',
+  'trust_report_id',
+  'problem_type',
+  'desired_remedy',
+  'callback_phone',
+  'info_request_from',
+  'info_request_question',
+  'info_request_due_at',
+  'info_requested_at',
+  'info_requested_by',
+  'escalated_at',
+  'escalated_by',
+  'escalation_reason',
+  'escalated_to',
+  'escalation_note',
+  'seller_replied_at',
+  'dispatch_overdue_due_at',
+  'dispatch_overdue_noted_at',
+  'overdue_notified_for',
+  'appeal_window_closed',
+] as const;
+export type FactColumn = (typeof FACT_COLUMNS)[number];
+
+/**
+ * A case row: jsonb columns typed, the fact columns gathered in facts and the pending approval
+ * (approval_request_id + pending_decision) in pending.
+ */
+export interface CaseRec extends Omit<Db['cases'], 'next_action' | 'decision' | 'decision_draft' | 'approval_request_id' | 'pending_decision' | FactColumn> {
   next_action: StoredNext;
   decision: StoredDecision | null;
   decision_draft: StoredDraft | null;
+  facts: CaseFacts;
+  pending: PendingApproval | null;
 }
 
 /** Order item facts copied when the case is opened (current state is read from orders at view time) */
@@ -162,6 +204,12 @@ export interface CaseFilter {
   category?: string;
   priority?: string;
   q?: string;
+  /** Appeal windows whose end the auto-close job has not recorded yet (appeal_window_closed = false) */
+  appealWindowOpen?: boolean;
+  /** Cases whose current response deadline was not announced yet (overdue_notified_for differs from next_response_due_at) */
+  overdueUnannounced?: boolean;
+  /** appeal_deadline before this time */
+  appealDeadlineBefore?: Date;
   openedFrom?: Date;
   openedTo?: Date;
   handler?: string;

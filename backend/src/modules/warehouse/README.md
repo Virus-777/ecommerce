@@ -146,6 +146,7 @@ Physical work for Official Store stock: bins, put-away of received goods, pick w
 | lines | `FulfillmentLine[]` |
 | packages | `Package[]` |
 | holdReason | `string?` e.g. 'Shortage reported: bin F-12-3 empty. Inventory is checking.' |
+| dispatchOverdueAt | `datetime?` When shipping reported the dispatch deadline missed (shipping.dispatch.overdue); the order then leads the pick list |
 | mixedOrderNote | `string?` e.g. 'This order also has Package 2 of 2 from Pixel & Port. They ship it separately.' |
 | totalPackagesInOrder | `int` |
 | createdAt | `datetime` |
@@ -278,6 +279,7 @@ Physical work for Official Store stock: bins, put-away of received goods, pick w
 | handlingNote | `string?` |
 | carrier | `string?` |
 | service | `string?` |
+| carrierServiceId | `uuid?` Shipping carrier service chosen at packing (PackageUpdate.serviceCode); the label is bought with it |
 | trackingNumber | `string?` |
 | labelUrl | `url?` |
 | packedBy | `Actor?` |
@@ -509,6 +511,7 @@ Indexes: `pk (stock_item_id, bin_id)`, `unique (stock_item_id) where primary_bin
 | ship_to | jsonb |
 | wave_id | uuid? → waves |
 | hold_reason | text? |
+| dispatch_overdue_at | timestamptz? (shipping.dispatch.overdue: the dispatch deadline was missed) |
 | discrepancy_ids | jsonb |
 | total_packages_in_order | int |
 | created_at | timestamptz |
@@ -593,6 +596,7 @@ Indexes: `(context, context_id, at)`
 | handling_note | text? |
 | carrier | text? |
 | service | text? |
+| carrier_service_id | uuid? (shipping carrier service chosen at packing) |
 | tracking_number | text? |
 | label_media_id | uuid? |
 | label_idempotency_key | text? |
@@ -747,6 +751,7 @@ Indexes: `(status, expected_by)`, `(return_id)`, `(tracking_number)`
 - **Shipping scales**: Weight captured at the packing station (fromScale)
 
 ## Notes
+- Event consumers and once-only jobs are idempotent through the kernel inbox (ctx.inbox), never through scan_log rows: orders.item.cancelled claims item-cancelled:<cancellationId>, shipping.dispatch.overdue claims dispatch-overdue:<exceptionId> and the at-risk job claims at-risk:<fulfillmentId>. scan_log stays a troubleshooting and productivity log.
 - Scope is Official Store stock only at launch. Outside sellers pick and pack their own orders; their tasks and shipments are in orders and shipping. The future fulfillment service (phase 4) reuses fulfillments, waves and packing for seller-owned stock.
 - Mixed orders: a fulfillment covers only the Official Store seller group. The packing slip lists only those items and says which package number it is and that other packages ship separately.
 - Labels are bought through shipping (shipping.createLabel with the package, the delivery choice and an idempotency key); warehouse never talks to carriers directly.
@@ -781,6 +786,8 @@ type WarehouseTask @areas(in: [ADMIN]) {
   packages: [WarehousePackage!]!
   "e.g. 'Shortage reported: bin F-12-3 empty. Inventory is checking.'"
   holdReason: String
+  "When shipping reported the dispatch deadline missed; the order then leads the pick list"
+  dispatchOverdueAt: DateTime
   "e.g. 'This order also has Package 2 of 2 from Pixel & Port. They ship it separately.'"
   mixedOrderNote: String
   totalPackagesInOrder: Int!

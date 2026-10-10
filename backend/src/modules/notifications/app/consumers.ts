@@ -325,7 +325,7 @@ export class Consumers {
           {
             topic: 'staff.approval.due_soon',
             recipients: approvers.length ? approvers.map((accountId) => ({ kind: 'staff_member', accountId })) : p.eligibleRoleKeys.map((roleKey) => ({ kind: 'staff_role', roleKey })),
-            link: { kind: 'approval', id: p.requestId, ref: p.ref, screen: 'admin/approvals', label: 'Review request' },
+            link: { kind: 'approval', id: p.requestId, ref: p.ref, screen: 'admin/inbox', label: 'Review request' },
             context: { due: { date: this.fmt.dateTime(p.dueAt) } },
             dedupeKey: `approval:${p.requestId}`,
             actionRequired: true,

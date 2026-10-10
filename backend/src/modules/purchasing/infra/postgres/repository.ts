@@ -44,6 +44,7 @@ const toSupplier = (r: T<'suppliers'>): SupplierRow => ({
   address: (r.address as common.Address | null) ?? null,
   paymentTerms: r.payment_terms,
   leadTimeDays: r.lead_time_days,
+  returnAuthorizationRequired: r.return_authorization_required,
   active: r.active,
   notes: r.notes,
   createdAt: asDate(r.created_at),
@@ -59,6 +60,7 @@ const supplierCols = (p: Partial<SupplierRow>) => {
   if (p.address !== undefined) c.address = p.address === null ? null : json(p.address);
   if (p.paymentTerms !== undefined) c.payment_terms = p.paymentTerms;
   if (p.leadTimeDays !== undefined) c.lead_time_days = p.leadTimeDays;
+  if (p.returnAuthorizationRequired !== undefined) c.return_authorization_required = p.returnAuthorizationRequired;
   if (p.active !== undefined) c.active = p.active;
   if (p.notes !== undefined) c.notes = p.notes;
   return c;
@@ -221,6 +223,7 @@ const toClaim = (r: T<'supplier_claims'>): ClaimRow => ({
   status: r.status as ClaimStatus,
   settlement: r.settlement as ClaimRow['settlement'],
   settledAmount: num(r.settled_amount),
+  supplierReference: r.supplier_reference,
   owner: parseActor(r.owner_id) ?? { kind: 'system', id: null, name: null },
   notes: r.notes,
   createdAt: asDate(r.created_at),
@@ -254,6 +257,7 @@ export function createPostgresPurchasingRepository(db: Db, inTransaction = false
           address: row.address === null ? null : json(row.address),
           payment_terms: row.paymentTerms,
           lead_time_days: row.leadTimeDays,
+          return_authorization_required: row.returnAuthorizationRequired,
           active: row.active,
           notes: row.notes,
           created_at: row.createdAt,
@@ -808,6 +812,7 @@ export function createPostgresPurchasingRepository(db: Db, inTransaction = false
           status: row.status,
           settlement: row.settlement,
           settled_amount: row.settledAmount,
+          supplier_reference: row.supplierReference,
           owner_id: actorText(row.owner),
           notes: row.notes,
           created_at: row.createdAt,
@@ -823,6 +828,7 @@ export function createPostgresPurchasingRepository(db: Db, inTransaction = false
       if (patch.status !== undefined) c.status = patch.status;
       if (patch.settlement !== undefined) c.settlement = patch.settlement;
       if (patch.settledAmount !== undefined) c.settled_amount = patch.settledAmount;
+      if (patch.supplierReference !== undefined) c.supplier_reference = patch.supplierReference;
       if (patch.notes !== undefined) c.notes = patch.notes;
       if (patch.decidedAt !== undefined) c.decided_at = patch.decidedAt;
       if (!Object.keys(c).length) return (await repo.getClaim(id))!;

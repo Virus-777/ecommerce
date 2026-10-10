@@ -1141,16 +1141,33 @@ export interface CheckoutDb {
     cart_id: string | null;
     customer_id: string | null;
     guest_session_id: string | null;
+    /** kind, phone, createAccountAfter, marketingOptIn, hidePricesOnSlip; email and name are columns */
     account: Json;
+    /** contact email: the customer's, or the guest's from the contact step; null until known */
+    email: string | null;
+    /** customer name, or the guest's delivery address name */
+    contact_name: string | null;
+    /** the shopper's app session id when the checkout started: the visitor id advertising keys ad clicks by */
+    visitor_key: string | null;
+    /** the shopper allowed personalization: a signed-in customer's personalizedRecommendations preference read at start; false for visitors, whose sessions carry no privacy choice */
+    personalization_allowed: boolean;
     address: Json | null;
     address_id: string | null;
     status: string;
     quote_version: number;
+    /** payable total of the quote at quote_version, minor units; Place order compares expectedTotal with it */
+    quote_total: number;
     currency: string;
     totals: Json;
     coupon_codes: Json;
     credit: Json | null;
+    /** method kind, label, saved method id, decline, cancelled orders; the intent and its state are columns */
     payment_selection: Json | null;
+    /** intent of the latest payment attempt */
+    payment_intent_id: string | null;
+    payment_state: 'accepted' | 'pending_check' | 'failed' | 'requires_action' | null;
+    /** payment attempt that order_id belongs to: the attemptNo passed to orders.createOrder */
+    order_attempt: number | null;
     gift_note: string | null;
     promotion_evaluation_id: string | null;
     redemption_reservation_id: string | null;
@@ -1505,7 +1522,7 @@ export const endpoints = defineEndpoints({
     auth: "shopper",
     scope: "own-customer",
     summary: "Place the order and pay",
-    desc: "Requires an Idempotency-Key; the same key returns the first result, and while a session is placing, pending or completed any further call returns the current result without a new charge. Steps: lock; check quoteVersion and expectedTotal; revalidate (changes → changes_required, nothing charged); hold stock (inventory.hold); reserve promotions; read content.currentPolicyVersions(['returns', 'shipping', 'purchase_terms']) (the versions accepted with this order); authorize (payments.authorize); then accepted → order created and accepted (confirmation); pending → order created with payment checking (payment-result page, no second payment); failed → no order, cart and choices kept, holds kept until retryUntil; requires_action → bank challenge. Before authorizing, the session's attempt count is checked against maxPaymentAttempts (PAYMENT_ATTEMPTS_EXCEEDED); editing the checkout never resets it, so edit → place cannot bypass the limit. createOrder gets the real authorize result as paymentState (accepted creates the order open in one step) and the session's attemptNo. A new card's providerToken is used for this authorize only and cleared from payment_selection afterwards, whatever the outcome.",
+    desc: "Requires an Idempotency-Key; the same key returns the first result, and while a session is placing, pending or completed any further call returns the current result without a new charge. Steps: lock; check quoteVersion and expectedTotal; revalidate (changes → changes_required, nothing charged); hold stock (inventory.hold); reserve promotions; hold store credit (wallet.holdCredit; INSUFFICIENT_CREDIT when the balance dropped below the amount applied); read content.currentPolicyVersions(['returns', 'shipping', 'purchase_terms']) (the versions accepted with this order); authorize (payments.authorize); then accepted → order created and accepted (confirmation); pending → order created with payment checking (payment-result page, no second payment); failed → no order, cart and choices kept, holds kept until retryUntil; requires_action → bank challenge. Before authorizing, the session's attempt count is checked against maxPaymentAttempts (PAYMENT_ATTEMPTS_EXCEEDED); editing the checkout never resets it, so edit → place cannot bypass the limit. createOrder gets the real authorize result as paymentState (accepted creates the order open in one step) and the session's attemptNo. A new card's providerToken is used for this authorize only and cleared from payment_selection afterwards, whatever the outcome.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1513,7 +1530,7 @@ export const endpoints = defineEndpoints({
     body: () => PlaceOrderInput,
     response: () => PlaceOrderResult,
     status: 200,
-    errors: ["QUOTE_OUTDATED","CHECKOUT_INCOMPLETE","TERMS_NOT_ACCEPTED","SESSION_EXPIRED","ORDERING_RESTRICTED","PAYMENT_METHOD_INVALID","PAYMENT_ATTEMPTS_EXCEEDED","IDEMPOTENCY_KEY_REUSED","ILLEGAL_TRANSITION"],
+    errors: ["QUOTE_OUTDATED","CHECKOUT_INCOMPLETE","TERMS_NOT_ACCEPTED","SESSION_EXPIRED","ORDERING_RESTRICTED","PAYMENT_METHOD_INVALID","PAYMENT_ATTEMPTS_EXCEEDED","INSUFFICIENT_CREDIT","IDEMPOTENCY_KEY_REUSED","ILLEGAL_TRANSITION"],
     idempotent: true,
     events: ["checkout.session.completed","checkout.changes.detected"],
     screens: ["store/checkout","store/payment-result","store/confirmation","store/checkout-review-changes"],
@@ -1556,7 +1573,7 @@ export const endpoints = defineEndpoints({
     body: () => RetryPaymentInput,
     response: () => PlaceOrderResult,
     status: 200,
-    errors: ["RETRY_WINDOW_EXPIRED","QUOTE_OUTDATED","PAYMENT_METHOD_INVALID","PAYMENT_ATTEMPTS_EXCEEDED","IDEMPOTENCY_KEY_REUSED","ILLEGAL_TRANSITION"],
+    errors: ["RETRY_WINDOW_EXPIRED","QUOTE_OUTDATED","PAYMENT_METHOD_INVALID","PAYMENT_ATTEMPTS_EXCEEDED","INSUFFICIENT_CREDIT","IDEMPOTENCY_KEY_REUSED","ILLEGAL_TRANSITION"],
     idempotent: true,
     events: ["checkout.payment.retried","checkout.session.completed"],
     screens: ["store/payment-result"],
@@ -1975,6 +1992,22 @@ export const spec = defineModuleSpec({
         "type": "jsonb",
         "nullable": false
       },
+      "email": {
+        "type": "text",
+        "nullable": true
+      },
+      "contact_name": {
+        "type": "text",
+        "nullable": true
+      },
+      "visitor_key": {
+        "type": "text",
+        "nullable": true
+      },
+      "personalization_allowed": {
+        "type": "bool",
+        "nullable": false
+      },
       "address": {
         "type": "jsonb",
         "nullable": true
@@ -1988,6 +2021,10 @@ export const spec = defineModuleSpec({
         "nullable": false
       },
       "quote_version": {
+        "type": "int",
+        "nullable": false
+      },
+      "quote_total": {
         "type": "int",
         "nullable": false
       },
@@ -2009,6 +2046,18 @@ export const spec = defineModuleSpec({
       },
       "payment_selection": {
         "type": "jsonb",
+        "nullable": true
+      },
+      "payment_intent_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "payment_state": {
+        "type": "text",
+        "nullable": true
+      },
+      "order_attempt": {
+        "type": "int",
         "nullable": true
       },
       "gift_note": {

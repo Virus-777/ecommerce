@@ -146,7 +146,7 @@ How one seller (or the Official Store) sells one variant in one condition: price
 |---|---|
 | businessDays | `int` 0 = same business day |
 | sameDayCutoff | `string?` Local cutoff HH:mm for same-day dispatch, market time zone |
-| shipsFrom | `string` City and region, e.g. 'Reno, NV'. Official Store offers: the inventory default location (inventory.getDefaultLocation), refreshed when that location changes; seller offers: the seller's ships-from address from shipping seller settings. Never empty: falls back to the market default location label (kernel config). |
+| shipsFrom | `string` City and region, e.g. 'Reno, NV'. Official Store offers: the inventory default location (inventory.getDefaultLocation), set at save and refreshed by the hourly offers.reevaluate-eligibility job when that location changes (inventory publishes no location event; the refresh does not bump termsVersion); seller offers: the seller's ships-from address from shipping seller settings. Never empty: falls back to the market default location label (kernel config). |
 | label | `string` e.g. 'Ships today', 'Ships in 1 business day' |
 
 ### ReturnTerms
@@ -156,9 +156,9 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | kind | `enum(baseline|extended)` extended = more generous than the platform baseline for the category |
 | windowDays | `int` |
 | freeReturnShipping | `bool` |
-| categoryException | `string?` Category exception text shown before purchase (from returns) |
+| categoryException | `string?` Category exception text shown before purchase: returns' summary when resolveTerms answered source category_exception at save (column return_category_exception); null otherwise |
 | summary | `string` e.g. '30-day returns. You pay return shipping unless the item is faulty.' |
-| policyId | `uuid?` returns module policy version the terms were validated against |
+| policyVersion | `string?` returns policy version (EffectiveTerms.policyVersion, e.g. '1.0') the terms were validated against at save; null when returns was off |
 
 ### WarrantyTerms
 
@@ -765,11 +765,22 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | Field | Type |
 |---|---|
 | offerId | `uuid` |
-| kind | `enum(price|availability|delivery|terms|removed|seller_restricted)` |
-| before | `string?` |
-| after | `string?` |
+| kind | `enum(price|availability|delivery|terms|removed|seller_restricted)` One change per line, checked in this order: removed, seller_restricted, availability, delivery, price, terms (terms only when the price did not change) |
+| before | `string?` Display text of the old value: price '$94.99', availability the quantity asked for ('3'), terms 'v2'; null for delivery, removed and seller_restricted. Read previous for the typed value. |
+| after | `string?` Display text of the new value: price '$99.99', availability the units that can be bought now ('1', '0'), delivery the location label that is not served, terms 'v3'; null for removed and seller_restricted. Read current for the typed value. |
+| previous | `OfferChangeValues?` Typed old value, by kind: price → price (the line's price), availability → quantity (asked for), terms → termsVersion (the line's). Null for delivery, removed and seller_restricted |
+| current | `OfferChangeValues?` Typed new value, by kind: price → price (now), availability → quantity (units that can be bought now, 0 when the offer is not active), delivery → postalCode (the location not served), terms → termsVersion (now). Null for removed and seller_restricted |
 | message | `string` Customer-facing explanation |
 | alternatives | `OfferView[]` Other offers for the same variant the customer may choose explicitly |
+
+### OfferChangeValues
+
+| Field | Type |
+|---|---|
+| price | `Money?` |
+| quantity | `int?` |
+| termsVersion | `int?` |
+| postalCode | `string?` |
 
 ### OfferSnapshot
 
@@ -785,7 +796,7 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | condition | `string` |
 | conditionNotes | `text?` |
 | missingItems | `string[]` |
-| price | `Money` |
+| price | `Money` Offer (regular) price at purchase. Campaign markdowns, flash prices, coupons and automatic discounts are not in it: the price the customer paid per unit comes from checkout (promotions evaluation) on the order item. |
 | compareAt | `Money?` |
 | dispatch | `DispatchTerms` |
 | returnTerms | `ReturnTerms` |
@@ -886,7 +897,8 @@ Nothing changes until apply. Only rows marked ready are applied; error rows are 
 | return_kind | text |
 | return_window_days | int |
 | free_return_shipping | bool |
-| return_policy_id | uuid? |
+| return_policy_version | text? (returns EffectiveTerms.policyVersion at save) |
+| return_category_exception | text? (returns category exception summary at save) |
 | warranty_kind | text |
 | warranty_months | int? |
 | warranty_handled_by | text? |
@@ -1156,7 +1168,7 @@ Checked through the access module (limits per role, second reviewer).
 |---|---|---|
 | `offers.apply-price-schedule` | every 1 min | Start scheduled price changes whose startsAt has passed; revert applied changes whose endsAt has passed; publish offers.offer.price_changed |
 | `offers.recompute-featured` | every 2 min (dirty rows) + nightly full | Recompute featured_offers rows marked dirty for each delivery zone; publish offers.featured.changed when the winner changes |
-| `offers.reevaluate-eligibility` | hourly | Read seller performance (on-time dispatch over the window, delivery reviews, open restrictions) from sellers and update offer_eligibility; publish offers.offer.eligibility_changed |
+| `offers.reevaluate-eligibility` | hourly | Read seller performance (on-time dispatch over the window, delivery reviews, open restrictions) from sellers and update offer_eligibility; publish offers.offer.eligibility_changed. Also: refresh Official Store ships-from from inventory.getDefaultLocation (no location event exists), fill titles of offers created before titles existed, and fill the return policy version and category exception of offers saved before those columns existed (only while returns is on; a bounded batch per run) |
 | `offers.verify-compare-at` | daily 02:00 market time | Drop compare-at prices whose basis no longer holds (e.g. no longer the 30-day low before the sale) and tell the owner |
 | `offers.expire-bulk-previews` | hourly | Expire preview_ready jobs past expiresAt |
 | `offers.parse-bulk-file` | every 1 min | Parse uploaded CSVs still waiting (normally parsed right after upload), resolve seller SKUs, validate rows, build preview. Reads the file bytes through media.readFile, not the signed URL |
@@ -1194,7 +1206,7 @@ Checked through the access module (limits per role, second reviewer).
 - Exports: seller offer exports run through reports (registerDataset / requestExport) like every other module's exports. Offers registers dataset offers.seller.offers (seller audience; columns: product, variant, seller SKU, condition, price, compare-at, available, review state, publication, status, updated at) and serves it from POST /api/seller/offers/offers/exports. Bulk hide of selected rows (POST /offers/bulk-pause) is phase 1 like selected-row price changes.
 - Uniqueness is enforced by the database for the Official Store too (seller_id null): unique nulls not distinct on (owner_type, seller_id, seller_sku) and on (owner_type, seller_id, variant_id) for live New offers, and one live offer per stock item (unique stock_item_id where status <> 'removed'). The service checks stay for friendly DUPLICATE_OFFER details; a 23505 from these indexes maps to DUPLICATE_OFFER too.
 - Stock item follows the offer: a draft's variant change and a catalog merge move the stock item with inventory.updateStockItem(stockItemId, { productId, variantId }); removal archives and reinstatement unarchives it (inventory on offers.offer.status_changed). No stale stock item is left on the old variant.
-- Official Store ships-from (decision O3): DispatchTerms.shipsFrom of Official Store offers is the inventory default location (inventory.getDefaultLocation().label), not a constant.
+- Official Store ships-from (decision O3): DispatchTerms.shipsFrom of Official Store offers is the inventory default location (inventory.getDefaultLocation(): 'City, Region', else its name), not a constant. It is set when the offer is saved and refreshed on every Official Store offer by the hourly offers.reevaluate-eligibility job; inventory publishes no event when the default location changes, so a change shows within the hour.
 - Offer title (decision O4): the title column of the offers table is denormalised from catalog so admin q search and shipping's profile usage lists need no catalog join.
 - Trust enforcements on offers (decision D8): suspend_offer / remove_offer recommendations are owned by the Catalog Manager, who holds offers.offers.remove. Reversals arrive as trust.enforcement.reversed and are undone here (see consumes).
 - Shipping profile ownership: create, update and bulk rows that set shippingProfileId check the owner with shipping.getProfileOwners([profileId]) (seller id, or official); a profile of another seller is SHIPPING_PROFILE_INVALID.

@@ -66,7 +66,7 @@ export class Views {
       this.core.setting('reopenWindowDays', 30),
     ]);
     const returnRefs = new Map<string, string>();
-    for (const a of aggs) if (a.c.return_id && a.c.next_action.facts?.returnRef) returnRefs.set(a.c.return_id, a.c.next_action.facts.returnRef);
+    for (const a of aggs) if (a.c.return_id && a.c.facts.returnRef) returnRefs.set(a.c.return_id, a.c.facts.returnRef);
     const missing = aggs.filter((a) => a.c.return_id && !returnRefs.has(a.c.return_id));
     if (missing.length) {
       const items = missing.flatMap((a) => a.items.map((i) => i.order_item_id));
@@ -91,7 +91,7 @@ export class Views {
   handler(agg: Agg, x: ViewCtx, area: Area): Handler {
     const c = agg.c;
     const owner = c.owner_staff_id ? x.staff.get(c.owner_staff_id) : undefined;
-    const name = c.handler_kind === 'seller' ? `${c.next_action.facts?.sellerName ?? 'The seller'} (seller)` : c.handler_kind === 'official_store' ? OFFICIAL_STORE_NAME : owner ? `${owner}, ${SUPPORT_NAME}` : SUPPORT_NAME;
+    const name = c.handler_kind === 'seller' ? `${c.facts.sellerName ?? 'The seller'} (seller)` : c.handler_kind === 'official_store' ? OFFICIAL_STORE_NAME : owner ? `${owner}, ${SUPPORT_NAME}` : SUPPORT_NAME;
     return {
       kind: c.handler_kind as Handler['kind'],
       name,
@@ -182,7 +182,7 @@ export class Views {
     if (!['open', 'waiting_on_seller', 'waiting_on_customer', 'reopened'].includes(c.status)) return false;
     if (c.handler_kind === 'official_store') return true;
     if (c.handler_kind !== 'seller') return false;
-    const f = c.next_action.facts ?? {};
+    const f = c.facts;
     if (f.dispatchOverdue || f.sellerRepliedAt) return true;
     if (c.status === 'waiting_on_seller' && c.next_response_due_at && c.next_response_due_at.getTime() <= now.getTime()) return true;
     if (agg.offers.some((o) => o.status === 'declined' || o.status === 'expired')) return true;
@@ -194,7 +194,7 @@ export class Views {
   caseView(agg: Agg, area: Area, x: ViewCtx): CaseView {
     const c = agg.c;
     const now = this.core.now();
-    const f = c.next_action.facts ?? {};
+    const f = c.facts;
     const cat = x.categories.get(c.category_key);
     const next = nextActionOf(this.core.nextFacts(agg), now);
     const party = area === 'store' ? 'customer' : area === 'seller' ? 'seller' : 'marketplace';
@@ -312,7 +312,7 @@ export class Views {
     const c = agg.c;
     const now = this.core.now();
     const out: NamedDeadline[] = [];
-    const f = c.next_action.facts ?? {};
+    const f = c.facts;
     const push = (label: string, at: Date | string | null | undefined, party: NamedDeadline['party']) => {
       const d = deadline(at ?? null, now);
       if (d) out.push({ label, deadline: d, party });
@@ -331,7 +331,7 @@ export class Views {
   async adminDetail(agg: Agg, x?: ViewCtx): Promise<AdminCaseDetail> {
     const ctx = x ?? (await this.prepare([agg]));
     const c = agg.c;
-    const f = c.next_action.facts ?? {};
+    const f = c.facts;
     const order = c.order_id ? ctx.orders.get(c.order_id) : null;
     const [customer, seller, shipments, holds, refunds, perf, ordersCount, openCases] = await Promise.all([
       c.customer_id && isUuid(c.customer_id) ? this.core.soft('customers', 'customer', (m) => m.getCustomer(c.customer_id!)) : undefined,
@@ -356,7 +356,10 @@ export class Views {
     const approver = (refunds ?? []).map((r) => r.approvedBy).find((a) => !!a) ?? null;
     const sellerOffer = [...agg.offers].reverse().find((o) => o.from_party === 'seller');
     const draft = c.decision_draft?.draft ? { draft: c.decision_draft.draft, savedAt: c.decision_draft.savedAt, savedBy: this.actor(c.decision_draft.savedBy, ctx, 'admin') } : null;
-    const pending = c.decision_draft?.pending;
+    const pending = c.pending;
+    const pendingApproval: common.ApprovalInfo | null = pending
+      ? ((await this.core.quiet('approval', () => this.core.ctx.use('access').approvalInfo(pending.requestId))) ?? { required: true, reason: 'Waiting for approval', approvalRequestId: pending.requestId, approvers: [] })
+      : null;
     const perfPct = perf?.metrics.find((m) => m.key === 'dispatch_reliability')?.value;
     return {
       case: this.caseView(agg, 'admin', ctx),
@@ -391,6 +394,7 @@ export class Views {
       deadlines: this.deadlines(agg),
       holds: (holds ?? []).filter((h) => h.status === 'active').map((h) => `${h.sellerName} hold $${(h.amount.amount / 100).toFixed(2)} · review ${dateLabel(h.reviewDate, this.core.tz)}`),
       decisionDraft: draft,
+      pendingApproval,
       history: agg.events.map((e) => ({ at: e.at.toISOString(), label: e.label, detail: [e.detail, e.reason].filter(Boolean).join(' · ') || null, actor: e.actor_kind === 'system' ? null : this.actor({ kind: e.actor_kind as common.Actor['kind'], id: e.actor_id }, ctx, 'admin') })),
     };
   }
@@ -430,7 +434,7 @@ export class Views {
 
   adminRow(agg: Agg, x: ViewCtx): AdminCaseRow {
     const c = agg.c;
-    const f = c.next_action.facts ?? {};
+    const f = c.facts;
     const now = this.core.now();
     const open = isOpen(c.status);
     const owner = c.owner_staff_id ? x.staff.get(c.owner_staff_id) : undefined;
@@ -456,7 +460,7 @@ export class Views {
 
   sellerRow(agg: Agg, x: ViewCtx): SellerCaseRow {
     const c = agg.c;
-    const f = c.next_action.facts ?? {};
+    const f = c.facts;
     const next = nextActionOf(this.core.nextFacts(agg), this.core.now());
     return {
       id: c.id,

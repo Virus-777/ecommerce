@@ -139,7 +139,7 @@ describe('export jobs', () => {
     await h.app.kernel.jobs.runNow('reports.run-exports');
     const job = await h.call('GET', `/api/admin/reports/exports/${created.body.id}`, h.tokens.staff(PERMS, me));
     expect(job.body).toMatchObject({ state: 'failed', downloadUrl: null });
-    expect(job.body.error).toContain('narrow the filters');
+    expect(job.body.error).toBe('More than 2 rows matched; narrow the filters');
 
     h.settings.clear();
     const other = newId();

@@ -13,7 +13,7 @@ import { adCampaignMachine } from '../domain/state-machines.js';
 import { advertiserIsOwn, dismissalLabel, frequencyLabel, hasDiscountClaim, isPageType, isPaid, linkState, missingDevices, OVERLAY_KEYS, shortDate, sourceKinds, stepFor, requiredSteps, type ReviewRole } from '../domain/rules.js';
 import type { AdvertisingRepository, CampaignRec, ItemRec, PlacementRec } from '../ports.js';
 import { encodeActor, invalid, notFound, Part, SYSTEM, type By } from './core.js';
-import { OFFER_PRODUCT, type Model } from './views.js';
+import type { Model } from './views.js';
 
 type Status = AdCampaign['status'];
 type Issue = { path: string; message: string };
@@ -30,7 +30,7 @@ export interface TransitionOptions {
 
 /** Normalized campaign values ready for the row */
 export interface CampaignValues {
-  row: Omit<CampaignRec, 'id' | 'ref' | 'status' | 'spent' | 'created_by' | 'created_at' | 'updated_at' | 'version' | 'paused_reason' | 'finished_reason'>;
+  row: Omit<CampaignRec, 'id' | 'ref' | 'status' | 'spent' | 'created_by' | 'created_at' | 'updated_at' | 'version' | 'paused_reason' | 'paused_by' | 'paused_at' | 'pause_cause' | 'rejected_reason' | 'finished_reason'>;
   items: Omit<ItemRec, 'campaign_id'>[];
   creatives: { creative_id: string; device: string }[];
   placement: PlacementRec;
@@ -314,8 +314,8 @@ export class CampaignsPart extends Part {
       const oi = p.kind === 'offer' ? info?.get(p.id) : undefined;
       if (p.kind === 'offer' && info && !oi) issues.push({ path: 'promoted', message: `Offer ${p.id} not found` });
       if (p.kind === 'offer' && oi && adv.kind === 'seller' && oi.offer.sellerId !== adv.sellerId) issues.push({ path: 'promoted', message: 'Sellers can only promote their own offers' });
-      items.push({ kind: p.kind, target_id: p.id, label: p.label ?? oi?.title ?? null });
-      if (oi) items.push({ kind: OFFER_PRODUCT, target_id: oi.productId, label: p.id });
+      // product_id: the product an offer or product item promotes, so product events find the ad in one lookup
+      items.push({ kind: p.kind, target_id: p.id, label: p.label ?? oi?.title ?? null, product_id: p.kind === 'product' ? p.id : (oi?.productId ?? null) });
     }
     if (issues.length) throw invalid(issues);
 
@@ -369,6 +369,10 @@ export class CampaignsPart extends Part {
         status: adCampaignMachine.initial,
         spent: 0,
         paused_reason: null,
+        paused_by: null,
+        paused_at: null,
+        pause_cause: null,
+        rejected_reason: null,
         finished_reason: null,
         created_by: encodeActor(by.actor),
         created_at: now,
@@ -607,7 +611,7 @@ export class CampaignsPart extends Part {
   async reject(id: string, reason: string, by: By, o: { audit?: boolean } = {}): Promise<CampaignRec> {
     const text = reason?.trim();
     if (!text) throw invalid([{ path: 'reason', message: 'Give a reason' }]);
-    const { before, after } = await this.transition(id, 'reject', by, { reason: text, patch: { paused_reason: text } });
+    const { before, after } = await this.transition(id, 'reject', by, { reason: text, patch: { rejected_reason: text } });
     await this.markSteps(id, null, 'rejected', text, by);
     if (o.audit !== false) await this.core.audit({ action: 'advertising.campaign.reject', actionLabel: `Rejected ${before.ref}`, target: this.target(before), reason: text }, by);
     return after;
@@ -642,11 +646,11 @@ export class CampaignsPart extends Part {
     return this.view(id);
   }
 
-  /** Staff or seller pause; automatic pauses use a cause (auto_pause:<cause>) so the matching event can resume them */
+  /** Staff or seller pause; automatic pauses keep their cause (pause_cause) so the matching event can resume them */
   async pause(id: string, reason: string | null, by: By, o: { sellerId?: string; cause?: string; audit?: boolean } = {}): Promise<CampaignRec> {
     const text = reason?.trim() || null;
     if (!o.cause && by.actor.kind === 'staff' && !text) throw invalid([{ path: 'reason', message: 'Give a reason' }]);
-    const { before, after } = await this.transition(id, 'pause', by, { reason: text, patch: { paused_reason: text }, logAction: o.cause ? `auto_pause:${o.cause}` : 'pause', ...(o.sellerId ? { sellerId: o.sellerId } : {}) });
+    const { before, after } = await this.transition(id, 'pause', by, { reason: text, patch: { paused_reason: text, paused_by: encodeActor(by.actor), paused_at: this.now(), pause_cause: (o.cause ?? null) as CampaignRec['pause_cause'] }, logAction: o.cause ? `auto_pause:${o.cause}` : 'pause', ...(o.sellerId ? { sellerId: o.sellerId } : {}) });
     if (o.audit) await this.core.audit({ action: 'advertising.campaign.pause', actionLabel: `Paused ${before.ref}`, target: this.target(before), reason: text }, by);
     return after;
   }
@@ -662,7 +666,7 @@ export class CampaignsPart extends Part {
       if (problem) throw this.ctx.error('AD_UNAVAILABLE', problem);
     }
     const to: Status = row.starts_at && row.starts_at.getTime() > this.now().getTime() ? 'scheduled' : 'live';
-    const { before, after } = await this.transition(id, 'resume', by, { to, reason: reason?.trim() || null, patch: { paused_reason: null }, logAction: o.logAction ?? 'resume', ...(o.sellerId ? { sellerId: o.sellerId } : {}) });
+    const { before, after } = await this.transition(id, 'resume', by, { to, reason: reason?.trim() || null, patch: { paused_reason: null, paused_by: null, paused_at: null, pause_cause: null }, logAction: o.logAction ?? 'resume', ...(o.sellerId ? { sellerId: o.sellerId } : {}) });
     if (o.audit) await this.core.audit({ action: 'advertising.campaign.resume', actionLabel: `Resumed ${before.ref}`, target: this.target(before), reason: reason ?? null }, by);
     return after;
   }
@@ -705,7 +709,7 @@ export class CampaignsPart extends Part {
     const endsAt = toDate(body.endsAt);
     if (!validDate(startsAt) || !validDate(endsAt) || endsAt!.getTime() <= startsAt!.getTime()) throw invalid([{ path: 'endsAt', message: 'The end must be after the start' }]);
     if (endsAt!.getTime() <= this.now().getTime()) throw invalid([{ path: 'endsAt', message: 'The end is in the past' }]);
-    const { id: _id, ref: _ref, status: _s, spent: _sp, created_by: _cb, created_at: _ca, updated_at: _ua, version: _v, paused_reason: _pr, finished_reason: _fr, ...rest } = r;
+    const { id: _id, ref: _ref, status: _s, spent: _sp, created_by: _cb, created_at: _ca, updated_at: _ua, version: _v, paused_reason: _pr, paused_by: _pb, paused_at: _pa, pause_cause: _pc, rejected_reason: _rr, finished_reason: _fr, ...rest } = r;
     const row = await this.insertDraft({ placement: m.placement, items: m.items.map(({ campaign_id: _c, ...i }) => i), creatives: m.creatives, row: { ...rest, starts_at: startsAt, ends_at: endsAt } }, by, 'renew', `Renewed from ${r.ref}`);
     await this.core.audit({ action: 'advertising.campaign.renew', actionLabel: `Renewed ${r.ref} as ${row.ref}`, target: this.target(row), relatedTargets: [this.target(r)], after: { startsAt: body.startsAt, endsAt: body.endsAt } }, by);
     return this.view(row.id);

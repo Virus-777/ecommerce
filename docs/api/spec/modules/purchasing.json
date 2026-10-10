@@ -41,6 +41,7 @@
       "actualLeadTimeDays": { "type": "number?", "desc": "Average over the last 90 days" },
       "onTimePct": { "type": "number?", "desc": "Deliveries arriving within the window, last 90 days" },
       "openPurchaseOrders": "int",
+      "returnAuthorizationRequired": { "type": "bool", "desc": "The supplier needs a return authorization (RMA) before units are sent back (getPreferredSupplier tells inventory and returns)" },
       "active": "bool",
       "notes": "text?",
       "createdAt": "datetime"
@@ -53,6 +54,7 @@
       "address": "Address?",
       "paymentTerms": "string?",
       "leadTimeDays": "int?",
+      "returnAuthorizationRequired": { "type": "bool?", "desc": "Default false" },
       "notes": "text?",
       "active": "bool?"
     },
@@ -258,6 +260,7 @@
       "status": "enum(open|submitted|settled|rejected|withdrawn)",
       "settlement": "enum(credit_note|refund|replacement)?",
       "settledAmount": "Money?",
+      "supplierReference": { "type": "string?", "desc": "The supplier's own reference for the claim, given when it is sent (submitClaim)" },
       "owner": "Actor",
       "notes": "text?",
       "createdAt": "datetime",
@@ -266,7 +269,7 @@
     "ClaimInput": { "purchaseOrderId": "uuid", "receiptId": "uuid?", "kind": "enum(shortage|damage|wrong_item|other)", "lines": "ClaimLine[]", "notes": "text?" }
   },
   "tables": [
-    { "name": "suppliers", "columns": { "id": "uuid pk", "name": "text", "location": "text?", "contact_name": "text?", "email": "text?", "phone": "text?", "address": "jsonb?", "payment_terms": "text", "lead_time_days": "int", "active": "bool", "notes": "text?", "created_at": "timestamptz" }, "indexes": ["(active, name)"] },
+    { "name": "suppliers", "columns": { "id": "uuid pk", "name": "text", "location": "text?", "contact_name": "text?", "email": "text?", "phone": "text?", "address": "jsonb?", "payment_terms": "text", "lead_time_days": "int", "return_authorization_required": "bool", "active": "bool", "notes": "text?", "created_at": "timestamptz" }, "indexes": ["(active, name)"] },
     { "name": "supplier_items", "desc": "Supplier price list per company stock item", "columns": { "supplier_id": "uuid → suppliers", "stock_item_id": "uuid", "supplier_sku": "text?", "unit_cost_amount": "bigint", "currency": "char(3)", "min_order_qty": "int?", "lead_time_days": "int?", "preferred": "bool", "updated_at": "timestamptz" }, "indexes": ["pk (supplier_id, stock_item_id)", "(stock_item_id) where preferred"] },
     { "name": "supplier_performance", "desc": "Nightly figures per supplier", "columns": { "supplier_id": "uuid pk → suppliers", "window_days": "int", "on_time_pct": "numeric(5,2)?", "avg_lead_time_days": "numeric(6,2)?", "shortage_rate_pct": "numeric(5,2)?", "damage_rate_pct": "numeric(5,2)?", "deliveries": "int", "computed_at": "timestamptz" } },
     { "name": "purchase_orders", "columns": { "id": "uuid pk", "ref": "text unique", "supplier_id": "uuid → suppliers", "ship_to_location_id": "uuid", "status": "text", "payment_terms": "text", "expected_date": "date?", "freight_amount": "bigint", "currency": "char(3)", "total_amount": "bigint", "approval_request_id": "uuid?", "approval_state": "text? (pending|approved|rejected)", "notes": "text?", "attachment_media_ids": "jsonb", "created_by": "text", "created_at": "timestamptz", "sent_at": "timestamptz?", "closed_at": "timestamptz?", "close_reason": "text?" }, "indexes": ["(status, expected_date)", "(supplier_id, created_at)", "(approval_request_id)"] },
@@ -275,7 +278,7 @@
     { "name": "deliveries", "desc": "Expected inbound deliveries per purchase order", "columns": { "id": "uuid pk", "purchase_order_id": "uuid → purchase_orders", "carrier": "text?", "tracking_ref": "text?", "window_from": "timestamptz", "window_to": "timestamptz", "units": "int", "status": "text", "delay_reason": "text?", "arrived_at": "timestamptz?", "dock": "text?" }, "indexes": ["(status, window_from)", "(purchase_order_id)"] },
     { "name": "receipts", "columns": { "id": "uuid pk", "ref": "text unique", "purchase_order_id": "uuid → purchase_orders", "delivery_id": "uuid → deliveries", "location_id": "uuid", "status": "text", "note": "text?", "received_by": "text", "started_at": "timestamptz", "submitted_at": "timestamptz?", "confirmed_by": "text?", "confirmed_at": "timestamptz?" }, "indexes": ["(status, started_at)", "unique (delivery_id) where status = 'in_progress'"] },
     { "name": "receipt_lines", "columns": { "receipt_id": "uuid → receipts", "purchase_order_line_id": "uuid → purchase_order_lines", "stock_item_id": "uuid", "expected": "int", "received": "int", "damaged": "int", "bin_code": "text?", "photo_media_ids": "jsonb", "note": "text?" }, "indexes": ["pk (receipt_id, purchase_order_line_id)"] },
-    { "name": "supplier_claims", "columns": { "id": "uuid pk", "ref": "text unique", "supplier_id": "uuid → suppliers", "purchase_order_id": "uuid → purchase_orders", "receipt_id": "uuid? → receipts", "kind": "text", "lines": "jsonb", "amount": "bigint", "currency": "char(3)", "status": "text", "settlement": "text?", "settled_amount": "bigint?", "owner_id": "text", "notes": "text?", "created_at": "timestamptz", "decided_at": "timestamptz?" }, "indexes": ["(status, created_at)", "(supplier_id)"] }
+    { "name": "supplier_claims", "columns": { "id": "uuid pk", "ref": "text unique", "supplier_id": "uuid → suppliers", "purchase_order_id": "uuid → purchase_orders", "receipt_id": "uuid? → receipts", "kind": "text", "lines": "jsonb", "amount": "bigint", "currency": "char(3)", "status": "text", "settlement": "text?", "settled_amount": "bigint?", "supplier_reference": "text?", "owner_id": "text", "notes": "text?", "created_at": "timestamptz", "decided_at": "timestamptz?" }, "indexes": ["(status, created_at)", "(supplier_id)"] }
   ],
   "stateMachines": [
     {
@@ -301,12 +304,13 @@
         ["expected", "arrive", "arrived"],
         ["delayed", "arrive", "arrived"],
         ["arrived", "startReceiving", "receiving"],
+        ["receiving", "reopen", "arrived"],
         ["receiving", "complete", "received"],
         ["receiving", "completeWithIssues", "received_with_issues"],
         ["expected", "cancel", "cancelled"],
         ["delayed", "cancel", "cancelled"]
       ],
-      "notes": "delay is set by the buyer or by the late-delivery job when the window passes without arrival. completeWithIssues when the submitted receipt has shortages, damage or over-receipt."
+      "notes": "delay is set by the buyer or by the late-delivery job when the window passes without arrival. completeWithIssues when the submitted receipt has shortages, damage or over-receipt. reopen when the only receiving record of the delivery is discarded (cancelReceipt): back to Arrived."
     },
     {
       "name": "Receipt", "field": "Receipt.status", "initial": "in_progress",
@@ -356,7 +360,7 @@
     { "id": "getReceipt", "area": "admin", "method": "GET", "path": "/receipts/{id}", "summary": "One receiving record: expected vs received, damage photos, bins, buying cost", "auth": "staff", "permission": "purchasing.orders.view", "params": { "id": "uuid" }, "response": "Receipt", "screens": ["ops/receiving"] },
     { "id": "updateReceipt", "area": "admin", "method": "PATCH", "path": "/receipts/{id}", "summary": "Record counted, damaged, bin and photos per line (save and finish later)", "auth": "staff", "permission": "purchasing.receipts.record", "params": { "id": "uuid" }, "body": { "lines": "ReceiptLineInput[]", "note": "text?" }, "response": "Receipt", "errors": ["ILLEGAL_TRANSITION", "OVER_RECEIPT"], "screens": ["ops/receiving"] },
     { "id": "submitReceipt", "area": "admin", "method": "POST", "path": "/receipts/{id}/submit", "summary": "Finish counting: shortages go to Purchasing, units wait in Incoming for Inventory to confirm", "desc": "Sends the counted lines to inventory (submitInbound); damaged lines need photos; shortages update the PO and can raise a claim.", "auth": "staff", "permission": "purchasing.receipts.record", "params": { "id": "uuid" }, "body": { "raiseClaims": "bool?" }, "response": "Receipt", "errors": ["ILLEGAL_TRANSITION", "DAMAGE_PHOTOS_REQUIRED", "OVER_RECEIPT"], "audited": true, "events": ["purchasing.receipt.recorded", "purchasing.purchase_order.status_changed"], "screens": ["ops/receiving"] },
-    { "id": "cancelReceipt", "area": "admin", "method": "POST", "path": "/receipts/{id}/cancel", "summary": "Discard a receiving record started by mistake", "auth": "staff", "permission": "purchasing.receipts.record", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "Receipt", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "screens": ["ops/receiving"] },
+    { "id": "cancelReceipt", "area": "admin", "method": "POST", "path": "/receipts/{id}/cancel", "summary": "Discard a receiving record started by mistake", "desc": "The receipt is cancelled; when no other receiving record is open for the delivery, the delivery goes back from Receiving to Arrived (reopen), so receiving can start again from the dock.", "auth": "staff", "permission": "purchasing.receipts.record", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "Receipt", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "screens": ["ops/receiving"] },
 
     { "id": "listClaims", "area": "admin", "method": "GET", "path": "/claims", "summary": "Supplier claims for shortages and damage", "auth": "staff", "permission": "purchasing.orders.view", "paging": true, "query": { "status": "enum(open|submitted|settled|rejected|withdrawn)?", "supplierId": "uuid?" }, "response": "SupplierClaim", "screens": ["admin/purchasing"] },
     { "id": "createClaim", "area": "admin", "method": "POST", "path": "/claims", "summary": "Open a supplier claim", "auth": "staff", "permission": "purchasing.claims.manage", "body": "ClaimInput", "response": "SupplierClaim", "status": 201, "audited": true, "screens": ["admin/purchasing"] },

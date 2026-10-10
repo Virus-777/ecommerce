@@ -50,7 +50,7 @@ import {
   type CampaignModel,
   type Issue,
 } from '../domain/rules.js';
-import { decodeActor, encodeActor, iso, isoOrNull, periodOf, storedDeals, toCode, toFundingReview, toLogEntry, toRedemption, toSummary, type StoredDeals } from '../mappers.js';
+import { decodeActor, encodeActor, iso, isoOrNull, periodOf, toCode, toFundingReview, toLogEntry, toRedemption, toSummary } from '../mappers.js';
 import type { CampaignRec, EligibleRec, FlashItemRec, FundingReviewRec, PromotionsRepository, ResultRec, TargetRec } from '../ports.js';
 import { invalid, notFound, Part, SYSTEM, type By, type OfferCard } from './core.js';
 
@@ -69,7 +69,6 @@ export interface ListCampaignsQuery {
 
 /** Row fields and targets of a campaign from its input */
 export function campaignFields(input: CampaignInput, currency: string): { row: Partial<CampaignRec>; targets: Omit<TargetRec, 'campaign_id'>[] } {
-  const deals: StoredDeals = { placement: input.deals ?? null, fundingNote: input.funding.note ?? null };
   return {
     row: {
       name: input.name.trim(),
@@ -92,10 +91,11 @@ export function campaignFields(input: CampaignInput, currency: string): { row: P
       funding_owner: input.funding.owner,
       platform_share_bps: input.funding.owner === 'shared' ? (input.funding.platformShareBps ?? null) : input.funding.owner === 'platform' ? 10000 : 0,
       cost_center: input.funding.costCenter ?? null,
+      funding_note: input.funding.note ?? null,
       stacking: input.stacking as never,
       exclusive_group: input.stacking.exclusiveGroup ?? null,
       participation: (input.participation ?? null) as never,
-      deals: deals as never,
+      deals: (input.deals ?? null) as never,
       terms: input.terms ?? null,
       currency: input.limits.budget?.currency ?? input.discount.amountOff?.currency ?? input.discount.minSpend?.currency ?? currency,
     },

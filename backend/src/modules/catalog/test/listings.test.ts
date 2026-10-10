@@ -111,7 +111,7 @@ describe('corrections', () => {
     await a.admin('POST', `/corrections/${s2.id}/decide`, { accept: true, reason: 'Model printed on the base' });
     const reopened = (await a.admin('GET', `/products/${id}`)).json();
     expect(reopened).toMatchObject({ reviewState: 'submitted', submission: { kind: 'content_change', state: 'open' }, product: { modelNumber: 'KK-K2-RGB' } });
-    expect((await a.admin('GET', '/review-queue?kind=correction&limit=100')).json().items.map((p: { product: { id: string } }) => p.product.id)).toContain(id);
+    expect((await a.admin('GET', '/review-queue?kind=content_change&limit=100')).json().items.map((p: { product: { id: string } }) => p.product.id)).toContain(id);
 
     // while it is back in review, and for drafts of other sellers, there is nothing to correct
     expect((await a.seller(other, 'POST', `/products/${id}/corrections`, { field: 'title', proposed: 'x' })).statusCode).toBe(404);

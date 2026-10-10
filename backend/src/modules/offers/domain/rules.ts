@@ -57,14 +57,14 @@ export function warrantyTerms(input: WarrantyInput, ownerType: 'official' | 'sel
   return { kind: 'seller', months, handledBy, summary: `${span}${ownerType === 'official' ? 'Official Store' : 'seller'} warranty`.replace(/^./, (c) => c.toUpperCase()) };
 }
 
-export function returnTermsOf(input: { kind: 'baseline' | 'extended'; windowDays: number; freeReturnShipping: boolean; categoryException?: string | null; policyId?: string | null }): ReturnTerms {
+export function returnTermsOf(input: { kind: 'baseline' | 'extended'; windowDays: number; freeReturnShipping: boolean; categoryException?: string | null; policyVersion?: string | null }): ReturnTerms {
   return {
     kind: input.kind,
     windowDays: input.windowDays,
     freeReturnShipping: input.freeReturnShipping,
     categoryException: input.categoryException ?? null,
     summary: returnSummary(input.windowDays, input.freeReturnShipping),
-    policyId: input.policyId ?? null,
+    policyVersion: input.policyVersion ?? null,
   };
 }
 

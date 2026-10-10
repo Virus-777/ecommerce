@@ -10,8 +10,8 @@ import type { AdCampaignInput, CreativeInput, PricingOption, SellerAdCampaign, S
 import type * as common from '../../../spec/common.js';
 import { billingLabel, EXAMPLE_RATES } from '../domain/rules.js';
 import { adCampaignMachine } from '../domain/state-machines.js';
-import { invalid, notFound, Part, type By } from './core.js';
-import { PAUSE_ACTIONS, type Model } from './views.js';
+import { decodeActor, invalid, notFound, Part, type By } from './core.js';
+import type { Model } from './views.js';
 
 const AUDIENCE_NOTE = 'Shown to shoppers on the pages you chose, labelled Sponsored. No personal targeting; paid placement never changes the order of other results.';
 
@@ -279,8 +279,8 @@ export class SellerPart extends Part {
     const row = await this.repo.get('campaigns', id);
     if (!row || row.seller_id !== sellerId) throw notFound('Campaign');
     if (row.status === 'paused') {
-      const last = (await this.repo.lastLogs([id], PAUSE_ACTIONS)).get(id);
-      if (last && last.actor_kind !== 'seller') throw new AppError('ILLEGAL_TRANSITION', 'Marketly paused this campaign; only Marketly can resume it.', { from: 'paused', event: 'resume', pausedBy: last.actor_kind });
+      const pausedBy = decodeActor(row.paused_by);
+      if (pausedBy && pausedBy.kind !== 'seller') throw new AppError('ILLEGAL_TRANSITION', 'Marketly paused this campaign; only Marketly can resume it.', { from: 'paused', event: 'resume', pausedBy: pausedBy.kind });
     }
     await this.parts.campaigns.resume(id, 'Resumed by the seller', by, { sellerId });
     return this.get(sellerId, id);

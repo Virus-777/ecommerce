@@ -151,7 +151,7 @@ Private service conversations linked to an order, item, return or case: customer
 |---|---|
 | id | `uuid` |
 | conversationId | `uuid` |
-| kind | `enum(text|system)` |
+| kind | `enum(text|system)` system: a note from Marketly (e.g. support joined from a case): unread for every participant, no author, no reply-state change and no messaging.message.sent (no notice is sent) |
 | author | `Actor?` |
 | authorLabel | `string` e.g. Marisol, Casa Verde Home / You |
 | fromMe | `bool` |
@@ -439,6 +439,22 @@ Indexes: `(conversation_id)`
 
 Indexes: `(conversation_id, at)`
 
+**seller_reply_stats**: 30-day reply figures per seller, rolled up by messaging.response-stats (behind 'Usually replies within …' on conversations and Seller.replyStats); computed on first use for a seller without a row
+
+| Column | Type |
+|---|---|
+| seller_id | uuid pk |
+| period_from | date |
+| period_to | date |
+| average_reply_minutes | int? |
+| median_reply_minutes | int? |
+| replied | int (reply rounds answered) |
+| replied_within_target | int |
+| decided | int (rounds answered or past the reply target) |
+| computed_at | timestamptz |
+
+Indexes: `(computed_at)`
+
 ## Events
 
 | Publishes | When | Payload | Consumed by |
@@ -464,7 +480,7 @@ Indexes: `(conversation_id, at)`
 | Function | Signature | Used by |
 |---|---|---|
 | findOrStartForOrder | `(input: { orderId: uuid, sellerId: uuid, orderItemId?: uuid, returnId?: uuid }) => Conversation`<br>One conversation per customer, seller and subject; reused when it exists. sellerId is OFFICIAL_STORE_ID for the Official Store | orders, returns |
-| postSystemNote | `(conversationId: uuid, text: string) => Message`<br>e.g. Marketly Support joined from case CS-261005-3381 | support, returns |
+| postSystemNote | `(conversationId: uuid, text: string) => Message`<br>A system note (Message.kind system), e.g. Marketly Support joined from case CS-261005-3381: unread for every participant, no reply-state change, no messaging.message.sent (nobody is notified) | support, returns |
 | addStaffParticipant | `(conversationId: uuid, staff: Actor, caseId: uuid) => Conversation`<br>Support joins an order conversation when a case is opened | support |
 | sellerResponseStats | `(sellerId: uuid, range: DateRange) => ResponseStats`<br>Response time for seller performance and reports | sellers, reports, graphql |
 | unreadCount | `(participant: Actor) => int`<br>Badge counts for the account and Seller Center | notifications |
@@ -490,7 +506,8 @@ Indexes: `(conversation_id, at)`
 
 | Code | Status | Meaning |
 |---|---|---|
-| `CONVERSATION_LOCKED` | 409 | The conversation is locked or archived for new messages. details.reason. |
+| `CONVERSATION_LOCKED` | 409 | The conversation takes no new messages: locked by Marketly (details.reason = the lock reason) or archived (details.reason = archived; starting a conversation on the same subject reopens an archived one, replying inside it does not). |
+| `TRUST_UNAVAILABLE` | 422 | refer_to_trust needs the Trust and Risk module, which is off; hide the message or lock the conversation instead. |
 | `MESSAGING_RESTRICTED` | 403 | The customer's account is restricted from messaging sellers (replies inside a case stay possible). details.reason, details.endsAt. |
 | `ORDER_NOT_ELIGIBLE` | 422 | The caller cannot message about this order (not their order, or seller not in the order). |
 
@@ -500,7 +517,7 @@ Indexes: `(conversation_id, at)`
 |---|---|---|
 | `messaging.reply-deadlines` | every 10 min | Move awaiting conversations past their due time to overdue and publish messaging.reply.overdue |
 | `messaging.archive` | daily 04:00 PT | Archive conversations past archiveAfterDays |
-| `messaging.response-stats` | hourly | Roll up seller reply times for performance and Seller Center |
+| `messaging.response-stats` | hourly | Roll up 30-day seller reply times into seller_reply_stats for sellers with messages in the last 2 hours and rows older than a day (bounded batches) |
 
 ## Settings
 
@@ -514,6 +531,7 @@ Indexes: `(conversation_id, at)`
 | archiveAfterDays | `180` | duration, days, 30–… | Days after order completion |
 
 ## Notes
+- Public API participants (participant: Actor): a customer actor carries the customers-module id (the customer participant id), never the account id; a guest session is a visitor actor (its session id), a seller actor the seller id, staff the staff account id.
 - Conversations are private to the customer, the seller and Marketly support. Sellers never see other sellers' conversations; staff reads are logged with a reason.
 - One conversation per customer + seller + subject (order, item or return); starting again appends to it, so history stays linked to the transaction.
 - Promotional messages are not allowed here; marketing goes through notifications with separate preferences (plan ch. 15, 19).
@@ -611,6 +629,7 @@ enum ConversationPartyKind @areas(in: [STORE, SELLER]) {
 
 type ConversationParticipant @areas(in: [STORE, SELLER]) {
   kind: ConversationParticipantKind!
+  "CUSTOMER: customers-module id; GUEST: order:<orderId>; SELLER: seller id (OFFICIAL_STORE_ID for the Official Store); STAFF: staff account id"
   id: String!
   name: String!
   "e.g. Marketly Support"
@@ -621,6 +640,8 @@ type ConversationParticipant @areas(in: [STORE, SELLER]) {
 
 enum ConversationParticipantKind @areas(in: [STORE, SELLER]) {
   CUSTOMER
+  "The buyer of a guest order (participant id order:<orderId>)"
+  GUEST
   SELLER
   STAFF
 }

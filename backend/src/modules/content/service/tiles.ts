@@ -4,7 +4,7 @@
  * Content only decides WHICH products appear and in what order; unavailable ones are hidden.
  */
 import type * as catalog from '../../../spec/catalog.js';
-import type { BrandTile, CategoryTile, PageInput, ProductSource, ProductTile, SectionProductRow, SellerTile, SourceRule } from '../../../spec/content.js';
+import type { BrandTile, CategoryTile, PageDraftInput, ProductSource, ProductTile, SectionProductRow, SellerTile, SourceRule } from '../../../spec/content.js';
 import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
 import type * as promotions from '../../../spec/promotions.js';
 import type * as search from '../../../spec/search.js';
@@ -68,7 +68,7 @@ export class ContentTiles extends ContentBase {
     if (!page || !versionId) return { sources: [] };
     if (opts.live && page.status !== 'published') return { sources: [] };
     const v = await this.repo.getVersion(versionId);
-    const snap = v?.snapshot as unknown as PageInput | undefined;
+    const snap = v?.snapshot as unknown as PageDraftInput | undefined;
     return { sources: (snap?.blocks ?? []).map((b) => b.productSource).filter((s): s is ProductSource => Boolean(s)) };
   }
 
@@ -340,7 +340,7 @@ export class ContentTiles extends ContentBase {
       const page = live.find((p) => p.brand_id === id);
       if (!page) continue;
       const v = page.live_version_id ? await this.repo.getVersion(page.live_version_id) : undefined;
-      const snap = v?.snapshot as unknown as PageInput | undefined;
+      const snap = v?.snapshot as unknown as PageDraftInput | undefined;
       const count = (await this.collectionItems(page.id)).length;
       const refs = await this.refsMap([snap?.coverImage?.id]);
       tiles.push({ brandId: id, name: page.title, logo: (snap?.coverImage?.id && refs.get(snap.coverImage.id)) || null, productCount: count });
@@ -354,7 +354,7 @@ export class ContentTiles extends ContentBase {
     const versionId = opts.live === false ? (page?.draft_version_id ?? page?.live_version_id) : page?.live_version_id;
     if (!page || !versionId) return [];
     const v = await this.repo.getVersion(versionId);
-    const snap = v?.snapshot as unknown as PageInput | undefined;
+    const snap = v?.snapshot as unknown as PageDraftInput | undefined;
     const blocks = (snap?.blocks ?? []).filter((b) => b.productSource && (!opts.blockId || b.id === opts.blockId));
     const out: ResolvedProduct[] = [];
     const seen = new Set<string>();

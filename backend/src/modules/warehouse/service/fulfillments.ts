@@ -154,6 +154,7 @@ export class Fulfillments {
           ship_to: task.shipTo,
           wave_id: null,
           hold_reason: null,
+          dispatch_overdue_at: null,
           discrepancy_ids: [],
           total_packages_in_order: Math.max(1, e.groups.length),
           created_at: now,
@@ -476,10 +477,10 @@ export class Fulfillments {
     if (e.ownerType !== 'official') return;
     const f = (await this.repo.find('fulfillments', { seller_group_id: e.groupId }))[0];
     if (!f) return;
-    if ((await this.repo.count('scan_log', { context: 'order_cancel', context_id: e.cancellationId })) > 0) return;
     const actor: common.Actor = { kind: 'system', id: null, name: 'Orders' };
     const batch = new Batch({ actor });
     await this.repo.transaction(async (tx) => {
+      if (!(await tx.claim(`item-cancelled:${e.cancellationId}`))) return;
       const fresh = await this.load(f.id, tx, { forUpdate: true });
       const lines = await tx.find('fulfillment_lines', { fulfillment_id: f.id }, { forUpdate: true });
       const line = lines.find((l) => l.order_item_id === e.itemId && l.state !== 'cancelled') ?? lines.find((l) => l.stock_item_id === e.stockItemId && l.state !== 'cancelled');
@@ -587,10 +588,12 @@ export class Fulfillments {
     if (e.ownerType !== 'official') return;
     const f = (await this.repo.find('fulfillments', { seller_group_id: e.groupId }))[0];
     if (!f || ['dispatched', 'cancelled'].includes(f.status)) return;
-    if ((await this.repo.count('scan_log', { context: 'overdue', context_id: e.exceptionId })) > 0) return;
     const due = new Date(e.dueAt);
     await this.repo.transaction(async (tx) => {
-      if (!Number.isNaN(due.getTime()) && due.getTime() < f.ship_by.getTime()) await tx.update('fulfillments', f.id, { ship_by: due, updated_at: this.core.now() });
+      if (!(await tx.claim(`dispatch-overdue:${e.exceptionId}`))) return;
+      const now = this.core.now();
+      const shipBy = !Number.isNaN(due.getTime()) && due.getTime() < f.ship_by.getTime() ? { ship_by: due } : {};
+      await tx.update('fulfillments', f.id, { ...shipBy, dispatch_overdue_at: f.dispatch_overdue_at ?? now, updated_at: now });
       await this.core.logScan({ context: 'overdue', contextId: e.exceptionId, code: f.order_ref, result: 'dispatch overdue', actor: { kind: 'system', id: null, name: 'Shipping' } }, tx);
     });
   }

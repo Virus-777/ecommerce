@@ -149,8 +149,17 @@ const BATCH = 500;
 const REVOCATION_OVERLAP_MS = 10_000;
 const UNVERIFIED_ACCOUNT_DAYS = 7;
 const RECOVERY_CODES = 10;
-/** Step-up purposes are endpoint keys such as payout-account or two-step-removal */
-const REAUTH_PURPOSE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+/** The reauth step-up purposes the spec declares (ReauthRequest.purpose); the body schema already enforces them */
+const REAUTH_PURPOSES: Record<ReauthRequest['purpose'], true> = {
+  'account-closure': true,
+  'email-change': true,
+  'two-step-removal': true,
+  'recovery-codes': true,
+  'business-change': true,
+  'payout-account': true,
+  'seller-closure': true,
+};
+const isReauthPurpose = (v: unknown): v is ReauthRequest['purpose'] => typeof v === 'string' && Object.hasOwn(REAUTH_PURPOSES, v);
 
 const seconds = (d: Date) => Math.floor(d.getTime() / 1000);
 const truncSecond = (d: Date) => new Date(seconds(d) * 1000);
@@ -2038,8 +2047,8 @@ export class IdentityService implements IdentityPublicApi {
   async reauthenticate(body: ReauthRequest, caller: Caller): Promise<ReauthToken> {
     const p = caller.principal;
     const a = await this.accountOf(p);
-    const purpose = typeof body.purpose === 'string' ? body.purpose.trim() : '';
-    if (!REAUTH_PURPOSE.test(purpose)) throw new AppError('VALIDATION_FAILED', 'Say which action this confirmation is for', issue('body.purpose', 'a step-up purpose such as payout-account'));
+    const purpose = body.purpose;
+    if (!isReauthPurpose(purpose)) throw new AppError('VALIDATION_FAILED', 'Say which action this confirmation is for', issue('body.purpose', 'a step-up purpose such as payout-account'));
     if (!body.password && !body.code) throw new AppError('VALIDATION_FAILED', 'Enter your password or a 2-step code', issue('body.password', 'password or code required'));
     const s = await this.cfg();
     await this.requireStepUp(a.id, { password: body.password ?? null, code: body.password ? null : body.code }, { client: caller.client, audience: p?.audience });

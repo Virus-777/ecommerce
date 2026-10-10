@@ -114,7 +114,7 @@ type TrustEnforcement @areas(in: [ADMIN]) {
 }
 
 type TrustReportResolution @areas(in: [ADMIN]) {
-  "action_taken, no_violation, insufficient_evidence, duplicate or referred"
+  "action_taken, no_violation, insufficient_evidence, duplicate (merged), referred or dismissed"
   outcome: String!
   summary: String!
   decidedBy: Actor!

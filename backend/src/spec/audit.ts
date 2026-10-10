@@ -672,14 +672,14 @@ export const endpoints = defineEndpoints({
     permission: "audit.retention.manage",
     scope: "staff",
     summary: "Change how long history is kept",
-    desc: "Lengthening applies now (200). Shortening returns 202 with pendingChange until the Business Owner approves.",
+    desc: "Lengthening applies now. Shortening is saved as pendingChange and sent to the Business Owner (approval action audit.retention.change): the normal 200 with pendingChange.approval (FORMAT.md, Approval responses); it applies when approved and is dropped when rejected, cancelled or expired. When access answers allowed for the caller, it applies at once. APPROVAL_REQUIRED (409, nothing saved) only while the access module is disabled, so no approval can be requested; FORBIDDEN when the caller may not even propose it. While a shortening waits, no other retention change is accepted (ILLEGAL_TRANSITION).",
     body: () => z.object({
       retainYears: z.number().int(),
       reason: z.string(),
     }),
     response: () => RetentionPolicy,
     status: 200,
-    errors: ["BELOW_LEGAL_MINIMUM","APPROVAL_REQUIRED"],
+    errors: ["BELOW_LEGAL_MINIMUM","APPROVAL_REQUIRED","ILLEGAL_TRANSITION"],
     audited: true,
     approval: "Approval action audit.retention.change. Shortening retention needs Business Owner approval",
     events: ["audit.retention.changed"],
@@ -738,7 +738,7 @@ export const spec = defineModuleSpec({
     {
       "key": "audit.entries.view",
       "audience": "staff",
-      "desc": "Read the action history (Platform Administrator, Business Owner, Finance Manager, Reports Analyst)"
+      "desc": "Read the action history, its integrity status and the retention policy. Seeded to the Business Owner and the Platform Administrator (told about integrity failures, proposes retention changes); other roles (e.g. a Finance Manager or an auditor) get it through their role's permissions"
     },
     {
       "key": "audit.entries.export",

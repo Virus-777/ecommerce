@@ -314,6 +314,11 @@ describe('statements and scheduled jobs', () => {
   it('downloads an issued statement as PDF or CSV; the open period is not ready', async () => {
     await initialDestination(S);
     await credit(S, 4_000);
+    // reading never creates a statement: the open one exists from the seller's approval (or the job's sweep)
+    const before = await k.call('GET', `${SELLER}/statements`, k.sellerToken(S));
+    expect(before.body.items.filter((s: any) => s.status === 'open')).toEqual([]);
+    expect(await k.svc.core.repo.findOne('statements', { seller_id: S, status: 'open' })).toBeUndefined();
+    await k.emit('sellers.seller.approved', { sellerId: S, applicationId: newId(), storeName: 'Store', ownerAccountId: newId(), categoryIds: [], returnAddress: { name: 'Store', line1: '1 Main St', city: 'Portland', region: 'OR', postalCode: '97204', country: 'US' }, returnContact: 'Ana', recommendedHoldDays: 0 });
     const list = await k.call('GET', `${SELLER}/statements`, k.sellerToken(S));
     const open = list.body.items.find((s: any) => s.status === 'open');
     expect(open).toBeTruthy();
@@ -325,6 +330,8 @@ describe('statements and scheduled jobs', () => {
     await newRun();
     const issued = (await k.call('GET', `${SELLER}/statements`, k.sellerToken(S))).body.items.find((s: any) => s.status === 'issued');
     expect(issued.id).toBe(open.id); // the open statement is the one issued at the cutoff
+    // and the next period's statement opens at issue
+    expect(await k.svc.core.repo.findOne('statements', { seller_id: S, status: 'open' })).toMatchObject({ seller_id: S });
     for (const format of ['pdf', 'csv']) {
       const file = await k.call('GET', `${SELLER}/statements/${issued.id}/download?format=${format}`, k.sellerToken(S));
       expect(file.status, JSON.stringify(file.body)).toBe(200);

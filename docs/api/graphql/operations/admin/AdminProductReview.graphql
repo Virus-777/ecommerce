@@ -3,7 +3,7 @@
 # why: The review queue by review deadline, the selected submission with its automated checks, offer and seller, and the duplicate candidates with their offers and reviews load together.
 query AdminProductReview(
   $productId: UUID!
-  $kind: String
+  $kind: ProductSubmissionKind
   $categoryId: UUID
   $paging: PageInput
   $offerPaging: PageInput

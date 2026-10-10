@@ -28,6 +28,8 @@ export interface Supplier {
   /** Deliveries arriving within the window, last 90 days */
   onTimePct?: number | null;
   openPurchaseOrders: number;
+  /** The supplier needs a return authorization (RMA) before units are sent back (getPreferredSupplier tells inventory and returns) */
+  returnAuthorizationRequired: boolean;
   active: boolean;
   notes?: string | null;
   createdAt: string;
@@ -48,6 +50,7 @@ export const Supplier: z.ZodType<Supplier> = z.object({
   actualLeadTimeDays: z.number().describe("Average over the last 90 days").nullish(),
   onTimePct: z.number().describe("Deliveries arriving within the window, last 90 days").nullish(),
   openPurchaseOrders: z.number().int(),
+  returnAuthorizationRequired: z.boolean().describe("The supplier needs a return authorization (RMA) before units are sent back (getPreferredSupplier tells inventory and returns)"),
   active: z.boolean(),
   notes: z.string().nullish(),
   createdAt: z.iso.datetime({ offset: true }),
@@ -61,6 +64,8 @@ export interface SupplierInput {
   address?: common.Address | null;
   paymentTerms?: string | null;
   leadTimeDays?: number | null;
+  /** Default false */
+  returnAuthorizationRequired?: boolean | null;
   notes?: string | null;
   active?: boolean | null;
 }
@@ -75,6 +80,7 @@ export const SupplierInput: z.ZodType<SupplierInput> = z.object({
   },
   paymentTerms: z.string().nullish(),
   leadTimeDays: z.number().int().nullish(),
+  returnAuthorizationRequired: z.boolean().describe("Default false").nullish(),
   notes: z.string().nullish(),
   active: z.boolean().nullish(),
 }).register(common.apiTypes, { id: "purchasing.SupplierInput" });
@@ -787,6 +793,8 @@ export interface SupplierClaim {
   status: "open" | "submitted" | "settled" | "rejected" | "withdrawn";
   settlement?: "credit_note" | "refund" | "replacement" | null;
   settledAmount?: common.Money | null;
+  /** The supplier's own reference for the claim, given when it is sent (submitClaim) */
+  supplierReference?: string | null;
   owner: common.Actor;
   notes?: string | null;
   createdAt: string;
@@ -813,6 +821,7 @@ export const SupplierClaim: z.ZodType<SupplierClaim> = z.object({
   get settledAmount() {
     return common.Money.nullish();
   },
+  supplierReference: z.string().describe("The supplier's own reference for the claim, given when it is sent (submitClaim)").nullish(),
   get owner() {
     return common.Actor;
   },
@@ -1014,6 +1023,7 @@ export interface PurchasingDb {
     address: Json | null;
     payment_terms: string;
     lead_time_days: number;
+    return_authorization_required: boolean;
     active: boolean;
     notes: string | null;
     created_at: Date;
@@ -1137,6 +1147,7 @@ export interface PurchasingDb {
     status: string;
     settlement: string | null;
     settled_amount: number | null;
+    supplier_reference: string | null;
     owner_id: string;
     notes: string | null;
     created_at: Date;
@@ -1655,6 +1666,7 @@ export const endpoints = defineEndpoints({
     permission: "purchasing.receipts.record",
     scope: "staff",
     summary: "Discard a receiving record started by mistake",
+    desc: "The receipt is cancelled; when no other receiving record is open for the delivery, the delivery goes back from Receiving to Arrived (reopen), so receiving can start again from the dock.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1908,6 +1920,11 @@ export const spec = defineModuleSpec({
         ],
         [
           "receiving",
+          "reopen",
+          "arrived"
+        ],
+        [
+          "receiving",
           "complete",
           "received"
         ],
@@ -2117,6 +2134,10 @@ export const spec = defineModuleSpec({
       },
       "lead_time_days": {
         "type": "int",
+        "nullable": false
+      },
+      "return_authorization_required": {
+        "type": "bool",
         "nullable": false
       },
       "active": {
@@ -2539,6 +2560,10 @@ export const spec = defineModuleSpec({
       },
       "settled_amount": {
         "type": "bigint",
+        "nullable": true
+      },
+      "supplier_reference": {
+        "type": "text",
         "nullable": true
       },
       "owner_id": {

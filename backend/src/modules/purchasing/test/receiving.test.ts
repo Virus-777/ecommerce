@@ -247,7 +247,7 @@ describe('supplier claims', () => {
 
     expect((await call('POST', `/claims/${c.id}/settle`, { settlement: 'credit_note', amount: usd(19000), reason: 'x' })).json().error.code).toBe('ILLEGAL_TRANSITION');
     const submitted = await call('POST', `/claims/${c.id}/submit`, { supplierReference: 'RMA-5521' });
-    expect(submitted.json()).toMatchObject({ status: 'submitted', notes: expect.stringContaining('RMA-5521') });
+    expect(submitted.json()).toMatchObject({ status: 'submitted', supplierReference: 'RMA-5521', notes: 'Silver instead of black' });
     const settled = await call('POST', `/claims/${c.id}/settle`, { settlement: 'credit_note', amount: usd(19000), reason: 'Credit note CN-88 received' });
     expect(settled.statusCode, settled.body).toBe(200);
     expect(settled.json()).toMatchObject({ status: 'settled', settlement: 'credit_note', settledAmount: usd(19000), decidedAt: expect.any(String) });

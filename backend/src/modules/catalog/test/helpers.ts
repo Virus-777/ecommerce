@@ -79,16 +79,17 @@ export interface CatalogTestApp {
   staffId: string;
 }
 
-export async function catalogApp(): Promise<CatalogTestApp> {
+/** `extra`: more modules to enable and more API stubs (e.g. settings with a business calendar) */
+export async function catalogApp(extra: { only?: string[]; apiStubs?: Record<string, object> } = {}): Promise<CatalogTestApp> {
   // follows real time (tokens are signed with it); tests move it forward by small steps
   let offset = 0;
   const clock = { now: () => new Date(Date.now() + offset), advance: (ms: number) => void (offset += ms), set: (d: Date | string) => void (offset = new Date(d).getTime() - Date.now()) };
   const s = stubs();
   const app = await buildTestApp({
-    only: ['catalog', 'media', 'audit', 'access', 'sellers', 'offers', 'reports', 'cart', 'orders', 'reviews'],
+    only: ['catalog', 'media', 'audit', 'access', 'sellers', 'offers', 'reports', 'cart', 'orders', 'reviews', ...(extra.only ?? [])],
     clock,
     config: { rateLimits: false },
-    apiStubs: s as never,
+    apiStubs: { ...s, ...extra.apiStubs } as never,
   });
   const events: EventEnvelope[] = [];
   const names = [

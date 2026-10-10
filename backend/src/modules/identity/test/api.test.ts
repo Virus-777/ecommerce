@@ -99,6 +99,12 @@ describe('seller context', () => {
     const noPurpose = await kit.call('POST', `${SELLER}/reauth`, { token: pick.body.accessToken, body: { purpose: '  ', password: c.password } });
     expect(noPurpose.status).toBe(400);
     expect(noPurpose.body.error.details.issues[0].path).toBe('body.purpose');
+    // only the declared reauth step-up purposes (code step-ups such as role-grant never take a token)
+    for (const purpose of ['anything-else', 'role-grant']) {
+      const unknown = await kit.call('POST', `${SELLER}/reauth`, { token: pick.body.accessToken, body: { purpose, password: c.password } });
+      expect(unknown.status).toBe(400);
+      expect(unknown.body.error.details.issues[0].path).toBe('body.purpose');
+    }
 
     // a store re-auth token never works for a seller session
     const store = await kit.call('POST', `${STORE}/reauth`, { token: c.tokens.accessToken, body: { purpose: 'payout-account', password: c.password } });

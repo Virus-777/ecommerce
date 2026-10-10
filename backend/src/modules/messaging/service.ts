@@ -23,7 +23,7 @@ import type {
 import type * as orders from '../../spec/orders.js';
 import { buyerName, DAY, groupSellerId, HOUR, isOfficialConversation, marketplaceSellerId, MINUTE, OFFICIAL_STORE_NAME, promotionalPhrase, replyRounds, responseTimeLabel, SUPPORT_LABEL, SUPPORT_TEAM_ID } from './domain/rules.js';
 import { conversationMachine, messageReportMachine, sellerReplyMachine } from './domain/state-machines.js';
-import type { ConversationKey, ConversationRec, MessageRec, ParticipantRec, ReportRec, TemplateRec } from './ports.js';
+import type { ConversationKey, ConversationRec, MessageRec, ParticipantRec, ReplyStatsRec, ReportRec, TemplateRec } from './ports.js';
 import { Core, guestKey, invalid, meOf, notFound, SYSTEM, type Author, type By, type Cfg, type MessagingServiceDeps, type Prepared, type Viewer } from './service/core.js';
 
 export type { MessagingServiceDeps, Viewer, By };
@@ -69,19 +69,18 @@ export class MessagingService implements MessagingPublicApi {
 
   async views(v: Viewer, rows: readonly ConversationRec[], o: { live?: boolean } = {}): Promise<ConversationView[]> {
     if (!rows.length) return [];
-    const [bundles, cards] = await Promise.all([this.core.bundles(rows), this.core.cards(rows)]);
+    const [bundles, cards, replyStats] = await Promise.all([this.core.bundles(rows), this.core.cards(rows), this.replyStatsOf(rows, !!o.live)]);
     const out: ConversationView[] = [];
     for (const b of bundles) {
       const live = o.live ? await this.core.live(v, b.conv) : undefined;
       const may = o.live && v.kind === 'customer' ? (await this.core.customerMayWrite(v, b.conv)).allowed : undefined;
-      const x = { cards, ...(live ? { subject: live.subject, dispatchWarning: live.dispatchWarning } : {}), ...(may === undefined ? {} : { mayWrite: may }) };
+      const x = { cards, replyStats, ...(live ? { subject: live.subject, dispatchWarning: live.dispatchWarning } : {}), ...(may === undefined ? {} : { mayWrite: may }) };
       out.push({ conversation: this.core.conversationOf(v, b, x), summary: this.core.summaryOf(v, b, x) });
     }
     return out;
   }
 
   private async one(v: Viewer, c: ConversationRec, live = true): Promise<Conversation> {
-    if (live && marketplaceSellerId(c.seller_id) && !this.core.replyCache.has(c.seller_id!)) await this.cacheStats(c.seller_id!);
     return (await this.views(v, [c], { live }))[0]!.conversation;
   }
 
@@ -134,7 +133,6 @@ export class MessagingService implements MessagingPublicApi {
     if (!isUuid(id)) return null;
     const c = await this.core.conversation(id);
     if (!c || !(await this.core.visible(v, c))) return null;
-    if (marketplaceSellerId(c.seller_id) && !this.core.replyCache.has(c.seller_id!)) await this.cacheStats(c.seller_id!);
     return (await this.views(v, [c], { live: true }))[0]!;
   }
 
@@ -381,13 +379,13 @@ export class MessagingService implements MessagingPublicApi {
   /** GET admin /conversations: headers only */
   async listAdminConversations(q: { orderId?: string; customerId?: string; sellerId?: string; caseId?: string; filter?: 'overdue' | 'reported' | 'locked' | 'official_awaiting' }, page: PageRequest, staff: StaffViewer): Promise<common.Page<AdminConversationRow>> {
     const rows = await this.repo.adminSearch(q, page);
-    const [bundles, cards, reports] = await Promise.all([this.core.bundles(rows.items, 1), this.core.cards(rows.items), this.repo.reportCounts(rows.items.map((r) => r.id))]);
+    const [bundles, cards, reports, replyStats] = await Promise.all([this.core.bundles(rows.items, 1), this.core.cards(rows.items), this.repo.reportCounts(rows.items.map((r) => r.id)), this.replyStatsOf(rows.items, false)]);
     return {
       ...rows,
       items: bundles.map((b) => ({
         id: b.conv.id,
         customerName: b.participants.find((p) => p.kind === 'customer' || p.kind === 'guest')?.name ?? (b.conv.kind === 'staff_seller' ? '—' : 'Guest'),
-        counterparty: this.core.counterpartyOf(staff, b, cards),
+        counterparty: this.core.counterpartyOf(staff, b, cards, replyStats),
         subject: this.core.subjectOf(b.conv),
         status: b.conv.status as AdminConversationRow['status'],
         replyState: b.conv.reply_state as AdminConversationRow['replyState'],
@@ -673,7 +671,7 @@ export class MessagingService implements MessagingPublicApi {
       outcome = 'Conversation locked';
     } else if (body.action === 'refer_to_trust') {
       const trust = this.ctx.tryUse('trust');
-      if (!trust) throw new AppError('SERVICE_UNAVAILABLE', 'Trust and Risk is not available right now', undefined, 503);
+      if (!trust) throw this.core.error('TRUST_UNAVAILABLE', 'Trust and Risk is not available: hide the message or lock the conversation instead');
       const m = await this.repo.get('messages', report.message_id);
       const c = await this.repo.get('conversations', report.conversation_id);
       const subject = c ? this.core.subjectOf(c) : null;
@@ -774,7 +772,7 @@ export class MessagingService implements MessagingPublicApi {
     return { targetHours: cfg.targetHours, averageReplyMinutes: r.averageReplyMinutes, medianReplyMinutes: r.medianReplyMinutes, repliedWithinTargetPct: r.repliedWithinTargetPct, awaitingReply: inbox.awaiting + inbox.overdue, overdue: inbox.overdue, period: range };
   }
 
-  private async replyFigures(sellerId: string, range: common.DateRange, cfg: Cfg): Promise<{ averageReplyMinutes: number | null; medianReplyMinutes: number | null; repliedWithinTargetPct: number | null }> {
+  private async replyFigures(sellerId: string, range: common.DateRange, cfg: Cfg): Promise<{ averageReplyMinutes: number | null; medianReplyMinutes: number | null; repliedWithinTargetPct: number | null; replied: number; within: number; decided: number }> {
     const tz = this.core.tz;
     const from = zonedTimeToUtc(range.from, '00:00', tz);
     const to = new Date(zonedTimeToUtc(range.to, '00:00', tz).getTime() + DAY);
@@ -792,6 +790,9 @@ export class MessagingService implements MessagingPublicApi {
       averageReplyMinutes: replied.length ? Math.round(times.reduce((s, x) => s + x, 0) / replied.length / MINUTE) : null,
       medianReplyMinutes: median === null ? null : Math.round(median / MINUTE),
       repliedWithinTargetPct: decided.length ? Math.round((within.length / decided.length) * 1000) / 10 : null,
+      replied: replied.length,
+      within: within.length,
+      decided: decided.length,
     };
   }
 
@@ -1196,19 +1197,35 @@ export class MessagingService implements MessagingPublicApi {
     }
   }
 
-  /** Job messaging.response-stats (hourly): Roll up seller reply times for performance and Seller Center */
+  /**
+   * Job messaging.response-stats (hourly): rolls up 30-day reply figures into seller_reply_stats for sellers with
+   * messages in the last 2 hours, then refreshes rows older than a day (bounded batches, oldest first).
+   */
   async responseStats(): Promise<void> {
-    const since = new Date(this.now().getTime() - 2 * HOUR);
-    const sellers = await this.repo.sellersActiveSince(since, 1000);
-    for (const id of sellers) await this.cacheStats(id);
+    const now = this.now();
+    const active = await this.repo.sellersActiveSince(new Date(now.getTime() - 2 * HOUR), 1000);
+    const stale = await this.repo.staleReplyStats(new Date(now.getTime() - DAY), 500);
+    for (const id of new Set([...active, ...stale])) if (marketplaceSellerId(id)) await this.computeStats(id);
   }
 
-  /** 30-day reply figures behind "Usually replies within …" */
-  private async cacheStats(sellerId: string) {
+  /** 30-day reply figures behind "Usually replies within …", written to seller_reply_stats */
+  private async computeStats(sellerId: string): Promise<ReplyStatsRec> {
     const to = this.core.today();
     const from = this.core.today(new Date(this.now().getTime() - 29 * DAY));
     const r = await this.replyFigures(sellerId, { from, to }, await this.core.cfg());
-    this.core.replyCache.set(sellerId, { ...r, at: this.now().getTime() });
+    const row: ReplyStatsRec = { seller_id: sellerId, period_from: from, period_to: to, average_reply_minutes: r.averageReplyMinutes, median_reply_minutes: r.medianReplyMinutes, replied: r.replied, replied_within_target: r.within, decided: r.decided, computed_at: this.now() };
+    await this.repo.upsertReplyStats(row);
+    return row;
+  }
+
+  /** 30-day average reply minutes of the marketplace sellers of these conversations (seller_reply_stats); compute: fill missing rows */
+  private async replyStatsOf(rows: readonly ConversationRec[], compute: boolean): Promise<Map<string, number | null>> {
+    const ids = [...new Set(rows.map((r) => marketplaceSellerId(r.seller_id)).filter((x): x is string => !!x))];
+    if (!ids.length) return new Map();
+    const found = await this.repo.find('seller_reply_stats', { seller_id: ids });
+    const out = new Map<string, number | null>(found.map((x) => [x.seller_id, x.average_reply_minutes]));
+    if (compute) for (const id of ids) if (!out.has(id)) out.set(id, (await this.computeStats(id)).average_reply_minutes);
+    return out;
   }
 
   /* ================================================================ helpers */

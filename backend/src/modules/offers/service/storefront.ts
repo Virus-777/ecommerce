@@ -479,12 +479,12 @@ export class StorefrontPart extends Part {
       const r = rows.get(l.offerId);
       const v = r ? views.get(r.id) : undefined;
       if (!r || !v || r.status === 'removed') {
-        changes.push({ offerId: l.offerId, kind: 'removed', before: null, after: null, message: 'This offer is no longer available. Choose another offer if you still want the item.', alternatives: r ? await alternatives(r) : [] });
+        changes.push({ offerId: l.offerId, kind: 'removed', before: null, after: null, previous: null, current: null, message: 'This offer is no longer available. Choose another offer if you still want the item.', alternatives: r ? await alternatives(r) : [] });
         continue;
       }
       const src = (r.ineligible_source ?? {}) as { kind?: string };
       if (r.status === 'ineligible' && (src.kind === 'restriction' || src.kind === 'suspension')) {
-        changes.push({ offerId: r.id, kind: 'seller_restricted', before: null, after: null, message: `${v.seller.name} can't sell this item right now. Choose another offer if you still want it.`, alternatives: await alternatives(r) });
+        changes.push({ offerId: r.id, kind: 'seller_restricted', before: null, after: null, previous: null, current: null, message: `${v.seller.name} can't sell this item right now. Choose another offer if you still want it.`, alternatives: await alternatives(r) });
         continue;
       }
       if (r.status !== 'active' || v.availability.maxPerOrder < l.quantity) {
@@ -494,21 +494,23 @@ export class StorefrontPart extends Part {
           kind: 'availability',
           before: String(l.quantity),
           after: String(left),
+          previous: { quantity: l.quantity },
+          current: { quantity: left },
           message: left > 0 ? `Only ${left} can be bought from ${v.seller.name} now.` : `This item is no longer available from ${v.seller.name}.`,
           alternatives: await alternatives(r),
         });
         continue;
       }
       if (!v.delivery.shipsToLocation) {
-        changes.push({ offerId: r.id, kind: 'delivery', before: null, after: deliverTo.label, message: `${v.seller.name} does not deliver to ${deliverTo.label}.`, alternatives: await alternatives(r) });
+        changes.push({ offerId: r.id, kind: 'delivery', before: null, after: deliverTo.label, previous: null, current: { postalCode: deliverTo.postalCode }, message: `${v.seller.name} does not deliver to ${deliverTo.label}.`, alternatives: await alternatives(r) });
         continue;
       }
       if (l.price.amount !== v.price.amount || l.price.currency !== v.price.currency) {
-        changes.push({ offerId: r.id, kind: 'price', before: formatMoney(l.price), after: formatMoney(v.price), message: `The price changed from ${formatMoney(l.price)} to ${formatMoney(v.price)}.`, alternatives: [] });
+        changes.push({ offerId: r.id, kind: 'price', before: formatMoney(l.price), after: formatMoney(v.price), previous: { price: l.price }, current: { price: v.price }, message: `The price changed from ${formatMoney(l.price)} to ${formatMoney(v.price)}.`, alternatives: [] });
         continue;
       }
       if (l.termsVersion !== r.terms_version) {
-        changes.push({ offerId: r.id, kind: 'terms', before: `v${l.termsVersion}`, after: `v${r.terms_version}`, message: `${v.seller.name} updated the delivery, return or warranty terms of this offer. Review them before you buy.`, alternatives: [] });
+        changes.push({ offerId: r.id, kind: 'terms', before: `v${l.termsVersion}`, after: `v${r.terms_version}`, previous: { termsVersion: l.termsVersion }, current: { termsVersion: r.terms_version }, message: `${v.seller.name} updated the delivery, return or warranty terms of this offer. Review them before you buy.`, alternatives: [] });
       }
     }
     return { ok: changes.length === 0, changes };

@@ -217,7 +217,7 @@ export class Profiles {
     });
     this.core.publish('shipping.profile.changed', { profileId: lineage, sellerId: owner.sellerId, effectiveFrom: eff.at.toISOString() }, by);
     const view = this.views.profile(row);
-    await this.core.audit({ action: 'shipping.profile.create', actionLabel: owner.ownerType === 'official' ? 'Created an Official Store shipping profile' : 'Created a shipping profile', category: 'settings', target: { type: 'shipping_profile', id: lineage, label: row.name }, before: null, after: view }, by);
+    await this.core.audit({ action: 'shipping.profile.create', actionLabel: owner.ownerType === 'official' ? 'Created an Official Store shipping profile' : 'Created a shipping profile', category: 'shipping', target: { type: 'shipping_profile', id: lineage, label: row.name }, before: null, after: view }, by);
     return view;
   }
 
@@ -274,7 +274,7 @@ export class Profiles {
       {
         action: 'shipping.profile.update',
         actionLabel: eff.scheduled ? `Scheduled new shipping rates from ${dayLabel(this.core.today(eff.at))}` : 'Changed shipping rates',
-        category: 'settings',
+        category: 'shipping',
         target: { type: 'shipping_profile', id: profileId, label: row.name },
         before: this.views.profile(current, using),
         after: view,
@@ -297,7 +297,7 @@ export class Profiles {
       return tx.update('profiles', active!.id, { status, is_default: false, updated_by: by.actor, updated_at: this.core.now() });
     });
     const view = this.views.profile(row, 0);
-    await this.core.audit({ action: 'shipping.profile.archive', actionLabel: 'Archived a shipping profile', category: 'settings', target: { type: 'shipping_profile', id: profileId, label: row.name }, before: this.views.profile(active!, 0), after: view }, by);
+    await this.core.audit({ action: 'shipping.profile.archive', actionLabel: 'Archived a shipping profile', category: 'shipping', target: { type: 'shipping_profile', id: profileId, label: row.name }, before: this.views.profile(active!, 0), after: view }, by);
     return view;
   }
 
@@ -424,7 +424,7 @@ export class Profiles {
       {
         action: 'shipping.seller_settings.update',
         actionLabel: eff.scheduled ? `Scheduled shipping settings from ${dayLabel(this.core.today(eff.at))}` : 'Changed shipping settings',
-        category: 'settings',
+        category: 'shipping',
         target: { type: 'seller_shipping_settings', id: sellerId, label: 'Shipping settings' },
         before: { coverage: before.coverage, handlingDays: before.handling_days, sameDayCutoff: before.same_day_cutoff, businessDays: before.business_days, buyLabels: before.buy_labels, shipsFrom: before.ships_from ?? null, defaultParcel: before.default_parcel },
         after: { coverage: input.coverage, handlingDays: d.handlingDays, sameDayCutoff: d.sameDayCutoff, businessDays: d.businessDays, buyLabels: input.buyLabelsInSellerCenter, shipsFrom: shipsFrom ?? before.ships_from ?? null, defaultParcel: parcel ?? before.default_parcel, effectiveFrom: eff.at.toISOString() },

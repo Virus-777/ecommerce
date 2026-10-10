@@ -112,11 +112,13 @@ export interface AdvertisingRepository {
   /** Any counter for these visitor keys (returning visitor) */
   hasHistory(visitorKeys: readonly string[]): Promise<boolean>;
   /** Display counters: session (reset when the session changes) and window (restarted when the window has passed) */
-  recordDisplay(visitorKeys: readonly string[], campaignId: string, sessionId: string, now: Date, windowDays: number | null): Promise<void>;
+  /** Counts a display on every key: session, window, the market day (day.day, starting at day.start) and the campaign total */
+  recordDisplay(visitorKeys: readonly string[], campaignId: string, sessionId: string, now: Date, windowDays: number | null, day: { day: string; start: Date }): Promise<void>;
   recordDismissal(visitorKeys: readonly string[], campaignId: string, sessionId: string, until: Date, now: Date): Promise<void>;
   /** Tracked displays per campaign for the visitor keys since `since` (all time when null) */
   displayCounts(visitorKeys: readonly string[], campaignIds: readonly string[], since: Date | null): Promise<Map<string, number>>;
-  expireFrequency(now: Date, oldestWindowStart: Date, endedCampaignIds: readonly string[]): Promise<number>;
+  /** Deletes stale rows (and every row of ended campaigns), keeping rows of keepCampaignIds (running campaigns with a total cap) */
+  expireFrequency(now: Date, oldestWindowStart: Date, endedCampaignIds: readonly string[], keepCampaignIds?: readonly string[]): Promise<number>;
 
   /* spend */
   /**

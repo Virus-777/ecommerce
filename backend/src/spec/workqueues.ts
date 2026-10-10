@@ -90,6 +90,8 @@ export const QueueDefinition: z.ZodType<QueueDefinition> = z.object({
 }).register(common.apiTypes, { id: "workqueues.QueueDefinition" });
 
 export interface QueueInput {
+  /** Create only (ignored on update: a queue's key never changes). Lowercase letters, numbers and underscores in two dot-separated parts, e.g. inventory.cycle_counts; 409 CONFLICT when taken. Omitted: derived as <area>.<name slug> (name lowercased, every run of other characters becomes _, at most 48 characters), with _2, _3… appended while that key is taken */
+  key?: string | null;
   name: string;
   area: string;
   ownerRole: string;
@@ -107,6 +109,7 @@ export interface QueueInput {
 }
 
 export const QueueInput: z.ZodType<QueueInput> = z.object({
+  key: z.string().describe("Create only (ignored on update: a queue's key never changes). Lowercase letters, numbers and underscores in two dot-separated parts, e.g. inventory.cycle_counts; 409 CONFLICT when taken. Omitted: derived as <area>.<name slug> (name lowercased, every run of other characters becomes _, at most 48 characters), with _2, _3… appended while that key is taken").nullish(),
   name: z.string(),
   area: z.string(),
   ownerRole: z.string(),
@@ -1096,10 +1099,11 @@ export const endpoints = defineEndpoints({
     permission: "workqueues.queues.manage",
     scope: "staff",
     summary: "Create a queue (lead, backup and escalation route required)",
+    desc: "The key is QueueInput.key when given, else derived from the area and name (see QueueInput.key).",
     body: () => QueueInput,
     response: () => QueueDefinition,
     status: 201,
-    errors: ["VALIDATION_FAILED","LEAD_EQUALS_BACKUP"],
+    errors: ["VALIDATION_FAILED","LEAD_EQUALS_BACKUP","CONFLICT"],
     audited: true,
     screens: ["admin/staff"],
     phase: 1,
@@ -2069,6 +2073,7 @@ export const spec = defineModuleSpec({
         "purchasing.receiving",
         "inventory.low_stock",
         "inventory.reservations",
+        "inventory.merge_candidates",
         "official_store.messages",
         "returns.inspection",
         "returns.decisions",

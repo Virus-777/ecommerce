@@ -161,6 +161,8 @@ export interface Alert {
   triggeredAt?: string | null;
   triggeredPrice?: common.Money | null;
   pausedReason?: string | null;
+  /** Back-in-stock alerts: when the item was seen unavailable, so a restock can fire the alert. Null while the item has stayed in stock since the alert was switched on. Price-drop alerts: the creation time */
+  armedAt?: string | null;
   createdAt: string;
 }
 
@@ -188,6 +190,7 @@ export const Alert: z.ZodType<Alert> = z.object({
     return common.Money.nullish();
   },
   pausedReason: z.string().nullish(),
+  armedAt: z.iso.datetime({ offset: true }).describe("Back-in-stock alerts: when the item was seen unavailable, so a restock can fire the alert. Null while the item has stayed in stock since the alert was switched on. Price-drop alerts: the creation time").nullish(),
   createdAt: z.iso.datetime({ offset: true }),
 }).register(common.apiTypes, { id: "wishlist.Alert" });
 
@@ -363,6 +366,8 @@ export interface WishlistDb {
     triggered_price: number | null;
     paused_reason: string | null;
     last_notified_at: Date | null;
+    /** back_in_stock: when what the alert follows was last seen unavailable; the alert fires only once armed */
+    armed_at: Date | null;
     created_at: Date;
   };
 }
@@ -436,7 +441,7 @@ export const endpoints = defineEndpoints({
     body: () => SaveItemInput,
     response: () => SavedItem,
     status: 201,
-    errors: ["LIST_LIMIT_REACHED"],
+    errors: ["LIST_LIMIT_REACHED","ALERT_LIMIT_REACHED"],
     events: ["wishlist.item.saved"],
     screens: ["store/product","account/wishlist"],
     phase: 3,
@@ -523,6 +528,7 @@ export const endpoints = defineEndpoints({
     body: () => AlertToggle,
     response: () => SavedItem,
     status: 200,
+    errors: ["ALERT_LIMIT_REACHED"],
     screens: ["account/wishlist"],
     phase: 3,
   },
@@ -673,7 +679,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => Alert,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION"],
+    errors: ["ILLEGAL_TRANSITION","ALERT_LIMIT_REACHED"],
     screens: ["account/wishlist"],
     phase: 3,
   },
@@ -993,6 +999,10 @@ export const spec = defineModuleSpec({
         "nullable": true
       },
       "last_notified_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
+      "armed_at": {
         "type": "timestamptz",
         "nullable": true
       },

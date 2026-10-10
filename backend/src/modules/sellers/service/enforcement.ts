@@ -96,7 +96,7 @@ export class EnforcementPart extends Part {
     const approval = o.staff ? await this.approvalInfo(s.approval_request_id) : null;
     return {
       id: s.id,
-      ref: suspensionRef(s),
+      ref: s.ref,
       sellerId: s.seller_id,
       state: SUSPENSION_STATE[s.state] ?? 'cancelled',
       title: 'All new sales suspended',
@@ -327,7 +327,8 @@ export class EnforcementPart extends Part {
         reason: body.changeReason,
         requestedBy: this.core.principalOf(by),
       });
-      throw new AppError('APPROVAL_REQUIRED', check.reason, { approvalRequestId: req.id, restrictionId: r.id });
+      const pending = await this.core.savePendingChange({ kind: 'restriction_change', sellerId: seller.id, targetId: r.id, approvalRequestId: req.id, payload: { patch, changeReason: body.changeReason }, reason: body.changeReason, actor: by.actor });
+      throw new AppError('APPROVAL_REQUIRED', check.reason, { approvalRequestId: req.id, restrictionId: r.id, pendingChangeId: pending.id });
     }
     return this.restrictionView(await this.applyRestrictionChange(r.id, patch, body.changeReason, by), { staff: true });
   }
@@ -467,6 +468,9 @@ export class EnforcementPart extends Part {
     for (const r of await this.repo.getMany('restrictions', needR)) restrictionRefs.set(r.id, r.ref);
     const needA = rows.filter((a) => a.subject === 'application_rejection').map((a) => a.subject_id);
     const appRefs = new Map((await this.repo.getMany('applications', needA)).map((a) => [a.id, a.ref]));
+    const suspensionRefs = new Map((ctx.suspensions ?? []).map((s) => [s.id, s.ref]));
+    const needS = rows.filter((a) => a.subject === 'suspension' && !suspensionRefs.has(a.subject_id)).map((a) => a.subject_id);
+    for (const s of await this.repo.getMany('suspensions', needS)) suspensionRefs.set(s.id, s.ref);
     const names = new Map<string, string | null>();
     for (const id of new Set(rows.map((a) => a.reviewer_id).filter((x): x is string => Boolean(x)))) names.set(id, await this.core.staffName(id));
     return rows.map((a) =>
@@ -478,7 +482,7 @@ export class EnforcementPart extends Part {
             : a.subject === 'application_rejection'
               ? (appRefs.get(a.subject_id) ?? a.subject_id)
               : a.subject === 'suspension'
-                ? suspensionRef({ id: a.subject_id })
+                ? (suspensionRefs.get(a.subject_id) ?? a.subject_id)
                 : a.subject_id,
         refs,
         now,
@@ -517,7 +521,7 @@ export class EnforcementPart extends Part {
     try {
       row = await this.repo.insert('appeals', {
         id,
-        ref: await this.ctx.refs.next('AP', { digits: 3 }),
+        ref: await this.ctx.refs.next('SAP', { digits: 3 }),
         seller_id: input.sellerId,
         subject: input.subject,
         subject_id: input.subjectId,
@@ -750,7 +754,7 @@ export class EnforcementPart extends Part {
     const row = await this.newSuspension(seller, input, by);
     const req = await this.ctx.use('access').requestApproval({
       action: 'sellers.sellers.suspend',
-      target: { type: 'suspension', id: row.id, ref: suspensionRef(row), label: seller.store_name, sellerId, screen: 'admin/seller' },
+      target: { type: 'suspension', id: row.id, ref: row.ref, label: seller.store_name, sellerId, screen: 'admin/seller' },
       summary: `Suspend all new sales of ${seller.store_name}`,
       details: { reasonCode: input.reasonCode, reviewDate: input.reviewDate, openOrders: input.openOrders, impact },
       reason: input.reason,
@@ -778,6 +782,7 @@ export class EnforcementPart extends Part {
   private async newSuspension(seller: SellerRec, input: SuspensionInput, by: By): Promise<SuspensionRec> {
     return this.repo.insert('suspensions', {
       id: newId(),
+      ref: await this.ctx.refs.next('SU', { digits: 4 }),
       seller_id: seller.id,
       state: 'pending_approval',
       reason_code: input.reasonCode,
@@ -1001,10 +1006,11 @@ export class EnforcementPart extends Part {
       return;
     }
     if (e.actionKey === 'sellers.sellers.restrict' && t.type === 'restriction_change') {
-      if (!approved) return;
-      const req = await this.ctx.use('access').getApproval(e.requestId);
-      const d = (req?.details ?? {}) as { patch?: Parameters<EnforcementPart['applyRestrictionChange']>[1]; changeReason?: string };
-      if (d.patch) await this.applyRestrictionChange(t.id, d.patch, d.changeReason ?? req?.reason ?? 'Approved change', by, e.requestId);
+      const kept = await this.core.decidePendingChange(e.requestId, approved);
+      if (!approved || kept === null) return;
+      const req = kept ? null : await this.ctx.use('access').getApproval(e.requestId);
+      const d = ((kept ? kept.payload : req?.details) ?? {}) as { patch?: Parameters<EnforcementPart['applyRestrictionChange']>[1]; changeReason?: string };
+      if (d.patch) await this.applyRestrictionChange(t.id, d.patch, d.changeReason ?? kept?.reason ?? req?.reason ?? 'Approved change', by, e.requestId);
       return;
     }
     if (e.actionKey === 'sellers.sellers.suspend' && t.type === 'suspension') {
@@ -1019,17 +1025,19 @@ export class EnforcementPart extends Part {
       return;
     }
     if (e.actionKey === 'sellers.sellers.close' && t.type === 'seller') {
-      if (!approved) return;
-      const req = await this.ctx.use('access').getApproval(e.requestId);
-      const d = (req?.details ?? {}) as { reason?: string; reasonCode?: string };
-      await this.parts.accounts.closeNow(t.id, { reason: d.reason ?? req?.reason ?? 'Closed', reasonCode: d.reasonCode ?? 'other' }, by, e.requestId);
+      const kept = await this.core.decidePendingChange(e.requestId, approved);
+      if (!approved || kept === null) return;
+      const req = kept ? null : await this.ctx.use('access').getApproval(e.requestId);
+      const d = ((kept ? kept.payload : req?.details) ?? {}) as { reason?: string; reasonCode?: string };
+      await this.parts.accounts.closeNow(t.id, { reason: d.reason ?? kept?.reason ?? req?.reason ?? 'Closed', reasonCode: d.reasonCode ?? 'other' }, by, e.requestId);
       return;
     }
     if (e.actionKey === 'sellers.performance.targets') {
-      if (!approved) return;
-      const req = await this.ctx.use('access').getApproval(e.requestId);
-      const d = (req?.details ?? {}) as { targets?: never[]; reason?: string; setBy?: common.Actor };
-      if (d.targets) await this.parts.performance.applyTargets(d.targets, d.reason ?? req?.reason ?? '', { actor: d.setBy ?? by.actor }, e.requestId);
+      const kept = await this.core.decidePendingChange(e.requestId, approved);
+      if (!approved || kept === null) return;
+      const req = kept ? null : await this.ctx.use('access').getApproval(e.requestId);
+      const d = ((kept ? kept.payload : req?.details) ?? {}) as { targets?: never[]; reason?: string; setBy?: common.Actor };
+      if (d.targets) await this.parts.performance.applyTargets(d.targets, d.reason ?? kept?.reason ?? req?.reason ?? '', { actor: d.setBy ?? by.actor }, e.requestId);
     }
   }
 
@@ -1090,7 +1098,7 @@ export class EnforcementPart extends Part {
         try {
           const req = await this.ctx.use('access').requestApproval({
             action: 'sellers.sellers.suspend',
-            target: { type: 'suspension', id: row.id, ref: suspensionRef(row), label: seller.store_name, sellerId, screen: 'admin/seller' },
+            target: { type: 'suspension', id: row.id, ref: row.ref, label: seller.store_name, sellerId, screen: 'admin/seller' },
             summary: `Suspend all new sales of ${seller.store_name} (Trust and Risk)`,
             details: { reasonCode: row.reason_code, reviewDate: row.review_date, enforcementId: e.enforcementId },
             reason: row.reason,
@@ -1232,4 +1240,4 @@ export class EnforcementPart extends Part {
   }
 }
 
-export const suspensionRef = (s: { id: string }) => `SU-${s.id.replace(/-/g, '').slice(-8).toUpperCase()}`;
+

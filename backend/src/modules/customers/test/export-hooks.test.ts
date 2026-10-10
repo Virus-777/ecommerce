@@ -76,8 +76,12 @@ describe('data export hooks', () => {
     const photo = [...files.keys()].find((n) => n.startsWith('attachments/messages/'));
     expect(photo).toMatch(/broken-lamp\.JPG$/);
     expect([...files.get(photo!)!]).toEqual([1, 2, 3, 4]);
+    // the consent log covers the personalisation switches too (ConsentRecord.channel)
+    const consent = JSON.parse(files.get('consent-log.json')!.toString()) as { channel: string }[];
+    expect(consent.map((x) => x.channel)).toEqual(expect.arrayContaining(['email', 'personalization', 'recent_searches']));
     const readme = JSON.parse(files.get('README.json')!.toString());
     expect(readme.sections).toEqual([
+      { file: 'orders.json', title: 'Orders', module: 'orders' }, // orders declares the export hook (pass 4)
       { file: 'messages.json', title: 'Messages', module: 'messaging' },
       { file: 'reviews.json', title: 'Reviews', module: 'reviews' },
     ]);

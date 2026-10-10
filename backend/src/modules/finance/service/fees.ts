@@ -45,7 +45,6 @@ export class FeesPart extends Part {
     await this.core.ensureRules();
     const id = newId();
     const version = `v${(await this.repo.count('fee_rule_sets', {})) + 1}`;
-    const categoryNames = Object.fromEntries(input.categoryRates.map((c) => [c.categoryId, c.categoryName]));
     await this.repo.transaction(async (tx) => {
       await tx.insert('fee_rule_sets', {
         id,
@@ -55,7 +54,7 @@ export class FeesPart extends Part {
         include_shipping: input.includeShipping,
         platform_discounts_reduce_fee: input.platformDiscountsReduceFee,
         default_rate_bps: input.defaultRateBps,
-        treatment: { ...input.treatment, categoryNames } as never,
+        treatment: input.treatment as never,
         agreement_version: input.agreementVersion,
         effective_from: effectiveFrom,
         reason: input.reason,
@@ -63,7 +62,7 @@ export class FeesPart extends Part {
         created_by: encodeActor(by.actor)!,
         created_at: this.now(),
       });
-      for (const c of input.categoryRates) await tx.insert('fee_category_rates', { rule_set_id: id, category_id: c.categoryId, rate_bps: c.rateBps });
+      for (const c of input.categoryRates) await tx.insert('fee_category_rates', { rule_set_id: id, category_id: c.categoryId, category_name: c.categoryName?.trim() || 'Category', rate_bps: c.rateBps });
     });
     // activation always needs the Business Owner (finance.fees.change: no limit, second person always)
     const req = await this.core.requestApproval(by, {

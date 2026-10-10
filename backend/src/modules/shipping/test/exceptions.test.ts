@@ -127,7 +127,7 @@ describe('staff handling of exceptions', () => {
     const id = opened.body.id;
     const owner = newId();
     const assigned = await h.call('POST', `${ADMIN}/exceptions/${id}/assign`, staff, { ownerStaffId: owner });
-    expect(assigned.body).toMatchObject({ status: 'in_progress', owner: { staffId: owner, name: 'Theo Grant, Shipping Manager' } });
+    expect(assigned.body).toMatchObject({ status: 'in_progress', owner: { staffId: owner, name: 'Theo Grant', role: 'Shipping Manager' } });
     const reminded = await h.call('POST', `${ADMIN}/exceptions/${id}/notify-seller`, staff, { message: 'Please check the packing' });
     expect(reminded.status).toBe(200);
     expect(reminded.body.sellerNotifiedAt).toBeTruthy();

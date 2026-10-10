@@ -485,6 +485,9 @@ export interface FrequencyRow {
   session_displays: number;
   window_displays: number;
   window_started_at: Date;
+  display_day?: string | null;
+  day_displays?: number;
+  total_displays?: number;
   last_display_at: Date | null;
   suppressed_until: Date | null;
 }

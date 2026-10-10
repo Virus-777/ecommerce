@@ -20,7 +20,7 @@ import { AGREEMENT_KEYS, agreementDocument, DEFAULT_AGREEMENT_VERSION, type Agre
 import type { StoredPayout } from '../domain/rules.js';
 import { taxIdCipher, type TaxIdCipher } from '../infra/crypto.js';
 import { actorText, type Refs } from '../mappers.js';
-import type { AccountEventRec, ApplicationRec, SellerRec, SellersProviders, SellersRepository } from '../ports.js';
+import type { AccountEventRec, ApplicationRec, PayoutChangeRec, PendingChangeRec, SellerRec, SellersProviders, SellersRepository } from '../ports.js';
 import type { AccountsPart } from './accounts.js';
 import type { ApplicationsPart } from './applications.js';
 import type { EnforcementPart } from './enforcement.js';
@@ -165,8 +165,47 @@ export class Core {
     return s.application_id ? repo.get('applications', s.application_id) : undefined;
   }
 
-  payoutOf(app: ApplicationRec | undefined): StoredPayout {
-    return ((app?.payout ?? {}) as StoredPayout) || {};
+  /** Keeps a staff change that waits for a second reviewer (pending_changes); applied on access.approval.decided */
+  async savePendingChange(input: { kind: PendingChangeRec['kind']; sellerId?: string | null; targetId?: string | null; approvalRequestId: string; payload: unknown; reason: string; actor: common.Actor }): Promise<PendingChangeRec> {
+    return this.repo.insert('pending_changes', {
+      id: newId(),
+      kind: input.kind,
+      seller_id: input.sellerId ?? null,
+      target_id: input.targetId ?? null,
+      approval_request_id: input.approvalRequestId,
+      payload: input.payload as never,
+      reason: input.reason,
+      requested_by: input.actor as never,
+      state: 'pending',
+      requested_at: this.now(),
+      decided_at: null,
+    });
+  }
+
+  /**
+   * The pending change of an approval request, marked applied or declined (once: null when already decided).
+   * undefined when there is no row (requests made before pending_changes existed keep their payload in access).
+   */
+  async decidePendingChange(approvalRequestId: string, approved: boolean): Promise<PendingChangeRec | null | undefined> {
+    return this.repo.transaction(async (tx) => {
+      const row = await tx.findOne('pending_changes', { approval_request_id: approvalRequestId }, { forUpdate: true });
+      if (!row) return undefined;
+      if (row.state !== 'pending') return null;
+      return tx.update('pending_changes', row.id, { state: approved ? 'applied' : 'declined', decided_at: this.now() });
+    });
+  }
+
+  /** The seller's payout destinations (payout_changes: the verified one is current, the pending one) and blocked reasons */
+  async payoutState(s: SellerRec, repo: SellersRepository = this.repo): Promise<StoredPayout> {
+    const rows = await repo.find('payout_changes', { seller_id: s.id }, { orderBy: [['requested_at', 'desc']] });
+    const details = (r: PayoutChangeRec) => ({ accountHolderName: r.account_holder_name, accountType: r.account_type, label: r.label, providerDestinationId: r.provider_destination_id });
+    const current = rows.find((r) => r.state === 'verified');
+    const pending = rows.find((r) => r.state === 'pending');
+    return {
+      current: current ? details(current) : null,
+      pendingChange: pending ? { ...details(pending), changeId: pending.id, requestedAt: pending.requested_at.toISOString() } : null,
+      blockedReasons: Array.isArray(s.payout_blocked_reasons) ? (s.payout_blocked_reasons as unknown[]).map(String) : [],
+    };
   }
 
   /** The state after `event` (ILLEGAL_TRANSITION otherwise) */

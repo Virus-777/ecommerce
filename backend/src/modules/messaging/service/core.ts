@@ -133,6 +133,8 @@ export interface Bundle {
 
 export interface ViewExtras {
   cards?: Map<string, sellers.SellerSummary>;
+  /** 30-day average reply minutes per seller (seller_reply_stats) */
+  replyStats?: Map<string, number | null>;
   /** Live subject (order, item, return or case status) */
   subject?: Subject;
   dispatchWarning?: string | null;
@@ -143,8 +145,6 @@ export interface ViewExtras {
 export class Core {
   readonly repo: MessagingRepository;
   readonly ctx: ModuleContext<'messaging'>;
-  /** Rolled-up 30-day reply times per seller (job messaging.response-stats) */
-  readonly replyCache = new Map<string, { averageReplyMinutes: number | null; repliedWithinTargetPct: number | null; at: number }>();
 
   constructor(deps: MessagingServiceDeps) {
     this.repo = deps.repo;
@@ -212,8 +212,9 @@ export class Core {
   /* ---------------------------------------------------------------- viewers and record scope */
 
   /**
-   * A public-API participant as a Viewer. Customer actors carry the customer id (customers passes it so);
-   * an account id is accepted too and resolved through customers. Seller actors carry the seller id.
+   * A public-API participant as a Viewer. Customer actors carry the customers-module id (the customer participant's
+   * id; account ids are not accepted, decision: customer id and account id stay separate). Seller actors carry the
+   * seller id, staff the staff account id, visitors the guest session id.
    */
   async viewerOf(p: common.Actor): Promise<Viewer | null> {
     if (!p?.id) return null;
@@ -221,9 +222,7 @@ export class Core {
     if (p.kind === 'staff') return { kind: 'staff', accountId: p.id, name: p.name ?? null };
     if (p.kind === 'visitor') return { kind: 'customer', customerId: null, guestSessionId: p.id, accountId: null };
     if (p.kind !== 'customer') return null;
-    if (await this.repo.count('participants', { kind: 'customer', participant_id: p.id })) return { kind: 'customer', customerId: p.id, guestSessionId: null, accountId: null };
-    const c = await this.soft('customers', 'customer of account', (x) => x.getCustomerByUserId(p.id!));
-    return c ? { kind: 'customer', customerId: c.id, guestSessionId: null, accountId: p.id } : { kind: 'customer', customerId: p.id, guestSessionId: null, accountId: null };
+    return { kind: 'customer', customerId: p.id, guestSessionId: null, accountId: null };
   }
 
   /** Whether the viewer takes part in the conversation (another tenant's conversation is simply not found) */
@@ -285,21 +284,20 @@ export class Core {
     return (marketplaceSellerId(c.seller_id) && cards?.get(c.seller_id!)?.storeName) || b.participants.find((p) => p.kind === 'seller')?.name || 'Seller';
   }
 
-  counterpartyOf(v: Viewer, b: Bundle, cards?: Map<string, sellers.SellerSummary>): Counterparty {
+  counterpartyOf(v: Viewer, b: Bundle, cards?: Map<string, sellers.SellerSummary>, replyStats?: Map<string, number | null>): Counterparty {
     const c = b.conv;
     const support: Counterparty = { kind: 'marketplace_support', name: SUPPORT_LABEL, verified: true };
     const seller = (): Counterparty => {
       if (isOfficialConversation(c)) return { kind: 'official_store', name: OFFICIAL_STORE_NAME, verified: true };
       if (!c.seller_id) return support;
       const card = cards?.get(c.seller_id);
-      const stats = this.replyCache.get(c.seller_id);
       return {
         kind: 'seller',
         id: c.seller_id,
         name: this.sellerName(b, cards),
         logoUrl: card?.logo?.url ?? null,
         verified: card?.verified ?? null,
-        responseTimeLabel: responseTimeLabel(stats?.averageReplyMinutes),
+        responseTimeLabel: responseTimeLabel(replyStats?.get(c.seller_id)),
         location: card?.location ?? null,
       };
     };
@@ -370,7 +368,7 @@ export class Core {
     const now = this.now();
     return {
       id: c.id,
-      counterparty: this.counterpartyOf(v, b, x.cards),
+      counterparty: this.counterpartyOf(v, b, x.cards, x.replyStats),
       subject: x.subject ?? this.subjectOf(c),
       lastMessagePreview: !last ? '' : last.hidden ? 'Message removed' : last.body ? preview(last.body) : 'Sent an attachment',
       lastMessageAt: c.last_message_at.toISOString(),
@@ -386,7 +384,7 @@ export class Core {
 
   conversationOf(v: Viewer, b: Bundle, x: ViewExtras = {}): Conversation {
     const c = b.conv;
-    const cp = this.counterpartyOf(v, b, x.cards);
+    const cp = this.counterpartyOf(v, b, x.cards, x.replyStats);
     const now = this.now();
     return {
       id: c.id,
@@ -717,7 +715,7 @@ export class Core {
         ...(c.reply_due_at ? { dueAt: c.reply_due_at.toISOString() } : {}),
         priority: 'normal',
         dedupeKey: key,
-        links: [{ label: 'Open conversation', screen: 'admin/messages', id: c.id }],
+        links: [{ label: 'Open conversation', screen: 'admin/official', id: c.id }],
       }),
     );
   }

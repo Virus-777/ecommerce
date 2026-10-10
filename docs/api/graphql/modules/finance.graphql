@@ -63,7 +63,10 @@ type FinanceSettlementRules @areas(in: [SELLER, ADMIN]) {
   schedule: String!
   availableAfterDeliveryDays: Int!
   minimumPayout: Money!
+  "Extra days before earnings become available while in the new-seller period; null after it"
   newSellerHoldDays: Int
+  "Last day of the new-seller period"
+  newSellerUntil: Date
   "Deducted from later earnings; if none, the balance shows the amount owed"
   refundAfterPayout: String!
   text: String!
@@ -353,6 +356,10 @@ type FinanceAmountOwed @areas(in: [SELLER, ADMIN]) {
   status: FinanceAmountOwedStatus!
   origin: [FinanceReference!]!
   note: String
+  "A write-off waiting for a second Finance reviewer"
+  pendingWriteOff: Money
+  "Approval request of the pending write-off"
+  approval: ApprovalInfo @areas(in: [ADMIN])
 }
 
 enum FinanceAmountOwedStatus @areas(in: [SELLER, ADMIN]) {

@@ -100,12 +100,12 @@ export function fromRest(p: RestSearchParams): SearchQuery & { exact?: boolean; 
 
 /** Business validation of filter values that needs no lookups */
 export function validateFilters(f: SearchFilters, sort: SortKey | undefined) {
-  if (f.minRating !== undefined && (f.minRating < 1 || f.minRating > 5)) throw new FilterError('rating', 'Rating filter is 1 to 5 stars');
-  if (f.priceMin !== undefined && f.priceMin < 0) throw new FilterError('priceMin', 'Minimum price cannot be negative');
-  if (f.priceMax !== undefined && f.priceMax < 0) throw new FilterError('priceMax', 'Maximum price cannot be negative');
-  if (f.priceMin !== undefined && f.priceMax !== undefined && f.priceMin > f.priceMax) throw new FilterError('priceMin', 'Minimum price is above the maximum');
-  if (f.listedWithinDays !== undefined && f.listedWithinDays < 1) throw new FilterError('listedWithinDays', 'listedWithinDays is at least 1');
-  if (f.arrivesBy !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(f.arrivesBy)) throw new FilterError('arrivesBy', 'arrivesBy is a date');
+  if (f.minRating != null && (f.minRating < 1 || f.minRating > 5)) throw new FilterError('rating', 'Rating filter is 1 to 5 stars');
+  if (f.priceMin != null && f.priceMin < 0) throw new FilterError('priceMin', 'Minimum price cannot be negative');
+  if (f.priceMax != null && f.priceMax < 0) throw new FilterError('priceMax', 'Maximum price cannot be negative');
+  if (f.priceMin != null && f.priceMax != null && f.priceMin > f.priceMax) throw new FilterError('priceMin', 'Minimum price is above the maximum');
+  if (f.listedWithinDays != null && f.listedWithinDays < 1) throw new FilterError('listedWithinDays', 'listedWithinDays is at least 1');
+  if (f.arrivesBy != null && !/^\d{4}-\d{2}-\d{2}$/.test(f.arrivesBy)) throw new FilterError('arrivesBy', 'arrivesBy is a date');
   for (const c of f.conditions ?? []) if (!CONDITION_GROUPS.includes(c)) throw new FilterError('condition', `Unknown condition '${c}'`);
   if (sort && !SORT_KEYS.includes(sort)) throw new FilterError('sort', `Unknown sort '${sort}'`);
 }

@@ -43,10 +43,9 @@ export class AfterSales {
 
   /** Adds to refundedAmount; a line becomes Refunded only when its whole refundable amount is sent */
   async onRefundSent(e: EventPayload<'payments.refund.sent'>) {
-    const o = await this.core.repo.get('orders', e.orderId);
-    if (!o || (o.flags?.refundsSent ?? []).includes(e.refundId)) return;
+    if (!(await this.exists(e.orderId)) || (await this.core.hasFact(e.orderId, 'refund_sent', e.refundId))) return;
     await this.core.write(e.orderId, { actor: SYSTEM }, async (tx, agg, batch) => {
-      if ((agg.order.flags?.refundsSent ?? []).includes(e.refundId)) return;
+      if (!(await this.core.addFact(tx, agg.order.id, { kind: 'refund_sent', source_id: e.refundId, ref: e.ref, amount: e.amount.amount, item_ids: e.items.map((x) => x.orderItemId) }))) return;
       for (const ri of e.items) {
         const item = agg.items.find((i) => i.id === ri.orderItemId);
         if (!item) continue;
@@ -56,11 +55,10 @@ export class AfterSales {
       }
       const c = e.originId ? agg.cancellations.find((x) => x.id === e.originId) : undefined;
       if (c) await tx.update('cancellations', c.id, { refund_status: 'sent', payment_refund_id: e.refundId });
-      const order = await this.core.setFlags(tx, agg.order, (f) => ({
-        ...f,
-        refundsSent: [...(f.refundsSent ?? []), e.refundId],
-        refundApprovals: (f.refundApprovals ?? []).filter((a) => a.id !== e.originId && !a.itemIds.every((id) => e.items.some((x) => x.orderItemId === id))),
-      }));
+      for (const a of agg.facts.refundApprovals ?? []) {
+        if (a.id === e.originId || a.itemIds.every((id) => e.items.some((x) => x.orderItemId === id))) await this.core.updateFact(tx, agg, 'refund_approval', a.id, { status: 'sent' });
+      }
+      const order = agg.order;
       await tx.update('orders', order.id, { refunded_total: Math.min(order.total, order.refunded_total + e.amount.amount) });
       await this.core.timeline(tx, e.orderId, [{ visibility: 'customer', label: 'Refund sent', detail: `${e.ref}: refund sent to ${e.destination}. Banks usually show it in 3–5 business days.` }]);
     });
@@ -69,8 +67,7 @@ export class AfterSales {
   async onChargebackOpened(e: EventPayload<'payments.chargeback.opened'>) {
     if (!(await this.exists(e.orderId))) return;
     await this.core.write(e.orderId, { actor: SYSTEM }, async (tx, agg) => {
-      if ((agg.order.flags?.chargebacks ?? []).some((c) => c.disputeId === e.disputeId)) return;
-      await this.core.setFlags(tx, agg.order, (f) => ({ ...f, chargebacks: [...(f.chargebacks ?? []), { disputeId: e.disputeId, kind: e.kind, groupId: e.groupId ?? null, at: this.core.now().toISOString() }] }));
+      if (!(await this.core.addFact(tx, agg.order.id, { kind: 'chargeback', source_id: e.disputeId, subkind: e.kind, group_id: e.groupId ?? null, ref: e.ref }))) return;
       await this.core.timeline(tx, e.orderId, [{ group_id: e.groupId ?? null, visibility: 'staff', label: 'Chargeback opened', detail: `${e.ref} (${e.kind})` }]);
     });
   }
@@ -123,10 +120,9 @@ export class AfterSales {
   async onRefundApproved(e: EventPayload<'returns.refund.approved'>) {
     if (!(await this.exists(e.orderId))) return;
     await this.core.write(e.orderId, { actor: SYSTEM }, async (tx, agg) => {
-      if ((agg.order.flags?.refundApprovals ?? []).some((a) => a.id === e.refundRequestId)) return;
-      for (const i of agg.items.filter((x) => e.orderItemIds.includes(x.id) && x.refund_status !== 'sent')) await tx.update('order_items', i.id, { refund_status: 'approved' });
       const returnRef = agg.items.find((x) => e.returnId && x.return_id === e.returnId)?.return_ref ?? null;
-      await this.core.setFlags(tx, agg.order, (f) => ({ ...f, refundApprovals: [...(f.refundApprovals ?? []), { id: e.refundRequestId, returnRef, amount: e.total.amount, itemIds: e.orderItemIds }] }));
+      if (!(await this.core.addFact(tx, agg.order.id, { kind: 'refund_approval', source_id: e.refundRequestId, ref: returnRef, amount: e.total.amount, item_ids: e.orderItemIds, status: 'approved' }))) return;
+      for (const i of agg.items.filter((x) => e.orderItemIds.includes(x.id) && x.refund_status !== 'sent')) await tx.update('order_items', i.id, { refund_status: 'approved' });
       await this.core.timeline(tx, e.orderId, [{ visibility: 'customer', label: 'Refund approved', detail: 'Approved, not sent yet. We will tell you when the money is on its way.' }]);
     });
   }
@@ -193,8 +189,7 @@ export class AfterSales {
   async onCaseOpened(e: EventPayload<'support.case.opened'>) {
     if (!(await this.exists(e.orderId))) return;
     await this.core.write(e.orderId!, { actor: SYSTEM }, async (tx, agg) => {
-      if ((agg.order.flags?.cases ?? []).some((c) => c.caseId === e.caseId)) return;
-      await this.core.setFlags(tx, agg.order, (f) => ({ ...f, cases: [...(f.cases ?? []), { caseId: e.caseId, ref: e.ref, itemIds: e.orderItemIds ?? [], status: 'open', nextUpdateBy: e.nextResponseDueAt ?? null }] }));
+      if (!(await this.core.addFact(tx, agg.order.id, { kind: 'case', source_id: e.caseId, ref: e.ref, item_ids: e.orderItemIds ?? [], status: 'open', due_at: e.nextResponseDueAt ? new Date(e.nextResponseDueAt) : null }))) return;
       await this.core.timeline(tx, agg.order.id, [{ visibility: 'customer', label: 'Support case opened', detail: `Case ${e.ref}` }]);
     });
   }
@@ -209,13 +204,10 @@ export class AfterSales {
     const key = `case-${status}:${eventId ?? `${e.caseId}:${'resolvedAt' in e ? e.resolvedAt : status}`}`;
     await this.core.write(e.orderId, { actor: SYSTEM }, async (tx, agg) => {
       if (!(await tx.claim(key))) return;
-      const cases = agg.order.flags?.cases ?? [];
-      const known = cases.find((c) => c.caseId === e.caseId);
+      const known = (agg.facts.cases ?? []).find((c) => c.caseId === e.caseId);
       if (known?.status === status) return;
-      const next = known
-        ? cases.map((c) => (c.caseId === e.caseId ? { ...c, status, ...(e.orderItemIds?.length ? { itemIds: e.orderItemIds } : {}) } : c))
-        : [...cases, { caseId: e.caseId, ref: e.ref, itemIds: e.orderItemIds ?? [], status, nextUpdateBy: null }];
-      await this.core.setFlags(tx, agg.order, (f) => ({ ...f, cases: next }));
+      if (known) await this.core.updateFact(tx, agg, 'case', e.caseId, { status, ...(e.orderItemIds?.length ? { item_ids: e.orderItemIds } : {}) });
+      else await this.core.addFact(tx, agg.order.id, { kind: 'case', source_id: e.caseId, ref: e.ref, item_ids: e.orderItemIds ?? [], status });
       await this.core.timeline(tx, agg.order.id, [{ visibility: 'customer', label: status === 'resolved' ? 'Support case resolved' : 'Support case reopened', detail: `Case ${e.ref}` }]);
     });
   }
@@ -227,9 +219,9 @@ export class AfterSales {
     for (const g of groups) byOrder.set(g.order_id, [...(byOrder.get(g.order_id) ?? []), g.id]);
     for (const [orderId, ids] of byOrder) {
       await this.core.write(orderId, { actor: SYSTEM }, async (tx, agg) => {
-        const known = new Set(agg.order.flags?.restrictedGroups ?? []);
+        const known = new Set(agg.facts.restrictedGroups ?? []);
         if (ids.every((id) => known.has(id))) return;
-        await this.core.setFlags(tx, agg.order, (f) => ({ ...f, restrictedGroups: [...new Set([...(f.restrictedGroups ?? []), ...ids])] }));
+        for (const id of ids) await this.core.addFact(tx, orderId, { kind: 'seller_restricted', source_id: id, group_id: id, subkind: e.reasonCode ?? null });
         await this.core.timeline(tx, orderId, ids.map((id) => ({ group_id: id, visibility: 'staff' as const, label: 'Seller restricted', detail: e.reason, reason: e.reasonCode })));
       });
     }
@@ -294,7 +286,11 @@ export class AfterSales {
         const done = await this.core.write(agg.order.id, { actor: SYSTEM }, async (tx, fresh, b) => {
           if (fresh.order.lifecycle !== 'open') return false;
           const lifecycle = orderLifecycleMachine.next('open', 'complete');
-          await tx.update('orders', fresh.order.id, { lifecycle, completed_at: now, ...(cases ? { flags: { ...fresh.order.flags, cases: (fresh.order.flags.cases ?? []).map((c) => ({ ...c, status: cases.find((x) => x.caseId === c.caseId)?.status ?? c.status })) } } : {}) });
+          await tx.update('orders', fresh.order.id, { lifecycle, completed_at: now });
+          for (const c of fresh.facts.cases ?? []) {
+            const status = cases?.find((x) => x.caseId === c.caseId)?.status;
+            if (status && status !== c.status) await this.core.updateFact(tx, fresh, 'case', c.caseId, { status });
+          }
           b.push('orders.order.completed', { orderId: fresh.order.id, ref: fresh.order.ref, completedAt: now.toISOString() });
           return true;
         });

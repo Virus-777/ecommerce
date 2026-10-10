@@ -55,6 +55,9 @@ export function toAsset(row: AssetRow, extra: { url: string | null; renditions: 
     inUse: extra.usageCount > 0,
     usageCount: extra.usageCount,
     retainUntil: iso(row.retain_until),
+    removedAt: row.status === 'removed' ? iso(row.removed_at) : null,
+    removedReason: row.status === 'removed' ? row.removed_reason : null,
+    showPlaceholder: row.status === 'removed' ? row.show_placeholder : null,
     createdAt: row.created_at.toISOString(),
     readyAt: iso(row.ready_at),
   };

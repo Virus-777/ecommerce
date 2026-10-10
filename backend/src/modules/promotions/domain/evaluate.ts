@@ -323,7 +323,7 @@ export function evaluate(input: EvalInput): EvalOutput {
   const perCampaign = new Map<string, CouponCandidate>();
   for (const cand of sorted) {
     if (perCampaign.has(cand.campaign.id)) {
-      reject(cand, 'per_order_limit', `Only ${cand.campaign.limits.perOrder ?? 1} code of this coupon can be used per order.`);
+      reject(cand, 'per_order_limit', 'Only one code of this coupon can be used per order.');
       continue;
     }
     perCampaign.set(cand.campaign.id, cand);

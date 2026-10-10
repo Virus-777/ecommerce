@@ -10,6 +10,9 @@ import { ageLabel, coverageGaps, escalationLabel, oldestLabel, routeIssues, slug
 import type { QueueRow } from '../ports.js';
 import { actorJson, type By, type Core, type Viewer } from './core.js';
 
+/** QueueInput.key: two dot-separated lowercase parts, e.g. inventory.cycle_counts */
+const QUEUE_KEY = /^[a-z][a-z0-9_]{0,47}\.[a-z0-9][a-z0-9_]{0,47}$/;
+
 export interface Oldest {
   itemId: string;
   ref: string;
@@ -177,11 +180,20 @@ export class Queues {
 
   async create(input: QueueInput, by: By): Promise<QueueDefinition> {
     await this.core.ensureSeeded();
+    const wanted = input.key?.trim();
+    if (wanted && !QUEUE_KEY.test(wanted)) throw new AppError('VALIDATION_FAILED', 'A queue key is two lowercase parts joined by a dot, e.g. inventory.cycle_counts', { issues: [{ path: 'key', message: 'lowercase letters, numbers and _ in two dot-separated parts' }] });
     await this.#validate(input);
-    const base = `${slug(input.area)}.${slug(input.name)}`;
     const row = this.#row(input, by);
-    let key = base;
-    for (let n = 2; !(await this.repo.insertQueue({ key, ...row })); n++) key = `${base}_${n}`;
+    let key: string;
+    if (wanted) {
+      key = wanted;
+      if (!(await this.repo.insertQueue({ key, ...row }))) throw new AppError('CONFLICT', `A queue with key ${key} already exists`);
+    } else {
+      // derived: <area>.<name slug>, with _2, _3… while taken (spec QueueInput.key)
+      const base = `${slug(input.area)}.${slug(input.name)}`;
+      key = base;
+      for (let n = 2; !(await this.repo.insertQueue({ key, ...row })); n++) key = `${base}_${n}`;
+    }
     const [def] = await this.definitions([{ key, ...row }]);
     await this.core.audit({ action: 'workqueues.queue.create', actionLabel: 'Created work queue', category: 'access', target: { type: 'work_queue', id: key, label: row.name }, reason: input.reason, after: def }, by);
     return def!;

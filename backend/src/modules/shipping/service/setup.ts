@@ -98,7 +98,7 @@ export class Setup {
       return c;
     });
     const view = await this.carrierView(created);
-    await this.core.audit({ action: 'shipping.carrier.create', actionLabel: 'Added a carrier', category: 'settings', target: { type: 'carrier', id, ref: code, label: created.name }, before: null, after: view }, by);
+    await this.core.audit({ action: 'shipping.carrier.create', actionLabel: 'Added a carrier', category: 'shipping', target: { type: 'carrier', id, ref: code, label: created.name }, before: null, after: view }, by);
     return view;
   }
 
@@ -117,7 +117,7 @@ export class Setup {
       ...(body.contacts ? { contacts: body.contacts } : {}),
     });
     const view = await this.carrierView(after);
-    await this.core.audit({ action: 'shipping.carrier.update', actionLabel: body.status && body.status !== before.status ? (body.status === 'active' ? 'Activated a carrier' : 'Deactivated a carrier') : 'Changed a carrier', category: 'settings', target: { type: 'carrier', id, ref: after.code, label: after.name }, before, after, reason: body.reason }, by);
+    await this.core.audit({ action: 'shipping.carrier.update', actionLabel: body.status && body.status !== before.status ? (body.status === 'active' ? 'Activated a carrier' : 'Deactivated a carrier') : 'Changed a carrier', category: 'shipping', target: { type: 'carrier', id, ref: after.code, label: after.name }, before, after, reason: body.reason }, by);
     return view;
   }
 
@@ -132,7 +132,7 @@ export class Setup {
       ...(body.labelSupported != null ? { label_supported: body.labelSupported } : {}),
       ...(body.transit ? { transit_min: body.transit.min, transit_max: body.transit.max } : {}),
     });
-    await this.core.audit({ action: 'shipping.carrier_service.update', actionLabel: body.enabled === false ? 'Disabled a carrier service' : body.enabled === true ? 'Enabled a carrier service' : 'Changed a carrier service', category: 'settings', target: { type: 'carrier_service', id: serviceId, label: after.name }, before, after }, by);
+    await this.core.audit({ action: 'shipping.carrier_service.update', actionLabel: body.enabled === false ? 'Disabled a carrier service' : body.enabled === true ? 'Enabled a carrier service' : 'Changed a carrier service', category: 'shipping', target: { type: 'carrier_service', id: serviceId, label: after.name }, before, after }, by);
     return this.views.service(after);
   }
 
@@ -165,7 +165,7 @@ export class Setup {
       carrier_service_ids: [...new Set(input.carrierServiceIds)],
       ...(input.active != null ? { active: input.active } : {}),
     });
-    await this.core.audit({ action: 'shipping.method.update', actionLabel: 'Changed a shipping method', category: 'settings', target: { type: 'shipping_method', id, ref: after.code, label: after.name }, before, after }, by);
+    await this.core.audit({ action: 'shipping.method.update', actionLabel: 'Changed a shipping method', category: 'shipping', target: { type: 'shipping_method', id, ref: after.code, label: after.name }, before, after }, by);
     return this.views.method(after);
   }
 
@@ -204,7 +204,7 @@ export class Setup {
     await this.core.ensureSeeded();
     const row = await this.repo.insert('zones', { id: newId(), ...this.zoneRow(input) });
     this.core.publish('shipping.coverage.changed', { zoneId: row.id, status: row.status }, by);
-    await this.core.audit({ action: 'shipping.zone.create', actionLabel: row.kind === 'excluded' ? 'Added an excluded area' : 'Added a served zone', category: 'settings', target: { type: 'zone', id: row.id, label: row.name }, before: null, after: row, reason: input.reason }, by);
+    await this.core.audit({ action: 'shipping.zone.create', actionLabel: row.kind === 'excluded' ? 'Added an excluded area' : 'Added a served zone', category: 'shipping', target: { type: 'zone', id: row.id, label: row.name }, before: null, after: row, reason: input.reason }, by);
     return this.views.zone(row);
   }
 
@@ -214,7 +214,7 @@ export class Setup {
     const after = await this.repo.update('zones', id, this.zoneRow(input));
     this.core.publish('shipping.coverage.changed', { zoneId: id, status: after.status }, by);
     const label = before.status !== after.status ? (after.status === 'active' ? 'Enabled a zone' : 'Disabled a zone') : 'Changed a zone';
-    await this.core.audit({ action: 'shipping.zone.update', actionLabel: label, category: 'settings', target: { type: 'zone', id, label: after.name }, before, after, reason: input.reason }, by);
+    await this.core.audit({ action: 'shipping.zone.update', actionLabel: label, category: 'shipping', target: { type: 'zone', id, label: after.name }, before, after, reason: input.reason }, by);
     return this.views.zone(after);
   }
 
@@ -253,7 +253,7 @@ export class Setup {
       reason: input.reason.trim(),
     });
     const after = { official: row.official, sellerDefault: { ...row.seller_default, allowedMinDays, allowedMaxDays }, effectiveFrom: row.effective_from.toISOString(), note: before.note };
-    await this.core.audit({ action: 'shipping.dispatch_targets.update', actionLabel: 'Changed dispatch targets', category: 'settings', target: { type: 'dispatch_targets', id: row.id, label: 'Dispatch targets' }, before, after, reason: input.reason }, by);
+    await this.core.audit({ action: 'shipping.dispatch_targets.update', actionLabel: 'Changed dispatch targets', category: 'shipping', target: { type: 'dispatch_targets', id: row.id, label: 'Dispatch targets' }, before, after, reason: input.reason }, by);
     return after;
   }
 
@@ -287,8 +287,9 @@ export class Setup {
   async createRule(input: FreeShippingRuleInput, by: By): Promise<FreeShippingRule> {
     const base = this.ruleRow(input);
     const today = this.core.today();
-    const row = await this.repo.insert('free_shipping_rules', { id: newId(), ...base, status: ruleStatus({ ...base, status: 'active' }, today) });
-    await this.core.audit({ action: 'shipping.free_rule.create', actionLabel: 'Added a free-shipping rule', category: 'settings', target: { type: 'free_shipping_rule', id: row.id, label: row.name }, before: null, after: row, reason: input.reason }, by);
+    // active false: added switched off (inactive) until switched on
+    const row = await this.repo.insert('free_shipping_rules', { id: newId(), ...base, status: ruleStatus({ ...base, status: input.active === false ? 'inactive' : 'active' }, today) });
+    await this.core.audit({ action: 'shipping.free_rule.create', actionLabel: 'Added a free-shipping rule', category: 'shipping', target: { type: 'free_shipping_rule', id: row.id, label: row.name }, before: null, after: row, reason: input.reason }, by);
     return this.views.rule(row);
   }
 
@@ -297,8 +298,11 @@ export class Setup {
     if (!before) throw notFound('Free-shipping rule');
     const base = this.ruleRow(input);
     const today = this.core.today();
-    const after = await this.repo.update('free_shipping_rules', id, { ...base, status: ruleStatus({ ...base, status: before.status === 'inactive' ? 'inactive' : 'active' }, today) });
-    await this.core.audit({ action: 'shipping.free_rule.update', actionLabel: after.status === 'ended' ? 'Ended a free-shipping rule' : 'Changed a free-shipping rule', category: 'settings', target: { type: 'free_shipping_rule', id, label: after.name }, before, after, reason: input.reason }, by);
+    // active switches the rule off (inactive) or back on; omitted keeps its current state
+    const on = input.active ?? before.status !== 'inactive';
+    const after = await this.repo.update('free_shipping_rules', id, { ...base, status: ruleStatus({ ...base, status: on ? 'active' : 'inactive' }, today) });
+    const label = after.status === 'inactive' && before.status !== 'inactive' ? 'Switched off a free-shipping rule' : before.status === 'inactive' && after.status !== 'inactive' ? 'Switched on a free-shipping rule' : after.status === 'ended' ? 'Ended a free-shipping rule' : 'Changed a free-shipping rule';
+    await this.core.audit({ action: 'shipping.free_rule.update', actionLabel: label, category: 'shipping', target: { type: 'free_shipping_rule', id, label: after.name }, before, after, reason: input.reason }, by);
     return this.views.rule(after);
   }
 
@@ -346,7 +350,7 @@ export class Setup {
 
   async createNotice(input: NoticeInput, by: By): Promise<ServiceNotice> {
     const row = await this.repo.insert('notices', { id: newId(), ...this.noticeRow(input), status: 'draft', created_by: by.actor, updated_at: this.core.now() });
-    await this.core.audit({ action: 'shipping.notice.create', actionLabel: 'Drafted a service notice', category: 'settings', target: { type: 'service_notice', id: row.id, label: row.title }, before: null, after: row }, by);
+    await this.core.audit({ action: 'shipping.notice.create', actionLabel: 'Drafted a service notice', category: 'shipping', target: { type: 'service_notice', id: row.id, label: row.title }, before: null, after: row }, by);
     return this.views.notice(row);
   }
 
@@ -355,7 +359,7 @@ export class Setup {
     if (!before) throw notFound('Notice');
     if (!['draft', 'scheduled', 'live'].includes(before.status)) throw new AppError('ILLEGAL_TRANSITION', `A ${before.status} notice cannot be edited`, { machine: 'Service notice', from: before.status, event: 'edit', allowed: [] });
     const after = await this.repo.update('notices', id, { ...this.noticeRow(input), updated_at: this.core.now() });
-    await this.core.audit({ action: 'shipping.notice.update', actionLabel: 'Changed a service notice', category: 'settings', target: { type: 'service_notice', id, label: after.title }, before, after }, by);
+    await this.core.audit({ action: 'shipping.notice.update', actionLabel: 'Changed a service notice', category: 'shipping', target: { type: 'service_notice', id, label: after.title }, before, after }, by);
     return this.views.notice(after);
   }
 
@@ -365,7 +369,7 @@ export class Setup {
     const status = serviceNoticeMachine.next(before.status as never, mode === 'now' ? 'publish_now' : 'schedule');
     const after = await this.repo.update('notices', id, { status, updated_at: this.core.now() });
     this.core.publish('shipping.notice.published', { noticeId: id, status, from: after.from_date, to: after.to_date }, by);
-    await this.core.audit({ action: 'shipping.notice.publish', actionLabel: mode === 'now' ? 'Published a service notice' : 'Scheduled a service notice', category: 'settings', target: { type: 'service_notice', id, label: after.title }, before, after }, by);
+    await this.core.audit({ action: 'shipping.notice.publish', actionLabel: mode === 'now' ? 'Published a service notice' : 'Scheduled a service notice', category: 'shipping', target: { type: 'service_notice', id, label: after.title }, before, after }, by);
     // scheduled notices whose time has come go live at once
     if (status === 'scheduled') await this.noticeSchedule([id]);
     return this.views.notice((await this.repo.get('notices', id))!);
@@ -377,7 +381,7 @@ export class Setup {
     if (!before) throw notFound('Notice');
     const status = serviceNoticeMachine.next(before.status as never, 'withdraw');
     const after = await this.repo.update('notices', id, { status, updated_at: this.core.now() });
-    await this.core.audit({ action: 'shipping.notice.withdraw', actionLabel: 'Withdrew a service notice', category: 'settings', target: { type: 'service_notice', id, label: after.title }, before, after, reason }, by);
+    await this.core.audit({ action: 'shipping.notice.withdraw', actionLabel: 'Withdrew a service notice', category: 'shipping', target: { type: 'service_notice', id, label: after.title }, before, after, reason }, by);
     return this.views.notice(after);
   }
 

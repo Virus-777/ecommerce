@@ -49,7 +49,7 @@ export class Intents {
 
   resultOf(i: IntentRec): AuthorizeResult {
     const state: AuthorizeResult['state'] = is(ACCEPTED, i.status) ? 'accepted' : is(ENDED, i.status) ? 'failed' : i.status === 'requires_action' ? 'requires_action' : 'pending_check';
-    return { intentId: i.id, state, decline: state === 'failed' ? i.decline : null, nextAction: state === 'requires_action' ? (i.method.pendingAction ?? null) : null, methodLabel: i.method.label };
+    return { intentId: i.id, state, decline: state === 'failed' ? i.decline : null, nextAction: state === 'requires_action' ? (i.next_action ?? null) : null, methodLabel: i.method.label };
   }
 
   async authorize(input: AuthorizeInput, idempotencyKey: string): Promise<AuthorizeResult> {
@@ -104,6 +104,7 @@ export class Intents {
       next_check_at: null,
       check_attempts: 0,
       orphan: false,
+      next_action: null,
       idempotency_key: idempotencyKey,
       created_at: now,
       updated_at: now,
@@ -229,7 +230,7 @@ export class Intents {
             authorization_expires_at: new Date(now.getTime() + cfg.authorizationValidDays * DAY),
             decline: null,
             next_check_at: null,
-            method: { ...i.method, pendingAction: null },
+            next_action: null,
           });
           batch.push('payments.payment.authorized', { intentId: i.id, checkoutSessionId: i.checkout_session_id, orderId: i.order_id, amount: this.m(authorized, i.currency), methodLabel: i.method.label, at: now.toISOString() });
           if ((status as IntentStatus) === 'captured') {
@@ -250,7 +251,7 @@ export class Intents {
         case 'requires_action':
           if (status === 'authorizing') {
             step('require_action');
-            patch.method = { ...i.method, pendingAction: p.nextAction ?? null };
+            patch.next_action = p.nextAction ?? null;
             patch.next_check_at = null;
           }
           break;
@@ -263,7 +264,7 @@ export class Intents {
           const d = p.decline ?? { code: 'no_record', category: 'processing_error' as const };
           patch.decline = declineOf(d.code, d.category, i.method.label);
           patch.next_check_at = null;
-          patch.method = { ...i.method, pendingAction: null };
+          patch.next_action = null;
           batch.push('payments.payment.failed', { intentId: i.id, checkoutSessionId: i.checkout_session_id, orderId: i.order_id, ...who, declineCategory: d.category, afterPendingCheck: wasPending, at: now.toISOString() });
           releaseHold = i.tenders.find((t) => t.creditHoldId)?.creditHoldId ?? null;
           break;
@@ -301,7 +302,7 @@ export class Intents {
       status = paymentIntentMachine.next('authorizing', 'timeout') as IntentStatus;
       const now = this.core.now();
       batch.push('payments.payment.pending_check', { intentId: i.id, checkoutSessionId: i.checkout_session_id, orderId: i.order_id, ...who, amount: this.m(i.amount, i.currency), since: now.toISOString() });
-      return tx.update('intents', i.id, { status, next_check_at: new Date(now.getTime() + checkBackoffMs(0)), check_attempts: 0, updated_at: now, method: { ...i.method, pendingAction: null } });
+      return tx.update('intents', i.id, { status, next_check_at: new Date(now.getTime() + checkBackoffMs(0)), check_attempts: 0, updated_at: now, next_action: null });
     });
     this.core.flush(batch, by);
     return after;
@@ -693,7 +694,7 @@ export class Intents {
       const after = await this.repo.transaction(async (tx) => {
         const x = (await tx.get('intents', intentId, { forUpdate: true }))!;
         if (x.status !== 'requires_action') return x;
-        return tx.update('intents', x.id, { status: paymentIntentMachine.next('requires_action', 'abandon'), method: { ...x.method, pendingAction: null }, updated_at: this.core.now() });
+        return tx.update('intents', x.id, { status: paymentIntentMachine.next('requires_action', 'abandon'), next_action: null, updated_at: this.core.now() });
       });
       const hold = i.tenders.find((t) => t.creditHoldId)?.creditHoldId;
       if (hold) await this.core.soft('wallet', 'releaseHold', (w) => w.releaseHold(hold));

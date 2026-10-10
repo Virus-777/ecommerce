@@ -146,6 +146,9 @@ Every uploaded or generated file: images, video and documents. Signed direct upl
 | inUse | `bool` |
 | usageCount | `int` |
 | retainUntil | `datetime?` Evidence files cannot be deleted before this |
+| removedAt | `datetime?` Taken down by staff (status removed); null otherwise |
+| removedReason | `string?` The takedown reason given by staff (status removed) |
+| showPlaceholder | `bool?` Taken-down public files: true when url and the old rendition URLs serve the neutral placeholder, false when they stop serving (no url). Null unless removed |
 | createdAt | `datetime` |
 | readyAt | `datetime?` |
 
@@ -314,6 +317,8 @@ complete is called by the client (POST /uploads/{id}/complete) or by the storage
 | rejection_reason | text? |
 | removed_reason | text? |
 | removed_by | text? |
+| removed_at | timestamptz? (set while status is removed) |
+| show_placeholder | bool? (while removed: public URLs serve the neutral placeholder; false = they stop serving) |
 | retain_until | timestamptz? |
 | expires_at | timestamptz? (generated files) |
 | created_at | timestamptz |
@@ -418,7 +423,7 @@ Indexes: `pk (owner_kind, owner_id, day)`
 | Function | Signature | Used by |
 |---|---|---|
 | getAsset | `(assetId: uuid) => MediaAsset | null`<br>Asset with renditions and status | catalog, offers, sellers, content, advertising, reviews, returns, support, messaging, customers |
-| refs | `(assetIds: uuid[], size?: 'thumb' | 'small' | 'medium' | 'large' | 'zoom') => MediaRef[]`<br>common.MediaRef (id, url, alt, width, height) for embedding in responses; removed files return the placeholder | catalog, offers, sellers, content, advertising, reviews, returns, support, messaging, search, cart, orders, wishlist |
+| refs | `(assetIds: uuid[], size?: 'thumb' | 'small' | 'medium' | 'large' | 'zoom') => MediaRef[]`<br>common.MediaRef (id, url, alt, width, height) for embedding in responses; removed files return the placeholder (or are left out when taken down without one) | catalog, offers, sellers, content, advertising, reviews, returns, support, messaging, search, cart, orders, wishlist |
 | attach | `(assetId: uuid, usage: UsageInput, expectedOwner: MediaOwner) => void`<br>Record that a record uses a file. Fails if the asset is not ready, belongs to another owner (ASSET_NOT_OWNED) or the purpose does not fit the usage. Evidence usages extend retainUntil. | catalog, offers, sellers, content, advertising, reviews, returns, support, messaging, warehouse, trust |
 | detach | `(assetId: uuid, usage: { module: string, kind: string, refId: string }) => void`<br>Record that a record no longer uses a file (image replaced, draft deleted) | catalog, offers, sellers, content, advertising, reviews, returns, support, messaging |
 | checkImage | `(assetId: uuid, rules: ImageRules) => ImageCheckResult`<br>Evaluate an image against category or placement rules; the result is stored on the asset | catalog, advertising, content, sellers |
@@ -495,5 +500,5 @@ Indexes: `pk (owner_kind, owner_id, day)`
 - Deletion rules: a file in use cannot be deleted (ASSET_IN_USE); files attached as evidence (return, case, order, inspection, verification, catalog correction, trust, payment dispute, supplier document) get retainUntil = last use + evidenceRetentionDays and cannot be deleted before that (ASSET_RETAINED) even if the record is closed. Past orders keep their product snapshot image URL; removing a product image does not break past orders because snapshot renditions are kept while referenced (usage kind order_evidence is attached by orders when a snapshot is taken).
 - Image standards: catalog owns per-category rules and passes them to checkImage when a seller submits; the result (measurements and plain-language issues) is stored on the asset and returned by catalog with the submission. media itself only enforces the platform baseline (minimum short side, formats).
 - Usage kinds and the upload purposes they accept: product_image and variant_image ← product_image; product_video ← product_video; offer_photo ← offer_photo, product_image; brand_logo ← brand_logo; brand_banner ← store_banner, content_image; category_image ← content_image, product_image; store_logo ← store_logo; store_banner ← store_banner; ad_creative ← ad_creative, ad_video; content_block ← content_image, product_image, product_video, ad_creative; help_article ← content_image; verification_document ← verification_document, other_document; return_evidence ← return_evidence; case_evidence ← case_evidence, return_evidence, inspection_photo, message_attachment, verification_document; order_evidence ← product_image, offer_photo, product_video; inspection_photo ← inspection_photo; correction_evidence ← product_image, other_document, verification_document, case_evidence; trust_evidence ← case_evidence, return_evidence, inspection_photo, message_attachment, verification_document, other_document, product_image; dispute_evidence ← case_evidence, return_evidence, inspection_photo, message_attachment, other_document; supplier_document ← other_document, inspection_photo, bulk_file; review_photo ← review_photo; message_attachment ← message_attachment; bulk_file ← bulk_file; generated ← generated purposes.
-- Who attaches what (every file a module keeps must be attached, or media.sweep-orphans deletes it after orphanGraceDays): catalog brand banners (brand_banner), category images (category_image), correction evidence (correction_evidence); trust report, appeal and proof files (trust_evidence); payments dispute evidence (dispute_evidence); purchasing PO attachments (supplier_document) and receipt damage photos (inspection_photo); warehouse damage and return-parcel photos (inspection_photo); inventory discrepancy photos (inspection_photo); orders product snapshot images (order_evidence); wallet gift card code files are generated files (storeGeneratedFile, no usage needed).
+- Who attaches what (every file a module keeps must be attached, or media.sweep-orphans deletes it after orphanGraceDays): catalog brand banners (brand_banner), category images (category_image), correction evidence (correction_evidence); trust report, appeal and proof files (trust_evidence; reporters and appellants upload them with purpose case_evidence, there is no trust upload purpose); payments dispute evidence (dispute_evidence); purchasing PO attachments (supplier_document) and receipt damage photos (inspection_photo); warehouse damage and return-parcel photos (inspection_photo); inventory discrepancy photos (inspection_photo); orders product snapshot images (order_evidence); wallet gift card code files are generated files (storeGeneratedFile, no usage needed).
 - Privacy: EXIF and GPS are stripped from every image before any rendition is public, which matters for customer return photos taken on phones.

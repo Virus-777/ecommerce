@@ -136,6 +136,7 @@ export class Packing {
         handling_note: null,
         carrier: null,
         service: null,
+        carrier_service_id: null,
         tracking_number: null,
         label_media_id: null,
         label_idempotency_key: null,
@@ -212,6 +213,7 @@ export class Packing {
     if (body.serviceCode === null || body.serviceCode === '') {
       patch.carrier = null;
       patch.service = null;
+      patch.carrier_service_id = null;
     } else if (body.serviceCode) {
       const merged = { ...p, ...patch } as PackageRec;
       const quotes = await this.quotes(merged, f, items);
@@ -220,6 +222,7 @@ export class Packing {
       if (!q.keepsPromise) throw this.core.error('SERVICE_BREAKS_PROMISE', `${q.serviceName} would arrive after the date the customer was promised`, { serviceCode: q.carrierServiceId, arrivesBy: q.estimatedArrival.to });
       patch.carrier = q.carrierName;
       patch.service = q.serviceName;
+      patch.carrier_service_id = q.carrierServiceId;
     }
     await this.repo.transaction(async (tx) => {
       const locked = await tx.get('packages', id, { forUpdate: true });
@@ -244,7 +247,7 @@ export class Packing {
     const quotes = await this.quotes(p, f, items);
     const priced = Boolean(p.weight) && Boolean(p.dimensions || p.box_type_id);
     const options = quotes.map((q) => ({ q, matches: matchesChoice(q, task.delivery) }));
-    const chosen = p.service ? options.find((o) => o.q.serviceName === p.service && o.q.carrierName === p.carrier) : (options.find((o) => o.matches && o.q.keepsPromise) ?? options.find((o) => o.q.keepsPromise));
+    const chosen = p.carrier_service_id ? options.find((o) => o.q.carrierServiceId === p.carrier_service_id) : p.service ? options.find((o) => o.q.serviceName === p.service && o.q.carrierName === p.carrier) : (options.find((o) => o.matches && o.q.keepsPromise) ?? options.find((o) => o.q.keepsPromise));
     return options
       .map(({ q, matches }) => ({
         serviceCode: q.carrierServiceId,
@@ -281,8 +284,9 @@ export class Packing {
     const task = await this.core.ctx.use('orders').getFulfillmentTask(f.seller_group_id);
     const quotes = await this.quotes(p, f, items);
     let q: LabelQuote | undefined;
-    if (p.service) {
-      q = quotes.find((x) => x.serviceName === p.service && x.carrierName === p.carrier);
+    if (p.carrier_service_id || p.service) {
+      // the chosen service (packages chosen before carrier_service_id existed match by name)
+      q = p.carrier_service_id ? quotes.find((x) => x.carrierServiceId === p.carrier_service_id) : quotes.find((x) => x.serviceName === p.service && x.carrierName === p.carrier);
       if (!q) throw invalidField('serviceCode', `${p.service} cannot carry this package now; choose another service`);
       if (!q.keepsPromise) throw this.core.error('SERVICE_BREAKS_PROMISE', `${q.serviceName} would arrive after the date the customer was promised`, { serviceCode: q.carrierServiceId });
     } else q = quotes.find((x) => x.keepsPromise && matchesChoice(x, task.delivery)) ?? quotes.find((x) => x.keepsPromise);

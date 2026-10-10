@@ -10,7 +10,7 @@ evidence files, deadlines and history (dispute review).
 """
 type Case {
   id: UUID!
-  "CS-NNNNNN"
+  "CS-YYMMDD-NNNN"
   ref: String!
   kind: CaseKind!
   subject: String!
@@ -72,6 +72,8 @@ type Case {
   reopened: Boolean! @areas(in: [ADMIN])
   "Saved, unpublished decision (Save decision draft); never shown to the parties"
   decisionDraft: CaseDecisionDraft @areas(in: [ADMIN])
+  "A decision above the decider's limit waiting for approval (support.remedies.approve); published once approved"
+  pendingApproval: ApprovalInfo @areas(in: [ADMIN])
 }
 
 "An unpublished decision draft saved by staff"

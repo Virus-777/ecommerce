@@ -196,6 +196,8 @@ type DeliveryException @areas(in: [SELLER, ADMIN]) {
   shipmentId: UUID
   sellerName: String!
   itemsSummary: String!
+  "The order items the exception is about (empty when it covers the whole group)"
+  orderItemIds: [UUID!]!
   "e.g. 'USPS number not recognized' or 'Label created, no scan 36 h'"
   situation: String!
   "The plan's required response for the kind"

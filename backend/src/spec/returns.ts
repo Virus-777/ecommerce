@@ -635,6 +635,7 @@ export const EligibilityResult: z.ZodType<EligibilityResult> = z.object({
 export interface ReturnCreateInput {
   orderId: string;
   items: ReturnItemInput[];
+  /** Grouped for the rules: defective, damaged, wrong_item, not_as_described and missing_parts are fault reasons (fault window, the seller pays return shipping); changed_mind, better_price, no_longer_needed, wrong_size and other are change of mind (change-of-mind window, return shipping per the terms). other counts as change of mind; when the customer's description shows a fault, the seller or Marketly can still decide it as one */
   reason: "defective" | "damaged" | "wrong_item" | "not_as_described" | "missing_parts" | "changed_mind" | "better_price" | "no_longer_needed" | "wrong_size" | "other";
   details: string;
   mediaIds?: string[] | null;
@@ -648,7 +649,7 @@ export const ReturnCreateInput: z.ZodType<ReturnCreateInput> = z.object({
   get items() {
     return z.array(ReturnItemInput);
   },
-  reason: z.enum(["defective", "damaged", "wrong_item", "not_as_described", "missing_parts", "changed_mind", "better_price", "no_longer_needed", "wrong_size", "other"]),
+  reason: z.enum(["defective", "damaged", "wrong_item", "not_as_described", "missing_parts", "changed_mind", "better_price", "no_longer_needed", "wrong_size", "other"]).describe("Grouped for the rules: defective, damaged, wrong_item, not_as_described and missing_parts are fault reasons (fault window, the seller pays return shipping); changed_mind, better_price, no_longer_needed, wrong_size and other are change of mind (change-of-mind window, return shipping per the terms). other counts as change of mind; when the customer's description shows a fault, the seller or Marketly can still decide it as one"),
   details: z.string(),
   mediaIds: z.array(z.uuid()).nullish(),
   remedy: z.enum(["refund", "replacement", "exchange", "store_credit"]),
@@ -2429,6 +2430,8 @@ export interface ReturnsPublicApi {
   cancelRefundsForCase(caseId: string, reason: string, actor: common.Actor): Promise<{ cancelled: RefundRequest[], notCancellable: RefundRequest[] }>;
   /** Open return requests per product (not closed, refunded or rejected). Catalog publication-impact preview. Used by: catalog. */
   countOpenReturnsForProducts(productIds: string[]): Promise<Record<string, number>>;
+  /** Customer data export hook (FORMAT.md): the customer's returns (reference, order, items, reason and their own description, remedy, status, dates) and refunds (reference, amount, destination, status, approved and sent dates) as plain records, with the photos they uploaded as attachments. Staff notes, inspection details and internal reasons are left out. Called by customers when it builds a data export Used by: customers. */
+  exportCustomerData(input: { customerId: string, accountId: string }): Promise<common.CustomerDataSection[]>;
 }
 
 /* ------------------------------------------------------------------ tables (Kysely row types) */
@@ -2519,6 +2522,8 @@ export interface ReturnsDb {
     inspector: Json | null;
     inspection_started_at: Date | null;
     requested_at: Date;
+    /** when the parcel reached the destination: the receipt time staff or the warehouse recorded */
+    received_at: Date | null;
     completed_at: Date | null;
     updated_at: Date;
   };
@@ -2595,7 +2600,7 @@ export interface ReturnsDb {
     stock_outcome_recorded_by: string | null;
     stock_outcome_recorded_at: Date | null;
   };
-  /** Customer refund decisions waiting for or past Finance approval. Money movement is in payments. */
+  /** Customer refund decisions waiting for or past Finance approval. Money movement is in payments. Items are in refund_request_items, the history in refund_request_events */
   refund_requests: {
     id: string;
     ref: string;
@@ -2603,15 +2608,30 @@ export interface ReturnsDb {
     return_id: string | null;
     case_id: string | null;
     order_id: string;
-    order_item_ids: Json;
     owner_type: 'official' | 'seller';
     seller_id: string | null;
+    /** the order customer; null for guests */
+    customer_id: string | null;
+    /** order contact email, so customer-facing events reach guests */
+    contact_email: string | null;
+    customer_name: string | null;
+    seller_name: string | null;
+    order_ref: string | null;
     status: string;
     item_amount: number;
     discount_share: number;
     shipping_refund: number;
     return_shipping_deduction: number;
+    /** RefundDeduction[]: the itemised deductions with reasons */
     deductions: Json;
+    /** sales tax included in total */
+    tax_refund: number | null;
+    /** what payments said could still be refunded when the request was made */
+    max_refundable: number;
+    destination: 'original_method' | 'store_credit';
+    destination_label: string;
+    /** full_refund, partial_refund, store_credit, exception, case */
+    remedy_kind: string;
     total: number;
     currency: string;
     funded_by: string;
@@ -2623,12 +2643,34 @@ export interface ReturnsDb {
     approval_request_id: string | null;
     proposed_by: string;
     approved_by: string | null;
+    approved_at: Date | null;
     decline_reason: string | null;
     payment_refund_id: string | null;
     failed_reason: string | null;
+    sent_at: Date | null;
+    note: string | null;
     idempotency_key: string | null;
     created_at: Date;
     updated_at: Date;
+  };
+  /** The order items a refund request covers, in order, with the amount refunded on each and the refunded quantity (null: the returned units) */
+  refund_request_items: {
+    refund_request_id: string;
+    order_item_id: string;
+    position: number;
+    quantity: number | null;
+    amount: number;
+  };
+  /** History of a refund request (RefundRequest.history): proposed, approved, handed over, sent, failed, declined, revised, cancelled */
+  refund_request_events: {
+    id: string;
+    refund_request_id: string;
+    at: Date;
+    label: string;
+    detail: string | null;
+    actor_kind: string | null;
+    actor_id: string | null;
+    actor_name: string | null;
   };
   /** Replacement or exchange units with their own shipment; the original order is not changed. return_id is null for replacements decided on a support case without a return (case_id set) */
   replacements: {
@@ -3681,11 +3723,11 @@ export const endpoints = defineEndpoints({
     permission: "returns.exceptions.propose",
     scope: "staff",
     summary: "Issue a refund from the order page (exception refund request)",
-    desc: "Admin 'Issue refund' dialog on admin/order. Items and amounts of one seller group, reason and funding; the dialog shows the cap from payments (GET /api/admin/payments/orders/{orderId}/refundable, in-process payments.remainingRefundable) and amounts above it return REFUND_EXCEEDS_REFUNDABLE. Creates a refund request with source exception that goes through Finance approval like any other; within the caller's limit it is approved in the same call and handed to payments. Optional trustReportId links it to a trust recommendation.",
+    desc: "Admin 'Issue refund' dialog on admin/order. Items and amounts of one seller group, reason and funding; the dialog shows the cap from payments (GET /api/admin/payments/orders/{orderId}/refundable, in-process payments.remainingRefundable) and amounts above it return REFUND_EXCEEDS_REFUNDABLE. Creates a refund request with source exception that goes through Finance approval like any other; within the caller's limit it is approved in the same call and handed to payments. Optional trustReportId links it to a trust recommendation. Above the caller's limit it is saved under review and the response (201) carries `approval` (FORMAT.md, Approval responses). VALIDATION_FAILED also when the items belong to more than one seller group; NOT_FOUND for an unknown order; REMEDY_NOT_AVAILABLE for store credit while wallet is off or for a guest order.",
     body: () => ExceptionRefundInput,
     response: () => RefundRequest,
     status: 201,
-    errors: ["APPROVAL_REQUIRED","REFUND_EXCEEDS_REFUNDABLE","DUPLICATE_REFUND","VALIDATION_FAILED"],
+    errors: ["VALIDATION_FAILED","NOT_FOUND","REFUND_EXCEEDS_REFUNDABLE","DUPLICATE_REFUND","REMEDY_NOT_AVAILABLE"],
     idempotent: true,
     audited: true,
     approval: "Approval action returns.refunds.approve. Within the caller's refund limit it is approved at once; above it a Finance member whose limit covers it, and a second reviewer above that limit's threshold, approve through access",
@@ -3925,7 +3967,7 @@ export const spec = defineModuleSpec({
   summary: "Return policies (platform baseline, seller terms, category exceptions, who pays return shipping), per-item eligibility, return requests and decisions, return shipments, receipt and inspection, remedies (refund, replacement, exchange) and the refund request that Finance approves before payments sends the money.",
   dependsOn: ["orders","shipping","payments","inventory"],
   optionalDeps: ["media","finance","support","messaging","access","wallet","workqueues","audit","content","identity","notifications","promotions","purchasing","reports","sellers","settings","customers","catalog","offers"],
-  publicApi: ["resolveTerms","returnStateForItems","requestRefund","requestReplacement","defaultWindowDays","recordWarehouseReceipt","sellerReturnStats","listOpenForCustomer","getReturnForCustomer","listForCustomer","customerOverview","getReturnForSeller","getReturnAdmin","listForOrder","eligibilityForItems","sellerQueueCounts","listEvidence","listForSeller","listRefundRequests","getRefundRequest","listRefundRequestsForOrder","listRefundRequestsForCase","sellerReturnTermsFor","exportRows","getReturn","cancelRefundsForCase","countOpenReturnsForProducts"],
+  publicApi: ["resolveTerms","returnStateForItems","requestRefund","requestReplacement","defaultWindowDays","recordWarehouseReceipt","sellerReturnStats","listOpenForCustomer","getReturnForCustomer","listForCustomer","customerOverview","getReturnForSeller","getReturnAdmin","listForOrder","eligibilityForItems","sellerQueueCounts","listEvidence","listForSeller","listRefundRequests","getRefundRequest","listRefundRequestsForOrder","listRefundRequestsForCase","sellerReturnTermsFor","exportRows","getReturn","cancelRefundsForCase","countOpenReturnsForProducts","exportCustomerData"],
   permissions: [
     {
       "key": "returns.requests.view",
@@ -4819,6 +4861,10 @@ export const spec = defineModuleSpec({
         "type": "timestamptz",
         "nullable": false
       },
+      "received_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
       "completed_at": {
         "type": "timestamptz",
         "nullable": true
@@ -5095,16 +5141,32 @@ export const spec = defineModuleSpec({
         "type": "uuid",
         "nullable": false
       },
-      "order_item_ids": {
-        "type": "jsonb",
-        "nullable": false
-      },
       "owner_type": {
         "type": "text",
         "nullable": false
       },
       "seller_id": {
         "type": "uuid",
+        "nullable": true
+      },
+      "customer_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "contact_email": {
+        "type": "text",
+        "nullable": true
+      },
+      "customer_name": {
+        "type": "text",
+        "nullable": true
+      },
+      "seller_name": {
+        "type": "text",
+        "nullable": true
+      },
+      "order_ref": {
+        "type": "text",
         "nullable": true
       },
       "status": {
@@ -5129,6 +5191,26 @@ export const spec = defineModuleSpec({
       },
       "deductions": {
         "type": "jsonb",
+        "nullable": false
+      },
+      "tax_refund": {
+        "type": "bigint",
+        "nullable": true
+      },
+      "max_refundable": {
+        "type": "bigint",
+        "nullable": false
+      },
+      "destination": {
+        "type": "text",
+        "nullable": false
+      },
+      "destination_label": {
+        "type": "text",
+        "nullable": false
+      },
+      "remedy_kind": {
+        "type": "text",
         "nullable": false
       },
       "total": {
@@ -5175,6 +5257,10 @@ export const spec = defineModuleSpec({
         "type": "text",
         "nullable": true
       },
+      "approved_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
       "decline_reason": {
         "type": "text",
         "nullable": true
@@ -5184,6 +5270,14 @@ export const spec = defineModuleSpec({
         "nullable": true
       },
       "failed_reason": {
+        "type": "text",
+        "nullable": true
+      },
+      "sent_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
+      "note": {
         "type": "text",
         "nullable": true
       },
@@ -5198,6 +5292,62 @@ export const spec = defineModuleSpec({
       "updated_at": {
         "type": "timestamptz",
         "nullable": false
+      }
+    },
+    "refund_request_items": {
+      "refund_request_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "order_item_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "position": {
+        "type": "int",
+        "nullable": false
+      },
+      "quantity": {
+        "type": "int",
+        "nullable": true
+      },
+      "amount": {
+        "type": "bigint",
+        "nullable": false
+      }
+    },
+    "refund_request_events": {
+      "id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "refund_request_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "at": {
+        "type": "timestamptz",
+        "nullable": false
+      },
+      "label": {
+        "type": "text",
+        "nullable": false
+      },
+      "detail": {
+        "type": "text",
+        "nullable": true
+      },
+      "actor_kind": {
+        "type": "text",
+        "nullable": true
+      },
+      "actor_id": {
+        "type": "text",
+        "nullable": true
+      },
+      "actor_name": {
+        "type": "text",
+        "nullable": true
       }
     },
     "replacements": {
@@ -5319,7 +5469,8 @@ export const spec = defineModuleSpec({
       "visitor": "guest_session_id"
     },
     "refund_requests": {
-      "seller": "seller_id"
+      "seller": "seller_id",
+      "customer": "customer_id"
     }
   },
   endpoints,

@@ -335,13 +335,14 @@ export class HoldsPart extends Part {
     if (f.sellerId) where.seller_id = f.sellerId;
     const res = await this.repo.page('amounts_owed', where, page, { column: 'since', direction: 'desc' });
     const names = await this.core.sellerInfo(res.items.map((r) => r.seller_id));
-    return { ...res, items: res.items.map((r) => toOwed(r, names.get(r.seller_id)?.name ?? 'Seller')) };
+    const approvals = await this.core.approvalInfos(res.items.map((r) => r.approval_request_id));
+    return { ...res, items: res.items.map((r) => toOwed(r, names.get(r.seller_id)?.name ?? 'Seller', approvals)) };
   }
 
   async owedView(id: string): Promise<AmountOwed> {
     const r = await this.repo.get('amounts_owed', id);
     if (!r) throw notFound('Amount owed');
-    return toOwed(r, await this.core.sellerName(r.seller_id));
+    return toOwed(r, await this.core.sellerName(r.seller_id), await this.core.approvalInfos([r.approval_request_id]));
   }
 
   async settle(id: string, body: { method: 'seller_paid' | 'offset' | 'written_off'; amount: common.Money; reason: string }, by: By): Promise<AmountOwed> {
@@ -353,6 +354,7 @@ export class HoldsPart extends Part {
     if (!Number.isSafeInteger(amount) || amount <= 0 || amount > owed.remaining) throw invalid([{ path: 'amount', message: `Up to the ${fmt(owed.remaining, owed.currency)} still owed` }]);
     if (!body.reason?.trim()) throw invalid([{ path: 'reason', message: 'Give a reason' }]);
     if (body.method === 'written_off') {
+      if (owed.approval_request_id) throw new AppError('CONFLICT', 'A write-off of this amount owed is already waiting for approval', { approvalRequestId: owed.approval_request_id });
       const check = await this.core.authority(by, 'finance.writeoffs.approve', amount);
       if (check.decision === 'approval_required') {
         const req = await this.core.requestApproval(by, {
@@ -363,9 +365,10 @@ export class HoldsPart extends Part {
           details: { amount, reason: body.reason },
           reason: body.reason,
         });
-        await this.repo.update('amounts_owed', id, { note: `Write-off of ${fmt(amount, owed.currency)} waiting for approval (${req.ref})` });
-        await this.core.audit({ action: 'finance.amount_owed.write_off_requested', actionLabel: 'Requested a write-off', category: 'financial', target: { type: 'amount_owed', id, sellerId: owed.seller_id }, reason: body.reason, approvalRequestId: req.id }, by);
-        throw this.core.approvalRequired(req, { amountOwedId: id }, 'Write-offs need a second Finance reviewer');
+        // saved pending on the record: the answer is the amount owed with `approval` (FORMAT.md, Approval responses)
+        const saved = await this.repo.updateWhere('amounts_owed', { id, approval_request_id: null }, { write_off_amount: amount, write_off_reason: body.reason.trim(), approval_request_id: req.id, note: `Write-off of ${fmt(amount, owed.currency)} waiting for approval (${req.ref})` });
+        if (saved) await this.core.audit({ action: 'finance.amount_owed.write_off_requested', actionLabel: 'Requested a write-off', category: 'financial', target: { type: 'amount_owed', id, sellerId: owed.seller_id }, reason: body.reason, approvalRequestId: req.id }, by);
+        return this.owedView(id);
       }
     }
     await this.settleNow(id, body.method, amount, body.reason, by);
@@ -379,11 +382,13 @@ export class HoldsPart extends Part {
       if (!o || o.status !== 'open') return null;
       const take = Math.min(amount, o.remaining);
       if (method !== 'offset') await this.core.post(tx, o.seller_id, [{ key: `owed:${o.id}:${method}:${o.remaining}`, type: 'owed_offset', amount: take, bucket: 'available', ref: { kind: 'seller', id: o.seller_id }, description: method === 'seller_paid' ? `Payment received from the seller: ${reason}` : `Written off: ${reason}`, recordedBy: by.actor }], out);
-      if (method === 'written_off') await this.parts.ledger.trading(tx, `write_off:${o.id}:${o.remaining}`, { at: this.now(), kind: 'write_off', amount: take, order_id: null, order_item_id: null, variant_id: null, ref_kind: 'platform_write_off', ref_id: o.id });
+      // a seller's debt written off is a marketplace (platform) loss, never Official Store trading
+      if (method === 'written_off') await this.parts.ledger.platformCost(tx, `write_off:${o.id}:${o.remaining}`, { at: this.now(), kind: 'write_off', amount: take, order_id: null, ref_kind: 'amount_owed', ref_id: o.id });
       const remaining = o.remaining - take;
       const event = remaining > 0 ? 'offset' : method === 'written_off' ? 'writeOff' : 'settle';
       const fresh = (await tx.get('amounts_owed', id))!;
-      await tx.update('amounts_owed', id, { remaining: Math.min(remaining, fresh.remaining), status: this.core.step(amountOwedMachine, o.status, event), note: `${method.replace('_', ' ')}: ${reason}` });
+      const clearPending = method === 'written_off' ? { write_off_amount: null, write_off_reason: null, approval_request_id: null } : {};
+      await tx.update('amounts_owed', id, { remaining: Math.min(remaining, fresh.remaining), status: this.core.step(amountOwedMachine, o.status, event), note: `${method.replace('_', ' ')}: ${reason}`, ...clearPending });
       return o;
     });
     this.core.flush(out, by);
@@ -405,7 +410,7 @@ export class HoldsPart extends Part {
       const causes = await this.repo.find('ledger_entries', { seller_id: a.seller_id, type: ['refund_after_payout', 'chargeback', 'adjustment', 'ad_charge', 'label_charge', 'refund'], amount: { op: '<', value: 0 }, at: { op: '>=', value: new Date(a.negative_since!.getTime() - 60 * DAY) } }, { orderBy: [['at', 'desc']], limit: 10 });
       const id = detId(`owed:${a.seller_id}:${a.negative_since!.toISOString()}`);
       const today = this.core.today();
-      const row = { id, seller_id: a.seller_id, amount: owedNow, remaining: owedNow, currency: a.currency, since: today, due_by: addDays(today, 30), status: amountOwedMachine.initial, origin: causes.map((c) => ({ kind: c.ref_kind, id: c.ref_id, ref: c.ref_label })) as never, note: `Negative balance not covered within ${days} days` };
+      const row = { id, seller_id: a.seller_id, amount: owedNow, remaining: owedNow, currency: a.currency, since: today, due_by: addDays(today, 30), status: amountOwedMachine.initial, origin: causes.map((c) => ({ kind: c.ref_kind, id: c.ref_id, ref: c.ref_label })) as never, note: `Negative balance not covered within ${days} days`, write_off_amount: null, write_off_reason: null, approval_request_id: null };
       if (await this.repo.insertIgnore('amounts_owed', row)) this.core.publish('finance.amount_owed.created', { amountOwedId: id, sellerId: a.seller_id, amount: this.money(owedNow), dueBy: row.due_by });
     }
   }
@@ -456,11 +461,20 @@ export class HoldsPart extends Part {
     }
     if (e.actionKey === 'finance.writeoffs.approve') {
       const o = isUuid(e.target.id) ? await this.repo.get('amounts_owed', e.target.id) : undefined;
-      if (!o || o.status !== 'open') return;
-      if (!approved) return void (await this.repo.update('amounts_owed', o.id, { note: `Write-off not approved (${e.outcome})${e.reason ? `: ${e.reason}` : ''}` }));
-      const req = await this.ctx.use('access').getApproval(e.requestId);
-      const d = (req?.details ?? {}) as { amount?: number; reason?: string };
-      await this.settleNow(o.id, 'written_off', Number(d.amount ?? e.amount?.amount ?? o.remaining), d.reason ?? 'Write-off approved', by);
+      // the pending write-off is on the record; one requested before pass 4 (no approval_request_id) keeps its details in access
+      if (!o || (o.approval_request_id && o.approval_request_id !== e.requestId)) return;
+      const clear = { write_off_amount: null, write_off_reason: null, approval_request_id: null };
+      if (o.status !== 'open') return void (o.approval_request_id && (await this.repo.update('amounts_owed', o.id, clear)));
+      if (!approved) return void (await this.repo.update('amounts_owed', o.id, { ...clear, note: `Write-off not approved (${e.outcome})${e.reason ? `: ${e.reason}` : ''}` }));
+      let amount = o.write_off_amount;
+      let reason = o.write_off_reason;
+      if (amount === null) {
+        const req = await this.ctx.use('access').getApproval(e.requestId);
+        const d = (req?.details ?? {}) as { amount?: number; reason?: string };
+        amount = Number(d.amount ?? e.amount?.amount ?? o.remaining);
+        reason = d.reason ?? null;
+      }
+      await this.settleNow(o.id, 'written_off', amount, reason ?? 'Write-off approved', by);
     }
   }
 
@@ -532,29 +546,14 @@ export class HoldsPart extends Part {
     const out = new Outbox();
     await this.repo.transaction((tx) => tx.lockAccount(e.sellerId, this.core.currency(), this.now()).then(() => undefined));
     this.core.flush(out);
+    // the new-seller period lives on the account (set once: a later approval event keeps the first period)
     const periodDays = await this.core.num('newSellerPeriodDays', 30);
     const extra = e.recommendedHoldDays ?? (await this.core.num('newSellerHoldDays', 14));
-    if (extra <= 0) return;
-    const today = this.core.today();
-    await this.repo.insertIgnore('holds', {
-      id: detId(`new_seller:${e.sellerId}`),
-      seller_id: e.sellerId,
-      amount: 0,
-      released_amount: 0,
-      currency: this.core.currency(),
-      reason_code: 'new_seller',
-      reason: `New seller: earnings become available ${extra} extra days after delivery during your first ${periodDays} days`,
-      review_date: addDays(today, periodDays),
-      ref_kind: 'seller',
-      ref_id: e.sellerId,
-      status: holdMachine.initial,
-      placed_by: encodeActor(SYSTEM)!,
-      placed_at: this.now(),
-      released_at: null,
-      release_reason: null,
-      approval_request_id: null,
-      trust_report_id: null,
-    });
+    if (extra > 0 && periodDays > 0) {
+      await this.repo.updateWhere('seller_accounts', { seller_id: e.sellerId, new_seller_until: null }, { new_seller_until: addDays(this.core.today(), periodDays), new_seller_extra_days: extra });
+    }
+    // the seller's first statement is open from approval (statements are never created on read)
+    await this.parts.statements.openStatement(e.sellerId);
   }
 
   async onSellerSuspended(e: EventPayload<'sellers.seller.suspended'>) {
@@ -567,16 +566,12 @@ export class HoldsPart extends Part {
     await this.parts.payouts.holdPendingPayouts(e.sellerId, `Account suspended: ${e.reason}`);
   }
 
-  /** Job finance.holds.review-due: holds at their review date go to Finance's queue; new-seller periods end */
+  /** Job finance.holds.review-due: holds at their review date go to Finance's queue */
   async reviewDue() {
     const today = this.core.today();
     const due = await this.repo.find('holds', { status: 'active', review_date: { op: '<=', value: today } }, { orderBy: [['review_date', 'asc']], limit: 500 });
     const names = await this.core.sellerInfo(due.map((h) => h.seller_id));
     for (const h of due) {
-      if (h.reason_code === 'new_seller' && h.amount === 0) {
-        await this.repo.update('holds', h.id, { status: this.core.step(holdMachine, h.status, 'release'), released_at: this.now(), release_reason: 'New-seller period ended' });
-        continue;
-      }
       await this.core.optional('workqueues', (w) =>
         w.raise({
           sourceModule: 'finance',

@@ -137,6 +137,7 @@ Saved shopping for customers: saved items in one or more lists, price-drop and b
 | triggeredAt | `datetime?` |
 | triggeredPrice | `Money?` |
 | pausedReason | `string?` |
+| armedAt | `datetime?` Back-in-stock alerts: when the item was seen unavailable, so a restock can fire the alert. Null while the item has stayed in stock since the alert was switched on. Price-drop alerts: the creation time |
 | createdAt | `datetime` |
 
 ### AlertInput
@@ -239,6 +240,7 @@ Indexes: `unique nulls not distinct (list_id, product_id, variant_id)`, `(custom
 | triggered_price | bigint? |
 | paused_reason | text? |
 | last_notified_at | timestamptz? |
+| armed_at | timestamptz? (back_in_stock: when what the alert follows was last seen unavailable; the alert fires only once armed) |
 | created_at | timestamptz |
 
 Indexes: `(product_id, kind, state)`, `(customer_id, state)`
@@ -305,10 +307,12 @@ Indexes: `(product_id, kind, state)`, `(customer_id, state)`
 
 ## Notes
 - Phase 3 (plan ch. 20 Customer growth): the module ships as a scaffold and stays off at launch; account/wishlist is marked 'coming later'.
-- Recently viewed belongs to customers (brief); the wishlist page shows it by calling customers.
+- Recently viewed belongs to customers (brief): the wishlist screen reads it from customers itself; WishlistPage does not carry it.
 - Alerts are promotional: notifications delivers them only if the customer allows wishlist alerts (account/notifications) and never mixes them into essential order updates.
 - Price hints are honest: 'Lowest in 30 days' only when the current price is the lowest in the window, from offers.priceRange(offerId, priceHintDays) (offers keeps the only price history); campaign was-prices come from promotions.referencePrice when enabled.
-- GraphQL: the store schema's WishlistAlert exposes sellerId (Alert.sellerId) and the seller field is resolved by the sellers module's shared mapper (decision: GraphQL shared mappers per owning module); wishlist itself has no sellers dependency.
+- GraphQL: the store schema's WishlistAlert exposes sellerId (Alert.sellerId). WishlistAlert.seller resolves null until the sellers module provides a shared mapper for it (decision: GraphQL shared mappers per owning module); wishlist has no sellers dependency, so clients name the seller from sellerId (e.g. Query.sellerStorefront).
+- Fixed limits (not settings): list names up to 60 characters, item notes up to 500 characters, GET /saved checks at most 100 product ids per call, and a shared list shows its first 100 items (no paging). Lists, items per list and active alerts are settings (maxLists, maxItemsPerList, maxActiveAlerts); every call that adds an active alert (saveItem with an alert, updateItemAlerts, createAlert, changeAlert resume or rearm) answers ALERT_LIMIT_REACHED above maxActiveAlerts.
+- Back-in-stock alerts fire only on a real restock: armed_at is set when the alert starts while the item is unavailable, and later whenever what it follows is seen unavailable (inventory.stock.changed to 0, an offer leaving active, or the evaluate-alerts job). An alert switched on while the item is in stock stays active but unarmed until then; rearming a triggered back-in-stock alert does the same check.
 - Wishlist is for signed-in customers only (decision D3): every store endpoint except the shared-list view needs a customer token.
 
 ## GraphQL (read layer)
@@ -400,7 +404,7 @@ type WishlistAlert @areas(in: [STORE]) @phase(n: 3) {
   variant: Variant
   "Seller the alert is limited to, if any (Alert.sellerId)"
   sellerId: UUID
-  "Seller the alert is limited to, if any (resolved by the sellers module's shared mapper from sellerId)"
+  "Seller the alert is limited to. Null until the sellers module provides a shared mapper (wishlist has no sellers dependency): use sellerId"
   seller: SellerPublicProfile
   kind: WishlistAlertKind!
   "e.g. Any drop below $329.00; Olive, from Trailhead Outfitters"
@@ -411,6 +415,8 @@ type WishlistAlert @areas(in: [STORE]) @phase(n: 3) {
   triggeredAt: DateTime
   triggeredPrice: Money
   pausedReason: String
+  "Back-in-stock: when the item was seen unavailable (a restock can fire it); null while it has stayed in stock since the alert was switched on"
+  armedAt: DateTime
   createdAt: DateTime!
 }
 

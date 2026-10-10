@@ -628,6 +628,8 @@ export interface Submission {
   expectedReviewBy?: string | null;
   /** Internal review target that orders the queue (setting reviewTargetBusinessDays) */
   reviewDeadline?: common.Deadline | null;
+  /** Set while a restriction or suspension of the seller pauses the review: the submission is left out of the review queue until the seller is reinstated */
+  pausedAt?: string | null;
   /** Reviewer who picked it up (staff only) */
   assignee?: common.Actor | null;
   decidedAt?: string | null;
@@ -654,6 +656,7 @@ export const Submission: z.ZodType<Submission> = z.object({
   get reviewDeadline() {
     return common.Deadline.nullish();
   },
+  pausedAt: z.iso.datetime({ offset: true }).describe("Set while a restriction or suspension of the seller pauses the review: the submission is left out of the review queue until the seller is reinstated").nullish(),
   get assignee() {
     return common.Actor.nullish();
   },
@@ -698,6 +701,8 @@ export interface ProductCheckEvidence {
   matchedProductId?: string | null;
   mediaId?: string | null;
   suggestedCategoryId?: string | null;
+  /** Duplicate candidates: when a reviewer marked this matched product not a duplicate (check_dismissals) */
+  dismissedAt?: string | null;
 }
 
 export const ProductCheckEvidence: z.ZodType<ProductCheckEvidence> = z.object({
@@ -708,6 +713,7 @@ export const ProductCheckEvidence: z.ZodType<ProductCheckEvidence> = z.object({
   matchedProductId: z.uuid().nullish(),
   mediaId: z.uuid().nullish(),
   suggestedCategoryId: z.uuid().nullish(),
+  dismissedAt: z.iso.datetime({ offset: true }).describe("Duplicate candidates: when a reviewer marked this matched product not a duplicate (check_dismissals)").nullish(),
 }).register(common.apiTypes, { id: "catalog.ProductCheckEvidence" });
 
 export interface ImageRule {
@@ -1412,6 +1418,8 @@ export interface CatalogDb {
     last_saved_by: Json | null;
     expected_review_by: Date | null;
     review_due_at: Date | null;
+    /** set while a seller restriction or suspension pauses the review; the queue leaves paused rows out */
+    paused_at: Date | null;
     assignee_staff_id: string | null;
     assignee_name: string | null;
     decided_at: Date | null;
@@ -1431,6 +1439,14 @@ export interface CatalogDb {
     dismissed_by: Json | null;
     dismiss_reason: string | null;
     dismissed_matched_product_id: string | null;
+  };
+  /** Per-candidate dismissals of a duplicate check: one row per matched product a reviewer marked not a duplicate. The check row's dismissed_* columns record the latest dismissal; the finding counts as dismissed once every candidate has a row here */
+  check_dismissals: {
+    check_id: string;
+    matched_product_id: string;
+    dismissed_at: Date;
+    dismissed_by: Json;
+    reason: string;
   };
   /** A reviewer's unsent decision per open submission; deleted when the decision is sent */
   review_drafts: {
@@ -1776,7 +1792,7 @@ export const endpoints = defineEndpoints({
     summary: "Submissions waiting for review, oldest first",
     query: () =>
       z.object({
-        kind: z.enum(["new", "correction", "resubmitted"]).optional(),
+        kind: z.enum(["new", "content_change", "resubmitted"]).describe("Submission kind (Submission.kind): content_change is an approved product reopened by an edit or an accepted correction").optional(),
         categoryId: z.uuid().optional(),
       }),
     paging: true,
@@ -1831,13 +1847,14 @@ export const endpoints = defineEndpoints({
     permission: "catalog.products.export",
     scope: "staff",
     summary: "Export the filtered product list",
-    desc: "Creates an authorized, logged export job through reports.requestExport (dataset catalog.admin.products, registered at boot with reports.registerDataset; rows from exportRows). Filters use the same keys as GET /products.",
+    desc: "Creates an authorized, logged export job through reports.requestExport (dataset catalog.admin.products, registered at boot with reports.registerDataset; rows from exportRows). Filters use the same keys as GET /products. 503 SERVICE_UNAVAILABLE while the reports module is off; 409 DATASET_UNAVAILABLE when reports refuses the dataset (not in the export registry, or catalog exports switched off).",
     body: () => z.object({
       filters: z.unknown(),
       format: z.enum(["csv", "xlsx"]).nullish(),
     }),
     response: () => reports.ExportJob,
     status: 202,
+    errors: ["SERVICE_UNAVAILABLE","DATASET_UNAVAILABLE"],
     audited: true,
     screens: ["admin/catalog"],
     phase: 1,
@@ -2422,7 +2439,7 @@ export const spec = defineModuleSpec({
   chapters: [5,8],
   summary: "What a product is: categories, attributes, brands, products, variants, and the review workflow that decides whether a product may be sold. How a seller sells it (price, stock, condition) belongs to offers.",
   dependsOn: ["media"],
-  optionalDeps: ["search","sellers","access","audit","offers","cart","reviews","inventory","reports","orders","returns","support"],
+  optionalDeps: ["search","sellers","access","audit","offers","cart","reviews","inventory","reports","orders","returns","support","settings"],
   publicApi: ["getProduct","isPurchasable","snapshotForOrder","getProducts","searchProducts","listProductIds","getBrands","getVariants","getParcels","getCategoryPaths","listCategories","getCategoryBySlug","getBrandBySlug","getProductForSeller","getProductAdmin","listReviewQueue","countProductsForSellers","exportRows"],
   permissions: [
     {
@@ -2636,6 +2653,10 @@ export const spec = defineModuleSpec({
     "BRAND_NOT_ACTIVE": {
       "status": 409,
       "meaning": "The product's brand is under review or blocked; decide the brand first"
+    },
+    "DATASET_UNAVAILABLE": {
+      "status": 409,
+      "meaning": "reports refused the export dataset: it is not in the export registry or catalog exports are switched off (raised by reports.requestExport)"
     }
   },
   tables: {
@@ -3088,6 +3109,10 @@ export const spec = defineModuleSpec({
         "type": "timestamptz",
         "nullable": true
       },
+      "paused_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
       "assignee_staff_id": {
         "type": "uuid",
         "nullable": true
@@ -3153,6 +3178,28 @@ export const spec = defineModuleSpec({
       "dismissed_matched_product_id": {
         "type": "uuid",
         "nullable": true
+      }
+    },
+    "check_dismissals": {
+      "check_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "matched_product_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "dismissed_at": {
+        "type": "timestamptz",
+        "nullable": false
+      },
+      "dismissed_by": {
+        "type": "jsonb",
+        "nullable": false
+      },
+      "reason": {
+        "type": "text",
+        "nullable": false
       }
     },
     "review_drafts": {

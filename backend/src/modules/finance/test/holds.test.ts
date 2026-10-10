@@ -198,11 +198,18 @@ describe('amounts owed and write-offs', () => {
     expect((await expectLedgerMatches(k, S)).available).toBe(-5_000);
     k.authority.set('finance.writeoffs.approve', 'approval_required');
     const wo = await k.call('POST', `${ADMIN}/amounts-owed/${owed.id}/settle`, k.staff, { method: 'written_off', amount: USD(5_000), reason: 'Seller closed, not recoverable' }, idem());
-    expect(wo.status).toBe(409);
-    expect(wo.body.error.code).toBe('APPROVAL_REQUIRED');
-    await k.decide(wo.body.error.details.approvalRequestId, 'approved');
+    // saved pending on the record: 200 with the approval (FORMAT.md, Approval responses)
+    expect(wo.status, JSON.stringify(wo.body)).toBe(200);
+    expect(wo.body).toMatchObject({ status: 'open', remaining: USD(5_000), pendingWriteOff: USD(5_000), approval: { required: true, approvalRequestId: expect.any(String) } });
+    // a second write-off while one waits is refused; nothing else changed
+    const again = await k.call('POST', `${ADMIN}/amounts-owed/${owed.id}/settle`, k.staff, { method: 'written_off', amount: USD(1_000), reason: 'Again' }, idem());
+    expect(again.body.error?.code).toBe('CONFLICT');
+    await k.decide(wo.body.approval.approvalRequestId, 'approved');
     const after = await k.call('GET', `${ADMIN}/amounts-owed?sellerId=${S}`, k.staff);
-    expect(after.body.items[0]).toMatchObject({ status: 'written_off', remaining: USD(0) });
+    expect(after.body.items[0]).toMatchObject({ status: 'written_off', remaining: USD(0), pendingWriteOff: null, approval: null });
+    // a seller's debt written off is a platform cost, never Official Store trading
+    expect(await k.svc.core.repo.find('platform_costs', { kind: 'write_off', ref_id: owed.id })).toEqual([expect.objectContaining({ amount: 5_000, ref_kind: 'amount_owed' })]);
+    expect(await k.svc.core.repo.find('trading_entries', { ref_id: owed.id })).toEqual([]);
     expect(await expectLedgerMatches(k, S)).toMatchObject({ available: 0 });
     const tooMuch = await k.call('POST', `${ADMIN}/amounts-owed/${owed.id}/settle`, k.staff, { method: 'seller_paid', amount: USD(1), reason: 'x' }, idem());
     expect(tooMuch.status).toBe(409);
@@ -274,7 +281,22 @@ describe('rule-based holds', () => {
     await k.deliver(ord);
     const lot = await k.svc.core.repo.findOne('earnings_lots', { order_item_id: ord.groups[0]!.items[0]!.id });
     expect(Math.round((lot!.available_at!.getTime() - lot!.delivered_at!.getTime()) / DAY)).toBe(7 + 14);
-    expect((await k.call('GET', `${ADMIN}/holds?sellerId=${S}`, k.staff)).body.items[0]).toMatchObject({ reasonCode: 'new_seller', amount: USD(0) });
+    // the period is on the seller account and in the settlement rules, not a zero-amount hold
+    expect((await k.call('GET', `${ADMIN}/holds?sellerId=${S}`, k.staff)).body.items).toEqual([]);
+    const acct = await k.svc.core.repo.findOne('seller_accounts', { seller_id: S });
+    expect(acct).toMatchObject({ new_seller_until: plusDays(30), new_seller_extra_days: 14 });
+    const balances = await k.svc.getSellerBalances(S);
+    expect(balances.settlementRules).toMatchObject({ newSellerHoldDays: 14, newSellerUntil: acct!.new_seller_until });
+    // the first statement is open from approval
+    expect(await k.svc.core.repo.findOne('statements', { seller_id: S, status: 'open' })).toBeTruthy();
+    // after the period, deliveries use the normal window and the rules no longer show it
+    k.clock.advance(31 * DAY);
+    const later = k.order(S, [{ title: 'Lamp', quantity: 1, price: 5_000 }]);
+    await k.accept(later);
+    await k.deliver(later);
+    const lot2 = await k.svc.core.repo.findOne('earnings_lots', { order_item_id: later.groups[0]!.items[0]!.id });
+    expect(Math.round((lot2!.available_at!.getTime() - lot2!.delivered_at!.getTime()) / DAY)).toBe(7);
+    expect((await k.svc.getSellerBalances(S)).settlementRules).toMatchObject({ newSellerHoldDays: null, newSellerUntil: null });
   });
 
   it('lists holds due for review in Finance\'s queue', async () => {

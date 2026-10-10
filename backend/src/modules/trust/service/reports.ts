@@ -41,7 +41,7 @@ export interface OpenInput {
   title: string;
   description: string;
   source: TrustReport['source'];
-  reporter: { kind: string; id: string | null; name?: string | null; contact?: string | null };
+  reporter: { kind: string; id: string | null; name?: string | null; org?: string | null; contact?: string | null };
   detector?: string | null;
   dedupeKey?: string | null;
   subjects: TrustSubject[];
@@ -139,6 +139,7 @@ export class Reports {
         reporter_kind: input.reporter.kind,
         reporter_id: input.reporter.id,
         reporter_name: input.reporter.name ?? null,
+        reporter_org: input.reporter.org ?? null,
         reporter_contact: input.reporter.contact ?? null,
         reporter_count: 1,
         detector: input.detector ?? null,
@@ -486,7 +487,7 @@ export class Reports {
         title: `Rights owner report: ${body.brandName.trim()}`,
         description: body.details.trim(),
         source: 'brand_owner',
-        reporter: { kind: 'brand_owner', id: by.actor.id ?? null, name: `${body.contactName.trim()} (${body.brandName.trim()})`, contact: email },
+        reporter: { kind: 'brand_owner', id: by.actor.id ?? null, name: body.contactName.trim(), org: body.brandName.trim(), contact: email },
         subjects,
         evidence: [this.evidenceRow(id, { kind: 'document', text: `Proof of rights from ${body.brandName.trim()}: ${body.details.trim()}`, mediaIds: body.proofMediaIds }, 'brand_owner', actor)],
         createdLabel: 'Reported by a brand or rights owner',
@@ -524,9 +525,8 @@ export class Reports {
         const key = customerId ? `customer:${customerId}` : `customer-contact:${r.reporter_contact ?? ''}`;
         if ((customerId || r.reporter_contact) && !out.has(key)) out.set(key, { kind: 'customer', customerId, contactName: name, contactEmail: r.reporter_contact });
       } else if (r.reporter_kind === 'brand_owner' && r.reporter_contact) {
-        // stored as "Contact Name (Brand)"
-        const contactName = name?.replace(/\s*\([^()]*\)$/, '') || name;
-        if (!out.has(`rights_owner:${r.reporter_contact}`)) out.set(`rights_owner:${r.reporter_contact}`, { kind: 'rights_owner', contactName, contactEmail: r.reporter_contact });
+        // reporter_name is the contact person, reporter_org the brand they report for
+        if (!out.has(`rights_owner:${r.reporter_contact}`)) out.set(`rights_owner:${r.reporter_contact}`, { kind: 'rights_owner', contactName: name, contactEmail: r.reporter_contact });
       }
     }
     return [...out.values()];
@@ -912,7 +912,7 @@ export class Reports {
     }
   }
 
-  async resolve(id: string, body: { outcome: string; summary: string; reporterOutcome: string }, by: By): Promise<TrustReport> {
+  async resolve(id: string, body: { outcome: (typeof OUTCOMES)[number]; summary: string; reporterOutcome: string }, by: By): Promise<TrustReport> {
     const issues: { path: string; message: string }[] = [];
     if (!(OUTCOMES as readonly string[]).includes(body.outcome)) issues.push({ path: 'outcome', message: OUTCOMES.join(', ') });
     if (!text(body.summary)) issues.push({ path: 'summary', message: 'Summarise the decision' });
@@ -1172,7 +1172,7 @@ export class Reports {
         riskLevel: riskLevel(r.risk_score, c.thresholds),
         source: r.source,
         reporterCount: r.reporter_count,
-        ...(identities ? { reporter: r.reporter_name ?? `${r.reporter_kind}${r.reporter_id ? ` ${r.reporter_id}` : ''}`, reporterContact: r.reporter_contact ?? '' } : {}),
+        ...(identities ? { reporter: (r.reporter_name ? `${r.reporter_name}${r.reporter_org ? ` (${r.reporter_org})` : ''}` : null) ?? `${r.reporter_kind}${r.reporter_id ? ` ${r.reporter_id}` : ''}`, reporterContact: r.reporter_contact ?? '' } : {}),
         subjects: a.subjects.map((s) => `${s.subject_type}: ${s.label}`).join('; '),
         assignee: r.assignee_staff_id ? (c.staff.get(r.assignee_staff_id)?.name ?? '') : '',
         deadline: r.due_at && this.core.isActive(r.status) ? r.due_at.toISOString() : '',

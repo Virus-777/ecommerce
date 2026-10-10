@@ -141,7 +141,7 @@ export class AccountsPart extends Part {
       sellerSince: s.approved_at ? this.core.today(s.approved_at) : null,
       verification: map.verificationLabel(s),
       productApproval: SELLING.includes(s.status) || s.status === 'closed' ? await this.productApproval(s.id, unavailable) : null,
-      payoutReadiness: map.payoutReadiness(s, this.core.payoutOf(app)),
+      payoutReadiness: map.payoutReadiness(s, await this.core.payoutState(s)),
       activeRestrictions: await this.restrictionSummaries(s.id),
       launchReview: map.launchReview(s),
       pendingAgreements: (await this.pendingAgreements(s.id)).length,
@@ -164,7 +164,7 @@ export class AccountsPart extends Part {
     const app = await this.core.applicationOf(s);
     const profile = await this.repo.getProfile(s.id);
     const pa = await this.productApproval(s.id, unavailable);
-    const readiness = map.payoutReadiness(s, this.core.payoutOf(app));
+    const readiness = map.payoutReadiness(s, await this.core.payoutState(s));
     const coverage = await this.core.optional('shipping', 'shipping_coverage', unavailable, (sh) => sh.hasCoverage(s.id));
     const terms = await this.core.optional('returns', 'return_address', unavailable, async (r) => (await r.sellerReturnTermsFor([s.id]))[s.id]);
     const payoutDone = readiness.state === 'verified' || readiness.state === 'change_under_review';
@@ -378,21 +378,37 @@ export class AccountsPart extends Part {
 
   async getPayoutAccount(sellerId: string) {
     const s = await this.core.seller(sellerId);
-    const payout = this.core.payoutOf(await this.core.applicationOf(s));
+    const payout = await this.core.payoutState(s);
     return { current: this.details(payout.current), pendingChange: this.details(payout.pendingChange), readiness: map.payoutReadiness(s, payout) };
   }
 
   /** Hand a destination to finance: initial (approval) or a change by the owner */
-  async submitDestination(tx: SellersRepository, s: SellerRec, app: ApplicationRec, details: StoredPayoutDetails, by: By) {
-    const payout = this.core.payoutOf(app);
+  async submitDestination(tx: SellersRepository, s: SellerRec, details: StoredPayoutDetails, by: By) {
+    const payout = await this.core.payoutState(s, tx);
     const isInitial = s.payout_readiness === 'not_added';
     const event = isInitial ? 'submitDestination' : 'requestChange';
     if (!payoutReadinessMachine.can(s.payout_readiness as never, event as never)) {
       throw new AppError('CONFLICT', s.payout_readiness === 'blocked' ? 'Payouts are blocked; contact your Seller Manager' : 'A payout account change is already being verified', { readiness: s.payout_readiness });
     }
     const changeId = newId();
-    const next: StoredPayout = { ...payout, pendingChange: { ...details, changeId, requestedAt: this.now().toISOString() }, ...(isInitial ? { current: null } : {}) };
-    await tx.update('applications', app.id, { payout: next as never });
+    const requestedAt = this.now();
+    await tx.insert('payout_changes', {
+      id: changeId,
+      seller_id: s.id,
+      kind: isInitial ? 'initial' : 'change',
+      account_holder_name: details.accountHolderName,
+      account_type: details.accountType,
+      label: details.label,
+      provider_destination_id: details.providerDestinationId,
+      previous_label: payout.current?.label ?? null,
+      state: 'pending',
+      rejection_reason: null,
+      review_id: null,
+      requested_by: by.actor as never,
+      requested_at: requestedAt,
+      decided_at: null,
+    });
+    const next: StoredPayout = { ...payout, pendingChange: { ...details, changeId, requestedAt: requestedAt.toISOString() }, ...(isInitial ? { current: null } : {}) };
     const after = await tx.update('sellers', s.id, { payout_readiness: this.core.step(payoutReadinessMachine, s.payout_readiness, event), ...(isInitial ? { payout_destination_label: details.label } : {}), updated_at: this.now() });
     const evt = {
       sellerId: s.id,
@@ -415,9 +431,7 @@ export class AccountsPart extends Part {
     const details = await this.tokenizePayout(body.details, { legalName: s.legal_name, owners: business.owners });
     const res = await this.repo.transaction(async (tx) => {
       const locked = await this.core.seller(sellerId, { repo: tx, forUpdate: true });
-      const app = await this.core.applicationOf(locked, tx);
-      if (!app) throw notFound('Application');
-      const r = await this.submitDestination(tx, locked, app, details, by);
+      const r = await this.submitDestination(tx, locked, details, by);
       await this.core.timeline(tx, s.id, { kind: 'payout_account_changed', title: `Payout account change to ${details.label} submitted`, detail: 'Your current account keeps receiving payouts until the new one is verified', actor: by.actor });
       return r;
     });
@@ -442,10 +456,13 @@ export class AccountsPart extends Part {
     await this.repo.transaction(async (tx) => {
       const s = await tx.get('sellers', e.sellerId, { forUpdate: true });
       if (!s || (s.payout_readiness !== 'verification_pending' && s.payout_readiness !== 'change_under_review')) return;
-      const app = await this.core.applicationOf(s, tx);
-      const payout = this.core.payoutOf(app);
+      const payout = await this.core.payoutState(s, tx);
       const current = payout.pendingChange ? { accountHolderName: payout.pendingChange.accountHolderName, accountType: payout.pendingChange.accountType, label: payout.pendingChange.label, providerDestinationId: payout.pendingChange.providerDestinationId } : payout.current;
-      if (app) await tx.update('applications', app.id, { payout: { ...payout, current, pendingChange: null, lastRejection: null } as never });
+      if (payout.pendingChange) {
+        // the destination it replaces stops being current
+        for (const old of await tx.find('payout_changes', { seller_id: s.id, state: 'verified' })) await tx.update('payout_changes', old.id, { state: 'replaced' });
+        await tx.update('payout_changes', payout.pendingChange.changeId, { state: 'verified', review_id: e.reviewId, decided_at: this.now() });
+      }
       await tx.update('sellers', s.id, { payout_readiness: this.core.step(payoutReadinessMachine, s.payout_readiness, 'verified'), payout_destination_label: current?.label ?? s.payout_destination_label, updated_at: this.now() });
       await this.core.timeline(tx, s.id, { kind: 'payout_verified', title: `Payout account ${current?.label ?? ''} verified`.trim(), ref: e.reviewId });
     });
@@ -456,10 +473,9 @@ export class AccountsPart extends Part {
     await this.repo.transaction(async (tx) => {
       const s = await tx.get('sellers', e.sellerId, { forUpdate: true });
       if (!s || (s.payout_readiness !== 'verification_pending' && s.payout_readiness !== 'change_under_review')) return;
-      const app = await this.core.applicationOf(s, tx);
-      const payout = this.core.payoutOf(app);
+      const payout = await this.core.payoutState(s, tx);
       const wasChange = s.payout_readiness === 'change_under_review';
-      if (app) await tx.update('applications', app.id, { payout: { ...payout, pendingChange: null, lastRejection: e.reason } as never });
+      if (payout.pendingChange) await tx.update('payout_changes', payout.pendingChange.changeId, { state: 'rejected', rejection_reason: e.reason, review_id: e.reviewId, decided_at: this.now() });
       await tx.update('sellers', s.id, {
         payout_readiness: this.core.step(payoutReadinessMachine, s.payout_readiness, 'rejected'),
         payout_destination_label: wasChange ? (payout.current?.label ?? s.payout_destination_label) : null,
@@ -555,6 +571,7 @@ export class AccountsPart extends Part {
         reason: body.reason.trim(),
         requestedBy: this.core.principalOf(by),
       });
+      const pending = await this.core.savePendingChange({ kind: 'closure', sellerId: s.id, targetId: s.id, approvalRequestId: req.id, payload: { reason: body.reason.trim(), reasonCode: body.reasonCode }, reason: body.reason.trim(), actor: by.actor });
       await this.core.timeline(this.repo, s.id, { kind: 'closure_requested', title: 'Closure proposed, waiting for a second reviewer', detail: body.reason, visibility: 'staff', actor: by.actor });
       await this.core.audit(
         {
@@ -568,7 +585,7 @@ export class AccountsPart extends Part {
         },
         by,
       );
-      throw new AppError('APPROVAL_REQUIRED', check.reason || 'Closing a seller always needs a second reviewer', { approvalRequestId: req.id });
+      throw new AppError('APPROVAL_REQUIRED', check.reason || 'Closing a seller always needs a second reviewer', { approvalRequestId: req.id, pendingChangeId: pending.id });
     }
     return this.account(await this.closeNow(sellerId, { reason: body.reason.trim(), reasonCode: body.reasonCode }, by), null);
   }

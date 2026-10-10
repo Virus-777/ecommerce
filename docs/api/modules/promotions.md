@@ -177,7 +177,7 @@ Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-
 | budget | `Money?` Campaign stops when the discount cost reaches it |
 | usageCap | `int?` Total redemptions |
 | perCustomer | `int?` Uses per customer |
-| perOrder | `int?` Coupons of this campaign per order |
+| perOrder | `int?` Codes of this campaign per order: empty or 1. A campaign applies at most once per order (a second code of the same campaign is rejected with per_order_limit); a value above 1 is refused with VALIDATION_FAILED |
 | perCustomerUnits | `int?` Purchase limit in units (markdowns, flash sales) |
 
 ### Funding
@@ -187,7 +187,7 @@ Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-
 | owner | `enum(platform|seller|shared)` |
 | platformShareBps | `int?` Platform share of the discount on seller offers when shared, e.g. 5000 |
 | costCenter | `string?` |
-| note | `string?` Official Store items: the discount is a company cost shown in company trading margin |
+| note | `string?` Funding note for Finance (column campaigns.funding_note), e.g. Official Store items: the discount is a company cost shown in company trading margin |
 
 ### StackingRules
 
@@ -648,7 +648,7 @@ Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-
 | purchaseLimit | `int?` |
 | flash | `FlashCountdown?` |
 | sellerPromos | `PromoBanner[]` e.g. 10% off orders over $100 from Northwind Audio, applied automatically |
-| automaticDiscount | `Money?` Per-unit discount the customer gets without doing anything (autoApply campaigns with no minimum spend, e.g. an automatic 10% off), on top of price. Offers subtracts it in comparable totals for the featured-offer rule (Total price = item + shipping − automatic discounts). Null when none |
+| automaticDiscount | `Money?` Per-unit discount the customer gets without doing anything (running autoApply coupon campaigns for everyone, or every signed-in customer when signed in, e.g. an automatic 10% off), on top of price. A minimum spend counts when one unit at price reaches it; category and brand scopes are matched from catalog (getProducts). Offers subtracts it in comparable totals for the featured-offer rule (Total price = item + shipping − automatic discounts). Null when none |
 | automaticDiscountLabel | `string?` |
 
 ### FlashCountdown
@@ -1027,10 +1027,11 @@ sellOut fires when claimed + reserved reaches dealStock. The regular offer stays
 | funding_owner | text |
 | platform_share_bps | int? |
 | cost_center | text? |
+| funding_note | text? (Funding.note) |
 | stacking | jsonb |
 | exclusive_group | text? |
 | participation | jsonb? |
-| deals | jsonb? |
+| deals | jsonb? (DealsPlacement) |
 | terms | text? |
 | status | text |
 | ended_reason | text? |
@@ -1142,13 +1143,15 @@ Indexes: `unique (campaign_id, offer_id)`
 |---|---|
 | id | uuid pk |
 | campaign_id | uuid → campaigns |
-| code | text unique (case-insensitive) |
+| code | text (case-insensitive: unique by upper(code) among active codes; a code frees up when its campaign ends or is cancelled) |
 | kind | text (shared|unique) |
 | max_redemptions | int? |
 | redemptions | int |
 | assigned_customer_id | uuid? |
 | active | bool |
 | created_at | timestamptz |
+
+Indexes: `unique (upper(code)) where active`, `(campaign_id, created_at)`, `(assigned_customer_id)`
 
 **coupon_clips**: Coupons a customer clipped; applied automatically at checkout
 
@@ -1289,7 +1292,7 @@ Indexes: `unique (campaign_id, day)`
 | `orders.item.cancelled` | orders | Reverse the item's allocations; restore usage and deal stock when cancelled before dispatch |
 | `returns.refund.approved` | returns | Partially reverse each item's allocations by its refunded quantity from the payload items ({ orderItemId, quantity }[]; a refund without items reverses nothing and is logged); count the return in campaign results |
 | `orders.item.split` | orders | Split the item's redemption_lines between the original and the new order item in proportion to the quantities, so later cancellations, refundShare and fundingSplitFor on either id find their share |
-| `payments.payment.failed` | payments | Release reservations of the failed quote |
+| `payments.payment.failed` | payments | Keep the declined checkout's reservations (idempotency key = checkoutSessionId) for the retry window: expiresAt is extended to at least reservationTtlMinutes after the decline, never shortened. They go back when they expire (release-expired-reservations), when checkout releases them (abandoned or expired session) or when the retry reserves a changed quote |
 | `offers.offer.price_changed` | offers | Flag participations whose seller raised the price during the campaign (the was price itself is read from offers.lowestPrice) |
 | `offers.offer.status_changed` | offers | Rebuild eligible offers; remove deactivated offers from flash sales |
 | `inventory.stock.changed` | inventory | Cap remaining flash deal stock at available stock; re-check participation stock rules |
@@ -1305,7 +1308,7 @@ Indexes: `unique (campaign_id, day)`
 |---|---|---|
 | priceOffers | `(offerIds: uuid[], ctx: { customerId?: uuid, at?: datetime }) => OfferPromotion[]`<br>Current markdown or flash price, was price, badges, purchase limit and countdown per offer. Used for product cards, the purchase box and cart lines so prices match everywhere (plan ch. 15: consistent across product page, cart, checkout and confirmation). | offers, search, cart, content, wishlist, graphql |
 | evaluateCart | `(input: CartEvaluationInput) => CartEvaluation`<br>Runs eligibility, stacking, limits and budgets for a cart or checkout quote. Returns per-line discounts with the funding split, free-shipping packages, applied codes with the items they cover and rejected codes with a reason the customer can read. Pure read: nothing is reserved. | cart, checkout |
-| reserveRedemption | `(evaluationId: uuid, idempotencyKey: string) => RedemptionReservation`<br>Holds budget, usage counts and flash deal stock for a quote while payment runs. Fails with BUDGET_EXHAUSTED, USAGE_LIMIT_REACHED or DEAL_SOLD_OUT so checkout can show the revised total before the customer commits (plan ch. 6). | checkout |
+| reserveRedemption | `(evaluationId: uuid, idempotencyKey: string) => RedemptionReservation`<br>Holds budget, usage counts and flash deal stock for a quote while payment runs. Fails with BUDGET_EXHAUSTED, USAGE_LIMIT_REACHED (total, per-customer or code limit, details.limit) or DEAL_SOLD_OUT so checkout can show the revised total before the customer commits (plan ch. 6); also PURCHASE_LIMIT_EXCEEDED (per-customer unit limit of a markdown or flash price, details.limit), COUPON_NOT_ELIGIBLE (details.reason expired: a campaign of the quote is no longer running), CONFLICT (the quote's validUntil has passed: evaluate again), NOT_FOUND (unknown evaluationId) and VALIDATION_FAILED (no idempotency key). Same evaluation and key while the hold is live: the same reservation. | checkout |
 | commitRedemption | `(reservationId: uuid, orderId: uuid, orderItemIds: map<string>) => Redemption[]`<br>Binds a reservation to the placed order (line id → order item id). Also triggered by orders.order.placed. | checkout |
 | releaseRedemption | `(reservationId: uuid) => void`<br>Releases held budget, usage and deal stock when payment fails or the quote expires. | checkout |
 | fundingSplitFor | `(orderItemId: uuid) => FundingSplit`<br>Discount allocations of one order item with platform and seller parts. Finance charges commission on the price after the seller-funded part only and credits the platform-funded part to seller proceeds. | finance, orders, returns, graphql |
@@ -1313,7 +1316,7 @@ Indexes: `unique (campaign_id, day)`
 | getPublicCampaign | `(campaignId: uuid) => PublicCampaign | null`<br>Name, period, terms and status for campaign pages, banners and ads. | content, advertising, graphql |
 | isCampaignActive | `(campaignId: uuid) => { active: bool, reason?: string }`<br>False when ended, paused, out of budget or sold out. Advertising stops linked ads; content hides teasers. | advertising, content |
 | liveDeals | `(opts: { limit: int, campaignId?: uuid }) => FlashSaleBlock[]`<br>Flash deals for the homepage Deals section. campaignId limits the result to one campaign (content SourceRule.campaignId: a section or collection fed by one promotion). | content, graphql |
-| referencePrice | `(offerId: uuid) => Money | null`<br>Honest 'was' price: delegates to offers.lowestPrice(offerId, referencePriceDays, campaignStart or now) and returns null when offers has no history for the window. No price history is kept in promotions. | offers, wishlist |
+| referencePrice | `(offerId: uuid) => Money | null`<br>Honest 'was' price: delegates to offers.lowestPrice(offerId, offers.wasPriceLookbackDays (read with ctx.settings.read; offers owns the window, decision O5), campaignStart or now) and returns null when offers has no history for the window. No price history is kept in promotions. | offers, wishlist |
 | getDealsPage | `(ctx: { customerId?: uuid, at?: datetime }) => DealsPage`<br>Deals page data in one call: tab counts, live flash sales, clippable coupons (clipped state for the customer), the first clearance batch, upcoming events with reminder state, the combination rules and serverTime for countdowns. Same data as GET /api/store/promotions/deals. | graphql |
 | listClearance | `(paging: PageInput) => Paged<DealProduct>`<br>Clearance products page by page (GET /deals/clearance). | graphql |
 | getFlashSale | `(campaignId: uuid) => FlashSaleBlock | null`<br>One flash sale with live claimed meters, deal stock and countdown (GET /flash-sales/{campaignId}). | graphql |
@@ -1378,7 +1381,6 @@ Checked through the access module (limits per role, second reviewer).
 | marketTimeZone | `"America/Los_Angeles"` | string | Default time zone for new campaigns |
 | reservationTtlMinutes | `30` | duration, minutes, 1–… | How long a checkout reservation holds budget, usage and deal stock |
 | couponsPerSellerPackage | `1` | int, 1–…, approval: second reviewer, seller-visible | Coupons per seller package (plan default: one coupon per seller per order) |
-| referencePriceDays | `30` | duration, days, 1–…, approval: business owner, seller-visible | Look-back window passed to offers.lowestPrice for the was price (keep equal to offers' compare-at window) |
 | budgetWarningPct | `90` | number, %, 1–100 | Notify Marketing and Finance when budget use crosses this |
 | restoreUsageOnCancel | `true` | bool | Give the use back to the customer when an item is cancelled before dispatch |
 | refundRestoresBudget | `false` | bool, approval: second reviewer | Whether refunds after delivery free budget |
@@ -1391,8 +1393,9 @@ Checked through the access module (limits per role, second reviewer).
 - Evaluation order: markdowns and flash prices set the unit price; then coupons per seller package (couponsPerSellerPackage) honouring stacking flags and exclusive groups; then free shipping per package. Rejections always carry a customer-readable message and the items involved (store/checkout 'Coupon rejected').
 - Evaluation is deterministic for an evaluationId; checkout re-evaluates before placing and shows changes (store/checkout-review-changes). Reservations are idempotent per Idempotency-Key from checkout.
 - Flash sale stock is a promotional allocation on top of inventory: when deal stock ends the offer stays purchasable at its regular price and the Deals page shows it separately (plan ch. 15).
-- Was prices are the offer's lowest price in the look-back window (referencePriceDays) before the campaign starts. referencePrice and priceOffers read it from offers.lowestPrice (offers owns offer_price_history, the single source); promotions stores no daily prices. Campaign terms state the rule.
+- Was prices are the offer's lowest price in the look-back window before the campaign starts. The window is offers' setting offers.wasPriceLookbackDays (decision O5: offers owns it; promotions reads it with ctx.settings.read and keeps no copy). referencePrice and priceOffers read it from offers.lowestPrice (offers owns offer_price_history, the single source); promotions stores no daily prices. Campaign terms state the rule.
 - Seller views are scoped to the caller's seller account; sellers never see other sellers' consent or earnings.
+- Which campaigns need seller consent: a platform campaign whose funding owner is seller or shared, or one that invites sellers (participation.inviteSellers). A seller's offers count in such a campaign only after the seller accepted the invitation with those offers (CONSENT_REQUIRED without the consent tick). A platform-funded campaign that invites nobody applies to seller offers in scope without consent: the platform pays the whole discount and seller proceeds are unchanged. Official Store offers never need consent. Seller discounts are the seller's own and need none.
 - Bundles and quantity deals (DiscountRule.bundle / quantityTiers) are phase 3: the kinds are accepted only when the phase-3 feature flag is on, otherwise VALIDATION_FAILED. Flash sales are phase 2 (plan 'growth promotions'); their endpoints are marked phase 2.
 - Automatic vs code vs clip (decision P1): autoApply decides. Evaluation applies autoApply campaigns without input, code campaigns only when the code is entered, and clip-only campaigns when a signed-in customer clipped them.
 - Deal limits (decision P2): quantity over a per-customer unit limit or the remaining deal stock is not refused; the line is split into discounted and regular-price units (LineDiscount.discountedQuantity) and the cart shows why.

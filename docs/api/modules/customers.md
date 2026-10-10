@@ -50,7 +50,7 @@ The customer side of an account: profile, saved addresses, marketing consent, re
 | POST | `/api/store/customers/data-requests/closure` | Request account closure _(step-up: reauth)_ | customer | `{ reauthToken: string, reason: text? }` → `DataRequest` |
 | POST | `/api/store/customers/data-requests/{id}/cancel` | Cancel a pending closure or export request | customer | `DataRequest` |
 | POST | `/api/store/customers/guest-orders/lookup` | Find a guest order by reference and checkout email | shopper | `{ orderRef: string, email: email }` → `GuestOrderAccess` |
-| POST | `/api/store/customers/guest-orders/links` | Email fresh links to every guest order placed with this email | visitor | `{ email: email }` → 204 No content |
+| POST | `/api/store/customers/guest-orders/links` | Email fresh links to every guest order placed with this email | visitor | `{ email: email }` → 202 No content |
 
 ## Admin API
 
@@ -187,7 +187,7 @@ The customer side of an account: profile, saved addresses, marketing consent, re
 
 | Field | Type |
 |---|---|
-| channel | `enum(email|sms|push|wishlist|personalization)` |
+| channel | `enum(email|sms|push|wishlist|personalization|recent_searches)` personalization is personalizedRecommendations, recent_searches is recentSearches; the others are the promotional channels |
 | granted | `bool` |
 | source | `enum(profile|app_settings|checkout|registration|unsubscribe_link|staff)` |
 | at | `datetime` |
@@ -726,7 +726,7 @@ Indexes: `(email_hash, at desc)`, `(ip, at desc)`
 | rememberCheckoutAddress | `(customerId: uuid, address: Address, label?: string) => SavedAddress`<br>Save an address entered at checkout when the customer ticks 'save to my addresses' | checkout |
 | canPlaceOrders | `(customerId: uuid) => { allowed: bool, reason?: string }`<br>False while the account is suspended, closed or has an active ordering restriction | checkout |
 | canSendMessages | `(customerId: uuid) => { allowed: bool, reason?: string, until?: datetime }`<br>False during an active messaging restriction. Replies inside open cases stay allowed (support decides). | messaging, reviews |
-| getMarketingConsent | `(customerId: uuid) => MarketingPreferences`<br>Promotional consent per channel plus the personalisation switches (recommendations, recent searches). Essential order messages ignore it. search reads recentSearches before saving a search to the account. | notifications, promotions, advertising, search |
+| getMarketingConsent | `(customerId: uuid) => MarketingPreferences`<br>Promotional consent per channel plus the personalisation switches (recommendations, recent searches). Essential order messages ignore it. search reads recentSearches before saving a search to the account. | notifications, promotions, advertising, search, checkout |
 | validateAddress | `(address: Address) => AddressValidation`<br>Same checks as POST /addresses/validate (provider when configured): issues, deliverability and a suggested correction. Used for addresses typed at checkout that are not saved. | checkout |
 | listRecentlyViewed | `(owner: { customerId?: uuid, guestSessionId?: string }, limit: int) => uuid[]`<br>Product ids, newest first, for recommendations and the phase-3 wishlist | wishlist, search |
 | listRecentlyViewedItems | `(owner: { customerId?: uuid, guestSessionId?: string }, limit: int) => RecentlyViewedItem[]`<br>Recently viewed rows, newest first, with the title and image snapshot and availability (same rows as GET /recently-viewed). In GraphQL the current price comes from offers through RecentlyViewedItem.product. | graphql |
@@ -768,7 +768,7 @@ Checked through the access module (limits per role, second reviewer).
 | Job | Schedule | Does |
 |---|---|---|
 | `customers.expire-restrictions` | every 10 min | Expire restrictions past endsAt; return the account to active when none remain |
-| `customers.build-data-exports` | every 5 min | Process requested exports: call exportCustomerData on every enabled module that declares it (orders, returns, support, messaging, reviews, wishlist, wallet, payments…) with the customerId and accountId, write one file per section plus the customer's attachments into a ZIP in media, mark ready, publish customers.data_export.ready. A module that throws fails the export (retried), never silently left out |
+| `customers.build-data-exports` | every 5 min | Process requested exports: call exportCustomerData on every enabled module that declares it (orders, returns, support, messaging, reviews, wishlist, wallet, payments…) with the customerId and accountId, write one file per section plus the customer's attachments into a ZIP in media, mark ready, publish customers.data_export.ready. A module that throws fails the export (retried), never silently left out; one that declares the hook but is off is listed in the README under notIncluded. There is no list-based fallback: a module holding customer data must declare the hook |
 | `customers.expire-export-links` | hourly | Expire ready exports after exportLinkValidDays and delete the file |
 | `customers.complete-closures` | daily 02:00 market time | For closures past the cooling-off date, re-check obligations; close the account, anonymise profile and addresses, keep order references. When obligations block it, keep the request and publish customers.closure.delayed (once per new set of blockers) |
 | `customers.prune-recently-viewed` | daily | Delete rows older than recentlyViewedRetentionDays and guest rows whose session expired |

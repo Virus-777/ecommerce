@@ -272,6 +272,18 @@ export function createPostgresMessagingRepository(db: Kysely<MessagingDb>, inbox
     async dueArchive(now, limit) {
       return d.selectFrom('conversations').selectAll().where('status', '=', 'open').where('archive_after', '<=', now).orderBy('archive_after', 'asc').limit(limit).execute();
     },
+    async upsertReplyStats(row) {
+      const { seller_id: _id, ...rest } = row;
+      await d
+        .insertInto('seller_reply_stats')
+        .values(row)
+        .onConflict((oc: any) => oc.column('seller_id').doUpdateSet(rest))
+        .execute();
+    },
+    async staleReplyStats(before, limit) {
+      const rows = await d.selectFrom('seller_reply_stats').select('seller_id').where('computed_at', '<', before).orderBy('computed_at', 'asc').limit(limit).execute();
+      return (rows as { seller_id: string }[]).map((r) => r.seller_id);
+    },
     async sellersActiveSince(since, limit) {
       const rows = await d.selectFrom('conversations').select('seller_id').distinct().where('seller_id', 'is not', null).where('last_message_at', '>=', since).limit(limit).execute();
       return (rows as { seller_id: string }[]).map((r) => r.seller_id);

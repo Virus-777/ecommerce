@@ -205,7 +205,7 @@ export class ContentHomepage extends ContentPages {
     const rows = await this.repo.listSections();
     if (rows.some((r) => r.kind === 'ad_position')) return;
     const advertising = this.ctx.tryUse('advertising');
-    const fromAds = await this.soft('advertising.adPositionsFor', advertising && (() => advertising.adPositionsFor({ page: 'home' })), null);
+    const fromAds = await this.soft('advertising.adPositionsFor', advertising && (() => advertising.adPositionsFor('home')), null);
     const positions = fromAds ? fromAds.filter((p) => p.enabled).map((p) => ({ key: p.placementKey, name: p.name })) : DEFAULT_AD_POSITIONS;
     if (!positions.length) return;
     const tz = await this.marketTimeZone();

@@ -6,6 +6,7 @@
 import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import { pageOf, toPageRequest, type PageRequest } from '../../../kernel/lib/pagination.js';
+import type * as catalog from '../../../spec/catalog.js';
 import type * as common from '../../../spec/common.js';
 import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
 import type * as offers from '../../../spec/offers.js';
@@ -49,11 +50,14 @@ export class StorefrontPart extends Part {
     const flashIds = [...running.filter((c) => c.kind === 'flash_sale'), ...upcomingFlash].map((c) => c.id);
     const flashRows = flashIds.length ? await this.repo.find('flash_items', { campaign_id: flashIds, offer_id: ids }) : [];
     const eligible = await this.repo.eligibleFor(ids, running.map((c) => c.id));
-    // automatic discounts the customer gets without doing anything: autoApply coupons with no minimum spend for everyone
-    // (or every signed-in customer). Category-scoped ones are not resolved here (no catalog read per offer).
+    // automatic discounts the customer gets without doing anything: autoApply coupons for everyone (or every signed-in
+    // customer). A minimum spend counts when one unit of the offer reaches it (the one-unit evaluation below decides);
+    // category and brand scopes are resolved from catalog (one batch read) when such a campaign runs.
     const automatic = (await this.core.models(await this.repo.runningCampaigns(at, { kinds: [...COUPON_KINDS] }))).filter(
-      (c) => c.autoApply && !c.discount.minSpend && (c.discount.percentOffBps || c.discount.amountOff) && (c.eligibility.audience === 'everyone' || (c.eligibility.audience === 'signed_in' && Boolean(customerId))),
+      (c) => c.autoApply && (c.discount.percentOffBps || c.discount.amountOff) && (c.eligibility.audience === 'everyone' || (c.eligibility.audience === 'signed_in' && Boolean(customerId))),
     );
+    const needsProduct = automatic.some((c) => [...c.scope.include, ...c.scope.exclude].some((t) => t.kind === 'category' || t.kind === 'brand'));
+    const productFacts = needsProduct ? await this.productFacts(list.map((o) => o.productId)) : new Map<string, { categoryIds: string[]; brandId: string | null }>();
     const consents = await this.parts.participation.consents([...running, ...automatic].filter(needsConsent).map((c) => c.id));
     const usage = new Map<string, { uses: number; units: number }>();
     if (customerId && (running.length || automatic.length)) {
@@ -64,8 +68,9 @@ export class StorefrontPart extends Part {
     const priceOptions = new Map<string, PriceOption[]>();
     for (const o of list) {
       const sellerId = o.sellerId ?? OFFICIAL_STORE_ID;
-      const attrs: OfferAttrs = { offerId: o.id, productId: o.productId, sellerId: o.sellerId ?? null, official: o.ownerType === 'official', categoryIds: [], brandId: null };
-      lines.push({ lineId: o.id, offerId: o.id, productId: o.productId, variantId: o.variantId, sellerId, officialStore: attrs.official, categoryId: null, quantity: 1, unitPrice: o.price, packageId: o.id, attrs });
+      const pf = productFacts.get(o.productId);
+      const attrs: OfferAttrs = { offerId: o.id, productId: o.productId, sellerId: o.sellerId ?? null, official: o.ownerType === 'official', categoryIds: pf?.categoryIds ?? [], brandId: pf?.brandId ?? null };
+      lines.push({ lineId: o.id, offerId: o.id, productId: o.productId, variantId: o.variantId, sellerId, officialStore: attrs.official, categoryId: pf?.categoryIds[0] ?? null, quantity: 1, unitPrice: o.price, packageId: o.id, attrs });
       const opts: PriceOption[] = [];
       for (const c of running) {
         if (!eligible.some((e) => e.campaign_id === c.id && e.offer_id === o.id)) continue;
@@ -81,7 +86,8 @@ export class StorefrontPart extends Part {
       }
       priceOptions.set(o.id, opts);
     }
-    const out = evaluate({
+    // a one-unit cart per offer: amounts, minimum spends and budgets are judged per offer, never split across the list
+    const evalLines = lines.map((ln) => evaluate({
       at,
       currency: list[0]!.price.currency,
       customerId,
@@ -89,18 +95,19 @@ export class StorefrontPart extends Part {
       isNewCustomer: null,
       region: null,
       couponsPerPackage: 1,
-      lines,
+      lines: [ln],
       shipping: null,
-      priceOptions,
+      priceOptions: new Map([[ln.lineId, priceOptions.get(ln.lineId) ?? []]]),
       coupons: automatic.map((c) => ({ campaign: c, source: 'automatic' as const, code: null, codeInfo: null })),
       rejected: [],
       usage,
       consents,
-    });
+    }).lines[0]!);
+    const out = { lines: evalLines };
     const automaticById = new Map(automatic.map((c) => [c.id, c]));
     const promos = await this.activeSellerPromotions([...new Set(list.map((o) => o.sellerId).filter((s): s is string => Boolean(s)))], { customerId: customerId ?? undefined, at: at.toISOString() }, true);
     const byId = new Map(running.map((c) => [c.id, c]));
-    const days = Number(await this.core.setting('referencePriceDays')) || 30;
+    const days = await this.core.lookbackDays();
     const result: OfferPromotion[] = [];
     for (const o of list) {
       const l = out.lines.find((x) => x.lineId === o.id)!;
@@ -145,6 +152,24 @@ export class StorefrontPart extends Part {
     return result;
   }
 
+  /** Category chain and brand per product for scope rules (catalog.getProducts, 200 ids per call); unknown products are left out */
+  async productFacts(productIds: readonly string[]): Promise<Map<string, { categoryIds: string[]; brandId: string | null }>> {
+    const ids = [...new Set(productIds.filter(isUuid))];
+    const out = new Map<string, { categoryIds: string[]; brandId: string | null }>();
+    for (let i = 0; i < ids.length; i += 200) {
+      const chunk = ids.slice(i, i + 200);
+      let records: catalog.ProductRecord[] = [];
+      try {
+        records = await this.ctx.use('catalog').getProducts(chunk);
+      } catch (err) {
+        // without catalog facts category and brand scopes simply do not match (no automatic discount shown)
+        this.ctx.log.warn({ err }, 'promotions: catalog products unavailable for automatic discounts');
+      }
+      for (const r of records) out.set(r.product.id, { categoryIds: await this.core.categoryChain(r.product.categoryId), brandId: r.product.brand?.id ?? null });
+    }
+    return out;
+  }
+
   /** Per-unit automatic discount on top of the price (one unit was evaluated), with its label; null when none */
   automaticDiscountOf(allocations: DiscountAllocation[], automatic: Map<string, CampaignModel>, currency: string): { automaticDiscount: common.Money | null; automaticDiscountLabel: string | null } {
     const own = allocations.filter((a) => automatic.has(a.campaignId) && a.amount.amount > 0);
@@ -166,7 +191,7 @@ export class StorefrontPart extends Part {
 
   /** Honest was price: offers' lowest price in the look-back window before the campaign start (or now) */
   async referencePrice(offerId: string): Promise<common.Money | null> {
-    const days = Number(await this.core.setting('referencePriceDays')) || 30;
+    const days = await this.core.lookbackDays();
     const now = this.now();
     const running = await this.core.models(await this.repo.runningCampaigns(now, { kinds: [...PRICE_KINDS] }));
     const rows = await this.repo.eligibleFor([offerId], running.map((c) => c.id));
@@ -435,7 +460,7 @@ export class StorefrontPart extends Part {
       coupons,
       clearance: want('clearance') ? clearance.slice(0, 12) : [],
       upcomingEvents: want('events') ? events : [],
-      rules: [...COUPON_RULES(perPackage), `Was prices are the lowest price in the ${Number(await this.core.setting('referencePriceDays')) || 30} days before the deal started.`],
+      rules: [...COUPON_RULES(perPackage), `Was prices are the lowest price in the ${await this.core.lookbackDays()} days before the deal started.`],
     };
   }
 

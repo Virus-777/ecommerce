@@ -82,7 +82,7 @@ type WishlistAlert @areas(in: [STORE]) @phase(n: 3) {
   variant: Variant
   "Seller the alert is limited to, if any (Alert.sellerId)"
   sellerId: UUID
-  "Seller the alert is limited to, if any (resolved by the sellers module's shared mapper from sellerId)"
+  "Seller the alert is limited to. Null until the sellers module provides a shared mapper (wishlist has no sellers dependency): use sellerId"
   seller: SellerPublicProfile
   kind: WishlistAlertKind!
   "e.g. Any drop below $329.00; Olive, from Trailhead Outfitters"
@@ -93,6 +93,8 @@ type WishlistAlert @areas(in: [STORE]) @phase(n: 3) {
   triggeredAt: DateTime
   triggeredPrice: Money
   pausedReason: String
+  "Back-in-stock: when the item was seen unavailable (a restock can fire it); null while it has stayed in stock since the alert was switched on"
+  armedAt: DateTime
   createdAt: DateTime!
 }
 

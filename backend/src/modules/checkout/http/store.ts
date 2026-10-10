@@ -10,7 +10,7 @@ import type { CheckoutService } from '../service.js';
 export const storeRoutes = (service: CheckoutService) =>
   routes(endpoints, 'store', {
     /** POST /sessions: Start checkout from the cart or Buy now */
-    startCheckout: async ({ scope, body, actor, requestId }) => service.startCheckout(scope, body, { actor, requestId }),
+    startCheckout: async ({ scope, body, actor, requestId, principal }) => service.startCheckout(scope, body, { actor, requestId }, principal),
     /** GET /sessions/{id}: The whole checkout: steps, contact, address, packages with options, coupons, payment, review and totals */
     getCheckout: async ({ scope, params }) => service.getCheckout(scope, params.id),
     /** PUT /sessions/{id}/contact: Guest contact details (email, optional phone) and the account-after-checkout choice */

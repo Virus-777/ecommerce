@@ -15,11 +15,11 @@ import { WarehouseService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.1.0',
+  version: '1.2.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const service = new WarehouseService({ repo: createPostgresWarehouseRepository(ctx.db), ctx });
+    const service = new WarehouseService({ repo: createPostgresWarehouseRepository(ctx.db, ctx.inbox), ctx });
     ctx.provide(service);
     ctx.http.routes(adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

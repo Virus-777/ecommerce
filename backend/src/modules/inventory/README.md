@@ -113,7 +113,7 @@ How many units exist and in which stock group: stock items per offer/SKU with Av
 | variantId | `uuid` |
 | condition | `string` |
 | label | `string` Product title and variant, e.g. 'Halden Aurora ANC Headphones, Black' |
-| image | `MediaRef?` |
+| image | `MediaRef?` The variant's first image, else the product's (read from catalog.getProducts; null while catalog is off) |
 | quantities | `StockQuantities` |
 | state | `enum(in_stock|low_stock|out_of_stock)` |
 | lowStockThreshold | `int?` Low-stock alert at / reorder point |
@@ -351,7 +351,8 @@ How many units exist and in which stock group: stock items per offer/SKU with Av
 | Field | Type |
 |---|---|
 | id | `uuid` |
-| key | `string` Checkout session key (idempotency) |
+| key | `string` Idempotency key within its source: the checkout session key (holds), order:<orderId> (an order re-allocated after its hold expired), or the caller's key for allocateForOrder |
+| source | `enum(checkout|replacement|exchange)` checkout: a checkout hold and the order's own allocation; replacement or exchange: allocateForOrder for a replacement or exchange shipment (no expiry; releaseHold may release it) |
 | state | `enum(held|allocated|fulfilled|released|expired)` |
 | orderId | `uuid?` |
 | orderRef | `string?` |
@@ -519,7 +520,8 @@ How many units exist and in which stock group: stock items per offer/SKU with Av
 | Field | Type |
 |---|---|
 | id | `uuid` |
-| ref | `string` |
+| ref | `string` TRF-YYMMDD-NNNN (numbered per market day) |
+| note | `text?` Planner's note from createTransfer |
 | fromLocationId | `uuid` |
 | toLocationId | `uuid` |
 | state | `enum(draft|in_transit|received|cancelled)` |
@@ -747,7 +749,8 @@ Indexes: `(stock_item_id, expected_date)`, `(source_kind, source_id)`
 | Column | Type |
 |---|---|
 | id | uuid pk |
-| key | text unique |
+| source | text (checkout|replacement|exchange) |
+| key | text |
 | order_id | uuid? |
 | order_ref | text? |
 | state | text |
@@ -756,7 +759,7 @@ Indexes: `(stock_item_id, expected_date)`, `(source_kind, source_id)`
 | created_at | timestamptz |
 | updated_at | timestamptz |
 
-Indexes: `(state, expires_at)`, `(order_id)`
+Indexes: `(source, key) unique`, `(state, expires_at)`, `(order_id)`
 
 **reservation_lines**
 
@@ -905,6 +908,7 @@ Indexes: `(state, reported_at)`, `(order_id)`
 | to_location_id | uuid → locations |
 | state | text |
 | created_by | text |
+| note | text? |
 | shipped_at | timestamptz? |
 | received_at | timestamptz? |
 
@@ -918,6 +922,20 @@ Indexes: `(state, reported_at)`, `(order_id)`
 | received_quantity | int? |
 
 Indexes: `pk (transfer_id, stock_item_id)`
+
+**valuation_snapshots**: Daily company stock valuation per stock group (job inventory.valuation-snapshot) for trading reports; one row per market day and group, rewritten if the job runs again that day
+
+| Column | Type |
+|---|---|
+| snapshot_date | date |
+| stock_group | text (available|reserved|incoming|damaged_held|returned) |
+| units | int |
+| value_at_cost_amount | bigint |
+| currency | char(3) |
+| sku_count | int |
+| taken_at | timestamptz |
+
+Indexes: `pk (snapshot_date, stock_group)`
 
 **stock_counts**: Phase 4
 
@@ -1051,7 +1069,7 @@ Checked through the access module (limits per role, second reviewer).
 | `inventory.reconcile-reservations` | every 15 min | Find allocations whose order items are cancelled, completed or delivered without a matching event and raise them for review (no automatic release of allocated units) |
 | `inventory.low-stock-digest` | daily 07:00 market time | Low and out-of-stock summary per seller and for the Official Store: publish inventory.stock.low_digest (notifications emails it) |
 | `inventory.held-stock-review` | daily 07:00 market time | Publish inventory.hold.review_due for Damaged or held stock past its review date (work queue for the Inventory Manager) |
-| `inventory.valuation-snapshot` | daily 23:59 market time | Snapshot units and value at cost per group for company trading reports |
+| `inventory.valuation-snapshot` | daily 23:59 market time | Snapshot units and value at cost per group of company stock into valuation_snapshots (one row per market day and group) for company trading reports |
 
 ## Settings
 
@@ -1065,6 +1083,9 @@ Checked through the access module (limits per role, second reviewer).
 | allowSellerNegativeAvailable | `false` | bool, read-only | Never sell beyond available quantity (plan ch. 9) |
 
 ## Notes
+- References: transfers are TRF-YYMMDD-NNNN (ctx.refs, numbered per market day).
+- Event consumers are idempotent through the kernel inbox, never through movement notes: orders.item.cancelled claims item-cancelled:<cancellationId>:<itemId>:<reservationId> and shipping.shipment.dispatched claims shipment-dispatched:<shipmentId> in the transaction that moves the units.
+- Work items: merge candidates after catalog.product.merged (two company stock items now hold the same variant and condition) are raised as manual_task items in the inventory.merge_candidates queue (owner Inventory Manager); order allocation problems go to inventory.reservations.
 - Stock groups are quantities, not statuses: each stock item carries all five numbers per location. Every change writes one stock_movements row and updates stock_levels in the same transaction with an optimistic version check (CONFLICT on race).
 - Sellable quantity = Available at sellable locations. Checkout cannot hold more than Available (plan ch. 9: prevent selling beyond eligible available quantities).
 - Seller stock and company stock are separate stock items with ownerType; summaries never add them together. The future fulfillment service keeps ownerType = seller at a company warehouse location, so reports can name the stock owner.

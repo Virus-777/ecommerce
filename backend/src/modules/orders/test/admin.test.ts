@@ -43,7 +43,7 @@ describe('admin orders', () => {
     const viewer = tokens.staff(['orders.orders.view']);
     const masked = await h.call('GET', `/api/admin/orders/orders/${o.id}`, viewer);
     expect(masked.body.customer.email).toBe('s***@example.com');
-    expect(masked.body.order.contact.email).toBe('s---@example.com');
+    expect(masked.body.order.contact.email).toBe('s***@example.com');
     expect(masked.body.customer.phone).toBe('***42');
     expect((await h.call('GET', `/api/admin/orders/orders/${newId()}`, all)).status).toBe(404);
 

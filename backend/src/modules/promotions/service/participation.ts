@@ -312,7 +312,7 @@ export class ParticipationPart extends Part {
             topic: 'seller.promotion.invited',
             recipients: [{ kind: 'seller', sellerId: p.seller_id }],
             context: { campaign: { respondBy: iso(p.respond_by!) } },
-            link: { kind: 'campaign', id: p.campaign_id, screen: 'seller/campaigns', label: 'Review invitation' },
+            link: { kind: 'campaign', id: p.campaign_id, screen: 'seller/marketing', label: 'Review invitation' },
             dedupeKey: key,
             actionRequired: true,
             deadline: iso(p.respond_by!),
