@@ -174,8 +174,7 @@ export class PurchasingService implements PurchasingPublicApi {
     if (!best) return null;
     const supplier = await this.repo.getSupplier(best.supplierId);
     if (!supplier) return null;
-    // the spec stores no return-authorization flag per supplier (spec gap): purchasing cannot say, so false
-    return { supplierId: supplier.id, name: supplier.name, supplierSku: best.supplierSku, unitCost: money(best.unitCostAmount, best.currency), returnAuthorizationRequired: false };
+    return { supplierId: supplier.id, name: supplier.name, supplierSku: best.supplierSku, unitCost: money(best.unitCostAmount, best.currency), returnAuthorizationRequired: supplier.returnAuthorizationRequired };
   }
 
   /** Incoming detail for stock screens and restock estimates */
@@ -363,6 +362,7 @@ export class PurchasingService implements PurchasingPublicApi {
       address: input.address ?? null,
       paymentTerms: clean(input.paymentTerms) ?? DEFAULT_PAYMENT_TERMS,
       leadTimeDays: input.leadTimeDays ?? 0,
+      returnAuthorizationRequired: input.returnAuthorizationRequired ?? false,
       active: input.active ?? true,
       notes: clean(input.notes),
       createdAt: this.now(),
@@ -389,6 +389,7 @@ export class PurchasingService implements PurchasingPublicApi {
       if (input.leadTimeDays != null) patch.leadTimeDays = input.leadTimeDays;
       if (input.notes !== undefined) patch.notes = clean(input.notes);
       if (input.active != null) patch.active = input.active;
+      if (input.returnAuthorizationRequired != null) patch.returnAuthorizationRequired = input.returnAuthorizationRequired;
       return { before, after: await tx.updateSupplier(id, patch) };
     });
     const deactivated = before.active && !after.active;
@@ -1235,7 +1236,9 @@ export class PurchasingService implements PurchasingPublicApi {
       const cur = await tx.getReceipt(id, { forUpdate: true });
       if (!cur) throw notFound('Receiving record');
       const updated = await tx.updateReceipt(id, { status: receiptMachine.next(cur.status, 'cancel') });
-      // the delivery stays in Receiving; starting again creates a new record (the spec has no way back to Arrived)
+      // the only receiving record of the delivery is gone: the delivery is back at the dock (Receiving → Arrived)
+      const delivery = await tx.getDelivery(cur.deliveryId, { forUpdate: true });
+      if (delivery?.status === 'receiving' && !(await tx.inProgressReceipt(cur.deliveryId))) await tx.updateDelivery(delivery.id, { status: deliveryMachine.next(delivery.status, 'reopen') });
       await tx.addEvent(this.event(cur.purchaseOrderId, `Receiving ${cur.ref} discarded`, reason, by.actor));
       return updated;
     });
@@ -1296,9 +1299,7 @@ export class PurchasingService implements PurchasingPublicApi {
       const before = await tx.getClaim(id, { forUpdate: true });
       if (!before) throw notFound('Supplier claim');
       const status = supplierClaimMachine.next(before.status, 'submit');
-      // no column for the supplier's reference (spec gap): kept in the notes
-      const notes = reference ? appendNote(before.notes, `Supplier reference: ${reference}`) : before.notes;
-      const after = await tx.updateClaim(id, { status, notes });
+      const after = await tx.updateClaim(id, { status, ...(reference ? { supplierReference: reference } : {}) });
       await tx.addEvent(this.event(before.purchaseOrderId, `Supplier claim ${before.ref} sent to supplier`, reference ? `Supplier reference ${reference}` : null, by.actor));
       return { before, after };
     });
@@ -1750,6 +1751,7 @@ export class PurchasingService implements PurchasingPublicApi {
       status: supplierClaimMachine.initial,
       settlement: null,
       settledAmount: null,
+      supplierReference: null,
       owner: c.owner,
       notes: c.notes,
       createdAt: this.now(),

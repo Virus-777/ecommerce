@@ -19,6 +19,7 @@ export interface SupplierRow {
   address: common.Address | null;
   paymentTerms: string;
   leadTimeDays: number;
+  returnAuthorizationRequired: boolean;
   active: boolean;
   notes: string | null;
   createdAt: Date;
@@ -147,6 +148,7 @@ export interface ClaimRow {
   status: ClaimStatus;
   settlement: 'credit_note' | 'refund' | 'replacement' | null;
   settledAmount: number | null;
+  supplierReference: string | null;
   owner: common.Actor;
   notes: string | null;
   createdAt: Date;
@@ -266,7 +268,7 @@ export interface PurchasingRepository {
 
   /* claims */
   insertClaim(row: ClaimRow): Promise<ClaimRow>;
-  updateClaim(id: string, patch: Partial<Pick<ClaimRow, 'status' | 'settlement' | 'settledAmount' | 'notes' | 'decidedAt'>>): Promise<ClaimRow>;
+  updateClaim(id: string, patch: Partial<Pick<ClaimRow, 'status' | 'settlement' | 'settledAmount' | 'supplierReference' | 'notes' | 'decidedAt'>>): Promise<ClaimRow>;
   getClaim(id: string, opts?: { forUpdate?: boolean }): Promise<ClaimRow | null>;
   claimsBy(filter: ClaimFilter): Promise<ClaimRow[]>;
   listClaims(filter: ClaimFilter, page: PageRequest): Promise<Page<ClaimRow>>;
