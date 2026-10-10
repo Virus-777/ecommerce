@@ -28,26 +28,27 @@ const inbox = async (headers: Record<string, string>, area: 'store' | 'seller', 
 const deliveriesTo = async (address: string) => (await app.inject({ method: 'GET', url: `/api/admin/notifications/deliveries?address=${encodeURIComponent(address)}`, headers: admin() })).json().items as any[];
 const guestEmail = () => `guest-${newId().slice(-12)}@example.com`;
 
-function cancelled(o: { orderId?: string; customerId?: string | null; contactEmail?: string | null; ref?: string }) {
+function cancelled(o: { orderId?: string; customerId?: string | null; contactEmail?: string | null; ref?: string; notifyCustomer?: boolean; ownerType?: 'official' | 'seller'; sellerId?: string | null; initiatedBy?: string }) {
   return {
     orderId: o.orderId ?? newId(),
     ref: o.ref ?? 'MK-261010-40001',
     customerId: o.customerId ?? null,
     contactEmail: o.contactEmail ?? null,
     groupId: newId(),
-    ownerType: 'official',
-    sellerId: null,
+    ownerType: o.ownerType ?? 'official',
+    sellerId: o.sellerId ?? null,
     itemId: newId(),
     offerId: newId(),
     stockItemId: newId(),
     quantity: 1,
     cancellationId: newId(),
-    initiatedBy: 'customer',
+    initiatedBy: o.initiatedBy ?? 'customer',
     reasonCode: 'changed_mind',
     beforeDispatch: true,
     countsAgainstSeller: false,
     refund: { itemAmount: money(4900), discountShare: money(0), shippingRefund: money(0), taxRefund: money(0), total: money(4900) },
     paymentIntentId: newId(),
+    notifyCustomer: o.notifyCustomer ?? true,
   };
 }
 
@@ -94,6 +95,7 @@ describe('customers named by the event', () => {
     await publish(app, 'returns.return.approved', {
       returnId,
       ref: 'RT-261010-0042',
+      orderRef: 'MK-261010-40042',
       orderId,
       customerId: c.customerId,
       contactEmail: null,
@@ -105,7 +107,7 @@ describe('customers named by the event', () => {
       dropOffBy: new Date(Date.now() + 7 * 86_400_000).toISOString(),
       trackingNumber: null,
     });
-    await publish(app, 'returns.return.received', { returnId, customerId: c.customerId, contactEmail: null, ownerType: 'official', sellerId: null, items: [], receivedAt: new Date().toISOString() });
+    await publish(app, 'returns.return.received', { returnId, ref: 'RT-261010-0042', orderId, orderRef: 'MK-261010-40042', customerId: c.customerId, contactEmail: null, ownerType: 'official', sellerId: null, items: [], receivedAt: new Date().toISOString() });
     const mine = await inbox(as.customer(c), 'store', '?group=returns_refunds');
     expect(mine.map((n) => n.topicKey)).toEqual(['customer.return.received', 'customer.return.approved']);
     expect(mine[1]).toMatchObject({ link: { kind: 'return', id: returnId, ref: 'RT-261010-0042' } });
@@ -221,6 +223,6 @@ describe('idempotent consumers', () => {
     await service.onLabelCreatedFromReturns(label, labelEvent);
     const due = await service.core.repo.dueScheduled(new Date(Date.now() + 30 * 86_400_000), 500);
     expect(due.filter((s) => s.dedupe_key === `return-dropoff:${returnId}`)).toHaveLength(1);
-    expect((due.find((s) => s.dedupe_key === `return-dropoff:${returnId}`)!.input as any).recipients).toEqual([{ kind: 'customer', accountId: c.accountId }]);
+    expect((due.find((s) => s.dedupe_key === `return-dropoff:${returnId}`)!.input as any).recipients).toEqual([{ kind: 'customer', customerId: c.customerId }]);
   });
 });

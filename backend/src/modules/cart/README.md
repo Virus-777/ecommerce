@@ -104,7 +104,7 @@ One cart across the Official Store and marketplace sellers for customers and gue
 | Field | Type |
 |---|---|
 | id | `uuid` |
-| kind | `enum(price_increased|price_decreased|out_of_stock|quantity_reduced|purchase_limit_reduced|offer_ended|seller_unavailable|product_unavailable|not_shippable|delivery_estimate_changed|coupon_no_longer_applies)` What changed since the customer added or last accepted the line |
+| kind | `enum(price_increased|price_decreased|out_of_stock|quantity_reduced|purchase_limit_reduced|offer_ended|seller_unavailable|product_unavailable|not_shippable|delivery_estimate_changed|coupon_no_longer_applies|terms_changed)` What changed since the customer added or last accepted the line. terms_changed: the offer's return, warranty or dispatch terms changed (OfferChange kind terms: offers termsVersion above acceptedTermsVersion); a warning the customer accepts, which moves acceptedTermsVersion to the current version |
 | severity | `enum(info|warning|blocking)` blocking = the line is excluded from checkout until resolved; warning = included only after the customer accepts; info = shown once |
 | message | `string` Customer-facing sentence, e.g. 'Price changed since you added it: was $94.99, now $99.99. Northwind Audio updated this offer on Oct 8.' |
 | previousPrice | `Money?` |
@@ -304,6 +304,7 @@ One cart across the Official Store and marketplace sellers for customers and gue
 |---|---|
 | mergedFromCartId | `uuid?` |
 | lines | `MergeLine[]` |
+| savedItemsMoved | `int` Guest saved-for-later items moved to the customer (an offer the customer already saved is kept once) |
 | message | `string?` Shown once after sign-in, e.g. 'We added 2 items from before you signed in' |
 
 ### MergeResult
@@ -484,7 +485,7 @@ Indexes: `(item_id) where resolved_at is null`
 | variant_id | uuid |
 | saved_at | timestamptz |
 
-Indexes: `unique (customer_id, offer_id)`, `(guest_session_id)`
+Indexes: `unique (customer_id, offer_id)`, `unique (guest_session_id, offer_id)`, `(guest_session_id)`
 
 **cart_merges**: Guest-to-customer merges with their report
 
@@ -522,7 +523,7 @@ Indexes: `unique (customer_id, offer_id)`, `(guest_session_id)`
 | `sellers.seller.restricted` | sellers | Lines from offers the restriction hides get seller_unavailable notices; nothing is switched to another seller |
 | `sellers.seller.suspended` | sellers | Same as restricted |
 | `catalog.product.publication_changed` | catalog | Hidden or suspended products give their lines a product_unavailable notice |
-| `identity.guest_session.claimed` | identity | Merge the claimed guest session's cart into the account's customer cart (same rules and report as POST /cart/merge; idempotent). This is how sign-in merges carts on every client; identity only publishes the event and calls nothing in cart |
+| `identity.guest_session.claimed` | identity | Merge the claimed guest session's cart and saved-for-later items into the account's customer cart (same rules and report as POST /cart/merge; idempotent). This is how sign-in merges carts on every client; identity only publishes the event and calls nothing in cart |
 
 ## In-process API (for other modules)
 
@@ -572,10 +573,11 @@ Indexes: `unique (customer_id, offer_id)`, `(guest_session_id)`
 - Dependencies: architecture lists offers and inventory. catalog is optional and only used for display fields that offers does not return; shipping (package estimates, coverage) and promotions (coupon preview, was-price) are optional so the cart still works with flat offer data when they are off; customers resolves saved address ids for the deliver-to location.
 - Owner resolution: a customer session uses the customer's cart; otherwise the X-Guest-Session header identifies the guest cart (guest sessions are issued by identity). Requests with neither get UNAUTHORIZED.
 - Never switch sellers: a line's offerId only changes through POST /cart/items/{id}/switch-offer. Alternatives are only hinted (count and lowest price), never applied.
-- Change detection runs on every GET /cart and before getCartForCheckout through offers.revalidate (lines with offerId, quantity, acceptedTermsVersion, acceptedUnitPrice; postal code of the deliver-to location) plus inventory.getAvailability; OfferChange kinds map to notices (price → price_increased/price_decreased, availability → out_of_stock/quantity_reduced, delivery → delivery_estimate_changed or not_shippable, removed → offer_ended, seller_restricted → seller_unavailable). Promotion-driven price changes come from promotions.priceOffers. Baseline = acceptedUnitPrice and the quantity the customer chose. Increases create a warning notice that must be accepted; decreases are info notices accepted automatically. Out of stock, offer ended, seller unavailable, product unavailable and not shippable are blocking: the line stays visible, is excluded from checkout and the rest of the cart is unchanged.
+- Change detection runs on every GET /cart and before getCartForCheckout through offers.getOffers (one batch read of every line's offer, any status) and offers.revalidate (lines with offerId, quantity, acceptedTermsVersion, acceptedUnitPrice; postal code of the deliver-to location) plus inventory.getAvailability; OfferChange kinds map to notices (price → price_increased/price_decreased, availability → out_of_stock/quantity_reduced, delivery → delivery_estimate_changed or not_shippable, removed → offer_ended, seller_restricted → seller_unavailable, terms → terms_changed). Promotion-driven price changes come from promotions.priceOffers. Baseline = acceptedUnitPrice and the quantity the customer chose. Increases create a warning notice that must be accepted; decreases are info notices accepted automatically. Out of stock, offer ended, seller unavailable, product unavailable and not shippable are blocking: the line stays visible, is excluded from checkout and the rest of the cart is unchanged.
 - Packages: lines group by seller and ship-from location. Delivery estimate and shipping per package come from shipping.quoteOptions for the default (cheapest eligible) method; checkout lets the customer pick other options. Package labels ('Package 2 of 3') are computed per view, not stored.
 - Quantity limits: the line maximum is min(offer purchase limit, available stock, maxQuantityPerLine). Per-customer limits that count earlier orders are enforced in checkout, which can read order history.
-- Merge on sign-in: same offer combines up to the limit; different offers for the same variant are both kept (kept_separate_offer); unavailable guest lines are dropped and listed in the report; guest coupon codes are carried over when still valid.
+- Merge on sign-in: same offer combines up to the limit; different offers for the same variant are both kept (kept_separate_offer); unavailable guest lines are dropped and listed in the report; guest coupon codes are carried over when still valid; guest saved-for-later items move to the customer, deduplicated on (customer_id, offer_id).
+- Promotions input: cart passes every line to promotions.evaluateCart with a non-empty sellerId (the seller id, or OFFICIAL_STORE_ID from common constants for Official Store lines; never '' or null) and categoryId when known (null otherwise). Checkout does the same. CheckoutCartLine.sellerId itself stays null for the Official Store, as in offers.
 - The cart never reserves stock. Reservations start at Place order in checkout.
 - Save for later is listed in the plan as a later addition (ch. 6) and belongs with saved shopping (Growth), so its endpoints are phase 3. 'Tell me when it's back' is a wishlist alert (phase 3).
 
@@ -859,6 +861,8 @@ enum CartNoticeKind @areas(in: [STORE]) {
   NOT_SHIPPABLE
   DELIVERY_ESTIMATE_CHANGED
   COUPON_NO_LONGER_APPLIES
+  "The offer's return, warranty or dispatch terms changed; accepting moves the accepted terms version"
+  TERMS_CHANGED
 }
 
 enum CartNoticeSeverity @areas(in: [STORE]) {

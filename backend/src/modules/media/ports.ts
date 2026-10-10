@@ -51,6 +51,14 @@ export interface MediaRepository {
   findAssetByStorageKey(bucket: string, key: string): Promise<AssetRow | null>;
   /** An earlier live asset of the same owner with this perceptual hash */
   findDuplicate(owner: OwnerFilter, phash: number, asset: { id: string; createdAt: Date }): Promise<string | null>;
+  /**
+   * Ready public images whose perceptual hash is within maxDistance (Hamming) of phash, closest first. Private
+   * files are never returned. usageKinds: only images with an active usage of one of these kinds.
+   */
+  similarImages(
+    phash: number,
+    filter: { excludeId: string; maxDistance: number; limit: number; ownerKind?: string; ownerId?: string; usageKinds?: readonly string[] },
+  ): Promise<{ asset: AssetRow; distance: number }[]>;
   /** Bytes an owner stores (live files), for the storage quota */
   storedBytes(owner: OwnerFilter): Promise<number>;
   /** Assets of one owner in the given statuses (account and seller closure) */

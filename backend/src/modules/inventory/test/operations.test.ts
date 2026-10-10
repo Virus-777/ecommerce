@@ -97,7 +97,7 @@ describe('receiving', () => {
         { stockItemId: b.id, expected: 4, received: 5, damaged: 0, unitCost: usd(2000) },
       ],
     });
-    expect(submitted).toMatchObject({ state: 'awaiting_confirmation', totals: { received: 15, damaged: 1, shortage: 0, sellable: 14 }, waitingOrders: 0, receivedBy: { name: 'Jordan Lee' } });
+    expect(submitted).toMatchObject({ state: 'awaiting_confirmation', totals: { received: 15, damaged: 1, shortage: 0, sellable: 14 }, openPickShortages: 0, receivedBy: { name: 'Jordan Lee' } });
     expect(submitted.lines.find((l) => l.stockItemId === b.id)).toMatchObject({ outOfStockNow: true, sellable: 5 });
     const again = await h.api.submitInbound({ receiptId, receiptRef: 'REC-261006-03', purchaseOrderId: po, purchaseOrderRef: 'PUR-2610-0042', supplierName: 'x', locationId: loc.id, receivedBy: staffActor, receivedAt: h.clock.now().toISOString(), lines: [] });
     expect(again.id).toBe(submitted.id); // same receipt: no double Incoming
@@ -125,15 +125,19 @@ describe('receiving', () => {
     expect(await ledgerMismatches(h)).toEqual([]);
   });
 
-  it('serves orders waiting on a pick shortage first when the receipt is confirmed', async () => {
+  it('lists open pick shortages on a receipt; nothing is allocated automatically (no backorders), staff reallocate', async () => {
     const a = await officialItem(h, loc.id, 1);
     const o = await order(a.id, 1);
     const reported = await h.api.reportDiscrepancy({ kind: 'pick_shortage', stockItemId: a.id, locationId: loc.id, quantity: 1, orderId: o.orderId, orderRef: 'MK-1', reportedBy: staffActor });
     const po = newId();
     await h.api.expectIncoming(po, 'PUR-2610-0050', loc.id, [{ stockItemId: a.id, quantity: 3, expectedDate: '2026-10-20' }]);
     const r = await h.api.submitInbound({ receiptId: newId(), receiptRef: 'REC-1', purchaseOrderId: po, purchaseOrderRef: 'PUR-2610-0050', supplierName: 'Halden', locationId: loc.id, receivedBy: staffActor, receivedAt: h.clock.now().toISOString(), lines: [{ stockItemId: a.id, expected: 3, received: 3, damaged: 0, unitCost: usd(500) }] });
-    expect(r.waitingOrders).toBe(1);
+    expect(r.openPickShortages).toBe(1);
     await admin(h, 'POST', `/inbound/${r.id}/confirm`, { lines: [], checked: true });
+    expect(eventsNamed(h, 'inventory.discrepancy.resolved')).toEqual([]);
+    expect((await admin(h, 'GET', `/inbound/${r.id}`)).json().openPickShortages).toBe(1);
+    const resolved = await admin(h, 'POST', `/discrepancies/${reported.id}/resolve`, { resolution: 'reallocated', sourceGroup: 'available', note: 'Served from the new delivery' });
+    expect(resolved.statusCode, resolved.body).toBe(200);
     expect(eventsNamed(h, 'inventory.discrepancy.resolved')).toEqual([{ discrepancyId: reported.id, resolution: 'reallocated', orderId: o.orderId }]);
     expect(await quantities(h, a.id)).toMatchObject({ available: 2, reserved: 1 });
     expect(await reservedMismatches(h)).toEqual([]);
@@ -142,11 +146,11 @@ describe('receiving', () => {
 
 describe('returns', () => {
   const inspected = async (returnId: string, variantId: string, quantity: number, proposed = 'restock', o: { orderItemId?: string; stockItemId?: string | null } = {}) => {
-    h.app.kernel.events.publish('returns', 'returns.return.inspected', { returnId, ownerType: 'official', sellerId: null, conditionOutcome: 'Like new, opened', proposedStockOutcome: proposed, orderItemId: o.orderItemId ?? newId(), variantId, stockItemId: o.stockItemId ?? null, quantity });
+    h.app.kernel.events.publish('returns', 'returns.return.inspected', { returnId, ref: 'RT-261010-0001', orderId: newId(), orderRef: 'MK-261010-0001', ownerType: 'official', sellerId: null, conditionOutcome: 'Like new, opened', proposedStockOutcome: proposed, orderItemId: o.orderItemId ?? newId(), variantId, stockItemId: o.stockItemId ?? null, quantity });
     await h.app.kernel.events.drain();
   };
   const received = async (returnId: string, items: { orderItemId: string; quantity: number; variantId: string; stockItemId?: string | null }[], ownerType: 'official' | 'seller' = 'official') => {
-    h.app.kernel.events.publish('returns', 'returns.return.received', { returnId, ownerType, sellerId: ownerType === 'seller' ? newId() : null, items, receivedAt: new Date().toISOString() });
+    h.app.kernel.events.publish('returns', 'returns.return.received', { returnId, ref: 'RT-261010-0001', orderId: newId(), orderRef: 'MK-261010-0001', ownerType, sellerId: ownerType === 'seller' ? newId() : null, items, receivedAt: new Date().toISOString() });
     await h.app.kernel.events.drain();
   };
 
@@ -165,7 +169,7 @@ describe('returns', () => {
 
     await inspected(returnId, a.variantId, 2, 'restock', { orderItemId: itemA, stockItemId: a.id });
     await inspected(returnId, a.variantId, 2, 'restock', { orderItemId: itemA, stockItemId: a.id }); // replay
-    h.app.kernel.events.publish('returns', 'returns.return.inspected', { returnId: newId(), ownerType: 'seller', sellerId: newId(), conditionOutcome: 'x', proposedStockOutcome: 'restock', orderItemId: newId(), variantId: a.variantId, quantity: 1 });
+    h.app.kernel.events.publish('returns', 'returns.return.inspected', { returnId: newId(), ref: 'RT-261010-0002', orderId: newId(), orderRef: 'MK-261010-0002', ownerType: 'seller', sellerId: newId(), conditionOutcome: 'x', proposedStockOutcome: 'restock', orderItemId: newId(), variantId: a.variantId, quantity: 1 });
     await h.app.kernel.events.drain();
     expect(await quantities(h, a.id)).toMatchObject({ returned: 2, available: 0 }); // inspection moves nothing
     const pending = (await admin(h, 'GET', '/return-outcomes?state=pending')).json().items.filter((o: { returnId: string }) => o.returnId === returnId);
@@ -278,7 +282,7 @@ describe('discrepancies', () => {
     expect(await reservedMismatches(h)).toEqual([]);
 
     const b = await officialItem(h, loc.id, 0);
-    h.app.kernel.events.publish('returns', 'returns.return.inspected', { returnId: newId(), ownerType: 'official', sellerId: null, conditionOutcome: 'New', proposedStockOutcome: 'restock', orderItemId: newId(), variantId: b.variantId, quantity: 1 });
+    h.app.kernel.events.publish('returns', 'returns.return.inspected', { returnId: newId(), ref: 'RT-261010-0002', orderId: newId(), orderRef: 'MK-261010-0002', ownerType: 'official', sellerId: null, conditionOutcome: 'New', proposedStockOutcome: 'restock', orderItemId: newId(), variantId: b.variantId, quantity: 1 });
     await h.app.kernel.events.drain();
     await admin(h, 'POST', '/adjustments', { stockItemId: b.id, fromGroup: 'outside', toGroup: 'available', quantity: 1, reasonCode: 'found_stock' });
     const ob = await order(b.id, 1);
@@ -304,17 +308,33 @@ describe('low stock and jobs', () => {
     expect(summary.lowStockHeadline).toMatch(/SKUs? at or below reorder point/);
   });
 
-  it('sends low-stock reminders once per cooldown in the daily digest', async () => {
+  it('publishes one low-stock digest per owner (worst first), and nothing for an owner with nothing to report', async () => {
     const sellerId = newId();
-    const item = await sellerItem(h, sellerId, 1);
+    const low = await sellerItem(h, sellerId, 1);
+    const out = await sellerItem(h, sellerId, 0);
+    await sellerItem(h, sellerId, 40); // well stocked
+    const quiet = newId();
+    await sellerItem(h, quiet, 40);
     h.events.length = 0;
-    h.clock.advance(25 * 3_600_000);
     await h.app.kernel.jobs.runNow('inventory.low-stock-digest');
     await h.app.kernel.events.drain();
-    expect(eventsNamed(h, 'inventory.stock.low').filter((e) => e.stockItemId === item.id)).toHaveLength(1);
-    await h.app.kernel.jobs.runNow('inventory.low-stock-digest');
-    await h.app.kernel.events.drain();
-    expect(eventsNamed(h, 'inventory.stock.low').filter((e) => e.stockItemId === item.id)).toHaveLength(1);
+    const digests = eventsNamed(h, 'inventory.stock.low_digest');
+    const mine = digests.filter((d) => d.sellerId === sellerId);
+    expect(mine).toEqual([
+      {
+        ownerType: 'seller',
+        sellerId,
+        date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+        lowCount: 1,
+        outOfStockCount: 1,
+        items: [
+          expect.objectContaining({ stockItemId: out.id, state: 'out_of_stock', available: 0 }),
+          expect.objectContaining({ stockItemId: low.id, offerId: low.offerId, sku: low.sku, state: 'low_stock', available: 1, threshold: expect.any(Number) }),
+        ],
+      },
+    ]);
+    expect(digests.filter((d) => d.sellerId === quiet)).toEqual([]);
+    expect(eventsNamed(h, 'inventory.stock.low')).toEqual([]); // the digest is one summary, not a reminder per item
   });
 
   it('takes a valuation snapshot', async () => {
@@ -403,8 +423,8 @@ describe('GraphQL read layer', () => {
     const sellerId = newId();
     const mine = await sellerItem(h, sellerId, 2, { lowStockThreshold: 5 });
     const theirs = await sellerItem(h, newId(), 9, { variantId: mine.variantId });
-    const sellerCtx = { area: 'seller', principal: { kind: 'seller', sellerId }, permissions: new Map() } as unknown as GraphQLContext;
-    const staffCtx = { area: 'admin', principal: { kind: 'staff' }, permissions: new Map() } as unknown as GraphQLContext;
+    const sellerCtx = { area: 'seller', principal: { kind: 'seller', sellerId }, permissions: new Map(), can: async () => false } as unknown as GraphQLContext;
+    const staffCtx = { area: 'admin', principal: { kind: 'staff' }, permissions: new Map(), can: async (p: string) => p === 'inventory.stock.view' } as unknown as GraphQLContext;
     const field = (type: string, name: string) => r[type]![name] as (root: unknown, args: unknown, ctx: GraphQLContext, info?: unknown) => Promise<any>;
     const [avail, other] = await Promise.all([
       field('Offer', 'availability')({ id: mine.offerId, stockItemId: mine.id, purchaseLimit: 1 }, {}, staffCtx),

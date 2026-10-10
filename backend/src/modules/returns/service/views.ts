@@ -5,6 +5,7 @@
  */
 import { money } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
+import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type {
   AdminReturnRow,
   EarningsImpact,
@@ -174,7 +175,7 @@ export class Views {
   }
 
   handlerName(ret: ReturnRec): string {
-    if (ret.owner_type === 'official') return 'Marketly Official';
+    if (ret.owner_type === 'official') return OFFICIAL_STORE_NAME;
     if (ret.platform_handling) return 'Marketly support';
     return ret.terms_snapshot.meta.sellerName;
   }
@@ -278,6 +279,7 @@ export class Views {
       shippingRefund: m(rr.shipping_refund),
       returnShippingDeduction: m(rr.return_shipping_deduction),
       deductions: rr.deductions.list,
+      taxRefund: rr.deductions.taxRefund ? m(rr.deductions.taxRefund) : null,
       total: m(rr.total),
       maxRefundable: m(rr.deductions.maxRefundable),
       destination: rr.deductions.destinationLabel,
@@ -307,13 +309,22 @@ export class Views {
 
   replacement(rep: ReplacementRec, agg: Agg): Replacement {
     const item = agg.items.find((i) => i.order_item_id === rep.order_item_id) ?? agg.items[0];
+    return this.replacementOf(rep, item ? { title: item.title, options: item.options ?? {}, variantId: item.variant_id } : undefined);
+  }
+
+  /** A replacement with the original item's title and options (from its return, or the order for case replacements) */
+  replacementOf(rep: ReplacementRec, item?: { title: string; options: Record<string, string>; variantId: string }): Replacement {
     return {
       id: rep.id,
+      returnId: rep.return_id,
+      caseId: rep.case_id,
+      orderId: rep.order_id,
+      orderItemId: rep.order_item_id,
       kind: rep.kind as Replacement['kind'],
       status: rep.status as Replacement['status'],
       variantId: rep.variant_id,
       title: item?.title ?? 'Replacement',
-      options: rep.variant_id === item?.variant_id ? (item?.options ?? {}) : {},
+      options: rep.variant_id === item?.variantId ? (item?.options ?? {}) : {},
       quantity: rep.quantity,
       chargeNote: rep.kind === 'exchange' ? 'Exchange at the same price, no charge' : 'Same item, no charge',
       carrier: null,
@@ -345,7 +356,7 @@ export class Views {
       ref: r.ref,
       orderId: r.order_id,
       orderRef: r.order_ref,
-      seller: { ownerType: r.owner_type, id: r.seller_id, name: r.owner_type === 'official' ? 'Marketly Official Store' : r.terms_snapshot.meta.sellerName },
+      seller: { ownerType: r.owner_type, id: r.seller_id, name: r.owner_type === 'official' ? OFFICIAL_STORE_NAME : r.terms_snapshot.meta.sellerName },
       status: r.status as ReturnStatus,
       statusLabel: customerStatusLabel(facts),
       track: returnTrack({ ...facts, remedyKind: rep && rep.status !== 'cancelled' ? rep.kind : r.remedy }),
@@ -566,7 +577,7 @@ export class Views {
       orderItemIds: rr.order_item_ids,
       ownerType: rr.owner_type,
       sellerId: rr.seller_id,
-      sellerName: rr.owner_type === 'official' ? 'Marketly Official Store' : (ret?.terms_snapshot.meta.sellerName ?? x.sellerName ?? 'Seller'),
+      sellerName: rr.owner_type === 'official' ? OFFICIAL_STORE_NAME : (ret?.terms_snapshot.meta.sellerName ?? x.sellerName ?? 'Seller'),
       customerName: ret?.terms_snapshot.meta.customerName ?? x.customerName ?? 'Customer',
       status: rr.status as RefundRequest['status'],
       breakdown: this.breakdown(rr, is(['requested', 'under_review', 'declined'], rr.status)),
@@ -606,7 +617,7 @@ export class Views {
       orderRef: r.order_ref,
       ownerType: r.owner_type,
       sellerId: r.seller_id,
-      sellerName: r.owner_type === 'official' ? 'Marketly Official Store' : r.terms_snapshot.meta.sellerName,
+      sellerName: r.owner_type === 'official' ? OFFICIAL_STORE_NAME : r.terms_snapshot.meta.sellerName,
       item: this.item(agg.items[0]!, r),
       itemCount: agg.items.reduce((n, i) => n + i.quantity, 0),
       status: r.status,
@@ -663,7 +674,7 @@ export class Views {
       ref: r.ref,
       orderId: r.order_id,
       orderRef: r.order_ref,
-      seller: { ownerType: r.owner_type, id: r.seller_id, name: r.owner_type === 'official' ? 'Marketly Official Store' : r.terms_snapshot.meta.sellerName },
+      seller: { ownerType: r.owner_type, id: r.seller_id, name: r.owner_type === 'official' ? OFFICIAL_STORE_NAME : r.terms_snapshot.meta.sellerName },
       item: this.item(agg.items[0]!, r),
       reason: reasonLabel(r.reason),
       amount: this.amountOf(agg),

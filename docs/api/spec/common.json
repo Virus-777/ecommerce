@@ -127,6 +127,19 @@
     "Deadline": {
       "dueAt": "datetime",
       "state": "enum(on_time|due_soon|overdue)"
+    },
+    "PageInfo": {
+      "nextCursor": { "type": "string?", "desc": "Cursor for the next batch; null on the last page" },
+      "page": "int?",
+      "totalPages": "int?",
+      "total": "int?"
+    },
+    "CustomerDataSection": {
+      "key": { "type": "string", "desc": "File name inside the export ZIP without extension, e.g. messages, reviews, store_credit" },
+      "title": { "type": "string", "desc": "Heading in the export's index, e.g. Messages" },
+      "module": "string",
+      "records": { "type": "json[]", "desc": "Plain records about the customer (their own words, choices and amounts). Other people's personal details are left out or masked; internal staff notes are never included." },
+      "attachmentIds": { "type": "uuid[]?", "desc": "Media assets the customer uploaded that belong in the ZIP (message attachments, review photos)" }
     }
   },
   "pagination": {
@@ -169,7 +182,7 @@
     },
     "APPROVAL_REQUIRED": {
       "status": 409,
-      "meaning": "Above the caller's limit or needs a second reviewer. details.approvalRequestId tracks it."
+      "meaning": "Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses)."
     },
     "CONFLICT": {
       "status": 409,
@@ -225,6 +238,10 @@
     "OFFICIAL_STORE_ID": {
       "value": "00000000-0000-7000-8000-000000000001",
       "desc": "Seller id of the Official Store, used wherever a seller id is required (feedback, reviews, returns terms, conversations, report facts, promotion lines). The sellers module never issues it."
+    },
+    "OFFICIAL_STORE_NAME": {
+      "value": "Marketly Official Store",
+      "desc": "Display name of the Official Store wherever a seller name is shown (cart, checkout, orders, conversations, reviews, returns, notices). Use this constant instead of writing the label."
     }
   },
   "stack": [

@@ -16,7 +16,7 @@ import { ContentService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.0.1',
+  version: '1.1.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
@@ -33,6 +33,8 @@ export default defineModule({
     ctx.events.on("offers.offer.status_changed", (e) => service.onOfferStatusChangedFromOffers(e.payload));
     ctx.events.on("inventory.stock.changed", (e) => service.onStockChangedFromInventory(e.payload));
     ctx.events.on("sellers.seller.suspended", (e) => service.onSellerSuspendedFromSellers(e.payload));
+    ctx.events.on("sellers.seller.reinstated", (e) => service.onSellerReinstatedFromSellers(e.payload));
+    ctx.events.on("sellers.seller.closed", (e) => service.onSellerClosedFromSellers(e.payload, e.id));
     ctx.events.on("access.approval.decided", (e) => service.onApprovalDecidedFromAccess(e.payload));
 
     // ad positions from advertising (locked markers in the homepage layout), once every module is up

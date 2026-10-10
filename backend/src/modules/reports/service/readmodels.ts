@@ -12,7 +12,7 @@ import type * as identity from '../../../spec/identity.js';
 import type * as orders from '../../../spec/orders.js';
 import type { ReadModelStatus } from '../../../spec/reports.js';
 import { isOfficialSeller, OFFICIAL_KEY, READ_MODELS, readModelDef } from '../domain/catalogue.js';
-import { addDays, customerKey, marketDay } from '../domain/rules.js';
+import { addDays, customerKey, marketDay, splitRefund } from '../domain/rules.js';
 import type { OrderItemFact } from '../ports.js';
 import { invalid, notFound, type Caller, type ReportsCore } from './core.js';
 
@@ -23,6 +23,20 @@ export interface Env {
 }
 
 const MINUTE = 60_000;
+
+/** What a rebuild reads per read model; the ones kept from events only cannot be rebuilt until the kernel keeps an event log */
+const REBUILDS: Record<string, string | null> = {
+  order_items: 'Order facts are refreshed from orders',
+  customers: 'Buyers are recomputed from the order facts',
+  discovery: 'Units ordered are recomputed from the order facts; views and stock-out minutes stay as received',
+  marketplace_finance: 'The last 90 days are pulled again from finance and advertising',
+  search_misses: 'Searches without results are pulled again from search for yesterday',
+  campaigns: 'The last 90 days are pulled again from advertising',
+  refunds: null,
+  returns: null,
+  service: null,
+};
+const EVENT_ONLY_NOTE = 'Kept from events only: there is no event log to replay yet, so it cannot be rebuilt';
 const DAY = 86_400_000;
 
 export class ReadModels {
@@ -215,25 +229,53 @@ export class ReadModels {
     await this.touch(['order_items', 'service', 'customers'], env);
   }
 
+  /**
+   * payments.refund.sent: one fact_refunds row per seller (decision D5). The items the refund names go to their
+   * sellers; the rest (shipping, unnamed amounts) is split proportionally to each seller's item amounts on the
+   * order. after_payout: a payout to that seller was paid between the item's delivery and the refund (the sale may
+   * already have been paid out).
+   */
   async onRefundSent(p: EventPayload<'payments.refund.sent'>, env: Env) {
     const rows = await this.ensureOrder(p.orderId, { accepted: true });
-    const sellers = [...new Set(p.items.map((i) => i.sellerId ?? null))];
-    const named = (sellers.length === 1 ? sellers[0] : p.items[0]?.sellerId) ?? null;
-    const sellerId = isOfficialSeller(named) ? null : named;
+    const keyOf = (sellerId: string | null | undefined) => (isOfficialSeller(sellerId) ? OFFICIAL_KEY : sellerId!);
+    const rowSeller = (r: OrderItemFact) => (r.owner_type === 'official' ? OFFICIAL_KEY : keyOf(r.seller_id));
+    const shares = splitRefund(
+      p.amount.amount,
+      p.items.map((i) => {
+        const row = rows.find((r) => r.order_item_id === i.orderItemId);
+        return { sellerId: i.sellerId ? keyOf(i.sellerId) : row ? rowSeller(row) : OFFICIAL_KEY, amount: i.amount.amount };
+      }),
+      rows.map((r) => ({ sellerId: rowSeller(r), weight: Number(r.item_minor) })),
+    );
     const sentAt = new Date(p.sentAt);
+    const sentDay = await this.day(sentAt);
+    // after_payout per seller, read before the transaction
+    const afterPayout = new Map<string, boolean>();
+    for (const sellerId of shares.keys()) {
+      if (sellerId === OFFICIAL_KEY) {
+        afterPayout.set(sellerId, false);
+        continue;
+      }
+      const theirs = rows.filter((r) => rowSeller(r) === sellerId && r.delivered_at);
+      const named = theirs.filter((r) => p.items.some((i) => i.orderItemId === r.order_item_id));
+      const delivered = (named.length ? named : theirs).map((r) => new Date(r.delivered_at!).getTime());
+      afterPayout.set(sellerId, delivered.length ? await this.repo.paidPayoutBetween(sellerId, await this.day(new Date(Math.min(...delivered))), sentDay) : false);
+    }
     await this.repo.transaction(async (tx) => {
-      const inserted = await tx.insertRefund({
-        refund_id: p.refundId,
-        order_id: p.orderId,
-        owner_type: sellerId ? 'seller' : 'official',
-        seller_id: sellerId,
-        amount_minor: p.amount.amount,
-        currency: p.amount.currency,
-        reason: p.origin || null,
-        after_payout: false,
-        sent_at: sentAt,
-      });
-      if (!inserted) return;
+      if (!(await tx.claim(`refund:${p.refundId}`))) return;
+      for (const [sellerId, amount] of shares) {
+        await tx.insertRefund({
+          refund_id: p.refundId,
+          seller_id: sellerId,
+          order_id: p.orderId,
+          owner_type: sellerId === OFFICIAL_KEY ? 'official' : 'seller',
+          amount_minor: amount,
+          currency: p.amount.currency,
+          reason: p.origin || null,
+          after_payout: afterPayout.get(sellerId) ?? false,
+          sent_at: sentAt,
+        });
+      }
       for (const i of p.items) {
         const row = rows.find((r) => r.order_item_id === i.orderItemId);
         if (row) await tx.addToOrderItem(row.order_item_id, { refunded_minor: i.amount.amount }, { last_refund_at: sentAt });
@@ -557,7 +599,9 @@ export class ReadModels {
     for (const sellerId of await this.repo.sellersWithMessages(day)) {
       if (sellerId === OFFICIAL_KEY) continue;
       const stats = await this.core.soft('messaging.sellerResponseStats', () => messaging.sellerResponseStats(sellerId, { from: day, to: day }));
-      if (stats?.averageReplyMinutes != null) await this.repo.bumpDaily('fact_service_daily', { seller_id: sellerId, day }, {}, { first_reply_minutes_p50: Math.round(stats.averageReplyMinutes) });
+      // the median first reply time (messaging's medianReplyMinutes), the average when messaging gives no median
+      const p50 = stats?.medianReplyMinutes ?? stats?.averageReplyMinutes;
+      if (p50 != null) await this.repo.bumpDaily('fact_service_daily', { seller_id: sellerId, day }, {}, { first_reply_minutes_p50: Math.round(p50) });
     }
   }
 
@@ -581,6 +625,8 @@ export class ReadModels {
         rows: await this.repo.countRows(m.table as never),
         state,
         rebuildProgressPct: state === 'rebuilding' ? (cp?.rebuild_progress ?? 0) : null,
+        rebuildable: Boolean(REBUILDS[m.key]),
+        rebuildNote: REBUILDS[m.key] ?? EVENT_ONLY_NOTE,
       });
     }
     return out;
@@ -590,6 +636,8 @@ export class ReadModels {
     const def = readModelDef(key);
     if (!def) throw notFound('Read model');
     if (!reason.trim()) throw invalid([{ path: 'reason', message: 'Say why the read model is rebuilt' }]);
+    // refunds, returns and service are kept from events only: nothing to rebuild them from yet
+    if (!REBUILDS[key]) throw this.core.ctx.error('REBUILD_UNAVAILABLE', `${def.description} is kept from events only and cannot be rebuilt until an event log exists`, { key });
     const cp = await this.repo.getCheckpoint(key);
     if (cp?.state === 'rebuilding') throw new AppError('CONFLICT', `${key} is already being rebuilt`, { startedAt: cp.rebuild_started_at?.toISOString() ?? null });
     await this.repo.upsertCheckpoint(key, { state: 'rebuilding', rebuild_started_at: this.core.now(), rebuild_progress: 0 });

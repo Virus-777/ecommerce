@@ -109,8 +109,8 @@ describe('job schedules from the spec', () => {
     expect(parseSchedule(text)).toEqual(expected);
   });
 
-  it('leaves phrases it cannot time to runNow()', () => {
-    expect(parseSchedule('per payoutSchedule at cutoff (e.g. Thu 23:59 PT)').kind).toBe('manual');
-    expect(parseSchedule('queue worker').kind).toBe('manual');
+  it('refuses phrases it cannot time, so no job silently never runs', () => {
+    expect(() => parseSchedule('per payoutSchedule at cutoff (e.g. Thu 23:59 PT)')).toThrow(/not one the scheduler can time/);
+    expect(() => parseSchedule('queue worker')).toThrow(/not one the scheduler can time/);
   });
 });

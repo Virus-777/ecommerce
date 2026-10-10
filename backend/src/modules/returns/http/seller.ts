@@ -82,5 +82,7 @@ export const sellerRoutes = (service: ReturnsService) => {
     getSellerTerms: async ({ sellerId }) => service.policies.getSellerTerms(sellerId),
     /** PUT /terms: Change return terms or return address */
     updateSellerTerms: async (i) => service.policies.updateSellerTerms(i.sellerId, i.body, by(i)),
+    /** POST /replacements/{id}/cancel: Cancel a replacement or exchange not shipped yet (e.g. no stock) with a reason */
+    sellerCancelReplacement: async (i) => service.handling.cancelReplacement(i.params.id, i.body.reason, by(i), { area: 'seller', sellerId: i.sellerId }),
   });
 };

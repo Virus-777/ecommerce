@@ -138,6 +138,10 @@ export interface TrustRepository {
   /** Admin queue: offset paging over the filtered reports */
   listReports(f: ReportFilter, page: { offset: number; limit: number }): Promise<{ items: ReportRec[]; total: number }>;
   countReports(f: ReportFilter): Promise<number>;
+  /** Distinct subject ids of a type named by reports (not merged), optionally only in these statuses / among these ids */
+  subjectIdsAbout(type: string, o: { statuses?: string[]; ids?: string[] }): Promise<string[]>;
+  /** Distinct reporter ids of a kind with reports filed (not merged), optionally only in these statuses / among these ids */
+  reporterIdsFiling(kind: string, o: { statuses?: string[]; ids?: string[] }): Promise<string[]>;
   /** Report ids that name any of the subjects */
   reportIdsAbout(types: string[], id: string): Promise<string[]>;
   /** Enforcement ids recorded against any of these targets (lookup table) */

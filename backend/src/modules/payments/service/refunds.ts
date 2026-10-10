@@ -80,9 +80,11 @@ export class Refunds {
   private async capturedGroups(repo: PaymentsRepository, intent: IntentRec | undefined): Promise<{ all: boolean; groups: Set<string> }> {
     // paid entirely with store credit: the whole order is charged once the payment is captured (nothing goes to a card)
     if (intent && intent.status === 'captured' && this.credit.card(intent) === 0 && this.credit.paid(intent) > 0) return { all: true, groups: new Set() };
-    if (!intent || intent.captured_amount <= 0) return { all: false, groups: new Set() };
+    if (!intent) return { all: false, groups: new Set() };
+    // succeeded captures charged their groups, credit-only ones (amount 0) included
     const captures = await repo.find('captures', { intent_id: intent.id, status: 'succeeded' });
-    return { all: captures.some((c) => c.group_id === null) || !captures.length, groups: new Set(captures.map((c) => c.group_id).filter((g): g is string => Boolean(g))) };
+    if (!captures.length) return { all: intent.captured_amount > 0, groups: new Set() };
+    return { all: captures.some((c) => c.group_id === null), groups: new Set(captures.map((c) => c.group_id).filter((g): g is string => Boolean(g))) };
   }
 
   /** Per item paid, sent, in flight and remaining, from the given repository (inside the lock when deciding) */
@@ -162,7 +164,8 @@ export class Refunds {
 
     const byKey = (await this.repo.find('refunds', { idempotency_key: idempotencyKey }))[0];
     if (byKey) return this.toApi(byKey);
-    if (input.originId) {
+    // one refund per origin, except cancellations (one per cancelled item, keyed by the hand-over key)
+    if (input.originId && input.origin !== 'cancellation') {
       const same = await this.byOrigin(this.repo, input.origin, input.originId);
       if (same) {
         const items = await this.repo.find('refund_items', { refund_id: same.id });
@@ -182,7 +185,9 @@ export class Refunds {
     if (unknown.length) throw invalid(unknown.map((x) => ({ path: 'items', message: `Item ${x.orderItemId} is not part of this order` })));
     const currency = intent?.currency ?? paid[0]!.paid.currency;
     if (input.items.some((x) => x.amount.currency !== currency)) throw invalid([{ path: 'items', message: `Refunds are in ${currency}` }]);
-    if (!intent || !is(ACCEPTED, intent.status) || (await this.charged(this.repo, intent)) <= 0) {
+    // a card authorization released after store credit alone paid what was left (voided) still has that credit to refund
+    const creditCharged = intent?.status === 'voided' && this.credit.taken(intent) > 0;
+    if (!intent || (!is(ACCEPTED, intent.status) && !creditCharged) || (await this.charged(this.repo, intent)) <= 0) {
       throw this.core.error('REFUND_EXCEEDS_REFUNDABLE', 'Nothing was charged for this order yet, so there is nothing to refund.', { items: input.items.map((x) => ({ orderItemId: x.orderItemId, remaining: this.m(0, currency) })) });
     }
     const ref = await this.refFor(input.requestRef);
@@ -232,7 +237,7 @@ export class Refunds {
     });
     if (!created) {
       // a concurrent hand-over with the same key or origin won
-      const winner = (await this.repo.find('refunds', { idempotency_key: idempotencyKey }))[0] ?? (input.originId ? await this.byOrigin(this.repo, input.origin, input.originId) : undefined);
+      const winner = (await this.repo.find('refunds', { idempotency_key: idempotencyKey }))[0] ?? (input.originId && input.origin !== 'cancellation' ? await this.byOrigin(this.repo, input.origin, input.originId) : undefined);
       if (!winner) throw new AppError('CONFLICT', 'The refund could not be started; try again');
       const items = await this.repo.find('refund_items', { refund_id: winner.id });
       if (winner.idempotency_key === idempotencyKey || this.sameContent(winner, items, input)) return this.toApi(winner);
@@ -281,6 +286,8 @@ export class Refunds {
       reason: o.reason,
       requested_by: o.requestedBy,
       idempotency_key: o.key,
+      destination_ref: null,
+      attempt_key: null,
       sent_at: null,
       last_attempt_at: null,
       next_attempt_at: null,
@@ -289,8 +296,8 @@ export class Refunds {
     };
   }
 
-  private async log(tx: PaymentsRepository, refundId: string, from: string | null, to: string, detail: string | null, actor: common.Actor): Promise<RefundLogRec> {
-    return tx.insert('refund_log', { id: newId(), refund_id: refundId, from_status: from, to_status: to, detail, actor, at: this.core.now() });
+  private async log(tx: PaymentsRepository, refundId: string, from: string | null, to: string, detail: string | null, actor: common.Actor, id: string = newId()): Promise<RefundLogRec> {
+    return tx.insert('refund_log', { id, refund_id: refundId, from_status: from, to_status: to, detail, actor, at: this.core.now() });
   }
 
   private async publishChange(r: RefundRec, from: string | null, to: string, by: { actor?: common.Actor; requestId?: string }) {
@@ -316,15 +323,15 @@ export class Refunds {
     const paid = await this.paidAmounts(e.orderId);
     const actor: common.Actor = { kind: e.initiatedBy === 'customer' ? 'customer' : e.initiatedBy === 'seller' ? 'seller' : e.initiatedBy === 'staff' ? 'staff' : 'system', id: null };
     const reason = `Cancellation (${e.reasonCode.replace(/_/g, ' ')})`;
+    // one refund per cancelled item: origin cancellation, originId = the cancellation, keyed by cancellation + item
+    const key = `cancel:${e.cancellationId}:${e.itemId}`;
     const outcome = await this.repo.transaction(async (tx) => {
       const locked = (await tx.get('intents', intent.id, { forUpdate: true }))!;
-      const existing = await this.byOrigin(tx, 'cancellation', e.cancellationId);
-      if (existing) {
-        const items = await tx.find('refund_items', { refund_id: existing.id });
-        if (items.some((i) => i.order_item_id === e.itemId)) return null; // replayed event
+      if ((await tx.find('refunds', { idempotency_key: key }))[0]) return null; // replayed event
+      // refunds started before pass 3 grouped a cancellation's items in one refund
+      for (const earlier of await tx.find('refunds', { origin: 'cancellation', origin_id: e.cancellationId })) {
+        if ((await tx.find('refund_items', { refund_id: earlier.id, order_item_id: e.itemId })).length) return null;
       }
-      const separate = existing ? (await tx.find('refunds', { idempotency_key: `cancel:${e.cancellationId}:${e.itemId}` }))[0] : undefined;
-      if (separate) return null;
       const c = await this.caps(tx, e.orderId, locked, paid);
       const cap = c.items.find((i) => i.orderItemId === e.itemId);
       const amount = Math.min(e.refund.total.amount, cap?.remaining ?? 0, Math.max(0, c.captured - c.sent - c.inFlight));
@@ -334,34 +341,16 @@ export class Refunds {
       }
       if (amount < e.refund.total.amount) this.core.ctx.log.warn({ orderId: e.orderId, itemId: e.itemId, asked: e.refund.total.amount, amount }, 'payments: cancellation refund capped at the remaining amount');
       const item: RefundItemRec = { refund_id: '', order_item_id: e.itemId, group_id: cap.groupId, seller_id: cap.sellerId, amount };
-      if (existing && existing.status === 'requested') {
-        await tx.insert('refund_items', { ...item, refund_id: existing.id });
-        const r = await tx.update('refunds', existing.id, { amount: existing.amount + amount, updated_at: this.core.now() });
-        await this.log(tx, r.id, 'requested', 'requested', `Added ${order?.items.get(e.itemId)?.title ?? 'an item'} to the cancellation refund`, actor);
-        return { r, fresh: false };
-      }
       const r = await tx.insertIfNew(
         'refunds',
-        this.newRow({
-          ref: await this.core.nextRef('RF', tx),
-          orderId: e.orderId,
-          intent: locked,
-          origin: 'cancellation',
-          originId: existing ? null : e.cancellationId,
-          originRef: null,
-          amount,
-          destination: 'original_method',
-          reason,
-          requestedBy: actor,
-          key: existing ? `cancel:${e.cancellationId}:${e.itemId}` : `cancel:${e.cancellationId}`,
-        }),
+        this.newRow({ ref: await this.core.nextRef('RF', tx), orderId: e.orderId, intent: locked, origin: 'cancellation', originId: e.cancellationId, originRef: null, amount, destination: 'original_method', reason, requestedBy: actor, key }),
       );
       if (!r) return null;
       await tx.insert('refund_items', { ...item, refund_id: r.id });
-      await this.log(tx, r.id, null, 'requested', 'Started by an item cancellation', actor);
-      return { r, fresh: true };
+      await this.log(tx, r.id, null, 'requested', `Started by an item cancellation (${order?.items.get(e.itemId)?.title ?? 'item'})`, actor);
+      return r;
     });
-    if (outcome) await this.publishChange(outcome.r, outcome.fresh ? null : 'requested', 'requested', { actor });
+    if (outcome) await this.publishChange(outcome, null, 'requested', { actor });
   }
 
   /** Refund of money captured without an order (orphan payment); the checkout session stands in for the order */
@@ -389,17 +378,34 @@ export class Refunds {
 
   /* ---------------------------------------------------------------- execution */
 
-  /** The key of the attempt in flight: the log entry that moved the refund to processing */
-  private async attemptKey(refundId: string): Promise<string | null> {
-    const logs = await this.repo.find('refund_log', { refund_id: refundId, to_status: 'processing' }, { orderBy: [['at', 'desc']], limit: 1 });
+  /**
+   * The provider key of the attempt in flight: refunds.attempt_key, stored with the move to processing before the
+   * provider is called (refunds from before it was stored: the log entry that moved the refund to processing)
+   */
+  private async attemptKey(r: RefundRec): Promise<string | null> {
+    if (r.attempt_key) return r.attempt_key;
+    const logs = await this.repo.find('refund_log', { refund_id: r.id, to_status: 'processing' }, { orderBy: [['at', 'desc']], limit: 1 });
     return logs[0] ? `refund:${logs[0].id}` : null;
+  }
+
+  /** The customer-chosen destination stored on the refund (refunds.destination_ref), for sends, checks and retries */
+  static destinationRef(d: RefundDestination | null): string | null {
+    if (d?.methodId) return `method:${d.methodId}`;
+    if (d?.token) return `token:${d.token}`;
+    return null;
+  }
+
+  static destinationOf(ref: string | null | undefined): RefundDestination | null {
+    if (ref?.startsWith('method:')) return { methodId: ref.slice('method:'.length) };
+    if (ref?.startsWith('token:')) return { token: ref.slice('token:'.length) };
+    return null;
   }
 
   /** requested → processing, then send (the store-credit part goes through wallet) */
   async submit(refundId: string, by: By, cfg?: Cfg): Promise<RefundRec> {
-    const moved = await this.move(refundId, 'submit', by, 'Sent to the provider', { attemptsDelta: 1 });
+    const moved = await this.move(refundId, 'submit', by, 'Sent to the provider', { attemptsDelta: 1, newAttempt: true });
     if (!moved) return this.get(refundId);
-    return this.send(moved.r, moved.logId, null, by, cfg ?? (await this.core.cfg()));
+    return this.send(moved.r, by, cfg ?? (await this.core.cfg()));
   }
 
   /** One transition with its log entry; null when the refund is no longer in a state that allows it */
@@ -408,7 +414,7 @@ export class Refunds {
     event: REv,
     by: By,
     detail: string | null,
-    o: { attemptsDelta?: number; resetAttempts?: boolean; patch?: Partial<RefundRec>; publish?: boolean; strict?: boolean } = {},
+    o: { attemptsDelta?: number; resetAttempts?: boolean; patch?: Partial<RefundRec>; publish?: boolean; strict?: boolean; newAttempt?: boolean } = {},
   ): Promise<{ r: RefundRec; from: RefundStatus; logId: string } | null> {
     const res = await this.repo.transaction(async (tx) => {
       const r = await tx.get('refunds', refundId, { forUpdate: true });
@@ -420,22 +426,31 @@ export class Refunds {
       const to = refundExecutionMachine.next(r.status as never, event);
       const now = this.core.now();
       const attempts = o.resetAttempts ? (o.attemptsDelta ?? 0) : r.attempts + (o.attemptsDelta ?? 0);
+      // a new provider attempt: its key is stored before the provider is called, so a check or retry after a restart
+      // asks about this attempt
+      const logId = newId();
       const updated = await tx.update('refunds', r.id, {
         ...o.patch,
+        ...(o.newAttempt ? { attempt_key: `refund:${logId}` } : {}),
         status: to,
         attempts,
         ...(to === 'processing' ? { last_attempt_at: now, outcome_unknown: false, failure_code: null, failure_reason: null, next_attempt_at: null } : {}),
         updated_at: now,
       });
-      const log = await this.log(tx, r.id, r.status, to, detail, by.actor);
+      const log = await this.log(tx, r.id, r.status, to, detail, by.actor, logId);
       return { r: updated, from: r.status as RefundStatus, logId: log.id };
     });
     if (res && o.publish !== false) await this.publishChange(res.r, res.from, res.r.status, by);
     return res;
   }
 
-  /** Sends the attempt started by log entry `logId` and applies the answer */
-  private async send(r: RefundRec, logId: string, destination: RefundDestination | null, by: By, cfg: Cfg): Promise<RefundRec> {
+  /**
+   * Sends the attempt in flight (refunds.attempt_key) to the refund's destination (the original payment, or the
+   * customer's choice in refunds.destination_ref) and applies the answer
+   */
+  private async send(r: RefundRec, by: By, cfg: Cfg): Promise<RefundRec> {
+    const attemptKey = (await this.attemptKey(r)) ?? `refund:${newId()}`;
+    const destination = Refunds.destinationOf(r.destination_ref);
     const intent = (await this.repo.get('intents', r.intent_id))!;
     const creditUnavailable: ProviderRefund = { status: 'failed', failure: { code: 'store_credit_unavailable', reason: 'Store credit could not be added right now', retryable: true } };
     // a mixed payment: the store-credit part goes back first (reserved once per refund, so a retry sends the same split)
@@ -468,7 +483,7 @@ export class Refunds {
       const result = await this.core.call(
         'refund',
         { intentId: intent.id, refundId: r.id },
-        () => this.core.provider.refund({ providerRef: intent.provider_ref ?? '', amount: this.m(cardAmount, r.currency), idempotencyKey: `refund:${logId}`, destination, refundId: r.id }),
+        () => this.core.provider.refund({ providerRef: intent.provider_ref ?? '', amount: this.m(cardAmount, r.currency), idempotencyKey: attemptKey, destination, refundId: r.id }),
         (x) => ({ outcome: x.status === 'failed' ? 'declined' : 'ok', providerRef: x.providerRef, message: x.failure ? `${x.failure.code}: ${x.failure.reason}` : `refund ${x.status}` }),
       );
       return this.apply(r.id, result, by, cfg);
@@ -504,7 +519,8 @@ export class Refunds {
       if (p.status === 'not_found') return r;
       if (p.status === 'succeeded') {
         const to = refundExecutionMachine.next('processing', 'provider_confirms');
-        const updated = await tx.update('refunds', r.id, { status: to, sent_at: now, provider_ref: p.providerRef ?? r.provider_ref, outcome_unknown: false, next_attempt_at: null, failure_code: null, failure_reason: null, updated_at: now });
+        // sent: the chosen destination and the attempt key are no longer needed
+        const updated = await tx.update('refunds', r.id, { status: to, sent_at: now, provider_ref: p.providerRef ?? r.provider_ref, outcome_unknown: false, next_attempt_at: null, failure_code: null, failure_reason: null, destination_ref: null, attempt_key: null, updated_at: now });
         // the intent lock is taken after the refund lock everywhere a refund changes the intent
         const intent = (await tx.get('intents', r.intent_id, { forUpdate: true }))!;
         await tx.update('intents', intent.id, { refunded_amount: intent.refunded_amount + r.amount, updated_at: now });
@@ -550,9 +566,9 @@ export class Refunds {
     const c = cfg ?? (await this.core.cfg());
     const r = await this.get(refundId);
     if (r.status !== 'processing' && r.status !== 'failed') return r;
-    const key = await this.attemptKey(r.id);
+    const key = await this.attemptKey(r);
     if (!key || r.destination === 'store_credit') {
-      if (r.status === 'processing' && r.destination === 'store_credit') return this.send(r, key?.slice('refund:'.length) ?? newId(), null, by, c);
+      if (r.status === 'processing' && r.destination === 'store_credit') return this.send(r, by, c);
       return r;
     }
     let p: ProviderRefund;
@@ -572,11 +588,11 @@ export class Refunds {
       return this.apply(r.id, p, by, c);
     }
     if (p.status === 'not_found') {
-      if (r.destination === 'new_method') {
+      if (r.destination === 'new_method' && !r.destination_ref) {
+        // chosen before destinations were stored: there is nothing to send it to again
         return this.apply(r.id, { status: 'failed', failure: { code: 'destination_needed', reason: 'The refund did not reach the new card; choose where it should go', retryable: false } }, by, c);
       }
-      const logId = key.slice('refund:'.length);
-      return this.send(r, logId, null, by, c); // never received: same key again
+      return this.send(r, by, c); // never received: the same key again, to the same destination
     }
     return this.apply(r.id, p, by, c);
   }
@@ -592,7 +608,7 @@ export class Refunds {
     if (r.status !== 'failed') refundExecutionMachine.next(r.status as never, 'retry'); // ILLEGAL_TRANSITION
     if (r.attempts >= cfg.refundMaxAttempts) throw this.core.error('REFUND_RETRY_LIMIT');
     if (r.destination === 'new_method') throw illegal('A refund to a new card is retried by asking the customer for a destination again');
-    const key = await this.attemptKey(r.id);
+    const key = await this.attemptKey(r);
     if (key && r.destination !== 'store_credit') {
       let p: ProviderRefund;
       try {
@@ -608,9 +624,9 @@ export class Refunds {
         return this.apply(r.id, p, by, cfg);
       }
     }
-    const moved = await this.move(r.id, 'retry', by, reason ? `Retried: ${reason}` : 'Retried', { attemptsDelta: 1, strict: o.admin });
+    const moved = await this.move(r.id, 'retry', by, reason ? `Retried: ${reason}` : 'Retried', { attemptsDelta: 1, strict: o.admin, newAttempt: true });
     if (!moved) return this.get(r.id);
-    return this.send(moved.r, moved.logId, null, by, cfg);
+    return this.send(moved.r, by, cfg);
   }
 
   /** payments.process-refunds */
@@ -678,7 +694,14 @@ export class Refunds {
       await this.log(tx, x.id, 'failed', 'failed', `Asked the customer for a new destination${message?.trim() ? `: ${message.trim()}` : ''}`, by.actor);
       return tx.update('refunds', x.id, { next_attempt_at: null, updated_at: this.core.now() });
     });
-    this.core.publish('payments.refund.destination_requested', { refundId: r.id, orderId: r.order_id, amount: this.m(r.amount, r.currency) }, by);
+    const lookup = this.core.lookup();
+    const [order, payer] = await Promise.all([lookup.order(r.order_id), this.repo.get('intents', r.intent_id)]);
+    const who = payer ? await this.core.contactOf({ customer_id: payer.customer_id, guest_email: payer.guest_email, order_id: r.order_id }, lookup) : { customerId: null, contactEmail: null };
+    this.core.publish(
+      'payments.refund.destination_requested',
+      { refundId: r.id, ref: r.ref, orderId: r.order_id, orderRef: order?.ref ?? r.origin_ref ?? r.ref, ...who, amount: this.m(r.amount, r.currency), failureReason: r.failure_reason ?? null, message: message?.trim() || null },
+      by,
+    );
     await this.core.audit({ action: 'payments.refund.request_destination', actionLabel: 'Asked the customer for a new refund destination', category: 'financial', target: { type: 'refund', id: r.id, ref: r.ref, label: r.destination_label, screen: 'admin/finance' }, reason: message ?? null }, by);
     return this.toApi(after);
   }
@@ -686,7 +709,7 @@ export class Refunds {
   async cancel(refundId: string, reason: string, by: By): Promise<Refund> {
     if (!reason?.trim()) throw invalid([{ path: 'reason', message: 'Give a reason, e.g. settled another way' }]);
     const before = await this.get(refundId);
-    const moved = await this.move(refundId, 'cancel', by, `Cancelled: ${reason.trim()}`, { strict: true, patch: { next_attempt_at: null } });
+    const moved = await this.move(refundId, 'cancel', by, `Cancelled: ${reason.trim()}`, { strict: true, patch: { next_attempt_at: null, destination_ref: null, attempt_key: null } });
     const after = moved?.r ?? (await this.get(refundId));
     if (after.status === 'cancelled') await this.credit.unreserve(after.intent_id, refundKey(after.id)); // a store-credit part not given back yet is free again
     await this.core.audit({ action: 'payments.refund.cancel', actionLabel: 'Cancelled a refund', category: 'financial', target: { type: 'refund', id: before.id, ref: before.ref, label: before.destination_label, screen: 'admin/finance' }, reason, before: { status: before.status, amount: before.amount }, after: { status: after.status } }, by);
@@ -756,9 +779,11 @@ export class Refunds {
       destination = { token: body.providerToken!.trim() };
       label = methodLabel(card);
     }
-    const moved = await this.move(r.id, 'retry', by, `New destination: ${label}`, { attemptsDelta: 1, resetAttempts: true, strict: true, patch: { destination: kind, destination_label: label } });
+    // the destination is stored with the move (before the provider is called), so an uncertain send is checked and
+    // resent to the same destination after a restart
+    const moved = await this.move(r.id, 'retry', by, `New destination: ${label}`, { attemptsDelta: 1, resetAttempts: true, strict: true, newAttempt: true, patch: { destination: kind, destination_label: label, destination_ref: Refunds.destinationRef(destination) } });
     if (!moved) throw illegal('A new destination can be chosen only after a refund failed');
-    await this.send(moved.r, moved.logId, destination, by, cfg);
+    await this.send(moved.r, by, cfg);
     return this.view(await this.get(r.id));
   }
 }

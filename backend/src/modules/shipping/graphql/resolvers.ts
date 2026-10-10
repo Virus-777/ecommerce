@@ -267,14 +267,19 @@ export const resolvers = (service: ShippingService): ModuleResolvers => {
       },
     },
     ReturnReplacement: {
-      shipment: async (root: { id: string; returnId?: string | null }, _args: unknown, ctx: GraphQLContext) => {
-        if (!root.returnId) return null;
-        const s = await load(ctx, 'replacementShipment', `${root.id}|${root.returnId}`, async (keys) => {
-          const list = keys.map((k) => ({ replacementId: k.split('|')[0]!, returnId: k.split('|')[1]! }));
-          const found = await service.shipmentsForReplacements(list);
+      shipment: async (root: { id: string; returnId?: string | null; orderItemId?: string | null }, _args: unknown, ctx: GraphQLContext) => {
+        // by its return, or by its order item when the replacement was decided on a case (no return)
+        if (!root.returnId && !root.orderItemId) return null;
+        const key = `${root.id}|${root.returnId ?? ''}|${root.orderItemId ?? ''}`;
+        const s = await load(ctx, 'replacementShipment', key, async (keys) => {
+          const list = keys.map((k) => {
+            const [replacementId, returnId, orderItemId] = k.split('|');
+            return { key: k, replacementId: replacementId!, returnId: returnId || null, orderItemIds: orderItemId ? [orderItemId] : [] };
+          });
+          const found = await service.shipmentsForReplacements(list.map(({ key: _k, ...r }) => r));
           const shipments = Object.values(found).filter((x): x is Shipment => Boolean(x));
           const enriched = await enrich(shipments, ctx);
-          return new Map(list.map((r) => [`${r.replacementId}|${r.returnId}`, found[r.replacementId] ? (enriched.get(found[r.replacementId]!.id) ?? null) : null]));
+          return new Map(list.map((r) => [r.key, found[r.replacementId] ? (enriched.get(found[r.replacementId]!.id) ?? null) : null]));
         });
         if (!s) return null;
         // store: only the customer's or guest's own order

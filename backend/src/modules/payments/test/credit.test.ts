@@ -138,7 +138,11 @@ describe('cancelling an order paid partly with store credit', () => {
   });
 
   // items cancelled before the capture shrink the order's allocation (payments.refreshAllocations); set it directly here
-  const captureWhole = (intentId: string) => h.service.intents.capture(intentId, { key: `${intentId}:capture:order`, final: true, by: { actor: { kind: 'system', id: null } } });
+  const captureWhole = async (intentId: string) => {
+    const c = await h.service.intents.capture(intentId, { key: `${intentId}:capture:order`, final: true, by: { actor: { kind: 'system', id: null } } });
+    await h.app.kernel.events.drain();
+    return c;
+  };
 
   it('charges the card only for what the credit did not pay when items were cancelled before the capture', async () => {
     const m = await mixedOrder(2_000, [6_000, 3_000], { captureMode: 'per_group_on_dispatch' });
@@ -156,10 +160,54 @@ describe('cancelling an order paid partly with store credit', () => {
     await captureWhole(m.intentId);
     expect((await intent(m.intentId))!.captured_amount).toBe(0); // nothing left to charge on the card
     expect(await balance(m.customerId)).toBe(6_000 + 3_000); // 3 000 of the 4 000 credit came back
+    // store credit alone pays what is left: a capture of 0 on the card with the 1 000 of credit, no provider capture,
+    // and the card authorization is released
+    expect(capturedOf(m.intentId)).toEqual([{ groupId: null, amount: 0, creditAmount: 1_000 }]);
+    expect((await h.service.core.repo.find('captures', { intent_id: m.intentId })).map((c) => [c.amount, c.credit_amount, c.status, c.provider_ref])).toEqual([[0, 1_000, 'succeeded', null]]);
+    expect(await h.calls(m.intentId, 'capture')).toEqual([]);
+    expect((await intent(m.intentId))!.status).toBe('voided');
     await captureWhole(m.intentId); // replayed: the credit comes back once
     expect(await balance(m.customerId)).toBe(9_000);
+    expect(capturedOf(m.intentId)).toHaveLength(1);
     // the payment now counts the 1 000 of credit still used for the order
     expect((await h.service.remainingRefundable(m.order.id)).captured).toEqual(USD(1_000));
+    // and it can be refunded: all of it goes back to store credit, nothing to the card
+    const cardBefore = toCard.length;
+    const r = await h.service.startRefund(refundOf(m.order.id, [{ orderItemId: m.items[1]!, amount: 1_000 }]), newId());
+    await h.run('payments.process-refunds');
+    expect(await h.service.getRefund(r.id)).toMatchObject({ status: 'sent', amount: USD(1_000) });
+    expect(await balance(m.customerId)).toBe(10_000);
+    expect(toCard.length).toBe(cardBefore);
+  });
+
+  it('captures an order paid entirely by store credit with amount 0 and creditAmount, without a provider call, once', async () => {
+    const m = await mixedOrder(4_500, [3_000, 1_500]); // on_acceptance: captured when orders accepts it
+    expect(capturedOf(m.intentId)).toEqual([{ groupId: null, amount: 0, creditAmount: 4_500 }]);
+    expect((await h.service.core.repo.find('captures', { intent_id: m.intentId })).map((c) => [c.group_id, c.amount, c.credit_amount, c.status, c.provider_ref])).toEqual([[null, 0, 4_500, 'succeeded', null]]);
+    expect((await intent(m.intentId))!).toMatchObject({ status: 'captured', authorized_amount: 0, captured_amount: 0 });
+    expect(await h.calls(m.intentId)).toEqual([]); // no card processor call at all
+    expect(h.named('payments.payment.captured').find((e) => e.intentId === m.intentId)).toMatchObject({ orderId: m.order.id, customerId: m.customerId, contactEmail: 'sam@example.com', providerRef: null, allocations: [expect.objectContaining({ amount: USD(4_500) })] });
+    await h.service.intents.capture(m.intentId, { key: `${m.intentId}:capture:order`, final: true, by: { actor: { kind: 'system', id: null } } }); // replayed
+    expect(capturedOf(m.intentId)).toHaveLength(1);
+    const detail = await h.call('GET', `/api/admin/payments/payments/${m.intentId}`, tokens.staff());
+    expect(detail.body.captures).toEqual([expect.objectContaining({ amount: USD(0), creditAmount: USD(4_500), status: 'succeeded' })]);
+  });
+
+  it('captures each group of a credit-only order with amount 0 when it ships (partially captured, then captured)', async () => {
+    const m = await mixedGroups(8_000, [[5_000], [3_000]]);
+    const [g1, g2] = m.groups as [{ id: string; items: string[] }, { id: string; items: string[] }];
+    await dispatch(m.order.id, g1.id);
+    expect(capturedOf(m.intentId)).toEqual([{ groupId: g1.id, amount: 0, creditAmount: 5_000 }]);
+    expect((await intent(m.intentId))!.status).toBe('partially_captured');
+    await dispatch(m.order.id, g1.id); // replayed
+    await dispatch(m.order.id, g2.id);
+    expect(capturedOf(m.intentId)).toEqual([
+      { groupId: g1.id, amount: 0, creditAmount: 5_000 },
+      { groupId: g2.id, amount: 0, creditAmount: 3_000 },
+    ]);
+    expect((await intent(m.intentId))!).toMatchObject({ status: 'captured', captured_amount: 0 });
+    expect(await h.calls(m.intentId)).toEqual([]);
+    expect(await h.service.remainingRefundable(m.order.id)).toMatchObject({ captured: USD(8_000), remaining: USD(8_000) });
   });
 });
 

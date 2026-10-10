@@ -1,5 +1,6 @@
 /** Store search: results and cards, text matching, synonyms, spelling correction, filters, facets, sorts, paging, context. */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import { ADMIN, boot, ean, shop, STORE, type Kit } from './helpers.js';
 
 let k: Kit;
@@ -152,7 +153,7 @@ describe('search context', () => {
       { value: 'used', label: 'Used', count: 1, selected: false },
       { value: 'refurbished', label: 'Refurbished', count: 0, selected: false },
     ]);
-    expect(facet('seller').values[0]).toMatchObject({ value: 'official', label: 'Official Store', count: 1, note: 'Shows company offers at the prices listed' });
+    expect(facet('seller').values[0]).toMatchObject({ value: 'official', label: OFFICIAL_STORE_NAME, count: 1, note: 'Shows company offers at the prices listed' });
     expect(facet('price').range).toMatchObject({ min: { amount: 18900 }, max: { amount: 18900 } });
     const anc = facet('noise_cancelling');
     expect(anc).toMatchObject({ group: 'category', groupLabel: 'Headphones features', kind: 'attribute', label: 'Noise cancelling' });

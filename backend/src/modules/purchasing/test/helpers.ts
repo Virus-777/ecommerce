@@ -3,7 +3,9 @@
  *
  * Stubbed APIs:
  *   inventory: a small in-memory company/seller stock list behind getStockItems (StockItemRef) and getAvailability
- *     ({ available, lowStockThreshold }); expectIncoming / cancelIncoming / submitInbound are recorded.
+ *     ({ available, lowStockThreshold }); expectIncoming / cancelIncoming / submitInbound are recorded. Locations:
+ *     LOCATION (default, Reno), OTHER_LOCATION (Sparks), INACTIVE_LOCATION and a seller virtual location;
+ *     getSalesRate answers from the `sales` map (units per day).
  *   access: check → allowed up to $25,000, approval_required above, denied for a token named "Intern";
  *     requestApproval → a new request; approvalInfo → "Over $25,000: needs Morgan Hale".
  *   audit.record, media (getAsset / attach / detach / refs) and notifications.notify → recorded calls.
@@ -19,6 +21,16 @@ import { auth, buildTestApp, ISSUER, TEST_JWK } from '../../../testing/app.js';
 
 export const NOW = '2026-10-09T17:00:00.000Z'; // 10:00 in Los Angeles
 export const LOCATION = newId();
+export const OTHER_LOCATION = newId();
+export const INACTIVE_LOCATION = newId();
+export const SELLER_LOCATION = newId();
+const addr = (line1: string, city: string) => ({ name: 'Marketly receiving', line1, city, region: 'NV', postalCode: '89502', country: 'US' });
+export const LOCATIONS = [
+  { id: LOCATION, code: 'RNO1', name: 'Reno, NV warehouse', kind: 'warehouse', ownerType: 'official', sellerId: null, address: addr('100 Dock Rd', 'Reno'), timeZone: 'America/Los_Angeles', sellable: true, active: true, isDefault: true },
+  { id: OTHER_LOCATION, code: 'SPK1', name: 'Sparks, NV overflow', kind: 'warehouse', ownerType: 'official', sellerId: null, address: addr('7 Spur Way', 'Sparks'), timeZone: 'America/Los_Angeles', sellable: true, active: true, isDefault: false },
+  { id: INACTIVE_LOCATION, code: 'OLD1', name: 'Old warehouse', kind: 'warehouse', ownerType: 'official', sellerId: null, address: null, timeZone: 'America/Los_Angeles', sellable: false, active: false, isDefault: false },
+  { id: SELLER_LOCATION, code: 'SV1', name: 'Seller stock', kind: 'seller_virtual', ownerType: 'official', sellerId: null, address: null, timeZone: 'America/Los_Angeles', sellable: true, active: true, isDefault: false },
+] as const;
 const SELLER = newId();
 const PRODUCT = newId();
 const VARIANT = newId();
@@ -38,7 +50,12 @@ export function makeStubs() {
     stock.set(id, { label: `${s.sku} item`, ownerType: 'official', available: 50, threshold: 10, ...s });
     return id;
   };
+  const sales = new Map<string, number>();
+  const locations = { list: [...LOCATIONS] as any[], defaultId: LOCATION as string | null };
   const inventory = {
+    getLocations: vi.fn(async (opts?: { activeOnly?: boolean }) => locations.list.filter((l) => !opts?.activeOnly || l.active)),
+    getDefaultLocation: vi.fn(async () => locations.list.find((l) => l.id === locations.defaultId) ?? null),
+    getSalesRate: vi.fn(async (ids: string[], days = 30) => Object.fromEntries(ids.filter((id) => sales.has(id)).map((id) => [id, { unitsSold: Math.round(sales.get(id)! * days), days, avgDailySales: sales.get(id)! }]))),
     getStockItems: vi.fn(async (ids: string[]): Promise<StockItemRef[]> =>
       ids
         .filter((id) => stock.has(id))
@@ -83,7 +100,7 @@ export function makeStubs() {
     refs: vi.fn(async (ids: string[]) => ids.map((id) => ({ id, url: `https://files.example/${id}.jpg`, alt: null }))),
   };
   const notifications = { notify: vi.fn(async () => ({ noticeIds: [], deliveryIds: [] })) };
-  return { stock, addStock, inventory, access, audit, media, notifications };
+  return { stock, addStock, sales, locations, inventory, access, audit, media, notifications };
 }
 
 export type Stubs = ReturnType<typeof makeStubs>;

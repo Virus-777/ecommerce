@@ -45,7 +45,8 @@ describe('Official Store returns', () => {
   it('approves automatically inside the window, with Marketly paying the label', async () => {
     const m = await officialReturn();
     expect(m.ret).toMatchObject({ status: 'approved', handledBy: 'official_store', seller: { ownerType: 'official', id: null }, shipment: { paidBy: 'platform', method: 'prepaid_qr' } });
-    expect(h.calls.labels.at(-1)).toMatchObject({ returnId: m.ret.id, billedTo: 'company', to: { name: 'Marketly Returns Center' } });
+    // the Official Store return address is the officialReturnAddress setting (default)
+    expect(h.calls.labels.at(-1)).toMatchObject({ returnId: m.ret.id, billedTo: 'company', to: { name: 'Marketly Returns', line1: '1250 Logistics Way', city: 'Reno' } });
     expect(h.named('returns.return.approved').find((e) => e.returnId === m.ret.id)).toMatchObject({ ownerType: 'official', sellerId: null, platformDecision: false });
   });
 
@@ -88,14 +89,15 @@ describe('Official Store returns', () => {
 
     h.authority.decision = 'approval_required';
     const above = await h.call('POST', `/api/admin/returns/refunds/${rr.id}/approve`, staff(), {}, idem());
-    expect(above.status).toBe(409);
-    expect(above.body.error).toMatchObject({ code: 'APPROVAL_REQUIRED', details: { refundRequestId: rr.id } });
+    // saved pending approval: 200 with the approval in the body (FORMAT.md, Approval responses)
+    expect(above.status).toBe(200);
+    expect(above.body).toMatchObject({ id: rr.id, status: 'under_review', approval: { required: true } });
     expect(h.calls.approvals.at(-1)).toMatchObject({ action: 'returns.refunds.approve', amount: { amount: 5400 }, target: { type: 'refund_request', id: rr.id } });
     const pending = await h.call('GET', `/api/admin/returns/refunds/${rr.id}`, staff());
     expect(pending.body).toMatchObject({ status: 'under_review', approval: { required: true } });
 
     // the approver decides in access
-    const approvalId = above.body.error.details.approvalRequestId;
+    const approvalId = above.body.approval.approvalRequestId;
     await h.publish('access', 'access.approval.decided', { requestId: approvalId, ref: 'AP-1', actionKey: 'returns.refunds.approve', module: 'returns', target: { type: 'refund_request', id: rr.id }, outcome: 'approved', decidedBy: { kind: 'staff', id: newId(), name: 'Olivia Owner' }, reason: null, amount: { amount: 5400, currency: 'USD' }, approverIds: [], requestedById: newId() });
     const approved = await h.call('GET', `/api/admin/returns/refunds/${rr.id}`, staff());
     expect(approved.body).toMatchObject({ status: 'processing', approvedBy: { name: 'Olivia Owner' } });
@@ -343,24 +345,34 @@ describe('staff reads and case refunds for support', () => {
     // above the approver's limit: waiting for access, cancelled with its approval request
     h.authority.decision = 'approval_required';
     const waiting = await ask(m.items[0]![2]!, 1000);
-    expect((await h.call('POST', `/api/admin/returns/refunds/${waiting.id}/approve`, staff(), {}, idem())).body.error.code).toBe('APPROVAL_REQUIRED');
+    // saved pending approval: the normal answer with the approval in the body (FORMAT.md, Approval responses)
+    const pending = await h.call('POST', `/api/admin/returns/refunds/${waiting.id}/approve`, staff(), {}, idem());
+    expect(pending.status).toBe(200);
+    expect(pending.body).toMatchObject({ status: 'under_review', approval: { required: true } });
     expect((await h.service.listRefundRequestsForCase(caseId)).find((r) => r.id === waiting.id)!.approval).toMatchObject({ required: true });
     const cancelledApprovals = h.calls.cancelledApprovals.length;
 
-    const res = await h.service.cancelRefundsForCase(caseId, 'The appeal changed the decision');
+    const appealer = { kind: 'staff' as const, id: newId(), name: 'Ana Appeals' };
+    const res = await h.service.cancelRefundsForCase(caseId, 'The appeal changed the decision', appealer);
+    await h.app.kernel.events.drain();
     expect(res.cancelled.map((r) => r.id).sort()).toEqual([review.id, waiting.id].sort());
     expect(res.cancelled.every((r) => r.status === 'cancelled')).toBe(true);
     expect(res.notCancellable).toEqual([expect.objectContaining({ id: moving.id, status: 'processing' })]);
     expect(h.calls.cancelledApprovals.length).toBe(cancelledApprovals + 1);
     expect(h.audits.filter((a) => a.action === 'returns.refund.cancel').map((a) => a.target.id)).toEqual(expect.arrayContaining([review.id, waiting.id]));
+    // recorded as the staff member deciding the appeal, and published
+    expect(h.audits.filter((a) => a.action === 'returns.refund.cancel').every((a) => a.actor.id === appealer.id)).toBe(true);
+    expect(h.named('returns.refund.cancelled')).toEqual(
+      expect.arrayContaining([expect.objectContaining({ refundRequestId: review.id, caseId, reason: 'The appeal changed the decision', by: appealer }), expect.objectContaining({ refundRequestId: waiting.id })]),
+    );
 
     // a second call changes nothing; a new refund for the cancelled items is no duplicate any more
-    const again = await h.service.cancelRefundsForCase(caseId, 'again');
+    const again = await h.service.cancelRefundsForCase(caseId, 'again', appealer);
     expect(again.cancelled).toEqual([]);
     expect(again.notCancellable.map((r) => r.id)).toEqual([moving.id]);
     h.authority.decision = 'allowed';
     expect((await ask(m.items[0]![0]!, 2500)).status).toBe('under_review');
-    expect(await h.service.cancelRefundsForCase(newId(), 'unknown case')).toEqual({ cancelled: [], notCancellable: [] });
+    expect(await h.service.cancelRefundsForCase(newId(), 'unknown case', appealer)).toEqual({ cancelled: [], notCancellable: [] });
   });
 
   it('carries the customer and contact email on refunds of a case without a return', async () => {

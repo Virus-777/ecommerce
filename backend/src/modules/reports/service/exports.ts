@@ -32,11 +32,6 @@ interface ScheduledRun {
   periodLabel: string;
 }
 
-const scheduledRunOf = (filters: unknown): ScheduledRun | null => {
-  const s = (filters as { schedule?: Partial<ScheduledRun> } | null)?.schedule;
-  return s && typeof s.id === 'string' && typeof s.periodLabel === 'string' ? { id: s.id, periodLabel: s.periodLabel } : null;
-};
-
 export interface ExportRequest {
   dataset?: string | null;
   reportKey?: string | null;
@@ -359,9 +354,6 @@ export class Exports {
       if (!done) return;
       const view = this.view(done);
       this.core.ctx.events.publish('reports.export.ready', { exportId: id, requestedBy: view.requestedBy, expiresAt: expiresAt.toISOString() });
-      // a scheduled run: notifications emails the schedule's recipients (once: only the run that finished the job gets here)
-      const run = scheduledRunOf(done.filters);
-      if (run) await this.scheduledReady(done, run, expiresAt);
       await this.core.audit(
         {
           action: 'reports.export.ready',
@@ -381,26 +373,6 @@ export class Exports {
         if (row?.state === 'running') await tx.updateJob(id, { state: exportJobMachine.next(row.state as never, 'fail'), error: message, finished_at: this.core.now() });
       });
     }
-  }
-
-  /** reports.scheduled_report.ready for a scheduled run's file (a schedule stopped meanwhile sends nothing) */
-  private async scheduledReady(job: JobRow, run: ScheduledRun, expiresAt: Date) {
-    const schedule = await this.core.repo.getSchedule(run.id);
-    if (!schedule?.active) return;
-    const recipients = strings(schedule.recipients);
-    if (!recipients.length) return;
-    const report = await this.core.repo.getReport(schedule.report_key);
-    this.core.ctx.events.publish('reports.scheduled_report.ready', {
-      scheduleId: schedule.id,
-      reportKey: schedule.report_key,
-      reportTitle: report?.title ?? schedule.report_key,
-      exportId: job.id,
-      // the file's own format: scheduled runs are produced as CSV (exports have no PDF renderer)
-      format: 'csv',
-      periodLabel: run.periodLabel,
-      recipients,
-      expiresAt: expiresAt.toISOString(),
-    });
   }
 
   /** Rows and columns of a job: the report itself, or the owner module page by page */

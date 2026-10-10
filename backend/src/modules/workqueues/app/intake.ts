@@ -19,7 +19,8 @@ export class Intake {
     private readonly items: Items,
   ) {}
 
-  async handle<N extends Consumed>(name: N, payload: EventPayload<N>): Promise<void> {
+  /** Run the table for one event. `eventId` (the envelope id) makes the closing idempotent through ctx.inbox. */
+  async handle<N extends Consumed>(name: N, payload: EventPayload<N>, eventId?: string): Promise<void> {
     const core = this.core;
     await core.ensureSeeded();
     const entry = INTAKE[name] as unknown as IntakeEntry<EventPayload<N>>;
@@ -28,8 +29,9 @@ export class Intake {
 
     for (const c of entry.closes ?? []) {
       const matches = c.subjects(payload).filter((m): m is Match => Boolean(m));
-      if (!matches.length) continue;
-      const n = await this.items.closeMatching(c.kinds, matches, c.note(payload), by, name);
+      const dedupeKeys = (c.dedupeKeys?.(payload) ?? []).filter((k): k is string => Boolean(k));
+      if (!matches.length && !dedupeKeys.length) continue;
+      const n = await this.items.closeMatching(c.kinds, matches, c.note(payload), by, name, { dedupeKeys, ...(eventId ? { claimKey: `${name}:${eventId}:${c.kinds.join(',')}` } : {}) });
       if (n) core.log.debug({ event: name, closed: n }, 'workqueues: items fixed at source');
     }
 

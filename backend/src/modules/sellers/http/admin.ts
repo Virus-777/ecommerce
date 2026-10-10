@@ -15,7 +15,7 @@ export const adminRoutes = (service: SellersService) => {
     getSellerAdmin: async ({ params, can }) => accounts.getSellerAdmin(params.id, { canSeeBalances: await can('finance.ledger.view') }),
     addSellerNote: async ({ params, body, actor, requestId }) => accounts.addSellerNote(params.id, body.body, { actor, requestId }),
     assignAccountManager: async ({ params, body, actor, requestId }) => accounts.assignAccountManager(params.id, body.staffId, { actor, requestId }),
-    createRestriction: async ({ params, body, actor, requestId, principal }) => enforcement.createRestriction(params.id, body, { actor, requestId, principal }, { throwPending: true }),
+    createRestriction: async ({ params, body, actor, requestId, principal }) => enforcement.createRestriction(params.id, body, { actor, requestId, principal }),
     updateRestriction: async ({ params, body, actor, requestId, principal }) => enforcement.updateRestriction(params.id, body, { actor, requestId, principal }),
     liftRestriction: async ({ params, body, actor, requestId, principal }) => enforcement.liftRestriction(params.id, body.reason, { actor, requestId, principal }),
     previewSuspension: async ({ params }) => enforcement.previewSuspension(params.id),

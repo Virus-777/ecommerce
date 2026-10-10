@@ -24,6 +24,8 @@ export interface StockRec {
   id: string;
   sku: string;
   label: string;
+  /** Variant GTIN inventory returns from catalog */
+  gtin?: string | null;
 }
 
 export interface Harness {
@@ -42,13 +44,15 @@ export interface Harness {
   returns: Map<string, returns.ReturnDetail>;
   files: { fileName: string; contentType: string; text: string }[];
   labels: { input: shipping.LabelRequest; key: string; id: string; shipmentId: string; tracking: string; voided: boolean }[];
+  /** media.attach calls: [assetId, usage, owner] */
+  attached: unknown[][];
   knobs: { labelFails: boolean; slowServicesOnly: boolean };
   events: { name: string; payload: any }[];
   named(name: string): any[];
   call(method: string, path: string, body?: unknown, o?: { token?: string; headers?: Record<string, string> }): Promise<{ status: number; body: any }>;
   publish(source: string, name: string, payload: unknown): Promise<void>;
   /** A company stock item known to the inventory stubs */
-  item(sku: string, label: string): StockRec;
+  item(sku: string, label: string, gtin?: string): StockRec;
   /** Bins at the harness location; returns them by code */
   bins(codes: string[], kind?: string): Promise<Record<string, any>>;
   /** An accepted order with an Official Store group (and optionally a seller group): returns its fulfillment */
@@ -75,6 +79,7 @@ export async function harness(): Promise<Harness> {
     returns: new Map<string, returns.ReturnDetail>(),
     files: [] as { fileName: string; contentType: string; text: string }[],
     labels: [] as Harness['labels'],
+    attached: [] as unknown[][],
     knobs: { labelFails: false, slowServicesOnly: false },
     events: [] as { name: string; payload: any }[],
   };
@@ -90,10 +95,11 @@ export async function harness(): Promise<Harness> {
     groupId: l.input.groupId,
     carrierName: svc.carrier,
     serviceName: svc.service,
+    carrierServiceId: svc.id,
     cost: USD(svc.cost),
     trackingNumber: l.tracking,
-    labelUrl: `https://files.test/labels/${l.id}.pdf`,
-    format: 'pdf',
+    labelUrl: `https://files.test/labels/${l.id}.${l.input.format ?? 'pdf'}`,
+    format: l.input.format ?? 'pdf',
     status: l.voided ? 'voided' : 'purchased',
     purchasedBy: { kind: 'system', id: null },
     purchasedAt: clock.now().toISOString(),
@@ -124,7 +130,7 @@ export async function harness(): Promise<Harness> {
         getStockItems: async (ids) =>
           ids.flatMap((id) => {
             const s = h.stock.get(id);
-            return s ? [{ id: s.id, sku: s.sku, label: s.label, ownerType: 'official' as const, sellerId: null, offerId: null, productId: newId(), variantId: newId(), condition: 'new', locationId: null, locationCode: null, binCode: null }] : [];
+            return s ? [{ id: s.id, sku: s.sku, label: s.label, ownerType: 'official' as const, sellerId: null, offerId: null, productId: newId(), variantId: newId(), condition: 'new', locationId: null, locationCode: null, binCode: null, gtin: s.gtin ?? null }] : [];
           }),
         findBySku: async (_owner, skus) =>
           [...h.stock.values()].filter((s) => skus.some((k) => k.trim().toUpperCase() === s.sku.toUpperCase())).map((s) => ({ id: s.id, ownerType: 'official', sku: s.sku, productId: newId(), variantId: newId(), condition: 'new', label: s.label, image: null, quantities: {}, state: 'in_stock', archived: false, updatedAt: clock.now().toISOString() }) as never),
@@ -182,7 +188,7 @@ export async function harness(): Promise<Harness> {
         },
       },
       media: {
-        attach: async () => undefined,
+        attach: async (...args: unknown[]) => void h.attached.push(args),
         refs: async (ids) => ids.map((id) => ({ id, url: `https://media.test/${id}.jpg` })),
         storeGeneratedFile: async (input) => {
           h.files.push({ fileName: input.fileName, contentType: input.contentType, text: await readStream(input.body) });
@@ -236,8 +242,8 @@ export async function harness(): Promise<Harness> {
     call,
     publish,
     named: (name) => h.events.filter((e) => e.name === name).map((e) => e.payload),
-    item(sku, label) {
-      const s = { id: newId(), sku, label };
+    item(sku, label, gtin?: string) {
+      const s = { id: newId(), sku, label, gtin: gtin ?? null };
       h.stock.set(s.id, s);
       return s;
     },

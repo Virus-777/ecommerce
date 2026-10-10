@@ -1,6 +1,6 @@
 /**
  * Storefront: the store profile editor, public claims and brand requests, change requests (store name,
- * claims, legal name, ownership, address) with their staff review, featured collections and the public storefront.
+ * tagline, claims, legal name, ownership, address) with their staff review, featured collections and the public storefront.
  */
 import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
@@ -13,6 +13,7 @@ import * as map from '../mappers.js';
 import type { ChangeRequestRec, ClaimRec, ProfileRec, SellerRec, SellersRepository } from '../ports.js';
 import { invalid, notFound, Part, type By } from './core.js';
 
+const TAGLINE_MAX = 80;
 const DEFAULT_CONTACT: ContactOptions = { orderMessages: true, productQuestions: true, showPhone: false, phone: null, replyTarget: 'within_24h' };
 const PUBLIC = ['approved', 'restricted', 'suspended'];
 
@@ -22,6 +23,7 @@ const IMPACT: Record<string, string> = {
   ownership: 'Selling continues. Identity checks run again for new owners and the Verified label may be reviewed.',
   business_address: 'Selling continues. Your return address is not changed by this request (manage it in Returns).',
   public_claim: 'The claim shows on your storefront only after staff approve it.',
+  tagline: 'Your current tagline stays on the storefront until the new one is approved.',
   brand_request: 'You can list products of this brand once Marketly adds it.',
 };
 
@@ -112,6 +114,7 @@ export class StorefrontPart extends Part {
     if (input.introduction && input.introduction.length > max) issues.push({ path: 'introduction', message: `At most ${max} characters` });
     if (input.contactOptions?.showPhone && !input.contactOptions.phone?.trim()) issues.push({ path: 'contactOptions.phone', message: 'Add the phone number to show' });
     if (input.storeName !== undefined && input.storeName !== null && !input.storeName.trim()) issues.push({ path: 'storeName', message: 'The store name cannot be empty' });
+    if (typeof input.tagline === 'string' && input.tagline.trim().length > TAGLINE_MAX) issues.push({ path: 'tagline', message: `At most ${TAGLINE_MAX} characters` });
     if (issues.length) throw invalid(issues);
 
     let nameRequest: ChangeRequestRec | undefined;
@@ -122,6 +125,18 @@ export class StorefrontPart extends Part {
         await this.repo.update('change_requests', old.id, { state: this.core.step(changeRequestMachine, old.state, 'withdraw') });
       }
       nameRequest = await this.newChangeRequest(s, 'store_name', { storeName: s.store_name }, { storeName: input.storeName.trim() }, [], by);
+    }
+
+    // a new tagline is reviewed like claims (the current one stays live); removing it needs no review
+    let taglineRequest: ChangeRequestRec | undefined;
+    const current = await this.profileOf(s.id);
+    const tagline = typeof input.tagline === 'string' ? input.tagline.trim() : undefined;
+    if (tagline !== undefined && tagline !== (current.tagline ?? '')) {
+      for (const old of await this.repo.find('change_requests', { seller_id: s.id, kind: 'tagline', state: 'pending' })) {
+        await this.repo.update('change_requests', old.id, { state: this.core.step(changeRequestMachine, old.state, 'withdraw') });
+        await this.core.resolveWork(`change_request:${old.id}`, 'Replaced by a newer tagline', by.actor);
+      }
+      if (tagline) taglineRequest = await this.newChangeRequest(s, 'tagline', { tagline: current.tagline }, { tagline }, [], by);
     }
 
     const before = await this.profileOf(s.id);
@@ -153,12 +168,17 @@ export class StorefrontPart extends Part {
       next.contact_options = { ...input.contactOptions, orderMessages: true, phone: input.contactOptions.phone?.trim() || null } as never;
       fields.push('contactOptions');
     }
+    if (tagline === '' && before.tagline) {
+      next.tagline = null;
+      fields.push('tagline');
+    }
     if (fields.length) {
       next.updated_at = this.now();
       await this.repo.upsertProfile(next);
       this.core.publish('sellers.storefront.updated', { sellerId: s.id, fields }, by);
     }
     if (nameRequest) this.core.publish('sellers.change_request.submitted', { changeRequestId: nameRequest.id, sellerId: s.id, kind: 'store_name' }, by);
+    if (taglineRequest) this.core.publish('sellers.change_request.submitted', { changeRequestId: taglineRequest.id, sellerId: s.id, kind: 'tagline' }, by);
     return this.storeProfile(s);
   }
 
@@ -285,6 +305,11 @@ export class StorefrontPart extends Part {
         if (c!.kind === 'store_name' && proposed.storeName) {
           await tx.update('sellers', s.id, { store_name: String(proposed.storeName), updated_at: now });
           storefrontFields = ['storeName'];
+        }
+        if (c!.kind === 'tagline' && typeof proposed.tagline === 'string') {
+          const profile = (await tx.getProfile(s.id)) ?? (await this.profileOf(s.id, tx));
+          await tx.upsertProfile({ ...profile, tagline: proposed.tagline, updated_at: now });
+          storefrontFields = ['tagline'];
         }
         if (c!.kind === 'legal_name' && proposed.legalName) await tx.update('sellers', s.id, { legal_name: String(proposed.legalName), updated_at: now });
         if (c!.kind === 'business_address' && proposed.address) await tx.update('sellers', s.id, { business_address: proposed.address, updated_at: now });

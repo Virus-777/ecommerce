@@ -25,5 +25,12 @@ export function createDevEmailProvider(): EmailProvider {
       if (domain === 'complaint.test') return { ok: true, providerMessageId, events: [{ type: 'delivered' }, { type: 'complained', detail: 'Simulated spam complaint' }] };
       return { ok: true, providerMessageId, events: [{ type: 'delivered' }] };
     },
+    /** Inbound attachments: data: URLs are decoded; any other URL gives a small text file naming it (no network) */
+    async fetchAttachment(downloadUrl: string, opts: { maxBytes: number }): Promise<Uint8Array> {
+      const data = /^data:[^,]*?(;base64)?,(.*)$/s.exec(downloadUrl);
+      const bytes = data ? (data[1] ? Buffer.from(data[2]!, 'base64') : Buffer.from(decodeURIComponent(data[2]!), 'utf8')) : Buffer.from(`Development attachment from ${downloadUrl}\n`, 'utf8');
+      if (bytes.length > opts.maxBytes) throw new Error(`Attachment is larger than ${opts.maxBytes} bytes`);
+      return new Uint8Array(bytes);
+    },
   };
 }

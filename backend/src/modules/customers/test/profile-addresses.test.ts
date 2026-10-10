@@ -130,7 +130,7 @@ describe('addresses', () => {
     expect(copy.line1).toBe('123 Main Street');
 
     // an order delivered to b makes it the most recently used
-    await kit.publish('orders', 'orders.order.placed', placed(c.customerId));
+    await kit.publish('orders', 'orders.order.placed', placed(c.customerId, b.id));
     expect((await kit.call('DELETE', `${STORE}/addresses/${a.id}`, { token: c.token })).status).toBe(204);
     const list = (await kit.call('GET', `${STORE}/addresses`, { token: c.token })).body;
     expect(list.map((x: any) => x.id).sort()).toEqual([b.id, d.id].sort());
@@ -162,8 +162,11 @@ describe('addresses', () => {
   });
 });
 
-function placed(customerId: string) {
+function placed(customerId: string, deliveryAddressId: string | null = null) {
   return {
+    attemptNo: 1,
+    contactName: 'Ana Lopez',
+    deliveryAddressId,
     orderId: crypto.randomUUID(),
     ref: 'MK-261009-00001',
     checkoutSessionId: crypto.randomUUID(),

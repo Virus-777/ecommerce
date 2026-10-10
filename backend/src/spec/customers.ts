@@ -903,6 +903,25 @@ export const CustomersClosureRequestedEvent: z.ZodType<CustomersClosureRequested
   scheduledFor: z.iso.datetime({ offset: true }),
 });
 
+/** customers.closure.delayed: The closure job finds the cooling-off period over but new obligations open (the request stays requested and is checked again daily); published once per new set of blockers */
+export interface CustomersClosureDelayedEvent {
+  customerId: string;
+  userId: string;
+  requestId: string;
+  blockers: ClosureBlocker[];
+  nextCheckAt: string;
+}
+
+export const CustomersClosureDelayedEvent: z.ZodType<CustomersClosureDelayedEvent> = z.object({
+  customerId: z.uuid(),
+  userId: z.uuid(),
+  requestId: z.uuid(),
+  get blockers() {
+    return z.array(ClosureBlocker);
+  },
+  nextCheckAt: z.iso.datetime({ offset: true }),
+});
+
 /** customers.account.closed: Closure completes; identity disables sign-in, notifications stops promotional sends */
 export interface CustomersAccountClosedEvent {
   customerId: string;
@@ -1344,7 +1363,7 @@ export const endpoints = defineEndpoints({
     auth: "customer",
     scope: "own-customer",
     summary: "Request a copy of my data",
-    desc: "Profile, addresses, consent log, orders, returns, messages and reviews (collected from those modules' export hooks) as a ZIP. Link emailed within dataExportSlaHours.",
+    desc: "Profile, addresses, consent log and every enabled module's exportCustomerData sections (orders, returns, cases, messages, reviews, wishlist, store credit…; FORMAT.md, Customer data export hook) as a ZIP. Link emailed within dataExportSlaHours.",
     response: () => DataRequest,
     status: 202,
     errors: ["DATA_REQUEST_IN_PROGRESS","RATE_LIMITED"],
@@ -1496,6 +1515,7 @@ export const endpoints = defineEndpoints({
     permission: "customers.accounts.view",
     scope: "staff",
     summary: "Customer accounts with orders, spend, open cases, status and verification",
+    desc: "hasOpenCases and hasAbuseReports are applied before paging: the id sets come from support.customerIdsWithOpenCases and trust.subjectIdsWithReports('customer') and filter the query, so pages are full and total is right. When the source module is off the filter is refused (VALIDATION_FAILED, details.unavailable) rather than ignored.",
     query: () =>
       z.object({
         q: z.string().describe("Name, email, phone, CU- reference or order reference (resolved through orders)").optional(),
@@ -1693,7 +1713,7 @@ export const spec = defineModuleSpec({
   chapters: [3,4,6,7,17,18,19],
   summary: "The customer side of an account: profile, saved addresses, marketing consent, recently viewed products, the Account tab overview, guest order access, data export and account closure, and the staff view of customer accounts with notes and recorded account actions. Credentials, sessions and verification belong to identity.",
   dependsOn: ["identity"],
-  optionalDeps: ["orders","returns","support","messaging","wallet","catalog","offers","trust","reports","notifications","access","audit","media","workqueues"],
+  optionalDeps: ["orders","returns","support","messaging","wallet","reviews","wishlist","payments","catalog","offers","trust","reports","notifications","access","audit","media","workqueues"],
   publicApi: ["getCustomer","getCustomerByUserId","getAddressForOrder","rememberCheckoutAddress","canPlaceOrders","canSendMessages","getMarketingConsent","validateAddress","listRecentlyViewed","listRecentlyViewedItems","searchCustomers","exportRows"],
   permissions: [
     {
@@ -1873,17 +1893,19 @@ export const spec = defineModuleSpec({
       "customers.data_export.requested": { when: "A customer asks for their data", payload: () => CustomersDataExportRequestedEvent },
       "customers.data_export.ready": { when: "The export file is ready (notifications emails the link)", payload: () => CustomersDataExportReadyEvent },
       "customers.closure.requested": { when: "A customer asks to close the account", payload: () => CustomersClosureRequestedEvent },
+      "customers.closure.delayed": { when: "The closure job finds the cooling-off period over but new obligations open (the request stays requested and is checked again daily); published once per new set of blockers", payload: () => CustomersClosureDelayedEvent },
       "customers.account.closed": { when: "Closure completes; identity disables sign-in, notifications stops promotional sends", payload: () => CustomersAccountClosedEvent },
     },
     consumes: {
       "access.approval.decided": "Finish a staff account closure that needed approval (approved: close; rejected, cancelled or expired: revert the pending closure)",
-      "orders.order.placed": "When guestEmail is set, add or update the guest buyer row (order count, spend, last order) Also: Update order count, spend and the used address's lastUsedAt",
+      "orders.order.placed": "When guestEmail is set, add or update the guest buyer row (order count, spend, last order; name from the payload's contactName) Also: Update order count and spend, and lastUsedAt of the saved address named by the payload's deliveryAddressId (no orders lookup). Idempotent per event (inbox)",
       "identity.user.registered": "Create the customer profile, default marketing preferences (all promotional channels off unless opted in at registration) and the first consent log rows; remove the guest buyer row with the same email",
       "identity.user.verified": "Mark email or phone verified (orders attaches guest orders with that email itself)",
       "identity.guest_session.claimed": "Merge the guest session's recently viewed list into the customer's list (newest view wins) and delete the guest rows",
       "identity.email.changed": "Update the mirrored email and its verification date",
       "identity.account.closed": "If identity closed the account directly (staff tool), move the customer to closed and stop promotional consent",
       "trust.enforcement.recorded": "When the target is a customer (restrict messaging, ordering, reviews or account), create the restriction with the enforcement's reason, end date and appeal route",
+      "trust.enforcement.reversed": "Undo what the enforcement did to a customer: lift every active restriction with that trustEnforcementId (lift reason: the reversal reason, actor system on behalf of trust), return the account to active when none remain, publish customers.account.restriction_lifted and customers.account.status_changed, and record it in the action history. Idempotent; restrictions already lifted or expired stay as they are",
       "catalog.product.merged": "Repoint recently viewed rows from the duplicate to the kept product"
     },
   },
@@ -1894,7 +1916,7 @@ export const spec = defineModuleSpec({
     },
     "customers.build-data-exports": {
       "schedule": "every 5 min",
-      "does": "Process requested exports: collect each enabled module's export hook, write a ZIP to media, mark ready, publish customers.data_export.ready"
+      "does": "Process requested exports: call exportCustomerData on every enabled module that declares it (orders, returns, support, messaging, reviews, wishlist, wallet, payments…) with the customerId and accountId, write one file per section plus the customer's attachments into a ZIP in media, mark ready, publish customers.data_export.ready. A module that throws fails the export (retried), never silently left out"
     },
     "customers.expire-export-links": {
       "schedule": "hourly",
@@ -1902,7 +1924,7 @@ export const spec = defineModuleSpec({
     },
     "customers.complete-closures": {
       "schedule": "daily 02:00 market time",
-      "does": "For closures past the cooling-off date, re-check obligations; close the account, anonymise profile and addresses, keep order references"
+      "does": "For closures past the cooling-off date, re-check obligations; close the account, anonymise profile and addresses, keep order references. When obligations block it, keep the request and publish customers.closure.delayed (once per new set of blockers)"
     },
     "customers.prune-recently-viewed": {
       "schedule": "daily",
@@ -2564,6 +2586,7 @@ declare module '../kernel/events/event-map.js' {
     "customers.data_export.requested": CustomersDataExportRequestedEvent;
     "customers.data_export.ready": CustomersDataExportReadyEvent;
     "customers.closure.requested": CustomersClosureRequestedEvent;
+    "customers.closure.delayed": CustomersClosureDelayedEvent;
     "customers.account.closed": CustomersAccountClosedEvent;
   }
 }

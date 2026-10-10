@@ -277,8 +277,8 @@ describe('reorder suggestions and public API', () => {
 
     // inventory.stock.low adds company items to the candidates; seller items are ignored
     const loose = stubs.addStock({ sku: 'LOOSE', label: 'Loose item', available: 0, threshold: 3 });
-    app.kernel.events.publish('inventory', 'inventory.stock.low', { stockItemId: loose, ownerType: 'official', sku: 'LOOSE', label: 'Loose item', available: 0, threshold: 3 });
-    app.kernel.events.publish('inventory', 'inventory.stock.low', { stockItemId: newId(), ownerType: 'seller', sellerId: newId(), sku: 'S', label: 'S', available: 0, threshold: 3 });
+    app.kernel.events.publish('inventory', 'inventory.stock.low', { stockItemId: loose, ownerType: 'official', productId: newId(), variantId: newId(), sku: 'LOOSE', label: 'Loose item', available: 0, threshold: 3 });
+    app.kernel.events.publish('inventory', 'inventory.stock.low', { stockItemId: newId(), ownerType: 'seller', sellerId: newId(), productId: newId(), variantId: newId(), sku: 'S', label: 'S', available: 0, threshold: 3 });
     await app.kernel.events.drain();
     const all = (await call('GET', '/reorder-suggestions?limit=100')).json().items;
     expect(all.find((x: { stockItemId: string }) => x.stockItemId === loose)).toMatchObject({ supplier: null, suggestedQuantity: 6 });

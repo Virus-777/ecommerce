@@ -9,6 +9,8 @@ const world = {
   inProgress: 0,
   approval: null as access.ApprovalRequest | null,
   decision: 'approval_required' as access.AuthorityCheck['decision'],
+  openCaseIds: [] as string[],
+  reportedIds: [] as string[],
 };
 const audits: audit.RecordInput[] = [];
 const identityCalls = { reset: vi.fn(async () => {}), revoke: vi.fn(async () => 2), close: vi.fn(async () => {}) };
@@ -24,7 +26,7 @@ beforeAll(async () => {
     apiStubs: {
       audit: { record: async (e) => (audits.push(e), newId()) },
       access: {
-        check: async (_p, action) => ({ decision: world.decision, action, reason: 'Always needs a second person', requiresSecondReviewer: true, approvalsNeeded: 1, eligibleApproverRoles: [], eligibleApprovers: [] }),
+        check: async (_p, action) => ({ decision: world.decision, action, reason: 'Always needs a second person', requiresSecondReviewer: true, approvalsNeeded: 1, eligibleApproverRoles: [], eligibleApprovers: [], stepUpRequired: false }),
         requestApproval,
         approvalForTargets: async (_p, _t, ids) => new Map(ids.map((id) => [id, world.approval])),
         getApproval: async (id) => (world.approval?.id === id ? world.approval : null),
@@ -32,11 +34,15 @@ beforeAll(async () => {
       orders: {
         countInProgress: async () => ({ inProgress: world.inProgress, delayedPackages: 0 }),
         listRecentForCustomer: async () => [],
-        getOrder: async () => ({ contact: { kind: 'guest', name: 'Gus Guest', email: 'gus@example.com' } }) as never,
+        // the order placed consumer reads the payload only
+        getOrder: async () => ({ contact: { kind: 'guest', name: 'Not From The Payload', email: 'gus@example.com' } }) as never,
         getOrderAdmin: async () => null,
       },
-      support: { listOpenCasesForCustomer: async () => ({ items: [], total: 0 }) },
-      trust: { reportsAbout: async () => ({ filedBy: 1, against: 2, open: 1, reportIds: [newId(), newId()] }) },
+      support: { listOpenCasesForCustomer: async () => ({ items: [], total: 0 }), customerIdsWithOpenCases: async () => world.openCaseIds },
+      trust: {
+        reportsAbout: async () => ({ filedBy: 1, against: 2, open: 1, reportIds: [newId(), newId()] }),
+        subjectIdsWithReports: async (type, filter) => (type === 'customer' && filter.role === 'against' ? world.reportedIds : []),
+      },
       messaging: { customerConversationSummaries: async (ids) => Object.fromEntries(ids.map((id) => [id, { conversationCount: 3, openCount: 1, reportedCount: 0, lastMessageAt: null, counterparties: [{ name: 'Casa Verde Home' }] }])) },
       identity: {
         sendPasswordReset: identityCalls.reset,
@@ -52,6 +58,8 @@ beforeEach(() => {
   world.inProgress = 0;
   world.approval = null;
   world.decision = 'approval_required';
+  world.openCaseIds = [];
+  world.reportedIds = [];
 });
 
 const act = (id: string, body: Record<string, unknown>, token = kit.staff()) =>
@@ -74,6 +82,28 @@ describe('customer list and detail', () => {
     const paged = await kit.call('GET', `${ADMIN}/customers?page=1&limit=2&sort=name`, { token: kit.staff() });
     expect(paged.body).toMatchObject({ page: 1 });
     expect(paged.body.total).toBeGreaterThan(0);
+  });
+
+  it('hasOpenCases and hasAbuseReports filter before paging: full pages and the right total', async () => {
+    const tag = `Zf${Date.now().toString(36)}`;
+    const [a, b, c] = [await kit.customer({ lastName: `${tag}a` }), await kit.customer({ lastName: `${tag}b` }), await kit.customer({ lastName: `${tag}c` })];
+    world.reportedIds = [b.customerId, newId()];
+    world.openCaseIds = [a.customerId, b.customerId];
+    const list = async (qs: string) => (await kit.call('GET', `${ADMIN}/customers?q=${tag}&sort=name&page=1&${qs}`, { token: kit.staff(['customers.accounts.view']) })).body;
+    // one row per page: before the fix the page held a, which the filter then dropped (empty page, total 3)
+    let p = await list('hasAbuseReports=true&limit=1');
+    expect(p.items.map((x: any) => x.id)).toEqual([b.customerId]);
+    expect(p.total).toBe(1);
+    p = await list('hasAbuseReports=false&limit=2');
+    expect(p.items.map((x: any) => x.id)).toEqual([a.customerId, c.customerId]);
+    expect(p.total).toBe(2);
+    p = await list('hasOpenCases=false&limit=5');
+    expect(p.items.map((x: any) => x.id)).toEqual([c.customerId]);
+    p = await list('hasOpenCases=true&hasAbuseReports=true&limit=5');
+    expect(p.items.map((x: any) => x.id)).toEqual([b.customerId]);
+    world.reportedIds = [];
+    p = await list('hasAbuseReports=true');
+    expect(p).toMatchObject({ items: [], total: 0 });
   });
 
   it('the detail aggregates other modules, lists unavailable ones and is audited', async () => {
@@ -258,6 +288,53 @@ describe('events from other modules', () => {
     expect(await kit.service.restrictionsOf(c.customerId, true)).toHaveLength(1);
   });
 
+  it('trust.enforcement.reversed lifts the restrictions that enforcement created and returns the account to active (once)', async () => {
+    const c = await kit.customer();
+    const enforcement = { enforcementId: newId(), reportId: newId(), action: 'restrict_customer_messaging', ownerTeam: 'customers', targets: [{ type: 'customer', id: c.customerId, label: 'Ana' }], reason: 'Harassing sellers', params: {}, appealDeadline: null, alreadyApplied: false };
+    await kit.publish('trust', 'trust.enforcement.recorded', enforcement);
+    // a staff restriction of its own stays
+    await act(c.customerId, { action: 'restrict_reviews' });
+    expect((await kit.service.getCustomer(c.customerId))!.accountStatus).toBe('restricted');
+    const reversed = {
+      enforcementId: enforcement.enforcementId,
+      ref: 'EN-261010-0001',
+      reportId: enforcement.reportId,
+      reportRef: 'TR-261010-0001',
+      action: 'restrict_customer_messaging',
+      ownerTeam: 'customers',
+      targets: enforcement.targets,
+      params: {},
+      appliedRef: null,
+      executionState: 'applied',
+      reason: 'Appeal upheld: the messages were quoted out of context',
+      appealId: newId(),
+      reversedBy: { kind: 'staff', id: newId() },
+      reversedAt: kit.clock.now().toISOString(),
+    };
+    const lifted = kit.of('customers.account.restriction_lifted').length;
+    await kit.publish('trust', 'trust.enforcement.reversed', reversed);
+    await kit.publish('trust', 'trust.enforcement.reversed', reversed); // redelivered: nothing more
+    let rs = await kit.service.restrictionsOf(c.customerId, true);
+    expect(rs.find((r) => r.trustEnforcementId === enforcement.enforcementId)).toMatchObject({ state: 'lifted' });
+    expect(rs.find((r) => r.scope === 'reviews')).toMatchObject({ state: 'active' });
+    expect(kit.of('customers.account.restriction_lifted').slice(lifted)).toEqual([{ customerId: c.customerId, restrictionId: expect.any(String), scope: 'messaging', trustEnforcementId: enforcement.enforcementId }]);
+    expect((await kit.service.getCustomer(c.customerId))!.accountStatus).toBe('restricted');
+    const actions = await kit.service.actionsOf(c.customerId, 10);
+    expect(actions.filter((a) => a.action === 'lift_restriction')).toEqual([expect.objectContaining({ details: expect.stringContaining('Appeal upheld'), actor: expect.objectContaining({ kind: 'system' }) })]);
+    expect(audits.at(-1)).toMatchObject({ action: 'customers.account.lift_restriction', target: { id: c.customerId } });
+
+    // a customer whose only restriction came from the reversed enforcement is active again
+    const d = await kit.customer();
+    const e2 = { ...enforcement, enforcementId: newId(), targets: [{ type: 'customer', id: d.customerId, label: 'Dee' }] };
+    await kit.publish('trust', 'trust.enforcement.recorded', e2);
+    expect((await kit.service.getCustomer(d.customerId))!.accountStatus).toBe('restricted');
+    await kit.publish('trust', 'trust.enforcement.reversed', { ...reversed, enforcementId: e2.enforcementId, targets: e2.targets });
+    expect((await kit.service.getCustomer(d.customerId))!.accountStatus).toBe('active');
+    expect(kit.of('customers.account.status_changed')).toContainEqual({ customerId: d.customerId, from: 'restricted', to: 'active', reasonCode: 'abusive_messages' });
+    rs = await kit.service.restrictionsOf(d.customerId, false);
+    expect(rs).toEqual([]);
+  });
+
   it('orders.order.placed keeps the guest buyer list and the customer read model', async () => {
     const email = `guest.${Date.now()}@example.com`;
     const placed = (o: Record<string, unknown>) => ({
@@ -272,6 +349,9 @@ describe('events from other modules', () => {
       couponCodes: [],
       groups: [],
       placedAt: kit.clock.now().toISOString(),
+      attemptNo: 1,
+      contactName: 'Gus Guest',
+      deliveryAddressId: null,
       ...o,
     });
     const first = placed({});
@@ -285,11 +365,23 @@ describe('events from other modules', () => {
     // the email registers: the guest moves to the customer list
     const c = await kit.customer({ email });
     expect((await kit.call('GET', `${ADMIN}/guest-buyers?q=${encodeURIComponent(email)}`, { token: kit.staff() })).body.items).toEqual([]);
-    const member = placed({ customerId: c.customerId, guestEmail: null, total: { amount: 4200, currency: 'USD' } });
+    const [home, work] = [
+      (await kit.call('POST', `${STORE}/addresses`, { token: c.token, body: { address: address({ line1: '1 Home Road' }) } })).body,
+      (await kit.call('POST', `${STORE}/addresses`, { token: c.token, body: { address: address({ line1: '2 Work Road' }) } })).body,
+    ];
+    const member = placed({ customerId: c.customerId, guestEmail: null, total: { amount: 4200, currency: 'USD' }, contactName: 'Ana Lopez', deliveryAddressId: work.id });
     await kit.publish('orders', 'orders.order.placed', member);
     await kit.publish('orders', 'orders.order.placed', member); // delivered twice: counted once
     const row = (await kit.call('GET', `${ADMIN}/customers?q=${encodeURIComponent(email)}`, { token: kit.staff() })).body.items[0];
     expect(row).toMatchObject({ orderCount: 1, totalSpend: { amount: 4200, currency: 'USD' } });
+    // the payload's deliveryAddressId names the used address (no orders lookup)
+    const saved = (await kit.call('GET', `${STORE}/addresses`, { token: c.token })).body;
+    expect(saved.find((a: any) => a.id === work.id).lastUsedAt).toBe(member.placedAt);
+    expect(saved.find((a: any) => a.id === home.id).lastUsedAt ?? null).toBeNull();
+    // another customer's address id is ignored
+    const other = await kit.customer();
+    await kit.publish('orders', 'orders.order.placed', placed({ customerId: other.customerId, guestEmail: null, deliveryAddressId: home.id }));
+    expect((await kit.call('GET', `${STORE}/addresses`, { token: c.token })).body.find((a: any) => a.id === home.id).lastUsedAt ?? null).toBeNull();
   });
 
   it('identity.account.closed closes the customer and stops promotions', async () => {

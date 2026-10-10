@@ -26,7 +26,8 @@ export const MONEY_KINDS: readonly RemedyKind[] = ['refund', 'partial_refund', '
 export const isOpen = (status: string) => !(CLOSED_STATUSES as readonly string[]).includes(status);
 export const priorityRank = (p: string) => Math.max(0, PRIORITIES.indexOf(p as Priority));
 
-export const OFFICIAL_STORE_NAME = 'Marketly Official Store';
+/** Display name of the Official Store (shared constant) */
+export { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 export const SUPPORT_NAME = 'Marketly support';
 
 /* ---------------------------------------------------------------- categories */

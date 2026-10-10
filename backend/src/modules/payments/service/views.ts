@@ -115,7 +115,7 @@ export class Views {
       lastCheckedAt: iso(i.last_checked_at),
       orphan: i.orphan,
       captures: captures.map(
-        (c): Capture => ({ id: c.id, groupId: c.group_id, amount: this.m(c.amount, i.currency), status: c.status as Capture['status'], providerRef: c.provider_ref, at: c.at.toISOString() }),
+        (c): Capture => ({ id: c.id, groupId: c.group_id, amount: this.m(c.amount, i.currency), creditAmount: c.credit_amount > 0 ? this.m(c.credit_amount, i.currency) : null, status: c.status as Capture['status'], providerRef: c.provider_ref, at: c.at.toISOString() }),
       ),
       refunds: await this.refunds(refunds, lookup, cfg),
       disputes: await Promise.all(disputes.map((d) => this.dispute(d, lookup))),

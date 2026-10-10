@@ -72,9 +72,15 @@ describe('carriers, methods and zones', () => {
     expect(t).toMatchObject({ official: { cutoff: '14:00' }, sellerDefault: { dispatchWithinBusinessDays: 2, allowedMinDays: 1, allowedMaxDays: 3 }, note: expect.stringContaining('Example targets') });
     const bad = await h.call('PUT', `${ADMIN}/dispatch-targets`, staff, { official: { ...t.official, cutoff: '25:00' }, sellerDefault: t.sellerDefault, effectiveFrom: h.clock.now().toISOString(), reason: 'x' });
     expect(bad.status).toBe(400);
-    const put = await h.call('PUT', `${ADMIN}/dispatch-targets`, staff, { official: { ...t.official, cutoff: '13:00' }, sellerDefault: { ...t.sellerDefault, allowedMaxDays: 4 }, effectiveFrom: h.clock.now().toISOString(), reason: 'Holiday season' });
+    const seller = { dispatchWithinBusinessDays: 3, validTrackingWithinHours: t.sellerDefault.validTrackingWithinHours, onTimeTargetPct: t.sellerDefault.onTimeTargetPct };
+    // the allowed range comes only from the sellerHandlingRange setting ([1, 3]): a default outside it is refused
+    const outside = await h.call('PUT', `${ADMIN}/dispatch-targets`, staff, { official: t.official, sellerDefault: { ...seller, dispatchWithinBusinessDays: 4 }, effectiveFrom: h.clock.now().toISOString(), reason: 'Longer' });
+    expect(outside.status).toBe(400);
+    expect(outside.body.error.details.issues).toEqual([expect.objectContaining({ path: 'sellerDefault.dispatchWithinBusinessDays' })]);
+    const put = await h.call('PUT', `${ADMIN}/dispatch-targets`, staff, { official: { ...t.official, cutoff: '13:00' }, sellerDefault: seller, effectiveFrom: h.clock.now().toISOString(), reason: 'Holiday season' });
+    expect(put.status, JSON.stringify(put.body)).toBe(200);
     expect(put.body.official.cutoff).toBe('13:00');
-    expect((await h.call('GET', `${ADMIN}/dispatch-targets`, staff)).body.sellerDefault.allowedMaxDays).toBe(4);
+    expect((await h.call('GET', `${ADMIN}/dispatch-targets`, staff)).body.sellerDefault).toEqual({ dispatchWithinBusinessDays: 3, allowedMinDays: 1, allowedMaxDays: 3, validTrackingWithinHours: seller.validTrackingWithinHours, onTimeTargetPct: seller.onTimeTargetPct });
     expect(h.audits.at(-1)).toMatchObject({ action: 'shipping.dispatch_targets.update', reason: 'Holiday season' });
 
     const later = await h.call('POST', `${ADMIN}/free-shipping-rules`, staff, { name: 'Holiday free shipping', scope: 'official_store', minOrderValue: { amount: 2500, currency: 'USD' }, methodCode: 'standard', fundedBy: 'company', window: { from: day(10), to: day(20) }, reason: 'Campaign' });

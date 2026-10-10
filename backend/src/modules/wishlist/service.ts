@@ -1,6 +1,7 @@
 import { AppError, isAppError } from '../../kernel/errors/index.js';
 import type { EventPayload } from '../../kernel/events/index.js';
 import { isUuid, newId } from '../../kernel/lib/ids.js';
+import { money } from '../../kernel/lib/money.js';
 import { pageOf, toPageRequest, type PageRequest } from '../../kernel/lib/pagination.js';
 import { secretFor } from '../../kernel/lib/secrets.js';
 import type { ModuleContext } from '../../kernel/module-system/index.js';
@@ -434,7 +435,7 @@ export class WishlistService implements WishlistPublicApi {
    * shows. A saved offer that is gone is never swapped for another seller silently: OFFER_CHANGED carries the
    * current offer to confirm. The item stays saved unless removeFromList is true.
    */
-  async moveToCart(customerId: string, id: string, body: { offerId?: string | null; quantity: number; removeFromList?: boolean | null }, by: By) {
+  async moveToCart(customerId: string, id: string, body: { offerId?: string | null; quantity: number; removeFromList?: boolean | null; expectedPrice?: common.Money | null }, by: By) {
     const item = await this.ownItem(customerId, id);
     if (!Number.isInteger(body.quantity) || body.quantity < 1) throw invalid('quantity', 'Choose at least 1');
     const lk = new Lookups(this.ctx);
@@ -459,6 +460,16 @@ export class WishlistService implements WishlistPublicApi {
       throw this.ctx.error('OFFER_CHANGED', 'This offer is no longer available. Check the current offer before adding it.', { savedOfferId: item.offer_id, current: current(featured) });
     }
     if (quote.status === 'out_of_stock' || quote.availability.state === 'out_of_stock') throw this.ctx.error('OUT_OF_STOCK', 'This item is out of stock.', { offerId });
+    // the price the card showed: a different price now is confirmed by the customer before anything is added
+    const expected = body.expectedPrice;
+    if (expected && (expected.amount !== quote.price.amount || expected.currency !== quote.price.currency)) {
+      throw this.ctx.error('OFFER_CHANGED', 'The price changed since you last saw it. Check the new price before adding it.', {
+        offerId,
+        price: quote.price,
+        previousPrice: expected,
+        availability: quote.availability.state,
+      });
+    }
     if (body.quantity > quote.availability.maxPerOrder) throw invalid('quantity', `You can add up to ${quote.availability.maxPerOrder}`);
 
     const cart = this.ctx.tryUse('cart');
@@ -607,9 +618,12 @@ export class WishlistService implements WishlistPublicApi {
     await this.engine.priceChanged({ productId: event.productId, variantId: event.variantId, offerId: event.offerId, sellerId: event.sellerId ?? null }, price);
   }
 
-  /** inventory.stock.changed: Evaluate back-in-stock alerts when available goes from 0 to positive */
+  /**
+   * inventory.stock.changed: Evaluate back-in-stock alerts when available goes from 0 to positive: alerts for the
+   * offer, for the variant and whole-product alerts (productId on the payload), narrowed by the alert's seller.
+   */
   async onStockChangedFromInventory(event: EventPayload<'inventory.stock.changed'>): Promise<void> {
-    if (!(event.previousAvailable <= 0 && event.available > 0)) return;
+    if (!(event.previousAvailable <= 0 && event.available > 0) || event.archived) return;
     if (event.offerId) {
       const offer = await this.ctx.use('offers').getOffer(event.offerId).catch(() => null);
       if (!offer) {
@@ -620,8 +634,10 @@ export class WishlistService implements WishlistPublicApi {
       await this.engine.backInStock({ productId: offer.productId, variantId: offer.variantId, offerId: offer.id, sellerId: offer.sellerId ?? null }, offer.price);
       return;
     }
-    // stock without an offer (company stock): the variant names the product through what customers saved or watch
-    for (const productId of await this.repo.productIdsForVariant(event.variantId)) {
+    // stock without an offer (company stock): the payload names the product, so whole-product alerts (no variant)
+    // are found too; events from before productId was on the payload fall back to what customers saved or watch
+    const productIds = event.productId ? [event.productId] : await this.repo.productIdsForVariant(event.variantId);
+    for (const productId of productIds) {
       await this.engine.backInStock({ productId, variantId: event.variantId, offerId: '', sellerId: event.sellerId ?? null }, null);
     }
   }
@@ -700,14 +716,96 @@ export class WishlistService implements WishlistPublicApi {
     }
   }
 
+  /**
+   * customers.account.closed: Delete the customer's lists, saved items and alerts (closure erases wishlist data;
+   * share links stop working with the list). Wishlist rows are keyed by the customer id, which is the account id
+   * (decision P4); both ids of the payload are covered. Idempotent: the claim commits with the deletes.
+   */
+  async onAccountClosedFromCustomers(event: EventPayload<'customers.account.closed'>): Promise<void> {
+    const ids = [...new Set([event.customerId, event.userId].filter((v): v is string => typeof v === 'string' && isUuid(v)))];
+    if (!ids.length) return;
+    const removed = await this.repo.transaction(async (tx) => {
+      if (!(await tx.claim(`account-closed:${event.customerId}`))) return null;
+      return tx.deleteCustomerData(ids);
+    });
+    if (removed && (removed.lists || removed.items || removed.alerts)) this.ctx.log.info({ customerId: event.customerId, ...removed }, 'wishlist: data of a closed account deleted');
+  }
+
+  /* ================================================================ customer data export */
+
+  /**
+   * Customer data export hook (FORMAT.md): lists, saved items with notes and alerts as plain records. No other
+   * person's data is kept here; product titles are read from catalog at export time (null when gone).
+   */
+  async exportCustomerData(input: { customerId: string; accountId: string }): Promise<common.CustomerDataSection[]> {
+    const ids = [...new Set([input.customerId, input.accountId].filter((v) => typeof v === 'string' && isUuid(v)))];
+    const data = ids.length ? await this.repo.customerData(ids) : { lists: [], items: [], alerts: [] };
+    const lk = new Lookups(this.ctx);
+    const title = async (productId: string) => (await lk.product(productId))?.title ?? null;
+    const iso = (d: Date | string | null) => (d === null ? null : (d instanceof Date ? d : new Date(d)).toISOString());
+    const listName = new Map(data.lists.map((l) => [l.id, l.name]));
+    const cur = this.views.currency;
+    const m = (v: number | null, currency = cur) => (v === null ? null : money(v, currency));
+    return [
+      {
+        key: 'wishlist_lists',
+        title: 'Wishlist lists',
+        module: 'wishlist',
+        records: data.lists.map((l) => ({ name: l.name, isDefault: l.is_default, shared: Boolean(l.share_token), createdAt: iso(l.created_at), updatedAt: iso(l.updated_at) })),
+      },
+      {
+        key: 'wishlist_items',
+        title: 'Saved items',
+        module: 'wishlist',
+        records: await Promise.all(
+          data.items.map(async (i) => ({
+            list: listName.get(i.list_id) ?? null,
+            productId: i.product_id,
+            title: await title(i.product_id),
+            variantId: i.variant_id,
+            offerId: i.offer_id,
+            priceWhenSaved: m(i.price_when_saved, i.currency),
+            note: i.note,
+            addedAt: iso(i.added_at),
+          })),
+        ),
+      },
+      {
+        key: 'wishlist_alerts',
+        title: 'Wishlist alerts',
+        module: 'wishlist',
+        records: await Promise.all(
+          data.alerts.map(async (a) => ({
+            kind: a.kind,
+            productId: a.product_id,
+            title: await title(a.product_id),
+            variantId: a.variant_id,
+            sellerId: a.seller_id,
+            targetPrice: m(a.target_price),
+            referencePrice: m(a.reference_price),
+            state: a.state,
+            triggeredAt: iso(a.triggered_at),
+            triggeredPrice: m(a.triggered_price),
+            createdAt: iso(a.created_at),
+          })),
+        ),
+      },
+    ];
+  }
+
   /* ================================================================ jobs */
 
-  /** Job wishlist.evaluate-alerts (every 10 min): Batch-evaluate alert conditions changed by recent events, apply cooldown, publish wishlist.alert.triggered */
-  async evaluateAlerts(): Promise<{ rearmed: number; resumed: number; fired: number }> {
+  /**
+   * Job wishlist.evaluate-alerts (every 10 min): Batch-evaluate alert conditions changed by recent events, apply
+   * cooldown, publish wishlist.alert.triggered. Also re-checks every active back-in-stock alert against current
+   * availability, so a restock missed by events or skipped inside the cooldown still triggers.
+   */
+  async evaluateAlerts(): Promise<{ rearmed: number; resumed: number; fired: number; restocked: number }> {
     const rearmed = await this.engine.rearmDue();
     const resumed = await this.engine.resumeConsented();
     const fired = await this.engine.evaluatePrices();
-    if (rearmed || resumed || fired) this.ctx.log.info({ rearmed, resumed, fired }, 'wishlist: alerts evaluated');
-    return { rearmed, resumed, fired };
+    const restocked = await this.engine.evaluateRestocks();
+    if (rearmed || resumed || fired || restocked) this.ctx.log.info({ rearmed, resumed, fired, restocked }, 'wishlist: alerts evaluated');
+    return { rearmed, resumed, fired, restocked };
   }
 }

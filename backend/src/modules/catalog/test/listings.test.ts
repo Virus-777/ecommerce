@@ -26,9 +26,9 @@ const offerEvents = async (o: { productId: string; variantId: string; sellerId: 
   const offerId = newId();
   const base = { offerId, productId: o.productId, variantId: o.variantId, ownerType: o.sellerId ? 'seller' : 'official', sellerId: o.sellerId };
   t.app.kernel.events.publish('offers', 'offers.offer.created', { ...base, condition: 'new', stockItemId: newId() });
-  t.app.kernel.events.publish('offers', 'offers.offer.status_changed', { ...base, from: 'draft', to: o.status });
+  t.app.kernel.events.publish('offers', 'offers.offer.status_changed', { ...base, from: 'draft', to: o.status, stockItemId: newId() });
   if (o.price) t.app.kernel.events.publish('offers', 'offers.offer.price_changed', { ...base, from: { amount: o.price + 500, currency: 'USD' }, to: { amount: o.price, currency: 'USD' }, termsVersion: 2 });
-  t.app.kernel.events.publish('inventory', 'inventory.stock.changed', { stockItemId: newId(), offerId, ownerType: base.ownerType, sellerId: o.sellerId, variantId: o.variantId, available: o.available ?? 4, reserved: 0, previousAvailable: 0, state: (o.available ?? 4) > 0 ? 'in_stock' : 'out_of_stock', cause: 'receipt' });
+  t.app.kernel.events.publish('inventory', 'inventory.stock.changed', { stockItemId: newId(), offerId, ownerType: base.ownerType, sellerId: o.sellerId, variantId: o.variantId, available: o.available ?? 4, reserved: 0, previousAvailable: 0, state: (o.available ?? 4) > 0 ? 'in_stock' : 'out_of_stock', cause: 'receipt', productId: o.productId, archived: false });
   await t.app.kernel.events.drain();
   return offerId;
 };
@@ -98,7 +98,9 @@ describe('corrections', () => {
     expect(acc.json()).toMatchObject({ state: 'accepted', decisionReason: 'Matches the box' });
     const after = (await t.catalog.getProductAdmin(id))!;
     expect(after).toMatchObject({ reviewState: 'approved', version: version + 1, product: { title: 'Kestrel Keys K2 mechanical keyboard' } });
-    expect(t.eventsNamed('catalog.product.updated').map((e) => e.payload)).toEqual([{ productId: id, version: version + 1 }]);
+    expect(t.eventsNamed('catalog.product.updated').map((e) => e.payload)).toEqual([{ productId: id, version: version + 1, title: 'Kestrel Keys K2 mechanical keyboard' }]);
+    // the accepted correction shows in the product history (it was logged but filtered out before)
+    expect(after.reviewLog).toContainEqual(expect.objectContaining({ action: 'correction_accepted', reason: 'Matches the box', fields: expect.objectContaining({ field: 'title' }) }));
     expect(t.eventsNamed('catalog.correction.decided').map((e) => e.payload)).toEqual([{ suggestionId: s1.json().id, accepted: true }]);
     expect((await a.admin('POST', `/corrections/${s1.json().id}/decide`, { accept: false, reason: 'x' })).statusCode).toBe(409);
 

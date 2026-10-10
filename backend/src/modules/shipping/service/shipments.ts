@@ -209,14 +209,28 @@ export class Shipments {
     return null;
   }
 
-  async forReplacements(replacements: { replacementId: string; returnId: string }[]): Promise<Record<string, Shipment | null>> {
+  /**
+   * The replacement shipment of each replacement: by its return, or, for a replacement decided on a case (no
+   * return), by the replacement's order items on the shipment's lines. Newest first; cancelled shipments never count.
+   */
+  async forReplacements(replacements: { replacementId: string; returnId: string | null; orderItemIds?: string[] | null }[]): Promise<Record<string, Shipment | null>> {
     const out: Record<string, Shipment | null> = {};
     for (const r of replacements) out[r.replacementId] = null;
-    const returnIds = [...new Set(replacements.map((r) => r.returnId))];
-    if (!returnIds.length) return out;
-    const rows = await this.repo.find('shipments', { kind: 'replacement', return_id: returnIds, status: { op: '<>', value: 'cancelled' } }, { orderBy: [['created_at', 'desc']] });
-    const views = await this.views.shipments(rows);
-    for (const r of replacements) out[r.replacementId] = views.find((v) => v.returnId === r.returnId) ?? null;
+    const returnIds = [...new Set(replacements.map((r) => r.returnId).filter((x): x is string => Boolean(x)))];
+    const itemIds = [...new Set(replacements.filter((r) => !r.returnId).flatMap((r) => r.orderItemIds ?? []))];
+    const live = { kind: 'replacement', status: { op: '<>', value: 'cancelled' } } as const;
+    const byReturn = returnIds.length ? await this.repo.find('shipments', { ...live, return_id: returnIds }, { orderBy: [['created_at', 'desc']] }) : [];
+    const lines = itemIds.length ? await this.repo.find('shipment_lines', { order_item_id: itemIds }) : [];
+    const byItems = lines.length ? await this.repo.find('shipments', { ...live, id: [...new Set(lines.map((l) => l.shipment_id))] }, { orderBy: [['created_at', 'desc']] }) : [];
+    const rows = [...byReturn, ...byItems.filter((s) => !byReturn.some((x) => x.id === s.id))].sort((a, b) => b.created_at.getTime() - a.created_at.getTime());
+    if (!rows.length) return out;
+    const views = new Map((await this.views.shipments(rows)).map((v) => [v.id, v]));
+    for (const r of replacements) {
+      const match = r.returnId
+        ? rows.find((s) => s.return_id === r.returnId)
+        : rows.find((s) => lines.some((l) => l.shipment_id === s.id && (r.orderItemIds ?? []).includes(l.order_item_id)));
+      out[r.replacementId] = match ? (views.get(match.id) ?? null) : null;
+    }
     return out;
   }
 
@@ -585,6 +599,8 @@ export class Shipments {
       to: g.task.shipTo,
       returnId: null,
       qr: false,
+      format: 'pdf',
+      dropOffBy: null,
     }, by);
     await this.profiles.rememberParcel(sellerId, quote.parcel);
     return result;
@@ -598,6 +614,8 @@ export class Shipments {
     const g = await this.groupContext(input.groupId);
     if (input.kind === 'return' && !input.to) throw invalid([{ path: 'to', message: 'Return labels need the return address' }]);
     if (input.kind === 'return' && !input.returnId) throw invalid([{ path: 'returnId', message: 'Return labels need the return' }]);
+    if (input.format && input.format !== 'pdf' && input.format !== 'zpl') throw invalid([{ path: 'format', message: 'Choose pdf or zpl' }]);
+    if (input.dropOffBy && Number.isNaN(new Date(input.dropOffBy).getTime())) throw invalid([{ path: 'dropOffBy', message: 'Give a date and time' }]);
     const options = await this.labelServices();
     let pick = input.carrierServiceId ? options.find((o) => o.service.id === input.carrierServiceId) : input.serviceCode ? options.find((o) => o.service.code === input.serviceCode || `${o.carrier.code}:${o.service.code}` === input.serviceCode) : undefined;
     if ((input.carrierServiceId || input.serviceCode) && !pick) throw this.core.error('LABELS_NOT_SUPPORTED', 'This carrier service cannot sell labels. Enter tracking manually.');
@@ -623,6 +641,9 @@ export class Shipments {
       to: input.kind === 'return' ? input.to! : (input.to ?? g.task.shipTo),
       returnId: input.kind === 'return' ? (input.returnId ?? null) : null,
       qr: input.kind === 'return' && input.labelMethod === 'prepaid_qr',
+      format: input.format ?? 'pdf',
+      // the drop-off deadline is decided by returns (approval + policy dropOffDays); shipping never invents one
+      dropOffBy: input.kind === 'return' && input.dropOffBy ? new Date(input.dropOffBy) : null,
     }, by);
   }
 
@@ -640,6 +661,8 @@ export class Shipments {
       to: Partial<common.Address>;
       returnId: string | null;
       qr: boolean;
+      format: 'pdf' | 'zpl';
+      dropOffBy: Date | null;
     },
     by: By,
   ): Promise<LabelResult> {
@@ -651,21 +674,21 @@ export class Shipments {
     const labelId = newId();
     let bought: { trackingNumber: string; pdf: Uint8Array; qrCode: string | null };
     try {
-      bought = await this.core.carriers.buyLabel({ carrierCode: carrier.code, carrierName: carrier.name, serviceCode: service.code, serviceName: service.name, parcel: o.parcel, from: o.from, to: o.to, reference: labelId, qr: o.qr });
+      bought = await this.core.carriers.buyLabel({ carrierCode: carrier.code, carrierName: carrier.name, serviceCode: service.code, serviceName: service.name, parcel: o.parcel, from: o.from, to: o.to, reference: labelId, qr: o.qr, format: o.format });
     } catch (err) {
       if (err instanceof CarrierRefused) throw this.core.error('LABEL_FAILED', 'The carrier did not sell the label. Nothing was charged; try again or choose another service.', { carrierMessage: err.carrierMessage });
       throw err;
     }
     const tracking = normalizeTracking(bought.trackingNumber);
     const asset = await this.core.soft('media', 'store label', (m) =>
-      m.storeGeneratedFile({ owner: g.owner.ownerType === 'seller' ? { kind: 'seller', id: g.owner.sellerId, label: 'Shipping label' } : { kind: 'platform', label: 'Shipping label' }, fileName: `label-${g.task.orderRef}-${tracking}.pdf`, contentType: 'application/pdf', body: new Blob([Buffer.from(bought.pdf)]).stream(), purpose: 'label' }),
+      m.storeGeneratedFile({ owner: g.owner.ownerType === 'seller' ? { kind: 'seller', id: g.owner.sellerId, label: 'Shipping label' } : { kind: 'platform', label: 'Shipping label' }, fileName: `label-${g.task.orderRef}-${tracking}.${o.format}`, contentType: o.format === 'zpl' ? 'application/x-zpl' : 'application/pdf', body: new Blob([Buffer.from(bought.pdf)]).stream(), purpose: 'label' }),
     );
     const now = this.core.now();
     const kindInfo = o.kind === 'return' ? { kind: 'return' as const, returnId: o.returnId } : this.kindOf(g, o.items);
     const meta: LabelMeta = {
       asset: asset?.id ?? null,
       qr: bought.qrCode,
-      dropOffBy: o.kind === 'return' ? new Date(now.getTime() + 7 * DAY_MS).toISOString() : null,
+      dropOffBy: o.dropOffBy?.toISOString() ?? null,
       billedTo: o.billedTo,
       kind: kindInfo.kind,
       returnId: kindInfo.returnId,
@@ -704,7 +727,7 @@ export class Shipments {
         created_at: now,
       });
       await tx.insertMany('shipment_lines', lines);
-      await tx.insert('tracking_events', { id: newId(), shipment_id: id, code: 'label_created', label: EVENT_LABELS.label_created, detail: `${service.name} ${tracking}`, location: null, source: by.actor.kind === 'seller' ? 'seller' : 'warehouse', carrier_event_id: null, at: now });
+      await tx.insert('tracking_events', { id: newId(), shipment_id: id, code: 'label_created', label: EVENT_LABELS.label_created, detail: `${service.name} ${tracking}`, location: null, source: 'system', carrier_event_id: null, at: now });
       const l = await tx.insert('labels', {
         id: labelId,
         shipment_id: id,
@@ -712,11 +735,12 @@ export class Shipments {
         carrier_service_id: service.id,
         cost: o.cost.amount,
         currency: o.cost.currency,
-        // the column allows seller, company or platform; a customer-paid return label is kept as platform with the payer in the label facts
-        billed_to: o.billedTo === 'customer' ? 'platform' : o.billedTo,
+        // customer: the customer pays (returns deducts it from the refund; finance books nothing for the label)
+        billed_to: o.billedTo,
         tracking_number: tracking,
         storage_key: JSON.stringify(meta),
-        format: 'pdf',
+        format: o.format,
+        drop_off_by: o.dropOffBy,
         status: labelMachine.initial,
         idempotency_key: o.key,
         purchased_by: by.actor,
@@ -756,7 +780,7 @@ export class Shipments {
       const updated = await tx.update('labels', labelId, { status: labelMachine.next('purchased', 'void'), voided_at: now });
       if (s) {
         const cancelled = await tx.update('shipments', s.id, { status: shipmentMachine.next(s.status as never, 'void_label') });
-        await tx.insert('tracking_events', { id: newId(), shipment_id: s.id, code: 'info', label: 'Label voided', detail: reason.trim(), location: null, source: by.actor.kind === 'seller' ? 'seller' : 'staff', carrier_event_id: null, at: now });
+        await tx.insert('tracking_events', { id: newId(), shipment_id: s.id, code: 'info', label: 'Label voided', detail: reason.trim(), location: null, source: 'system', carrier_event_id: null, at: now });
         this.statusChanged(batch, cancelled, s.status, cancelled.status, now);
       }
       batch.push('shipping.label.voided', { labelId, shipmentId: l.shipment_id, orderId: s?.order_id ?? '', kind: meta.kind, returnId: meta.returnId, sellerId: s?.seller_id ?? null, billedTo: meta.billedTo, cost: money(l.cost, l.currency) });
@@ -983,7 +1007,7 @@ export class Shipments {
         if (!fresh?.failed_delivery || fresh.failed_delivery.chosen || !['delivery_failed', 'held_for_pickup'].includes(fresh.status)) return null;
         const to = shipmentMachine.next(fresh.status as never, 'return_to_sender');
         const after = await tx.update('shipments', s.id, { status: to, failed_delivery: { ...fresh.failed_delivery, chosen } });
-        await tx.insert('tracking_events', { id: newId(), shipment_id: s.id, code: 'returning', label: EVENT_LABELS.returning, detail: 'No next step was chosen in time; returning to the seller', location: null, source: 'staff', carrier_event_id: null, at: now });
+        await tx.insert('tracking_events', { id: newId(), shipment_id: s.id, code: 'returning', label: EVENT_LABELS.returning, detail: 'No next step was chosen in time; returning to the seller', location: null, source: 'system', carrier_event_id: null, at: now });
         this.statusChanged(batch, after, fresh.status, to, now);
         return after;
       });
@@ -1039,6 +1063,8 @@ export class Shipments {
         created_at: now,
       });
       const after = await tx.update('shipments', id, { status: shipmentMachine.next(row.status as never, 'hand_over'), shipped_at: now });
+      // the customer arranged the return and entered the tracking themselves
+      await tx.insert('tracking_events', { id: newId(), shipment_id: id, code: 'info', label: 'Tracking entered by the customer', detail: null, location: null, source: 'customer', carrier_event_id: null, at: now });
       this.created(batch, { ...after, status: 'label_created' }, [], 'Return parcel');
       this.statusChanged(batch, after, 'label_created', after.status, now);
       this.dispatched(batch, after, []);

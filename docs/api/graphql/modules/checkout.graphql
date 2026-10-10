@@ -454,6 +454,8 @@ enum CheckoutChangeKind @areas(in: [STORE]) {
   COUPON_AMOUNT_CHANGED
   NOT_SHIPPABLE
   PURCHASE_LIMIT
+  "The offer's return, warranty or dispatch terms changed since the line was quoted"
+  TERMS_CHANGED
 }
 
 enum CheckoutChangeChoice @areas(in: [STORE]) {

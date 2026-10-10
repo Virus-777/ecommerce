@@ -110,14 +110,14 @@ export class ReviewsService implements ReviewsPublicApi {
 
   /** orders.item.delivered: Make the item eligible for a Verified Purchase review and its seller package for feedback; schedule the invitation */
   async onItemDeliveredFromOrders(event: EventPayload<'orders.item.delivered'>): Promise<void> {
-    // eligibility is read from orders (getOrderItem) when the customer writes; the invitations job looks at this customer
-    this.summaries.noteDelivery(event.customerId, new Date(event.deliveredAt));
+    // eligibility is read from orders (getOrderItem) when the customer writes; the invitation is stored (D-R2)
+    await this.summaries.noteDelivery(event);
   }
 
-  /** orders.item.cancelled: Remove eligibility for cancelled items */
+  /** orders.item.cancelled: Remove eligibility for cancelled items and cancel their pending invites */
   async onItemCancelledFromOrders(event: EventPayload<'orders.item.cancelled'>): Promise<void> {
-    // a cancelled item is never delivered: orders no longer reports it (getOrderItem state, listDeliveredItems), so it gets no review or invitation
-    this.core.ctx.log.debug({ itemId: event.itemId }, 'reviews: item cancelled, no review eligibility');
+    // a cancelled item is never delivered: orders no longer reports it (getOrderItem state, listDeliveredItems), so it gets no review
+    await this.summaries.cancelInvite(event.itemId);
   }
 
   /** catalog.product.merged: Move reviews, questions and the rating summary to the kept product */
@@ -125,13 +125,38 @@ export class ReviewsService implements ReviewsPublicApi {
     await this.summaries.moveProductContent(event.duplicateProductId, event.keptProductId, event.newVariantId ?? event.intoVariantId ?? null);
   }
 
-  /** trust.enforcement.recorded: Remove reviews and answers named in a fake-review enforcement and notify authors */
+  /**
+   * trust.enforcement.recorded: remove_reviews removes the named reviews, questions and answers (trustEnforcementId on
+   * reviews.moderation.decided, so trust confirms); keep_reviews decides their open moderation items as kept. Other
+   * actions are ignored.
+   */
   async onEnforcementRecordedFromTrust(event: EventPayload<'trust.enforcement.recorded'>): Promise<void> {
-    if (event.alreadyApplied || event.action !== 'remove_reviews') return;
+    if (event.alreadyApplied || (event.action !== 'remove_reviews' && event.action !== 'keep_reviews')) return;
     const ids = (event.targets as { type?: string; id?: string }[])
       .filter((t) => t && typeof t.id === 'string' && ['review', 'question', 'answer'].includes(t.type ?? ''))
       .map((t) => t.id!);
-    if (ids.length) await this.moderation.removeForEnforcement(ids, event.enforcementId, event.reason);
+    if (!ids.length) return;
+    if (event.action === 'remove_reviews') await this.moderation.removeForEnforcement(ids, event.enforcementId, event.reason);
+    else await this.moderation.keepForEnforcement(ids, event.enforcementId, event.reason);
+  }
+
+  /** trust.enforcement.reversed: remove_reviews reversed reinstates the content that enforcement removed */
+  async onEnforcementReversedFromTrust(event: EventPayload<'trust.enforcement.reversed'>): Promise<void> {
+    if (event.action !== 'remove_reviews') return;
+    await this.moderation.reinstateForEnforcement(event.enforcementId, event.reason);
+  }
+
+  /**
+   * customers.account.closed: the customer's display name becomes Former customer on their reviews, feedback,
+   * questions and answers (content stays published as the honest record of a purchase); pending invites are cancelled.
+   */
+  async onAccountClosedFromCustomers(event: EventPayload<'customers.account.closed'>): Promise<void> {
+    await this.summaries.anonymise(event.customerId);
+  }
+
+  /** Export hook (customers.build-data-exports): the customer's reviews, feedback, questions, answers and reports */
+  async exportCustomerData(input: { customerId: string; accountId: string }): Promise<common.CustomerDataSection[]> {
+    return this.summaries.exportFor(input.customerId);
   }
 
   /** sellers.seller.closed: Keep feedback published; stop new responses from the closed seller */

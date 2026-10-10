@@ -40,6 +40,8 @@ export interface Cfg {
 export interface StockInfo {
   sku: string;
   label: string;
+  /** Variant GTIN (inventory.getStockItems from catalog), so item barcodes match too */
+  gtin?: string | null;
 }
 
 type OwnEvent = keyof EventMap & `warehouse.${string}`;
@@ -152,12 +154,21 @@ export class Core {
     const unique = [...new Set(ids.filter(Boolean))];
     const out = new Map<string, StockInfo>();
     if (!unique.length) return out;
-    for (const i of await this.ctx.use('inventory').getStockItems(unique)) out.set(i.id, { sku: i.sku, label: i.label });
+    for (const i of await this.ctx.use('inventory').getStockItems(unique)) out.set(i.id, { sku: i.sku, label: i.label, gtin: i.gtin ?? null });
     const missing = unique.filter((id) => !out.has(id));
     if (missing.length) {
       const lines = await this.repo.find('fulfillment_lines', { stock_item_id: missing }, { limit: 500 });
       for (const l of lines) if (!out.has(l.stock_item_id)) out.set(l.stock_item_id, { sku: l.sku, label: l.label });
     }
+    return out;
+  }
+
+  /** GTINs of stock items (variant barcodes; inventory.getStockItems), for scans that read the item barcode instead of the SKU label */
+  async gtins(ids: readonly string[]): Promise<Map<string, string>> {
+    const unique = [...new Set(ids.filter(Boolean))];
+    const out = new Map<string, string>();
+    if (!unique.length) return out;
+    for (const i of await this.ctx.use('inventory').getStockItems(unique)) if (i.gtin) out.set(i.id, i.gtin);
     return out;
   }
 

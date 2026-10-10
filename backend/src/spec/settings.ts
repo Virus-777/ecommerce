@@ -71,6 +71,10 @@ export interface MarketSettings {
   businessHoursLabel: string;
   closures: Closure[];
   support: SupportContacts;
+  /** market.legalName */
+  legalName: string;
+  /** market.companyLine */
+  companyLine: string;
 }
 
 export const MarketSettings: z.ZodType<MarketSettings> = z.object({
@@ -91,6 +95,8 @@ export const MarketSettings: z.ZodType<MarketSettings> = z.object({
   get support() {
     return SupportContacts;
   },
+  legalName: z.string().describe("market.legalName"),
+  companyLine: z.string().describe("market.companyLine"),
 }).register(common.apiTypes, { id: "settings.MarketSettings" });
 
 export interface ServiceRegion {
@@ -171,6 +177,10 @@ export interface PublicMarket {
   timeZone: string;
   locale: string;
   serviceRegionLabel: string;
+  /** Legal name of the operating company, e.g. Marketly, Inc. (footer, policies, receipts) */
+  legalName: string;
+  /** One-line company details for the footer and emails, e.g. Marketly, Inc. · 500 Market St, San Francisco, CA */
+  companyLine: string;
 }
 
 export const PublicMarket: z.ZodType<PublicMarket> = z.object({
@@ -179,6 +189,8 @@ export const PublicMarket: z.ZodType<PublicMarket> = z.object({
   timeZone: z.string(),
   locale: z.string(),
   serviceRegionLabel: z.string(),
+  legalName: z.string().describe("Legal name of the operating company, e.g. Marketly, Inc. (footer, policies, receipts)"),
+  companyLine: z.string().describe("One-line company details for the footer and emails, e.g. Marketly, Inc. · 500 Market St, San Francisco, CA"),
 }).register(common.apiTypes, { id: "settings.PublicMarket" });
 
 export interface PublicSupport {
@@ -778,12 +790,12 @@ export const SettingsFeatureFlagChangedEvent: z.ZodType<SettingsFeatureFlagChang
 
 /** What other modules may call in-process: `ctx.use('settings')` (or `ctx.tryUse` for an optional dependency). */
 export interface SettingsPublicApi {
-  /** Value in force at a time (default now), falling back to the declared default. Cached; invalidated by settings.setting.changed. Used by: *. */
+  /** Value in force at a time (default now), falling back to the declared default. Cached; invalidated by settings.setting.changed. key is the full '<module>.<name>': any module may read another enabled module's declared setting (read-only), e.g. audit reads reports.maxExportRows; the kernel exposes it as ctx.settings.read(fullKey) next to ctx.settings.get(ownName). An unknown key or a disabled module's key throws UNKNOWN_SETTING. Used by: *. */
   get<T>(key: string, at?: string): Promise<T>;
   /** Country, region, currency, time zone, locale, business hours Used by: checkout, orders, shipping, finance, reports, promotions, advertising, support, workqueues. */
   market(): Promise<MarketSettings>;
-  /** Business-hour arithmetic in the market time zone for SLA deadlines Used by: support, workqueues, returns, sellers. */
-  businessCalendar(): Promise<{ isOpen(at: string): boolean, addBusinessMinutes(from: string, minutes: number): string, nextOpen(after: string): string }>;
+  /** Business-hour arithmetic in the market time zone for SLA deadlines. addBusinessDays counts whole days that have opening hours (closures and closed weekdays skipped) and keeps the local time of day, moved to closing time when that day closes earlier; from inside a closed day it counts from the next business day. Used by: support, workqueues, returns, sellers, catalog, shipping. */
+  businessCalendar(): Promise<{ isOpen(at: string): boolean, isBusinessDay(day: string): boolean, addBusinessMinutes(from: string, minutes: number): string, addBusinessDays(from: string, days: number): string, nextOpen(after: string): string }>;
   /** Feature flag check Used by: *. */
   isEnabled(flagKey: string, subject?: { accountId?: string, realm?: string }): Promise<boolean>;
   /** Called at boot by modules that own a section of the settings page (returns, finance, shipping, advertising) so the overview shows their current values, last change and scheduled changes with a link to their own edit endpoints Used by: returns, finance, shipping, advertising, sellers, support. */
@@ -1067,7 +1079,7 @@ export const endpoints = defineEndpoints({
     status: 200,
     errors: ["ILLEGAL_TRANSITION","IMPACT_BLOCKING","CHANGE_CONFLICT","LEAD_TIME_TOO_SHORT"],
     audited: true,
-    approval: "Approval action settings.changes.apply. Per definition: none, second reviewer, or Business Owner",
+    approval: "Approval action settings.changes.apply (second reviewer), or settings.changes.apply-owner when any item needs the Business Owner. Per definition: none, second reviewer, or Business Owner",
     events: ["settings.change.submitted","settings.change.scheduled"],
     screens: ["admin/settings"],
     phase: 1,
@@ -1206,10 +1218,17 @@ export const spec = defineModuleSpec({
   approvalActions: [
     {
       "key": "settings.changes.apply",
-      "desc": "Apply a change request to effective-dated platform settings",
+      "desc": "Apply a change request whose strictest item rule is second_reviewer",
       "limit": "none",
-      "secondReviewer": "above-limit",
-      "approvers": "Per setting definition: none, a second reviewer, or the Business Owner (the strictest rule among the changed items applies)"
+      "secondReviewer": "always",
+      "approvers": "Another Platform Administrator or the Business Owner (never the proposer)"
+    },
+    {
+      "key": "settings.changes.apply-owner",
+      "desc": "Apply a change request with at least one item whose rule is business_owner",
+      "limit": "none",
+      "secondReviewer": "always",
+      "approvers": "Business Owner only (never the proposer)"
     }
   ],
   stateMachines: {
@@ -1274,7 +1293,7 @@ export const spec = defineModuleSpec({
       "settings.feature_flag.changed": { when: "A feature flag is switched", payload: () => SettingsFeatureFlagChangedEvent },
     },
     consumes: {
-      "access.approval.decided": "For settings.changes.apply requests: approved → scheduled (applied at once if effectiveAt has passed); rejected/expired → rejected; cancelled → cancelled",
+      "access.approval.decided": "For settings.changes.apply and settings.changes.apply-owner requests: approved → scheduled (applied at once if effectiveAt has passed); rejected/expired → rejected; cancelled → cancelled",
       "access.approval.returned": "Move the change back to draft with the reviewer's comment on its timeline"
     },
   },

@@ -71,6 +71,14 @@ type Variant {
   options: [VariantOption!]!
   gtin: String
   images: [MediaRef!]!
+  "Shipping weight of one unit in its retail packaging, in grams (parcel data for shipping quotes and labels)"
+  weightGrams: Int
+  "Packaged length of one unit, in centimetres"
+  lengthCm: Int
+  widthCm: Int
+  heightCm: Int
+  "Manufacturer list price (MSRP) set by Marketly staff; offers may show it as a reference price"
+  listPrice: Money
 }
 
 type VariantOption {
@@ -138,6 +146,8 @@ type Brand {
   banner: MediaRef
   description: String
   productCount: Int!
+  "active, under_review or blocked. Store lists only show active brands; admin reads and catalog.getBrands return any status"
+  status: String! @areas(in: [SELLER, ADMIN])
 }
 
 enum ProductReviewState @areas(in: [SELLER, ADMIN]) {

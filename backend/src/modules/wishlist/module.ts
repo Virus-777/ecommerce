@@ -16,11 +16,11 @@ import { WishlistService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.0.1',
+  version: '1.1.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const service = new WishlistService({ repo: createPostgresWishlistRepository(ctx.db), ctx });
+    const service = new WishlistService({ repo: createPostgresWishlistRepository(ctx.db, ctx.inbox), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
@@ -31,6 +31,7 @@ export default defineModule({
     ctx.events.on("offers.offer.status_changed", (e) => service.onOfferStatusChangedFromOffers(e.payload));
     ctx.events.on("catalog.product.merged", (e) => service.onProductMergedFromCatalog(e.payload));
     ctx.events.on("catalog.product.publication_changed", (e) => service.onProductPublicationChangedFromCatalog(e.payload));
+    ctx.events.on("customers.account.closed", (e) => service.onAccountClosedFromCustomers(e.payload));
 
     // Background jobs (spec jobs)
     ctx.jobs.handle("wishlist.evaluate-alerts", () => service.evaluateAlerts());

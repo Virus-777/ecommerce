@@ -31,7 +31,7 @@ Saved shopping for customers: saved items in one or more lists, price-drop and b
 | POST | `/api/store/wishlist/items` | Save a product (optionally with alerts) | customer | `SaveItemInput` → `SavedItem` |
 | DELETE | `/api/store/wishlist/items/{id}` | Remove a saved item (its alerts are removed too) | customer | 204 No content |
 | POST | `/api/store/wishlist/items/{id}/move` | Move an item to another list | customer | `{ listId: uuid }` → `SavedItem` |
-| POST | `/api/store/wishlist/items/{id}/move-to-cart` | Add the item to the cart with an explicit offer | customer | `{ offerId: uuid?, quantity: int, removeFromList: bool? }` → `{ cartLineId: string, cartItemCount: int, item: SavedItem? }` |
+| POST | `/api/store/wishlist/items/{id}/move-to-cart` | Add the item to the cart with an explicit offer | customer | `{ offerId: uuid?, quantity: int, removeFromList: bool?, expectedPrice: Money? }` → `{ cartLineId: string, cartItemCount: int, item: SavedItem? }` |
 | PUT | `/api/store/wishlist/items/{id}/alerts` | Turn price-drop and back-in-stock alerts on or off for an item | customer | `AlertToggle` → `SavedItem` |
 | GET | `/api/store/wishlist/lists` | My lists | customer | `WishlistList[]` |
 | POST | `/api/store/wishlist/lists` | Create a named list | customer | `{ name: string }` → `WishlistList` |
@@ -256,10 +256,11 @@ Indexes: `(product_id, kind, state)`, `(customer_id, state)`
 | Consumes | From | Does |
 |---|---|---|
 | `offers.offer.price_changed` | offers | Evaluate price-drop alerts for saved offers |
-| `inventory.stock.changed` | inventory | Evaluate back-in-stock alerts when available goes from 0 to positive |
+| `inventory.stock.changed` | inventory | Evaluate back-in-stock alerts when available goes from 0 to positive: alerts for the offer, for the variant (variantId) and whole-product alerts (productId on the payload), narrowed by the alert's sellerId when set |
 | `offers.offer.status_changed` | offers | Evaluate back-in-stock alerts for reactivated offers; clear saved offer ids of closed offers |
 | `catalog.product.merged` | catalog | Move saved items and alerts to the kept product |
 | `catalog.product.publication_changed` | catalog | Pause alerts for suspended products; mark items unavailable |
+| `customers.account.closed` | customers | Delete the customer's lists, saved items and alerts (closure erases wishlist data; share links stop working) |
 
 ## In-process API (for other modules)
 
@@ -270,6 +271,7 @@ Indexes: `(product_id, kind, state)`, `(customer_id, state)`
 | listItems | `(customerId: uuid, opts: { listId?: uuid, paging: PageInput }) => Paged<SavedItem>`<br>Saved items of a list (default list when omitted) with price hints and alert toggles (GET /wishlist, GET /lists/{id}/items). | graphql |
 | listLists | `(customerId: uuid) => WishlistList[]`<br>The customer's lists with item counts and share state (GET /lists). | graphql |
 | listAlerts | `(customerId: uuid) => Alert[]`<br>The customer's price-drop and back-in-stock alerts (GET /alerts). | graphql |
+| exportCustomerData | `(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]`<br>Customer data export hook (decision: every module that keeps customer data answers the customers data export): lists, saved items with notes and alerts as plain records. Called by customers when it builds a data export | customers |
 
 ## Permissions
 
@@ -290,7 +292,7 @@ Indexes: `(product_id, kind, state)`, `(customer_id, state)`
 
 | Job | Schedule | Does |
 |---|---|---|
-| `wishlist.evaluate-alerts` | every 10 min | Batch-evaluate alert conditions changed by recent events, apply cooldown, publish wishlist.alert.triggered |
+| `wishlist.evaluate-alerts` | every 10 min | Batch-evaluate alert conditions changed by recent events, apply cooldown, publish wishlist.alert.triggered. Also re-checks every active back-in-stock alert against current availability (offers and inventory.getAvailability), so a restock missed by events or skipped inside the cooldown still triggers once the cooldown has passed |
 
 ## Settings
 
@@ -308,6 +310,8 @@ Indexes: `(product_id, kind, state)`, `(customer_id, state)`
 - Recently viewed belongs to customers (brief); the wishlist page shows it by calling customers.
 - Alerts are promotional: notifications delivers them only if the customer allows wishlist alerts (account/notifications) and never mixes them into essential order updates.
 - Price hints are honest: 'Lowest in 30 days' only when the current price is the lowest in the window, from offers.priceRange(offerId, priceHintDays) (offers keeps the only price history); campaign was-prices come from promotions.referencePrice when enabled.
+- GraphQL: the store schema's WishlistAlert exposes sellerId (Alert.sellerId) and the seller field is resolved by the sellers module's shared mapper (decision: GraphQL shared mappers per owning module); wishlist itself has no sellers dependency.
+- Wishlist is for signed-in customers only (decision D3): every store endpoint except the shared-list view needs a customer token.
 
 ## GraphQL (read layer)
 
@@ -396,7 +400,9 @@ type WishlistAlert @areas(in: [STORE]) @phase(n: 3) {
   itemId: UUID
   product: Product!
   variant: Variant
-  "Seller the alert is limited to, if any"
+  "Seller the alert is limited to, if any (Alert.sellerId)"
+  sellerId: UUID
+  "Seller the alert is limited to, if any (resolved by the sellers module's shared mapper from sellerId)"
   seller: SellerPublicProfile
   kind: WishlistAlertKind!
   "e.g. Any drop below $329.00; Olive, from Trailhead Outfitters"

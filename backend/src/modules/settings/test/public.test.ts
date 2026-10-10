@@ -31,7 +31,15 @@ describe('app-config', () => {
     expect(res.statusCode, res.body).toBe(200);
     const cfg = res.json();
     expect(cfg).toMatchObject({
-      market: { country: 'US', currency: 'USD', timeZone: 'America/Los_Angeles', locale: 'en-US', serviceRegionLabel: 'United States, 48 contiguous states' },
+      market: {
+        country: 'US',
+        currency: 'USD',
+        timeZone: 'America/Los_Angeles',
+        locale: 'en-US',
+        serviceRegionLabel: 'United States, 48 contiguous states',
+        legalName: 'Marketly, Inc.',
+        companyLine: 'Marketly, Inc. · 500 Market St, San Francisco, CA',
+      },
       support: { hoursLabel: 'Mon–Sat, 8 AM–8 PM PT', phone: expect.any(String), openNow: expect.any(Boolean), closedLabel: 'Closed Sundays and US holidays' },
       checkout: { guestCheckoutEnabled: true, offerAccountAfterGuestPurchase: true },
       features: { wishlist: false, paidSellerAds: false, externalSignIn: false },
@@ -113,6 +121,7 @@ describe('market and business calendar', () => {
     expect(m).toMatchObject({ country: 'US', currency: 'USD', timeZone: 'America/Los_Angeles', businessHoursLabel: 'Mon–Sat, 8:00 AM – 8:00 PM PT', serviceRegion: { code: 'US-48' } });
     expect(m.businessHours).toHaveLength(6);
     expect(m.support.closedLabel).toBe('Closed Sundays and US holidays');
+    expect(m).toMatchObject({ legalName: 'Marketly, Inc.', companyLine: 'Marketly, Inc. · 500 Market St, San Francisco, CA' });
   });
 
   it('GET /business-calendar gives open hours per day minus closures', async () => {
@@ -138,6 +147,20 @@ describe('market and business calendar', () => {
     expect(cal.addBusinessMinutes('2026-11-26T03:00:00.000Z', 120)).toBe('2026-11-27T17:00:00.000Z'); // Wed 19:00 + 2h → Fri 09:00 PT
     expect(cal.nextOpen('2026-11-29T20:00:00.000Z')).toBe('2026-11-30T16:00:00.000Z'); // Sunday → Monday 8 AM PT
     expect(cal.nextOpen('2026-11-30T17:00:00.000Z')).toBe('2026-11-30T17:00:00.000Z'); // open now
+  });
+
+  it('businessCalendar() counts whole business days and tells business days apart', async () => {
+    const cal = await h.api.businessCalendar();
+    expect(cal.isBusinessDay('2026-11-25')).toBe(true);
+    expect(cal.isBusinessDay('2026-11-26')).toBe(false); // Thanksgiving
+    expect(cal.isBusinessDay('2026-11-29')).toBe(false); // Sunday
+    expect(() => cal.isBusinessDay('nope')).toThrow();
+    expect(cal.addBusinessDays('2026-11-25T18:00:00.000Z', 1)).toBe('2026-11-27T18:00:00.000Z'); // Wed 10:00 PT + 1 → Fri 10:00 (Thanksgiving skipped)
+    expect(cal.addBusinessDays('2026-11-28T18:00:00.000Z', 1)).toBe('2026-11-30T18:00:00.000Z'); // Sat + 1 → Mon (Sunday closed)
+    expect(cal.addBusinessDays('2026-11-25T18:00:00.000Z', 3)).toBe('2026-11-30T18:00:00.000Z'); // Wed + 3 → Fri, Sat, Mon
+    expect(cal.addBusinessDays('2026-11-29T20:00:00.000Z', 1)).toBe('2026-12-01T20:00:00.000Z'); // from Sunday: counts from Monday → Tue 12:00 PT
+    expect(cal.addBusinessDays('2026-11-26T05:00:00.000Z', 1)).toBe('2026-11-28T04:00:00.000Z'); // Wed 21:00 PT + 1 → Fri, which closes at 20:00
+    expect(cal.addBusinessDays('2026-11-25T18:00:00.000Z', 0)).toBe('2026-11-25T18:00:00.000Z');
   });
 });
 
@@ -217,8 +240,16 @@ describe('GraphQL', () => {
 });
 
 describe('get()', () => {
-  it('falls back to the declared default and answers null for undeclared keys', async () => {
+  it("reads any enabled module's declared setting by its full key, falling back to the default", async () => {
     expect(await h.api.get('catalog.maxImagesPerProduct')).toBe(12);
-    expect(await h.api.get('nope.nothing')).toBeNull();
+    expect(await h.api.get('market.legalName')).toBe('Marketly, Inc.');
+    expect(await h.api.get('settings.appConfigCacheSeconds')).toEqual(expect.any(Number));
+  });
+
+  it('refuses unknown keys and keys of disabled modules with UNKNOWN_SETTING', async () => {
+    await expect(h.api.get('nope.nothing')).rejects.toMatchObject({ code: 'UNKNOWN_SETTING' });
+    await expect(h.api.get('catalog.noSuchSetting')).rejects.toMatchObject({ code: 'UNKNOWN_SETTING' });
+    // wallet is not running in this app
+    await expect(h.api.get('wallet.goodwillMaxPerCustomer30Days')).rejects.toMatchObject({ code: 'UNKNOWN_SETTING' });
   });
 });

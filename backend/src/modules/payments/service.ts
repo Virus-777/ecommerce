@@ -264,8 +264,8 @@ export class PaymentsService implements PaymentsPublicApi {
   }
 
   /** Job payments.expire-authorizations (hourly) */
-  expireAuthorizations(): Promise<void> {
-    return this.intents.expireAuthorizations();
+  async expireAuthorizations(): Promise<void> {
+    await this.intents.expireAuthorizations();
   }
 
   /** Job payments.dispute-deadlines (hourly) */

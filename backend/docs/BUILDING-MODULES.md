@@ -35,7 +35,8 @@ infra/<provider>/   provider adapters (email, payments, carriers, storage) behin
 - The service implements the spec's `PublicApi` interface (already declared on the class). Public API methods are called by other modules in-process; keep them free of HTTP concerns.
 - Map DB rows (snake_case) to API types (camelCase) in the repository or a `mappers.ts`; keep the mapping in one place per type.
 - Time comes from `ctx.clock.now()`, never `new Date()` in services (tests move the clock). IDs from `newId()` (`kernel/lib/ids`). Human references from `ctx.refs` (`MK-…`, `RT-…`). Money from `kernel/lib/money` (integer minor units, never floats).
-- Runtime settings: `await ctx.settings.get('key')` (spec `settings`; the settings module overrides the default).
+- Runtime settings: `await ctx.settings.get('key')` (spec `settings`; the settings module overrides the default). Another module's setting, read-only: `await ctx.settings.read('reports.maxExportRows')` (its value in force, else its spec default) — never duplicate a setting to keep two equal.
+- The Official Store's display name is `OFFICIAL_STORE_NAME` and its seller id `OFFICIAL_STORE_ID` (`src/spec/common.ts`); never hardcode either.
 
 ## 3. What the middleware already did (don't repeat it)
 
@@ -105,7 +106,8 @@ const check = await access.check(principal, 'finance.payout.release', { amount }
 if (check.decision === 'denied') throw new AppError('FORBIDDEN', check.reason);
 if (check.decision === 'approval_required') {
   const req = await access.requestApproval({ actionKey: 'finance.payout.release', target: {…}, amount, requestedBy: actor, … });
-  // keep the record pending; answer as the spec says (202 with the approval, or APPROVAL_REQUIRED)
+  // save the record pending and answer the endpoint's normal status with `approval` in the body (FORMAT.md "Approval responses");
+  // 409 APPROVAL_REQUIRED only when nothing was saved
 }
 ```
 
@@ -131,12 +133,17 @@ Granting a permission never grants financial authority: `check` is the only sour
   (no network; e.g. payments: amounts ending in `02` decline, `03` time out; storage: local `.data/` or memory;
   email: recorded as sent). Wire the dev adapter in `module.ts`; real adapters come later behind the same port.
 - **Jobs** (`spec.jobs`): implement every handler wired in `module.ts`. Make them restartable and idempotent;
-  process in bounded batches; use `ctx.clock`.
+  process in bounded batches (walk all rows with a keyset cursor; never re-read the same first page each run); use `ctx.clock`.
+  The schedule must be a phrase the scheduler times (FORMAT.md); any other phrase fails boot. A job that acts "at a cutoff"
+  runs on an interval and checks the cutoff itself, idempotent per cutoff.
 - **Webhooks:** register `ctx.http.webhookVerifier(hmacWebhookVerifier(ctx.config, ctx.name))`
   (`kernel/http/webhooks.ts`) unless the provider has its own scheme. The middleware rejects bad signatures
   and marks replays; handlers process `body` idempotently by provider event id.
 - **GraphQL:** implement every field listed in `graphql/resolvers.ts` by calling service read methods.
   The resolver context has `principal`, `auth` and `scope`-relevant data; apply the same record scope as REST.
+- **Work items:** `workqueues.raise({ …, sourceModule: ctx.name })`: the kind must be one of the spec's work item kinds (typed) and the queue one that workqueues seeds.
+- **Files:** every uploaded file you keep must be attached with `media.attach` under the right usage kind, or media's orphan sweep deletes it after 30 days.
+- **Customer data export:** a module holding a customer's personal data declares `exportCustomerData({ customerId, accountId }) => CustomerDataSection[]` (FORMAT.md) and anonymises on `customers.account.closed`.
 - **Kernel helpers added during tranche 1:**
   - `ctx.modules`: the modules running in this process (don't read `modules.config.ts`).
   - `ctx.afterBoot(fn)`: runs once every module has registered: call other modules at startup there (register a dataset, warm a cache), never in `register`.

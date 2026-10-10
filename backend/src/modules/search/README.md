@@ -5,7 +5,7 @@
 Finding products: a product index built from catalog, offers, inventory and reviews events; search with misspelling tolerance and corrections, suggestions (queries, categories, brands, stores, products, recent searches), universal and category filters with counts, sorting, sponsored slots from advertising, and guidance for empty or unavailable results.
 
 - **Group:** Catalog and stock · **Launch phase:** 1 · **Plan chapters:** 4, 3, 19
-- **Depends on:** [catalog](../catalog/README.md), [offers](../offers/README.md) · **Optional:** [inventory](../inventory/README.md), [reviews](../reviews/README.md), [sellers](../sellers/README.md), [advertising](../advertising/README.md), [promotions](../promotions/README.md), [customers](../customers/README.md), [media](../media/README.md), [reports](../reports/README.md), [wishlist](../wishlist/README.md), [orders](../orders/README.md), [returns](../returns/README.md)
+- **Depends on:** [catalog](../catalog/README.md), [offers](../offers/README.md) · **Optional:** [inventory](../inventory/README.md), [reviews](../reviews/README.md), [sellers](../sellers/README.md), [advertising](../advertising/README.md), [promotions](../promotions/README.md), [customers](../customers/README.md), [media](../media/README.md), [reports](../reports/README.md), [wishlist](../wishlist/README.md), [orders](../orders/README.md), [returns](../returns/README.md), [audit](../audit/README.md)
 
 ## Owns
 - Product search index (Postgres full-text + trigram first; external engine adapter later)
@@ -627,6 +627,18 @@ Indexes: `(normalized, at)`, `(results, at) where results = 0`
 
 Indexes: `(search_id)`, `(product_id, at)`
 
+**product_sales_daily**: Units and orders per product per market day (decision S-D3), fed idempotently by orders events through the inbox; the nightly job sums the last 30 days into search_documents.sales_30d. Rebuildable from orders
+
+| Column | Type |
+|---|---|
+| product_id | uuid |
+| day | date (market time zone) |
+| units | int |
+| orders | int |
+| updated_at | timestamptz |
+
+Indexes: `pk (product_id, day)`, `(day)`
+
 **dirty_documents**: Products waiting to be reindexed
 
 | Column | Type |
@@ -690,7 +702,8 @@ Indexes: `(search_id)`, `(product_id, at)`
 | `sellers.seller.closed` | sellers | Remove the store from suggestions |
 | `promotions.campaign.started` | promotions | Update deal badges, was prices and deal end times on cards |
 | `promotions.campaign.ended` | promotions | Remove deal badges |
-| `orders.order.placed` | orders | Count units for best-selling sort and popularity (phase 2 sort) |
+| `orders.order.placed` | orders | Add the order's units per product to product_sales_daily for the placed day (items read with orders.getOrder; inbox-claimed per event so redelivery never counts twice). Feeds best-selling sort and popularity (phase 2 sort) |
+| `orders.order.cancelled` | orders | Subtract the cancelled order's units from product_sales_daily for the day it was placed (inbox-claimed), so declined-payment orders do not count as sales |
 | `identity.guest_session.claimed` | identity | Merge the guest session's recent searches into the account (identity calls nothing in search) |
 | `catalog.brand.changed` | catalog | Reindex the brand name, slug and status on the brand's product documents and brand suggestions; only active brands are suggested or offered as a facet |
 | `customers.marketing_preferences.changed` | customers | recentSearches false: delete the customer's saved recent searches and stop saving new ones; true: start saving again (nothing is restored) |
@@ -733,10 +746,10 @@ Indexes: `(search_id)`, `(product_id, at)`
 | Job | Schedule | Does |
 |---|---|---|
 | `search.process-dirty` | every 30 s | Rebuild documents in dirty_documents from catalog, offers, inventory, reviews and promotions public APIs |
-| `search.refresh-delivery-flags` | every 15 min | Recompute 'Ships today' and arrives-by flags as dispatch cutoffs pass |
+| `search.refresh-delivery-flags` | every 15 min | Recompute 'Ships today' and arrives-by flags as dispatch cutoffs pass (arrival = dispatch days + transitBusinessDays) |
 | `search.refresh-suggestions` | hourly | Rebuild suggestion_terms from popular queries (with results), categories, brands, stores and product names |
 | `search.full-reindex` | nightly 03:00 market time | Full rebuild (catches category tree changes, which catalog does not publish as events) |
-| `search.sales-counts` | nightly 03:30 market time | 30-day units sold per product for best-selling sort and popularity; enables best_selling once bestSellingMinOrders is reached; ranks the top 100 products per leaf category (best_seller_rank, shown as #3 in Headphones) |
+| `search.sales-counts` | nightly 03:30 market time | Sum product_sales_daily over the last 30 days into sales_30d per product (and delete rows older than 90 days) for best-selling sort and popularity; enables best_selling once bestSellingMinOrders is reached; ranks the top 100 products per leaf category (best_seller_rank, shown as #3 in Headphones) |
 | `search.prune-logs` | daily 04:00 market time | Delete recent searches older than the retention period and query/click logs older than 13 months |
 
 ## Settings
@@ -750,6 +763,7 @@ Indexes: `(search_id)`, `(product_id, at)`
 | recentSearchRetentionDays | `90` | duration, days, 1–… | Recent searches older than this are deleted |
 | newArrivalsWindowDays | `30` | duration, days, 1–… | 'New arrivals' = first listed within this window |
 | bestSellingMinOrders | `500` | int, 0–… | Platform orders in 30 days before best-selling sort is offered |
+| transitBusinessDays | `3` | duration, business days, 0–15 | Carrier transit business days assumed for every destination in the market (decision S-D4): search results' arrives-by filter and delivery cues use dispatch days + this. The purchase box and checkout show shipping's real estimate |
 | excludeOutOfStockByDefault | `true` | bool | Out-of-stock products appear only with 'Include out of stock' |
 | searchEngine | `"postgres"` | enum (postgres \| external), approval: second reviewer | postgres | external (adapter added later) |
 
@@ -769,7 +783,7 @@ Indexes: `(search_id)`, `(product_id, at)`
 - Returning to previous results: the query string is the state; searchId plus page/cursor restores the same page after viewing a product.
 - Recent searches are stored per customer or guest session and merged on sign-in when search consumes identity.guest_session.claimed. For a customer they are saved to the account only while customers.MarketingPreferences.recentSearches is on (customers.getMarketingConsent at save time). Turning it off deletes the saved history: customers publishes customers.marketing_preferences.changed and search deletes the rows. With customers disabled, nothing is saved to accounts.
 - Reports read unavailable searches through zeroResultStats; query logs are not exported directly.
-- Optional dependencies: inventory (stock flags), reviews (ratings), sellers (store suggestions), advertising (sponsored slots), promotions (deal badges), customers (recent-search preference). With any of them off, the related fields are simply empty.
+- Optional dependencies: inventory (stock flags), reviews (ratings), sellers (store suggestions), advertising (sponsored slots), promotions (deal badges), customers (recent-search preference), orders (sales counts), audit (synonym, reindex and ranking policy changes are written to the action history when audit is enabled). With any of them off, the related fields are simply empty.
 
 ## GraphQL (read layer)
 

@@ -179,6 +179,23 @@ export function createPostgresInventoryRepository(db: Kysely<InventoryDb>, inbox
       if (!refIds.length) return [];
       return db.selectFrom('stock_movements').selectAll().where('ref_kind', '=', refKind).where('ref_id', 'in', refIds).orderBy('at').orderBy('id').execute();
     },
+    async unitsByReasonSince(itemIds, since, reasonCodes) {
+      const out = new Map<string, number>();
+      if (!itemIds.length || !reasonCodes.length) return out;
+      const rows = await db
+        .selectFrom('stock_movements')
+        .select(['stock_item_id', sql<number>`sum(quantity)::int`.as('n')])
+        .where('stock_item_id', 'in', itemIds)
+        .where('reason_code', 'in', reasonCodes)
+        .where('at', '>=', since)
+        .groupBy('stock_item_id')
+        .execute();
+      for (const r of rows) out.set(r.stock_item_id, Number(r.n));
+      return out;
+    },
+    async reservationsByKeyPrefix(orderId, prefix) {
+      return db.selectFrom('reservations').selectAll().where('order_id', '=', orderId).where('key', 'like', `${prefix.replace(/[\\%_]/g, (c) => `\\${c}`)}%`).orderBy('created_at').execute();
+    },
     async dispatchedSince(itemIds, since) {
       const out = new Map<string, number>();
       if (!itemIds.length) return out;

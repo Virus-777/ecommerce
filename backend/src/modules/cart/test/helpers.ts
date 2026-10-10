@@ -1,19 +1,20 @@
 /**
- * Test kit for cart: boots cart on in-memory PostgreSQL with real inventory (stock items and
- * availability), and an in-memory "offer world" behind stubs of offers (built in parallel) and catalog
- * (product content). Shipping and promotions are optional: tests that need them boot them and stub them.
+ * Test kit for cart: boots cart on in-memory PostgreSQL with an in-memory "offer world" behind stubs
+ * of offers, catalog (product content) and inventory availability (stock changes are published as
+ * inventory.stock.changed, as inventory does). Shipping and promotions are optional: tests that need
+ * them boot them and stub them.
  */
 import type { FastifyInstance } from 'fastify';
-import { expect } from 'vitest';
 import type { BuildOptions } from '../../../app.js';
 import type { EventEnvelope } from '../../../kernel/events/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { money } from '../../../kernel/lib/money.js';
 import type * as catalog from '../../../spec/catalog.js';
 import { spec } from '../../../spec/cart.js';
+import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type * as offers from '../../../spec/offers.js';
 import { auth, buildTestApp, callers, movingClock } from '../../../testing/app.js';
-import type { InventoryPublicApi } from '../../../spec/inventory.js';
+
 import type { CartService } from '../service.js';
 
 export const STORE = '/api/store/cart';
@@ -32,8 +33,8 @@ export interface World {
   /** offers that don't ship to the location (quoteOffer delivery) */
   notShippable: Set<string>;
   purchasable: Map<string, boolean>;
-  /** stock item → seller that owns it (inventory) */
-  stockSeller: Map<string, string>;
+  /** available units per stock item (inventory.getAvailability stub) */
+  stock: Map<string, number>;
   /** postal codes offers.revalidate was called with */
   revalidatedFor: string[];
 }
@@ -49,11 +50,11 @@ export interface Kit {
   publish(source: string, name: string, payload: unknown): Promise<void>;
   /** A product with one variant (or more) in the catalog stub */
   product(o?: { title?: string; variants?: number }): Promise<{ productId: string; variantIds: string[] }>;
-  /** An active offer with real inventory stock */
+  /** An active offer with stock (inventory availability stub) */
   offer(o: { productId: string; variantId: string; price: number; stock?: number; sellerName?: string; official?: boolean; sellerId?: string; purchaseLimit?: number | null; shipsFrom?: string; condition?: offers.Offer['condition'] }): Promise<offers.Offer>;
   /** Change an offer in the world (price, status, purchase limit …); bumps termsVersion */
   change(offerId: string, patch: Partial<offers.Offer>): void;
-  /** Set available stock in inventory (publishes inventory.stock.changed) */
+  /** Set available stock (publishes inventory.stock.changed as inventory would) */
   stock(offerId: string, available: number): Promise<void>;
   visitor(sid?: string): { sid: string; token: string };
   customer(accountId?: string): { accountId: string; token: string };
@@ -93,7 +94,7 @@ const viewOf = (o: offers.Offer, world: World): offers.OfferView => ({
 
 export async function boot(opts: BuildOptions & { only?: string[] } = {}): Promise<Kit> {
   const clock = movingClock();
-  const world: World = { offers: new Map(), products: new Map(), restricted: new Set(), notShippable: new Set(), purchasable: new Map(), stockSeller: new Map(), revalidatedFor: [] };
+  const world: World = { offers: new Map(), products: new Map(), restricted: new Set(), notShippable: new Set(), purchasable: new Map(), stock: new Map(), revalidatedFor: [] };
   const alternatives = (o: offers.Offer) => [...world.offers.values()].filter((x) => x.id !== o.id && x.variantId === o.variantId && x.status === 'active').map((x) => viewOf(x, world));
   const app = await buildTestApp({
     clock,
@@ -104,6 +105,7 @@ export async function boot(opts: BuildOptions & { only?: string[] } = {}): Promi
       ...opts.apiStubs,
       offers: {
         getOffer: async (id) => (world.offers.has(id) ? structuredClone(world.offers.get(id)!) : null),
+        getOffers: async (ids) => Object.fromEntries(ids.map((id) => [id, world.offers.has(id) ? structuredClone(world.offers.get(id)!) : null])),
         quoteOffer: async (id) => {
           const o = world.offers.get(id);
           if (!o) throw new Error('unknown offer');
@@ -118,6 +120,7 @@ export async function boot(opts: BuildOptions & { only?: string[] } = {}): Promi
             if (world.restricted.has(o.id)) changes.push({ offerId: o.id, kind: 'seller_restricted', message: `${o.sellerName} can't sell right now`, alternatives: alternatives(o) });
             if (o.price.amount !== l.price.amount) changes.push({ offerId: o.id, kind: 'price', before: String(l.price.amount), after: String(o.price.amount), message: 'Price changed', alternatives: alternatives(o) });
             if (o.status !== 'active') changes.push({ offerId: o.id, kind: o.status === 'out_of_stock' ? 'availability' : 'removed', message: 'Not available', alternatives: alternatives(o) });
+            else if (o.price.amount === l.price.amount && l.termsVersion !== o.termsVersion) changes.push({ offerId: o.id, kind: 'terms', before: `v${l.termsVersion}`, after: `v${o.termsVersion}`, message: `${o.sellerName} updated the delivery, return or warranty terms of this offer.`, alternatives: [] });
           }
           return { ok: changes.length === 0, changes };
         },
@@ -129,12 +132,22 @@ export async function boot(opts: BuildOptions & { only?: string[] } = {}): Promi
         isPurchasable: async (id) => world.purchasable.get(id) ?? true,
         ...(opts.apiStubs?.catalog ?? {}),
       },
+      inventory: {
+        getAvailability: async (ids) =>
+          Object.fromEntries(
+            ids.filter((id) => world.stock.has(id)).map((id) => {
+              const available = world.stock.get(id)!;
+              return [id, { available, state: available > 0 ? 'in_stock' : 'out_of_stock', lowStockThreshold: null, nextIncoming: null }];
+            }),
+          ),
+        ...(opts.apiStubs?.inventory ?? {}),
+      },
     },
   });
   const events: EventEnvelope[] = [];
   const bus = app.kernel.events;
   for (const name of Object.keys(spec.events.publishes)) bus.subscribe('test', name, (e) => void events.push(e));
-  const inventory = app.kernel.boot.apis.get('inventory') as InventoryPublicApi;
+
 
   const kit: Kit = {
     app,
@@ -185,15 +198,16 @@ export async function boot(opts: BuildOptions & { only?: string[] } = {}): Promi
       const id = newId();
       const official = o.official ?? false;
       const sellerId = official ? null : (o.sellerId ?? newId());
-      const stockOwner = sellerId ?? newId();
-      const stock = await inventory.createStockItem({ ownerType: 'seller', sellerId: stockOwner, offerId: id, sku: `SKU-${id.slice(-8)}`, productId: o.productId, variantId: o.variantId, condition: o.condition ?? 'new', label: 'Item', initialAvailable: o.stock ?? 20 });
-      world.stockSeller.set(stock.id, stockOwner);
+      const stock = { id: newId() };
+      world.stock.set(stock.id, o.stock ?? 20);
       const now = clock.now().toISOString();
       const offer: offers.Offer = {
         id,
         ownerType: official ? 'official' : 'seller',
         sellerId,
-        sellerName: o.sellerName ?? (official ? 'Marketly Official Store' : 'Northwind Audio'),
+        sellerName: o.sellerName ?? (official ? OFFICIAL_STORE_NAME : 'Northwind Audio'),
+        title: 'Linen Duvet Cover – Queen',
+        missingItemsStale: false,
         productId: o.productId,
         variantId: o.variantId,
         condition: o.condition ?? 'new',
@@ -224,8 +238,22 @@ export async function boot(opts: BuildOptions & { only?: string[] } = {}): Promi
     },
     async stock(offerId, available) {
       const o = world.offers.get(offerId)!;
-      const res = await inventory.applyBulkQuantities(world.stockSeller.get(o.stockItemId)!, [{ stockItemId: o.stockItemId, newAvailable: available }], newId(), { kind: 'system' });
-      expect(res[0]?.ok, res[0]?.error).toBe(true);
+      const previousAvailable = world.stock.get(o.stockItemId) ?? 0;
+      world.stock.set(o.stockItemId, available);
+      bus.publish('inventory', 'inventory.stock.changed', {
+        stockItemId: o.stockItemId,
+        offerId: o.id,
+        ownerType: o.ownerType,
+        sellerId: o.sellerId ?? null,
+        productId: o.productId,
+        variantId: o.variantId,
+        available,
+        reserved: 0,
+        previousAvailable,
+        state: available > 0 ? 'in_stock' : 'out_of_stock',
+        archived: false,
+        cause: 'bulk_update',
+      });
       await bus.drain();
     },
     visitor(sid = newId()) {

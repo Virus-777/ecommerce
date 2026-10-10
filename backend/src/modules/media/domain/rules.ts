@@ -5,13 +5,15 @@
 import type { MediaOwner, UploadRequest, UsageInput } from '../../../spec/media.js';
 
 export type Purpose = UploadRequest['purpose'];
-export type GeneratedPurpose = 'export' | 'statement' | 'report' | 'correction_report' | 'data_export' | 'label';
+export type GeneratedPurpose = 'export' | 'statement' | 'report' | 'correction_report' | 'data_export' | 'label' | 'gift_card_codes';
 export type UsageKind = UsageInput['kind'];
 export type AssetKind = 'image' | 'video' | 'document' | 'spreadsheet';
 export type OwnerKind = MediaOwner['kind'];
 export type FileType = 'jpeg' | 'png' | 'webp' | 'heic' | 'gif' | 'mp4' | 'mov' | 'pdf' | 'csv' | 'xlsx';
 
-export const GENERATED_PURPOSES: readonly GeneratedPurpose[] = ['export', 'statement', 'report', 'correction_report', 'data_export', 'label'];
+export const GENERATED_PURPOSES: readonly GeneratedPurpose[] = ['export', 'statement', 'report', 'correction_report', 'data_export', 'label', 'gift_card_codes'];
+/** Generated files whose download links are recorded with a reason (the owning module checks access first) */
+export const SENSITIVE_GENERATED: readonly string[] = ['gift_card_codes'];
 export const isGeneratedPurpose = (p: string): p is GeneratedPurpose => (GENERATED_PURPOSES as readonly string[]).includes(p);
 
 /* ------------------------------------------------------------------ who may upload what */
@@ -201,16 +203,28 @@ export function limitFor(purpose: Purpose, configured: Record<string, PurposeLim
 /* ------------------------------------------------------------------ usages */
 
 /** Usages that make a file evidence: kept for evidenceRetentionDays after their last use */
-export const EVIDENCE_KINDS: readonly string[] = ['verification_document', 'return_evidence', 'case_evidence', 'order_evidence', 'inspection_photo'];
+export const EVIDENCE_KINDS: readonly string[] = [
+  'verification_document',
+  'return_evidence',
+  'case_evidence',
+  'order_evidence',
+  'inspection_photo',
+  'correction_evidence',
+  'trust_evidence',
+  'dispute_evidence',
+  'supplier_document',
+];
 export const isEvidenceKind = (kind: string) => EVIDENCE_KINDS.includes(kind);
 
-/** Which upload purposes each usage accepts ("the purpose does not fit the usage" otherwise) */
-const USAGE_PURPOSES: Record<UsageKind, readonly string[]> = {
+/** Which upload purposes each usage accepts ("the purpose does not fit the usage" otherwise; spec notes, Usage kinds) */
+export const USAGE_PURPOSES: Record<UsageKind, readonly string[]> = {
   product_image: ['product_image'],
   variant_image: ['product_image'],
   product_video: ['product_video'],
   offer_photo: ['offer_photo', 'product_image'],
   brand_logo: ['brand_logo'],
+  brand_banner: ['store_banner', 'content_image'],
+  category_image: ['content_image', 'product_image'],
   store_logo: ['store_logo'],
   store_banner: ['store_banner'],
   ad_creative: ['ad_creative', 'ad_video'],
@@ -222,6 +236,10 @@ const USAGE_PURPOSES: Record<UsageKind, readonly string[]> = {
   // orders keep the product snapshot image of past orders
   order_evidence: ['product_image', 'offer_photo', 'product_video'],
   inspection_photo: ['inspection_photo'],
+  correction_evidence: ['product_image', 'other_document', 'verification_document', 'case_evidence'],
+  trust_evidence: ['case_evidence', 'return_evidence', 'inspection_photo', 'message_attachment', 'verification_document', 'other_document', 'product_image'],
+  dispute_evidence: ['case_evidence', 'return_evidence', 'inspection_photo', 'message_attachment', 'other_document'],
+  supplier_document: ['other_document', 'inspection_photo', 'bulk_file'],
   review_photo: ['review_photo'],
   message_attachment: ['message_attachment'],
   bulk_file: ['bulk_file'],
@@ -241,12 +259,14 @@ export interface DeleteCheck {
   reason?: string;
 }
 
-const KIND_NOUN: Record<string, [string, string]> = {
+export const KIND_NOUN: Record<UsageKind, [string, string]> = {
   product_image: ['product', 'products'],
   variant_image: ['variant', 'variants'],
   product_video: ['product', 'products'],
   offer_photo: ['offer', 'offers'],
   brand_logo: ['brand', 'brands'],
+  brand_banner: ['brand', 'brands'],
+  category_image: ['category', 'categories'],
   store_logo: ['store logo', 'store logos'],
   store_banner: ['store banner', 'store banners'],
   ad_creative: ['ad', 'ads'],
@@ -257,6 +277,10 @@ const KIND_NOUN: Record<string, [string, string]> = {
   case_evidence: ['case', 'cases'],
   order_evidence: ['order', 'orders'],
   inspection_photo: ['inspection', 'inspections'],
+  correction_evidence: ['catalog correction', 'catalog corrections'],
+  trust_evidence: ['trust case', 'trust cases'],
+  dispute_evidence: ['payment dispute', 'payment disputes'],
+  supplier_document: ['purchase order', 'purchase orders'],
   review_photo: ['review', 'reviews'],
   message_attachment: ['message', 'messages'],
   bulk_file: ['bulk update', 'bulk updates'],
@@ -269,13 +293,17 @@ const EVIDENCE_LABEL: Record<string, string> = {
   case_evidence: 'case evidence',
   order_evidence: 'order evidence',
   inspection_photo: 'inspection evidence',
+  correction_evidence: 'catalog correction evidence',
+  trust_evidence: 'trust evidence',
+  dispute_evidence: 'payment dispute evidence',
+  supplier_document: 'supplier document',
 };
 
 /** "Used by 2 products, 1 ad" from the active usages */
 export function usedByText(usages: readonly { kind: string }[]): string {
   const counts = new Map<string, number>();
   for (const u of usages) {
-    const [one, many] = KIND_NOUN[u.kind] ?? ['record', 'records'];
+    const [one, many] = KIND_NOUN[u.kind as UsageKind] ?? ['record', 'records'];
     const key = `${one}\u0000${many}`;
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }

@@ -19,6 +19,7 @@ import type {
   PurchaseOrderInput,
   PurchaseOrderLineInput,
   PurchaseOrderRow,
+  PurchaseOrderShipTo,
   PurchaseOrderUpdate,
   PurchasingPublicApi,
   PurchasingSummary,
@@ -33,6 +34,7 @@ import type {
   SupplierItem,
   SupplierItemInput,
 } from '../../spec/purchasing.js';
+import type { Location } from '../../spec/inventory.js';
 import {
   ACTIVE_CLAIM_STATUSES,
   addDays,
@@ -104,6 +106,10 @@ const EXPORT_BATCH = 200;
 const RECENT_POS = 10;
 const SHORTAGE_LOOKBACK_DAYS = 180;
 const UNUSABLE_ASSET = ['removed', 'deleted', 'expired', 'rejected'];
+/** Sales velocity window for reorder suggestions (inventory.getSalesRate) */
+const SALES_RATE_DAYS = 30;
+/** Suppliers deliver to company warehouses only (not seller virtual locations) */
+const isCompanyWarehouse = (l: Location) => l.ownerType === 'official' && l.kind === 'warehouse';
 
 const clean = (s: string | null | undefined): string | null => {
   const t = typeof s === 'string' ? s.trim() : '';
@@ -489,6 +495,7 @@ export class PurchasingService implements PurchasingPublicApi {
       },
       by,
     );
+    await this.syncAttachments(po, [], attachmentIds);
     return this.views.purchaseOrder(po);
   }
 
@@ -558,6 +565,7 @@ export class PurchasingService implements PurchasingPublicApi {
     });
 
     if (dropApproval) await this.cancelApprovalQuietly(before.approvalRequestId!, by.actor, 'The purchase order changed after approval was requested');
+    if (attachmentIds) await this.syncAttachments(after, before.attachmentIds, attachmentIds);
     if (incoming && datesChanged) {
       this.ctx.events.publish(
         'purchasing.delivery.rescheduled',
@@ -730,7 +738,7 @@ export class PurchasingService implements PurchasingPublicApi {
     return pageOf(await this.suggestions({ supplierId: query.supplierId }), page);
   }
 
-  async createFromSuggestions(body: { stockItemIds: string[]; quantities?: Record<string, number> | null }, by: Caller): Promise<PurchaseOrder[]> {
+  async createFromSuggestions(body: { stockItemIds: string[]; quantities?: Record<string, number> | null; shipToLocationId?: string | null }, by: Caller): Promise<PurchaseOrder[]> {
     const ids = [...new Set(body.stockItemIds ?? [])];
     if (!ids.length) throw invalid('stockItemIds', 'Choose at least one item');
     const quantities = body.quantities ?? {};
@@ -742,8 +750,8 @@ export class PurchasingService implements PurchasingPublicApi {
     const noSupplier = ids.filter((i) => !suggestions.get(i)?.supplier);
     if (noSupplier.length) throw invalidMany('Some items have no supplier on a price list', noSupplier.map((i) => ({ path: `stockItemIds.${ids.indexOf(i)}`, message: 'No active supplier sells this item; add it to a price list first' })));
     const info = await this.requireCompanyStock(ids);
-    const shipTo = (await this.repo.purchaseOrdersBy({ limit: 1 }))[0]?.shipToLocationId;
-    if (!shipTo) throw invalid('stockItemIds', 'Create the first purchase order by hand so the receiving warehouse is known');
+    // every draft ships to the chosen company warehouse, or inventory's default one (never copied from an earlier PO)
+    const shipTo = (await this.shipToLocation(body.shipToLocationId ?? null)).id;
     const items = await this.repo.itemsForStock({ stockItemIds: ids });
     const bySupplier = new Map<string, string[]>();
     for (const id of ids) {
@@ -795,11 +803,13 @@ export class PurchasingService implements PurchasingPublicApi {
     for (const i of items) if (!best.has(i.stockItemId)) best.set(i.stockItemId, i); // preferred first, then cheapest
     const scoped = filter.supplierId ? ids.filter((id) => best.get(id)?.supplierId === filter.supplierId) : ids;
     if (!scoped.length) return [];
-    const [availability, onOrder, coverDays, suppliers] = await Promise.all([
+    const [availability, onOrder, coverDays, suppliers, rates] = await Promise.all([
       this.inventory().getAvailability(scoped),
       this.repo.linesForStock(scoped, OPEN_PO_STATUSES),
       this.ctx.settings.get('reorderCoverDays'),
       this.repo.getSuppliers([...new Set(scoped.flatMap((id) => (best.get(id) ? [best.get(id)!.supplierId] : [])))]),
+      // units sold per day over the last 30 days (inventory.getSalesRate)
+      this.inventory().getSalesRate(scoped, SALES_RATE_DAYS),
     ]);
     const supplierById = new Map(suppliers.map((s) => [s.id, s]));
     const out: (ReorderSuggestion & { gap: number })[] = [];
@@ -814,7 +824,8 @@ export class PurchasingService implements PurchasingPublicApi {
       if (!filter.includeAll && (reorderPoint === null || a.available + incoming + drafted > reorderPoint)) continue;
       const item = best.get(id);
       const supplier = item ? supplierById.get(item.supplierId) : undefined;
-      const qty = suggestedQuantity({ available: a.available, incoming: incoming + drafted, reorderPoint: reorderPoint ?? 0, avgDailySales: null, coverDays, minOrderQuantity: item?.minOrderQty ?? null });
+      const avgDailySales = rates?.[id] ? Math.round(rates[id]!.avgDailySales * 100) / 100 : null;
+      const qty = suggestedQuantity({ available: a.available, incoming: incoming + drafted, reorderPoint: reorderPoint ?? 0, avgDailySales, coverDays, minOrderQuantity: item?.minOrderQty ?? null });
       pending.push(id);
       out.push({
         stockItemId: id,
@@ -823,8 +834,7 @@ export class PurchasingService implements PurchasingPublicApi {
         available: a.available,
         reorderPoint,
         incoming,
-        // no sales-velocity source in any spec'd public API yet (spec gap)
-        avgDailySales: null,
+        avgDailySales,
         suggestedQuantity: qty,
         supplier: supplier ? this.views.supplierCue(supplier, supplier.id) : null,
         unitCost: item ? money(item.unitCostAmount, item.currency) : null,
@@ -1638,6 +1648,7 @@ export class PurchasingService implements PurchasingPublicApi {
     const [lines, supplier] = await Promise.all([this.repo.linesOf([id]), this.repo.getSupplier(po.supplierId)]);
     if (!supplier) throw notFound('Supplier');
     if (!supplier.active) throw new AppError('SUPPLIER_INACTIVE', `${supplier.name} is deactivated.`, { supplierId: supplier.id });
+    const shipTo = await this.shipToOf(po.shipToLocationId);
     await this.inventory().expectIncoming(po.id, po.ref, po.shipToLocationId, this.incomingLines(lines, po.expectedDate, supplier));
     let after: PoRow;
     try {
@@ -1669,6 +1680,7 @@ export class PurchasingService implements PurchasingPublicApi {
         emailSupplier: o.emailSupplier,
         message: o.message,
         locationId: after.shipToLocationId,
+        shipTo,
         total,
         lines: lines.map((l) => this.views.poLine(l, after.currency, after.expectedDate)),
       },
@@ -1745,6 +1757,51 @@ export class PurchasingService implements PurchasingPublicApi {
     });
     await tx.addEvent(this.event(c.po.id, `Supplier claim ${c.ref} opened`, `${c.kind.replace('_', ' ')} · ${formatMoney(money(amount, c.po.currency))}`, c.owner));
     return claim;
+  }
+
+  /**
+   * The company warehouse a draft ships to: the given location (known, active, a company warehouse) or
+   * inventory's default location. VALIDATION_FAILED otherwise.
+   */
+  private async shipToLocation(locationId: string | null): Promise<Location> {
+    const inventory = this.inventory();
+    if (!locationId) {
+      const def = await inventory.getDefaultLocation();
+      if (!def || !isCompanyWarehouse(def)) throw invalid('shipToLocationId', 'There is no default company warehouse yet; choose where the supplier delivers');
+      return def;
+    }
+    const loc = (await inventory.getLocations({ ownerType: 'official', activeOnly: false })).find((l) => l.id === locationId);
+    if (!loc) throw invalid('shipToLocationId', 'Unknown stock location');
+    if (!loc.active) throw invalid('shipToLocationId', `${loc.name} is not active`);
+    if (!isCompanyWarehouse(loc)) throw invalid('shipToLocationId', `${loc.name} is not a company warehouse`);
+    return loc;
+  }
+
+  /** Where the supplier delivers, for purchasing.purchase_order.sent (names, address and time zone come from inventory) */
+  private async shipToOf(locationId: string): Promise<PurchaseOrderShipTo> {
+    const loc = (await this.inventory().getLocations({ ownerType: 'official', activeOnly: false })).find((l) => l.id === locationId);
+    if (!loc) {
+      this.ctx.log.warn({ locationId }, 'purchasing: the ship-to location is unknown to inventory');
+      return { locationId, code: '', name: 'Company warehouse', address: null, timeZone: this.ctx.config.market.timeZone };
+    }
+    return { locationId: loc.id, code: loc.code, name: loc.name, address: loc.address ?? null, timeZone: loc.timeZone };
+  }
+
+  /**
+   * Purchase order attachments are supplier documents: attached in media (usage supplier_document, refId
+   * the PO) when added and detached when removed, so the media orphan sweep never deletes them.
+   */
+  private async syncAttachments(po: PoRow, before: readonly string[], after: readonly string[]) {
+    const media = this.ctx.tryUse('media');
+    if (!media) return;
+    const added = after.filter((id) => !before.includes(id));
+    const removed = before.filter((id) => !after.includes(id));
+    for (const id of added) {
+      const asset = await media.getAsset(id);
+      if (!asset) continue;
+      await media.attach(id, { module: 'purchasing', kind: 'supplier_document', refId: po.id, refLabel: po.ref }, asset.owner);
+    }
+    for (const id of removed) await media.detach(id, { module: 'purchasing', kind: 'supplier_document', refId: po.id });
   }
 
   /** PO attachments are supplier documents in media: they must exist, be usable and belong to staff or the platform. */

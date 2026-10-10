@@ -62,7 +62,8 @@ interface Draft {
   mediaOwner: media.MediaOwner | null;
 }
 
-const priorityFactor: Record<string, number> = { urgent: 0.5, high: 0.75, medium: 1, low: 1.5 };
+/** Default of the priorityTargetFactors setting (decision D-S1) */
+const PRIORITY_FACTORS: Record<string, number> = { urgent: 0.5, high: 0.75, medium: 1, low: 1.5 };
 
 export class Cases {
   constructor(
@@ -107,9 +108,16 @@ export class Cases {
     return ref.name;
   }
 
+  /** Multiplier on the category's targets for a priority (priorityTargetFactors setting) */
+  async priorityFactor(priority: string): Promise<number> {
+    const set = (await this.core.ctx.settings.get('priorityTargetFactors').catch(() => null)) as Record<string, unknown> | null;
+    const v = Number(set && typeof set === 'object' ? set[priority] : undefined);
+    return Number.isFinite(v) && v > 0 ? v : (PRIORITY_FACTORS[priority] ?? 1);
+  }
+
   /** Response target from now for Marketly, scaled by priority */
   async marketplaceDue(category: CategoryRec, priority: string, first: boolean, from: Date = this.core.now()): Promise<Date> {
-    const hours = (first ? category.first_response_business_hours : category.next_response_business_hours) * (priorityFactor[priority] ?? 1);
+    const hours = (first ? category.first_response_business_hours : category.next_response_business_hours) * (await this.priorityFactor(priority));
     return this.core.addBusinessHours(from, hours);
   }
 
@@ -250,6 +258,8 @@ export class Cases {
         orderId: d.order?.id ?? null,
         orderItemIds: items.map((i) => i.order_item_id),
         handler,
+        ownerStaffId: ownerId,
+        trustReportId: facts.trustReportId ?? null,
         nextResponseDueAt: firstDue.toISOString(),
       },
       by,
@@ -399,7 +409,7 @@ export class Cases {
         openedBy: by.actor,
         author: { role: 'marketly_staff', label: staffName ? `${staffName}, ${SUPPORT_NAME}` : SUPPORT_NAME },
         replyChannel: null,
-        facts: { customerName: customer?.displayName ?? null, contactEmail: customer?.email ?? null },
+        facts: { customerName: customer?.displayName ?? null, contactEmail: customer?.email ?? null, trustReportId: body.trustReportId ?? null },
         ownerId: body.ownerId ?? null,
         evidenceParty: 'staff',
         mediaOwner: null,
@@ -412,7 +422,7 @@ export class Cases {
    * In-process opening (return escalation, delivery exception, failed refund). An existing case for the same
    * return, or an open case on the same items, is returned (and linked to the return) instead of a second one.
    */
-  async openFromModule(input: { kind: string; category: string; orderId?: string; orderItemIds?: string[]; customerId?: string; sellerId?: string; returnId?: string; subject: string; message: string; openedBy: common.Actor }): Promise<Agg> {
+  async openFromModule(input: { kind: string; category: string; orderId?: string; orderItemIds?: string[]; customerId?: string; sellerId?: string; returnId?: string; trustReportId?: string; subject: string; message: string; openedBy: common.Actor }): Promise<Agg> {
     const kind = (KINDS as readonly string[]).includes(input.kind) ? (input.kind as CaseKind) : input.kind === 'return' || input.kind === 'return_dispute' ? 'dispute' : null;
     if (!kind) throw invalidField('kind', 'Unknown case kind');
     const by: By = { actor: input.openedBy };
@@ -451,7 +461,7 @@ export class Cases {
         openedBy: input.openedBy,
         author: { role: input.openedBy.kind === 'customer' ? 'customer' : input.openedBy.kind === 'seller' ? 'seller' : input.openedBy.kind === 'staff' ? 'marketly_staff' : 'system', label: input.openedBy.kind === 'customer' ? (order?.contact.name ?? 'Customer') : input.openedBy.kind === 'system' ? 'Marketly' : (input.openedBy.name ?? SUPPORT_NAME) },
         replyChannel: null,
-        facts: { returnRef },
+        facts: { returnRef, trustReportId: input.trustReportId ?? null },
         ownerId: null,
         team: input.returnId ? 'returns' : null,
         evidenceParty: 'staff',
@@ -494,15 +504,17 @@ export class Cases {
 
   /* ================================================================ conversation */
 
-  async customerReply(agg: Agg, body: { body: string; mediaIds?: string[] | null }, who: Shopper, by: By): Promise<void> {
+  /** claim: inbox key (email replies are added once); fromEmail: attachments came with the email (not uploaded through the app) */
+  async customerReply(agg: Agg, body: { body: string; mediaIds?: string[] | null }, who: Shopper, by: By, o: { claim?: string; fromEmail?: boolean } = {}): Promise<void> {
     if (!this.core.isOpen(agg.c)) throw illegal('This case is closed. Reopen it to add a message.', { from: agg.c.status, event: 'customerReplied' });
     if (!body.body?.trim()) throw invalidField('body', 'Write a message');
-    await this.core.checkAttachments(body.mediaIds);
+    if (!o.fromEmail) await this.core.checkAttachments(body.mediaIds);
     const mediaIds = body.mediaIds ?? [];
     await this.core.attach(mediaIds, agg.c.id, `Case ${agg.c.ref}`, who.guestSessionId && !who.customerId ? { kind: 'guest', id: who.guestSessionId } : { kind: 'customer', id: who.accountId ?? by.actor.id ?? null });
     const cat = (await this.core.category(agg.c.category_key))!;
     const [sellerDue, staffDue] = await Promise.all([this.core.addBusinessDays(this.core.now(), await this.core.setting('sellerReplyBusinessDays', 2)), this.marketplaceDue(cat, agg.c.priority, false)]);
     await this.core.write(agg.c.id, by, async (tx, a, batch) => {
+      if (o.claim && !(await tx.claim(o.claim))) return;
       if (!this.core.isOpen(a.c)) throw illegal('This case is closed. Reopen it to add a message.', { from: a.c.status });
       const patch: Partial<CaseRec> = {};
       const facts: Partial<CaseFacts> = {};
@@ -867,13 +879,16 @@ export class Cases {
     if (!body.label?.trim()) issues.push({ path: 'label', message: 'Add a label' });
     if (!body.reason?.trim()) issues.push({ path: 'reason', message: 'Give a reason' });
     for (const k of ['firstResponseBusinessHours', 'nextResponseBusinessHours', 'resolutionBusinessDays'] as const) if (!Number.isInteger(body[k]) || body[k] < 1 || body[k] > 1000) issues.push({ path: k, message: 'Use a whole number from 1' });
-    if (issues.length) throw invalid(issues);
     const before = await this.core.category(key);
+    // a new key needs its audience and group; an existing category keeps them when they are left out
+    if (!before && !body.audience) issues.push({ path: 'audience', message: 'Choose who the category is for' });
+    if (!before && !body.group) issues.push({ path: 'group', message: 'Choose the group' });
+    if (issues.length) throw invalid(issues);
     const row = await this.core.repo.upsertCategory({
       key,
       label: body.label.trim(),
-      audience: before?.audience ?? (body.team === 'seller_management' ? 'seller' : 'customer'),
-      group_key: before?.group_key ?? 'other',
+      audience: body.audience ?? before?.audience ?? 'customer',
+      group_key: body.group ?? before?.group_key ?? 'other',
       default_priority: body.defaultPriority,
       team: body.team,
       seller_handles_first: body.sellerHandlesFirst,

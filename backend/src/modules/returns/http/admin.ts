@@ -125,5 +125,7 @@ export const adminRoutes = (service: ReturnsService) => {
     previewCategoryException: async (i) => service.policies.previewCategoryException(i.body, by(i)),
     /** PATCH /category-exceptions/{id}: Change or retire a category exception from a date */
     updateCategoryException: async (i) => service.policies.updateCategoryException(i.params.id, i.body, by(i)),
+    /** POST /replacements/{id}/cancel: Cancel a replacement or exchange not shipped yet with a reason */
+    cancelReplacement: async (i) => service.handling.cancelReplacement(i.params.id, i.body.reason, by(i), { area: 'admin' }),
   });
 };

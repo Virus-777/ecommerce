@@ -108,6 +108,7 @@ describe('events from other modules', () => {
       quantity: 1,
       cancellationId: newId(),
       initiatedBy: 'staff',
+      notifyCustomer: true,
       reasonCode: 'other',
       beforeDispatch: false,
       countsAgainstSeller: false,
@@ -135,7 +136,7 @@ describe('events from other modules', () => {
     await h.publish('shipping', 'shipping.shipment.status_changed', { shipmentId, kind: 'return', orderId: m.order.id, groupId, returnId: m.ret.id, from: 'label_created', to: 'in_transit', statusLabel: 'In transit', estimatedArrival: { from: '2026-10-12', to: '2026-10-13' }, at: now() });
     let d = await detail(m.ret.id, m.sellerId);
     expect(d.detail).toMatchObject({ status: 'in_transit', shipment: { status: 'in_transit' } });
-    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'lost_or_damaged', orderId: m.order.id, groupId, shipmentId, sellerId: m.sellerId, orderItemIds: [], dueAt: now(), customerAction: null });
+    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'lost_or_damaged', orderId: m.order.id, groupId, shipmentId, sellerId: m.sellerId, orderItemIds: [], dueAt: now(), customerAction: null, source: 'carrier', caseRef: null });
     d = await detail(m.ret.id, m.sellerId);
     expect(d.detail.shipment.status).toBe('exception');
     await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId, kind: 'return', orderId: m.order.id, groupId, returnId: m.ret.id, sellerId: m.sellerId, lines: [], deliveredAt: now() });
@@ -147,7 +148,7 @@ describe('events from other modules', () => {
   it('applies a case decision that refunds without the item coming back', async () => {
     const m = await sellerReturn();
     const caseId = newId();
-    await h.publish('support', 'support.case.decided', { caseId, ref: 'CS-000777', outcome: 'customer_favour', orderId: m.order.id, returnId: m.ret.id, sellerId: m.sellerId, remedies: [{ id: newId(), kind: 'refund', orderItemIds: [m.items[0]![0]!], status: 'approved', statusLabel: 'Approved', track: [] }], appealDeadline: null, final: true });
+    await h.publish('support', 'support.case.decided', { caseId, ref: 'CS-000777', outcome: 'customer_favour', orderId: m.order.id, returnId: m.ret.id, sellerId: m.sellerId, remedies: [{ id: newId(), kind: 'refund', orderItemIds: [m.items[0]![0]!], status: 'approved', statusLabel: 'Approved', track: [] }], appealDeadline: null, final: true, notified: true });
     const d = await detail(m.ret.id, m.sellerId);
     expect(d).toMatchObject({ caseId, detail: { status: 'awaiting_remedy', decision: { kind: 'approved_without_return', platformDecision: true } } });
     // the refund decided in the case completes the return once it is sent

@@ -9,7 +9,8 @@ import type { ReviewsDb } from '../../spec/reviews.js';
 export type Db = ReviewsDb;
 export type Table = keyof Db & string;
 /** Tables keyed by `id` */
-export type IdTable = Exclude<Table, 'helpful_votes' | 'product_rating_summaries' | 'seller_feedback_summaries'>;
+export type IdTable = Exclude<Table, 'helpful_votes' | 'product_rating_summaries' | 'seller_feedback_summaries' | 'review_invites'>;
+export type InviteRec = Db['review_invites'];
 
 export type ReviewRec = Db['product_reviews'];
 export type FeedbackRec = Db['seller_feedback'];
@@ -84,6 +85,10 @@ export interface ModerationListFilter {
 
 export interface ReviewsRepository {
   transaction<R>(fn: (tx: ReviewsRepository) => Promise<R>): Promise<R>;
+  /** Inbox (ctx.inbox): true the first time this key is claimed; commits with the transaction it runs in */
+  claim(key: string): Promise<boolean>;
+  /** Insert unless a unique key already holds the row; true when inserted */
+  insertIgnore<T extends Table>(table: T, row: Db[T]): Promise<boolean>;
 
   /* generic table access */
   get<T extends IdTable>(table: T, id: string, o?: { forUpdate?: boolean }): Promise<Db[T] | undefined>;

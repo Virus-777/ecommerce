@@ -90,6 +90,35 @@ export function createPostgresMediaRepository(db: Kysely<MediaDb>): MediaReposit
       return row?.id ?? null;
     },
 
+    async similarImages(phash, f) {
+      // Hamming distance between the 64-bit perceptual hashes
+      const distance = sql<number>`bit_count(cast(phash # ${phash}::bigint as bit(64)))::int`;
+      let q = db
+        .selectFrom('assets')
+        .selectAll()
+        .select(distance.as('distance'))
+        .where('phash', 'is not', null)
+        .where('id', '!=', f.excludeId)
+        .where('status', '=', 'ready')
+        .where('kind', '=', 'image')
+        // private files (evidence, documents, originals of private purposes) are never offered
+        .where('visibility', '=', 'public')
+        .where(sql<boolean>`${distance} <= ${f.maxDistance}`);
+      if (f.ownerKind) q = q.where('owner_kind', '=', f.ownerKind);
+      if (f.ownerId) q = q.where('owner_id', '=', f.ownerId);
+      if (f.usageKinds?.length) {
+        const kinds = [...f.usageKinds];
+        q = q.where((eb) =>
+          eb.exists(eb.selectFrom('usages').select('usages.id').whereRef('usages.asset_id', '=', 'assets.id').where('usages.detached_at', 'is', null).where('usages.kind', 'in', kinds)),
+        );
+      }
+      const rows = await q.orderBy(distance).orderBy('created_at').orderBy('id').limit(f.limit).execute();
+      return rows.map((r) => {
+        const { distance: d, ...asset } = r as typeof r & { distance: number };
+        return { asset: asset as AssetRow, distance: Number(d) };
+      });
+    },
+
     async storedBytes(owner) {
       const row = await db
         .selectFrom('assets')

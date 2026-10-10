@@ -59,9 +59,10 @@ describe('approval limits from access', () => {
     const small = await f.call('POST', `${ADMIN}/holds`, { token: specialist.accessToken, body: { sellerId: S, amount: USD(100_000), reasonCode: 'risk_review', reason: 'Spike in refunds', reviewDate: svc.core.today() }, headers: { 'idempotency-key': newId() } });
     expect(small.status, JSON.stringify(small.body)).toBe(201);
     const big = await f.call('POST', `${ADMIN}/holds`, { token: specialist.accessToken, body: { sellerId: S, amount: USD(2_000_000), reasonCode: 'risk_review', reason: 'Large unusual payout', reviewDate: svc.core.today() }, headers: { 'idempotency-key': newId() } });
-    expect(big.status, JSON.stringify(big.body)).toBe(409);
-    expect(big.body.error.code).toBe('APPROVAL_REQUIRED');
-    const { approvalRequestId, holdId } = big.body.error.details;
+    // saved waiting for approval: 201 with approval in the body (FORMAT.md, Approval responses)
+    expect(big.status, JSON.stringify(big.body)).toBe(201);
+    expect(big.body.approval).toMatchObject({ required: true, approvalRequestId: expect.any(String) });
+    const { id: holdId, approval: { approvalRequestId } } = big.body;
     expect((await svc.core.repo.findOne('seller_accounts', { seller_id: S }))?.held).toBe(100_000);
     const approved = await f.call('POST', `/api/admin/access/approval-requests/${approvalRequestId}/approve`, { token: managerA.accessToken, body: { note: 'Agreed', stepUpCode: f.code(managerA) } });
     expect(approved.status, JSON.stringify(approved.body)).toBe(200);
@@ -74,7 +75,7 @@ describe('approval limits from access', () => {
     }
   });
 
-  it('a run above the threshold needs two different Finance Managers; the first cannot approve twice', async () => {
+  it("a run above the first manager's payout limit (access) needs two different Finance Managers; the first cannot approve twice", async () => {
     clock.advance(60_000);
     const run = await f.call('POST', `${ADMIN}/payout-runs`, { token: managerA.accessToken, body: { cutoffAt: clock.now().toISOString(), scheduledRelease: new Date(clock.now().getTime() + 3_600_000).toISOString() }, headers: { 'idempotency-key': newId() } });
     expect(run.status, JSON.stringify(run.body)).toBe(201);

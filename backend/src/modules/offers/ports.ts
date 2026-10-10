@@ -42,15 +42,18 @@ export interface OfferListFilter {
   statuses?: string[];
   excludeStatuses?: string[];
   conditions?: string[];
-  /** seller SKU, offer id (text match) */
+  /** offer title (substring or trigram match), seller SKU or offer id */
   q?: string;
   contentGap?: string;
+  shippingProfileId?: string;
   featuredEligible?: boolean;
   ineligibilityCode?: string;
 }
 
 export interface OffersRepository {
   transaction<R>(fn: (tx: OffersRepository) => Promise<R>): Promise<R>;
+  /** Inbox (kernel ctx.inbox): true the first time this key is claimed; inside a transaction it commits with the effects */
+  claim(key: string): Promise<boolean>;
 
   /* generic table access */
   get<T extends IdTable>(table: T, id: string, o?: { forUpdate?: boolean }): Promise<Db[T] | undefined>;

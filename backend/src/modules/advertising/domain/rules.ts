@@ -4,6 +4,7 @@
  * and the actions a campaign offers in each status. No I/O.
  */
 import type * as common from '../../../spec/common.js';
+import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type { AdBudget, AdvertiserRef, Audience, CreativeFormat, DismissalRule, FrequencyCap, GlobalRules, Placement, PopupTrigger, RotationRule } from '../../../spec/advertising.js';
 
 /* ------------------------------------------------------------------ pages */
@@ -388,7 +389,7 @@ export const footnoteFor = (key: string, endsAt: Date | null, cap: FrequencyCap,
 
 export const advertiserIsOwn = (kind: string) => kind === 'platform' || kind === 'official_store';
 export const isPaid = (kind: string, billing: string) => !advertiserIsOwn(kind) && billing !== 'none';
-export const ownAdvertiserName = (kind: string) => (kind === 'official_store' ? 'Marketly Official Store' : 'Marketly');
+export const ownAdvertiserName = (kind: string) => (kind === 'official_store' ? OFFICIAL_STORE_NAME : 'Marketly');
 
 export const sourceKinds = (source: string | null | undefined): string[] | undefined => {
   switch (source) {

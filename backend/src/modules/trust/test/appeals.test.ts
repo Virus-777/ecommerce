@@ -9,11 +9,11 @@ beforeAll(async () => {
 afterAll(() => kit.close());
 
 /** An accepted enforcement; returns the people involved */
-async function enforced(action: string, team: string, targets: { type: string; id: string; label: string }[], ownerPerm: string, params: Record<string, unknown> = {}) {
+async function enforced(action: string, team: string, targets: { type: string; id: string; label: string }[], ownerPerm: string, params: Record<string, unknown> = {}, externalRef?: string) {
   const r = await staffReport(kit, targets);
   const rec = await routed(kit, r.id, { action, ownerTeam: team, targets, params });
   const owner = newId();
-  const ok = await kit.call('POST', `${ADMIN}/recommendations/${rec.id}/decide`, staff(owner, ['trust.recommendations.decide', ownerPerm]), { accept: true, reason: 'Confirmed violation' });
+  const ok = await kit.call('POST', `${ADMIN}/recommendations/${rec.id}/decide`, staff(owner, ['trust.recommendations.decide', ownerPerm]), { accept: true, reason: 'Confirmed violation', ...(externalRef ? { externalRef } : {}) });
   expect(ok.status, JSON.stringify(ok.body)).toBe(200);
   return { report: r, enforcement: ok.body.enforcement, owner, trustStaff: rec.trustStaff as string };
 }
@@ -24,7 +24,7 @@ describe('appeals on trust enforcement', () => {
     const e = await enforced('suspend_offer', 'catalog', [{ type: 'offer', id: l.offerId, label: 'Offer' }], 'offers.offers.remove');
     // pending until offers confirms
     kit.offers.get(l.offerId)!.status = 'removed';
-    await kit.emit('offers', 'offers.offer.status_changed', { offerId: l.offerId, productId: l.productId, variantId: newId(), sellerId: l.sellerId, ownerType: 'seller', from: 'active', to: 'removed', reasonCode: 'enforcement', reason: 'Confirmed violation' });
+    await kit.emit('offers', 'offers.offer.status_changed', { offerId: l.offerId, productId: l.productId, variantId: newId(), sellerId: l.sellerId, ownerType: 'seller', from: 'active', to: 'removed', reasonCode: 'enforcement', reason: 'Confirmed violation', stockItemId: newId() });
 
     expect((await kit.call('POST', `${SELLER}/appeals`, seller(newId()), { enforcementId: e.enforcement.id, argument: 'x' })).status).toBe(404);
     expect((await kit.call('POST', `${SELLER}/appeals`, seller(l.sellerId), { enforcementId: e.enforcement.id, argument: '' })).status).toBe(400);
@@ -52,8 +52,9 @@ describe('appeals on trust enforcement', () => {
     const d = await kit.call('POST', `${ADMIN}/appeals/${res.body.id}/decide`, staff(reviewer), { outcome: 'overturn', explanation: 'The invoices are genuine' });
     expect(d.status, JSON.stringify(d.body)).toBe(200);
     expect(d.body).toMatchObject({ state: 'overturned', decision: { outcome: 'overturned', explanation: 'The invoices are genuine', decidedBy: { kind: 'staff', id: reviewer } } });
-    expect(kit.last('trust.appeal.decided')).toEqual({ appealId: res.body.id, enforcementId: e.enforcement.id, outcome: 'overturned' });
-    expect(kit.last('trust.enforcement.reversed')).toMatchObject({ enforcementId: e.enforcement.id, action: 'suspend_offer', reason: expect.stringContaining('overturned') });
+    expect(kit.last('trust.appeal.decided')).toEqual({ appealId: res.body.id, ref: res.body.ref, enforcementId: e.enforcement.id, outcome: 'overturned', explanation: 'The invoices are genuine', customerId: null, sellerId: l.sellerId });
+    expect(kit.last('trust.enforcement.reversed')).toMatchObject({ enforcementId: e.enforcement.id, ref: e.enforcement.ref, reportRef: e.report.ref, action: 'suspend_offer', ownerTeam: 'catalog', params: { mode: 'remove' }, appliedRef: l.offerId, executionState: 'applied', appealId: res.body.id, reversedBy: { kind: 'staff', id: reviewer }, reason: expect.stringContaining('overturned') });
+    expect(kit.work.filter((w) => w.dedupeKey === `trust_reversal:${e.enforcement.id}`)).toEqual([expect.objectContaining({ queueKey: 'catalog.product_review', kind: 'enforcement_reversal' })]);
     const list = (await kit.call('GET', `${ADMIN}/enforcements?targetType=offer&targetId=${l.offerId}`, staff())).body.items;
     expect(list[0].executionState).toBe('reversed');
     expect(kit.audits.at(-1)).toMatchObject({ action: 'trust.appeal.decide' });
@@ -70,7 +71,7 @@ describe('appeals on trust enforcement', () => {
     expect(mine.body[0]).toMatchObject({ title: 'Selling restricted', appealRoute: expect.stringContaining('Account health') });
 
     const buyer = newId();
-    const inform = await enforced('inform_customers', 'support', [{ type: 'customer', id: buyer, label: 'Buyer' }], 'support.cases.handle');
+    const inform = await enforced('inform_customers', 'support', [{ type: 'customer', id: buyer, label: 'Buyer' }], 'support.cases.handle', {}, 'CS-100200');
     const me = customer(buyer);
     const na = await kit.call('POST', `${STORE}/appeals`, me, { enforcementId: inform.enforcement.id, argument: 'x' });
     expect(na.body.error.code).toBe('NOT_APPEALABLE');

@@ -177,6 +177,7 @@ The accepted purchase: one order per checkout, one seller group per seller packa
 | returnWindowEndsAt | `datetime?` |
 | splitFromItemId | `uuid?` Set when a partial cancel, shipment or return split the line |
 | replacementOfItemId | `uuid?` |
+| checkoutLineId | `string?` Checkout session line the item came from (OrderItemInput.checkoutLineId); checkout maps its lines to order items by it, not by offer id. Split lines keep it; replacement lines have none |
 | afterSales | `ItemAfterSales` |
 | actions | `enum(cancel|return|track|view_return|review|report_problem|contact_seller|buy_again)[]` What the viewer can do now |
 
@@ -839,7 +840,10 @@ The accepted purchase: one order per checkout, one seller group per seller packa
 | Field | Type |
 |---|---|
 | checkoutSessionId | `uuid` |
+| attemptNo | `int?` Payment attempt that this order belongs to (default 1). createOrder is idempotent per (checkoutSessionId, attemptNo); checkout passes the next number when the customer retries after a pending payment was finally declined |
 | reservationId | `uuid?` Checkout's inventory stock hold for this order; carried on orders.order.accepted so inventory can allocate from it |
+| deliveryAddressId | `uuid?` Saved customer address the delivery address came from (customers module); null for guests and one-off addresses |
+| visitorId | `string?` Visitor id of the shopper's app session, set only when the shopper allowed personalization (advertising attributes guest orders to ad clicks by it). Null otherwise |
 | contact | `Contact` |
 | channel | `enum(web|android)` |
 | currency | `string` |
@@ -849,7 +853,7 @@ The accepted purchase: one order per checkout, one seller group per seller packa
 | policyVersions | `AcceptedPolicyVersion[]` From content.currentPolicyVersions(['returns', 'shipping', 'purchase_terms']) read by checkout at placement; empty when content is off |
 | couponCodes | `string[]` |
 | paymentIntentId | `uuid` |
-| paymentState | `enum(accepted|pending_check)` |
+| paymentState | `enum(accepted|pending_check)` The authorize result: accepted when the payment is already authorized (or nothing is left to pay by card), pending_check only when the provider is still checking |
 | paymentMethodLabel | `string` |
 | groups | `OrderGroupInput[]` |
 | totals | `AmountBreakdown` |
@@ -957,8 +961,10 @@ Customer requests start as requested; the seller confirms by respondBy (end of t
 |---|---|
 | id | uuid pk |
 | ref | text unique (MK-YYMMDD-NNNNN) |
-| checkout_session_id | uuid unique |
+| checkout_session_id | uuid |
+| attempt_no | int |
 | reservation_id | uuid? |
+| delivery_address_id | uuid? |
 | customer_id | uuid? |
 | contact_email | text |
 | contact_phone | text? |
@@ -986,9 +992,8 @@ Customer requests start as requested; the seller confirms by respondBy (end of t
 | placed_at | timestamptz |
 | accepted_at | timestamptz? |
 | completed_at | timestamptz? |
-| search | tsvector (ref, contact, product titles, tracking numbers) |
 
-Indexes: `(customer_id, placed_at desc)`, `(lower(contact_email)) where customer_id is null`, `(display_status, placed_at desc)`, `(lifecycle)`, `gin(search)`
+Indexes: `unique (checkout_session_id, attempt_no)`, `(customer_id, placed_at desc)`, `(lower(contact_email)) where customer_id is null`, `(display_status, placed_at desc)`, `(lifecycle)`, `gin(contact_name gin_trgm_ops)`, `gin(contact_email gin_trgm_ops)`
 
 **seller_groups**: One per seller package; the seller's fulfillment task
 
@@ -1049,9 +1054,9 @@ Indexes: `(seller_id, status, dispatch_by)`, `(order_id)`, `(status, dispatch_by
 | return_window_ends_at | timestamptz? |
 | split_from_item_id | uuid? → order_items |
 | replacement_of_item_id | uuid? → order_items |
-| checkout_line_id | text |
+| checkout_line_id | text? |
 
-Indexes: `(order_id)`, `(group_id, state)`, `(offer_id)`, `(product_id)`
+Indexes: `(order_id)`, `(group_id, state)`, `(offer_id)`, `(product_id)`, `(split_from_item_id)`
 
 **item_state_log**: Every item state change
 
@@ -1178,12 +1183,13 @@ Indexes: `(order_id, at desc)`
 
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
-| `orders.order.placed` | An order is created after an authorized or pending payment | `{ orderId: uuid, ref: string, checkoutSessionId: uuid, customerId: uuid?, guestEmail: email?, paymentIntentId: uuid, paymentState: enum(accepted|pending_check), total: Money, couponCodes: string[], groups: PlacedGroup[], placedAt: datetime }` | advertising, customers, fulfillment-service, payments, promotions, reports, search, trust, wallet |
+| `orders.order.placed` | An order is created after an authorized or pending payment | `{ orderId: uuid, ref: string, checkoutSessionId: uuid, customerId: uuid?, guestEmail: email?, paymentIntentId: uuid, paymentState: enum(accepted|pending_check), total: Money, couponCodes: string[], groups: PlacedGroup[], placedAt: datetime, attemptNo: int, deliveryAddressId: uuid?, contactName: string, visitorId: string? }` | advertising, customers, fulfillment-service, payments, promotions, reports, search, trust, wallet |
 | `orders.order.accepted` | Payment accepted: fulfillment tasks start, confirmation is sent | `{ orderId: uuid, ref: string, customerId: uuid?, contactEmail: email, total: Money, groups: PlacedGroup[], items: AcceptedItem[], reservationId: uuid?, acceptedAt: datetime }` | finance, inventory, notifications, payments, reports, sellers, shipping, warehouse |
-| `orders.order.cancelled` | A pending payment was declined, or every item was cancelled | `{ orderId: uuid, ref: string, reason: enum(payment_declined|all_items_cancelled), checkoutSessionId: uuid }` | checkout, payments |
+| `orders.order.cancelled` | A pending payment was declined, or every item was cancelled | `{ orderId: uuid, ref: string, reason: enum(payment_declined|all_items_cancelled), checkoutSessionId: uuid }` | checkout, payments, search |
 | `orders.order.completed` | Every item is final and no return, case or refund is open | `{ orderId: uuid, ref: string, completedAt: datetime }` | messaging, reports |
 | `orders.item.state_changed` | Any item state change (for timelines, notifications and reports) | `{ orderId: uuid, groupId: uuid, itemId: uuid, from: string, to: string, actor: Actor, at: datetime }` | - |
-| `orders.item.cancelled` | Items are cancelled (customer request accepted, seller cannot fulfill, staff) | `{ orderId: uuid, ref: string, customerId: uuid?, contactEmail: email?, groupId: uuid, ownerType: enum(official|seller), sellerId: uuid?, itemId: uuid, offerId: uuid, stockItemId: uuid, quantity: int, cancellationId: uuid, initiatedBy: enum(customer|seller|staff|system), reasonCode: string, beforeDispatch: bool, countsAgainstSeller: bool, refund: RefundBreakdownPayload, paymentIntentId: uuid, trustReportId: uuid? }` | advertising, finance, fulfillment-service, inventory, notifications, payments, promotions, reports, returns, reviews, sellers, shipping, support, trust, warehouse, workqueues |
+| `orders.item.cancelled` | Items are cancelled (customer request accepted, seller cannot fulfill, staff) | `{ orderId: uuid, ref: string, customerId: uuid?, contactEmail: email?, groupId: uuid, ownerType: enum(official|seller), sellerId: uuid?, itemId: uuid, offerId: uuid, stockItemId: uuid, quantity: int, cancellationId: uuid, initiatedBy: enum(customer|seller|staff|system), reasonCode: string, beforeDispatch: bool, countsAgainstSeller: bool, refund: RefundBreakdownPayload, paymentIntentId: uuid, trustReportId: uuid?, notifyCustomer: bool }` | advertising, finance, fulfillment-service, inventory, notifications, payments, promotions, reports, returns, reviews, sellers, shipping, support, trust, warehouse, workqueues |
+| `orders.item.split` | A partial cancellation, shipment or return splits an item line: the original line keeps its id with the remaining quantity and a new line takes the split-off quantity (splitFromItemId = original) | `{ orderId: uuid, groupId: uuid, itemId: uuid, newItemId: uuid, rootItemId: uuid, offerId: uuid, stockItemId: uuid, quantity: int, remainingQuantity: int, reason: enum(cancellation|shipment|return|replacement), at: datetime }` | inventory, promotions, warehouse |
 | `orders.item.delayed` | Items become Delayed (seller report or overdue dispatch) | `{ orderId: uuid, customerId: uuid?, contactEmail: email?, groupId: uuid, itemIds: uuid[], source: enum(seller|overdue), expectedDispatchBy: datetime?, reason: string }` | notifications |
 | `orders.item.delivered` | Items in a delivered shipment become Delivered | `{ orderId: uuid, groupId: uuid, ownerType: enum(official|seller), sellerId: uuid?, itemId: uuid, quantity: int, deliveredAt: datetime, returnWindowEndsAt: datetime, customerId: uuid?, contactEmail: email? }` | finance, reports, returns, reviews |
 | `orders.cancellation.requested` | A customer asks to cancel items that need the seller's confirmation | `{ cancellationId: uuid, orderId: uuid, groupId: uuid, sellerId: uuid?, itemIds: uuid[], respondBy: datetime }` | - |
@@ -1214,6 +1220,8 @@ Indexes: `(order_id, at desc)`
 | `returns.refund.approved` | returns | Item refund status Approved (shown as not yet sent) |
 | `returns.replacement.created` | returns | Add a replacement line (confirmed) linked to the original item; the original keeps its history |
 | `support.case.opened` | support | Flag the order and link the case to its items |
+| `support.case.resolved` | support | Unlink the case (payload orderId); clear the case_open flag when no other case on the order is open |
+| `support.case.reopened` | support | Link the case again and set the case_open flag (payload orderId) |
 | `sellers.seller.restricted` | sellers | Flag open groups of the seller (seller_restricted); orders stay accessible and fulfillable |
 | `identity.user.verified` | identity | Attach guest orders placed with the verified email to the new customer account |
 
@@ -1221,7 +1229,7 @@ Indexes: `(order_id, at desc)`
 
 | Function | Signature | Used by |
 |---|---|---|
-| createOrder | `(input: OrderCreateInput) => OrderDetail`<br>Create the order from an authorized or pending payment. Freezes catalog.snapshotForOrder and offers.snapshotForOrder per item. Status open when paymentState=accepted (publishes orders.order.placed and orders.order.accepted in one transaction), payment_pending otherwise (publishes orders.order.placed only). Idempotent per checkoutSessionId: a second call returns the existing order. | checkout |
+| createOrder | `(input: OrderCreateInput) => OrderDetail`<br>Create the order from an authorized or pending payment. Freezes catalog.snapshotForOrder and offers.snapshotForOrder per item. Status open when paymentState=accepted (publishes orders.order.placed and orders.order.accepted in one transaction), payment_pending otherwise (publishes orders.order.placed only). Idempotent per (checkoutSessionId, attemptNo): a second call with the same pair returns the existing order; a retry after a finally declined pending payment passes the next attemptNo and gets a new order (the declined one stays cancelled). paymentState is the real authorize result: accepted creates the order open in one step; only pending_check creates it payment_pending. Attaches each item's snapshot image to the order (media.attach, usage kind order_evidence, ref the order id) so the image outlives catalog changes. | checkout |
 | acceptOrder | `(orderId: uuid, paymentIntentId: uuid) => OrderDetail`<br>payment_pending → open when the payment result arrives (also done on payments.payment.authorized). Idempotent. | checkout |
 | cancelForDeclinedPayment | `(orderId: uuid) => void`<br>payment_pending → cancelled when a pending payment is finally declined (also done on payments.payment.failed). | checkout |
 | getOrder | `(orderId: uuid) => OrderDetail | null`<br>Full order for other modules (no access check) | payments, shipping, returns, support, finance, messaging, warehouse, reviews |
@@ -1235,6 +1243,7 @@ Indexes: `(order_id, at desc)`
 | listRecentForCustomer | `(customerId: uuid, limit: int) => OrderSummary[]`<br>Account overview recent orders | customers |
 | listDelayedItemsForCustomer | `(customerId: uuid) => DelayedItemAlert[]`<br>Account overview delay alerts with new estimate and options | customers |
 | countPurchased | `(customerId: uuid, offerId: uuid, sinceDays: int) => int`<br>Units bought recently, for per-customer purchase limits | checkout, promotions |
+| hasPlacedOrder | `(who: { customerId?: uuid, email?: string }) => bool`<br>True when the customer (or, for guests, the normalised contact email) has an order that was accepted (lifecycle open, completed, or cancelled after acceptance). Orders still payment_pending or cancelled for a declined payment do not count. Promotions new_customers audience. | promotions |
 | isVerifiedPurchase | `(customerId: uuid, productId: uuid) => { orderItemId: uuid, deliveredAt: datetime } | null`<br>Delivered purchase of the product for Verified Purchase labels | reviews |
 | getOrderForViewer | `(viewer: { customerId?: uuid, guestSessionId?: uuid }, ref: string) => OrderDetail | null`<br>Store order detail by reference. Returns the order only when it belongs to the signed-in customer or the guest session has access (identity.hasGuestOrderAccess); otherwise null (NOT_FOUND). | graphql |
 | listOrdersForCustomer | `(customerId: uuid, filter: { q?: string, range?: string, from?: date, to?: date, tab?: string }, page: PageInput) => Page<OrderDetail>`<br>Order history with search, date range and status tab (same filters as GET /orders); fields are resolved lazily so list cards stay cheap | graphql |
@@ -1305,6 +1314,8 @@ Indexes: `(order_id, at desc)`
 - Dispatch deadlines: checkout passes the promise from shipping (dispatchBy) into createOrder. When a pending payment is accepted later, shipping recalculates and calls setDispatchDeadline. Overdue detection and exception tasks are shipping's (shipping.dispatch.overdue); orders turns the items Delayed.
 - Guest orders: customers serves the lookup form and emailed links (findGuestOrder, listGuestOrdersByEmail); identity grants order access to a guest session; orders only checks identity.hasGuestOrderAccess. The session that placed the order is granted access at placement by checkout.
 - Dependencies follow the architecture (catalog, offers). Optional: identity (guest access checks), finance (fee and earnings estimates in seller and admin views), support (case links), returns (return state), promotions (funding split display), messaging (seller contact links), content (policy version links). Shipping, payments, returns and warehouse depend on orders and talk back through events or orders' public API.
+- Line splits: every split publishes orders.item.split in the same transaction, so inventory (reservations and allocations) and promotions (redemption lines) split their per-item rows and later events on the new id (cancellation, shipment, refund) find them.
+- Order search (decision S-D2): no tsvector column. q matches ref exactly or by prefix, contact name and email through trigram indexes, and tracking numbers through shipment_refs.
 - Admin exports and saved filters cover plan ch. 18 'saved filters and authorized exports'. Bulk actions on overdue orders (remind sellers, assign owner, escalate) are shipping exception actions. Exports run through reports (requestExport, getExport): orders registers datasets orders.admin.orders (staff, orders.orders.export) and orders.seller.orders (seller, orders.fulfillment.export, own groups only) and serves the rows through exportRows, which masks customer email and phone unless the requester has orders.customers.view-contact.
 
 ## GraphQL (read layer)

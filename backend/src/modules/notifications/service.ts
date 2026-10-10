@@ -1,4 +1,5 @@
-import { AppError } from '../../kernel/errors/index.js';
+import { AppError, isNotImplemented } from '../../kernel/errors/index.js';
+import { dateInZone } from '../../kernel/lib/clock.js';
 import type { EventPayload } from '../../kernel/events/index.js';
 import { newId } from '../../kernel/lib/ids.js';
 import type { PageRequest } from '../../kernel/lib/pagination.js';
@@ -28,7 +29,9 @@ export interface NotificationsServiceDeps {
 function targetOf(r: Recipient, topic: string): Target {
   switch (r.kind) {
     case 'customer':
-      if (!r.accountId) throw new AppError('VALIDATION_FAILED', 'Customer recipients need accountId', { issues: [{ path: 'recipients.accountId', message: 'required for customer' }] });
+      // the customers-module id is preferred (account and email resolved through customers.getCustomer); accountId only when no customerId is known
+      if (r.customerId) return { kind: 'customer', customerId: r.customerId };
+      if (!r.accountId) throw new AppError('VALIDATION_FAILED', 'Customer recipients need customerId or accountId', { issues: [{ path: 'recipients.customerId', message: 'required for customer' }] });
       return { kind: 'customer', accountId: r.accountId };
     case 'guest_email':
       if (!r.email) throw new AppError('VALIDATION_FAILED', 'Guest recipients need email', { issues: [{ path: 'recipients.email', message: 'required for guest_email' }] });
@@ -138,14 +141,14 @@ export class NotificationsService implements NotificationsPublicApi {
   /** Consent, suppression and account status check before any promotional send */
   async canSendPromotional(recipient: Recipient, channel: 'email' | 'sms' | 'push'): Promise<boolean> {
     const core = this.core;
-    if (recipient.kind === 'customer' && recipient.accountId) {
-      const c = await core.customerByAccount(recipient.accountId);
+    if (recipient.kind === 'customer' && (recipient.customerId || recipient.accountId)) {
+      const c = recipient.customerId ? await core.customer(recipient.customerId) : await core.customerByAccount(recipient.accountId!);
       if (!c || c.accountStatus === 'closed' || c.accountStatus === 'suspended') return false;
       const consent = await core.consent(c.id);
       if (!consent) return false;
       if (channel === 'email') return consent.emailPromotions && !(await core.repo.activeSuppression('email', hashAddress('email', c.email)));
       if (channel === 'sms') return Boolean(consent.smsPromotions && consent.smsNumber && !(await core.repo.activeSuppression('sms', hashAddress('sms', consent.smsNumber))));
-      return consent.pushPromotions && (await core.repo.pushDevices({ accountIds: [recipient.accountId], audience: 'customer', activeOnly: true })).length > 0;
+      return consent.pushPromotions && (await core.repo.pushDevices({ accountIds: [c.userId], audience: 'customer', activeOnly: true })).length > 0;
     }
     if ((recipient.kind === 'seller_member' || recipient.kind === 'seller') && recipient.sellerId) {
       const rows = await core.sellerMembers(recipient.sellerId);
@@ -650,6 +653,46 @@ export class NotificationsService implements NotificationsPublicApi {
     await this.consumers.handle('workqueues.day_end.prepared', event, eventId);
   }
 
+  /** workqueues.day_end.completed: Staff (topic staff.day_end.completed, to roleKeys): the day-end summary; resolves the staff.day_end.summary action notices */
+  async onDayEndCompletedFromWorkqueues(event: EventPayload<'workqueues.day_end.completed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('workqueues.day_end.completed', event, eventId);
+  }
+
+  /** trust.evidence.requested: the asked customer or seller owner: proof needed, action required until trust resolves trust-evidence:<requestId> */
+  async onEvidenceRequestedFromTrust(event: EventPayload<'trust.evidence.requested'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('trust.evidence.requested', event, eventId);
+  }
+
+  /** trust.appeal.decided: the appellant (customer or seller owner): the outcome and what changes */
+  async onAppealDecidedFromTrust(event: EventPayload<'trust.appeal.decided'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('trust.appeal.decided', event, eventId);
+  }
+
+  /** payments.refund.destination_requested: Customer (or the order email): choose where to receive the refund; action required until it is sent */
+  async onRefundDestinationRequestedFromPayments(event: EventPayload<'payments.refund.destination_requested'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('payments.refund.destination_requested', event, eventId);
+  }
+
+  /** customers.closure.delayed: Customer: the closure waits for new obligations, and when it is checked again */
+  async onClosureDelayedFromCustomers(event: EventPayload<'customers.closure.delayed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('customers.closure.delayed', event, eventId);
+  }
+
+  /** offers.offer.missing_items_stale: Seller members with offers.offers.manage, or the Catalog Manager role for Official Store offers */
+  async onOfferMissingItemsStaleFromOffers(event: EventPayload<'offers.offer.missing_items_stale'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('offers.offer.missing_items_stale', event, eventId);
+  }
+
+  /** inventory.stock.low_digest: Official Store items to the Inventory Manager role; a seller's own items to that seller */
+  async onStockLowDigestFromInventory(event: EventPayload<'inventory.stock.low_digest'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('inventory.stock.low_digest', event, eventId);
+  }
+
+  /** sellers.application.information_reminder: Applicant (owner): requested information still missing, with the deadline */
+  async onApplicationInformationReminderFromSellers(event: EventPayload<'sellers.application.information_reminder'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('sellers.application.information_reminder', event, eventId);
+  }
+
   async onCampaignEndingSoonFromAdvertising(event: EventPayload<'advertising.campaign.ending_soon'>, eventId?: string): Promise<void> {
     await this.consumers.handle('advertising.campaign.ending_soon', event, eventId);
   }
@@ -709,8 +752,16 @@ export class NotificationsService implements NotificationsPublicApi {
   /** Job notifications.staff-digest (daily at the start of business hours): Email the daily digest to staff who chose it */
   async staffDigest(): Promise<void> {
     const now = this.core.now();
-    const since = new Date(now.getTime() - 24 * 3_600_000);
-    const day = now.toISOString().slice(0, 10);
+    const DAY = 24 * 3_600_000;
+    const tz = this.core.timeZone;
+    const day = dateInZone(now, tz);
+    // 08:00 market time is the start of business hours: on closed days the digest waits for the next open day,
+    // which then covers everything since the previous open day's digest
+    const calendar = await this.#businessCalendar();
+    if (calendar && !calendar.isBusinessDay(day)) return;
+    let back = 1;
+    while (calendar && back < 14 && !calendar.isBusinessDay(dateInZone(new Date(now.getTime() - back * DAY), tz))) back++;
+    const since = new Date(now.getTime() - back * DAY);
     for (const p of await this.core.repo.digestSubscribers()) {
       const notices = (await this.core.repo.unreadSince(p.account_id, since)).filter((n) => !topicDef(n.topic_key)?.urgent);
       if (!notices.length) continue;
@@ -728,7 +779,19 @@ export class NotificationsService implements NotificationsPublicApi {
     }
   }
 
-  /** Job notifications.purge (daily): Delete notices older than noticeRetentionMonths and delivery rows older than deliveryLogRetentionDays; expire unresolved action notices whose records closed */
+  /** The market's business calendar (settings); null when settings is off or not built (every day counts as open) */
+  async #businessCalendar(): Promise<{ isBusinessDay(day: string): boolean } | null> {
+    const api = this.core.ctx.tryUse('settings');
+    if (!api) return null;
+    try {
+      return await api.businessCalendar();
+    } catch (err) {
+      if (!isNotImplemented(err)) throw err;
+      return null;
+    }
+  }
+
+  /** Job notifications.purge (daily): Delete notices older than noticeRetentionMonths and delivery rows older than deliveryLogRetentionDays; unresolved action notices whose records closed are marked expired (expired_at, never resolved_at) */
   async purge(): Promise<void> {
     const now = this.core.now();
     const days = Number(await this.core.setting('deliveryLogRetentionDays'));

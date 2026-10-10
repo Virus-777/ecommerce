@@ -152,7 +152,7 @@ describe('seller stock (own items only)', () => {
     expect((await seller(h, avery, 'PATCH', `/stock-items/${item.id}`, { lowStockThreshold: -1 })).statusCode).toBe(400);
     h.events.length = 0;
     await seller(h, avery, 'POST', `/stock-items/${item.id}/adjustments`, { newAvailable: 5, reasonCode: 'count_correction' });
-    expect(eventsNamed(h, 'inventory.stock.low')).toEqual([{ stockItemId: item.id, offerId: item.offerId, ownerType: 'seller', sellerId: avery, sku: item.sku, label: item.label, available: 5, threshold: 6 }]);
+    expect(eventsNamed(h, 'inventory.stock.low')).toEqual([{ stockItemId: item.id, offerId: item.offerId, ownerType: 'seller', sellerId: avery, productId: item.productId, variantId: item.variantId, sku: item.sku, label: item.label, available: 5, threshold: 6 }]);
     await seller(h, avery, 'POST', `/stock-items/${item.id}/adjustments`, { newAvailable: 4, reasonCode: 'count_correction' });
     expect(eventsNamed(h, 'inventory.stock.low')).toHaveLength(1); // within the cooldown
     h.clock.advance(25 * 3_600_000);
@@ -166,7 +166,7 @@ describe('seller stock (own items only)', () => {
     const sellerId = newId();
     const a = await sellerItem(h, sellerId, 5);
     const b = await sellerItem(h, sellerId, 5);
-    h.app.kernel.events.publish('offers', 'offers.offer.status_changed', { offerId: a.offerId!, productId: a.productId, variantId: a.variantId, sellerId, ownerType: 'seller', from: 'active', to: 'removed', reasonCode: 'seller_removed' });
+    h.app.kernel.events.publish('offers', 'offers.offer.status_changed', { offerId: a.offerId!, productId: a.productId, variantId: a.variantId, sellerId, ownerType: 'seller', from: 'active', to: 'removed', reasonCode: 'seller_removed', stockItemId: a.id });
     await h.app.kernel.events.drain();
     expect((await seller(h, sellerId, 'POST', `/stock-items/${a.id}/adjustments`, { newAvailable: 1, reasonCode: 'other' })).json().error.code).toBe('STOCK_ITEM_ARCHIVED');
     await expect(h.api.hold(`chk-${newId()}`, [{ stockItemId: a.id, quantity: 1 }])).rejects.toMatchObject({ code: 'INSUFFICIENT_STOCK' });

@@ -86,7 +86,7 @@ export interface AuditEntry {
   /** Released payout hold */
   actionLabel: string;
   module: string;
-  category: "financial" | "seller_enforcement" | "catalog" | "orders" | "returns" | "customers" | "settings" | "access" | "security" | "content" | "advertising" | "other";
+  category: "financial" | "seller_enforcement" | "catalog" | "orders" | "returns" | "customers" | "settings" | "access" | "security" | "content" | "advertising" | "support" | "trust" | "inventory" | "shipping" | "other";
   target: AuditTarget;
   relatedTargets: AuditTarget[];
   reason?: string | null;
@@ -115,7 +115,7 @@ export const AuditEntry: z.ZodType<AuditEntry> = z.object({
   action: z.string().describe("Key, e.g. finance.hold.released"),
   actionLabel: z.string().describe("Released payout hold"),
   module: z.string(),
-  category: z.enum(["financial", "seller_enforcement", "catalog", "orders", "returns", "customers", "settings", "access", "security", "content", "advertising", "other"]),
+  category: z.enum(["financial", "seller_enforcement", "catalog", "orders", "returns", "customers", "settings", "access", "security", "content", "advertising", "support", "trust", "inventory", "shipping", "other"]),
   get target() {
     return AuditTarget;
   },
@@ -143,7 +143,7 @@ export interface RecordInput {
   action: string;
   actionLabel: string;
   module: string;
-  category: "financial" | "seller_enforcement" | "catalog" | "orders" | "returns" | "customers" | "settings" | "access" | "security" | "content" | "advertising" | "other";
+  category: "financial" | "seller_enforcement" | "catalog" | "orders" | "returns" | "customers" | "settings" | "access" | "security" | "content" | "advertising" | "support" | "trust" | "inventory" | "shipping" | "other";
   target: AuditTarget;
   relatedTargets?: AuditTarget[] | null;
   reason?: string | null;
@@ -172,7 +172,7 @@ export const RecordInput: z.ZodType<RecordInput> = z.object({
   action: z.string(),
   actionLabel: z.string(),
   module: z.string(),
-  category: z.enum(["financial", "seller_enforcement", "catalog", "orders", "returns", "customers", "settings", "access", "security", "content", "advertising", "other"]),
+  category: z.enum(["financial", "seller_enforcement", "catalog", "orders", "returns", "customers", "settings", "access", "security", "content", "advertising", "support", "trust", "inventory", "shipping", "other"]),
   get target() {
     return AuditTarget;
   },
@@ -199,7 +199,7 @@ export interface AuditFilters {
   actorId?: string | null;
   roleKey?: string | null;
   module?: string | null;
-  category?: "financial" | "seller_enforcement" | "catalog" | "orders" | "returns" | "customers" | "settings" | "access" | "security" | "content" | "advertising" | "other" | null;
+  category?: "financial" | "seller_enforcement" | "catalog" | "orders" | "returns" | "customers" | "settings" | "access" | "security" | "content" | "advertising" | "support" | "trust" | "inventory" | "shipping" | "other" | null;
   targetType?: string | null;
   targetId?: string | null;
   sellerId?: string | null;
@@ -214,7 +214,7 @@ export const AuditFilters: z.ZodType<AuditFilters> = z.object({
   actorId: z.string().nullish(),
   roleKey: z.string().nullish(),
   module: z.string().nullish(),
-  category: z.enum(["financial", "seller_enforcement", "catalog", "orders", "returns", "customers", "settings", "access", "security", "content", "advertising", "other"]).nullish(),
+  category: z.enum(["financial", "seller_enforcement", "catalog", "orders", "returns", "customers", "settings", "access", "security", "content", "advertising", "support", "trust", "inventory", "shipping", "other"]).nullish(),
   targetType: z.string().nullish(),
   targetId: z.string().nullish(),
   sellerId: z.uuid().nullish(),
@@ -314,6 +314,11 @@ export interface IntegrityStatus {
   lastVerifiedAt?: string | null;
   lastVerifiedSeq?: number | null;
   brokenAtSeq?: number | null;
+  /** Newest signed checkpoint */
+  lastCheckpointSeq?: number | null;
+  lastCheckpointAt?: string | null;
+  /** False when a checkpoint's HMAC does not verify (someone rewrote the chain and its hashes) */
+  checkpointSignatureOk?: boolean | null;
   message?: string | null;
 }
 
@@ -322,6 +327,9 @@ export const IntegrityStatus: z.ZodType<IntegrityStatus> = z.object({
   lastVerifiedAt: z.iso.datetime({ offset: true }).nullish(),
   lastVerifiedSeq: z.number().int().nullish(),
   brokenAtSeq: z.number().int().nullish(),
+  lastCheckpointSeq: z.number().int().describe("Newest signed checkpoint").nullish(),
+  lastCheckpointAt: z.iso.datetime({ offset: true }).nullish(),
+  checkpointSignatureOk: z.boolean().describe("False when a checkpoint's HMAC does not verify (someone rewrote the chain and its hashes)").nullish(),
   message: z.string().nullish(),
 }).register(common.apiTypes, { id: "audit.IntegrityStatus" });
 
@@ -470,6 +478,18 @@ export interface AuditDb {
     last_purge_removed: number | null;
     last_purge_through: Date | null;
   };
+  /** Signed chain checkpoints: written after each successful verification and before a purge, so verification continues across purged ranges and a rewritten chain is detected even if every hash was recomputed */
+  checkpoints: {
+    id: string;
+    seq: number;
+    hash: Uint8Array;
+    /** hex HMAC-SHA256 of seq || hash */
+    mac: string;
+    /** secret derivation label, e.g. audit.checkpoint.v1 */
+    key_id: string;
+    kind: 'verified' | 'purge';
+    created_at: Date;
+  };
   integrity_checks: {
     id: string;
     started_at: Date;
@@ -499,7 +519,7 @@ export const endpoints = defineEndpoints({
         actorId: z.string().optional(),
         roleKey: z.string().optional(),
         module: z.string().optional(),
-        category: z.enum(["financial", "seller_enforcement", "catalog", "orders", "returns", "customers", "settings", "access", "security", "content", "advertising", "other"]).optional(),
+        category: z.enum(["financial", "seller_enforcement", "catalog", "orders", "returns", "customers", "settings", "access", "security", "content", "advertising", "support", "trust", "inventory", "shipping", "other"]).optional(),
         targetType: z.string().optional(),
         targetId: z.string().optional(),
         sellerId: z.uuid().optional(),
@@ -577,7 +597,7 @@ export const endpoints = defineEndpoints({
     permission: "audit.entries.export",
     scope: "staff",
     summary: "Export filtered history (authorized, recorded)",
-    desc: "Records the reason in the action history, then creates an authorized export job through reports.requestExport (dataset audit.admin.entries, csv or jsonl). Poll GET /exports/{id} for the download link. Limited to reports.maxExportRows.",
+    desc: "Records the reason in the action history, then creates an authorized export job through reports.requestExport (dataset audit.admin.entries, csv or jsonl). Poll GET /exports/{id} for the download link. Limited to reports.maxExportRows, read through settings (settings.get('reports.maxExportRows')) and checked against the matching entry count before the job is created.",
     body: () => z.object({
       get filters() {
         return AuditFilters;
@@ -728,7 +748,7 @@ export const spec = defineModuleSpec({
     {
       "key": "audit.retention.manage",
       "audience": "staff",
-      "desc": "Change the retention period (shortening still needs Business Owner approval)"
+      "desc": "Change the retention period (shortening still needs Business Owner approval). Seeded to the Business Owner and Platform Administrator roles"
     },
     {
       "key": "audit.own-history.view",
@@ -793,7 +813,7 @@ export const spec = defineModuleSpec({
   jobs: {
     "audit.verify-chain": {
       "schedule": "daily 03:00 market time",
-      "does": "Recompute hashes from the last verified seq; on mismatch publish audit.integrity.failed (Platform Administrator and Business Owner are notified)"
+      "does": "Verify the newest checkpoint's HMAC, recompute hashes from it; on success write a new signed checkpoint at the last seq; on a hash or signature mismatch publish audit.integrity.failed (Platform Administrator and Business Owner are notified)"
     },
     "audit.purge-expired": {
       "schedule": "monthly",
@@ -832,8 +852,8 @@ export const spec = defineModuleSpec({
   },
   errorCodes: {
     "EXPORT_TOO_LARGE": {
-      "status": 400,
-      "meaning": "The filters match more than reports.maxExportRows; narrow the date range. details.matched."
+      "status": 422,
+      "meaning": "The filters match more than reports.maxExportRows; narrow the date range. details.matched, details.max."
     },
     "BELOW_LEGAL_MINIMUM": {
       "status": 400,
@@ -1059,6 +1079,36 @@ export const spec = defineModuleSpec({
       "last_purge_through": {
         "type": "timestamptz",
         "nullable": true
+      }
+    },
+    "checkpoints": {
+      "id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "seq": {
+        "type": "bigint",
+        "nullable": false
+      },
+      "hash": {
+        "type": "bytea",
+        "nullable": false
+      },
+      "mac": {
+        "type": "text",
+        "nullable": false
+      },
+      "key_id": {
+        "type": "text",
+        "nullable": false
+      },
+      "kind": {
+        "type": "text",
+        "nullable": false
+      },
+      "created_at": {
+        "type": "timestamptz",
+        "nullable": false
       }
     },
     "integrity_checks": {

@@ -2,6 +2,7 @@
  * Row (snake_case) → API type (camelCase) mapping, one place per type.
  */
 import type * as common from '../../spec/common.js';
+import { OFFICIAL_STORE_NAME } from '../../spec/common.js';
 import type {
   BulkRowError,
   BulkUpdateJob,
@@ -22,7 +23,8 @@ import type {
 import { compareAtExplanation, dispatchLabel, reason, returnSummary, warrantyTerms } from './domain/rules.js';
 import type { BulkJobRec, BulkRowRec, EligibilityRec, OfferRec, PriceHistoryRec, RuleRec, StatusLogRec } from './ports.js';
 
-export const OFFICIAL_NAME = 'Official Store';
+/** The Official Store's display name wherever a seller name is shown */
+export const OFFICIAL_NAME = OFFICIAL_STORE_NAME;
 
 export const iso = (d: Date | string | null | undefined): string | null => (d ? (d instanceof Date ? d.toISOString() : new Date(d).toISOString()) : null);
 export const isoReq = (d: Date | string): string => iso(d)!;
@@ -84,9 +86,25 @@ export function eligibilityOf(r: OfferRec, e: EligibilityRec | undefined): Featu
   return { eligible: reasons.length === 0, reasons, evaluatedAt: isoReq(r.updated_at) };
 }
 
+/** Status reason as the API shows it (the stored JSON may also carry internal keys such as enforcementId) */
 export function statusReasonOf(r: OfferRec): StatusReason | null {
-  const s = r.status_reason as StatusReason | null;
-  return s && typeof s === 'object' && s.code ? s : null;
+  const s = r.status_reason as (StatusReason & { enforcementId?: string }) | null;
+  if (!s || typeof s !== 'object' || !s.code) return null;
+  const { enforcementId: _e, ...reason } = s;
+  return reason;
+}
+
+/** Trust enforcement that removed or held the offer (kept in status_reason / ineligible_source) */
+export function enforcementIdOf(r: OfferRec): string | null {
+  const s = r.status_reason as { code?: string; enforcementId?: string } | null;
+  if (s?.code === 'enforcement' && s.enforcementId) return s.enforcementId;
+  const src = r.ineligible_source as { kind?: string; id?: string | null } | null;
+  return src?.kind === 'enforcement' && src.id ? src.id : null;
+}
+
+/** 'Aurora Headphones – Black': product title with the variant label (title alone when the variant has no options) */
+export function offerTitle(productTitle: string, options: Record<string, string> | null | undefined): string {
+  return Object.keys(options ?? {}).length ? `${productTitle} – ${variantLabel(options)}` : productTitle;
 }
 
 export function toOffer(r: OfferRec, x: { sellerName: string; eligibility?: EligibilityRec; lookbackDays: number }): Offer {
@@ -98,11 +116,13 @@ export function toOffer(r: OfferRec, x: { sellerName: string; eligibility?: Elig
     sellerName: r.owner_type === 'official' ? OFFICIAL_NAME : x.sellerName,
     productId: r.product_id,
     variantId: r.variant_id,
+    title: r.title,
     condition: r.condition as Offer['condition'],
     conditionNotes: r.condition_notes,
     includedItems: strings(r.included_items),
     missingItems: missing,
     complete: missing.length === 0,
+    missingItemsStale: Boolean(r.missing_items_stale),
     sellerSku: r.seller_sku,
     stockItemId: r.stock_item_id,
     price: money(r.price_amount, r.currency),

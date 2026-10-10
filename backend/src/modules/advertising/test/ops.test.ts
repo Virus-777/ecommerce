@@ -21,9 +21,9 @@ describe('placements', () => {
     const list = await k.call('GET', `${ADMIN}/placements`, k.staff);
     expect(list.status).toBe(200);
     expect(list.body.map((p: any) => p.key)).toEqual(['opening_fullscreen', 'home_banner', 'category_banner', 'campaign_banner', 'popup', 'sponsored_product', 'sponsored_store', 'floating', 'interstitial', 'video']);
-    // Placement carries no version (spec gap): the seeded placements start at version 1
+    // Placement.version is the optimistic lock PATCH sends back; the seeded placements start at version 1
     const popup = list.body.find((p: any) => p.key === 'popup');
-    expect(popup).toMatchObject({ kind: 'overlay', availability: 'launch', label: 'Ad', trigger: { afterSeconds: 8 }, dismissal: { mode: 'days', days: 7 }, pagesLabel: expect.stringContaining('Home') });
+    expect(popup).toMatchObject({ version: 1, kind: 'overlay', availability: 'launch', label: 'Ad', trigger: { afterSeconds: 8 }, dismissal: { mode: 'days', days: 7 }, pagesLabel: expect.stringContaining('Home') });
     let res = await k.call('PATCH', `${ADMIN}/placements/${popup.id}`, k.staff, { eligiblePages: ['home', 'checkout'], reason: 'x', version: 1 });
     expect(res.status, JSON.stringify(res.body)).toBe(422);
     expect(res.body.error.code).toBe('PAGE_NOT_ELIGIBLE');
@@ -33,9 +33,12 @@ describe('placements', () => {
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ frequencyCap: { label: 'Once per session · max 2 per visitor per 7 days' }, updatedBy: { kind: 'staff' } });
     expect(k.of('advertising.placement.updated')).toContainEqual({ placementKey: 'popup', enabled: true, version: 2 });
+    expect(res.body.version).toBe(2);
     res = await k.call('PATCH', `${ADMIN}/placements/${popup.id}`, k.staff, { enabled: false, reason: 'stale', version: 1 });
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('CONFLICT');
+    // a stale PATCH changes nothing
+    expect((await k.call('GET', `${ADMIN}/placements`, k.staff)).body.find((p: any) => p.key === 'popup')).toMatchObject({ enabled: true, version: 2 });
     // turning a placement off takes effect for new displays at once
     res = await k.call('PATCH', `${ADMIN}/placements/${popup.id}`, k.staff, { enabled: false, reason: 'Pause pop-ups for the holidays', version: 2 });
     expect(res.body.enabled).toBe(false);
@@ -71,17 +74,17 @@ describe('reactions to other modules', () => {
   it('offer, stock and product changes pause sponsored ads and resume those paused automatically', async () => {
     const offer = k.offer({ sellerId: null, title: 'Ceramic vase' });
     const c = await official(offer.id, { name: 'Vase ad' });
-    const status = { offerId: offer.id, productId: offer.productId, variantId: offer.variantId, sellerId: null, ownerType: 'official', from: 'active', to: 'paused' };
+    const status = { offerId: offer.id, productId: offer.productId, variantId: offer.variantId, sellerId: null, ownerType: 'official', from: 'active', to: 'paused', stockItemId: newId() };
     await k.emit('offers.offer.status_changed', status);
     expect(await get(c.id)).toMatchObject({ status: 'paused', pausedBy: { kind: 'system' } });
     k.offers.get(offer.id)!.status = 'active';
     await k.emit('offers.offer.status_changed', { ...status, from: 'paused', to: 'active' });
     expect((await get(c.id)).status).toBe('live');
 
-    await k.emit('inventory.stock.low', { stockItemId: offer.stockItemId, offerId: offer.id, ownerType: 'official', sellerId: null, sku: 'S', label: 'Vase', available: 4, threshold: 5 });
+    await k.emit('inventory.stock.low', { stockItemId: offer.stockItemId, offerId: offer.id, ownerType: 'official', sellerId: null, productId: offer.productId, variantId: offer.variantId, sku: 'S', label: 'Vase', available: 4, threshold: 5 });
     expect((await get(c.id)).status).toBe('paused');
     k.offers.get(offer.id)!.stock = 30;
-    await k.emit('inventory.stock.changed', { stockItemId: offer.stockItemId, offerId: offer.id, ownerType: 'official', sellerId: null, variantId: offer.variantId, available: 30, reserved: 0, previousAvailable: 4, state: 'in_stock', cause: 'receipt' });
+    await k.emit('inventory.stock.changed', { stockItemId: offer.stockItemId, offerId: offer.id, ownerType: 'official', sellerId: null, productId: offer.productId, variantId: offer.variantId, archived: false, available: 30, reserved: 0, previousAvailable: 4, state: 'in_stock', cause: 'receipt' });
     expect((await get(c.id)).status).toBe('live');
 
     await k.emit('catalog.product.publication_changed', { productId: offer.productId, from: 'active', to: 'hidden', reason: 'Listing review' });
@@ -91,7 +94,7 @@ describe('reactions to other modules', () => {
 
     // a staff pause is never lifted by these events
     await k.call('POST', `${ADMIN}/campaigns/${c.id}/pause`, k.staff, { reason: 'Manual' });
-    await k.emit('inventory.stock.changed', { stockItemId: offer.stockItemId, offerId: offer.id, ownerType: 'official', sellerId: null, variantId: offer.variantId, available: 40, reserved: 0, previousAvailable: 30, state: 'in_stock', cause: 'receipt' });
+    await k.emit('inventory.stock.changed', { stockItemId: offer.stockItemId, offerId: offer.id, ownerType: 'official', sellerId: null, productId: offer.productId, variantId: offer.variantId, archived: false, available: 40, reserved: 0, previousAvailable: 30, state: 'in_stock', cause: 'receipt' });
     expect((await get(c.id)).status).toBe('paused');
   });
 
@@ -123,11 +126,30 @@ describe('reactions to other modules', () => {
     const c1 = await creative(k, 'sponsored_product', 'any', [600, 600]);
     const c = await official(offer.id, { name: 'Enforced', creativeIds: [c1.id] });
     expect((await get(c.id)).creatives[0].status).toBe('approved');
-    await k.emit('trust.enforcement.recorded', { enforcementId: newId(), reportId: newId(), action: 'remove_offer', ownerTeam: 'catalog', targets: [{ type: 'offer', id: offer.id, label: 'Lamp' }], reason: 'Counterfeit', params: {}, alreadyApplied: false });
+    const review = await k.call('POST', `${ADMIN}/campaigns`, k.staff, campaignInput(k, { name: 'Enforced request', advertiser: { kind: 'official_store' }, placementKey: 'sponsored_product', pages: ['search'], creativeIds: [], promoted: [{ kind: 'offer', id: offer.id }], dismissal: null, frequencyCap: null }));
+    await k.call('POST', `${ADMIN}/campaigns/${review.body.id}/submit`, k.staff, {});
+    const enforcementId = newId();
+    await k.emit('trust.enforcement.recorded', { enforcementId, reportId: newId(), action: 'suspend_offer', ownerTeam: 'catalog', targets: [{ type: 'offer', id: offer.id, label: 'Lamp' }], reason: 'Counterfeit', params: {}, alreadyApplied: false });
     const after = await get(c.id);
     expect(after.status).toBe('paused');
-    expect(after.creatives[0]).toMatchObject({ status: 'rejected', reviews: [expect.objectContaining({ decision: 'rejected', comment: 'Trust enforcement: Counterfeit' })] });
+    // the enforcement id stays with the reason, so a reversal can find what it did
+    expect(after.creatives[0]).toMatchObject({ status: 'rejected', reviews: [expect.objectContaining({ decision: 'rejected', comment: `Trust enforcement: Counterfeit (enforcement ${enforcementId})` })] });
     expect(k.of('advertising.creative.reviewed')).toContainEqual({ creativeId: c1.id, campaignId: c.id, decision: 'rejected', reasonCode: 'policy' });
+    expect((await get(review.body.id)).status).toBe('rejected');
+
+    // overturned: the creative goes back to review (never straight to approved), the request reopens as a draft; once per event
+    const reversed = { id: newId(), payload: { enforcementId, ref: 'EN-261010-0001', reportId: newId(), reportRef: 'TR-1', action: 'suspend_offer', ownerTeam: 'catalog', targets: [{ type: 'offer', id: offer.id, label: 'Lamp' }], params: {}, appliedRef: null, executionState: 'applied', reason: 'Appeal upheld', appealId: newId(), reversedBy: { kind: 'staff', id: newId() }, reversedAt: k.clock.now().toISOString() } };
+    await k.svc.onEnforcementReversedFromTrust(reversed.payload as never, reversed.id);
+    await k.svc.onEnforcementReversedFromTrust(reversed.payload as never, reversed.id);
+    const back = await get(c.id);
+    expect(back.creatives[0].status).toBe('in_review');
+    expect(back.status).toBe('paused'); // a running ad is not restarted by the reversal
+    const reopened = await get(review.body.id);
+    expect(reopened.status).toBe('draft');
+    expect(k.of('advertising.campaign.status_changed').filter((e) => e.campaignId === review.body.id && e.from === 'rejected' && e.to === 'draft')).toHaveLength(1);
+    // a different enforcement's reversal touches nothing
+    await k.emit('trust.enforcement.reversed', { ...reversed.payload, enforcementId: newId() });
+    expect((await get(review.body.id)).status).toBe('draft');
   });
 
   it('a product merge repoints promoted items and creative links to the kept product', async () => {

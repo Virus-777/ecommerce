@@ -3,7 +3,7 @@
 The customer side of an account: profile, saved addresses, marketing consent, recently viewed products, the Account tab overview, guest order access, data export and account closure, and the staff view of customer accounts with notes and recorded account actions. Credentials, sessions and verification belong to identity.
 
 - **Group:** Participants · **Launch phase:** 1 · **Plan chapters:** 3, 4, 6, 7, 17, 18, 19
-- **Depends on:** [identity](identity.md) · **Optional:** [orders](orders.md), [returns](returns.md), [support](support.md), [messaging](messaging.md), [wallet](wallet.md), [catalog](catalog.md), [offers](offers.md), [trust](trust.md), [reports](reports.md), [notifications](notifications.md), [access](access.md), [audit](audit.md), [media](media.md), [workqueues](workqueues.md)
+- **Depends on:** [identity](identity.md) · **Optional:** [orders](orders.md), [returns](returns.md), [support](support.md), [messaging](messaging.md), [wallet](wallet.md), [reviews](reviews.md), [wishlist](wishlist.md), [payments](payments.md), [catalog](catalog.md), [offers](offers.md), [trust](trust.md), [reports](reports.md), [notifications](notifications.md), [access](access.md), [audit](audit.md), [media](media.md), [workqueues](workqueues.md)
 - **Required by:** [checkout](checkout.md), [wallet](wallet.md), [wishlist](wishlist.md)
 
 ## Owns
@@ -699,19 +699,21 @@ Indexes: `(email_hash, at desc)`, `(ip, at desc)`
 | `customers.data_export.requested` | A customer asks for their data | `{ customerId: uuid, requestId: uuid }` | workqueues |
 | `customers.data_export.ready` | The export file is ready (notifications emails the link) | `{ customerId: uuid, requestId: uuid, expiresAt: datetime }` | notifications, workqueues |
 | `customers.closure.requested` | A customer asks to close the account | `{ customerId: uuid, requestId: uuid, scheduledFor: datetime }` | - |
-| `customers.account.closed` | Closure completes; identity disables sign-in, notifications stops promotional sends | `{ customerId: uuid, userId: uuid }` | identity, media, notifications |
+| `customers.closure.delayed` | The closure job finds the cooling-off period over but new obligations open (the request stays requested and is checked again daily); published once per new set of blockers | `{ customerId: uuid, userId: uuid, requestId: uuid, blockers: ClosureBlocker[], nextCheckAt: datetime }` | notifications |
+| `customers.account.closed` | Closure completes; identity disables sign-in, notifications stops promotional sends | `{ customerId: uuid, userId: uuid }` | identity, media, messaging, notifications, reviews, wishlist |
 
 | Consumes | From | Does |
 |---|---|---|
 | `access.approval.decided` | access | Finish a staff account closure that needed approval (approved: close; rejected, cancelled or expired: revert the pending closure) |
-| `orders.order.placed` | orders | When guestEmail is set, add or update the guest buyer row (order count, spend, last order) |
+| `orders.order.placed` | orders | When guestEmail is set, add or update the guest buyer row (order count, spend, last order; name from the payload's contactName) |
 | `identity.user.registered` | identity | Create the customer profile, default marketing preferences (all promotional channels off unless opted in at registration) and the first consent log rows; remove the guest buyer row with the same email |
 | `identity.user.verified` | identity | Mark email or phone verified (orders attaches guest orders with that email itself) |
 | `identity.guest_session.claimed` | identity | Merge the guest session's recently viewed list into the customer's list (newest view wins) and delete the guest rows |
 | `identity.email.changed` | identity | Update the mirrored email and its verification date |
 | `identity.account.closed` | identity | If identity closed the account directly (staff tool), move the customer to closed and stop promotional consent |
-| `orders.order.placed` | orders | Update order count, spend and the used address's lastUsedAt |
+| `orders.order.placed` | orders | Update order count and spend, and lastUsedAt of the saved address named by the payload's deliveryAddressId (no orders lookup). Idempotent per event (inbox) |
 | `trust.enforcement.recorded` | trust | When the target is a customer (restrict messaging, ordering, reviews or account), create the restriction with the enforcement's reason, end date and appeal route |
+| `trust.enforcement.reversed` | trust | Undo what the enforcement did to a customer: lift every active restriction with that trustEnforcementId (lift reason: the reversal reason, actor system on behalf of trust), return the account to active when none remain, publish customers.account.restriction_lifted and customers.account.status_changed, and record it in the action history. Idempotent; restrictions already lifted or expired stay as they are |
 | `catalog.product.merged` | catalog | Repoint recently viewed rows from the duplicate to the kept product |
 
 ## In-process API (for other modules)
@@ -766,9 +768,9 @@ Checked through the access module (limits per role, second reviewer).
 | Job | Schedule | Does |
 |---|---|---|
 | `customers.expire-restrictions` | every 10 min | Expire restrictions past endsAt; return the account to active when none remain |
-| `customers.build-data-exports` | every 5 min | Process requested exports: collect each enabled module's export hook, write a ZIP to media, mark ready, publish customers.data_export.ready |
+| `customers.build-data-exports` | every 5 min | Process requested exports: call exportCustomerData on every enabled module that declares it (orders, returns, support, messaging, reviews, wishlist, wallet, payments…) with the customerId and accountId, write one file per section plus the customer's attachments into a ZIP in media, mark ready, publish customers.data_export.ready. A module that throws fails the export (retried), never silently left out |
 | `customers.expire-export-links` | hourly | Expire ready exports after exportLinkValidDays and delete the file |
-| `customers.complete-closures` | daily 02:00 market time | For closures past the cooling-off date, re-check obligations; close the account, anonymise profile and addresses, keep order references |
+| `customers.complete-closures` | daily 02:00 market time | For closures past the cooling-off date, re-check obligations; close the account, anonymise profile and addresses, keep order references. When obligations block it, keep the request and publish customers.closure.delayed (once per new set of blockers) |
 | `customers.prune-recently-viewed` | daily | Delete rows older than recentlyViewedRetentionDays and guest rows whose session expired |
 
 ## Settings
@@ -789,7 +791,8 @@ Checked through the access module (limits per role, second reviewer).
 - **Address validation provider (optional)**: Normalise US addresses and detect PO boxes; format rules only when not configured
 
 ## Notes
-- Customer id is separate from the identity user id (one-to-one). Other modules store customerId; the guest order flow stores email only.
+- Customer id is separate from the identity user id (one-to-one). Other modules store customerId; the guest order flow stores email only. Ids are never interchangeable: callers that hold an account id resolve it with getCustomerByUserId, and no API accepts either.
+- Data export contract: customers owns the export ZIP; each module owns its part through the exportCustomerData hook (FORMAT.md; common.CustomerDataSection). Needed from: orders, returns, support, messaging, reviews, wishlist, wallet, payments (saved methods, masked). Anonymisation after closure is each module's consumer of customers.account.closed.
 - Recently viewed is owned here at launch (brief: phase 1, used on the home page) instead of the phase-3 wishlist module listed in the architecture doc. Wishlist reads it through listRecentlyViewed. optionalDeps gain catalog and offers for current price and availability.
 - Overview aggregation uses ctx.tryUse for orders, returns, messaging, support and wallet. Each source answers within overviewSourceTimeoutMs or is reported in `unavailable`; the page never fails because one module is slow or off. Builders: those modules must expose countInProgress, listRecentForCustomer, listDelayedItemsForCustomer (orders), listOpenForCustomer (returns), unreadCount (messaging, exists), listOpenCasesForCustomer (support) and getBalance (wallet) in their contracts.
 - Marketing consent is the source of truth here; notifications reads getMarketingConsent and consumes customers.marketing_preferences.changed. Notification channel routing and essential notices stay in notifications. This resolves the overlap between 'marketing preferences' (customers) and 'preferences (essential vs promotional)' (notifications) in the architecture doc.

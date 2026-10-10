@@ -75,6 +75,22 @@ describe('scenario 2: changed offers', () => {
     expect(lineOf(await get(), offers[0]!.id).notices).toEqual([]);
   });
 
+  it('changed return, warranty or dispatch terms (OfferChange terms) need the customer to accept them', async () => {
+    const { v, offers, get } = await cartWith({ price: 5000 }, { price: 1200, sellerName: 'Harbor Goods' });
+    k.change(offers[0]!.id, { returnTerms: { kind: 'extended', windowDays: 60, freeReturnShipping: true, summary: '60-day free returns.' } });
+    const view = await get();
+    const line = lineOf(view, offers[0]!.id);
+    expect(line).toMatchObject({ state: 'needs_attention', includedInCheckout: false, acceptedTermsVersion: 1 });
+    expect(line.notices).toMatchObject([{ kind: 'terms_changed', severity: 'warning', actions: ['accept', 'remove'] }]);
+    expect(line.notices[0].message).toContain('Northwind Audio updated the delivery, return or warranty terms');
+    expect(lineOf(view, offers[1]!.id)).toMatchObject({ state: 'ok' });
+    expect(view.checkoutReady).toBe(false);
+    const accepted = await k.call('POST', `${STORE}/cart/items/${line.id}/accept`, { token: v.token, body: { noticeIds: [line.notices[0].id] } });
+    expect(accepted.status, JSON.stringify(accepted.body)).toBe(200);
+    expect(lineOf(accepted.body, offers[0]!.id)).toMatchObject({ state: 'ok', acceptedTermsVersion: 2, notices: [] });
+    expect(lineOf(await get(), offers[0]!.id)).toMatchObject({ state: 'ok', notices: [] });
+  });
+
   it('out of stock blocks only that line, with alternatives hinted and never applied; restock clears it', async () => {
     const { v, offers, get } = await cartWith({ price: 3000 }, { price: 1000, sellerName: 'Harbor Goods' });
     const other = await k.offer({ productId: offers[0]!.productId, variantId: offers[0]!.variantId, price: 2900, sellerName: 'Cedar & Co' });

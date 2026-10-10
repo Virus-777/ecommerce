@@ -143,6 +143,22 @@ describe('account closure', () => {
     kit.clock.advance(15 * DAY);
     world.inProgress = 1;
     expect(await kit.service.completeClosures()).toMatchObject({ completed: 0 });
+    await kit.drain();
+    const delayed = kit.of('customers.closure.delayed').filter((e) => e.requestId === r.id);
+    expect(delayed).toEqual([{ customerId: c.customerId, userId: c.accountId, requestId: r.id, blockers: [{ kind: 'open_orders', count: 1, detail: expect.any(String) }], nextCheckAt: expect.any(String) }]);
+    expect(Date.parse(delayed[0].nextCheckAt)).toBeGreaterThan(kit.clock.now().getTime());
+    expect(Date.parse(delayed[0].nextCheckAt) - kit.clock.now().getTime()).toBeLessThanOrEqual(DAY);
+    // the same blockers on the next run: told once
+    world.inProgress = 2;
+    await kit.service.completeClosures();
+    await kit.drain();
+    expect(kit.of('customers.closure.delayed').filter((e) => e.requestId === r.id)).toHaveLength(1);
+    // a new set of blockers: told again
+    world.openCases = 1;
+    await kit.service.completeClosures();
+    await kit.drain();
+    expect(kit.of('customers.closure.delayed').filter((e) => e.requestId === r.id).map((e) => e.blockers.map((b: any) => b.kind))).toEqual([['open_orders'], ['open_orders', 'open_cases']]);
+    world.openCases = 0;
     world.inProgress = 0;
     expect(await kit.service.completeClosures()).toMatchObject({ completed: 1 });
     await kit.drain();

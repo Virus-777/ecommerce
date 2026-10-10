@@ -148,15 +148,19 @@ describe('consumers', () => {
 
   it('a lost package opens a case when the customer has none (shipping.shipment.exception)', async () => {
     const o = await sellerOrder(h, { deliver: false });
-    // an exception without a package (raised from a customer's report) opens nothing
-    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'lost_or_damaged', orderId: o.order.id, groupId: o.order.groups[0]!.id, shipmentId: null, sellerId: o.sellerId, orderItemIds: [o.itemId], dueAt: h.clock.now().toISOString(), customerAction: null });
+    // an exception raised from a customer's report (it already has its case) opens nothing, even with a package
+    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'lost_or_damaged', orderId: o.order.id, groupId: o.order.groups[0]!.id, shipmentId: newId(), sellerId: o.sellerId, orderItemIds: [o.itemId], dueAt: h.clock.now().toISOString(), customerAction: null, source: 'customer_report', caseRef: 'CS-000999' });
     expect(await h.service.casesForOrder(o.order.id)).toHaveLength(0);
-    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'lost_or_damaged', orderId: o.order.id, groupId: o.order.groups[0]!.id, shipmentId: newId(), sellerId: o.sellerId, orderItemIds: [o.itemId], dueAt: h.clock.now().toISOString(), customerAction: null });
+    // nor one opened from a case (caseRef) or reported by the seller
+    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'lost_or_damaged', orderId: o.order.id, groupId: o.order.groups[0]!.id, shipmentId: newId(), sellerId: o.sellerId, orderItemIds: [o.itemId], dueAt: h.clock.now().toISOString(), customerAction: null, source: 'staff', caseRef: 'CS-000998' });
+    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'lost_or_damaged', orderId: o.order.id, groupId: o.order.groups[0]!.id, shipmentId: newId(), sellerId: o.sellerId, orderItemIds: [o.itemId], dueAt: h.clock.now().toISOString(), customerAction: null, source: 'seller', caseRef: null });
+    expect(await h.service.casesForOrder(o.order.id)).toHaveLength(0);
+    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'lost_or_damaged', orderId: o.order.id, groupId: o.order.groups[0]!.id, shipmentId: newId(), sellerId: o.sellerId, orderItemIds: [o.itemId], dueAt: h.clock.now().toISOString(), customerAction: null, source: 'carrier', caseRef: null });
     const cases = await h.service.casesForOrder(o.order.id);
     expect(cases).toHaveLength(1);
     const opened = h.named('support.case.opened').find((e) => e.caseId === cases[0]!.caseId);
     expect(opened).toMatchObject({ kind: 'order_problem', category: 'item_damaged', customerId: o.customerId, orderItemIds: [o.itemId] });
-    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'lost_or_damaged', orderId: o.order.id, groupId: o.order.groups[0]!.id, shipmentId: newId(), sellerId: o.sellerId, orderItemIds: [o.itemId], dueAt: h.clock.now().toISOString(), customerAction: null });
+    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'lost_or_damaged', orderId: o.order.id, groupId: o.order.groups[0]!.id, shipmentId: newId(), sellerId: o.sellerId, orderItemIds: [o.itemId], dueAt: h.clock.now().toISOString(), customerAction: null, source: 'system', caseRef: null });
     expect(await h.service.casesForOrder(o.order.id)).toHaveLength(1);
   });
 
@@ -184,12 +188,12 @@ describe('consumers', () => {
   it('returns.return.escalated without a case opens a Returns-team dispute', async () => {
     const o = await sellerOrder(h);
     const returnId = newId();
-    await h.publish('returns', 'returns.return.escalated', { returnId, ownerType: 'seller', sellerId: o.sellerId, orderId: o.order.id, reason: 'seller_no_response', by: { kind: 'system' } });
+    await h.publish('returns', 'returns.return.escalated', { returnId, ref: 'RT-000001-0001', orderId: o.order.id, orderRef: o.order.ref, ownerType: 'seller', sellerId: o.sellerId, reason: 'seller_no_response', by: { kind: 'system' } });
     const [k] = await h.service.casesForOrder(o.order.id);
     expect(k).toBeDefined();
     const admin = await h.service.getCaseAdmin(k!.ref);
     expect(admin).toMatchObject({ team: 'Returns', case: { kind: 'dispute', status: 'escalated', returnId } });
-    await h.publish('returns', 'returns.return.escalated', { returnId, ownerType: 'seller', sellerId: o.sellerId, orderId: o.order.id, reason: 'seller_no_response', by: { kind: 'system' } });
+    await h.publish('returns', 'returns.return.escalated', { returnId, ref: 'RT-000001-0001', orderId: o.order.id, orderRef: o.order.ref, ownerType: 'seller', sellerId: o.sellerId, reason: 'seller_no_response', by: { kind: 'system' } });
     expect(await h.service.casesForOrder(o.order.id)).toHaveLength(1);
   });
 });

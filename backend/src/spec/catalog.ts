@@ -83,6 +83,8 @@ export interface Brand {
   productCount: number;
   /** Brand page banner image */
   banner?: common.MediaRef | null;
+  /** Store lists only show active brands; getBrands and admin reads return any status */
+  status: "active" | "under_review" | "blocked";
 }
 
 export const Brand: z.ZodType<Brand> = z.object({
@@ -97,6 +99,7 @@ export const Brand: z.ZodType<Brand> = z.object({
   get banner() {
     return common.MediaRef.nullish();
   },
+  status: z.enum(["active", "under_review", "blocked"]).describe("Store lists only show active brands; getBrands and admin reads return any status"),
 }).register(common.apiTypes, { id: "catalog.Brand" });
 
 export interface Variant {
@@ -105,6 +108,14 @@ export interface Variant {
   options: Record<string, string>;
   gtin?: string | null;
   images: common.MediaRef[];
+  /** Shipping weight of one unit in its retail packaging (parcel data for shipping quotes and labels) */
+  weightGrams?: number | null;
+  /** Packaged length of one unit */
+  lengthCm?: number | null;
+  widthCm?: number | null;
+  heightCm?: number | null;
+  /** Manufacturer list price (MSRP) set by Marketly staff; sellers cannot set it. Offers may show it as a reference price */
+  listPrice?: common.Money | null;
 }
 
 export const Variant: z.ZodType<Variant> = z.object({
@@ -114,7 +125,114 @@ export const Variant: z.ZodType<Variant> = z.object({
   get images() {
     return z.array(common.MediaRef);
   },
+  weightGrams: z.number().int().describe("Shipping weight of one unit in its retail packaging (parcel data for shipping quotes and labels)").nullish(),
+  lengthCm: z.number().int().describe("Packaged length of one unit").nullish(),
+  widthCm: z.number().int().nullish(),
+  heightCm: z.number().int().nullish(),
+  get listPrice() {
+    return common.Money.nullish();
+  },
 }).register(common.apiTypes, { id: "catalog.Variant" });
+
+export interface VariantParcel {
+  weightGrams: number;
+  lengthCm?: number | null;
+  widthCm?: number | null;
+  heightCm?: number | null;
+}
+
+export const VariantParcel: z.ZodType<VariantParcel> = z.object({
+  weightGrams: z.number().int(),
+  lengthCm: z.number().int().nullish(),
+  widthCm: z.number().int().nullish(),
+  heightCm: z.number().int().nullish(),
+}).register(common.apiTypes, { id: "catalog.VariantParcel" });
+
+export interface VariantRef {
+  id: string;
+  productId: string;
+  productTitle: string;
+  options: Record<string, string>;
+  gtin?: string | null;
+  weightGrams?: number | null;
+  lengthCm?: number | null;
+  widthCm?: number | null;
+  heightCm?: number | null;
+  listPrice?: common.Money | null;
+}
+
+export const VariantRef: z.ZodType<VariantRef> = z.object({
+  id: z.uuid(),
+  productId: z.uuid(),
+  productTitle: z.string(),
+  options: z.record(z.string(), z.string()),
+  gtin: z.string().nullish(),
+  weightGrams: z.number().int().nullish(),
+  lengthCm: z.number().int().nullish(),
+  widthCm: z.number().int().nullish(),
+  heightCm: z.number().int().nullish(),
+  get listPrice() {
+    return common.Money.nullish();
+  },
+}).register(common.apiTypes, { id: "catalog.VariantRef" });
+
+export interface ProductRecord {
+  product: Product;
+  reviewState: "draft" | "submitted" | "changes_requested" | "approved" | "rejected";
+  publication: "active" | "hidden" | "suspended";
+  /** Approved and active (same answer as isPurchasable) */
+  purchasable: boolean;
+  /** Null for Official Store products */
+  ownerSellerId?: string | null;
+  /** Set when this product was merged into another; read the kept product instead */
+  mergedIntoId?: string | null;
+}
+
+export const ProductRecord: z.ZodType<ProductRecord> = z.object({
+  get product() {
+    return Product;
+  },
+  reviewState: z.enum(["draft", "submitted", "changes_requested", "approved", "rejected"]),
+  publication: z.enum(["active", "hidden", "suspended"]),
+  purchasable: z.boolean().describe("Approved and active (same answer as isPurchasable)"),
+  ownerSellerId: z.uuid().describe("Null for Official Store products").nullish(),
+  mergedIntoId: z.uuid().describe("Set when this product was merged into another; read the kept product instead").nullish(),
+}).register(common.apiTypes, { id: "catalog.ProductRecord" });
+
+export interface CategoryPath {
+  categoryId: string;
+  /** Root first, ending with the category itself, e.g. ["Electronics", "Audio", "Headphones"] */
+  names: string[];
+  /** Category ids in the same order */
+  ids: string[];
+}
+
+export const CategoryPath: z.ZodType<CategoryPath> = z.object({
+  categoryId: z.uuid(),
+  names: z.array(z.string()).describe("Root first, ending with the category itself, e.g. [\"Electronics\", \"Audio\", \"Headphones\"]"),
+  ids: z.array(z.uuid()).describe("Category ids in the same order"),
+}).register(common.apiTypes, { id: "catalog.CategoryPath" });
+
+export interface VariantDetailsInput {
+  weightGrams?: number | null;
+  lengthCm?: number | null;
+  widthCm?: number | null;
+  heightCm?: number | null;
+  /** Staff only. Send null to clear */
+  listPrice?: common.Money | null;
+  reason: string;
+}
+
+export const VariantDetailsInput: z.ZodType<VariantDetailsInput> = z.object({
+  weightGrams: z.number().int().nullish(),
+  lengthCm: z.number().int().nullish(),
+  widthCm: z.number().int().nullish(),
+  heightCm: z.number().int().nullish(),
+  get listPrice() {
+    return common.Money.nullish();
+  },
+  reason: z.string(),
+}).register(common.apiTypes, { id: "catalog.VariantDetailsInput" });
 
 export interface ProductSummary {
   id: string;
@@ -272,7 +390,7 @@ export const ProductAdmin: z.ZodType<ProductAdmin> = z.object({
 
 export interface ReviewLogEntry {
   id: string;
-  action: "submitted" | "approved" | "changes_requested" | "rejected" | "publication_changed" | "merged" | "check_dismissed";
+  action: "submitted" | "approved" | "changes_requested" | "rejected" | "publication_changed" | "merged" | "check_dismissed" | "correction_accepted" | "variant_details_changed";
   /** Decision reason, or the submitter's note to the reviewer on submitted entries */
   reason?: string | null;
   /** Field-level comments on changes requested */
@@ -283,7 +401,7 @@ export interface ReviewLogEntry {
 
 export const ReviewLogEntry: z.ZodType<ReviewLogEntry> = z.object({
   id: z.uuid(),
-  action: z.enum(["submitted", "approved", "changes_requested", "rejected", "publication_changed", "merged", "check_dismissed"]),
+  action: z.enum(["submitted", "approved", "changes_requested", "rejected", "publication_changed", "merged", "check_dismissed", "correction_accepted", "variant_details_changed"]),
   reason: z.string().describe("Decision reason, or the submitter's note to the reviewer on submitted entries").nullish(),
   fields: z.record(z.string(), z.string()).describe("Field-level comments on changes requested"),
   get actor() {
@@ -336,12 +454,26 @@ export interface VariantInput {
   options: Record<string, string>;
   gtin?: string | null;
   imageIds?: string[] | null;
+  /** Packaged weight of one unit; reviewed with the product */
+  weightGrams?: number | null;
+  lengthCm?: number | null;
+  widthCm?: number | null;
+  heightCm?: number | null;
+  /** Accepted only on admin endpoints (Official Store drafts); refused with VALIDATION_FAILED from sellers */
+  listPrice?: common.Money | null;
 }
 
 export const VariantInput: z.ZodType<VariantInput> = z.object({
   options: z.record(z.string(), z.string()),
   gtin: z.string().nullish(),
   imageIds: z.array(z.uuid()).nullish(),
+  weightGrams: z.number().int().describe("Packaged weight of one unit; reviewed with the product").nullish(),
+  lengthCm: z.number().int().nullish(),
+  widthCm: z.number().int().nullish(),
+  heightCm: z.number().int().nullish(),
+  get listPrice() {
+    return common.Money.nullish();
+  },
 }).register(common.apiTypes, { id: "catalog.VariantInput" });
 
 export interface CorrectionSuggestion {
@@ -454,6 +586,10 @@ export interface ProductSnapshot {
   options: Record<string, string>;
   modelNumber?: string | null;
   imageUrl?: string | null;
+  /** Media asset id of the main image (variant image first, else product image), so orders can resolve it later with media.refs even if the product changes */
+  imageId?: string | null;
+  /** The same image as a MediaRef at snapshot time */
+  image?: common.MediaRef | null;
   takenAt: string;
 }
 
@@ -467,6 +603,10 @@ export const ProductSnapshot: z.ZodType<ProductSnapshot> = z.object({
   options: z.record(z.string(), z.string()),
   modelNumber: z.string().nullish(),
   imageUrl: z.url().nullish(),
+  imageId: z.uuid().describe("Media asset id of the main image (variant image first, else product image), so orders can resolve it later with media.refs even if the product changes").nullish(),
+  get image() {
+    return common.MediaRef.nullish();
+  },
   takenAt: z.iso.datetime({ offset: true }),
 }).register(common.apiTypes, { id: "catalog.ProductSnapshot" });
 
@@ -486,7 +626,7 @@ export interface Submission {
   lastSavedBy?: common.Actor | null;
   /** Shown to the submitter */
   expectedReviewBy?: string | null;
-  /** Internal review target that orders the queue (setting reviewTargetBusinessHours) */
+  /** Internal review target that orders the queue (setting reviewTargetBusinessDays) */
   reviewDeadline?: common.Deadline | null;
   /** Reviewer who picked it up (staff only) */
   assignee?: common.Actor | null;
@@ -920,11 +1060,23 @@ export const PublicationImpact: z.ZodType<PublicationImpact> = z.object({
 export interface CatalogProductSubmittedEvent {
   productId: string;
   ownerSellerId?: string | null;
+  submissionId: string;
+  /** Submission reference SUB-YYMMDD-NNNN */
+  ref: string;
+  kind: "new" | "content_change" | "resubmitted";
+  title: string;
+  /** Review deadline (setting reviewTargetBusinessDays), so the product_review work item carries it */
+  reviewDueAt: string;
 }
 
 export const CatalogProductSubmittedEvent: z.ZodType<CatalogProductSubmittedEvent> = z.object({
   productId: z.uuid(),
   ownerSellerId: z.uuid().nullish(),
+  submissionId: z.uuid(),
+  ref: z.string().describe("Submission reference SUB-YYMMDD-NNNN"),
+  kind: z.enum(["new", "content_change", "resubmitted"]),
+  title: z.string(),
+  reviewDueAt: z.iso.datetime({ offset: true }).describe("Review deadline (setting reviewTargetBusinessDays), so the product_review work item carries it"),
 });
 
 /** catalog.product.approved: A reviewer approves */
@@ -973,6 +1125,8 @@ export interface CatalogProductPublicationChangedEvent {
   to: string;
   reason: string;
   trustReportId?: string | null;
+  /** Set when trust.enforcement.recorded (suspend) or trust.enforcement.reversed (reactivate) caused the change, so trust can confirm the enforcement */
+  trustEnforcementId?: string | null;
 }
 
 export const CatalogProductPublicationChangedEvent: z.ZodType<CatalogProductPublicationChangedEvent> = z.object({
@@ -981,17 +1135,21 @@ export const CatalogProductPublicationChangedEvent: z.ZodType<CatalogProductPubl
   to: z.string(),
   reason: z.string(),
   trustReportId: z.uuid().nullish(),
+  trustEnforcementId: z.uuid().describe("Set when trust.enforcement.recorded (suspend) or trust.enforcement.reversed (reactivate) caused the change, so trust can confirm the enforcement").nullish(),
 });
 
-/** catalog.product.updated: Shared content changes */
+/** catalog.product.updated: Shared content changes (including variant weight, dimensions and list price) */
 export interface CatalogProductUpdatedEvent {
   productId: string;
   version: number;
+  /** Current title, so read models that denormalise it (offers title search) need no lookup */
+  title: string;
 }
 
 export const CatalogProductUpdatedEvent: z.ZodType<CatalogProductUpdatedEvent> = z.object({
   productId: z.uuid(),
   version: z.number().int(),
+  title: z.string().describe("Current title, so read models that denormalise it (offers title search) need no lookup"),
 });
 
 /** catalog.product.merged: A duplicate or submission is merged (one event per merged record) */
@@ -1082,8 +1240,22 @@ export interface CatalogPublicApi {
   getProduct(productId: string): Promise<Product | null>;
   /** Approved and Active. Offers only go live on purchasable products. Used by: offers, cart. */
   isPurchasable(productId: string): Promise<boolean>;
-  /** Frozen copy of title, brand, options and version stored on an order item (plan ch. 8: purchases keep what was accepted) Used by: orders. */
+  /** Frozen copy of title, brand, options, version and main image (imageId and image) stored on an order item (plan ch. 8: purchases keep what was accepted) Used by: orders. */
   snapshotForOrder(variantId: string): Promise<ProductSnapshot>;
+  /** Batch read of products in any review state or publication, with purchasable and mergedIntoId (follow it for merged records). Unknown ids are left out; at most 200 ids per call Used by: search, promotions, advertising, content, offers, wishlist, graphql. */
+  getProducts(productIds: string[]): Promise<ProductRecord[]>;
+  /** Product pickers in other modules' admin screens (campaign items, content tiles, promotions): q matches title, PRD- ref, model number and GTIN. Not the store search (search module) Used by: promotions, advertising, content, offers. */
+  searchProducts(filter: { q?: string, categoryId?: string, brandId?: string, ownerSellerId?: string, purchasableOnly?: boolean, reviewStates?: string[] }, page: common.PageInput): Promise<common.Page<ProductSummary>>;
+  /** Keyset walk over all product ids (ordered by id, limit 1–1000) for index rebuilds; purchasableOnly keeps approved and active products Used by: search. */
+  listProductIds(opts: { after?: string, limit: number, purchasableOnly?: boolean, updatedSince?: string }): Promise<{ ids: string[], nextAfter: string | null }>;
+  /** Brands by id with status (content brand tiles, advertising brand names, search). Unknown ids are left out Used by: content, advertising, search, graphql. */
+  getBrands(brandIds: string[]): Promise<Brand[]>;
+  /** Variants by id with product id and title, options, GTIN, shipping weight and dimensions and list price. Unknown ids are left out Used by: offers, inventory, returns, graphql. */
+  getVariants(variantIds: string[]): Promise<VariantRef[]>;
+  /** Shipping weight and dimensions of one unit per variant (decision: parcel data lives on the catalog variant). null when the variant has no weight yet; callers fall back to their own default parcel Used by: offers, shipping, cart, checkout. */
+  getParcels(variantIds: string[]): Promise<Record<string, VariantParcel | null>>;
+  /** Root-first category names and ids for each category, so callers can show the path and match subcategories (a rule on a category covers every id whose ids[] contains it) Used by: returns, checkout, finance, reports. */
+  getCategoryPaths(categoryIds: string[]): Promise<Record<string, CategoryPath>>;
   /** Category tree for menus and the Categories tab, with in-stock product counts and category images Used by: graphql, search. */
   listCategories(opts: { includeHidden?: boolean }): Promise<Category[]>;
   /** Category page header, breadcrumb and filterable attributes Used by: graphql. */
@@ -1195,6 +1367,12 @@ export interface CatalogDb {
     gtin: string | null;
     media_ids: Json;
     position: number;
+    weight_grams: number | null;
+    length_cm: number | null;
+    width_cm: number | null;
+    height_cm: number | null;
+    list_price_amount: number | null;
+    list_price_currency: string | null;
   };
   /** Every submission, decision, publication change and merge */
   review_log: {
@@ -1873,6 +2051,29 @@ export const endpoints = defineEndpoints({
     screens: ["admin/catalog","admin/trust"],
     phase: 1,
   },
+  updateVariantDetails: {
+    area: "admin",
+    method: "PATCH",
+    path: "/products/{id}/variants/{variantId}",
+    auth: "staff",
+    permission: "catalog.products.review",
+    scope: "staff",
+    summary: "Set a variant's shipping weight, dimensions and list price",
+    desc: "Works on any product, including approved ones (these fields do not change what the product is, so no correction or re-review is needed). Omitted fields stay; listPrice null clears it. Recorded in the review log (variant_details_changed) and published as catalog.product.updated with the new version.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+        variantId: z.uuid(),
+      }),
+    body: () => VariantDetailsInput,
+    response: () => ProductAdmin,
+    status: 200,
+    errors: ["NOT_FOUND","VALIDATION_FAILED"],
+    audited: true,
+    events: ["catalog.product.updated"],
+    screens: ["admin/catalog","admin/official"],
+    phase: 1,
+  },
   publicationImpact: {
     area: "admin",
     method: "GET",
@@ -2222,7 +2423,7 @@ export const spec = defineModuleSpec({
   summary: "What a product is: categories, attributes, brands, products, variants, and the review workflow that decides whether a product may be sold. How a seller sells it (price, stock, condition) belongs to offers.",
   dependsOn: ["media"],
   optionalDeps: ["search","sellers","access","audit","offers","cart","reviews","inventory","reports","orders","returns","support"],
-  publicApi: ["getProduct","isPurchasable","snapshotForOrder","listCategories","getCategoryBySlug","getBrandBySlug","getProductForSeller","getProductAdmin","listReviewQueue","countProductsForSellers","exportRows"],
+  publicApi: ["getProduct","isPurchasable","snapshotForOrder","getProducts","searchProducts","listProductIds","getBrands","getVariants","getParcels","getCategoryPaths","listCategories","getCategoryBySlug","getBrandBySlug","getProductForSeller","getProductAdmin","listReviewQueue","countProductsForSellers","exportRows"],
   permissions: [
     {
       "key": "catalog.products.review",
@@ -2376,7 +2577,7 @@ export const spec = defineModuleSpec({
       "catalog.product.changes_requested": { when: "A reviewer asks for changes", payload: () => CatalogProductChangesRequestedEvent },
       "catalog.product.rejected": { when: "A reviewer rejects", payload: () => CatalogProductRejectedEvent },
       "catalog.product.publication_changed": { when: "Active / Hidden / Suspended changes", payload: () => CatalogProductPublicationChangedEvent },
-      "catalog.product.updated": { when: "Shared content changes", payload: () => CatalogProductUpdatedEvent },
+      "catalog.product.updated": { when: "Shared content changes (including variant weight, dimensions and list price)", payload: () => CatalogProductUpdatedEvent },
       "catalog.product.merged": { when: "A duplicate or submission is merged (one event per merged record)", payload: () => CatalogProductMergedEvent },
       "catalog.correction.suggested": { when: "A seller suggests a correction", payload: () => CatalogCorrectionSuggestedEvent },
       "catalog.correction.decided": { when: "Staff accept or decline a correction", payload: () => CatalogCorrectionDecidedEvent },
@@ -2389,7 +2590,8 @@ export const spec = defineModuleSpec({
       "sellers.seller.restricted": "When the restriction covers product submissions (optionally scoped to categories), block new drafts and submissions from that seller in scope and pause its open submissions in the review queue",
       "sellers.seller.suspended": "Pause the seller's open submissions in the review queue",
       "sellers.seller.reinstated": "Return paused submissions to the review queue",
-      "trust.enforcement.recorded": "Suspend products named in a counterfeit enforcement",
+      "trust.enforcement.recorded": "action suspend_product: suspend the named products (publication suspended, reason from the enforcement); the review-log entry keeps enforcementId and trustReportId and catalog.product.publication_changed carries both",
+      "trust.enforcement.reversed": "action suspend_product: reactivate each target product whose current suspension came from that enforcement (found by the enforcementId on its publication_changed review-log entry). Products suspended again since, or merged, are left alone. No publication-override approval is asked: the reversal was already approved in trust. Logs the reversal reason and publishes catalog.product.publication_changed (suspended → active, trustEnforcementId). Other actions are ignored",
       "offers.offer.created": "Add the offer to offer_index and refresh listing_stats for the product",
       "offers.offer.status_changed": "Update offer eligibility in offer_index and refresh listing_stats (offerNote names paused offers)",
       "offers.offer.price_changed": "Update the offer price in offer_index and the product best price",
@@ -2418,6 +2620,15 @@ export const spec = defineModuleSpec({
       "type": "int",
       "min": 0,
       "unit": "characters",
+      "sellerVisible": true
+    },
+    "reviewTargetBusinessDays": {
+      "default": 1,
+      "desc": "Internal target from submission to review decision; sets each submission's review deadline (queue order) and the expected review date shown to the submitter",
+      "type": "duration",
+      "min": 1,
+      "max": 10,
+      "unit": "business days",
       "sellerVisible": true
     }
   },
@@ -2722,6 +2933,30 @@ export const spec = defineModuleSpec({
       "position": {
         "type": "int",
         "nullable": false
+      },
+      "weight_grams": {
+        "type": "int",
+        "nullable": true
+      },
+      "length_cm": {
+        "type": "int",
+        "nullable": true
+      },
+      "width_cm": {
+        "type": "int",
+        "nullable": true
+      },
+      "height_cm": {
+        "type": "int",
+        "nullable": true
+      },
+      "list_price_amount": {
+        "type": "bigint",
+        "nullable": true
+      },
+      "list_price_currency": {
+        "type": "char(3)",
+        "nullable": true
       }
     },
     "review_log": {

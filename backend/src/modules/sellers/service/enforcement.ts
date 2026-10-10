@@ -175,9 +175,10 @@ export class EnforcementPart extends Part {
 
   /**
    * Restrict a seller under the caller's authority (access): active at once when allowed, otherwise
-   * pending_approval with an approval request. `throwPending` answers APPROVAL_REQUIRED (admin endpoint).
+   * pending_approval with an approval request. The pending restriction is saved, so the answer is the
+   * normal one with `approval` filled (FORMAT.md, Approval responses), never APPROVAL_REQUIRED.
    */
-  async createRestriction(sellerId: string, input: RestrictionInput, by: By, o: { throwPending?: boolean; recommendedBy?: common.Actor | null; skipAuthority?: boolean } = {}): Promise<Restriction> {
+  async createRestriction(sellerId: string, input: RestrictionInput, by: By, o: { recommendedBy?: common.Actor | null; skipAuthority?: boolean } = {}): Promise<Restriction> {
     const seller = await this.core.seller(sellerId);
     if (!SELLING.includes(seller.status)) throw new AppError('ILLEGAL_TRANSITION', `A ${seller.status.replace(/_/g, ' ')} seller cannot be restricted`, { from: seller.status, event: 'restrict' });
     this.validateInput(input);
@@ -217,7 +218,6 @@ export class EnforcementPart extends Part {
         },
         by,
       );
-      if (o.throwPending) throw new AppError('APPROVAL_REQUIRED', reason || 'This restriction needs a second reviewer', { approvalRequestId: req.id, restrictionId: row.id });
       return this.restrictionView(pending, { staff: true });
     }
     const active = await this.activateRestriction(row.id, by, { approvalNote: 'Within your authority' });
@@ -788,6 +788,7 @@ export class EnforcementPart extends Part {
       second_reviewer_id: isUuid(input.secondReviewerId) ? input.secondReviewerId : NIL,
       approval_request_id: null,
       trust_report_id: input.trustReportId ?? null,
+      trust_enforcement_id: input.trustEnforcementId ?? null,
       appeal_route: (await this.appealRoute(null)) as never,
       started_at: null,
       ended_at: null,
@@ -825,6 +826,7 @@ export class EnforcementPart extends Part {
         openOrders: after.open_orders as 'seller_keeps_fulfilling' | 'cancel_unshipped_and_refund',
         appealDeadline: route.deadline,
         trustReportId: after.trust_report_id,
+        trustEnforcementId: after.trust_enforcement_id,
       },
       by,
     );
@@ -894,7 +896,7 @@ export class EnforcementPart extends Part {
 
   /* ---------------------------------------------------------------- warnings */
 
-  async issueWarning(sellerId: string, body: { kind: SellerWarning['kind']; title: string; detail: string }, by: By, o: { ref?: string } = {}): Promise<SellerWarning> {
+  async issueWarning(sellerId: string, body: { kind: SellerWarning['kind']; title: string; detail: string }, by: By, o: { ref?: string; trustEnforcementId?: string | null } = {}): Promise<SellerWarning> {
     const seller = await this.core.seller(sellerId);
     if (!SELLING.includes(seller.status) && seller.status !== 'closed') throw new AppError('ILLEGAL_TRANSITION', 'Warnings are for approved sellers', { from: seller.status, event: 'warn' });
     const issues: { path: string; message: string }[] = [];
@@ -912,9 +914,10 @@ export class EnforcementPart extends Part {
       issued_at: this.now(),
       resolved_at: null,
       resolution_note: null,
+      trust_enforcement_id: o.trustEnforcementId ?? null,
     });
     await this.core.timeline(this.repo, sellerId, { kind: 'warning', title: `Warning: ${row.title}`, detail: row.detail, actor: by.actor, ref: o.ref ?? row.id });
-    this.core.publish('sellers.warning.issued', { sellerId, warningId: row.id, kind: row.kind, title: row.title }, by);
+    this.core.publish('sellers.warning.issued', { sellerId, warningId: row.id, kind: row.kind, title: row.title, trustEnforcementId: row.trust_enforcement_id }, by);
     await this.core.audit(
       {
         action: 'sellers.warning.issue',
@@ -936,6 +939,7 @@ export class EnforcementPart extends Part {
     const after = await this.repo.update('warnings', id, { state: this.core.step(sellerWarningMachine, w.state, 'resolve'), resolved_at: this.now(), resolution_note: note.trim() });
     const seller = await this.core.seller(w.seller_id);
     await this.core.timeline(this.repo, seller.id, { kind: 'warning_resolved', title: `Warning resolved: ${w.title}`, detail: note.trim(), actor: by.actor });
+    this.core.publish('sellers.warning.resolved', { sellerId: seller.id, warningId: w.id, note: note.trim(), trustEnforcementId: w.trust_enforcement_id }, by);
     await this.core.audit(
       {
         action: 'sellers.warning.resolve',
@@ -1066,7 +1070,7 @@ export class EnforcementPart extends Part {
         }
       } else if (e.action === 'warn_seller') {
         if (await this.repo.findOne('account_events', { seller_id: sellerId, kind: 'warning', ref: e.enforcementId })) continue;
-        await this.issueWarning(sellerId, { kind: p.kind ?? 'policy', title: p.title ?? 'Policy warning after a Trust and Risk review', detail: p.detail ?? e.reason }, by, { ref: e.enforcementId });
+        await this.issueWarning(sellerId, { kind: p.kind ?? 'policy', title: p.title ?? 'Policy warning after a Trust and Risk review', detail: p.detail ?? e.reason }, by, { ref: e.enforcementId, trustEnforcementId: e.enforcementId });
       } else {
         if (await this.repo.findOne('account_events', { seller_id: sellerId, kind: 'suspension_requested', ref: e.enforcementId })) continue;
         if (!sellerAccountStatusMachine.can(seller.status as never, 'suspend' as never)) continue;
@@ -1079,6 +1083,7 @@ export class EnforcementPart extends Part {
             openOrders: p.openOrders ?? 'seller_keeps_fulfilling',
             secondReviewerId: p.secondReviewerId ?? NIL,
             trustReportId: e.reportId,
+            trustEnforcementId: e.enforcementId,
           },
           by,
         );
@@ -1099,6 +1104,60 @@ export class EnforcementPart extends Part {
         await this.core.timeline(this.repo, sellerId, { kind: 'suspension_requested', title: 'Suspension proposed by Trust and Risk, waiting for the second reviewer', detail: row.reason, visibility: 'staff', actor, ref: e.enforcementId });
       }
     }
+  }
+
+  /**
+   * trust.enforcement.reversed (decision D9): undo exactly what the enforcement created. restrict_seller
+   * lifts the active restriction (or cancels one still pending second review); suspend_seller reinstates
+   * (other restrictions stay) or cancels a pending suspension; warn_seller resolves the open warning. No
+   * approval: the reversal was approved in trust. Nothing found is a no-op; other actions are ignored.
+   * Idempotent: every step checks the record's state, and the envelope id is claimed once done.
+   */
+  async onEnforcementReversed(e: EventPayload<'trust.enforcement.reversed'>, eventId?: string) {
+    if (!['restrict_seller', 'warn_seller', 'suspend_seller'].includes(e.action)) return;
+    const key = `trust-enforcement-reversed:${eventId ?? e.enforcementId}`;
+    if (await this.ctx.inbox.seen(this.ctx.db, key)) return;
+    const by: By = { actor: e.reversedBy?.kind === 'staff' ? e.reversedBy : { ...TRUST_TEAM } };
+    const reason = `Reversed by Trust and Risk (${e.ref}): ${e.reason}`;
+    const sellerIds = new Set((e.targets ?? []).filter((t) => t?.type === 'seller' && isUuid(t.id)).map((t) => t.id));
+    const mine = <T extends { seller_id: string }>(rows: T[]) => rows.filter((r) => !sellerIds.size || sellerIds.has(r.seller_id));
+    const byRef = async <K extends 'restrictions' | 'suspensions' | 'warnings'>(table: K) =>
+      // records created before pass 3 have no trust_enforcement_id: trust's appliedRef names them
+      e.appliedRef && isUuid(e.appliedRef) ? await this.repo.get(table, e.appliedRef) : undefined;
+
+    if (e.action === 'restrict_seller') {
+      const rows = mine(await this.repo.find('restrictions', { trust_enforcement_id: e.enforcementId, state: ['active', 'pending_approval'] }));
+      const legacy = await byRef('restrictions');
+      if (legacy && ['active', 'pending_approval'].includes(legacy.state) && !rows.some((r) => r.id === legacy.id) && mine([legacy]).length) rows.push(legacy);
+      for (const r of rows) {
+        if (r.state === 'active') await this.endRestriction(r.id, 'lift', reason, by);
+        else {
+          await this.repo.update('restrictions', r.id, { state: this.core.step(restrictionMachine, r.state, 'decline'), lift_reason: reason });
+          await this.core.timeline(this.repo, r.seller_id, { kind: 'restriction_declined', title: `Proposed restriction withdrawn: ${r.title}`, detail: reason, visibility: 'staff', actor: by.actor, ref: r.ref });
+        }
+      }
+    } else if (e.action === 'suspend_seller') {
+      const rows = mine(await this.repo.find('suspensions', { trust_enforcement_id: e.enforcementId, state: ['active', 'pending_approval'] }));
+      const legacy = await byRef('suspensions');
+      if (legacy && ['active', 'pending_approval'].includes(legacy.state) && !rows.some((r) => r.id === legacy.id) && mine([legacy]).length) rows.push(legacy);
+      for (const s of rows) {
+        if (s.state === 'active') {
+          const seller = await this.repo.get('sellers', s.seller_id);
+          // reinstate keeping every other restriction (keepRestrictionIds absent = keep all)
+          if (seller?.status === 'suspended') await this.reinstateSeller(s.seller_id, { reason }, by);
+          else await this.repo.update('suspensions', s.id, { state: this.core.step(suspensionMachine, s.state, 'end'), ended_at: this.now(), end_reason: reason });
+        } else {
+          await this.repo.update('suspensions', s.id, { state: this.core.step(suspensionMachine, s.state, 'decline'), end_reason: reason });
+          await this.core.timeline(this.repo, s.seller_id, { kind: 'suspension_declined', title: 'Proposed suspension withdrawn', detail: reason, visibility: 'staff', actor: by.actor });
+        }
+      }
+    } else {
+      const rows = mine(await this.repo.find('warnings', { trust_enforcement_id: e.enforcementId, state: 'open' }));
+      const legacy = await byRef('warnings');
+      if (legacy?.state === 'open' && !rows.some((r) => r.id === legacy.id) && mine([legacy]).length) rows.push(legacy);
+      for (const w of rows) await this.resolveWarning(w.id, reason, by);
+    }
+    await this.ctx.inbox.claim(this.ctx.db, key);
   }
 
   /* ---------------------------------------------------------------- jobs */

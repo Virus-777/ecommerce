@@ -286,7 +286,8 @@ export interface SellerCredit {
   reason: string;
   /** What the credit is for, e.g. the fulfillment-service lost-unit claim */
   reference: Reference;
-  status: "posted" | "pending_approval" | "rejected";
+  /** withdrawn: the calling module withdrew it while it waited for approval (withdrawSellerCredit) */
+  status: "posted" | "pending_approval" | "rejected" | "withdrawn";
   /** The seller_credit entry once posted */
   ledgerEntry?: LedgerEntry | null;
   approvalRequestId?: string | null;
@@ -305,7 +306,7 @@ export const SellerCredit: z.ZodType<SellerCredit> = z.object({
   get reference() {
     return Reference;
   },
-  status: z.enum(["posted", "pending_approval", "rejected"]),
+  status: z.enum(["posted", "pending_approval", "rejected", "withdrawn"]).describe("withdrawn: the calling module withdrew it while it waited for approval (withdrawSellerCredit)"),
   get ledgerEntry() {
     return LedgerEntry.nullish();
   },
@@ -1456,7 +1457,7 @@ export const MarketplaceIncome: z.ZodType<MarketplaceIncome> = z.object({
 }).register(common.apiTypes, { id: "finance.MarketplaceIncome" });
 
 export interface ReconChecklistItem {
-  key: "provider_deposit" | "chargebacks_reviewed" | "payments_matched" | "seller_amounts_matched" | "failed_payouts_followed" | "unexplained_explained";
+  key: "provider_deposit" | "chargebacks_reviewed" | "payments_matched" | "seller_amounts_matched" | "store_credit_matched" | "failed_payouts_followed" | "unexplained_explained";
   label: string;
   state: "done" | "in_progress" | "late" | "todo";
   note?: string | null;
@@ -1464,7 +1465,7 @@ export interface ReconChecklistItem {
 }
 
 export const ReconChecklistItem: z.ZodType<ReconChecklistItem> = z.object({
-  key: z.enum(["provider_deposit", "chargebacks_reviewed", "payments_matched", "seller_amounts_matched", "failed_payouts_followed", "unexplained_explained"]),
+  key: z.enum(["provider_deposit", "chargebacks_reviewed", "payments_matched", "seller_amounts_matched", "store_credit_matched", "failed_payouts_followed", "unexplained_explained"]),
   label: z.string(),
   state: z.enum(["done", "in_progress", "late", "todo"]),
   note: z.string().nullish(),
@@ -1522,7 +1523,8 @@ export const CorrectionInput: z.ZodType<CorrectionInput> = z.object({
 export interface ReconItem {
   id: string;
   date: string;
-  check: "payments_vs_orders" | "seller_amounts" | "provider_deposit" | "unexplained_amount";
+  /** store_credit: wallet balances vs finance's store-credit liability, and per-account differences reported by wallet (recordExternalDifference) */
+  check: "payments_vs_orders" | "seller_amounts" | "provider_deposit" | "store_credit" | "unexplained_amount";
   reference?: Reference | null;
   /** Seller name, payment method or deposit */
   subject: string;
@@ -1543,7 +1545,7 @@ export interface ReconItem {
 export const ReconItem: z.ZodType<ReconItem> = z.object({
   id: z.uuid(),
   date: z.iso.date(),
-  check: z.enum(["payments_vs_orders", "seller_amounts", "provider_deposit", "unexplained_amount"]),
+  check: z.enum(["payments_vs_orders", "seller_amounts", "provider_deposit", "store_credit", "unexplained_amount"]).describe("store_credit: wallet balances vs finance's store-credit liability, and per-account differences reported by wallet (recordExternalDifference)"),
   get reference() {
     return Reference.nullish();
   },
@@ -2056,6 +2058,12 @@ export interface FinancePublicApi {
   creditSellerCharge(input: { sellerId: string, amount: common.Money, originalEntryId: string, reason: string, idempotencyKey: string }): Promise<LedgerEntry>;
   /** Credits a seller without an original charge (fulfillment-service reimbursements for lost or damaged units, goodwill to a seller) as ledger type seller_credit. Up to creditSecondReviewerThreshold it is posted at once (status posted, ledgerEntry set). Above it the credit waits as pending_approval with an approval request (finance.credits.issue) and is posted or rejected on access.approval.decided, publishing finance.seller_credit.decided. Same idempotencyKey returns the first credit. Used by: fulfillment-service. */
   creditSeller(input: { sellerId: string, amount: common.Money, reason: string, reference: Reference, idempotencyKey: string }): Promise<SellerCredit>;
+  /** Current state of a credit asked for with creditSeller (posted, pending_approval, rejected or withdrawn), by id or by the caller's idempotency key; replaces re-calling creditSeller to read it back Used by: fulfillment-service. */
+  getSellerCredit(by: { creditId?: string, idempotencyKey?: string }): Promise<SellerCredit | null>;
+  /** Withdraws a credit still pending_approval (e.g. the reimbursement it pays was reversed): status withdrawn, its approval request is cancelled through access, nothing is posted. A posted credit is refused with ILLEGAL_TRANSITION (reverse it with an adjustment); withdrawing a withdrawn credit returns it unchanged Used by: fulfillment-service. */
+  withdrawSellerCredit(input: { creditId?: string, idempotencyKey?: string, reason: string }): Promise<SellerCredit>;
+  /** Another module reports a money difference it found in its own books for the daily check (wallet: a customer balance that differs from its ledger sum). Creates an open reconciliation item on today's day for check store_credit (finance.reconciliation.mismatch_found); the same key returns the existing item, and a later report with expected = actual matches it (finance.reconciliation.item_closed) Used by: wallet. */
+  recordExternalDifference(input: { check: 'store_credit', subject: string, description: string, expected: common.Money, actual: common.Money, reference?: Reference, key: string }): Promise<ReconItem>;
   /** Company trading costs for the Official Store margin Used by: purchasing, inventory, shipping, warehouse. */
   recordCompanyCost(input: { kind: 'buying_cost' | 'shipping_expense' | 'return_loss' | 'write_off' | 'supplier_credit', amount: common.Money, reference: Reference, at: string }): Promise<void>;
   /** Whether a seller can be paid (verified destination, no full hold) Used by: sellers. */
@@ -2197,6 +2205,8 @@ export interface FinanceDb {
     released_at: Date | null;
     release_reason: string | null;
     approval_request_id: string | null;
+    /** set when the hold executes a trust recommendation; kept through approval so finance.hold.placed carries it when the approved hold is placed */
+    trust_report_id: string | null;
   };
   adjustments: {
     id: string;
@@ -2225,7 +2235,7 @@ export interface FinanceDb {
     ref_kind: string;
     ref_id: string;
     ref_label: string | null;
-    status: 'posted' | 'pending_approval' | 'rejected';
+    status: 'posted' | 'pending_approval' | 'rejected' | 'withdrawn';
     idempotency_key: string;
     requested_by: string;
     approval_request_id: string | null;
@@ -3038,7 +3048,7 @@ export const endpoints = defineEndpoints({
     errors: ["APPROVAL_REQUIRED"],
     idempotent: true,
     audited: true,
-    approval: "Approval action finance.adjustments.record. Above adjustmentSecondReviewerThreshold (e.g. $500) a second Finance reviewer approves through access",
+    approval: "Approval action finance.adjustments.record. Above the caller's adjustment limit (access, e.g. $500) a second Finance reviewer approves through access",
     events: ["finance.adjustment.recorded"],
     screens: ["admin/seller","ops/finance-checks"],
     phase: 1,
@@ -3251,7 +3261,7 @@ export const endpoints = defineEndpoints({
     errors: ["ILLEGAL_TRANSITION","SAME_APPROVER","APPROVAL_REQUIRED","STEP_UP_REQUIRED"],
     idempotent: true,
     audited: true,
-    approval: "Approval action finance.payouts.release. Runs over runSecondReviewerThreshold (e.g. $50,000) need a second Finance reviewer through access; platform administrators without payout authority cannot approve",
+    approval: "Approval action finance.payouts.release. Runs over the first approver's payout limit (access, e.g. $50,000) need a second Finance reviewer through access; platform administrators without payout authority cannot approve",
     events: ["finance.payout_run.approved"],
     screens: ["admin/payouts"],
     phase: 1,
@@ -3372,12 +3382,15 @@ export const endpoints = defineEndpoints({
     stepUp: {"kind":"code","purpose":"payout-destination"},
     scope: "staff",
     summary: "Verify a new payout destination",
+    desc: "The phone callback check has no separate step: the reviewer phones the seller owner on the number on file (not one given in the change) and records the result with callbackConfirmed. false records the check as failed (the review stays under review; reject it if the owner did not ask for the change).",
     params: () =>
       z.object({
         id: z.uuid(),
       }),
     body: () => z.object({
       reason: z.string(),
+      callbackConfirmed: z.boolean().describe("The owner confirmed the change on a callback to the phone number on file"),
+      callbackNote: z.string().nullish(),
     }),
     response: () => DestinationReview,
     status: 200,
@@ -3440,7 +3453,7 @@ export const endpoints = defineEndpoints({
     query: () =>
       z.object({
         date: z.iso.date().optional(),
-        check: z.enum(["payments_vs_orders", "seller_amounts", "provider_deposit", "unexplained_amount"]).optional(),
+        check: z.enum(["payments_vs_orders", "seller_amounts", "provider_deposit", "store_credit", "unexplained_amount"]).optional(),
         status: z.enum(["open", "explained", "correction_pending", "corrected", "matched"]).optional(),
       }),
     paging: true,
@@ -3512,7 +3525,7 @@ export const endpoints = defineEndpoints({
     errors: ["ILLEGAL_TRANSITION","APPROVAL_REQUIRED"],
     idempotent: true,
     audited: true,
-    approval: "Approval action finance.reconciliation.correct. Corrections above correctionSecondReviewerThreshold need a second Finance reviewer (access)",
+    approval: "Approval action finance.reconciliation.correct. Corrections above the caller's correction limit (access) need a second Finance reviewer",
     events: ["finance.adjustment.recorded","finance.reconciliation.item_closed"],
     screens: ["ops/finance-checks","admin/finance"],
     phase: 1,
@@ -3566,7 +3579,7 @@ export const spec = defineModuleSpec({
   summary: "Seller money and company money kept apart: the seller ledger (proceeds, pending, available, held, negative and amounts owed), fee rules, holds, adjustments, payout runs and payouts, statements, payout-destination verification, daily reconciliation checks, and company trading margins separate from marketplace fee income.",
   dependsOn: ["orders","payments","sellers","access"],
   optionalDeps: ["returns","advertising","promotions","purchasing","inventory","shipping","support","wallet","workqueues","notifications","audit","identity","media","reports","settings","offers"],
-  publicApi: ["previewRefundImpact","calculateFee","getSellerBalances","recordAdCharge","recordServiceFee","creditSellerCharge","creditSeller","recordCompanyCost","hasPayoutBlock","marketplaceIncomeByDay","getSellerAccount","getStatementForSeller","getStatement","getPayoutRun","listPayoutRuns","holdsForReference","previewOfferEarnings","getNextPayoutRun","previewRefundImpactForOrder","exportRows"],
+  publicApi: ["previewRefundImpact","calculateFee","getSellerBalances","recordAdCharge","recordServiceFee","creditSellerCharge","creditSeller","getSellerCredit","withdrawSellerCredit","recordExternalDifference","recordCompanyCost","hasPayoutBlock","marketplaceIncomeByDay","getSellerAccount","getStatementForSeller","getStatement","getPayoutRun","listPayoutRuns","holdsForReference","previewOfferEarnings","getNextPayoutRun","previewRefundImpactForOrder","exportRows"],
   permissions: [
     {
       "key": "finance.ledger.view",
@@ -3657,7 +3670,7 @@ export const spec = defineModuleSpec({
       "desc": "Record a manual seller adjustment (credit or debit)",
       "limit": "money",
       "secondReviewer": "above-limit",
-      "approvers": "Finance staff up to adjustmentSecondReviewerThreshold (e.g. $500); a second Finance reviewer above it"
+      "approvers": "Finance staff within their adjustment limit (access, e.g. $500); a second Finance reviewer above it"
     },
     {
       "key": "finance.credits.issue",
@@ -3678,7 +3691,7 @@ export const spec = defineModuleSpec({
       "desc": "Approve and release a payout run",
       "limit": "money",
       "secondReviewer": "above-limit",
-      "approvers": "Finance Manager; a second Finance reviewer above runSecondReviewerThreshold (e.g. $50,000); Business Owner above the manager limit (example values)"
+      "approvers": "Finance Manager within their payout limit (access, e.g. $50,000); a second Finance reviewer above it; Business Owner above the manager limit (example values)"
     },
     {
       "key": "finance.destinations.approve",
@@ -3692,7 +3705,7 @@ export const spec = defineModuleSpec({
       "desc": "Apply a reconciliation correction that moves money",
       "limit": "money",
       "secondReviewer": "above-limit",
-      "approvers": "Finance staff up to correctionSecondReviewerThreshold (e.g. $200); a second Finance reviewer above it"
+      "approvers": "Finance staff within their correction limit (access, e.g. $200); a second Finance reviewer above it"
     }
   ],
   stateMachines: {
@@ -3946,6 +3959,11 @@ export const spec = defineModuleSpec({
           "pending_approval",
           "reject",
           "rejected"
+        ],
+        [
+          "pending_approval",
+          "withdraw",
+          "withdrawn"
         ]
       ]
     },
@@ -4038,7 +4056,7 @@ export const spec = defineModuleSpec({
       "orders.order.accepted": "Create pending earnings lots and fee charges per seller item (sale, shipping charged, seller-funded discount, fee); Official Store items go to trading_entries",
       "orders.item.cancelled": "Reverse the lot; apply the cancellation fee treatment",
       "orders.item.delivered": "Start the availability clock for the item's lot",
-      "payments.payment.captured": "Record collected money for reconciliation (payments vs orders): card amount plus creditAmount (store credit) per capture; the daily check compares card captures plus credit with the order total less cancelled items, so a mixed card and credit payment is not a mismatch",
+      "payments.payment.captured": "Record collected money for reconciliation (payments vs orders): card amount plus creditAmount (store credit) per capture, including captures with amount 0 for orders or groups paid entirely by store credit; the daily check compares card captures plus credit with the order total less cancelled items, so mixed and credit-only payments are not mismatches",
       "returns.refund.approved": "Store the funding split (seller, platform, shared) for the refund",
       "payments.refund.sent": "Post the refund and proportional fee refund to the seller ledger (refund_after_payout when the lot was paid out) or to company trading",
       "payments.chargeback.opened": "Place a chargeback hold on the seller (fee kept while open per fee treatment)",
@@ -4057,7 +4075,10 @@ export const spec = defineModuleSpec({
       "access.approval.decided": "Finish approval-required holds, adjustments, corrections, payout runs, fee rule changes and seller credits (finance.credits.issue: post or reject, publish finance.seller_credit.decided)",
       "support.case.decided": "Release or apply dispute holds linked to the case",
       "wallet.credit.granted": "Phase 3: record the store-credit liability (refund to credit, goodwill, gift cards). Only kind goodwill with chargedTo platform is booked as a platform cost; chargedTo seller is posted to the seller's earnings",
-      "wallet.credit.used": "Phase 3: reduce the store-credit liability when credit pays for an order"
+      "wallet.credit.used": "Phase 3: reduce the store-credit liability when credit pays for an order",
+      "wallet.credit.reversed": "Phase 3: a goodwill grant was reversed (unused credit removed): reduce the store-credit liability by the amount; chargedTo seller: credit the seller back the goodwill charge posted for the grant (keyed by grantEntryId, never more than was charged); chargedTo platform: reduce the platform goodwill cost. Keyed by entryId",
+      "wallet.credit.expired": "Phase 3: unused credit expired: reduce the store-credit liability (expired credit is recorded as platform breakage, not seller money). Keyed by entryId",
+      "wallet.credit.corrected": "Phase 3: staff corrected a balance: increase (positive) or reduce (negative) the store-credit liability, booked as a platform credit correction with the reason. Keyed by entryId"
     },
   },
   jobs: {
@@ -4066,8 +4087,8 @@ export const spec = defineModuleSpec({
       "does": "Move earnings lots to available once delivered + availableAfterDeliveryDays have passed"
     },
     "finance.payout-run.create": {
-      "schedule": "per payoutSchedule at cutoff (e.g. Thu 23:59 PT)",
-      "does": "Issue statements for the period and create the draft payout run"
+      "schedule": "every 15 min",
+      "does": "Checks the payoutSchedule cutoff itself (e.g. Thu 23:59 market time before a Friday payout): once the latest cutoff has passed and no run exists for it, issue statements for the period and create the draft payout run. Idempotent per cutoff (RUN_ALREADY_EXISTS-safe), so a late or repeated run, or a restart after the cutoff, creates exactly one run"
     },
     "finance.payout-run.release": {
       "schedule": "every 5 min",
@@ -4079,14 +4100,14 @@ export const spec = defineModuleSpec({
     },
     "finance.reconcile.daily": {
       "schedule": "daily 06:00 PT",
-      "does": "Build the day check: payments vs orders (card captures plus store credit used against the order total less cancelled items), seller amounts vs statements, provider deposit, unexplained amounts, failed payouts; publish mismatches, and finance.reconciliation.item_closed for items that now match"
+      "does": "Build the day check: payments vs orders (card captures plus store credit used against the order total less cancelled items), seller amounts vs statements, provider deposit, store credit (finance's store-credit liability vs wallet.getLiabilityTotal when wallet is enabled, plus differences wallet reported with recordExternalDifference), unexplained amounts, failed payouts; publish mismatches, and finance.reconciliation.item_closed for items that now match"
     },
     "finance.holds.review-due": {
       "schedule": "daily 07:00 PT",
       "does": "List holds reaching their review date for Finance (workqueues)"
     },
     "finance.negative-balance.age": {
-      "schedule": "daily",
+      "schedule": "daily 01:00 PT",
       "does": "Turn negative balances older than negativeBalanceOwedAfterDays into amounts owed"
     },
     "finance.fee-rules.activate": {
@@ -4149,45 +4170,12 @@ export const spec = defineModuleSpec({
       "approval": "second_reviewer",
       "sellerVisible": true
     },
-    "runSecondReviewerThreshold": {
-      "default": {
-        "amount": 5000000,
-        "currency": "USD"
-      },
-      "desc": "Runs above this need a second Finance reviewer ($50,000 example)",
-      "type": "money",
-      "min": 0,
-      "approval": "business_owner",
-      "sellerVisible": false
-    },
-    "adjustmentSecondReviewerThreshold": {
-      "default": {
-        "amount": 50000,
-        "currency": "USD"
-      },
-      "desc": "Adjustments above this need a second reviewer ($500 example)",
-      "type": "money",
-      "min": 0,
-      "approval": "business_owner",
-      "sellerVisible": false
-    },
-    "correctionSecondReviewerThreshold": {
-      "default": {
-        "amount": 20000,
-        "currency": "USD"
-      },
-      "desc": "Reconciliation corrections above this need a second reviewer ($200 example)",
-      "type": "money",
-      "min": 0,
-      "approval": "business_owner",
-      "sellerVisible": false
-    },
     "creditSecondReviewerThreshold": {
       "default": {
         "amount": 50000,
         "currency": "USD"
       },
-      "desc": "Seller credits from other modules (creditSeller) above this wait for a Finance reviewer ($500 example)",
+      "desc": "Seller credits from other modules (creditSeller) above this wait for a Finance reviewer ($500 example). The only finance threshold setting: a module caller has no access limit of its own; staff actions use access limits",
       "type": "money",
       "min": 0,
       "approval": "business_owner",
@@ -4639,6 +4627,10 @@ export const spec = defineModuleSpec({
         "nullable": true
       },
       "approval_request_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "trust_report_id": {
         "type": "uuid",
         "nullable": true
       }

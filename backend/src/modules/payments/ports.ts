@@ -140,6 +140,11 @@ export interface PaymentsRepository {
   find<T extends Table>(table: T, where: Where<Recs[T]>, o?: FindOptions<Recs[T]>): Promise<Recs[T][]>;
   insert<T extends Table>(table: T, row: Recs[T]): Promise<Recs[T]>;
   insertMany<T extends Table>(table: T, rows: Recs[T][]): Promise<void>;
+  /**
+   * Live authorizations (authorized, partially_captured) last changed at or before `upTo`, in keyset order
+   * (updated_at, id) after the given position: the expiry sweep walks them page by page until none are left.
+   */
+  liveAuthorizations(after: { updatedAt: Date; id: string } | null, upTo: Date, limit: number): Promise<IntentRec[]>;
   update<T extends Table>(table: T, id: string, patch: Partial<Recs[T]>): Promise<Recs[T]>;
   /** Conditional update: only rows matching `where` change (money-safe compare-and-set); returns the changed rows */
   updateWhere<T extends Table>(table: T, where: Where<Recs[T]>, patch: Partial<Recs[T]>): Promise<Recs[T][]>;
@@ -251,6 +256,12 @@ export interface PaymentProvider {
   capture(o: { providerRef: string; amount: common.Money; idempotencyKey: string }): Promise<ProviderCapture>;
   retrieveCapture(o: { idempotencyKey: string }): Promise<ProviderCapture>;
   void(o: { providerRef: string; idempotencyKey: string }): Promise<void>;
+  /**
+   * Optional capability (decision D-P1): lowers an authorization by `amount` (partial reversal) and answers the
+   * amount still authorized. Adapters without it leave the amount authorized; payments then only takes the
+   * cancelled card share off the allocations and releases the remainder at the final capture.
+   */
+  partialVoid?(o: { providerRef: string; amount: common.Money; idempotencyKey: string }): Promise<{ authorizedAmount: number }>;
   refund(o: { providerRef: string; amount: common.Money; idempotencyKey: string; destination?: RefundDestination | null; refundId: string }): Promise<ProviderRefund>;
   retrieveRefund(o: { idempotencyKey: string }): Promise<ProviderRefund>;
 

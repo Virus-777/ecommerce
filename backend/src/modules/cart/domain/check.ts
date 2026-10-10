@@ -6,10 +6,11 @@
 import { money, type Money } from '../../../kernel/lib/money.js';
 import type * as catalog from '../../../spec/catalog.js';
 import type { SellerLabel } from '../../../spec/cart.js';
+import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type * as offers from '../../../spec/offers.js';
 import type * as promotions from '../../../spec/promotions.js';
 import type { ItemRow } from '../ports.js';
-import { desired, lineMaximum, minLimit, offerBlock, packageKey, type DesiredNotice, type JsonObject, type LimitKind } from './rules.js';
+import { desired, lineMaximum, minLimit, offerBlock, packageKey, SEVERITY, type DesiredNotice, type JsonObject, type LimitKind } from './rules.js';
 
 /** What other modules say about one offer right now */
 export interface OfferFacts {
@@ -71,11 +72,9 @@ export interface LineEval {
   deliveryChange: string | null;
 }
 
-export const OFFICIAL_NAME = 'Marketly Official Store';
-
 export function sellerLabelOf(item: Pick<ItemRow, 'owner_type' | 'seller_id'>, offer: offers.Offer | null, quote: offers.OfferView | null): SellerLabel {
   const official = item.owner_type === 'official';
-  const name = quote?.seller.name ?? offer?.sellerName ?? (official ? OFFICIAL_NAME : 'Seller');
+  const name = quote?.seller.name ?? offer?.sellerName ?? (official ? OFFICIAL_STORE_NAME : 'Seller');
   return {
     ownerType: item.owner_type,
     id: item.seller_id,
@@ -145,7 +144,8 @@ export function evaluateLine(item: ItemRow, facts: OfferFacts, product: ProductF
     // purchase limit (offer, deal) and the platform line maximum
     const limit = minLimit(purchaseLimit, s.maxQuantityPerLine)!;
     if (item.quantity > limit && !(available !== null && available < limit && item.quantity > available)) {
-      notices.push(desired('purchase_limit_reduced', { quantity: item.quantity }, { limit }));
+      // the offer edit that lowered the limit bumped termsVersion: resolving this notice accepts that version
+      notices.push(desired('purchase_limit_reduced', { quantity: item.quantity }, { limit, termsVersion: offer.termsVersion }));
     }
     // price against the accepted baseline
     if (!blocked) {
@@ -163,6 +163,12 @@ export function evaluateLine(item: ItemRow, facts: OfferFacts, product: ProductF
         newAcceptedPrice = unitPrice.amount;
         if (s.showPriceDecreaseNotices) notices.push(desired('price_decreased', { price: acceptedPrice.amount, currency }, { price: unitPrice.amount, currency }));
       }
+    }
+    // return, warranty or dispatch terms changed (offers reports it only when the price did not change).
+    // Another warning on the line (a lower purchase limit) already explains the new version: it is shown alone.
+    const terms = facts.changes.find((c) => c.kind === 'terms');
+    if (!blocked && terms && offer.termsVersion > item.accepted_terms_version && !notices.some((n) => SEVERITY[n.kind] !== 'info')) {
+      notices.push(desired('terms_changed', { termsVersion: item.accepted_terms_version }, { termsVersion: offer.termsVersion, message: terms.message, ...altJson }));
     }
     const delivery = facts.changes.find((c) => c.kind === 'delivery');
     if (delivery) deliveryChange = delivery.message;

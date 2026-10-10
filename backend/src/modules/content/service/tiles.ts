@@ -5,6 +5,8 @@
  */
 import type * as catalog from '../../../spec/catalog.js';
 import type { BrandTile, CategoryTile, PageInput, ProductSource, ProductTile, SectionProductRow, SellerTile, SourceRule } from '../../../spec/content.js';
+import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
+import type * as promotions from '../../../spec/promotions.js';
 import type * as search from '../../../spec/search.js';
 import { RULE_DESCRIPTIONS } from '../domain/rules.js';
 import { ContentBase, unique } from './base.js';
@@ -91,7 +93,48 @@ export class ContentTiles extends ContentBase {
     return out;
   }
 
+  /** deals limited to one promotion: its live flash items (promotions.liveDeals({ campaignId })) */
+  private async campaignDeals(campaignId: string, limit: number): Promise<ResolvedProduct[]> {
+    const promotionsApi = this.ctx.tryUse('promotions');
+    if (!promotionsApi) return [];
+    const blocks = await this.soft('promotions.liveDeals', () => promotionsApi.liveDeals({ limit, campaignId }), [] as promotions.FlashSaleBlock[]);
+    return blocks
+      .filter((b) => b.campaignId === campaignId)
+      .flatMap((b) => b.items ?? [])
+      .slice(0, limit)
+      .map((item): ResolvedProduct => {
+        const left = Math.max(0, item.dealStock - item.claimed);
+        const official = item.sellerId === OFFICIAL_STORE_ID;
+        return {
+          productId: item.productId,
+          offerId: item.offerId,
+          sellerId: official ? null : item.sellerId,
+          available: left > 0,
+          hiddenReason: left > 0 ? null : 'out_of_stock',
+          tile: {
+            productId: item.productId,
+            offerId: item.offerId,
+            title: item.title,
+            image: item.image ?? null,
+            price: item.dealPrice,
+            wasPrice: item.regularPrice,
+            fromPrice: false,
+            sellerName: item.sellerName,
+            officialStore: official,
+            rating: null,
+            ratingCount: null,
+            availability: left > 0 ? 'in_stock' : 'out_of_stock',
+            availableQty: left,
+            checkedAt: this.now().toISOString(),
+            badge: item.percentOffBps ? `−${Math.round(item.percentOffBps / 100)}%` : null,
+            rank: null,
+          },
+        };
+      });
+  }
+
   private async resolveRule(rule: SourceRule, opts: { limit: number; categoryId?: string | null }): Promise<ResolvedProduct[]> {
+    if (rule.kind === 'deals' && rule.campaignId) return this.campaignDeals(rule.campaignId, opts.limit);
     const searchApi = this.ctx.tryUse('search');
     if (!searchApi) return [];
     const category = await this.categorySlug(opts.categoryId ?? rule.categoryId);

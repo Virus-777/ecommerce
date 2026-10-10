@@ -43,6 +43,10 @@ export const CaseCategory: z.ZodType<CaseCategory> = z.object({
 
 export interface CaseCategoryInput {
   label: string;
+  /** Required when creating a category; unchanged when left out on an existing one */
+  audience?: "customer" | "seller" | null;
+  /** Required when creating a category; unchanged when left out on an existing one */
+  group?: "delivery" | "damaged_or_wrong" | "returns_refunds" | "payment" | "order_change" | "account" | "seller_report" | "account_health" | "fees_payouts" | "listing_rules" | "shipping_dispatch" | "advertising" | "other" | null;
   defaultPriority: "low" | "medium" | "high" | "urgent";
   team: "customer_support" | "returns" | "finance" | "trust" | "seller_management" | "official_store";
   sellerHandlesFirst: boolean;
@@ -55,6 +59,8 @@ export interface CaseCategoryInput {
 
 export const CaseCategoryInput: z.ZodType<CaseCategoryInput> = z.object({
   label: z.string(),
+  audience: z.enum(["customer", "seller"]).describe("Required when creating a category; unchanged when left out on an existing one").nullish(),
+  group: z.enum(["delivery", "damaged_or_wrong", "returns_refunds", "payment", "order_change", "account", "seller_report", "account_health", "fees_payouts", "listing_rules", "shipping_dispatch", "advertising", "other"]).describe("Required when creating a category; unchanged when left out on an existing one").nullish(),
   defaultPriority: z.enum(["low", "medium", "high", "urgent"]),
   team: z.enum(["customer_support", "returns", "finance", "trust", "seller_management", "official_store"]),
   sellerHandlesFirst: z.boolean(),
@@ -956,6 +962,7 @@ export interface DecisionInput {
   remedies: RemedyInput[];
   reason: string;
   appealDeadline?: string | null;
+  /** False records the decision without emailing the parties (support.case.decided carries notified=false and notifications skips it); the parties still see it on the case */
   notifyParties: boolean;
 }
 
@@ -966,7 +973,7 @@ export const DecisionInput: z.ZodType<DecisionInput> = z.object({
   },
   reason: z.string(),
   appealDeadline: z.iso.datetime({ offset: true }).nullish(),
-  notifyParties: z.boolean(),
+  notifyParties: z.boolean().describe("False records the decision without emailing the parties (support.case.decided carries notified=false and notifications skips it); the parties still see it on the case"),
 }).register(common.apiTypes, { id: "support.DecisionInput" });
 
 export interface DecisionDraft {
@@ -1038,6 +1045,8 @@ export interface StaffCaseInput {
   message: string;
   priority?: "low" | "medium" | "high" | "urgent" | null;
   ownerId?: string | null;
+  /** Trust and Risk report this case acts on (inform_customers outreach); carried on support.case.opened so trust confirms the enforcement */
+  trustReportId?: string | null;
 }
 
 export const StaffCaseInput: z.ZodType<StaffCaseInput> = z.object({
@@ -1052,6 +1061,7 @@ export const StaffCaseInput: z.ZodType<StaffCaseInput> = z.object({
   message: z.string(),
   priority: z.enum(["low", "medium", "high", "urgent"]).nullish(),
   ownerId: z.uuid().nullish(),
+  trustReportId: z.uuid().describe("Trust and Risk report this case acts on (inform_customers outreach); carried on support.case.opened so trust confirms the enforcement").nullish(),
 }).register(common.apiTypes, { id: "support.StaffCaseInput" });
 
 /* ------------------------------------------------------------------ events */
@@ -1070,6 +1080,10 @@ export interface SupportCaseOpenedEvent {
   orderId?: string | null;
   orderItemIds: string[];
   handler: string;
+  /** Staff owner when one is assigned at opening (messaging adds them to the order conversation) */
+  ownerStaffId?: string | null;
+  /** Trust and Risk report the case acts on (inform_customers outreach) */
+  trustReportId?: string | null;
   nextResponseDueAt?: string | null;
 }
 
@@ -1085,6 +1099,8 @@ export const SupportCaseOpenedEvent: z.ZodType<SupportCaseOpenedEvent> = z.objec
   orderId: z.uuid().nullish(),
   orderItemIds: z.array(z.uuid()),
   handler: z.string(),
+  ownerStaffId: z.uuid().describe("Staff owner when one is assigned at opening (messaging adds them to the order conversation)").nullish(),
+  trustReportId: z.uuid().describe("Trust and Risk report the case acts on (inform_customers outreach)").nullish(),
   nextResponseDueAt: z.iso.datetime({ offset: true }).nullish(),
 });
 
@@ -1122,6 +1138,8 @@ export interface SupportCaseDecidedEvent {
   remedies: Remedy[];
   appealDeadline?: string | null;
   final: boolean;
+  /** False when the decider chose not to notify the parties (notifyParties=false); notifications sends nothing */
+  notified: boolean;
 }
 
 export const SupportCaseDecidedEvent: z.ZodType<SupportCaseDecidedEvent> = z.object({
@@ -1138,12 +1156,15 @@ export const SupportCaseDecidedEvent: z.ZodType<SupportCaseDecidedEvent> = z.obj
   },
   appealDeadline: z.iso.datetime({ offset: true }).nullish(),
   final: z.boolean(),
+  notified: z.boolean().describe("False when the decider chose not to notify the parties (notifyParties=false); notifications sends nothing"),
 });
 
-/** support.case.resolved: A case is resolved */
+/** support.case.resolved: A case is resolved (orders clears its open-case alert on the items) */
 export interface SupportCaseResolvedEvent {
   caseId: string;
   ref: string;
+  orderId?: string | null;
+  orderItemIds: string[];
   /** Customers-module id; null for guests */
   customerId?: string | null;
   /** Order contact email, for guests */
@@ -1155,21 +1176,37 @@ export interface SupportCaseResolvedEvent {
 export const SupportCaseResolvedEvent: z.ZodType<SupportCaseResolvedEvent> = z.object({
   caseId: z.uuid(),
   ref: z.string(),
+  orderId: z.uuid().nullish(),
+  orderItemIds: z.array(z.uuid()),
   customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
   contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   sellerId: z.uuid().nullish(),
   resolvedAt: z.iso.datetime({ offset: true }),
 });
 
-/** support.case.reopened: A case is reopened */
+/** support.case.reopened: A case is reopened (orders shows the open-case alert again) */
 export interface SupportCaseReopenedEvent {
   caseId: string;
+  ref: string;
+  orderId?: string | null;
+  orderItemIds: string[];
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
+  sellerId?: string | null;
   by: common.Actor;
   reason: string;
 }
 
 export const SupportCaseReopenedEvent: z.ZodType<SupportCaseReopenedEvent> = z.object({
   caseId: z.uuid(),
+  ref: z.string(),
+  orderId: z.uuid().nullish(),
+  orderItemIds: z.array(z.uuid()),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
+  sellerId: z.uuid().nullish(),
   get by() {
     return common.Actor;
   },
@@ -1254,8 +1291,10 @@ export const SupportCaseOverdueEvent: z.ZodType<SupportCaseOverdueEvent> = z.obj
 
 /** What other modules may call in-process: `ctx.use('support')` (or `ctx.tryUse` for an optional dependency). */
 export interface SupportPublicApi {
-  /** Open a case from another module (return escalation, delivery exception, failed refund). With returnId the return's evidence is copied in through returns.listEvidence. Used by: returns, shipping, payments. */
-  openCase(input: { kind: string, category: string, orderId?: string, orderItemIds?: string[], customerId?: string, sellerId?: string, returnId?: string, subject: string, message: string, openedBy: common.Actor }): Promise<CaseView>;
+  /** Open a case from another module (return escalation, delivery exception, failed refund). With returnId the return's evidence is copied in through returns.listEvidence. trustReportId links customer outreach to a Trust and Risk report (support.case.opened carries it). Used by: returns, shipping, payments. */
+  openCase(input: { kind: string, category: string, orderId?: string, orderItemIds?: string[], customerId?: string, sellerId?: string, returnId?: string, trustReportId?: string, subject: string, message: string, openedBy: common.Actor }): Promise<CaseView>;
+  /** Customers-module ids with at least one case that is not resolved or closed. With ids only those ids are checked; without, every matching id is returned. The customer list filters hasOpenCases with it before paging, so pages are full and totals right. Used by: customers. */
+  customerIdsWithOpenCases(filter: { ids?: string[] }): Promise<string[]>;
   /** Open and recent cases per order item for the order page Used by: orders, returns. */
   casesForOrder(orderId: string): Promise<{ caseId: string, ref: string, status: string, orderItemIds: string[] }[]>;
   /** Unresolved cases for seller performance Used by: sellers, reports. */
@@ -1821,6 +1860,7 @@ export const endpoints = defineEndpoints({
     permission: "support.cases.handle",
     scope: "staff",
     summary: "Open a case on behalf of a customer or seller",
+    desc: "With trustReportId the case is Trust and Risk outreach (inform_customers); support.case.opened carries the report id.",
     body: () => StaffCaseInput,
     response: () => AdminCaseDetail,
     status: 201,
@@ -1883,7 +1923,7 @@ export const endpoints = defineEndpoints({
     permission: "support.cases.assign",
     scope: "staff",
     summary: "Staff who can own cases, with team and current open case count",
-    desc: "Small bounded list (staff with support.cases.handle from access). Used by the assign pickers.",
+    desc: "Small bounded list (staff holding support.cases.handle, from access.staffWithPermission, not a fixed list of roles). Used by the assign pickers.",
     query: () =>
       z.object({
         team: z.string().optional(),
@@ -2040,7 +2080,7 @@ export const endpoints = defineEndpoints({
     permission: "support.disputes.decide",
     scope: "staff",
     summary: "Record the decision and remedy, publish the appeal deadline to both parties",
-    desc: "Refund remedies create a refund request in returns (Finance approves within limits; approved is not sent). Goodwill above the decider's limit needs approval through access.",
+    desc: "Refund remedies create a refund request in returns (Finance approves within limits; approved is not sent). Goodwill credit needs the wallet module (GOODWILL_UNAVAILABLE while it is off, decision D-RT3); goodwill above the decider's limit needs approval through wallet and access. A guest has no wallet: their goodwill becomes a platform-funded partial refund through returns. Remedies left without items (goodwill, refunds) default to the case's items. A replacement needs a return on the case (REPLACEMENT_NEEDS_RETURN, decision D-S5) until returns can create replacements without one. notifyParties=false still records and shows the decision but sends no email (notified=false).",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -2048,7 +2088,7 @@ export const endpoints = defineEndpoints({
     body: () => DecisionInput,
     response: () => AdminCaseDetail,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","APPROVAL_REQUIRED"],
+    errors: ["ILLEGAL_TRANSITION","APPROVAL_REQUIRED","GOODWILL_UNAVAILABLE","REPLACEMENT_NEEDS_RETURN","VALIDATION_FAILED"],
     idempotent: true,
     audited: true,
     approval: "Approval action support.remedies.approve. Goodwill or platform-funded remedies above the decider's limit (e.g. $50) go to Finance through access",
@@ -2161,11 +2201,37 @@ export const endpoints = defineEndpoints({
     }),
     response: () => AdminCaseDetail,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","SAME_DECIDER","APPROVAL_REQUIRED"],
+    errors: ["ILLEGAL_TRANSITION","SAME_DECIDER","APPROVAL_REQUIRED","GOODWILL_UNAVAILABLE","REPLACEMENT_NEEDS_RETURN"],
     idempotent: true,
     audited: true,
     events: ["support.case.appeal_decided","support.case.decided"],
     screens: ["admin/case","admin/cases"],
+    phase: 1,
+  },
+  settleRemedy: {
+    area: "admin",
+    method: "POST",
+    path: "/cases/{id}/remedies/{remedyId}/settle",
+    auth: "staff",
+    permission: "support.disputes.decide",
+    scope: "staff",
+    summary: "Record that a remedy was completed or cancelled outside the system",
+    desc: "For remedies nothing in the system can finish (a refund recorded for Finance while returns is off, a remedy for a guest with no refund path), so the case can be resolved. Refused with REMEDY_NOT_SETTLEABLE while a returns refund request, a wallet grant or a replacement still drives the remedy, or when it is already completed or cancelled. The note and external reference go into the case history.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+        remedyId: z.uuid(),
+      }),
+    body: () => z.object({
+      outcome: z.enum(["completed", "cancelled"]),
+      note: z.string(),
+      externalRef: z.string().describe("e.g. the Finance transfer or ticket reference").nullish(),
+    }),
+    response: () => AdminCaseDetail,
+    status: 200,
+    errors: ["ILLEGAL_TRANSITION","REMEDY_NOT_SETTLEABLE","NOT_FOUND"],
+    audited: true,
+    screens: ["admin/case"],
     phase: 1,
   },
   listCategories: {
@@ -2189,6 +2255,7 @@ export const endpoints = defineEndpoints({
     permission: "support.sla.manage",
     scope: "staff",
     summary: "Create or change a category and its targets",
+    desc: "A new key needs audience and group (VALIDATION_FAILED otherwise); an existing category keeps them when they are left out.",
     params: () =>
       z.object({
         key: z.string(),
@@ -2213,7 +2280,7 @@ export const spec = defineModuleSpec({
   summary: "Help cases and disputes: customer help and order-problem cases opened from the order with items pre-identified, seller support requests to Marketly, disputes between customer and seller with evidence, decision, remedy and appeal, plus categories, priority, owner, SLA deadlines, assignment, escalation and resolve/reopen rules.",
   dependsOn: ["orders","access"],
   optionalDeps: ["returns","payments","shipping","sellers","messaging","media","finance","trust","wallet","workqueues","notifications","settings","audit","content","customers","identity","promotions","reports","warehouse"],
-  publicApi: ["openCase","casesForOrder","sellerCaseStats","hasUnresolvedRemedy","listOpenCasesForCustomer","getCaseForCustomer","listCasesForCustomer","getCaseForSeller","getCaseAdmin","listCasesForOrder","listCasesForSeller","getCasesForReturns","exportRows","countOpenCasesForProducts"],
+  publicApi: ["openCase","customerIdsWithOpenCases","casesForOrder","sellerCaseStats","hasUnresolvedRemedy","listOpenCasesForCustomer","getCaseForCustomer","listCasesForCustomer","getCaseForSeller","getCaseAdmin","listCasesForOrder","listCasesForSeller","getCasesForReturns","exportRows","countOpenCasesForProducts"],
   permissions: [
     {
       "key": "support.cases.view",
@@ -2445,6 +2512,31 @@ export const spec = defineModuleSpec({
           "failed",
           "cancel",
           "cancelled"
+        ],
+        [
+          "pending_approval",
+          "settle",
+          "completed"
+        ],
+        [
+          "approved",
+          "settle",
+          "completed"
+        ],
+        [
+          "in_progress",
+          "settle",
+          "completed"
+        ],
+        [
+          "failed",
+          "settle",
+          "completed"
+        ],
+        [
+          "in_progress",
+          "cancel",
+          "cancelled"
         ]
       ]
     },
@@ -2501,8 +2593,8 @@ export const spec = defineModuleSpec({
       "support.case.opened": { when: "A case is opened by a customer, seller, staff or another module", payload: () => SupportCaseOpenedEvent },
       "support.case.escalated": { when: "Marketly steps in, a case becomes a dispute, or it moves to another team", payload: () => SupportCaseEscalatedEvent },
       "support.case.decided": { when: "A decision (or appeal decision) is recorded", payload: () => SupportCaseDecidedEvent },
-      "support.case.resolved": { when: "A case is resolved", payload: () => SupportCaseResolvedEvent },
-      "support.case.reopened": { when: "A case is reopened", payload: () => SupportCaseReopenedEvent },
+      "support.case.resolved": { when: "A case is resolved (orders clears its open-case alert on the items)", payload: () => SupportCaseResolvedEvent },
+      "support.case.reopened": { when: "A case is reopened (orders shows the open-case alert again)", payload: () => SupportCaseReopenedEvent },
       "support.case.appealed": { when: "A party appeals a decision", payload: () => SupportCaseAppealedEvent },
       "support.case.appeal_decided": { when: "An appeal is decided", payload: () => SupportCaseAppealDecidedEvent },
       "support.case.assigned": { when: "Owner changes", payload: () => SupportCaseAssignedEvent },
@@ -2512,13 +2604,16 @@ export const spec = defineModuleSpec({
     consumes: {
       "returns.return.escalated": "Open or link a dispute case for the return and assign it to the Returns team",
       "returns.refund.approved": "Move the matching refund remedy to approved/in progress",
+      "returns.refund.declined": "Cancel the refund remedy behind the declined refund request (Finance's reason in the case history) and put the case back in the owner's queue so they decide again",
       "payments.refund.sent": "Complete the refund remedy; the case can now be resolved",
       "wallet.goodwill.decided": "For a case's goodwill credit remedy waiting for approval: mark it granted (done) or rejected and put the case back in the owner's queue",
       "payments.refund.failed": "Mark the refund remedy failed and put the case back in the owner's queue",
       "returns.replacement.created": "Link the replacement to its remedy",
       "shipping.shipment.delivered": "Complete replacement remedies when their shipment is delivered",
+      "shipping.shipment.dispatched": "Complete ship-by-deadline remedies whose items shipped by the promised date (lines, shippedAt); a later dispatch leaves the remedy to fall back to a refund",
       "shipping.dispatch.overdue": "Add the overdue dispatch to open cases for the item and expose the customer escalation route",
-      "shipping.shipment.exception": "Open a case for lost or damaged packages when the customer has not already",
+      "shipping.shipment.exception": "Open a case for lost or damaged packages reported by the carrier or the system. Exceptions with source customer_report, or with a caseRef (opened from a case), are only noted on the existing case, never a new one",
+      "notifications.email_reply.received": "module support: add the reply to the case thread (refId = case id) as a customer message when fromEmail is the case's customer or order contact; other senders are dropped with a log line. Attachments come as media assets",
       "orders.item.cancelled": "Note cancellations on linked cases (e.g. ship-by remedy fell back to cancellation)",
       "sellers.seller.restricted": "Keep cases open; route seller-handled cases of a suspended seller to Marketly support",
       "access.approval.decided": "Finish approval-required remedies"
@@ -2617,6 +2712,17 @@ export const spec = defineModuleSpec({
       "type": "int",
       "min": 1,
       "unit": "MB"
+    },
+    "priorityTargetFactors": {
+      "default": {
+        "low": 1.5,
+        "medium": 1,
+        "high": 0.75,
+        "urgent": 0.5
+      },
+      "desc": "Multiplier on the category's response and resolution targets per case priority (urgent halves them); deadlines are recalculated when the priority changes (decision D-S1)",
+      "type": "json",
+      "approval": "second_reviewer"
     }
   },
   errorCodes: {
@@ -2647,6 +2753,18 @@ export const spec = defineModuleSpec({
     "ESCALATION_NOT_AVAILABLE": {
       "status": 409,
       "meaning": "The seller is still within its reply deadline. details.availableFrom."
+    },
+    "GOODWILL_UNAVAILABLE": {
+      "status": 422,
+      "meaning": "Goodwill credit needs the wallet module, which is off; choose a refund or partial refund instead."
+    },
+    "REPLACEMENT_NEEDS_RETURN": {
+      "status": 422,
+      "meaning": "A replacement can only be promised on a case with a return (returns creates the replacement from it); ask for a return or choose a refund."
+    },
+    "REMEDY_NOT_SETTLEABLE": {
+      "status": 409,
+      "meaning": "The remedy is still driven by a refund request, wallet grant or replacement, or is already finished. details.status."
     }
   },
   tables: {

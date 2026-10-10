@@ -40,7 +40,7 @@ Buying stock for the Official Store: suppliers and their price lists, purchase o
 | POST | `/api/admin/purchasing/purchase-orders/{id}/cancel` | Cancel a draft or a sent PO with nothing received _(audited)_ | staff<br>`purchasing.orders.manage` | `{ reason: text }` → `PurchaseOrder` |
 | POST | `/api/admin/purchasing/purchase-orders/{id}/close` | Close a partly received PO short (remaining units will not arrive) _(audited)_ | staff<br>`purchasing.orders.manage` | `{ reason: text, raiseShortageClaim: bool? }` → `PurchaseOrder` |
 | GET | `/api/admin/purchasing/reorder-suggestions` | SKUs at or below reorder point after incoming stock, with suggested quantity and preferred supplier | staff<br>`purchasing.orders.view` | Page<ReorderSuggestion> |
-| POST | `/api/admin/purchasing/purchase-orders/from-suggestions` | Create draft POs (one per preferred supplier) from selected suggestions _(audited)_ | staff<br>`purchasing.orders.manage` | `{ stockItemIds: uuid[], quantities: map<int>? }` → `PurchaseOrder[]` |
+| POST | `/api/admin/purchasing/purchase-orders/from-suggestions` | Create draft POs (one per preferred supplier) from selected suggestions _(audited)_ | staff<br>`purchasing.orders.manage` | `{ stockItemIds: uuid[], quantities: map<int>?, shipToLocationId: uuid? }` → `PurchaseOrder[]` |
 | GET | `/api/admin/purchasing/deliveries` | Expected and arrived purchase deliveries for receiving | staff<br>`purchasing.orders.view` | Page<Delivery> |
 | POST | `/api/admin/purchasing/purchase-orders/{id}/deliveries` | Add an expected delivery (carrier, reference, arrival window) | staff<br>`purchasing.orders.manage` | `DeliveryInput` → `Delivery` |
 | PATCH | `/api/admin/purchasing/deliveries/{id}` | Reschedule or mark a delivery delayed, with a reason | staff<br>`purchasing.orders.manage` | `DeliveryUpdate` → `Delivery` |
@@ -258,6 +258,16 @@ Buying stock for the Official Store: suppliers and their price lists, purchase o
 | lowStockItems | `int` |
 | reorderSuggested | `int` |
 
+### PurchaseOrderShipTo
+
+| Field | Type |
+|---|---|
+| locationId | `uuid` |
+| code | `string` |
+| name | `string` e.g. Reno, NV warehouse |
+| address | `Address?` |
+| timeZone | `string` |
+
 ### ReorderSuggestion
 
 | Field | Type |
@@ -268,7 +278,7 @@ Buying stock for the Official Store: suppliers and their price lists, purchase o
 | available | `int` |
 | reorderPoint | `int?` |
 | incoming | `int` |
-| avgDailySales | `number?` |
+| avgDailySales | `number?` From inventory.getSalesRate over the last 30 days |
 | suggestedQuantity | `int` |
 | supplier | `SupplierCue?` |
 | unitCost | `Money?` |
@@ -697,7 +707,7 @@ Indexes: `(status, created_at)`, `(supplier_id)`
 
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
-| `purchasing.purchase_order.sent` | A PO is sent to the supplier | `{ purchaseOrderId: uuid, ref: string, supplierId: uuid, supplierName: string, supplierEmail: email?, emailSupplier: bool, message: text?, locationId: uuid, total: Money, lines: PurchaseOrderLine[] }` | notifications |
+| `purchasing.purchase_order.sent` | A PO is sent to the supplier | `{ purchaseOrderId: uuid, ref: string, supplierId: uuid, supplierName: string, supplierEmail: email?, emailSupplier: bool, message: text?, locationId: uuid, shipTo: PurchaseOrderShipTo, total: Money, lines: PurchaseOrderLine[] }` | notifications |
 | `purchasing.purchase_order.status_changed` | Any PO status transition | `{ purchaseOrderId: uuid, ref: string, from: string, to: string, reason: text? }` | - |
 | `purchasing.delivery.rescheduled` | An expected arrival window changes or a delivery is marked delayed | `{ deliveryId: uuid?, purchaseOrderId: uuid, ref: string, windowFrom: datetime?, windowTo: datetime?, reason: text }` | - |
 | `purchasing.delivery.late` | A delivery window passed without arrival | `{ deliveryId: uuid, purchaseOrderId: uuid, ref: string, supplierName: string }` | - |
@@ -754,7 +764,7 @@ Checked through the access module (limits per role, second reviewer).
 |---|---|---|
 | `purchasing.flag-late-deliveries` | every 30 min | Deliveries past windowTo + grace without arrival → delayed; publish purchasing.delivery.late (work queue for the Purchasing Manager) |
 | `purchasing.supplier-performance` | nightly 02:30 market time | Recompute on-time %, average lead time, shortage and damage rates per supplier over the window |
-| `purchasing.reorder-suggestions` | hourly | Rebuild suggestions from inventory low stock, incoming quantities and 30-day sales velocity |
+| `purchasing.reorder-suggestions` | hourly | Rebuild suggestions from inventory low stock, incoming quantities and 30-day sales velocity (inventory.getSalesRate) |
 
 ## Settings
 
@@ -777,3 +787,5 @@ Checked through the access module (limits per role, second reviewer).
 - Buying cost per received line (PO unit cost; freight is allocated pro rata by line value) is passed to inventory, which keeps the weighted average unit cost used for margins and valuation.
 - Seller stock is not purchased here; only company (Official Store) stock items can appear on purchase orders.
 - Put-away bins are suggested by warehouse and recorded on receipt lines; warehouse consumes purchasing.receipt.recorded to create put-away tasks.
+- Media usages: purchase order attachments (attachmentIds) are attached with media.attach (usage kind supplier_document, refId the PO id) when the PO is created or updated, and detached when removed; receipt damage photos use inspection_photo. Unattached uploads would be deleted by the media orphan sweep.
+- Locations: ship-to names, addresses and time zones come from inventory.getLocations / getDefaultLocation; purchasing stores only the location id.

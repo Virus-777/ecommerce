@@ -86,7 +86,7 @@ Seller money and company money kept apart: the seller ledger (proceeds, pending,
 | GET | `/api/admin/finance/payouts` | All payouts, e.g. failed payouts to follow up | staff<br>`finance.ledger.view` | Page<Payout> |
 | POST | `/api/admin/finance/payouts/{id}/retry` | Recover a failed payout to a verified destination _(idempotent, audited)_ | staff<br>`finance.payouts.approve` | `{ now: bool, reason: text }` → `Payout` |
 | GET | `/api/admin/finance/destination-reviews` | Payout destination changes waiting for verification and review | staff<br>`finance.destinations.review` | Page<DestinationReview> |
-| POST | `/api/admin/finance/destination-reviews/{id}/approve` | Verify a new payout destination _(audited, step-up: code)_ | staff<br>`finance.destinations.review` | `{ reason: text }` → `DestinationReview` |
+| POST | `/api/admin/finance/destination-reviews/{id}/approve` | Verify a new payout destination _(audited, step-up: code)_ | staff<br>`finance.destinations.review` | `{ reason: text, callbackConfirmed: bool, callbackNote: text? }` → `DestinationReview` |
 | POST | `/api/admin/finance/destination-reviews/{id}/reject` | Reject a payout destination change _(audited, step-up: code)_ | staff<br>`finance.destinations.review` | `{ reason: text }` → `DestinationReview` |
 | GET | `/api/admin/finance/reconciliation/days/{date}` | Daily finance check: checklist, totals and failed payouts | staff<br>`finance.reconciliation.work` | `ReconDay` |
 | GET | `/api/admin/finance/reconciliation/items` | Mismatched payments, seller amounts, deposits and unexplained amounts | staff<br>`finance.reconciliation.work` | Page<ReconItem> |
@@ -237,7 +237,7 @@ Seller money and company money kept apart: the seller ledger (proceeds, pending,
 | amount | `Money` |
 | reason | `text` |
 | reference | `Reference` What the credit is for, e.g. the fulfillment-service lost-unit claim |
-| status | `enum(posted|pending_approval|rejected)` |
+| status | `enum(posted|pending_approval|rejected|withdrawn)` withdrawn: the calling module withdrew it while it waited for approval (withdrawSellerCredit) |
 | ledgerEntry | `LedgerEntry?` The seller_credit entry once posted |
 | approvalRequestId | `uuid?` |
 | requestedBy | `Actor` |
@@ -722,7 +722,7 @@ Seller money and company money kept apart: the seller ledger (proceeds, pending,
 
 | Field | Type |
 |---|---|
-| key | `enum(provider_deposit|chargebacks_reviewed|payments_matched|seller_amounts_matched|failed_payouts_followed|unexplained_explained)` |
+| key | `enum(provider_deposit|chargebacks_reviewed|payments_matched|seller_amounts_matched|store_credit_matched|failed_payouts_followed|unexplained_explained)` |
 | label | `string` |
 | state | `enum(done|in_progress|late|todo)` |
 | note | `string?` |
@@ -757,7 +757,7 @@ Seller money and company money kept apart: the seller ledger (proceeds, pending,
 |---|---|
 | id | `uuid` |
 | date | `date` |
-| check | `enum(payments_vs_orders|seller_amounts|provider_deposit|unexplained_amount)` |
+| check | `enum(payments_vs_orders|seller_amounts|provider_deposit|store_credit|unexplained_amount)` store_credit: wallet balances vs finance's store-credit liability, and per-account differences reported by wallet (recordExternalDifference) |
 | reference | `Reference?` |
 | subject | `string` Seller name, payment method or deposit |
 | description | `string` |
@@ -888,7 +888,7 @@ stateDiagram-v2
   approved --> cancelled: cancel
 ```
 
-Runs above runSecondReviewerThreshold need two different Finance approvers (access approval request for the second). Approved is not paid: release sends each pending payout to the provider (processing). complete runs when every payout is paid, failed or cancelled.
+A run above the first approver's finance.payouts.release limit (access) needs a second, different Finance approver (access approval request for the second). Approved is not paid: release sends each pending payout to the provider (processing). complete runs when every payout is paid, failed or cancelled.
 
 ### Payout (`Payout.status`)
 
@@ -916,7 +916,7 @@ stateDiagram-v2
   under_review --> rejected: reject
 ```
 
-Created when sellers publishes sellers.payout_account.changed. Checks: micro-deposits, owner re-authentication, callback to the registered phone. Payouts keep going to the current verified account until verify; payouts to the new one wait at least destinationChangePauseHours.
+Created when sellers publishes sellers.payout_account.changed. Checks: micro-deposits (confirm-deposits), owner re-authentication, callback to the registered phone (the reviewer records it with callbackConfirmed on approve; verify is refused with CHECKS_INCOMPLETE until all three passed). Payouts keep going to the current verified account until verify; payouts to the new one wait at least destinationChangePauseHours.
 
 ### Fee rule set (`FeeRuleSet.status`)
 
@@ -945,7 +945,7 @@ stateDiagram-v2
   pending_approval --> rejected: reject
 ```
 
-Within the recorder's limit an adjustment is recorded at once; above adjustmentSecondReviewerThreshold it waits for a second Finance reviewer.
+Within the recorder's finance.adjustments.record limit (access) an adjustment is recorded at once; above it it waits for a second Finance reviewer.
 
 ### Seller credit (`SellerCredit.status`)
 
@@ -954,9 +954,10 @@ stateDiagram-v2
   [*] --> pending_approval
   pending_approval --> posted: approve
   pending_approval --> rejected: reject
+  pending_approval --> withdrawn: withdraw
 ```
 
-creditSeller posts credits up to creditSecondReviewerThreshold at once (created posted). Larger credits wait for finance.credits.issue and finish on access.approval.decided.
+creditSeller posts credits up to creditSecondReviewerThreshold at once (created posted). Larger credits wait for finance.credits.issue and finish on access.approval.decided. withdraw (withdrawSellerCredit, by the module that asked for the credit) cancels the approval request; an approval decided after a withdrawal posts nothing.
 
 ### Reconciliation item (`ReconItem.status`)
 
@@ -970,7 +971,7 @@ stateDiagram-v2
   correction_pending --> open: rejectCorrection
 ```
 
-explain records a reason when no money needs to move (timing, provider fee). Corrections above correctionSecondReviewerThreshold need a second reviewer; applying one posts the matching entry (refund via payments, seller adjustment, write-off).
+explain records a reason when no money needs to move (timing, provider fee). Corrections above the caller's correction limit (access) need a second reviewer; applying one posts the matching entry (refund via payments, seller adjustment, write-off).
 
 ### Amount owed (`AmountOwed.status`)
 
@@ -1132,6 +1133,7 @@ Indexes: `(rule_set_id, category_id) unique`
 | released_at | timestamptz? |
 | release_reason | text? |
 | approval_request_id | uuid? |
+| trust_report_id | uuid? (set when the hold executes a trust recommendation; kept through approval so finance.hold.placed carries it when the approved hold is placed) |
 
 Indexes: `(seller_id, status)`, `(status, review_date)`
 
@@ -1169,7 +1171,7 @@ Indexes: `(seller_id, created_at desc)`, `(status)`
 | ref_kind | text |
 | ref_id | text |
 | ref_label | text? |
-| status | text (posted|pending_approval|rejected) |
+| status | text (posted|pending_approval|rejected|withdrawn) |
 | idempotency_key | text unique |
 | requested_by | text |
 | approval_request_id | uuid? |
@@ -1401,7 +1403,7 @@ Indexes: `(date, check)`, `(status, detected_at)`
 | `orders.order.accepted` | orders | Create pending earnings lots and fee charges per seller item (sale, shipping charged, seller-funded discount, fee); Official Store items go to trading_entries |
 | `orders.item.cancelled` | orders | Reverse the lot; apply the cancellation fee treatment |
 | `orders.item.delivered` | orders | Start the availability clock for the item's lot |
-| `payments.payment.captured` | payments | Record collected money for reconciliation (payments vs orders): card amount plus creditAmount (store credit) per capture; the daily check compares card captures plus credit with the order total less cancelled items, so a mixed card and credit payment is not a mismatch |
+| `payments.payment.captured` | payments | Record collected money for reconciliation (payments vs orders): card amount plus creditAmount (store credit) per capture, including captures with amount 0 for orders or groups paid entirely by store credit; the daily check compares card captures plus credit with the order total less cancelled items, so mixed and credit-only payments are not mismatches |
 | `returns.refund.approved` | returns | Store the funding split (seller, platform, shared) for the refund |
 | `payments.refund.sent` | payments | Post the refund and proportional fee refund to the seller ledger (refund_after_payout when the lot was paid out) or to company trading |
 | `payments.chargeback.opened` | payments | Place a chargeback hold on the seller (fee kept while open per fee treatment) |
@@ -1421,6 +1423,9 @@ Indexes: `(date, check)`, `(status, detected_at)`
 | `support.case.decided` | support | Release or apply dispute holds linked to the case |
 | `wallet.credit.granted` | wallet | Phase 3: record the store-credit liability (refund to credit, goodwill, gift cards). Only kind goodwill with chargedTo platform is booked as a platform cost; chargedTo seller is posted to the seller's earnings |
 | `wallet.credit.used` | wallet | Phase 3: reduce the store-credit liability when credit pays for an order |
+| `wallet.credit.reversed` | wallet | Phase 3: a goodwill grant was reversed (unused credit removed): reduce the store-credit liability by the amount; chargedTo seller: credit the seller back the goodwill charge posted for the grant (keyed by grantEntryId, never more than was charged); chargedTo platform: reduce the platform goodwill cost. Keyed by entryId |
+| `wallet.credit.expired` | wallet | Phase 3: unused credit expired: reduce the store-credit liability (expired credit is recorded as platform breakage, not seller money). Keyed by entryId |
+| `wallet.credit.corrected` | wallet | Phase 3: staff corrected a balance: increase (positive) or reduce (negative) the store-credit liability, booked as a platform credit correction with the reason. Keyed by entryId |
 
 ## In-process API (for other modules)
 
@@ -1433,6 +1438,9 @@ Indexes: `(date, check)`, `(status, detected_at)`
 | recordServiceFee | `(input: { sellerId: uuid, amount: Money, kind: string, reference: Reference, description: string, idempotencyKey: string }) => LedgerEntry`<br>Posts a fulfillment-service fee (storage, handling, receiving, returns processing, removal; kind = the FeeCharge type) to the seller ledger as service_fee, kept separate from commission and ad charges. Same idempotencyKey returns the first entry. | fulfillment-service |
 | creditSellerCharge | `(input: { sellerId: uuid, amount: Money, originalEntryId: uuid, reason: string, idempotencyKey: string }) => LedgerEntry`<br>Credits back all or part of an ad charge or service fee (originalEntryId = the LedgerEntry returned by recordAdCharge or recordServiceFee) as charge_credit; never more than the original minus earlier credits. Same idempotencyKey returns the first entry. | advertising, fulfillment-service |
 | creditSeller | `(input: { sellerId: uuid, amount: Money, reason: string, reference: Reference, idempotencyKey: string }) => SellerCredit`<br>Credits a seller without an original charge (fulfillment-service reimbursements for lost or damaged units, goodwill to a seller) as ledger type seller_credit. Up to creditSecondReviewerThreshold it is posted at once (status posted, ledgerEntry set). Above it the credit waits as pending_approval with an approval request (finance.credits.issue) and is posted or rejected on access.approval.decided, publishing finance.seller_credit.decided. Same idempotencyKey returns the first credit. | fulfillment-service |
+| getSellerCredit | `(by: { creditId?: uuid, idempotencyKey?: string }) => SellerCredit | null`<br>Current state of a credit asked for with creditSeller (posted, pending_approval, rejected or withdrawn), by id or by the caller's idempotency key; replaces re-calling creditSeller to read it back | fulfillment-service |
+| withdrawSellerCredit | `(input: { creditId?: uuid, idempotencyKey?: string, reason: string }) => SellerCredit`<br>Withdraws a credit still pending_approval (e.g. the reimbursement it pays was reversed): status withdrawn, its approval request is cancelled through access, nothing is posted. A posted credit is refused with ILLEGAL_TRANSITION (reverse it with an adjustment); withdrawing a withdrawn credit returns it unchanged | fulfillment-service |
+| recordExternalDifference | `(input: { check: 'store_credit', subject: string, description: string, expected: Money, actual: Money, reference?: Reference, key: string }) => ReconItem`<br>Another module reports a money difference it found in its own books for the daily check (wallet: a customer balance that differs from its ledger sum). Creates an open reconciliation item on today's day for check store_credit (finance.reconciliation.mismatch_found); the same key returns the existing item, and a later report with expected = actual matches it (finance.reconciliation.item_closed) | wallet |
 | recordCompanyCost | `(input: { kind: 'buying_cost' | 'shipping_expense' | 'return_loss' | 'write_off' | 'supplier_credit', amount: Money, reference: Reference, at: datetime }) => void`<br>Company trading costs for the Official Store margin | purchasing, inventory, shipping, warehouse |
 | hasPayoutBlock | `(sellerId: uuid) => { blocked: bool, reasons: string[] }`<br>Whether a seller can be paid (verified destination, no full hold) | sellers |
 | marketplaceIncomeByDay | `(range: DateRange, sellerId?: uuid) => DailySellerIncome[]`<br>Fee income per seller per market day (commission and fees charged, fee refunds, net, ad income), from fee_charges and ledger_entries. Company revenue only; seller sales are not income. | reports |
@@ -1473,12 +1481,12 @@ Checked through the access module (limits per role, second reviewer).
 | `finance.fees.change` | none | always | Business Owner | Activate a new fee rule version (scheduled after approval with seller notice) |
 | `finance.holds.place` | money | above-limit | Finance staff within their hold limit; Finance Manager above it; Business Owner above $50,000 (example values) | Place a manual hold on seller funds |
 | `finance.holds.release` | money | above-limit | Finance staff within their hold limit; Finance Manager above it (example values) | Release a hold early or apply it |
-| `finance.adjustments.record` | money | above-limit | Finance staff up to adjustmentSecondReviewerThreshold (e.g. $500); a second Finance reviewer above it | Record a manual seller adjustment (credit or debit) |
+| `finance.adjustments.record` | money | above-limit | Finance staff within their adjustment limit (access, e.g. $500); a second Finance reviewer above it | Record a manual seller adjustment (credit or debit) |
 | `finance.credits.issue` | money | above-limit | A Finance reviewer above creditSecondReviewerThreshold (e.g. $500); Finance Manager above their limit (example values) | Post a seller credit without an original charge (creditSeller, e.g. a fulfillment-service reimbursement) above creditSecondReviewerThreshold |
 | `finance.writeoffs.approve` | money | always | A second Finance reviewer (Finance Manager or Business Owner above their limit) | Write off an amount a seller owes |
-| `finance.payouts.release` | money | above-limit | Finance Manager; a second Finance reviewer above runSecondReviewerThreshold (e.g. $50,000); Business Owner above the manager limit (example values) | Approve and release a payout run |
+| `finance.payouts.release` | money | above-limit | Finance Manager within their payout limit (access, e.g. $50,000); a second Finance reviewer above it; Business Owner above the manager limit (example values) | Approve and release a payout run |
 | `finance.destinations.approve` | none | always | A Finance reviewer other than the person who requested or entered the change | Approve a seller payout destination change before money goes to the new account |
-| `finance.reconciliation.correct` | money | above-limit | Finance staff up to correctionSecondReviewerThreshold (e.g. $200); a second Finance reviewer above it | Apply a reconciliation correction that moves money |
+| `finance.reconciliation.correct` | money | above-limit | Finance staff within their correction limit (access, e.g. $200); a second Finance reviewer above it | Apply a reconciliation correction that moves money |
 
 ## Error codes
 
@@ -1499,12 +1507,12 @@ Checked through the access module (limits per role, second reviewer).
 | Job | Schedule | Does |
 |---|---|---|
 | `finance.release-pending` | hourly | Move earnings lots to available once delivered + availableAfterDeliveryDays have passed |
-| `finance.payout-run.create` | per payoutSchedule at cutoff (e.g. Thu 23:59 PT) | Issue statements for the period and create the draft payout run |
+| `finance.payout-run.create` | every 15 min | Checks the payoutSchedule cutoff itself (e.g. Thu 23:59 market time before a Friday payout): once the latest cutoff has passed and no run exists for it, issue statements for the period and create the draft payout run. Idempotent per cutoff (RUN_ALREADY_EXISTS-safe), so a late or repeated run, or a restart after the cutoff, creates exactly one run |
 | `finance.payout-run.release` | every 5 min | Release approved runs at their scheduled time |
 | `finance.payout-status.poll` | every 30 min | Ask the provider about processing payouts without a webhook result |
-| `finance.reconcile.daily` | daily 06:00 PT | Build the day check: payments vs orders (card captures plus store credit used against the order total less cancelled items), seller amounts vs statements, provider deposit, unexplained amounts, failed payouts; publish mismatches, and finance.reconciliation.item_closed for items that now match |
+| `finance.reconcile.daily` | daily 06:00 PT | Build the day check: payments vs orders (card captures plus store credit used against the order total less cancelled items), seller amounts vs statements, provider deposit, store credit (finance's store-credit liability vs wallet.getLiabilityTotal when wallet is enabled, plus differences wallet reported with recordExternalDifference), unexplained amounts, failed payouts; publish mismatches, and finance.reconciliation.item_closed for items that now match |
 | `finance.holds.review-due` | daily 07:00 PT | List holds reaching their review date for Finance (workqueues) |
-| `finance.negative-balance.age` | daily | Turn negative balances older than negativeBalanceOwedAfterDays into amounts owed |
+| `finance.negative-balance.age` | daily 01:00 PT | Turn negative balances older than negativeBalanceOwedAfterDays into amounts owed |
 | `finance.fee-rules.activate` | every 5 min | Activate scheduled fee rule versions at their effective time |
 
 ## Settings
@@ -1517,10 +1525,7 @@ Checked through the access module (limits per role, second reviewer).
 | minimumPayout | `{"amount":2500,"currency":"USD"}` | money, 0–…, approval: second reviewer, seller-visible | Smaller balances roll to the next run |
 | newSellerHoldDays | `14` | duration, days, 0–…, approval: second reviewer, seller-visible | Extra hold during the first newSellerPeriodDays of selling |
 | newSellerPeriodDays | `30` | duration, days, 0–…, approval: second reviewer, seller-visible | Length of the new-seller period |
-| runSecondReviewerThreshold | `{"amount":5000000,"currency":"USD"}` | money, 0–…, approval: business owner | Runs above this need a second Finance reviewer ($50,000 example) |
-| adjustmentSecondReviewerThreshold | `{"amount":50000,"currency":"USD"}` | money, 0–…, approval: business owner | Adjustments above this need a second reviewer ($500 example) |
-| correctionSecondReviewerThreshold | `{"amount":20000,"currency":"USD"}` | money, 0–…, approval: business owner | Reconciliation corrections above this need a second reviewer ($200 example) |
-| creditSecondReviewerThreshold | `{"amount":50000,"currency":"USD"}` | money, 0–…, approval: business owner | Seller credits from other modules (creditSeller) above this wait for a Finance reviewer ($500 example) |
+| creditSecondReviewerThreshold | `{"amount":50000,"currency":"USD"}` | money, 0–…, approval: business owner | Seller credits from other modules (creditSeller) above this wait for a Finance reviewer ($500 example). The only finance threshold setting: a module caller has no access limit of its own; staff actions use access limits |
 | negativeBalanceOwedAfterDays | `30` | duration, days, 1–…, approval: second reviewer, seller-visible | Uncovered negative balance becomes an amount owed |
 | destinationChangePauseHours | `72` | duration, hours, 0–…, approval: business owner, seller-visible | Minimum wait before paying a newly verified destination |
 | statementPeriod | `"weekly"` | enum (weekly \| monthly), approval: second reviewer, seller-visible | Statement period, aligned with the payout schedule |
@@ -1537,7 +1542,9 @@ Checked through the access module (limits per role, second reviewer).
 - Fee example (illustration only): an eligible $100 item sale with a 10% fee creates $10 of fee income and $90 of seller earnings before other adjustments. Default rules: commission on item price after seller-funded discounts, shipping excluded, platform-funded discounts do not lower seller proceeds. Category rates are examples (Electronics 8%, Computers 7%, Home & Kitchen 12%, Fashion 15%, Sports 10%, Beauty 12%).
 - Refund after payout: the refund is deducted from later earnings (refund_after_payout entry); if the balance stays negative for negativeBalanceOwedAfterDays it becomes an amount owed. Statements show the deduction with the original payout reference (acceptance scenario 6).
 - Ad charges are separate ledger entries and a separate statement section, never part of commission.
-- Approvals: holds, adjustments, corrections, write-offs, payout runs and fee rule changes check the caller's limit through access (seller credits from creditSeller use creditSecondReviewerThreshold, since the caller is a module); above it they return APPROVAL_REQUIRED with details.approvalRequestId and finish on access.approval.decided. Staff access to finance screens is not financial authority: approve endpoints need finance.payouts.approve and a limit.
+- Approvals (decision F-D1: limits come from access only): holds, adjustments, corrections, write-offs, payout runs and fee rule changes check the caller's limit through access (seller credits from creditSeller use creditSecondReviewerThreshold, since the caller is a module); above it they return APPROVAL_REQUIRED with details.approvalRequestId and finish on access.approval.decided. The former runSecondReviewerThreshold, adjustmentSecondReviewerThreshold and correctionSecondReviewerThreshold settings are removed (a migration deletes their stored values); the example amounts live in the access limits seed. Staff access to finance screens is not financial authority: approve endpoints need finance.payouts.approve and a limit.
+- Store credit liability (phase 3): finance keeps the liability from wallet events: granted adds, used, reversed and expired reduce, corrected adds or reduces (each keyed by the wallet entry id). A reversed seller-charged goodwill grant credits the seller back the charge posted for it. The daily store_credit check compares the liability with wallet.getLiabilityTotal and lists per-account differences wallet reports through recordExternalDifference.
+- Trust holds: a hold placed for a trust recommendation (HoldInput.trustReportId) keeps holds.trust_report_id through an approval, so finance.hold.placed carries trustReportId when the approved hold is finally placed and trust can confirm the hold_payout action.
 - Payout destination details belong to sellers (owner-only changes); finance stores only a label, provider destination id and verification state, and never pays an unverified destination.
 - Chargeback cases themselves are in payments; finance holds the seller amount and applies or releases it when payments reports the outcome.
 - Dependency note: returns, advertising, promotions, purchasing, inventory, shipping and support are optional inputs; without them their lines are simply absent from statements and trading.

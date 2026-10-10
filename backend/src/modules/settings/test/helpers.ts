@@ -11,7 +11,7 @@ export interface Harness {
   app: FastifyInstance;
   clock: ReturnType<typeof fixedClock>;
   /** What access.check answers next */
-  access: { decision: access.AuthorityCheck['decision']; requests: access.RequestApprovalInput[]; cancelled: { requestId: string; reason: string }[]; lastRequestId: string | null };
+  access: { decision: access.AuthorityCheck['decision']; checks: string[]; requests: access.RequestApprovalInput[]; cancelled: { requestId: string; reason: string }[]; lastRequestId: string | null };
   audits: audit.RecordInput[];
   events: { name: string; payload: any }[];
   api: SettingsPublicApi;
@@ -23,7 +23,7 @@ export async function harness(): Promise<Harness> {
   const clock = fixedClock(new Date());
   const h = {
     clock,
-    access: { decision: 'approval_required' as access.AuthorityCheck['decision'], requests: [] as access.RequestApprovalInput[], cancelled: [] as { requestId: string; reason: string }[], lastRequestId: null as string | null },
+    access: { decision: 'approval_required' as access.AuthorityCheck['decision'], checks: [] as string[], requests: [] as access.RequestApprovalInput[], cancelled: [] as { requestId: string; reason: string }[], lastRequestId: null as string | null },
     audits: [] as audit.RecordInput[],
     events: [] as { name: string; payload: any }[],
   };
@@ -34,7 +34,7 @@ export async function harness(): Promise<Harness> {
     config: { rateLimits: false },
     apiStubs: {
       access: {
-        check: async (_p, action) => ({
+        check: async (_p, action) => (h.access.checks.push(action), {
           decision: h.access.decision,
           action,
           reason: h.access.decision === 'allowed' ? 'You hold this authority' : h.access.decision === 'denied' ? 'Your role cannot apply setting changes' : 'Needs approval',
@@ -42,6 +42,7 @@ export async function harness(): Promise<Harness> {
           approvalsNeeded: h.access.decision === 'allowed' ? 0 : 1,
           eligibleApproverRoles: [],
           eligibleApprovers: [],
+          stepUpRequired: false,
         }),
         requestApproval: async (input) => {
           h.access.requests.push(input);
@@ -86,7 +87,8 @@ export const decided = (h: Harness, change: { id: string; ref: string }, outcome
   h.app.kernel.events.publish('access', 'access.approval.decided', {
     requestId,
     ref: 'AP-261009-0001',
-    actionKey: 'settings.changes.apply',
+    // the action the change was sent for (settings.changes.apply, or apply-owner for Business Owner rules)
+    actionKey: h.access.requests.at(-1)?.action ?? 'settings.changes.apply',
     module: 'settings',
     target: { type: 'setting_change', id: change.id, ref: change.ref },
     outcome,

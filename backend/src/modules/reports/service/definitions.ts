@@ -3,9 +3,12 @@
  * group, saved views and (phase 2) scheduled report emails.
  */
 import { AppError } from '../../../kernel/errors/index.js';
-import { newId } from '../../../kernel/lib/ids.js';
+import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { MetricDefinition, MetricInput, MetricSuggestion, ReportDefinition, ReportGroup, ReportQuery, ReportSchedule, SavedView, StaffRef } from '../../../spec/reports.js';
 import { GROUPS, METRICS, REPORTS, SELLER_GROUP, UNASSIGNED_OWNER, groupOf } from '../domain/catalogue.js';
+
+/** A named owner (the legacy placeholder id counts as nobody) */
+const ownerOf = (id: string | null | undefined): string | null => (id && id !== UNASSIGNED_OWNER ? id : null);
 import { TIME_OF_DAY, metricIssues, nextRun } from '../domain/rules.js';
 import { metricDefinitionMachine, metricSuggestionMachine } from '../domain/state-machines.js';
 import type { MetricRow, ReportRow, SavedViewRow, ScheduleRow, SuggestionRow, VersionRow } from '../ports.js';
@@ -17,7 +20,7 @@ const SEED_EFFECTIVE_FROM = '2026-01-01';
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
 /** What a published version records (owner as id, resolved when shown) */
-type Snapshot = Omit<MetricDefinition, 'owner'> & { ownerId: string };
+type Snapshot = Omit<MetricDefinition, 'owner'> & { ownerId: string | null };
 
 export class Definitions {
   constructor(private readonly core: ReportsCore) {}
@@ -27,7 +30,7 @@ export class Definitions {
   async seed() {
     const cfg = await this.core.cfg();
     const now = this.core.now();
-    for (const g of GROUPS) await this.core.repo.seedGroup({ key: g.key, label: g.label, owner_staff_id: UNASSIGNED_OWNER, position: g.position });
+    for (const g of GROUPS) await this.core.repo.seedGroup({ key: g.key, label: g.label, owner_staff_id: null, position: g.position });
     for (const m of METRICS) {
       const row: MetricRow = {
         key: m.key,
@@ -45,7 +48,8 @@ export class Definitions {
         related_keys: m.relatedKeys,
         audience: m.audience,
         launch_measure: cfg.launchMetrics.includes(m.key),
-        owner_staff_id: UNASSIGNED_OWNER,
+        // seeded metrics start without a person (decision D10); PUT /metrics/{key}/owner names one
+        owner_staff_id: null,
         status: 'published',
         version: 1,
         effective_from: SEED_EFFECTIVE_FROM,
@@ -75,7 +79,7 @@ export class Definitions {
 
   async metricViews(rows: MetricRow[]): Promise<MetricDefinition[]> {
     const refs = await this.core.staffRefs(
-      rows.map((r) => r.owner_staff_id),
+      rows.map((r) => ownerOf(r.owner_staff_id)),
       (id) => this.core.groupRole(rows.find((r) => r.owner_staff_id === id)?.group_key ?? ''),
     );
     const notes = new Map<string, string>();
@@ -83,18 +87,18 @@ export class Definitions {
       const v = (await this.core.repo.listVersions(r.key)).find((x) => x.version === r.version);
       if (v) notes.set(r.key, v.change_note);
     }
-    return rows.map((r) => ({ ...rowView(r), owner: refs.get(r.owner_staff_id)!, changeNote: notes.get(r.key) ?? null }));
+    return rows.map((r) => ({ ...rowView(r), owner: ownerOf(r.owner_staff_id) ? (refs.get(r.owner_staff_id!) ?? null) : null, changeNote: notes.get(r.key) ?? null }));
   }
 
   async versionViews(rows: VersionRow[]): Promise<MetricDefinition[]> {
     const snaps = rows.map((v) => ({ v, s: v.snapshot as unknown as Snapshot }));
     const refs = await this.core.staffRefs(
-      snaps.map((x) => x.s.ownerId),
+      snaps.map((x) => ownerOf(x.s.ownerId)),
       (id) => this.core.groupRole(snaps.find((x) => x.s.ownerId === id)?.s.group ?? ''),
     );
     return snaps.map(({ v, s }) => {
       const { ownerId, ...rest } = s;
-      return { ...rest, status: 'published', version: v.version, effectiveFrom: v.effective_from, changeNote: v.change_note, owner: refs.get(ownerId)! } as MetricDefinition;
+      return { ...rest, status: 'published', version: v.version, effectiveFrom: v.effective_from, changeNote: v.change_note, owner: ownerOf(ownerId) ? (refs.get(ownerId!) ?? null) : null } as MetricDefinition;
     });
   }
 
@@ -145,11 +149,11 @@ export class Definitions {
 
   /* ---------------------------------------------------------------- metric changes */
 
-  private async ownerKnown(ownerId: string): Promise<boolean> {
-    if (ownerId === UNASSIGNED_OWNER) return false;
+  private async ownerKnown(ownerId: string | null | undefined): Promise<boolean> {
+    if (!ownerOf(ownerId)) return false;
     const access = this.core.api('access');
     if (!access) return true; // nobody to ask: the id is kept as given
-    const ref = await this.core.soft('access.getStaffRef', () => access.getStaffRef(ownerId));
+    const ref = await this.core.soft('access.getStaffRef', () => access.getStaffRef(ownerId!));
     return ref === undefined ? true : ref !== null;
   }
 
@@ -157,7 +161,8 @@ export class Definitions {
     const key = body.key.trim();
     const m = body.metric;
     const issues = metricIssues(m, key);
-    if (!issues.length && !(await this.ownerKnown(m.ownerId))) issues.push({ path: 'metric.ownerId', message: 'The owner must be a staff member' });
+    // the owner may be named later (PUT /metrics/{key}/owner); a named one must be a staff member
+    if (!issues.length && m.ownerId && !(await this.ownerKnown(m.ownerId))) issues.push({ path: 'metric.ownerId', message: 'The owner must be a staff member' });
     if (issues.length) throw invalid(issues);
     const cfg = await this.core.cfg();
     const today = await this.core.today();
@@ -182,7 +187,7 @@ export class Definitions {
 
   async reviseMetric(key: string, m: MetricInput, by: Caller): Promise<MetricDefinition> {
     const issues = metricIssues(m);
-    if (!issues.length && !(await this.ownerKnown(m.ownerId))) issues.push({ path: 'metric.ownerId', message: 'The owner must be a staff member' });
+    if (!issues.length && m.ownerId && !(await this.ownerKnown(m.ownerId))) issues.push({ path: 'metric.ownerId', message: 'The owner must be a staff member' });
     if (issues.length) throw invalid(issues);
     const today = await this.core.today();
     const { before, after } = await this.core.repo.transaction(async (tx) => {
@@ -191,7 +196,7 @@ export class Definitions {
       // a published metric gets a new draft version; a draft is edited in place; retired cannot change
       const status = before.status === 'draft' ? 'draft' : metricDefinitionMachine.next(before.status as never, 'revise');
       const version = before.status === 'published' ? before.version + 1 : before.version;
-      const after = await tx.updateMetric(key, { ...inputColumns(m), launch_measure: m.launchMeasure ?? before.launch_measure, status, version, effective_from: m.effectiveFrom ?? (before.status === 'published' ? today : before.effective_from) });
+      const after = await tx.updateMetric(key, { ...inputColumns(m), owner_staff_id: m.ownerId ?? before.owner_staff_id, launch_measure: m.launchMeasure ?? before.launch_measure, status, version, effective_from: m.effectiveFrom ?? (before.status === 'published' ? today : before.effective_from) });
       return { before, after };
     });
     await this.core.audit({ action: 'reports.metric.revise', actionLabel: `Revised metric definition (draft v${after.version})`, category: 'other', target: { type: 'metric', id: key, label: after.name, screen: 'admin/reports' }, before: rowView(before), after: rowView(after), reason: m.changeNote }, by);
@@ -278,6 +283,52 @@ export class Definitions {
     return (await this.suggestionViews([after]))[0]!;
   }
 
+  /* ---------------------------------------------------------------- owners (decision D10) */
+
+  /** The staff member a PUT .../owner names: an active staff member, else VALIDATION_FAILED */
+  private async ownerRef(ownerId: string, reason: string) {
+    const issues: { path: string; message: string }[] = [];
+    if (!reason?.trim()) issues.push({ path: 'reason', message: 'Say why the owner changes' });
+    const access = this.core.api('access');
+    const ref = access && isUuid(ownerId) ? await this.core.soft('access.getStaffRef', () => access.getStaffRef(ownerId)) : null;
+    if (!ref) issues.push({ path: 'ownerId', message: 'The owner must be an active staff member' });
+    if (issues.length) throw invalid(issues);
+    return ref!;
+  }
+
+  /** Names (or changes) the owner of a metric; not a new version; recorded in the audit history */
+  async setMetricOwner(key: string, body: { ownerId: string; reason: string }, by: Caller): Promise<MetricDefinition> {
+    const current = await this.core.repo.getMetric(key);
+    if (!current) throw notFound('Metric');
+    const ref = await this.ownerRef(body.ownerId, body.reason);
+    const after = await this.core.repo.transaction(async (tx) => {
+      const before = await tx.getMetric(key, { forUpdate: true });
+      if (!before) throw notFound('Metric');
+      return tx.updateMetric(key, { owner_staff_id: body.ownerId });
+    });
+    await this.core.audit(
+      { action: 'reports.metric.owner', actionLabel: `Named ${ref.name} owner of the metric`, category: 'other', target: { type: 'metric', id: key, label: after.name, screen: 'admin/reports' }, before: { ownerId: ownerOf(current.owner_staff_id) }, after: { ownerId: body.ownerId }, reason: body.reason.trim() },
+      by,
+    );
+    return (await this.metricViews([after]))[0]!;
+  }
+
+  /** Names (or changes) the owner of a report group */
+  async setGroupOwner(key: string, body: { ownerId: string; reason: string }, by: Caller): Promise<ReportGroup> {
+    const before = (await this.core.repo.listGroups()).find((g) => g.key === key);
+    if (!before) throw notFound('Report group');
+    const ref = await this.ownerRef(body.ownerId, body.reason);
+    const after = (await this.core.repo.setGroupOwner(key, body.ownerId))!;
+    await this.core.audit(
+      { action: 'reports.group.owner', actionLabel: `Named ${ref.name} owner of the report group`, category: 'other', target: { type: 'report_group', id: key, label: after.label, screen: 'admin/reports' }, before: { ownerId: ownerOf(before.owner_staff_id) }, after: { ownerId: body.ownerId }, reason: body.reason.trim() },
+      by,
+    );
+    const reports = (await this.core.repo.listReports({ audience: 'staff', active: true })).filter((r) => r.group_key === key);
+    const visible: ReportDefinition[] = [];
+    for (const r of reports) if (await this.core.principalCan(by.principal, r.permission, by.can)) visible.push(this.reportView(r));
+    return { key, label: after.label, owner: { staffId: body.ownerId, name: ref.name, role: ref.roleLabel ?? 'Staff' }, ownerRole: groupOf(key)?.ownerRole ?? 'Reports Analyst', reports: visible };
+  }
+
   /* ---------------------------------------------------------------- catalogue */
 
   reportView(r: ReportRow): ReportDefinition {
@@ -313,7 +364,7 @@ export class Definitions {
   async catalogue(by: Caller): Promise<ReportGroup[]> {
     const [groups, reports] = await Promise.all([this.core.repo.listGroups(), this.core.repo.listReports({ audience: 'staff', active: true })]);
     const refs = await this.core.staffRefs(
-      groups.map((g) => g.owner_staff_id),
+      groups.map((g) => ownerOf(g.owner_staff_id)),
       (id) => groupOf(groups.find((g) => g.owner_staff_id === id)?.key ?? '')?.ownerRole ?? 'Reports Analyst',
     );
     const out: ReportGroup[] = [];
@@ -321,8 +372,8 @@ export class Definitions {
       const visible: ReportDefinition[] = [];
       for (const r of reports.filter((x) => x.group_key === g.key)) if (await this.core.principalCan(by.principal, r.permission, by.can)) visible.push(this.reportView(r));
       if (!visible.length) continue;
-      const owner = g.owner_staff_id === UNASSIGNED_OWNER ? { staffId: UNASSIGNED_OWNER, name: `${groupOf(g.key)?.ownerRole ?? 'Reports Analyst'} (no person named yet)`, role: groupOf(g.key)?.ownerRole ?? 'Reports Analyst' } : refs.get(g.owner_staff_id)!;
-      out.push({ key: g.key, label: g.label, owner, reports: visible });
+      const ownerId = ownerOf(g.owner_staff_id);
+      out.push({ key: g.key, label: g.label, owner: ownerId ? (refs.get(ownerId) ?? null) : null, ownerRole: groupOf(g.key)?.ownerRole ?? 'Reports Analyst', reports: visible });
     }
     return out;
   }
@@ -367,12 +418,12 @@ export class Definitions {
   /* ---------------------------------------------------------------- schedules (phase 2) */
 
   private async scheduleViews(rows: ScheduleRow[]): Promise<ReportSchedule[]> {
-    const refs = await this.core.staffRefs(rows.map((r) => r.owner_staff_id));
+    const refs = await this.core.staffRefs([...rows.map((r) => r.owner_staff_id), ...rows.flatMap((r) => strings(r.recipients))]);
     return rows.map((r) => ({
       id: r.id,
       reportKey: r.report_key,
       savedViewId: r.saved_view_id,
-      recipients: strings(r.recipients),
+      recipients: strings(r.recipients).map((id) => refs.get(id) ?? { staffId: id, name: 'Staff member', role: 'Staff' }),
       frequency: r.frequency as ReportSchedule['frequency'],
       dayOfWeek: r.day_of_week,
       time: r.time,
@@ -384,7 +435,7 @@ export class Definitions {
   }
 
   async createSchedule(
-    body: { reportKey: string; savedViewId?: string | null; recipients: string[]; frequency: 'daily' | 'weekly' | 'monthly'; dayOfWeek?: number | null; time: string; format: 'pdf' | 'csv' },
+    body: { reportKey: string; savedViewId?: string | null; recipientStaffIds: string[]; frequency: 'daily' | 'weekly' | 'monthly'; dayOfWeek?: number | null; time: string; format: 'csv' | 'xlsx' },
     by: Caller,
   ): Promise<ReportSchedule> {
     const issues: { path: string; message: string }[] = [];
@@ -394,14 +445,15 @@ export class Definitions {
       const v = await this.core.repo.getSavedView(body.savedViewId);
       if (!v || v.report_key !== body.reportKey || (v.owner_staff_id !== staffId(by) && !v.shared)) issues.push({ path: 'savedViewId', message: 'Choose one of your saved views of this report' });
     }
-    const recipients = [...new Set(body.recipients.map((e) => e.trim().toLowerCase()))];
-    if (!recipients.length) issues.push({ path: 'recipients', message: 'Add at least one recipient' });
+    const recipients = [...new Set(body.recipientStaffIds ?? [])];
+    if (!recipients.length) issues.push({ path: 'recipientStaffIds', message: 'Add at least one staff recipient' });
     if (body.frequency === 'weekly' && (body.dayOfWeek == null || body.dayOfWeek < 0 || body.dayOfWeek > 6)) issues.push({ path: 'dayOfWeek', message: 'Weekly schedules need a day of the week (0 = Sunday … 6 = Saturday)' });
     if (!TIME_OF_DAY.test(body.time)) issues.push({ path: 'time', message: 'Time is HH:MM market time, e.g. 07:30' });
     if (report && !(await this.core.principalCan(by.principal, report.permission, by.can))) issues.push({ path: 'reportKey', message: `You may not see this report (${report.permission})` });
-    const bad = recipients.filter((e) => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e));
-    if (bad.length) issues.push({ path: 'recipients', message: `Not an email address: ${bad.join(', ')}` });
     if (issues.length) throw invalid(issues);
+    // staff only (decision D2): every recipient is an active staff member holding the report's permission
+    const notPermitted = (await this.recipientsAllowed(recipients, report!.permission)).denied;
+    if (notPermitted.length) throw this.core.ctx.error('RECIPIENT_NOT_PERMITTED', `${notPermitted.length === 1 ? 'A recipient is' : `${notPermitted.length} recipients are`} not active staff with ${report!.permission}`, { staffIds: notPermitted, permission: report!.permission });
     const cfg = await this.core.cfg();
     const row = await this.core.repo.insertSchedule({
       id: newId(),
@@ -419,6 +471,25 @@ export class Definitions {
     const [view] = await this.scheduleViews([row]);
     await this.core.audit({ action: 'reports.schedule.create', actionLabel: 'Scheduled a report email', category: 'other', target: { type: 'report_schedule', id: row.id, label: report!.title, screen: 'admin/reports' }, after: view }, by);
     return view!;
+  }
+
+  /**
+   * Splits staff ids into those who may receive a report now (active staff, access.getStaffRef, holding the
+   * permission, ctx.can) and those who may not. Without access nobody can be checked: everyone is refused.
+   */
+  async recipientsAllowed(staffIds: readonly string[], permission: string): Promise<{ allowed: string[]; denied: string[] }> {
+    const access = this.core.api('access');
+    const allowed: string[] = [];
+    const denied: string[] = [];
+    for (const id of staffIds) {
+      const ok =
+        !!access &&
+        isUuid(id) &&
+        !!(await this.core.soft('access.getStaffRef', () => access.getStaffRef(id))) &&
+        (await this.core.principalCan({ kind: 'staff', accountId: id } as Caller['principal'], permission));
+      (ok ? allowed : denied).push(id);
+    }
+    return { allowed, denied };
   }
 
   async listSchedules(): Promise<ReportSchedule[]> {
@@ -458,7 +529,7 @@ function inputColumns(m: MetricInput) {
     default_date_basis: m.defaultDateBasis,
     related_keys: m.relatedKeys ?? [],
     audience: m.audience,
-    owner_staff_id: m.ownerId,
+    owner_staff_id: m.ownerId ?? null,
   };
 }
 

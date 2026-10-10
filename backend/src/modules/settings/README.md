@@ -102,6 +102,8 @@ Market-level platform settings: country and service region, currency, time zone,
 | businessHoursLabel | `string` Mon–Sat, 8:00 AM – 8:00 PM PT |
 | closures | `Closure[]` |
 | support | `SupportContacts` |
+| legalName | `string` market.legalName |
+| companyLine | `string` market.companyLine |
 
 ### ServiceRegion
 
@@ -146,6 +148,8 @@ Market-level platform settings: country and service region, currency, time zone,
 | timeZone | `string` |
 | locale | `string` |
 | serviceRegionLabel | `string` |
+| legalName | `string` Legal name of the operating company, e.g. Marketly, Inc. (footer, policies, receipts) |
+| companyLine | `string` One-line company details for the footer and emails, e.g. Marketly, Inc. · 500 Market St, San Francisco, CA |
 
 ### PublicSupport
 
@@ -417,7 +421,7 @@ stateDiagram-v2
   scheduled --> applied: apply
 ```
 
-submit is refused while the impact preview has blocking items (effective date inside minLeadDays, invalid value) or another open change touches the same key (CHANGE_CONFLICT). The strictest approval rule among the items applies (business_owner > second_reviewer > none); approval goes through access (action settings.changes.apply) and finishes on access.approval.decided. apply runs at effectiveAt (job) and writes a new version per key; a change whose effectiveAt is now applies immediately after approval. Applied changes are never edited: a correction is a new change.
+submit is refused while the impact preview has blocking items (effective date inside minLeadDays, invalid value) or another open change touches the same key (CHANGE_CONFLICT). The strictest approval rule among the items applies (business_owner > second_reviewer > none); approval goes through access and finishes on access.approval.decided: action settings.changes.apply-owner (Business Owner only) when any item's rule is business_owner, otherwise settings.changes.apply (a second reviewer). A Platform Administrator can therefore never approve a Business Owner rule change. apply runs at effectiveAt (job) and writes a new version per key; a change whose effectiveAt is now applies immediately after approval. Applied changes are never edited: a correction is a new change.
 
 ## Data (schema `settings`)
 
@@ -528,16 +532,16 @@ Indexes: `unique (key) where open`
 
 | Consumes | From | Does |
 |---|---|---|
-| `access.approval.decided` | access | For settings.changes.apply requests: approved → scheduled (applied at once if effectiveAt has passed); rejected/expired → rejected; cancelled → cancelled |
+| `access.approval.decided` | access | For settings.changes.apply and settings.changes.apply-owner requests: approved → scheduled (applied at once if effectiveAt has passed); rejected/expired → rejected; cancelled → cancelled |
 | `access.approval.returned` | access | Move the change back to draft with the reviewer's comment on its timeline |
 
 ## In-process API (for other modules)
 
 | Function | Signature | Used by |
 |---|---|---|
-| get | `<T>(key: string, at?: datetime) => T`<br>Value in force at a time (default now), falling back to the declared default. Cached; invalidated by settings.setting.changed. | * |
+| get | `<T>(key: string, at?: datetime) => T`<br>Value in force at a time (default now), falling back to the declared default. Cached; invalidated by settings.setting.changed. key is the full '<module>.<name>': any module may read another enabled module's declared setting (read-only), e.g. audit reads reports.maxExportRows; the kernel exposes it as ctx.settings.read(fullKey) next to ctx.settings.get(ownName). An unknown key or a disabled module's key throws UNKNOWN_SETTING. | * |
 | market | `() => MarketSettings`<br>Country, region, currency, time zone, locale, business hours | checkout, orders, shipping, finance, reports, promotions, advertising, support, workqueues |
-| businessCalendar | `() => { isOpen(at: datetime): bool, addBusinessMinutes(from: datetime, minutes: int): datetime, nextOpen(after: datetime): datetime }`<br>Business-hour arithmetic in the market time zone for SLA deadlines | support, workqueues, returns, sellers |
+| businessCalendar | `() => { isOpen(at: datetime): bool, isBusinessDay(day: date): bool, addBusinessMinutes(from: datetime, minutes: int): datetime, addBusinessDays(from: datetime, days: int): datetime, nextOpen(after: datetime): datetime }`<br>Business-hour arithmetic in the market time zone for SLA deadlines. addBusinessDays counts whole days that have opening hours (closures and closed weekdays skipped) and keeps the local time of day, moved to closing time when that day closes earlier; from inside a closed day it counts from the next business day. | support, workqueues, returns, sellers, catalog, shipping |
 | isEnabled | `(flagKey: string, subject?: { accountId?: uuid, realm?: string }) => bool`<br>Feature flag check | * |
 | registerSection | `(provider: { key: string, order: int, load: () => SettingsSection }) => void`<br>Called at boot by modules that own a section of the settings page (returns, finance, shipping, advertising) so the overview shows their current values, last change and scheduled changes with a link to their own edit endpoints | returns, finance, shipping, advertising, sellers, support |
 | registerImpactEstimator | `(keyPrefix: string, estimate: (change: { key: string, from: json, to: json, effectiveAt: datetime, applyScope: string }) => ImpactItem[]) => void`<br>Owning modules explain what a change of their declared settings does to existing commitments (open orders, sellers, content) | checkout, orders, shipping, support, content, notifications |
@@ -558,7 +562,8 @@ Checked through the access module (limits per role, second reviewer).
 
 | Action | Limit | Second reviewer | Approvers | Meaning |
 |---|---|---|---|---|
-| `settings.changes.apply` | none | above-limit | Per setting definition: none, a second reviewer, or the Business Owner (the strictest rule among the changed items applies) | Apply a change request to effective-dated platform settings |
+| `settings.changes.apply` | none | always | Another Platform Administrator or the Business Owner (never the proposer) | Apply a change request whose strictest item rule is second_reviewer |
+| `settings.changes.apply-owner` | none | always | Business Owner only (never the proposer) | Apply a change request with at least one item whose rule is business_owner |
 
 ## Error codes
 
@@ -589,7 +594,7 @@ Checked through the access module (limits per role, second reviewer).
 ## Notes
 - Boundary: settings owns market-level values (market.*, support.*, checkout.*, apps.*) and the generic store for runtime settings that modules declare in their manifest (the same `settings` entries as in their specs, opted in with editable: true). Versioned business rule sets with their own lifecycle stay in their modules: returns baseline and category exceptions (returns), fee rules and payout/hold settings (finance), shipping defaults and holidays (shipping), advertising global rules (advertising), seller performance targets (sellers), SLA targets (support). Those modules register a section provider so GET /overview shows their values, last change and scheduled changes, and the page edits them through the owning module's endpoint (SectionLink).
 - Every change states its effective date and its impact on existing commitments before saving (plan ch. 18). applyScope new_only means orders placed before the effective date keep what they accepted; purchase snapshots in orders already guarantee this for terms copied at purchase.
-- Settings-owned keys and their defaults (examples to confirm): market.country = US; market.serviceRegion = 48 contiguous states (Alaska, Hawaii and territories later); market.currency = USD (not editable at launch); market.timeZone = America/Los_Angeles; market.locale = en-US; support.businessHours = Mon–Sat 08:00–20:00; support.closures = Thanksgiving, Christmas, New Year; support.phone = 1-800-555-0136; checkout.guestCheckoutEnabled = true (approval: business_owner); checkout.offerAccountAfterGuestPurchase = true; apps.android.minVersionCode, apps.android.latestVersionCode, apps.android.updateUrl; apps.maintenance.
+- Settings-owned keys and their defaults (examples to confirm): market.country = US; market.serviceRegion = 48 contiguous states (Alaska, Hawaii and territories later); market.currency = USD (not editable at launch); market.timeZone = America/Los_Angeles; market.locale = en-US; support.businessHours = Mon–Sat 08:00–20:00; support.closures = Thanksgiving, Christmas, New Year; support.phone = 1-800-555-0136; checkout.guestCheckoutEnabled = true (approval: business_owner); checkout.offerAccountAfterGuestPurchase = true; market.legalName = Marketly, Inc. and market.companyLine (approval: business_owner; shown in footers, policies and emails); apps.android.minVersionCode, apps.android.latestVersionCode, apps.android.updateUrl; apps.maintenance.
 - Launch has one market (plan ch. 1: one service region and one main currency; no other languages are planned). AppConfig.market (United States · English (US) · USD) is still returned for formatting, but the apps show no market row and no market or language picker and no supportedMarkets list until an expansion project adds a second market.
 - apps.maintenance holds { active, kind, message, until }; every change sets updatedAt. kind incident is used by the Platform Administrator for live service problems so error pages can show the current status note.
 - Changing market.timeZone or market.currency after launch needs a migration plan: both are business_owner approval, minLeadDays 30, and currency stays read-only in phase 1 (one currency, plan ch. 1).

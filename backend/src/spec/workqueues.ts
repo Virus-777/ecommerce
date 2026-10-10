@@ -56,6 +56,8 @@ export interface QueueDefinition {
   defaultDeadlineMinutes: number;
   /** Deadlines count market business hours from settings */
   businessHoursOnly: boolean;
+  /** While an item waits on someone outside the team (seller, customer, carrier, supplier) its deadline clock stops; on resume dueAt moves later by the time spent waiting. False: waiting keeps the deadline */
+  pauseWhileWaiting: boolean;
   /** Prototype screen where the work is done, e.g. ops/dispatch */
   screen: string;
   screenFilter?: string | null;
@@ -80,6 +82,7 @@ export const QueueDefinition: z.ZodType<QueueDefinition> = z.object({
   escalationLabel: z.string().describe("Readable route, e.g. 'Seller Manager (sellers), Business Owner after 48 h'"),
   defaultDeadlineMinutes: z.number().int(),
   businessHoursOnly: z.boolean().describe("Deadlines count market business hours from settings"),
+  pauseWhileWaiting: z.boolean().describe("While an item waits on someone outside the team (seller, customer, carrier, supplier) its deadline clock stops; on resume dueAt moves later by the time spent waiting. False: waiting keeps the deadline"),
   screen: z.string().describe("Prototype screen where the work is done, e.g. ops/dispatch"),
   screenFilter: z.string().nullish(),
   visibleToSeller: z.boolean(),
@@ -95,6 +98,7 @@ export interface QueueInput {
   escalationRoute: EscalationStep[];
   defaultDeadlineMinutes: number;
   businessHoursOnly?: boolean | null;
+  pauseWhileWaiting?: boolean | null;
   screen: string;
   screenFilter?: string | null;
   visibleToSeller?: boolean | null;
@@ -113,6 +117,7 @@ export const QueueInput: z.ZodType<QueueInput> = z.object({
   },
   defaultDeadlineMinutes: z.number().int(),
   businessHoursOnly: z.boolean().nullish(),
+  pauseWhileWaiting: z.boolean().nullish(),
   screen: z.string(),
   screenFilter: z.string().nullish(),
   visibleToSeller: z.boolean().nullish(),
@@ -159,7 +164,7 @@ export const QueueSummary: z.ZodType<QueueSummary> = z.object({
 }).register(common.apiTypes, { id: "workqueues.QueueSummary" });
 
 export interface WorkSubject {
-  type: "order" | "order_item" | "shipment" | "delivery_exception" | "offer" | "stock_item" | "purchase_order" | "approval_request" | "case" | "return" | "refund" | "payout" | "payment" | "reconciliation_check" | "seller" | "application" | "appeal" | "restriction" | "change_request" | "trust_report" | "recommendation" | "campaign" | "customer" | "data_request" | "other";
+  type: "order" | "order_item" | "shipment" | "delivery_exception" | "product" | "offer" | "stock_item" | "purchase_order" | "approval_request" | "case" | "return" | "return_parcel" | "refund" | "payout" | "payment" | "dispute" | "reconciliation_check" | "seller" | "application" | "appeal" | "restriction" | "change_request" | "trust_report" | "recommendation" | "enforcement" | "moderation_item" | "conversation" | "campaign" | "customer" | "data_request" | "other";
   id: string;
   /** Human reference, e.g. MK-261007-10433, PO-261002-0311 */
   ref?: string | null;
@@ -167,7 +172,7 @@ export interface WorkSubject {
 }
 
 export const WorkSubject: z.ZodType<WorkSubject> = z.object({
-  type: z.enum(["order", "order_item", "shipment", "delivery_exception", "offer", "stock_item", "purchase_order", "approval_request", "case", "return", "refund", "payout", "payment", "reconciliation_check", "seller", "application", "appeal", "restriction", "change_request", "trust_report", "recommendation", "campaign", "customer", "data_request", "other"]),
+  type: z.enum(["order", "order_item", "shipment", "delivery_exception", "product", "offer", "stock_item", "purchase_order", "approval_request", "case", "return", "return_parcel", "refund", "payout", "payment", "dispute", "reconciliation_check", "seller", "application", "appeal", "restriction", "change_request", "trust_report", "recommendation", "enforcement", "moderation_item", "conversation", "campaign", "customer", "data_request", "other"]),
   id: z.string(),
   ref: z.string().describe("Human reference, e.g. MK-261007-10433, PO-261002-0311").nullish(),
   label: z.string().nullish(),
@@ -197,7 +202,7 @@ export interface WorkItem {
   queueName: string;
   area: string;
   /** What kind of work; how each kind closes is in the notes */
-  kind: "overdue_dispatch" | "missing_tracking" | "delivery_exception" | "seller_cannot_fulfill" | "low_stock" | "receiving" | "pick_pack" | "return_inspection" | "return_decision" | "approval_waiting" | "case_past_target" | "case_escalated" | "payout_failed" | "payment_check" | "payment_mismatch" | "chargeback" | "hold_review" | "product_review" | "application_waiting" | "launch_review" | "appeal_due" | "restriction_review" | "restriction_evidence" | "seller_performance" | "storefront_review" | "trust_report" | "trust_recommendation" | "data_request" | "seller_reply_overdue" | "unexpected_return_parcel" | "return_parcel_overdue" | "manual_task";
+  kind: "overdue_dispatch" | "missing_tracking" | "delivery_exception" | "seller_cannot_fulfill" | "low_stock" | "receiving" | "pick_pack" | "return_inspection" | "return_decision" | "approval_waiting" | "case_past_target" | "case_escalated" | "payout_failed" | "payment_check" | "payment_mismatch" | "chargeback" | "hold_review" | "product_review" | "application_waiting" | "launch_review" | "appeal_due" | "restriction_review" | "restriction_evidence" | "seller_performance" | "seller_owner_missing" | "storefront_review" | "trust_report" | "trust_recommendation" | "enforcement_reversal" | "review_moderation_overdue" | "official_store_reply" | "data_request" | "seller_reply_overdue" | "unexpected_return_parcel" | "return_parcel_overdue" | "manual_task";
   title: string;
   summary?: string | null;
   subject: WorkSubject;
@@ -228,6 +233,8 @@ export interface WorkItem {
   openedAt: string;
   updatedAt: string;
   resolvedAt?: string | null;
+  /** Resolved more than itemRetentionDays ago; left out of lists unless archived=true */
+  archived: boolean;
   /** { outcome: fixed_at_source|resolved|dismissed, note, by } */
   resolution?: unknown | null;
 }
@@ -238,7 +245,7 @@ export const WorkItem: z.ZodType<WorkItem> = z.object({
   queueKey: z.string(),
   queueName: z.string(),
   area: z.string(),
-  kind: z.enum(["overdue_dispatch", "missing_tracking", "delivery_exception", "seller_cannot_fulfill", "low_stock", "receiving", "pick_pack", "return_inspection", "return_decision", "approval_waiting", "case_past_target", "case_escalated", "payout_failed", "payment_check", "payment_mismatch", "chargeback", "hold_review", "product_review", "application_waiting", "launch_review", "appeal_due", "restriction_review", "restriction_evidence", "seller_performance", "storefront_review", "trust_report", "trust_recommendation", "data_request", "seller_reply_overdue", "unexpected_return_parcel", "return_parcel_overdue", "manual_task"]).describe("What kind of work; how each kind closes is in the notes"),
+  kind: z.enum(["overdue_dispatch", "missing_tracking", "delivery_exception", "seller_cannot_fulfill", "low_stock", "receiving", "pick_pack", "return_inspection", "return_decision", "approval_waiting", "case_past_target", "case_escalated", "payout_failed", "payment_check", "payment_mismatch", "chargeback", "hold_review", "product_review", "application_waiting", "launch_review", "appeal_due", "restriction_review", "restriction_evidence", "seller_performance", "seller_owner_missing", "storefront_review", "trust_report", "trust_recommendation", "enforcement_reversal", "review_moderation_overdue", "official_store_reply", "data_request", "seller_reply_overdue", "unexpected_return_parcel", "return_parcel_overdue", "manual_task"]).describe("What kind of work; how each kind closes is in the notes"),
   title: z.string(),
   summary: z.string().nullish(),
   get subject() {
@@ -285,15 +292,18 @@ export const WorkItem: z.ZodType<WorkItem> = z.object({
   openedAt: z.iso.datetime({ offset: true }),
   updatedAt: z.iso.datetime({ offset: true }),
   resolvedAt: z.iso.datetime({ offset: true }).nullish(),
+  archived: z.boolean().describe("Resolved more than itemRetentionDays ago; left out of lists unless archived=true"),
   resolution: z.unknown().describe("{ outcome: fixed_at_source|resolved|dismissed, note, by }").nullish(),
 }).register(common.apiTypes, { id: "workqueues.WorkItem" });
 
 export interface RaiseInput {
   queueKey: string;
   /** One of the work item kinds */
-  kind: "overdue_dispatch" | "missing_tracking" | "delivery_exception" | "seller_cannot_fulfill" | "low_stock" | "receiving" | "pick_pack" | "return_inspection" | "return_decision" | "approval_waiting" | "case_past_target" | "case_escalated" | "payout_failed" | "payment_check" | "payment_mismatch" | "chargeback" | "hold_review" | "product_review" | "application_waiting" | "launch_review" | "appeal_due" | "restriction_review" | "restriction_evidence" | "seller_performance" | "storefront_review" | "trust_report" | "trust_recommendation" | "data_request" | "seller_reply_overdue" | "unexpected_return_parcel" | "return_parcel_overdue" | "manual_task";
+  kind: "overdue_dispatch" | "missing_tracking" | "delivery_exception" | "seller_cannot_fulfill" | "low_stock" | "receiving" | "pick_pack" | "return_inspection" | "return_decision" | "approval_waiting" | "case_past_target" | "case_escalated" | "payout_failed" | "payment_check" | "payment_mismatch" | "chargeback" | "hold_review" | "product_review" | "application_waiting" | "launch_review" | "appeal_due" | "restriction_review" | "restriction_evidence" | "seller_performance" | "seller_owner_missing" | "storefront_review" | "trust_report" | "trust_recommendation" | "enforcement_reversal" | "review_moderation_overdue" | "official_store_reply" | "data_request" | "seller_reply_overdue" | "unexpected_return_parcel" | "return_parcel_overdue" | "manual_task";
   title: string;
   summary?: string | null;
+  /** The calling module (stored as items.source_module and shown on the item); required */
+  sourceModule: string;
   subject: WorkSubject;
   relatedSubjects?: WorkSubject[] | null;
   sellerId?: string | null;
@@ -311,9 +321,10 @@ export interface RaiseInput {
 
 export const RaiseInput: z.ZodType<RaiseInput> = z.object({
   queueKey: z.string(),
-  kind: z.enum(["overdue_dispatch", "missing_tracking", "delivery_exception", "seller_cannot_fulfill", "low_stock", "receiving", "pick_pack", "return_inspection", "return_decision", "approval_waiting", "case_past_target", "case_escalated", "payout_failed", "payment_check", "payment_mismatch", "chargeback", "hold_review", "product_review", "application_waiting", "launch_review", "appeal_due", "restriction_review", "restriction_evidence", "seller_performance", "storefront_review", "trust_report", "trust_recommendation", "data_request", "seller_reply_overdue", "unexpected_return_parcel", "return_parcel_overdue", "manual_task"]).describe("One of the work item kinds"),
+  kind: z.enum(["overdue_dispatch", "missing_tracking", "delivery_exception", "seller_cannot_fulfill", "low_stock", "receiving", "pick_pack", "return_inspection", "return_decision", "approval_waiting", "case_past_target", "case_escalated", "payout_failed", "payment_check", "payment_mismatch", "chargeback", "hold_review", "product_review", "application_waiting", "launch_review", "appeal_due", "restriction_review", "restriction_evidence", "seller_performance", "seller_owner_missing", "storefront_review", "trust_report", "trust_recommendation", "enforcement_reversal", "review_moderation_overdue", "official_store_reply", "data_request", "seller_reply_overdue", "unexpected_return_parcel", "return_parcel_overdue", "manual_task"]).describe("One of the work item kinds"),
   title: z.string(),
   summary: z.string().nullish(),
+  sourceModule: z.string().describe("The calling module (stored as items.source_module and shown on the item); required"),
   get subject() {
     return WorkSubject;
   },
@@ -786,20 +797,36 @@ export const WorkqueuesQueueChangedEvent: z.ZodType<WorkqueuesQueueChangedEvent>
   backupId: z.uuid(),
 });
 
-/** workqueues.day_end.completed: The day-end review is completed */
+/** workqueues.day_end.completed: The day-end review is completed (the day-end summary notifications sends to the shared roles) */
 export interface WorkqueuesDayEndCompletedEvent {
   reviewId: string;
   date: string;
+  completedBy: common.Actor;
+  completedAt: string;
   openItems: number;
+  overdueItems: number;
+  note?: string | null;
+  /** { key, title, summary, note? } per day-end item, as checked */
+  items: unknown[];
+  /** dayEndSharedRoles: who receives the summary */
+  roleKeys: string[];
 }
 
 export const WorkqueuesDayEndCompletedEvent: z.ZodType<WorkqueuesDayEndCompletedEvent> = z.object({
   reviewId: z.uuid(),
   date: z.iso.date(),
+  get completedBy() {
+    return common.Actor;
+  },
+  completedAt: z.iso.datetime({ offset: true }),
   openItems: z.number().int(),
+  overdueItems: z.number().int(),
+  note: z.string().nullish(),
+  items: z.array(z.unknown()).describe("{ key, title, summary, note? } per day-end item, as checked"),
+  roleKeys: z.array(z.string()).describe("dayEndSharedRoles: who receives the summary"),
 });
 
-/** workqueues.day_end.prepared: Today's day-end review is built (the day-end summary for dayEndSharedRoles) */
+/** workqueues.day_end.prepared: Today's day-end review is built and still open (the reminder for dayEndSharedRoles); not published when the review was already completed */
 export interface WorkqueuesDayEndPreparedEvent {
   reviewId: string;
   date: string;
@@ -823,9 +850,9 @@ export const WorkqueuesDayEndPreparedEvent: z.ZodType<WorkqueuesDayEndPreparedEv
 
 /** What other modules may call in-process: `ctx.use('workqueues')` (or `ctx.tryUse` for an optional dependency). */
 export interface WorkqueuesPublicApi {
-  /** Create or refresh a work item. Idempotent on dedupeKey: a second call updates title, deadline and amount instead of creating a duplicate. For checks that are not events (e.g. finance's daily reconciliation, returns' deadline job). Used by: finance, returns, support, sellers, trust, inventory, warehouse, customers. */
+  /** Create or refresh a work item. Idempotent on dedupeKey: a second call updates title, deadline and amount instead of creating a duplicate. For checks that are not events (e.g. finance's daily reconciliation, returns' deadline job). input.sourceModule names the caller. Used by: finance, returns, support, sellers, trust, inventory, warehouse, customers, reviews, purchasing, messaging, payments. */
   raise(input: RaiseInput): Promise<WorkItem>;
-  /** Close open items for a fixed source; returns how many closed Used by: finance, returns, support, sellers, trust. */
+  /** Close open items for a fixed source; returns how many closed Used by: finance, returns, support, sellers, trust, inventory, warehouse, reviews, purchasing, messaging, payments. */
   resolveBySource(dedupeKey: string, outcome: { note: string, by: common.Actor }): Promise<number>;
   /** Open items about one order, seller, case or payout, for detail pages Used by: orders, sellers, support, finance, graphql. */
   listForSubject(subjectType: string, subjectId: string): Promise<WorkItem[]>;
@@ -860,6 +887,7 @@ export interface WorkqueuesDb {
     escalation_label: string;
     default_deadline_minutes: number;
     business_hours_only: boolean;
+    pause_while_waiting: boolean;
     screen: string;
     screen_filter: string | null;
     visible_to_seller: boolean;
@@ -905,6 +933,8 @@ export interface WorkqueuesDb {
     priority: string;
     state: string;
     waiting_on: string | null;
+    /** set on wait, cleared on resume; used to push due_at when the queue pauses while waiting */
+    waiting_since: Date | null;
     escalation_level: number;
     escalated_to: string | null;
     dedupe_key: string;
@@ -916,6 +946,8 @@ export interface WorkqueuesDb {
     updated_at: Date;
     resolved_at: Date | null;
     resolution: Json | null;
+    /** resolved items past itemRetentionDays; rows stay */
+    archived_at: Date | null;
   };
   /** History: raised, refreshed, assigned, state changes, escalations, notes */
   item_events: {
@@ -1141,6 +1173,7 @@ export const endpoints = defineEndpoints({
         subjectRef: z.string().optional(),
         q: z.string().optional(),
         savedFilterId: z.uuid().optional(),
+        archived: z.stringbool().describe("true: only archived items (resolved more than itemRetentionDays ago)").optional(),
         sort: z.enum(["deadline", "oldest", "priority", "amount"]).optional(),
       }),
     paging: true,
@@ -1189,7 +1222,7 @@ export const endpoints = defineEndpoints({
     permission: "workqueues.items.work",
     scope: "staff",
     summary: "Assign to a person (owner and next action)",
-    desc: "Assigning someone else needs workqueues.items.assign-others; the assignee must hold the queue's owner role or be its lead or backup.",
+    desc: "Works on open, assigned, in-progress and waiting items; open items become assigned, the others keep their state. Assigning someone else needs workqueues.items.assign-others; the assignee must hold the queue's owner role or be its lead or backup.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1758,6 +1791,16 @@ export const spec = defineModuleSpec({
           "assigned"
         ],
         [
+          "in_progress",
+          "assign",
+          "in_progress"
+        ],
+        [
+          "waiting",
+          "assign",
+          "waiting"
+        ],
+        [
           "open",
           "start",
           "in_progress"
@@ -1895,8 +1938,8 @@ export const spec = defineModuleSpec({
       "workqueues.item.escalated": { when: "An item reaches the next escalation step", payload: () => WorkqueuesItemEscalatedEvent },
       "workqueues.item.resolved": { when: "An item is resolved or dismissed", payload: () => WorkqueuesItemResolvedEvent },
       "workqueues.queue.changed": { when: "Lead, backup or escalation route changes", payload: () => WorkqueuesQueueChangedEvent },
-      "workqueues.day_end.completed": { when: "The day-end review is completed", payload: () => WorkqueuesDayEndCompletedEvent },
-      "workqueues.day_end.prepared": { when: "Today's day-end review is built (the day-end summary for dayEndSharedRoles)", payload: () => WorkqueuesDayEndPreparedEvent },
+      "workqueues.day_end.completed": { when: "The day-end review is completed (the day-end summary notifications sends to the shared roles)", payload: () => WorkqueuesDayEndCompletedEvent },
+      "workqueues.day_end.prepared": { when: "Today's day-end review is built and still open (the reminder for dayEndSharedRoles); not published when the review was already completed", payload: () => WorkqueuesDayEndPreparedEvent },
     },
     consumes: {
       "shipping.dispatch.overdue": "Open an overdue_dispatch item about the order (seller-visible for marketplace sellers) with the payload exceptionId as a related delivery_exception subject, so Remind seller can call shipping; resolves on shipping.shipment.dispatched or orders.item.cancelled",
@@ -1926,11 +1969,11 @@ export const spec = defineModuleSpec({
       "payments.payment.authorized": "Resolve the payment_check item when the pending check ends authorized (capture may come later)",
       "payments.chargeback.opened": "Open a chargeback item in finance.chargebacks",
       "payments.chargeback.decided": "Resolve the chargeback item (won, lost or conceded; inquiries that close without a chargeback end as won)",
-      "catalog.product.submitted": "Open a product_review item",
+      "catalog.product.submitted": "Open a product_review item due at the payload's reviewDueAt (the catalog review target in business hours; queue default when absent)",
       "catalog.product.approved": "Resolve product review items",
       "catalog.product.changes_requested": "Resolve product review items",
       "catalog.product.rejected": "Resolve product review items",
-      "sellers.application.submitted": "Open an application_waiting item with the decision target as deadline",
+      "sellers.application.submitted": "Open an application_waiting item due at the payload's decisionTargetAt (queue default when absent)",
       "sellers.application.information_provided": "Reopen the application item for review",
       "sellers.application.decided": "Resolve application items",
       "sellers.launch_review.requested": "Open a launch_review item in sellers.launch_reviews",
@@ -1947,11 +1990,12 @@ export const spec = defineModuleSpec({
       "trust.report.resolved": "Resolve trust report items",
       "trust.recommendation.routed": "Open a trust_recommendation item in the owning team's queue (Catalog, Seller Manager, Support, Finance)",
       "trust.recommendation.decided": "Resolve the recommendation item",
-      "messaging.reply.overdue": "Open a seller-visible seller_reply_overdue task",
+      "messaging.reply.overdue": "Open a seller-visible seller_reply_overdue task. Skipped when officialStore is true: messaging keeps its own official_store_reply item for the Official Store (staff owe the reply)",
       "messaging.message.sent": "Resolve seller_reply_overdue when the seller replies",
       "customers.data_export.requested": "Open a data_request item with the promised delivery time",
       "customers.data_export.ready": "Resolve the data request item",
-      "warehouse.return_parcel.received": "Resolve the return_parcel_overdue item for that parcel"
+      "warehouse.return_parcel.received": "Resolve the return_parcel_overdue item for that parcel",
+      "reviews.moderation.decided": "Resolve the review_moderation_overdue item for that moderation item (dedupeKey review_moderation_overdue:<moderationItemId>)"
     },
   },
   jobs: {
@@ -1969,7 +2013,7 @@ export const spec = defineModuleSpec({
     },
     "workqueues.day-end-prepare": {
       "schedule": "daily 15:00 market time",
-      "does": "Build today's day-end review from open items and other modules' forecasts; publish workqueues.day_end.prepared (the summary notifications sends)"
+      "does": "Build today's day-end review from open items and other modules' forecasts (refresh it if staff opened it earlier); publish workqueues.day_end.prepared as the reminder only while it is still open. The summary goes out on completion (workqueues.day_end.completed)"
     },
     "workqueues.day-end-close": {
       "schedule": "daily 23:59 market time",
@@ -1977,7 +2021,7 @@ export const spec = defineModuleSpec({
     },
     "workqueues.archive": {
       "schedule": "monthly",
-      "does": "Move resolved items older than itemRetentionDays to cold storage"
+      "does": "Mark resolved items older than itemRetentionDays archived (archived_at). Rows, notes and history stay in Postgres; archived items leave the default lists and counts and remain reachable by id and with archived=true. Nothing is deleted"
     }
   },
   settings: {
@@ -2009,7 +2053,7 @@ export const spec = defineModuleSpec({
     },
     "itemRetentionDays": {
       "default": 400,
-      "desc": "Resolved items kept online",
+      "desc": "Resolved items stay in the default lists this long, then are archived (kept in Postgres)",
       "type": "duration",
       "min": 30,
       "unit": "days"
@@ -2025,6 +2069,7 @@ export const spec = defineModuleSpec({
         "purchasing.receiving",
         "inventory.low_stock",
         "inventory.reservations",
+        "official_store.messages",
         "returns.inspection",
         "returns.decisions",
         "finance.daily_checks",
@@ -2038,7 +2083,9 @@ export const spec = defineModuleSpec({
         "sellers.restrictions",
         "sellers.appeals",
         "sellers.performance",
+        "sellers.accounts",
         "trust.reports",
+        "reviews.moderation",
         "access.approvals",
         "customers.data_requests"
       ],
@@ -2108,6 +2155,10 @@ export const spec = defineModuleSpec({
         "nullable": false
       },
       "business_hours_only": {
+        "type": "bool",
+        "nullable": false
+      },
+      "pause_while_waiting": {
         "type": "bool",
         "nullable": false
       },
@@ -2271,6 +2322,10 @@ export const spec = defineModuleSpec({
         "type": "text",
         "nullable": true
       },
+      "waiting_since": {
+        "type": "timestamptz",
+        "nullable": true
+      },
       "escalation_level": {
         "type": "int",
         "nullable": false
@@ -2313,6 +2368,10 @@ export const spec = defineModuleSpec({
       },
       "resolution": {
         "type": "jsonb",
+        "nullable": true
+      },
+      "archived_at": {
+        "type": "timestamptz",
         "nullable": true
       }
     },

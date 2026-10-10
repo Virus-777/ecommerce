@@ -14,12 +14,18 @@
  *   change_request:<changeRequestId>    trust_report:<reportId>            trust_recommendation:<recommendationId>
  *   reply_overdue:<conversationId>      data_request:<requestId>
  * Raised by warehouse (raise()): return_parcel:<parcelId> (unexpected), return_parcel_overdue:<parcelId>,
- * both with the parcel as subject ('other'); queues per kind are in domain/catalog.ts KIND_QUEUES.
+ * both with the parcel as subject (return_parcel; 'other' before pass 3); queues per kind are in
+ * domain/catalog.ts KIND_QUEUES. Raised by reviews: review_moderation_overdue:<moderationItemId>, closed
+ * here on reviews.moderation.decided by that dedupe key. Raised and closed by their modules with
+ * resolveBySource: seller_owner_missing (sellers), official_store_reply (messaging), enforcement_reversal (trust).
+ *
+ * Subjects typed in pass 3 (product, dispute, conversation, return_parcel) were 'other' before: closes
+ * match both, so items opened before the upgrade still close.
  */
 import type { EventName, EventPayload } from '../../../kernel/events/index.js';
 import type { Money } from '../../../spec/common.js';
 import type { spec, WorkSubject } from '../../../spec/workqueues.js';
-import type { Kind, Priority } from './catalog.js';
+import { SUBJECT_TYPES, type Kind, type Priority } from './catalog.js';
 
 export type SubjectType = WorkSubject['type'];
 
@@ -72,6 +78,8 @@ export interface Match {
 export interface CloseDecl<P> {
   kinds: Kind[];
   subjects: (p: P) => (Match | null | undefined | false)[];
+  /** Close the active item of these dedupe keys too (items another module raised with raise()) */
+  dedupeKeys?: (p: P) => (string | null | undefined | false)[];
   note: (p: P) => string;
 }
 
@@ -95,8 +103,8 @@ const list = (...s: (WorkSubject | null)[]) => s.filter((x): x is WorkSubject =>
 const M = (type: SubjectType, id: string | null | undefined): Match | null => (id ? { type, id } : null);
 const L = (label: string, screen: string, state?: string | null): Link => ({ label, screen, ...(state ? { state } : {}) });
 
-const SUBJECT_TYPES = new Set<string>(['order', 'order_item', 'shipment', 'delivery_exception', 'offer', 'stock_item', 'purchase_order', 'approval_request', 'case', 'return', 'refund', 'payout', 'payment', 'reconciliation_check', 'seller', 'application', 'appeal', 'restriction', 'change_request', 'trust_report', 'recommendation', 'campaign', 'customer', 'data_request', 'other']);
-const subjectTypeOf = (t: string | null | undefined): SubjectType => (t && SUBJECT_TYPES.has(t) ? (t as SubjectType) : 'other');
+const SUBJECT_TYPE_SET = new Set<string>(SUBJECT_TYPES);
+const subjectTypeOf = (t: string | null | undefined): SubjectType => (t && SUBJECT_TYPE_SET.has(t) ? (t as SubjectType) : 'other');
 
 /** support.case.escalated `to` → owner role of the escalated case item */
 export const CASE_TEAM_ROLES: Record<string, string> = {
@@ -126,6 +134,9 @@ export const riskPriority = (score: number): Priority => (score >= 80 ? 'urgent'
 const SELLER_MISSED = new Set(['seller_no_response', 'seller_missed_inspection', 'response_deadline_missed', 'seller_missed_deadline']);
 
 const DISPATCH_KINDS: Kind[] = ['overdue_dispatch', 'missing_tracking', 'seller_cannot_fulfill'];
+
+/** A product subject (typed since pass 3; 'other' before) */
+const product = (id: string) => [M('product', id), M('other', id)];
 
 /* ------------------------------------------------------------------ the table */
 
@@ -494,7 +505,7 @@ export const INTAKE: IntakeTable = {
             queueKey: 'finance.chargebacks',
             title: `Chargeback ${p.ref}`,
             summary: `${human(p.kind)} opened by the provider`,
-            subject: { type: 'other', id: p.disputeId, ref: p.ref, label: 'Chargeback' },
+            subject: { type: 'dispute', id: p.disputeId, ref: p.ref, label: 'Chargeback' },
             related: list(S('order', p.orderId), S('seller', p.sellerId)),
             sellerId: p.sellerId ?? null,
             amount: p.amount,
@@ -509,7 +520,7 @@ export const INTAKE: IntakeTable = {
   },
 
   'payments.chargeback.decided': {
-    closes: [{ kinds: ['chargeback'], subjects: (p) => [M('other', p.disputeId)], note: (p) => `Chargeback ${p.outcome}` }],
+    closes: [{ kinds: ['chargeback'], subjects: (p) => [M('dispute', p.disputeId), M('other', p.disputeId)], note: (p) => `Chargeback ${p.outcome}` }],
   },
 
   /* ---------------------------------------------------------------- catalog */
@@ -520,15 +531,17 @@ export const INTAKE: IntakeTable = {
         queues: ['catalog.product_review'],
         title: 'Product to review',
         dedupe: 'product_review:{productId}',
-        deadline: 'now + queue default (business hours)',
+        deadline: 'event.reviewDueAt (catalog review target, business hours), else queue default',
         priority: 'normal',
         build: (p) => [
           {
             queueKey: 'catalog.product_review',
             title: p.ownerSellerId ? 'Seller product to review' : 'Official Store product to review',
-            subject: { type: 'other', id: p.productId, label: 'Product' },
+            summary: [p.ref, p.kind ? human(p.kind) : null].filter(Boolean).join(', ') || null,
+            subject: { type: 'product', id: p.productId, label: p.title || 'Product' },
             related: list(S('seller', p.ownerSellerId)),
             sellerId: p.ownerSellerId ?? null,
+            dueAt: p.reviewDueAt ?? null,
             dedupeKey: `product_review:${p.productId}`,
             links: [L('Review product', 'admin/product-review', p.productId)],
           },
@@ -536,9 +549,9 @@ export const INTAKE: IntakeTable = {
       },
     ],
   },
-  'catalog.product.approved': { closes: [{ kinds: ['product_review'], subjects: (p) => [M('other', p.productId)], note: () => 'Product approved' }] },
-  'catalog.product.changes_requested': { closes: [{ kinds: ['product_review'], subjects: (p) => [M('other', p.productId)], note: (p) => `Changes requested: ${p.reason}` }] },
-  'catalog.product.rejected': { closes: [{ kinds: ['product_review'], subjects: (p) => [M('other', p.productId)], note: (p) => `Product rejected: ${p.reason}` }] },
+  'catalog.product.approved': { closes: [{ kinds: ['product_review'], subjects: (p) => product(p.productId), note: () => 'Product approved' }] },
+  'catalog.product.changes_requested': { closes: [{ kinds: ['product_review'], subjects: (p) => product(p.productId), note: (p) => `Changes requested: ${p.reason}` }] },
+  'catalog.product.rejected': { closes: [{ kinds: ['product_review'], subjects: (p) => product(p.productId), note: (p) => `Product rejected: ${p.reason}` }] },
 
   /* ---------------------------------------------------------------- sellers */
   'sellers.application.submitted': {
@@ -548,16 +561,17 @@ export const INTAKE: IntakeTable = {
         queues: ['sellers.applications'],
         title: 'Seller application to review',
         dedupe: 'application:{applicationId}',
-        deadline: 'now + queue default (business hours; the decision target)',
+        deadline: 'event.decisionTargetAt (the decision target), else queue default (business hours)',
         priority: 'normal (high when invited)',
         build: (p) => [
           {
             queueKey: 'sellers.applications',
             title: 'Seller application to review',
-            summary: `${human(p.sellerType)} seller, ${p.categoryIds.length} categor${p.categoryIds.length === 1 ? 'y' : 'ies'}${p.invited ? ', invited' : ''}`,
-            subject: { type: 'application', id: p.applicationId },
+            summary: `${human(p.sellerType)} seller, ${p.categoryIds.length} categor${p.categoryIds.length === 1 ? 'y' : 'ies'}${p.invited ? ', invited' : ''}${p.duplicateCount ? `, ${p.duplicateCount} possible duplicate${p.duplicateCount === 1 ? '' : 's'}` : ''}`,
+            subject: { type: 'application', id: p.applicationId, ...(p.ref ? { ref: p.ref } : {}) },
             related: list(S('seller', p.sellerId)),
             sellerId: p.sellerId,
+            dueAt: p.decisionTargetAt ?? null,
             priority: p.invited ? 'high' : 'normal',
             dedupeKey: `application:${p.applicationId}`,
             links: [L('Review application', 'admin/seller-application', p.applicationId)],
@@ -792,16 +806,16 @@ export const INTAKE: IntakeTable = {
       {
         kind: 'seller_reply_overdue',
         queues: ['sellers.performance'],
-        title: 'Seller reply overdue',
+        title: 'Seller reply overdue (skipped for the Official Store: messaging raises official_store_reply)',
         dedupe: 'reply_overdue:{conversationId}',
         deadline: 'now + queue default',
         priority: 'normal',
         build: (p) => [
-          {
+          !p.officialStore && {
             queueKey: 'sellers.performance',
             title: 'Reply to the customer message',
             summary: `The reply target ${p.dueAt} passed`,
-            subject: { type: 'other', id: p.conversationId, label: 'Conversation' },
+            subject: { type: 'conversation', id: p.conversationId, label: 'Conversation' },
             related: list(S('order', p.orderId), S('seller', p.sellerId)),
             sellerId: p.sellerId,
             dedupeKey: `reply_overdue:${p.conversationId}`,
@@ -813,7 +827,7 @@ export const INTAKE: IntakeTable = {
     ],
   },
   'messaging.message.sent': {
-    closes: [{ kinds: ['seller_reply_overdue'], subjects: (p) => (p.authorKind === 'seller' ? [M('other', p.conversationId)] : []), note: () => 'The seller replied' }],
+    closes: [{ kinds: ['seller_reply_overdue'], subjects: (p) => (p.authorKind === 'seller' ? [M('conversation', p.conversationId), M('other', p.conversationId)] : []), note: () => 'The seller replied' }],
   },
   'customers.data_export.requested': {
     opens: [
@@ -844,7 +858,19 @@ export const INTAKE: IntakeTable = {
 
   /* ---------------------------------------------------------------- warehouse (raise() opens; unexpected_return_parcel is closed by hand) */
   'warehouse.return_parcel.received': {
-    closes: [{ kinds: ['return_parcel_overdue'], subjects: (p) => [M('other', p.parcelId), M('return', p.returnId)], note: (p) => `Parcel received at ${p.receivedAt} (${human(p.parcelCondition)})` }],
+    closes: [{ kinds: ['return_parcel_overdue'], subjects: (p) => [M('return_parcel', p.parcelId), M('other', p.parcelId), M('return', p.returnId)], note: (p) => `Parcel received at ${p.receivedAt} (${human(p.parcelCondition)})` }],
+  },
+
+  /* ---------------------------------------------------------------- reviews (raise() opens review_moderation_overdue) */
+  'reviews.moderation.decided': {
+    closes: [
+      {
+        kinds: ['review_moderation_overdue'],
+        subjects: (p) => [M('moderation_item', p.moderationItemId)],
+        dedupeKeys: (p) => [`review_moderation_overdue:${p.moderationItemId}`],
+        note: (p) => `Moderation decided: ${human(p.decision)}`,
+      },
+    ],
   },
 };
 

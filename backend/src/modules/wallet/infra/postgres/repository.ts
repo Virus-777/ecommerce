@@ -243,6 +243,24 @@ export function createPostgresWalletRepository(db: Kysely<WalletDb>, inbox: Inbo
       return db.selectFrom('gift_cards').selectAll().where('state', '=', 'active').where('expires_at', '<=', now).orderBy('expires_at').orderBy('id').limit(limit).execute();
     },
 
+    /* ---------------------------------------------------------------- gift card batches */
+    async insertBatch(row) {
+      await db.insertInto('gift_card_batches').values(row).onConflict((oc) => oc.doNothing()).execute();
+      return db.selectFrom('gift_card_batches').selectAll().where('id', '=', row.id).executeTakeFirstOrThrow();
+    },
+    async getBatch(id, o) {
+      let q = db.selectFrom('gift_card_batches').selectAll().where('id', '=', id);
+      if (o?.forUpdate) q = q.forUpdate();
+      return q.executeTakeFirst();
+    },
+    async updateBatch(id, patch) {
+      return db.updateTable('gift_card_batches').set(patch).where('id', '=', id).returningAll().executeTakeFirstOrThrow();
+    },
+    async clearExpiredBatchCodes(now) {
+      const r = await db.updateTable('gift_card_batches').set({ codes_ciphertext: null }).where('codes_ciphertext', 'is not', null).where('codes_expire_at', '<=', now).executeTakeFirst();
+      return Number(r.numUpdatedRows ?? 0);
+    },
+
     /* ---------------------------------------------------------------- loyalty */
     async loyaltyPoints(customerId) {
       const r = await db.selectFrom('loyalty_entries').select(sql<number>`coalesce(sum(points), 0)::int`.as('points')).where('customer_id', '=', customerId).executeTakeFirst();
@@ -263,6 +281,28 @@ export function createPostgresWalletRepository(db: Kysely<WalletDb>, inbox: Inbo
       return rows.rows.map(
         (r): BalanceSnapshot => ({ customerId: r.customer_id, available: n(r.available), held: n(r.held), ledgerSum: n(r.ledger_sum), lotsSum: n(r.lots_sum), holdsSum: n(r.holds_sum) }),
       );
+    },
+    async liabilityNow() {
+      const r = await sql<{ available: number; held: number; accounts: number }>`
+        select coalesce(sum(available), 0)::bigint as available, coalesce(sum(held), 0)::bigint as held, count(*)::int as accounts
+        from wallet.accounts`.execute(db);
+      const x = r.rows[0];
+      return { available: n(x?.available), held: n(x?.held), accounts: n(x?.accounts) };
+    },
+    async liabilityAt(asOf) {
+      // total: the ledger up to asOf (append-only, so the sum is the balance then);
+      // held: holds whose 'hold' entry is at or before asOf and that no capture or release ended by then
+      const r = await sql<{ total: number; held: number; accounts: number }>`
+        select
+          coalesce((select sum(amount) from wallet.ledger where at <= ${asOf}), 0)::bigint as total,
+          coalesce((
+            select sum(h.amount) from wallet.holds h
+            where exists (select 1 from wallet.ledger e where e.hold_id = h.id and e.kind = 'hold' and e.at <= ${asOf})
+              and not exists (select 1 from wallet.ledger e where e.hold_id = h.id and e.kind in ('capture', 'release') and e.at <= ${asOf})
+          ), 0)::bigint as held,
+          (select count(distinct customer_id) from wallet.ledger where at <= ${asOf})::int as accounts`.execute(db);
+      const x = r.rows[0];
+      return { total: n(x?.total), held: n(x?.held), accounts: n(x?.accounts) };
     },
   };
   return repo;

@@ -222,7 +222,9 @@ export class Setup {
 
   async getTargets(): Promise<DispatchTargets> {
     const t = await this.core.targets();
-    return { official: t.official, sellerDefault: t.seller_default, effectiveFrom: t.effective_from.toISOString(), note: 'Example targets. Final service standards are in the seller agreement.' };
+    // the allowed handling range is shown read-only from the sellerHandlingRange setting (its only source)
+    const [allowedMinDays, allowedMaxDays] = (await this.core.cfg()).sellerHandlingRange;
+    return { official: t.official, sellerDefault: { ...t.seller_default, allowedMinDays, allowedMaxDays }, effectiveFrom: t.effective_from.toISOString(), note: 'Example targets. Final service standards are in the seller agreement.' };
   }
 
   async updateTargets(input: DispatchTargetsInput, by: By): Promise<DispatchTargets> {
@@ -233,8 +235,8 @@ export class Setup {
     if (!isTime(o.cutoff)) issues.push({ path: 'official.cutoff', message: 'Use HH:mm (market time)' });
     if (!o.businessDays.length) issues.push({ path: 'official.businessDays', message: 'Choose at least one dispatch day' });
     if (o.businessDays.some((d) => !(WEEKDAYS as readonly string[]).includes(d))) issues.push({ path: 'official.businessDays', message: 'Unknown day' });
-    if (s.allowedMinDays < 0 || s.allowedMinDays > s.allowedMaxDays) issues.push({ path: 'sellerDefault.allowedMinDays', message: 'The allowed range is invalid' });
-    if (s.dispatchWithinBusinessDays < s.allowedMinDays || s.dispatchWithinBusinessDays > s.allowedMaxDays) issues.push({ path: 'sellerDefault.dispatchWithinBusinessDays', message: 'The default must be inside the allowed range' });
+    const [allowedMinDays, allowedMaxDays] = (await this.core.cfg()).sellerHandlingRange;
+    if (!Number.isInteger(s.dispatchWithinBusinessDays) || s.dispatchWithinBusinessDays < allowedMinDays || s.dispatchWithinBusinessDays > allowedMaxDays) issues.push({ path: 'sellerDefault.dispatchWithinBusinessDays', message: `The default must be inside the allowed range (${allowedMinDays} to ${allowedMaxDays} business days, setting sellerHandlingRange)` });
     if (s.validTrackingWithinHours <= 0) issues.push({ path: 'sellerDefault.validTrackingWithinHours', message: 'Must be positive' });
     if (s.onTimeTargetPct < 0 || s.onTimeTargetPct > 100) issues.push({ path: 'sellerDefault.onTimeTargetPct', message: 'A percentage between 0 and 100' });
     const from = new Date(input.effectiveFrom);
@@ -245,12 +247,12 @@ export class Setup {
     const row = await this.repo.insert('dispatch_targets', {
       id: newId(),
       official: { ...o, onTimeRate30d: o.onTimeRate30d ?? current.official.onTimeRate30d ?? null },
-      seller_default: s,
+      seller_default: { dispatchWithinBusinessDays: s.dispatchWithinBusinessDays, allowedMinDays, allowedMaxDays, validTrackingWithinHours: s.validTrackingWithinHours, onTimeTargetPct: s.onTimeTargetPct },
       effective_from: from.getTime() < this.core.now().getTime() ? this.core.now() : from,
       set_by: by.actor,
       reason: input.reason.trim(),
     });
-    const after = { official: row.official, sellerDefault: row.seller_default, effectiveFrom: row.effective_from.toISOString(), note: before.note };
+    const after = { official: row.official, sellerDefault: { ...row.seller_default, allowedMinDays, allowedMaxDays }, effectiveFrom: row.effective_from.toISOString(), note: before.note };
     await this.core.audit({ action: 'shipping.dispatch_targets.update', actionLabel: 'Changed dispatch targets', category: 'settings', target: { type: 'dispatch_targets', id: row.id, label: 'Dispatch targets' }, before, after, reason: input.reason }, by);
     return after;
   }

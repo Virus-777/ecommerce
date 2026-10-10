@@ -20,6 +20,7 @@ import type {
   InboundReceipt,
   InventoryPublicApi,
   Location,
+  LowStockDigestItem,
   LocationInput,
   LowStockRow,
   Movement,
@@ -125,6 +126,17 @@ const BATCH = 200;
 const STALE_ALLOCATION_DAYS = 14;
 /** Review date of units moved into Damaged or held without one (damage at packing, damaged on receipt) */
 const DEFAULT_HOLD_REVIEW_DAYS = 14;
+
+/** Reservations made by allocateForOrder carry this key prefix (then source kind): they never expire and releaseHold may release them */
+const ORDER_ALLOCATION_PREFIX = 'order-allocation:';
+type AllocationSource = 'checkout' | 'replacement' | 'exchange';
+const allocationSourceOf = (r: Pick<Row<'reservations'>, 'key'>): AllocationSource => {
+  if (!r.key.startsWith(ORDER_ALLOCATION_PREFIX)) return 'checkout';
+  return r.key.slice(ORDER_ALLOCATION_PREFIX.length).startsWith('exchange:') ? 'exchange' : 'replacement';
+};
+/** Movements that put sold units back on the shelf (net of dispatches in getSalesRate) */
+const RESTOCK_REASONS = ['return_restock', 'return_different_condition', 'returned_item_restocked'];
+const DIGEST_ITEMS = 50;
 
 const invalid = (path: string, message: string) => new AppError('VALIDATION_FAILED', message, { issues: [{ path, message }] });
 const notFound = (what = 'Stock item') => new AppError('NOT_FOUND', `${what} not found`);
@@ -317,15 +329,15 @@ export class InventoryService implements InventoryPublicApi {
     const items = await this.#skus(itemIds);
     const levels = await this.repo.levels(itemIds);
     const locations = new Map((await this.repo.locations({ ids: [...new Set(levels.map((l) => l.location_id))] })).map((l) => [l.id, l]));
-    const waiting = await this.repo.discrepanciesWhere({ itemIds, states: ['open'], kinds: ['pick_shortage'] });
+    // no backorders at launch: open pick shortages on these SKUs are shown so they can be reallocated first
+    const shortages = await this.repo.discrepanciesWhere({ itemIds, states: ['open'], kinds: ['pick_shortage'] });
     return rows.map((r) => {
       const own = lines.filter((l) => l.inbound_id === r.id);
       const ownItems = new Set(own.map((l) => l.stock_item_id));
-      const orders = new Set(waiting.filter((d) => ownItems.has(d.stock_item_id) && d.order_id).map((d) => d.order_id));
       return toInbound(
         r,
         own.map((l) => toInboundLine(l, items.get(l.stock_item_id), sellableAvailable(levels.filter((x) => x.stock_item_id === l.stock_item_id), locations) === 0, this.currency)),
-        orders.size,
+        shortages.filter((d) => ownItems.has(d.stock_item_id)).length,
       );
     });
   }
@@ -569,27 +581,273 @@ export class InventoryService implements InventoryPublicApi {
     return this.#reservationApi(reservationId);
   }
 
-  /** Abandoned checkout or failed purchase */
+  /**
+   * Abandoned checkout or failed purchase; also releases an allocation made with allocateForOrder that is no longer
+   * needed (cancelled replacement or exchange). A normal order's allocation is released by cancelling its items.
+   */
   async releaseHold(reservationId: string, reason: string): Promise<void> {
     const r = await this.repo.get('reservations', reservationId);
     if (!r) throw notFound('Reservation');
     if (r.state === 'released' || r.state === 'expired') return; // already done (idempotent)
-    if (r.state !== 'held') {
+    const source = allocationSourceOf(r);
+    const releasable = (state: string) => state === 'held' || (source !== 'checkout' && state === 'allocated');
+    if (!releasable(r.state)) {
       throw new AppError('ILLEGAL_TRANSITION', 'The order was accepted: its units are released by cancelling order items', { machine: 'Reservation', from: r.state, event: 'release', allowed: reservationMachine.eventsFrom(r.state as ReservationState) });
     }
+    const label = source === 'checkout' ? 'Checkout hold' : `${source === 'exchange' ? 'Exchange' : 'Replacement'} allocation${r.order_ref ? `, order ${r.order_ref}` : ''}`;
     const result = await this.#stock('hold_released', async (st) => {
       const locked = (await st.tx.get('reservations', reservationId, { forUpdate: true }))!;
-      if (locked.state !== 'held') return null;
+      if (!releasable(locked.state)) return null;
       const lines = await st.tx.lines([locked.id], { forUpdate: true });
-      return this.#releaseLines(st, locked, lines.filter((l) => l.state === 'held'), {
-        reason: 'hold_released',
+      return this.#releaseLines(st, locked, lines.filter((l) => l.state === 'held' || l.state === 'allocated'), {
+        reason: source === 'checkout' ? 'hold_released' : 'allocation_released',
         note: reason || null,
-        releasedReason: reason || 'Abandoned checkout',
-        ref: { kind: 'reservation', id: locked.id, label: 'Checkout hold' },
+        releasedReason: reason || (source === 'checkout' ? 'Abandoned checkout' : `${label} no longer needed`),
+        ref: { kind: 'reservation', id: locked.id, label },
         actor: SYSTEM_ACTOR,
       });
     });
-    if (result) this.#publishReleased(result.reservation, result.changed, 'abandoned');
+    if (result) await this.#publishReleased(result.reservation, result.changed, source === 'checkout' ? 'abandoned' : 'cancelled');
+  }
+
+  /**
+   * All-or-nothing allocation with no expiry for a replacement or exchange shipment of an existing order
+   * (Available → Reserved, state allocated). Same key returns the existing reservation. Fulfilled on
+   * shipping.shipment.dispatched (replacement shipments) like any allocation; released with releaseHold.
+   */
+  async allocateForOrder(input: {
+    key: string;
+    orderId: string;
+    orderRef?: string;
+    source: { kind: 'replacement' | 'exchange'; id: string; ref?: string };
+    lines: { stockItemId: string; quantity: number; orderItemId?: string }[];
+    actor: common.Actor;
+  }): Promise<Reservation> {
+    if (!input?.key?.trim()) throw invalid('key', 'An allocation needs its idempotency key');
+    if (!isUuid(input.orderId)) throw invalid('orderId', 'Not an order id');
+    if (input.source?.kind !== 'replacement' && input.source?.kind !== 'exchange') throw invalid('source.kind', 'Allocate for a replacement or an exchange');
+    if (!input.lines?.length) throw invalid('lines', 'Nothing to allocate');
+    const wanted = new Map<string, number>();
+    for (const [i, l] of input.lines.entries()) {
+      if (!isUuid(l.stockItemId)) throw invalid(`lines[${i}].stockItemId`, 'Not a stock item id');
+      if (!Number.isInteger(l.quantity) || l.quantity <= 0) throw invalid(`lines[${i}].quantity`, 'Quantity must be at least 1');
+      if (l.orderItemId != null && !isUuid(l.orderItemId)) throw invalid(`lines[${i}].orderItemId`, 'Not an order item id');
+      wanted.set(l.stockItemId, (wanted.get(l.stockItemId) ?? 0) + l.quantity);
+    }
+    const key = `${ORDER_ALLOCATION_PREFIX}${input.source.kind}:${input.key.trim()}`;
+    const existing = await this.repo.reservationByKey(key);
+    if (existing) return (await this.#reservationsApi([existing]))[0]!;
+    const what = input.source.kind === 'exchange' ? 'Exchange' : 'Replacement';
+    const ref: MovementRef = { kind: 'order', id: input.orderId, label: `${what}${input.source.ref ? ` ${input.source.ref}` : ''}${input.orderRef ? `, order ${input.orderRef}` : ''}` };
+    const id = newId();
+    const created = await this.#stock(
+      'order_allocated',
+      async (st) => {
+        const now = st.now;
+        const inserted = await st.tx.insert('reservations', { id, key, order_id: input.orderId, order_ref: input.orderRef ?? null, state: 'allocated', expires_at: null, released_reason: null, created_at: now, updated_at: now }, { ignoreConflict: true });
+        if (!inserted) return false; // the same key won a race
+        await st.lock([...wanted.keys()]);
+        const short: { stockItemId: string; requested: number; available: number }[] = [];
+        for (const [itemId, qty] of wanted) {
+          const item = st.items.get(itemId);
+          const available = item && !item.archived ? st.sellableAvailable(itemId) : 0;
+          if (available < qty) short.push({ stockItemId: itemId, requested: qty, available });
+        }
+        if (short.length) throw inventoryError('INSUFFICIENT_STOCK', short.length === 1 ? 'Not enough stock for one item' : `Not enough stock for ${short.length} items`, { lines: short });
+        for (const l of input.lines) {
+          let left = l.quantity;
+          for (const level of st.sellableLevels(l.stockItemId)) {
+            if (left <= 0) break;
+            const take = Math.min(left, level.available);
+            await st.move(l.stockItemId, level.location_id, 'available', 'reserved', take, { reason: 'allocated_for_order', note: input.source.ref ?? null, ref, actor: input.actor });
+            await st.tx.insert('reservation_lines', { id: newId(), reservation_id: id, stock_item_id: l.stockItemId, location_id: level.location_id, order_item_id: l.orderItemId ?? null, quantity: take, fulfilled_qty: 0, released_qty: 0, state: 'allocated' });
+            left -= take;
+          }
+        }
+        return true;
+      },
+      { actor: input.actor },
+    );
+    const row = created ? (await this.repo.get('reservations', id))! : (await this.repo.reservationByKey(key))!;
+    if (created) await this.#publishAllocated(id, input.orderId, await this.repo.lines([id]), input.source.kind, { actor: input.actor });
+    return (await this.#reservationsApi([row]))[0]!;
+  }
+
+  /** Stock locations with code, name, address and time zone (company warehouses by default), default first */
+  async getLocations(opts: { ownerType?: 'official' | 'seller'; sellerId?: string; activeOnly?: boolean } = {}): Promise<Location[]> {
+    const ownerType = opts?.ownerType ?? (opts?.sellerId ? 'seller' : 'official');
+    if (opts?.sellerId && !isUuid(opts.sellerId)) return [];
+    const rows = (await this.repo.locations({ ownerType, ...(opts?.sellerId ? { sellerId: opts.sellerId } : {}) })).filter((l) => !opts?.activeOnly || l.active);
+    rows.sort((a, b) => Number(b.is_default) - Number(a.is_default) || a.code.localeCompare(b.code));
+    return rows.map(toLocation);
+  }
+
+  /** The default company location: the Official Store ships-from address, receiving and return default. Null before the first location exists. */
+  async getDefaultLocation(): Promise<Location | null> {
+    const row = await this.#officialDefault();
+    return row ? toLocation(row) : null;
+  }
+
+  /**
+   * Keeps a stock item in step with its offer or catalog record (variant change, catalog merge, SKU or condition
+   * change). Quantities and history stay on the item. SKU_TAKEN when another item of the same owner has the SKU.
+   * Publishes inventory.stock.changed (cause item_updated) so read models re-key.
+   */
+  async updateStockItem(stockItemId: string, patch: { productId?: string; variantId?: string; condition?: string; sku?: string; label?: string; offerId?: string }, actor: common.Actor): Promise<StockItem> {
+    const before = await this.#item(stockItemId);
+    const next: Partial<Row<'stock_items'>> = {};
+    for (const [field, column] of [
+      ['productId', 'product_id'],
+      ['variantId', 'variant_id'],
+      ['offerId', 'offer_id'],
+    ] as const) {
+      const v = patch?.[field];
+      if (v === undefined) continue;
+      if (!isUuid(v)) throw invalid(field, `Not a valid ${field.replace('Id', '')} id`);
+      if (v !== before[column]) next[column] = v;
+    }
+    for (const [field, column] of [
+      ['condition', 'condition'],
+      ['sku', 'sku'],
+      ['label', 'label'],
+    ] as const) {
+      const v = patch?.[field];
+      if (v === undefined) continue;
+      const t = String(v ?? '').trim();
+      if (!t) throw invalid(field, `Enter the ${field === 'sku' ? 'SKU' : field}`);
+      if (t !== before[column]) next[column] = t;
+    }
+    if (!Object.keys(next).length) return this.#itemApi(before);
+    if (next.sku) {
+      const taken = (await this.repo.items({ ownerType: before.owner_type as 'official' | 'seller', ...(before.seller_id ? { sellerId: before.seller_id } : {}), skus: [next.sku], includeArchived: true })).find((i) => i.id !== before.id);
+      if (taken) throw inventoryError('SKU_TAKEN', `A stock item with SKU ${next.sku} already exists`, { sku: next.sku, stockItemId: taken.id });
+    }
+    try {
+      await this.#stock(
+        'item_updated',
+        async (st) => {
+          await st.lock([before.id]);
+          st.touch(before.id, await st.tx.update('stock_items', before.id, { ...next, updated_at: st.now }));
+        },
+        { actor },
+      );
+    } catch (err) {
+      if (!isAppError(err) && /unique|duplicate/i.test(String((err as Error)?.message))) throw inventoryError('SKU_TAKEN', `A stock item with SKU ${next.sku} already exists`, { sku: next.sku });
+      throw err;
+    }
+    return this.#itemApi(await this.#item(before.id));
+  }
+
+  /** Archives or unarchives an item with its quantities kept; publishes inventory.stock.changed (cause archived or unarchived) */
+  async #setArchived(item: Row<'stock_items'>, archived: boolean, actor: common.Actor): Promise<Row<'stock_items'>> {
+    if (item.archived === archived) return item;
+    return this.#stock(
+      archived ? 'archived' : 'unarchived',
+      async (st) => {
+        await st.lock([item.id]);
+        const locked = st.item(item.id);
+        if (locked.archived === archived) return locked;
+        const row = await st.tx.update('stock_items', item.id, { archived, updated_at: st.now, ...(archived ? {} : { low_since: null }) });
+        st.touch(item.id, row);
+        return row;
+      },
+      { actor },
+    );
+  }
+
+  /** Reinstated offer: the archived item becomes active again with the quantities it kept. Publishes inventory.stock.changed (cause unarchived). */
+  async unarchiveStockItem(stockItemId: string, actor: common.Actor): Promise<StockItem> {
+    const item = await this.#item(stockItemId);
+    return this.#itemApi(await this.#setArchived(item, false, actor));
+  }
+
+  /**
+   * Two items of the same owner describe the same thing: every quantity group moves to the target with merge
+   * movements (held units keep their review dates), open reservation lines and incoming expectations move with
+   * their units (still matched by orderItemId), the unit cost is averaged and the source is archived.
+   */
+  async mergeStockItems(fromStockItemId: string, intoStockItemId: string, reason: string, actor: common.Actor): Promise<StockItem> {
+    const why = reason?.trim();
+    if (!why) throw invalid('reason', 'Say why the stock items are merged');
+    if (fromStockItemId === intoStockItemId) throw invalid('intoStockItemId', 'Choose another stock item to merge into');
+    const from = await this.#item(fromStockItemId);
+    const into = isUuid(intoStockItemId) ? await this.repo.get('stock_items', intoStockItemId) : undefined;
+    if (!into) throw invalid('intoStockItemId', 'Stock item not found');
+    if (from.owner_type !== into.owner_type || (from.seller_id ?? null) !== (into.seller_id ?? null)) throw invalid('intoStockItemId', 'Both stock items must belong to the same owner');
+    if (into.archived) throw inventoryError('STOCK_ITEM_ARCHIVED', `${into.sku} is archived; unarchive it first or merge into another item`, { stockItemId: into.id });
+    if ((await this.repo.adjustmentsWhere({ itemIds: [from.id], states: ['requested', 'pending_review'] })).length) {
+      throw new AppError('CONFLICT', `${from.sku} has adjustments waiting for review; decide or cancel them first`, { stockItemId: from.id });
+    }
+    const ref: MovementRef = { kind: 'merge', id: from.id, label: `Merged ${from.sku} into ${into.sku}` };
+    const today = this.today();
+    await this.#stock(
+      'merge',
+      async (st) => {
+        await st.lock([from.id, into.id]);
+        const src = st.item(from.id);
+        const dst = st.item(into.id);
+        const moved = st.total(from.id);
+        const meta = { note: why, ref, actor };
+        for (const level of st.levels(from.id)) {
+          const q = levelQty(level);
+          for (const g of GROUPS) {
+            const n = q[FIELD[g]];
+            if (n <= 0) continue;
+            if (g !== 'damaged_held') {
+              await st.move(from.id, level.location_id, g, 'outside', n, { ...meta, reason: 'merged_out' });
+              await st.move(into.id, level.location_id, 'outside', g, n, { ...meta, reason: 'merged_in' });
+              continue;
+            }
+            // held units move hold by hold, keeping their reason and review date
+            let left = n;
+            for (const h of await st.tx.openHeld(from.id, level.location_id)) {
+              const take = Math.min(left, h.quantity);
+              if (take <= 0) continue;
+              await st.move(from.id, level.location_id, 'damaged_held', 'outside', take, { ...meta, reason: 'merged_out' });
+              await st.move(into.id, level.location_id, 'outside', 'damaged_held', take, { ...meta, reason: 'merged_in', hold: { reasonCode: h.reason_code, reviewDate: h.review_date, reason: h.reason, sourceRef: h.source_ref } });
+              left -= take;
+            }
+            if (left > 0) {
+              await st.move(from.id, level.location_id, 'damaged_held', 'outside', left, { ...meta, reason: 'merged_out' });
+              await st.move(into.id, level.location_id, 'outside', 'damaged_held', left, { ...meta, reason: 'merged_in', hold: { reasonCode: 'merged', reviewDate: addDays(today, DEFAULT_HOLD_REVIEW_DAYS), reason: why } });
+            }
+          }
+        }
+        // open reservation lines and incoming expectations follow their units
+        for (const l of await st.tx.linesWhere({ itemIds: [from.id], states: ['held', 'allocated'] }, { forUpdate: true })) await st.tx.update('reservation_lines', l.id, { stock_item_id: into.id });
+        const theirs = await st.tx.expectations({ itemIds: [into.id], openOnly: true }, { forUpdate: true });
+        for (const e of await st.tx.expectations({ itemIds: [from.id], openOnly: true }, { forUpdate: true })) {
+          const twin = theirs.find((x) => x.source_kind === e.source_kind && x.source_id === e.source_id && x.location_id === e.location_id);
+          if (twin) {
+            await st.tx.update('incoming_expectations', twin.id, { quantity_open: twin.quantity_open + e.quantity_open });
+            await st.tx.update('incoming_expectations', e.id, { quantity_open: 0 });
+          } else await st.tx.update('incoming_expectations', e.id, { stock_item_id: into.id });
+        }
+        // the target's buying cost becomes the weighted average of both
+        const cost = src.unit_cost_amount === null ? null : Number(src.unit_cost_amount);
+        const units = onHand(moved);
+        const patch: Partial<Row<'stock_items'>> = { updated_at: st.now };
+        if (cost !== null && units > 0) patch.unit_cost_amount = weightedAverage(dst.unit_cost_amount === null ? null : Number(dst.unit_cost_amount), onHand(st.total(into.id)) - units, cost, units);
+        st.touch(into.id, await st.tx.update('stock_items', into.id, patch));
+        st.touch(from.id, await st.tx.update('stock_items', from.id, { archived: true, updated_at: st.now }));
+      },
+      { actor },
+    );
+    return this.#itemApi(await this.#item(into.id));
+  }
+
+  /** Units that left stock to customer orders (dispatched, net of restocked returns) over the last days (default 30) */
+  async getSalesRate(stockItemIds: string[], days = 30): Promise<Record<string, { unitsSold: number; days: number; avgDailySales: number }>> {
+    const window = Number.isInteger(days) && days >= 1 && days <= 365 ? days : 30;
+    const ids = [...new Set((stockItemIds ?? []).filter((id) => isUuid(id)))];
+    const since = new Date(this.now().getTime() - window * 86_400_000);
+    const [sold, restocked] = await Promise.all([this.repo.dispatchedSince(ids, since), this.repo.unitsByReasonSince(ids, since, RESTOCK_REASONS)]);
+    const out: Record<string, { unitsSold: number; days: number; avgDailySales: number }> = {};
+    for (const id of ids) {
+      const unitsSold = Math.max(0, (sold.get(id) ?? 0) - (restocked.get(id) ?? 0));
+      out[id] = { unitsSold, days: window, avgDailySales: Math.round((unitsSold / window) * 100) / 100 };
+    }
+    return out;
   }
 
   /**
@@ -633,7 +891,7 @@ export class InventoryService implements InventoryPublicApi {
     });
   }
 
-  async #publishReleased(r: Row<'reservations'>, lines: Row<'reservation_lines'>[], reason: 'cancelled' | 'expired' | 'abandoned' | 'staff', by: By = { actor: SYSTEM_ACTOR }) {
+  async #publishReleased(r: Row<'reservations'>, lines: Row<'reservation_lines'>[], reason: 'cancelled' | 'expired' | 'abandoned' | 'staff' | 'unmatched', by: By = { actor: SYSTEM_ACTOR }) {
     if (!lines.length) return;
     const items = await this.#skus(lines.map((l) => l.stock_item_id));
     this.ctx.events.publish(
@@ -792,6 +1050,9 @@ export class InventoryService implements InventoryPublicApi {
     if (!location) throw invalid('locationId', 'Unknown stock location');
     const id = newId();
     const ref: MovementRef = { kind: 'discrepancy', id, label: input.orderRef ? `Damage found, order ${input.orderRef}` : 'Damage found at packing' };
+    // photos are attached (inspection_photo) so the media orphan sweep never deletes them
+    const photoIds = [...new Set(input.photoIds ?? [])];
+    const detach = await this.#attachPhotos(photoIds, { refId: id, refLabel: `${input.kind === 'pick_shortage' ? 'Pick shortage' : 'Damage found'} · ${item.sku}` });
     const changed = await this.#stock('discrepancy', async (st) => {
       await st.tx.insert('discrepancies', {
         id,
@@ -830,10 +1091,38 @@ export class InventoryService implements InventoryPublicApi {
       if (left > 0) await st.move(item.id, location.id, 'available', 'damaged_held', left, meta);
       // the reservation keeps its state while the report is open: the order waits in warehouse for the resolution
       return touched;
+    }).catch(async (err) => {
+      await detach();
+      throw err;
     });
     void changed;
     this.ctx.events.publish('inventory.discrepancy.reported', { discrepancyId: id, kind: input.kind, stockItemId: item.id, orderId: input.orderId ?? null, quantity: input.quantity }, { actor: input.reportedBy });
     return (await this.#discrepanciesApi([(await this.repo.get('discrepancies', id))!]))[0]!;
+  }
+
+  /** Attaches discrepancy photos (media usage inspection_photo) and returns an undo; unknown files are a validation problem */
+  async #attachPhotos(photoIds: string[], usage: { refId: string; refLabel: string }): Promise<() => Promise<void>> {
+    const media = this.ctx.tryUse('media');
+    const done: string[] = [];
+    const undo = async () => {
+      for (const assetId of done) await media?.detach(assetId, { module: 'inventory', kind: 'inspection_photo', refId: usage.refId }).catch(() => {});
+    };
+    if (!media || !photoIds.length) return undo;
+    try {
+      for (const [i, assetId] of photoIds.entries()) {
+        try {
+          await media.attach(assetId, { module: 'inventory', kind: 'inspection_photo', refId: usage.refId, refLabel: usage.refLabel }, { kind: 'platform' });
+        } catch (err) {
+          if (isAppError(err) && (err.code === 'NOT_FOUND' || err.code === 'VALIDATION_FAILED')) throw invalid(`photoIds[${i}]`, 'Photo not found or not an inspection photo; upload it again');
+          throw err;
+        }
+        done.push(assetId);
+      }
+    } catch (err) {
+      await undo();
+      throw err;
+    }
+    return undo;
   }
 
   async #openOrderLines(tx: InventoryRepository, orderId: string, itemId: string, locationId: string): Promise<Row<'reservation_lines'>[]> {
@@ -870,6 +1159,16 @@ export class InventoryService implements InventoryPublicApi {
       if (own) sellerLocation.set(sellerId, own);
     }
     const fallback = rows.some((r) => r.owner_type === 'official') ? await this.#officialDefault() : undefined;
+    // variant GTINs for warehouse scans (null when catalog is off or the variant has none)
+    const gtins = new Map<string, string | null>();
+    const catalog = this.ctx.tryUse('catalog');
+    if (catalog) {
+      try {
+        for (const v of await catalog.getVariants([...new Set(rows.map((r) => r.variant_id))])) gtins.set(v.id, v.gtin ?? null);
+      } catch (err) {
+        this.ctx.log.warn({ err }, 'inventory: variant GTINs unavailable');
+      }
+    }
     const units = (l: Row<'stock_levels'>) => l.available + l.reserved + l.incoming + l.damaged_held + l.returned;
     const mainOf = (r: Row<'stock_items'>): Row<'locations'> | undefined => {
       if (r.owner_type === 'seller') {
@@ -900,6 +1199,7 @@ export class InventoryService implements InventoryPublicApi {
           locationId: loc?.id ?? null,
           locationCode: loc?.code ?? null,
           binCode: r.primary_bin_code,
+          gtin: gtins.get(r.variant_id) ?? null,
         };
       });
   }
@@ -1337,19 +1637,42 @@ export class InventoryService implements InventoryPublicApi {
     return item;
   }
 
-  async updateStockItem(id: string, body: { lowStockThreshold?: number | null; reorderQuantity?: number | null; archived?: boolean | null }, by: StaffBy): Promise<StockItem> {
+  /** PATCH /stock-items/{id}: reorder point, reorder quantity, archive; archived false unarchives (same as unarchiveStockItem) */
+  async updateStockItemAsStaff(id: string, body: { lowStockThreshold?: number | null; reorderQuantity?: number | null; archived?: boolean | null }, by: StaffBy): Promise<StockItem> {
     const before = await this.#officialItem(id);
     if (body.lowStockThreshold != null && body.lowStockThreshold < 0) throw invalid('lowStockThreshold', 'The reorder point must be 0 or more');
     if (body.reorderQuantity != null && body.reorderQuantity < 0) throw invalid('reorderQuantity', 'The reorder quantity must be 0 or more');
     const patch: Partial<Row<'stock_items'>> = {};
     if (body.lowStockThreshold !== undefined) patch.low_stock_threshold = body.lowStockThreshold;
     if (body.reorderQuantity !== undefined) patch.reorder_quantity = body.reorderQuantity;
-    if (body.archived !== undefined && body.archived !== null) patch.archived = body.archived;
-    if (!Object.keys(patch).length) return this.#itemApi(before);
+    const archive = body.archived !== undefined && body.archived !== null && body.archived !== before.archived ? body.archived : null;
+    if (!Object.keys(patch).length && archive === null) return this.#itemApi(before);
     const beforeApi = await this.#itemApi(before);
-    const after = await this.#itemApi(await this.repo.update('stock_items', id, { ...patch, updated_at: this.now() }));
+    let row = Object.keys(patch).length ? await this.repo.update('stock_items', id, { ...patch, updated_at: this.now() }) : before;
+    if (archive !== null) row = await this.#setArchived(row, archive, by.actor);
+    const after = await this.#itemApi(row);
+    const action = archive === true ? 'archive' : archive === false ? 'unarchive' : 'update';
+    const label = { archive: 'Archived company SKU', unarchive: 'Unarchived company SKU', update: 'Changed reorder point' }[action];
+    await this.#audit({ action: `inventory.stock_item.${action}`, actionLabel: label, category: 'other', target: { type: 'stock_item', id, ref: after.sku, label: after.label, screen: 'ops/inventory' }, before: beforeApi, after }, by);
+    return after;
+  }
+
+  /** POST /stock-items/{id}/merge: merge a company SKU into another one (mergeStockItems), audited */
+  async mergeStockItemAsStaff(id: string, body: { intoStockItemId: string; reason: string }, by: StaffBy): Promise<StockItem> {
+    const from = await this.#officialItem(id);
+    const beforeApi = await this.#itemApi(from);
+    const after = await this.mergeStockItems(from.id, body.intoStockItemId, body.reason, by.actor);
     await this.#audit(
-      { action: body.archived ? 'inventory.stock_item.archive' : 'inventory.stock_item.update', actionLabel: body.archived ? 'Archived company SKU' : 'Changed reorder point', category: 'other', target: { type: 'stock_item', id, ref: after.sku, label: after.label, screen: 'ops/inventory' }, before: beforeApi, after },
+      {
+        action: 'inventory.stock_item.merge',
+        actionLabel: 'Merged company SKU into another',
+        category: 'other',
+        target: { type: 'stock_item', id: after.id, ref: after.sku, label: after.label, screen: 'ops/inventory' },
+        relatedTargets: [{ type: 'stock_item', id: from.id, ref: from.sku, label: from.label }],
+        reason: body.reason?.trim() || null,
+        before: beforeApi,
+        after,
+      },
       by,
     );
     return after;
@@ -1568,7 +1891,6 @@ export class InventoryService implements InventoryPublicApi {
     }
     const ref: MovementRef = { kind: 'receipt', id: receipt.receipt_id, label: `Received ${receipt.purchase_order_ref}` };
     const reviewDate = addDays(this.today(), DEFAULT_HOLD_REVIEW_DAYS);
-    const resolved: Row<'discrepancies'>[] = [];
     await this.#stock(
       'receipt_confirmed',
       async (st) => {
@@ -1591,22 +1913,14 @@ export class InventoryService implements InventoryPublicApi {
           if (rejected > 0) await st.move(item.id, locked.location_id, 'incoming', 'outside', rejected, { reason: 'receipt_not_accepted', note: d.reason, ref, actor: by.actor });
           await st.tx.updateInboundLine(id, item.id, { sellable: d.sellable, damaged: d.damaged, reason: d.reason });
         }
-        // orders waiting on a pick shortage of these SKUs are served first from the new units
-        const waiting = (await st.tx.discrepanciesWhere({ itemIds: lines.map((l) => l.stock_item_id), states: ['open'], kinds: ['pick_shortage'] })).filter((x) => x.order_id && x.location_id === locked.location_id).reverse();
-        for (const w of waiting) {
-          if (st.qty(w.stock_item_id, w.location_id).available < w.quantity) continue;
-          const lines = await this.#openOrderLines(st.tx, w.order_id!, w.stock_item_id, w.location_id);
-          if (!lines.length) continue;
-          await this.#reallocateShortage(st, w, 'available', by.actor);
-          resolved.push(await st.tx.update('discrepancies', w.id, { state: discrepancyMachine.next('open', 'resolve'), resolution: 'reallocated', resolution_note: `Served from receipt ${receipt.receipt_ref}`, resolved_by: actorText(by.actor), resolved_at: st.now }));
-        }
+        // no backorders at launch: open pick shortages on these SKUs are listed on the receipt (openPickShortages) for the
+        // Inventory Manager to reallocate first; nothing is allocated automatically
         await st.tx.update('inbound_receipts', id, { state, confirmed_by: actorText(by.actor), confirmed_at: st.now, note: body.note ?? null });
       },
       this.#meta(by),
     );
     const api = await this.getInbound(id);
     this.ctx.events.publish('inventory.receipt.confirmed', { inboundId: id, receiptId: receipt.receipt_id, purchaseOrderId: receipt.purchase_order_id, lines: api.lines, confirmedBy: by.actor }, this.#meta(by));
-    for (const d of resolved) this.ctx.events.publish('inventory.discrepancy.resolved', { discrepancyId: d.id, resolution: 'reallocated', orderId: d.order_id }, this.#meta(by));
     await this.#audit({ action: 'inventory.inbound.confirm', actionLabel: 'Confirmed received stock', category: 'other', target: { type: 'receipt', id: receipt.receipt_id, ref: receipt.receipt_ref, label: `${receipt.supplier_name} · ${receipt.purchase_order_ref}`, screen: 'ops/receiving' }, after: api.totals, reason: body.note ?? null }, by);
     return api;
   }
@@ -2066,18 +2380,33 @@ export class InventoryService implements InventoryPublicApi {
     }
     for (const r of reservations) {
       if (r.state === 'held') {
-        const done = await this.repo.transaction(async (tx) => {
+        const done = await this.#stock('order_allocated', async (st) => {
+          const tx = st.tx;
           const locked = (await tx.get('reservations', r.id, { forUpdate: true }))!;
           if (locked.state !== 'held' || (locked.order_id && locked.order_id !== event.orderId)) return null;
           if (!(await tx.claimEvent(`order-accepted:${event.orderId}:${r.id}`))) return null;
           await this.#mapToOrderItems(tx, (await tx.lines([r.id], { forUpdate: true })).filter((l) => l.state === 'held'), event.items);
+          // hold units no accepted item asks for (quantity reduced or line dropped at placement) go back to Available now
+          let released: { reservation: Row<'reservations'>; changed: Row<'reservation_lines'>[] } | null = null;
+          const excess = this.#unmatchedUnits((await tx.lines([r.id], { forUpdate: true })).filter((l) => l.state === 'held'), event.items);
+          if (excess.size) {
+            released = await this.#releaseLines(st, locked, (await tx.lines([r.id], { forUpdate: true })).filter((l) => excess.has(l.id)), {
+              reason: 'hold_unmatched',
+              releasedReason: 'Not on the accepted order',
+              ref: { kind: 'order', id: event.orderId, label: `Order ${event.ref}` },
+              actor: SYSTEM_ACTOR,
+              qty: (l) => excess.get(l.id) ?? 0,
+            });
+          }
           const lines = await tx.lines([r.id], { forUpdate: true });
           const allocated: Row<'reservation_lines'>[] = [];
           for (const l of lines) if (l.state === 'held') allocated.push(await tx.update('reservation_lines', l.id, { state: 'allocated' }));
-          await tx.update('reservations', r.id, { state: reservationMachine.next('held', 'allocate'), order_id: event.orderId, order_ref: event.ref, expires_at: null, updated_at: this.now() });
-          return allocated;
+          if (allocated.length) await tx.update('reservations', r.id, { state: reservationMachine.next('held', 'allocate'), order_id: event.orderId, order_ref: event.ref, expires_at: null, updated_at: this.now() });
+          else await tx.update('reservations', r.id, { order_id: event.orderId, order_ref: event.ref, updated_at: this.now() });
+          return { allocated, released };
         });
-        if (done?.length) await this.#publishAllocated(r.id, event.orderId, done);
+        if (done?.released?.changed.length) await this.#publishReleased({ ...done.released.reservation, order_id: event.orderId }, done.released.changed, 'unmatched');
+        if (done?.allocated.length) await this.#publishAllocated(r.id, event.orderId, done.allocated);
       } else if (r.state === 'expired' && !reservations.some((x) => x.state === 'allocated' || x.state === 'fulfilled')) {
         await this.#reallocateExpired(r, event);
       }
@@ -2100,9 +2429,30 @@ export class InventoryService implements InventoryPublicApi {
     }
   }
 
-  async #publishAllocated(reservationId: string, orderId: string, lines: Row<'reservation_lines'>[]) {
+  /**
+   * Open units of held lines that no accepted item asks for, per line: lines without an order item or with one the
+   * order does not list, and units beyond an item's accepted quantity. Empty when the event lists no items.
+   */
+  #unmatchedUnits(lines: Row<'reservation_lines'>[], items: EventPayload<'orders.order.accepted'>['items'] | undefined): Map<string, number> {
+    const out = new Map<string, number>();
+    if (!items?.length) return out;
+    const need = new Map<string, number>();
+    for (const i of items) need.set(`${i.orderItemId}:${i.stockItemId}`, (need.get(`${i.orderItemId}:${i.stockItemId}`) ?? 0) + Math.max(0, i.quantity));
+    for (const l of lines) {
+      const open = openQty({ quantity: l.quantity, fulfilled: l.fulfilled_qty, released: l.released_qty, state: l.state });
+      if (open <= 0) continue;
+      const key = `${l.order_item_id}:${l.stock_item_id}`;
+      const left = l.order_item_id ? (need.get(key) ?? 0) : 0;
+      const keep = Math.min(open, left);
+      if (l.order_item_id) need.set(key, left - keep);
+      if (open - keep > 0) out.set(l.id, open - keep);
+    }
+    return out;
+  }
+
+  async #publishAllocated(reservationId: string, orderId: string, lines: Row<'reservation_lines'>[], source: AllocationSource = 'checkout', meta: PublishMeta = { actor: SYSTEM_ACTOR }) {
     const items = await this.#skus(lines.map((l) => l.stock_item_id));
-    this.ctx.events.publish('inventory.reservation.allocated', { reservationId, orderId, lines: lines.map((l) => toReservationLine(l, items.get(l.stock_item_id)?.sku ?? '')) }, { actor: SYSTEM_ACTOR });
+    this.ctx.events.publish('inventory.reservation.allocated', { reservationId, orderId, lines: lines.map((l) => toReservationLine(l, items.get(l.stock_item_id)?.sku ?? '')), source }, meta);
   }
 
   /** The hold expired before payment was accepted: reserve the units again if they are still there */
@@ -2139,7 +2489,46 @@ export class InventoryService implements InventoryPublicApi {
     }
   }
 
-  /** orders.item.cancelled: Release that item's held or allocated units back to Available */
+  /**
+   * orders.item.split: a line was split for a partial cancel, shipment or return. The reservation line of itemId
+   * gives quantity open units (same stock item, location and state) to a new line of newItemId; fulfilled and
+   * released counts stay on the original. A line split off whole simply changes its order item. Units that already
+   * left stock are not moved. Idempotent per newItemId (inbox), so later cancel, dispatch and release events can name
+   * either item.
+   */
+  async onItemSplitFromOrders(event: EventPayload<'orders.item.split'>): Promise<void> {
+    if (!isUuid(event.itemId) || !isUuid(event.newItemId) || !(event.quantity > 0)) return;
+    const candidates = (await this.repo.linesWhere({ orderItemIds: [event.itemId] })).filter((l) => l.state === 'held' || l.state === 'allocated');
+    const reservationIds = [...new Set(candidates.map((l) => l.reservation_id))];
+    const moved = await this.repo.transaction(async (tx) => {
+      if (!(await tx.claimEvent(`item-split:${event.newItemId}`))) return null;
+      const lines = (await tx.lines(reservationIds, { forUpdate: true }))
+        .filter((l) => l.order_item_id === event.itemId && (l.state === 'held' || l.state === 'allocated'))
+        .filter((l) => !event.stockItemId || !isUuid(event.stockItemId) || l.stock_item_id === event.stockItemId || candidates.every((c) => c.stock_item_id !== event.stockItemId));
+      let left = event.quantity;
+      let n = 0;
+      for (const l of lines) {
+        if (left <= 0) break;
+        const open = openQty({ quantity: l.quantity, fulfilled: l.fulfilled_qty, released: l.released_qty, state: l.state });
+        const take = Math.min(left, open);
+        if (take <= 0) continue;
+        left -= take;
+        n += take;
+        if (take === l.quantity) {
+          await tx.update('reservation_lines', l.id, { order_item_id: event.newItemId });
+          continue;
+        }
+        const quantity = l.quantity - take;
+        await tx.update('reservation_lines', l.id, { quantity, state: lineStateAfter({ quantity, fulfilled: l.fulfilled_qty, released: l.released_qty, state: l.state }) });
+        await tx.insert('reservation_lines', { id: newId(), reservation_id: l.reservation_id, stock_item_id: l.stock_item_id, location_id: l.location_id, order_item_id: event.newItemId, quantity: take, fulfilled_qty: 0, released_qty: 0, state: l.state });
+      }
+      for (const rid of new Set(lines.map((l) => l.reservation_id))) await this.#syncReservationState(tx, (await tx.get('reservations', rid))!);
+      return n;
+    });
+    if (moved === 0) this.ctx.log.info({ orderId: event.orderId, itemId: event.itemId, newItemId: event.newItemId, reason: event.reason }, 'inventory: split order item has no open reserved units to move');
+  }
+
+  /** orders.item.cancelled: Release that item's held or allocated units back to Available (matched by itemId, so a split-off item releases only its own units) */
   async onItemCancelledFromOrders(event: EventPayload<'orders.item.cancelled'>): Promise<void> {
     const dedupe = `Cancellation ${event.cancellationId}`;
     const lines = (await this.repo.linesWhere({ orderItemIds: [event.itemId] })).filter((l) => l.state === 'held' || l.state === 'allocated');
@@ -2178,16 +2567,31 @@ export class InventoryService implements InventoryPublicApi {
     if ((await this.repo.movementsByRef('order', [event.orderId])).some((m) => m.note === dedupe && m.reason_code === 'dispatched')) return;
     const wanted = new Map<string, number>();
     for (const l of event.lines) wanted.set(l.orderItemId, (wanted.get(l.orderItemId) ?? 0) + l.quantity);
-    const lines = (await this.repo.linesWhere({ orderItemIds: [...wanted.keys()] })).filter((l) => l.state === 'allocated' || l.state === 'held');
-    if (!lines.length) return;
+    // replacement shipments use the order's allocateForOrder reservations; normal shipments never touch them
+    const replacement = event.kind === 'replacement';
+    const allocations = replacement ? await this.repo.reservationsByKeyPrefix(event.orderId, ORDER_ALLOCATION_PREFIX) : [];
+    const allocationIds = new Set(allocations.map((r) => r.id));
+    const byItem = (await this.repo.linesWhere({ orderItemIds: [...wanted.keys()] })).filter((l) => l.state === 'allocated' || l.state === 'held');
+    const keys = new Map((await this.#reservationKeys([...new Set(byItem.map((l) => l.reservation_id))])).map((r) => [r.id, r.key]));
+    const lines = byItem.filter((l) => (replacement ? allocationIds.has(l.reservation_id) : !(keys.get(l.reservation_id) ?? '').startsWith(ORDER_ALLOCATION_PREFIX)));
+    // allocations made without order items are matched in order for what is left
+    const free = replacement ? (await this.repo.lines([...allocationIds])).filter((l) => !l.order_item_id && (l.state === 'allocated' || l.state === 'held')) : [];
+    if (!lines.length && !free.length) return;
     await this.#stock('dispatched', async (st) => {
-      await st.lock(lines.map((l) => l.stock_item_id));
+      await st.lock([...lines, ...free].map((l) => l.stock_item_id));
       const touched = new Set<string>();
-      for (const l of (await st.tx.lines([...new Set(lines.map((x) => x.reservation_id))], { forUpdate: true })).filter((x) => wanted.has(x.order_item_id ?? ''))) {
+      const locked = await st.tx.lines([...new Set([...lines, ...free].map((x) => x.reservation_id))], { forUpdate: true });
+      const own = locked.filter((x) => lines.some((l) => l.id === x.id));
+      const spare = locked.filter((x) => free.some((l) => l.id === x.id));
+      const plan: { l: Row<'reservation_lines'>; itemId: string | null }[] = [...own.map((l) => ({ l, itemId: l.order_item_id })), ...spare.map((l) => ({ l, itemId: null }))];
+      for (const p of plan) {
+        const l = p.l;
+        const itemId = p.itemId ?? [...wanted].find(([, n]) => n > 0)?.[0];
+        if (!itemId) continue;
         const open = openQty({ quantity: l.quantity, fulfilled: l.fulfilled_qty, released: l.released_qty, state: l.state });
-        const n = Math.min(open, wanted.get(l.order_item_id!) ?? 0);
+        const n = Math.min(open, wanted.get(itemId) ?? 0);
         if (n <= 0) continue;
-        wanted.set(l.order_item_id!, wanted.get(l.order_item_id!)! - n);
+        wanted.set(itemId, wanted.get(itemId)! - n);
         const r = await st.tx.get('reservations', l.reservation_id);
         await st.move(l.stock_item_id, l.location_id, 'reserved', 'outside', n, { reason: 'dispatched', note: dedupe, ref: { kind: 'order', id: event.orderId, label: `Order ${r?.order_ref ?? ''}`.trim() }, actor: SYSTEM_ACTOR });
         const fulfilled = l.fulfilled_qty + n;
@@ -2201,6 +2605,10 @@ export class InventoryService implements InventoryPublicApi {
         await this.#syncReservationState(st.tx, (await st.tx.get('reservations', rid))!);
       }
     });
+  }
+
+  async #reservationKeys(ids: string[]): Promise<Row<'reservations'>[]> {
+    return (await Promise.all(ids.map((id) => this.repo.get('reservations', id)))).filter((r): r is Row<'reservations'> => Boolean(r));
   }
 
   /**
@@ -2319,11 +2727,67 @@ export class InventoryService implements InventoryPublicApi {
     if (item.primary_bin_code !== event.binCode) await this.repo.update('stock_items', item.id, { primary_bin_code: event.binCode });
   }
 
-  /** offers.offer.status_changed: Archive a seller stock item when its offer is removed (reserved units stay with their orders) */
+  /**
+   * offers.offer.status_changed: Archive a seller stock item when its offer is removed (reserved units stay with their
+   * orders); unarchive it when the offer leaves removed (reinstated), so the offer shows its kept quantity again.
+   */
   async onOfferStatusChangedFromOffers(event: EventPayload<'offers.offer.status_changed'>): Promise<void> {
-    if (event.to !== 'removed' || event.ownerType !== 'seller') return;
-    const archived = await this.repo.archiveItems({ offerId: event.offerId }, this.now());
-    if (!archived.length) this.ctx.log.debug({ offerId: event.offerId }, 'inventory: removed offer has no live stock item');
+    if (event.ownerType !== 'seller') return;
+    const removed = event.to === 'removed';
+    const reinstated = event.from === 'removed' && event.to !== 'removed';
+    if (!removed && !reinstated) return;
+    const items = (await this.repo.items({ offerIds: [event.offerId], includeArchived: true })).filter((i) => i.owner_type === 'seller');
+    const named = event.stockItemId && isUuid(event.stockItemId) ? items.filter((i) => i.id === event.stockItemId) : [];
+    const targets = named.length ? named : items;
+    if (!targets.length) {
+      this.ctx.log.debug({ offerId: event.offerId }, 'inventory: offer status change for an offer without a stock item');
+      return;
+    }
+    const actor: common.Actor = { kind: 'system', id: 'offers', name: 'Offers' };
+    for (const item of targets) await this.#setArchived(item, removed, actor);
+  }
+
+  /**
+   * catalog.product.merged: company stock items of the merged product follow it to the kept product and the mapped
+   * variant (newVariantId or intoVariantId, else the kept variant with the same options) through updateStockItem.
+   * When the kept variant already has a company item in the same condition, the pair is raised for the Inventory
+   * Manager to merge (POST /stock-items/{id}/merge). Seller items follow their offers (offers re-keys them).
+   * Idempotent: a second delivery finds no item left on the merged product.
+   */
+  async onProductMergedFromCatalog(event: EventPayload<'catalog.product.merged'>): Promise<void> {
+    if (event.duplicateProductId === event.keptProductId) return;
+    const items = await this.repo.items({ ownerType: 'official', productIds: [event.duplicateProductId], includeArchived: true });
+    if (!items.length) return;
+    const catalog = this.ctx.tryUse('catalog');
+    let kept: { id: string; options: Record<string, string> }[] = [];
+    let options = new Map<string, Record<string, string>>();
+    if (catalog && !event.newVariantId && !event.intoVariantId) {
+      try {
+        kept = (await catalog.getProduct(event.keptProductId))?.variants ?? [];
+        options = new Map((await catalog.getVariants([...new Set(items.map((i) => i.variant_id))])).map((v) => [v.id, v.options]));
+      } catch (err) {
+        this.ctx.log.warn({ err, productId: event.keptProductId }, 'inventory: kept product variants unavailable; stock items keep their variant');
+      }
+    }
+    const same = (a: Record<string, string> | undefined, b: Record<string, string>) => !!a && Object.keys(a).length === Object.keys(b).length && Object.entries(a).every(([k, v]) => b[k] === v);
+    const actor: common.Actor = { kind: 'system', id: 'catalog', name: 'Catalog merge' };
+    for (const item of items) {
+      const variantId = event.intoVariantId ?? event.newVariantId ?? kept.find((v) => same(options.get(item.variant_id), v.options))?.id ?? item.variant_id;
+      const updated = await this.updateStockItem(item.id, { productId: event.keptProductId, variantId }, actor);
+      if (item.archived) continue;
+      const twin = (await this.repo.items({ ownerType: 'official', variantIds: [variantId] })).find((i) => i.id !== item.id && i.condition === item.condition);
+      if (twin) {
+        await this.#raise({
+          queueKey: 'inventory.low_stock',
+          kind: 'manual_task',
+          title: `Merge ${updated.sku} into ${twin.sku}`,
+          summary: `Products were merged in the catalog, so ${updated.sku} and ${twin.sku} now hold the same variant in the same condition. Merge them on the stock item page.`,
+          subject: { type: 'stock_item', id: item.id, ref: updated.sku },
+          priority: 'normal',
+          dedupeKey: `inventory.merge_candidate:${item.id}:${twin.id}`,
+        });
+      }
+    }
   }
 
   /** sellers.seller.closed: Archive the seller's stock items */
@@ -2424,35 +2888,51 @@ export class InventoryService implements InventoryPublicApi {
     const wq = this.ctx.tryUse('workqueues');
     if (!wq) return;
     try {
-      await wq.raise({ ...input, subject: input.subject as never, relatedSubjects: [] });
+      await wq.raise({ ...input, subject: input.subject as never, relatedSubjects: [], sourceModule: 'inventory' });
     } catch (err) {
       this.ctx.log.warn({ err, dedupeKey: input.dedupeKey }, 'inventory: work item could not be raised');
     }
   }
 
-  /** Job inventory.low-stock-digest (daily 07:00 market time): Low and out-of-stock summary per seller and for the Official Store (notifications) */
+  /**
+   * Job inventory.low-stock-digest (daily 07:00 market time): one inventory.stock.low_digest per seller with low or
+   * out-of-stock items and one for the Official Store (notifications emails it); nothing when there is nothing to report.
+   */
   async lowStockDigest(): Promise<{ owners: number; items: number }> {
     const def = await this.#defaultThreshold();
-    const cooldownHours = Number(await this.ctx.settings.get('lowStockAlertCooldownHours'));
-    const now = this.now();
-    const owners = new Set<string>();
+    const date = this.today();
+    type Entry = { item: LowStockDigestItem; ratio: number };
+    const owners = new Map<string, { ownerType: 'official' | 'seller'; sellerId: string | null; entries: Entry[]; low: number; out: number }>();
     let count = 0;
     for (let offset = 0; ; offset += BATCH) {
       const ids = await this.repo.itemIds({ filter: 'low_or_out', defaultSellerThreshold: def }, BATCH, offset);
       const rows = await this.#rowsInOrder(ids);
       const items = await this.#itemsApi(rows);
       for (const [i, row] of rows.entries()) {
+        if (row.archived) continue;
         const api = items[i]!;
         const threshold = effectiveThreshold(row, def);
-        if (threshold === null) continue;
-        owners.add(row.seller_id ?? 'official');
+        const available = api.quantities.available;
+        const state = available <= 0 ? 'out_of_stock' : threshold !== null && available <= threshold ? 'low_stock' : null;
+        if (!state) continue;
+        const key = row.seller_id ?? 'official';
+        const o = owners.get(key) ?? { ownerType: row.owner_type as 'official' | 'seller', sellerId: row.seller_id, entries: [], low: 0, out: 0 };
+        if (state === 'out_of_stock') o.out++;
+        else o.low++;
+        o.entries.push({ item: { stockItemId: row.id, offerId: row.offer_id, sku: row.sku, label: row.label, available, threshold, state }, ratio: threshold ? available / threshold : available });
+        owners.set(key, o);
         count++;
-        // a reminder per item through inventory.stock.low (notifications turns it into the owner's notice), at most once per cooldown
-        if (row.low_since && now.getTime() - row.low_since.getTime() < cooldownHours * 3_600_000) continue;
-        await this.repo.update('stock_items', row.id, { low_since: now });
-        this.ctx.events.publish('inventory.stock.low', { stockItemId: row.id, offerId: row.offer_id, ownerType: row.owner_type, sellerId: row.seller_id, sku: row.sku, label: row.label, available: api.quantities.available, threshold }, { actor: SYSTEM_ACTOR });
       }
       if (ids.length < BATCH) break;
+    }
+    for (const o of owners.values()) {
+      // worst first: out of stock, then the lowest share of the threshold, then SKU
+      const worst = o.entries.sort((a, b) => Number(b.item.state === 'out_of_stock') - Number(a.item.state === 'out_of_stock') || a.ratio - b.ratio || a.item.sku.localeCompare(b.item.sku));
+      this.ctx.events.publish(
+        'inventory.stock.low_digest',
+        { ownerType: o.ownerType, sellerId: o.sellerId, date, lowCount: o.low, outOfStockCount: o.out, items: worst.slice(0, DIGEST_ITEMS).map((e) => e.item) },
+        { actor: SYSTEM_ACTOR },
+      );
     }
     this.ctx.log.info({ owners: owners.size, items: count }, 'inventory: low-stock digest');
     return { owners: owners.size, items: count };

@@ -207,7 +207,7 @@ export class Cancellations {
     agg: Agg,
     group: GroupRec,
     lines: Line[],
-    o: { initiatedBy: Initiator; reasonCode: string; reason: string | null; idempotencyKey: string | null; pending: Date | null; trustReportId?: string | null; countsAgainstSeller?: boolean },
+    o: { initiatedBy: Initiator; reasonCode: string; reason: string | null; idempotencyKey: string | null; pending: Date | null; trustReportId?: string | null; countsAgainstSeller?: boolean; notifyCustomer?: boolean },
   ): Promise<string> {
     const now = this.core.now();
     const id = newId();
@@ -215,7 +215,7 @@ export class Cancellations {
     const stored: StoredCancellationLine[] = [];
     const acted: ItemRec[] = [];
     for (const l of lines) {
-      const { part } = await this.core.split(tx, l.item, l.quantity, agg.order.currency);
+      const { part } = await this.core.split(tx, batch, l.item, l.quantity, agg.order.currency, 'cancellation');
       stored.push({ itemId: part.id, title: this.views.title(part), variantLabel: this.views.variantLabel(part), quantity: l.quantity, shipped: false });
       acted.push(part);
     }
@@ -255,6 +255,7 @@ export class Cancellations {
       reasonCode: o.reasonCode,
       trustReportId: o.trustReportId ?? null,
       countsAgainstSeller: o.countsAgainstSeller ?? false,
+      notifyCustomer: o.notifyCustomer ?? true,
       label: o.initiatedBy === 'customer' ? 'Items cancelled at your request' : o.initiatedBy === 'seller' ? `${group.seller_name} cancelled items` : 'Items cancelled by Marketly',
       detail: titles,
       reason: o.reason,
@@ -271,7 +272,7 @@ export class Cancellations {
     cancellationId: string,
     lines: readonly StoredCancellationLine[],
     refund: RefundPreview,
-    o: { initiatedBy: Initiator; reasonCode: string; trustReportId: string | null; countsAgainstSeller: boolean; label: string; detail: string; reason: string | null },
+    o: { initiatedBy: Initiator; reasonCode: string; trustReportId: string | null; countsAgainstSeller: boolean; notifyCustomer?: boolean; label: string; detail: string; reason: string | null },
   ) {
     for (const l of lines) {
       const item = (await tx.get('order_items', l.itemId))!;
@@ -293,6 +294,7 @@ export class Cancellations {
         reasonCode: o.reasonCode,
         beforeDispatch: true,
         countsAgainstSeller: o.countsAgainstSeller,
+        notifyCustomer: o.notifyCustomer ?? true,
         refund: line
           ? { itemAmount: line.itemAmount, discountShare: line.discountShare, shippingRefund: line.shippingRefund, taxRefund: line.taxRefund, total: line.refund }
           : { itemAmount: zero, discountShare: zero, shippingRefund: zero, taxRefund: zero, total: zero },
@@ -446,6 +448,7 @@ export class Cancellations {
             pending: null,
             trustReportId: input.trustReportId ?? null,
             countsAgainstSeller: counts,
+            notifyCustomer: input.notifyCustomer !== false,
           }),
         );
       }

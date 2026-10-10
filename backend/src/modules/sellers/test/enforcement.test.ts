@@ -47,23 +47,25 @@ describe('restrictions', () => {
     expect(kit.audits.filter((a) => a.target.id === res.body.id).map((a) => a.action)).toEqual(expect.arrayContaining(['sellers.restriction.create', 'sellers.restriction.update', 'sellers.restriction.lift']));
   });
 
-  it('above authority: pending approval with APPROVAL_REQUIRED, activated or cancelled by the decision', async () => {
+  it('above authority: saved pending approval (201 with approval, FORMAT.md Approval responses), activated or cancelled by the decision', async () => {
     const s = await approvedSeller(kit);
     kit.authority.set('sellers.sellers.restrict', 'approval_required');
     try {
       const res = await kit.call('POST', `${ADMIN}/sellers/${s.sellerId}/restrictions`, staff(), restrictionInput());
-      expect(res.status).toBe(409);
-      expect(res.body.error.code).toBe('APPROVAL_REQUIRED');
-      const { approvalRequestId, restrictionId } = res.body.error.details;
+      // before pass 3: 409 APPROVAL_REQUIRED although the pending restriction was saved
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(res.body).toMatchObject({ state: 'pending_approval', approval: { required: true, approvalRequestId: expect.any(String) } });
+      const { approvalRequestId } = res.body.approval;
+      const restrictionId = res.body.id;
       expect((await kit.svc.getSeller(s.sellerId))!.status).toBe('approved');
       await kit.decide(approvalRequestId, 'approved');
       expect((await kit.svc.getSeller(s.sellerId))!.status).toBe('restricted');
       expect(kit.last('sellers.seller.restricted').restrictionId).toBe(restrictionId);
 
       const second = await kit.call('POST', `${ADMIN}/sellers/${s.sellerId}/restrictions`, staff(), restrictionInput({ title: 'Promotions paused', affectedActivities: ['promotions'] }));
-      await kit.decide(second.body.error.details.approvalRequestId, 'rejected');
+      await kit.decide(second.body.approval.approvalRequestId, 'rejected');
       const list = await kit.call('GET', `${ADMIN}/sellers/${s.sellerId}`, staff());
-      expect(list.body.restrictions.find((r: any) => r.id === second.body.error.details.restrictionId).state).toBe('cancelled');
+      expect(list.body.restrictions.find((r: any) => r.id === second.body.id).state).toBe('cancelled');
     } finally {
       kit.authority.delete('sellers.sellers.restrict');
     }

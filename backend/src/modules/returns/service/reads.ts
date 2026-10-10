@@ -408,17 +408,27 @@ export class Reads {
     });
   }
 
-  /** Public API: only items returns has seen on a return can be resolved by id (orders has no lookup by item) */
+  /**
+   * Public API: each item's eligibility from the item itself (orders.getOrderItem: state, delivered at,
+   * quantity; the order's terms snapshot for the window) minus quantities on open or completed returns. An
+   * item never becomes ineligible just because it has no return record.
+   */
   async eligibilityForItems(orderItemIds: string[]): Promise<ItemEligibilityOut[]> {
-    const ids = orderItemIds.filter(isUuid);
-    const rows = ids.length ? await this.core.repo.find('return_items', { order_item_id: ids }) : [];
-    const rets = rows.length ? await this.core.repo.find('returns', { id: [...new Set(rows.map((r) => r.return_id))] }) : [];
+    const ids = [...new Set(orderItemIds.filter(isUuid))];
+    const orders = this.core.ctx.use('orders');
+    const infos = (await Promise.all(ids.map((id) => this.core.quiet('order item', () => orders.getOrderItem(id))))).filter((x): x is NonNullable<typeof x> => !!x);
     const facts = new Map<string, ItemFactsInput>();
-    for (const orderId of [...new Set(rets.map((r) => r.order_id))]) {
-      const order = await this.core.quiet('order', () => this.core.ctx.use('orders').getOrder(orderId));
+    for (const orderId of [...new Set(infos.map((i) => i.orderId))]) {
+      const order = await this.core.quiet('order', () => orders.getOrder(orderId));
       for (const i of order?.groups.flatMap((g) => g.items) ?? []) {
         if (ids.includes(i.id)) facts.set(i.id, { orderItemId: i.id, state: i.state, quantity: i.quantity, deliveredAt: i.deliveredAt ?? null, returnWindowEndsAt: i.returnWindowEndsAt ?? null, windowDays: i.returnTerms.windowDays });
       }
+    }
+    // the order could not be read: the item's own facts (window from delivery to its return-by)
+    for (const i of infos) {
+      if (facts.has(i.id)) continue;
+      const days = i.deliveredAt && i.returnWindowEndsAt ? Math.max(0, Math.round((new Date(i.returnWindowEndsAt).getTime() - new Date(i.deliveredAt).getTime()) / DAY)) : 0;
+      facts.set(i.id, { orderItemId: i.id, state: i.state, quantity: i.quantity, deliveredAt: i.deliveredAt ?? null, returnWindowEndsAt: i.returnWindowEndsAt ?? null, windowDays: days });
     }
     const known = await this.eligibilityFromFacts([...facts.values()]);
     return orderItemIds.map(

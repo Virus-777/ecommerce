@@ -7,7 +7,7 @@ import type { EventPayload } from '../../../kernel/events/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { orderLifecycleMachine } from '../domain/state-machines.js';
 import { FINAL, is } from '../domain/rules.js';
-import type { ItemRec } from '../ports.js';
+import type { ItemRec, StoredOffer } from '../ports.js';
 import { SYSTEM, type Core } from './core.js';
 
 const REFUND_STATUS: Record<string, string> = { requested: 'requested', processing: 'processing', sent: 'sent', failed: 'failed', cancelled: 'none' };
@@ -135,6 +135,7 @@ export class AfterSales {
   async onReplacementCreated(e: EventPayload<'returns.replacement.created'>) {
     if (!(await this.exists(e.orderId))) return;
     const marker = `replacement:${e.replacementId}`;
+    // older replacement lines carried the marker as checkout line id; new ones have none (inbox claim below)
     if ((await this.core.repo.find('order_items', { order_id: e.orderId, checkout_line_id: marker })).length) return;
     const original = await this.core.repo.get('order_items', e.orderItemId);
     if (!original || original.order_id !== e.orderId) return;
@@ -147,8 +148,9 @@ export class AfterSales {
         .catch(() => null);
       if (snap) product = { ...snap, categoryId: snap.categoryId ?? original.category_id ?? original.product_snapshot.categoryId ?? null };
     }
-    if (e.offerId !== original.offer_id) offer = await this.core.ctx.use('offers').snapshotForOrder(e.offerId).then((o) => ({ ...o, sellerSku: null }), () => original.offer_snapshot);
+    if (e.offerId !== original.offer_id) offer = await this.core.ctx.use('offers').snapshotForOrder(e.offerId).then((o): StoredOffer => ({ ...o, sellerSku: o.sellerSku || null }), () => original.offer_snapshot);
     await this.core.write(e.orderId, { actor: SYSTEM }, async (tx, agg) => {
+      if (!(await tx.claim(marker))) return;
       const now = this.core.now();
       const id = newId();
       await tx.insert('order_items', {
@@ -176,9 +178,9 @@ export class AfterSales {
         return_window_ends_at: null,
         split_from_item_id: null,
         replacement_of_item_id: original.id,
-        checkout_line_id: marker,
+        checkout_line_id: null,
       });
-      await tx.insert('item_state_log', { id: newId(), item_id: id, from_state: 'pending_payment', to_state: 'confirmed', event: 'replacement', reason: `Replacement for return`, actor_kind: 'system', actor_id: null, at: now });
+      await tx.insert('item_state_log', { id: newId(), item_id: id, from_state: 'pending_payment', to_state: 'confirmed', event: 'replacement', reason: e.returnId ? 'Replacement for a return' : 'Replacement for a support case', actor_kind: 'system', actor_id: null, at: now });
       await this.core.timeline(tx, agg.order.id, [
         { group_id: original.group_id, visibility: 'customer', label: 'Replacement on the way', detail: `${product.title} × ${e.quantity} will ship as a replacement.` },
         { group_id: original.group_id, visibility: 'seller', label: 'Replacement to ship', detail: `${product.title} × ${e.quantity}` },
@@ -194,6 +196,27 @@ export class AfterSales {
       if ((agg.order.flags?.cases ?? []).some((c) => c.caseId === e.caseId)) return;
       await this.core.setFlags(tx, agg.order, (f) => ({ ...f, cases: [...(f.cases ?? []), { caseId: e.caseId, ref: e.ref, itemIds: e.orderItemIds ?? [], status: 'open', nextUpdateBy: e.nextResponseDueAt ?? null }] }));
       await this.core.timeline(tx, agg.order.id, [{ visibility: 'customer', label: 'Support case opened', detail: `Case ${e.ref}` }]);
+    });
+  }
+
+  /**
+   * support.case.resolved / support.case.reopened: the case's status on the order (the case_open flag clears when no
+   * other case on the order is open, and comes back on reopen). Inbox-claimed per event, so a late redelivery of an
+   * older event never flips the status back.
+   */
+  async onCaseStatus(e: EventPayload<'support.case.resolved'> | EventPayload<'support.case.reopened'>, status: 'resolved' | 'open', eventId?: string) {
+    if (!e.orderId || !(await this.exists(e.orderId))) return;
+    const key = `case-${status}:${eventId ?? `${e.caseId}:${'resolvedAt' in e ? e.resolvedAt : status}`}`;
+    await this.core.write(e.orderId, { actor: SYSTEM }, async (tx, agg) => {
+      if (!(await tx.claim(key))) return;
+      const cases = agg.order.flags?.cases ?? [];
+      const known = cases.find((c) => c.caseId === e.caseId);
+      if (known?.status === status) return;
+      const next = known
+        ? cases.map((c) => (c.caseId === e.caseId ? { ...c, status, ...(e.orderItemIds?.length ? { itemIds: e.orderItemIds } : {}) } : c))
+        : [...cases, { caseId: e.caseId, ref: e.ref, itemIds: e.orderItemIds ?? [], status, nextUpdateBy: null }];
+      await this.core.setFlags(tx, agg.order, (f) => ({ ...f, cases: next }));
+      await this.core.timeline(tx, agg.order.id, [{ visibility: 'customer', label: status === 'resolved' ? 'Support case resolved' : 'Support case reopened', detail: `Case ${e.ref}` }]);
     });
   }
 

@@ -158,8 +158,8 @@ describe('labels, claims, wallet and previews', () => {
     expect((await expectLedgerMatches(k, S)).total).toBe(0);
     await k.emit('shipping.label.purchased', { labelId: newId(), shipmentId: null, orderId, groupId: newId(), sellerId: S, billedTo: 'seller', cost: USD(500), kind: 'return', returnId: newId() });
     expect((await expectLedgerMatches(k, S)).total).toBe(0); // return labels come from returns
-    await k.emit('returns.label.created', { returnId: newId(), ownerType: 'seller', sellerId: S, labelId: newId(), orderId, cost: USD(650), paidBy: 'seller' });
-    await k.emit('returns.label.created', { returnId: newId(), ownerType: 'seller', sellerId: S, labelId: newId(), orderId, cost: USD(650), paidBy: 'customer' });
+    await k.emit('returns.label.created', { returnId: newId(), ref: 'RT-261010-0001', orderRef: 'MK-261010-00001', ownerType: 'seller', sellerId: S, labelId: newId(), orderId, cost: USD(650), paidBy: 'seller' });
+    await k.emit('returns.label.created', { returnId: newId(), ref: 'RT-261010-0001', orderRef: 'MK-261010-00001', ownerType: 'seller', sellerId: S, labelId: newId(), orderId, cost: USD(650), paidBy: 'customer' });
     expect((await expectLedgerMatches(k, S)).total).toBe(-650);
     const before = (await k.call('GET', `${ADMIN}/trading?from=${today()}&to=${today()}`, k.staff)).body.shippingExpense.amount;
     await k.emit('shipping.label.purchased', { labelId: newId(), shipmentId: null, orderId, groupId: newId(), sellerId: null, billedTo: 'company', cost: USD(700), kind: 'outbound', returnId: null });
@@ -232,7 +232,7 @@ describe('daily finance checks', () => {
     expect(res.body.error).toMatchObject({ code: 'RECON_DAY_INCOMPLETE', details: { openItems: expect.arrayContaining([mismatchId, orphanId]) } });
   });
 
-  it('assigns, explains and corrects (a second reviewer above the threshold), then signs off', async () => {
+  it("assigns, explains and corrects (a second reviewer above the caller's correction limit), then signs off", async () => {
     const owner = newId();
     const a = await k.call('POST', `${ADMIN}/reconciliation/items/${orphanId}/assign`, k.staff, { ownerId: owner });
     expect(a.body).toMatchObject({ owner: { kind: 'staff', id: owner, name: 'Fran Finance' }, ownerRole: 'Finance Specialist' });
@@ -241,11 +241,12 @@ describe('daily finance checks', () => {
     expect((await k.call('POST', `${ADMIN}/reconciliation/items/${orphanId}/explain`, k.staff, { reasonCode: 'timing', note: 'again' })).status).toBe(409);
     k.authority.set('finance.reconciliation.correct', 'approval_required');
     const c = await k.call('POST', `${ADMIN}/reconciliation/items/${mismatchId}/correct`, k.staff, { type: 'refund_duplicate_capture', amount: USD(200), reasonCode: 'duplicate_capture', note: 'Captured twice by the provider' }, idem());
-    expect(c.status).toBe(409);
-    expect(c.body.error.code).toBe('APPROVAL_REQUIRED');
+    // saved pending approval: the item answers with the correction and its approval (FORMAT.md, Approval responses)
+    expect(c.status, JSON.stringify(c.body)).toBe(200);
+    expect(c.body).toMatchObject({ id: mismatchId, status: 'correction_pending', correction: { status: 'pending_approval', amount: USD(200), approval: { required: true, approvalRequestId: expect.any(String) } } });
     const pending = await k.call('GET', `${ADMIN}/reconciliation/items?status=correction_pending`, k.staff);
     expect(pending.body.items[0]).toMatchObject({ id: mismatchId, correction: { status: 'pending_approval', approval: { required: true } } });
-    await k.decide(c.body.error.details.approvalRequestId, 'approved');
+    await k.decide(c.body.correction.approval.approvalRequestId, 'approved');
     expect(k.refunds).toEqual([expect.objectContaining({ origin: 'correction', originId: mismatchId, items: [expect.objectContaining({ amount: USD(200) })] })]);
     const done = await k.call('GET', `${ADMIN}/reconciliation/items?status=corrected`, k.staff);
     expect(done.body.items[0]).toMatchObject({ id: mismatchId, correction: { status: 'applied', resultReference: { kind: 'refund' } } });

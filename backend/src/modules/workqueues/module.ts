@@ -7,7 +7,6 @@ import { adminRoutes } from './http/admin.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresWorkqueuesRepository } from './infra/postgres/repository.js';
 import { WorkqueuesService } from './service.js';
-import { createDevArchiveStore } from './infra/archive/dev.js';
 
 /**
  * Work queues: The Operations Center's shared to-do system: queue definitions with an owner role, a named lead, a backup and an escalation route, and work items raised from other modules' events (overdue dispatch, low stock, waiting approvals, cases past target, failed payouts, mismatches) with deadlines, assignment and automatic escalation. Also the My work queues view, the dashboard's needs-attention tiles, the day-end review, the daily routine and saved filters.
@@ -17,12 +16,11 @@ import { createDevArchiveStore } from './infra/archive/dev.js';
  */
 export default defineModule({
   spec,
-  version: '1.0.0',
+  version: '1.1.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    // cold storage for archived items: deterministic development adapter; a real store plugs in behind the same port
-    const service = new WorkqueuesService({ repo: createPostgresWorkqueuesRepository(ctx.db, ctx.inbox), ctx, archive: createDevArchiveStore() });
+    const service = new WorkqueuesService({ repo: createPostgresWorkqueuesRepository(ctx.db, ctx.inbox), ctx });
     ctx.provide(service);
     ctx.http.routes(sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
@@ -83,6 +81,7 @@ export default defineModule({
     ctx.events.on("sellers.restriction.lifted", (e) => service.onRestrictionLiftedFromSellers(e.payload));
     ctx.events.on("sellers.restriction.updated", (e) => service.onRestrictionUpdatedFromSellers(e.payload));
     ctx.events.on("warehouse.return_parcel.received", (e) => service.onReturnParcelReceivedFromWarehouse(e.payload));
+    ctx.events.on("reviews.moderation.decided", (e) => service.onModerationDecidedFromReviews(e.payload, e.id));
 
     // Background jobs (spec jobs)
     ctx.jobs.handle("workqueues.deadline-sweep", () => service.deadlineSweep());

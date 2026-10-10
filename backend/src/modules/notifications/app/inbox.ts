@@ -191,6 +191,9 @@ export class Inbox {
         actionRequired: n.action_required,
         deadline: deadlineOf(n.deadline_at, now),
         resolvedAt: n.resolved_at?.toISOString() ?? null,
+        // action notices only: an expired one ("No longer needed") is never shown as resolved
+        state: n.action_required ? (n.resolved_at ? 'resolved' : n.expired_at ? 'expired' : 'open') : null,
+        expiredAt: n.expired_at?.toISOString() ?? null,
         routedTo,
       };
     });

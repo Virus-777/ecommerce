@@ -171,7 +171,7 @@ export interface MetricInputLike {
   unit: string;
   dateBasisOptions: string[];
   defaultDateBasis: string;
-  ownerId: string;
+  ownerId?: string | null;
   changeNote: string;
 }
 
@@ -215,3 +215,42 @@ export function nextRun(s: { frequency: 'daily' | 'weekly' | 'monthly'; dayOfWee
 }
 
 export const TIME_OF_DAY = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/**
+ * A refund split per seller (decision D5): the named items' amounts go to their sellers; the rest is split in
+ * proportion to each seller's item amounts on the order (largest remainder, so the shares add up exactly). Without
+ * order lines the rest goes to the named sellers in proportion to their items.
+ */
+export function splitRefund(total: number, named: { sellerId: string; amount: number }[], lines: { sellerId: string; weight: number }[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const n of named) out.set(n.sellerId, (out.get(n.sellerId) ?? 0) + Math.max(0, n.amount));
+  const namedSum = [...out.values()].reduce((s, x) => s + x, 0);
+  // the named amounts exceed the refund: scale them down to the total
+  if (namedSum > total) return largestRemainder(total, [...out].map(([key, weight]) => ({ key, weight })));
+  const rest = total - namedSum;
+  if (rest === 0) return out;
+  const weights = new Map<string, number>();
+  for (const l of lines) weights.set(l.sellerId, (weights.get(l.sellerId) ?? 0) + Math.max(0, l.weight));
+  let basis = [...weights].filter(([, w]) => w > 0).map(([key, weight]) => ({ key, weight }));
+  if (!basis.length) basis = [...out].filter(([, v]) => v > 0).map(([key, weight]) => ({ key, weight }));
+  if (!basis.length) basis = [{ key: named[0]?.sellerId ?? lines[0]?.sellerId ?? '', weight: 1 }];
+  for (const [k, v] of largestRemainder(rest, basis)) out.set(k, (out.get(k) ?? 0) + v);
+  return out;
+}
+
+/** Integer shares of a total in proportion to weights; the leftover units go to the largest remainders */
+function largestRemainder(total: number, parts: { key: string; weight: number }[]): Map<string, number> {
+  const sum = parts.reduce((s, p) => s + p.weight, 0);
+  const out = new Map<string, number>();
+  if (!parts.length || sum <= 0) return out;
+  const raw = parts.map((p) => ({ key: p.key, exact: (total * p.weight) / sum }));
+  let given = 0;
+  for (const r of raw) {
+    const v = Math.floor(r.exact);
+    out.set(r.key, (out.get(r.key) ?? 0) + v);
+    given += v;
+  }
+  const order = [...raw].sort((a, b) => b.exact - Math.floor(b.exact) - (a.exact - Math.floor(a.exact)));
+  for (let i = 0; given < total; i = (i + 1) % order.length, given++) out.set(order[i]!.key, out.get(order[i]!.key)! + 1);
+  return out;
+}

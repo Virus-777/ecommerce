@@ -229,7 +229,7 @@ Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-
 | internalNote | `string?` |
 | discount | `DiscountRule` |
 | code | `string?` Shared code, e.g. FALLHOME20. Omit for automatic discounts. |
-| autoApply | `bool?` Also applied automatically from the campaign page or when clipped |
+| autoApply | `bool?` Authoritative (decision P1): true = applied automatically to every eligible cart, with or without the code; false = applied only through its code or, for signed-in customers, a clip. A campaign with no code and autoApply false is clip-only. Default false. |
 | startsAt | `datetime` |
 | endsAt | `datetime` |
 | timeZone | `string` |
@@ -624,7 +624,7 @@ Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-
 | couponRedemptions | `int` |
 | redemptionShareOfOrders | `number` |
 | returnsOnPromotedPct | `number` |
-| storeReturnsPct | `number` |
+| storeReturnsPct | `number?` Store-wide return rate for the same range, from reports when enabled; null when not available (never 0 as a stand-in) |
 | tabs | `TabCount[]` |
 | dailyCost | `DailyPoint[]` |
 | results | `CampaignResult[]` |
@@ -650,6 +650,8 @@ Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-
 | purchaseLimit | `int?` |
 | flash | `FlashCountdown?` |
 | sellerPromos | `PromoBanner[]` e.g. 10% off orders over $100 from Northwind Audio, applied automatically |
+| automaticDiscount | `Money?` Per-unit discount the customer gets without doing anything (autoApply campaigns with no minimum spend, e.g. an automatic 10% off), on top of price. Offers subtracts it in comparable totals for the featured-offer rule (Total price = item + shipping − automatic discounts). Null when none |
+| automaticDiscountLabel | `string?` |
 
 ### FlashCountdown
 
@@ -792,9 +794,9 @@ Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-
 | offerId | `uuid` |
 | productId | `uuid` |
 | variantId | `uuid` |
-| sellerId | `uuid` |
+| sellerId | `uuid` The seller id, or OFFICIAL_STORE_ID for Official Store lines. Defensive: evaluateCart maps '' or null to OFFICIAL_STORE_ID when officialStore is true (VALIDATION_FAILED otherwise), so redemption_lines.seller_id is always a uuid |
 | officialStore | `bool` |
-| categoryId | `uuid` |
+| categoryId | `uuid?` Null when the caller does not know it (catalog off); category-scoped campaigns then do not match the line |
 | brandId | `uuid?` |
 | quantity | `int` |
 | unitPrice | `Money` Offer price before promotions |
@@ -807,6 +809,7 @@ Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-
 | customerId | `uuid?` |
 | guestSessionId | `string?` |
 | region | `string?` |
+| contactEmail | `email?` Guest checkout contact email. Per-customer limits and new-customer eligibility for guests key on its normalised hash (usage_counters.customer_key), so one person cannot reuse a one-per-customer coupon by checking out as a new guest. Ignored when customerId is set |
 | lines | `CartLineInput[]` |
 | codes | `string[]` Codes entered by the customer; clipped coupons of a signed-in customer are added automatically |
 | shipping | `map<Money>?` packageId → shipping charge, for free-shipping evaluation |
@@ -834,6 +837,7 @@ Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-
 | lineDiscount | `Money` |
 | purchaseLimit | `int?` |
 | limitExceeded | `bool` |
+| discountedQuantity | `int` Units that get the deal price (decision P2). Quantity above the remaining per-customer or deal limit is split: discountedQuantity units at unitPrice, the rest at regularUnitPrice, limitExceeded true. Equals the line quantity when nothing is over the limit |
 
 ### PackageDiscount
 
@@ -857,12 +861,21 @@ Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-
 | coversLineIds | `string[]` |
 | source | `enum(automatic|code|clipped)` |
 
+### SkippedPromotion
+
+| Field | Type |
+|---|---|
+| campaignId | `uuid` |
+| label | `string` |
+| reason | `enum(budget_insufficient|budget_exhausted|usage_limit|deal_sold_out|purchase_limit)` |
+| message | `text` |
+
 ### RejectedCode
 
 | Field | Type |
 |---|---|
 | code | `string` |
-| reason | `enum(not_found|not_started|expired|no_eligible_items|min_spend_not_met|customer_not_eligible|sign_in_required|region|usage_limit|budget_exhausted|not_combinable|per_order_limit)` |
+| reason | `enum(not_found|not_started|expired|no_eligible_items|min_spend_not_met|customer_not_eligible|sign_in_required|region|usage_limit|budget_exhausted|budget_insufficient|not_combinable|per_order_limit)` budget_insufficient: the remaining budget does not cover the whole discount for this cart; nothing is applied (decision P3, never a partial discount) |
 | message | `text` e.g. Applies only to Home & Kitchen items from the Official Store. None in your cart qualify. |
 | details | `string[]` |
 
@@ -876,6 +889,7 @@ Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-
 | packages | `PackageDiscount[]` |
 | applied | `AppliedPromotion[]` |
 | rejected | `RejectedCode[]` |
+| skipped | `SkippedPromotion[]` Automatic or clipped campaigns that matched but were not applied, with a reason the customer can read |
 | totals | `FundingBreakdown` |
 | changes | `string[]` Differences from the previous evaluation, e.g. HOMEWEEK10 ended at 12:00 PM PT |
 
@@ -1275,7 +1289,8 @@ Indexes: `unique (campaign_id, day)`
 |---|---|---|
 | `orders.order.placed` | orders | Commit reservations referenced by the order (fallback when commitRedemption was not called) |
 | `orders.item.cancelled` | orders | Reverse the item's allocations; restore usage and deal stock when cancelled before dispatch |
-| `returns.refund.approved` | returns | Partially reverse the item's allocations by the refunded quantity; count the return in campaign results |
+| `returns.refund.approved` | returns | Partially reverse each item's allocations by its refunded quantity from the payload items ({ orderItemId, quantity }[]; a refund without items reverses nothing and is logged); count the return in campaign results |
+| `orders.item.split` | orders | Split the item's redemption_lines between the original and the new order item in proportion to the quantities, so later cancellations, refundShare and fundingSplitFor on either id find their share |
 | `payments.payment.failed` | payments | Release reservations of the failed quote |
 | `offers.offer.price_changed` | offers | Flag participations whose seller raised the price during the campaign (the was price itself is read from offers.lowestPrice) |
 | `offers.offer.status_changed` | offers | Rebuild eligible offers; remove deactivated offers from flash sales |
@@ -1299,7 +1314,7 @@ Indexes: `unique (campaign_id, day)`
 | refundShare | `(orderItemId: uuid, quantity: int) => RefundShare`<br>Coupon share to deduct when refunding part of an order (coupons are split across items by value). Used to cap refunds at the remaining refundable amount. | returns, payments, support |
 | getPublicCampaign | `(campaignId: uuid) => PublicCampaign | null`<br>Name, period, terms and status for campaign pages, banners and ads. | content, advertising, graphql |
 | isCampaignActive | `(campaignId: uuid) => { active: bool, reason?: string }`<br>False when ended, paused, out of budget or sold out. Advertising stops linked ads; content hides teasers. | advertising, content |
-| liveDeals | `(opts: { limit: int }) => FlashSaleBlock[]`<br>Flash deals for the homepage Deals section. | content, graphql |
+| liveDeals | `(opts: { limit: int, campaignId?: uuid }) => FlashSaleBlock[]`<br>Flash deals for the homepage Deals section. campaignId limits the result to one campaign (content SourceRule.campaignId: a section or collection fed by one promotion). | content, graphql |
 | referencePrice | `(offerId: uuid) => Money | null`<br>Honest 'was' price: delegates to offers.lowestPrice(offerId, referencePriceDays, campaignStart or now) and returns null when offers has no history for the window. No price history is kept in promotions. | offers, wishlist |
 | getDealsPage | `(ctx: { customerId?: uuid, at?: datetime }) => DealsPage`<br>Deals page data in one call: tab counts, live flash sales, clippable coupons (clipped state for the customer), the first clearance batch, upcoming events with reminder state, the combination rules and serverTime for countdowns. Same data as GET /api/store/promotions/deals. | graphql |
 | listClearance | `(paging: PageInput) => Paged<DealProduct>`<br>Clearance products page by page (GET /deals/clearance). | graphql |
@@ -1381,6 +1396,11 @@ Checked through the access module (limits per role, second reviewer).
 - Was prices are the offer's lowest price in the look-back window (referencePriceDays) before the campaign starts. referencePrice and priceOffers read it from offers.lowestPrice (offers owns offer_price_history, the single source); promotions stores no daily prices. Campaign terms state the rule.
 - Seller views are scoped to the caller's seller account; sellers never see other sellers' consent or earnings.
 - Bundles and quantity deals (DiscountRule.bundle / quantityTiers) are phase 3: the kinds are accepted only when the phase-3 feature flag is on, otherwise VALIDATION_FAILED. Flash sales are phase 2 (plan 'growth promotions'); their endpoints are marked phase 2.
+- Automatic vs code vs clip (decision P1): autoApply decides. Evaluation applies autoApply campaigns without input, code campaigns only when the code is entered, and clip-only campaigns when a signed-in customer clipped them.
+- Deal limits (decision P2): quantity over a per-customer unit limit or the remaining deal stock is not refused; the line is split into discounted and regular-price units (LineDiscount.discountedQuantity) and the cart shows why.
+- Budgets (decision P3): a discount is applied in full or not at all. When the remaining budget (minus live reservations) is below the discount for this cart, a code is rejected with budget_insufficient and an automatic campaign is listed in skipped; reserveRedemption re-checks and fails BUDGET_EXHAUSTED if the budget moved in between.
+- New customers: audience new_customers means orders.hasPlacedOrder({ customerId }) is false, or for guests hasPlacedOrder({ email: contactEmail }); a guest without a contact email is not eligible (customer_not_eligible).
+- Offer reads: evaluation, eligibility rebuilds and participation checks read offers in one batch with offers.getOffers(ids) (any status, with sellerId) instead of per-offer getOffer calls.
 - access is an optional dependency here: funding confirmation checks the approval action promotions.budgets.approve through access.check / access.requestApproval when access is enabled.
 - Campaign pages, banners and the Deals homepage section are content; promotional ads are advertising. Both read campaign status through getPublicCampaign / isCampaignActive and react to promotions.campaign.ended.
 

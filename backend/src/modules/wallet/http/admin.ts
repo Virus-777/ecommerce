@@ -33,5 +33,7 @@ export const adminRoutes = (service: WalletService) => {
     listGiftCards: async ({ query, page }) => service.giftCards.list(query, page),
     /** POST /gift-cards/{id}/void: Void a gift card (lost, fraud) */
     voidGiftCard: async (i) => service.giftCards.void(i.params.id, i.body.reason, byOf(i)),
+    /** GET /gift-cards/batches/{id}/codes: Download a batch's gift card codes once */
+    getGiftCardCodes: async (i) => service.giftCards.codes(i.params.id, byOf(i)),
   });
 };

@@ -153,15 +153,15 @@ export const MediaAsset: z.ZodType<MediaAsset> = z.object({
 
 export interface UsageInput {
   module: string;
-  /** Evidence kinds: verification_document, return_evidence, case_evidence, order_evidence, inspection_photo */
-  kind: "product_image" | "product_video" | "variant_image" | "offer_photo" | "brand_logo" | "store_logo" | "store_banner" | "ad_creative" | "content_block" | "help_article" | "verification_document" | "return_evidence" | "case_evidence" | "order_evidence" | "inspection_photo" | "review_photo" | "message_attachment" | "bulk_file" | "generated";
+  /** Evidence kinds: verification_document, return_evidence, case_evidence, order_evidence, inspection_photo, correction_evidence, trust_evidence, dispute_evidence, supplier_document. The upload purposes each kind accepts are listed in the notes. */
+  kind: "product_image" | "product_video" | "variant_image" | "offer_photo" | "brand_logo" | "brand_banner" | "category_image" | "store_logo" | "store_banner" | "ad_creative" | "content_block" | "help_article" | "verification_document" | "return_evidence" | "case_evidence" | "order_evidence" | "inspection_photo" | "correction_evidence" | "trust_evidence" | "dispute_evidence" | "supplier_document" | "review_photo" | "message_attachment" | "bulk_file" | "generated";
   refId: string;
   refLabel?: string | null;
 }
 
 export const UsageInput: z.ZodType<UsageInput> = z.object({
   module: z.string(),
-  kind: z.enum(["product_image", "product_video", "variant_image", "offer_photo", "brand_logo", "store_logo", "store_banner", "ad_creative", "content_block", "help_article", "verification_document", "return_evidence", "case_evidence", "order_evidence", "inspection_photo", "review_photo", "message_attachment", "bulk_file", "generated"]).describe("Evidence kinds: verification_document, return_evidence, case_evidence, order_evidence, inspection_photo"),
+  kind: z.enum(["product_image", "product_video", "variant_image", "offer_photo", "brand_logo", "brand_banner", "category_image", "store_logo", "store_banner", "ad_creative", "content_block", "help_article", "verification_document", "return_evidence", "case_evidence", "order_evidence", "inspection_photo", "correction_evidence", "trust_evidence", "dispute_evidence", "supplier_document", "review_photo", "message_attachment", "bulk_file", "generated"]).describe("Evidence kinds: verification_document, return_evidence, case_evidence, order_evidence, inspection_photo, correction_evidence, trust_evidence, dispute_evidence, supplier_document. The upload purposes each kind accepts are listed in the notes."),
   refId: z.string(),
   refLabel: z.string().nullish(),
 }).register(common.apiTypes, { id: "media.UsageInput" });
@@ -456,12 +456,18 @@ export interface MediaPublicApi {
   detach(assetId: string, usage: { module: string, kind: string, refId: string }): Promise<void>;
   /** Evaluate an image against category or placement rules; the result is stored on the asset Used by: catalog, advertising, content, sellers. */
   checkImage(assetId: string, rules: ImageRules): Promise<ImageCheckResult>;
-  /** Store a file produced by the platform (private) Used by: audit, offers, customers, finance, reports, warehouse, shipping, inventory. */
-  storeGeneratedFile(input: { owner: MediaOwner, fileName: string, contentType: string, body: ReadableStream, ttlHours?: number, purpose: 'export' | 'statement' | 'report' | 'correction_report' | 'data_export' | 'label' }): Promise<MediaAsset>;
+  /** Store a file produced by the platform (private). gift_card_codes files (a wallet gift card batch's codes) are sensitive: download links need the owning module's check and are recorded with a reason; they expire after ttlHours like every generated file. Used by: audit, offers, customers, finance, reports, warehouse, shipping, inventory, wallet. */
+  storeGeneratedFile(input: { owner: MediaOwner, fileName: string, contentType: string, body: ReadableStream, ttlHours?: number, purpose: 'export' | 'statement' | 'report' | 'correction_report' | 'data_export' | 'label' | 'gift_card_codes' }): Promise<MediaAsset>;
   /** Signed link for a private file after the caller's module checked access; recorded for sensitive purposes Used by: customers, finance, reports, audit, sellers, returns, support. */
   signedDownload(assetId: string, principal: identity.Principal, reason?: string): Promise<DownloadLink>;
   /** Takedown on behalf of a moderation decision (trust, reviews, catalog) Used by: trust, reviews, catalog, advertising. */
   remove(assetId: string, input: { reason: string, by: common.Actor }): Promise<void>;
+  /** The original bytes of a ready file, for modules that parse uploads in-process (offers bulk files, purchasing supplier files). Fails with ASSET_NOT_OWNED when expectedOwner is given and differs, ILLEGAL_TRANSITION when the asset is not ready, FILE_TOO_LARGE above maxBytes (default 25 MB). Works with every storage adapter (development disk included); callers never fetch signed URLs themselves. Used by: offers, purchasing, catalog, inventory. */
+  readFile(assetId: string, expectedOwner?: MediaOwner, opts?: { maxBytes?: number }): Promise<{ fileName: string, contentType: string, sizeBytes: number, body: Uint8Array }>;
+  /** Store a file that arrived outside an upload session (inbound email attachments) under the purpose's type and size limits. It is processed like an upload (scan, strip, renditions) and starts in processing; the receiving module attaches it like any upload. Refused types and sizes fail with FILE_TYPE_NOT_ALLOWED or FILE_TOO_LARGE so the caller can tell the sender. source goes on the asset history, e.g. inbound-email:<providerEventId>. Used by: notifications. */
+  storeInboundFile(input: { owner: MediaOwner, purpose: 'message_attachment' | 'case_evidence' | 'other_document', fileName: string, contentType: string, body: Uint8Array, source: string }): Promise<MediaAsset>;
+  /** Ready images whose perceptual hash is within maxDistance (Hamming distance, default 6) of this image, closest first (default limit 20), for duplicate-product checks. Never returns private evidence files. Used by: catalog. */
+  findSimilar(assetId: string, scope: { ownerKind?: 'seller' | 'platform', ownerId?: string, usageKinds?: string[], maxDistance?: number, limit?: number }): Promise<{ assetId: string, distance: number, owner: MediaOwner, usages: Usage[] }[]>;
 }
 
 /* ------------------------------------------------------------------ tables (Kysely row types) */
@@ -873,13 +879,14 @@ export const endpoints = defineEndpoints({
     permission: "media.assets.manage",
     scope: "staff",
     summary: "Confirm a staff upload",
+    desc: "Only the staff member who started the upload may complete it; anyone else gets NOT_FOUND (the response carries the asset, so completing someone else's upload would leak a private file).",
     params: () =>
       z.object({
         id: z.uuid(),
       }),
     response: () => MediaAsset,
     status: 202,
-    errors: ["UPLOAD_INCOMPLETE","UPLOAD_EXPIRED","CHECKSUM_MISMATCH"],
+    errors: ["NOT_FOUND","UPLOAD_INCOMPLETE","UPLOAD_EXPIRED","CHECKSUM_MISMATCH"],
     screens: ["admin/official","admin/content","admin/ad-assets"],
     phase: 1,
   },
@@ -891,7 +898,7 @@ export const endpoints = defineEndpoints({
     permission: "media.assets.manage",
     scope: "staff",
     summary: "Send the file bytes of a staff upload (development storage)",
-    desc: "Development storage only: receives the file bytes for a signed upload ticket (real storage takes the bytes directly at the ticket URL). Answers 409 when a real storage adapter is configured. The body is the raw file (any content type), at most the ticket's maxBytes.",
+    desc: "Development storage only: receives the file bytes for a signed upload ticket (real storage takes the bytes directly at the ticket URL). Answers 409 when a real storage adapter is configured. The body is the raw file (any content type), at most the ticket's maxBytes. Only the staff member who started the upload may send its bytes (NOT_FOUND otherwise).",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -900,7 +907,7 @@ export const endpoints = defineEndpoints({
     body: () => z.instanceof(Uint8Array),
     response: null,
     status: 204,
-    errors: ["DEV_STORAGE_ONLY","UPLOAD_EXPIRED","FILE_TOO_LARGE","ILLEGAL_TRANSITION"],
+    errors: ["NOT_FOUND","DEV_STORAGE_ONLY","UPLOAD_EXPIRED","FILE_TOO_LARGE","ILLEGAL_TRANSITION"],
     phase: 1,
   },
   listAssetsAdmin: {
@@ -1125,7 +1132,7 @@ export const spec = defineModuleSpec({
   summary: "Every uploaded or generated file: images, video and documents. Signed direct uploads, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted).",
   dependsOn: [],
   optionalDeps: ["audit","identity"],
-  publicApi: ["getAsset","refs","attach","detach","checkImage","storeGeneratedFile","signedDownload","remove"],
+  publicApi: ["getAsset","refs","attach","detach","checkImage","storeGeneratedFile","signedDownload","remove","readFile","storeInboundFile","findSimilar"],
   permissions: [
     {
       "key": "media.assets.view",
@@ -1222,8 +1229,8 @@ export const spec = defineModuleSpec({
   },
   jobs: {
     "media.process": {
-      "schedule": "queue worker",
-      "does": "Scan, probe, strip metadata, build renditions, run baseline image checks, start video transcodes; retry with backoff; publish media.asset.ready or media.asset.rejected"
+      "schedule": "every minute",
+      "does": "Also started at once when an upload completes. Scan, probe, strip metadata, build renditions, run baseline image checks, start video transcodes; retry with backoff; publish media.asset.ready or media.asset.rejected"
     },
     "media.expire-uploads": {
       "schedule": "hourly",

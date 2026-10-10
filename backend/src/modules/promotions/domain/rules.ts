@@ -225,14 +225,15 @@ export function scopeLabel(scope: Scope): string | null {
 
 export type CustomerReason = 'sign_in_required' | 'customer_not_eligible' | 'region';
 
-export function customerCheck(e: Eligibility, who: { signedIn: boolean; isNewCustomer: boolean | null; region: string | null }): { ok: true } | { ok: false; reason: CustomerReason; message: string } {
+export function customerCheck(e: Eligibility, who: { signedIn: boolean; guestEmail?: boolean; isNewCustomer: boolean | null; region: string | null }): { ok: true } | { ok: false; reason: CustomerReason; message: string } {
   switch (e.audience) {
     case 'everyone':
       return { ok: true };
     case 'signed_in':
       return who.signedIn ? { ok: true } : { ok: false, reason: 'sign_in_required', message: 'Sign in to use this coupon.' };
     case 'new_customers':
-      if (!who.signedIn) return { ok: false, reason: 'sign_in_required', message: 'Sign in to use this coupon. It is for new customers.' };
+      // guests qualify by their checkout contact email (orders.hasPlacedOrder({ email })); without one they are not eligible
+      if (!who.signedIn && !who.guestEmail) return { ok: false, reason: 'customer_not_eligible', message: 'Only for new customers. Sign in or enter your email at checkout to use it.' };
       return who.isNewCustomer === false ? { ok: false, reason: 'customer_not_eligible', message: e.newCustomerRule ? `Only for new customers (${e.newCustomerRule}).` : 'Only for new customers.' } : { ok: true };
     case 'regions': {
       const regions = (e.regions ?? []).map((r) => r.toUpperCase());

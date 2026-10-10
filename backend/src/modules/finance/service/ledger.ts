@@ -20,7 +20,7 @@ type Item = orders.OrderItem;
 const REFERENCE_KINDS: readonly Reference['kind'][] = ['order', 'order_item', 'return', 'refund', 'case', 'chargeback', 'payout', 'adjustment', 'ad_campaign', 'fulfillment_service', 'statement', 'seller', 'reconciliation'];
 
 /** Kinds of trading_entries rows that are platform (marketplace) facts, never Official Store trading */
-export const PLATFORM_KINDS = ['platform_label', 'platform_refund', 'platform_claim', 'coupon_redemption', 'coupon_seller_part', 'wallet_credit', 'wallet_credit_used', 'wallet_liability'];
+export const PLATFORM_KINDS = ['platform_label', 'platform_refund', 'platform_claim', 'coupon_redemption', 'coupon_seller_part', 'wallet_credit', 'wallet_credit_used', 'wallet_liability', 'wallet_breakage', 'wallet_correction'];
 
 export class LedgerPart extends Part {
   /* ---------------------------------------------------------------- lookups */
@@ -435,6 +435,61 @@ export class LedgerPart extends Part {
   /** wallet.credit.used: store credit paying for an order reduces the liability */
   async onCreditUsed(e: EventPayload<'wallet.credit.used'>) {
     await this.repo.transaction((tx) => this.trading(tx, `wallet_used:${e.orderId}`, { at: this.now(), kind: 'discount', amount: -e.amount.amount, currency: e.amount.currency, order_id: e.orderId, order_item_id: null, variant_id: null, ref_kind: 'wallet_liability', ref_id: e.orderId }));
+  }
+
+  /**
+   * wallet.credit.reversed: unused goodwill removed. The liability goes down by the amount; platform-funded
+   * goodwill lowers the platform goodwill cost; seller-funded goodwill credits the seller back the charge posted
+   * for the grant (keyed by grantEntryId, never more than was charged). Once per reversal entry (inbox).
+   */
+  async onCreditReversed(e: EventPayload<'wallet.credit.reversed'>) {
+    const base = { at: this.now(), order_id: e.orderId ?? null, order_item_id: null, variant_id: null, ref_id: e.entryId };
+    await this.repo.transaction(async (tx) => {
+      if (!(await tx.claim(`wallet.credit.reversed:${e.entryId}`))) return;
+      await this.trading(tx, `wallet_liability_reversed:${e.entryId}`, { ...base, kind: 'discount', amount: -e.amount.amount, currency: e.amount.currency, ref_kind: 'wallet_liability' });
+      if (e.chargedTo === 'platform') await this.trading(tx, `wallet_reversed:${e.entryId}`, { ...base, kind: 'discount', amount: -e.amount.amount, currency: e.amount.currency, ref_kind: 'wallet_credit' });
+    });
+    if (e.chargedTo !== 'seller') return;
+    if (!e.sellerId || !isUuid(e.sellerId)) return void this.ctx.log.warn({ entryId: e.entryId, grantEntryId: e.grantEntryId }, 'finance: reversed seller-funded store credit without a seller');
+    // the debit booked from wallet.credit.granted for this grant (recordSystemAdjustment key wallet_credit:<grantEntryId>)
+    const charge = await this.repo.get('adjustments', detId(`adjustment:wallet_credit:${e.grantEntryId}`));
+    if (!charge || charge.direction !== 'debit' || charge.seller_id !== e.sellerId) return void this.ctx.log.warn({ entryId: e.entryId, grantEntryId: e.grantEntryId }, 'finance: no seller charge found for the reversed goodwill');
+    const back = Math.min(e.amount.amount, charge.amount);
+    if (back <= 0) return;
+    await this.parts.holds.recordSystemAdjustment({
+      key: `wallet_credit_reversed:${e.grantEntryId}`,
+      sellerId: e.sellerId,
+      direction: 'credit',
+      amount: back,
+      reasonCode: 'goodwill',
+      reason: 'Goodwill store credit charged to you was reversed: the charge is given back',
+      reference: e.caseId ? { kind: 'case', id: e.caseId, ref: null } : e.orderId ? { kind: 'order', id: e.orderId, ref: null } : null,
+    });
+  }
+
+  /** wallet.credit.expired: unused credit expired; the liability goes down and the platform records breakage (never seller money) */
+  async onCreditExpired(e: EventPayload<'wallet.credit.expired'>) {
+    const base = { at: this.now(), order_id: null, order_item_id: null, variant_id: null, ref_id: e.entryId };
+    await this.repo.transaction(async (tx) => {
+      if (!(await tx.claim(`wallet.credit.expired:${e.entryId}`))) return;
+      await this.trading(tx, `wallet_liability_expired:${e.entryId}`, { ...base, kind: 'discount', amount: -e.amount.amount, currency: e.amount.currency, ref_kind: 'wallet_liability' });
+      await this.trading(tx, `wallet_breakage:${e.entryId}`, { ...base, kind: 'discount', amount: -e.amount.amount, currency: e.amount.currency, ref_kind: 'wallet_breakage' });
+    });
+  }
+
+  /** wallet.credit.corrected: a staff balance correction raises (positive) or lowers (negative) the liability; booked as a platform credit correction */
+  async onCreditCorrected(e: EventPayload<'wallet.credit.corrected'>) {
+    const base = { at: this.now(), order_id: null, order_item_id: null, variant_id: null, ref_id: e.entryId };
+    await this.repo.transaction(async (tx) => {
+      if (!(await tx.claim(`wallet.credit.corrected:${e.entryId}`))) return;
+      await this.trading(tx, `wallet_liability_corrected:${e.entryId}`, { ...base, kind: 'discount', amount: e.amount.amount, currency: e.amount.currency, ref_kind: 'wallet_liability' });
+      await this.trading(tx, `wallet_correction:${e.entryId}`, { ...base, kind: 'discount', amount: e.amount.amount, currency: e.amount.currency, ref_kind: 'wallet_correction' });
+    });
+  }
+
+  /** Finance's store-credit liability (wallet_liability entries) up to a time */
+  async storeCreditLiability(before: Date): Promise<number> {
+    return this.repo.sum('trading_entries', 'amount', { ref_kind: 'wallet_liability', at: { op: '<', value: before } });
   }
 
   /* ---------------------------------------------------------------- public API: ad charges, company costs */

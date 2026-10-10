@@ -125,8 +125,8 @@ describe('reactions to other modules', () => {
     const b = k.offer({ ownerType: 'official', sellerId: null, categoryId: HOME, price: USD(5000), stock: 30 });
     const c = await k.call('POST', `${ADMIN}/campaigns`, k.staff, campaignInput(k.clock, { name: 'Flash', discount: { kind: 'flash_sale' }, scope: { mode: 'offers', include: [{ kind: 'offer', id: a.id }, { kind: 'offer', id: b.id }], exclude: [] } }));
     await k.call('PUT', `${ADMIN}/campaigns/${c.body.id}/flash-items`, k.staff, { items: [{ offerId: a.id, dealPrice: USD(3000), dealStock: 20, purchaseLimit: 2 }, { offerId: b.id, dealPrice: USD(3000), dealStock: 20, purchaseLimit: 2 }] });
-    await k.emit('offers.offer.status_changed', { offerId: a.id, productId: a.productId, variantId: a.variantId, sellerId: null, ownerType: 'official', from: 'active', to: 'paused', reasonCode: null, reason: null });
-    await k.emit('inventory.stock.changed', { stockItemId: b.stockItemId, offerId: b.id, ownerType: 'official', sellerId: null, variantId: b.variantId, available: 5, reserved: 0, previousAvailable: 30, state: 'in_stock', cause: 'sale' });
+    await k.emit('offers.offer.status_changed', { offerId: a.id, productId: a.productId, variantId: a.variantId, sellerId: null, ownerType: 'official', from: 'active', to: 'paused', reasonCode: null, reason: null, stockItemId: a.stockItemId });
+    await k.emit('inventory.stock.changed', { stockItemId: b.stockItemId, offerId: b.id, ownerType: 'official', sellerId: null, productId: b.productId, variantId: b.variantId, available: 5, reserved: 0, previousAvailable: 30, state: 'in_stock', archived: false, cause: 'sale' });
     const items = await k.call('GET', `${ADMIN}/campaigns/${c.body.id}/flash-items`, k.staff);
     const byOffer = Object.fromEntries(items.body.map((f: any) => [f.offerId, f]));
     expect(byOffer[a.id].state).toBe('ended');

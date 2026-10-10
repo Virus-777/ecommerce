@@ -73,6 +73,8 @@ export interface QueueSeed {
   ownerRole: string;
   defaultDeadlineMinutes: number;
   businessHoursOnly: boolean;
+  /** While an item waits on someone outside the team its deadline clock stops (spec QueueDefinition.pauseWhileWaiting) */
+  pauseWhileWaiting: boolean;
   screen: string;
   screenFilter: string | null;
   visibleToSeller: boolean;
@@ -90,10 +92,12 @@ const H = 60;
 const D = 24 * H;
 const OWNER = 'business_owner';
 
-const seed = (s: Omit<QueueSeed, 'screenFilter' | 'visibleToSeller' | 'businessHoursOnly'> & Partial<Pick<QueueSeed, 'screenFilter' | 'visibleToSeller' | 'businessHoursOnly'>>): QueueSeed => ({
+type SeedDefaults = 'screenFilter' | 'visibleToSeller' | 'businessHoursOnly' | 'pauseWhileWaiting';
+const seed = (s: Omit<QueueSeed, SeedDefaults> & Partial<Pick<QueueSeed, SeedDefaults>>): QueueSeed => ({
   screenFilter: null,
   visibleToSeller: false,
   businessHoursOnly: false,
+  pauseWhileWaiting: false,
   ...s,
 });
 
@@ -109,6 +113,7 @@ export const QUEUE_SEEDS: Record<string, QueueSeed> = Object.fromEntries(
     seed({ key: 'purchasing.receiving', name: 'Receiving', area: 'purchasing', ownerRole: 'purchasing_manager', defaultDeadlineMinutes: D, screen: 'ops/receiving', escalationRoute: [role('official_store_manager', 0), role(OWNER, 2 * D)] }),
     seed({ key: 'inventory.reservations', name: 'Stock reservations', area: 'inventory_warehouse', ownerRole: 'inventory_manager', defaultDeadlineMinutes: D, businessHoursOnly: true, screen: 'ops/inventory', screenFilter: 'reservations', escalationRoute: [role('order_manager', 0), role('official_store_manager', D)] }),
     seed({ key: 'inventory.low_stock', name: 'Low stock', area: 'inventory_warehouse', ownerRole: 'inventory_manager', defaultDeadlineMinutes: D, businessHoursOnly: true, screen: 'ops/inventory', screenFilter: 'low_stock', escalationRoute: [role('purchasing_manager', 0), role('official_store_manager', D)] }),
+    seed({ key: 'official_store.messages', name: 'Official Store messages', area: 'support', ownerRole: 'official_store_manager', defaultDeadlineMinutes: 4 * H, businessHoursOnly: true, screen: 'admin/official', screenFilter: 'messages', escalationRoute: [role('customer_support_manager', 0), role(OWNER, D)] }),
     seed({ key: 'returns.inspection', name: 'Return inspection', area: 'returns', ownerRole: 'returns_manager', defaultDeadlineMinutes: D, screen: 'ops/return-inspection', escalationRoute: [role('warehouse_manager', 0), role(OWNER, 2 * D)] }),
     seed({ key: 'returns.decisions', name: 'Return decisions', area: 'returns', ownerRole: 'returns_manager', defaultDeadlineMinutes: D, screen: 'admin/returns', screenFilter: 'escalated', escalationRoute: [role('customer_support_manager', 0), role(OWNER, 2 * D)] }),
     seed({ key: 'finance.daily_checks', name: 'Daily finance checks', area: 'finance', ownerRole: 'finance_manager', defaultDeadlineMinutes: D, businessHoursOnly: true, screen: 'ops/finance-checks', escalationRoute: [role(OWNER, 0, 'amount over $1,000'), role(OWNER, D)] }),
@@ -122,7 +127,9 @@ export const QUEUE_SEEDS: Record<string, QueueSeed> = Object.fromEntries(
     seed({ key: 'sellers.restrictions', name: 'Restrictions', area: 'sellers', ownerRole: 'seller_manager', defaultDeadlineMinutes: 2 * D, businessHoursOnly: true, screen: 'admin/sellers', screenFilter: 'restrictions', escalationRoute: [role('trust_and_risk_manager', 0), role(OWNER, 2 * D)] }),
     seed({ key: 'sellers.appeals', name: 'Appeals', area: 'sellers', ownerRole: 'seller_manager', defaultDeadlineMinutes: 2 * D, businessHoursOnly: true, screen: 'admin/sellers', screenFilter: 'appeals', escalationRoute: [role('trust_and_risk_manager', 0), role(OWNER, 2 * D)] }),
     seed({ key: 'sellers.performance', name: 'Seller performance', area: 'sellers', ownerRole: 'seller_manager', defaultDeadlineMinutes: 3 * D, businessHoursOnly: true, screen: 'admin/sellers', screenFilter: 'below_target', escalationRoute: [role(OWNER, 2 * D)] }),
+    seed({ key: 'sellers.accounts', name: 'Seller accounts', area: 'sellers', ownerRole: 'seller_manager', defaultDeadlineMinutes: 2 * D, businessHoursOnly: true, screen: 'admin/sellers', screenFilter: 'accounts', escalationRoute: [role(OWNER, 2 * D)] }),
     seed({ key: 'trust.reports', name: 'Trust reports', area: 'trust', ownerRole: 'trust_and_risk_manager', defaultDeadlineMinutes: D, screen: 'admin/trust', escalationRoute: [role(OWNER, D)] }),
+    seed({ key: 'reviews.moderation', name: 'Review moderation', area: 'trust', ownerRole: 'trust_and_risk_manager', defaultDeadlineMinutes: D, businessHoursOnly: true, screen: 'admin/reviews', screenFilter: 'moderation', escalationRoute: [role(OWNER, D)] }),
     seed({ key: 'access.approvals', name: 'Approvals waiting', area: 'platform', ownerRole: OWNER, defaultDeadlineMinutes: D, screen: 'admin/staff', screenFilter: 'approvals', escalationRoute: [role(OWNER, 0)] }),
     seed({ key: 'customers.data_requests', name: 'Customer data requests', area: 'support', ownerRole: 'customer_support_manager', defaultDeadlineMinutes: 30 * D, screen: 'admin/customers', screenFilter: 'data_requests', escalationRoute: [role('platform_administrator', 0), role(OWNER, 2 * D)] }),
   ].map((q) => [q.key, q]),
@@ -148,7 +155,16 @@ export const KIND_QUEUES: Partial<Record<Kind, string>> = {
   low_stock: 'inventory.low_stock',
   unexpected_return_parcel: 'warehouse.return_parcels',
   return_parcel_overdue: 'warehouse.return_parcels',
+  seller_owner_missing: 'sellers.accounts',
+  review_moderation_overdue: 'reviews.moderation',
+  official_store_reply: 'official_store.messages',
 };
+
+/** Every work item kind (spec WorkItem.kind) */
+export const KINDS: readonly Kind[] = ['overdue_dispatch', 'missing_tracking', 'delivery_exception', 'seller_cannot_fulfill', 'low_stock', 'receiving', 'pick_pack', 'return_inspection', 'return_decision', 'approval_waiting', 'case_past_target', 'case_escalated', 'payout_failed', 'payment_check', 'payment_mismatch', 'chargeback', 'hold_review', 'product_review', 'application_waiting', 'launch_review', 'appeal_due', 'restriction_review', 'restriction_evidence', 'seller_performance', 'seller_owner_missing', 'storefront_review', 'trust_report', 'trust_recommendation', 'enforcement_reversal', 'review_moderation_overdue', 'official_store_reply', 'data_request', 'seller_reply_overdue', 'unexpected_return_parcel', 'return_parcel_overdue', 'manual_task'];
+
+/** Every subject type (spec WorkSubject.type) */
+export const SUBJECT_TYPES: readonly string[] = ['order', 'order_item', 'shipment', 'delivery_exception', 'product', 'offer', 'stock_item', 'purchase_order', 'approval_request', 'case', 'return', 'return_parcel', 'refund', 'payout', 'payment', 'dispute', 'reconciliation_check', 'seller', 'application', 'appeal', 'restriction', 'change_request', 'trust_report', 'recommendation', 'enforcement', 'moderation_item', 'conversation', 'campaign', 'customer', 'data_request', 'other'];
 
 /** Seller Center screen of a seller-visible task */
 export function sellerScreen(kind: string): string {

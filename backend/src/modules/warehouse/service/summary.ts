@@ -105,8 +105,12 @@ export class Summary {
       return { ...base, kind: 'bin', bin: view, message };
     }
 
-    // a stock item this context knows (pick list, package), else any company SKU
-    const known = ctx?.items.find((i) => itemMatches(raw, i));
+    // a stock item this context knows (pick list, package) by SKU label or GTIN, else any company SKU
+    let known = ctx?.items.find((i) => itemMatches(raw, i));
+    if (!known && ctx?.items.length) {
+      const gtins = await this.core.gtins(ctx.items.map((i) => i.stockItemId));
+      known = ctx.items.find((i) => itemMatches(raw, { ...i, extraCodes: [gtins.get(i.stockItemId)] }));
+    }
     if (known) return { ...base, kind: 'item', stockItemId: known.stockItemId, sku: known.sku, label: known.label, fulfillmentId: ctx?.fulfillmentId ?? null, packageId: ctx?.packageId ?? null, message: null };
     const bySku = await this.core
       .ctx.use('inventory')
@@ -187,6 +191,7 @@ export class Summary {
       this.core.publish('warehouse.fulfillment.at_risk', { fulfillmentId: f.id, orderId: f.order_id, shipBy: f.ship_by.toISOString(), status: f.status });
       await this.core.soft('workqueues', 'at-risk pick and pack', (w) =>
         w.raise({
+          sourceModule: 'warehouse',
           queueKey: 'warehouse.pick_pack',
           kind: 'pick_pack',
           title: `Pack ${f.order_ref} before ${f.ship_by.toISOString().slice(11, 16)} UTC`,

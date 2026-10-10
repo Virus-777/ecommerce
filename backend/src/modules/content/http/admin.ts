@@ -68,4 +68,10 @@ export const adminRoutes = (service: ContentService) =>
 
     /* ---------------------------------------------------------------- navigation */
     updateNavigation: async (i) => service.updateNavigation(i.body, by(i)),
+    /** POST /homepage/submit: Send the draft layout for review */
+    submitHomepageDraft: async (i) => service.submitHomepageDraft(i.body ?? {}, by(i)),
+    /** POST /homepage/review: Approve the draft layout or request changes */
+    reviewHomepageDraft: async (i) => service.reviewHomepageDraft(i.body, by(i)),
+    /** POST /pages/{id}/cancel-schedule: Cancel a scheduled publication */
+    cancelPageSchedule: async (i) => service.cancelPageSchedule(i.params.id, i.body ?? {}, by(i)),
   });

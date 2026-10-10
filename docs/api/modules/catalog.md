@@ -65,6 +65,7 @@ What a product is: categories, attributes, brands, products, variants, and the r
 | POST | `/api/admin/catalog/products/{id}/request-changes` | Ask the submitter to fix specific fields _(audited)_ | staff<br>`catalog.products.review` | `{ reason: text, fields: map<string> }` → `ProductAdmin` |
 | POST | `/api/admin/catalog/products/{id}/reject` | Reject with a reason _(audited)_ | staff<br>`catalog.products.review` | `{ reason: text }` → `ProductAdmin` |
 | POST | `/api/admin/catalog/products/{id}/publication` | Set Active, Hidden or Suspended _(audited)_ | staff<br>`catalog.products.publish` | `{ publication: enum(active|hidden|suspended), reason: text, trustReportId: uuid? }` → `ProductAdmin` |
+| PATCH | `/api/admin/catalog/products/{id}/variants/{variantId}` | Set a variant's shipping weight, dimensions and list price _(audited)_ | staff<br>`catalog.products.review` | `VariantDetailsInput` → `ProductAdmin` |
 | GET | `/api/admin/catalog/products/{id}/publication-impact` | What hiding or suspending the product would do | staff<br>`catalog.products.publish` | `PublicationImpact` |
 | POST | `/api/admin/catalog/products/merge` | Merge duplicates and submissions into the product to keep _(audited)_ | staff<br>`catalog.products.review` | `MergeRequest` → `MergeResult` |
 | POST | `/api/admin/catalog/products/merge/preview` | Preview what a merge moves before confirming | staff<br>`catalog.products.review` | `MergeRequest` → `MergePreview` |
@@ -124,6 +125,7 @@ What a product is: categories, attributes, brands, products, variants, and the r
 | description | `text?` |
 | productCount | `int` |
 | banner | `MediaRef?` Brand page banner image |
+| status | `enum(active|under_review|blocked)` Store lists only show active brands; getBrands and admin reads return any status |
 
 ### Variant
 
@@ -133,6 +135,65 @@ What a product is: categories, attributes, brands, products, variants, and the r
 | options | `map<string>` e.g. { "color": "Sage" } |
 | gtin | `string?` |
 | images | `MediaRef[]` |
+| weightGrams | `int?` Shipping weight of one unit in its retail packaging (parcel data for shipping quotes and labels) |
+| lengthCm | `int?` Packaged length of one unit |
+| widthCm | `int?` |
+| heightCm | `int?` |
+| listPrice | `Money?` Manufacturer list price (MSRP) set by Marketly staff; sellers cannot set it. Offers may show it as a reference price |
+
+### VariantParcel
+
+| Field | Type |
+|---|---|
+| weightGrams | `int` |
+| lengthCm | `int?` |
+| widthCm | `int?` |
+| heightCm | `int?` |
+
+### VariantRef
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| productId | `uuid` |
+| productTitle | `string` |
+| options | `map<string>` |
+| gtin | `string?` |
+| weightGrams | `int?` |
+| lengthCm | `int?` |
+| widthCm | `int?` |
+| heightCm | `int?` |
+| listPrice | `Money?` |
+
+### ProductRecord
+
+| Field | Type |
+|---|---|
+| product | `Product` |
+| reviewState | `enum(draft|submitted|changes_requested|approved|rejected)` |
+| publication | `enum(active|hidden|suspended)` |
+| purchasable | `bool` Approved and active (same answer as isPurchasable) |
+| ownerSellerId | `uuid?` Null for Official Store products |
+| mergedIntoId | `uuid?` Set when this product was merged into another; read the kept product instead |
+
+### CategoryPath
+
+| Field | Type |
+|---|---|
+| categoryId | `uuid` |
+| names | `string[]` Root first, ending with the category itself, e.g. ["Electronics", "Audio", "Headphones"] |
+| ids | `uuid[]` Category ids in the same order |
+
+### VariantDetailsInput
+
+| Field | Type |
+|---|---|
+| weightGrams | `int?` |
+| lengthCm | `int?` |
+| widthCm | `int?` |
+| heightCm | `int?` |
+| listPrice | `Money?` Staff only. Send null to clear |
+| reason | `text` |
 
 ### ProductSummary
 
@@ -200,7 +261,7 @@ What a product is: categories, attributes, brands, products, variants, and the r
 | Field | Type |
 |---|---|
 | id | `uuid` |
-| action | `enum(submitted|approved|changes_requested|rejected|publication_changed|merged|check_dismissed)` |
+| action | `enum(submitted|approved|changes_requested|rejected|publication_changed|merged|check_dismissed|correction_accepted|variant_details_changed)` |
 | reason | `text?` Decision reason, or the submitter's note to the reviewer on submitted entries |
 | fields | `map<string>` Field-level comments on changes requested |
 | actor | `Actor` |
@@ -232,6 +293,11 @@ What a product is: categories, attributes, brands, products, variants, and the r
 | options | `map<string>` |
 | gtin | `string?` |
 | imageIds | `uuid[]?` |
+| weightGrams | `int?` Packaged weight of one unit; reviewed with the product |
+| lengthCm | `int?` |
+| widthCm | `int?` |
+| heightCm | `int?` |
+| listPrice | `Money?` Accepted only on admin endpoints (Official Store drafts); refused with VALIDATION_FAILED from sellers |
 
 ### CorrectionSuggestion
 
@@ -294,6 +360,8 @@ What a product is: categories, attributes, brands, products, variants, and the r
 | options | `map<string>` |
 | modelNumber | `string?` |
 | imageUrl | `url?` |
+| imageId | `uuid?` Media asset id of the main image (variant image first, else product image), so orders can resolve it later with media.refs even if the product changes |
+| image | `MediaRef?` The same image as a MediaRef at snapshot time |
 | takenAt | `datetime` |
 
 ### Submission
@@ -311,7 +379,7 @@ What a product is: categories, attributes, brands, products, variants, and the r
 | lastSavedAt | `datetime?` |
 | lastSavedBy | `Actor?` |
 | expectedReviewBy | `datetime?` Shown to the submitter |
-| reviewDeadline | `Deadline?` Internal review target that orders the queue (setting reviewTargetBusinessHours) |
+| reviewDeadline | `Deadline?` Internal review target that orders the queue (setting reviewTargetBusinessDays) |
 | assignee | `Actor?` Reviewer who picked it up (staff only) |
 | decidedAt | `datetime?` |
 | note | `text?` Submitter's note to the reviewer, e.g. what changed on resubmission |
@@ -669,6 +737,12 @@ Indexes: `(review_state, id)`, `(category_id, id)`, `(owner_seller_id, id)`, `gi
 | gtin | text? unique |
 | media_ids | jsonb |
 | position | int |
+| weight_grams | int? check > 0 |
+| length_cm | int? |
+| width_cm | int? |
+| height_cm | int? |
+| list_price_amount | bigint? |
+| list_price_currency | char(3)? |
 
 **review_log**: Every submission, decision, publication change and merge
 
@@ -823,13 +897,13 @@ Indexes: `pk (brand_id, category_id)`, `(category_id, product_count desc)`
 
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
-| `catalog.product.submitted` | A seller or the Official Store submits a product | `{ productId: uuid, ownerSellerId: uuid? }` | sellers, workqueues |
+| `catalog.product.submitted` | A seller or the Official Store submits a product | `{ productId: uuid, ownerSellerId: uuid?, submissionId: uuid, ref: string, kind: enum(new|content_change|resubmitted), title: string, reviewDueAt: datetime }` | sellers, workqueues |
 | `catalog.product.approved` | A reviewer approves | `{ productId: uuid, ownerSellerId: uuid? }` | notifications, offers, search, sellers, workqueues |
 | `catalog.product.changes_requested` | A reviewer asks for changes | `{ productId: uuid, ownerSellerId: uuid?, reason: text, fields: map<string> }` | notifications, sellers, workqueues |
 | `catalog.product.rejected` | A reviewer rejects | `{ productId: uuid, ownerSellerId: uuid?, reason: text }` | notifications, sellers, workqueues |
-| `catalog.product.publication_changed` | Active / Hidden / Suspended changes | `{ productId: uuid, from: string, to: string, reason: text, trustReportId: uuid? }` | advertising, cart, content, offers, promotions, search, trust, wishlist |
-| `catalog.product.updated` | Shared content changes | `{ productId: uuid, version: int }` | offers, search |
-| `catalog.product.merged` | A duplicate or submission is merged (one event per merged record) | `{ keptProductId: uuid, duplicateProductId: uuid, newVariantId: uuid?, intoVariantId: uuid?, reason: text }` | advertising, content, customers, offers, promotions, reviews, search, wishlist |
+| `catalog.product.publication_changed` | Active / Hidden / Suspended changes | `{ productId: uuid, from: string, to: string, reason: text, trustReportId: uuid?, trustEnforcementId: uuid? }` | advertising, cart, content, offers, promotions, search, trust, wishlist |
+| `catalog.product.updated` | Shared content changes (including variant weight, dimensions and list price) | `{ productId: uuid, version: int, title: string }` | offers, search |
+| `catalog.product.merged` | A duplicate or submission is merged (one event per merged record) | `{ keptProductId: uuid, duplicateProductId: uuid, newVariantId: uuid?, intoVariantId: uuid?, reason: text }` | advertising, content, customers, inventory, offers, promotions, reviews, search, wishlist |
 | `catalog.correction.suggested` | A seller suggests a correction | `{ suggestionId: uuid, productId: uuid }` | - |
 | `catalog.correction.decided` | Staff accept or decline a correction | `{ suggestionId: uuid, accepted: bool }` | - |
 | `catalog.category.changed` | A category is created, renamed, moved, hidden or its attributes change | `{ categoryId: uuid, change: enum(created|updated|attributes) }` | - |
@@ -842,7 +916,8 @@ Indexes: `pk (brand_id, category_id)`, `(category_id, product_count desc)`
 | `sellers.seller.restricted` | sellers | When the restriction covers product submissions (optionally scoped to categories), block new drafts and submissions from that seller in scope and pause its open submissions in the review queue |
 | `sellers.seller.suspended` | sellers | Pause the seller's open submissions in the review queue |
 | `sellers.seller.reinstated` | sellers | Return paused submissions to the review queue |
-| `trust.enforcement.recorded` | trust | Suspend products named in a counterfeit enforcement |
+| `trust.enforcement.recorded` | trust | action suspend_product: suspend the named products (publication suspended, reason from the enforcement); the review-log entry keeps enforcementId and trustReportId and catalog.product.publication_changed carries both |
+| `trust.enforcement.reversed` | trust | action suspend_product: reactivate each target product whose current suspension came from that enforcement (found by the enforcementId on its publication_changed review-log entry). Products suspended again since, or merged, are left alone. No publication-override approval is asked: the reversal was already approved in trust. Logs the reversal reason and publishes catalog.product.publication_changed (suspended → active, trustEnforcementId). Other actions are ignored |
 | `offers.offer.created` | offers | Add the offer to offer_index and refresh listing_stats for the product |
 | `offers.offer.status_changed` | offers | Update offer eligibility in offer_index and refresh listing_stats (offerNote names paused offers) |
 | `offers.offer.price_changed` | offers | Update the offer price in offer_index and the product best price |
@@ -855,7 +930,14 @@ Indexes: `pk (brand_id, category_id)`, `(category_id, product_count desc)`
 |---|---|---|
 | getProduct | `(productId: uuid) => Product | null`<br>Read shared product content | offers, search, reviews, promotions, graphql |
 | isPurchasable | `(productId: uuid) => bool`<br>Approved and Active. Offers only go live on purchasable products. | offers, cart |
-| snapshotForOrder | `(variantId: uuid) => ProductSnapshot`<br>Frozen copy of title, brand, options and version stored on an order item (plan ch. 8: purchases keep what was accepted) | orders |
+| snapshotForOrder | `(variantId: uuid) => ProductSnapshot`<br>Frozen copy of title, brand, options, version and main image (imageId and image) stored on an order item (plan ch. 8: purchases keep what was accepted) | orders |
+| getProducts | `(productIds: uuid[]) => ProductRecord[]`<br>Batch read of products in any review state or publication, with purchasable and mergedIntoId (follow it for merged records). Unknown ids are left out; at most 200 ids per call | search, promotions, advertising, content, offers, wishlist, graphql |
+| searchProducts | `(filter: { q?: string, categoryId?: uuid, brandId?: uuid, ownerSellerId?: uuid, purchasableOnly?: bool, reviewStates?: string[] }, page: PageInput) => Page<ProductSummary>`<br>Product pickers in other modules' admin screens (campaign items, content tiles, promotions): q matches title, PRD- ref, model number and GTIN. Not the store search (search module) | promotions, advertising, content, offers |
+| listProductIds | `(opts: { after?: uuid, limit: int, purchasableOnly?: bool, updatedSince?: datetime }) => { ids: uuid[], nextAfter: uuid | null }`<br>Keyset walk over all product ids (ordered by id, limit 1–1000) for index rebuilds; purchasableOnly keeps approved and active products | search |
+| getBrands | `(brandIds: uuid[]) => Brand[]`<br>Brands by id with status (content brand tiles, advertising brand names, search). Unknown ids are left out | content, advertising, search, graphql |
+| getVariants | `(variantIds: uuid[]) => VariantRef[]`<br>Variants by id with product id and title, options, GTIN, shipping weight and dimensions and list price. Unknown ids are left out | offers, inventory, returns, graphql |
+| getParcels | `(variantIds: uuid[]) => map<VariantParcel | null>`<br>Shipping weight and dimensions of one unit per variant (decision: parcel data lives on the catalog variant). null when the variant has no weight yet; callers fall back to their own default parcel | offers, shipping, cart, checkout |
+| getCategoryPaths | `(categoryIds: uuid[]) => map<CategoryPath>`<br>Root-first category names and ids for each category, so callers can show the path and match subcategories (a rule on a category covers every id whose ids[] contains it) | returns, checkout, finance, reports |
 | listCategories | `(opts: { includeHidden?: bool }) => Category[]`<br>Category tree for menus and the Categories tab, with in-stock product counts and category images | graphql, search |
 | getCategoryBySlug | `(slug: string) => { category: Category, breadcrumb: Category[], filters: Attribute[] } | null`<br>Category page header, breadcrumb and filterable attributes | graphql |
 | getBrandBySlug | `(slug: string) => Brand | null`<br>Brand page header | graphql |
@@ -903,6 +985,7 @@ Checked through the access module (limits per role, second reviewer).
 |---|---|---|---|
 | maxImagesPerProduct | `12` | int, 1–30, seller-visible | Images per product |
 | minDescriptionLength | `40` | int, characters, 0–…, seller-visible | Characters required before submission |
+| reviewTargetBusinessDays | `1` | duration, business days, 1–10, seller-visible | Internal target from submission to review decision; sets each submission's review deadline (queue order) and the expected review date shown to the submitter |
 
 ## Notes
 - Official Store products follow the same review standard as seller products (plan ch. 2).
@@ -915,6 +998,9 @@ Checked through the access module (limits per role, second reviewer).
 - Brand requests: a seller who cannot find a brand sends requestedBrand with the product. On submit the brand is created with status under_review and requestedBy; the reviewer activates or blocks it (POST /brands/{id}/status) before deciding the product. Brand affiliation claims shown on storefronts stay in sellers (public claims). A seller can also request a brand without a product (sellers POST /brand-requests, a brand_request change request reviewed in sellers with its evidence). Both paths end in the same catalog state, an active brand with requestedBy set: on sellers.change_request.decided (approved) catalog creates the brand as active, or activates a same-name brand that is still under_review from a product submission, so the product waiting on it can then be decided. catalog does not review that request a second time.
 - Seller offer creation: myProduct / getProductForSeller resolves any approved, active product so seller/offer can show the read-only product card before the seller has an offer on it.
 - Impact and merge previews count open and past order items, open returns and open cases in-process (orders.countOrderItemsForProducts, returns.countOpenReturnsForProducts, support.countOpenCasesForProducts). Those modules depend on catalog, so catalog lists them only as optional dependencies resolved at call time; a disabled module leaves its count null.
+- Parcel data and list price live on the variant (decision O1/O2): sellers may enter weight and packaged dimensions with the submission; Marketly staff set or correct them on any product with PATCH /products/{id}/variants/{variantId}. listPrice (MSRP) is a staff-only field. Offers, shipping, cart and checkout read them with getParcels / getVariants and fall back to their own default parcel when weightGrams is null.
+- Media usages: every uploaded file catalog keeps is attached with media.attach so the media orphan sweep never deletes it: product_image / product_video / variant_image, brand_logo, brand_banner (brand banners), category_image (category tiles) and correction_evidence (correction suggestion evidence).
+- Accepted corrections are logged as correction_accepted review-log entries and shown in the product history like every other action.
 
 ## GraphQL (read layer)
 
@@ -994,6 +1080,14 @@ type Variant {
   options: [VariantOption!]!
   gtin: String
   images: [MediaRef!]!
+  "Shipping weight of one unit in its retail packaging, in grams (parcel data for shipping quotes and labels)"
+  weightGrams: Int
+  "Packaged length of one unit, in centimetres"
+  lengthCm: Int
+  widthCm: Int
+  heightCm: Int
+  "Manufacturer list price (MSRP) set by Marketly staff; offers may show it as a reference price"
+  listPrice: Money
 }
 
 type VariantOption {
@@ -1061,6 +1155,8 @@ type Brand {
   banner: MediaRef
   description: String
   productCount: Int!
+  "active, under_review or blocked. Store lists only show active brands; admin reads and catalog.getBrands return any status"
+  status: String! @areas(in: [SELLER, ADMIN])
 }
 
 enum ProductReviewState @areas(in: [SELLER, ADMIN]) {

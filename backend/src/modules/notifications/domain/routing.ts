@@ -10,9 +10,13 @@
  *   approval:<requestId>                  approver notices and scheduled due reminders
  *   workitem:<itemId>                     work queue notices (resolved by workqueues.item.resolved)
  *   payout:<payoutId>                     failed payout action notices (resolved when paid)
+ *   trust-evidence:<requestId>            trust evidence requests to a customer or seller (trust resolves it when answered)
+ *   official-store:<conversationId>       Official Store message notices to staff (resolved when the store replies)
+ *   day-end:<reviewId>                    day-end review reminders (resolved by workqueues.day_end.completed)
+ *   refund:<refundId>:destination         refund destination requests (resolved when the refund is sent)
  */
 import type { EventName, EventPayload } from '../../../kernel/events/index.js';
-import type { Money } from '../../../spec/common.js';
+import { OFFICIAL_STORE_ID, OFFICIAL_STORE_NAME, type Money } from '../../../spec/common.js';
 import type { NoticeLink } from '../../../spec/notifications.js';
 import type { spec } from '../../../spec/notifications.js';
 
@@ -135,6 +139,17 @@ const shopper = (p: Shopper, ...fallback: (RouteTarget | null)[]): (RouteTarget 
 /** Guests get the order link minted by identity (they have no account to open the order in) */
 const guestLink = (p: Shopper, orderId: string | null | undefined): Pick<RouteSend, 'guestOrderLink'> =>
   !p.customerId && p.contactEmail && orderId ? { guestOrderLink: { orderId, email: p.contactEmail } } : {};
+
+/** What the customer paid: the card amount, store credit alone ("$15.00 in store credit"), or both */
+function paidAmount(p: { amount: Money; creditAmount?: Money | null }, f: Fmt): string {
+  const credit = p.creditAmount && p.creditAmount.amount > 0 ? p.creditAmount : null;
+  if (!credit) return f.money(p.amount);
+  if (p.amount.amount === 0) return `${f.money(credit)} in store credit`;
+  return `${f.money(p.amount)} plus ${f.money(credit)} in store credit`;
+}
+
+/** A conversation whose seller side is the Official Store (staff answer it; never a seller workspace) */
+const officialStoreConversation = (p: { sellerId?: string | null; officialStore?: boolean }) => p.officialStore === true || p.sellerId === OFFICIAL_STORE_ID;
 
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
@@ -286,6 +301,18 @@ export const ROUTES: Routes = {
       { topic: 'customer.account.data_export_ready', to: [customer(p.customerId)], link: L('account', p.requestId, 'account/privacy', 'Download'), context: { export: { expires: f.date(p.expiresAt) } }, dedupe: `export:${p.requestId}` },
     ],
   },
+  'customers.closure.delayed': {
+    sends: (p, f) => [
+      {
+        topic: 'customer.account.closure_delayed',
+        to: [customer(p.customerId)],
+        link: L('account', p.requestId, 'account/privacy', 'See what is open'),
+        context: { closure: { blockers: p.blockers.map((b) => b.detail).join(', ') || 'open orders or requests', nextCheck: f.date(p.nextCheckAt) } },
+        // customers publishes once per new set of blockers
+        dedupe: `closure-delayed:${p.requestId}:${[...new Set(p.blockers.map((b) => b.kind))].sort().join(',')}`,
+      },
+    ],
+  },
 
   /* ---------------------------------------------------------------- orders */
   'orders.order.accepted': {
@@ -315,7 +342,8 @@ export const ROUTES: Routes = {
   },
   'orders.item.cancelled': {
     sends: (p, f) => [
-      {
+      // staff may cancel without telling the customer (notifyCustomer false); the seller is always told
+      p.notifyCustomer !== false && {
         topic: 'customer.order.item_cancelled',
         to: shopper(p, byOrder(p.orderId)),
         link: orderLink(p.orderId, p.ref),
@@ -370,7 +398,7 @@ export const ROUTES: Routes = {
         topic: 'customer.payment.captured',
         to: shopper(p, byOrder(p.orderId)),
         link: orderLink(p.orderId),
-        context: { payment: { amount: f.money(p.amount) } },
+        context: { payment: { amount: paidAmount(p, f) } },
         subjects: { orderId: p.orderId },
         dedupe: `payment:${p.captureId}`,
         skipIfRecent: { topic: 'customer.order.accepted', key: 'orderId', value: p.orderId, dedupe: `order:${p.orderId}:accepted` },
@@ -396,7 +424,27 @@ export const ROUTES: Routes = {
       },
     ],
   },
+  'payments.refund.destination_requested': {
+    sends: (p, f) => [
+      {
+        topic: 'customer.refund.destination_needed',
+        to: shopper(p, byOrder(p.orderId)),
+        link: L('refund', p.refundId, 'account/refund', 'Choose where to receive it', p.ref),
+        context: {
+          order: { ref: p.orderRef },
+          refund: { amount: f.money(p.amount), reason: p.failureReason?.trim() || 'the original payment method can no longer receive it' },
+          destination: { message: p.message?.trim() ?? '' },
+        },
+        subjects: { orderId: p.orderId },
+        dedupe: `refund:${p.refundId}:destination`,
+        actionRequired: true,
+        ...guestLink(p, p.orderId),
+      },
+    ],
+  },
   'payments.refund.sent': {
+    // the customer chose a destination (or the refund went through another way)
+    resolve: (p) => [`refund:${p.refundId}:destination`],
     sends: (p, f) => [
       {
         topic: 'customer.refund.sent',
@@ -526,7 +574,7 @@ export const ROUTES: Routes = {
         topic: 'staff.shipping.dispatch_overdue',
         to: [role('shipping_manager')],
         link: L('order', p.orderId, 'ops/dispatch', 'Open dispatch queue', p.orderRef),
-        context: { order: { ref: p.orderRef }, seller: { name: p.ownerType === 'official' ? 'The Official Store' : 'The seller' }, due: { date: f.dateTime(p.dueAt) } },
+        context: { order: { ref: p.orderRef }, seller: { name: p.ownerType === 'official' ? OFFICIAL_STORE_NAME : 'The seller' }, due: { date: f.dateTime(p.dueAt) } },
         subjects: { orderId: p.orderId, groupId: p.groupId },
         deadline: p.dueAt,
         dedupe: `dispatch:${p.groupId}`,
@@ -701,8 +749,9 @@ export const ROUTES: Routes = {
   },
   'support.case.decided': {
     resolve: (p) => [`case:${p.caseId}`],
+    // decided without notifying the parties (notifyParties false): nothing is sent
     sends: (p, f) => [
-      {
+      p.notified !== false && {
         topic: 'customer.case.decided',
         to: shopper(p, byCase(p.caseId)),
         link: caseLink(p.caseId, p.ref),
@@ -710,6 +759,7 @@ export const ROUTES: Routes = {
         subjects: { caseId: p.caseId, orderId: p.orderId, returnId: p.returnId },
         dedupe: `case:${p.caseId}:decided:${p.final}`,
       },
+      p.notified !== false &&
       p.sellerId && {
         topic: 'seller.case.decided',
         to: [seller(p.sellerId)],
@@ -728,9 +778,22 @@ export const ROUTES: Routes = {
 
   /* ---------------------------------------------------------------- messaging */
   'messaging.message.sent': {
+    // the Official Store team answered: its staff notice for the conversation is done
+    resolve: (p) => [officialStoreConversation(p) && (p.authorKind === 'staff' || p.authorKind === 'seller') ? `official-store:${p.conversationId}` : null],
     sends: (p) => {
       const from = p.authorKind === 'seller' ? 'the seller' : p.authorKind === 'customer' ? 'a customer' : 'Marketly';
+      const toOfficialStore = officialStoreConversation(p) && (p.recipientKinds.includes('official_store') || p.recipientKinds.includes('seller'));
       return [
+        // messages to the Official Store go to its staff (Official Store Manager role), action required until answered
+        toOfficialStore && {
+          topic: 'staff.official_store.message_received',
+          to: [role('official_store_manager')],
+          link: L('conversation', p.conversationId, 'admin/messages', 'Reply'),
+          context: { message: { from: p.authorKind === 'customer' || p.authorKind === 'guest' ? 'A customer' : from } },
+          subjects: { conversationId: p.conversationId, orderId: p.orderId },
+          dedupe: `official-store:${p.conversationId}`,
+          actionRequired: true,
+        },
         p.recipientKinds.includes('customer') &&
           p.customerId && {
             topic: 'customer.message.new',
@@ -742,7 +805,8 @@ export const ROUTES: Routes = {
             dedupe: `message:${p.messageId}`,
           },
         p.recipientKinds.includes('seller') &&
-          p.sellerId && {
+          p.sellerId &&
+          !officialStoreConversation(p) && {
             topic: 'seller.message.new',
             to: [seller(p.sellerId)],
             link: L('conversation', p.conversationId, 'seller/messages', 'Reply'),
@@ -763,6 +827,20 @@ export const ROUTES: Routes = {
   'sellers.application.information_requested': {
     sends: (p, f) => [
       { topic: 'seller.application.information_requested', to: [seller(p.sellerId)], link: L('seller', p.applicationId, 'seller/application', 'Answer now'), context: { due: { date: f.dateTime(p.dueAt) } }, sellerId: p.sellerId, deadline: p.dueAt, dedupe: `seller-application:${p.applicationId}:info` },
+    ],
+  },
+  'sellers.application.information_reminder': {
+    // a reminder about the same request: resolved with it when the application is decided
+    sends: (p, f) => [
+      {
+        topic: 'seller.application.information_reminder',
+        to: [seller(p.sellerId)],
+        link: L('seller', p.applicationId, 'seller/application', 'Answer now', p.ref),
+        context: { due: { date: f.dateTime(p.dueAt) }, application: { openItems: p.openItems } },
+        sellerId: p.sellerId,
+        deadline: p.dueAt,
+        dedupe: `seller-application:${p.applicationId}:info`,
+      },
     ],
   },
   'sellers.application.decided': {
@@ -876,6 +954,18 @@ export const ROUTES: Routes = {
     sends: (p) => [
       p.ownerSellerId && { topic: 'seller.product.rejected', to: [seller(p.ownerSellerId)], link: L('product', p.productId, 'seller/product', 'View product'), context: { product: { reason: p.reason } }, sellerId: p.ownerSellerId, dedupe: `product:${p.productId}:rejected` },
     ],
+  },
+  'inventory.stock.low_digest': {
+    sends: (p, f) => {
+      const shown = p.items.slice(0, 5).map((i) => `${i.label} (${i.state === 'out_of_stock' ? 'out of stock' : `${i.available} left`})`);
+      const more = p.items.length > shown.length ? `; and ${p.lowCount + p.outOfStockCount - shown.length} more` : '';
+      const context = { digest: { low: p.lowCount, out: p.outOfStockCount, lines: `${shown.join('; ')}${more}`, date: f.date(`${p.date}T12:00:00Z`) } };
+      return [
+        p.ownerType === 'official' && { topic: 'staff.inventory.low_stock_digest', to: [role('inventory_manager')], link: L('stock', p.date, 'ops/stock', 'Open stock'), context, dedupe: `stock-digest:official:${p.date}` },
+        p.ownerType === 'seller' &&
+          p.sellerId && { topic: 'seller.stock.low_digest', to: [seller(p.sellerId)], link: L('stock', p.date, 'seller/stock', 'Review stock'), context, sellerId: p.sellerId, dedupe: `stock-digest:${p.sellerId}:${p.date}` },
+      ];
+    },
   },
   'inventory.stock.low': {
     sends: (p) => [
@@ -1098,16 +1188,18 @@ export const ROUTES: Routes = {
     ],
   },
   'reports.scheduled_report.ready': {
-    // phase 2 topic: the schedule's recipients are addresses (external_email), whoever they belong to
-    sends: (p, f) => [
-      {
-        topic: 'staff.report.scheduled',
-        to: [...new Set(p.recipients.map((e) => e.trim().toLowerCase()))].map((email) => external(email)),
-        link: L('export', p.exportId, 'admin/reports', 'Download'),
-        context: { report: { title: p.reportTitle, period: p.periodLabel, format: p.format.toUpperCase() }, export: { expires: f.date(p.expiresAt) } },
-        dedupe: `scheduled-report:${p.exportId}`,
-      },
-    ],
+    // phase 2 topic, staff only: each recipient gets the export requested in their name (only they can download it)
+    sends: (p, f) => {
+      const context = { report: { title: p.reportTitle, period: p.periodLabel, format: p.format.toUpperCase() }, export: { expires: f.date(p.expiresAt) } };
+      const seen = new Set<string>();
+      return (p.deliveries as { staffId?: unknown; exportId?: unknown }[]).map((d) => {
+        const staffId = typeof d?.staffId === 'string' ? d.staffId : null;
+        const exportId = typeof d?.exportId === 'string' ? d.exportId : null;
+        if (!staffId || !exportId || seen.has(staffId)) return null;
+        seen.add(staffId);
+        return { topic: 'staff.report.scheduled', to: [staff(staffId)], link: L('export', exportId, 'admin/exports', 'Download'), context, dedupe: `scheduled-report:${exportId}` };
+      });
+    },
   },
 
   /* ---------------------------------------------------------------- purchasing, wallet, workqueues day end */
@@ -1121,6 +1213,7 @@ export const ROUTES: Routes = {
           total: f.money(p.total),
           lines: p.lines.map((l) => `${l.label} (${l.sku}) × ${l.quantityOrdered}`).join('; '),
           message: p.message?.trim() ? `Message from your buyer: ${p.message.trim()}` : '',
+          shipTo: shipToText(p.shipTo),
         },
         supplier: { name: p.supplierName },
       };
@@ -1154,6 +1247,32 @@ export const ROUTES: Routes = {
         dedupe: `day-end:${p.reviewId}`,
       },
     ],
+  },
+  'workqueues.day_end.completed': {
+    // the review is done: the "day-end review is open" action notices are resolved
+    resolve: (p) => [`day-end:${p.reviewId}`],
+    sends: (p, f) => {
+      const lines = (p.items as { title?: unknown; summary?: unknown; note?: unknown }[])
+        .filter((i) => i && typeof i.note === 'string' && i.note.trim())
+        .map((i) => `${typeof i.title === 'string' ? i.title : 'Item'}: ${String(i.note).trim()}`);
+      return [
+        {
+          topic: 'staff.day_end.completed',
+          to: [...new Set(p.roleKeys)].map(role),
+          link: L('day_end', p.reviewId, 'ops/queues', 'Open day-end summary'),
+          context: {
+            dayend: {
+              date: f.date(`${p.date}T12:00:00Z`),
+              open: p.openItems,
+              overdue: p.overdueItems,
+              by: p.completedBy.name ?? (p.completedBy.kind === 'system' ? 'Marketly' : 'a staff member'),
+              notes: [p.note?.trim(), ...lines].filter(Boolean).join('; ') || 'No notes.',
+            },
+          },
+          dedupe: `day-end:${p.reviewId}:completed`,
+        },
+      ];
+    },
   },
 
   /* ---------------------------------------------------------------- advertising, content (daily reminders) */
@@ -1241,6 +1360,57 @@ export const ROUTES: Routes = {
       ];
     },
   },
+  'trust.evidence.requested': {
+    // action required until trust records the answer: trust resolves `trust-evidence:<requestId>`
+    sends: (p, f) => {
+      const context = { report: { ref: p.reportRef }, evidence: { question: p.question }, due: { date: f.dateTime(p.dueAt) } };
+      const dedupe = `trust-evidence:${p.requestId}`;
+      return [
+        p.customerId && {
+          topic: 'customer.trust.evidence_requested',
+          to: [customer(p.customerId)],
+          link: L('evidence_request', p.requestId, 'help/case', 'Send what we asked for', p.reportRef),
+          context,
+          deadline: p.dueAt,
+          dedupe,
+        },
+        !p.customerId &&
+          p.sellerId && {
+            topic: 'seller.trust.evidence_requested',
+            to: [seller(p.sellerId)],
+            link: L('evidence_request', p.requestId, 'seller/notifications', 'Send proof', p.reportRef),
+            context,
+            sellerId: p.sellerId,
+            deadline: p.dueAt,
+            dedupe,
+          },
+      ];
+    },
+  },
+  'trust.appeal.decided': {
+    sends: (p) => {
+      const outcome = p.outcome === 'upheld' ? 'kept' : p.outcome === 'overturned' ? 'overturned' : 'partly overturned';
+      const changes = p.outcome === 'upheld' ? 'The action on your account stays in place.' : p.outcome === 'overturned' ? 'We are lifting the action on your account.' : 'We are lifting part of the action on your account.';
+      const context = { appeal: { ref: p.ref, outcome, explanation: p.explanation.trim(), changes } };
+      const dedupe = `trust-appeal:${p.appealId}`;
+      return [
+        p.customerId && { topic: 'customer.trust.appeal_decided', to: [customer(p.customerId)], link: L('appeal', p.appealId, 'help/case', 'View appeal', p.ref), context, dedupe },
+        !p.customerId && p.sellerId && { topic: 'seller.trust.appeal_decided', to: [seller(p.sellerId)], link: L('appeal', p.appealId, 'seller/account-health', 'View appeal', p.ref), context, sellerId: p.sellerId, dedupe },
+      ];
+    },
+  },
+  'offers.offer.missing_items_stale': {
+    sends: (p) => {
+      const parts = [p.staleItems.length ? `no longer in the box: ${p.staleItems.join(', ')}` : '', p.newBoxItems.length ? `new in the box: ${p.newBoxItems.join(', ')}` : ''].filter(Boolean);
+      const context = { product: { title: p.title }, offer: { items: parts.join('; ') || 'the box contents changed' } };
+      const dedupe = `offer-missing-items:${p.offerId}:${[...p.staleItems, '|', ...p.newBoxItems].join(',').slice(0, 200)}`;
+      const official = p.ownerType === 'official' || !p.sellerId || p.sellerId === OFFICIAL_STORE_ID;
+      return [
+        official && { topic: 'staff.offer.missing_items_review', to: [role('catalog_manager')], link: L('offer', p.offerId, 'admin/official', 'Review offer'), context, dedupe },
+        !official && { topic: 'seller.offer.missing_items_review', to: [seller(p.sellerId)], link: L('offer', p.offerId, 'seller/offer', 'Review offer'), context, sellerId: p.sellerId, dedupe },
+      ];
+    },
+  },
   'trust.rights_report.received': {
     sends: (p) => [
       {
@@ -1275,6 +1445,14 @@ const CONTENT_WORDS: Record<string, string> = {
   answer: 'answer',
   seller_response: 'response',
 };
+
+/** "Reno, NV warehouse, 100 Industrial Way, Reno, NV 89502, US" (the location name alone when it has no address) */
+function shipToText(s: { name: string; code?: string; address?: { name?: string | null; line1?: string; line2?: string | null; city?: string; region?: string | null; postalCode?: string; country?: string } | null } | null | undefined): string {
+  if (!s) return 'the delivery address on the purchase order';
+  const a = s.address;
+  const street = a ? [a.line1, a.line2, a.city, [a.region, a.postalCode].filter(Boolean).join(' '), a.country].filter((x) => x && String(x).trim()).join(', ') : '';
+  return street ? `${s.name}, ${street}` : s.name;
+}
 
 function maskEmail(email: string) {
   const [user = '', domain = ''] = email.split('@');

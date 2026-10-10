@@ -134,6 +134,7 @@ export const resolvers = (service: WishlistService): ModuleResolvers => {
   const alertOut = (a: Alert, ctx: GraphQLContext) => ({
     ...a,
     itemId: a.itemId ?? null,
+    sellerId: a.sellerId ?? null,
     product: async () => {
       const p = await lk(ctx).product(a.productId);
       return p ? productOut(p) : null;

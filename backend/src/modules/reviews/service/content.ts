@@ -4,8 +4,8 @@
  */
 import { isUuid } from '../../../kernel/lib/ids.js';
 import type { ContentType } from '../domain/rules.js';
-import { answerMachine, productReviewMachine, sellerFeedbackMachine, sellerResponseMachine } from '../domain/state-machines.js';
-import { apply, walk } from '../domain/transitions.js';
+import { answerMachine, productReviewMachine, questionMachine, sellerFeedbackMachine, sellerResponseMachine } from '../domain/state-machines.js';
+import { apply, oneStep, walk } from '../domain/transitions.js';
 import type { AnswerRec, FeedbackRec, QuestionRec, ResponseRec, ReviewRec, ReviewsRepository } from '../ports.js';
 import type { Core, Effects } from './core.js';
 
@@ -78,6 +78,8 @@ export function machineOf(type: ContentType) {
       return answerMachine;
     case 'seller_response':
       return sellerResponseMachine;
+    case 'question':
+      return questionMachine;
     default:
       return null;
   }
@@ -104,6 +106,10 @@ export interface StateChange {
   reasonCode?: string | null;
   /** Take down the review's photos (media moderation) */
   takedown?: boolean;
+  /** One state move only (moderation decisions); otherwise the shortest chain of allowed events */
+  oneStep?: boolean;
+  /** The trust enforcement the change executes or undoes (reviews.review.removed carries it) */
+  trustEnforcementId?: string | null;
 }
 
 /**
@@ -116,7 +122,7 @@ export async function moveContent(core: Core, tx: ReviewsRepository, fx: Effects
   if (from === target) return c;
   const machine = machineOf(c.type);
   if (machine) {
-    const path = walk(machine as never, from as never, target as never, events);
+    const path = (change.oneStep ? oneStep : walk)(machine as never, from as never, target as never, events);
     apply(machine as never, from as never, path as never);
   }
   switch (c.type) {
@@ -126,7 +132,8 @@ export async function moveContent(core: Core, tx: ReviewsRepository, fx: Effects
       await core.touchProduct(tx, fx, row.product_id);
       if (visible) fx.emit('reviews.review.published', { reviewId: row.id, productId: row.product_id, sellerId: row.seller_id, rating: row.rating, verified: row.verified });
       if (target === 'removed' || target === 'deleted') {
-        if (from !== 'draft') fx.emit('reviews.review.removed', { reviewId: row.id, productId: row.product_id, byModeration: change.byModeration, reasonCode: change.reasonCode ?? null });
+        if (from !== 'draft')
+          fx.emit('reviews.review.removed', { reviewId: row.id, productId: row.product_id, sellerId: row.seller_id, customerId: row.customer_id, byModeration: change.byModeration, reasonCode: change.reasonCode ?? null, trustEnforcementId: change.trustEnforcementId ?? null });
         const media = (row.media_ids as string[]) ?? [];
         if (change.takedown) fx.takedown.push(...media);
         else if (target === 'deleted') fx.detach.push(...media.map((assetId) => ({ assetId, refId: row.id })));
@@ -144,7 +151,8 @@ export async function moveContent(core: Core, tx: ReviewsRepository, fx: Effects
     case 'question': {
       const row = await tx.update('questions', c.row.id, { status: target });
       await core.touchProduct(tx, fx, row.product_id);
-      if (target === 'published') fx.emit('reviews.question.asked', { questionId: row.id, productId: row.product_id });
+      // sellerIds and officialStore are filled from offers after the commit (Core.flush)
+      if (target === 'published' && from === 'pending_review') fx.emit('reviews.question.asked', { questionId: row.id, productId: row.product_id, customerId: row.customer_id, sellerIds: [], officialStore: false });
       return { type: c.type, row };
     }
     case 'answer': {
@@ -152,19 +160,29 @@ export async function moveContent(core: Core, tx: ReviewsRepository, fx: Effects
       const row = await tx.update('answers', c.row.id, { status: target, ...(published && !c.row.published_at ? { published_at: now } : {}) });
       const question = await syncAnswerCount(tx, row.question_id);
       if (question) await core.touchProduct(tx, fx, question.product_id);
-      if (published && question) fx.emit('reviews.answer.published', { answerId: row.id, questionId: row.question_id, productId: question.product_id, label: labelOf(row) });
+      if (published && question) fx.emit('reviews.answer.published', answerPublished(row, question));
       return { type: c.type, row };
     }
     case 'seller_response': {
       const published = target === 'published';
       const row = await tx.update('seller_responses', c.row.id, { status: target, ...(published ? { published_at: c.row.published_at ?? now } : {}) });
-      if (published) fx.emit('reviews.response.published', { responseId: row.id, sellerId: row.seller_id, targetType: row.target_type, status: row.status });
+      const payload = published ? await responsePublished(tx, row) : null;
+      if (payload) fx.emit('reviews.response.published', payload);
       return { type: c.type, row };
     }
   }
 }
 
-export const labelOf = (a: AnswerRec) => (a.author_kind === 'seller' ? 'seller' : a.author_kind === 'staff' ? 'marketly_staff' : 'customer');
+/** reviews.answer.published: the asker is told; sellerId for seller answers */
+export const answerPublished = (a: AnswerRec, q: QuestionRec) => ({ answerId: a.id, questionId: q.id, productId: q.product_id, label: labelOf(a), askerCustomerId: q.customer_id, sellerId: a.author_kind === 'seller' ? a.seller_id : null });
+
+/** reviews.response.published: the author of the review or feedback being answered is told */
+export async function responsePublished(repo: ReviewsRepository, r: ResponseRec) {
+  const target = r.target_type === 'product_review' ? await repo.get('product_reviews', r.target_id) : await repo.get('seller_feedback', r.target_id);
+  return target ? { responseId: r.id, sellerId: r.seller_id, targetType: r.target_type, targetId: r.target_id, status: r.status, customerId: target.customer_id } : null;
+}
+
+export const labelOf = (a: AnswerRec) =>(a.author_kind === 'seller' ? 'seller' : a.author_kind === 'staff' ? 'marketly_staff' : 'customer');
 
 /** questions.answer_count = published answers */
 export async function syncAnswerCount(tx: ReviewsRepository, questionId: string): Promise<QuestionRec | undefined> {

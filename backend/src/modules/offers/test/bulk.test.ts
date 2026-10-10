@@ -99,7 +99,7 @@ describe('Official Store price files', () => {
     const skus = [sku('OFF'), sku('OFF')];
     const ids: string[] = [];
     for (const [i, s] of skus.entries()) {
-      const res = await asStaff(h, 'POST', '/official/offers', { productId: p.id, variantId: p.variants[i]!, condition: 'new', price: { amount: 10000, currency: 'USD' }, sku: s, dispatchBusinessDays: 1, shippingProfileId: profile(h), returnTerms: { kind: 'baseline' }, warranty: { kind: 'none' } });
+      const res = await asStaff(h, 'POST', '/official/offers', { productId: p.id, variantId: p.variants[i]!, condition: 'new', price: { amount: 10000, currency: 'USD' }, sku: s, dispatchBusinessDays: 1, shippingProfileId: profile(h, 599, 3, null), returnTerms: { kind: 'baseline' }, warranty: { kind: 'none' } });
       expect(res.statusCode, res.body).toBe(201);
       ids.push(res.json().offer.id);
     }
@@ -128,7 +128,7 @@ describe('seller tools', () => {
     const sellerId = addSeller(h);
     const p = addProduct(h);
     await sellerOffer(h, addSeller(h), p.id, p.variants[0]!, { price: { amount: 15000, currency: 'USD' } });
-    const preview = await asSeller(h, sellerId, 'POST', '/offers/preview', offerInput(p.id, p.variants[0]!, profile(h, 499, 2), { compareAt: { amount: { amount: 25000, currency: 'USD' }, basis: 'lowest_30_days' } }));
+    const preview = await asSeller(h, sellerId, 'POST', '/offers/preview', offerInput(p.id, p.variants[0]!, profile(h, 499, 2, sellerId), { compareAt: { amount: { amount: 25000, currency: 'USD' }, basis: 'lowest_30_days' } }));
     expect(preview.statusCode, preview.body).toBe(200);
     expect(preview.json()).toMatchObject({ lowestNewPrice: { amount: 15000 }, returnBaseline: { windowDays: 30, kind: 'baseline' }, delivery: { shippingCost: { amount: 499 } }, compareAtCheck: { verified: false } });
     expect(preview.json().warnings.some((w: string) => w.includes('more than 20% above'))).toBe(true);

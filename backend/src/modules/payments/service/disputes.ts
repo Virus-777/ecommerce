@@ -189,12 +189,17 @@ export class Disputes {
         if (!media) throw invalid([{ path: 'fileIds', message: 'Evidence files are not available right now' }]);
         files = await media.refs(fileIds);
         if (files.length !== fileIds.length) throw invalid([{ path: 'fileIds', message: 'Some files were not found' }]);
+        // each file is attached to the dispute (usage dispute_evidence), so the media orphan sweep never deletes it
+        for (const id of fileIds) {
+          const asset = await media.getAsset(id);
+          if (!asset || (asset.owner.kind !== 'staff' && asset.owner.kind !== 'platform')) throw invalid([{ path: 'fileIds', message: `File ${id} is not a staff upload` }]);
+          await media.attach(id, { module: 'payments', kind: 'dispute_evidence', refId: d0.id, refLabel: d0.ref }, asset.owner);
+        }
       } else files = [];
     }
     if (body.submit) {
       try {
-        // provider_calls has no dispute operation in the spec: dispute calls show in the case history
-        await this.core.provider.submitDisputeEvidence({ caseId: d0.provider_case_id, text, fileUrls: files.map((f) => f.url) });
+        await this.core.call('dispute_evidence', { intentId: d0.intent_id }, () => this.core.provider.submitDisputeEvidence({ caseId: d0.provider_case_id, text, fileUrls: files.map((f) => f.url) }), () => ({ outcome: 'ok', providerRef: d0.provider_case_id, message: `evidence for ${d0.ref}: ${files.length} file${files.length === 1 ? '' : 's'}` }));
       } catch (err) {
         if (err instanceof ProviderError) throw this.core.error('PROVIDER_UNAVAILABLE');
         throw err;
@@ -251,7 +256,7 @@ export class Disputes {
     const d0 = await this.get(disputeId);
     if (d0.status !== 'opened') return d0;
     try {
-      await this.core.provider.acceptDispute({ caseId: d0.provider_case_id });
+      await this.core.call('dispute_accept', { intentId: d0.intent_id }, () => this.core.provider.acceptDispute({ caseId: d0.provider_case_id }), () => ({ outcome: 'ok', providerRef: d0.provider_case_id, message: `conceded ${d0.ref}` }));
     } catch (err) {
       if (err instanceof ProviderError) throw this.core.error('PROVIDER_UNAVAILABLE');
       throw err;

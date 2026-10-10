@@ -17,11 +17,11 @@ import { ReviewsService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.0.2',
+  version: '1.1.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
-    const service = new ReviewsService({ repo: createPostgresReviewsRepository(ctx.db), ctx });
+    const service = new ReviewsService({ repo: createPostgresReviewsRepository(ctx.db, ctx.inbox), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
@@ -31,6 +31,8 @@ export default defineModule({
     ctx.events.on("orders.item.cancelled", (e) => service.onItemCancelledFromOrders(e.payload));
     ctx.events.on("catalog.product.merged", (e) => service.onProductMergedFromCatalog(e.payload));
     ctx.events.on("trust.enforcement.recorded", (e) => service.onEnforcementRecordedFromTrust(e.payload));
+    ctx.events.on("trust.enforcement.reversed", (e) => service.onEnforcementReversedFromTrust(e.payload));
+    ctx.events.on("customers.account.closed", (e) => service.onAccountClosedFromCustomers(e.payload));
     ctx.events.on("sellers.seller.closed", (e) => service.onSellerClosedFromSellers(e.payload));
 
     // Background jobs (spec jobs)

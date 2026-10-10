@@ -64,7 +64,11 @@ export interface StaffBy extends By {
 const DAY_MS = 86_400_000;
 /** Values and flags are re-read in the background after this long (other server instances may have written) */
 const SNAPSHOT_TTL_MS = 30_000;
+/** Second reviewer (another Platform Administrator or the Business Owner) */
 const APPROVAL_ACTION = 'settings.changes.apply';
+/** Any item whose rule is business_owner: the Business Owner only, so a Platform Administrator can never approve it */
+const OWNER_APPROVAL_ACTION = 'settings.changes.apply-owner';
+const APPROVAL_ACTIONS: readonly string[] = [APPROVAL_ACTION, OWNER_APPROVAL_ACTION];
 const APPROVAL_TARGET = 'setting_change';
 /** Settings whose change moves what existing orders get */
 const ORDER_MODULES = new Set(['checkout', 'orders', 'returns', 'shipping', 'finance', 'payments', 'offers', 'promotions', 'wallet']);
@@ -74,6 +78,8 @@ const MARKET_KEYS = [
   'market.currency',
   'market.timeZone',
   'market.locale',
+  'market.legalName',
+  'market.companyLine',
   'support.businessHours',
   'support.closures',
   'support.phone',
@@ -217,14 +223,26 @@ export class SettingsService implements SettingsPublicApi {
   }
 
   async #timeZone(): Promise<string> {
-    const tz = await this.get<string>('market.timeZone');
+    const tz = await this.#valueOf<string>('market.timeZone');
     return typeof tz === 'string' && tz ? tz : this.ctx.config.market.timeZone;
   }
 
   /* ================================================================ public API (in-process) */
 
-  /** Value in force at a time (default now), falling back to the declared default. Cached; invalidated by settings.setting.changed. */
+  /**
+   * Value in force at a time (default now), falling back to the declared default. Cached; invalidated by
+   * settings.setting.changed. key is the full '<module>.<name>' of any enabled module's declared setting (or a
+   * settings-owned key): any module may read another's (read-only). Unknown keys and disabled modules' keys
+   * throw UNKNOWN_SETTING.
+   */
   async get<T>(key: string, at?: string): Promise<T> {
+    const def = typeof key === 'string' ? (await this.#defs()).get(key) : undefined;
+    if (!def || !def.available) throw this.ctx.error('UNKNOWN_SETTING', `There is no setting ${String(key)}`, { key });
+    return this.#valueOf<T>(key, at);
+  }
+
+  /** Value in force or the declared default, without the enabled-module check (this module's own screens and drafts) */
+  async #valueOf<T>(key: string, at?: string): Promise<T> {
     const r = await this.#resolve(key, at);
     if (r) return r.value as T;
     const def = (await this.#defs()).get(key);
@@ -233,7 +251,7 @@ export class SettingsService implements SettingsPublicApi {
 
   /** Country, region, currency, time zone, locale, business hours */
   async market(): Promise<MarketSettings> {
-    const v = Object.fromEntries(await Promise.all(MARKET_KEYS.map(async (k) => [k, await this.get(k)] as const))) as Record<(typeof MARKET_KEYS)[number], unknown>;
+    const v = Object.fromEntries(await Promise.all(MARKET_KEYS.map(async (k) => [k, await this.#valueOf(k)] as const))) as Record<(typeof MARKET_KEYS)[number], unknown>;
     const timeZone = (v['market.timeZone'] as string) || this.ctx.config.market.timeZone;
     const hours = (v['support.businessHours'] as DayHours[] | null) ?? [];
     const closures = (v['support.closures'] as Closure[] | null) ?? [];
@@ -245,6 +263,8 @@ export class SettingsService implements SettingsPublicApi {
       currency: (v['market.currency'] as string) ?? this.ctx.config.market.currency,
       timeZone,
       locale: (v['market.locale'] as string) ?? 'en-US',
+      legalName: (v['market.legalName'] as string) ?? '',
+      companyLine: (v['market.companyLine'] as string) ?? '',
       businessHours: hours,
       businessHoursLabel: hoursLabel(hours, timeZone),
       closures,
@@ -259,7 +279,13 @@ export class SettingsService implements SettingsPublicApi {
   }
 
   /** Business-hour arithmetic in the market time zone for SLA deadlines */
-  async businessCalendar(): Promise<{ isOpen(at: string): boolean; addBusinessMinutes(from: string, minutes: number): string; nextOpen(after: string): string }> {
+  async businessCalendar(): Promise<{
+    isOpen(at: string): boolean;
+    isBusinessDay(day: string): boolean;
+    addBusinessMinutes(from: string, minutes: number): string;
+    addBusinessDays(from: string, days: number): string;
+    nextOpen(after: string): string;
+  }> {
     const m = await this.market();
     const cal = createCalendar(m.businessHours, m.closures, m.timeZone);
     const date = (s: string, name: string) => {
@@ -269,7 +295,12 @@ export class SettingsService implements SettingsPublicApi {
     };
     return {
       isOpen: (at) => cal.isOpen(date(at, 'at')),
+      isBusinessDay: (day) => {
+        if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new AppError('VALIDATION_FAILED', 'Invalid day', { issues: [{ path: 'day', message: 'not a date (YYYY-MM-DD)' }] });
+        return cal.isBusinessDay(day);
+      },
       addBusinessMinutes: (from, minutes) => (cal.addBusinessMinutes(date(from, 'from'), minutes) ?? date(from, 'from')).toISOString(),
+      addBusinessDays: (from, days) => (cal.addBusinessDays(date(from, 'from'), days) ?? date(from, 'from')).toISOString(),
       nextOpen: (after) => (cal.nextOpen(date(after, 'after')) ?? date(after, 'after')).toISOString(),
     };
   }
@@ -373,7 +404,7 @@ export class SettingsService implements SettingsPublicApi {
     const now = this.now();
     const [m, defs, flags] = await Promise.all([this.market(), this.#defs(), this.#flags()]);
     const keys = [...defs.values()].filter((d) => d.public && d.available).map((d) => d.key).sort();
-    const raw = Object.fromEntries(await Promise.all(keys.map(async (k) => [k, await this.get(k)] as const)));
+    const raw = Object.fromEntries(await Promise.all(keys.map(async (k) => [k, await this.#valueOf(k)] as const)));
     const cal = createCalendar(m.businessHours, m.closures, m.timeZone);
     const openNow = cal.isOpen(now);
     const next = openNow ? null : cal.nextOpen(now);
@@ -394,7 +425,7 @@ export class SettingsService implements SettingsPublicApi {
       .update(JSON.stringify({ raw, flags: publicFlags.map((f) => [f.key, f.enabled, f.rollout, f.percentage, this.#enabled.has(f.module)]) }))
       .digest('hex')
       .slice(0, 16);
-    const market: PublicMarket = { country: m.country, currency: m.currency, timeZone: m.timeZone, locale: m.locale, serviceRegionLabel: m.serviceRegion?.label ?? m.country };
+    const market: PublicMarket = { country: m.country, currency: m.currency, timeZone: m.timeZone, locale: m.locale, serviceRegionLabel: m.serviceRegion?.label ?? m.country, legalName: m.legalName, companyLine: m.companyLine };
     const support: PublicSupport = {
       hoursLabel: m.support.phoneHoursLabel,
       openNow,
@@ -445,7 +476,7 @@ export class SettingsService implements SettingsPublicApi {
           return {
             key: d.key,
             label: d.label,
-            valueText: valueText(d, await this.get(d.key), tz),
+            valueText: valueText(d, await this.#valueOf(d.key), tz),
             hint: item && next ? `Changes to ${item.toText} on ${dateText(next.effectiveAt, tz)}` : d.editable ? null : 'Read-only',
             exampleValue: d.exampleValue,
           };
@@ -663,8 +694,9 @@ export class SettingsService implements SettingsPublicApi {
     const rule = preview.approvalRule;
     let approvalNote: string | null = rule === 'none' ? 'No approval needed for these settings' : null;
     let needsApproval = false;
+    const action = rule === 'business_owner' ? OWNER_APPROVAL_ACTION : APPROVAL_ACTION;
     if (rule !== 'none') {
-      const check = await this.ctx.use('access').check(by.principal, APPROVAL_ACTION);
+      const check = await this.ctx.use('access').check(by.principal, action);
       if (check.decision === 'denied') throw new AppError('FORBIDDEN', check.reason || 'You cannot apply setting changes');
       approvalNote = check.reason || null;
       // the Business Owner's own change needs no further approval; a second reviewer is always someone else
@@ -676,7 +708,7 @@ export class SettingsService implements SettingsPublicApi {
     if (needsApproval) {
       const access = this.ctx.use('access');
       const request = await access.requestApproval({
-        action: APPROVAL_ACTION,
+        action,
         target: { type: APPROVAL_TARGET, id, ref: c.ref, label: title, screen: 'admin/settings' },
         summary: title,
         details: { approvalRule: rule, effectiveAt: c.effectiveAt.toISOString(), applyScope: c.applyScope, items: items.map(({ key, label, from, to, fromText, toText }) => ({ key, label, from, to, fromText, toText })) },
@@ -785,7 +817,7 @@ export class SettingsService implements SettingsPublicApi {
       seen.add(item.key);
       issues.push(...validateValue(def, item.value, `items.${i}.value`));
       if (!def.applyScopes.includes(input.applyScope)) issues.push({ path: 'applyScope', message: `${def.label} can only apply to ${def.applyScopes.join(' or ')}` });
-      const from = await this.get(def.key);
+      const from = await this.#valueOf(def.key);
       if (sameValue(from, item.value)) issues.push({ path: `items.${i}.value`, message: `${def.label} already has this value` });
       items.push({ key: def.key, label: def.label, section: def.section, from, to: item.value, fromText: valueText(def, from, tz), toText: valueText(def, item.value, tz) });
     }
@@ -800,7 +832,7 @@ export class SettingsService implements SettingsPublicApi {
     return Promise.all(
       items.map(async (i) => {
         const def = defs.get(i.key);
-        const from = await this.get(i.key);
+        const from = await this.#valueOf(i.key);
         return { ...i, from, fromText: def ? valueText(def, from, tz) : i.fromText };
       }),
     );
@@ -845,8 +877,8 @@ export class SettingsService implements SettingsPublicApi {
     // the app's minimum version can never pass the latest one
     const to = (key: string) => c.items.find((i) => i.key === key)?.to;
     if (c.items.some((i) => i.key === 'apps.android.minVersionCode' || i.key === 'apps.android.latestVersionCode')) {
-      const min = Number(to('apps.android.minVersionCode') ?? (await this.get('apps.android.minVersionCode')));
-      const latest = Number(to('apps.android.latestVersionCode') ?? (await this.get('apps.android.latestVersionCode')));
+      const min = Number(to('apps.android.minVersionCode') ?? (await this.#valueOf('apps.android.minVersionCode')));
+      const latest = Number(to('apps.android.latestVersionCode') ?? (await this.#valueOf('apps.android.latestVersionCode')));
       if (min > latest) blocking.push('The minimum Android version code cannot be above the latest one');
     }
 
@@ -1085,7 +1117,7 @@ export class SettingsService implements SettingsPublicApi {
 
   /** access.approval.decided: For settings.changes.apply requests: approved → scheduled (applied at once if effectiveAt has passed); rejected/expired → rejected; cancelled → cancelled */
   async onApprovalDecidedFromAccess(event: EventPayload<'access.approval.decided'>): Promise<void> {
-    if (event.actionKey !== APPROVAL_ACTION) return;
+    if (!APPROVAL_ACTIONS.includes(event.actionKey)) return;
     const found = await this.#changeForApproval(event.requestId, event.target);
     if (!found || found.status !== 'pending_approval' || found.approvalRequestId !== event.requestId) {
       if (!found) this.ctx.log.info({ requestId: event.requestId }, 'settings: approval decided for an unknown change, ignored');
@@ -1139,7 +1171,7 @@ export class SettingsService implements SettingsPublicApi {
 
   /** access.approval.returned: Move the change back to draft with the reviewer's comment on its timeline */
   async onApprovalReturnedFromAccess(event: EventPayload<'access.approval.returned'>): Promise<void> {
-    if (event.actionKey !== APPROVAL_ACTION) return;
+    if (!APPROVAL_ACTIONS.includes(event.actionKey)) return;
     const found = await this.#changeForApproval(event.requestId, event.target);
     if (!found || found.status !== 'pending_approval' || found.approvalRequestId !== event.requestId) return;
     const now = this.now();

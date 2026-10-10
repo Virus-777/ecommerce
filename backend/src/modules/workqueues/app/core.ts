@@ -17,7 +17,7 @@ import { isActive, isPlaceholder, PLACEHOLDER_BACKUP, PLACEHOLDER_LEAD, QUEUE_SE
 import { intakeQueueKeys, intakeRuleDocs } from '../domain/intake.js';
 import { deadlineState, escalationLabel } from '../domain/rules.js';
 import { DEFAULT_TEMPLATES } from '../domain/routine-defaults.js';
-import type { ArchiveStore, ItemEventRow, ItemNoteRow, ItemRow, ItemVisibility, QueueRow, WorkqueuesRepository } from '../ports.js';
+import type { ItemEventRow, ItemNoteRow, ItemRow, ItemVisibility, QueueRow, WorkqueuesRepository } from '../ports.js';
 
 export const SYSTEM: Actor = { kind: 'system', name: 'Work queues' };
 
@@ -56,13 +56,11 @@ export const actorJson = (a: Actor) => JSON.stringify({ kind: a.kind, ...(a.id ?
 export interface WorkqueuesCoreDeps {
   repo: WorkqueuesRepository;
   ctx: ModuleContext<'workqueues'>;
-  archive: ArchiveStore;
 }
 
 export class Core {
   readonly repo: WorkqueuesRepository;
   readonly ctx: ModuleContext<'workqueues'>;
-  readonly archive: ArchiveStore;
   #seeding: Promise<void> | undefined;
   #staff = new Map<string, { at: number; info: StaffInfo }>();
   #roles = new Map<string, { at: number; roles: string[] }>();
@@ -70,7 +68,6 @@ export class Core {
   constructor(deps: WorkqueuesCoreDeps) {
     this.repo = deps.repo;
     this.ctx = deps.ctx;
-    this.archive = deps.archive;
   }
 
   now = () => this.ctx.clock.now();
@@ -114,7 +111,7 @@ export class Core {
       const cov = coverage.find((c) => c.role.key === s.ownerRole);
       const lead = cov?.lead?.accountId ?? PLACEHOLDER_LEAD;
       const backup = cov?.backups.find((b) => b.accountId !== lead)?.accountId ?? PLACEHOLDER_BACKUP;
-      await this.repo.insertQueue({
+      const inserted = await this.repo.insertQueue({
         key: s.key,
         name: s.name,
         area: s.area,
@@ -125,6 +122,7 @@ export class Core {
         escalation_label: escalationLabel(s.escalationRoute),
         default_deadline_minutes: s.defaultDeadlineMinutes,
         business_hours_only: s.businessHoursOnly,
+        pause_while_waiting: s.pauseWhileWaiting,
         screen: s.screen,
         screen_filter: s.screenFilter,
         visible_to_seller: s.visibleToSeller,
@@ -132,6 +130,7 @@ export class Core {
         updated_by: SYSTEM_UPDATED_BY,
         updated_at: now,
       });
+      if (!inserted) await this.#fillPlaceholders(key, lead, backup === lead ? PLACEHOLDER_BACKUP : backup);
     }
     const existing = new Set((await this.repo.listQueues()).map((q) => q.key));
     const rules = intakeRuleDocs()
@@ -156,6 +155,20 @@ export class Core {
         await this.repo.upsertTemplate({ id: stableId(`routine|${t.title}`), title: t.title, area_label: t.areaLabel, owner_roles: t.ownerRoles as never, due_time: t.dueTime, weekdays: t.weekdays as never, active: true });
       }
     }
+  }
+
+  /**
+   * A system-managed queue still on a placeholder (seeded by a migration, or before access had people)
+   * takes the role's lead and backup once access has them. Queues set by hand are never touched.
+   */
+  async #fillPlaceholders(key: string, lead: string, backup: string) {
+    const q = await this.repo.getQueue(key);
+    if (!q || q.updated_by !== SYSTEM_UPDATED_BY) return;
+    const patch: Partial<QueueRow> = {};
+    if (isPlaceholder(q.lead_staff_id) && !isPlaceholder(lead) && lead !== q.backup_staff_id) patch.lead_staff_id = lead;
+    const nextLead = patch.lead_staff_id ?? q.lead_staff_id;
+    if (isPlaceholder(q.backup_staff_id) && !isPlaceholder(backup) && backup !== nextLead) patch.backup_staff_id = backup;
+    if (Object.keys(patch).length) await this.repo.updateQueue(key, { ...patch, updated_at: this.now() });
   }
 
   /** Role coverage from access (empty when access cannot answer yet) */
@@ -298,6 +311,7 @@ export class Core {
       escalationLabel: q.escalation_label,
       defaultDeadlineMinutes: q.default_deadline_minutes,
       businessHoursOnly: q.business_hours_only,
+      pauseWhileWaiting: q.pause_while_waiting,
       screen: q.screen,
       screenFilter: q.screen_filter,
       visibleToSeller: q.visible_to_seller,
@@ -363,7 +377,7 @@ export class Core {
         lead: q ? refs.get(q.lead_staff_id)! : { staffId: PLACEHOLDER_LEAD, name: 'Not set', role: null },
         backup: q ? refs.get(q.backup_staff_id)! : { staffId: PLACEHOLDER_BACKUP, name: 'Not set', role: null },
         assignee: r.assignee_staff_id ? (refs.get(r.assignee_staff_id) ?? null) : null,
-        deadline: { dueAt: r.due_at.toISOString(), state: isActive(r.state) ? deadlineState(r.due_at, now, dueSoon) : (r.deadline_state as WorkItem['deadline']['state']) },
+        deadline: { dueAt: r.due_at.toISOString(), state: isActive(r.state) && !(r.state === 'waiting' && q?.pause_while_waiting) ? deadlineState(r.due_at, now, dueSoon) : (r.deadline_state as WorkItem['deadline']['state']) },
         priority: r.priority as WorkItem['priority'],
         state: r.state as WorkItem['state'],
         waitingOn: (r.waiting_on as WorkItem['waitingOn']) ?? null,
@@ -377,6 +391,7 @@ export class Core {
         openedAt: r.opened_at.toISOString(),
         updatedAt: r.updated_at.toISOString(),
         resolvedAt: r.resolved_at ? r.resolved_at.toISOString() : null,
+        archived: Boolean(r.archived_at),
         resolution: r.resolution ?? null,
       };
     });

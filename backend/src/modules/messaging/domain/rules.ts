@@ -2,7 +2,7 @@
  * Pure messaging rules: the content filter (contact details and outside links masked, promotional content refused),
  * reply deadlines and the labels the inbox shows. No I/O.
  */
-import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
+import { OFFICIAL_STORE_ID, OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type * as common from '../../../spec/common.js';
 
 /** Seller id of the Official Store (spec constant): conversations with the Official Store store it as seller_id */
@@ -20,7 +20,8 @@ export const HOUR = 60 * MINUTE;
 export const DAY = 24 * HOUR;
 
 export const SUPPORT_LABEL = 'Marketly Support';
-export const OFFICIAL_STORE_NAME = 'Marketly Official Store';
+/** Display name of the Official Store (spec constant) */
+export { OFFICIAL_STORE_NAME };
 /** The support team as a participant when a case joins a conversation before a named agent posts */
 export const SUPPORT_TEAM_ID = 'marketly-support';
 export const RULES_NOTE = 'Keep payments and contact details on Marketly. No promotional messages.';
@@ -161,7 +162,7 @@ export function replyRounds(lines: readonly { conversation_id: string; author_ki
   const open = new Map<string, Date>();
   const rounds: { conversationId: string; start: Date; reply: Date | null }[] = [];
   for (const m of lines) {
-    if (m.author_kind === 'customer') {
+    if (m.author_kind === 'customer' || m.author_kind === 'guest') {
       if (!open.has(m.conversation_id)) open.set(m.conversation_id, m.at);
     } else if (m.author_kind === 'seller') {
       const start = open.get(m.conversation_id);

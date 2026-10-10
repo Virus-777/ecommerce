@@ -92,4 +92,10 @@ export const storeRoutes = (service: ReviewsService) =>
     deleteFeedback: async (i) => service.feedback.remove(customerWho(i), i.params.id),
     /** POST /me/appeals: Appeal a moderation decision on my content */
     customerAppeal: async (i) => service.moderation.submitAppeal({ kind: 'customer', id: customerIdOf(i.scope), actor: i.actor, requestId: i.requestId }, i.body),
+    /** PATCH /me/answers/{id}: Edit my answer, or fix and resubmit it after an edit request */
+    editMyAnswer: async (i) => {
+      const who = customerWho(i);
+      if (!who.customerId) throw new AppError('NOT_FOUND', 'Answer not found');
+      return service.qa.editAnswer({ kind: 'customer', customerId: who.customerId }, i.params.id, i.body.text, who);
+    },
   });

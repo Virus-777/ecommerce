@@ -45,7 +45,7 @@ One JSON file per backend module: `docs/api/spec/modules/<module>.json`.
       "secondReviewer": "above-limit",     // always | above-limit | never
       "approvers": "Finance Manager; Business Owner above $50,000 (example)" }
   ],
-  "jobs": [ { "name": "catalog.reindex-stale", "schedule": "every 10 min", "does": "…" } ],
+  "jobs": [ { "name": "catalog.reindex-stale", "schedule": "every 10 min", "does": "…" } ],   // schedule: "every N min|hours", "hourly", "daily|nightly HH:MM market time", "weekly", "monthly", "on boot"; anything else fails boot
   "settings": [ { "key": "maxImagesPerProduct", "type": "int", "default": 12, "desc": "…", "min": 1, "max": 30 } ],   // see "Settings"
   "integrations": [ { "name": "S3-compatible storage", "purpose": "…" } ],
   "notes": ["Anything a builder must know"]
@@ -146,7 +146,20 @@ Reserved values every module may use go in `common.json` under `constants`. `npm
 }
 ```
 
-`OFFICIAL_STORE_ID` is the seller id of the Official Store wherever a seller id is required (feedback, reviews, returns terms, conversations, report facts, promotion lines). The sellers module never issues it.
+`OFFICIAL_STORE_ID` is the seller id of the Official Store wherever a seller id is required (feedback, reviews, returns terms, conversations, report facts, promotion lines). The sellers module never issues it. `OFFICIAL_STORE_NAME` is its display name wherever a seller name is shown.
+
+## Approval responses
+
+An endpoint whose action may need approval (`approval` rule, access `check()` answers `approval_required`) answers in one of two ways:
+
+- **Saved, pending approval**: the module keeps its record in a pending state, calls `access.requestApproval` and answers its normal success status (200, 201 or 202 as declared) with `approval: ApprovalInfo` (required = true, approvalRequestId) in the response body. It finishes on `access.approval.decided`. This is the default.
+- **Nothing saved**: only when the action cannot be recorded before approval does it answer `409 APPROVAL_REQUIRED` with `details.approvalRequestId`; the caller repeats the call after the approval.
+
+A response type that can carry a pending approval declares `approval: ApprovalInfo?` (or an existing field such as `pendingApproval`).
+
+## Customer data export hook
+
+Modules holding a customer's personal data (orders, returns, support, messaging, reviews, wishlist, wallet…) declare a public API function `exportCustomerData` with the signature `(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]` (common.CustomerDataSection) and `usedBy: ["customers"]`. customers.build-data-exports calls it on every enabled module that declares it and writes each section into the export ZIP; a module that fails is retried, never silently left out.
 
 ## Rules
 1. Paths are nouns, plural, kebab-case; actions on a record are `POST /{things}/{id}/{verb}` (e.g. `/payouts/{id}/approve`).

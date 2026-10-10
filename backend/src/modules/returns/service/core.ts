@@ -10,7 +10,8 @@ import type { ModuleContext, PublicApiMap } from '../../../kernel/module-system/
 import type * as audit from '../../../spec/audit.js';
 import type * as common from '../../../spec/common.js';
 import type { ShippingResponsibility } from '../../../spec/returns.js';
-import { DEFAULT_POLICY_ID, defaultResponsibilities } from '../domain/rules.js';
+import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
+import { DEFAULT_POLICY_ID, defaultResponsibilities, OFFICIAL_RETURN_ADDRESS } from '../domain/rules.js';
 import type { DraftRec, EventRec, EvidenceRec, InspectionRec, ItemRec, PolicyRec, RefundRec, ReplacementRec, ReturnRec, ReturnsRepository, ShipmentRec, TermsRec } from '../ports.js';
 
 export interface ReturnsServiceDeps {
@@ -208,8 +209,9 @@ export class Core {
     return rows[0] ? this.baselineOf(rows[0]) : this.baseline();
   }
 
-  /** The seller's terms in force now, or at a time */
+  /** The seller's terms in force now, or at a time (the Official Store has none) */
   async sellerTerms(sellerId: string, at?: Date): Promise<TermsRec | null> {
+    if (sellerId === OFFICIAL_STORE_ID) return null;
     if (!at) return (await this.repo.find('seller_terms', { seller_id: sellerId, superseded_at: null }, { orderBy: [['version', 'desc']], limit: 1 }))[0] ?? null;
     const rows = await this.repo.find('seller_terms', { seller_id: sellerId, effective_from: { op: '<=', value: at } }, { orderBy: [['version', 'desc']] });
     return rows.find((t) => !t.superseded_at || t.superseded_at.getTime() > at.getTime()) ?? (await this.sellerTerms(sellerId));
@@ -236,7 +238,7 @@ export class Core {
     for (const x of items) out.get(x.return_id)?.items.push(x);
     for (const x of shipments) out.get(x.return_id)?.shipments.push(x);
     for (const x of refunds) if (x.return_id) out.get(x.return_id)?.refunds.push(x);
-    for (const x of replacements) out.get(x.return_id)?.replacements.push(x);
+    for (const x of replacements) if (x.return_id) out.get(x.return_id)?.replacements.push(x);
     for (const x of inspections) out.get(x.return_id)?.inspections.push(x);
     for (const x of drafts) {
       const a = out.get(x.return_id);
@@ -343,13 +345,23 @@ export class Core {
     return { customerId: x.customerId ?? order?.contact.customerId ?? null, contactEmail: order?.contact.email ?? null };
   }
 
+  /** ref, orderId and orderRef carried by every returns.return.* event */
+  refs(r: ReturnRec): { ref: string; orderId: string; orderRef: string } {
+    return { ref: r.ref, orderId: r.order_id, orderRef: r.order_ref };
+  }
+
+  /** Where Official Store returns go (officialReturnAddress setting, Business Owner approval; decision D-RT1) */
+  async officialReturnAddress(): Promise<common.Address> {
+    const a = (await this.ctx.settings.get('officialReturnAddress').catch(() => null)) as common.Address | null;
+    return a && typeof a === 'object' && a.line1 ? { ...a, name: a.name || OFFICIAL_RETURN_ADDRESS.name } : OFFICIAL_RETURN_ADDRESS;
+  }
+
   /** returns.return.approved for a return (items and the label's tracking number included) */
   approvedEvent(a: Agg, o: { withoutReturn: boolean; platformDecision: boolean; shipment?: ShipmentRec | null }): EventMap['returns.return.approved'] {
     const r = a.ret;
     return {
       returnId: r.id,
-      ref: r.ref,
-      orderId: r.order_id,
+      ...this.refs(r),
       ...this.recipient(r),
       ownerType: r.owner_type,
       sellerId: r.seller_id,

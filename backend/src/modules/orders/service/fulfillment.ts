@@ -250,7 +250,7 @@ export class Fulfillment {
           this.core.ctx.log.warn({ itemId, shipmentId: e.shipmentId }, 'orders: shipment line for an item that cannot ship');
           continue;
         }
-        const { part } = await this.core.split(tx, item, Math.min(qty, item.quantity), agg.order.currency);
+        const { part } = await this.core.split(tx, batch, item, Math.min(qty, item.quantity), agg.order.currency, 'shipment');
         await this.core.move(tx, batch, part, 'ship', { patch: { shipment_id: e.shipmentId, state_before_request: null } });
         shippedIds.push(part.id);
       }

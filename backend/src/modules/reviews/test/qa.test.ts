@@ -21,7 +21,7 @@ describe('questions', () => {
     const q = await ask(p.productId);
     expect(q.status, JSON.stringify(q.body)).toBe(201);
     expect(q.body).toMatchObject({ productId: p.productId, productTitle: 'Kestrel 27" monitor', askedBy: 'Sam R.', status: 'published', answers: [], answerCount: 0, answerExpectation: 'The Official Store usually answers within 1 business day.' });
-    expect(k.of('reviews.question.asked')).toEqual([{ questionId: q.body.id, productId: p.productId }]);
+    expect(k.of('reviews.question.asked')).toEqual([{ questionId: q.body.id, productId: p.productId, customerId: expect.any(String), sellerIds: [], officialStore: true }]);
     const list = await k.call('GET', `${STORE}/products/${p.productId}/questions`, tokens.visitor());
     expect(list.body.items.map((x: any) => x.id)).toEqual([q.body.id]);
   });

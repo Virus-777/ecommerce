@@ -120,6 +120,11 @@ const REASON_LABELS: Record<string, string> = {
   transfer_received: 'Transfer received',
   transfer_short: 'Transfer short on arrival',
   count_difference: 'Stock count difference',
+  allocated_for_order: 'Allocated for a replacement or exchange',
+  allocation_released: 'Replacement or exchange allocation released',
+  hold_unmatched: 'Held units not on the accepted order',
+  merged_out: 'Merged into another SKU',
+  merged_in: 'Merged from another SKU',
 };
 
 export const reasonLabel = (code: string) => REASON_LABELS[code] ?? code.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());

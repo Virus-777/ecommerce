@@ -8,7 +8,7 @@ export const earningsLotMachine = createStateMachine("Earnings lot", spec.stateM
 /** Hold: Hold.status. Every hold has a reason and a review date shown to the seller. apply turns the held amount into a deduction (e.g. chargeback lost) with a reason. Placing or releasing above the approver's hold limit needs an access approval. */
 export const holdMachine = createStateMachine("Hold", spec.stateMachines["Hold"]);
 
-/** Payout run: PayoutRun.status. Runs above runSecondReviewerThreshold need two different Finance approvers (access approval request for the second). Approved is not paid: release sends each pending payout to the provider (processing). complete runs when every payout is paid, failed or cancelled. */
+/** Payout run: PayoutRun.status. A run above the first approver's finance.payouts.release limit (access) needs a second, different Finance approver (access approval request for the second). Approved is not paid: release sends each pending payout to the provider (processing). complete runs when every payout is paid, failed or cancelled. */
 export const payoutRunMachine = createStateMachine("Payout run", spec.stateMachines["Payout run"]);
 
 /** Payout: Payout.status. Plan ch. 14 payout statuses. Paid only when the provider confirms the deposit. A failed payout returns its money to the seller's available balance (payout_returned entry); recovery creates a new payout (retryOf) after the destination is fixed and verified. Payouts only go to a verified destination. */
@@ -20,10 +20,10 @@ export const destinationReviewMachine = createStateMachine("Destination review",
 /** Fee rule set: FeeRuleSet.status. Proposed by the Platform Administrator or Finance, approved by the Business Owner (access). Fees on an order item use the version active when the order was accepted. */
 export const feeRuleSetMachine = createStateMachine("Fee rule set", spec.stateMachines["Fee rule set"]);
 
-/** Adjustment: Adjustment.status. Within the recorder's limit an adjustment is recorded at once; above adjustmentSecondReviewerThreshold it waits for a second Finance reviewer. */
+/** Adjustment: Adjustment.status. Within the recorder's limit an adjustment is recorded at once; above their finance.adjustments.record limit (access) it waits for a second Finance reviewer. */
 export const adjustmentMachine = createStateMachine("Adjustment", spec.stateMachines["Adjustment"]);
 
-/** Reconciliation item: ReconItem.status. explain records a reason when no money needs to move (timing, provider fee). Corrections above correctionSecondReviewerThreshold need a second reviewer; applying one posts the matching entry (refund via payments, seller adjustment, write-off). */
+/** Reconciliation item: ReconItem.status. explain records a reason when no money needs to move (timing, provider fee). Corrections above the caller's correction limit (access) need a second reviewer; applying one posts the matching entry (refund via payments, seller adjustment, write-off). */
 export const reconciliationItemMachine = createStateMachine("Reconciliation item", spec.stateMachines["Reconciliation item"]);
 
 /** Amount owed: AmountOwed.status. Created when a negative balance is not covered within negativeBalanceOwedAfterDays. New earnings offset it first. Write-off needs a reason and approval. */

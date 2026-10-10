@@ -7,7 +7,7 @@ import type { DeliverTo, FeaturedCandidate, FeaturedDecision, FeaturedRule, Feat
 import { CONDITIONS, conditionGroup, DEFAULT_RULE, rankCandidates, reason, RULE_NOTES, zoneKey, type ConditionGroup } from '../domain/rules.js';
 import { actorText, featuredRule, iso, isoReq, money } from '../mappers.js';
 import type { OfferRec, RuleRec } from '../ports.js';
-import { invalid, invalidField, Part, SYSTEM, type By } from './core.js';
+import { invalid, invalidField, Part, SYSTEM, type By, type ProductCache } from './core.js';
 import type { Facts } from './storefront.js';
 
 interface Cached {
@@ -265,5 +265,15 @@ export class FeaturedPart extends Part {
       for (const id of chunk) await this.core.refreshEligibility(bySeller.get(id)!, standing);
     }
     await this.core.refreshEligibility(official);
+    await this.backfillTitles();
+  }
+
+  /** Offers created before titles existed get theirs from catalog, a bounded batch per run */
+  async backfillTitles(limit = 200): Promise<number> {
+    const rows = await this.repo.find('offers', { title: '' }, { limit });
+    const cache: ProductCache = new Map();
+    let n = 0;
+    for (const r of rows) if (await this.core.ensureTitle(r, cache)) n++;
+    return n;
   }
 }

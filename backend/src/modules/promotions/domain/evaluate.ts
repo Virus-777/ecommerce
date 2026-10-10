@@ -4,7 +4,7 @@
  * Every allocation is split into platformPart and sellerPart. Deterministic for the same input.
  */
 import type * as common from '../../../spec/common.js';
-import type { AppliedPromotion, CartLineInput, DiscountAllocation, LineDiscount, PackageDiscount, RejectedCode } from '../../../spec/promotions.js';
+import type { AppliedPromotion, CartLineInput, DiscountAllocation, LineDiscount, PackageDiscount, RejectedCode, SkippedPromotion } from '../../../spec/promotions.js';
 import {
   allocateByValue,
   COUPON_KINDS,
@@ -70,7 +70,11 @@ export interface EvalInput {
   at: Date;
   currency: string;
   customerId: string | null;
+  /** Whose usage counts for per-customer limits: the customer id, or a guest's email (or session) key */
+  customerKey?: string | null;
   signedIn: boolean;
+  /** A guest gave a contact email (new-customer offers can be checked for guests only then) */
+  guestEmail?: boolean;
   isNewCustomer: boolean | null;
   region: string | null;
   couponsPerPackage: number;
@@ -117,6 +121,7 @@ export interface EvalOutput {
   packages: PackageDiscount[];
   applied: AppliedPromotion[];
   rejected: RejectedCode[];
+  skipped: SkippedPromotion[];
   totals: { total: common.Money; platform: common.Money; seller: common.Money };
   holds: Hold[];
 }
@@ -135,6 +140,8 @@ interface LineState {
   hasSellerMarkdown: boolean;
   purchaseLimit: number | null;
   limitExceeded: boolean;
+  /** Units at the deal price (the rest of the line stays at the regular price) */
+  discounted: number;
 }
 
 interface Accepted {
@@ -145,7 +152,14 @@ interface Accepted {
 
 export function evaluate(input: EvalInput): EvalOutput {
   const cur = input.currency;
-  const who = { signedIn: input.signedIn, isNewCustomer: input.isNewCustomer, region: input.region };
+  const who = { signedIn: input.signedIn, guestEmail: input.guestEmail ?? false, isNewCustomer: input.isNewCustomer, region: input.region };
+  /** Per-customer limits count for this key (customer, or guest email / session) */
+  const limitedKey = input.customerKey ?? input.customerId;
+  const skippedMap = new Map<string, SkippedPromotion>();
+  const skip = (c: CampaignModel, reason: SkippedPromotion['reason'], message: string) => {
+    if (!skippedMap.has(c.id)) skippedMap.set(c.id, { campaignId: c.id, label: c.name, reason, message });
+  };
+  const budgetReason = (c: CampaignModel): 'budget_insufficient' | 'budget_exhausted' => (budgetLeft(c) > 0 ? 'budget_insufficient' : 'budget_exhausted');
   const holds = new Map<string, Hold>();
   const pendingBudget = new Map<string, number>();
   const pendingUnits = new Map<string, number>();
@@ -185,25 +199,38 @@ export function evaluate(input: EvalInput): EvalOutput {
   for (const line of input.lines) {
     const regular = line.unitPrice.amount;
     const qty = line.quantity;
-    const st: LineState = { line, regular, unit: regular, value: regular * qty, remaining: regular * qty, allocations: [], hasFlash: false, hasSellerMarkdown: false, purchaseLimit: null, limitExceeded: false };
+    const st: LineState = { line, regular, unit: regular, value: regular * qty, remaining: regular * qty, allocations: [], hasFlash: false, hasSellerMarkdown: false, purchaseLimit: null, limitExceeded: false, discounted: Math.max(qty, 0) };
     states.push(st);
     if (qty <= 0) continue;
     let limitHit: number | null = null;
-    const cands: { opt: PriceOption; perUnit: number; limit: number | null }[] = [];
+    // units: how many of the line's units get this price (decision P2: the rest stays at the regular price)
+    const cands: { opt: PriceOption; perUnit: number; limit: number | null; units: number }[] = [];
     for (const opt of input.priceOptions.get(line.lineId) ?? []) {
       const c = opt.campaign;
       if (!isRunning(c, input.at) || !customerCheck(c.eligibility, who).ok) continue;
-      if (c.limits.usageCap != null && c.usageCount >= c.limits.usageCap) continue;
-      if (c.limits.perCustomer != null && input.customerId && usageOf(c.id).uses >= c.limits.perCustomer) continue;
+      if (c.limits.usageCap != null && c.usageCount >= c.limits.usageCap) {
+        skip(c, 'usage_limit', `${c.name} has been fully used. The regular price applies.`);
+        continue;
+      }
+      if (c.limits.perCustomer != null && limitedKey && usageOf(c.id).uses >= c.limits.perCustomer) {
+        skip(c, 'usage_limit', `You've already used ${c.name} the maximum number of times. The regular price applies.`);
+        continue;
+      }
       // flash purchase limits count per item (campaign:offer), markdown unit limits per campaign
       const unitKey = c.kind === 'flash_sale' ? `${c.id}:${line.offerId}` : c.id;
       const usedUnits = (input.usage.get(unitKey)?.units ?? 0) + (pendingUnits.get(unitKey) ?? 0);
       let perUnit: number;
       let limit: number | null;
+      let units = qty;
       if (c.kind === 'flash_sale') {
         const f = opt.flash;
-        if (!f || f.state !== 'active') continue;
-        if (f.dealStock - f.claimed - f.reserved - (pendingDeal.get(unitKey) ?? 0) < qty) continue;
+        if (!f || (f.state !== 'active' && f.state !== 'sold_out')) continue;
+        const left = f.dealStock - f.claimed - f.reserved - (pendingDeal.get(unitKey) ?? 0);
+        if (f.state === 'sold_out' || left <= 0) {
+          skip(c, 'deal_sold_out', `The flash deal ${c.name} is sold out. The regular price applies.`);
+          continue;
+        }
+        units = Math.min(units, left);
         limit = f.purchaseLimit;
         perUnit = Math.max(0, regular - f.dealPrice);
       } else {
@@ -211,16 +238,24 @@ export function evaluate(input: EvalInput): EvalOutput {
         perUnit = markdownOff(c.discount, regular);
       }
       if (perUnit <= 0) continue;
-      if (limit != null && usedUnits + qty > limit) {
+      if (limit != null && usedUnits + units > limit) {
         limitHit = limitHit === null ? limit : Math.min(limitHit, limit);
+        units = Math.max(0, limit - usedUnits);
+      }
+      if (units <= 0) {
+        skip(c, 'purchase_limit', `${c.name} is limited to ${limit} per customer at the deal price. The regular price applies.`);
         continue;
       }
-      if (perUnit * qty > budgetLeft(c)) continue;
-      cands.push({ opt, perUnit, limit });
+      // all or nothing (decision P3): never a partial discount on the budget that is left
+      if (perUnit * units > budgetLeft(c)) {
+        skip(c, budgetReason(c), budgetReason(c) === 'budget_exhausted' ? `${c.name} has run out. The regular price applies.` : `${c.name} doesn't have enough budget left for your cart. The regular price applies.`);
+        continue;
+      }
+      cands.push({ opt, perUnit, limit, units });
     }
     cands.sort(
       (a, b) =>
-        b.perUnit - a.perUnit ||
+        b.perUnit * b.units - a.perUnit * a.units ||
         Number(b.opt.campaign.kind === 'flash_sale') - Number(a.opt.campaign.kind === 'flash_sale') ||
         a.opt.campaign.endsAt.getTime() - b.opt.campaign.endsAt.getTime() ||
         a.opt.campaign.id.localeCompare(b.opt.campaign.id),
@@ -229,20 +264,23 @@ export function evaluate(input: EvalInput): EvalOutput {
     // a platform markdown that combines with seller markdowns applies on top of the seller's price
     const sellerMd = cands.find((x) => x.opt.campaign.kind === 'markdown' && x.opt.campaign.ownerKind === 'seller');
     const platMd = cands.find((x) => x.opt.campaign.kind === 'markdown' && x.opt.campaign.ownerKind === 'platform' && x.opt.campaign.stacking.withSellerMarkdowns);
-    if (sellerMd && platMd) {
+    if (sellerMd && platMd && sellerMd.units === platMd.units) {
       const second = markdownOff(platMd.opt.campaign.discount, regular - sellerMd.perUnit);
-      if (sellerMd.perUnit + second > (chosen[0]?.perUnit ?? 0) && second > 0) chosen = [sellerMd, { ...platMd, perUnit: second }];
+      const best = chosen[0] ? chosen[0].perUnit * chosen[0].units : 0;
+      if ((sellerMd.perUnit + second) * sellerMd.units > best && second > 0) chosen = [sellerMd, { ...platMd, perUnit: second }];
     }
     if (!chosen.length) {
       if (limitHit !== null) {
         st.purchaseLimit = limitHit;
         st.limitExceeded = true;
+        st.discounted = 0;
       }
       continue;
     }
+    const units = chosen[0]!.units;
     for (const ch of chosen) {
       const c = ch.opt.campaign;
-      const amount = ch.perUnit * qty;
+      const amount = ch.perUnit * units;
       const split = splitFunding(amount, c, line.attrs, ch.opt.consentBps);
       st.unit -= ch.perUnit;
       st.allocations.push({ campaignId: c.id, code: null, label: c.kind === 'flash_sale' ? `Flash deal: ${c.name}` : c.name, amount: m(amount, cur), platformPart: m(split.platform, cur), sellerPart: m(split.seller, cur) });
@@ -250,17 +288,19 @@ export function evaluate(input: EvalInput): EvalOutput {
       if (c.kind === 'flash_sale') st.hasFlash = true;
       if (c.kind === 'markdown' && c.ownerKind === 'seller') st.hasSellerMarkdown = true;
       const h = holdOf(c, null, null);
-      h.units += qty;
+      h.units += units;
       const unitKey = c.kind === 'flash_sale' ? `${c.id}:${line.offerId}` : c.id;
-      pendingUnits.set(unitKey, (pendingUnits.get(unitKey) ?? 0) + qty);
+      pendingUnits.set(unitKey, (pendingUnits.get(unitKey) ?? 0) + units);
       if (c.kind === 'flash_sale') {
-        h.flash.push({ offerId: line.offerId, qty });
-        pendingDeal.set(unitKey, (pendingDeal.get(unitKey) ?? 0) + qty);
+        h.flash.push({ offerId: line.offerId, qty: units });
+        pendingDeal.set(unitKey, (pendingDeal.get(unitKey) ?? 0) + units);
       }
-      addToHold(h, { lineId: line.lineId, offerId: line.offerId, sellerId: line.sellerId, quantity: qty, amount, platform: split.platform, seller: split.seller });
+      addToHold(h, { lineId: line.lineId, offerId: line.offerId, sellerId: line.sellerId, quantity: units, amount, platform: split.platform, seller: split.seller });
       apply(c, 'automatic', null, c.kind === 'flash_sale' ? `Flash deal: ${c.name}` : c.name, amount, [line.lineId]);
     }
-    st.value = st.unit * qty;
+    st.discounted = units;
+    st.limitExceeded = units < qty;
+    st.value = st.unit * units + regular * (qty - units);
     st.remaining = st.value;
   }
   const orderValue = states.reduce((a, s) => a + s.value, 0);
@@ -269,7 +309,11 @@ export function evaluate(input: EvalInput): EvalOutput {
   /* ---------------------------------------------------------------- 2. coupons */
   const rejected: RejectedCode[] = [...input.rejected];
   const reject = (cand: CouponCandidate, reason: Reason, message: string, details: string[] = []) => {
-    if (cand.source !== 'code' || !cand.code) return;
+    if (cand.source !== 'code' || !cand.code) {
+      // an automatic or clipped campaign that matched the cart but could not be applied says why
+      if (reason === 'budget_insufficient' || reason === 'budget_exhausted' || reason === 'usage_limit') skip(cand.campaign, reason, message);
+      return;
+    }
     if (rejected.some((r) => r.code.toUpperCase() === cand.code!.toUpperCase())) return;
     rejected.push({ code: cand.code, reason, message, details });
   };
@@ -301,7 +345,7 @@ export function evaluate(input: EvalInput): EvalOutput {
     if (!who2.ok) return { ok: false, reason: who2.reason, message: who2.message };
     if (c.limits.usageCap != null && c.usageCount >= c.limits.usageCap) return { ok: false, reason: 'usage_limit', message: 'This coupon has been fully used.' };
     if (info?.maxRedemptions != null && info.redemptions >= info.maxRedemptions) return { ok: false, reason: 'usage_limit', message: 'This code has already been used.' };
-    if (c.limits.perCustomer != null && input.customerId && usageOf(c.id).uses >= c.limits.perCustomer) {
+    if (c.limits.perCustomer != null && limitedKey && usageOf(c.id).uses >= c.limits.perCustomer) {
       return { ok: false, reason: 'usage_limit', message: c.limits.perCustomer === 1 ? "You've already used this coupon." : `You've used this coupon ${c.limits.perCustomer} times, the limit per customer.` };
     }
     if (c.limits.budget && c.budgetUsed >= c.limits.budget.amount) return { ok: false, reason: 'budget_exhausted', message: 'This coupon has run out.' };
@@ -328,7 +372,8 @@ export function evaluate(input: EvalInput): EvalOutput {
   for (const cand of perCampaign.values()) {
     const s = standalone(cand);
     if (!s.ok) {
-      reject(cand, s.reason, s.message);
+      // automatic and clipped campaigns are only reported when they match something in the cart
+      if (cand.source === 'code' || coverage(cand.campaign).covered.length) reject(cand, s.reason, s.message);
       continue;
     }
     if (isFreeShippingOnly(cand.campaign)) shippingCands.push(cand);
@@ -400,7 +445,9 @@ export function evaluate(input: EvalInput): EvalOutput {
       continue;
     }
     if (amount > budgetLeft(c)) {
-      reject(cand, 'budget_exhausted', 'This coupon has run out.');
+      // all or nothing (decision P3): never a partial discount
+      const reason = budgetReason(c);
+      reject(cand, reason, reason === 'budget_exhausted' ? 'This coupon has run out.' : `This coupon doesn't have enough budget left to cover your cart (${moneyLabel(amount, cur)}). Nothing was applied.`);
       continue;
     }
     const parts = allocateByValue(amount, lines.map((l) => l.remaining));
@@ -468,7 +515,8 @@ export function evaluate(input: EvalInput): EvalOutput {
         break;
       }
       if (charge > budgetLeft(c)) {
-        fail('budget_exhausted', 'This free-shipping offer has run out.');
+        const reason = budgetReason(c);
+        fail(reason, reason === 'budget_exhausted' ? 'This free-shipping offer has run out.' : "This free-shipping offer doesn't have enough budget left for this package.");
         continue;
       }
       const official = lines.every((l) => l.line.attrs.official);
@@ -506,6 +554,7 @@ export function evaluate(input: EvalInput): EvalOutput {
     ),
     purchaseLimit: s.purchaseLimit,
     limitExceeded: s.limitExceeded,
+    discountedQuantity: s.discounted,
   }));
   let total = 0;
   let platform = 0;
@@ -522,6 +571,7 @@ export function evaluate(input: EvalInput): EvalOutput {
     packages,
     applied,
     rejected,
+    skipped: [...skippedMap.values()].filter((s) => !appliedMap.has(s.campaignId)),
     totals: { total: m(total, cur), platform: m(platform, cur), seller: m(total - platform, cur) },
     holds: [...holds.values()].filter((h) => h.amount > 0 || h.lines.length || h.flash.length || fsApplied.has(h.campaignId)),
   };

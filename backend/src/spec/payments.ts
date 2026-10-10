@@ -282,7 +282,10 @@ export const PaymentOptions: z.ZodType<PaymentOptions> = z.object({
 export interface Capture {
   id: string;
   groupId?: string | null;
+  /** Card amount captured; 0 for a credit-only capture (store credit alone paid the order or group, no provider call) */
   amount: common.Money;
+  /** Store-credit share charged with this capture; null when no credit was used */
+  creditAmount?: common.Money | null;
   status: "pending" | "succeeded" | "failed" | "unknown";
   providerRef?: string | null;
   at: string;
@@ -294,6 +297,9 @@ export const Capture: z.ZodType<Capture> = z.object({
   get amount() {
     return common.Money;
   },
+  get creditAmount() {
+    return common.Money.nullish();
+  },
   status: z.enum(["pending", "succeeded", "failed", "unknown"]),
   providerRef: z.string().nullish(),
   at: z.iso.datetime({ offset: true }),
@@ -301,7 +307,8 @@ export const Capture: z.ZodType<Capture> = z.object({
 
 export interface ProviderCall {
   at: string;
-  operation: "authorize" | "capture" | "void" | "refund" | "retrieve" | "setup" | "detach";
+  /** partial_void lowers an authorization when the adapter supports it; dispute_* calls are logged against the dispute's intent */
+  operation: "authorize" | "capture" | "void" | "partial_void" | "refund" | "retrieve" | "setup" | "detach" | "dispute_retrieve" | "dispute_evidence" | "dispute_accept";
   outcome: "ok" | "declined" | "error" | "timeout";
   providerRef?: string | null;
   message?: string | null;
@@ -309,7 +316,7 @@ export interface ProviderCall {
 
 export const ProviderCall: z.ZodType<ProviderCall> = z.object({
   at: z.iso.datetime({ offset: true }),
-  operation: z.enum(["authorize", "capture", "void", "refund", "retrieve", "setup", "detach"]),
+  operation: z.enum(["authorize", "capture", "void", "partial_void", "refund", "retrieve", "setup", "detach", "dispute_retrieve", "dispute_evidence", "dispute_accept"]).describe("partial_void lowers an authorization when the adapter supports it; dispute_* calls are logged against the dispute's intent"),
   outcome: z.enum(["ok", "declined", "error", "timeout"]),
   providerRef: z.string().nullish(),
   message: z.string().nullish(),
@@ -862,7 +869,7 @@ export const PaymentsPaymentAuthorizedEvent: z.ZodType<PaymentsPaymentAuthorized
   at: z.iso.datetime({ offset: true }),
 });
 
-/** payments.payment.captured: Money is captured (whole order or one seller group) */
+/** payments.payment.captured: Money is captured (whole order or one seller group). Also published with amount 0 when store credit alone pays the order or a group (credit-only order, or a group whose card share is 0): a capture row is written without a provider call and creditAmount carries the credit */
 export interface PaymentsPaymentCapturedEvent {
   intentId: string;
   captureId: string;
@@ -872,7 +879,7 @@ export interface PaymentsPaymentCapturedEvent {
   /** Order contact email, for guests */
   contactEmail?: string | null;
   groupId?: string | null;
-  /** Card amount captured */
+  /** Card amount captured; 0 when store credit alone paid */
   amount: common.Money;
   /** Store credit applied to the captured order or group (its wallet hold share); null when no credit was used. Finance compares card plus credit with the order total */
   creditAmount?: common.Money | null;
@@ -970,7 +977,10 @@ export const PaymentsPaymentVoidedEvent: z.ZodType<PaymentsPaymentVoidedEvent> =
 export interface PaymentsPaymentOrphanedEvent {
   intentId: string;
   checkoutSessionId: string;
+  /** Card money that moved without an order: the captured amount when captured (the amount the orphan refund returns, less refunds already sent or in flight), otherwise the authorized amount. Never the intent amount including store credit */
   amount: common.Money;
+  /** Store credit held for the intent (returned to the wallet with the void or refund); null when none */
+  creditAmount?: common.Money | null;
   captured: boolean;
   action: "voided" | "refund_started" | "needs_review";
 }
@@ -980,6 +990,9 @@ export const PaymentsPaymentOrphanedEvent: z.ZodType<PaymentsPaymentOrphanedEven
   checkoutSessionId: z.uuid(),
   get amount() {
     return common.Money;
+  },
+  get creditAmount() {
+    return common.Money.nullish();
   },
   captured: z.boolean(),
   action: z.enum(["voided", "refund_started", "needs_review"]),
@@ -1085,16 +1098,32 @@ export const PaymentsRefundFailedEvent: z.ZodType<PaymentsRefundFailedEvent> = z
 /** payments.refund.destination_requested: The customer is asked for a new refund destination */
 export interface PaymentsRefundDestinationRequestedEvent {
   refundId: string;
+  /** RF- reference of the refund */
+  ref: string;
   orderId: string;
+  orderRef: string;
+  /** Customers-module id; null for guests */
+  customerId?: string | null;
+  /** Order contact email, for guests */
+  contactEmail?: string | null;
   amount: common.Money;
+  failureReason?: string | null;
+  /** Staff message to the customer */
+  message?: string | null;
 }
 
 export const PaymentsRefundDestinationRequestedEvent: z.ZodType<PaymentsRefundDestinationRequestedEvent> = z.object({
   refundId: z.uuid(),
+  ref: z.string().describe("RF- reference of the refund"),
   orderId: z.uuid(),
+  orderRef: z.string(),
+  customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
+  contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   get amount() {
     return common.Money;
   },
+  failureReason: z.string().nullish(),
+  message: z.string().describe("Staff message to the customer").nullish(),
 });
 
 /** payments.chargeback.opened: A provider dispute or chargeback is opened */
@@ -1260,11 +1289,14 @@ export interface PaymentsDb {
     seller_id: string | null;
     amount: number;
   };
+  /** One row per capture attempt key; a credit-only capture is a succeeded row with amount 0 and no provider call */
   captures: {
     id: string;
     intent_id: string;
     group_id: string | null;
     amount: number;
+    /** store-credit share charged with this capture; 0 when none */
+    credit_amount: number;
     status: string;
     provider_ref: string | null;
     idempotency_key: string;
@@ -1303,6 +1335,10 @@ export interface PaymentsDb {
     reason: string;
     requested_by: Json;
     idempotency_key: string;
+    /** provider method id or single-use token of a customer-chosen new destination; kept until the refund is sent or cancelled, then cleared */
+    destination_ref: string | null;
+    /** provider idempotency key of the attempt in flight; status checks and retries of that attempt reuse it */
+    attempt_key: string | null;
     sent_at: Date | null;
     last_attempt_at: Date | null;
     next_attempt_at: Date | null;
@@ -1970,6 +2006,7 @@ export const endpoints = defineEndpoints({
     permission: "payments.disputes.manage",
     scope: "staff",
     summary: "Save or submit evidence (tracking, delivery proof, messages, receipts)",
+    desc: "fileIds are media uploads; each is attached to the dispute with media.attach (usage kind dispute_evidence, owner the dispute) when saved, so the media orphan sweep never deletes them. Submitting sends them to the provider (ProviderCall dispute_evidence).",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -2166,6 +2203,16 @@ export const spec = defineModuleSpec({
           "authorized",
           "expire",
           "expired"
+        ],
+        [
+          "authorized",
+          "reduce",
+          "authorized"
+        ],
+        [
+          "partially_captured",
+          "reduce",
+          "partially_captured"
         ]
       ]
     },
@@ -2245,7 +2292,7 @@ export const spec = defineModuleSpec({
   events: {
     publishes: {
       "payments.payment.authorized": { when: "An authorization succeeds (directly or after a pending check)", payload: () => PaymentsPaymentAuthorizedEvent },
-      "payments.payment.captured": { when: "Money is captured (whole order or one seller group)", payload: () => PaymentsPaymentCapturedEvent },
+      "payments.payment.captured": { when: "Money is captured (whole order or one seller group). Also published with amount 0 when store credit alone pays the order or a group (credit-only order, or a group whose card share is 0): a capture row is written without a provider call and creditAmount carries the credit", payload: () => PaymentsPaymentCapturedEvent },
       "payments.payment.failed": { when: "An authorization is declined or a pending check ends declined", payload: () => PaymentsPaymentFailedEvent },
       "payments.payment.pending_check": { when: "The provider's answer is uncertain; the status-check job takes over", payload: () => PaymentsPaymentPendingCheckEvent },
       "payments.payment.voided": { when: "An authorization is released without capture", payload: () => PaymentsPaymentVoidedEvent },
@@ -2262,17 +2309,17 @@ export const spec = defineModuleSpec({
     },
     consumes: {
       "orders.order.placed": "Link the intent to the order and store seller-group allocations (fallback when linkOrder was not called)",
-      "orders.order.accepted": "Capture the authorization when captureMode is on_acceptance: the card is charged only the card share; the store-credit share is taken from the wallet hold and reported as creditAmount",
-      "shipping.shipment.dispatched": "Capture the group's allocation when captureMode is per_group_on_dispatch: the card is charged only the group's card share (allocation minus its store-credit share, reported as creditAmount)",
+      "orders.order.accepted": "Capture the authorization when captureMode is on_acceptance: the card is charged only the card share; the store-credit share is taken from the wallet hold and reported as creditAmount (a credit-only order is captured with amount 0)",
+      "shipping.shipment.dispatched": "Capture the group's allocation when captureMode is per_group_on_dispatch: the card is charged only the group's card share (allocation minus its store-credit share, reported as creditAmount; a group paid entirely by credit is captured with amount 0)",
       "orders.order.cancelled": "Void the authorization if nothing was captured, and return the uncaptured store-credit share to the wallet",
-      "orders.item.cancelled": "Start a cancellation refund for the item's refund breakdown (origin cancellation, no Finance approval) or reduce the uncaptured authorization. Before capture, the item's store-credit share goes back to the wallet (wallet.creditRefund, keyed by the item) and only its card share is taken off the authorization; an authorization whose remaining card amount drops to 0 is voided (payments.payment.voided) instead of being left to lapse",
+      "orders.item.cancelled": "Start a cancellation refund for the item's refund breakdown (origin cancellation, originId = the event's cancellationId, no Finance approval; one cancellation of several items publishes one event per item, so each item gets its own refund keyed by cancellationId + itemId and the (origin, origin_id) uniqueness does not apply to cancellations) or reduce the uncaptured authorization (partial reversal through the adapter when supported). Before capture, the item's store-credit share goes back to the wallet (wallet.creditRefund, keyed by the item) and only its card share is taken off the authorization; an authorization whose remaining card amount drops to 0 is voided (payments.payment.voided) instead of being left to lapse",
       "access.approval.decided": "Complete or drop a dispute concession waiting for approval"
     },
   },
   jobs: {
     "payments.check-uncertain": {
       "schedule": "every 30 s",
-      "does": "Retrieve pending_check intents from the provider with backoff (30 s, 1 min, 2 min, 5 min…); after uncertainMaxHours raise it to Finance (payments.payment.orphaned with needs_review if money moved)"
+      "does": "Retrieve pending_check intents from the provider with backoff (30 s, 1 min, 2 min, 5 min…); while an intent with a store-credit hold is pending, keep the hold alive with wallet.extendHold (until the next check plus a margin) so it never lapses into INSUFFICIENT_CREDIT; after uncertainMaxHours raise it to Finance (payments.payment.orphaned with needs_review if money moved)"
     },
     "payments.process-refunds": {
       "schedule": "every 1 min",
@@ -2284,7 +2331,7 @@ export const spec = defineModuleSpec({
     },
     "payments.expire-authorizations": {
       "schedule": "hourly",
-      "does": "Authorizations near expiry: capture if the order is accepted, otherwise void; an authorization with no card amount left is voided at once"
+      "does": "Walks every live authorization (authorized or partially_captured) in keyset pages ordered by (updated_at, id) until none are left, never only the oldest page: an authorization with no card amount left is voided at once (groups paid entirely by store credit count as charged, never as open card amount); authorizations near expiry are captured if the order is accepted, otherwise voided. A failed expiry capture is retried on the next run with a new capture key (intent id + expiry + attempt number), never blocked by the failed row's key; one failing intent never stops the walk"
     },
     "payments.dispute-deadlines": {
       "schedule": "hourly",
@@ -2399,7 +2446,7 @@ export const spec = defineModuleSpec({
     },
     "DUPLICATE_REFUND": {
       "status": 409,
-      "meaning": "A refund for the same origin (cancellation, return or request) already exists. details.refundId."
+      "meaning": "A refund for the same origin (return, case, exception, correction or orphan payment; for cancellations the same cancellation and item) already exists. details.refundId."
     },
     "REFUND_RETRY_LIMIT": {
       "status": 409,
@@ -2572,6 +2619,10 @@ export const spec = defineModuleSpec({
         "type": "int",
         "nullable": false
       },
+      "credit_amount": {
+        "type": "int",
+        "nullable": false
+      },
       "status": {
         "type": "text",
         "nullable": false
@@ -2707,6 +2758,14 @@ export const spec = defineModuleSpec({
       "idempotency_key": {
         "type": "text",
         "nullable": false
+      },
+      "destination_ref": {
+        "type": "text",
+        "nullable": true
+      },
+      "attempt_key": {
+        "type": "text",
+        "nullable": true
       },
       "sent_at": {
         "type": "timestamptz",

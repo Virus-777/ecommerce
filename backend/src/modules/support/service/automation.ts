@@ -82,13 +82,28 @@ export class Automation {
     await this.decisions.moveRemedy(r.id, 'in_progress', { refundRequestId: e.refundRequestId, label: 'Refund approved and being processed', note: "Approved means we agreed to refund you; it isn't money in your account yet" });
   }
 
-  /** returns.replacement.created: link the replacement to its remedy */
+  /** returns.replacement.created: link the replacement to its remedy (by the case that asked for it, else the return's case) */
   async onReplacementCreated(e: EventPayload<'returns.replacement.created'>): Promise<void> {
-    const cases = await this.core.repo.find('cases', { return_id: e.returnId });
-    const candidates = cases.length ? await this.core.repo.find('case_remedies', { case_id: cases.map((c) => c.id), kind: 'replacement', replacement_id: null }) : [];
+    const linked = isUuid(e.replacementId) ? (await this.core.repo.find('case_remedies', { replacement_id: e.replacementId }))[0] : undefined;
+    if (linked) return;
+    const caseIds = new Set<string>();
+    if (isUuid(e.caseId)) caseIds.add(e.caseId);
+    if (isUuid(e.returnId)) for (const c of await this.core.repo.find('cases', { return_id: e.returnId })) caseIds.add(c.id);
+    const candidates = caseIds.size ? await this.core.repo.find('case_remedies', { case_id: [...caseIds], kind: 'replacement', replacement_id: null }) : [];
     const byItem = candidates.find((r) => r.order_item_ids.includes(e.orderItemId)) ?? candidates[0];
     if (!byItem) return;
     await this.decisions.moveRemedy(byItem.id, 'in_progress', { replacementId: e.replacementId, label: 'Replacement on its way' });
+  }
+
+  /**
+   * returns.refund.declined: Finance sent the refund request back. The refund remedy behind it is cancelled
+   * (Finance's reason in the case history) and the case goes back to the owner's queue to decide again.
+   */
+  async onRefundDeclined(e: EventPayload<'returns.refund.declined'>): Promise<void> {
+    if (!isUuid(e.refundRequestId)) return;
+    const r = (await this.core.repo.find('case_remedies', { refund_request_id: e.refundRequestId }))[0];
+    if (!r) return;
+    await this.decisions.moveRemedy(r.id, 'cancelled', { label: 'Finance sent the refund back', note: `Declined by Finance: ${e.reason}`, visibility: 'staff', requeue: true });
   }
 
   /* ================================================================ payments */
@@ -160,6 +175,25 @@ export class Automation {
     }
   }
 
+  /**
+   * shipping.shipment.dispatched: ship-by-deadline remedies whose items shipped by the promised date complete;
+   * a later dispatch leaves the remedy to fall back to a refund (shipByDeadlines).
+   */
+  async onShipmentDispatched(e: EventPayload<'shipping.shipment.dispatched'>): Promise<void> {
+    if (e.kind !== 'outbound' || !isUuid(e.orderId)) return;
+    const items = new Set(e.lines.map((l) => l.orderItemId));
+    if (!items.size) return;
+    const cases = await this.core.repo.find('cases', { order_id: e.orderId });
+    if (!cases.length) return;
+    const shippedAt = new Date(e.shippedAt);
+    const remedies = await this.core.repo.find('case_remedies', { case_id: cases.map((c) => c.id), kind: 'ship_by_deadline', status: ['pending_approval', 'approved', 'in_progress'] });
+    for (const r of remedies) {
+      if (!r.order_item_ids.some((id) => items.has(id))) continue;
+      if (r.due_at && shippedAt.getTime() > r.due_at.getTime()) continue;
+      await this.decisions.moveRemedy(r.id, 'completed', { label: 'The seller shipped the item by the agreed date' });
+    }
+  }
+
   /** shipping.dispatch.overdue: open cases on the items get the warning and the customer escalation route */
   async onDispatchOverdue(e: EventPayload<'shipping.dispatch.overdue'>): Promise<void> {
     const links = await this.core.repo.casesForItems(e.orderItemIds ?? [], true);
@@ -176,10 +210,16 @@ export class Automation {
     if (ids.length) await this.shipByDeadlines(ids);
   }
 
-  /** shipping.shipment.exception: a lost or damaged package opens a case unless the customer already has one */
+  /**
+   * shipping.shipment.exception: a lost or damaged package reported by the carrier, the system or staff opens a
+   * case unless one is open on the items. An exception that came from a case (source customer_report, or a
+   * caseRef) is only noted on that case, never a new one, so a case never loops into a second case.
+   */
   async onShipmentException(e: EventPayload<'shipping.shipment.exception'>): Promise<void> {
     if (e.kind !== 'lost_or_damaged') return;
-    const open = await this.core.repo.casesForItems(e.orderItemIds ?? [], true);
+    const fromCase = e.source === 'customer_report' || !!e.caseRef;
+    const byRef = e.caseRef ? (await this.core.repo.find('cases', { ref: e.caseRef.trim().toUpperCase() }))[0] : undefined;
+    const open = [...(byRef ? [{ caseId: byRef.id }] : []), ...(await this.core.repo.casesForItems(e.orderItemIds ?? [], true))];
     if (open.length) {
       for (const id of [...new Set(open.map((o) => o.caseId))]) {
         await this.core.write(id, SYS, async (tx, a) => {
@@ -189,9 +229,9 @@ export class Automation {
       }
       return;
     }
-    // only a package the carrier reported (an exception raised from a customer's report has no shipment and
-    // already has its case)
-    if (!e.shipmentId) return;
+    // only carrier, system and staff reports open a case (a customer's report already has its case; a seller's
+    // cannot-fulfil is handled by shipping)
+    if (fromCase || !['carrier', 'system', 'staff'].includes(e.source)) return;
     const order = isUuid(e.orderId) ? await this.core.quiet('order', () => this.core.ctx.use('orders').getOrder(e.orderId)) : null;
     if (!order) return;
     await this.cases.openFromModule({
@@ -205,6 +245,44 @@ export class Automation {
       message: e.customerAction ? `The carrier reported a problem with the package. ${e.customerAction}` : 'The carrier reported the package lost or damaged. We are sorting it out with the seller.',
       openedBy: SYSTEM,
     });
+  }
+
+  /* ================================================================ notifications */
+
+  /**
+   * notifications.email_reply.received (module support): the reply joins the case thread (refId = case id) as a
+   * customer message when it comes from the case's customer or order contact; other senders are dropped with a
+   * log line. Attachments arrive as media assets. Claimed once per event.
+   */
+  async onEmailReplyReceived(e: EventPayload<'notifications.email_reply.received'>, eventId?: string): Promise<void> {
+    if (e.module !== 'support' || !isUuid(e.refId)) return;
+    const agg = await this.core.load(e.refId);
+    if (!agg) {
+      this.core.ctx.log.info({ refId: e.refId }, 'support: email reply for an unknown case dropped');
+      return;
+    }
+    const from = e.fromEmail.trim().toLowerCase();
+    const known = new Set<string>();
+    const add = (x: string | null | undefined) => x && known.add(x.trim().toLowerCase());
+    add(agg.c.next_action.facts?.contactEmail);
+    if (agg.c.customer_id && isUuid(agg.c.customer_id)) add((await this.core.soft('customers', 'customer', (c) => c.getCustomer(agg.c.customer_id!)))?.email);
+    if (agg.c.order_id) add((await this.core.quiet('order contact', () => this.core.ctx.use('orders').getOrder(agg.c.order_id!)))?.contact.email);
+    if (!known.has(from) || agg.c.kind === 'seller_request') {
+      this.core.ctx.log.info({ caseId: agg.c.id, fromEmail: from }, 'support: email reply from someone who is not the case customer dropped');
+      return;
+    }
+    if (!this.core.isOpen(agg.c)) {
+      this.core.ctx.log.info({ caseId: agg.c.id }, 'support: email reply to a closed case dropped');
+      return;
+    }
+    const actor = { kind: agg.c.customer_id ? 'customer' : 'visitor', id: e.accountId ?? null } as const;
+    await this.cases.customerReply(
+      agg,
+      { body: e.text, mediaIds: e.attachmentAssetIds },
+      { customerId: agg.c.customer_id, accountId: e.accountId ?? null, guestSessionId: agg.c.guest_session_id },
+      { actor },
+      { claim: `notifications.email_reply.received:${eventId ?? `${e.refId}:${e.receivedAt}`}`, fromEmail: true },
+    );
   }
 
   /* ================================================================ orders and sellers */

@@ -2,7 +2,7 @@ import type { EventPayload } from '../../kernel/events/index.js';
 import { isUuid } from '../../kernel/lib/ids.js';
 import type * as common from '../../spec/common.js';
 import type * as identity from '../../spec/identity.js';
-import type { AdminReturnRow, CustomerReturnsOverview, EffectiveTerms, RefundBreakdown, RefundRequest, ReturnCase, ReturnDetail, ReturnEvidence, ReturnsPublicApi, ReturnSummary, SellerReturnCounts } from '../../spec/returns.js';
+import type { AdminReturnRow, CustomerReturnsOverview, EffectiveTerms, RefundBreakdown, RefundRequest, Replacement, ReturnCase, ReturnDetail, ReturnEvidence, ReturnsPublicApi, ReturnSummary, SellerReturnCounts } from '../../spec/returns.js';
 import { Automation } from './service/automation.js';
 import { Core, type ReturnsServiceDeps } from './service/core.js';
 import { Decisions } from './service/decisions.js';
@@ -52,8 +52,18 @@ export class ReturnsService implements ReturnsPublicApi {
     return this.reads.returnStateForItems(orderItemIds);
   }
 
-  requestRefund(input: { source: 'case' | 'exception'; caseId?: string; orderId: string; orderItemIds: string[]; breakdown: RefundBreakdown; fundedBy: string; reason: string; proposedBy: common.Actor }): Promise<RefundRequest> {
+  requestRefund(input: { source: 'case' | 'exception'; caseId?: string; orderId: string; orderItemIds: string[]; items?: { orderItemId: string; quantity: number }[]; breakdown: RefundBreakdown; fundedBy: string; reasonCode?: string; reason: string; proposedBy: common.Actor }): Promise<RefundRequest> {
     return this.refunds.requestRefund(input);
+  }
+
+  /** A replacement decided on a support case without a return (stock allocated through inventory) */
+  requestReplacement(input: { caseId: string; orderId: string; orderItemId: string; quantity: number; variantId?: string; reason: string; requestedBy: common.Actor }, idempotencyKey: string): Promise<Replacement> {
+    return this.handling.requestReplacement(input, idempotencyKey);
+  }
+
+  /** Baseline return window in force now (content's service strip warns when its text disagrees) */
+  defaultWindowDays(): Promise<{ windowDays: number; policyVersion: string | null }> {
+    return this.policies.defaultWindowDays();
   }
 
   /** Warehouse scanned an Official Store return at the dock (a second scan changes nothing) */
@@ -143,8 +153,8 @@ export class ReturnsService implements ReturnsPublicApi {
     return agg ? this.views.returnCase(agg, 'admin') : null;
   }
 
-  cancelRefundsForCase(caseId: string, reason: string): Promise<{ cancelled: RefundRequest[]; notCancellable: RefundRequest[] }> {
-    return this.refunds.cancelForCase(caseId, reason);
+  cancelRefundsForCase(caseId: string, reason: string, actor: common.Actor): Promise<{ cancelled: RefundRequest[]; notCancellable: RefundRequest[] }> {
+    return this.refunds.cancelForCase(caseId, reason, actor);
   }
 
   countOpenReturnsForProducts(productIds: string[]): Promise<Record<string, number>> {

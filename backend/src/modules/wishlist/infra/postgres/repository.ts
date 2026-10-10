@@ -1,4 +1,5 @@
 import { sql, type Kysely } from 'kysely';
+import type { Inbox } from '../../../../kernel/events/inbox.js';
 import { paginate } from '../../../../kernel/lib/pagination.js';
 import type { WishlistDb } from '../../../../spec/wishlist.js';
 import type { AlertCandidate, AlertRow, ItemRow, ListWithCount, WishlistRepository } from '../../ports.js';
@@ -13,7 +14,7 @@ const alert = <T extends AlertRow | undefined>(r: T): T =>
   r ? ({ ...r, target_price: num(r.target_price), reference_price: num(r.reference_price), triggered_price: num(r.triggered_price) } as T) : r;
 
 /** Postgres adapter for WishlistRepository. `db` is scoped to the `wishlist` schema. */
-export function createPostgresWishlistRepository(db: Kysely<WishlistDb>): WishlistRepository {
+export function createPostgresWishlistRepository(db: Kysely<WishlistDb>, inbox: Inbox): WishlistRepository {
   const variantIs = <Q extends { where: (...a: any[]) => any }>(q: Q, variantId: string | null, column = 'variant_id'): Q =>
     (variantId === null ? q.where(column as never, 'is', null) : q.where(column as never, '=', variantId as never)) as Q;
 
@@ -25,7 +26,8 @@ export function createPostgresWishlistRepository(db: Kysely<WishlistDb>): Wishli
       .select('i.offer_id as item_offer_id');
 
   const repo: WishlistRepository = {
-    transaction: (fn) => db.transaction().execute((trx) => fn(createPostgresWishlistRepository(trx))),
+    transaction: (fn) => db.transaction().execute((trx) => fn(createPostgresWishlistRepository(trx, inbox))),
+    claim: (key) => inbox.claim(db, key),
 
     /* ---------------------------------------------------------------- lists */
     async ensureDefaultList(row) {
@@ -192,10 +194,26 @@ export function createPostgresWishlistRepository(db: Kysely<WishlistDb>): Wishli
     async pausedFor(customerId, reason) {
       return (await db.selectFrom('alerts').selectAll().where('customer_id', '=', customerId).where('state', '=', 'paused').where('paused_reason', '=', reason).execute()).map(alert);
     },
-    async activePriceAlertsAfter(afterId, limit) {
-      let q = candidateQuery().where('a.kind', '=', 'price_drop').where('a.state', '=', 'active');
+    async activeAlertsAfter(kind, afterId, limit) {
+      let q = candidateQuery().where('a.kind', '=', kind).where('a.state', '=', 'active');
       if (afterId) q = q.where('a.id', '>', afterId);
       return (await q.orderBy('a.id').limit(limit).execute()).map((r) => alert(r as AlertCandidate));
+    },
+
+    /* ---------------------------------------------------------------- customer data */
+    async customerData(customerIds) {
+      const [lists, items, alerts] = await Promise.all([
+        db.selectFrom('lists').selectAll().where('customer_id', 'in', ids(customerIds)).orderBy('created_at').orderBy('id').execute(),
+        db.selectFrom('items').selectAll().where('customer_id', 'in', ids(customerIds)).orderBy('added_at').orderBy('id').execute(),
+        db.selectFrom('alerts').selectAll().where('customer_id', 'in', ids(customerIds)).where('state', '!=', 'removed').orderBy('created_at').orderBy('id').execute(),
+      ]);
+      return { lists, items: items.map(item), alerts: alerts.map(alert) };
+    },
+    async deleteCustomerData(customerIds) {
+      const a = await db.deleteFrom('alerts').where('customer_id', 'in', ids(customerIds)).executeTakeFirst();
+      const i = await db.deleteFrom('items').where('customer_id', 'in', ids(customerIds)).executeTakeFirst();
+      const l = await db.deleteFrom('lists').where('customer_id', 'in', ids(customerIds)).executeTakeFirst();
+      return { alerts: Number(a.numDeletedRows ?? 0), items: Number(i.numDeletedRows ?? 0), lists: Number(l.numDeletedRows ?? 0) };
     },
 
     /* ---------------------------------------------------------------- insights */

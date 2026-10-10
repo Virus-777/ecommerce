@@ -132,6 +132,10 @@ export interface RefundExtras {
   /** Remedy kind that produced it (full_refund, partial_refund, store_credit, exception) */
   kind: string;
   perItem: { orderItemId: string; amount: number }[];
+  /** Refunded quantity per item (returns.refund.approved items): returned units, or the requested quantities */
+  items?: { orderItemId: string; quantity: number }[];
+  /** Sales tax included in total (RefundBreakdown.taxRefund) */
+  taxRefund?: number | null;
   customerId?: string | null;
   /** Order contact email (customer-facing events reach guests through it) */
   contactEmail?: string | null;

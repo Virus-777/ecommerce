@@ -19,6 +19,7 @@ import type * as access from '../../../spec/access.js';
 import type * as audit from '../../../spec/audit.js';
 import type * as catalog from '../../../spec/catalog.js';
 import type * as common from '../../../spec/common.js';
+import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type * as offers from '../../../spec/offers.js';
 import type { OrderCreateInput, OrderDetail, OrderGroupInput, OrderItemInput, OrdersPublicApi } from '../../../spec/orders.js';
 import type { AuthorizeInput } from '../../../spec/payments.js';
@@ -40,6 +41,8 @@ export interface Harness {
   sessions: Map<string, { orderId: string | null; status: string; customerId: string | null; guestSessionId?: string | null }>;
   access: { decision: access.AuthorityCheck['decision']; requests: access.RequestApprovalInput[]; staff: Map<string, string> };
   files: Set<string>;
+  /** media.attach calls (dispute evidence) */
+  attached: { assetId: string; usage: { module: string; kind: string; refId: string; refLabel?: string | null }; owner: unknown }[];
   call(method: string, url: string, token: string | null, body?: unknown, headers?: Record<string, string>): Promise<{ status: number; body: any; headers: Record<string, unknown> }>;
   publish(source: string, name: string, payload: unknown): Promise<void>;
   named(name: string): any[];
@@ -63,6 +66,7 @@ export async function harness(o: { modules?: string[] } = {}): Promise<Harness> 
     sessions: new Map() as Harness['sessions'],
     access: { decision: 'allowed' as access.AuthorityCheck['decision'], requests: [] as access.RequestApprovalInput[], staff: new Map<string, string>() },
     files: new Set<string>(),
+    attached: [] as Harness['attached'],
   };
   const app = await buildTestApp({
     only: ['payments', 'orders', 'customers', 'identity', 'audit', 'access', 'checkout', 'media', ...(o.modules ?? [])],
@@ -93,6 +97,7 @@ export async function harness(o: { modules?: string[] } = {}): Promise<Harness> 
             approvalsNeeded: h.access.decision === 'approval_required' ? 1 : 0,
             eligibleApproverRoles: [],
             eligibleApprovers: [],
+            stepUpRequired: false,
           }) as access.AuthorityCheck,
         requestApproval: async (input) => {
           h.access.requests.push(input);
@@ -112,6 +117,10 @@ export async function harness(o: { modules?: string[] } = {}): Promise<Harness> 
       },
       media: {
         refs: async (ids) => ids.filter((id) => h.files.has(id)).map((id) => ({ id, url: `https://files.example/${id}.jpg`, alt: null })),
+        getAsset: async (id) => (h.files.has(id) ? ({ id, status: 'ready', owner: { kind: 'staff', id: 'staff-1' } } as never) : null),
+        attach: async (assetId, usage, owner) => {
+          h.attached.push({ assetId, usage, owner });
+        },
       },
       settings: {
         get: (async (key: string) => h.settings[key] ?? null) as never,
@@ -210,7 +219,9 @@ export function product(h: Harness, o: { title: string; price: number; ownerType
     termsVersion: 1,
     ownerType,
     sellerId: ownerType === 'seller' ? (o.sellerId ?? newId()) : null,
-    sellerName: o.sellerName ?? (ownerType === 'official' ? 'Marketly Official Store' : 'Casa Verde Home'),
+    sellerName: o.sellerName ?? (ownerType === 'official' ? OFFICIAL_STORE_NAME : 'Casa Verde Home'),
+    sellerSku: 'SKU-100',
+    title: o.title,
     condition: 'new',
     conditionNotes: null,
     missingItems: [],

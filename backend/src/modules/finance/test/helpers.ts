@@ -114,7 +114,7 @@ function orderDetail(o: FakeOrder): any {
   return { id: o.id, ref: o.ref, groups, totals: { total: USD(total) } };
 }
 
-export async function boot(o: { modules?: string[] } = {}): Promise<Kit> {
+export async function boot(o: { modules?: string[]; apiStubs?: NonNullable<Parameters<typeof buildTestApp>[0]>['apiStubs'] } = {}): Promise<Kit> {
   const clock = movingClock();
   // tokens are signed at the app's (moved) time, so they stay valid when tests move the clock by weeks
   tokenClock.now = () => clock.now();
@@ -151,7 +151,7 @@ export async function boot(o: { modules?: string[] } = {}): Promise<Kit> {
       access: {
         check: async (_p: any, action: string) => {
           const decision = authority.get(action) ?? 'allowed';
-          return { decision, action, reason: decision === 'allowed' ? 'Within your limit' : decision === 'denied' ? 'Your role has no authority for this' : 'Above your limit: Finance Manager approval', requiresSecondReviewer: decision === 'approval_required', approvalsNeeded: decision === 'approval_required' ? 1 : 0, eligibleApproverRoles: [], eligibleApprovers: [] } as any;
+          return { decision, action, reason: decision === 'allowed' ? 'Within your limit' : decision === 'denied' ? 'Your role has no authority for this' : 'Above your limit: Finance Manager approval', requiresSecondReviewer: decision === 'approval_required', approvalsNeeded: decision === 'approval_required' ? 1 : 0, eligibleApproverRoles: [], eligibleApprovers: [], stepUpRequired: false } as any;
         },
         requestApproval: async (input: access.RequestApprovalInput) => {
           const existing = [...approvals.entries()].find(([, a]) => a.status === 'pending' && a.action === input.action && a.target.id === input.target.id);
@@ -193,6 +193,7 @@ export async function boot(o: { modules?: string[] } = {}): Promise<Kit> {
           return newId();
         },
       },
+      ...o.apiStubs,
     },
   });
   const events: EventEnvelope[] = [];

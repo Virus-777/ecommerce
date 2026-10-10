@@ -28,6 +28,7 @@ import { auth, buildTestApp, movingClock, token } from '../../../testing/app.js'
 
 export const OFFER_EVENTS = [
   'offers.offer.created',
+  'offers.offer.missing_items_stale',
   'offers.offer.updated',
   'offers.offer.price_changed',
   'offers.offer.status_changed',
@@ -51,12 +52,14 @@ export interface Harness {
   api: OffersPublicApi;
   products: Map<string, catalog.ProductAdmin>;
   sellers: Map<string, SellerState>;
-  shipping: Map<string, { price: number; days: number }>;
+  shipping: Map<string, { price: number; days: number; owner?: string | null }>;
   access: { decision: access.AuthorityCheck['decision']; requests: access.RequestApprovalInput[]; cancelled: string[] };
   audits: audit.RecordInput[];
   events: { name: string; payload: any }[];
   files: Map<string, { name: string; owner: media.MediaOwner; text: string }>;
   exports: unknown[];
+  /** inventory.updateStockItem calls */
+  stockUpdates: { stockItemId: string; productId?: string; variantId?: string; condition?: string }[];
 }
 
 const iso = (d: Date) => d.toISOString();
@@ -68,12 +71,13 @@ export async function harness(): Promise<Harness> {
     clock,
     products: new Map<string, catalog.ProductAdmin>(),
     sellers: new Map<string, SellerState>(),
-    shipping: new Map<string, { price: number; days: number }>(),
+    shipping: new Map<string, { price: number; days: number; owner?: string | null }>(),
     access: { decision: 'allowed' as access.AuthorityCheck['decision'], requests: [] as access.RequestApprovalInput[], cancelled: [] as string[] },
     audits: [] as audit.RecordInput[],
     events: [] as { name: string; payload: any }[],
     files: new Map<string, { name: string; owner: media.MediaOwner; text: string }>(),
     exports: [] as unknown[],
+    stockUpdates: [] as { stockItemId: string; productId?: string; variantId?: string; condition?: string }[],
   };
   const seller = (id: string) => h.sellers.get(id);
   const snapshot = (id: string): sellers.SellerSnapshot | null => {
@@ -159,6 +163,7 @@ export async function harness(): Promise<Harness> {
           return { shipsToLocation: true, reason: null, options: [option], default: option };
         },
         getSellerShippingSummaries: async () => ({}),
+        getProfileOwners: async (ids) => Object.fromEntries(ids.map((id) => { const p = h.shipping.get(id); return [id, p ? { ownerType: p.owner ? ('seller' as const) : ('official' as const), sellerId: p.owner ?? null, status: 'active' } : null]; })),
       },
       returns: {
         resolveTerms: async (sellerId, categoryId, condition) => ({
@@ -185,6 +190,7 @@ export async function harness(): Promise<Harness> {
           approvalsNeeded: h.access.decision === 'approval_required' ? 1 : 0,
           eligibleApproverRoles: [],
           eligibleApprovers: [],
+          stepUpRequired: false,
         }),
         requestApproval: async (input) => {
           h.access.requests.push(input);
@@ -211,6 +217,12 @@ export async function harness(): Promise<Harness> {
           if (!f) throw new AppError('NOT_FOUND', 'File not found');
           return { url: `data:text/csv;base64,${Buffer.from(f.text).toString('base64')}`, expiresAt: iso(new Date(clock.now().getTime() + 3_600_000)), fileName: f.name, contentType: 'text/csv', sizeBytes: f.text.length };
         },
+        readFile: async (id) => {
+          const f = h.files.get(id);
+          if (!f) throw new AppError('NOT_FOUND', 'File not found');
+          const body = new TextEncoder().encode(f.text);
+          return { fileName: f.name, contentType: 'text/csv', sizeBytes: body.length, body };
+        },
         storeGeneratedFile: async (input) => {
           const id = newId();
           const text = await new Response(input.body).text();
@@ -228,7 +240,82 @@ export async function harness(): Promise<Harness> {
     },
   });
   for (const name of OFFER_EVENTS) app.kernel.events.subscribe('test', name, (e) => void h.events.push({ name, payload: e.payload }));
+  fakeInventory(app, h);
   return { ...h, app, api: app.kernel.boot.apis.get('offers') as OffersPublicApi };
+}
+
+/**
+ * In-memory stock behind the inventory functions offers calls (inventory itself is being changed in parallel):
+ * stock items per offer with available units, SKU uniqueness per owner (SKU_TAKEN), availability cues and
+ * inventory.stock.changed published the way inventory does. Replaced on the service instance, because apiStubs
+ * would wrap the service in a proxy its private methods refuse.
+ */
+function fakeInventory(app: FastifyInstance, h: Pick<Harness, 'stockUpdates'> & { clock: ReturnType<typeof movingClock> }) {
+  type Item = { id: string; ownerType: 'official' | 'seller'; sellerId: string | null; sku: string; offerId: string | null; productId: string; variantId: string; condition: string; label: string; available: number; lowStockThreshold: number | null; archived: boolean };
+  const items = new Map<string, Item>();
+  const stateOf = (i: Item) => (i.available <= 0 ? 'out_of_stock' : i.lowStockThreshold !== null && i.available <= i.lowStockThreshold ? 'low_stock' : 'in_stock');
+  const changed = (i: Item, previousAvailable: number, cause: string) =>
+    app.kernel.events.publish('inventory', 'inventory.stock.changed', { stockItemId: i.id, offerId: i.offerId, ownerType: i.ownerType, sellerId: i.sellerId, productId: i.productId, variantId: i.variantId, available: i.available, reserved: 0, previousAvailable, state: stateOf(i), archived: i.archived, cause }, { actor: { kind: 'system', id: null } });
+  const api = (i: Item) => ({
+    id: i.id,
+    ownerType: i.ownerType,
+    sellerId: i.sellerId,
+    sku: i.sku,
+    offerId: i.offerId,
+    productId: i.productId,
+    variantId: i.variantId,
+    condition: i.condition,
+    label: i.label,
+    image: null,
+    quantities: { available: i.available, reserved: 0, incoming: 0, damagedHeld: 0 },
+    state: stateOf(i),
+    lowStockThreshold: i.lowStockThreshold,
+    nextIncoming: null,
+    archived: i.archived,
+    updatedAt: h.clock.now().toISOString(),
+  });
+  const inventory = app.kernel.boot.apis.get('inventory') as Record<string, unknown>;
+  inventory.createStockItem = async (input: { ownerType: 'official' | 'seller'; sellerId?: string; offerId?: string; sku: string; productId: string; variantId: string; condition: string; label: string; initialAvailable: number; lowStockThreshold?: number }) => {
+    const owner = input.ownerType === 'seller' ? (input.sellerId ?? null) : null;
+    if ([...items.values()].some((i) => !i.archived && i.ownerType === input.ownerType && i.sellerId === owner && i.sku === input.sku)) throw new AppError('SKU_TAKEN', `SKU ${input.sku} is already used by another stock item`, undefined, 409);
+    const item: Item = { id: newId(), ownerType: input.ownerType, sellerId: owner, sku: input.sku, offerId: input.offerId ?? null, productId: input.productId, variantId: input.variantId, condition: input.condition, label: input.label, available: input.initialAvailable, lowStockThreshold: input.lowStockThreshold ?? null, archived: false };
+    items.set(item.id, item);
+    changed(item, 0, 'receipt');
+    return api(item);
+  };
+  inventory.getAvailability = async (ids: string[]) => Object.fromEntries(ids.filter((id) => items.has(id)).map((id) => [id, { available: items.get(id)!.archived ? 0 : items.get(id)!.available, state: stateOf(items.get(id)!), lowStockThreshold: items.get(id)!.lowStockThreshold, nextIncoming: null }]));
+  inventory.applyBulkQuantities = async (_sellerId: string, rows: { stockItemId: string; newAvailable: number }[]) =>
+    rows.map((r) => {
+      const i = items.get(r.stockItemId);
+      if (!i) return { stockItemId: r.stockItemId, ok: false, error: 'Unknown stock item' };
+      const before = i.available;
+      i.available = r.newAvailable;
+      changed(i, before, 'bulk_update');
+      return { stockItemId: r.stockItemId, ok: true };
+    });
+  inventory.getOfferAvailability = async (offers: { offerId: string; stockItemId: string; purchaseLimit?: number }[]) =>
+    Object.fromEntries(
+      offers.map((o) => {
+        const i = items.get(o.stockItemId);
+        const available = i && !i.archived ? i.available : 0;
+        const state = i ? stateOf(i) : 'out_of_stock';
+        const limit = o.purchaseLimit ?? null;
+        return [o.offerId, { state, quantity: state === 'low_stock' ? available : null, maxPerOrder: Math.max(0, limit !== null ? Math.min(available, limit) : available), purchaseLimit: limit, label: state === 'out_of_stock' ? 'Out of stock' : state === 'low_stock' ? `Only ${available} left` : 'In stock', expectedRestockDate: null }];
+      }),
+    );
+  inventory.getStockForOffers = async (offerIds: string[], viewer: { sellerId?: string }) =>
+    Object.fromEntries(offerIds.map((id) => {
+      const i = [...items.values()].find((x) => x.offerId === id && (!viewer.sellerId || (x.ownerType === 'seller' && x.sellerId === viewer.sellerId)));
+      return [id, i ? api(i) : null];
+    }));
+  inventory.getUnitCost = async () => null;
+  inventory.getDefaultLocation = async () => ({ id: newId(), code: 'RNO1', name: 'Reno warehouse', kind: 'warehouse', ownerType: 'official', sellerId: null, address: ADDRESS, timeZone: 'America/Los_Angeles', sellable: true, active: true, isDefault: true });
+  inventory.updateStockItem = async (stockItemId: string, patch: { productId?: string; variantId?: string; condition?: string }) => {
+    h.stockUpdates.push({ stockItemId, ...patch });
+    const i = items.get(stockItemId);
+    if (i) Object.assign(i, Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)));
+    return i ? api(i) : { id: stockItemId };
+  };
 }
 
 /* ---------------------------------------------------------------- callers */
@@ -308,9 +395,10 @@ export function addProduct(h: Harness, over: { reviewState?: catalog.ProductAdmi
   return { id, variants: variants.map((v) => v.id), product: p };
 }
 
-export function profile(h: Harness, price = 599, days = 3): string {
+/** A shipping profile owned by a seller (id) or the Official Store (null) */
+export function profile(h: Harness, price = 599, days = 3, owner: string | null = null): string {
   const id = newId();
-  h.shipping.set(id, { price, days });
+  h.shipping.set(id, { price, days, owner });
   return id;
 }
 
@@ -335,7 +423,7 @@ export function offerInput(productId: string, variantId: string, profileId: stri
 
 /** A published seller offer; returns its id and stock item id */
 export async function sellerOffer(h: Harness, sellerId: string, productId: string, variantId: string, over: Record<string, unknown> = {}) {
-  const res = await asSeller(h, sellerId, 'POST', '/offers', offerInput(productId, variantId, (over.shippingProfileId as string) ?? profile(h), { publish: true, ...over }));
+  const res = await asSeller(h, sellerId, 'POST', '/offers', offerInput(productId, variantId, (over.shippingProfileId as string) ?? profile(h, 599, 3, sellerId), { publish: true, ...over }));
   if (res.statusCode !== 201) throw new Error(res.body);
   const body = res.json();
   return { id: body.offer.id as string, stockItemId: body.offer.stockItemId as string, body };

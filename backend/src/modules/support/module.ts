@@ -17,7 +17,7 @@ import { SupportService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.0.0',
+  version: '1.1.0',
   migrations,
   graphql: typeDefs,
   async register(ctx) {
@@ -32,6 +32,9 @@ export default defineModule({
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("returns.return.escalated", (e) => service.onReturnEscalatedFromReturns(e.payload));
     ctx.events.on("returns.refund.approved", (e) => service.onRefundApprovedFromReturns(e.payload));
+    ctx.events.on("returns.refund.declined", (e) => service.onRefundDeclinedFromReturns(e.payload));
+    ctx.events.on("shipping.shipment.dispatched", (e) => service.onShipmentDispatchedFromShipping(e.payload));
+    ctx.events.on("notifications.email_reply.received", (e) => service.onEmailReplyReceivedFromNotifications(e.payload, e.id));
     ctx.events.on("payments.refund.sent", (e) => service.onRefundSentFromPayments(e.payload));
     ctx.events.on("payments.refund.failed", (e) => service.onRefundFailedFromPayments(e.payload));
     ctx.events.on("returns.replacement.created", (e) => service.onReplacementCreatedFromReturns(e.payload));

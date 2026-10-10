@@ -1,4 +1,5 @@
 import { sql, type Kysely } from 'kysely';
+import type { Inbox } from '../../../../kernel/events/inbox.js';
 import { paginate, type PageRequest } from '../../../../kernel/lib/pagination.js';
 import type { OrdersDb } from '../../../../spec/orders.js';
 import { OPEN_GROUP } from '../../domain/rules.js';
@@ -53,14 +54,14 @@ const DELIVERED = ['delivered', 'completed', 'partly_cancelled'];
 const OPEN = [...OPEN_GROUP];
 
 /** Postgres adapter for OrdersRepository. `db` is scoped to the `orders` schema. */
-export function createPostgresOrdersRepository(db: Kysely<OrdersDb>): OrdersRepository {
+export function createPostgresOrdersRepository(db: Kysely<OrdersDb>, inbox?: Inbox): OrdersRepository {
   // generic table access: the row types are checked at the OrdersRepository boundary
   const d: any = db;
 
   const repo: OrdersRepository = {
     async transaction(fn) {
       if (db.isTransaction) return fn(repo);
-      return db.transaction().execute((trx) => fn(createPostgresOrdersRepository(trx)));
+      return db.transaction().execute((trx) => fn(createPostgresOrdersRepository(trx, inbox)));
     },
 
     /* ---------------------------------------------------------------- generic */
@@ -99,11 +100,15 @@ export function createPostgresOrdersRepository(db: Kysely<OrdersDb>): OrdersRepo
       await d.deleteFrom(table).where(keyOf(table), '=', id).execute();
     },
 
+    async claim(key) {
+      if (!inbox) return true;
+      return inbox.claim(db, key);
+    },
     async insertOrderIfNew(row) {
       const r = await d
         .insertInto('orders')
         .values(encode('orders', row as unknown as Record<string, unknown>))
-        .onConflict((oc: any) => oc.column('checkout_session_id').doNothing())
+        .onConflict((oc: any) => oc.columns(['checkout_session_id', 'attempt_no']).doNothing())
         .returningAll()
         .executeTakeFirst();
       return (r as OrderRec | undefined) ?? null;
@@ -236,6 +241,13 @@ export function createPostgresOrdersRepository(db: Kysely<OrdersDb>): OrdersRepo
     async adminCount(f, now) {
       const r = await adminQuery(d, f, now).select(sql<number>`count(*)::int`.as('n')).executeTakeFirst();
       return r?.n ?? 0;
+    },
+    async hasAcceptedOrder(who) {
+      if (!who.customerId && !who.email?.trim()) return false;
+      let q = d.selectFrom('orders').select('id').where('accepted_at', 'is not', null);
+      if (who.customerId) q = q.where('customer_id', '=', who.customerId);
+      else q = q.where(sql<boolean>`lower(contact_email) = ${who.email!.trim().toLowerCase()}`);
+      return Boolean(await q.limit(1).executeTakeFirst());
     },
     async guestOrdersByEmail(email) {
       return d
@@ -378,9 +390,11 @@ function itemInfoQuery(d: any): any {
 function adminQuery(d: any, f: AdminOrderFilter, now: Date): any {
   let q = d.selectFrom('orders');
   if (f.q?.trim()) {
+    // decision S-D2: ref exactly or by prefix; contact name and email through their trigram indexes; tracking numbers
     const term = like(f.q);
+    const prefix = `${f.q.trim().toUpperCase().replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
     q = q.where(
-      sql<boolean>`(lower(ref) like ${term} or lower(contact_name) like ${term} or lower(contact_email) like ${term} or exists (select 1 from orders.shipment_refs s where s.order_id = orders.id and lower(coalesce(s.tracking_number, '')) like ${term}))`,
+      sql<boolean>`(upper(ref) like ${prefix} or contact_name ilike ${term} or contact_email ilike ${term} or exists (select 1 from orders.shipment_refs s where s.order_id = orders.id and lower(coalesce(s.tracking_number, '')) like ${term}))`,
     );
   }
   if (f.sellerType === 'official') q = q.where(sql<boolean>`exists (select 1 from orders.seller_groups g where g.order_id = orders.id and g.owner_type = 'official')`);

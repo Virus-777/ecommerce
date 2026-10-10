@@ -51,7 +51,7 @@ export class Decisions {
     if (method === 'customer_arranged') {
       return {
         labelId: null,
-        row: { ...base, id: newId(), status: 'label_issued', carrier: null, service: null, tracking_number: null, label_url: null, qr_code_url: null, drop_off_by: dropOffBy, cost: null, paid_by: 'customer', shipping_shipment_id: null },
+        row: { ...base, id: newId(), status: 'label_issued', carrier: null, service: null, tracking_number: null, label_url: null, qr_code_url: null, drop_off_by: dropOffBy, cost: null, paid_by: 'customer', shipping_shipment_id: null, label_id: null, carrier_service_id: null },
       };
     }
     const billedTo = r.owner_type === 'official' ? 'company' : (r.shipping_paid_by as 'seller' | 'customer' | 'platform');
@@ -68,6 +68,8 @@ export class Decisions {
         returnId: r.id,
         labelMethod: method,
         billedTo,
+        // the policy's drop-off days from approval; shipping stores it on the label and never invents one
+        dropOffBy: dropOffBy.toISOString(),
       },
       `return-label:${r.id}:${method}`,
     );
@@ -88,6 +90,8 @@ export class Decisions {
         cost: l.cost.amount,
         paid_by: r.shipping_paid_by,
         shipping_shipment_id: result.shipment.id,
+        label_id: l.id,
+        carrier_service_id: l.carrierServiceId ?? null,
       },
     };
   }
@@ -115,7 +119,7 @@ export class Decisions {
           decision,
           ...this.platformPatch(a, mode),
           shipping_paid_by: row.paid_by,
-          terms_snapshot: { ...a.ret.terms_snapshot, meta: { ...a.ret.terms_snapshot.meta, carrierServiceId: body.carrierServiceId ?? a.ret.terms_snapshot.meta.carrierServiceId ?? null } },
+          terms_snapshot: { ...a.ret.terms_snapshot, meta: { ...a.ret.terms_snapshot.meta, carrierServiceId: row.carrier_service_id ?? body.carrierServiceId ?? a.ret.terms_snapshot.meta.carrierServiceId ?? null } },
           updated_at: now,
         });
         await tx.insert('return_shipments', row);
@@ -130,7 +134,7 @@ export class Decisions {
           ...(body.note ? [{ kind: 'note', label: 'Approval note', detail: body.note, visibility: 'seller' as const, actor: by.actor }] : []),
         ]);
         batch.push('returns.return.approved', this.core.approvedEvent(a, { withoutReturn: false, platformDecision: decision.platformDecision, shipment: row }));
-        if (labelId && row.cost !== null) batch.push('returns.label.created', { returnId: id, ...this.core.recipient(a.ret), ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, labelId, orderId: a.ret.order_id, cost: { amount: row.cost, currency: this.core.currency }, paidBy: row.paid_by as 'seller' | 'customer' | 'platform' });
+        if (labelId && row.cost !== null) batch.push('returns.label.created', { returnId: id, ...this.core.refs(a.ret), ...this.core.recipient(a.ret), ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, labelId, cost: { amount: row.cost, currency: this.core.currency }, paidBy: row.paid_by as 'seller' | 'customer' | 'platform' });
       });
     } catch (err) {
       await this.voidLabel(labelId, 'The return could not be approved');
@@ -163,7 +167,7 @@ export class Decisions {
         updated_at: now,
       });
       await this.core.timeline(tx, id, [{ kind: 'info_requested', label: 'Question about your return', detail: question.trim(), visibility: 'customer', actor: by.actor }]);
-      batch.push('returns.return.info_requested', { returnId: id, ...this.core.recipient(a.ret), replyDueAt: replyDueAt.toISOString() });
+      batch.push('returns.return.info_requested', { returnId: id, ...this.core.refs(a.ret), ...this.core.recipient(a.ret), replyDueAt: replyDueAt.toISOString() });
     });
     if (mode === 'admin') await this.core.audit({ action: 'returns.return.request-info', actionLabel: `Asked the customer about return ${agg.ret.ref}`, target: this.target(agg), after: { question } }, by);
   }
@@ -177,7 +181,7 @@ export class Decisions {
       const status = returnMachine.next(a.ret.status as ReturnStatus, 'reject');
       await tx.update('returns', id, { status, decision, ...this.platformPatch(a, mode), updated_at: now });
       await this.core.timeline(tx, id, [{ kind: 'rejected', label: `Return rejected: ${REJECT_LABEL[body.reasonCode] ?? body.reasonCode}`, detail: body.explanation.trim(), visibility: 'customer', actor: by.actor }]);
-      batch.push('returns.return.rejected', { returnId: id, ...this.core.recipient(a.ret), ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, reasonCode: body.reasonCode, platformDecision: decision.platformDecision });
+      batch.push('returns.return.rejected', { returnId: id, ...this.core.refs(a.ret), ...this.core.recipient(a.ret), ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, reasonCode: body.reasonCode, platformDecision: decision.platformDecision });
     });
     if (mode === 'admin') await this.core.audit({ action: 'returns.return.reject', actionLabel: `Rejected return ${agg.ret.ref}`, target: this.target(agg), before: { status: agg.ret.status }, after: { status: 'rejected', reasonCode: body.reasonCode }, reason: body.explanation }, by);
   }
@@ -202,7 +206,7 @@ export class Decisions {
         { kind: 'taken_over', label: 'Marketly support is handling your return', visibility: 'customer', actor: by.actor },
         { kind: 'taken_over', label: 'Marketly took over this return', detail: body.note.trim(), visibility: 'seller', actor: by.actor },
       ]);
-      if (!a.ret.platform_handling) batch.push('returns.return.escalated', { returnId: id, ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, orderId: a.ret.order_id, reason: body.reason, by: by.actor });
+      if (!a.ret.platform_handling) batch.push('returns.return.escalated', { returnId: id, ...this.core.refs(a.ret), ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, reason: body.reason, by: by.actor });
     });
     await this.core.audit({ action: 'returns.return.take-over', actionLabel: `Took over return ${agg.ret.ref}`, target: this.target(agg), before: { platformHandling: agg.ret.platform_handling }, after: { platformHandling: true, ownerId }, reason: body.note }, by);
   }
@@ -246,7 +250,7 @@ export class Decisions {
           await tx.insert('return_shipments', row);
           await this.core.timeline(tx, id, [{ kind: 'overturned', label: 'Marketly approved your return', detail: `Drop off by ${shortDate(row.drop_off_by!, this.core.tz)}`, visibility: 'customer', actor: by.actor }]);
           batch.push('returns.return.approved', this.core.approvedEvent(a, { withoutReturn: false, platformDecision: true, shipment: row }));
-          if (labelId && row.cost !== null) batch.push('returns.label.created', { returnId: id, ...this.core.recipient(a.ret), ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, labelId, orderId: a.ret.order_id, cost: { amount: row.cost, currency: this.core.currency }, paidBy: row.paid_by as 'seller' | 'customer' | 'platform' });
+          if (labelId && row.cost !== null) batch.push('returns.label.created', { returnId: id, ...this.core.refs(a.ret), ...this.core.recipient(a.ret), ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, labelId, cost: { amount: row.cost, currency: this.core.currency }, paidBy: row.paid_by as 'seller' | 'customer' | 'platform' });
         });
       } catch (err) {
         await this.voidLabel(labelId, 'The return could not be approved');
@@ -297,7 +301,7 @@ export class Decisions {
     const exception = { reasonCode: input.reasonCode, details: input.details.trim(), proposedBy: by.actor, proposedAt: now.toISOString(), approvedBy: approvedNow ? by.actor : null, approvedAt: approvedNow ? now.toISOString() : null, stockOutcome: 'write_off' };
     const decision: ReturnDecision = { kind: 'approved_without_return', reasonCode: input.reasonCode, explanation: input.remedy.explanation ?? null, decidedBy: by.actor, decidedAt: now.toISOString(), platformDecision: this.platformDecision(agg, mode) };
     const shipment = this.core.shipmentOf(agg);
-    const labelToVoid = shipment && shipment.status === 'label_issued' && shipment.method !== 'customer_arranged' ? shipment.id : null;
+    const labelToVoid = shipment && shipment.status === 'label_issued' && shipment.method !== 'customer_arranged' ? (shipment.label_id ?? shipment.id) : null;
     const rrId = await this.core.write(id, by, async (tx, a, batch) => {
       const status = returnMachine.next(a.ret.status as ReturnStatus, event);
       await tx.update('returns', id, { status, decision, exception, ...(mode === 'admin' ? this.platformPatch(a, 'admin') : {}), updated_at: now });

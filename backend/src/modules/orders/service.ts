@@ -122,6 +122,12 @@ export class OrdersService implements OrdersPublicApi {
     return this.core.repo.countPurchased(customerId, offerId, new Date(this.core.now().getTime() - Math.max(0, sinceDays) * 86_400_000));
   }
 
+  /** An accepted order exists for the customer (or, for guests, the normalised contact email): promotions new_customers */
+  hasPlacedOrder(who: { customerId?: string; email?: string }): Promise<boolean> {
+    if (who.customerId && !isUuid(who.customerId)) return Promise.resolve(false);
+    return this.core.repo.hasAcceptedOrder({ customerId: who.customerId ?? null, email: who.customerId ? null : (who.email ?? null) });
+  }
+
   async isVerifiedPurchase(customerId: string, productId: string): Promise<{ orderItemId: string; deliveredAt: string } | null> {
     const i = await this.core.repo.verifiedPurchase(customerId, productId);
     return i?.delivered_at ? { orderItemId: i.id, deliveredAt: i.delivered_at.toISOString() } : null;
@@ -313,6 +319,14 @@ export class OrdersService implements OrdersPublicApi {
 
   onCaseOpenedFromSupport(event: EventPayload<'support.case.opened'>) {
     return this.afterSales.onCaseOpened(event);
+  }
+
+  onCaseResolvedFromSupport(event: EventPayload<'support.case.resolved'>, eventId?: string) {
+    return this.afterSales.onCaseStatus(event, 'resolved', eventId);
+  }
+
+  onCaseReopenedFromSupport(event: EventPayload<'support.case.reopened'>, eventId?: string) {
+    return this.afterSales.onCaseStatus(event, 'open', eventId);
   }
 
   onSellerRestrictedFromSellers(event: EventPayload<'sellers.seller.restricted'>) {

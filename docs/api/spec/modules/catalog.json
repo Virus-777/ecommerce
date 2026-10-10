@@ -67,9 +67,86 @@
     {
       "name": "snapshotForOrder",
       "signature": "(variantId: uuid) => ProductSnapshot",
-      "desc": "Frozen copy of title, brand, options and version stored on an order item (plan ch. 8: purchases keep what was accepted)",
+      "desc": "Frozen copy of title, brand, options, version and main image (imageId and image) stored on an order item (plan ch. 8: purchases keep what was accepted)",
       "usedBy": [
         "orders"
+      ]
+    },
+    {
+      "name": "getProducts",
+      "signature": "(productIds: uuid[]) => ProductRecord[]",
+      "desc": "Batch read of products in any review state or publication, with purchasable and mergedIntoId (follow it for merged records). Unknown ids are left out; at most 200 ids per call",
+      "usedBy": [
+        "search",
+        "promotions",
+        "advertising",
+        "content",
+        "offers",
+        "wishlist",
+        "graphql"
+      ]
+    },
+    {
+      "name": "searchProducts",
+      "signature": "(filter: { q?: string, categoryId?: uuid, brandId?: uuid, ownerSellerId?: uuid, purchasableOnly?: bool, reviewStates?: string[] }, page: PageInput) => Page<ProductSummary>",
+      "desc": "Product pickers in other modules' admin screens (campaign items, content tiles, promotions): q matches title, PRD- ref, model number and GTIN. Not the store search (search module)",
+      "usedBy": [
+        "promotions",
+        "advertising",
+        "content",
+        "offers"
+      ]
+    },
+    {
+      "name": "listProductIds",
+      "signature": "(opts: { after?: uuid, limit: int, purchasableOnly?: bool, updatedSince?: datetime }) => { ids: uuid[], nextAfter: uuid | null }",
+      "desc": "Keyset walk over all product ids (ordered by id, limit 1–1000) for index rebuilds; purchasableOnly keeps approved and active products",
+      "usedBy": [
+        "search"
+      ]
+    },
+    {
+      "name": "getBrands",
+      "signature": "(brandIds: uuid[]) => Brand[]",
+      "desc": "Brands by id with status (content brand tiles, advertising brand names, search). Unknown ids are left out",
+      "usedBy": [
+        "content",
+        "advertising",
+        "search",
+        "graphql"
+      ]
+    },
+    {
+      "name": "getVariants",
+      "signature": "(variantIds: uuid[]) => VariantRef[]",
+      "desc": "Variants by id with product id and title, options, GTIN, shipping weight and dimensions and list price. Unknown ids are left out",
+      "usedBy": [
+        "offers",
+        "inventory",
+        "returns",
+        "graphql"
+      ]
+    },
+    {
+      "name": "getParcels",
+      "signature": "(variantIds: uuid[]) => map<VariantParcel | null>",
+      "desc": "Shipping weight and dimensions of one unit per variant (decision: parcel data lives on the catalog variant). null when the variant has no weight yet; callers fall back to their own default parcel",
+      "usedBy": [
+        "offers",
+        "shipping",
+        "cart",
+        "checkout"
+      ]
+    },
+    {
+      "name": "getCategoryPaths",
+      "signature": "(categoryIds: uuid[]) => map<CategoryPath>",
+      "desc": "Root-first category names and ids for each category, so callers can show the path and match subcategories (a rule on a category covers every id whose ids[] contains it)",
+      "usedBy": [
+        "returns",
+        "checkout",
+        "finance",
+        "reports"
       ]
     },
     {
@@ -194,6 +271,10 @@
       "banner": {
         "type": "MediaRef?",
         "desc": "Brand page banner image"
+      },
+      "status": {
+        "type": "enum(active|under_review|blocked)",
+        "desc": "Store lists only show active brands; getBrands and admin reads return any status"
       }
     },
     "Variant": {
@@ -203,7 +284,78 @@
         "desc": "e.g. { \"color\": \"Sage\" }"
       },
       "gtin": "string?",
-      "images": "MediaRef[]"
+      "images": "MediaRef[]",
+      "weightGrams": {
+        "type": "int?",
+        "desc": "Shipping weight of one unit in its retail packaging (parcel data for shipping quotes and labels)"
+      },
+      "lengthCm": {
+        "type": "int?",
+        "desc": "Packaged length of one unit"
+      },
+      "widthCm": "int?",
+      "heightCm": "int?",
+      "listPrice": {
+        "type": "Money?",
+        "desc": "Manufacturer list price (MSRP) set by Marketly staff; sellers cannot set it. Offers may show it as a reference price"
+      }
+    },
+    "VariantParcel": {
+      "weightGrams": "int",
+      "lengthCm": "int?",
+      "widthCm": "int?",
+      "heightCm": "int?"
+    },
+    "VariantRef": {
+      "id": "uuid",
+      "productId": "uuid",
+      "productTitle": "string",
+      "options": "map<string>",
+      "gtin": "string?",
+      "weightGrams": "int?",
+      "lengthCm": "int?",
+      "widthCm": "int?",
+      "heightCm": "int?",
+      "listPrice": "Money?"
+    },
+    "ProductRecord": {
+      "product": "Product",
+      "reviewState": "enum(draft|submitted|changes_requested|approved|rejected)",
+      "publication": "enum(active|hidden|suspended)",
+      "purchasable": {
+        "type": "bool",
+        "desc": "Approved and active (same answer as isPurchasable)"
+      },
+      "ownerSellerId": {
+        "type": "uuid?",
+        "desc": "Null for Official Store products"
+      },
+      "mergedIntoId": {
+        "type": "uuid?",
+        "desc": "Set when this product was merged into another; read the kept product instead"
+      }
+    },
+    "CategoryPath": {
+      "categoryId": "uuid",
+      "names": {
+        "type": "string[]",
+        "desc": "Root first, ending with the category itself, e.g. [\"Electronics\", \"Audio\", \"Headphones\"]"
+      },
+      "ids": {
+        "type": "uuid[]",
+        "desc": "Category ids in the same order"
+      }
+    },
+    "VariantDetailsInput": {
+      "weightGrams": "int?",
+      "lengthCm": "int?",
+      "widthCm": "int?",
+      "heightCm": "int?",
+      "listPrice": {
+        "type": "Money?",
+        "desc": "Staff only. Send null to clear"
+      },
+      "reason": "text"
     },
     "ProductSummary": {
       "id": "uuid",
@@ -309,7 +461,7 @@
     },
     "ReviewLogEntry": {
       "id": "uuid",
-      "action": "enum(submitted|approved|changes_requested|rejected|publication_changed|merged|check_dismissed)",
+      "action": "enum(submitted|approved|changes_requested|rejected|publication_changed|merged|check_dismissed|correction_accepted|variant_details_changed)",
       "reason": {
         "type": "text?",
         "desc": "Decision reason, or the submitter's note to the reviewer on submitted entries"
@@ -346,7 +498,18 @@
     "VariantInput": {
       "options": "map<string>",
       "gtin": "string?",
-      "imageIds": "uuid[]?"
+      "imageIds": "uuid[]?",
+      "weightGrams": {
+        "type": "int?",
+        "desc": "Packaged weight of one unit; reviewed with the product"
+      },
+      "lengthCm": "int?",
+      "widthCm": "int?",
+      "heightCm": "int?",
+      "listPrice": {
+        "type": "Money?",
+        "desc": "Accepted only on admin endpoints (Official Store drafts); refused with VALIDATION_FAILED from sellers"
+      }
     },
     "CorrectionSuggestion": {
       "id": "uuid",
@@ -412,6 +575,14 @@
       "options": "map<string>",
       "modelNumber": "string?",
       "imageUrl": "url?",
+      "imageId": {
+        "type": "uuid?",
+        "desc": "Media asset id of the main image (variant image first, else product image), so orders can resolve it later with media.refs even if the product changes"
+      },
+      "image": {
+        "type": "MediaRef?",
+        "desc": "The same image as a MediaRef at snapshot time"
+      },
       "takenAt": "datetime"
     },
     "Submission": {
@@ -440,7 +611,7 @@
       },
       "reviewDeadline": {
         "type": "Deadline?",
-        "desc": "Internal review target that orders the queue (setting reviewTargetBusinessHours)"
+        "desc": "Internal review target that orders the queue (setting reviewTargetBusinessDays)"
       },
       "assignee": {
         "type": "Actor?",
@@ -832,7 +1003,13 @@
         "options": "jsonb",
         "gtin": "text? unique",
         "media_ids": "jsonb",
-        "position": "int"
+        "position": "int",
+        "weight_grams": "int? check > 0",
+        "length_cm": "int?",
+        "width_cm": "int?",
+        "height_cm": "int?",
+        "list_price_amount": "bigint?",
+        "list_price_currency": "char(3)?"
       }
     },
     {
@@ -1677,6 +1854,34 @@
       "desc": "Call GET /products/{id}/publication-impact first; the confirmation shows its effects."
     },
     {
+      "id": "updateVariantDetails",
+      "area": "admin",
+      "method": "PATCH",
+      "path": "/products/{id}/variants/{variantId}",
+      "summary": "Set a variant's shipping weight, dimensions and list price",
+      "desc": "Works on any product, including approved ones (these fields do not change what the product is, so no correction or re-review is needed). Omitted fields stay; listPrice null clears it. Recorded in the review log (variant_details_changed) and published as catalog.product.updated with the new version.",
+      "auth": "staff",
+      "permission": "catalog.products.review",
+      "params": {
+        "id": "uuid",
+        "variantId": "uuid"
+      },
+      "body": "VariantDetailsInput",
+      "response": "ProductAdmin",
+      "errors": [
+        "NOT_FOUND",
+        "VALIDATION_FAILED"
+      ],
+      "audited": true,
+      "events": [
+        "catalog.product.updated"
+      ],
+      "screens": [
+        "admin/catalog",
+        "admin/official"
+      ]
+    },
+    {
       "id": "publicationImpact",
       "area": "admin",
       "method": "GET",
@@ -2031,7 +2236,18 @@
         "when": "A seller or the Official Store submits a product",
         "payload": {
           "productId": "uuid",
-          "ownerSellerId": "uuid?"
+          "ownerSellerId": "uuid?",
+          "submissionId": "uuid",
+          "ref": {
+            "type": "string",
+            "desc": "Submission reference SUB-YYMMDD-NNNN"
+          },
+          "kind": "enum(new|content_change|resubmitted)",
+          "title": "string",
+          "reviewDueAt": {
+            "type": "datetime",
+            "desc": "Review deadline (setting reviewTargetBusinessDays), so the product_review work item carries it"
+          }
         }
       },
       {
@@ -2069,15 +2285,23 @@
           "from": "string",
           "to": "string",
           "reason": "text",
-          "trustReportId": "uuid?"
+          "trustReportId": "uuid?",
+          "trustEnforcementId": {
+            "type": "uuid?",
+            "desc": "Set when trust.enforcement.recorded (suspend) or trust.enforcement.reversed (reactivate) caused the change, so trust can confirm the enforcement"
+          }
         }
       },
       {
         "name": "catalog.product.updated",
-        "when": "Shared content changes",
+        "when": "Shared content changes (including variant weight, dimensions and list price)",
         "payload": {
           "productId": "uuid",
-          "version": "int"
+          "version": "int",
+          "title": {
+            "type": "string",
+            "desc": "Current title, so read models that denormalise it (offers title search) need no lookup"
+          }
         }
       },
       {
@@ -2155,7 +2379,11 @@
       },
       {
         "name": "trust.enforcement.recorded",
-        "does": "Suspend products named in a counterfeit enforcement"
+        "does": "action suspend_product: suspend the named products (publication suspended, reason from the enforcement); the review-log entry keeps enforcementId and trustReportId and catalog.product.publication_changed carries both"
+      },
+      {
+        "name": "trust.enforcement.reversed",
+        "does": "action suspend_product: reactivate each target product whose current suspension came from that enforcement (found by the enforcementId on its publication_changed review-log entry). Products suspended again since, or merged, are left alone. No publication-override approval is asked: the reversal was already approved in trust. Logs the reversal reason and publishes catalog.product.publication_changed (suspended → active, trustEnforcementId). Other actions are ignored"
       },
       {
         "name": "offers.offer.created",
@@ -2233,6 +2461,11 @@
       "key": "minDescriptionLength", "type": "int",
       "default": 40,
       "desc": "Characters required before submission", "min": 0, "unit": "characters", "sellerVisible": true
+    },
+    {
+      "key": "reviewTargetBusinessDays", "type": "duration",
+      "default": 1,
+      "desc": "Internal target from submission to review decision; sets each submission's review deadline (queue order) and the expected review date shown to the submitter", "min": 1, "max": 10, "unit": "business days", "sellerVisible": true
     }
   ],
   "notes": [
@@ -2245,7 +2478,10 @@
     "Listing counts: catalog keeps offer_index from offers and inventory events (offers.getOfferStats on rebuild) so admin lists, CatalogMatch, category and brand counts need no per-row calls to offers. Counts may lag by the job interval.",
     "Brand requests: a seller who cannot find a brand sends requestedBrand with the product. On submit the brand is created with status under_review and requestedBy; the reviewer activates or blocks it (POST /brands/{id}/status) before deciding the product. Brand affiliation claims shown on storefronts stay in sellers (public claims). A seller can also request a brand without a product (sellers POST /brand-requests, a brand_request change request reviewed in sellers with its evidence). Both paths end in the same catalog state, an active brand with requestedBy set: on sellers.change_request.decided (approved) catalog creates the brand as active, or activates a same-name brand that is still under_review from a product submission, so the product waiting on it can then be decided. catalog does not review that request a second time.",
     "Seller offer creation: myProduct / getProductForSeller resolves any approved, active product so seller/offer can show the read-only product card before the seller has an offer on it.",
-    "Impact and merge previews count open and past order items, open returns and open cases in-process (orders.countOrderItemsForProducts, returns.countOpenReturnsForProducts, support.countOpenCasesForProducts). Those modules depend on catalog, so catalog lists them only as optional dependencies resolved at call time; a disabled module leaves its count null."
+    "Impact and merge previews count open and past order items, open returns and open cases in-process (orders.countOrderItemsForProducts, returns.countOpenReturnsForProducts, support.countOpenCasesForProducts). Those modules depend on catalog, so catalog lists them only as optional dependencies resolved at call time; a disabled module leaves its count null.",
+    "Parcel data and list price live on the variant (decision O1/O2): sellers may enter weight and packaged dimensions with the submission; Marketly staff set or correct them on any product with PATCH /products/{id}/variants/{variantId}. listPrice (MSRP) is a staff-only field. Offers, shipping, cart and checkout read them with getParcels / getVariants and fall back to their own default parcel when weightGrams is null.",
+    "Media usages: every uploaded file catalog keeps is attached with media.attach so the media orphan sweep never deletes it: product_image / product_video / variant_image, brand_logo, brand_banner (brand banners), category_image (category tiles) and correction_evidence (correction suggestion evidence).",
+    "Accepted corrections are logged as correction_accepted review-log entries and shown in the product history like every other action."
   ],
   "approvalActions": [
     {

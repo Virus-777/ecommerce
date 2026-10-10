@@ -17,7 +17,7 @@ import { AdvertisingService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.1.1',
+  version: '1.2.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
@@ -37,6 +37,7 @@ export default defineModule({
     ctx.events.on("sellers.seller.restricted", (e) => service.onSellerRestrictedFromSellers(e.payload));
     ctx.events.on("sellers.seller.suspended", (e) => service.onSellerSuspendedFromSellers(e.payload));
     ctx.events.on("trust.enforcement.recorded", (e) => service.onEnforcementRecordedFromTrust(e.payload));
+    ctx.events.on("trust.enforcement.reversed", (e) => service.onEnforcementReversedFromTrust(e.payload, e.id));
     ctx.events.on("orders.order.placed", (e) => service.onOrderPlacedFromOrders(e.payload));
     ctx.events.on("orders.item.cancelled", (e) => service.onItemCancelledFromOrders(e.payload));
     ctx.events.on("content.page.published", (e) => service.onPagePublishedFromContent(e.payload));

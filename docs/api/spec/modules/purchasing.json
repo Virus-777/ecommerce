@@ -161,6 +161,7 @@
       "lowStockItems": "int",
       "reorderSuggested": "int"
     },
+    "PurchaseOrderShipTo": { "locationId": "uuid", "code": "string", "name": { "type": "string", "desc": "e.g. Reno, NV warehouse" }, "address": "Address?", "timeZone": "string" },
     "ReorderSuggestion": {
       "stockItemId": "uuid",
       "sku": "string",
@@ -168,7 +169,7 @@
       "available": "int",
       "reorderPoint": "int?",
       "incoming": "int",
-      "avgDailySales": "number?",
+      "avgDailySales": { "type": "number?", "desc": "From inventory.getSalesRate over the last 30 days" },
       "suggestedQuantity": "int",
       "supplier": "SupplierCue?",
       "unitCost": "Money?",
@@ -343,7 +344,7 @@
     { "id": "cancelPurchaseOrder", "area": "admin", "method": "POST", "path": "/purchase-orders/{id}/cancel", "summary": "Cancel a draft or a sent PO with nothing received", "auth": "staff", "permission": "purchasing.orders.manage", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "PurchaseOrder", "errors": ["ILLEGAL_TRANSITION", "PO_HAS_RECEIPTS"], "audited": true, "events": ["purchasing.purchase_order.status_changed"], "screens": ["admin/purchasing"] },
     { "id": "closePurchaseOrder", "area": "admin", "method": "POST", "path": "/purchase-orders/{id}/close", "summary": "Close a partly received PO short (remaining units will not arrive)", "auth": "staff", "permission": "purchasing.orders.manage", "params": { "id": "uuid" }, "body": { "reason": "text", "raiseShortageClaim": "bool?" }, "response": "PurchaseOrder", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["purchasing.purchase_order.status_changed"], "screens": ["admin/purchasing"] },
     { "id": "listReorderSuggestions", "area": "admin", "method": "GET", "path": "/reorder-suggestions", "summary": "SKUs at or below reorder point after incoming stock, with suggested quantity and preferred supplier", "auth": "staff", "permission": "purchasing.orders.view", "paging": true, "query": { "supplierId": "uuid?" }, "response": "ReorderSuggestion", "screens": ["admin/purchasing"] },
-    { "id": "createFromSuggestions", "area": "admin", "method": "POST", "path": "/purchase-orders/from-suggestions", "summary": "Create draft POs (one per preferred supplier) from selected suggestions", "auth": "staff", "permission": "purchasing.orders.manage", "body": { "stockItemIds": "uuid[]", "quantities": { "type": "map<int>?", "desc": "stockItemId → quantity override" } }, "response": "PurchaseOrder[]", "status": 201, "audited": true, "screens": ["admin/purchasing"] },
+    { "id": "createFromSuggestions", "area": "admin", "method": "POST", "path": "/purchase-orders/from-suggestions", "summary": "Create draft POs (one per preferred supplier) from selected suggestions", "desc": "Every draft ships to shipToLocationId, or to inventory.getDefaultLocation() when omitted (never copied from an earlier PO, so it also works before the first PO exists). VALIDATION_FAILED when the location is unknown, inactive or not a company warehouse, or when a selected item has no preferred supplier.", "auth": "staff", "permission": "purchasing.orders.manage", "body": { "stockItemIds": "uuid[]", "quantities": { "type": "map<int>?", "desc": "stockItemId → quantity override" }, "shipToLocationId": { "type": "uuid?", "desc": "Company stock location (inventory.getLocations); the default location when omitted" } }, "response": "PurchaseOrder[]", "status": 201, "errors": ["VALIDATION_FAILED"], "audited": true, "screens": ["admin/purchasing"] },
 
     { "id": "listDeliveries", "area": "admin", "method": "GET", "path": "/deliveries", "summary": "Expected and arrived purchase deliveries for receiving", "auth": "staff", "permission": "purchasing.orders.view", "paging": true, "query": { "date": "date?", "status": "enum(expected|delayed|arrived|receiving|received|received_with_issues|cancelled)?", "purchaseOrderId": "uuid?" }, "response": "Delivery", "screens": ["ops/receiving"] },
     { "id": "addDelivery", "area": "admin", "method": "POST", "path": "/purchase-orders/{id}/deliveries", "summary": "Add an expected delivery (carrier, reference, arrival window)", "auth": "staff", "permission": "purchasing.orders.manage", "params": { "id": "uuid" }, "body": "DeliveryInput", "response": "Delivery", "status": 201, "errors": ["ILLEGAL_TRANSITION"], "screens": ["admin/purchasing"] },
@@ -365,7 +366,7 @@
   ],
   "events": {
     "publishes": [
-      { "name": "purchasing.purchase_order.sent", "when": "A PO is sent to the supplier", "payload": { "purchaseOrderId": "uuid", "ref": "string", "supplierId": "uuid", "supplierName": "string", "supplierEmail": { "type": "email?", "desc": "Supplier contact email; null when the supplier has none" }, "emailSupplier": { "type": "bool", "desc": "The buyer asked to email the purchase order to the supplier" }, "message": { "type": "text?", "desc": "The buyer's message to the supplier" }, "locationId": "uuid", "total": "Money", "lines": "PurchaseOrderLine[]" } },
+      { "name": "purchasing.purchase_order.sent", "when": "A PO is sent to the supplier", "payload": { "purchaseOrderId": "uuid", "ref": "string", "supplierId": "uuid", "supplierName": "string", "supplierEmail": { "type": "email?", "desc": "Supplier contact email; null when the supplier has none" }, "emailSupplier": { "type": "bool", "desc": "The buyer asked to email the purchase order to the supplier" }, "message": { "type": "text?", "desc": "The buyer's message to the supplier" }, "locationId": "uuid", "shipTo": { "type": "PurchaseOrderShipTo", "desc": "Where the supplier delivers, so the supplier email can name and address the warehouse" }, "total": "Money", "lines": "PurchaseOrderLine[]" } },
       { "name": "purchasing.purchase_order.status_changed", "when": "Any PO status transition", "payload": { "purchaseOrderId": "uuid", "ref": "string", "from": "string", "to": "string", "reason": "text?" } },
       { "name": "purchasing.delivery.rescheduled", "when": "An expected arrival window changes or a delivery is marked delayed", "payload": { "deliveryId": "uuid?", "purchaseOrderId": "uuid", "ref": "string", "windowFrom": "datetime?", "windowTo": "datetime?", "reason": "text" } },
       { "name": "purchasing.delivery.late", "when": "A delivery window passed without arrival", "payload": { "deliveryId": "uuid", "purchaseOrderId": "uuid", "ref": "string", "supplierName": "string" } },
@@ -392,7 +393,7 @@
   "jobs": [
     { "name": "purchasing.flag-late-deliveries", "schedule": "every 30 min", "does": "Deliveries past windowTo + grace without arrival → delayed; publish purchasing.delivery.late (work queue for the Purchasing Manager)" },
     { "name": "purchasing.supplier-performance", "schedule": "nightly 02:30 market time", "does": "Recompute on-time %, average lead time, shortage and damage rates per supplier over the window" },
-    { "name": "purchasing.reorder-suggestions", "schedule": "hourly", "does": "Rebuild suggestions from inventory low stock, incoming quantities and 30-day sales velocity" }
+    { "name": "purchasing.reorder-suggestions", "schedule": "hourly", "does": "Rebuild suggestions from inventory low stock, incoming quantities and 30-day sales velocity (inventory.getSalesRate)" }
   ],
   "settings": [
     { "key": "purchaseOrderRefFormat", "type": "string", "default": "PUR-YYMM-NNNN", "desc": "Human reference for purchase orders", "editable": false },
@@ -419,6 +420,8 @@
     "Purchase limits and second approval come from access approval limits for the role; granting purchasing.orders.manage never raises the limit.",
     "Buying cost per received line (PO unit cost; freight is allocated pro rata by line value) is passed to inventory, which keeps the weighted average unit cost used for margins and valuation.",
     "Seller stock is not purchased here; only company (Official Store) stock items can appear on purchase orders.",
-    "Put-away bins are suggested by warehouse and recorded on receipt lines; warehouse consumes purchasing.receipt.recorded to create put-away tasks."
+    "Put-away bins are suggested by warehouse and recorded on receipt lines; warehouse consumes purchasing.receipt.recorded to create put-away tasks.",
+    "Media usages: purchase order attachments (attachmentIds) are attached with media.attach (usage kind supplier_document, refId the PO id) when the PO is created or updated, and detached when removed; receipt damage photos use inspection_photo. Unattached uploads would be deleted by the media orphan sweep.",
+    "Locations: ship-to names, addresses and time zones come from inventory.getLocations / getDefaultLocation; purchasing stores only the location id."
   ]
 }

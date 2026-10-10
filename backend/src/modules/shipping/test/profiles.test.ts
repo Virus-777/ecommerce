@@ -220,3 +220,68 @@ describe('estimates and quotes', () => {
     expect(setup.body.carriers.every((c: any) => c.contacts.length === 0)).toBe(true);
   });
 });
+
+describe('pass 3: profile owners, exact in-use counts, ships from, Official Store free shipping', () => {
+  it('getProfileOwners names the owner of a lineage or a version id; unknown ids are null', async () => {
+    const s = await seller();
+    expect((await h.call('PUT', `${SELLER}/profiles/${s.profileId}`, s.token, await profileInput({ standard: 649 }))).status).toBe(200);
+    const versionIds = (await h.service.core.repo.find('profiles', { lineage_id: s.profileId })).map((r) => r.id);
+    expect(versionIds).toHaveLength(2);
+    const official = (await h.service.core.repo.find('profiles', { owner_type: 'official', status: 'active', is_default: true }))[0]!;
+    const unknown = newId();
+    const owners = await h.service.getProfileOwners([s.profileId, ...versionIds, official.lineage_id, unknown, 'not-a-uuid']);
+    const sellerOwner = { ownerType: 'seller', sellerId: s.sellerId, status: 'active' };
+    expect(owners).toEqual({
+      [s.profileId]: sellerOwner,
+      [versionIds[0]!]: sellerOwner,
+      [versionIds[1]!]: sellerOwner,
+      [official.lineage_id]: { ownerType: 'official', sellerId: null, status: 'active' },
+      [unknown]: null,
+      'not-a-uuid': null,
+    });
+    expect((await h.call('POST', `${SELLER}/profiles/${s.profileId}/archive`, s.token)).body.status).toBe('archived');
+    expect((await h.service.getProfileOwners([s.profileId]))[s.profileId]).toEqual({ ...sellerOwner, status: 'archived' });
+  });
+
+  it('refuses to archive a profile while offers use it, from the exact count (no paged listing cap)', async () => {
+    const s = await seller();
+    h.offerCounts.set(s.profileId, 7_342); // more active offers than any listing page or cap
+    try {
+      const res = await h.call('POST', `${SELLER}/profiles/${s.profileId}/archive`, s.token);
+      expect(res.status).toBe(409);
+      expect(res.body.error).toMatchObject({ code: 'PROFILE_IN_USE', details: { offerCount: 7_342 } });
+      expect((await h.call('GET', `${SELLER}/profiles`, s.token)).body[0]).toMatchObject({ id: s.profileId, offersUsing: 7_342, status: 'active' });
+    } finally {
+      h.offerCounts.delete(s.profileId);
+    }
+    expect((await h.call('POST', `${SELLER}/profiles/${s.profileId}/archive`, s.token)).body.status).toBe('archived');
+  });
+
+  it('keeps ships-from and the default parcel with the seller settings; storefront summaries read ships-from in one batch', async () => {
+    const s = await seller();
+    const quiet = await seller(); // a seller who never shipped anything still shows where it ships from
+    const parcel = { weightGrams: 1500, lengthCm: 30, widthCm: 20, heightCm: 10 };
+    const saved = await h.call('PUT', `${SELLER}/settings`, s.token, { ...settingsInput(), shipsFrom: 'Portland, OR', defaultParcel: parcel });
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    expect(saved.body).toMatchObject({ shipsFrom: 'Portland, OR', labels: { defaultParcel: parcel } });
+    expect((await h.call('PUT', `${SELLER}/settings`, quiet.token, { ...settingsInput(), shipsFrom: 'Austin, TX' })).status).toBe(200);
+    // null keeps the current value
+    const kept = await h.call('PUT', `${SELLER}/settings`, s.token, { ...settingsInput({ handlingDays: 2 }), shipsFrom: null, defaultParcel: null });
+    expect(kept.body).toMatchObject({ shipsFrom: 'Portland, OR', labels: { defaultParcel: parcel }, dispatch: { handlingDays: 2 } });
+    const bad = await h.call('PUT', `${SELLER}/settings`, s.token, { ...settingsInput(), shipsFrom: '  ', defaultParcel: { weightGrams: 0 } });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error.details.issues.map((i: { path: string }) => i.path).sort()).toEqual(['defaultParcel.weightGrams', 'shipsFrom']);
+    const summaries = await h.service.getSellerShippingSummaries([s.sellerId, quiet.sellerId]);
+    expect(summaries[s.sellerId]!.shipsFrom).toBe('Portland, OR');
+    expect(summaries[quiet.sellerId]!.shipsFrom).toBe('Austin, TX');
+  });
+
+  it('getOfficialFreeShipping answers the default Official Store profile threshold, else an active official free-shipping rule', async () => {
+    expect(await h.service.getOfficialFreeShipping()).toEqual({ threshold: USD(3500), methodCode: 'standard', active: true, label: 'Free Standard shipping on Official Store orders over $35' });
+    const today = new Date(h.clock.now().getTime()).toISOString().slice(0, 10);
+    const later = new Date(h.clock.now().getTime() + 20 * 86_400_000).toISOString().slice(0, 10);
+    const rule = await h.call('POST', `${ADMIN}/free-shipping-rules`, tokens.staff(), { name: 'Spring free shipping', scope: 'official_store', minOrderValue: USD(2500), methodCode: 'standard', fundedBy: 'company', window: { from: today, to: later }, reason: 'Campaign' });
+    expect(rule.status, JSON.stringify(rule.body)).toBe(201);
+    expect(await h.service.getOfficialFreeShipping()).toEqual({ threshold: USD(2500), methodCode: 'standard', active: true, label: 'Free Standard shipping on Official Store orders over $25' });
+  });
+});

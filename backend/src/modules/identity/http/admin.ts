@@ -36,5 +36,5 @@ export const adminRoutes = (service: IdentityService) =>
     /** POST /invitations/{id}/resend: Resend a staff invitation (new 7-day link) */
     resendInvitation: async (input) => service.resendInvitation(input.params.id, caller(input)),
     /** POST /invitations/{id}/revoke: Cancel a staff invitation */
-    revokeInvitation: async (input) => service.revokeInvitation(input.params.id, input.body.reason, caller(input)),
+    revokeInvitation: async (input) => service.revokeStaffInvitation(input.params.id, input.body.reason, caller(input)),
   });

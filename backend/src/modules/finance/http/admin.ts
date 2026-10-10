@@ -51,7 +51,7 @@ export const adminRoutes = (service: FinanceService) =>
     listPayouts: async ({ query, page }) => service.payouts.listPayouts(query, page),
     retryPayout: async (i) => service.payouts.retry(i.params.id, i.body, byOf(i)),
     listDestinationReviews: async ({ query, page }) => service.destinations.list(query, page),
-    approveDestination: async (i) => service.destinations.approve(i.params.id, i.body.reason, byOf(i)),
+    approveDestination: async (i) => service.destinations.approve(i.params.id, i.body, byOf(i)),
     rejectDestination: async (i) => service.destinations.reject(i.params.id, i.body.reason, byOf(i)),
     getReconDay: async ({ params }) => service.recon.day(params.date),
     listReconItems: async ({ query, page }) => service.recon.list(query, page),

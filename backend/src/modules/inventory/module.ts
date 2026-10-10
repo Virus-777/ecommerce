@@ -16,7 +16,7 @@ import { InventoryService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.0.0',
+  version: '1.1.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
@@ -30,6 +30,8 @@ export default defineModule({
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("orders.order.accepted", (e) => service.onOrderAcceptedFromOrders(e.payload));
     ctx.events.on("orders.item.cancelled", (e) => service.onItemCancelledFromOrders(e.payload));
+    ctx.events.on("orders.item.split", (e) => service.onItemSplitFromOrders(e.payload));
+    ctx.events.on("catalog.product.merged", (e) => service.onProductMergedFromCatalog(e.payload));
     ctx.events.on("shipping.shipment.dispatched", (e) => service.onShipmentDispatchedFromShipping(e.payload));
     ctx.events.on("returns.return.received", (e) => service.onReturnReceivedFromReturns(e.payload));
     ctx.events.on("returns.return.inspected", (e) => service.onReturnInspectedFromReturns(e.payload, e));

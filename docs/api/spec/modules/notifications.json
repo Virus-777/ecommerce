@@ -42,7 +42,8 @@
   "types": {
     "Recipient": {
       "kind": { "type": "enum(customer|guest_email|seller|seller_member|staff_role|staff_member|external_email)", "desc": "external_email: a contact outside Marketly (supplier, rights owner, scheduled-report address); email only, essential topics only" },
-      "accountId": { "type": "uuid?", "desc": "Identity account (customer, seller member, staff member)" },
+      "accountId": { "type": "uuid?", "desc": "Identity account (seller member, staff member; a customer only when no customerId is known)" },
+      "customerId": { "type": "uuid?", "desc": "customer: the customers-module id (preferred over accountId; never an account id). notifications resolves the identity account and email through customers.getCustomer, so modules that only know an order's customerId (shipping, returns, payments) address the customer directly instead of the order email" },
       "email": { "type": "email?", "desc": "Guests (checkout email) and external_email recipients" },
       "sellerId": { "type": "uuid?", "desc": "seller: all members who should get this topic; seller_member: one member" },
       "memberId": "uuid?",
@@ -89,6 +90,8 @@
       "actionRequired": "bool",
       "deadline": "Deadline?",
       "resolvedAt": { "type": "datetime?", "desc": "The work was done (shows 'Resolved Oct 7')" },
+      "state": { "type": "enum(open|resolved|expired)?", "desc": "Action notices only (null for information notices): open; resolved = the work was done; expired = no longer needed (the record closed another way or the notice aged out), shown as 'No longer needed', never as Resolved" },
+      "expiredAt": "datetime?",
       "routedTo": { "type": "RoutingInfo?", "desc": "Staff notices only" }
     },
     "InboxSummary": {
@@ -147,6 +150,7 @@
       "seller": "Topic[]",
       "staff": "Topic[]",
       "promotional": "Topic[]",
+      "external": { "type": "Topic[]", "desc": "Email-only topics for contacts outside Marketly (suppliers, rights owners)" },
       "stats": "DeliveryStats"
     },
     "TemplateContent": {
@@ -178,7 +182,7 @@
     "Template": {
       "id": "uuid",
       "topicKey": "string",
-      "audience": "enum(customer|seller|staff)",
+      "audience": { "type": "enum(customer|seller|staff|external)", "desc": "external: email templates for suppliers and rights owners" },
       "channel": "enum(email|in_app|sms|push)",
       "language": { "type": "string", "desc": "en-US (only locale at launch)" },
       "live": "TemplateVersionSummary?",
@@ -210,7 +214,7 @@
       "noticeId": "uuid?",
       "topicKey": "string",
       "channel": "enum(email|sms|push)",
-      "recipientKind": "enum(customer|guest_email|seller_member|staff_member)",
+      "recipientKind": "enum(customer|guest_email|seller_member|staff_member|external_email)",
       "accountId": "uuid?",
       "addressMasked": "string",
       "status": "enum(queued|sending|sent|delivered|retrying|failed|bounced|complained|suppressed|skipped)",
@@ -325,7 +329,7 @@
     { "name": "topics", "desc": "Topic catalogue seeded from module code; staff toggle channels", "columns": { "key": "text pk", "audience": "text", "category": "text", "group_key": "text", "label": "text", "description": "text", "triggers": "jsonb", "opens": "text", "channels": "jsonb (channel → enabled)", "action_required": "bool", "staff_role_keys": "jsonb", "seller_permission": "text?", "owner_only": "bool", "frequency_label": "text?", "variables": "jsonb", "phase": "int", "updated_by": "text?", "updated_at": "timestamptz?" } },
     { "name": "templates", "columns": { "id": "uuid pk", "topic_key": "text → topics", "channel": "text", "language": "text", "live_version_id": "uuid? → template_versions", "updated_at": "timestamptz" }, "indexes": ["unique (topic_key, channel, language)"] },
     { "name": "template_versions", "columns": { "id": "uuid pk", "template_id": "uuid → templates", "version": "int", "status": "text", "content": "jsonb", "note": "text?", "created_by": "text", "created_at": "timestamptz", "published_by": "text?", "published_at": "timestamptz?" }, "indexes": ["unique (template_id, version)", "(template_id) where status = 'draft'"] },
-    { "name": "notices", "desc": "In-app notices (one per addressed audience: a customer, a seller workspace, a staff role or member)", "columns": { "id": "uuid pk", "topic_key": "text", "audience": "text", "address_kind": "text (customer|seller|role|staff)", "address_id": "text", "seller_id": "uuid?", "group_key": "text", "title": "text", "body": "text", "icon": "text?", "tone": "text", "link": "jsonb", "linked_ref": "text?", "action_required": "bool", "deadline_at": "timestamptz?", "dedupe_key": "text?", "resolved_at": "timestamptz?", "resolve_note": "text?", "created_at": "timestamptz", "expires_at": "timestamptz" }, "indexes": ["(address_kind, address_id, created_at desc)", "(dedupe_key)", "(expires_at)"] },
+    { "name": "notices", "desc": "In-app notices (one per addressed audience: a customer, a seller workspace, a staff role or member)", "columns": { "id": "uuid pk", "topic_key": "text", "audience": "text", "address_kind": "text (customer|seller|role|staff)", "address_id": "text", "seller_id": "uuid?", "group_key": "text", "title": "text", "body": "text", "icon": "text?", "tone": "text", "link": "jsonb", "linked_ref": "text?", "action_required": "bool", "deadline_at": "timestamptz?", "dedupe_key": "text?", "resolved_at": "timestamptz?", "resolve_note": "text?", "expired_at": "timestamptz? (action notices that ended without being resolved)", "created_at": "timestamptz", "expires_at": "timestamptz" }, "indexes": ["(address_kind, address_id, created_at desc)", "(dedupe_key)", "(expires_at)"] },
     { "name": "notice_recipients", "desc": "Fan-out with per-person read state (seller members, staff lead/backup)", "columns": { "notice_id": "uuid → notices", "account_id": "uuid", "reason": "text", "covering_for": "text?", "read_at": "timestamptz?", "created_at": "timestamptz" }, "indexes": ["pk (notice_id, account_id)", "(account_id, read_at, created_at desc)"] },
     { "name": "scheduled_notifications", "columns": { "id": "uuid pk", "dedupe_key": "text", "send_at": "timestamptz", "input": "jsonb", "status": "text (pending|sent|cancelled)", "created_by_module": "text", "created_at": "timestamptz" }, "indexes": ["(status, send_at)", "(dedupe_key)"] },
     { "name": "deliveries", "columns": { "id": "uuid pk", "notice_id": "uuid? → notices", "topic_key": "text", "channel": "text", "recipient_kind": "text", "account_id": "uuid?", "address_hash": "text", "address_masked": "text", "status": "text", "skip_reason": "text?", "attempts": "int", "last_error": "text?", "provider_message_id": "text?", "template_version_id": "uuid?", "subject": "text?", "linked_ref": "text?", "dedupe_key": "text?", "broadcast_id": "uuid?", "created_at": "timestamptz", "sent_at": "timestamptz?", "delivered_at": "timestamptz?", "next_attempt_at": "timestamptz?" }, "indexes": ["(status, next_attempt_at)", "(provider_message_id)", "(account_id, created_at desc)", "(address_hash, created_at desc)", "(topic_key, created_at desc)", "(linked_ref)"] },
@@ -377,12 +381,12 @@
       "notes": "Recipients are resolved at start from consent (customers.getMarketingConsent, seller member promotions group) minus suppressions; quiet hours apply to SMS and push."
     },
     {
-      "name": "Action notice", "field": "Notice.resolvedAt", "initial": "open",
+      "name": "Action notice", "field": "Notice.state", "initial": "open",
       "transitions": [
         ["open", "resolve", "resolved"],
         ["open", "expire", "expired"]
       ],
-      "notes": "Only notices with actionRequired. resolve comes from the owning module (resolve(dedupeKey)) when the work is done; expire when the notice ages out. Read state is separate and per person."
+      "notes": "Only notices with actionRequired. resolve comes from the owning module (resolve(dedupeKey)) when the work is done and sets resolvedAt; expire (purge job: the record closed without the work, or the deadline passed long ago) sets expiredAt and never resolvedAt. Read state is separate and per person."
     }
   ],
   "endpoints": [
@@ -413,7 +417,7 @@
 
     { "id": "getTopicMatrix", "area": "admin", "method": "GET", "path": "/topics", "summary": "Audience × event × channel matrix with delivery stats", "auth": "staff", "permission": "notifications.templates.view", "response": "TopicMatrix", "screens": ["admin/notifications"] },
     { "id": "updateTopicChannels", "area": "admin", "method": "PUT", "path": "/topics/{key}/channels", "summary": "Turn channels on or off for a topic", "desc": "In-app cannot be turned off for essential topics; channels before their phase are unavailable.", "auth": "staff", "permission": "notifications.routing.manage", "params": { "key": "string" }, "body": { "channels": "ChannelSetting[]", "reason": "text" }, "response": "Topic", "errors": ["CHANNEL_LOCKED", "CHANNEL_NOT_AVAILABLE"], "audited": true, "events": ["notifications.topic.changed"], "screens": ["admin/notifications"] },
-    { "id": "listTemplates", "area": "admin", "method": "GET", "path": "/templates", "summary": "Templates", "auth": "staff", "permission": "notifications.templates.view", "paging": true, "query": { "topicKey": "string?", "audience": "enum(customer|seller|staff)?", "channel": "enum(email|in_app|sms|push)?", "hasDraft": "bool?", "q": "string?" }, "response": "Template", "screens": ["admin/notifications"] },
+    { "id": "listTemplates", "area": "admin", "method": "GET", "path": "/templates", "summary": "Templates", "auth": "staff", "permission": "notifications.templates.view", "paging": true, "query": { "topicKey": "string?", "audience": "enum(customer|seller|staff|external)?", "channel": "enum(email|in_app|sms|push)?", "hasDraft": "bool?", "q": "string?" }, "response": "Template", "screens": ["admin/notifications"] },
     { "id": "getTemplate", "area": "admin", "method": "GET", "path": "/templates/{id}", "summary": "Template editor: topic, variables, live and draft versions, history", "auth": "staff", "permission": "notifications.templates.view", "params": { "id": "uuid" }, "response": "TemplateDetail", "screens": ["admin/notifications"] },
     { "id": "createDraftVersion", "area": "admin", "method": "POST", "path": "/templates/{id}/versions", "summary": "Start a draft (from the live version, or restore an older one)", "auth": "staff", "permission": "notifications.templates.edit", "params": { "id": "uuid" }, "body": { "fromVersionId": "uuid?" }, "response": "TemplateVersion", "status": 201, "errors": ["DRAFT_EXISTS"], "screens": ["admin/notifications"] },
     { "id": "updateDraftVersion", "area": "admin", "method": "PATCH", "path": "/templates/{id}/versions/{versionId}", "summary": "Edit a draft (returns validation)", "auth": "staff", "permission": "notifications.templates.edit", "params": { "id": "uuid", "versionId": "uuid" }, "body": { "content": "TemplateContent", "note": "text?" }, "response": "TemplateVersion", "errors": ["ILLEGAL_TRANSITION"], "screens": ["admin/notifications"] },
@@ -434,7 +438,7 @@
 
     { "id": "emailProviderEvents", "area": "webhooks", "method": "POST", "path": "/email-events", "summary": "Delivery, bounce, complaint and open events from the email provider", "desc": "Signature-verified; idempotent per providerEventId. Hard bounces and complaints add suppressions.", "auth": "provider", "body": { "events": "ProviderEmailEvent[]" }, "response": null, "events": ["notifications.address.suppressed", "notifications.delivery.failed"] },
     { "id": "smsProviderEvents", "area": "webhooks", "method": "POST", "path": "/sms-events", "summary": "SMS delivery receipts and STOP replies", "desc": "STOP adds an SMS suppression and is forwarded to customers as an SMS promotions opt-out.", "auth": "provider", "body": { "providerEventId": "string", "providerMessageId": "string?", "type": "enum(delivered|failed|stop|start)", "phone": "string", "at": "datetime" }, "response": null, "events": ["notifications.address.suppressed"], "phase": 2 },
-    { "id": "inboundEmail", "area": "webhooks", "method": "POST", "path": "/inbound-email", "summary": "Replies to case and message emails", "desc": "The reply-to address carries a signed token naming the module and record (case, conversation) and the recipient. Valid replies are published for support or messaging; attachments are stored through media. Unknown or expired tokens get an automatic 'please reply in your account' email.", "auth": "provider", "body": "InboundEmail", "response": null, "events": ["notifications.email_reply.received"] }
+    { "id": "inboundEmail", "area": "webhooks", "method": "POST", "path": "/inbound-email", "summary": "Replies to case and message emails", "desc": "The reply-to address carries a signed token naming the module and record (case, conversation) and the recipient. Valid replies are published for support or messaging; attachments are stored through media.storeInboundFile (purpose message_attachment for conversations, case_evidence for cases; owner = the replying customer, seller or guest) and listed in attachmentAssetIds, refused files are named in the auto-reply. Unknown or expired tokens get an automatic 'please reply in your account' email.", "auth": "provider", "body": "InboundEmail", "response": null, "events": ["notifications.email_reply.received"] }
   ],
   "events": {
     "publishes": [
@@ -461,10 +465,10 @@
       { "name": "customers.account.closed", "does": "Stop all promotional sends, remove push devices, keep essential notices for open obligations only" },
       { "name": "customers.data_export.ready", "does": "Email the customer the export download link" },
       { "name": "orders.order.accepted", "does": "Customer: order accepted (confirmation only after acceptance). Seller: new order per seller group (orders group, members with order permission)" },
-      { "name": "orders.item.cancelled", "does": "Customer: cancellation update for the item; seller: item cancelled" },
+      { "name": "orders.item.cancelled", "does": "Customer: cancellation update for the item, skipped when the payload's notifyCustomer is false (staff cancelled without telling the customer); seller: item cancelled (always)" },
       { "name": "orders.item.delayed", "does": "Customer: delay notice with the new estimate and options (wait, cancel, contact support)" },
       { "name": "orders.cancellation.decided", "does": "Customer: result of a cancellation request" },
-      { "name": "payments.payment.captured", "does": "Customer: payment accepted (combined with order accepted when simultaneous)" },
+      { "name": "payments.payment.captured", "does": "Customer: payment accepted (combined with order accepted when simultaneous); for orders paid fully with store credit (amount 0, creditAmount set) the notice says paid with store credit" },
       { "name": "payments.payment.failed", "does": "Customer: payment failed, retry link" },
       { "name": "payments.payment.pending_check", "does": "Customer: payment result is being checked; link to order status" },
       { "name": "payments.refund.sent", "does": "Customer: refund sent, with destination and expected timing" },
@@ -488,9 +492,9 @@
       { "name": "support.case.message_added", "does": "Customer or seller: case reply (email carries a reply-to token)" },
       { "name": "support.case.escalated", "does": "Staff: escalated case to Customer Support Manager (or Returns Manager by category)" },
       { "name": "support.case.overdue", "does": "Staff: case past its response target to the queue lead and backup" },
-      { "name": "support.case.decided", "does": "Customer and seller: decision and remedy, with the appeal deadline" },
+      { "name": "support.case.decided", "does": "Customer and seller: decision and remedy, with the appeal deadline. Nothing is sent when the payload's notified is false (staff decided without notifying the parties)" },
       { "name": "support.case.resolved", "does": "Customer: case resolved" },
-      { "name": "messaging.message.sent", "does": "Recipient (customer or seller members with customer permission): new message, reply-to token in email" },
+      { "name": "messaging.message.sent", "does": "Recipient (customer or seller members with customer permission): new message, reply-to token in email. When the recipient seller is the Official Store (OFFICIAL_STORE_ID) the notice goes to staff instead (topic staff.official_store.message_received, Official Store Manager role through access, action required until the conversation is answered)" },
       { "name": "sellers.invitation.sent", "does": "Email the invited business its invitation code and how to apply (code never stored in the delivery log)" },
       { "name": "sellers.application.submitted", "does": "Staff: new application to Seller Manager" },
       { "name": "sellers.application.information_requested", "does": "Applicant: information required, with deadline" },
@@ -536,15 +540,23 @@
       { "name": "settings.change.scheduled", "does": "Sellers (seller-visible changes): upcoming platform change with its effective date" },
       { "name": "audit.integrity.failed", "does": "Staff: urgent notice to Platform Administrator and Business Owner" },
       { "name": "reports.export.ready", "does": "Export ready to the requester (staff or seller member), including audit, orders and module list exports" },
-      { "name": "reports.scheduled_report.ready", "does": "Phase 2: each recipient address (external_email, topic staff.report.scheduled, email only): the scheduled report with its download link and expiry" },
-      { "name": "purchasing.purchase_order.sent", "does": "Supplier (external_email, topic supplier.purchase_order.sent, email only) when emailSupplier is true and supplierEmail is set: the purchase order with its lines, delivery location and the buyer's message; in-app copy to the Purchasing Manager role" },
+      { "name": "reports.scheduled_report.ready", "does": "Phase 2: each staff recipient (staff_member, topic staff.report.scheduled, in-app and email): the scheduled report with a link to its export in the Admin Center (scheduled reports go to staff only; no outside addresses)" },
+      { "name": "purchasing.purchase_order.sent", "does": "Supplier (external_email, topic supplier.purchase_order.sent, email only) when emailSupplier is true and supplierEmail is set: the purchase order with its lines, the delivery address from the payload's shipTo (location name and address) and the buyer's message; in-app copy to the Purchasing Manager role" },
       { "name": "wallet.credit.expiring", "does": "Customer (account group, topic customer.credit.expiring): unused store credit amount and expiry date, with a link to shop" },
-      { "name": "workqueues.day_end.prepared", "does": "Staff (topic staff.day_end.summary, to roleKeys): today's day-end review is ready with open and overdue counts and the due time; action required" },
+      { "name": "workqueues.day_end.prepared", "does": "Staff (topic staff.day_end.summary, to roleKeys): reminder that today's day-end review is open, with open and overdue counts and the due time; action required (resolved when the review is completed). workqueues does not publish it once the review is completed" },
       { "name": "advertising.campaign.ending_soon", "does": "Seller (members with advertising permission, topic seller.campaign.ending_soon) for seller campaigns; staff (ownerStaffId, else the Advertising Manager role; topic staff.campaign.ending_soon) for own and brand campaigns: ends on endsAt, renew or let it finish" },
       { "name": "content.article.review_due", "does": "Staff (ownerStaffId, else the Content Manager role; topic staff.article.review_due): help article due for review, action required" },
       { "name": "reviews.moderation.decided", "does": "Reporters (topic customer.review_report.decided, seller variant for sellers): reporterOutcome; author (topic customer.review.moderated, seller.content.moderated for responses and answers): kept, edited or removed with the reason and appealUntil" },
       { "name": "trust.report.resolved", "does": "Each reporter (customers and sellers in-app and email, rights owners by external_email; topic trust.report.resolved): the reporterOutcome text, never the reported party's details" },
-      { "name": "trust.rights_report.received", "does": "Rights owner (external_email, topic rights_owner.report.received): confirmation with the TR reference and what happens next" }
+      { "name": "trust.rights_report.received", "does": "Rights owner (external_email, topic rights_owner.report.received): confirmation with the TR reference and what happens next" },
+      { "name": "trust.evidence.requested", "does": "The asked party: customer (topic customer.trust.evidence_requested, cases group) or seller owner (topic seller.trust.evidence_requested): Trust and Risk needs proof, what to send and by when; action required until trust records the answer (resolve by the request's dedupe key)" },
+      { "name": "trust.appeal.decided", "does": "The appellant: customer (topic customer.trust.appeal_decided) or seller owner (topic seller.trust.appeal_decided): the appeal outcome and what changes (restriction lifted or kept)" },
+      { "name": "payments.refund.destination_requested", "does": "Customer (by the payload's customerId, else the order email; topic customer.refund.destination_needed, returns_refunds group): the refund could not go back to the original payment method; choose where to receive it, with the deadline; action required" },
+      { "name": "customers.closure.delayed", "does": "Customer (topic customer.account.closure_delayed, account group): the account closure is waiting because new obligations appeared (blockers listed), and when it is checked again" },
+      { "name": "offers.offer.missing_items_stale", "does": "Ask the seller to review the offer's missing-items list after the product's box contents changed (topic seller.offer.missing_items_review, members with offers.offers.manage); Official Store offers go to staff (topic staff.offer.missing_items_review, Catalog Manager role)" },
+      { "name": "inventory.stock.low_digest", "does": "Daily digest of items at or below their reorder point: Official Store items to staff (topic staff.inventory.low_stock_digest, Inventory Manager role); each seller's own items to that seller (topic seller.stock.low_digest, members with the stock permission). Replaces one notice per item for non-urgent low stock" },
+      { "name": "sellers.application.information_reminder", "does": "Applicant (topic seller.application.information_reminder, owner only): reminder that requested information is still missing, with the deadline; same action notice as the original request" },
+      { "name": "workqueues.day_end.completed", "does": "Staff (topic staff.day_end.completed, to the payload's roleKeys): the day-end summary (who completed it, open and overdue counts, items with notes); resolves the staff.day_end.summary action notices" }
     ]
   },
   "permissions": [
@@ -559,12 +571,12 @@
     { "key": "notifications.preferences.manage", "audience": "seller", "desc": "Set notification preferences for every seller member (owner by default)" }
   ],
   "jobs": [
-    { "name": "notifications.dispatch", "schedule": "queue worker", "does": "Render and send queued deliveries per channel with provider rate limits; mark sent" },
+    { "name": "notifications.dispatch", "schedule": "every minute", "does": "Also started at once after notices are queued. Render and send queued deliveries per channel with provider rate limits; mark sent" },
     { "name": "notifications.retry", "schedule": "every minute", "does": "Re-send retrying deliveries whose nextAttemptAt passed; give up after maxDeliveryAttempts (notifications.delivery.failed)" },
     { "name": "notifications.send-scheduled", "schedule": "every minute", "does": "Send scheduled notices due now (dispatch deadline reminders 4 h before, drop-off reminders, approval due reminders)" },
     { "name": "notifications.send-broadcasts", "schedule": "every minute", "does": "Start scheduled broadcasts, resolve consenting recipients, respect quiet hours for SMS and push, publish notifications.broadcast.sent" },
-    { "name": "notifications.staff-digest", "schedule": "daily at the start of business hours", "does": "Email the daily digest to staff who chose it" },
-    { "name": "notifications.purge", "schedule": "daily", "does": "Delete notices older than noticeRetentionMonths and delivery rows older than deliveryLogRetentionDays; expire unresolved action notices whose records closed" }
+    { "name": "notifications.staff-digest", "schedule": "daily 08:00 market time", "does": "Email the daily digest to staff who chose it (08:00 is the start of business hours; on closed days it waits for the next open day)" },
+    { "name": "notifications.purge", "schedule": "daily", "does": "Delete notices older than noticeRetentionMonths and delivery rows older than deliveryLogRetentionDays; mark unresolved action notices whose records closed as expired (expired_at, not resolved_at)" }
   ],
   "settings": [
     { "key": "noticeRetentionMonths", "type": "duration", "default": 12, "desc": "Notices are kept for 12 months (seller inbox copy)", "unit": "months", "min": 1 },

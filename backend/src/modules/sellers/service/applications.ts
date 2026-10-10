@@ -282,6 +282,7 @@ export class ApplicationsPart extends Part {
         can_reapply_from: null,
         draft_saved_at: now,
         created_at: now,
+        tax_id_hash: null,
       });
       if (invitation) await tx.update('seller_invitations', invitation.id, { state: this.core.step(sellerInvitationMachine, invitation.state, 'apply'), application_id: a.id });
       return a;
@@ -330,6 +331,7 @@ export class ApplicationsPart extends Part {
     }
     const sec = this.sections(a);
     const issues: { path: string; message: string }[] = [];
+    let taxIdHash: string | undefined;
     if (body.account) {
       const { invitationCode: _c, ...acc } = body.account;
       sec.account = { ...acc, workEmail: acc.workEmail.trim().toLowerCase() };
@@ -348,6 +350,7 @@ export class ApplicationsPart extends Part {
         else {
           const digits = taxIdDigits(v.taxId);
           tax = { taxIdType: v.taxIdType, taxIdLast4: digits.slice(-4), taxIdEncrypted: this.core.cipher.encrypt(digits).toString('base64') };
+          taxIdHash = this.core.taxIdHash(digits);
         }
       }
       if (v.w9Method === 'uploaded' && v.w9DocumentId && !isUuid(v.w9DocumentId)) issues.push({ path: 'verification.w9DocumentId', message: 'Attach the W-9 first' });
@@ -375,6 +378,7 @@ export class ApplicationsPart extends Part {
       completed_steps: done as never,
       current_step: nextStep(done, body.step),
       draft_saved_at: this.now(),
+      ...(taxIdHash ? { tax_id_hash: taxIdHash } : {}),
     });
     return this.view(after);
   }
@@ -493,6 +497,10 @@ export class ApplicationsPart extends Part {
     const risky = riskCategoriesIn(`${b.plannedProducts ?? ''} ${b.shippingPlan ?? ''}`, (await this.core.setting('riskReviewCategories')) as readonly string[]);
     const target = addBusinessDays(now, await this.core.setting('decisionTargetBusinessDays'));
     const sellerRef = await this.ctx.refs.next('SL', { daily: false });
+    // duplicate checks: keyed hashes only (never the tax id), against every other application and seller
+    const taxIdHash = a.tax_id_hash ?? this.taxHashOf(v);
+    const hashes = this.hashesOf(sec, taxIdHash);
+    const duplicates = await this.duplicateMatches({ ...a, tax_id_hash: taxIdHash });
     const res = await this.repo.transaction(async (tx) => {
       const locked = await this.own(accountId, id, tx, true);
       if (locked.state !== 'draft') throw this.illegal(locked, 'submit');
@@ -538,6 +546,7 @@ export class ApplicationsPart extends Part {
         decision_target_at: target,
         current_step: 'agreement',
         verification: { ...v, owners: ownersPending } as never,
+        tax_id_hash: taxIdHash,
       });
       for (const d of docs) await tx.update('application_documents', d.id, { seller_id: seller.id });
       for (const doc of required) {
@@ -572,7 +581,24 @@ export class ApplicationsPart extends Part {
       await this.core.timeline(tx, seller.id, { kind: 'applied', title: 'Application submitted', detail: `Decision target ${isoDate(target)}`, actor: by.actor, ref: locked.ref });
       return { after, seller };
     });
-    this.core.publish('sellers.application.submitted', { applicationId: a.id, sellerId: res.seller.id, categoryIds: b.categoryIds ?? [], sellerType: res.seller.seller_type, invited: Boolean(a.invitation_id) }, by);
+    this.core.publish(
+      'sellers.application.submitted',
+      {
+        applicationId: a.id,
+        ref: a.ref,
+        sellerId: res.seller.id,
+        categoryIds: b.categoryIds ?? [],
+        sellerType: res.seller.seller_type,
+        invited: Boolean(a.invitation_id),
+        decisionTargetAt: target.toISOString(),
+        taxIdHash,
+        bankTokenHash: hashes.bankTokenHash,
+        addressKey: hashes.addressKey,
+        duplicateCount: duplicates.length,
+      },
+      by,
+    );
+    await this.signalDuplicates(a, res.seller.id, duplicates);
     for (const doc of required) this.core.publish('sellers.agreement.accepted', { sellerId: res.seller.id, applicationId: a.id, key: doc.key, versionLabel: doc.versionLabel }, by);
     try {
       await this.runChecks({ applicationId: a.id });
@@ -769,25 +795,101 @@ export class ApplicationsPart extends Part {
   }
 
   private async duplicateSignals(a: ApplicationRec): Promise<string[]> {
+    return (await this.duplicateMatches(a)).map((d) => d.text);
+  }
+
+  /** Tax id hash of stored verification details (the encrypted tax id), for applications saved before the column */
+  private taxHashOf(v: StoredVerification | null | undefined): string | null {
+    if (!v?.taxIdEncrypted) return null;
+    try {
+      return this.core.taxIdHash(this.core.cipher.decrypt(Buffer.from(v.taxIdEncrypted, 'base64')));
+    } catch {
+      return null;
+    }
+  }
+
+  /** Hashes sellers.application.submitted carries for trust's own rules (never the values themselves) */
+  private hashesOf(sec: ApplicationSections, taxIdHash: string | null): { taxIdHash: string | null; bankTokenHash: string | null; addressKey: string | null } {
+    const token = sec.payout?.current?.providerDestinationId ?? sec.payout?.pendingChange?.providerDestinationId ?? null;
+    const addr = sec.business?.address;
+    return {
+      taxIdHash,
+      bankTokenHash: token ? this.core.hash(`payout:${token}`) : null,
+      addressKey: addr?.line1 ? this.core.hash(`${addr.line1.trim().toLowerCase()}|${(addr.postalCode ?? '').trim().toLowerCase()}|${(addr.country ?? 'US').trim().toLowerCase()}`) : null,
+    };
+  }
+
+  /**
+   * Other applications and sellers (closed ones too) sharing the tax id hash, payout token, business or
+   * return address, or work email, with what matched.
+   */
+  private async duplicateMatches(a: ApplicationRec): Promise<{ app: ApplicationRec; seller: SellerRec | undefined; why: string[]; text: string }[]> {
     const sec = this.sections(a);
     const tokens = [sec.payout?.current?.providerDestinationId, sec.payout?.pendingChange?.providerDestinationId].filter((x): x is string => Boolean(x));
-    const addr = sec.business?.address;
+    const addrs = [sec.business?.address, sec.returnAddress?.address].filter((x): x is common.Address => Boolean(x?.line1 && x?.postalCode));
+    const taxHash = a.tax_id_hash ?? null;
     const matches = await this.repo.applicationsMatching(
-      { emails: sec.account?.workEmail ? [sec.account.workEmail] : [], tokens, addresses: addr ? [{ line1: addr.line1, postalCode: addr.postalCode }] : [] },
+      { emails: sec.account?.workEmail ? [sec.account.workEmail] : [], tokens, addresses: addrs.map((x) => ({ line1: x.line1, postalCode: x.postalCode })), taxIdHashes: taxHash ? [taxHash] : [] },
       a.id,
     );
-    const out: string[] = [];
+    const same = (x: common.Address | null | undefined, y: common.Address) => Boolean(x?.line1 && x.line1.trim().toLowerCase() === y.line1.trim().toLowerCase() && x.postalCode?.trim() === y.postalCode.trim());
+    const out: { app: ApplicationRec; seller: SellerRec | undefined; why: string[]; text: string }[] = [];
     for (const m of matches) {
       const ms = this.sections(m);
       const why: string[] = [];
+      if (taxHash && m.tax_id_hash === taxHash) why.push('tax id');
       if (ms.account?.workEmail && ms.account.workEmail === sec.account?.workEmail) why.push('work email');
       const mt = [ms.payout?.current?.providerDestinationId, ms.payout?.pendingChange?.providerDestinationId];
       if (tokens.some((t) => mt.includes(t))) why.push('bank account');
-      if (addr && ms.business?.address && ms.business.address.line1.toLowerCase() === addr.line1.toLowerCase() && ms.business.address.postalCode === addr.postalCode) why.push('business address');
+      if (addrs.some((x) => same(ms.business?.address, x))) why.push('business address');
+      if (addrs.some((x) => same(ms.returnAddress?.address, x))) why.push('return address');
+      if (!why.length) continue;
       const seller = m.seller_id ? await this.repo.get('sellers', m.seller_id) : undefined;
-      out.push(`Same ${why.join(', ')} as ${m.ref} (${seller ? `${seller.store_name}, ${seller.status}` : m.state})`);
+      out.push({ app: m, seller, why, text: `Same ${why.join(', ')} as ${m.ref} (${seller ? `${seller.store_name}, ${seller.status}` : m.state})` });
     }
     return out;
+  }
+
+  /** Each duplicate goes to trust (type duplicate_application; subjects the application and the matched seller; one dedupe key per application) */
+  private async signalDuplicates(a: ApplicationRec, sellerId: string, duplicates: { app: ApplicationRec; seller: SellerRec | undefined; why: string[]; text: string }[]) {
+    if (!duplicates.length) return;
+    const trust = this.ctx.tryUse('trust');
+    if (!trust) return;
+    const label = this.storeNameOf(a) || a.ref;
+    for (const d of duplicates) {
+      try {
+        await trust.raiseSignal({
+          type: 'duplicate_application',
+          detector: 'sellers.submitApplication',
+          title: `Application ${a.ref} matches ${d.seller ? d.seller.store_name : d.app.ref}`,
+          subjects: [
+            { type: 'application', id: a.id, ref: a.ref, label, screen: 'admin/seller-application' },
+            ...(d.seller ? [{ type: 'seller' as const, id: d.seller.id, ref: d.seller.ref, label: d.seller.store_name, statusLabel: d.seller.status, screen: 'admin/seller' }] : [{ type: 'application' as const, id: d.app.id, ref: d.app.ref, label: this.storeNameOf(d.app) || d.app.ref, screen: 'admin/seller-application' }]),
+          ],
+          evidence: [{ kind: 'signal', result: 'warn', text: d.text }],
+          dedupeKey: `duplicate_application:${a.id}`,
+        });
+      } catch (err) {
+        this.ctx.log.warn({ err, applicationId: a.id, sellerId }, 'sellers: could not send a duplicate application signal to trust');
+      }
+    }
+  }
+
+  /** Public API getApplicationParticipant: the applicant behind an application (messaging adds them to staff conversations) */
+  async participant(applicationId: string) {
+    const a = isUuid(applicationId) ? await this.repo.get('applications', applicationId) : undefined;
+    if (!a) return null;
+    const sec = this.sections(a);
+    return {
+      applicationId: a.id,
+      ref: a.ref,
+      state: a.state,
+      applicantAccountId: a.applicant_account_id,
+      sellerId: a.seller_id,
+      name: sec.account?.contactName ?? '',
+      email: sec.account?.workEmail ?? '',
+      storeName: (sec.business?.storeName || sec.account?.storeName || '').trim() || null,
+    };
   }
 
   async adminView(a: ApplicationRec): Promise<ApplicationAdmin> {
@@ -942,6 +1044,7 @@ export class ApplicationsPart extends Part {
     const blocking = this.blockingChecks(await this.checksOf(a0.id));
     if (blocking.length) throw new AppError('CHECKS_UNRESOLVED', 'Verification checks are failed or need attention without an accepted note', { checks: blocking });
     const retention = await this.core.setting('documentRetentionDays');
+    const labelDays = await this.parts.accounts.labelValidDays();
     const now = this.now();
     const decision = { outcome: 'approved', reasonCode: null, explanation: body.note?.trim() || 'Your application was approved.', ruleRef: null, canReapplyFrom: null, notEligibleToReapply: false, appealDeadline: null, conditions: [] as unknown[], decidedBy: by.actor, decidedAt: now.toISOString() };
     const res = await this.repo.transaction(async (tx) => {
@@ -953,7 +1056,7 @@ export class ApplicationsPart extends Part {
       const strict = this.latestChecks(await tx.find('verification_checks', { application_id: a.id })).every((c) => !['identity', 'business_registration', 'payout_account', 'return_address'].includes(c.kind) || c.result === 'passed');
       let granted = false;
       if (!labelBlocking.length && strict) {
-        seller = await this.parts.accounts.grantLabel(tx, seller, by);
+        seller = await this.parts.accounts.grantLabel(tx, seller, by, labelDays);
         granted = true;
       }
       const sec = this.sections(a);
@@ -1082,9 +1185,13 @@ export class ApplicationsPart extends Part {
     await this.repo.update('applications', a.id, { verification: { ...v, owners: v.owners.map((o) => ({ ...o, verificationState: state })) } as never });
   }
 
-  /** Send pending checks to the providers (one application, one check, or a bounded batch) */
-  async runChecks(o: { applicationId?: string; checkId?: string } = {}) {
-    const where = o.checkId ? { id: o.checkId } : o.applicationId ? { application_id: o.applicationId, result: 'pending', provider_ref: null } : { result: 'pending', provider_ref: null };
+  /** Send pending checks to the providers (one application, one check, or a bounded batch); `retry` asks again for checks sent without a result yet */
+  async runChecks(o: { applicationId?: string; checkId?: string; retry?: boolean } = {}) {
+    const where = o.checkId
+      ? { id: o.checkId }
+      : o.applicationId
+        ? { application_id: o.applicationId, result: 'pending', provider_ref: null }
+        : { result: 'pending', provider_ref: o.retry ? { op: 'is not' as const, value: null } : null };
     const checks = await this.repo.find('verification_checks', where as never, { limit: 100 });
     const apps = new Map<string, ApplicationRec>();
     for (const c of checks) {
@@ -1111,9 +1218,10 @@ export class ApplicationsPart extends Part {
     }
   }
 
-  /** sellers.run-verification-checks: pending checks, then automatic Trust and Risk referrals */
+  /** sellers.run-verification-checks (every 5 min; submit also runs the checks once): new checks, a retry of checks still without a result, then automatic Trust and Risk referrals */
   async runVerificationChecks() {
     await this.runChecks();
+    await this.runChecks({ retry: true });
     const trust = this.ctx.tryUse('trust');
     if (!trust) return;
     for (const r of await this.repo.find('risk_reviews', { state: 'requested', trust_report_id: null }, { limit: 50 })) {
@@ -1181,7 +1289,10 @@ export class ApplicationsPart extends Part {
       if (r.due_at.getTime() <= now.getTime()) continue;
       await this.repo.update('information_requests', r.id, { reminded_at: now });
       const a = await this.repo.get('applications', r.application_id);
-      if (a?.seller_id) await this.core.timeline(this.repo, a.seller_id, { kind: 'information_reminder', title: `Reminder: send the requested information by ${isoDate(r.due_at)}`, ref: a.ref });
+      if (!a?.seller_id) continue;
+      await this.core.timeline(this.repo, a.seller_id, { kind: 'information_reminder', title: `Reminder: send the requested information by ${isoDate(r.due_at)}`, ref: a.ref });
+      const openItems = ((r.items ?? []) as unknown as { status?: string }[]).filter((i) => !i.status || i.status === 'open' || i.status === 'rejected').length;
+      this.core.publish('sellers.application.information_reminder', { applicationId: a.id, ref: a.ref, sellerId: a.seller_id, applicantAccountId: a.applicant_account_id, dueAt: r.due_at.toISOString(), openItems });
     }
     for (const r of await this.repo.find('information_requests', { state: 'open', due_at: { op: '<', value: now } }, { limit: 200 })) {
       const expired = await this.repo.transaction(async (tx) => {

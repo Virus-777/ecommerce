@@ -12,18 +12,21 @@ export const DAY = 86_400_000;
 
 /** Id of the baseline used while no policy version was ever proposed (settings fallback) */
 export const DEFAULT_POLICY_ID = '00000000-0000-4000-8000-000000000001';
-export const OFFICIAL_NAME = 'Marketly Official';
+/** Id of the baseline version 1.0 seeded by migration 0003 (decision D-RT2) */
+export const SEEDED_POLICY_ID = '00000000-0000-4000-8000-000000000010';
 /**
- * Where Official Store returns go. The spec gives returns no source for the warehouse address
- * (warehouse is not a dependency and there is no setting), so it is a constant here.
+ * Where Official Store returns go when the officialReturnAddress setting cannot be read (the setting's
+ * default is the same address; decision D-RT1).
  */
 export const OFFICIAL_RETURN_ADDRESS: common.Address = {
-  name: 'Marketly Returns Center',
-  line1: '4100 Logistics Way',
+  name: 'Marketly Returns',
+  line1: '1250 Logistics Way',
+  line2: 'Dock 4',
   city: 'Reno',
   region: 'NV',
   postalCode: '89502',
   country: 'US',
+  phone: null,
 };
 
 /* ---------------------------------------------------------------- statuses */
@@ -36,8 +39,11 @@ export const OPEN_STATUSES: ReturnStatus[] = ['requested', 'info_requested', 'ap
 /** Still being handled (rejected is a decision) */
 export const ACTIVE_STATUSES: ReturnStatus[] = ['requested', 'info_requested', 'approved', 'in_transit', 'received', 'awaiting_remedy'];
 export const CLOSED_STATUSES: ReturnStatus[] = ['completed', 'cancelled', 'rejected'];
-/** A refund request that still covers its items (DUPLICATE_REFUND) */
-export const LIVE_REFUND: RefundStatus[] = ['requested', 'under_review', 'approved', 'processing', 'sent', 'failed'];
+/**
+ * A refund request still in progress for its items (DUPLICATE_REFUND). Sent, failed, declined and cancelled
+ * requests never block a second refund: the remaining refundable amount from payments caps it.
+ */
+export const LIVE_REFUND: RefundStatus[] = ['requested', 'under_review', 'approved', 'processing'];
 /** Money not yet sent */
 export const PENDING_REFUND: RefundStatus[] = ['requested', 'under_review', 'approved', 'processing', 'failed'];
 
@@ -352,6 +358,8 @@ export interface BreakdownResult {
   shippingRefund: number;
   returnShippingDeduction: number;
   deductionsTotal: number;
+  /** Sales tax included in the refunded items and shipping (never above the total); 0 when none was charged */
+  taxRefund: number;
   /** Before the cap */
   full: number;
   total: number;
@@ -371,12 +379,14 @@ export function computeBreakdown(b: BreakdownInput): BreakdownResult {
   let itemAmount = 0;
   let discount = 0;
   let shipping = 0;
+  let tax = 0;
   let cap = 0;
   const perLine: { orderItemId: string; value: number; cap: number }[] = [];
   for (const l of b.lines) {
     const p = l.paid;
     const item = share(p.itemAmount + p.taxShare, l.quantity, p.quantity);
     const disc = share(p.discountShare, l.quantity, p.quantity);
+    tax += share(p.taxShare, l.quantity, p.quantity);
     const ship = b.originalShippingRefunded ? share(p.shippingShare, l.quantity, p.quantity) : 0;
     const paidShare = share(p.paid, l.quantity, p.quantity);
     const lineCap = Math.max(0, Math.min(paidShare, l.remaining ?? paidShare));
@@ -397,6 +407,7 @@ export function computeBreakdown(b: BreakdownInput): BreakdownResult {
     shippingRefund: shipping,
     returnShippingDeduction: b.returnShippingDeduction,
     deductionsTotal,
+    taxRefund: Math.min(tax, total),
     full,
     total,
     maxRefundable: cap,

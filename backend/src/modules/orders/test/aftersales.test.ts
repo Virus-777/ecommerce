@@ -80,7 +80,7 @@ describe('shipping and delivery', () => {
   it('flags delivery exceptions and corrects tracking', async () => {
     const m = await twoSellerOrder();
     const s = await ship(m.order.id, m.gB.id, m.sellerB, [{ orderItemId: m.gB.items[0]!.id, quantity: 1 }], '1ZBAD');
-    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'failed_delivery', orderId: m.order.id, groupId: m.gB.id, shipmentId: s, sellerId: m.sellerB, orderItemIds: [m.gB.items[0]!.id], dueAt: now(), customerAction: null });
+    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'failed_delivery', orderId: m.order.id, groupId: m.gB.id, shipmentId: s, sellerId: m.sellerB, orderItemIds: [m.gB.items[0]!.id], dueAt: now(), customerAction: null, source: 'carrier' });
     await h.publish('shipping', 'shipping.tracking.corrected', { shipmentId: s, orderId: m.order.id, from: '1ZBAD', to: '1ZGOOD12345', reason: 'Typo', by: { kind: 'seller', id: m.sellerB } });
     const o = (await h.service.getOrder(m.order.id))!;
     expect(o.status.flags).toContain('delivery_issue');
@@ -110,16 +110,16 @@ describe('returns, refunds, cases and completion', () => {
     const s = await ship(m.order.id, m.gB.id, m.sellerB, [{ orderItemId: itemB.id, quantity: 1 }]);
     await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId: s, kind: 'outbound', orderId: m.order.id, groupId: m.gB.id, sellerId: m.sellerB, lines: [{ orderItemId: itemB.id, title: 'x', variantLabel: '', quantity: 1 }], deliveredAt: now() });
     const returnId = newId();
-    await h.publish('returns', 'returns.return.requested', { returnId, ref: 'RT-261009-0001', orderId: m.order.id, ownerType: 'seller', sellerId: m.sellerB, orderItemIds: [itemB.id], reason: 'damaged', responseDueAt: now() });
+    await h.publish('returns', 'returns.return.requested', { returnId, ref: 'RT-261009-0001', orderId: m.order.id, orderRef: m.order.ref, ownerType: 'seller', sellerId: m.sellerB, orderItemIds: [itemB.id], reason: 'damaged', responseDueAt: now() });
     let o = (await h.service.getOrder(m.order.id))!;
     expect(o.groups[1]!.items[0]).toMatchObject({ state: 'return_requested', afterSales: { returnId, returnRef: 'RT-261009-0001' } });
     expect(o.progress.returns).toMatchObject({ state: 'requested', openReturns: 1 });
     expect(o.status.flags).toContain('return_open');
 
-    await h.publish('returns', 'returns.return.received', { returnId, customerId: m.customerId, contactEmail: 'sam@example.com', ownerType: 'seller', sellerId: m.sellerB, items: [{ orderItemId: itemB.id, quantity: 1, variantId: itemB.product.variantId, stockItemId: itemB.stockItemId }], receivedAt: now() });
+    await h.publish('returns', 'returns.return.received', { returnId, ref: 'RT-261009-0001', orderId: m.order.id, orderRef: m.order.ref, customerId: m.customerId, contactEmail: 'sam@example.com', ownerType: 'seller', sellerId: m.sellerB, items: [{ orderItemId: itemB.id, quantity: 1, variantId: itemB.product.variantId, stockItemId: itemB.stockItemId }], receivedAt: now() });
     const breakdown = { itemAmount: { amount: 3000, currency: 'USD' }, discountShare: { amount: 0, currency: 'USD' }, shippingRefund: { amount: 0, currency: 'USD' }, returnShippingDeduction: { amount: 0, currency: 'USD' }, deductions: [], total: { amount: 3200, currency: 'USD' }, maxRefundable: { amount: 3200, currency: 'USD' }, destination: 'Visa •••• 4417', isEstimate: false };
     const refundRequestId = newId();
-    await h.publish('returns', 'returns.refund.approved', { refundRequestId, returnId, caseId: null, orderId: m.order.id, orderItemIds: [itemB.id], ownerType: 'seller', sellerId: m.sellerB, source: 'return', trustReportId: null, total: { amount: 3200, currency: 'USD' }, breakdown, fundedBy: 'seller', sellerShare: null, platformShare: null, approvedBy: { kind: 'staff', id: newId() } });
+    await h.publish('returns', 'returns.refund.approved', { refundRequestId, returnId, caseId: null, orderId: m.order.id, orderItemIds: [itemB.id], items: [{ orderItemId: itemB.id, quantity: 1 }], ownerType: 'seller', sellerId: m.sellerB, source: 'return', trustReportId: null, total: { amount: 3200, currency: 'USD' }, breakdown, fundedBy: 'seller', sellerShare: null, platformShare: null, approvedBy: { kind: 'staff', id: newId() } });
     o = (await h.service.getOrder(m.order.id))!;
     expect(o.groups[1]!.items[0]!.afterSales.refundStatus).toBe('approved');
     expect(o.totals.expectedRefunds).toEqual([{ label: 'Return refund', ref: 'RT-261009-0001', amount: { amount: 3200, currency: 'USD' }, status: 'approved' }]);
@@ -145,8 +145,8 @@ describe('returns, refunds, cases and completion', () => {
     const s = await ship(m.order.id, m.gB.id, m.sellerB, [{ orderItemId: itemB.id, quantity: 1 }]);
     await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId: s, kind: 'outbound', orderId: m.order.id, groupId: m.gB.id, sellerId: m.sellerB, lines: [], deliveredAt: now() });
     const returnId = newId();
-    await h.publish('returns', 'returns.return.requested', { returnId, ref: 'RT-2', orderId: m.order.id, ownerType: 'seller', sellerId: m.sellerB, orderItemIds: [itemB.id], reason: 'x', responseDueAt: now() });
-    await h.publish('returns', 'returns.return.rejected', { returnId, ownerType: 'seller', sellerId: m.sellerB, reasonCode: 'used', platformDecision: false });
+    await h.publish('returns', 'returns.return.requested', { returnId, ref: 'RT-2', orderId: m.order.id, orderRef: m.order.ref, ownerType: 'seller', sellerId: m.sellerB, orderItemIds: [itemB.id], reason: 'x', responseDueAt: now() });
+    await h.publish('returns', 'returns.return.rejected', { returnId, ref: 'RT-2', orderId: m.order.id, orderRef: m.order.ref, ownerType: 'seller', sellerId: m.sellerB, reasonCode: 'used', platformDecision: false });
     expect((await h.service.getOrder(m.order.id))!.groups[1]!.items[0]!.state).toBe('delivered');
     const replacement = { replacementId: newId(), returnId, orderId: m.order.id, orderItemId: itemB.id, ownerType: 'seller' as const, sellerId: m.sellerB, variantId: h.products.get([...h.products.keys()].find((k) => h.products.get(k)!.title === 'Lamp')!)!.variantId, offerId: m.gB.items[0]!.offer.offerId, quantity: 1, kind: 'replacement' };
     await h.publish('returns', 'returns.replacement.created', replacement);

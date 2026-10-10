@@ -86,8 +86,8 @@ export const OfferAlternativesHint: z.ZodType<OfferAlternativesHint> = z.object(
 
 export interface CartNotice {
   id: string;
-  /** What changed since the customer added or last accepted the line */
-  kind: "price_increased" | "price_decreased" | "out_of_stock" | "quantity_reduced" | "purchase_limit_reduced" | "offer_ended" | "seller_unavailable" | "product_unavailable" | "not_shippable" | "delivery_estimate_changed" | "coupon_no_longer_applies";
+  /** What changed since the customer added or last accepted the line. terms_changed: the offer's return, warranty or dispatch terms changed (OfferChange kind terms: offers termsVersion above acceptedTermsVersion); a warning the customer accepts, which moves acceptedTermsVersion to the current version */
+  kind: "price_increased" | "price_decreased" | "out_of_stock" | "quantity_reduced" | "purchase_limit_reduced" | "offer_ended" | "seller_unavailable" | "product_unavailable" | "not_shippable" | "delivery_estimate_changed" | "coupon_no_longer_applies" | "terms_changed";
   /** blocking = the line is excluded from checkout until resolved; warning = included only after the customer accepts; info = shown once */
   severity: "info" | "warning" | "blocking";
   /** Customer-facing sentence, e.g. 'Price changed since you added it: was $94.99, now $99.99. Northwind Audio updated this offer on Oct 8.' */
@@ -108,7 +108,7 @@ export interface CartNotice {
 
 export const CartNotice: z.ZodType<CartNotice> = z.object({
   id: z.uuid(),
-  kind: z.enum(["price_increased", "price_decreased", "out_of_stock", "quantity_reduced", "purchase_limit_reduced", "offer_ended", "seller_unavailable", "product_unavailable", "not_shippable", "delivery_estimate_changed", "coupon_no_longer_applies"]).describe("What changed since the customer added or last accepted the line"),
+  kind: z.enum(["price_increased", "price_decreased", "out_of_stock", "quantity_reduced", "purchase_limit_reduced", "offer_ended", "seller_unavailable", "product_unavailable", "not_shippable", "delivery_estimate_changed", "coupon_no_longer_applies", "terms_changed"]).describe("What changed since the customer added or last accepted the line. terms_changed: the offer's return, warranty or dispatch terms changed (OfferChange kind terms: offers termsVersion above acceptedTermsVersion); a warning the customer accepts, which moves acceptedTermsVersion to the current version"),
   severity: z.enum(["info", "warning", "blocking"]).describe("blocking = the line is excluded from checkout until resolved; warning = included only after the customer accepts; info = shown once"),
   message: z.string().describe("Customer-facing sentence, e.g. 'Price changed since you added it: was $94.99, now $99.99. Northwind Audio updated this offer on Oct 8.'"),
   get previousPrice() {
@@ -528,6 +528,8 @@ export const MergeLine: z.ZodType<MergeLine> = z.object({
 export interface MergeReport {
   mergedFromCartId?: string | null;
   lines: MergeLine[];
+  /** Guest saved-for-later items moved to the customer (an offer the customer already saved is kept once) */
+  savedItemsMoved: number;
   /** Shown once after sign-in, e.g. 'We added 2 items from before you signed in' */
   message?: string | null;
 }
@@ -537,6 +539,7 @@ export const MergeReport: z.ZodType<MergeReport> = z.object({
   get lines() {
     return z.array(MergeLine);
   },
+  savedItemsMoved: z.number().int().describe("Guest saved-for-later items moved to the customer (an offer the customer already saved is kept once)"),
   message: z.string().describe("Shown once after sign-in, e.g. 'We added 2 items from before you signed in'").nullish(),
 }).register(common.apiTypes, { id: "cart.MergeReport" });
 
@@ -1081,7 +1084,7 @@ export const endpoints = defineEndpoints({
     auth: "customer",
     scope: "own-customer",
     summary: "Merge the guest cart into the customer cart after sign-in",
-    desc: "Send with the customer session and the X-Guest-Session header of the guest cart. Same offer: quantities combine up to the limit. Different offer for the same variant: both lines kept. Unavailable guest lines are dropped with a note. Idempotent by guest cart: a second call returns the same report.",
+    desc: "Send with the customer session and the X-Guest-Session header of the guest cart. Same offer: quantities combine up to the limit. Different offer for the same variant: both lines kept. Unavailable guest lines are dropped with a note. The guest's saved-for-later items move to the customer in the same transaction (owner_kind customer, customer_id set, guest_session_id cleared; when the customer already saved that offer the customer's row is kept and the guest row deleted). Idempotent by guest cart: a second call returns the same report.",
     body: () => z.object({
       guestSessionId: z.uuid(),
     }),
@@ -1308,7 +1311,7 @@ export const spec = defineModuleSpec({
       "sellers.seller.restricted": "Lines from offers the restriction hides get seller_unavailable notices; nothing is switched to another seller",
       "sellers.seller.suspended": "Same as restricted",
       "catalog.product.publication_changed": "Hidden or suspended products give their lines a product_unavailable notice",
-      "identity.guest_session.claimed": "Merge the claimed guest session's cart into the account's customer cart (same rules and report as POST /cart/merge; idempotent). This is how sign-in merges carts on every client; identity only publishes the event and calls nothing in cart"
+      "identity.guest_session.claimed": "Merge the claimed guest session's cart and saved-for-later items into the account's customer cart (same rules and report as POST /cart/merge; idempotent). This is how sign-in merges carts on every client; identity only publishes the event and calls nothing in cart"
     },
   },
   jobs: {

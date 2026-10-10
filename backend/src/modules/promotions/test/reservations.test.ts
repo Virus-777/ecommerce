@@ -19,7 +19,7 @@ const campaignRow = (id: string) => k.svc.core.repo.get('campaigns', id);
 const rowsOf = (reservationId: string) => k.svc.core.repo.find('redemptions', { reservation_id: reservationId });
 const declined = (checkoutSessionId: string) => k.emit('payments.payment.failed', { intentId: newId(), checkoutSessionId, orderId: null, customerId: null, contactEmail: 'g@example.com', declineCategory: 'card_declined', afterPendingCheck: false, at: k.clock.now().toISOString() });
 const placed = (orderId: string, checkoutSessionId: string) =>
-  k.emit('orders.order.placed', { orderId, ref: 'MK-261010-00001', checkoutSessionId, customerId: null, guestEmail: 'g@example.com', paymentIntentId: newId(), paymentState: 'accepted', total: USD(9000), couponCodes: [], groups: [], placedAt: k.clock.now().toISOString() });
+  k.emit('orders.order.placed', { orderId, ref: 'MK-261010-00001', checkoutSessionId, customerId: null, guestEmail: 'g@example.com', paymentIntentId: newId(), paymentState: 'accepted', total: USD(9000), couponCodes: [], groups: [], placedAt: k.clock.now().toISOString(), attemptNo: 1, contactName: 'Guest Shopper' });
 
 async function coupon(code: string) {
   const o = k.offer({ sellerId: SELLER_A, categoryId: HOME, price: USD(10000) });

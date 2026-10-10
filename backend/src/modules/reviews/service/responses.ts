@@ -5,16 +5,19 @@
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import { pageOf, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
-import type { ResponseInput, SellerProductReviewRow, SellerResponse } from '../../../spec/reviews.js';
-import { addDays, isSellerId, responseChecks } from '../domain/rules.js';
+import type { OfficialReviewRow, ResponseInput, SellerProductReviewRow, SellerResponse } from '../../../spec/reviews.js';
+import { addDays, isSellerId, OFFICIAL_STORE_ID, responseChecks } from '../domain/rules.js';
 import { sellerResponseMachine } from '../domain/state-machines.js';
-import type { ResponseRec, ReviewsRepository } from '../ports.js';
-import { type Core, Effects, notFound, type SellerWho, invalid } from './core.js';
+import type { FeedbackRec, ResponseRec, ReviewRec, ReviewsRepository } from '../ports.js';
+import { type By, type Core, Effects, notFound, type SellerWho, invalid } from './core.js';
+import { responsePublished } from './content.js';
 import type { FeedbackPart } from './feedback.js';
 import type { ModerationPart } from './moderation.js';
 import type { Views } from './views.js';
 
 const MAX_RESPONSE = 2000;
+/** Rows read for the Official Store list when it mixes reviews and feedback */
+const OFFICIAL_LIST_MAX = 500;
 
 export class ResponsesPart {
   constructor(
@@ -79,7 +82,8 @@ export class ResponsesPart {
         editable_until: addDays(now, editDays),
       });
       if (failures.length) await this.moderation.hold(tx, { type: 'seller_response', id: r.id }, failures);
-      fx.emit('reviews.response.published', { responseId: r.id, sellerId: who.sellerId, targetType: input.targetType, status });
+      const payload = await responsePublished(tx, r);
+      if (payload) fx.emit('reviews.response.published', payload);
       return r;
     });
     await this.core.flush(fx, who);
@@ -113,7 +117,8 @@ export class ResponsesPart {
         ...(status === 'published' ? { published_at: now } : {}),
       });
       if (failures.length) await this.moderation.hold(tx, { type: 'seller_response', id }, failures);
-      fx.emit('reviews.response.published', { responseId: id, sellerId: who.sellerId, targetType: r.target_type, status });
+      const payload = await responsePublished(tx, r);
+      if (payload) fx.emit('reviews.response.published', payload);
       return r;
     });
     await this.core.flush(fx, who);
@@ -123,6 +128,71 @@ export class ResponsesPart {
   private async out(r: ResponseRec): Promise<SellerResponse> {
     const names = await this.core.sellerNames([r.seller_id]);
     return this.views.responseOut(r, this.core.sellerName(names, r.seller_id), true);
+  }
+
+  /* ---------------------------------------------------------------- the Official Store (staff, reviews.answers.staff) */
+
+  /** Product reviews of Official Store sales and Official Store feedback, to respond as the Official Store */
+  async listOfficial(filter: { targetType?: 'product_review' | 'seller_feedback'; needsResponse?: boolean; rating?: number }, page: PageRequest): Promise<common.Page<OfficialReviewRow>> {
+    const repo = this.core.repo;
+    const reviewRows = async (p: PageRequest) =>
+      repo.listReviews({ sellerId: OFFICIAL_STORE_ID, publicOnly: true, ...(filter.rating ? { stars: filter.rating } : {}), ...(filter.needsResponse !== undefined ? { needsResponse: filter.needsResponse } : {}), sort: 'newest' }, p);
+    const feedbackRows = async (p: PageRequest) => repo.listFeedback({ sellerId: OFFICIAL_STORE_ID, publicOnly: true, ...(filter.needsResponse !== undefined ? { needsResponse: filter.needsResponse } : {}) }, p);
+    const toRows = async (reviews: ReviewRec[], feedback: FeedbackRec[]): Promise<{ at: Date; row: OfficialReviewRow }[]> => {
+      const [rv, fb, orders] = await Promise.all([this.views.reviews(reviews, { internal: true }), this.views.feedback(feedback, { internal: true }), this.core.orders([...reviews.map((r) => r.order_id), ...feedback.map((f) => f.order_id)])]);
+      return [
+        ...rv.map((review, i) => ({ at: reviews[i]!.created_at, row: { targetType: 'product_review' as const, review, feedback: null, orderRef: orders.get(reviews[i]!.order_id)?.ref ?? null, needsResponse: !review.response, canRespond: !review.response } })),
+        ...fb.map((fbk, i) => ({ at: feedback[i]!.created_at, row: { targetType: 'seller_feedback' as const, review: null, feedback: fbk, orderRef: orders.get(feedback[i]!.order_id)?.ref ?? null, needsResponse: !fbk.response, canRespond: !fbk.response } })),
+      ];
+    };
+    if (filter.targetType === 'product_review') {
+      const rows = await reviewRows(page);
+      return { ...rows, items: (await toRows(rows.items, [])).map((x) => x.row) };
+    }
+    if (filter.targetType === 'seller_feedback') {
+      const rows = await feedbackRows(page);
+      return { ...rows, items: (await toRows([], rows.items)).map((x) => x.row) };
+    }
+    // both kinds, newest first (bounded: the Official Store's recent reviews and feedback)
+    const all = { mode: 'page', page: 1, limit: OFFICIAL_LIST_MAX } as PageRequest;
+    const [reviews, feedback] = await Promise.all([reviewRows(all), feedbackRows(all)]);
+    const merged = (await toRows(reviews.items, feedback.items)).sort((a, b) => b.at.getTime() - a.at.getTime()).map((x) => x.row);
+    return pageOf(merged, page);
+  }
+
+  /** Responds publicly as the Official Store (same rules as seller responses) */
+  async postOfficial(by: By, input: ResponseInput): Promise<SellerResponse> {
+    const r = await this.post({ sellerId: OFFICIAL_STORE_ID, actor: by.actor, ...(by.requestId ? { requestId: by.requestId } : {}) }, input);
+    await this.core.audit(
+      {
+        action: 'reviews.response.official',
+        actionLabel: 'Responded publicly as the Official Store',
+        category: 'content',
+        target: { type: input.targetType, id: input.targetId },
+        relatedTargets: [{ type: 'seller_response', id: r.id }],
+        after: { text: r.text, status: r.status },
+      },
+      by,
+    );
+    return r;
+  }
+
+  async editOfficial(by: By, id: string, text: string): Promise<SellerResponse> {
+    const before = await this.own(OFFICIAL_STORE_ID, id);
+    const r = await this.edit({ sellerId: OFFICIAL_STORE_ID, actor: by.actor, ...(by.requestId ? { requestId: by.requestId } : {}) }, id, text);
+    await this.core.audit(
+      {
+        action: 'reviews.response.official_edit',
+        actionLabel: 'Edited an Official Store response',
+        category: 'content',
+        target: { type: before.target_type, id: before.target_id },
+        relatedTargets: [{ type: 'seller_response', id }],
+        before: { text: before.text, status: before.status },
+        after: { text: r.text, status: r.status },
+      },
+      by,
+    );
+    return r;
   }
 
   /** Product reviews of items the seller sold */

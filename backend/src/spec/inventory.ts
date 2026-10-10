@@ -121,6 +121,8 @@ export interface StockItemRef {
   locationCode?: string | null;
   /** Primary bin */
   binCode?: string | null;
+  /** Variant GTIN from catalog.getVariants (null when catalog is off or the variant has none), so warehouse scans can match item barcodes */
+  gtin?: string | null;
 }
 
 export const StockItemRef: z.ZodType<StockItemRef> = z.object({
@@ -136,6 +138,7 @@ export const StockItemRef: z.ZodType<StockItemRef> = z.object({
   locationId: z.uuid().describe("Main location: the seller's virtual location, or the company location holding the item's stock (the default location when it has none)").nullish(),
   locationCode: z.string().nullish(),
   binCode: z.string().describe("Primary bin").nullish(),
+  gtin: z.string().describe("Variant GTIN from catalog.getVariants (null when catalog is off or the variant has none), so warehouse scans can match item barcodes").nullish(),
 }).register(common.apiTypes, { id: "inventory.StockItemRef" });
 
 export interface StockItemInput {
@@ -229,14 +232,14 @@ export const LocationInput: z.ZodType<LocationInput> = z.object({
 }).register(common.apiTypes, { id: "inventory.LocationInput" });
 
 export interface MovementRef {
-  kind: "order" | "reservation" | "purchase_order" | "receipt" | "return" | "adjustment" | "bulk_update" | "transfer" | "count" | "discrepancy" | "initial";
+  kind: "order" | "reservation" | "purchase_order" | "receipt" | "return" | "adjustment" | "bulk_update" | "transfer" | "count" | "discrepancy" | "initial" | "merge";
   id: string;
   /** e.g. 'Received PUR-2610-0031', 'Return RT-261001-0161' */
   label: string;
 }
 
 export const MovementRef: z.ZodType<MovementRef> = z.object({
-  kind: z.enum(["order", "reservation", "purchase_order", "receipt", "return", "adjustment", "bulk_update", "transfer", "count", "discrepancy", "initial"]),
+  kind: z.enum(["order", "reservation", "purchase_order", "receipt", "return", "adjustment", "bulk_update", "transfer", "count", "discrepancy", "initial", "merge"]),
   id: z.string(),
   label: z.string().describe("e.g. 'Received PUR-2610-0031', 'Return RT-261001-0161'"),
 }).register(common.apiTypes, { id: "inventory.MovementRef" });
@@ -614,8 +617,8 @@ export interface InboundReceipt {
     shortage: number;
     sellable: number;
   };
-  /** Orders waiting for out-of-stock SKUs on this receipt; allocated first */
-  waitingOrders: number;
+  /** Open pick-shortage discrepancies on this receipt's SKUs; resolve them (reallocate) first. There are no backorders at launch: an order is never accepted without reserved units */
+  openPickShortages: number;
   confirmedBy?: common.Actor | null;
   confirmedAt?: string | null;
 }
@@ -642,7 +645,7 @@ export const InboundReceipt: z.ZodType<InboundReceipt> = z.object({
     shortage: z.number().int(),
     sellable: z.number().int(),
   }),
-  waitingOrders: z.number().int().describe("Orders waiting for out-of-stock SKUs on this receipt; allocated first"),
+  openPickShortages: z.number().int().describe("Open pick-shortage discrepancies on this receipt's SKUs; resolve them (reallocate) first. There are no backorders at launch: an order is never accepted without reserved units"),
   get confirmedBy() {
     return common.Actor.nullish();
   },
@@ -842,6 +845,26 @@ export const ResolveDiscrepancyRequest: z.ZodType<ResolveDiscrepancyRequest> = z
   note: z.string(),
 }).register(common.apiTypes, { id: "inventory.ResolveDiscrepancyRequest" });
 
+export interface LowStockDigestItem {
+  stockItemId: string;
+  offerId?: string | null;
+  sku: string;
+  label: string;
+  available: number;
+  threshold?: number | null;
+  state: "low_stock" | "out_of_stock";
+}
+
+export const LowStockDigestItem: z.ZodType<LowStockDigestItem> = z.object({
+  stockItemId: z.uuid(),
+  offerId: z.uuid().nullish(),
+  sku: z.string(),
+  label: z.string(),
+  available: z.number().int(),
+  threshold: z.number().int().nullish(),
+  state: z.enum(["low_stock", "out_of_stock"]),
+}).register(common.apiTypes, { id: "inventory.LowStockDigestItem" });
+
 export interface LowStockRow {
   item: StockItem;
   /** Available ÷ average daily sales (30 days) */
@@ -946,17 +969,21 @@ export const CountLine: z.ZodType<CountLine> = z.object({
 
 /* ------------------------------------------------------------------ events */
 
-/** inventory.stock.changed: Available or Reserved changes for a stock item */
+/** inventory.stock.changed: Available or Reserved changes for a stock item, or the item is re-keyed, archived or unarchived */
 export interface InventoryStockChangedEvent {
   stockItemId: string;
   offerId?: string | null;
   ownerType: string;
   sellerId?: string | null;
+  /** So consumers keyed by product (wishlist whole-product alerts, catalog counts) need no lookup */
+  productId: string;
   variantId: string;
   available: number;
   reserved: number;
   previousAvailable: number;
   state: "in_stock" | "low_stock" | "out_of_stock";
+  archived: boolean;
+  /** e.g. hold, allocate, release, fulfil, adjustment, bulk_update, receipt, return, item_updated, archived, unarchived, merge */
   cause: string;
 }
 
@@ -965,12 +992,14 @@ export const InventoryStockChangedEvent: z.ZodType<InventoryStockChangedEvent> =
   offerId: z.uuid().nullish(),
   ownerType: z.string(),
   sellerId: z.uuid().nullish(),
+  productId: z.uuid().describe("So consumers keyed by product (wishlist whole-product alerts, catalog counts) need no lookup"),
   variantId: z.uuid(),
   available: z.number().int(),
   reserved: z.number().int(),
   previousAvailable: z.number().int(),
   state: z.enum(["in_stock", "low_stock", "out_of_stock"]),
-  cause: z.string(),
+  archived: z.boolean(),
+  cause: z.string().describe("e.g. hold, allocate, release, fulfil, adjustment, bulk_update, receipt, return, item_updated, archived, unarchived, merge"),
 });
 
 /** inventory.stock.low: Available drops to or below the threshold (once per cooldown) */
@@ -979,6 +1008,8 @@ export interface InventoryStockLowEvent {
   offerId?: string | null;
   ownerType: string;
   sellerId?: string | null;
+  productId: string;
+  variantId: string;
   sku: string;
   label: string;
   available: number;
@@ -990,17 +1021,43 @@ export const InventoryStockLowEvent: z.ZodType<InventoryStockLowEvent> = z.objec
   offerId: z.uuid().nullish(),
   ownerType: z.string(),
   sellerId: z.uuid().nullish(),
+  productId: z.uuid(),
+  variantId: z.uuid(),
   sku: z.string(),
   label: z.string(),
   available: z.number().int(),
   threshold: z.number().int(),
 });
 
-/** inventory.reservation.allocated: A hold is allocated to an accepted order */
+/** inventory.stock.low_digest: Daily low-stock digest (job inventory.low-stock-digest): one event per seller with low or out-of-stock items, and one for the Official Store (ownerType official); nothing when there is nothing to report */
+export interface InventoryStockLowDigestEvent {
+  ownerType: "official" | "seller";
+  sellerId?: string | null;
+  date: string;
+  lowCount: number;
+  outOfStockCount: number;
+  /** Worst first, at most 50 */
+  items: LowStockDigestItem[];
+}
+
+export const InventoryStockLowDigestEvent: z.ZodType<InventoryStockLowDigestEvent> = z.object({
+  ownerType: z.enum(["official", "seller"]),
+  sellerId: z.uuid().nullish(),
+  date: z.iso.date(),
+  lowCount: z.number().int(),
+  outOfStockCount: z.number().int(),
+  get items() {
+    return z.array(LowStockDigestItem);
+  },
+});
+
+/** inventory.reservation.allocated: A hold is allocated to an accepted order, or allocateForOrder allocates units for a replacement or exchange */
 export interface InventoryReservationAllocatedEvent {
   reservationId: string;
   orderId: string;
   lines: ReservationLine[];
+  /** checkout for normal order allocation */
+  source: "checkout" | "replacement" | "exchange";
 }
 
 export const InventoryReservationAllocatedEvent: z.ZodType<InventoryReservationAllocatedEvent> = z.object({
@@ -1009,20 +1066,21 @@ export const InventoryReservationAllocatedEvent: z.ZodType<InventoryReservationA
   get lines() {
     return z.array(ReservationLine);
   },
+  source: z.enum(["checkout", "replacement", "exchange"]).describe("checkout for normal order allocation"),
 });
 
-/** inventory.reservation.released: Held or allocated units return to Available (cancel, expiry, abandoned checkout, staff release) */
+/** inventory.reservation.released: Held or allocated units return to Available (cancel, expiry, abandoned checkout, staff release, hold units no accepted item matched) */
 export interface InventoryReservationReleasedEvent {
   reservationId: string;
   orderId?: string | null;
-  reason: "cancelled" | "expired" | "abandoned" | "staff";
+  reason: "cancelled" | "expired" | "abandoned" | "staff" | "unmatched";
   lines: ReservationLine[];
 }
 
 export const InventoryReservationReleasedEvent: z.ZodType<InventoryReservationReleasedEvent> = z.object({
   reservationId: z.uuid(),
   orderId: z.uuid().nullish(),
-  reason: z.enum(["cancelled", "expired", "abandoned", "staff"]),
+  reason: z.enum(["cancelled", "expired", "abandoned", "staff", "unmatched"]),
   get lines() {
     return z.array(ReservationLine);
   },
@@ -1169,8 +1227,22 @@ export interface InventoryPublicApi {
   extendHold(reservationId: string, until: string): Promise<Reservation>;
   /** Links a hold to the placed order so acceptance can allocate it Used by: checkout, orders. */
   attachOrder(reservationId: string, orderId: string, lines: { stockItemId: string, orderItemId: string }[]): Promise<Reservation>;
-  /** Abandoned checkout or failed purchase Used by: checkout. */
+  /** Abandoned checkout or failed purchase; also releases an allocation made with allocateForOrder that is no longer needed (cancelled replacement or exchange) Used by: checkout, returns. */
   releaseHold(reservationId: string, reason: string): Promise<void>;
+  /** All-or-nothing allocation with no expiry for a replacement or exchange shipment of an existing order (Available → Reserved, state allocated, publishes inventory.reservation.allocated). Throws INSUFFICIENT_STOCK with details per line. Same key returns the existing reservation (idempotent). Fulfilled on shipping.shipment.dispatched like any allocation; released with releaseHold Used by: returns, support. */
+  allocateForOrder(input: { key: string, orderId: string, orderRef?: string, source: { kind: 'replacement' | 'exchange', id: string, ref?: string }, lines: { stockItemId: string, quantity: number, orderItemId?: string }[], actor: common.Actor }): Promise<Reservation>;
+  /** Stock locations with code, name, address and time zone (company warehouses by default) Used by: purchasing, warehouse, shipping, returns, offers. */
+  getLocations(opts?: { ownerType?: 'official' | 'seller', sellerId?: string, activeOnly?: boolean }): Promise<Location[]>;
+  /** The default company location (isDefault): Official Store ships-from address for delivery estimates and rates (decision O3), receiving and return default. Null only before the first location is created Used by: offers, shipping, cart, checkout, returns, purchasing, warehouse. */
+  getDefaultLocation(): Promise<Location | null>;
+  /** Keep a stock item in step with its offer or catalog record (variant change on an offer, catalog merge, SKU or condition change). Quantities and history stay on the item; SKU_TAKEN when the new SKU is used by another item of the same owner. Publishes inventory.stock.changed (cause item_updated) so read models re-key Used by: offers. */
+  updateStockItem(stockItemId: string, patch: { productId?: string, variantId?: string, condition?: string, sku?: string, label?: string, offerId?: string }, actor: common.Actor): Promise<StockItem>;
+  /** Reinstated offer: the archived item becomes active again with the quantities it kept, so the offer is not stuck out of stock. Publishes inventory.stock.changed (cause unarchived) Used by: offers. */
+  unarchiveStockItem(stockItemId: string, actor: common.Actor): Promise<StockItem>;
+  /** Two items of the same owner now describe the same thing (variant merge, duplicate seller offers): every quantity group moves to the target with merge movements, open reservation lines and incoming expectations move with their units (still matched by orderItemId), and the source is archived. Returns the target Used by: offers. */
+  mergeStockItems(fromStockItemId: string, intoStockItemId: string, reason: string, actor: common.Actor): Promise<StockItem>;
+  /** Units that left stock to customer orders (fulfilled order allocations, net of restocked returns) over the last days (default 30), for reorder maths and days of cover Used by: purchasing, reports. */
+  getSalesRate(stockItemIds: string[], days?: number): Promise<Record<string, { unitsSold: number, days: number, avgDailySales: number }>>;
   /** Seller bulk file quantities, recorded as 'Bulk update' movements Used by: offers. */
   applyBulkQuantities(sellerId: string, rows: { stockItemId: string, newAvailable: number }[], jobId: string, actor: common.Actor): Promise<{ stockItemId: string, ok: boolean, error?: string }[]>;
   /** Weighted average buying cost of company stock Used by: offers, finance, returns, reports. */
@@ -1695,6 +1767,7 @@ export const endpoints = defineEndpoints({
     permission: "inventory.items.manage",
     scope: "staff",
     summary: "Change reorder point, reorder quantity or archive a company SKU",
+    desc: "archived false unarchives the item (same as unarchiveStockItem).",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1707,6 +1780,32 @@ export const endpoints = defineEndpoints({
     response: () => StockItem,
     status: 200,
     audited: true,
+    events: ["inventory.stock.changed"],
+    screens: ["ops/inventory"],
+    phase: 1,
+  },
+  mergeStockItem: {
+    area: "admin",
+    method: "POST",
+    path: "/stock-items/{id}/merge",
+    auth: "staff",
+    permission: "inventory.items.manage",
+    scope: "staff",
+    summary: "Merge this company SKU into another one (e.g. after a catalog variant merge)",
+    desc: "Same owner only. Every quantity group, open reservation line and incoming expectation moves to the target with merge movements; this item is archived. See mergeStockItems.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      intoStockItemId: z.uuid(),
+      reason: z.string(),
+    }),
+    response: () => StockItem,
+    status: 200,
+    errors: ["NOT_FOUND","VALIDATION_FAILED","STOCK_ITEM_ARCHIVED","CONFLICT"],
+    audited: true,
+    events: ["inventory.stock.changed"],
     screens: ["ops/inventory"],
     phase: 1,
   },
@@ -1880,7 +1979,7 @@ export const endpoints = defineEndpoints({
     permission: "inventory.inbound.confirm",
     scope: "staff",
     summary: "Make received units available for sale",
-    desc: "Incoming → Available (sellable) and → Damaged or held (damaged). Updates weighted average unit cost with the receipt's unit cost. Orders waiting for out-of-stock SKUs are allocated first.",
+    desc: "Incoming → Available (sellable) and → Damaged or held (damaged). Updates weighted average unit cost with the receipt's unit cost. Open pick shortages on these SKUs are listed so they can be resolved first (no backorders at launch).",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -2222,7 +2321,7 @@ export const spec = defineModuleSpec({
   summary: "How many units exist and in which stock group: stock items per offer/SKU with Available, Reserved, Incoming, Damaged or held and Returned quantities per location, checkout holds and order allocations, an append-only movement ledger, reasoned adjustments with second review, low-stock alerts, receipt confirmation and return stock outcomes.",
   dependsOn: [],
   optionalDeps: ["access","audit","catalog","finance","fulfillment-service","media","purchasing","reports","workqueues","offers"],
-  publicApi: ["createStockItem","getAvailability","hold","extendHold","attachOrder","releaseHold","applyBulkQuantities","getUnitCost","expectIncoming","cancelIncoming","submitInbound","reportDiscrepancy","findBySku","getStockItems","getOfferAvailability","getStockForOffers","listStockForVariants","getSellerStockSummary","getStockSummary","exportRows"],
+  publicApi: ["createStockItem","getAvailability","hold","extendHold","attachOrder","releaseHold","allocateForOrder","getLocations","getDefaultLocation","updateStockItem","unarchiveStockItem","mergeStockItems","getSalesRate","applyBulkQuantities","getUnitCost","expectIncoming","cancelIncoming","submitInbound","reportDiscrepancy","findBySku","getStockItems","getOfferAvailability","getStockForOffers","listStockForVariants","getSellerStockSummary","getStockSummary","exportRows"],
   permissions: [
     {
       "key": "inventory.stock.adjust",
@@ -2440,10 +2539,11 @@ export const spec = defineModuleSpec({
   },
   events: {
     publishes: {
-      "inventory.stock.changed": { when: "Available or Reserved changes for a stock item", payload: () => InventoryStockChangedEvent },
+      "inventory.stock.changed": { when: "Available or Reserved changes for a stock item, or the item is re-keyed, archived or unarchived", payload: () => InventoryStockChangedEvent },
       "inventory.stock.low": { when: "Available drops to or below the threshold (once per cooldown)", payload: () => InventoryStockLowEvent },
-      "inventory.reservation.allocated": { when: "A hold is allocated to an accepted order", payload: () => InventoryReservationAllocatedEvent },
-      "inventory.reservation.released": { when: "Held or allocated units return to Available (cancel, expiry, abandoned checkout, staff release)", payload: () => InventoryReservationReleasedEvent },
+      "inventory.stock.low_digest": { when: "Daily low-stock digest (job inventory.low-stock-digest): one event per seller with low or out-of-stock items, and one for the Official Store (ownerType official); nothing when there is nothing to report", payload: () => InventoryStockLowDigestEvent },
+      "inventory.reservation.allocated": { when: "A hold is allocated to an accepted order, or allocateForOrder allocates units for a replacement or exchange", payload: () => InventoryReservationAllocatedEvent },
+      "inventory.reservation.released": { when: "Held or allocated units return to Available (cancel, expiry, abandoned checkout, staff release, hold units no accepted item matched)", payload: () => InventoryReservationReleasedEvent },
       "inventory.adjustment.recorded": { when: "A seller or staff adjustment is applied", payload: () => InventoryAdjustmentRecordedEvent },
       "inventory.receipt.confirmed": { when: "The Inventory Manager confirms a receipt", payload: () => InventoryReceiptConfirmedEvent },
       "inventory.return_outcome.recorded": { when: "Stock outcome of a return is recorded", payload: () => InventoryReturnOutcomeRecordedEvent },
@@ -2453,13 +2553,15 @@ export const spec = defineModuleSpec({
       "inventory.transfer.received": { when: "Phase 4: a transfer is received", payload: () => InventoryTransferReceivedEvent },
     },
     consumes: {
-      "orders.order.accepted": "Allocate the order's held reservation (reservationId) to its order items: each reservation line is matched to an entry of items by stockItemId and quantity, so allocation never depends on checkout's attachOrder (lines it already attached keep their orderItemId)",
-      "orders.item.cancelled": "Release that item's held or allocated units back to Available",
-      "shipping.shipment.dispatched": "Fulfil the allocated lines in the shipment (Reserved → leaves stock)",
+      "orders.order.accepted": "Allocate the order's held reservation (reservationId) to its order items: each reservation line is matched to an entry of items by stockItemId and quantity, so allocation never depends on checkout's attachOrder (lines it already attached keep their orderItemId). Hold units that match no accepted item (quantity reduced or line dropped at placement) are released in the same transaction (inventory.reservation.released, reason unmatched), so no units stay reserved without an order item",
+      "orders.item.cancelled": "Release that item's held or allocated units back to Available (matched by itemId, so a split-off item releases only its own units)",
+      "orders.item.split": "A line was split for a partial cancel, shipment or return (decision S-D1): split the reservation line of itemId so newItemId gets its own line with quantity units (same stock item, location and state; fulfilled and released counts stay on the original line) and the original keeps the rest. Later cancel, dispatch and release events name either item. Idempotent per newItemId",
+      "shipping.shipment.dispatched": "Fulfil the allocated lines in the shipment (Reserved → leaves stock), matched by order item id; replacement and exchange shipments fulfil their allocateForOrder reservation",
       "returns.return.received": "Official Store items: add each listed item's units (items[].stockItemId, quantity) to Returned at the receiving warehouse, once per return item. Seller returns are recorded by sellers through adjustments.",
       "returns.return.inspected": "Create a pending return stock outcome with the inspector's proposed outcome. The units stay in Returned until the outcome is recorded (restock → Available; damaged_stock, repair, return_to_supplier → Damaged or held; write_off → outside). Units that never arrived through returns.return.received are added to Returned first, so a missed event loses no stock",
       "warehouse.bin.assigned": "Update the stock item's primary bin code shown in stock lists",
-      "offers.offer.status_changed": "Archive a seller stock item when its offer is removed (reserved units stay with their orders)",
+      "offers.offer.status_changed": "Archive a seller stock item when its offer is removed (reserved units stay with their orders); unarchive it when the offer leaves removed (reinstated), so the offer shows its kept quantity again",
+      "catalog.product.merged": "Re-point company stock items of the merged product to the kept product and the mapped variant (newVariantId or intoVariantId) with updateStockItem; when the kept variant already has a company item with the same condition, raise it for the Inventory Manager to merge (POST /stock-items/{id}/merge). Seller items follow their offers (offers calls updateStockItem or mergeStockItems)",
       "sellers.seller.closed": "Archive the seller's stock items",
       "access.approval.decided": "Apply or reject adjustments waiting for second review"
     },
@@ -2475,7 +2577,7 @@ export const spec = defineModuleSpec({
     },
     "inventory.low-stock-digest": {
       "schedule": "daily 07:00 market time",
-      "does": "Low and out-of-stock summary per seller and for the Official Store (notifications)"
+      "does": "Low and out-of-stock summary per seller and for the Official Store: publish inventory.stock.low_digest (notifications emails it)"
     },
     "inventory.held-stock-review": {
       "schedule": "daily 07:00 market time",
@@ -3355,6 +3457,7 @@ declare module '../kernel/events/event-map.js' {
   interface EventMap {
     "inventory.stock.changed": InventoryStockChangedEvent;
     "inventory.stock.low": InventoryStockLowEvent;
+    "inventory.stock.low_digest": InventoryStockLowDigestEvent;
     "inventory.reservation.allocated": InventoryReservationAllocatedEvent;
     "inventory.reservation.released": InventoryReservationReleasedEvent;
     "inventory.adjustment.recorded": InventoryAdjustmentRecordedEvent;

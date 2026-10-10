@@ -319,6 +319,8 @@ export interface WishlistPublicApi {
   listLists(customerId: string): Promise<WishlistList[]>;
   /** The customer's price-drop and back-in-stock alerts (GET /alerts). Used by: graphql. */
   listAlerts(customerId: string): Promise<Alert[]>;
+  /** Customer data export hook (decision: every module that keeps customer data answers the customers data export): lists, saved items with notes and alerts as plain records. Called by customers when it builds a data export Used by: customers. */
+  exportCustomerData(input: { customerId: string, accountId: string }): Promise<common.CustomerDataSection[]>;
 }
 
 /* ------------------------------------------------------------------ tables (Kysely row types) */
@@ -482,7 +484,7 @@ export const endpoints = defineEndpoints({
     auth: "customer",
     scope: "own-customer",
     summary: "Add the item to the cart with an explicit offer",
-    desc: "Uses the saved offer, or the current main offer shown on the card; the seller is never swapped silently. The item stays saved unless removeFromList is true.",
+    desc: "Uses the saved offer, or the current main offer shown on the card; the seller is never swapped silently. With expectedPrice (the price the card showed), a different current price returns OFFER_CHANGED with details { offerId, price, previousPrice, availability } and nothing is added; the app confirms and retries with the new price. The item stays saved unless removeFromList is true.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -491,6 +493,9 @@ export const endpoints = defineEndpoints({
       offerId: z.uuid().nullish(),
       quantity: z.number().int(),
       removeFromList: z.boolean().nullish(),
+      get expectedPrice() {
+        return common.Money.nullish();
+      },
     }),
     response: () => z.object({
       cartLineId: z.string(),
@@ -728,7 +733,7 @@ export const spec = defineModuleSpec({
   summary: "Saved shopping for customers: saved items in one or more lists, price-drop and back-in-stock alerts, and shareable lists. Alerts are delivered through notifications under the customer's promotional preferences.",
   dependsOn: ["catalog","offers","customers"],
   optionalDeps: ["inventory","cart","promotions","notifications","reports","media","search"],
-  publicApi: ["savedCount","isSaved","listItems","listLists","listAlerts"],
+  publicApi: ["savedCount","isSaved","listItems","listLists","listAlerts","exportCustomerData"],
   permissions: [
     {
       "key": "wishlist.insights.view",
@@ -788,16 +793,17 @@ export const spec = defineModuleSpec({
     },
     consumes: {
       "offers.offer.price_changed": "Evaluate price-drop alerts for saved offers",
-      "inventory.stock.changed": "Evaluate back-in-stock alerts when available goes from 0 to positive",
+      "inventory.stock.changed": "Evaluate back-in-stock alerts when available goes from 0 to positive: alerts for the offer, for the variant (variantId) and whole-product alerts (productId on the payload), narrowed by the alert's sellerId when set",
       "offers.offer.status_changed": "Evaluate back-in-stock alerts for reactivated offers; clear saved offer ids of closed offers",
       "catalog.product.merged": "Move saved items and alerts to the kept product",
-      "catalog.product.publication_changed": "Pause alerts for suspended products; mark items unavailable"
+      "catalog.product.publication_changed": "Pause alerts for suspended products; mark items unavailable",
+      "customers.account.closed": "Delete the customer's lists, saved items and alerts (closure erases wishlist data; share links stop working)"
     },
   },
   jobs: {
     "wishlist.evaluate-alerts": {
       "schedule": "every 10 min",
-      "does": "Batch-evaluate alert conditions changed by recent events, apply cooldown, publish wishlist.alert.triggered"
+      "does": "Batch-evaluate alert conditions changed by recent events, apply cooldown, publish wishlist.alert.triggered. Also re-checks every active back-in-stock alert against current availability (offers and inventory.getAvailability), so a restock missed by events or skipped inside the cooldown still triggers once the cooldown has passed"
     }
   },
   settings: {

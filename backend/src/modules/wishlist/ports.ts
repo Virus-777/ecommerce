@@ -36,6 +36,8 @@ export interface Lock {
 export interface WishlistRepository {
   /** Runs fn with a repository bound to one transaction */
   transaction<T>(fn: (tx: WishlistRepository) => Promise<T>): Promise<T>;
+  /** Inbox (ctx.inbox): true the first time this key is claimed; commits with the transaction it runs in */
+  claim(key: string): Promise<boolean>;
 
   /* ---------------- lists */
   /** The customer's default list, created when missing (safe under concurrency) */
@@ -90,8 +92,14 @@ export interface WishlistRepository {
   /** Customers with alerts paused for a reason */
   customersPausedFor(reason: string, limit: number): Promise<string[]>;
   pausedFor(customerId: string, reason: string): Promise<AlertRow[]>;
-  /** Active price-drop alerts after an id, in id order (job batches) */
-  activePriceAlertsAfter(afterId: string | null, limit: number): Promise<AlertCandidate[]>;
+  /** Active alerts of a kind after an id, in id order (job batches) */
+  activeAlertsAfter(kind: AlertKind, afterId: string | null, limit: number): Promise<AlertCandidate[]>;
+
+  /* ---------------- customer data (export and account closure) */
+  /** Every list, item and alert (not removed) of the customer ids */
+  customerData(customerIds: string[]): Promise<{ lists: ListRow[]; items: ItemRow[]; alerts: AlertRow[] }>;
+  /** Deletes every alert, item and list of the customer ids */
+  deleteCustomerData(customerIds: string[]): Promise<{ lists: number; items: number; alerts: number }>;
 
   /* ---------------- insights (aggregates, no customer data) */
   insights(o: { from?: Date; to?: Date; limit: number }): Promise<InsightRow[]>;

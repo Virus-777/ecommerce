@@ -30,4 +30,10 @@ export const adminRoutes = (service: ReviewsService) =>
     listReviewsAdmin: async ({ query, page }) => service.reviews.listAdmin(query, page),
     /** GET /moderation-reasons: Policy reasons for decisions */
     listModerationReasons: async () => service.moderation.reasons(),
+    /** GET /official-store/reviews: Product reviews of Official Store sales and Official Store feedback, to respond as the Official Store */
+    listOfficialStoreReviews: async ({ query, page }) => service.responses.listOfficial(query, page),
+    /** POST /official-store/responses: Respond publicly as the Official Store */
+    postOfficialResponse: async ({ body, actor, requestId }) => service.responses.postOfficial({ actor, requestId }, body),
+    /** PATCH /official-store/responses/{id}: Edit an Official Store response within the edit window */
+    editOfficialResponse: async ({ params, body, actor, requestId }) => service.responses.editOfficial({ actor, requestId }, params.id, body.text),
   });

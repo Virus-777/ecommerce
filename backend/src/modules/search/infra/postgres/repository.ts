@@ -140,20 +140,41 @@ export function createPostgresSearchRepository(db: Db, inbox: Inbox): SearchRepo
 
     /* ---------------------------------------------------------------- sales */
 
-    async addSales(units) {
+    async recordSales(day, units, sign, at) {
       for (const u of units) {
+        if (u.units <= 0) continue;
+        const n = sign * u.units;
+        await d
+          .insertInto('product_sales_daily')
+          .values({ product_id: u.productId, day, units: Math.max(n, 0), orders: sign > 0 ? 1 : 0, updated_at: at })
+          .onConflict((oc) =>
+            oc.columns(['product_id', 'day']).doUpdateSet({
+              units: sql`greatest(product_sales_daily.units + ${n}, 0)`,
+              orders: sql`greatest(product_sales_daily.orders + ${sign}, 0)`,
+              updated_at: at,
+            } as never),
+          )
+          .execute();
         await d
           .updateTable('search_documents')
-          .set({ popularity: sql`popularity + ${u.units}`, sales_30d: sql`round(popularity + ${u.units})::int` } as never)
+          .set({ popularity: sql`greatest(popularity + ${n}, 0)`, sales_30d: sql`greatest(sales_30d + ${n}, 0)` } as never)
           .where('product_id', '=', u.productId)
           .execute();
       }
     },
-    async decaySales(factor) {
-      await d
-        .updateTable('search_documents')
-        .set({ popularity: sql`round(popularity * ${factor}::numeric, 4)`, sales_30d: sql`round(popularity * ${factor}::numeric)::int` } as never)
-        .execute();
+    async sumSales(from) {
+      await sql`
+        update search.search_documents doc
+           set sales_30d = x.units, popularity = x.units
+          from (select d2.product_id, coalesce(sum(s.units), 0)::int as units
+                  from search.search_documents d2
+                  left join search.product_sales_daily s on s.product_id = d2.product_id and s.day >= ${from}::date
+                 group by d2.product_id) x
+         where x.product_id = doc.product_id
+           and (doc.sales_30d <> x.units or doc.popularity <> x.units)`.execute(d);
+    },
+    async pruneSales(before) {
+      await d.deleteFrom('product_sales_daily').where('day', '<', before).execute();
     },
     async platformUnits30d() {
       const r = await d.selectFrom('search_documents').select(sql<number>`coalesce(sum(sales_30d), 0)::int`.as('n')).executeTakeFirstOrThrow();

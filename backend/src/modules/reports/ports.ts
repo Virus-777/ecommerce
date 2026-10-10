@@ -70,6 +70,8 @@ export interface ReportsRepository {
   /* catalogue and definitions */
   seedGroup(row: GroupRow): Promise<void>;
   listGroups(): Promise<GroupRow[]>;
+  /** Names the owner of a report group; undefined for an unknown group */
+  setGroupOwner(key: string, ownerStaffId: string): Promise<GroupRow | undefined>;
   seedMetric(row: MetricRow, version: VersionRow): Promise<void>;
   getMetric(key: string, opts?: { forUpdate?: boolean }): Promise<MetricRow | undefined>;
   listMetrics(filter: { group?: string; status?: string; keys?: string[] }): Promise<MetricRow[]>;
@@ -130,6 +132,8 @@ export interface ReportsRepository {
 
   /* facts: refunds, returns, customers */
   insertRefund(row: Row<'fact_refunds'>): Promise<boolean>;
+  /** A payout to the seller was paid on a day between these market days (inclusive) */
+  paidPayoutBetween(sellerId: string, fromDay: string, toDay: string): Promise<boolean>;
   refundsAgg(f: { start: Date; end: Date; timeZone: string; ownerType?: string; sellerId?: string }, group: 'bucket' | 'reason' | 'none', bucket?: 'day' | 'week' | 'month'): Promise<{ key: string | null; amount: number; count: number }[]>;
   insertReturn(row: Row<'fact_returns'>): Promise<boolean>;
   updateReturn(returnId: string, patch: Partial<Row<'fact_returns'>>): Promise<number>;

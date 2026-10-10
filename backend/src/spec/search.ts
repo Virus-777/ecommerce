@@ -864,15 +864,15 @@ export interface SearchPublicApi {
   /** Unavailable searches for the products and discovery report Used by: reports. */
   zeroResultStats(from: string, to: string): Promise<ZeroResultQuery[]>;
   /** Store search with spelling correction, facets, store match, empty guidance and sponsored placeholders (ads are filled by advertising) Used by: graphql. */
-  runSearch(query: unknown & { exact?: boolean, postalCode?: string, searchId?: string }, page: common.PageInput): Promise<{ context: SearchContext, items: { productId: string, match: unknown }[], sponsoredSlots: unknown[], page: unknown }>;
+  runSearch(query: unknown & { exact?: boolean, postalCode?: string, searchId?: string }, page: common.PageInput): Promise<{ context: SearchContext, items: { productId: string, match: unknown }[], sponsoredSlots: unknown[], page: common.PageInfo }>;
   /** Category page listing with category attribute facets and category context Used by: graphql. */
-  listCategoryProducts(slug: string, query: unknown & { postalCode?: string, searchId?: string }, page: common.PageInput): Promise<{ context: SearchContext, items: { productId: string, match: unknown }[], sponsoredSlots: unknown[], page: unknown } | null>;
+  listCategoryProducts(slug: string, query: unknown & { postalCode?: string, searchId?: string }, page: common.PageInput): Promise<{ context: SearchContext, items: { productId: string, match: unknown }[], sponsoredSlots: unknown[], page: common.PageInfo } | null>;
   /** Suggestions while typing: queries, categories, brands, stores, products and recent searches Used by: graphql. */
   getSuggestions(prefix: string, session?: { customerId?: string, guestSessionId?: string }): Promise<Suggestions>;
   /** Similar in-stock products per product (related products, alternatives for unavailable products) Used by: graphql. */
   similarProducts(productIds: string[], limit: number): Promise<Record<string, string[]>>;
   /** Storefront product grid: products with a live offer from this seller, with the same filters, facets and sorts as search (query.filters.sellerIds is replaced by the seller). Each result's match.offer is this seller's offer. No store match and no sponsored slots. Used by: graphql. */
-  listSellerProducts(sellerId: string, query: unknown & { postalCode?: string, searchId?: string }, page: common.PageInput): Promise<{ context: SearchContext, items: { productId: string, match: unknown }[], sponsoredSlots: unknown[], page: unknown }>;
+  listSellerProducts(sellerId: string, query: unknown & { postalCode?: string, searchId?: string }, page: common.PageInput): Promise<{ context: SearchContext, items: { productId: string, match: unknown }[], sponsoredSlots: unknown[], page: common.PageInfo }>;
   /** Storefront category chips: categories in which the seller has live offers, with product counts from the search index (the REST storefront's categories) Used by: sellers, graphql. */
   sellerCategoryCounts(sellerIds: string[]): Promise<Record<string, { categoryId: string, name: string, slug: string, count: number, comingSoon: boolean }[]>>;
   /** Best-seller rank of products in their category by 30-day units sold; null when not ranked (outside the top 100 or below bestSellingMinOrders) Used by: graphql, content. */
@@ -998,6 +998,15 @@ export interface SearchDb {
     sponsored: boolean;
     at: Date;
   };
+  /** Units and orders per product per market day (decision S-D3), fed idempotently by orders events through the inbox; the nightly job sums the last 30 days into search_documents.sales_30d. Rebuildable from orders */
+  product_sales_daily: {
+    product_id: string;
+    /** market time zone */
+    day: string;
+    units: number;
+    orders: number;
+    updated_at: Date;
+  };
   /** Products waiting to be reindexed */
   dirty_documents: {
     product_id: string;
@@ -1090,6 +1099,7 @@ export const endpoints = defineEndpoints({
         arrivesBy: z.iso.date().optional(),
         attrs: z.string().optional(),
         listedWithinDays: z.coerce.number().int().optional(),
+        onSale: z.stringbool().describe("Same as GET /products: only products with a deal price now, so facet counts match the deals list").optional(),
         sort: z.enum(["recommended", "price_asc", "price_desc", "newest", "rating", "best_selling"]).optional(),
         postalCode: z.string().optional(),
       }),
@@ -1473,7 +1483,7 @@ export const spec = defineModuleSpec({
   chapters: [4,3,19],
   summary: "Finding products: a product index built from catalog, offers, inventory and reviews events; search with misspelling tolerance and corrections, suggestions (queries, categories, brands, stores, products, recent searches), universal and category filters with counts, sorting, sponsored slots from advertising, and guidance for empty or unavailable results.",
   dependsOn: ["catalog","offers"],
-  optionalDeps: ["inventory","reviews","sellers","advertising","promotions","customers","media","reports","wishlist","orders","returns"],
+  optionalDeps: ["inventory","reviews","sellers","advertising","promotions","customers","media","reports","wishlist","orders","returns","audit"],
   publicApi: ["searchProducts","getProductCards","zeroResultStats","runSearch","listCategoryProducts","getSuggestions","similarProducts","listSellerProducts","sellerCategoryCounts","bestSellerRanks"],
   permissions: [
     {
@@ -1545,7 +1555,8 @@ export const spec = defineModuleSpec({
       "sellers.seller.closed": "Remove the store from suggestions",
       "promotions.campaign.started": "Update deal badges, was prices and deal end times on cards",
       "promotions.campaign.ended": "Remove deal badges",
-      "orders.order.placed": "Count units for best-selling sort and popularity (phase 2 sort)",
+      "orders.order.placed": "Add the order's units per product to product_sales_daily for the placed day (items read with orders.getOrder; inbox-claimed per event so redelivery never counts twice). Feeds best-selling sort and popularity (phase 2 sort)",
+      "orders.order.cancelled": "Subtract the cancelled order's units from product_sales_daily for the day it was placed (inbox-claimed), so declined-payment orders do not count as sales",
       "identity.guest_session.claimed": "Merge the guest session's recent searches into the account (identity calls nothing in search)",
       "catalog.brand.changed": "Reindex the brand name, slug and status on the brand's product documents and brand suggestions; only active brands are suggested or offered as a facet",
       "customers.marketing_preferences.changed": "recentSearches false: delete the customer's saved recent searches and stop saving new ones; true: start saving again (nothing is restored)"
@@ -1558,7 +1569,7 @@ export const spec = defineModuleSpec({
     },
     "search.refresh-delivery-flags": {
       "schedule": "every 15 min",
-      "does": "Recompute 'Ships today' and arrives-by flags as dispatch cutoffs pass"
+      "does": "Recompute 'Ships today' and arrives-by flags as dispatch cutoffs pass (arrival = dispatch days + transitBusinessDays)"
     },
     "search.refresh-suggestions": {
       "schedule": "hourly",
@@ -1570,7 +1581,7 @@ export const spec = defineModuleSpec({
     },
     "search.sales-counts": {
       "schedule": "nightly 03:30 market time",
-      "does": "30-day units sold per product for best-selling sort and popularity; enables best_selling once bestSellingMinOrders is reached; ranks the top 100 products per leaf category (best_seller_rank, shown as #3 in Headphones)"
+      "does": "Sum product_sales_daily over the last 30 days into sales_30d per product (and delete rows older than 90 days) for best-selling sort and popularity; enables best_selling once bestSellingMinOrders is reached; ranks the top 100 products per leaf category (best_seller_rank, shown as #3 in Headphones)"
     },
     "search.prune-logs": {
       "schedule": "daily 04:00 market time",
@@ -1623,6 +1634,14 @@ export const spec = defineModuleSpec({
       "desc": "Platform orders in 30 days before best-selling sort is offered",
       "type": "int",
       "min": 0
+    },
+    "transitBusinessDays": {
+      "default": 3,
+      "desc": "Carrier transit business days assumed for every destination in the market (decision S-D4): search results' arrives-by filter and delivery cues use dispatch days + this. The purchase box and checkout show shipping's real estimate",
+      "type": "duration",
+      "min": 0,
+      "max": 15,
+      "unit": "business days"
     },
     "excludeOutOfStockByDefault": {
       "default": true,
@@ -2029,6 +2048,28 @@ export const spec = defineModuleSpec({
         "nullable": false
       },
       "at": {
+        "type": "timestamptz",
+        "nullable": false
+      }
+    },
+    "product_sales_daily": {
+      "product_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "day": {
+        "type": "date",
+        "nullable": false
+      },
+      "units": {
+        "type": "int",
+        "nullable": false
+      },
+      "orders": {
+        "type": "int",
+        "nullable": false
+      },
+      "updated_at": {
         "type": "timestamptz",
         "nullable": false
       }

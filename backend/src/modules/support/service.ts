@@ -37,8 +37,13 @@ export class SupportService implements SupportPublicApi {
   /* ---------------- public API (in-process) */
 
   /** Open a case from another module (return escalation, delivery exception, failed refund). With returnId the return's evidence is copied in through returns.listEvidence. */
-  async openCase(input: { kind: string; category: string; orderId?: string; orderItemIds?: string[]; customerId?: string; sellerId?: string; returnId?: string; subject: string; message: string; openedBy: common.Actor }): Promise<CaseView> {
+  async openCase(input: { kind: string; category: string; orderId?: string; orderItemIds?: string[]; customerId?: string; sellerId?: string; returnId?: string; trustReportId?: string; subject: string; message: string; openedBy: common.Actor }): Promise<CaseView> {
     return this.views.view(await this.cases.openFromModule(input), 'admin');
+  }
+
+  /** Customers with at least one case that is not resolved or closed (the customer list filters before paging) */
+  customerIdsWithOpenCases(filter: { ids?: string[] }): Promise<string[]> {
+    return this.reads.customerIdsWithOpenCases(filter);
   }
 
   /** Open and recent cases per order item for the order page */
@@ -122,6 +127,21 @@ export class SupportService implements SupportPublicApi {
   /** returns.refund.approved: Move the matching refund remedy to approved/in progress */
   onRefundApprovedFromReturns(event: EventPayload<'returns.refund.approved'>): Promise<void> {
     return this.automation.onRefundApproved(event);
+  }
+
+  /** returns.refund.declined: Cancel the refund remedy behind it and put the case back in the owner's queue */
+  onRefundDeclinedFromReturns(event: EventPayload<'returns.refund.declined'>): Promise<void> {
+    return this.automation.onRefundDeclined(event);
+  }
+
+  /** shipping.shipment.dispatched: Complete ship-by-deadline remedies whose items shipped by the promised date */
+  onShipmentDispatchedFromShipping(event: EventPayload<'shipping.shipment.dispatched'>): Promise<void> {
+    return this.automation.onShipmentDispatched(event);
+  }
+
+  /** notifications.email_reply.received: the customer's email reply joins the case thread */
+  onEmailReplyReceivedFromNotifications(event: EventPayload<'notifications.email_reply.received'>, eventId?: string): Promise<void> {
+    return this.automation.onEmailReplyReceived(event, eventId);
   }
 
   /** payments.refund.sent: Complete the refund remedy; the case can now be resolved */

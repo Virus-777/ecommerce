@@ -48,6 +48,7 @@ const cancelled = (orderId: string, itemId: string, stockItemId: string, quantit
     quantity,
     cancellationId,
     initiatedBy: 'customer',
+    notifyCustomer: true,
     reasonCode: 'changed_mind',
     beforeDispatch: true,
     countsAgainstSeller: false,

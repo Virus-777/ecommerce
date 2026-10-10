@@ -7,8 +7,9 @@ import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import { pageOf, toPageRequest, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
+import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
 import type * as offers from '../../../spec/offers.js';
-import type { AccountCoupons, CodeCheck, CouponCard, DealProduct, DealsPage, FlashCountdown, FlashSaleBlock, OfferPromotion, ProductPromotions, PromoBadge, PromoBanner, PublicCampaign, UpcomingEvent } from '../../../spec/promotions.js';
+import type { AccountCoupons, CodeCheck, CouponCard, DealProduct, DealsPage, DiscountAllocation, FlashCountdown, FlashSaleBlock, OfferPromotion, ProductPromotions, PromoBadge, PromoBanner, PublicCampaign, UpcomingEvent } from '../../../spec/promotions.js';
 import { evaluate, type EvalLine, type PriceOption } from '../domain/evaluate.js';
 import { amountAndUnit, bpsLabel, COUPON_KINDS, customerCheck, dayLabel, discountLabel, isRunning, m, moneyLabel, needsConsent, PRICE_KINDS, scopeCheck, scopeLabel, SHIPPING_KINDS, type CampaignModel, type OfferAttrs } from '../domain/rules.js';
 import { iso, periodOf } from '../mappers.js';
@@ -48,18 +49,23 @@ export class StorefrontPart extends Part {
     const flashIds = [...running.filter((c) => c.kind === 'flash_sale'), ...upcomingFlash].map((c) => c.id);
     const flashRows = flashIds.length ? await this.repo.find('flash_items', { campaign_id: flashIds, offer_id: ids }) : [];
     const eligible = await this.repo.eligibleFor(ids, running.map((c) => c.id));
-    const consents = await this.parts.participation.consents(running.filter(needsConsent).map((c) => c.id));
+    // automatic discounts the customer gets without doing anything: autoApply coupons with no minimum spend for everyone
+    // (or every signed-in customer). Category-scoped ones are not resolved here (no catalog read per offer).
+    const automatic = (await this.core.models(await this.repo.runningCampaigns(at, { kinds: [...COUPON_KINDS] }))).filter(
+      (c) => c.autoApply && !c.discount.minSpend && (c.discount.percentOffBps || c.discount.amountOff) && (c.eligibility.audience === 'everyone' || (c.eligibility.audience === 'signed_in' && Boolean(customerId))),
+    );
+    const consents = await this.parts.participation.consents([...running, ...automatic].filter(needsConsent).map((c) => c.id));
     const usage = new Map<string, { uses: number; units: number }>();
-    if (customerId && running.length) {
+    if (customerId && (running.length || automatic.length)) {
       const keys = [customerId, ...ids.map((o) => `${customerId}:${o}`)];
-      for (const u of await this.repo.find('usage_counters', { campaign_id: running.map((c) => c.id), customer_key: keys })) usage.set(u.customer_key === customerId ? u.campaign_id : `${u.campaign_id}:${u.customer_key.slice(customerId.length + 1)}`, { uses: u.uses, units: u.units });
+      for (const u of await this.repo.find('usage_counters', { campaign_id: [...running, ...automatic].map((c) => c.id), customer_key: keys })) usage.set(u.customer_key === customerId ? u.campaign_id : `${u.campaign_id}:${u.customer_key.slice(customerId.length + 1)}`, { uses: u.uses, units: u.units });
     }
     const lines: EvalLine[] = [];
     const priceOptions = new Map<string, PriceOption[]>();
     for (const o of list) {
-      const sellerId = o.sellerId ?? o.id;
+      const sellerId = o.sellerId ?? OFFICIAL_STORE_ID;
       const attrs: OfferAttrs = { offerId: o.id, productId: o.productId, sellerId: o.sellerId ?? null, official: o.ownerType === 'official', categoryIds: [], brandId: null };
-      lines.push({ lineId: o.id, offerId: o.id, productId: o.productId, variantId: o.variantId, sellerId, officialStore: attrs.official, categoryId: o.productId, quantity: 1, unitPrice: o.price, packageId: o.id, attrs });
+      lines.push({ lineId: o.id, offerId: o.id, productId: o.productId, variantId: o.variantId, sellerId, officialStore: attrs.official, categoryId: null, quantity: 1, unitPrice: o.price, packageId: o.id, attrs });
       const opts: PriceOption[] = [];
       for (const c of running) {
         if (!eligible.some((e) => e.campaign_id === c.id && e.offer_id === o.id)) continue;
@@ -75,7 +81,23 @@ export class StorefrontPart extends Part {
       }
       priceOptions.set(o.id, opts);
     }
-    const out = evaluate({ at, currency: list[0]!.price.currency, customerId, signedIn: Boolean(customerId), isNewCustomer: null, region: null, couponsPerPackage: 1, lines, shipping: null, priceOptions, coupons: [], rejected: [], usage, consents });
+    const out = evaluate({
+      at,
+      currency: list[0]!.price.currency,
+      customerId,
+      signedIn: Boolean(customerId),
+      isNewCustomer: null,
+      region: null,
+      couponsPerPackage: 1,
+      lines,
+      shipping: null,
+      priceOptions,
+      coupons: automatic.map((c) => ({ campaign: c, source: 'automatic' as const, code: null, codeInfo: null })),
+      rejected: [],
+      usage,
+      consents,
+    });
+    const automaticById = new Map(automatic.map((c) => [c.id, c]));
     const promos = await this.activeSellerPromotions([...new Set(list.map((o) => o.sellerId).filter((s): s is string => Boolean(s)))], { customerId: customerId ?? undefined, at: at.toISOString() }, true);
     const byId = new Map(running.map((c) => [c.id, c]));
     const days = Number(await this.core.setting('referencePriceDays')) || 30;
@@ -117,9 +139,19 @@ export class StorefrontPart extends Part {
         purchaseLimit: l.purchaseLimit ?? null,
         flash: flashRow && flashCampaign ? this.countdown(flashCampaign, flashRow, at) : null,
         sellerPromos,
+        ...this.automaticDiscountOf(l.allocations, automaticById, l.unitPrice.currency),
       });
     }
     return result;
+  }
+
+  /** Per-unit automatic discount on top of the price (one unit was evaluated), with its label; null when none */
+  automaticDiscountOf(allocations: DiscountAllocation[], automatic: Map<string, CampaignModel>, currency: string): { automaticDiscount: common.Money | null; automaticDiscountLabel: string | null } {
+    const own = allocations.filter((a) => automatic.has(a.campaignId) && a.amount.amount > 0);
+    if (!own.length) return { automaticDiscount: null, automaticDiscountLabel: null };
+    const amount = own.reduce((s, a) => s + a.amount.amount, 0);
+    const label = own.map((a) => `${automatic.get(a.campaignId)!.name}, applied automatically`).join(' + ');
+    return { automaticDiscount: m(amount, currency), automaticDiscountLabel: label };
   }
 
   countdown(c: CampaignModel, f: FlashItemRec, at: Date): FlashCountdown {
@@ -159,9 +191,19 @@ export class StorefrontPart extends Part {
     return this.flashBlock(c!);
   }
 
-  async liveDeals(opts: { limit: number }): Promise<FlashSaleBlock[]> {
+  async liveDeals(opts: { limit: number; campaignId?: string }): Promise<FlashSaleBlock[]> {
     const limit = Math.min(Math.max(opts.limit || 1, 1), 20);
     const now = this.now();
+    if (opts.campaignId !== undefined) {
+      // one campaign (content SourceRule.campaignId): its block while it is live or upcoming
+      if (!isUuid(opts.campaignId)) return [];
+      const row = await this.repo.get('campaigns', opts.campaignId);
+      if (!row || row.kind !== 'flash_sale') return [];
+      const [c] = await this.core.models([row]);
+      const live = isRunning(c!, now);
+      const upcoming = row.status === 'scheduled' && c!.startsAt.getTime() > now.getTime();
+      return live || upcoming ? [await this.flashBlock(c!)] : [];
+    }
     const live = await this.repo.runningCampaigns(now, { kinds: ['flash_sale'] });
     const upcoming = live.length >= limit ? [] : await this.repo.find('campaigns', { status: 'scheduled', kind: 'flash_sale', starts_at: { op: '>', value: now } }, { orderBy: [['starts_at', 'asc']], limit: limit - live.length });
     const models = await this.core.models([...live, ...upcoming].slice(0, limit));
@@ -284,7 +326,7 @@ export class StorefrontPart extends Part {
     if (c.status === 'paused') throw notEligible('expired', "This coupon isn't available right now");
     if (c.startsAt.getTime() > now.getTime()) throw notEligible('not_started', `This coupon starts on ${dayLabel(c.startsAt, c.timeZone)}`);
     if (!this.isCard(c)) throw notEligible('not_found', 'This coupon is used with its code at checkout');
-    const isNew = c.eligibility.audience === 'new_customers' ? await this.parts.checkout.isNewCustomer(customerId) : null;
+    const isNew = c.eligibility.audience === 'new_customers' ? await this.parts.checkout.isNewCustomer({ customerId }, customerId) : null;
     const who = customerCheck(c.eligibility.audience === 'regions' ? { audience: 'everyone' } : c.eligibility, { signedIn: true, isNewCustomer: isNew, region: null });
     if (!who.ok) throw notEligible(who.reason, who.message);
     const [card] = await this.cards([c], customerId);
@@ -322,7 +364,7 @@ export class StorefrontPart extends Part {
     if (row.assigned_customer_id && row.assigned_customer_id !== customerId) return { code: typed, valid: false, coupon: null, reason: "We couldn't find this code. Check the spelling." };
     const usage = new Map<string, { uses: number; units: number }>();
     if (customerId) for (const u of await this.repo.find('usage_counters', { campaign_id: c.id, customer_key: customerId })) usage.set(u.campaign_id, { uses: u.uses, units: u.units });
-    const isNew = customerId && c.eligibility.audience === 'new_customers' ? await this.parts.checkout.isNewCustomer(customerId) : null;
+    const isNew = customerId && c.eligibility.audience === 'new_customers' ? await this.parts.checkout.isNewCustomer({ customerId }, customerId) : null;
     // the cart decides which items a code covers; here only its own conditions count
     const out = evaluate({ at: this.now(), currency: c.currency, customerId, signedIn: Boolean(customerId), isNewCustomer: isNew, region: null, couponsPerPackage: 1, lines: [], shipping: null, priceOptions: new Map(), coupons: [{ campaign: c, source: 'code', code: typed, codeInfo: { id: row.id, code: row.code, kind: row.kind, maxRedemptions: row.max_redemptions, redemptions: row.redemptions, active: row.active, assignedCustomerId: row.assigned_customer_id } }], rejected: [], usage, consents: new Map() });
     const r = out.rejected[0];
@@ -466,10 +508,10 @@ export class StorefrontPart extends Part {
       const label = discountLabel(c.discount, c.currency);
       const banner: PromoBanner & { offerIds?: string[] } = {
         campaignId: c.id,
-        title: c.code ? `${label} with code ${c.code}` : label,
-        detail: c.code ? `Use code ${c.code} at checkout${c.discount.minSpend ? ` on orders over ${moneyLabel(c.discount.minSpend.amount, c.currency)}` : ''}` : 'Applied automatically at checkout',
+        title: c.code && !c.autoApply ? `${label} with code ${c.code}` : label,
+        detail: c.code && !c.autoApply ? `Use code ${c.code} at checkout${c.discount.minSpend ? ` on orders over ${moneyLabel(c.discount.minSpend.amount, c.currency)}` : ''}` : c.autoApply ? 'Applied automatically at checkout' : 'Clip it to use it at checkout',
         period: periodOf(c),
-        autoApply: !c.code,
+        autoApply: c.autoApply,
         code: c.code,
         ...(withOffers && c.scope.mode === 'offers' ? { offerIds: c.scope.include.filter((t) => t.kind === 'offer').map((t) => t.id) } : {}),
       };

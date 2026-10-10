@@ -66,7 +66,7 @@ export class CatalogTaxonomy extends CatalogViews {
     if (body.parentId && !tax.byId.has(body.parentId)) throw invalid('parentId', 'Parent category not found');
     const siblings = tax.children(body.parentId ?? null);
     const id = newId();
-    const undo = body.imageId ? await this.attachAll([{ assetId: body.imageId, kind: 'content_block', path: 'imageId' }], { refId: id, refLabel: name }, PLATFORM) : null;
+    const undo = body.imageId ? await this.attachAll([{ assetId: body.imageId, kind: 'category_image', path: 'imageId' }], { refId: id, refLabel: name }, PLATFORM) : null;
     let row: CategoryRow;
     try {
       row = await this.repo.insertCategory({
@@ -114,7 +114,7 @@ export class CatalogTaxonomy extends CatalogViews {
     if (body.comingSoon != null) patch.coming_soon = body.comingSoon;
     let swap: Awaited<ReturnType<typeof this.swapMedia>> | null = null;
     if (body.imageId !== undefined && body.imageId !== before.image_media_id) {
-      swap = await this.swapMedia([before.image_media_id], [body.imageId], 'content_block', 'imageId', { refId: id, refLabel: patch.name ?? before.name }, PLATFORM);
+      swap = await this.swapMedia([before.image_media_id], [body.imageId], 'category_image', 'imageId', { refId: id, refLabel: patch.name ?? before.name }, PLATFORM, ['content_block']);
       patch.image_media_id = body.imageId;
     }
     let after: CategoryRow;
@@ -310,7 +310,7 @@ export class CatalogTaxonomy extends CatalogViews {
     const now = this.now();
     const media = [
       ...(body.logoId ? [{ assetId: body.logoId, kind: 'brand_logo' as const, path: 'logoId' }] : []),
-      ...(body.bannerId ? [{ assetId: body.bannerId, kind: 'content_block' as const, path: 'bannerId' }] : []),
+      ...(body.bannerId ? [{ assetId: body.bannerId, kind: 'brand_banner' as const, path: 'bannerId' }] : []),
     ];
     const undo = await this.attachAll(media, { refId: id, refLabel: name }, PLATFORM);
     let row: BrandRow;
@@ -365,7 +365,7 @@ export class CatalogTaxonomy extends CatalogViews {
     }
     if (body.bannerId !== undefined && body.bannerId !== before.banner_media_id) {
       try {
-        swaps.push(await this.swapMedia([before.banner_media_id], [body.bannerId], 'content_block', 'bannerId', label, PLATFORM));
+        swaps.push(await this.swapMedia([before.banner_media_id], [body.bannerId], 'brand_banner', 'bannerId', label, PLATFORM, ['content_block']));
       } catch (err) {
         for (const s of swaps) await s.undo();
         throw err;

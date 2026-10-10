@@ -96,7 +96,7 @@ export async function boot(): Promise<Kit> {
   const customer = (id: string) => ({ id, userId: id, ref: 'CU-000001', displayName: h.names.get(id) ?? 'Sam Rivera', email: 'sam@example.com', accountStatus: 'active' as const, canOrder: true, canMessage: true });
   const live = (o: offers.Offer) => ['active', 'paused', 'out_of_stock'].includes(o.status);
   const app = await buildTestApp({
-    only: ['reviews', 'offers', 'media', 'customers', 'audit', 'shipping', 'access'],
+    only: ['reviews', 'offers', 'media', 'customers', 'audit', 'shipping', 'access', 'workqueues'],
     clock,
     config: { rateLimits: false, launchPhase: 4 },
     apiStubs: {
@@ -131,11 +131,21 @@ export async function boot(): Promise<Kit> {
         listOwnOffersForProduct: async (sellerId, productIds) => Object.fromEntries(productIds.map((p) => [p, h.offers.filter((o) => o.sellerId === sellerId && o.productId === p)])),
         getFeaturedOfferForProduct: async (items) => Object.fromEntries(items.map((i) => [i.productId, h.offers.find((o) => o.productId === i.productId && o.status === 'active') ?? null])),
         listOffersAdmin: async (f) => {
-          const items = h.offers.filter((o) => live(o) && (f.sellerId ? o.sellerId === f.sellerId : true) && (f.official === undefined ? true : f.official === (o.ownerType === 'official')));
+          const items = h.offers.filter((o) => live(o) && (f.sellerId ? o.sellerId === f.sellerId : true) && (f.productId ? o.productId === f.productId : true) && (f.official === undefined ? true : f.official === (o.ownerType === 'official')));
           return { items, nextCursor: null };
         },
         listActiveOffersForProduct: async (productId) =>
           h.offers.filter((o) => o.productId === productId && o.status === 'active').map((o) => ({ id: o.id, productId: o.productId, ownerType: o.ownerType }) as unknown as offers.OfferSummary),
+      },
+      workqueues: {
+        raise: async (input) => {
+          rec('workqueues.raise', input);
+          return { id: newId() } as never;
+        },
+        resolveBySource: async (key, outcome) => {
+          rec('workqueues.resolveBySource', key, outcome);
+          return 1;
+        },
       },
       media: {
         attach: async (assetId, usage, owner) => {

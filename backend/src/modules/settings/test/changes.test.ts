@@ -228,7 +228,9 @@ describe('approval', () => {
     expect(res.statusCode, res.body).toBe(200);
     const pending = res.json();
     expect(pending).toMatchObject({ status: 'pending_approval', approval: { required: true, approvalRequestId: h.access.lastRequestId } });
-    expect(h.access.requests.at(-1)).toMatchObject({ action: 'settings.changes.apply', target: { type: 'setting_change', id: c.id, ref: c.ref }, reason: 'Fraud wave' });
+    // a Business Owner rule goes to the Business Owner only (never another Platform Administrator)
+    expect(h.access.checks.at(-1)).toBe('settings.changes.apply-owner');
+    expect(h.access.requests.at(-1)).toMatchObject({ action: 'settings.changes.apply-owner', target: { type: 'setting_change', id: c.id, ref: c.ref }, reason: 'Fraud wave' });
     expect(h.events.map((e) => e.name)).toEqual(['settings.change.submitted']);
     expect(await h.api.get('checkout.guestCheckoutEnabled')).toBe(true);
 
@@ -255,6 +257,7 @@ describe('approval', () => {
     const res = await submit(h, c.id);
     // a second reviewer is always someone else, even when the caller holds the authority
     expect(res.json().status).toBe('pending_approval');
+    expect(h.access.requests.at(-1)).toMatchObject({ action: 'settings.changes.apply' });
 
     const bo = (await draft(h, { items: [{ key: 'market.serviceRegion', value: { code: 'US-49', label: 'United States, 48 states and Alaska', includedRegions: ['AK', 'CA'] } }], effectiveAt: inDays(h, 31) })).json();
     expect(bo.impact.approvalRule).toBe('business_owner');
@@ -333,7 +336,7 @@ describe('rules a module declares for its settings', () => {
     expect(c.impact).toMatchObject({ blocking: [], needsApproval: true, approvalRule: 'business_owner', approvers: ['Business Owner'] });
     const res = await submit(h, c.id);
     expect(res.json()).toMatchObject({ status: 'pending_approval', approval: { required: true } });
-    expect(h.access.requests.at(-1)).toMatchObject({ action: 'settings.changes.apply', details: { approvalRule: 'business_owner' } });
+    expect(h.access.requests.at(-1)).toMatchObject({ action: 'settings.changes.apply-owner', details: { approvalRule: 'business_owner' } });
     await h.app.inject({ method: 'POST', url: `/api/admin/settings/changes/${c.id}/cancel`, headers: staff(), payload: { reason: 'Test done' } });
   });
 

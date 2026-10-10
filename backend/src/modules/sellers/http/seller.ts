@@ -49,5 +49,6 @@ export const sellerRoutes = (service: SellersService) => {
     listAgreements: async ({ sellerId }) => accounts.listAgreements(sellerId),
     acceptAgreement: async ({ sellerId, params, body, actor, requestId }) => accounts.acceptAgreement(sellerId, params.key, body, { actor, requestId }),
     requestSellerClosure: async ({ sellerId, body, actor, requestId }) => accounts.requestSellerClosure(sellerId, body.reason, { actor, requestId }),
+    reactivateMember: async ({ sellerId, params, body, actor, requestId }) => members.reactivateMember(sellerId, params.id, body?.reason, { actor, requestId }),
   });
 };

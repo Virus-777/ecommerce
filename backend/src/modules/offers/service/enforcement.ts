@@ -9,7 +9,7 @@ import type { EventPayload } from '../../../kernel/events/index.js';
 import type * as common from '../../../spec/common.js';
 import type { StatusReason } from '../../../spec/offers.js';
 import { activityLabel, inScope, type ScopeLike } from '../domain/rules.js';
-import { strings } from '../mappers.js';
+import { enforcementIdOf, offerTitle, strings } from '../mappers.js';
 import type { OfferRec } from '../ports.js';
 import { Part, SYSTEM, type By, type ProductCache, type TransitionSpec } from './core.js';
 
@@ -226,9 +226,11 @@ export class EnforcementPart extends Part {
         try {
           await this.repo.transaction(async (tx) => {
             const locked = await this.core.offerRow(r.id, { repo: tx, forUpdate: true });
-            await tx.update('offers', r.id, { product_id: kept.product.id, variant_id: target!.id, terms_version: locked.published_at ? locked.terms_version + 1 : locked.terms_version, updated_at: this.now() });
+            await tx.update('offers', r.id, { product_id: kept.product.id, variant_id: target!.id, title: offerTitle(kept.product.title, target!.options), terms_version: locked.published_at ? locked.terms_version + 1 : locked.terms_version, updated_at: this.now() });
           });
           moved = true;
+          // the stock item follows the offer to the kept product and variant
+          await this.ctx.use('inventory').updateStockItem(r.stock_item_id, { productId: kept.product.id, variantId: target.id }, by.actor);
           await this.core.markDirty([r.variant_id, target.id]);
           if (r.published_at) this.core.publish('offers.offer.updated', { offerId: r.id, productId: kept.product.id, termsVersion: r.terms_version + 1, fields: ['productId', 'variantId'] });
         } catch (err) {
@@ -243,17 +245,31 @@ export class EnforcementPart extends Part {
     await this.parts.views.refreshContentGaps(e.keptProductId);
   }
 
-  /** Box contents changed: stale missing items are flagged for the seller; content gaps refreshed */
+  /**
+   * Box contents changed: offers whose missingItems name items no longer in the box, or that miss new box items,
+   * get missing_items_stale and offers.offer.missing_items_stale once per flag (the seller is asked to review; the
+   * offer stays on sale). Titles and content gaps are refreshed from catalog.
+   */
   async onProductUpdated(e: EventPayload<'catalog.product.updated'>) {
     const p = await this.core.productAdmin(e.productId);
     if (!p) return;
     const box = p.product.includedItems;
+    const lower = (list: readonly string[]) => list.map((x) => x.toLowerCase());
     const rows = await this.repo.find('offers', { product_id: e.productId, status: { op: '<>', value: 'removed' } });
     for (const r of rows) {
       const missing = strings(r.missing_items);
-      const stale = missing.filter((m) => !box.includes(m));
-      const included = box.filter((b) => !missing.includes(b));
-      if (JSON.stringify(included) !== JSON.stringify(strings(r.included_items))) await this.repo.update('offers', r.id, { included_items: included as never, updated_at: this.now() });
+      const included = strings(r.included_items);
+      const stale = missing.filter((m) => !lower(box).includes(m.toLowerCase()));
+      const newBoxItems = box.filter((b) => !lower([...included, ...missing]).includes(b.toLowerCase()));
+      const title = offerTitle(p.product.title, p.product.variants.find((v) => v.id === r.variant_id)?.options);
+      const flag = stale.length > 0 || newBoxItems.length > 0;
+      const patch: Partial<OfferRec> = {};
+      if (title !== r.title) patch.title = title;
+      if (flag && !r.missing_items_stale) patch.missing_items_stale = true;
+      if (Object.keys(patch).length) await this.repo.update('offers', r.id, { ...patch, updated_at: this.now() });
+      if (patch.missing_items_stale) {
+        this.core.publish('offers.offer.missing_items_stale', { offerId: r.id, productId: r.product_id, variantId: r.variant_id, ownerType: r.owner_type, sellerId: r.seller_id, title, staleItems: stale, newBoxItems });
+      }
       if (!stale.length) continue;
       const already = await this.repo.findOne('offer_status_log', { offer_id: r.id, event: 'review_missing_items', reason: `Review missing items: ${stale.join(', ')} are no longer in the product's box` });
       if (already) continue;
@@ -311,12 +327,66 @@ export class EnforcementPart extends Part {
       if (r.status === 'removed') continue;
       if (hold) {
         const reason = this.core.statusReason('enforcement', e.reason, by, { reviewDate: params.reviewDate?.slice(0, 10) ?? null, appealRoute: e.appealDeadline ? `Appeal before ${e.appealDeadline.slice(0, 10)}` : null });
-        await this.makeIneligible([r], { kind: 'enforcement', id: e.enforcementId }, reason, by);
+        await this.makeIneligible([r], { kind: 'enforcement', id: e.enforcementId }, reason, by, { trustEnforcementId: e.enforcementId });
       } else {
-        const reason = this.core.statusReason('enforcement', e.reason, by, { appealRoute: e.appealDeadline ? `Appeal before ${e.appealDeadline.slice(0, 10)}` : null });
-        await this.core.move(r.id, { event: 'remove', by, reason, log: { reasonCode: 'enforcement', reason: e.reason } });
+        // status_reason keeps the enforcement id so a reversal finds the offers it removed
+        const reason = { ...this.core.statusReason('enforcement', e.reason, by, { appealRoute: e.appealDeadline ? `Appeal before ${e.appealDeadline.slice(0, 10)}` : null }), enforcementId: e.enforcementId };
+        await this.core.move(r.id, { event: 'remove', by, reason, log: { reasonCode: 'enforcement', reason: e.reason, trustEnforcementId: e.enforcementId } });
       }
     }
+  }
+
+  /**
+   * trust.enforcement.reversed: undoes what onEnforcementRecorded did for that enforcement, once per event (inbox).
+   * Offers it removed go back to Paused (reinstate path: inventory unarchives the stock item; the seller resumes);
+   * offers it held are released to their previous status (or switch to another cause still stopping them). Offers
+   * someone else changed since (seller ended, staff removed for another reason, hold replaced) are left alone and
+   * the skip is written to offer_status_log; trust's owner work item covers the rest.
+   */
+  async onEnforcementReversed(e: EventPayload<'trust.enforcement.reversed'>, eventId: string | undefined, actor?: common.Actor) {
+    const targets = (e.targets ?? []) as { type?: string; id?: string }[];
+    const ids = targets.filter((t) => t?.type === 'offer' && isUuid(t.id)).map((t) => t.id!);
+    if (!ids.length) return;
+    if (!(await this.repo.transaction((tx) => tx.claim(eventId ?? `enforcement-reversed:${e.enforcementId}`)))) return;
+    const by: By = { actor: actor ?? e.reversedBy ?? { kind: 'system', id: null, name: 'Trust and Risk' } };
+    const text = `Enforcement ${e.ref} reversed${e.appealId ? ' after an appeal' : ''}: ${e.reason}`;
+    for (const r of await this.repo.getMany('offers', ids)) {
+      const mine = enforcementIdOf(r) === e.enforcementId;
+      try {
+        if (mine && r.status === 'removed') {
+          await this.parts.manage.reinstate(r.id, text, by, { trustEnforcementId: e.enforcementId });
+          continue;
+        }
+        if (mine && r.status === 'ineligible') {
+          await this.restoreOrSwitch(r, { by, log: { reasonCode: 'enforcement_reversed', reason: text, trustEnforcementId: e.enforcementId } });
+          continue;
+        }
+      } catch (err) {
+        if (!isAppError(err) || err.status >= 500) throw err;
+        await this.noteSkipped(r, `${text}. Not undone: ${err.message}`);
+        continue;
+      }
+      await this.noteSkipped(r, `${text}. Not undone: the offer was changed by someone else since`);
+    }
+  }
+
+  /** A reversal that changes nothing on this offer, kept in its status log */
+  private async noteSkipped(r: OfferRec, reasonText: string) {
+    await this.repo.insert('offer_status_log', {
+      id: newId(),
+      offer_id: r.id,
+      from_status: r.status,
+      to_status: r.status,
+      event: 'enforcement_reversed',
+      reason_code: 'enforcement_reversal_skipped',
+      reason: reasonText,
+      affected_activity: null,
+      appeal_route: null,
+      review_date: null,
+      actor_kind: 'system',
+      actor_id: null,
+      at: this.now(),
+    });
   }
 
   async onCampaignStarted(e: EventPayload<'promotions.campaign.started'>) {

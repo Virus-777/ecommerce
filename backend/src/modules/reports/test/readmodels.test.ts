@@ -88,7 +88,7 @@ describe('order facts from events (idempotent, order-tolerant)', () => {
     const groupId = o.groups[0]!.id;
     h.placed(o);
     await h.drain();
-    const cancel = { orderId: o.id, ref: o.ref, groupId, ownerType: 'seller', sellerId, itemId: b!.id, offerId: b!.offer.offerId, stockItemId: newId(), quantity: 1, cancellationId: newId(), initiatedBy: 'seller', reasonCode: 'out_of_stock', beforeDispatch: true, countsAgainstSeller: true, refund: { itemAmount: usd(4000), discountShare: usd(0), shippingRefund: usd(500), taxRefund: usd(400), total: usd(4900) }, paymentIntentId: newId() };
+    const cancel = { orderId: o.id, ref: o.ref, groupId, ownerType: 'seller', sellerId, itemId: b!.id, offerId: b!.offer.offerId, stockItemId: newId(), quantity: 1, cancellationId: newId(), initiatedBy: 'seller', reasonCode: 'out_of_stock', beforeDispatch: true, countsAgainstSeller: true, refund: { itemAmount: usd(4000), discountShare: usd(0), shippingRefund: usd(500), taxRefund: usd(400), total: usd(4900) }, paymentIntentId: newId(), notifyCustomer: true };
     h.publish('orders', 'orders.item.cancelled', cancel);
     h.publish('orders', 'orders.item.cancelled', cancel);
     const refund = { refundId: newId(), ref: 'RF-1', orderId: o.id, origin: 'return', originId: null, amount: usd(3000), items: [{ orderItemId: a!.id, title: 'Lamp', groupId, sellerId, amount: usd(3000) }], destination: 'card', sentAt: h.clock.now().toISOString() };
@@ -117,9 +117,9 @@ describe('order facts from events (idempotent, order-tolerant)', () => {
     h.placed(o);
     await h.drain();
     const returnId = newId();
-    h.publish('returns', 'returns.return.requested', { returnId, ref: 'RT-1', orderId: o.id, ownerType: 'seller', sellerId, orderItemIds: [o.groups[0]!.items[0]!.id], reason: 'damaged', responseDueAt: h.clock.now().toISOString() });
+    h.publish('returns', 'returns.return.requested', { returnId, ref: 'RT-1', orderId: o.id, orderRef: o.ref, ownerType: 'seller', sellerId, orderItemIds: [o.groups[0]!.items[0]!.id], reason: 'damaged', responseDueAt: h.clock.now().toISOString() });
     await h.drain();
-    h.publish('returns', 'returns.return.inspected', { returnId, ownerType: 'seller', sellerId, conditionOutcome: 'damaged_in_transit', proposedStockOutcome: 'damaged', orderItemId: o.groups[0]!.items[0]!.id, variantId: newId(), stockItemId: null, quantity: 1 });
+    h.publish('returns', 'returns.return.inspected', { returnId, ref: 'RT-1', orderId: o.id, orderRef: o.ref, ownerType: 'seller', sellerId, conditionOutcome: 'damaged_in_transit', proposedStockOutcome: 'damaged', orderItemId: o.groups[0]!.items[0]!.id, variantId: newId(), stockItemId: null, quantity: 1 });
     await h.drain();
     const mine = await sellerReport(sellerId, 'seller.returns_by_reason', { preset: 'today' });
     expect(kpi(mine.body, 'service.return_requests').value).toBe(1);
@@ -154,16 +154,16 @@ describe('admin reports from the other read models', () => {
   it('service: dispatch, overdue, delivery issues, messages and the case backlog', async () => {
     const sellerId = newId();
     h.publish('shipping', 'shipping.dispatch.overdue', { orderId: newId(), orderRef: 'MK-1', groupId: newId(), ownerType: 'seller', sellerId, orderItemIds: [newId()], dueAt: h.clock.now().toISOString(), exceptionId: newId() });
-    const ex = { exceptionId: newId(), kind: 'lost_or_damaged', orderId: newId(), groupId: newId(), sellerId, orderItemIds: [newId()], dueAt: h.clock.now().toISOString() };
+    const ex = { exceptionId: newId(), kind: 'lost_or_damaged', orderId: newId(), groupId: newId(), sellerId, orderItemIds: [newId()], dueAt: h.clock.now().toISOString(), source: 'carrier' };
     h.publish('shipping', 'shipping.shipment.exception', ex);
     h.publish('shipping', 'shipping.shipment.exception', ex);
-    h.publish('messaging', 'messaging.message.sent', { messageId: newId(), conversationId: newId(), authorKind: 'customer', recipientKinds: ['seller'], sellerId });
+    h.publish('messaging', 'messaging.message.sent', { messageId: newId(), conversationId: newId(), conversationKind: 'order', authorKind: 'customer', recipientKinds: ['seller'], sellerId, officialStore: false, staffIds: [] });
     const caseA = newId();
     h.publish('support', 'support.case.opened', { caseId: caseA, ref: 'CS-1', kind: 'order_problem', category: 'damaged_item', priority: 'normal', sellerId, orderItemIds: [], handler: 'seller' });
     h.publish('support', 'support.case.opened', { caseId: newId(), ref: 'CS-2', kind: 'order_problem', category: 'late', priority: 'normal', sellerId, orderItemIds: [], handler: 'seller' });
     await h.drain();
-    h.publish('support', 'support.case.resolved', { caseId: caseA, ref: 'CS-1', sellerId, resolvedAt: h.clock.now().toISOString() });
-    h.publish('support', 'support.case.resolved', { caseId: caseA, ref: 'CS-1', sellerId, resolvedAt: h.clock.now().toISOString() });
+    h.publish('support', 'support.case.resolved', { caseId: caseA, ref: 'CS-1', sellerId, orderItemIds: [], resolvedAt: h.clock.now().toISOString() });
+    h.publish('support', 'support.case.resolved', { caseId: caseA, ref: 'CS-1', sellerId, orderItemIds: [], resolvedAt: h.clock.now().toISOString() });
     await h.drain();
     const r = await h.call('POST', '/api/admin/reports/reports/service.sellers/query', h.tokens.staff(), { preset: 'today', sellerId });
     expect(r.status).toBe(200);
@@ -248,7 +248,7 @@ describe('admin reports from the other read models', () => {
     await h.service.onItemAddedFromCart(added, env);
     await h.service.onItemAddedFromCart(added, env); // the same event again
     h.placed(h.order({ items: [{ productId, quantity: 3 }] }));
-    const stock = { stockItemId: newId(), offerId, ownerType: 'seller', variantId: newId(), available: 0, reserved: 0, previousAvailable: 2, cause: 'order' };
+    const stock = { stockItemId: newId(), offerId, ownerType: 'seller', productId: newId(), variantId: newId(), available: 0, reserved: 0, previousAvailable: 2, archived: false, cause: 'order' };
     h.publish('inventory', 'inventory.stock.changed', { ...stock, state: 'out_of_stock' });
     await h.drain();
     h.clock.advance(90 * 60_000);

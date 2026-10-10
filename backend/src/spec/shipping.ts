@@ -496,6 +496,8 @@ export const CustomerPreview: z.ZodType<CustomerPreview> = z.object({
 }).register(common.apiTypes, { id: "shipping.CustomerPreview" });
 
 export interface SellerShippingSettings {
+  /** City and state the seller ships from, e.g. 'Portland, OR' */
+  shipsFrom?: string | null;
   coverage: Coverage;
   dispatch: DispatchSchedule;
   labels: LabelSettings;
@@ -509,6 +511,7 @@ export interface SellerShippingSettings {
 }
 
 export const SellerShippingSettings: z.ZodType<SellerShippingSettings> = z.object({
+  shipsFrom: z.string().describe("City and state the seller ships from, e.g. 'Portland, OR'").nullish(),
   get coverage() {
     return Coverage;
   },
@@ -547,6 +550,10 @@ export interface SellerShippingSettingsInput {
   coverage: Coverage;
   dispatch: DispatchScheduleInput;
   buyLabelsInSellerCenter: boolean;
+  /** City and state the seller ships from, e.g. 'Portland, OR' (storefront and dispatch labels); null keeps the current value */
+  shipsFrom?: string | null;
+  /** Default package that pre-fills the record-shipment and buy-label forms; null keeps the current value */
+  defaultParcel?: Parcel | null;
   effectiveFrom?: string | null;
 }
 
@@ -558,6 +565,10 @@ export const SellerShippingSettingsInput: z.ZodType<SellerShippingSettingsInput>
     return DispatchScheduleInput;
   },
   buyLabelsInSellerCenter: z.boolean(),
+  shipsFrom: z.string().describe("City and state the seller ships from, e.g. 'Portland, OR' (storefront and dispatch labels); null keeps the current value").nullish(),
+  get defaultParcel() {
+    return Parcel.nullish();
+  },
   effectiveFrom: z.iso.datetime({ offset: true }).nullish(),
 }).register(common.apiTypes, { id: "shipping.SellerShippingSettingsInput" });
 
@@ -610,7 +621,9 @@ export const OfficialDispatchTarget: z.ZodType<OfficialDispatchTarget> = z.objec
 
 export interface SellerDispatchTarget {
   dispatchWithinBusinessDays: number;
+  /** Read-only here: from the sellerHandlingRange setting (the only source of the allowed range) */
   allowedMinDays: number;
+  /** Read-only here: from the sellerHandlingRange setting */
   allowedMaxDays: number;
   validTrackingWithinHours: number;
   onTimeTargetPct: number;
@@ -618,15 +631,28 @@ export interface SellerDispatchTarget {
 
 export const SellerDispatchTarget: z.ZodType<SellerDispatchTarget> = z.object({
   dispatchWithinBusinessDays: z.number().int(),
-  allowedMinDays: z.number().int(),
-  allowedMaxDays: z.number().int(),
+  allowedMinDays: z.number().int().describe("Read-only here: from the sellerHandlingRange setting (the only source of the allowed range)"),
+  allowedMaxDays: z.number().int().describe("Read-only here: from the sellerHandlingRange setting"),
   validTrackingWithinHours: z.number().int(),
   onTimeTargetPct: z.number(),
 }).register(common.apiTypes, { id: "shipping.SellerDispatchTarget" });
 
+export interface SellerDispatchTargetInput {
+  dispatchWithinBusinessDays: number;
+  validTrackingWithinHours: number;
+  onTimeTargetPct: number;
+}
+
+export const SellerDispatchTargetInput: z.ZodType<SellerDispatchTargetInput> = z.object({
+  dispatchWithinBusinessDays: z.number().int(),
+  validTrackingWithinHours: z.number().int(),
+  onTimeTargetPct: z.number(),
+}).register(common.apiTypes, { id: "shipping.SellerDispatchTargetInput" });
+
 export interface DispatchTargetsInput {
   official: OfficialDispatchTarget;
-  sellerDefault: SellerDispatchTarget;
+  /** The allowed handling range is changed through the sellerHandlingRange setting, not here */
+  sellerDefault: SellerDispatchTargetInput;
   effectiveFrom: string;
   reason: string;
 }
@@ -636,7 +662,7 @@ export const DispatchTargetsInput: z.ZodType<DispatchTargetsInput> = z.object({
     return OfficialDispatchTarget;
   },
   get sellerDefault() {
-    return SellerDispatchTarget;
+    return SellerDispatchTargetInput;
   },
   effectiveFrom: z.iso.datetime({ offset: true }),
   reason: z.string(),
@@ -1050,7 +1076,8 @@ export interface TrackingEvent {
   label: string;
   detail?: string | null;
   location?: string | null;
-  source: "carrier_webhook" | "carrier_poll" | "seller" | "staff" | "warehouse";
+  /** customer: tracking the customer entered for a customer-arranged return (registerReturnTracking) or a failed-delivery choice; system: events shipping records itself (label created, failed-delivery default, label void) */
+  source: "carrier_webhook" | "carrier_poll" | "seller" | "staff" | "warehouse" | "customer" | "system";
 }
 
 export const TrackingEvent: z.ZodType<TrackingEvent> = z.object({
@@ -1059,7 +1086,7 @@ export const TrackingEvent: z.ZodType<TrackingEvent> = z.object({
   label: z.string(),
   detail: z.string().nullish(),
   location: z.string().nullish(),
-  source: z.enum(["carrier_webhook", "carrier_poll", "seller", "staff", "warehouse"]),
+  source: z.enum(["carrier_webhook", "carrier_poll", "seller", "staff", "warehouse", "customer", "system"]).describe("customer: tracking the customer entered for a customer-arranged return (registerReturnTracking) or a failed-delivery choice; system: events shipping records itself (label created, failed-delivery default, label void)"),
 }).register(common.apiTypes, { id: "shipping.TrackingEvent" });
 
 export interface TrackingCorrection {
@@ -1149,6 +1176,8 @@ export interface Label {
   id: string;
   shipmentId?: string | null;
   groupId: string;
+  /** Carrier service the label was bought for (returns passes it to findDropOffPoints) */
+  carrierServiceId: string;
   carrierName: string;
   serviceName: string;
   cost: common.Money;
@@ -1168,6 +1197,7 @@ export const Label: z.ZodType<Label> = z.object({
   id: z.uuid(),
   shipmentId: z.uuid().nullish(),
   groupId: z.uuid(),
+  carrierServiceId: z.uuid().describe("Carrier service the label was bought for (returns passes it to findDropOffPoints)"),
   carrierName: z.string(),
   serviceName: z.string(),
   get cost() {
@@ -1226,8 +1256,12 @@ export interface LabelRequest {
   returnId?: string | null;
   /** Return labels: QR drop-off code or printable label */
   labelMethod?: "printed" | "prepaid_qr" | "prepaid_label" | null;
-  /** Who pays; return labels take it from returns' shipping responsibility */
+  /** Who pays; return labels take it from returns' shipping responsibility (customer: deducted from the refund by returns; finance books nothing for the label) */
   billedTo?: "seller" | "company" | "platform" | "customer" | null;
+  /** Return labels: drop-off deadline decided by returns (approval + policy dropOffDays); stored on the label and returned as Label.dropOffBy. Shipping never invents one */
+  dropOffBy?: string | null;
+  /** Label file format; default pdf (warehouse thermal printers ask for zpl) */
+  format?: "pdf" | "zpl" | null;
 }
 
 export const LabelRequest: z.ZodType<LabelRequest> = z.object({
@@ -1250,7 +1284,9 @@ export const LabelRequest: z.ZodType<LabelRequest> = z.object({
   },
   returnId: z.uuid().nullish(),
   labelMethod: z.enum(["printed", "prepaid_qr", "prepaid_label"]).describe("Return labels: QR drop-off code or printable label").nullish(),
-  billedTo: z.enum(["seller", "company", "platform", "customer"]).describe("Who pays; return labels take it from returns' shipping responsibility").nullish(),
+  billedTo: z.enum(["seller", "company", "platform", "customer"]).describe("Who pays; return labels take it from returns' shipping responsibility (customer: deducted from the refund by returns; finance books nothing for the label)").nullish(),
+  dropOffBy: z.iso.datetime({ offset: true }).describe("Return labels: drop-off deadline decided by returns (approval + policy dropOffDays); stored on the label and returned as Label.dropOffBy. Shipping never invents one").nullish(),
+  format: z.enum(["pdf", "zpl"]).describe("Label file format; default pdf (warehouse thermal printers ask for zpl)").nullish(),
 }).register(common.apiTypes, { id: "shipping.LabelRequest" });
 
 export interface LabelResult {
@@ -1960,6 +1996,10 @@ export interface ShippingShipmentExceptionEvent {
   dueAt: string;
   /** e.g. choose redelivery by a date */
   customerAction?: string | null;
+  /** What opened it: carrier events, shipping's own jobs (late dispatch, missing tracking, stalled), staff (POST /exceptions), the seller (cannot fulfill) or a customer report that support already holds as a case (support.case.opened). Support opens a case only for carrier, system and staff sources, never for customer_report, so a case never loops back into a second case */
+  source: "carrier" | "system" | "staff" | "seller" | "customer_report";
+  /** Support case the exception came from (source customer_report) */
+  caseRef?: string | null;
 }
 
 export const ShippingShipmentExceptionEvent: z.ZodType<ShippingShipmentExceptionEvent> = z.object({
@@ -1974,6 +2014,8 @@ export const ShippingShipmentExceptionEvent: z.ZodType<ShippingShipmentException
   orderItemIds: z.array(z.uuid()),
   dueAt: z.iso.datetime({ offset: true }),
   customerAction: z.string().describe("e.g. choose redelivery by a date").nullish(),
+  source: z.enum(["carrier", "system", "staff", "seller", "customer_report"]).describe("What opened it: carrier events, shipping's own jobs (late dispatch, missing tracking, stalled), staff (POST /exceptions), the seller (cannot fulfill) or a customer report that support already holds as a case (support.case.opened). Support opens a case only for carrier, system and staff sources, never for customer_report, so a case never loops back into a second case"),
+  caseRef: z.string().describe("Support case the exception came from (source customer_report)").nullish(),
 });
 
 /** shipping.exception.updated: An exception is assigned, escalated, notified or answered by the seller */
@@ -2201,7 +2243,7 @@ export interface ShippingPublicApi {
   activeNotices(postalCode?: string, carrierCodes?: string[], surface?: string): Promise<CustomerNotice[]>;
   /** Carrier services that can carry this parcel to the destination, with cost, estimated arrival and keepsPromise against the customer's promised range (same rule createLabel enforces with keepPromise) Used by: warehouse. */
   quoteLabelOptions(input: LabelRequest): Promise<LabelQuote[]>;
-  /** Buy a carrier label and create the shipment (label_created). kind = return creates the return parcel for returns (labelMethod prepaid_qr adds a QR drop-off code; dropOffBy from the return); its tracking events carry kind = return and returnId. Same key returns the same label. Used by: warehouse, returns, fulfillment-service. */
+  /** Buy a carrier label and create the shipment (label_created). kind = return creates the return parcel for returns (labelMethod prepaid_qr adds a QR drop-off code; LabelRequest.dropOffBy from the return is stored and returned on the label); format pdf (default) or zpl; its tracking events carry kind = return and returnId. Same key returns the same label. Used by: warehouse, returns, fulfillment-service. */
   createLabel(input: LabelRequest, idempotencyKey: string): Promise<LabelResult>;
   /** Void an unused label (before the first carrier scan) Used by: warehouse, returns. */
   voidLabel(labelId: string, reason: string): Promise<Label>;
@@ -2227,10 +2269,14 @@ export interface ShippingPublicApi {
   listExceptions(filter: { kind?: string, status?: string, sellerType?: string, ownerStaffId?: string, customerNotNotified?: boolean, q?: string }, page: common.PageInput): Promise<common.Page<DeliveryException>>;
   /** Open exceptions per kind and not-yet-notified customers (queue tiles) Used by: graphql. */
   countOpenExceptions(): Promise<ExceptionCounts>;
-  /** Storefront shipping section from the seller's active shipping settings and default profile (the REST storefront's shipping block): ships from, coverage and exclusions, dispatch time and same-day cutoff, carriers, methods with transit, free-shipping threshold, upcoming closures and live notices. Null when the seller has no active profile. Used by: sellers, graphql. */
+  /** Storefront shipping section from the seller's active shipping settings and default profile (the REST storefront's shipping block): ships from (seller_settings.ships_from, one query for the whole batch), coverage and exclusions, dispatch time and same-day cutoff, carriers, methods with transit, free-shipping threshold, upcoming closures and live notices. Null when the seller has no active profile. Used by: sellers, graphql. */
   getSellerShippingSummaries(sellerIds: string[]): Promise<Record<string, { shipsFrom: string | null, coverage: Coverage, coverageLabel: string, excluded: string[], handlingDays: number, sameDayCutoff: string | null, dispatchLabel: string, businessDays: string[], closures: Closure[], carriers: string[], methods: { name: string, transit: TransitRange, priceLabel: string }[], freeShippingThreshold: common.Money | null, freeShippingLabel: string | null, notices: CustomerNotice[] } | null>>;
-  /** The REPLACEMENT shipment sent for a return's replacement or exchange (shipments.kind = replacement, matched by return id) Used by: returns, graphql. */
-  shipmentsForReplacements(replacements: { replacementId: string, returnId: string }[]): Promise<Record<string, Shipment | null>>;
+  /** The REPLACEMENT shipment sent for a replacement or exchange (shipments.kind = replacement), matched by return id, or by the replacement's order item ids when it has no return (replacement decided on a case) Used by: returns, graphql. */
+  shipmentsForReplacements(replacements: { replacementId: string, returnId: string | null, orderItemIds?: string[] }[]): Promise<Record<string, Shipment | null>>;
+  /** Owner of each shipping profile (by lineage id or version id); null when unknown. offers checks that a seller only uses its own profiles (and the Official Store only official ones) Used by: offers. */
+  getProfileOwners(profileIds: string[]): Promise<Record<string, { ownerType: 'official' | 'seller', sellerId: string | null, status: string } | null>>;
+  /** The Official Store's standing free-shipping threshold in force now (default profile threshold or an active official_store free-shipping rule), e.g. for the content service strip to warn when its text disagrees Used by: content. */
+  getOfficialFreeShipping(): Promise<{ threshold: common.Money | null, methodCode: string | null, active: boolean, label: string | null }>;
   /** Carriers and services the seller can use, whether labels can be bought and the default package, for the record-shipment form Used by: graphql. */
   getSellerShippingSetup(sellerId: string): Promise<SellerShippingSetup>;
   /** Export rows for reports dataset shipping.admin.exceptions (delivery exceptions) Used by: reports. */
@@ -2322,6 +2368,8 @@ export interface ShippingDb {
     updated_by: Json;
     updated_at: Date;
     default_parcel: Json | null;
+    /** e.g. Portland, OR; null for the Official Store, which ships from inventory's default location */
+    ships_from: string | null;
   };
   closures: {
     id: string;
@@ -2431,10 +2479,11 @@ export interface ShippingDb {
     carrier_service_id: string;
     cost: number;
     currency: string;
-    billed_to: 'seller' | 'company' | 'platform';
+    billed_to: 'seller' | 'company' | 'platform' | 'customer';
     tracking_number: string;
     storage_key: string;
     format: string;
+    drop_off_by: Date | null;
     status: string;
     idempotency_key: string;
     purchased_by: Json;
@@ -3916,7 +3965,7 @@ export const spec = defineModuleSpec({
   summary: "How things get delivered: carriers and services, destinations and excluded areas, shipping profiles with rates (Official Store and sellers), free-shipping rules, dispatch targets and cutoffs, the holiday and service-interruption calendar, delivery estimates for a location, shipments with contents and tracking, labels where supported, partial shipments, and delivery exceptions with their required responses and carrier claims.",
   dependsOn: ["orders"],
   optionalDeps: ["offers","sellers","media","support","access","settings","audit","finance","fulfillment-service","identity","notifications","returns","reports"],
-  publicApi: ["quote","quoteOptions","checkCoverage","hasCoverage","dispatchDeadline","activeNotices","quoteLabelOptions","createLabel","voidLabel","handOver","getShipmentsForOrder","dispatchMetrics","registerReturnTracking","findDropOffPoints","listShipmentsForGroups","getShipment","estimateOffers","listExceptionsForOrder","listExceptions","countOpenExceptions","getSellerShippingSummaries","shipmentsForReplacements","getSellerShippingSetup","exportRows"],
+  publicApi: ["quote","quoteOptions","checkCoverage","hasCoverage","dispatchDeadline","activeNotices","quoteLabelOptions","createLabel","voidLabel","handOver","getShipmentsForOrder","dispatchMetrics","registerReturnTracking","findDropOffPoints","listShipmentsForGroups","getShipment","estimateOffers","listExceptionsForOrder","listExceptions","countOpenExceptions","getSellerShippingSummaries","shipmentsForReplacements","getProfileOwners","getOfficialFreeShipping","getSellerShippingSetup","exportRows"],
   permissions: [
     {
       "key": "shipping.settings.view",
@@ -4301,8 +4350,8 @@ export const spec = defineModuleSpec({
       "orders.item.cancelled": "Remove items from the watch; open (or update) a seller_cannot_fulfill exception when the seller cancelled; close dispatch exceptions when nothing is left to ship; void unused labels",
       "warehouse.package.packed": "Official Store package handed to the carrier pickup (handOver)",
       "sellers.seller.restricted": "Mark open exceptions of the seller for escalation to the Seller Manager",
-      "support.case.opened": "Open a lost_or_damaged exception for missing or damaged package reports when none is open",
-      "returns.replacement.created": "Watch the replacement's dispatch like an original shipment",
+      "support.case.opened": "Open a lost_or_damaged exception for missing or damaged package reports when none is open for that group and package (source customer_report, caseRef set, shipmentId from the report when given)",
+      "returns.replacement.created": "Watch the replacement's dispatch like an original shipment (with or without a return: returnId may be null for a replacement decided on a case)",
       "payments.refund.sent": "Close seller_cannot_fulfill exceptions whose refund was sent"
     },
   },
@@ -4355,7 +4404,7 @@ export const spec = defineModuleSpec({
         1,
         3
       ],
-      "desc": "Allowed seller handling days (HANDLING_OUT_OF_RANGE outside)",
+      "desc": "Allowed seller handling days [min, max] (HANDLING_OUT_OF_RANGE outside). The only source of the range: dispatch targets show it read-only",
       "type": "json",
       "approval": "second_reviewer",
       "sellerVisible": true
@@ -4461,7 +4510,7 @@ export const spec = defineModuleSpec({
     },
     "EXCEPTION_ALREADY_OPEN": {
       "status": 409,
-      "meaning": "An open exception of this kind exists for the group. details.exceptionId."
+      "meaning": "An open exception of this kind exists for the group and package (or for the group when no package is named). details.exceptionId."
     },
     "WEBHOOK_SIGNATURE_INVALID": {
       "status": 401,
@@ -4738,6 +4787,10 @@ export const spec = defineModuleSpec({
       },
       "default_parcel": {
         "type": "jsonb",
+        "nullable": true
+      },
+      "ships_from": {
+        "type": "text",
         "nullable": true
       }
     },
@@ -5137,6 +5190,10 @@ export const spec = defineModuleSpec({
       "format": {
         "type": "text",
         "nullable": false
+      },
+      "drop_off_by": {
+        "type": "timestamptz",
+        "nullable": true
       },
       "status": {
         "type": "text",

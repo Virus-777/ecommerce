@@ -1,19 +1,22 @@
 /** Product drafts (sellers and the Official Store), submission for review and the automated submission checks. */
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
+import type * as common from '../../../spec/common.js';
 import type { MediaOwner } from '../../../spec/media.js';
-import type { ProductCheck, ProductCheckEvidence, ProductInput, RequestedBrand } from '../../../spec/catalog.js';
+import type { ProductCheck, ProductCheckEvidence, ProductInput, RequestedBrand, VariantInput } from '../../../spec/catalog.js';
 import {
   addBusinessDays,
   attributeFilled,
-  EXPECTED_REVIEW_BUSINESS_DAYS,
+  EXPECTED_REVIEW_MARGIN_BUSINESS_DAYS,
   findClaims,
   findRestricted,
   gtinValid,
   imageRulesOf,
+  MAX_PARCEL_VALUE,
   normalize,
   normalizeModel,
-  REVIEW_TARGET_BUSINESS_DAYS,
+  PARCEL_COLUMNS,
+  PARCEL_FIELDS,
   sameOptions,
   slugify,
   titleSimilarity,
@@ -95,9 +98,10 @@ export class CatalogProducts extends CatalogTaxonomy {
     const row = await this.saveProduct({ existing, owner: { type: 'official', sellerId: null }, body, by });
     if (existing.review_state !== 'approved') return this.adminView(row, this.staffViewer(by));
     const ref = await this.submissionRef();
+    const targetDays = await this.reviewTargetDays();
     const { product, submission } = await this.repo.transaction(async (tx) => {
       const locked = (await tx.getProduct(id, { forUpdate: true }))!;
-      return this.reopenTx(tx, locked, by, 'Official Store edit', ref);
+      return this.reopenTx(tx, locked, by, 'Official Store edit', ref, targetDays);
     });
     await this.afterSubmit(product, submission, by, null);
     return this.adminView(product, this.staffViewer(by));
@@ -157,6 +161,7 @@ export class CatalogProducts extends CatalogTaxonomy {
     const productId = existing?.id ?? newId();
     const currentVariants = existing ? await this.repo.variantsOf([existing.id]) : [];
     let variants: VariantRow[] = currentVariants;
+    const currency = this.ctx.config.market.currency;
     if (body.variants !== undefined) {
       const list = body.variants ?? [];
       const gtins = new Map<string, number>();
@@ -175,7 +180,20 @@ export class CatalogProducts extends CatalogTaxonomy {
         if (twin >= 0) throw invalid(`variants[${i}].options`, 'Two variants have the same options');
         const imgs = v.imageIds ?? [];
         const same = currentVariants.find((c) => sameOptions(stringMap(c.options), options));
-        return { id: same?.id ?? newId(), product_id: productId, options: options as never, gtin, media_ids: imgs as never, position: i };
+        // list price (MSRP) is a staff field: sellers can't set it, and saving their draft keeps what staff set
+        if (owner.type === 'seller' && v.listPrice != null) throw invalid(`variants[${i}].listPrice`, 'The list price is set by Marketly staff');
+        const listPrice = owner.type === 'seller' || v.listPrice === undefined ? currentListPrice(same) : checkListPrice(v.listPrice, `variants[${i}].listPrice`, currency);
+        return {
+          id: same?.id ?? newId(),
+          product_id: productId,
+          options: options as never,
+          gtin,
+          media_ids: imgs as never,
+          position: i,
+          ...parcelColumns(v, same, `variants[${i}]`),
+          list_price_amount: listPrice?.amount ?? null,
+          list_price_currency: listPrice?.currency ?? null,
+        };
       });
       if (existing?.review_state === 'approved') {
         const dropped = currentVariants.filter((c) => !variants.some((v) => v.id === c.id));
@@ -253,7 +271,20 @@ export class CatalogProducts extends CatalogTaxonomy {
           for (const c of currentVariants) if (c.gtin && keepIds.has(c.id)) await tx.updateVariant(c.id, { gtin: null });
           await tx.deleteVariants(removed.map((r) => r.id));
           for (const v of variants) {
-            if (currentVariants.some((c) => c.id === v.id)) await tx.updateVariant(v.id, { options: v.options, gtin: v.gtin, media_ids: v.media_ids, position: v.position });
+            if (currentVariants.some((c) => c.id === v.id)) {
+              await tx.updateVariant(v.id, {
+                options: v.options,
+                gtin: v.gtin,
+                media_ids: v.media_ids,
+                position: v.position,
+                weight_grams: v.weight_grams,
+                length_cm: v.length_cm,
+                width_cm: v.width_cm,
+                height_cm: v.height_cm,
+                list_price_amount: v.list_price_amount,
+                list_price_currency: v.list_price_currency,
+              });
+            }
             else await tx.insertVariant(v);
           }
         }
@@ -268,7 +299,7 @@ export class CatalogProducts extends CatalogTaxonomy {
       throw err;
     }
     for (const s of swaps) await s.commit();
-    if (saved.listed_at) this.ctx.events.publish('catalog.product.updated', { productId: saved.id, version: saved.version }, { actor: by.actor, requestId: by.requestId });
+    if (saved.listed_at) this.ctx.events.publish('catalog.product.updated', { productId: saved.id, version: saved.version, title: saved.title }, { actor: by.actor, requestId: by.requestId });
     return saved;
   }
 
@@ -308,6 +339,7 @@ export class CatalogProducts extends CatalogTaxonomy {
     const note = opts.note?.trim() || null;
     const now = this.now();
     const ref = await this.submissionRef();
+    const targetDays = await this.reviewTargetDays();
     const result = await this.repo.transaction(async (tx) => {
       const locked = await tx.getProduct(row.id, { forUpdate: true });
       if (!locked) throw notFound();
@@ -339,7 +371,7 @@ export class CatalogProducts extends CatalogTaxonomy {
         }
       }
       const kind: SubmissionRow['kind'] = locked.review_state === 'changes_requested' || (await tx.submissionCount(locked.id)) > 0 ? 'resubmitted' : 'new';
-      const submission = await this.insertSubmissionTx(tx, locked, kind, by, note, now, ref);
+      const submission = await this.insertSubmissionTx(tx, locked, kind, by, note, now, ref, targetDays);
       const product = await tx.updateProduct(locked.id, { review_state: state, brand_id: brandId, updated_at: now });
       await tx.insertLog({ id: newId(), product_id: locked.id, action: 'submitted', reason: note, fields: {} as never, actor_kind: by.actor.kind, actor_id: by.actor.id ?? null, at: now });
       return { product, submission, createdBrand };
@@ -361,7 +393,8 @@ export class CatalogProducts extends CatalogTaxonomy {
     return this.ctx.refs.next('SUB', { digits: 4 });
   }
 
-  protected async insertSubmissionTx(tx: CatalogRepository, product: ProductRow, kind: SubmissionRow['kind'], by: By, note: string | null, now: Date, ref: string) {
+  /** `targetDays`: setting reviewTargetBusinessDays, read before the transaction */
+  protected async insertSubmissionTx(tx: CatalogRepository, product: ProductRow, kind: SubmissionRow['kind'], by: By, note: string | null, now: Date, ref: string, targetDays: number) {
     return tx.insertSubmission({
       id: newId(),
       ref,
@@ -373,8 +406,8 @@ export class CatalogProducts extends CatalogTaxonomy {
       submitted_by: by.actor as never,
       last_saved_at: null,
       last_saved_by: null,
-      expected_review_by: addBusinessDays(now, EXPECTED_REVIEW_BUSINESS_DAYS),
-      review_due_at: addBusinessDays(now, REVIEW_TARGET_BUSINESS_DAYS),
+      expected_review_by: addBusinessDays(now, targetDays + EXPECTED_REVIEW_MARGIN_BUSINESS_DAYS),
+      review_due_at: addBusinessDays(now, targetDays),
       assignee_staff_id: null,
       assignee_name: null,
       decided_at: null,
@@ -383,10 +416,10 @@ export class CatalogProducts extends CatalogTaxonomy {
   }
 
   /** approved → submitted (reopen): an accepted correction or an Official Store edit changed what the product is */
-  protected async reopenTx(tx: CatalogRepository, locked: ProductRow, by: By, note: string | null, ref: string) {
+  protected async reopenTx(tx: CatalogRepository, locked: ProductRow, by: By, note: string | null, ref: string, targetDays: number) {
     const now = this.now();
     const state = productReviewMachine.next(locked.review_state as never, 'reopen');
-    const submission = await this.insertSubmissionTx(tx, locked, 'content_change', by, note, now, ref);
+    const submission = await this.insertSubmissionTx(tx, locked, 'content_change', by, note, now, ref, targetDays);
     const product = await tx.updateProduct(locked.id, { review_state: state, updated_at: now });
     await tx.insertLog({ id: newId(), product_id: locked.id, action: 'submitted', reason: note, fields: {} as never, actor_kind: by.actor.kind, actor_id: by.actor.id ?? null, at: now });
     return { product, submission };
@@ -399,7 +432,19 @@ export class CatalogProducts extends CatalogTaxonomy {
     if (createdBrand && product.owner_seller_id) {
       this.ctx.events.publish('catalog.brand.requested', { brandId: createdBrand.id, name: createdBrand.name, sellerId: product.owner_seller_id, productId: product.id }, meta);
     }
-    this.ctx.events.publish('catalog.product.submitted', { productId: product.id, ownerSellerId: product.owner_seller_id }, meta);
+    this.ctx.events.publish(
+      'catalog.product.submitted',
+      {
+        productId: product.id,
+        ownerSellerId: product.owner_seller_id,
+        submissionId: submission.id,
+        ref: submission.ref,
+        kind: submission.kind,
+        title: product.title,
+        reviewDueAt: (submission.review_due_at ?? submission.expected_review_by ?? submission.submitted_at).toISOString(),
+      },
+      meta,
+    );
   }
 
   /* ================================================================ automated checks (advisory) */
@@ -592,4 +637,40 @@ export class CatalogProducts extends CatalogTaxonomy {
     if (p.no_gtin) return { kind: 'identifier', result: 'warn', message: 'The submitter confirmed the product has no GTIN', details: ['Ask for proof if the brand normally assigns GTINs'], evidence: [] };
     return { kind: 'identifier', result: 'pass', message: 'GTINs are valid and not used by other products', details: [], evidence: [] };
   }
+}
+
+/* ---------------------------------------------------------------- variant parcel data and list price */
+
+/** A whole number above zero (grams or centimetres), null to clear */
+export function checkParcelValue(v: unknown, field: (typeof PARCEL_FIELDS)[number], path: string): number | null {
+  if (v === null) return null;
+  if (typeof v !== 'number' || !Number.isInteger(v) || v <= 0) throw invalid(path, field === 'weightGrams' ? 'Enter the weight in whole grams, above zero' : 'Enter the size in whole centimetres, above zero');
+  if (v > MAX_PARCEL_VALUE[field]) throw invalid(path, `At most ${MAX_PARCEL_VALUE[field]}`);
+  return v;
+}
+
+/** Weight and packaged dimensions of a variant: given values replace, omitted ones keep the current variant's */
+function parcelColumns(v: VariantInput, current: VariantRow | undefined, path: string) {
+  const out: Pick<VariantRow, 'weight_grams' | 'length_cm' | 'width_cm' | 'height_cm'> = {
+    weight_grams: current?.weight_grams ?? null,
+    length_cm: current?.length_cm ?? null,
+    width_cm: current?.width_cm ?? null,
+    height_cm: current?.height_cm ?? null,
+  };
+  for (const field of PARCEL_FIELDS) {
+    if (v[field] !== undefined) out[PARCEL_COLUMNS[field]] = checkParcelValue(v[field], field, `${path}.${field}`);
+  }
+  return out;
+}
+
+export function currentListPrice(v: VariantRow | undefined): common.Money | null {
+  return v && v.list_price_amount !== null && v.list_price_currency ? { amount: Number(v.list_price_amount), currency: v.list_price_currency.trim() } : null;
+}
+
+/** Staff list price: whole minor units above zero in the market currency; null clears it */
+export function checkListPrice(m: common.Money | null | undefined, path: string, currency: string): common.Money | null {
+  if (m == null) return null;
+  if (!Number.isInteger(m.amount) || m.amount <= 0) throw invalid(path, 'Enter a list price above zero');
+  if (m.currency !== currency) throw invalid(path, `Enter the list price in ${currency}`);
+  return { amount: m.amount, currency: m.currency };
 }

@@ -28,7 +28,7 @@ function definition(d: MetricDefinition, area: GraphQLContext['area']) {
     relatedKeys: d.relatedKeys,
     version: d.version,
     effectiveFrom: d.effectiveFrom,
-    ownerName: area === 'admin' ? d.owner.name : null,
+    ownerName: area === 'admin' ? (d.owner?.name ?? null) : null,
   };
 }
 

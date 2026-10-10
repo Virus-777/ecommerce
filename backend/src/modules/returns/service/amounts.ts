@@ -80,6 +80,7 @@ export class Amounts {
       shippingRefund: m(b.shippingRefund),
       returnShippingDeduction: m(b.returnShippingDeduction),
       deductions,
+      taxRefund: b.taxRefund > 0 ? m(b.taxRefund) : null,
       total: m(b.total),
       maxRefundable: m(b.maxRefundable),
       destination,

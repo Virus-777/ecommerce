@@ -7,6 +7,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { money } from '../../../kernel/lib/money.js';
+import type { Kysely } from 'kysely';
+import type { CartDb } from '../../../spec/cart.js';
+import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
 import type * as promotions from '../../../spec/promotions.js';
 import type * as shipping from '../../../spec/shipping.js';
 import { auth } from '../../../testing/app.js';
@@ -19,6 +22,7 @@ const codes = new Map<string, { covers: string[]; amount: number; seller?: boole
 const freeShippingSellers = new Set<string>();
 const ADDRESS_ID = newId();
 const quoteCalls: shipping.PackageQuoteInput[] = [];
+const evalInputs: promotions.CartEvaluationInput[] = [];
 
 beforeAll(async () => {
   k = await boot({
@@ -35,9 +39,10 @@ beforeAll(async () => {
       promotions: {
         priceOffers: async (ids) => ids.map((id) => promo.get(id)).filter((p): p is promotions.OfferPromotion => !!p),
         evaluateCart: async (input) => {
+          evalInputs.push(input);
           const applied: promotions.AppliedPromotion[] = [];
           const rejected: promotions.RejectedCode[] = [];
-          const lines: promotions.LineDiscount[] = input.lines.map((l) => ({ lineId: l.lineId, regularUnitPrice: l.unitPrice, unitPrice: l.unitPrice, allocations: [], lineDiscount: money(0), limitExceeded: false }));
+          const lines: promotions.LineDiscount[] = input.lines.map((l) => ({ lineId: l.lineId, regularUnitPrice: l.unitPrice, unitPrice: l.unitPrice, allocations: [], lineDiscount: money(0), limitExceeded: false, discountedQuantity: l.quantity }));
           for (const code of input.codes) {
             const rule = codes.get(code) ?? { reject: 'not_found' as const };
             if ('reject' in rule || (code === 'MEMBER' && !input.customerId)) {
@@ -60,7 +65,7 @@ beforeAll(async () => {
           const packages = [...new Set(input.lines.map((l) => l.packageId))]
             .filter((p) => input.lines.some((l) => l.packageId === p && freeShippingSellers.has(l.sellerId)))
             .map((packageId) => ({ packageId, sellerId: input.lines.find((l) => l.packageId === packageId)!.sellerId, shippingDiscount: input.shipping?.[packageId] ?? money(0), freeShipping: true }));
-          return { evaluationId: newId(), validUntil: new Date().toISOString(), lines, packages, applied, rejected, totals: { total: money(0), platform: money(0), seller: money(0) }, changes: [] };
+          return { evaluationId: newId(), validUntil: new Date().toISOString(), lines, packages, applied, rejected, skipped: [], totals: { total: money(0), platform: money(0), seller: money(0) }, changes: [] };
         },
       },
       shipping: {
@@ -182,6 +187,25 @@ describe('coupon preview', () => {
     expect(view.coupons).toMatchObject([{ code: 'MEMBER', status: 'applied', fundedBy: 'seller' }]);
   });
 
+  it('sends Official Store lines to promotions with OFFICIAL_STORE_ID (never an empty seller id) and the category when known', async () => {
+    const p = await k.product();
+    const official = await k.offer({ productId: p.productId, variantId: p.variantIds[0]!, price: 4000, official: true });
+    const sellerId = newId();
+    const seller = await k.offer({ productId: p.productId, variantId: p.variantIds[0]!, price: 3000, sellerId, sellerName: 'Harbor Goods' });
+    codes.set('OFFICIAL5', { covers: [official.id], amount: 500 });
+    const v = k.visitor();
+    await addTo(v.token, official.id);
+    await addTo(v.token, seller.id);
+    evalInputs.length = 0;
+    const ok = await k.call('POST', `${STORE}/cart/coupons`, { token: v.token, body: { code: 'OFFICIAL5' } });
+    expect(ok.body.result).toMatchObject({ status: 'applied', amount: { amount: 500 } });
+    const lines = evalInputs.at(-1)!.lines;
+    const categoryId = k.world.products.get(p.productId)!.categoryId;
+    expect(lines.find((l) => l.offerId === official.id)).toMatchObject({ sellerId: OFFICIAL_STORE_ID, officialStore: true, categoryId });
+    expect(lines.find((l) => l.offerId === seller.id)).toMatchObject({ sellerId, officialStore: false, categoryId });
+    for (const input of evalInputs) for (const l of input.lines) expect(l.sellerId).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
   it('limits coupon attempts per owner per hour', async () => {
     const v = k.visitor();
     const statuses: number[] = [];
@@ -226,6 +250,47 @@ describe('saved for later, checkout hand-offs and GraphQL', () => {
     const sid = (await k.call('GET', `${STORE}/cart/saved`, { token: v.token })).body.items[0].id;
     expect((await k.call('DELETE', `${STORE}/cart/saved/${sid}`, { token: k.visitor().token })).status).toBe(404);
     expect((await k.call('DELETE', `${STORE}/cart/saved/${sid}`, { token: v.token })).status).toBe(204);
+  });
+
+  it('moves the guest saved-for-later items to the customer at sign-in, keeping an offer both saved once', async () => {
+    const p = await k.product({ variants: 3 });
+    const [a, b, c] = await Promise.all(p.variantIds.map((variantId, i) => k.offer({ productId: p.productId, variantId, price: 1000 + i })));
+    const cust = k.customer();
+    // the customer already saved b
+    const addB = await addTo(cust.token, b!.id);
+    await k.call('POST', `${STORE}/cart/items/${addB.itemId}/save-for-later`, { token: cust.token });
+    // the guest saves a and b, and keeps c in the cart
+    const v = k.visitor();
+    for (const o of [a!, b!]) {
+      const add = await addTo(v.token, o.id);
+      expect((await k.call('POST', `${STORE}/cart/items/${add.itemId}/save-for-later`, { token: v.token })).status).toBe(200);
+    }
+    await addTo(v.token, c!.id);
+
+    await k.publish('identity', 'identity.guest_session.claimed', { guestSessionId: v.sid, accountId: cust.accountId });
+    const saved = (await k.call('GET', `${STORE}/cart/saved`, { token: cust.token })).body.items;
+    expect(saved.map((s: any) => s.offerId).sort()).toEqual([a!.id, b!.id].sort());
+    expect((await k.call('GET', `${STORE}/cart/saved`, { token: v.token })).body.items).toEqual([]);
+    const merged = await k.call('POST', `${STORE}/cart/merge`, { token: cust.token, body: { guestSessionId: v.sid } });
+    expect(merged.status, JSON.stringify(merged.body)).toBe(200);
+    expect(merged.body.report).toMatchObject({ savedItemsMoved: 1, lines: [{ offerId: c!.id, outcome: 'added' }] });
+    expect(merged.body.report.message).toContain('1 saved item');
+    expect(merged.body.cart.savedForLaterCount).toBe(2);
+  });
+
+  it('moves guest saved items at sign-in even when the guest has no cart left', async () => {
+    const p = await k.product();
+    const a = await k.offer({ productId: p.productId, variantId: p.variantIds[0]!, price: 1700 });
+    const v = k.visitor();
+    const add = await addTo(v.token, a.id);
+    await k.call('POST', `${STORE}/cart/items/${add.itemId}/save-for-later`, { token: v.token });
+    // the emptied guest cart expires before sign-in
+    const guestCart = (await k.call('GET', `${STORE}/cart`, { token: v.token })).body.id;
+    await (k.app.kernel.database.kysely.withSchema('cart') as Kysely<CartDb>).updateTable('carts').set({ status: 'expired' }).where('id', '=', guestCart).execute();
+    const cust = k.customer();
+    await k.publish('identity', 'identity.guest_session.claimed', { guestSessionId: v.sid, accountId: cust.accountId });
+    const saved = (await k.call('GET', `${STORE}/cart/saved`, { token: cust.token })).body.items;
+    expect(saved.map((s: any) => s.offerId)).toEqual([a.id]);
   });
 
   it('removes purchased lines (converting an emptied cart) and restores them after a declined payment', async () => {

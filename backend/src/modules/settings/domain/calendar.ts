@@ -2,10 +2,11 @@
  * Business-hour arithmetic in the market time zone (pure): weekly business hours minus closures.
  * Used for SLA deadlines (support, workqueues, returns, sellers), "open now" and the admin calendar.
  */
-import { dateInZone, zonedTimeToUtc } from '../../../kernel/lib/clock.js';
+import { dateInZone, zonedTimeToUtc, zoneOffsetMs } from '../../../kernel/lib/clock.js';
 import type { BusinessDay, Closure, DayHours } from '../../../spec/settings.js';
 
 const WEEKDAY_OF = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
+const DAY_MS = 86_400_000;
 const MAX_DAYS = 800; // search horizon; a calendar with no open hours at all gives up after this
 
 export interface Interval {
@@ -30,6 +31,13 @@ export interface BusinessCalendar {
   nextOpen(after: Date): Date | null;
   /** `from` plus business minutes (only open time counts); null when the calendar never opens */
   addBusinessMinutes(from: Date, minutes: number): Date | null;
+  /** The market-local date has opening hours (closures and closed weekdays are not business days) */
+  isBusinessDay(date: string): boolean;
+  /**
+   * `from` plus whole business days, keeping the local time of day (moved to closing time when that day
+   * closes earlier); from inside a closed day it counts from the next business day. null when the calendar never opens.
+   */
+  addBusinessDays(from: Date, days: number): Date | null;
   day(date: string): BusinessDay;
 }
 
@@ -88,6 +96,30 @@ export function createCalendar(hours: readonly DayHours[], closures: readonly Cl
     return null;
   };
 
+  const isBusinessDay = (date: string) => intervals(date).length > 0;
+
+  const nextBusinessDay = (date: string): string | null => {
+    for (let d = 1; d <= MAX_DAYS; d++) if (isBusinessDay(addDays(date, d))) return addDays(date, d);
+    return null;
+  };
+
+  const addBusinessDays = (from: Date, days: number): Date | null => {
+    if (!hasHours) return null;
+    let date: string | null = dateInZone(from, timeZone);
+    // from inside a closed day: count from the next business day
+    if (!isBusinessDay(date)) date = nextBusinessDay(date);
+    for (let n = 0; date && n < Math.max(0, Math.trunc(days)); n++) date = nextBusinessDay(date);
+    if (!date) return null;
+    // keep the local time of day (seconds included)
+    const ofDay = (((from.getTime() + zoneOffsetMs(from, timeZone)) % DAY_MS) + DAY_MS) % DAY_MS;
+    const hh = String(Math.floor(ofDay / 3_600_000)).padStart(2, '0');
+    const mm = String(Math.floor((ofDay % 3_600_000) / 60_000)).padStart(2, '0');
+    const at = new Date(zonedTimeToUtc(date, `${hh}:${mm}`, timeZone).getTime() + (ofDay % 60_000));
+    // the day closes earlier than that time: its closing time
+    const close = intervals(date).at(-1)!.end;
+    return at > close ? close : at;
+  };
+
   const day = (date: string): BusinessDay => {
     const list = intervals(date);
     const closure = closureOf.get(date);
@@ -100,5 +132,5 @@ export function createCalendar(hours: readonly DayHours[], closures: readonly Cl
     };
   };
 
-  return { intervals, isOpen, nextOpen, addBusinessMinutes, day };
+  return { intervals, isOpen, nextOpen, addBusinessMinutes, isBusinessDay, addBusinessDays, day };
 }

@@ -650,7 +650,8 @@ export class ModerationPart {
     if (item.queue === 'appeal') throw new AppError('ILLEGAL_TRANSITION', 'This item is under appeal: decide the appeal instead', { machine: 'Moderation item', from: 'open', event: 'decide', queue: 'appeal' });
     const type = item.content_type as ContentType;
     const target = TARGET[type]?.[input.decision];
-    if (!target) throw invalid([{ path: 'decision', message: `"${input.decision}" does not apply to ${CONTENT_NOUN[type]}s` }]);
+    // a decision the content's machine does not allow (e.g. an edit request on seller feedback) is an illegal move
+    if (!target) throw new AppError('ILLEGAL_TRANSITION', `"${input.decision}" does not apply to ${CONTENT_NOUN[type]}s`, { machine: type, event: input.decision });
     if (ADVERSE.has(input.decision) && input.reasonCode === 'legitimate_experience') {
       throw this.core.ctx.error('INVALID_REMOVAL_REASON', 'A legitimate experience is kept: removal needs a policy reason. Unfavourable content or harm to sales is not one.');
     }
@@ -667,7 +668,8 @@ export class ModerationPart {
       const status = moderationItemMachine.next(locked.status as 'open' | 'decided', 'decide');
       const c = (await loadContent(tx, type, item.content_id, { forUpdate: true }))!;
       const events = type === 'seller_response' ? RESPONSE_MODERATION_EVENTS : MODERATION_EVENTS;
-      const moved = await moveContent(this.core, tx, fx, c, target, events, { byModeration: true, reasonCode: input.reasonCode, takedown: input.decision === 'remove' });
+      // one state move from the content's current state (spec decideModeration)
+      const moved = await moveContent(this.core, tx, fx, c, target, events, { byModeration: true, reasonCode: input.reasonCode, takedown: input.decision === 'remove', oneStep: true });
       const decision = await tx.insert('moderation_decisions', {
         id: newId(),
         moderation_item_id: item.id,
@@ -679,6 +681,7 @@ export class ModerationPart {
         moderator_id: actorId(by.actor),
         decided_at: now,
         appeal_by: ADVERSE.has(input.decision) ? addDays(now, appealDays) : null,
+        trust_enforcement_id: null,
       });
       await tx.update('moderation_items', item.id, { status, decided_at: now });
       const answered = await tx.find('reports', { moderation_item_id: item.id, status: 'open' });
@@ -699,6 +702,7 @@ export class ModerationPart {
     });
     fx.takedownReason = `Review removed: ${reasonLabel(input.reasonCode)}`;
     await this.core.flush(fx, by);
+    await this.resolveOverdue(item.id);
     await this.core.audit(
       {
         action: 'reviews.moderation.decide',
@@ -733,6 +737,7 @@ export class ModerationPart {
       moderator_id: actorId(by.actor),
       decided_at: this.core.now(),
       appeal_by: null,
+      trust_enforcement_id: null,
     });
     const author = authorOf(c);
     this.core.publish('reviews.content.referred', { moderationItemId: item.id, contentType: item.content_type, contentId: item.content_id, authorId: author.id, note: note.trim() }, by);
@@ -865,8 +870,11 @@ export class ModerationPart {
         await tx.updateWhere('reports', { moderation_item_id: item.id, status: 'open' }, { status: 'decided', outcome_text: reporterOutcomeText(decision.decision, decision.reason_code, CONTENT_NOUN[type]), decided_at: now });
       }
     });
-    fx.emit('reviews.appeal.decided', { appealId: appeal.id, overturned: input.overturn });
+    // the author who appealed is told the outcome
+    const appellant = (appeal.by_kind === 'customer' || appeal.by_kind === 'seller') && isUuid(appeal.by_id) ? { kind: appeal.by_kind as ContentParty['kind'], id: appeal.by_id } : null;
+    fx.emit('reviews.appeal.decided', { appealId: appeal.id, overturned: input.overturn, contentType: appeal.content_type, contentId: appeal.content_id, author: appellant, outcome: reason });
     await this.core.flush(fx, by);
+    await this.resolveOverdue(decision.moderation_item_id);
     await this.core.audit(
       {
         action: 'reviews.appeal.decide',
@@ -885,7 +893,18 @@ export class ModerationPart {
 
   /* ================================================================ trust enforcement */
 
-  /** Removes content named in a fake-review enforcement; returns how many were removed (already removed ones don't count) */
+  /** Closes the review_moderation_overdue work item of a decided moderation item (workqueues, optional) */
+  async resolveOverdue(itemId: string) {
+    await this.core.optional('workqueues', (w) => w.resolveBySource(`review_moderation_overdue:${itemId}`, { note: 'Moderation item decided', by: { kind: 'system', id: null, name: 'Reviews' } }));
+  }
+
+  /**
+   * remove_reviews: removes the reviews, questions and answers named in the enforcement with a moderation decision
+   * (reason proven_fake, trust_enforcement_id recorded), tells the authors and publishes reviews.moderation.decided
+   * with trustEnforcementId so trust confirms execution. Content already removed (e.g. by moderation) is confirmed
+   * without a new decision, so a reversal never reinstates what moderation removed. Each content is handled once per
+   * enforcement (inbox). Returns how many were removed now.
+   */
   async removeForEnforcement(contentIds: readonly string[], enforcementId: string, reason: string): Promise<number> {
     let removed = 0;
     const by: By = { actor: TRUST_ACTOR };
@@ -897,19 +916,29 @@ export class ModerationPart {
         continue;
       }
       const target = REMOVED_STATE[c.type];
-      if (c.row.status === target || c.row.status === 'deleted') continue;
       const fx = await this.core.prepare(new Effects());
       fx.takedownReason = 'Removed after a Trust and Risk investigation';
       const now = this.core.now();
+      const closed: string[] = [];
       const done = await this.core.repo.transaction(async (tx) => {
+        if (!(await tx.claim(`trust-remove:${enforcementId}:${c.row.id}`))) return false;
         const locked = await loadContent(tx, c.type, c.row.id, { forUpdate: true });
-        if (!locked || locked.row.status === target || locked.row.status === 'deleted') return false;
+        if (!locked) return false;
+        if (locked.row.status === target || locked.row.status === 'deleted') {
+          // already gone: confirm to trust (the latest decided item names it), no decision of this enforcement
+          const last = (await tx.find('moderation_items', { content_type: c.type, content_id: c.row.id }, { orderBy: [['first_reported_at', 'desc']], limit: 1 }))[0];
+          if (last) {
+            fx.emit('reviews.moderation.decided', { moderationItemId: last.id, contentType: c.type, contentId: c.row.id, decision: 'remove', reasonCode: 'proven_fake', author: partyOf(locked), reporters: [], reporterOutcome: null, appealUntil: null, trustEnforcementId: enforcementId });
+          }
+          return false;
+        }
         const outcome = `We removed this ${CONTENT_NOUN[c.type]} after a Trust and Risk investigation.`;
         const answered: ReportRec[] = [];
         for (const open of await tx.find('moderation_items', { content_type: c.type, content_id: c.row.id, status: 'open' })) {
           answered.push(...(await tx.find('reports', { moderation_item_id: open.id, status: 'open' })));
           await tx.update('moderation_items', open.id, { status: 'decided', decided_at: now });
           await tx.updateWhere('reports', { moderation_item_id: open.id, status: 'open' }, { status: 'decided', outcome_text: outcome, decided_at: now });
+          closed.push(open.id);
         }
         const item = await tx.insert('moderation_items', {
           id: newId(),
@@ -948,9 +977,10 @@ export class ModerationPart {
           moderator_id: SYSTEM_MODERATOR_ID,
           decided_at: now,
           appeal_by: null,
+          trust_enforcement_id: enforcementId,
         });
         const events = c.type === 'seller_response' ? RESPONSE_MODERATION_EVENTS : MODERATION_EVENTS;
-        await moveContent(this.core, tx, fx, locked, target, events, { byModeration: true, reasonCode: 'proven_fake', takedown: true });
+        await moveContent(this.core, tx, fx, locked, target, events, { byModeration: true, reasonCode: 'proven_fake', takedown: true, trustEnforcementId: enforcementId });
         fx.emit('reviews.moderation.decided', {
           moderationItemId: item.id,
           contentType: c.type,
@@ -962,15 +992,110 @@ export class ModerationPart {
           reporterOutcome: outcome,
           // an enforcement is appealed through Trust and Risk, not the moderation appeal
           appealUntil: null,
+          trustEnforcementId: enforcementId,
         });
         return true;
       });
-      if (done) {
-        removed++;
-        await this.core.flush(fx, by);
-      }
+      await this.core.flush(fx, by);
+      for (const itemId of closed) await this.resolveOverdue(itemId);
+      if (done) removed++;
     }
     return removed;
+  }
+
+  /**
+   * keep_reviews: the open moderation items on the named content are decided as kept (reason legitimate_experience,
+   * trust_enforcement_id recorded), so held content is published again. Once per content and enforcement.
+   */
+  async keepForEnforcement(contentIds: readonly string[], enforcementId: string, reason: string): Promise<number> {
+    let kept = 0;
+    const by: By = { actor: TRUST_ACTOR };
+    for (const id of new Set(contentIds)) {
+      if (!isUuid(id)) continue;
+      const c = await findContent(this.core.repo, id);
+      if (!c) continue;
+      const fx = await this.core.prepare(new Effects());
+      const now = this.core.now();
+      const closed: string[] = [];
+      await this.core.repo.transaction(async (tx) => {
+        if (!(await tx.claim(`trust-keep:${enforcementId}:${c.row.id}`))) return;
+        let locked = await loadContent(tx, c.type, c.row.id, { forUpdate: true });
+        if (!locked) return;
+        for (const item of await tx.find('moderation_items', { content_type: c.type, content_id: c.row.id, status: 'open' }, { forUpdate: true })) {
+          if (item.queue === 'appeal') continue;
+          const answered = await tx.find('reports', { moderation_item_id: item.id, status: 'open' });
+          const outcome = `We checked this ${CONTENT_NOUN[c.type]} with Trust and Risk and kept it.`;
+          await tx.insert('moderation_decisions', {
+            id: newId(),
+            moderation_item_id: item.id,
+            decision: 'keep',
+            reason_code: 'legitimate_experience',
+            message_to_reporter: null,
+            message_to_author: null,
+            edit_request: null,
+            moderator_id: SYSTEM_MODERATOR_ID,
+            decided_at: now,
+            appeal_by: null,
+            trust_enforcement_id: enforcementId,
+          });
+          await tx.update('moderation_items', item.id, { status: moderationItemMachine.next('open', 'decide'), decided_at: now, visibility: 'visible' });
+          await tx.updateWhere('reports', { moderation_item_id: item.id, status: 'open' }, { status: 'decided', outcome_text: outcome, decided_at: now });
+          if (['held', 'pending', 'pending_review'].includes(locked.row.status)) {
+            const events = locked.type === 'seller_response' ? RESPONSE_MODERATION_EVENTS : MODERATION_EVENTS;
+            locked = await moveContent(this.core, tx, fx, locked, 'published', events, { byModeration: true, reasonCode: 'legitimate_experience' });
+          }
+          fx.emit('reviews.moderation.decided', { moderationItemId: item.id, contentType: c.type, contentId: c.row.id, decision: 'keep', reasonCode: 'legitimate_experience', author: partyOf(locked), reporters: reportersOf(answered), reporterOutcome: outcome, appealUntil: null, trustEnforcementId: enforcementId });
+          closed.push(item.id);
+          kept++;
+        }
+      });
+      await this.core.flush(fx, by);
+      for (const itemId of closed) await this.resolveOverdue(itemId);
+      void reason;
+    }
+    return kept;
+  }
+
+  /**
+   * trust.enforcement.reversed (remove_reviews): content that enforcement removed (decisions with its
+   * trust_enforcement_id) is reinstated unless the author deleted it since; ratings are recalculated and the
+   * authors told (reviews.moderation.decided, decision reinstate). Once per content and enforcement.
+   */
+  async reinstateForEnforcement(enforcementId: string, reason: string): Promise<number> {
+    if (!isUuid(enforcementId)) return 0;
+    const decisions = await this.core.repo.find('moderation_decisions', { trust_enforcement_id: enforcementId, decision: 'remove' });
+    let reinstated = 0;
+    const by: By = { actor: TRUST_ACTOR };
+    for (const d of decisions) {
+      const item = await this.core.repo.get('moderation_items', d.moderation_item_id);
+      if (!item) continue;
+      const fx = await this.core.prepare(new Effects());
+      const now = this.core.now();
+      const done = await this.core.repo.transaction(async (tx) => {
+        if (!(await tx.claim(`trust-reinstate:${enforcementId}:${item.content_id}`))) return false;
+        const c = await loadContent(tx, item.content_type, item.content_id, { forUpdate: true });
+        if (!c || c.row.status === 'deleted' || c.row.status !== REMOVED_STATE[c.type]) return false;
+        await moveContent(this.core, tx, fx, c, 'published', RESTORE_EVENTS, { byModeration: true, trustEnforcementId: enforcementId });
+        await tx.insert('moderation_decisions', {
+          id: newId(),
+          moderation_item_id: item.id,
+          decision: 'reinstate',
+          reason_code: 'enforcement_reversed',
+          message_to_reporter: null,
+          message_to_author: `Restored: Trust and Risk reversed its decision. ${reason}`.trim(),
+          edit_request: null,
+          moderator_id: SYSTEM_MODERATOR_ID,
+          decided_at: now,
+          appeal_by: null,
+          trust_enforcement_id: enforcementId,
+        });
+        fx.emit('reviews.moderation.decided', { moderationItemId: item.id, contentType: c.type, contentId: c.row.id, decision: 'reinstate', reasonCode: 'enforcement_reversed', author: partyOf(c), reporters: [], reporterOutcome: null, appealUntil: null, trustEnforcementId: enforcementId });
+        return true;
+      });
+      await this.core.flush(fx, by);
+      if (done) reinstated++;
+    }
+    return reinstated;
   }
 
   /** The product behind content (for summaries in other parts) */

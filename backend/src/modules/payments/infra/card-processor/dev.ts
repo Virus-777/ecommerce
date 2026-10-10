@@ -19,6 +19,8 @@
  *   tok_timeout_lost            times out and the processor has no record (retrieve: not_found)
  *   tok_unavailable             the processor cannot be reached; nothing is processed
  *   tok_closed                  approves, but refunds to this card fail: card closed by the issuer (not retryable)
+ *   tok_refund_lost             a refund destination: the first refund sent to it times out and the processor has no
+ *                               record of it (retrieve: not_found); the same key sent again succeeds
  *   anything else               not a token (PAYMENT_METHOD_INVALID)
  *
  * Amounts (minor units, last two digits) on any approving card, as in BUILDING-MODULES §9:
@@ -28,6 +30,7 @@
  *   refund …12 fails, card closed (not retryable) · …13 times out, then retrieve says succeeded
  *   refund …14 fails once with a processing error (retryable), the next attempt succeeds
  *   refund …15 pending at the bank, retrieve says succeeded
+ *   partial void (partialVoid) lowers an authorization by an amount, once per key
  *
  * Saved methods: setup tokens seti_<brand>_<last4>[_<MMYY>] confirm to a saved card pm_…; seti_<brand>_<last4>_renew
  * gets a new expiry from the card updater; seti_unavailable fails with the processor unavailable; any other
@@ -91,8 +94,8 @@ const nextYear = () => new Date().getUTCFullYear() + 3;
 function cardOf(token: string): CardDetails | null {
   const t = token.trim();
   if (!t.startsWith('tok_')) return null;
-  if (DECLINES[t] || ['tok_3ds', 'tok_timeout', 'tok_timeout_declined', 'tok_timeout_lost', 'tok_unavailable', 'tok_closed'].includes(t)) {
-    return { kind: 'card', brand: 'visa', last4: t === 'tok_closed' ? '0341' : '0002', expMonth: 12, expYear: nextYear() };
+  if (DECLINES[t] || ['tok_3ds', 'tok_timeout', 'tok_timeout_declined', 'tok_timeout_lost', 'tok_unavailable', 'tok_closed', 'tok_refund_lost'].includes(t)) {
+    return { kind: 'card', brand: 'visa', last4: t === 'tok_closed' ? '0341' : t === 'tok_refund_lost' ? '7777' : '0002', expMonth: 12, expYear: nextYear() };
   }
   const [, first, second, third] = t.split('_');
   if (first === 'applepay' || first === 'googlepay') {
@@ -113,6 +116,8 @@ export function createDevCardProcessor(): PaymentProvider {
   const refundAttempts = new Map<string, number>(); // by refund id
   const methods = new Map<string, { card: CardDetails; renew: boolean; token: string }>();
   const pending3ds = new Map<string, string>(); // payment ref → completion key
+  const reductions = new Map<string, number>(); // partial void key → amount still authorized after it
+  const lostRefundDestinations = new Set<string>(); // refund keys whose first send to tok_refund_lost was lost
 
   const timeout = (what: string) => new ProviderError(`${what}: the processor did not answer in time`, true);
   const unavailable = (what: string) => new ProviderError(`${what}: the processor is unavailable`, false);
@@ -253,6 +258,17 @@ export function createDevCardProcessor(): PaymentProvider {
       if (p && p.status === 'authorized') p.status = 'voided';
     },
 
+    async partialVoid(o) {
+      const known = reductions.get(o.idempotencyKey);
+      if (known !== undefined) return { authorizedAmount: known };
+      const p = byRef.get(o.providerRef);
+      if (!p || !['authorized', 'captured'].includes(p.status)) throw new ProviderError('partial void: no authorization to lower', false);
+      if (o.amount.amount <= 0 || o.amount.amount > p.amount - p.captured) throw new ProviderError('partial void: more than is left of the authorization', false);
+      p.amount -= o.amount.amount;
+      reductions.set(o.idempotencyKey, p.amount);
+      return { authorizedAmount: p.amount };
+    },
+
     async refund(o: { providerRef: string; amount: common.Money; idempotencyKey: string; destination?: RefundDestination | null; refundId: string }) {
       const known = refunds.get(o.idempotencyKey);
       if (known) return { status: known.status, providerRef: known.ref, failure: known.failure ?? null };
@@ -263,6 +279,10 @@ export function createDevCardProcessor(): PaymentProvider {
       refundAttempts.set(o.refundId, attempt);
       const r: DevRefund = { ref: `re_${rand(14)}`, status: 'succeeded' };
       const target = o.destination ? destToken : p?.token;
+      if (target === 'tok_refund_lost' && !lostRefundDestinations.has(o.idempotencyKey)) {
+        lostRefundDestinations.add(o.idempotencyKey);
+        throw timeout('refund'); // lost in transit: no record
+      }
       if (!o.destination && !p) {
         r.status = 'failed';
         r.failure = { code: 'no_payment', reason: 'The original payment was not found', retryable: false };

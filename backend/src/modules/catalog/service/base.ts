@@ -157,8 +157,25 @@ export class CatalogBase {
     }
   }
 
-  /** Attach new ids and detach dropped ids of one usage kind */
-  protected async swapMedia(before: (string | null)[], after: (string | null)[], kind: UsageInput['kind'], path: string, usage: { refId: string; refLabel: string }, owner: MediaOwner) {
+  /** Review target in business days (setting reviewTargetBusinessDays); read before a transaction */
+  protected async reviewTargetDays(): Promise<number> {
+    const v = Number(await this.ctx.settings.get('reviewTargetBusinessDays'));
+    return Number.isFinite(v) && v >= 1 ? Math.round(v) : 1;
+  }
+
+  /**
+   * Attach new ids and detach dropped ids of one usage kind. `legacyKinds`: kinds the same files were attached
+   * under before (e.g. content_block for brand banners and category images), also detached when a file is dropped.
+   */
+  protected async swapMedia(
+    before: (string | null)[],
+    after: (string | null)[],
+    kind: UsageInput['kind'],
+    path: string,
+    usage: { refId: string; refLabel: string },
+    owner: MediaOwner,
+    legacyKinds: string[] = [],
+  ) {
     const prev = new Set(before.filter((x): x is string => Boolean(x)));
     const next = after.filter((x): x is string => Boolean(x));
     const undo = await this.attachAll(
@@ -168,7 +185,11 @@ export class CatalogBase {
     );
     return {
       undo,
-      commit: () => this.detachAll([...prev].filter((id) => !next.includes(id)).map((assetId) => ({ assetId, kind })), usage.refId),
+      commit: () =>
+        this.detachAll(
+          [...prev].filter((id) => !next.includes(id)).flatMap((assetId) => [kind, ...legacyKinds].map((k) => ({ assetId, kind: k }))),
+          usage.refId,
+        ),
     };
   }
 }

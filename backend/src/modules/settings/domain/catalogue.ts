@@ -28,7 +28,7 @@ export interface Definition extends SettingDefinition {
 export const APPROVAL_STRENGTH: Record<ApprovalRule, number> = { none: 0, second_reviewer: 1, business_owner: 2 };
 export const APPROVER_LABELS: Record<ApprovalRule, string[]> = {
   none: [],
-  second_reviewer: ['A second reviewer (another Platform Administrator)'],
+  second_reviewer: ['A second reviewer (another Platform Administrator or the Business Owner)'],
   business_owner: ['Business Owner'],
 };
 
@@ -93,6 +93,17 @@ export const BUILT_INS: BuiltIn[] = [
   { key: 'market.currency', section: 'market', label: 'Currency', description: 'ISO 4217 currency. Fixed for launch (one currency, plan ch. 1).', valueType: 'string', default: 'USD', editable: false, approval: 'business_owner', minLeadDays: 30 },
   { key: 'market.timeZone', section: 'market', label: 'Time zone', description: 'IANA time zone used for deadlines, reports and campaign schedules. Changing it after launch needs a migration plan.', valueType: 'string', default: 'America/Los_Angeles', approval: 'business_owner', minLeadDays: 30 },
   { key: 'market.locale', section: 'market', label: 'Language and formats', description: 'Locale for formatting dates, numbers and money.', valueType: 'string', default: 'en-US', approval: 'second_reviewer' },
+  { key: 'market.legalName', section: 'market', label: 'Legal name', description: 'Legal name of the operating company, shown in the footer, policies and receipts.', valueType: 'string', default: 'Marketly, Inc.', approval: 'business_owner', exampleValue: true },
+  {
+    key: 'market.companyLine',
+    section: 'market',
+    label: 'Company line',
+    description: 'One-line company details for the footer and emails.',
+    valueType: 'string',
+    default: 'Marketly, Inc. · 500 Market St, San Francisco, CA',
+    approval: 'business_owner',
+    exampleValue: true,
+  },
   // support hours and contacts
   {
     key: 'support.businessHours',
@@ -224,7 +235,7 @@ export function inferDefinition(module: string, name: string, declared: SettingD
 
 /**
  * Every settable key: settings-owned keys plus every module spec's settings. Keys of disabled
- * modules are kept with available = false (get() still answers their default).
+ * modules are kept with available = false (shown as unavailable; get() refuses them with UNKNOWN_SETTING).
  */
 export function buildCatalogue(specs: Readonly<Record<string, ModuleSpecDef>>, enabled: ReadonlySet<string>, o: CatalogueOptions): Map<string, Definition> {
   const out = new Map<string, Definition>();

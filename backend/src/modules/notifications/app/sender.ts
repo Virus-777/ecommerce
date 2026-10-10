@@ -142,6 +142,7 @@ export class Sender {
             dedupe_key: dedupeKey,
             resolved_at: null,
             resolve_note: null,
+            expired_at: null,
             created_at: now,
             expires_at: addMonths(now, retention),
           });

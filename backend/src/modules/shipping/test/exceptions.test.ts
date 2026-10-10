@@ -135,7 +135,10 @@ describe('staff handling of exceptions', () => {
     expect((await h.call('POST', `${ADMIN}/exceptions/${id}/notify-seller`, staff, {})).status).toBe(429);
     const told = await h.call('POST', `${ADMIN}/exceptions/${id}/notify-customer`, staff, {});
     expect(told.body.customerNotifiedAt).toBeTruthy();
-    expect(h.notices.at(-1)).toMatchObject({ topic: 'customer.shipment.exception', recipients: [{ kind: 'guest_email', email: 'jordan@example.com' }] });
+    // the order's customer by customers-module id (the order email only for guests)
+    expect(o.order.contact.customerId).toBeTruthy();
+    expect(h.notices.at(-1)).toMatchObject({ topic: 'customer.shipment.exception' });
+    expect(h.notices.at(-1)!.recipients).toEqual([{ kind: 'customer', customerId: o.order.contact.customerId }]);
     expect((await h.call('POST', `${ADMIN}/exceptions/${id}/request-tracking`, staff, { dueAt: new Date(h.clock.now().getTime() - HOUR).toISOString() })).status).toBe(400);
     const requested = await h.call('POST', `${ADMIN}/exceptions/${id}/request-tracking`, staff, { dueAt: new Date(h.clock.now().getTime() + 24 * HOUR).toISOString() });
     expect(requested.body.nextStep).toMatch(/valid tracking/);
@@ -215,7 +218,7 @@ describe('events from other modules', () => {
   it('seller cancellations open seller_cannot_fulfill; the refund closes it; nothing left closes late dispatch', async () => {
     const o = await sellerOrder(h);
     const refund = { itemAmount: { amount: 3000, currency: 'USD' }, discountShare: { amount: 0, currency: 'USD' }, shippingRefund: { amount: 0, currency: 'USD' }, taxRefund: { amount: 0, currency: 'USD' }, total: { amount: 3000, currency: 'USD' } };
-    await h.publish('orders', 'orders.item.cancelled', { orderId: o.order.id, ref: o.order.ref, groupId: o.groupId, ownerType: 'seller', sellerId: o.sellerId, itemId: o.lamp.id, offerId: newId(), stockItemId: newId(), quantity: 1, cancellationId: newId(), initiatedBy: 'seller', reasonCode: 'out_of_stock', beforeDispatch: true, countsAgainstSeller: true, refund, paymentIntentId: newId() });
+    await h.publish('orders', 'orders.item.cancelled', { orderId: o.order.id, ref: o.order.ref, groupId: o.groupId, ownerType: 'seller', sellerId: o.sellerId, itemId: o.lamp.id, offerId: newId(), stockItemId: newId(), quantity: 1, cancellationId: newId(), initiatedBy: 'seller', reasonCode: 'out_of_stock', beforeDispatch: true, countsAgainstSeller: true, refund, paymentIntentId: newId(), notifyCustomer: true });
     const ex = h.named('shipping.shipment.exception').at(-1);
     expect(ex).toMatchObject({ kind: 'seller_cannot_fulfill', groupId: o.groupId, orderItemIds: [o.lamp.id] });
     const view = (await h.call('GET', `${ADMIN}/exceptions/${ex.exceptionId}`, tokens.staff())).body;
@@ -231,11 +234,54 @@ describe('events from other modules', () => {
     expect((await h.call('GET', `${ADMIN}/exceptions/${e.id}`, tokens.staff())).body).toMatchObject({ status: 'escalated', escalatedTo: 'seller_manager' });
     await h.publish('support', 'support.case.opened', { caseId: newId(), ref: 'CS-261009-0001', kind: 'order_problem', category: 'package_not_received', priority: 'high', customerId: o.customerId, sellerId: o.sellerId, orderId: o.order.id, orderItemIds: [o.speaker.id], handler: 'support', nextResponseDueAt: null });
     const opened = h.named('shipping.shipment.exception').at(-1);
-    expect(opened).toMatchObject({ kind: 'lost_or_damaged', groupId: o.groupId, orderItemIds: [o.speaker.id] });
+    // from a customer report support already holds as a case: support must not open a second case for it
+    expect(opened).toMatchObject({ kind: 'lost_or_damaged', groupId: o.groupId, orderItemIds: [o.speaker.id], source: 'customer_report', caseRef: 'CS-261009-0001' });
+    expect(h.named('shipping.shipment.exception').find((x) => x.exceptionId === e.id)).toMatchObject({ source: 'staff', caseRef: null });
     expect((await h.call('GET', `${ADMIN}/exceptions/${opened.exceptionId}`, tokens.staff())).body.caseRef).toBe('CS-261009-0001');
     // the same report twice does not open a second one
     await h.publish('support', 'support.case.opened', { caseId: newId(), ref: 'CS-261009-0002', kind: 'order_problem', category: 'package_not_received', priority: 'high', customerId: o.customerId, sellerId: o.sellerId, orderId: o.order.id, orderItemIds: [o.speaker.id], handler: 'support', nextResponseDueAt: null });
     expect(await h.service.core.repo.count('exceptions', { group_id: o.groupId, kind: 'lost_or_damaged' })).toBe(1);
+  });
+});
+
+describe('pass 3: one exception per package, replacement shipments without a return', () => {
+  it('opens one exception per package: a second lost package of the same group gets its own; the same package twice is refused', async () => {
+    const o = await sellerOrder(h);
+    const seller = tokens.seller(o.sellerId);
+    const s1 = (await h.call('POST', `${SELLER}/shipments`, seller, { groupId: o.groupId, carrierCode: 'ups', trackingNumber: ups(), shippedAt: h.clock.now().toISOString(), items: [{ orderItemId: o.lamp.id, quantity: 1 }] })).body;
+    const s2 = (await h.call('POST', `${SELLER}/shipments`, seller, { groupId: o.groupId, carrierCode: 'ups', trackingNumber: ups(), shippedAt: h.clock.now().toISOString(), items: [{ orderItemId: o.speaker.id, quantity: 2 }] })).body;
+    const staff = tokens.staff();
+    const e1 = await h.call('POST', `${ADMIN}/exceptions`, staff, { kind: 'lost_or_damaged', groupId: o.groupId, shipmentId: s1.id, situation: 'First package lost' });
+    const e2 = await h.call('POST', `${ADMIN}/exceptions`, staff, { kind: 'lost_or_damaged', groupId: o.groupId, shipmentId: s2.id, situation: 'Second package lost too' });
+    expect([e1.status, e2.status]).toEqual([201, 201]);
+    expect(e2.body.id).not.toBe(e1.body.id);
+    const dup = await h.call('POST', `${ADMIN}/exceptions`, staff, { kind: 'lost_or_damaged', groupId: o.groupId, shipmentId: s1.id, situation: 'Again' });
+    expect(dup.status).toBe(409);
+    expect(dup.body.error).toMatchObject({ code: 'EXCEPTION_ALREADY_OPEN', details: { exceptionId: e1.body.id } });
+    expect(h.named('shipping.shipment.exception').filter((x) => [e1.body.id, e2.body.id].includes(x.exceptionId)).map((x) => [x.shipmentId, x.source, x.caseRef])).toEqual([
+      [s1.id, 'staff', null],
+      [s2.id, 'staff', null],
+    ]);
+    expect(await h.service.core.repo.count('exceptions', { group_id: o.groupId, kind: 'lost_or_damaged', status: ['open', 'in_progress', 'escalated'] })).toBe(2);
+  });
+
+  it('finds the replacement shipment of a replacement decided on a case (no return) by its order items', async () => {
+    const o = await sellerOrder(h);
+    const seller = tokens.seller(o.sellerId);
+    const viaCase = (await h.call('POST', `${SELLER}/shipments`, seller, { groupId: o.groupId, carrierCode: 'ups', trackingNumber: ups(), shippedAt: h.clock.now().toISOString(), items: [{ orderItemId: o.lamp.id, quantity: 1 }] })).body;
+    const viaReturn = (await h.call('POST', `${SELLER}/shipments`, seller, { groupId: o.groupId, carrierCode: 'ups', trackingNumber: ups(), shippedAt: h.clock.now().toISOString(), items: [{ orderItemId: o.speaker.id, quantity: 1 }] })).body;
+    const returnId = newId();
+    await h.service.core.repo.update('shipments', viaCase.id, { kind: 'replacement', return_id: null });
+    await h.service.core.repo.update('shipments', viaReturn.id, { kind: 'replacement', return_id: returnId });
+    const [r1, r2, r3] = [newId(), newId(), newId()];
+    const found = await h.service.shipmentsForReplacements([
+      { replacementId: r1, returnId: null, orderItemIds: [o.lamp.id] },
+      { replacementId: r2, returnId },
+      { replacementId: r3, returnId: null, orderItemIds: [newId()] },
+    ]);
+    expect(found[r1]).toMatchObject({ id: viaCase.id, kind: 'replacement', returnId: null });
+    expect(found[r2]).toMatchObject({ id: viaReturn.id, kind: 'replacement', returnId });
+    expect(found[r3]).toBeNull();
   });
 });
 

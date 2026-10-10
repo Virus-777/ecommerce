@@ -7,7 +7,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { Config } from '../config/index.js';
 import type { Database } from '../db/index.js';
 import type { Principal } from '../auth/index.js';
-import { isNotImplemented, moduleError, notImplemented } from '../errors/index.js';
+import { isAppError, isNotImplemented, moduleError, notImplemented } from '../errors/index.js';
 import { moduleInbox } from '../events/inbox.js';
 import { moduleEvents, type EventBus } from '../events/index.js';
 import type { ModuleResolvers } from '../graphql/index.js';
@@ -136,6 +136,21 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
             if (!isNotImplemented(err)) throw err; // until the settings module is built, the spec defaults apply
           }
           return declared.default as never;
+        },
+        async read(fullKey: string) {
+          const dot = fullKey.indexOf('.');
+          const owner = fullKey.slice(0, dot);
+          const declared = specOf(owner)?.settings[fullKey.slice(dot + 1)];
+          if (dot < 1 || !declared) throw new Error(`${name} reads setting ${fullKey}, which no module declares`);
+          const settings = apis.get('settings') as { get?: (key: string) => Promise<unknown> } | undefined;
+          try {
+            const v = await settings?.get?.(fullKey);
+            if (v != null) return v;
+          } catch (err) {
+            // settings not built yet, or the owning module is off: the owner's spec default applies
+            if (!isNotImplemented(err) && !(isAppError(err) && err.code === 'UNKNOWN_SETTING')) throw err;
+          }
+          return declared.default;
         },
       },
       refs: k.refs,

@@ -16,8 +16,12 @@ import { SearchBase, type CategoryTree } from './base.js';
 const LIVE_STATUSES = ['active', 'out_of_stock'];
 const DIRTY_BATCH = 200;
 const BEST_SELLER_TOP = 100;
-/** One night of a 30-day window: popularity decays by e^(-1/30) each night */
-const NIGHTLY_DECAY = Math.exp(-1 / 30);
+/** Best-selling and popularity window (market days, today included) */
+const SALES_WINDOW_DAYS = 30;
+/** Daily sales rows are kept this long */
+const SALES_KEEP_DAYS = 90;
+/** YYYY-MM-DD plus n calendar days */
+const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 
 export type RebuildResult = 'indexed' | 'removed';
 
@@ -347,15 +351,39 @@ export class SearchIndexer extends SearchBase {
     await this.markDirty(ids, 'promotions.campaign.ended');
   }
 
-  async onOrderPlacedFromOrders(e: EventPayload<'orders.order.placed'>) {
-    const order = await this.optional('orders', 'order items', (o) => o.getOrder(e.orderId));
-    if (!order) return;
+  /** Units per product of an order and its market day (orders.getOrder); undefined when orders can't answer */
+  protected async orderUnits(orderId: string): Promise<{ day: string; units: { productId: string; units: number }[] } | undefined> {
+    const order = await this.optional('orders', 'order items', (o) => o.getOrder(orderId));
+    if (!order) return undefined;
     const units = new Map<string, number>();
     for (const g of order.groups ?? []) for (const it of g.items ?? []) units.set(it.product.productId, (units.get(it.product.productId) ?? 0) + it.quantity);
+    const placedAt = new Date(order.placedAt);
+    return { day: this.marketDate(Number.isNaN(placedAt.getTime()) ? this.now() : placedAt), units: [...units].map(([productId, n]) => ({ productId, units: n })) };
+  }
+
+  /** orders.order.placed: the order's units per product go to product_sales_daily for the placed day, once per order */
+  async onOrderPlacedFromOrders(e: EventPayload<'orders.order.placed'>) {
+    const sales = await this.orderUnits(e.orderId);
+    if (!sales) return;
     // an order counts once: a redelivered event finds its key claimed and adds nothing
     await this.repo.transaction(async (tx) => {
       if (!(await tx.claim(`order-placed:${e.orderId}`))) return;
-      await tx.addSales([...units].map(([productId, n]) => ({ productId, units: n })), this.now());
+      await tx.recordSales(sales.day, sales.units, 1, this.now());
+    });
+  }
+
+  /**
+   * orders.order.cancelled (declined payment, every item cancelled): the order's units come off the day it was
+   * placed, once. A cancellation that arrives before the placement claims the placement too, so the order never counts.
+   */
+  async onOrderCancelledFromOrders(e: EventPayload<'orders.order.cancelled'>) {
+    const sales = await this.orderUnits(e.orderId);
+    if (!sales) return;
+    await this.repo.transaction(async (tx) => {
+      if (!(await tx.claim(`order-cancelled:${e.orderId}`))) return;
+      const notCountedYet = await tx.claim(`order-placed:${e.orderId}`);
+      if (notCountedYet) return;
+      await tx.recordSales(sales.day, sales.units, -1, this.now());
     });
   }
 
@@ -554,9 +582,14 @@ export class SearchIndexer extends SearchBase {
     return [...ids];
   }
 
-  /** search.sales-counts: 30-day units, best_selling availability and the top 100 per leaf category */
+  /**
+   * search.sales-counts: sales_30d = units of the last 30 market days (product_sales_daily), daily rows older than
+   * 90 days deleted, best_selling availability and the top 100 per leaf category
+   */
   async salesCounts(): Promise<void> {
-    await this.repo.decaySales(NIGHTLY_DECAY);
+    const today = this.marketDate();
+    await this.repo.sumSales(addDays(today, -(SALES_WINDOW_DAYS - 1)));
+    await this.repo.pruneSales(addDays(today, -SALES_KEEP_DAYS));
     const enabled = (await this.repo.platformUnits30d()) >= (await this.setting('bestSellingMinOrders'));
     await this.repo.rankBestSellers(BEST_SELLER_TOP, enabled);
     this.salesCountedAt = this.now();

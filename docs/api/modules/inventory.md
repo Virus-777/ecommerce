@@ -51,6 +51,7 @@ How many units exist and in which stock group: stock items per offer/SKU with Av
 | GET | `/api/admin/inventory/stock-items/{id}` | Stock item with levels per location, reservations, incoming, pending adjustments and history | staff<br>`inventory.stock.view` | `StockItemDetail` |
 | POST | `/api/admin/inventory/stock-items` | Create a company stock item (SKU) at a location _(audited)_ | staff<br>`inventory.items.manage` | `StockItemInput` → `StockItem` |
 | PATCH | `/api/admin/inventory/stock-items/{id}` | Change reorder point, reorder quantity or archive a company SKU _(audited)_ | staff<br>`inventory.items.manage` | `{ lowStockThreshold: int?, reorderQuantity: int?, archived: bool? }` → `StockItem` |
+| POST | `/api/admin/inventory/stock-items/{id}/merge` | Merge this company SKU into another one (e.g. after a catalog variant merge) _(audited)_ | staff<br>`inventory.items.manage` | `{ intoStockItemId: uuid, reason: text }` → `StockItem` |
 | POST | `/api/admin/inventory/adjustments` | Move company stock between groups, or into or out of stock, with a reason _(audited)_ | staff<br>`inventory.stock.adjust-official` | `AdjustmentRequest` → `Adjustment` |
 | GET | `/api/admin/inventory/adjustments` | Adjustments, including those waiting for second review | staff<br>`inventory.stock.view` | Page<Adjustment> |
 | POST | `/api/admin/inventory/adjustments/{id}/cancel` | Withdraw an adjustment waiting for review _(audited)_ | staff<br>`inventory.stock.adjust-official` | `{ reason: text }` → `Adjustment` |
@@ -138,6 +139,7 @@ How many units exist and in which stock group: stock items per offer/SKU with Av
 | locationId | `uuid?` Main location: the seller's virtual location, or the company location holding the item's stock (the default location when it has none) |
 | locationCode | `string?` |
 | binCode | `string?` Primary bin |
+| gtin | `string?` Variant GTIN from catalog.getVariants (null when catalog is off or the variant has none), so warehouse scans can match item barcodes |
 
 ### StockItemInput
 
@@ -191,7 +193,7 @@ How many units exist and in which stock group: stock items per offer/SKU with Av
 
 | Field | Type |
 |---|---|
-| kind | `enum(order|reservation|purchase_order|receipt|return|adjustment|bulk_update|transfer|count|discrepancy|initial)` |
+| kind | `enum(order|reservation|purchase_order|receipt|return|adjustment|bulk_update|transfer|count|discrepancy|initial|merge)` |
 | id | `string` |
 | label | `string` e.g. 'Received PUR-2610-0031', 'Return RT-261001-0161' |
 
@@ -386,7 +388,7 @@ How many units exist and in which stock group: stock items per offer/SKU with Av
 | state | `enum(awaiting_confirmation|confirmed)` |
 | lines | `InboundLine[]` |
 | totals | `{"received":"int","damaged":"int","shortage":"int","sellable":"int"}` |
-| waitingOrders | `int` Orders waiting for out-of-stock SKUs on this receipt; allocated first |
+| openPickShortages | `int` Open pick-shortage discrepancies on this receipt's SKUs; resolve them (reallocate) first. There are no backorders at launch: an order is never accepted without reserved units |
 | confirmedBy | `Actor?` |
 | confirmedAt | `datetime?` |
 
@@ -489,6 +491,18 @@ How many units exist and in which stock group: stock items per offer/SKU with Av
 | sourceGroup | `enum(available|returned)?` Where the replacement unit came from when reallocated |
 | note | `text` |
 
+### LowStockDigestItem
+
+| Field | Type |
+|---|---|
+| stockItemId | `uuid` |
+| offerId | `uuid?` |
+| sku | `string` |
+| label | `string` |
+| available | `int` |
+| threshold | `int?` |
+| state | `enum(low_stock|out_of_stock)` |
+
 ### LowStockRow
 
 | Field | Type |
@@ -557,7 +571,7 @@ stateDiagram-v2
   allocated --> released: release
 ```
 
-held: checkout hold (Available → Reserved) with expiresAt, extended while a payment result is checked. allocate on orders.order.accepted. fulfill on shipping.shipment.dispatched (Reserved → outside). release on cancellation (orders.item.cancelled) or abandoned checkout: Reserved → Available. Released units return to Available only when the purchase has ended or been cancelled (plan ch. 9). Lines move individually (partial cancel or partial shipment); the reservation state is the furthest state of its open lines.
+held: checkout hold (Available → Reserved) with expiresAt, extended while a payment result is checked. allocate on orders.order.accepted. fulfill on shipping.shipment.dispatched (Reserved → outside). release on cancellation (orders.item.cancelled) or abandoned checkout: Reserved → Available. Released units return to Available only when the purchase has ended or been cancelled (plan ch. 9). Lines move individually (partial cancel or partial shipment); the reservation state is the furthest state of its open lines. On allocate, hold units that match no accepted order item are released at once (reason unmatched). orders.item.split splits a line so each order item keeps its own units. allocateForOrder (replacements, exchanges) creates a reservation directly as allocated with no expiresAt; it never expires and is fulfilled or released like any allocation.
 
 ### Adjustment (`Adjustment.state`)
 
@@ -581,7 +595,7 @@ stateDiagram-v2
   awaiting_confirmation --> confirmed: confirm
 ```
 
-Units stay in Incoming until confirm: sellable → Available, damaged → Damaged or held (review date = supplier claim follow-up). Out-of-stock SKUs allocate waiting orders first.
+Units stay in Incoming until confirm: sellable → Available, damaged → Damaged or held (review date = supplier claim follow-up). Open pick shortages on the receipt's SKUs are shown (openPickShortages) so the Inventory Manager can reallocate to them first; nothing is allocated automatically (no backorders at launch).
 
 ### Return stock outcome (`ReturnOutcome.state`)
 
@@ -930,10 +944,11 @@ Indexes: `pk (count_id, stock_item_id)`
 
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
-| `inventory.stock.changed` | Available or Reserved changes for a stock item | `{ stockItemId: uuid, offerId: uuid?, ownerType: string, sellerId: uuid?, variantId: uuid, available: int, reserved: int, previousAvailable: int, state: enum(in_stock|low_stock|out_of_stock), cause: string }` | advertising, cart, catalog, content, offers, promotions, reports, search, wishlist, workqueues |
-| `inventory.stock.low` | Available drops to or below the threshold (once per cooldown) | `{ stockItemId: uuid, offerId: uuid?, ownerType: string, sellerId: uuid?, sku: string, label: string, available: int, threshold: int }` | advertising, fulfillment-service, notifications, purchasing, workqueues |
-| `inventory.reservation.allocated` | A hold is allocated to an accepted order | `{ reservationId: uuid, orderId: uuid, lines: ReservationLine[] }` | - |
-| `inventory.reservation.released` | Held or allocated units return to Available (cancel, expiry, abandoned checkout, staff release) | `{ reservationId: uuid, orderId: uuid?, reason: enum(cancelled|expired|abandoned|staff), lines: ReservationLine[] }` | - |
+| `inventory.stock.changed` | Available or Reserved changes for a stock item, or the item is re-keyed, archived or unarchived | `{ stockItemId: uuid, offerId: uuid?, ownerType: string, sellerId: uuid?, productId: uuid, variantId: uuid, available: int, reserved: int, previousAvailable: int, state: enum(in_stock|low_stock|out_of_stock), archived: bool, cause: string }` | advertising, cart, catalog, content, offers, promotions, reports, search, wishlist, workqueues |
+| `inventory.stock.low` | Available drops to or below the threshold (once per cooldown) | `{ stockItemId: uuid, offerId: uuid?, ownerType: string, sellerId: uuid?, productId: uuid, variantId: uuid, sku: string, label: string, available: int, threshold: int }` | advertising, fulfillment-service, notifications, purchasing, workqueues |
+| `inventory.stock.low_digest` | Daily low-stock digest (job inventory.low-stock-digest): one event per seller with low or out-of-stock items, and one for the Official Store (ownerType official); nothing when there is nothing to report | `{ ownerType: enum(official|seller), sellerId: uuid?, date: date, lowCount: int, outOfStockCount: int, items: LowStockDigestItem[] }` | notifications |
+| `inventory.reservation.allocated` | A hold is allocated to an accepted order, or allocateForOrder allocates units for a replacement or exchange | `{ reservationId: uuid, orderId: uuid, lines: ReservationLine[], source: enum(checkout|replacement|exchange) }` | - |
+| `inventory.reservation.released` | Held or allocated units return to Available (cancel, expiry, abandoned checkout, staff release, hold units no accepted item matched) | `{ reservationId: uuid, orderId: uuid?, reason: enum(cancelled|expired|abandoned|staff|unmatched), lines: ReservationLine[] }` | - |
 | `inventory.adjustment.recorded` | A seller or staff adjustment is applied | `{ adjustmentId: uuid?, movementId: uuid, stockItemId: uuid, ownerType: string, sellerId: uuid?, fromGroup: string, toGroup: string, quantity: int, reasonCode: string, actor: Actor }` | - |
 | `inventory.receipt.confirmed` | The Inventory Manager confirms a receipt | `{ inboundId: uuid, receiptId: uuid, purchaseOrderId: uuid, lines: InboundLine[], confirmedBy: Actor }` | purchasing |
 | `inventory.return_outcome.recorded` | Stock outcome of a return is recorded | `{ returnId: uuid, stockItemId: uuid, outcome: string, targetStockItemId: uuid?, quantity: int, valueAtCost: Money? }` | - |
@@ -944,13 +959,15 @@ Indexes: `pk (count_id, stock_item_id)`
 
 | Consumes | From | Does |
 |---|---|---|
-| `orders.order.accepted` | orders | Allocate the order's held reservation (reservationId) to its order items: each reservation line is matched to an entry of items by stockItemId and quantity, so allocation never depends on checkout's attachOrder (lines it already attached keep their orderItemId) |
-| `orders.item.cancelled` | orders | Release that item's held or allocated units back to Available |
-| `shipping.shipment.dispatched` | shipping | Fulfil the allocated lines in the shipment (Reserved → leaves stock) |
+| `orders.order.accepted` | orders | Allocate the order's held reservation (reservationId) to its order items: each reservation line is matched to an entry of items by stockItemId and quantity, so allocation never depends on checkout's attachOrder (lines it already attached keep their orderItemId). Hold units that match no accepted item (quantity reduced or line dropped at placement) are released in the same transaction (inventory.reservation.released, reason unmatched), so no units stay reserved without an order item |
+| `orders.item.cancelled` | orders | Release that item's held or allocated units back to Available (matched by itemId, so a split-off item releases only its own units) |
+| `orders.item.split` | orders | A line was split for a partial cancel, shipment or return (decision S-D1): split the reservation line of itemId so newItemId gets its own line with quantity units (same stock item, location and state; fulfilled and released counts stay on the original line) and the original keeps the rest. Later cancel, dispatch and release events name either item. Idempotent per newItemId |
+| `shipping.shipment.dispatched` | shipping | Fulfil the allocated lines in the shipment (Reserved → leaves stock), matched by order item id; replacement and exchange shipments fulfil their allocateForOrder reservation |
 | `returns.return.received` | returns | Official Store items: add each listed item's units (items[].stockItemId, quantity) to Returned at the receiving warehouse, once per return item. Seller returns are recorded by sellers through adjustments. |
 | `returns.return.inspected` | returns | Create a pending return stock outcome with the inspector's proposed outcome. The units stay in Returned until the outcome is recorded (restock → Available; damaged_stock, repair, return_to_supplier → Damaged or held; write_off → outside). Units that never arrived through returns.return.received are added to Returned first, so a missed event loses no stock |
 | `warehouse.bin.assigned` | warehouse | Update the stock item's primary bin code shown in stock lists |
-| `offers.offer.status_changed` | offers | Archive a seller stock item when its offer is removed (reserved units stay with their orders) |
+| `offers.offer.status_changed` | offers | Archive a seller stock item when its offer is removed (reserved units stay with their orders); unarchive it when the offer leaves removed (reinstated), so the offer shows its kept quantity again |
+| `catalog.product.merged` | catalog | Re-point company stock items of the merged product to the kept product and the mapped variant (newVariantId or intoVariantId) with updateStockItem; when the kept variant already has a company item with the same condition, raise it for the Inventory Manager to merge (POST /stock-items/{id}/merge). Seller items follow their offers (offers calls updateStockItem or mergeStockItems) |
 | `sellers.seller.closed` | sellers | Archive the seller's stock items |
 | `access.approval.decided` | access | Apply or reject adjustments waiting for second review |
 
@@ -963,7 +980,14 @@ Indexes: `pk (count_id, stock_item_id)`
 | hold | `(key: string, lines: { stockItemId: uuid, quantity: int }[], ttlMinutes?: int) => Reservation`<br>All-or-nothing checkout hold; throws INSUFFICIENT_STOCK with details per line. Same key returns the existing hold (idempotent). | checkout |
 | extendHold | `(reservationId: uuid, until: datetime) => Reservation`<br>Keeps stock while a payment result is being checked (scenario 3) | checkout, payments |
 | attachOrder | `(reservationId: uuid, orderId: uuid, lines: { stockItemId: uuid, orderItemId: uuid }[]) => Reservation`<br>Links a hold to the placed order so acceptance can allocate it | checkout, orders |
-| releaseHold | `(reservationId: uuid, reason: string) => void`<br>Abandoned checkout or failed purchase | checkout |
+| releaseHold | `(reservationId: uuid, reason: string) => void`<br>Abandoned checkout or failed purchase; also releases an allocation made with allocateForOrder that is no longer needed (cancelled replacement or exchange) | checkout, returns |
+| allocateForOrder | `(input: { key: string, orderId: uuid, orderRef?: string, source: { kind: 'replacement' | 'exchange', id: uuid, ref?: string }, lines: { stockItemId: uuid, quantity: int, orderItemId?: uuid }[], actor: Actor }) => Reservation`<br>All-or-nothing allocation with no expiry for a replacement or exchange shipment of an existing order (Available → Reserved, state allocated, publishes inventory.reservation.allocated). Throws INSUFFICIENT_STOCK with details per line. Same key returns the existing reservation (idempotent). Fulfilled on shipping.shipment.dispatched like any allocation; released with releaseHold | returns, support |
+| getLocations | `(opts?: { ownerType?: 'official' | 'seller', sellerId?: uuid, activeOnly?: bool }) => Location[]`<br>Stock locations with code, name, address and time zone (company warehouses by default) | purchasing, warehouse, shipping, returns, offers |
+| getDefaultLocation | `() => Location | null`<br>The default company location (isDefault): Official Store ships-from address for delivery estimates and rates (decision O3), receiving and return default. Null only before the first location is created | offers, shipping, cart, checkout, returns, purchasing, warehouse |
+| updateStockItem | `(stockItemId: uuid, patch: { productId?: uuid, variantId?: uuid, condition?: string, sku?: string, label?: string, offerId?: uuid }, actor: Actor) => StockItem`<br>Keep a stock item in step with its offer or catalog record (variant change on an offer, catalog merge, SKU or condition change). Quantities and history stay on the item; SKU_TAKEN when the new SKU is used by another item of the same owner. Publishes inventory.stock.changed (cause item_updated) so read models re-key | offers |
+| unarchiveStockItem | `(stockItemId: uuid, actor: Actor) => StockItem`<br>Reinstated offer: the archived item becomes active again with the quantities it kept, so the offer is not stuck out of stock. Publishes inventory.stock.changed (cause unarchived) | offers |
+| mergeStockItems | `(fromStockItemId: uuid, intoStockItemId: uuid, reason: string, actor: Actor) => StockItem`<br>Two items of the same owner now describe the same thing (variant merge, duplicate seller offers): every quantity group moves to the target with merge movements, open reservation lines and incoming expectations move with their units (still matched by orderItemId), and the source is archived. Returns the target | offers |
+| getSalesRate | `(stockItemIds: uuid[], days?: int) => map<{ unitsSold: int, days: int, avgDailySales: number }>`<br>Units that left stock to customer orders (fulfilled order allocations, net of restocked returns) over the last days (default 30), for reorder maths and days of cover | purchasing, reports |
 | applyBulkQuantities | `(sellerId: uuid, rows: { stockItemId: uuid, newAvailable: int }[], jobId: uuid, actor: Actor) => { stockItemId: uuid, ok: bool, error?: string }[]`<br>Seller bulk file quantities, recorded as 'Bulk update' movements | offers |
 | getUnitCost | `(stockItemId: uuid) => Money | null`<br>Weighted average buying cost of company stock | offers, finance, returns, reports |
 | expectIncoming | `(purchaseOrderId: uuid, purchaseOrderRef: string, locationId: uuid, lines: { stockItemId: uuid, quantity: int, expectedDate: date }[]) => void`<br>Adds Incoming when a purchase order is sent; repeated calls replace the open quantities for that PO | purchasing |
@@ -1023,7 +1047,7 @@ Checked through the access module (limits per role, second reviewer).
 |---|---|---|
 | `inventory.expire-holds` | every 1 min | Expire held reservations past expiresAt (Reserved → Available); publish inventory.reservation.released with reason expired |
 | `inventory.reconcile-reservations` | every 15 min | Find allocations whose order items are cancelled, completed or delivered without a matching event and raise them for review (no automatic release of allocated units) |
-| `inventory.low-stock-digest` | daily 07:00 market time | Low and out-of-stock summary per seller and for the Official Store (notifications) |
+| `inventory.low-stock-digest` | daily 07:00 market time | Low and out-of-stock summary per seller and for the Official Store: publish inventory.stock.low_digest (notifications emails it) |
 | `inventory.held-stock-review` | daily 07:00 market time | Publish inventory.hold.review_due for Damaged or held stock past its review date (work queue for the Inventory Manager) |
 | `inventory.valuation-snapshot` | daily 23:59 market time | Snapshot units and value at cost per group for company trading reports |
 
@@ -1049,6 +1073,11 @@ Checked through the access module (limits per role, second reviewer).
 - The seller bulk price-and-quantity file is owned by offers (seller SKU lives there); its quantity rows are applied here through applyBulkQuantities with reason 'Bulk update'.
 - Exports: seller exports run through reports (registerDataset / requestExport) so permission filtering, audit and link expiry match other modules. Inventory registers dataset inventory.seller.stock (seller audience; columns: product, variant, seller SKU, condition, available, reserved, incoming, low-stock threshold, state, updated at) and serves it from POST /api/seller/inventory/stock-items/exports.
 - Inventory has no hard dependencies; it reads product labels through the optional catalog dependency when creating company stock items and otherwise trusts the label passed in.
+- Discrepancy photos (reportDiscrepancy photoIds) are attached with media.attach (usage kind inspection_photo, refId the discrepancy id) when the discrepancy is created, so the media orphan sweep never deletes them.
+- Locations: getDefaultLocation is the single source of the Official Store ships-from address (decision O3); offers, shipping, cart and checkout read it instead of configuration. getLocations gives purchasing and warehouse location names and time zones.
+- Seller stock items follow their offer: offers calls updateStockItem when an offer's variant, condition or SKU changes, mergeStockItems when two offers become one, and unarchiveStockItem (or the status_changed consumer) when a removed offer is reinstated.
+- GraphQL: stock fields on Offer.stock and Variant.stock resolve only for the owning seller or staff with inventory.stock.view; cost fields (unitCost, valueAtCost) need inventory.stock.view. Customers see stock only through getOfferAvailability.
+- No backorders at launch: an order is accepted only with reserved units; a pick shortage is a discrepancy that inventory resolves (reallocate, adjust or no change).
 
 ## GraphQL (read layer)
 
@@ -1081,7 +1110,8 @@ enum StockState {
 
 """
 One stock item: one per seller offer, or one per Official Store SKU. Seller stock and company stock are never added together.
-In the Seller Center only the caller's own items resolve; in the Admin Center reading needs inventory.stock.view.
+In the Seller Center only the caller's own items resolve; in the Admin Center reading needs inventory.stock.view
+(Offer.stock and Variant.stock check it for staff; customers see stock only through Offer.availability).
 """
 type StockItem @areas(in: [SELLER, ADMIN]) {
   id: UUID!
@@ -1201,12 +1231,12 @@ extend type Offer {
   availability: Availability! @source(module: "inventory", fn: "getOfferAvailability")
 
   "The stock item holding this offer's quantities (seller: own offers only)"
-  stock: StockItem @areas(in: [SELLER, ADMIN]) @source(module: "inventory", fn: "getStockForOffers")
+  stock: StockItem @areas(in: [SELLER, ADMIN]) @auth(requires: SELLER) @source(module: "inventory", fn: "getStockForOffers")
 }
 
 extend type Variant {
   "Stock items for this variant. Seller Center: the caller's own items; Admin Center: company and seller items, never summed"
-  stock: [StockItem!]! @areas(in: [SELLER, ADMIN]) @source(module: "inventory", fn: "listStockForVariants")
+  stock: [StockItem!]! @areas(in: [SELLER, ADMIN]) @auth(requires: SELLER) @source(module: "inventory", fn: "listStockForVariants")
 }
 
 extend type Query {

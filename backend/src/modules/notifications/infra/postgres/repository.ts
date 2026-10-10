@@ -82,7 +82,7 @@ function repo(db: Db, inTx: boolean): NotificationsRepository {
     let q = inboxBase(owner).selectAll('n').select(['r.read_at', 'r.reason', 'r.covering_for']);
     if (f.group) q = q.where('n.group_key', '=', f.group);
     if (f.unreadOnly) q = q.where('r.read_at', 'is', null);
-    if (f.actionRequired === true || f.openActionOnly) q = q.where('n.action_required', '=', true).where('n.resolved_at', 'is', null);
+    if (f.actionRequired === true || f.openActionOnly) q = q.where('n.action_required', '=', true).where('n.resolved_at', 'is', null).where('n.expired_at', 'is', null);
     if (f.actionRequired === false) q = q.where('n.action_required', '=', false);
     if (f.topicKeys) q = f.topicKeys.length ? q.where('n.topic_key', 'in', f.topicKeys) : q.where(sql<boolean>`false`);
     if (f.mentionsOnly) q = q.where('r.reason', '=', 'mention');
@@ -200,7 +200,7 @@ function repo(db: Db, inTx: boolean): NotificationsRepository {
           'n.group_key as group',
           sql<number>`count(*)::int`.as('total'),
           sql<number>`(count(*) filter (where r.read_at is null))::int`.as('unread'),
-          sql<number>`(count(*) filter (where n.action_required and n.resolved_at is null))::int`.as('openActions'),
+          sql<number>`(count(*) filter (where n.action_required and n.resolved_at is null and n.expired_at is null))::int`.as('openActions'),
           sql<number>`(count(*) filter (where r.reason = 'mention' and r.read_at is null))::int`.as('mentionsUnread'),
         ])
         .groupBy('n.group_key')
@@ -252,6 +252,7 @@ function repo(db: Db, inTx: boolean): NotificationsRepository {
         .where('dedupe_key', '=', dedupeKey)
         .where('action_required', '=', true)
         .where('resolved_at', 'is', null)
+        .where('expired_at', 'is', null)
         .executeTakeFirst();
       return Number(r.numUpdatedRows);
     },
@@ -279,7 +280,7 @@ function repo(db: Db, inTx: boolean): NotificationsRepository {
       return out;
     },
     openRoleNotices: (roleKey) =>
-      db.selectFrom('notices').selectAll().where('address_kind', '=', 'role').where('address_id', '=', roleKey).where('action_required', '=', true).where('resolved_at', 'is', null).execute(),
+      db.selectFrom('notices').selectAll().where('address_kind', '=', 'role').where('address_id', '=', roleKey).where('action_required', '=', true).where('resolved_at', 'is', null).where('expired_at', 'is', null).execute(),
     recentRoleNotices: (roleKeys, since) =>
       roleKeys.length
         ? db.selectFrom('notices').selectAll().where('address_kind', '=', 'role').where('address_id', 'in', roleKeys).where('created_at', '>=', since).execute()
@@ -302,9 +303,11 @@ function repo(db: Db, inTx: boolean): NotificationsRepository {
     async expireActionNotices(deadlineBefore, at) {
       const r = await db
         .updateTable('notices')
-        .set({ resolved_at: at, resolve_note: 'expired' })
+        // expired, never resolved: shown as "No longer needed"
+        .set({ expired_at: at })
         .where('action_required', '=', true)
         .where('resolved_at', 'is', null)
+        .where('expired_at', 'is', null)
         .where('deadline_at', '<', deadlineBefore)
         .executeTakeFirst();
       return Number(r.numUpdatedRows);

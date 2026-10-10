@@ -57,7 +57,8 @@ describe('investigation workflow', () => {
     const q = await kit.call('POST', `${ADMIN}/reports/${r.id}/evidence-requests`, staff(), { to: { type: 'seller', id: sellerId, label: 'Gadget Grove' }, question: 'Send proof of supply for BRL-S2', dueAt: due });
     expect(q.status, JSON.stringify(q.body)).toBe(201);
     expect(q.body).toMatchObject({ state: 'open', to: { type: 'seller', id: sellerId } });
-    expect(kit.last('trust.evidence.requested')).toEqual({ requestId: q.body.id, reportId: r.id, toType: 'seller', toId: sellerId, dueAt: due });
+    expect(kit.last('trust.evidence.requested')).toEqual({ requestId: q.body.id, reportId: r.id, reportRef: r.ref, toType: 'seller', toId: sellerId, customerId: null, sellerId, question: 'Send proof of supply for BRL-S2', dueAt: due });
+    expect(q.body.reportRef).toBe(r.ref);
     const list = await kit.call('GET', `${SELLER}/evidence-requests?state=open`, seller(sellerId));
     expect(list.body.map((x: any) => x.id)).toEqual([q.body.id]);
     expect((await kit.call('GET', `${SELLER}/evidence-requests`, seller(newId()))).body).toEqual([]);

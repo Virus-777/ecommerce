@@ -34,7 +34,7 @@ const anyByDedupe = async (dedupeKey: string) => (await t.service.core.repo.acti
 describe('intake table', () => {
   it('covers every event the spec consumes, and nothing else', () => {
     expect(Object.keys(INTAKE).sort()).toEqual(Object.keys(spec.events.consumes).sort());
-    expect(Object.keys(INTAKE)).toHaveLength(53);
+    expect(Object.keys(INTAKE)).toHaveLength(54);
   });
 
   it('every entry opens, closes or routes something', () => {
@@ -45,7 +45,7 @@ describe('intake table', () => {
     const opened = new Set(intakeRuleDocs().map((r) => r.kind));
     for (const r of intakeRuleDocs()) expect(QUEUE_SEEDS[r.queueKey], r.queueKey).toBeDefined();
     // kinds other modules raise through raise() and an event closes (spec notes)
-    const raised = new Set(['restriction_review', 'return_parcel_overdue']);
+    const raised = new Set(['restriction_review', 'return_parcel_overdue', 'review_moderation_overdue']);
     for (const [kind] of resolvesOnByKind()) expect(opened.has(kind) || raised.has(kind), kind).toBe(true);
   });
 
@@ -233,7 +233,7 @@ function scenarios(): Scenario[] {
   }
   {
     const c = id();
-    out.push({ name: 'reply overdue', open: ['messaging.reply.overdue', ev('messaging.reply.overdue', { conversationId: c })], kind: 'seller_reply_overdue', queue: 'sellers.performance', dedupe: `reply_overdue:${c}`, close: ['messaging.message.sent', ev('messaging.message.sent', { conversationId: c, authorKind: 'seller' })] });
+    out.push({ name: 'reply overdue', open: ['messaging.reply.overdue', ev('messaging.reply.overdue', { conversationId: c, officialStore: false })], kind: 'seller_reply_overdue', queue: 'sellers.performance', dedupe: `reply_overdue:${c}`, close: ['messaging.message.sent', ev('messaging.message.sent', { conversationId: c, authorKind: 'seller' })] });
   }
   {
     const r = id();
@@ -249,6 +249,7 @@ describe('every opening event raises its item and its resolving event closes it'
     const used = new Set(list.flatMap((s) => [s.open[0], ...(Array.isArray(s.close) ? [s.close[0]] : [])]));
     used.add('shipping.dispatch.overdue'); // tested above
     used.add('warehouse.return_parcel.received'); // closes items raised through raise(): tested below
+    used.add('reviews.moderation.decided'); // closes items reviews raises through raise(): test/pass3.test.ts
     const routing = ['access.away.started', 'access.away.ended', 'access.coverage.changed', 'sellers.application.information_provided'];
     expect(Object.keys(spec.events.consumes).filter((e) => !used.has(e) && !routing.includes(e))).toEqual([]);
   });
@@ -296,7 +297,7 @@ describe('special intake rules', () => {
 
   it('a customer message does not close a seller reply task', async () => {
     const c = newId();
-    await publish(t.app, 'messaging.reply.overdue', ev('messaging.reply.overdue', { conversationId: c }));
+    await publish(t.app, 'messaging.reply.overdue', ev('messaging.reply.overdue', { conversationId: c, officialStore: false }));
     await publish(t.app, 'messaging.message.sent', ev('messaging.message.sent', { conversationId: c, authorKind: 'customer' }));
     expect(await active(`reply_overdue:${c}`)).toMatchObject({ visible_to_seller: true });
   });
@@ -362,7 +363,7 @@ describe('kinds raised by other modules and the queue of each kind', () => {
     const restrictionId = newId();
     const sellerId = newId();
     // sellers names its old queue: the kind's own queue wins
-    const review = await t.service.raise({ queueKey: 'sellers.performance', kind: 'restriction_review', title: 'Review restriction RS-1', subject: { type: 'restriction', id: restrictionId, ref: 'RS-1' }, sellerId, dedupeKey: `restriction_review:${restrictionId}:2026-10-10` });
+    const review = await t.service.raise({ sourceModule: 'test', queueKey: 'sellers.performance', kind: 'restriction_review', title: 'Review restriction RS-1', subject: { type: 'restriction', id: restrictionId, ref: 'RS-1' }, sellerId, dedupeKey: `restriction_review:${restrictionId}:2026-10-10` });
     expect(review.queueKey).toBe('sellers.restrictions');
     await publish(t.app, 'sellers.restriction.evidence_submitted', ev('sellers.restriction.evidence_submitted', { restrictionId, sellerId }));
     await publish(t.app, 'sellers.restriction.updated', ev('sellers.restriction.updated', { restrictionId, sellerId }));
@@ -377,10 +378,10 @@ describe('kinds raised by other modules and the queue of each kind', () => {
   it('return parcels: overdue items close when the parcel is received, unexpected parcels stay for a person', async () => {
     const parcelId = newId();
     const returnId = newId();
-    const overdue = await t.service.raise({ queueKey: 'returns.decisions', kind: 'return_parcel_overdue', title: 'Return parcel not received: RT-1', subject: { type: 'other', id: parcelId, label: 'Return parcel' }, relatedSubjects: [{ type: 'return', id: returnId }], dedupeKey: `return_parcel_overdue:${parcelId}` });
+    const overdue = await t.service.raise({ sourceModule: 'test', queueKey: 'returns.decisions', kind: 'return_parcel_overdue', title: 'Return parcel not received: RT-1', subject: { type: 'other', id: parcelId, label: 'Return parcel' }, relatedSubjects: [{ type: 'return', id: returnId }], dedupeKey: `return_parcel_overdue:${parcelId}` });
     expect(overdue).toMatchObject({ queueKey: 'warehouse.return_parcels', kind: 'return_parcel_overdue' });
     const strayId = newId();
-    const stray = await t.service.raise({ queueKey: 'warehouse.return_parcels', kind: 'unexpected_return_parcel', title: 'Unexpected return parcel 1Z', subject: { type: 'other', id: strayId, label: 'Return parcel' }, dedupeKey: `return_parcel:${strayId}` });
+    const stray = await t.service.raise({ sourceModule: 'test', queueKey: 'warehouse.return_parcels', kind: 'unexpected_return_parcel', title: 'Unexpected return parcel 1Z', subject: { type: 'other', id: strayId, label: 'Return parcel' }, dedupeKey: `return_parcel:${strayId}` });
     const received = (id: string, unexpected: boolean) => ev('warehouse.return_parcel.received', { parcelId: id, returnId: unexpected ? null : returnId, unexpected, parcelCondition: 'intact', receivedAt: new Date().toISOString() });
     await publish(t.app, 'warehouse.return_parcel.received', received(parcelId, false));
     await publish(t.app, 'warehouse.return_parcel.received', received(parcelId, false));
@@ -389,7 +390,7 @@ describe('kinds raised by other modules and the queue of each kind', () => {
     expect(await t.service.core.repo.getItem(stray.id)).toMatchObject({ state: 'open' });
     // an overdue item raised before parcels were the subject (the return was) closes too
     const oldStyle = newId();
-    const before = await t.service.raise({ queueKey: 'warehouse.return_parcels', kind: 'return_parcel_overdue', title: 'Return parcel not received', subject: { type: 'return', id: oldStyle }, dedupeKey: `return_parcel_overdue:${newId()}` });
+    const before = await t.service.raise({ sourceModule: 'test', queueKey: 'warehouse.return_parcels', kind: 'return_parcel_overdue', title: 'Return parcel not received', subject: { type: 'return', id: oldStyle }, dedupeKey: `return_parcel_overdue:${newId()}` });
     await publish(t.app, 'warehouse.return_parcel.received', ev('warehouse.return_parcel.received', { parcelId: newId(), returnId: oldStyle, unexpected: false }));
     expect(await t.service.core.repo.getItem(before.id)).toMatchObject({ state: 'resolved' });
   });
@@ -401,7 +402,7 @@ describe('kinds raised by other modules and the queue of each kind', () => {
     const resolved = capture(t.app, 'workqueues.item.resolved');
     await publish(t.app, 'payments.payment.authorized', ev('payments.payment.authorized', { intentId: newId() }));
     expect(resolved).toEqual([]);
-    expect(await t.service.raise({ queueKey: 'finance.daily_checks', kind: 'chargeback', title: 'Chargeback DP-1', subject: { type: 'other', id: newId() }, dedupeKey: `chargeback:${newId()}`, amount: money(5_000) })).toMatchObject({ queueKey: 'finance.chargebacks' });
+    expect(await t.service.raise({ sourceModule: 'test', queueKey: 'finance.daily_checks', kind: 'chargeback', title: 'Chargeback DP-1', subject: { type: 'other', id: newId() }, dedupeKey: `chargeback:${newId()}`, amount: money(5_000) })).toMatchObject({ queueKey: 'finance.chargebacks' });
   });
 });
 
@@ -415,7 +416,7 @@ describe('seeding an existing install', () => {
     const oldId = newId();
     await repo.upsertIntakeRules([{ ...oldRule, id: oldId, queue_key: 'finance.daily_checks', active: true }]);
 
-    const restart = () => new Core({ repo, ctx: t.service.core.ctx, archive: t.service.core.archive }).ensureSeeded();
+    const restart = () => new Core({ repo, ctx: t.service.core.ctx }).ensureSeeded();
     await restart();
     const queues = await repo.listQueues();
     for (const key of ['warehouse.return_parcels', 'inventory.low_stock', 'finance.payment_checks', 'finance.chargebacks', 'sellers.launch_reviews', 'sellers.restrictions']) expect(queues.map((q) => q.key)).toContain(key);
@@ -435,7 +436,7 @@ describe('public API', () => {
   it('raise is idempotent on dedupeKey and refreshes title, deadline and amount; listForSubject, openCounts, sellerTaskCounts', async () => {
     const sellerId = newId();
     const subjectId = newId();
-    const base = { queueKey: 'warehouse.pick_pack', kind: 'pick_pack' as const, title: 'Pick MK-1', subject: { type: 'order' as const, id: subjectId, ref: 'MK-1' }, sellerId, dedupeKey: `pick_pack:${subjectId}`, amount: money(1000), visibleToSeller: true };
+    const base = { sourceModule: 'warehouse', queueKey: 'warehouse.pick_pack', kind: 'pick_pack' as const, title: 'Pick MK-1', subject: { type: 'order' as const, id: subjectId, ref: 'MK-1' }, sellerId, dedupeKey: `pick_pack:${subjectId}`, amount: money(1000), visibleToSeller: true };
     const first = await t.service.raise(base);
     const due = new Date(Date.now() + 5 * 3_600_000).toISOString();
     const second = await t.service.raise({ ...base, title: 'Pick MK-1 (2 lines)', dueAt: due, amount: money(2000) });
@@ -452,8 +453,8 @@ describe('public API', () => {
   });
 
   it('raise refuses unknown queues and kinds', async () => {
-    await expect(t.service.raise({ queueKey: 'nope.queue', kind: 'pick_pack', title: 'x', subject: { type: 'other', id: 'x' }, dedupeKey: 'x' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
-    await expect(t.service.raise({ queueKey: 'warehouse.pick_pack', kind: 'teleport' as never, title: 'x', subject: { type: 'other', id: 'x' }, dedupeKey: 'x' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    await expect(t.service.raise({ sourceModule: 'test', queueKey: 'nope.queue', kind: 'pick_pack', title: 'x', subject: { type: 'other', id: 'x' }, dedupeKey: 'x' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    await expect(t.service.raise({ sourceModule: 'test', queueKey: 'warehouse.pick_pack', kind: 'teleport' as never, title: 'x', subject: { type: 'other', id: 'x' }, dedupeKey: 'x' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
   });
 
   it('registers the export dataset with reports at boot', async () => {

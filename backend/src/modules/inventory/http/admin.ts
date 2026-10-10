@@ -17,7 +17,7 @@ export const adminRoutes = (service: InventoryService) =>
     /** POST /stock-items: Create a company stock item (SKU) at a location */
     createStockItem: async ({ body, principal, actor, requestId }) => service.createStockItemAsStaff(body, { principal, actor, requestId }),
     /** PATCH /stock-items/{id}: Change reorder point, reorder quantity or archive a company SKU */
-    updateStockItem: async ({ params, body, principal, actor, requestId }) => service.updateStockItem(params.id, body, { principal, actor, requestId }),
+    updateStockItem: async ({ params, body, principal, actor, requestId }) => service.updateStockItemAsStaff(params.id, body, { principal, actor, requestId }),
     /** POST /adjustments: Move company stock between groups, or into or out of stock, with a reason */
     createAdjustment: async ({ body, principal, actor, requestId }) => service.createAdjustment(body, { principal, actor, requestId }),
     /** GET /adjustments: Adjustments, including those waiting for second review */
@@ -68,4 +68,6 @@ export const adminRoutes = (service: InventoryService) =>
     recordCountLines: async ({ params, body }) => service.recordCountLines(params.id, body.lines),
     /** POST /counts/{id}/submit: Submit a count; differences become count-correction adjustments */
     submitCount: async ({ params, principal, actor, requestId }) => service.submitCount(params.id, { principal, actor, requestId }),
+    /** POST /stock-items/{id}/merge: Merge this company SKU into another one (e.g. after a catalog variant merge) (TODO pass 3: implement) */
+    mergeStockItem: async ({ params, body, principal, actor, requestId }) => service.mergeStockItemAsStaff(params.id, body, { principal, actor, requestId }),
   });

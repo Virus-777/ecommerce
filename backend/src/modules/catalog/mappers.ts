@@ -51,6 +51,7 @@ export function toBrand(r: BrandRow, productCount: number, refs: Map<string, com
     description: r.description,
     productCount,
     banner: (r.banner_media_id && refs.get(r.banner_media_id)) || null,
+    status: r.status as Brand['status'],
   };
 }
 
@@ -88,8 +89,18 @@ const actorOf = (v: unknown): common.Actor => {
   return { kind: a.kind ?? 'system', ...(a.id != null ? { id: a.id } : {}), ...(a.name != null ? { name: a.name } : {}) };
 };
 
-/** Actions the API knows; other rows (accepted corrections) stay in the table only */
-export const LOG_ACTIONS: readonly ReviewLogEntry['action'][] = ['submitted', 'approved', 'changes_requested', 'rejected', 'publication_changed', 'merged', 'check_dismissed'];
+/** Actions shown in the product history (every action catalog logs) */
+export const LOG_ACTIONS: readonly ReviewLogEntry['action'][] = [
+  'submitted',
+  'approved',
+  'changes_requested',
+  'rejected',
+  'publication_changed',
+  'merged',
+  'check_dismissed',
+  'correction_accepted',
+  'variant_details_changed',
+];
 
 export function toLogEntry(r: ReviewLogRow): ReviewLogEntry {
   return {

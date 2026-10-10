@@ -68,15 +68,33 @@ describe('events consumed', () => {
       const r = await h.call('POST', `${STORE}/conversations`, tokens.customer(o.customerId!), { with: 'seller', orderId: o.order.id, sellerId: o.sellerB, body: 'Hi B' });
       return r.body.conversation.id as string;
     })();
-    const base = { enforcementId: newId(), reportId: newId(), ownerTeam: 'messaging', reason: 'Harassment', params: {}, appealDeadline: null, alreadyApplied: false };
-    await h.publish('trust', 'trust.enforcement.recorded', { ...base, action: 'suspend_offer', ownerTeam: 'offers', targets: [{ type: 'conversation', id }] });
+    const enforcementId = newId();
+    const base = { enforcementId, reportId: newId(), ownerTeam: 'messaging', reason: 'Harassment', params: {}, appealDeadline: null, alreadyApplied: false };
+    const conv = (cid: string) => ({ type: 'conversation', id: cid, label: 'Conversation' });
+    // bug (pass 3): any action owned by messaging locked; only lock_conversation does (restrict_customer_messaging is customers')
+    await h.publish('trust', 'trust.enforcement.recorded', { ...base, enforcementId: newId(), action: 'restrict_customer_messaging', ownerTeam: 'messaging', targets: [conv(id)] });
+    await h.publish('trust', 'trust.enforcement.recorded', { ...base, enforcementId: newId(), action: 'suspend_offer', ownerTeam: 'catalog', targets: [conv(id)] });
     expect((await h.call('GET', `${STORE}/conversations/${id}`, tokens.customer(o.customerId!))).body.status).toBe('open');
-    await h.publish('trust', 'trust.enforcement.recorded', { ...base, action: 'lock_conversation', targets: [{ type: 'conversation', id }, { type: 'message', id: msg.body.id }, { type: 'conversation', id: newId() }] });
-    await h.publish('trust', 'trust.enforcement.recorded', { ...base, action: 'lock_conversation', targets: [{ type: 'conversation', id }] });
+    await h.publish('trust', 'trust.enforcement.recorded', { ...base, action: 'lock_conversation', targets: [conv(id), { type: 'message', id: msg.body.id, label: 'Message' }, conv(newId())] });
+    await h.publish('trust', 'trust.enforcement.recorded', { ...base, action: 'lock_conversation', targets: [conv(id)] });
     const c = await h.call('GET', `${STORE}/conversations/${id}`, tokens.customer(o.customerId!));
     expect(c.body).toMatchObject({ status: 'locked', lockedReason: 'Trust and Risk enforcement: Harassment' });
-    expect(h.named('messaging.conversation.locked').filter((e) => e.conversationId === id)).toHaveLength(1);
+    const locked = h.named('messaging.conversation.locked').filter((e) => e.conversationId === id);
+    expect(locked).toEqual([{ conversationId: id, reason: 'Trust and Risk enforcement: Harassment', lockedBy: expect.objectContaining({ kind: 'system' }), trustEnforcementId: enforcementId, customerId: o.customerId, sellerId: o.sellerA }]);
     expect((await h.call('GET', `${STORE}/conversations/${id2}`, tokens.customer(o.customerId!))).body.status).toBe('open');
+
+    // reversing the enforcement unlocks what it locked (once, even when delivered twice)
+    const reversed = { enforcementId, ref: 'EN-261010-0001', reportId: base.reportId, reportRef: 'TR-0001', action: 'lock_conversation', ownerTeam: 'messaging', targets: [conv(id)], params: {}, appliedRef: id, executionState: 'applied', reason: 'Appeal overturned', appealId: null, reversedBy: { kind: 'staff', id: newId() }, reversedAt: new Date().toISOString() };
+    await h.publish('trust', 'trust.enforcement.reversed', reversed);
+    await h.publish('trust', 'trust.enforcement.reversed', reversed);
+    expect((await h.call('GET', `${STORE}/conversations/${id}`, tokens.customer(o.customerId!))).body.status).toBe('open');
+    expect(h.named('messaging.conversation.unlocked').filter((e) => e.conversationId === id)).toEqual([{ conversationId: id, reason: 'Trust and Risk reversed EN-261010-0001: Appeal overturned', unlockedBy: expect.objectContaining({ kind: 'system' }), trustEnforcementId: enforcementId }]);
+
+    // a conversation staff locked themselves is not unlocked by another enforcement's reversal
+    const mod = tokens.staff(['messaging.conversations.moderate']);
+    expect((await h.call('POST', `${ADMIN}/conversations/${id2}/lock`, mod, { locked: true, reason: 'Fraud' })).status).toBe(200);
+    await h.publish('trust', 'trust.enforcement.reversed', { ...reversed, targets: [conv(id2)] });
+    expect((await h.call('GET', `${STORE}/conversations/${id2}`, tokens.customer(o.customerId!))).body.status).toBe('locked');
   });
 });
 

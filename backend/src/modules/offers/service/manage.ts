@@ -8,14 +8,14 @@ import type * as catalog from '../../../spec/catalog.js';
 import type * as common from '../../../spec/common.js';
 import type { CompareAtInput, HoldOfferRequest, OfferInput, OfferUpdate, OfficialOfferInput, RemoveOfferRequest, ReturnTerms, ReturnTermsInput, StatusReason, WarrantyInput } from '../../../spec/offers.js';
 import { activityLabel, conditionLabel, needsConditionNotes, returnTermsOf, warrantyTerms, type Condition } from '../domain/rules.js';
-import { variantLabel } from '../mappers.js';
+import { offerTitle, variantLabel } from '../mappers.js';
 import type { OfferRec } from '../ports.js';
 import { invalidField, notFound, Part, SYSTEM, type By } from './core.js';
 
 /** Parcel used for profile checks and quotes: catalog variants carry no dimensions yet (spec gap) */
 export const DEFAULT_PARCEL = { weightGrams: 1000 };
-/** Market default delivery location (spec: "market default (settings)"; no such setting exists yet) */
-const OFFICIAL_SHIPS_FROM = 'Official Store warehouse';
+
+
 const DEFAULT_RETURN_DAYS = 30;
 
 const PATCH_TERMS: Record<string, string> = {
@@ -148,9 +148,20 @@ export class ManagePart extends Part {
     if (at && new Date(at).getTime() <= this.now().getTime()) throw invalidField('saleEndsAt', 'The sale end must be in the future');
   }
 
+  /**
+   * Official Store ships-from (decision O3): the inventory default location as 'City, Region' (its name when it has
+   * no address), never empty: the market default location label when inventory has none.
+   */
+  async officialShipsFrom(): Promise<string> {
+    const loc = await this.core.soft('inventory.getDefaultLocation', () => this.ctx.use('inventory').getDefaultLocation());
+    const a = loc?.address;
+    const label = a?.city ? [a.city, a.region].filter(Boolean).join(', ') : (loc?.name ?? '');
+    return label.trim() || this.ctx.config.market.defaultLocation.label;
+  }
+
   /** Ships-from and same-day cutoff for the owner (shipping, then the seller's storefront location) */
   async origin(sellerId: string | null): Promise<{ shipsFrom: string; sameDayCutoff: string | null }> {
-    if (!sellerId) return { shipsFrom: OFFICIAL_SHIPS_FROM, sameDayCutoff: null };
+    if (!sellerId) return { shipsFrom: await this.officialShipsFrom(), sameDayCutoff: null };
     const s = await this.core.optional('shipping', 'getSellerShippingSummaries', (sh) => sh.getSellerShippingSummaries([sellerId]));
     const summary = s?.[sellerId];
     if (summary?.shipsFrom) return { shipsFrom: summary.shipsFrom, sameDayCutoff: summary.sameDayCutoff ?? null };
@@ -158,10 +169,19 @@ export class ManagePart extends Part {
     return { shipsFrom: card?.location ?? '', sameDayCutoff: null };
   }
 
-  /** The profile must exist and quote for the market (shipping off: accepted as given) */
-  async checkShippingProfile(profileId: string, dispatch: { businessDays: number; sameDayCutoff: string | null; shipsFrom: string }) {
+  /**
+   * The profile must belong to the offer's owner (shipping.getProfileOwners: the seller's own profile, or an
+   * Official Store profile for Official Store offers) and quote for the market. Shipping off: accepted as given.
+   */
+  async checkShippingProfile(profileId: string, dispatch: { businessDays: number; sameDayCutoff: string | null; shipsFrom: string }, owner: { ownerType: 'official' | 'seller'; sellerId: string | null }) {
     const shipping = this.ctx.tryUse('shipping');
     if (!shipping) return;
+    const invalidProfile = (reason: string) => this.core.error('SHIPPING_PROFILE_INVALID', owner.ownerType === 'official' ? 'Choose an Official Store shipping profile' : 'Choose one of your shipping profiles', { shippingProfileId: profileId, reason });
+    if (!isUuid(profileId)) throw invalidProfile('unknown_profile');
+    const owners = await shipping.getProfileOwners([profileId]);
+    const o = owners[profileId];
+    if (!o) throw invalidProfile('unknown_profile');
+    if (o.ownerType !== owner.ownerType || (owner.ownerType === 'seller' && o.sellerId !== owner.sellerId)) throw invalidProfile('not_your_profile');
     try {
       await shipping.quote(profileId, this.ctx.config.market.defaultLocation.postalCode, DEFAULT_PARCEL, dispatch);
     } catch (err) {
@@ -220,7 +240,7 @@ export class ManagePart extends Part {
     await this.checkPrice(input.price, res.categoryId);
     const compareAt = await this.compareAtForNew(input.compareAt, input.price, res.product);
     const origin = await this.origin(sellerId);
-    await this.checkShippingProfile(input.shippingProfileId, { businessDays: input.dispatchBusinessDays, ...origin });
+    await this.checkShippingProfile(input.shippingProfileId, { businessDays: input.dispatchBusinessDays, ...origin }, { ownerType: 'seller', sellerId });
 
     const id = newId();
     const stock = await this.stockItem(() =>
@@ -243,6 +263,7 @@ export class ManagePart extends Part {
       sellerId,
       input: { ...input, compareAt: compareAt ? { amount: input.compareAt!.amount, basis: input.compareAt!.basis } : null },
       sku,
+      title: offerTitle(res.product.product.title, res.variant.options),
       stockItemId: stock.id,
       items,
       returns,
@@ -269,7 +290,7 @@ export class ManagePart extends Part {
     await this.checkPrice(input.price, res.categoryId);
     const compareAt = await this.compareAtForNew(input.compareAt, input.price, res.product);
     const origin = await this.origin(null);
-    await this.checkShippingProfile(input.shippingProfileId, { businessDays: input.dispatchBusinessDays, ...origin });
+    await this.checkShippingProfile(input.shippingProfileId, { businessDays: input.dispatchBusinessDays, ...origin }, { ownerType: 'official', sellerId: null });
 
     const id = newId();
     let stockItemId: string;
@@ -300,6 +321,7 @@ export class ManagePart extends Part {
       sellerId: null,
       input: { ...input, saleEndsAt: null, compareAt: compareAt ? { amount: input.compareAt!.amount, basis: input.compareAt!.basis } : null },
       sku,
+      title: offerTitle(res.product.product.title, res.variant.options),
       stockItemId,
       items,
       returns,
@@ -342,6 +364,7 @@ export class ManagePart extends Part {
     sellerId: string | null;
     input: Pick<OfferInput, 'productId' | 'variantId' | 'condition' | 'price' | 'purchaseLimit' | 'dispatchBusinessDays' | 'shippingProfileId' | 'saleEndsAt'> & { compareAt?: CompareAtInput | null };
     sku: string;
+    title: string;
     stockItemId: string;
     items: { notes: string | null; missing: string[]; included: string[] };
     returns: { kind: string; windowDays: number; freeReturnShipping: boolean; policyId: string | null };
@@ -352,18 +375,21 @@ export class ManagePart extends Part {
   }): Promise<OfferRec> {
     const now = this.now();
     const i = o.input;
-    try {
-      return await this.repo.transaction(async (tx) => {
+    // a unique index (SKU, live New offer per variant, live offer per stock item) lost a race: DUPLICATE_OFFER
+    return this.core.unique(() =>
+      this.repo.transaction(async (tx) => {
         const row = await tx.insert('offers', {
           id: o.id,
           owner_type: o.ownerType,
           seller_id: o.sellerId,
           product_id: i.productId,
           variant_id: i.variantId,
+          title: o.title,
           condition: i.condition,
           condition_notes: o.items.notes,
           included_items: o.items.included as never,
           missing_items: o.items.missing as never,
+          missing_items_stale: false,
           seller_sku: o.sku,
           stock_item_id: o.stockItemId,
           price_amount: i.price.amount,
@@ -423,12 +449,8 @@ export class ManagePart extends Part {
           at: now,
         });
         return row;
-      });
-    } catch (err) {
-      // unique (owner, seller, sku) or (seller, variant) New lost a race
-      if ((err as { code?: string }).code === '23505') throw this.core.error('DUPLICATE_OFFER', 'An offer with this SKU or variant already exists', {});
-      throw err;
-    }
+      }),
+    );
   }
 
   private async afterCreate(row: OfferRec, by: By) {
@@ -555,7 +577,7 @@ export class ManagePart extends Part {
     // inventory archives the offer's stock item on removal
     this.core.publish(
       'offers.offer.status_changed',
-      { offerId: row.id, productId: row.product_id, variantId: row.variant_id, sellerId: row.seller_id, ownerType: row.owner_type, from: 'draft', to: 'removed', reasonCode: 'ended_by_seller', reason: 'Draft deleted' },
+      { offerId: row.id, productId: row.product_id, variantId: row.variant_id, sellerId: row.seller_id, ownerType: row.owner_type, from: 'draft', to: 'removed', reasonCode: 'ended_by_seller', reason: 'Draft deleted', stockItemId: row.stock_item_id, trustEnforcementId: null },
       by,
     );
   }
@@ -608,7 +630,14 @@ export class ManagePart extends Part {
       if (!fields.includes(field)) fields.push(field);
     };
 
-    if (body.variantId !== undefined && body.variantId !== null) set('variant_id', variantId, 'variantId');
+    // a price change above largeSellerPriceChangePct needs confirmLargeChange in the same body; nothing is saved without it
+    if (body.price && !o.official && !body.confirmLargeChange) await this.parts.pricing.assertLargeChangeConfirmed(row, body.price);
+
+    if (body.variantId !== undefined && body.variantId !== null) {
+      set('variant_id', variantId, 'variantId');
+      const v = product.product.variants.find((x) => x.id === variantId);
+      if (variantId !== row.variant_id && v) patch.title = offerTitle(product.product.title, v.options);
+    }
     if (body.condition) set('condition', condition, 'condition');
     if (body.conditionNotes !== undefined || body.missingItems !== undefined || body.condition) {
       const items = this.conditionAndItems(condition, body.conditionNotes !== undefined ? body.conditionNotes : row.condition_notes, body.missingItems !== undefined ? body.missingItems : (row.missing_items as string[]), product);
@@ -616,6 +645,8 @@ export class ManagePart extends Part {
       set('missing_items', items.missing as never, 'missingItems');
       set('included_items', items.included as never, 'missingItems');
     }
+    // the seller saved missingItems again: the box review is done
+    if (body.missingItems !== undefined && row.missing_items_stale) patch.missing_items_stale = false;
     if (body.purchaseLimit !== undefined) {
       await this.checkPurchaseLimit(body.purchaseLimit);
       set('purchase_limit', body.purchaseLimit ?? null, 'purchaseLimit');
@@ -634,7 +665,7 @@ export class ManagePart extends Part {
     }
     if (body.shippingProfileId) {
       if (body.shippingProfileId !== row.shipping_profile_id) {
-        await this.checkShippingProfile(body.shippingProfileId, { businessDays: patch.dispatch_business_days ?? row.dispatch_business_days, sameDayCutoff: row.same_day_cutoff?.slice(0, 5) ?? null, shipsFrom: row.ships_from });
+        await this.checkShippingProfile(body.shippingProfileId, { businessDays: patch.dispatch_business_days ?? row.dispatch_business_days, sameDayCutoff: row.same_day_cutoff?.slice(0, 5) ?? null, shipsFrom: row.ships_from }, { ownerType: row.owner_type, sellerId: row.seller_id });
       }
       set('shipping_profile_id', body.shippingProfileId, 'shippingProfileId');
     }
@@ -675,16 +706,22 @@ export class ManagePart extends Part {
     let after = row;
     if (Object.keys(patch).length) {
       const visible = fields.length > 0 && Boolean(row.published_at);
-      after = await this.repo.transaction(async (tx) => {
-        const locked = await this.core.offerRow(row.id, { repo: tx, forUpdate: true });
-        if (locked.status === 'removed') throw new AppError('ILLEGAL_TRANSITION', 'Removed offers cannot be edited', { from: 'removed', event: 'update' });
-        return tx.update('offers', row.id, { ...patch, ...(visible ? { terms_version: locked.terms_version + 1 } : {}), updated_at: this.now() });
-      });
+      after = await this.core.unique(() =>
+        this.repo.transaction(async (tx) => {
+          const locked = await this.core.offerRow(row.id, { repo: tx, forUpdate: true });
+          if (locked.status === 'removed') throw new AppError('ILLEGAL_TRANSITION', 'Removed offers cannot be edited', { from: 'removed', event: 'update' });
+          return tx.update('offers', row.id, { ...patch, ...(visible ? { terms_version: locked.terms_version + 1 } : {}), updated_at: this.now() });
+        }),
+      );
       if (visible) this.core.publish('offers.offer.updated', { offerId: after.id, productId: after.product_id, termsVersion: after.terms_version, fields }, by);
       if (fields.some((f) => ['dispatch', 'shippingProfileId', 'compareAt', 'condition', 'variantId'].includes(f))) await this.core.markDirty([row.variant_id, after.variant_id]);
+      // the stock item follows a draft's new variant or condition (no stock left on the old variant)
+      if (after.variant_id !== row.variant_id || after.condition !== row.condition) {
+        await this.ctx.use('inventory').updateStockItem(after.stock_item_id, { productId: after.product_id, variantId: after.variant_id, condition: after.condition }, by.actor);
+      }
     }
     if (body.price && !o.official) {
-      after = (await this.parts.pricing.changeSellerPrice(after, { price: body.price, compareAt: body.compareAt, saleEndsAt: body.saleEndsAt }, by, { confirmLarge: false, source: 'seller', product })).offer;
+      after = (await this.parts.pricing.changeSellerPrice(after, { price: body.price, compareAt: body.compareAt, saleEndsAt: body.saleEndsAt }, by, { confirmLarge: Boolean(body.confirmLargeChange), source: 'seller', product })).offer;
     }
     return after;
   }
@@ -737,9 +774,19 @@ export class ManagePart extends Part {
     return after;
   }
 
-  async reinstate(id: string, reasonText: string, by: By): Promise<OfferRec> {
+  /** A removed offer can come back only while nobody took its stock item or New-variant slot (DUPLICATE_OFFER) */
+  async assertReinstatable(r: OfferRec) {
+    if (r.status !== 'removed') return; // the transition refuses it
+    const taken = (await this.repo.find('offers', { stock_item_id: r.stock_item_id, status: { op: '<>', value: 'removed' } })).find((x) => x.id !== r.id);
+    if (taken) throw this.core.error('DUPLICATE_OFFER', 'Another live offer now sells this stock item', { offerId: taken.id, reason: 'stock_item_in_use' });
+    if (r.condition === 'new') await this.duplicateCheck({ ownerType: r.owner_type, sellerId: r.seller_id, variantId: r.variant_id, condition: 'new', sku: null, exceptId: r.id });
+  }
+
+  async reinstate(id: string, reasonText: string, by: By, o: { trustEnforcementId?: string | null } = {}): Promise<OfferRec> {
     if (!reasonText?.trim()) throw invalidField('reason', 'Give the reason for reinstating the offer');
-    const t = await this.core.move(id, { event: 'reinstate', by, reason: null, log: { reasonCode: 'reinstated', reason: reasonText.trim() } });
+    await this.assertReinstatable(await this.core.offerRow(id));
+    // inventory unarchives the stock item on offers.offer.status_changed with from = removed
+    const t = await this.core.move(id, { event: 'reinstate', by, reason: null, log: { reasonCode: 'reinstated', reason: reasonText.trim(), trustEnforcementId: o.trustEnforcementId ?? null } });
     await this.core.audit({ action: 'offers.offer.reinstate', actionLabel: 'Reinstated an offer', category: 'catalog', target: this.target(t.after), reason: reasonText, before: { status: t.before.status }, after: { status: t.after.status }, visibleToSeller: Boolean(t.after.seller_id) }, by);
     return t.after;
   }

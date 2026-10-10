@@ -34,6 +34,10 @@ export interface CustomerSearch {
   q?: string;
   /** Customer ids resolved from the query outside this module (e.g. an order reference) */
   extraIds?: string[];
+  /** Only these customers (filters resolved in other modules before paging; empty = nobody) */
+  onlyIds?: string[];
+  /** Never these customers (filters resolved in other modules before paging) */
+  excludeIds?: string[];
   statuses?: string[];
   verification?: string;
   joinedFrom?: Date;
@@ -102,6 +106,8 @@ export interface CustomersRepository {
   listRestrictions(customerId: string, o?: { activeAt?: Date }): Promise<RestrictionRow[]>;
   getRestriction(customerId: string, id: string, o?: { forUpdate?: boolean }): Promise<RestrictionRow | undefined>;
   findRestrictionByEnforcement(customerId: string, enforcementId: string): Promise<RestrictionRow | undefined>;
+  /** Active restrictions a trust enforcement created, any customer */
+  activeRestrictionsByEnforcement(enforcementId: string): Promise<RestrictionRow[]>;
   insertRestriction(row: RestrictionRow): Promise<RestrictionRow>;
   updateRestriction(id: string, patch: Partial<RestrictionRow>): Promise<RestrictionRow>;
   /** Active restrictions whose end has passed */

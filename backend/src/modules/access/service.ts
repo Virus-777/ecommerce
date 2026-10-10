@@ -203,7 +203,7 @@ export class AccessService implements AccessPublicApi {
     const mode = act.second_reviewer as SecondMode;
     const label = act.label;
     const mine = snapshot.requester;
-    const base = { action: act.key, callerLimit: mine?.value ?? null };
+    const base = { action: act.key, callerLimit: mine?.value ?? null, stepUpRequired: await this.stepUpNeeded(amt) };
 
     if (principal.kind !== 'staff' || !principal.accountId || !mine || mine.value.authority === 'not_permitted') {
       return { ...base, decision: 'denied', reason: `Your role has no authority to ${label.charAt(0).toLowerCase()}${label.slice(1)}`, requiresSecondReviewer: false, approvalsNeeded: 0, eligibleApproverRoles: [], eligibleApprovers: [] };
@@ -312,6 +312,41 @@ export class AccessService implements AccessPublicApi {
     const ids = dir.membersOf(role.id);
     const refs = await this.staffRefs(ids, dir);
     return ids.map((id) => refs.get(id)!).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /**
+   * Active staff whose active role assignments grant the permission (the hasPermission rule: own roles plus roles
+   * covered with an approved delegation). Disabled or closed accounts are left out; locked ones are shown away.
+   * includeCovering adds people who hold it only as an away-period backup (without delegation).
+   */
+  async staffWithPermission(permissionKey: string, opts?: { includeCovering?: boolean }): Promise<StaffRef[]> {
+    await this.ready();
+    const dir = await loadDirectory(this.repo, this.now());
+    const holders = new Set<string>();
+    for (const a of dir.assignments) {
+      const role = dir.roleById.get(a.role_id);
+      if (role && !role.archived_at && dir.permsByRole.get(role.id)?.has(permissionKey)) holders.add(a.account_id);
+    }
+    for (const { period, coverage } of dir.away) {
+      for (const c of coverage) {
+        if (!c.covered_by_account_id || !dir.holds(period.account_id, c.role_id)) continue;
+        if (!dir.permsByRole.get(c.role_id)?.has(permissionKey)) continue;
+        if (period.delegate_approvals || opts?.includeCovering) holders.add(c.covered_by_account_id);
+      }
+    }
+    const ids = [...holders];
+    const accounts = await this.accounts(ids);
+    const refs = await this.staffRefs(ids, dir, accounts);
+    return ids
+      .filter((id) => {
+        const status = accounts.get(id)?.status;
+        return status !== 'disabled' && status !== 'closed';
+      })
+      .map((id) => {
+        const ref = refs.get(id)!;
+        return accounts.get(id)?.status === 'locked' ? { ...ref, away: true } : ref;
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   /** Requests the caller may decide now, oldest due first (same rules as GET /approval-requests?view=to_decide). canDecide and steps are computed for the caller. */
@@ -1556,7 +1591,20 @@ export class AccessService implements AccessPublicApi {
       const actionKeys = new Set(actions.map((a) => a.key));
       const created: { seed: (typeof SYSTEM_ROLES)[number]; row: RoleRow }[] = [];
       for (const seed of SYSTEM_ROLES) {
-        if (await tx.getRoleByKey(seed.key)) continue;
+        const existing = await tx.getRoleByKey(seed.key);
+        if (existing) {
+          // seeded limits added later (or for actions registered later) reach existing installs: a limit row is
+          // only added where the role never had one for that action (limit rows are effective-dated, never deleted,
+          // so a limit the Business Owner changed or removed is never overwritten)
+          if (existing.system && !existing.archived_at) {
+            const rows: LimitRow[] = [];
+            for (const [key, v] of Object.entries(seed.limits)) {
+              if (actionKeys.has(key) && !(await tx.limitRowExists(existing.id, key))) rows.push(this.limitRow(existing.id, key, normalizeLimit(v), now, null));
+            }
+            await tx.insertLimits(rows);
+          }
+          continue;
+        }
         const row = await tx.insertRole({
           id: newId(),
           key: seed.key,
@@ -1786,6 +1834,14 @@ export class AccessService implements AccessPublicApi {
       await this.repo.updateAway(p.id, { status });
       if (approved && p.starts_at <= this.now() && p.ends_at > this.now()) await this.startAway(p.id);
     }
+  }
+
+  /** The amount is above stepUpAbove (money in the same currency): acting or approving needs a fresh 2-step code */
+  private async stepUpNeeded(amount: Amount): Promise<boolean> {
+    const m = amount.money;
+    if (!m) return false;
+    const above = (await this.ctx.settings.get('stepUpAbove')) as common.Money | null;
+    return !!above && above.currency === m.currency && m.amount > above.amount;
   }
 
   private async requireStepUp(row: RequestRow, accountId: string, code: string | null) {

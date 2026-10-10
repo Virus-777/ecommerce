@@ -144,26 +144,38 @@ export class Appeals {
     const enforcement = a.enforcement_id ? await this.core.repo.get('enforcements', a.enforcement_id) : undefined;
     const conflicted = await this.conflicted(enforcement);
     if (by.actor.id && (conflicted.has(by.actor.id) || by.actor.id === a.original_decider_id)) throw this.core.error('SAME_REVIEWER_NOT_ALLOWED', 'You recommended or accepted the original action; another reviewer decides the appeal');
-    const { after, reversed } = await this.core.write(a.report_id!, by, async (tx, _agg, b) => {
+    // other modules are asked before the transaction (never inside it)
+    const appellantCustomerId = a.appellant_kind === 'customer' ? await this.customerIdOf(a.appellant_id) : null;
+    const { after, reversed, reportRef } = await this.core.write(a.report_id!, by, async (tx, agg, b) => {
       const cur = (await tx.get('appeals', id, { forUpdate: true }))!;
       const state = trustAppealMachine.next(cur.state as 'under_review', event as 'uphold');
       const now = this.core.now();
       const decision = { outcome: state, explanation: body.explanation.trim(), decidedBy: by.actor, decidedAt: now.toISOString(), changes: body.changes ?? null };
       const after = await tx.update('appeals', id, { state, decision });
       await this.core.timeline(tx, cur.report_id!, [{ kind: 'appeal_decided', label: `Appeal ${cur.ref} ${humanize(state).toLowerCase()}`, text: body.explanation.trim(), actor: by.actor, meta: { appealId: id, enforcementId: cur.enforcement_id } }]);
-      let reversed = false;
+      let reversed: EnforcementRec | null = null;
       if (state === 'overturned' && cur.enforcement_id) {
         const e = (await tx.get('enforcements', cur.enforcement_id, { forUpdate: true }))!;
         if (e.execution_state === 'applied') {
-          await this.actions.reverseNow(e.id, `Appeal ${cur.ref} overturned: ${body.explanation.trim()}`, by, tx, b);
-          reversed = true;
+          reversed = await this.actions.reverseNow(e.id, `Appeal ${cur.ref} overturned: ${body.explanation.trim()}`, by, tx, b, id);
         } else {
           await this.core.timeline(tx, cur.report_id!, [{ kind: 'appeal_reversal_pending', label: `${e.ref} is ${e.execution_state}; the owner team is asked to stop it`, meta: { enforcementId: e.id } }]);
         }
       }
-      b.push('trust.appeal.decided', { appealId: id, enforcementId: cur.enforcement_id ?? '', outcome: state });
-      return { after, reversed };
+      if (cur.enforcement_id) {
+        b.push('trust.appeal.decided', {
+          appealId: id,
+          ref: cur.ref,
+          enforcementId: cur.enforcement_id,
+          outcome: state as 'upheld' | 'overturned' | 'partly_overturned',
+          explanation: body.explanation.trim(),
+          customerId: cur.appellant_kind === 'customer' ? appellantCustomerId : null,
+          sellerId: cur.appellant_kind === 'seller' ? cur.appellant_id : null,
+        });
+      }
+      return { after, reversed, reportRef: agg.report.ref };
     });
+    if (reversed) await this.actions.raiseReversal(reversed, reportRef, `Appeal ${after.ref} overturned: ${body.explanation.trim()}`);
     // overturned before it was applied, or partly overturned: the owner team applies the change
     if (enforcement && ((after.state === 'overturned' && !reversed) || after.state === 'partly_overturned')) {
       const team = isTeam(enforcement.owner_team) ? enforcement.owner_team : 'support';
@@ -171,6 +183,7 @@ export class Appeals {
         w.raise({
           queueKey: TEAM_QUEUES[team],
           kind: 'trust_recommendation',
+          sourceModule: 'trust',
           title: `Apply appeal ${after.ref}: ${humanize(after.state)} (${enforcement.ref})`,
           summary: body.explanation.trim(),
           subject: { type: 'appeal', id: after.id, ref: after.ref, label: after.decision_appealed },
@@ -182,6 +195,15 @@ export class Appeals {
     }
     await this.core.audit({ action: 'trust.appeal.decide', actionLabel: 'Decided an appeal on trust enforcement', target: this.target(after), reason: body.explanation, before: { state: a.state }, after: { state: after.state, changes: body.changes ?? null, enforcementReversed: reversed } }, by);
     return (await this.view([after]))[0]!;
+  }
+
+  /** The customers-module id of a customer appellant (stored under the customer id when known, else the account id) */
+  private async customerIdOf(appellantId: string): Promise<string | null> {
+    if (!isUuid(appellantId)) return null;
+    const byId = await this.core.soft('customers', 'getCustomer', (c) => c.getCustomer(appellantId));
+    if (byId) return byId.id;
+    const byAccount = await this.core.soft('customers', 'getCustomerByUserId', (c) => c.getCustomerByUserId(appellantId));
+    return byAccount?.id ?? null;
   }
 
   target(a: AppealRec) {
@@ -250,6 +272,7 @@ export class Appeals {
           queueKey: 'trust.reports',
           // appeal_due belongs to sellers.appeals; trust appeals stay in trust.reports
           kind: 'trust_report',
+          sourceModule: 'trust',
           title: `Appeal ${a.ref} ${overdue ? 'is past its decision target' : 'is due within a day'}`,
           summary: a.decision_appealed,
           subject: { type: 'appeal', id: a.id, ref: a.ref, label: a.appellant_name },

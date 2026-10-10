@@ -123,7 +123,7 @@ export class Core {
   }
 
   async audit(entry: Omit<audit.RecordInput, 'actor' | 'module' | 'requestId' | 'category'> & { category?: audit.RecordInput['category'] }, by: By) {
-    await this.soft('audit', 'audit entry', (a) => a.record({ category: 'customers', ...entry, actor: by.actor, module: this.ctx.name, requestId: by.requestId ?? null }));
+    await this.soft('audit', 'audit entry', (a) => a.record({ category: 'support', ...entry, actor: by.actor, module: this.ctx.name, requestId: by.requestId ?? null }));
   }
 
   /** An optional module's answer; off, not built or failing → undefined (the caller degrades) */

@@ -383,6 +383,7 @@ How things get delivered: carriers and services, destinations and excluded areas
 
 | Field | Type |
 |---|---|
+| shipsFrom | `string?` City and state the seller ships from, e.g. 'Portland, OR' |
 | coverage | `Coverage` |
 | dispatch | `DispatchSchedule` |
 | labels | `LabelSettings` |
@@ -406,6 +407,8 @@ How things get delivered: carriers and services, destinations and excluded areas
 | coverage | `Coverage` |
 | dispatch | `DispatchScheduleInput` |
 | buyLabelsInSellerCenter | `bool` |
+| shipsFrom | `string?` City and state the seller ships from, e.g. 'Portland, OR' (storefront and dispatch labels); null keeps the current value |
+| defaultParcel | `Parcel?` Default package that pre-fills the record-shipment and buy-label forms; null keeps the current value |
 | effectiveFrom | `datetime?` |
 
 ### DispatchScheduleInput
@@ -440,8 +443,16 @@ How things get delivered: carriers and services, destinations and excluded areas
 | Field | Type |
 |---|---|
 | dispatchWithinBusinessDays | `int` |
-| allowedMinDays | `int` |
-| allowedMaxDays | `int` |
+| allowedMinDays | `int` Read-only here: from the sellerHandlingRange setting (the only source of the allowed range) |
+| allowedMaxDays | `int` Read-only here: from the sellerHandlingRange setting |
+| validTrackingWithinHours | `int` |
+| onTimeTargetPct | `number` |
+
+### SellerDispatchTargetInput
+
+| Field | Type |
+|---|---|
+| dispatchWithinBusinessDays | `int` |
 | validTrackingWithinHours | `int` |
 | onTimeTargetPct | `number` |
 
@@ -450,7 +461,7 @@ How things get delivered: carriers and services, destinations and excluded areas
 | Field | Type |
 |---|---|
 | official | `OfficialDispatchTarget` |
-| sellerDefault | `SellerDispatchTarget` |
+| sellerDefault | `SellerDispatchTargetInput` The allowed handling range is changed through the sellerHandlingRange setting, not here |
 | effectiveFrom | `datetime` |
 | reason | `text` |
 
@@ -667,7 +678,7 @@ How things get delivered: carriers and services, destinations and excluded areas
 | label | `string` |
 | detail | `string?` |
 | location | `string?` |
-| source | `enum(carrier_webhook|carrier_poll|seller|staff|warehouse)` |
+| source | `enum(carrier_webhook|carrier_poll|seller|staff|warehouse|customer|system)` customer: tracking the customer entered for a customer-arranged return (registerReturnTracking) or a failed-delivery choice; system: events shipping records itself (label created, failed-delivery default, label void) |
 
 ### TrackingCorrection
 
@@ -719,6 +730,7 @@ How things get delivered: carriers and services, destinations and excluded areas
 | id | `uuid` |
 | shipmentId | `uuid?` |
 | groupId | `uuid` |
+| carrierServiceId | `uuid` Carrier service the label was bought for (returns passes it to findDropOffPoints) |
 | carrierName | `string` |
 | serviceName | `string` |
 | cost | `Money` |
@@ -760,7 +772,9 @@ How things get delivered: carriers and services, destinations and excluded areas
 | to | `Address?` |
 | returnId | `uuid?` |
 | labelMethod | `enum(printed|prepaid_qr|prepaid_label)?` Return labels: QR drop-off code or printable label |
-| billedTo | `enum(seller|company|platform|customer)?` Who pays; return labels take it from returns' shipping responsibility |
+| billedTo | `enum(seller|company|platform|customer)?` Who pays; return labels take it from returns' shipping responsibility (customer: deducted from the refund by returns; finance books nothing for the label) |
+| dropOffBy | `datetime?` Return labels: drop-off deadline decided by returns (approval + policy dropOffDays); stored on the label and returned as Label.dropOffBy. Shipping never invents one |
+| format | `enum(pdf|zpl)?` Label file format; default pdf (warehouse thermal printers ask for zpl) |
 
 ### LabelResult
 
@@ -1233,6 +1247,7 @@ Indexes: `(lineage_id, status)`, `(seller_id, status)`
 | updated_by | jsonb |
 | updated_at | timestamptz |
 | default_parcel | jsonb? |
+| ships_from | text? (e.g. Portland, OR; null for the Official Store, which ships from inventory's default location) |
 
 Indexes: `(seller_id, status)`
 
@@ -1381,10 +1396,11 @@ Indexes: `(shipment_id, at)`, `unique (shipment_id, carrier_event_id)`
 | carrier_service_id | uuid → carrier_services |
 | cost | int |
 | currency | text |
-| billed_to | text (seller|company|platform) |
+| billed_to | text (seller|company|platform|customer) |
 | tracking_number | text |
 | storage_key | text |
 | format | text |
+| drop_off_by | timestamptz? |
 | status | text |
 | idempotency_key | text unique |
 | purchased_by | jsonb |
@@ -1447,7 +1463,7 @@ Indexes: `(due_at) where overdue_since is null`
 | opened_by | jsonb |
 | opened_at | timestamptz |
 
-Indexes: `(kind, status, due_at)`, `(seller_id, status)`, `(group_id)`, `unique (group_id, kind) where status in ('open','in_progress','escalated')`
+Indexes: `(kind, status, due_at)`, `(seller_id, status)`, `(group_id)`, `unique nulls not distinct (group_id, kind, shipment_id) where status in ('open','in_progress','escalated')`
 
 **exception_log**
 
@@ -1504,10 +1520,10 @@ Indexes: `unique (carrier_code, external_id)`
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
 | `shipping.shipment.created` | A shipment is recorded or a label is bought | `{ shipmentId: uuid, kind: enum(outbound|replacement|return), orderId: uuid, groupId: uuid, returnId: uuid?, sellerId: uuid?, packageLabel: string, carrierCode: string?, carrierName: string?, serviceName: string?, trackingNumber: string?, trackingUrl: url?, lines: ShipmentLine[], status: string }` | orders |
-| `shipping.shipment.dispatched` | A package is handed to the carrier (seller record, warehouse hand-over or first scan) | `{ shipmentId: uuid, kind: enum(outbound|replacement|return), orderId: uuid, customerId: uuid?, contactEmail: email?, groupId: uuid, returnId: uuid?, ownerType: enum(official|seller), sellerId: uuid?, lines: ShipmentLine[], shippedAt: datetime, dispatchDueAt: datetime?, onTime: bool?, trackingValid: bool, estimatedArrival: DateRange? }` | fulfillment-service, inventory, notifications, orders, payments, reports, returns, sellers, warehouse, workqueues |
+| `shipping.shipment.dispatched` | A package is handed to the carrier (seller record, warehouse hand-over or first scan) | `{ shipmentId: uuid, kind: enum(outbound|replacement|return), orderId: uuid, customerId: uuid?, contactEmail: email?, groupId: uuid, returnId: uuid?, ownerType: enum(official|seller), sellerId: uuid?, lines: ShipmentLine[], shippedAt: datetime, dispatchDueAt: datetime?, onTime: bool?, trackingValid: bool, estimatedArrival: DateRange? }` | fulfillment-service, inventory, notifications, orders, payments, reports, returns, sellers, support, warehouse, workqueues |
 | `shipping.shipment.status_changed` | Any shipment status change | `{ shipmentId: uuid, kind: enum(outbound|replacement|return), orderId: uuid, groupId: uuid, returnId: uuid?, from: string, to: string, statusLabel: string, estimatedArrival: DateRange?, at: datetime }` | orders, returns |
 | `shipping.shipment.delivered` | The carrier confirms delivery (or pickup) | `{ shipmentId: uuid, kind: enum(outbound|replacement|return), orderId: uuid, customerId: uuid?, contactEmail: email?, groupId: uuid, returnId: uuid?, sellerId: uuid?, lines: ShipmentLine[], deliveredAt: datetime }` | notifications, orders, returns, sellers, support, workqueues |
-| `shipping.shipment.exception` | A delivery exception is opened | `{ exceptionId: uuid, kind: enum(seller_cannot_fulfill|late_dispatch|missing_tracking|lost_or_damaged|failed_delivery), orderId: uuid, customerId: uuid?, contactEmail: email?, groupId: uuid, shipmentId: uuid?, sellerId: uuid?, orderItemIds: uuid[], dueAt: datetime, customerAction: string? }` | notifications, orders, reports, returns, support, workqueues |
+| `shipping.shipment.exception` | A delivery exception is opened | `{ exceptionId: uuid, kind: enum(seller_cannot_fulfill|late_dispatch|missing_tracking|lost_or_damaged|failed_delivery), orderId: uuid, customerId: uuid?, contactEmail: email?, groupId: uuid, shipmentId: uuid?, sellerId: uuid?, orderItemIds: uuid[], dueAt: datetime, customerAction: string?, source: enum(carrier|system|staff|seller|customer_report), caseRef: string? }` | notifications, orders, reports, returns, support, workqueues |
 | `shipping.exception.updated` | An exception is assigned, escalated, notified or answered by the seller | `{ exceptionId: uuid, action: string, by: Actor }` | - |
 | `shipping.exception.resolved` | An exception is resolved or its condition clears | `{ exceptionId: uuid, kind: string, orderId: uuid, groupId: uuid, resolution: string }` | - |
 | `shipping.dispatch.overdue` | A seller group passes its dispatch deadline with unshipped items | `{ orderId: uuid, orderRef: string, groupId: uuid, ownerType: enum(official|seller), sellerId: uuid?, orderItemIds: uuid[], dueAt: datetime, exceptionId: uuid }` | notifications, orders, reports, sellers, support, warehouse, workqueues |
@@ -1527,8 +1543,8 @@ Indexes: `unique (carrier_code, external_id)`
 | `orders.item.cancelled` | orders | Remove items from the watch; open (or update) a seller_cannot_fulfill exception when the seller cancelled; close dispatch exceptions when nothing is left to ship; void unused labels |
 | `warehouse.package.packed` | warehouse | Official Store package handed to the carrier pickup (handOver) |
 | `sellers.seller.restricted` | sellers | Mark open exceptions of the seller for escalation to the Seller Manager |
-| `support.case.opened` | support | Open a lost_or_damaged exception for missing or damaged package reports when none is open |
-| `returns.replacement.created` | returns | Watch the replacement's dispatch like an original shipment |
+| `support.case.opened` | support | Open a lost_or_damaged exception for missing or damaged package reports when none is open for that group and package (source customer_report, caseRef set, shipmentId from the report when given) |
+| `returns.replacement.created` | returns | Watch the replacement's dispatch like an original shipment (with or without a return: returnId may be null for a replacement decided on a case) |
 | `payments.refund.sent` | payments | Close seller_cannot_fulfill exceptions whose refund was sent |
 
 ## In-process API (for other modules)
@@ -1542,7 +1558,7 @@ Indexes: `unique (carrier_code, external_id)`
 | dispatchDeadline | `(ownerType: 'official'|'seller', sellerId: uuid | null, from: datetime, dispatch: DispatchInput) => datetime`<br>Dispatch deadline from acceptance time, handling days, same-day cutoff, business days and closures | checkout |
 | activeNotices | `(postalCode?: string, carrierCodes?: string[], surface?: string) => CustomerNotice[]`<br>Live service notices for a location | offers, checkout, content |
 | quoteLabelOptions | `(input: LabelRequest) => LabelQuote[]`<br>Carrier services that can carry this parcel to the destination, with cost, estimated arrival and keepsPromise against the customer's promised range (same rule createLabel enforces with keepPromise) | warehouse |
-| createLabel | `(input: LabelRequest, idempotencyKey: string) => LabelResult`<br>Buy a carrier label and create the shipment (label_created). kind = return creates the return parcel for returns (labelMethod prepaid_qr adds a QR drop-off code; dropOffBy from the return); its tracking events carry kind = return and returnId. Same key returns the same label. | warehouse, returns, fulfillment-service |
+| createLabel | `(input: LabelRequest, idempotencyKey: string) => LabelResult`<br>Buy a carrier label and create the shipment (label_created). kind = return creates the return parcel for returns (labelMethod prepaid_qr adds a QR drop-off code; LabelRequest.dropOffBy from the return is stored and returned on the label); format pdf (default) or zpl; its tracking events carry kind = return and returnId. Same key returns the same label. | warehouse, returns, fulfillment-service |
 | voidLabel | `(labelId: uuid, reason: string) => Label`<br>Void an unused label (before the first carrier scan) | warehouse, returns |
 | handOver | `(shipmentId: uuid, at: datetime, actor: Actor) => Shipment`<br>Package handed to the carrier (label_created → shipped). Publishes shipping.shipment.dispatched. | warehouse, fulfillment-service |
 | getShipmentsForOrder | `(orderId: uuid) => ShipmentSummary[]`<br>Shipments of an order with status and contents | support, returns, messaging |
@@ -1555,8 +1571,10 @@ Indexes: `unique (carrier_code, external_id)`
 | listExceptionsForOrder | `(orderId: uuid, sellerId?: uuid) => DeliveryException[]`<br>Delivery exceptions on an order; with sellerId only that seller's groups | graphql |
 | listExceptions | `(filter: { kind?: string, status?: string, sellerType?: string, ownerStaffId?: uuid, customerNotNotified?: bool, q?: string }, page: PageInput) => Page<DeliveryException>`<br>Dispatch and delivery exceptions for staff (same filters as admin GET /exceptions) | graphql |
 | countOpenExceptions | `() => ExceptionCounts`<br>Open exceptions per kind and not-yet-notified customers (queue tiles) | graphql |
-| getSellerShippingSummaries | `(sellerIds: uuid[]) => map<{ shipsFrom: string | null, coverage: Coverage, coverageLabel: string, excluded: string[], handlingDays: int, sameDayCutoff: string | null, dispatchLabel: string, businessDays: string[], closures: Closure[], carriers: string[], methods: { name: string, transit: TransitRange, priceLabel: string }[], freeShippingThreshold: Money | null, freeShippingLabel: string | null, notices: CustomerNotice[] } | null>`<br>Storefront shipping section from the seller's active shipping settings and default profile (the REST storefront's shipping block): ships from, coverage and exclusions, dispatch time and same-day cutoff, carriers, methods with transit, free-shipping threshold, upcoming closures and live notices. Null when the seller has no active profile. | sellers, graphql |
-| shipmentsForReplacements | `(replacements: { replacementId: uuid, returnId: uuid }[]) => map<Shipment | null>`<br>The REPLACEMENT shipment sent for a return's replacement or exchange (shipments.kind = replacement, matched by return id) | returns, graphql |
+| getSellerShippingSummaries | `(sellerIds: uuid[]) => map<{ shipsFrom: string | null, coverage: Coverage, coverageLabel: string, excluded: string[], handlingDays: int, sameDayCutoff: string | null, dispatchLabel: string, businessDays: string[], closures: Closure[], carriers: string[], methods: { name: string, transit: TransitRange, priceLabel: string }[], freeShippingThreshold: Money | null, freeShippingLabel: string | null, notices: CustomerNotice[] } | null>`<br>Storefront shipping section from the seller's active shipping settings and default profile (the REST storefront's shipping block): ships from (seller_settings.ships_from, one query for the whole batch), coverage and exclusions, dispatch time and same-day cutoff, carriers, methods with transit, free-shipping threshold, upcoming closures and live notices. Null when the seller has no active profile. | sellers, graphql |
+| shipmentsForReplacements | `(replacements: { replacementId: uuid, returnId: uuid | null, orderItemIds?: uuid[] }[]) => map<Shipment | null>`<br>The REPLACEMENT shipment sent for a replacement or exchange (shipments.kind = replacement), matched by return id, or by the replacement's order item ids when it has no return (replacement decided on a case) | returns, graphql |
+| getProfileOwners | `(profileIds: uuid[]) => map<{ ownerType: 'official' | 'seller', sellerId: uuid | null, status: string } | null>`<br>Owner of each shipping profile (by lineage id or version id); null when unknown. offers checks that a seller only uses its own profiles (and the Official Store only official ones) | offers |
+| getOfficialFreeShipping | `() => { threshold: Money | null, methodCode: string | null, active: bool, label: string | null }`<br>The Official Store's standing free-shipping threshold in force now (default profile threshold or an active official_store free-shipping rule), e.g. for the content service strip to warn when its text disagrees | content |
 | getSellerShippingSetup | `(sellerId: uuid) => SellerShippingSetup`<br>Carriers and services the seller can use, whether labels can be bought and the default package, for the record-shipment form | graphql |
 | exportRows | `(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }`<br>Export rows for reports dataset shipping.admin.exceptions (delivery exceptions) | reports |
 
@@ -1598,7 +1616,7 @@ Checked through the access module (limits per role, second reviewer).
 | `HANDLING_OUT_OF_RANGE` | 422 | Handling days are outside the platform's allowed range. details.min, details.max. |
 | `PROFILE_IN_USE` | 409 | Active offers use this profile. details.offerCount. |
 | `CHOICE_WINDOW_CLOSED` | 409 | The time to choose a next step has passed; the default was applied. |
-| `EXCEPTION_ALREADY_OPEN` | 409 | An open exception of this kind exists for the group. details.exceptionId. |
+| `EXCEPTION_ALREADY_OPEN` | 409 | An open exception of this kind exists for the group and package (or for the group when no package is named). details.exceptionId. |
 | `WEBHOOK_SIGNATURE_INVALID` | 401 | The carrier signature did not verify. |
 
 ## Background jobs
@@ -1619,7 +1637,7 @@ Checked through the access module (limits per role, second reviewer).
 | Key | Default | Rules | Meaning |
 |---|---|---|---|
 | defaultSellerHandlingDays | `2` | duration, business days, 1–…, approval: second reviewer, seller-visible | Dispatch within business days when a seller sets nothing |
-| sellerHandlingRange | `[1,3]` | json, approval: second reviewer, seller-visible | Allowed seller handling days (HANDLING_OUT_OF_RANGE outside) |
+| sellerHandlingRange | `[1,3]` | json, approval: second reviewer, seller-visible | Allowed seller handling days [min, max] (HANDLING_OUT_OF_RANGE outside). The only source of the range: dispatch targets show it read-only |
 | officialCutoff | `"14:00"` | time | Official Store same-day cutoff, market time |
 | dispatchDueTime | `"17:00"` | time, seller-visible | Local time a dispatch deadline falls on |
 | validTrackingWithinHours | `24` | duration, hours, 1–…, seller-visible | Tracking must be valid this long after dispatch |
@@ -1639,12 +1657,18 @@ Checked through the access module (limits per role, second reviewer).
 - Dispatch deadlines: checkout gets dispatchBy per option and orders freezes it. The dispatch watch is fed by orders.order.accepted; overdue detection opens one late_dispatch exception per group and deadline, notifies the seller, and orders turns the items Delayed (customer told, with support route). workqueues mirrors these as queue items with lead, backup and escalation.
 - Missing tracking never implies delivery: until a carrier scan, customers see 'Shipped, tracking pending', and deliver only comes from a carrier event (or a staff-recorded event with proof).
 - Partial shipments: a shipment covers chosen items and quantities; orders splits lines; remaining items keep their deadline. Corrections keep history and notify the buyer.
-- Labels: sellers (Seller Center, cost deducted from earnings via shipping.label.purchased → finance), warehouse (Official Store, company cost) and returns (return labels, billed per return responsibility) all buy through createLabel with an idempotency key; nobody calls carriers directly.
+- Labels: sellers (Seller Center, cost deducted from earnings via shipping.label.purchased → finance), warehouse (Official Store, company cost) and returns (return labels, billed per return responsibility; billedTo customer when the customer pays and returns deducts it from the refund) all buy through createLabel with an idempotency key; nobody calls carriers directly. The label keeps the requested format (pdf or zpl), its carrier service and, for return labels, the drop-off deadline returns passed in LabelRequest.dropOffBy.
 - Seller endpoints act on the caller's seller only: shipments and exceptions of other sellers return NOT_FOUND. Return address and return terms live in returns; the seller/shipping screen shows them from there.
 - Service notices are scoped by carrier or single carrier services, by states, ZIP prefixes or zones, and by seller scope (all, Official Store only, marketplace sellers only). activeNotices matches a location by postal prefix and state; POST /notices/preview shows the checkout message and the moved arrival estimates before publishing. Notices change arrival estimates, never dispatch deadlines, unless noDispatch is set.
 - Carrier contacts (plan ch. 2: the Shipping Manager maintains carrier contacts) are stored on the carrier (account manager, operations, claims, billing, escalation) and edited with POST/PATCH /carriers; they are never returned to sellers.
 - Official Store: ownerType official with sellerId null (as in offers). Its profile and dispatch schedule are edited in the admin area.
-- Dependencies: architecture lists orders. Optional: offers (resolve offer → profile and dispatch for GET /estimates), sellers (names, restriction state), media (claim evidence, label files), support (link lost/damaged cases), access (claim approvals), settings (market time zone and default location).
+- Carriers and carrier services (decision D-S1) are defined by the carrier adapters and seeded by a shipping migration (codes, services, transit, label support, tracking patterns); there are no create endpoints for services or methods. POST /carriers only records the account of a carrier an adapter supports; staff then enable services and set transit with PATCH.
+- Seller handling range (decision D-S2): the sellerHandlingRange setting is the only source of the allowed handling days; dispatch targets show it read-only and updateSellerSettings checks against it (HANDLING_OUT_OF_RANGE).
+- Ships from: each seller's ships-from text is stored in its shipping settings (seller_settings.ships_from, set in PUT /settings), so storefront summaries and dispatch labels for many sellers are read in one query; shipping never calls sellers for it (sellers calls shipping, so a call back would be circular).
+- Delivery exceptions are unique per (group, kind, package) while open (decision D-S3): a second lost or late package of the same group gets its own exception; exceptions without a package stay one per group and kind.
+- Profile checks: archiving refuses while offers use the profile; the count comes from offers.countActiveOffersByProfile (exact count, no paging cap). offers checks profile ownership with getProfileOwners.
+- Direct customer notices (notifyCustomer, tracking corrections, failed-delivery default, exception updates) are addressed with Recipient.customerId when the order has a customer (customers-module id from the order), and to the order contact email only for guests; customer ids are never used as identity account ids.
+- Dependencies: architecture lists orders. Optional: offers (resolve offer → profile and dispatch for GET /estimates; countActiveOffersByProfile for PROFILE_IN_USE), notifications (direct customer notices), sellers (names, restriction state), media (claim evidence, label files), support (link lost/damaged cases), access (claim approvals), settings (market time zone and default location).
 
 ## GraphQL (read layer)
 

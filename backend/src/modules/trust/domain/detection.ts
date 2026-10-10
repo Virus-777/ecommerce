@@ -102,7 +102,7 @@ export const RULES: RuleSeed[] = [
     type: 'seller_application',
     signal: 'application_submitted',
     active: true,
-    thresholds: { fields: ['taxIdHash', 'bankToken', 'addressKey'], windowDays: 365 },
+    thresholds: { fields: ['taxIdHash', 'bankTokenHash', 'addressKey'], windowDays: 365 },
     baseScore: 50,
   },
 ];
@@ -249,14 +249,15 @@ export function evaluate(key: string, t: Record<string, unknown>, signals: Signa
       break;
     }
     case 'sellers.application_duplicates': {
-      const fields = Array.isArray(t.fields) ? (t.fields as unknown[]).map(String) : ['taxIdHash', 'bankToken', 'addressKey'];
+      // 'bankToken' (rules seeded before pass 3) reads bankTokenHash
+      const fields = [...new Set((Array.isArray(t.fields) ? (t.fields as unknown[]).map(String) : ['taxIdHash', 'bankTokenHash', 'addressKey']).map((f) => (f === 'bankToken' ? 'bankTokenHash' : f)))];
       for (const field of fields) {
         for (const [value, list] of groupBy(signals, (s) => str(s.features[field]))) {
           const sellers = uniq(list.map((s) => str(s.features.sellerId)).filter((x): x is string => !!x));
           if (sellers.length < 2) continue;
           hits.push({
             dedupeKey: `sellers.application_duplicates:${field}:${value}`,
-            title: `Seller applications share a ${field === 'taxIdHash' ? 'tax id' : field === 'bankToken' ? 'bank account' : 'business address'}`,
+            title: `Seller applications share a ${field === 'taxIdHash' ? 'tax id' : field === 'bankTokenHash' ? 'bank account' : 'business address'}`,
             subjects: [
               ...list.flatMap((s) => (str(s.features.applicationId) ? [{ type: 'application' as const, id: s.features.applicationId as string, label: 'Seller application' }] : [])),
               ...sellers.map((id) => ({ type: 'seller' as const, id, label: 'Seller' })),

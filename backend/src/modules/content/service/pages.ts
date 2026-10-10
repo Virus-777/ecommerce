@@ -10,7 +10,7 @@ import type { BannerBlock, Check, CollectionCard, LinkedPromotion, PageAdmin, Pa
 import { isValidSlug, isValidTimeZone, sanitizeHtml, slugify } from '../domain/rules.js';
 import { contentPublicationMachine } from '../domain/state-machines.js';
 import type { PageRow, VersionRow } from '../ports.js';
-import { dateOrNull, invalid, iso, notFound, requireText, SYSTEM, type By, type DraftReview } from './base.js';
+import { dateOrNull, invalid, unique, iso, notFound, requireText, SYSTEM, type By, type DraftReview } from './base.js';
 import { ContentTiles } from './tiles.js';
 
 type PageSnapshot = PageInput & { _review?: DraftReview | null };
@@ -219,7 +219,18 @@ export class ContentPages extends ContentTiles {
   }
 
   /** Blocks with their products resolved; media refreshed from media (files no longer usable are left out) */
-  protected async resolveBlocks(blocks: PageBlock[]): Promise<PageBlock[]> {
+  /** Sellers whose seller_feature blocks stay out of store reads: suspended, restricted from sales or closed (status at read time) */
+  protected async hiddenFeatureSellers(blocks: PageBlock[]): Promise<Set<string>> {
+    const ids = unique(blocks.filter((b) => b.type === 'seller_feature' && b.sellerId).map((b) => b.sellerId!));
+    const sellersApi = this.ctx.tryUse('sellers');
+    if (!ids.length || !sellersApi) return new Set();
+    const snaps = await this.soft('sellers.getSellers', () => sellersApi.getSellers(ids), []);
+    return new Set(snaps.filter((s) => s.status === 'suspended' || s.status === 'restricted' || s.status === 'closed').map((s) => s.id));
+  }
+
+  protected async resolveBlocks(all: PageBlock[]): Promise<PageBlock[]> {
+    const hidden = await this.hiddenFeatureSellers(all);
+    const blocks = all.filter((b) => !(b.type === 'seller_feature' && b.sellerId && hidden.has(b.sellerId)));
     const refs = await this.refsMap(blocks.flatMap((b) => (b.banner?.images ?? []).map((i) => i.id)));
     const max = await this.ctx.settings.get('maxSectionProducts');
     return Promise.all(
@@ -513,6 +524,17 @@ export class ContentPages extends ContentTiles {
     this.invalidateHome();
     await this.logAction('page', id, 'schedule', by, `${publishAt.toISOString()}${unpublishAt ? ` – ${unpublishAt.toISOString()}` : ''}`);
     await this.audit({ action: 'content.page.schedule', actionLabel: 'Scheduled page', target: { type: 'page', id, label: p.title }, before: { publishAt: iso(p.publish_at), unpublishAt: iso(p.unpublish_at), status: p.status }, after: { publishAt: iso(row.publish_at), unpublishAt: iso(row.unpublish_at), status: row.status } }, by);
+    return this.pageAdmin(row);
+  }
+
+  /** scheduled → draft: the publish and removal times are cleared; the draft (and any live version) is kept */
+  async cancelPageSchedule(id: string, body: { reason?: string | null }, by: By): Promise<PageAdmin> {
+    const p = await this.pageOrThrow(id);
+    const status = contentPublicationMachine.next(p.status as Status, 'cancelSchedule');
+    const row = await this.repo.updatePage(id, { status, publish_at: null, unpublish_at: null, updated_at: this.now() });
+    this.invalidateHome();
+    await this.logAction('page', id, 'cancel_schedule', by, body.reason ?? null);
+    await this.audit({ action: 'content.page.cancel-schedule', actionLabel: 'Cancelled the page schedule', target: { type: 'page', id, label: p.title }, before: { publishAt: iso(p.publish_at), unpublishAt: iso(p.unpublish_at), status: p.status }, after: { publishAt: null, unpublishAt: null, status: row.status }, reason: body.reason ?? null }, by);
     return this.pageAdmin(row);
   }
 

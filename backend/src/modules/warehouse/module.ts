@@ -15,7 +15,7 @@ import { WarehouseService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.0.0',
+  version: '1.1.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
@@ -27,6 +27,7 @@ export default defineModule({
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("orders.order.accepted", (e) => service.onOrderAcceptedFromOrders(e.payload));
     ctx.events.on("orders.item.cancelled", (e) => service.onItemCancelledFromOrders(e.payload));
+    ctx.events.on("orders.item.split", (e) => service.onItemSplitFromOrders(e.payload));
     ctx.events.on("inventory.discrepancy.resolved", (e) => service.onDiscrepancyResolvedFromInventory(e.payload));
     ctx.events.on("purchasing.receipt.recorded", (e) => service.onReceiptRecordedFromPurchasing(e.payload));
     ctx.events.on("returns.return.approved", (e) => service.onReturnApprovedFromReturns(e.payload));

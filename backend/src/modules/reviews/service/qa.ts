@@ -10,7 +10,7 @@ import type { AdminQuestionRow, Answer, Question, SellerQuestionRow } from '../.
 import { ageLabel, isOrderSpecific, qaChecks } from '../domain/rules.js';
 import { answerMachine } from '../domain/state-machines.js';
 import type { AnswerRec, QuestionRec } from '../ports.js';
-import { syncAnswerCount } from './content.js';
+import { answerPublished, syncAnswerCount } from './content.js';
 import { type By, type Core, type CustomerWho, Effects, invalid, notFound, type SellerWho } from './core.js';
 import type { FeedbackPart } from './feedback.js';
 import type { ModerationPart } from './moderation.js';
@@ -71,7 +71,7 @@ export class QaPart {
         created_at: now,
       });
       if (failures.length) await this.moderation.hold(tx, { type: 'question', id: q.id }, failures);
-      else fx.emit('reviews.question.asked', { questionId: q.id, productId });
+      else fx.emit('reviews.question.asked', { questionId: q.id, productId, customerId: q.customer_id, sellerIds: [], officialStore: false });
       return q;
     });
     await this.core.flush(fx, who);
@@ -122,7 +122,7 @@ export class QaPart {
       if (status === 'published') {
         await syncAnswerCount(tx, question.id);
         await this.core.touchProduct(tx, fx, question.product_id);
-        fx.emit('reviews.answer.published', { answerId: a.id, questionId: question.id, productId: question.product_id, label: author.kind === 'seller' ? 'seller' : author.kind === 'staff' ? 'marketly_staff' : 'customer' });
+        fx.emit('reviews.answer.published', answerPublished(a, question));
       } else {
         await this.moderation.hold(tx, { type: 'answer', id: a.id }, failures.length ? failures : [{ label: 'Second check requested for a staff answer', reason: 'other' }]);
       }
@@ -156,6 +156,43 @@ export class QaPart {
       by,
     );
     return answer;
+  }
+
+  /**
+   * The author edits an answer: a published answer goes back through the automatic checks (edit), one with an edit
+   * request is fixed and resubmitted for review (resubmit). Only the author's own answers (others: NOT_FOUND).
+   */
+  async editAnswer(author: { kind: 'customer'; customerId: string } | { kind: 'seller'; sellerId: string }, id: string, text: string, by: By): Promise<Answer> {
+    const repo = this.core.repo;
+    const own = (a: AnswerRec | undefined) => !!a && (author.kind === 'customer' ? a.author_kind === 'customer' && a.author_id === author.customerId : a.author_kind === 'seller' && (a.seller_id ?? a.author_id) === author.sellerId);
+    const before = isUuid(id) ? await repo.get('answers', id) : undefined;
+    if (!before || !own(before)) throw notFound('Answer');
+    const issues = this.textIssues(text, 2);
+    if (issues.length) throw invalid(issues);
+    const event = before.status === 'edit_requested' ? 'resubmit' : 'edit';
+    answerMachine.next(before.status as Answer['status'], event);
+    const failures = qaChecks(text);
+    const fx = await this.core.prepare(new Effects());
+    const now = this.core.now();
+    const row = await repo.transaction(async (tx) => {
+      const locked = (await tx.get('answers', id, { forUpdate: true }))!;
+      const pending = answerMachine.next(locked.status as Answer['status'], event);
+      // an edited published answer that passes the checks is published again; a resubmission waits for review
+      const status = event === 'edit' && !failures.length ? answerMachine.next(pending, 'publish') : pending;
+      const a = await tx.update('answers', id, {
+        text: text.trim(),
+        status,
+        rule_check: { passed: !failures.length, failures: failures.map((f) => f.label) },
+        ...(status === 'published' ? { published_at: now } : {}),
+      });
+      const question = await syncAnswerCount(tx, a.question_id);
+      if (question) await this.core.touchProduct(tx, fx, question.product_id);
+      if (status === 'published' && question) fx.emit('reviews.answer.published', answerPublished(a, question));
+      else await this.moderation.hold(tx, { type: 'answer', id }, failures.length ? failures : [{ label: 'Resubmitted after an edit request', reason: 'other' }]);
+      return a;
+    });
+    await this.core.flush(fx, by);
+    return this.views.answerOut(row);
   }
 
   /* ================================================================ offers */

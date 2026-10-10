@@ -2,6 +2,7 @@
 import { AppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type { AffectedSeller, ProductAdmin, PublicationImpact, ReviewDraft } from '../../../spec/catalog.js';
+import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import { productReviewMachine, publicationMachine } from '../domain/state-machines.js';
 import { evidenceOf, stringMap, toReviewDraft } from '../mappers.js';
 import type { BrandRow, OfferIndexRow, ProductRow } from '../ports.js';
@@ -187,7 +188,7 @@ export class CatalogReview extends CatalogProducts {
    */
   protected async changePublication(
     id: string,
-    input: { to: Publication; reason: string; trustReportId: string | null },
+    input: { to: Publication; reason: string; trustReportId: string | null; trustEnforcementId?: string | null },
     by: By,
     opts: { system?: boolean; claim?: string; approvalRequestId?: string; approvalNote?: string } = {},
   ): Promise<ProductRow> {
@@ -207,6 +208,7 @@ export class CatalogReview extends CatalogProducts {
       const row = await tx.updateProduct(id, { publication: to, updated_at: now });
       const fields: Record<string, string> = { from: locked.publication, to };
       if (input.trustReportId) fields.trustReportId = input.trustReportId;
+      if (input.trustEnforcementId) fields.enforcementId = input.trustEnforcementId;
       if (approvalRequestId) fields.approvalRequestId = approvalRequestId;
       await tx.insertLog({ id: newId(), product_id: id, action: 'publication_changed', reason: input.reason, fields: fields as never, actor_kind: by.actor.kind, actor_id: by.actor.id ?? null, at: now });
       return row;
@@ -214,7 +216,7 @@ export class CatalogReview extends CatalogProducts {
     if (!after) return before;
     this.ctx.events.publish(
       'catalog.product.publication_changed',
-      { productId: id, from: before.publication, to: after.publication, reason: input.reason, trustReportId: input.trustReportId },
+      { productId: id, from: before.publication, to: after.publication, reason: input.reason, trustReportId: input.trustReportId, trustEnforcementId: input.trustEnforcementId ?? null },
       { actor: by.actor, requestId: by.requestId },
     );
     await this.audit(
@@ -225,7 +227,7 @@ export class CatalogReview extends CatalogProducts {
         target: this.productTarget(after),
         reason: input.reason,
         before: { publication: before.publication },
-        after: { publication: after.publication, trustReportId: input.trustReportId },
+        after: { publication: after.publication, trustReportId: input.trustReportId, ...(input.trustEnforcementId ? { trustEnforcementId: input.trustEnforcementId } : {}) },
         approvalRequestId,
         approvalNote,
         visibleToSeller: Boolean(after.owner_seller_id),
@@ -279,7 +281,7 @@ export class CatalogReview extends CatalogProducts {
     const sellers = new Map<string, AffectedSeller>();
     for (const o of to === 'active' ? offers.filter((x) => x.status === 'active') : stopping) {
       const key = o.seller_id ?? 'official';
-      const cur = sellers.get(key) ?? { sellerId: o.seller_id, name: o.seller_id ? (o.seller_name ?? 'Seller') : 'Official Store', offers: 0 };
+      const cur = sellers.get(key) ?? { sellerId: o.seller_id, name: o.seller_id ? (o.seller_name ?? 'Seller') : OFFICIAL_STORE_NAME, offers: 0 };
       cur.offers++;
       sellers.set(key, cur);
     }

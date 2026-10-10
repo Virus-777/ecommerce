@@ -77,12 +77,21 @@ describe('queue, assignment and priority', () => {
 
   it('lists assignees with their open cases', async () => {
     const agent = { accountId: newId(), name: 'Ava Agent', away: false, roleLabel: 'Support Agent' };
+    const finance = { accountId: newId(), name: 'Finn Finance', away: false, roleLabel: 'Finance Staff' };
     h.members.support_agent = [agent];
+    h.members.finance_staff = [finance];
+    // handlers come from access.staffWithPermission (support.cases.handle), not a fixed list of roles
+    h.handlers.push(agent, finance);
     const o = await disputeCase();
     await h.call('POST', `/api/admin/support/cases/${o.caseId}/assign`, tokens.staff(), { ownerId: agent.accountId });
     const res = await h.call('GET', '/api/admin/support/assignees?team=customer_support', tokens.staff());
     expect(res.status).toBe(200);
     expect(res.body.find((x: { staffId: string }) => x.staffId === agent.accountId)).toMatchObject({ name: 'Ava Agent', team: 'customer_support', openCases: 1 });
+    expect(res.body.some((x: { staffId: string }) => x.staffId === finance.accountId)).toBe(false);
+    expect(h.calls.permissionLookups).toContain('support.cases.handle');
+    const all = await h.call('GET', '/api/admin/support/assignees', tokens.staff());
+    expect(all.body.find((x: { staffId: string }) => x.staffId === finance.accountId)).toMatchObject({ team: 'finance' });
+    h.handlers.length = 0;
   });
 
   it('shows queue KPIs', async () => {
@@ -304,8 +313,16 @@ describe('seller support requests and categories', () => {
     const o = await sellerOrder(h);
     const opened = await reportProblem(h, { customerId: o.customerId, orderId: o.order.id, itemIds: [o.itemId] });
     expect(opened.body.priority).toBe('urgent');
-    const created = await h.call('PUT', '/api/admin/support/categories/warranty_claim', tokens.staff(), { label: 'Warranty claim', defaultPriority: 'medium', team: 'customer_support', sellerHandlesFirst: false, firstResponseBusinessHours: 8, nextResponseBusinessHours: 8, resolutionBusinessDays: 10, active: true, reason: 'New topic' });
+    const warranty = { label: 'Warranty claim', defaultPriority: 'medium', team: 'customer_support', sellerHandlesFirst: false, firstResponseBusinessHours: 8, nextResponseBusinessHours: 8, resolutionBusinessDays: 10, active: true, reason: 'New topic' };
+    // a new key needs its audience and group
+    const missing = await h.call('PUT', '/api/admin/support/categories/warranty_claim', tokens.staff(), warranty);
+    expect(missing.status).toBe(400);
+    expect(missing.body.error.details.issues.map((i: { path: string }) => i.path).sort()).toEqual(['audience', 'group']);
+    const created = await h.call('PUT', '/api/admin/support/categories/warranty_claim', tokens.staff(), { ...warranty, audience: 'customer', group: 'damaged_or_wrong' });
     expect(created.status).toBe(200);
+    expect(created.body).toMatchObject({ audience: 'customer', group: 'damaged_or_wrong' });
+    // an existing one keeps them when left out
+    expect((await h.call('PUT', '/api/admin/support/categories/warranty_claim', tokens.staff(), { ...warranty, label: 'Warranty' })).body).toMatchObject({ label: 'Warranty', audience: 'customer', group: 'damaged_or_wrong' });
     expect((await h.call('PUT', '/api/admin/support/categories/Bad Key', tokens.staff(), { label: 'x', defaultPriority: 'low', team: 'customer_support', sellerHandlesFirst: false, firstResponseBusinessHours: 1, nextResponseBusinessHours: 1, resolutionBusinessDays: 1, active: true, reason: 'x' })).status).toBe(400);
   });
 });

@@ -24,7 +24,7 @@ import type * as orders from '../../spec/orders.js';
 import { buyerName, DAY, groupSellerId, HOUR, isOfficialConversation, marketplaceSellerId, MINUTE, OFFICIAL_STORE_NAME, promotionalPhrase, replyRounds, responseTimeLabel, SUPPORT_LABEL, SUPPORT_TEAM_ID } from './domain/rules.js';
 import { conversationMachine, messageReportMachine, sellerReplyMachine } from './domain/state-machines.js';
 import type { ConversationKey, ConversationRec, MessageRec, ParticipantRec, ReportRec, TemplateRec } from './ports.js';
-import { Core, invalid, meOf, notFound, SYSTEM, type Author, type By, type Cfg, type MessagingServiceDeps, type Prepared, type Viewer } from './service/core.js';
+import { Core, guestKey, invalid, meOf, notFound, SYSTEM, type Author, type By, type Cfg, type MessagingServiceDeps, type Prepared, type Viewer } from './service/core.js';
 
 export type { MessagingServiceDeps, Viewer, By };
 
@@ -35,6 +35,7 @@ type ReportReason = MessageReport['reason'];
 
 const ROUND_LOOKBACK_MS = 14 * DAY;
 const JOB_BATCH = 100;
+const FORMER_CUSTOMER = 'Former customer';
 const MAX_BATCHES = 50;
 
 /** A conversation as one viewer sees it, with the summary fields (GraphQL Conversation has both) */
@@ -86,9 +87,11 @@ export class MessagingService implements MessagingPublicApi {
 
   /** Inbox rows as views (REST lists the summaries, GraphQL the full conversation objects) */
   async inboxViews(v: Viewer, filter: { unreadOnly?: boolean; replyState?: string; orderId?: string; q?: string }, page: PageRequest): Promise<common.Page<ConversationView>> {
+    // a guest reaches the conversations of a guest order it has access to (keyed by the order, D-M2)
+    const guestOrders = v.kind === 'customer' && !v.customerId && v.guestSessionId && filter.orderId && (await this.core.guestReaches(v.guestSessionId, filter.orderId)) ? [filter.orderId] : [];
     const owner =
       v.kind === 'customer'
-        ? ({ kind: 'customer', customerId: v.customerId, guestSessionId: v.guestSessionId } as const)
+        ? ({ kind: 'customer', customerId: v.customerId, guestSessionId: v.guestSessionId, orderIds: guestOrders } as const)
         : v.kind === 'seller'
           ? ({ kind: 'seller', sellerId: v.sellerId } as const)
           : ({ kind: 'staff', staffId: v.accountId } as const);
@@ -129,7 +132,7 @@ export class MessagingService implements MessagingPublicApi {
   /** One conversation as a view with live status, or null when the viewer does not take part (GraphQL) */
   async viewOf(v: Viewer, id: string): Promise<ConversationView | null> {
     if (!isUuid(id)) return null;
-    const c = await this.repo.get('conversations', id);
+    const c = await this.core.conversation(id);
     if (!c || !(await this.core.visible(v, c))) return null;
     if (marketplaceSellerId(c.seller_id) && !this.core.replyCache.has(c.seller_id!)) await this.cacheStats(c.seller_id!);
     return (await this.views(v, [c], { live: true }))[0]!;
@@ -154,7 +157,13 @@ export class MessagingService implements MessagingPublicApi {
       if (!item) throw notFound('Order item');
       group = order.groups.find((g) => g.id === item!.groupId);
     }
-    if (body.with === 'seller') {
+    if (body.with === 'official_store') {
+      // the Official Store's package of the order (sellerId is ignored: OFFICIAL_STORE_ID is used)
+      const g = order.groups.find((x) => x.seller.ownerType === 'official');
+      if (!g) throw notEligible('The order has no items from the Official Store');
+      if (group && group.id !== g.id) throw notEligible('This item is sold by another seller');
+      group = g;
+    } else if (body.with === 'seller') {
       if (body.sellerId) {
         // a marketplace seller's id, or OFFICIAL_STORE_ID for the Official Store's package
         const g = order.groups.find((x) => groupSellerId(x) === body.sellerId);
@@ -169,16 +178,17 @@ export class MessagingService implements MessagingPublicApi {
     }
     const ret = body.returnId ? await this.verifyReturn(order, body.returnId) : null;
     const kase = body.caseId ? await this.verifyCase(order.id, body.caseId) : null;
-    const kind = body.with === 'seller' ? 'order' : 'support';
+    const kind = body.with === 'marketplace_support' ? 'support' : 'order';
     const sellerId = kind === 'order' && group ? groupSellerId(group) : null;
-    const may = await this.core.customerMayWrite(v, { case_id: kase?.id ?? null });
-    if (!may.allowed) throw new AppError('FORBIDDEN', may.reason);
+    await this.core.assertMayWrite(v, { case_id: kase?.id ?? null });
 
     const cfg = await this.core.cfg();
     const name = buyerName(order.contact.name);
+    // a guest writes as the order's guest participant (any session with access to the order, D-M2)
+    const me = meOf(v, { order_id: order.id });
     const author: Author = {
-      kind: 'customer',
-      id: meOf(v).id,
+      kind: me.kind as 'customer' | 'guest',
+      id: me.id,
       label: name,
       mediaOwner: v.customerId && v.accountId ? { kind: 'customer', id: v.accountId } : { kind: 'guest', id: v.guestSessionId },
       participantName: name,
@@ -197,7 +207,7 @@ export class MessagingService implements MessagingPublicApi {
     };
     const subject = this.subjectFrom(order, group ?? null, item ?? null, ret, kase, kind === 'support' ? SUPPORT_LABEL : null);
     const participants: Omit<ParticipantRec, 'conversation_id' | 'joined_at'>[] = [
-      { kind: 'customer', participant_id: author.id, name, label: 'Buyer', joined_from_case_id: null, last_read_message_id: null, unread_count: 0 },
+      { kind: author.kind, participant_id: author.id, name, label: 'Buyer', joined_from_case_id: null, last_read_message_id: null, unread_count: 0 },
     ];
     // the Official Store is answered by Marketly staff, who join when they reply: no seller participant
     if (marketplaceSellerId(sellerId) && group) participants.push({ kind: 'seller', participant_id: sellerId!, name: group.seller.name, label: 'Seller', joined_from_case_id: null, last_read_message_id: null, unread_count: 0 });
@@ -214,11 +224,10 @@ export class MessagingService implements MessagingPublicApi {
     const item = body.orderItemId ? group.items.find((i) => i.id === body.orderItemId) : undefined;
     if (body.orderItemId && !item) throw notEligible('This item is not part of your order');
     const cfg = await this.core.cfg();
-    const customerName = buyerName(order.contact.name);
     const participants: Omit<ParticipantRec, 'conversation_id' | 'joined_at'>[] = [
       { kind: 'seller', participant_id: v.sellerId, name: group.seller.name, label: 'Seller', joined_from_case_id: null, last_read_message_id: null, unread_count: 0 },
     ];
-    if (order.contact.customerId) participants.unshift({ kind: 'customer', participant_id: order.contact.customerId, name: customerName, label: 'Buyer', joined_from_case_id: null, last_read_message_id: null, unread_count: 0 });
+    participants.unshift(this.buyerParticipant(order));
     const author = this.core.authorOf(v, { kind: 'order', seller_id: v.sellerId } as ConversationRec, participants.map((p) => ({ ...p, conversation_id: '', joined_at: this.now() })));
     const prepared = await this.core.prepare(author, body, cfg);
     const key: ConversationKey = { kind: 'order', customer_id: order.contact.customerId ?? null, seller_id: v.sellerId, application_id: null, order_id: order.id, order_item_id: item?.id ?? null, return_id: null };
@@ -231,8 +240,7 @@ export class MessagingService implements MessagingPublicApi {
     const c = await this.core.visibleConversation(v, id);
     if (!this.core.writes(v, c)) throw notFound();
     if (c.status !== 'open') throw this.lockedError(c);
-    const may = await this.core.customerMayWrite(v, c);
-    if (!may.allowed) throw new AppError('FORBIDDEN', may.reason);
+    await this.core.assertMayWrite(v, c);
     const cfg = await this.core.cfg();
     const author = this.core.authorOf(v, c, await this.repo.participantsOf([c.id]));
     const prepared = await this.core.prepare(author, body, cfg);
@@ -245,7 +253,7 @@ export class MessagingService implements MessagingPublicApi {
     const c = await this.core.visibleConversation(v, id);
     const m = await this.repo.get('messages', upToMessageId);
     if (!m || m.conversation_id !== c.id) throw notFound('Message');
-    const me = meOf(v);
+    const me = meOf(v, c);
     const now = this.now();
     await this.repo.transaction(async (tx) => {
       await tx.insertIgnore('participants', {
@@ -276,9 +284,18 @@ export class MessagingService implements MessagingPublicApi {
 
   private async unreadRows(v: Viewer): Promise<ParticipantRec[]> {
     const me = meOf(v);
-    const ids = v.kind === 'customer' ? [v.customerId, v.guestSessionId].filter((x): x is string => !!x) : [me.id];
-    if (!ids.length) return [];
-    const rows = await this.repo.find('participants', { kind: me.kind, participant_id: ids, unread_count: { op: '>', value: 0 } });
+    let rows: ParticipantRec[];
+    if (v.kind === 'customer' && !v.customerId) {
+      // a guest: the guest participant of the orders whose conversations this session started (and legacy session rows)
+      if (!v.guestSessionId) return [];
+      const orders = [...new Set((await this.repo.find('conversations', { guest_session_id: v.guestSessionId })).map((c) => c.order_id).filter((x): x is string => !!x))];
+      rows = [
+        ...(orders.length ? await this.repo.find('participants', { kind: 'guest', participant_id: orders.map(guestKey), unread_count: { op: '>', value: 0 } }) : []),
+        ...(await this.repo.find('participants', { kind: 'customer', participant_id: v.guestSessionId, unread_count: { op: '>', value: 0 } })),
+      ];
+    } else {
+      rows = await this.repo.find('participants', { kind: me.kind, participant_id: [me.id], unread_count: { op: '>', value: 0 } });
+    }
     if (!rows.length) return [];
     // only conversations the viewer still reaches (a seller's staff conversations, a customer's own threads)
     const convs = await this.repo.getMany('conversations', rows.map((r) => r.conversation_id));
@@ -293,7 +310,7 @@ export class MessagingService implements MessagingPublicApi {
     if (!m) throw notFound('Message');
     const c = await this.repo.get('conversations', m.conversation_id);
     if (!c || !(await this.core.visible(v, c))) throw notFound('Message');
-    const me = meOf(v);
+    const me = meOf(v, c);
     if (m.kind === 'system' || !m.author_kind) throw invalid([{ path: 'id', message: 'System notes cannot be reported' }]);
     if (m.author_kind === me.kind && m.author_id === me.id) throw invalid([{ path: 'id', message: 'You cannot report your own message' }]);
     const existing = await this.repo.findOne('message_reports', { message_id: m.id, reporter_kind: me.kind, reporter_id: me.id, status: 'open' });
@@ -362,14 +379,14 @@ export class MessagingService implements MessagingPublicApi {
   /* ================================================================ admin endpoints */
 
   /** GET admin /conversations: headers only */
-  async listAdminConversations(q: { orderId?: string; customerId?: string; sellerId?: string; caseId?: string; filter?: 'overdue' | 'reported' | 'locked' }, page: PageRequest, staff: StaffViewer): Promise<common.Page<AdminConversationRow>> {
+  async listAdminConversations(q: { orderId?: string; customerId?: string; sellerId?: string; caseId?: string; filter?: 'overdue' | 'reported' | 'locked' | 'official_awaiting' }, page: PageRequest, staff: StaffViewer): Promise<common.Page<AdminConversationRow>> {
     const rows = await this.repo.adminSearch(q, page);
     const [bundles, cards, reports] = await Promise.all([this.core.bundles(rows.items, 1), this.core.cards(rows.items), this.repo.reportCounts(rows.items.map((r) => r.id))]);
     return {
       ...rows,
       items: bundles.map((b) => ({
         id: b.conv.id,
-        customerName: b.participants.find((p) => p.kind === 'customer')?.name ?? (b.conv.kind === 'staff_seller' ? '—' : 'Guest'),
+        customerName: b.participants.find((p) => p.kind === 'customer' || p.kind === 'guest')?.name ?? (b.conv.kind === 'staff_seller' ? '—' : 'Guest'),
         counterparty: this.core.counterpartyOf(staff, b, cards),
         subject: this.core.subjectOf(b.conv),
         status: b.conv.status as AdminConversationRow['status'],
@@ -382,7 +399,7 @@ export class MessagingService implements MessagingPublicApi {
 
   /** GET admin /conversations/{id}/messages: a logged read with a reason */
   async readConversationAsStaff(staff: StaffViewer, id: string, q: { reason: string; caseId?: string }, page: PageRequest, by: By): Promise<common.Page<Message>> {
-    const c = await this.repo.get('conversations', id);
+    const c = await this.core.conversation(id);
     if (!c) throw notFound();
     const reason = q.reason?.trim();
     if (!reason) throw invalid([{ path: 'reason', message: 'Say why you are opening this private conversation' }]);
@@ -438,6 +455,16 @@ export class MessagingService implements MessagingPublicApi {
       { kind: 'staff', participant_id: staff.accountId, name: staff.name ?? SUPPORT_LABEL, label: SUPPORT_LABEL, joined_from_case_id: body.caseId ?? null, last_read_message_id: null, unread_count: 0 },
     ];
     if (body.sellerId) participants.push({ kind: 'seller', participant_id: body.sellerId, name: sellerName, label: 'Seller', joined_from_case_id: null, last_read_message_id: null, unread_count: 0 });
+    if (body.applicationId) {
+      // the applicant takes part from the start (not on their first action): their account, as their customer id
+      const applicant = await this.core.soft('sellers', 'application participant', (s) => s.getApplicationParticipant(body.applicationId!));
+      if (applicant === null) throw notFound('Seller application');
+      if (applicant) {
+        const customer = await this.core.soft('customers', 'applicant customer', (c) => c.getCustomerByUserId(applicant.applicantAccountId));
+        participants.push({ kind: 'customer', participant_id: customer?.id ?? applicant.applicantAccountId, name: applicant.name, label: 'Applicant', joined_from_case_id: null, last_read_message_id: null, unread_count: 0 });
+      }
+    }
+    // case_id is a link for staff conversations, not part of the key
     const key: ConversationKey = {
       kind: 'staff_seller',
       customer_id: null,
@@ -446,7 +473,6 @@ export class MessagingService implements MessagingPublicApi {
       order_id: order?.id ?? null,
       order_item_id: item?.id ?? null,
       return_id: ret?.id ?? null,
-      case_id: body.caseId ?? null,
     };
     const subjectKind: Subject['kind'] = body.applicationId ? 'application' : ret ? 'return' : body.caseId ? 'case' : item ? 'order_item' : order ? 'order' : 'seller_account';
     const subject: Subject = {
@@ -489,7 +515,7 @@ export class MessagingService implements MessagingPublicApi {
 
   /** POST admin /conversations/{id}/messages: post as Marketly Support, joining the conversation */
   async sendStaffMessage(staff: StaffViewer, id: string, body: { body: string; mediaIds?: string[] | null; caseId?: string | null }, by: By): Promise<Message> {
-    const c = await this.repo.get('conversations', id);
+    const c = await this.core.conversation(id);
     if (!c) throw notFound();
     if (c.status !== 'open') throw this.lockedError(c);
     const cfg = await this.core.cfg();
@@ -500,7 +526,8 @@ export class MessagingService implements MessagingPublicApi {
     if (joining) {
       const caseRef = body.caseId ? await this.caseRef(c.order_id, body.caseId) : null;
       await this.core.systemNote(c.id, `${author.participantLabel ?? SUPPORT_LABEL} joined the conversation${caseRef ? ` from case ${caseRef}` : ''}`);
-      if (body.caseId && !c.case_id && c.kind !== 'staff_seller') await this.repo.update('conversations', c.id, { case_id: body.caseId });
+      // the case is a link on order conversations (support conversations are keyed by their case)
+      if (body.caseId && !c.case_id && c.kind === 'order') await this.repo.update('conversations', c.id, { case_id: body.caseId });
     }
     const { message } = await this.core.commit(c.id, author, prepared, cfg, by);
     await this.core.audit(
@@ -553,7 +580,9 @@ export class MessagingService implements MessagingPublicApi {
   async lockConversation(staff: StaffViewer, id: string, body: { locked: boolean; reason: string }, by: By): Promise<Conversation> {
     const reason = body.reason?.trim();
     if (!reason) throw invalid([{ path: 'reason', message: 'Give a reason' }]);
-    const { before, after } = await this.setLock(id, body.locked, reason, by);
+    const conv = await this.core.conversation(id);
+    if (!conv) throw notFound();
+    const { before, after } = (await this.setLock(conv.id, body.locked, reason, by))!;
     await this.core.audit(
       {
         action: body.locked ? 'messaging.conversation.lock' : 'messaging.conversation.unlock',
@@ -569,15 +598,32 @@ export class MessagingService implements MessagingPublicApi {
     return this.one(staff, after, false);
   }
 
-  private async setLock(id: string, locked: boolean, reason: string, by: By) {
+  /**
+   * Locks or unlocks (staff, a message report, or trust's lock_conversation enforcement). A staff lock or unlock
+   * clears the enforcement link, so reversing that enforcement later does not undo the staff decision.
+   */
+  private async setLock(id: string, locked: boolean, reason: string, by: By, o: { trustEnforcementId?: string | null; claim?: string; onlyIfLockedBy?: string } = {}) {
     const res = await this.repo.transaction(async (tx) => {
+      if (o.claim && !(await tx.claim(o.claim))) return null;
       const before = await tx.get('conversations', id, { forUpdate: true });
       if (!before) throw notFound();
+      // a reversal unlocks only what that enforcement locked (staff unlocked or re-locked it since: leave it)
+      if (o.onlyIfLockedBy && (before.status !== 'locked' || before.locked_by_enforcement_id !== o.onlyIfLockedBy)) return null;
       const status = conversationMachine.next(before.status as 'open' | 'locked' | 'archived', locked ? 'lock' : 'unlock');
-      const after = await tx.update('conversations', id, { status, locked_reason: locked ? reason : null });
+      const after = await tx.update('conversations', id, { status, locked_reason: locked ? reason : null, locked_by_enforcement_id: locked ? (o.trustEnforcementId ?? null) : null });
       return { before, after };
     });
-    if (locked) this.core.publish('messaging.conversation.locked', { conversationId: id, reason }, by);
+    if (!res) return null;
+    const c = res.after;
+    if (locked) {
+      this.core.publish(
+        'messaging.conversation.locked',
+        { conversationId: id, reason, lockedBy: by.actor, trustEnforcementId: o.trustEnforcementId ?? null, customerId: c.customer_id, sellerId: c.seller_id },
+        by,
+      );
+    } else {
+      this.core.publish('messaging.conversation.unlocked', { conversationId: id, reason, unlockedBy: by.actor, trustEnforcementId: o.trustEnforcementId ?? null }, by);
+    }
     return res;
   }
 
@@ -696,7 +742,7 @@ export class MessagingService implements MessagingPublicApi {
     const participants: Omit<ParticipantRec, 'conversation_id' | 'joined_at'>[] = marketplaceSellerId(input.sellerId)
       ? [{ kind: 'seller', participant_id: input.sellerId, name: group.seller.name, label: 'Seller', joined_from_case_id: null, last_read_message_id: null, unread_count: 0 }]
       : [];
-    if (customerId) participants.unshift({ kind: 'customer', participant_id: customerId, name: buyerName(order.contact.name), label: 'Buyer', joined_from_case_id: null, last_read_message_id: null, unread_count: 0 });
+    participants.unshift(this.buyerParticipant(order));
     const key: ConversationKey = { kind: 'order', customer_id: customerId, seller_id: input.sellerId, application_id: null, order_id: order.id, order_item_id: item?.id ?? null, return_id: ret?.id ?? null };
     const c = await this.findOrCreate(key, { guest_session_id: null, subject: this.subjectFrom(order, group, item ?? null, ret, null, null), case_id: null }, participants, { actor: SYSTEM });
     const viewer: Viewer = customerId ? { kind: 'customer', customerId, guestSessionId: null, accountId: null } : { kind: 'seller', sellerId: input.sellerId, accountId: null, name: null };
@@ -725,10 +771,10 @@ export class MessagingService implements MessagingPublicApi {
     if (range.from > range.to) throw invalid([{ path: 'from', message: 'The start date must be on or before the end date' }]);
     const [cfg, inbox] = await Promise.all([this.core.cfg(), this.repo.sellerInbox(sellerId)]);
     const r = await this.replyFigures(sellerId, range, cfg);
-    return { targetHours: cfg.targetHours, averageReplyMinutes: r.averageReplyMinutes, repliedWithinTargetPct: r.repliedWithinTargetPct, awaitingReply: inbox.awaiting + inbox.overdue, overdue: inbox.overdue, period: range };
+    return { targetHours: cfg.targetHours, averageReplyMinutes: r.averageReplyMinutes, medianReplyMinutes: r.medianReplyMinutes, repliedWithinTargetPct: r.repliedWithinTargetPct, awaitingReply: inbox.awaiting + inbox.overdue, overdue: inbox.overdue, period: range };
   }
 
-  private async replyFigures(sellerId: string, range: common.DateRange, cfg: Cfg): Promise<{ averageReplyMinutes: number | null; repliedWithinTargetPct: number | null }> {
+  private async replyFigures(sellerId: string, range: common.DateRange, cfg: Cfg): Promise<{ averageReplyMinutes: number | null; medianReplyMinutes: number | null; repliedWithinTargetPct: number | null }> {
     const tz = this.core.tz;
     const from = zonedTimeToUtc(range.from, '00:00', tz);
     const to = new Date(zonedTimeToUtc(range.to, '00:00', tz).getTime() + DAY);
@@ -739,8 +785,12 @@ export class MessagingService implements MessagingPublicApi {
     const replied = rounds.filter((x) => x.reply);
     const decided = rounds.filter((x) => x.reply || x.start.getTime() + target <= now);
     const within = replied.filter((x) => x.reply!.getTime() - x.start.getTime() <= target);
+    const times = replied.map((x) => x.reply!.getTime() - x.start.getTime()).sort((a, b) => a - b);
+    const mid = Math.floor(times.length / 2);
+    const median = !times.length ? null : times.length % 2 ? times[mid]! : (times[mid - 1]! + times[mid]!) / 2;
     return {
-      averageReplyMinutes: replied.length ? Math.round(replied.reduce((s, x) => s + (x.reply!.getTime() - x.start.getTime()), 0) / replied.length / MINUTE) : null,
+      averageReplyMinutes: replied.length ? Math.round(times.reduce((s, x) => s + x, 0) / replied.length / MINUTE) : null,
+      medianReplyMinutes: median === null ? null : Math.round(median / MINUTE),
       repliedWithinTargetPct: decided.length ? Math.round((within.length / decided.length) * 1000) / 10 : null,
     };
   }
@@ -867,7 +917,13 @@ export class MessagingService implements MessagingPublicApi {
       this.ctx.log.info({ caseId: event.caseId, orderId: event.orderId }, 'messaging: case opened without an order conversation');
       return;
     }
-    for (const c of concerned) await this.joinFromCase(c, { id: SUPPORT_TEAM_ID, name: SUPPORT_LABEL }, event.caseId, event.ref);
+    // the case owner joins when one is assigned at opening; otherwise the support team
+    let staff = { id: SUPPORT_TEAM_ID, name: SUPPORT_LABEL };
+    if (event.ownerStaffId && isUuid(event.ownerStaffId)) {
+      const account = await this.core.soft('identity', 'case owner', (i) => i.getAccount(event.ownerStaffId!));
+      staff = { id: event.ownerStaffId, name: account?.displayName ?? SUPPORT_LABEL };
+    }
+    for (const c of concerned) await this.joinFromCase(c, staff, event.caseId, event.ref);
   }
 
   /** Adds Marketly Support as a participant (once per case) and posts the system note */
@@ -887,7 +943,7 @@ export class MessagingService implements MessagingPublicApi {
         unread_count: 0,
       });
       if (!added) await tx.updateWhere('participants', { conversation_id: c.id, kind: 'staff', participant_id: staff.id }, { joined_from_case_id: caseId });
-      if (!c.case_id && c.kind !== 'staff_seller') await tx.update('conversations', c.id, { case_id: caseId });
+      if (!c.case_id && c.kind === 'order') await tx.update('conversations', c.id, { case_id: caseId });
       return true;
     });
     if (joined) await this.core.systemNote(c.id, `${SUPPORT_LABEL} joined from case ${caseRef ?? caseId}`);
@@ -901,10 +957,14 @@ export class MessagingService implements MessagingPublicApi {
     if (!n) this.ctx.log.debug({ orderId: event.orderId }, 'messaging: completed order has no conversations');
   }
 
-  /** trust.enforcement.recorded: Lock conversations named in an abuse enforcement */
+  /**
+   * trust.enforcement.recorded: only lock_conversation locks the conversations named in targets (a conversation, or
+   * the conversation of a message), recording the enforcement id; messaging.conversation.locked carries it so trust
+   * confirms execution. Other actions (restrict_customer_messaging is executed by customers) are ignored.
+   */
   async onEnforcementRecordedFromTrust(event: EventPayload<'trust.enforcement.recorded'>): Promise<void> {
     if (event.alreadyApplied) return;
-    if (event.action !== 'lock_conversation' && event.ownerTeam !== 'messaging') return;
+    if (event.action !== 'lock_conversation') return;
     const targets = (event.targets ?? []) as { type?: string; id?: string }[];
     const ids = new Set<string>();
     for (const t of targets) {
@@ -924,7 +984,8 @@ export class MessagingService implements MessagingPublicApi {
         continue;
       }
       if (c.status !== 'open') continue; // already locked (or archived: nothing to stop)
-      await this.setLock(id, true, reason, by);
+      const done = await this.setLock(id, true, reason, by, { trustEnforcementId: event.enforcementId, claim: `trust-lock:${event.enforcementId}:${id}` });
+      if (!done) continue;
       await this.core.audit(
         {
           action: 'messaging.conversation.lock',
@@ -941,6 +1002,162 @@ export class MessagingService implements MessagingPublicApi {
     }
   }
 
+  /**
+   * trust.enforcement.reversed: a lock_conversation enforcement reversed unlocks the conversations it locked
+   * (locked_by_enforcement_id) unless staff unlocked or locked them again since; publishes messaging.conversation.unlocked.
+   */
+  async onEnforcementReversedFromTrust(event: EventPayload<'trust.enforcement.reversed'>): Promise<void> {
+    if (event.action !== 'lock_conversation' || !isUuid(event.enforcementId)) return;
+    const rows = await this.repo.find('conversations', { locked_by_enforcement_id: event.enforcementId, status: 'locked' });
+    const by: By = { actor: { kind: 'system', id: null, name: 'Trust and Risk' } };
+    const reason = `Trust and Risk reversed ${event.ref}: ${event.reason}`;
+    for (const c of rows) {
+      const done = await this.setLock(c.id, false, reason, by, { trustEnforcementId: event.enforcementId, onlyIfLockedBy: event.enforcementId, claim: `trust-unlock:${event.enforcementId}:${c.id}` });
+      if (!done) continue;
+      await this.core.audit(
+        {
+          action: 'messaging.conversation.unlock',
+          actionLabel: 'Unlocked a conversation (trust enforcement reversed)',
+          category: 'customers',
+          target: { type: 'conversation', id: c.id, ref: this.core.subjectOf(c).orderRef ?? null, label: this.core.subjectOf(c).title, sellerId: c.seller_id },
+          relatedTargets: [{ type: 'trust_enforcement', id: event.enforcementId, ref: event.ref }],
+          reason,
+          before: { status: 'locked' },
+          after: { status: 'open' },
+        },
+        by,
+      );
+    }
+  }
+
+  /**
+   * notifications.email_reply.received (module messaging): the reply is appended to the conversation (refId) as a
+   * message from the participant whose email matches fromEmail: the customer, a guest order's contact, or a member of
+   * the seller. Other senders are dropped; a locked conversation refuses it. The email event id is the message's
+   * clientMessageId, so a redelivered email adds nothing.
+   */
+  async onEmailReplyReceivedFromNotifications(event: EventPayload<'notifications.email_reply.received'>, eventId?: string): Promise<void> {
+    if (event.module !== 'messaging') return;
+    const c = isUuid(event.refId) ? await this.core.conversation(event.refId) : undefined;
+    if (!c) {
+      this.ctx.log.info({ refId: event.refId }, 'messaging: email reply for an unknown conversation (dropped)');
+      return;
+    }
+    const from = event.fromEmail.trim().toLowerCase();
+    const parts = await this.repo.participantsOf([c.id]);
+    let viewer: Viewer | null = null;
+    for (const p of parts) {
+      if (p.kind === 'customer' && isUuid(p.participant_id)) {
+        const cust = await this.core.soft('customers', 'email reply sender', (x) => x.getCustomer(p.participant_id));
+        if (cust && (cust.email?.toLowerCase() === from || (event.accountId && cust.userId === event.accountId))) viewer = { kind: 'customer', customerId: cust.id, guestSessionId: null, accountId: cust.userId };
+      } else if (p.kind === 'guest' && c.order_id) {
+        const order = await this.core.orderOf(c.order_id);
+        if (order?.contact.email?.toLowerCase() === from) viewer = { kind: 'customer', customerId: null, guestSessionId: c.guest_session_id ?? `email:${c.order_id}`, accountId: null };
+      } else if (p.kind === 'seller' && isUuid(p.participant_id)) {
+        const accountId = await this.sellerMemberByEmail(p.participant_id, from, event.accountId ?? null);
+        if (accountId) {
+          const account = await this.core.soft('identity', 'seller member', (i) => i.getAccount(accountId));
+          viewer = { kind: 'seller', sellerId: p.participant_id, accountId, name: account?.displayName ?? null };
+        }
+      }
+      if (viewer) break;
+    }
+    if (!viewer) {
+      this.ctx.log.info({ conversationId: c.id }, 'messaging: email reply from someone who is not a participant (dropped)');
+      return;
+    }
+    if (c.status !== 'open') {
+      this.ctx.log.info({ conversationId: c.id, status: c.status }, 'messaging: email reply to a locked or archived conversation (refused)');
+      return;
+    }
+    const cfg = await this.core.cfg();
+    const author = this.core.authorOf(viewer, c, parts);
+    const media = this.ctx.tryUse('media');
+    const assets = media && event.attachmentAssetIds.length ? (await Promise.all(event.attachmentAssetIds.map((id) => media.getAsset(id).catch(() => null)))).filter((a): a is NonNullable<typeof a> => !!a) : [];
+    if (assets[0]) author.mediaOwner = assets[0].owner;
+    const text = event.text.trim();
+    if (!text && !assets.length) return;
+    const prepared = await this.core.prepare(author, { body: text || 'Sent files by email', clientMessageId: `email:${eventId ?? `${event.refId}:${event.receivedAt}`}` }, cfg);
+    prepared.mediaIds = assets.slice(0, cfg.maxAttachments).map((a) => a.id);
+    try {
+      await this.core.commit(c.id, author, prepared, cfg, { actor: { kind: viewer.kind === 'seller' ? 'seller' : 'customer', id: viewer.kind === 'seller' ? viewer.sellerId : (viewer.customerId ?? null) } });
+    } catch (err) {
+      if ((err as { code?: string })?.code === 'CONVERSATION_LOCKED') {
+        this.ctx.log.info({ conversationId: c.id }, 'messaging: email reply to a locked conversation (refused)');
+        return;
+      }
+      throw err;
+    }
+  }
+
+  /** The seller member account that sent an email (by account id, else by the member's account email) */
+  private async sellerMemberByEmail(sellerId: string, email: string, accountId: string | null): Promise<string | null> {
+    const sellers = this.ctx.tryUse('sellers');
+    if (!sellers) return null;
+    if (accountId && (await sellers.getMemberAccess(sellerId, accountId).catch(() => null))) return accountId;
+    const members = await sellers.listMembers(sellerId).catch(() => []);
+    if (!members.length) return null;
+    const accounts = (await this.core.soft('identity', 'member emails', (i) => i.getAccounts(members.map((m) => m.accountId)))) ?? [];
+    return accounts.find((a) => a.email.toLowerCase() === email)?.id ?? null;
+  }
+
+  /**
+   * customers.account.closed: the customer's side becomes "Former customer" (participant name and message author
+   * labels); the text stays for the seller's service record (contact details were already masked); the customer's own
+   * attachments are released.
+   */
+  async onAccountClosedFromCustomers(event: EventPayload<'customers.account.closed'>): Promise<void> {
+    if (!isUuid(event.customerId)) return;
+    const released = await this.repo.transaction(async (tx) => {
+      if (!(await tx.claim(`account-closed:${event.customerId}`))) return null;
+      await tx.updateWhere('participants', { kind: 'customer', participant_id: event.customerId }, { name: FORMER_CUSTOMER });
+      const mine = await tx.find('messages', { author_kind: 'customer', author_id: event.customerId });
+      await tx.updateWhere('messages', { author_kind: 'customer', author_id: event.customerId }, { author_label: FORMER_CUSTOMER });
+      return mine.flatMap((m) => ((m.media_ids as string[] | null) ?? []).map((assetId) => ({ assetId, messageId: m.id })));
+    });
+    if (!released?.length) return;
+    const media = this.ctx.tryUse('media');
+    for (const r of released) {
+      await media?.detach(r.assetId, { module: 'messaging', kind: 'message_attachment', refId: r.messageId }).catch((err) => this.ctx.log.warn({ err, assetId: r.assetId }, 'messaging: attachment not released'));
+    }
+  }
+
+  /**
+   * Export hook (customers.build-data-exports): the customer's conversations and the messages they can see (no hidden
+   * messages or staff-only text; other parties' contact details were masked when sent). Attachments: the files the
+   * customer uploaded.
+   */
+  async exportCustomerData(input: { customerId: string; accountId: string }): Promise<common.CustomerDataSection[]> {
+    if (!isUuid(input.customerId)) return [];
+    const own = await this.repo.find('conversations', { customer_id: input.customerId }, { orderBy: [['created_at', 'asc']] });
+    const asApplicant = (await this.repo.conversationsOf('customer', input.customerId)).filter((c) => c.kind === 'staff_seller');
+    const convs = [...new Map([...own, ...asApplicant].map((c) => [c.id, c])).values()];
+    const v: CustomerViewer = { kind: 'customer', customerId: input.customerId, guestSessionId: null, accountId: input.accountId };
+    const [bundles, cards] = await Promise.all([this.core.bundles(convs, 1), this.core.cards(convs)]);
+    const records: unknown[] = [];
+    const attachmentIds = new Set<string>();
+    for (const b of bundles) {
+      const c = b.conv;
+      const messages = await this.repo.find('messages', { conversation_id: c.id, hidden: false }, { orderBy: [['at', 'asc']] });
+      const cp = this.core.counterpartyOf(v, b, cards);
+      records.push({
+        conversationId: c.id,
+        with: cp.name,
+        about: this.core.subjectOf(c).title,
+        orderRef: this.core.subjectOf(c).orderRef ?? null,
+        status: c.status,
+        startedAt: c.created_at.toISOString(),
+        messages: messages.map((m) => {
+          const mine = m.author_kind === 'customer' && m.author_id === input.customerId;
+          const files = (m.media_ids as string[] | null) ?? [];
+          if (mine) files.forEach((id) => attachmentIds.add(id));
+          return { at: m.at.toISOString(), from: mine ? 'You' : m.kind === 'system' ? 'Marketly' : m.author_label, text: m.body, attachments: files.length };
+        }),
+      });
+    }
+    return [{ key: 'messages', title: 'Messages', module: 'messaging', records, attachmentIds: [...attachmentIds] }];
+  }
+
   /* ================================================================ jobs */
 
   /** Job messaging.reply-deadlines (every 10 min): Move awaiting conversations past their due time to overdue and publish messaging.reply.overdue */
@@ -955,7 +1172,8 @@ export class MessagingService implements MessagingPublicApi {
           return tx.update('conversations', c.id, { reply_state: sellerReplyMachine.next('awaiting_seller', 'deadlinePasses') });
         });
         if (moved?.seller_id && moved.reply_due_at) {
-          this.core.publish('messaging.reply.overdue', { conversationId: moved.id, sellerId: moved.seller_id, orderId: moved.order_id, dueAt: moved.reply_due_at.toISOString() });
+          // officialStore: staff owe the reply (messaging keeps its official_store_reply item), not a seller task
+          this.core.publish('messaging.reply.overdue', { conversationId: moved.id, sellerId: moved.seller_id, officialStore: isOfficialConversation(moved), orderId: moved.order_id, dueAt: moved.reply_due_at.toISOString() });
         }
       }
       if (due.length < JOB_BATCH) return;
@@ -1032,7 +1250,7 @@ export class MessagingService implements MessagingPublicApi {
       if (!retried && (err as { code?: string })?.code === '23505') return this.findOrCreate(key, extra, participants, by, true);
       throw err;
     }
-    this.core.publish('messaging.conversation.started', { conversationId: c.id, kind: c.kind, orderId: c.order_id, sellerId: marketplaceSellerId(c.seller_id) }, by);
+    this.core.publish('messaging.conversation.started', { conversationId: c.id, kind: c.kind, orderId: c.order_id, customerId: c.customer_id ?? participants.find((p) => p.kind === 'customer')?.participant_id ?? null, sellerId: c.seller_id ?? null, officialStore: isOfficialConversation(c), applicationId: c.application_id }, by);
     return c;
   }
 
@@ -1058,6 +1276,7 @@ export class MessagingService implements MessagingPublicApi {
         subject: extra.subject as never,
         status: conversationMachine.initial,
         locked_reason: null,
+        locked_by_enforcement_id: null,
         reply_state: sellerReplyMachine.initial,
         reply_due_at: null,
         awaiting_since: null,
@@ -1075,6 +1294,13 @@ export class MessagingService implements MessagingPublicApi {
     const c = (await this.repo.get('conversations', conversationId))!;
     const [conversation, msg] = await Promise.all([this.one(v, c, false), this.core.messagesOf(v, [message])]);
     return { conversation, message: msg[0]! };
+  }
+
+  /** The buyer side of an order conversation: the customer, or the order's guest participant (created with the conversation, D-M2) */
+  private buyerParticipant(order: orders.OrderDetail): Omit<ParticipantRec, 'conversation_id' | 'joined_at'> {
+    const name = buyerName(order.contact.name);
+    const customerId = order.contact.customerId ?? null;
+    return { kind: customerId ? 'customer' : 'guest', participant_id: customerId ?? guestKey(order.id), name, label: 'Buyer', joined_from_case_id: null, last_read_message_id: null, unread_count: 0 };
   }
 
   private subjectFrom(

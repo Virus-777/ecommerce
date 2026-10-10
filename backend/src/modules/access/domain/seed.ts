@@ -26,6 +26,8 @@ export interface SeedRole {
 const usd = (dollars: number) => ({ amount: dollars * 100, currency: 'USD' });
 const upTo = (dollars: number, extra: Partial<LimitValue> = {}) => ({ authority: 'permitted' as const, limitMoney: usd(dollars), ...extra });
 const PERMITTED = { authority: 'permitted' as const };
+/** May propose a Business-Owner-only action: check() answers approval_required (not denied) and the proposal becomes a Business Owner request (access spec notes, Seeded limits) */
+const RECOMMEND = { authority: 'recommend_only' as const };
 /** Every staff role also works its own queues */
 const QUEUES = ['workqueues.items.view', 'workqueues.items.work'];
 /** Owner teams accept or decline Trust and Risk's recommendations for the actions they own (trust spec: trust.recommendations.decide); Trust recommends, the owner acts */
@@ -38,7 +40,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     kind: 'owner',
     workArea: 'Business',
     description: 'Sets approval limits and is the final approver above every limit.',
-    permissions: ['*.view', 'access.limits.approve', 'access.limits.propose', 'access.approvals.view-all', 'audit.entries.*', ...QUEUES],
+    permissions: ['*.view', 'access.limits.approve', 'access.limits.propose', 'access.approvals.view-all', 'audit.entries.*', 'audit.retention.manage', ...QUEUES],
     limits: {}, // permitted without limit for every registered action (added by the registry sync)
   },
   {
@@ -60,11 +62,17 @@ export const SYSTEM_ROLES: SeedRole[] = [
       'settings.flags.manage',
       'notifications.templates.*',
       'notifications.routing.manage',
+      // may propose shortening the retention period (the Business Owner approves audit.retention.change)
+      'audit.retention.manage',
       ...QUEUES,
     ],
     limits: {
       'access.roles.sensitive-grant': PERMITTED,
       'settings.changes.apply': { authority: 'permitted_with_second_review', secondReviewerRoleKeys: [PLATFORM_ADMINISTRATOR, BUSINESS_OWNER] },
+      'settings.changes.apply-owner': RECOMMEND,
+      'audit.retention.change': RECOMMEND,
+      'access.limits.change': RECOMMEND,
+      'access.delegations.approve': RECOMMEND,
     },
   },
   {
@@ -135,7 +143,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     description: 'Return requests, inspections and return policies. Refund approval belongs to Finance.',
     escalationRoleKey: BUSINESS_OWNER,
     permissions: ['returns.requests.*', 'returns.inspections.record', 'returns.exceptions.propose', 'returns.policies.manage', 'inventory.returns.record', OWNER_DECIDES, ...QUEUES],
-    limits: {},
+    limits: { 'returns.baseline.change': RECOMMEND, 'returns.policies.shorten-window': RECOMMEND },
   },
   {
     key: 'catalog_manager',
@@ -144,7 +152,8 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Catalog',
     description: 'Product review and publication, taxonomy, media and search synonyms.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['catalog.*', 'media.assets.*', 'search.synonyms.manage', 'reviews.answers.staff', OWNER_DECIDES, ...QUEUES],
+    // offers.offers.remove: Catalog owns offer suspension (decision D8)
+    permissions: ['catalog.*', 'media.assets.*', 'search.synonyms.manage', 'reviews.answers.staff', 'offers.offers.view', 'offers.offers.remove', OWNER_DECIDES, ...QUEUES],
     limits: { 'catalog.products.publication-override': PERMITTED },
   },
   {
@@ -205,6 +214,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
       'fulfillment-service.reimbursements.approve': upTo(10_000),
       'fulfillment-service.charges.reverse': upTo(10_000),
       'inventory.adjustments.apply': { authority: 'permitted', limitNumber: 500 },
+      'finance.fees.change': RECOMMEND,
     },
   },
   {
@@ -225,7 +235,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     description: 'Ad campaigns, placements, rules and billing.',
     escalationRoleKey: BUSINESS_OWNER,
     permissions: ['advertising.*', ...QUEUES],
-    limits: { 'advertising.charges.void': upTo(500) },
+    limits: { 'advertising.charges.void': upTo(500), 'advertising.rules.change': RECOMMEND },
   },
   {
     key: 'content_manager',
@@ -235,7 +245,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     description: 'Pages, help center and policies (policies approved by the Business Owner).',
     escalationRoleKey: BUSINESS_OWNER,
     permissions: ['content.*', 'media.assets.manage', 'advertising.campaigns.review', ...QUEUES],
-    limits: {},
+    limits: { 'content.policies.approve': RECOMMEND, 'content.policies.short-notice': RECOMMEND },
   },
   {
     key: 'trust_and_risk_manager',
@@ -357,6 +367,7 @@ export const DEFAULT_ELIGIBLE: Record<string, string[]> = {
   'sellers.sellers.close': ['seller_manager', BUSINESS_OWNER],
   'sellers.performance.targets': ['seller_manager', BUSINESS_OWNER],
   'settings.changes.apply': [PLATFORM_ADMINISTRATOR, BUSINESS_OWNER],
+  'settings.changes.apply-owner': [BUSINESS_OWNER],
   'shipping.claims.open': ['shipping_manager', 'finance_manager'],
   'support.remedies.approve': ['support_agent', 'customer_support_manager', 'finance_manager'],
   'trust.enforcements.reverse': ['trust_and_risk_manager', BUSINESS_OWNER],

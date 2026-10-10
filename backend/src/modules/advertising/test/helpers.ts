@@ -68,6 +68,8 @@ export interface Kit {
   approvals: Map<string, access.RequestApprovalInput>;
   authority: Map<string, Decision>;
   restricted: Map<string, string>;
+  /** access.rolesOf answers by account id (default business_owner) */
+  roles: Map<string, string[]>;
   /** finance.recordAdCharge calls, with the ledger entry id returned */
   adCharges: { sellerId: string; campaignId: string; amount: { amount: number; currency: string }; period: { from: string; to: string }; entryId: string }[];
   /** finance.creditSellerCharge calls (stubbed per src/spec/finance.ts: the same idempotencyKey returns the first entry) */
@@ -124,6 +126,8 @@ export async function boot(): Promise<Kit> {
   const approvals = new Map<string, access.RequestApprovalInput>();
   const authority = new Map<string, Decision>();
   const restricted = new Map<string, string>();
+  /** access.rolesOf by account id; anyone not listed is a Business Owner (may act on every review step) */
+  const roles = new Map<string, string[]>();
   const adCharges: Kit['adCharges'] = [];
   const chargeCredits: Kit['chargeCredits'] = [];
   const creditEntries = new Map<string, string>();
@@ -193,6 +197,7 @@ export async function boot(): Promise<Kit> {
         approvalInfo: async (id: string) => ({ required: true, approvalRequestId: id, approvers: ['Business Owner'] }),
         cancelApproval: async () => {},
         getStaffRef: async (id: string) => ({ id, name: `Staff ${id.slice(0, 4)}` }) as any,
+        rolesOf: async (accountId: string) => (roles.get(accountId) ?? ['business_owner']).map((key) => ({ id: newId(), key, name: key })),
       },
       finance: {
         recordAdCharge: async (input: any) => {
@@ -231,6 +236,7 @@ export async function boot(): Promise<Kit> {
     approvals,
     authority,
     restricted,
+    roles,
     adCharges,
     chargeCredits,
     staff: callers.staff(),

@@ -59,6 +59,16 @@ export class WalletService implements WalletPublicApi {
     return this.ledger.releaseHold(holdId);
   }
 
+  /** Keep a held credit hold alive while its payment is pending check; capped at pendingHoldMaxHours after it was made. */
+  async extendHold(holdId: string, until: string): Promise<CreditHold> {
+    return this.ledger.extendHold(holdId, until);
+  }
+
+  /** Store credit outstanding over all accounts, for finance's daily store_credit check. */
+  async getLiabilityTotal(asOf?: string): Promise<{ available: common.Money; held: common.Money; accounts: number }> {
+    return this.ledger.liabilityTotal(asOf);
+  }
+
   /** Refund to store credit (customer's choice) or return the credit part of a refunded order. Idempotent per refundId. */
   async creditRefund(input: { customerId: string; refundId: string; orderId: string; amount: common.Money; reason: string }, idempotencyKey: string): Promise<LedgerEntry> {
     return this.ledger.creditRefund(input, idempotencyKey);
@@ -115,12 +125,14 @@ export class WalletService implements WalletPublicApi {
     this.deps.ctx.log.info({ ...r, giftCardsExpired: cards }, 'wallet: expiry run');
   }
 
-  /** Job wallet.release-stale-holds (every 1 min): Release holds past expiresAt */
+  /** Job wallet.release-stale-holds (every 1 min): Release holds past expiresAt (an extended hold's is the extended time); delete undelivered gift card codes past giftCardCodesTtlHours */
   async releaseStaleHolds(): Promise<void> {
     await this.ledger.releaseStaleHolds();
+    const cleared = await this.giftCards.clearExpiredCodes();
+    if (cleared) this.deps.ctx.log.info({ batches: cleared }, 'wallet: undelivered gift card codes deleted');
   }
 
-  /** Job wallet.balance-check (daily): Verify every account balance equals the ledger sum; flag differences to Finance checks */
+  /** Job wallet.balance-check (daily 05:00 market time): Verify every account balance equals the ledger sum; report differences to finance.recordExternalDifference */
   async balanceCheck(): Promise<void> {
     await this.ledger.balanceCheck();
   }

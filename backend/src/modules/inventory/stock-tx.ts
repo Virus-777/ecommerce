@@ -47,6 +47,8 @@ export class StockTx {
   readonly #levels = new Map<string, Map<string, Row<'stock_levels'>>>();
   readonly #locations = new Map<string, Row<'locations'>>();
   readonly #before = new Map<string, { available: number; reserved: number }>();
+  /** Items whose stock.changed is published even without a quantity change (re-keyed, archived, unarchived, merged) */
+  readonly #touched = new Set<string>();
 
   constructor(
     readonly tx: InventoryRepository,
@@ -70,6 +72,12 @@ export class StockTx {
     const missing = [...new Set(ids)].filter((id) => !this.#locations.has(id));
     if (!missing.length) return;
     for (const loc of await this.tx.locations({ ids: missing })) this.#locations.set(loc.id, loc);
+  }
+
+  /** Publish stock.changed for a locked item even if Available and Reserved did not change; `row` is the item as it is now */
+  touch(itemId: string, row?: Row<'stock_items'>): void {
+    if (row) this.items.set(itemId, row);
+    this.#touched.add(itemId);
   }
 
   item(id: string): Row<'stock_items'> {
@@ -196,14 +204,27 @@ export class StockTx {
       const item = this.items.get(id)!;
       const available = this.sellableAvailable(id);
       const reserved = this.total(id).reserved;
-      if (available === before.available && reserved === before.reserved) continue;
+      if (available === before.available && reserved === before.reserved && !this.#touched.has(id)) continue;
       const threshold = item.low_stock_threshold ?? (item.owner_type === 'seller' ? opts.defaultSellerThreshold : null);
       const state = item.archived ? 'out_of_stock' : stockState(available, threshold);
-      out.changed.push({ stockItemId: id, offerId: item.offer_id, ownerType: item.owner_type, sellerId: item.seller_id, variantId: item.variant_id, available, reserved, previousAvailable: before.available, state, cause });
+      out.changed.push({
+        stockItemId: id,
+        offerId: item.offer_id,
+        ownerType: item.owner_type,
+        sellerId: item.seller_id,
+        productId: item.product_id,
+        variantId: item.variant_id,
+        available,
+        reserved,
+        previousAvailable: before.available,
+        state,
+        archived: item.archived,
+        cause,
+      });
       const cooled = !item.low_since || this.now.getTime() - item.low_since.getTime() >= opts.cooldownHours * 3_600_000;
       if (threshold !== null && !item.archived && available <= threshold && available < before.available && cooled) {
         this.items.set(id, await this.tx.update('stock_items', id, { low_since: this.now }));
-        out.low.push({ stockItemId: id, offerId: item.offer_id, ownerType: item.owner_type, sellerId: item.seller_id, sku: item.sku, label: item.label, available, threshold });
+        out.low.push({ stockItemId: id, offerId: item.offer_id, ownerType: item.owner_type, sellerId: item.seller_id, productId: item.product_id, variantId: item.variant_id, sku: item.sku, label: item.label, available, threshold });
       }
     }
     return out;

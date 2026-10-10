@@ -171,7 +171,7 @@ export class Core {
     if (!media || !ids?.length) return;
     for (const id of [...new Set(ids)]) {
       try {
-        await media.attach(id, { module: 'trust', kind: 'case_evidence', refId, refLabel }, owner);
+        await media.attach(id, { module: 'trust', kind: 'trust_evidence', refId, refLabel }, owner);
       } catch (err) {
         if (isAppError(err) && err.code === 'NOT_FOUND') throw invalidField('mediaIds', 'A file was not found; upload it again');
         throw err;

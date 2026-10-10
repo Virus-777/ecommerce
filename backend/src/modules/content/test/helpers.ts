@@ -34,6 +34,11 @@ export interface Harness {
   audits: audit.RecordInput[];
   notices: unknown[];
   events: { name: string; payload: any }[];
+  /** Setting overrides by full key ('content.reviewRequired'); the spec default applies otherwise */
+  settingsValues: Record<string, unknown>;
+  /** promotions.liveDeals answer (null: one live sale with no items) and the calls it got */
+  deals: unknown[] | null;
+  dealCalls: { limit: number; campaignId?: string }[];
   eventsNamed(name: string): any[];
   /** Staff token for an account id (all permissions unless given) */
   staff(id?: string, permissions?: string[]): Record<string, string>;
@@ -65,6 +70,9 @@ export async function harness(): Promise<Harness> {
     audits: [] as audit.RecordInput[],
     notices: [] as unknown[],
     events: [] as { name: string; payload: any }[],
+    settingsValues: {} as Record<string, unknown>,
+    deals: null as unknown[] | null,
+    dealCalls: [] as { limit: number; campaignId?: string }[],
   };
   const app = await buildTestApp({
     only: ['content', 'catalog', 'search', 'promotions', 'sellers', 'audit', 'notifications'],
@@ -84,14 +92,17 @@ export async function harness(): Promise<Harness> {
           return c ? ({ id, name: c.name, status: c.status, period: { startsAt: c.startsAt, endsAt: c.endsAt, timeZone: 'America/Los_Angeles', display: '' } } as never) : null;
         },
         isCampaignActive: async (id: string) => ({ active: h.campaigns.get(id)?.active ?? false }),
-        liveDeals: async () => [{ campaignId: newId(), name: 'Flash Friday', state: 'live', secondsLeft: 3600 }] as never,
+        liveDeals: async (opts: { limit: number; campaignId?: string }) => {
+          h.dealCalls.push(opts);
+          return (h.deals ?? [{ campaignId: newId(), name: 'Flash Friday', state: 'live', secondsLeft: 3600, items: [] }]) as never;
+        },
       },
       sellers: {
         getStorefrontCard: async (ids: string[]) => ids.filter((id) => h.sellers.has(id)).map((id) => ({ id, slug: `store-${id.slice(0, 4)}`, storeName: h.sellers.get(id)!.name, logo: null, verified: true, location: 'Portland, OR', positivePct: 98, ratingCount: 120, dispatchLabel: 'Ships in 1 business day' })),
         getSellers: async (ids: string[]) => ids.filter((id) => h.sellers.has(id)).map((id) => ({ id, ref: 'SL-1', slug: 's', storeName: h.sellers.get(id)!.name, status: h.sellers.get(id)!.status, verified: true, canSellNew: true, activeRestrictionIds: [], launchReady: true }) as never),
       },
       access: {
-        check: async (_p, action) => ({ decision: h.decision, action, reason: h.decision === 'allowed' ? 'Business Owner authority' : 'Needs the Business Owner', requiresSecondReviewer: true, approvalsNeeded: h.decision === 'allowed' ? 0 : 1, eligibleApproverRoles: [], eligibleApprovers: [] }),
+        check: async (_p, action) => ({ decision: h.decision, action, reason: h.decision === 'allowed' ? 'Business Owner authority' : 'Needs the Business Owner', requiresSecondReviewer: true, approvalsNeeded: h.decision === 'allowed' ? 0 : 1, eligibleApproverRoles: [], eligibleApprovers: [], stepUpRequired: false }),
         requestApproval: async (input) => {
           h.approvals.push(input);
           return { id: newId(), ref: 'AP-261009-0001', status: 'pending' } as never;
@@ -107,6 +118,10 @@ export async function harness(): Promise<Harness> {
           h.audits.push(entry);
           return newId();
         },
+      },
+      // the settings module is off here: ctx.settings reads these overrides, else the spec defaults
+      settings: {
+        get: (async (key: string) => h.settingsValues[key] ?? null) as never,
       },
       notifications: {
         notify: async (input) => {

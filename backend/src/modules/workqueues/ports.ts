@@ -41,6 +41,8 @@ export interface ItemQuery {
   subjectRef?: string;
   search?: string;
   visibleToSeller?: boolean;
+  /** true: only archived items; false: only items not archived; absent: both (internal counts) */
+  archived?: boolean;
 }
 
 export interface QueueCountRow {
@@ -108,9 +110,8 @@ export interface WorkqueuesRepository {
   /** Items opened / resolved in a time range, per queue (daily counts) */
   openedBetween(from: Date, to: Date): Promise<{ queue_key: string; n: number }[]>;
   resolvedBetween(from: Date, to: Date): Promise<{ queue_key: string; opened_at: Date; resolved_at: Date }[]>;
-  /** Closed items resolved before `before` (archive), oldest first */
-  closedBefore(before: Date, limit: number): Promise<ItemRow[]>;
-  deleteItems(ids: string[]): Promise<void>;
+  /** Mark closed items resolved before `before` archived (archived_at = at); rows, notes and history stay. Returns how many (at most `limit`) */
+  archiveClosedBefore(before: Date, at: Date, limit: number): Promise<number>;
 
   /* history and notes */
   insertEvent(row: ItemEventRow): Promise<void>;
@@ -154,7 +155,3 @@ export interface WorkqueuesRepository {
   dailyCounts(date: string): Promise<DailyCountRow[]>;
 }
 
-/** Cold storage for archived work items (the archive job): rows leave the online tables after itemRetentionDays */
-export interface ArchiveStore {
-  put(batch: { at: string; items: unknown[] }): Promise<void>;
-}

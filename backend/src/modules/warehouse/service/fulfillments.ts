@@ -299,9 +299,12 @@ export class Fulfillments {
     }
     const itemCode = body.itemCode?.trim() ?? '';
     if (cfg.requireItemScan || itemCode) {
-      if (!itemMatches(itemCode, { sku: line.sku, stockItemId: line.stock_item_id })) {
+      // the SKU label or the variant GTIN (the manufacturer barcode)
+      const gtins = itemCode && !itemMatches(itemCode, { sku: line.sku, stockItemId: line.stock_item_id }) ? await this.core.gtins([line.stock_item_id]) : new Map<string, string>();
+      if (!itemMatches(itemCode, { sku: line.sku, stockItemId: line.stock_item_id, extraCodes: [gtins.get(line.stock_item_id)] })) {
         const siblings = await this.repo.find('fulfillment_lines', { fulfillment_id: f.id });
-        const other = siblings.find((l) => l.id !== line.id && itemMatches(itemCode, { sku: l.sku, stockItemId: l.stock_item_id }));
+        const sibGtins = await this.core.gtins(siblings.map((l) => l.stock_item_id));
+        const other = siblings.find((l) => l.id !== line.id && itemMatches(itemCode, { sku: l.sku, stockItemId: l.stock_item_id, extraCodes: [sibGtins.get(l.stock_item_id)] }));
         throw await mismatch('item', line.sku, itemCode, other ? `Wrong item: this line is ${line.sku}; ${other.sku} is another line of the order` : `Wrong item: not on this pick list (expected ${line.sku})`);
       }
     }
@@ -360,7 +363,7 @@ export class Fulfillments {
     return this.get(f.id);
   }
 
-  /** A damaged unit at pick or pack (photos required): inventory moves it to Damaged or held, the order waits */
+  /** A damaged unit at pick or pack, also once every line is picked (photos required): inventory moves it to Damaged or held, the order waits */
   async reportDamage(id: string, body: DamageReport, by: By): Promise<Fulfillment> {
     const f = await this.load(id);
     const line = (await this.repo.find('fulfillment_lines', { id: body.lineId, fulfillment_id: id }))[0];
@@ -372,6 +375,11 @@ export class Fulfillments {
     if (!Number.isInteger(body.quantity) || body.quantity < 1 || body.quantity > line.quantity) issues.push({ path: 'quantity', message: `Between 1 and ${line.quantity} units` });
     if (line.state === 'cancelled') issues.push({ path: 'lineId', message: 'This line was cancelled' });
     if (issues.length) throw new AppError('VALIDATION_FAILED', issues[0]!.message, { issues });
+    // the photos are inspection evidence of this fulfillment (media usage inspection_photo), so the orphan sweep keeps them
+    const media = this.core.ctx.tryUse('media');
+    if (media) {
+      for (const assetId of [...new Set(body.photoIds)]) await media.attach(assetId, { module: 'warehouse', kind: 'inspection_photo', refId: id, refLabel: `Damage on ${f.order_ref}` }, { kind: 'staff', id: by.actor.id ?? null });
+    }
     const d = await this.core.ctx.use('inventory').reportDiscrepancy({
       kind: 'damage_found',
       stockItemId: line.stock_item_id,
@@ -510,6 +518,68 @@ export class Fulfillments {
       await this.settleWave(tx, fresh.wave_id);
     });
     this.core.flush(batch);
+  }
+
+  /**
+   * orders.item.split (decision S-D1): the line of itemId is split so newItemId gets its own line with
+   * `quantity` units; picked (and short) units stay on the original line first, and open package items
+   * follow the same split. Later cancel and dispatch events naming either item find their line.
+   * Idempotent per newItemId.
+   */
+  async onItemSplit(e: EventPayload<'orders.item.split'>): Promise<void> {
+    // only Official Store groups have a fulfillment
+    const f = (await this.repo.find('fulfillments', { seller_group_id: e.groupId }))[0];
+    if (!f) return;
+    await this.repo.transaction(async (tx) => {
+      const lines = await tx.find('fulfillment_lines', { fulfillment_id: f.id }, { forUpdate: true });
+      if (lines.some((l) => l.order_item_id === e.newItemId)) return; // already split
+      const line = lines.find((l) => l.order_item_id === e.itemId && l.state !== 'cancelled');
+      if (!line) {
+        this.core.ctx.log.debug({ itemId: e.itemId, newItemId: e.newItemId }, 'warehouse: split of an item with no fulfillment line, ignored');
+        return;
+      }
+      const moved = Math.min(e.quantity, line.quantity);
+      if (moved < 1) return;
+      const keep = line.quantity - moved;
+      // picked, then short units stay on the original line first
+      const keepPicked = Math.min(line.picked, keep);
+      const keepShort = Math.min(line.short, keep - keepPicked);
+      const newPicked = line.picked - keepPicked;
+      const newShort = Math.min(line.short - keepShort, moved - newPicked);
+      const stateOf = (qty: number, picked: number, short: number) => (line.state === 'cancelled' ? 'cancelled' : qty === 0 ? 'cancelled' : short > 0 && line.state === 'short' ? 'short' : picked >= qty ? 'picked' : 'pending');
+      await tx.update('fulfillment_lines', line.id, { quantity: keep, picked: keepPicked, short: keepShort, state: stateOf(keep, keepPicked, keepShort) });
+      await tx.insert('fulfillment_lines', {
+        id: newId(),
+        fulfillment_id: f.id,
+        order_item_id: e.newItemId,
+        stock_item_id: line.stock_item_id,
+        sku: line.sku,
+        label: line.label,
+        quantity: moved,
+        bin_code: line.bin_code,
+        picked: newPicked,
+        short: newShort,
+        state: stateOf(moved, newPicked, newShort),
+        picked_by: newPicked > 0 ? line.picked_by : null,
+        picked_at: newPicked > 0 ? line.picked_at : null,
+      });
+      // package items of the original item split the same way (original first)
+      let left = keep;
+      for (const it of await tx.find('package_items', { order_item_id: line.order_item_id })) {
+        const pkg = await tx.get('packages', it.package_id);
+        if (!pkg || pkg.fulfillment_id !== f.id || ['voided', 'dispatched'].includes(pkg.status)) continue;
+        const stay = Math.min(it.quantity, left);
+        left -= stay;
+        const go = it.quantity - stay;
+        if (go <= 0) continue;
+        const stayScanned = Math.min(it.scanned, stay);
+        const serials = it.serial_numbers ?? [];
+        if (stay > 0) await tx.updateWhere('package_items', { package_id: it.package_id, order_item_id: it.order_item_id }, { quantity: stay, scanned: stayScanned, serial_numbers: serials.slice(0, stayScanned) });
+        else await tx.removeWhere('package_items', { package_id: it.package_id, order_item_id: it.order_item_id });
+        await tx.insert('package_items', { package_id: it.package_id, order_item_id: e.newItemId, stock_item_id: it.stock_item_id, quantity: go, scanned: it.scanned - stayScanned, serial_numbers: serials.slice(stayScanned) });
+      }
+      await this.core.logScan({ context: 'order_split', contextId: e.newItemId, code: e.itemId, result: `split ${moved} to a new line`, actor: { kind: 'system', id: null, name: 'Orders' } }, tx);
+    });
   }
 
   /** shipping.dispatch.overdue: the order goes to the top of the pick list (ship-by is the passed deadline) */

@@ -60,6 +60,7 @@ function purchaseOrder(o: { supplierEmail?: string | null; emailSupplier: boolea
     emailSupplier: o.emailSupplier,
     message: o.message ?? null,
     locationId: newId(),
+    shipTo: { locationId: newId(), code: 'RNO1', name: 'Reno, NV warehouse', address: { name: 'Marketly Receiving', line1: '100 Industrial Way', line2: null, city: 'Reno', region: 'NV', postalCode: '89502', country: 'US', phone: null }, timeZone: 'America/Los_Angeles' },
     total: money(226800),
     lines: [line('LAMP-BLK', 'Aurora Desk Lamp, black', 24), line('LAMP-WHT', 'Aurora Desk Lamp, white', 12)],
   };
@@ -79,6 +80,8 @@ describe('external recipients', () => {
     expect(mail[0]!.message.text).toContain('Aurora Desk Lamp, black (LAMP-BLK) × 24; Aurora Desk Lamp, white (LAMP-WHT) × 12');
     expect(mail[0]!.message.text).toContain('$2,268.00');
     expect(mail[0]!.message.text).toContain('Message from your buyer: Please confirm the delivery date by Friday.');
+    // the delivery address comes from the payload's shipTo (location name and address)
+    expect(mail[0]!.message.text).toContain('Deliver to: Reno, NV warehouse, 100 Industrial Way, Reno, NV 89502, US');
     const log = await deliveries(`topicKey=supplier.purchase_order.sent&address=${encodeURIComponent(supplierEmail)}`);
     expect(log).toMatchObject([{ status: 'delivered', noticeId: null, accountId: null, linkedRef: po.ref }]);
     const row = await service.core.repo.getDelivery(log[0].id);
@@ -123,28 +126,34 @@ describe('external recipients', () => {
     expect(await deliveries(`topicKey=rights_owner.report.received&address=${encodeURIComponent(contactEmail)}`)).toMatchObject([{ noticeId: null, linkedRef: 'TR-261010-004' }]);
   });
 
-  it('emails a scheduled report to every recipient address (phase 2), without inbox notices', async () => {
-    const a = addr('report-a');
-    const b = addr('report-b');
-    const exportId = newId();
+  it('tells each staff recipient of a scheduled report (phase 2) with a link to their own export; never outside addresses', async () => {
+    const a = world.staff();
+    const b = world.staff();
+    const [exportA, exportB] = [newId(), newId()];
     await publish(app, 'reports.scheduled_report.ready', {
       scheduleId: newId(),
       reportKey: 'sales_summary',
       reportTitle: 'Weekly sales',
-      exportId,
-      format: 'pdf',
+      format: 'csv',
       periodLabel: 'Week of Oct 5, 2026',
-      recipients: [a, b, a.toUpperCase()],
+      deliveries: [
+        { staffId: a.accountId, exportId: exportA },
+        { staffId: b.accountId, exportId: exportB },
+      ],
+      skippedStaffIds: [],
       expiresAt: inDays(7),
     });
-    for (const to of [a, b]) {
-      const mail = emailsTo(to);
+    for (const [p, exportId] of [[a, exportA], [b, exportB]] as const) {
+      const [n] = await inbox(as.staff(p), 'admin');
+      expect(n).toMatchObject({ topicKey: 'staff.report.scheduled', group: 'Reports', link: { kind: 'export', id: exportId, screen: 'admin/exports' } });
+      const mail = emailsTo(p.email);
       expect(mail).toHaveLength(1);
       expect(mail[0]!.message.subject).toBe('Weekly sales: Week of Oct 5, 2026');
-      expect(mail[0]!.message.text).toContain('(PDF)');
+      expect(mail[0]!.message.text).toContain('(CSV)');
+      expect(mail[0]!.message.text).toContain(`/admin/exports/${exportId}`);
     }
     const log = await deliveries('topicKey=staff.report.scheduled');
-    expect(log.filter((d) => d.noticeId === null && (d.addressMasked as string).endsWith('@example.com')).length).toBeGreaterThanOrEqual(2);
+    expect(log.every((d) => d.recipientKind === 'staff_member')).toBe(true);
   });
 
   it('accepts external_email recipients on essential topics only (public API)', async () => {

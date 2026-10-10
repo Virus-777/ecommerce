@@ -139,7 +139,7 @@ describe('admin: moderation', () => {
     const lock = await h.call('POST', `${ADMIN}/conversations/${t.id}/lock`, mod, { locked: true, reason: 'Fraud investigation' });
     expect(lock.status).toBe(200);
     expect(lock.body).toMatchObject({ status: 'locked', lockedReason: 'Fraud investigation' });
-    expect(h.named('messaging.conversation.locked').at(-1)).toEqual({ conversationId: t.id, reason: 'Fraud investigation' });
+    expect(h.named('messaging.conversation.locked').at(-1)).toEqual({ conversationId: t.id, reason: 'Fraud investigation', lockedBy: expect.objectContaining({ kind: 'staff' }), trustEnforcementId: null, customerId: o.customerId, sellerId: o.sellerA });
     const customer = tokens.customer(o.customerId!);
     const send = await h.call('POST', `${STORE}/conversations/${t.id}/messages`, customer, { body: 'Hello?' });
     expect(send.status).toBe(409);
@@ -152,6 +152,7 @@ describe('admin: moderation', () => {
     expect((await h.call('GET', `${ADMIN}/conversations?filter=locked&orderId=${o.order.id}`, tokens.staff())).body.items).toHaveLength(1);
     const unlock = await h.call('POST', `${ADMIN}/conversations/${t.id}/lock`, mod, { locked: false, reason: 'Cleared' });
     expect(unlock.body.status).toBe('open');
+    expect(h.named('messaging.conversation.unlocked').at(-1)).toEqual({ conversationId: t.id, reason: 'Cleared', unlockedBy: expect.objectContaining({ kind: 'staff' }), trustEnforcementId: null });
     expect((await h.call('POST', `${STORE}/conversations/${t.id}/messages`, customer, { body: 'Hello?' })).status).toBe(201);
     expect((await h.call('POST', `${ADMIN}/messages/${newId()}/hide`, mod, { reason: 'x' })).status).toBe(404);
   });

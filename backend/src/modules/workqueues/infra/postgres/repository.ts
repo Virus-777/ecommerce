@@ -74,6 +74,8 @@ function conditions(eb: ItemsEb, q: ItemQuery): Expression<SqlBool>[] {
   if (q.sellerKind === 'marketplace') c.push(eb('seller_id', 'is not', null));
   if (q.subjectRef) c.push(eb.or([eb('subject_ref', '=', q.subjectRef), eb('ref', '=', q.subjectRef), relatedRef(q.subjectRef)]));
   if (q.visibleToSeller !== undefined) c.push(eb('visible_to_seller', '=', q.visibleToSeller));
+  if (q.archived === true) c.push(eb('archived_at', 'is not', null));
+  if (q.archived === false) c.push(eb('archived_at', 'is', null));
   if (q.search?.trim()) {
     const like = `%${q.search.trim().replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
     c.push(eb.or([eb('title', 'ilike', like), eb('ref', 'ilike', like), eb('subject_ref', 'ilike', like), eb('subject_label', 'ilike', like), eb('seller_name', 'ilike', like), eb('summary', 'ilike', like)]));
@@ -267,14 +269,10 @@ function repo(db: Db, inTx: boolean, inbox: Inbox): WorkqueuesRepository {
       const rows = await db.selectFrom('items').where('state', '=', 'resolved').where('resolved_at', '>=', from).where('resolved_at', '<', to).select(['queue_key', 'opened_at', 'resolved_at']).execute();
       return rows.map((r) => ({ queue_key: r.queue_key, opened_at: r.opened_at, resolved_at: r.resolved_at! }));
     },
-    async closedBefore(before, limit) {
-      return (await db.selectFrom('items').selectAll().where('state', 'in', CLOSED).where('resolved_at', '<', before).orderBy('resolved_at').limit(limit).execute()).map(item);
-    },
-    async deleteItems(ids) {
-      if (!ids.length) return;
-      await db.deleteFrom('item_events').where('item_id', 'in', ids).execute();
-      await db.deleteFrom('item_notes').where('item_id', 'in', ids).execute();
-      await db.deleteFrom('items').where('id', 'in', ids).execute();
+    async archiveClosedBefore(before, at, limit) {
+      const ids = db.selectFrom('items').select('id').where('state', 'in', CLOSED).where('archived_at', 'is', null).where('resolved_at', '<', before).orderBy('resolved_at').limit(limit);
+      const r = await db.updateTable('items').set({ archived_at: at }).where('id', 'in', ids).executeTakeFirst();
+      return Number(r.numUpdatedRows ?? 0);
     },
 
     /* ---------------------------------------------------------------- history and notes */

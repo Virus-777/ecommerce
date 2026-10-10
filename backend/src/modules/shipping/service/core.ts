@@ -10,6 +10,7 @@ import { newId } from '../../../kernel/lib/ids.js';
 import type { ModuleContext, PublicApiMap } from '../../../kernel/module-system/index.js';
 import type * as audit from '../../../spec/audit.js';
 import type * as common from '../../../spec/common.js';
+import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type { Coverage, OfficialDispatchTarget, SellerDispatchTarget } from '../../../spec/shipping.js';
 import { MON_FRI } from '../domain/calendar.js';
 import { CONTIGUOUS_48_DC, MILITARY, TERRITORIES } from '../domain/geo.js';
@@ -63,7 +64,7 @@ export interface Recipient {
 }
 /** Events notifications sends to the customer: they carry the order's customer and contact email */
 const TO_CUSTOMER = new Set<string>(['shipping.shipment.dispatched', 'shipping.shipment.delivered', 'shipping.shipment.exception']);
-export const OFFICIAL_NAME = 'Marketly Official Store';
+export const OFFICIAL_NAME = OFFICIAL_STORE_NAME;
 export const DEFAULT_CUTOFF = '14:00';
 
 export const invalid = (issues: { path: string; message: string }[], message = 'Some details need fixing') => new AppError('VALIDATION_FAILED', message, { issues });
@@ -298,6 +299,8 @@ export class Core {
         updated_by: SYSTEM,
         updated_at: now,
         default_parcel: { weightGrams: 1000, lengthCm: 30, widthCm: 20, heightCm: 15 },
+        // the Official Store ships from inventory's default location, never a stored text
+        ships_from: null,
       });
     }
     if (!(await repo.count('profiles', { owner_type: 'official' }))) {

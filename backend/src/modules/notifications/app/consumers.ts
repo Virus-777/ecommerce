@@ -187,10 +187,8 @@ export class Consumers {
 
   /** Drop-off reminder recipient: the customer or guest the event names; earlier notices only when it names neither */
   async #returnRecipient(p: EventPayload<'returns.label.created'>): Promise<Recipient | null> {
-    if (p.customerId) {
-      const snap = await this.core.customer(p.customerId);
-      return snap?.userId ? { kind: 'customer', accountId: snap.userId } : null;
-    }
+    // the customers-module id is resolved when the reminder is sent (Recipient.customerId)
+    if (p.customerId) return { kind: 'customer', customerId: p.customerId };
     if (p.contactEmail) return { kind: 'guest_email', email: p.contactEmail };
     const who = (await this.core.repo.addresseeOf('customer', 'returnId', p.returnId)) ?? (await this.core.repo.addresseeOf('customer', 'orderId', p.orderId));
     return who ? { kind: 'customer', accountId: who.addressId } : null;

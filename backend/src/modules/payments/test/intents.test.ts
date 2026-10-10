@@ -178,7 +178,8 @@ describe('uncertain results (scenario 3)', () => {
     } finally {
       provider.retrievePayment = original;
     }
-    expect(h.named('payments.payment.orphaned')).toEqual([expect.objectContaining({ intentId: r.intentId, action: 'needs_review', captured: false })]);
+    // the card amount that may have moved (nothing is known as authorized yet); no store credit on this payment
+    expect(h.named('payments.payment.orphaned')).toEqual([{ intentId: r.intentId, checkoutSessionId: expect.any(String), amount: USD(4000), creditAmount: null, action: 'needs_review', captured: false }]);
     const list = await h.call('GET', '/api/admin/payments/payments?flag=pending_check', staff());
     expect(list.body.items.map((x: any) => x.id)).toContain(r.intentId);
   });

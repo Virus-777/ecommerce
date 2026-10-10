@@ -225,8 +225,12 @@ export function addBusinessDays(from: Date, days: number): Date {
 }
 
 /** Internal review target (orders the queue) and the date shown to the submitter */
-export const REVIEW_TARGET_BUSINESS_DAYS = 1;
-export const EXPECTED_REVIEW_BUSINESS_DAYS = 2;
+/** The expected review date shown to the submitter is one business day after the internal target (setting reviewTargetBusinessDays) */
+export const EXPECTED_REVIEW_MARGIN_BUSINESS_DAYS = 1;
+/** Positive whole numbers for weight and packaged dimensions (grams, centimetres) */
+export const PARCEL_FIELDS = ['weightGrams', 'lengthCm', 'widthCm', 'heightCm'] as const;
+export const PARCEL_COLUMNS = { weightGrams: 'weight_grams', lengthCm: 'length_cm', widthCm: 'width_cm', heightCm: 'height_cm' } as const;
+export const MAX_PARCEL_VALUE = { weightGrams: 1_000_000, lengthCm: 1_000, widthCm: 1_000, heightCm: 1_000 } as const;
 const DUE_SOON_MS = 4 * 3_600_000;
 
 export function deadlineState(dueAt: Date, now: Date): 'on_time' | 'due_soon' | 'overdue' {

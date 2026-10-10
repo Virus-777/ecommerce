@@ -363,6 +363,17 @@ export function createPostgresAdvertisingRepository(db: Kysely<AdvertisingDb>, i
     async lastClick(customerId, since) {
       return d.selectFrom('ad_events').selectAll().where('customer_id', '=', customerId).where('kind', '=', 'click').where('at', '>=', since).orderBy('at', 'desc').limit(1).executeTakeFirst();
     },
+    async enforcementTargets(marker) {
+      const like = `%${marker.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+      const [creatives, campaigns] = await Promise.all([
+        d.selectFrom('creative_reviews').select('creative_id').distinct().where('decision', '=', 'rejected').where('comment', 'like', like).execute(),
+        d.selectFrom('campaign_log').select('campaign_id').distinct().where('action', '=', 'reject').where('reason', 'like', like).execute(),
+      ]);
+      return { creativeIds: creatives.map((r: { creative_id: string }) => r.creative_id), campaignIds: campaigns.map((r: { campaign_id: string }) => r.campaign_id) };
+    },
+    async lastClickByVisitor(visitorKey, since) {
+      return d.selectFrom('ad_events').selectAll().where('visitor_key', '=', visitorKey).where('kind', '=', 'click').where('at', '>=', since).orderBy('at', 'desc').limit(1).executeTakeFirst();
+    },
   };
   return repo;
 }

@@ -2534,19 +2534,43 @@ export class IdentityService implements IdentityPublicApi {
   }
 
   /** POST /invitations/{id}/revoke: the invited account closes */
-  async revokeInvitation(id: string, reason: string, caller: Caller): Promise<Invitation> {
-    const now = this.now();
+  async revokeStaffInvitation(id: string, reason: string, caller: Caller): Promise<Invitation> {
     await this.staffInvitation(id);
-    const row = await this.repo.transaction(async (repo) => {
-      const i = (await repo.getInvitation(id, { forUpdate: true }))!;
-      const status = invitationMachine.next(i.status as never, 'revoke');
-      const updated = await repo.updateInvitation(i.id, { status, revoked_at: now, revoke_reason: reason });
+    return this.revokeInvitationCore(id, { reason, by: caller.actor, requestId: caller.requestId, client: caller.client });
+  }
+
+  /**
+   * Public API: cancel a pending invitation (sellers passes its sellerId as contextRef). Another context's
+   * invitation is NOT_FOUND; an already revoked one comes back unchanged; accepted or expired ones are
+   * ILLEGAL_TRANSITION.
+   */
+  async revokeInvitation(invitationId: string, input: { reason: string; by: common.Actor; contextRef?: string }): Promise<Invitation> {
+    return this.revokeInvitationCore(invitationId, { reason: input.reason, by: input.by, contextRef: input.contextRef });
+  }
+
+  private async revokeInvitationCore(id: string, o: { reason: string; by: common.Actor; contextRef?: string; requestId?: string; client?: ClientInfo }): Promise<Invitation> {
+    const now = this.now();
+    const result = await this.repo.transaction(async (repo) => {
+      const i = isUuid(id) ? await repo.getInvitation(id, { forUpdate: true }) : undefined;
+      if (!i || (o.contextRef !== undefined && i.context_ref !== o.contextRef)) throw new AppError('NOT_FOUND', 'Invitation not found');
+      if (i.status === 'revoked') return { row: i, changed: false };
+      // a pending link past its end is expired even before the hourly job marks it
+      const from = i.status === 'pending' && i.expires_at <= now ? 'expired' : i.status;
+      const status = invitationMachine.next(from as never, 'revoke');
+      const updated = await repo.updateInvitation(i.id, { status, revoked_at: now, revoke_reason: o.reason });
       const a = i.account_id ? await repo.getAccount(i.account_id, { forUpdate: true }) : undefined;
       if (a && a.status === 'invited') await repo.updateAccount(a.id, { status: accountStatusMachine.next('invited', 'revokeInvitation'), closed_at: now });
-      return updated;
+      return { row: updated, changed: true };
     });
-    this.publish('identity.invitation.revoked', { invitationId: row.id, purpose: row.purpose, contextRef: row.context_ref }, caller);
-    await this.audit({ action: 'identity.invitation.revoke', actionLabel: 'Cancelled staff invitation', target: { type: 'staff_invitation', id: row.id, label: `${row.name} (${row.email})`, screen: 'admin/staff' }, reason }, caller);
+    const row = result.row;
+    if (result.changed) {
+      const by = { actor: o.by, requestId: o.requestId, client: o.client };
+      this.publish('identity.invitation.revoked', { invitationId: row.id, purpose: row.purpose, contextRef: row.context_ref }, by);
+      // seller member invitations are audited by sellers (the action the seller took)
+      if (row.purpose === 'staff') {
+        await this.audit({ action: 'identity.invitation.revoke', actionLabel: 'Cancelled staff invitation', target: { type: 'staff_invitation', id: row.id, label: `${row.name} (${row.email})`, screen: 'admin/staff' }, reason: o.reason }, by);
+      }
+    }
     return map.invitation(row, now);
   }
 

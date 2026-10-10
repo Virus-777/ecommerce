@@ -15,6 +15,14 @@ import { actorText, invalid, notFound, type By, type Core } from './core.js';
 import type { Reports } from './reports.js';
 import type { Views } from './views.js';
 
+/** Median of amounts (null when there are none) */
+export function median(xs: number[]): number | null {
+  const s = xs.filter((x) => Number.isFinite(x) && x > 0).sort((a, b) => a - b);
+  if (!s.length) return null;
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m]! : Math.round((s[m - 1]! + s[m]!) / 2);
+}
+
 const REVIEW_CONTENT: Record<string, TrustSubject['type']> = { review: 'review', question: 'question', answer: 'answer', response: 'review', feedback: 'review' };
 
 export class Detection {
@@ -89,9 +97,9 @@ export class Detection {
     if (e.ownerType === 'official') return;
     const offer = await this.core.soft('offers', 'getOfferAdmin', (o) => o.getOfferAdmin(e.offerId));
     const product = await this.core.soft('catalog', 'getProduct', (c) => c.getProduct(e.productId));
-    const stats = await this.core.soft('offers', 'getOfferStats', (o) => o.getOfferStats([e.productId]));
-    const s = stats?.[e.productId];
-    const reference = s ? Math.round((s.lowest.amount + s.highest.amount) / 2) : null;
+    // reference price: the median of the other active offers on the product (decision D7), not an authorised price list
+    const peers = (await this.core.soft('offers', 'listActiveOffersForProduct', (o) => o.listActiveOffersForProduct(e.productId))) ?? [];
+    const reference = median(peers.filter((p) => p.id !== e.offerId && p.price.currency === (offer?.price.currency ?? p.price.currency)).map((p) => p.price.amount));
     await this.record(
       e.offerId,
       'offer_created',
@@ -112,7 +120,17 @@ export class Detection {
 
   /** Application rules, and the submission noted on any open assessment of the seller */
   async onApplicationSubmitted(e: EventPayload<'sellers.application.submitted'>) {
-    await this.record(e.applicationId, 'application_submitted', { type: 'application', id: e.applicationId }, { applicationId: e.applicationId, sellerId: e.sellerId, sellerType: e.sellerType, categoryIds: e.categoryIds, invited: e.invited });
+    await this.record(e.applicationId, 'application_submitted', { type: 'application', id: e.applicationId }, {
+      applicationId: e.applicationId,
+      sellerId: e.sellerId,
+      sellerType: e.sellerType,
+      categoryIds: e.categoryIds,
+      invited: e.invited,
+      // hashes only (sellers never sends the tax id, bank token or address itself)
+      taxIdHash: e.taxIdHash ?? null,
+      bankTokenHash: e.bankTokenHash ?? null,
+      addressKey: e.addressKey ?? null,
+    });
     const key = `sellers.application.submitted:${e.applicationId}`;
     if (!(await this.reports.seen(key))) {
       const ids = [...new Set([...(await this.core.repo.reportIdsAbout(['application'], e.applicationId)), ...(await this.core.repo.reportIdsAbout(['seller'], e.sellerId))])];

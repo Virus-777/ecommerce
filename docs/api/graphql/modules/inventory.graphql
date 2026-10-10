@@ -24,7 +24,8 @@ enum StockState {
 
 """
 One stock item: one per seller offer, or one per Official Store SKU. Seller stock and company stock are never added together.
-In the Seller Center only the caller's own items resolve; in the Admin Center reading needs inventory.stock.view.
+In the Seller Center only the caller's own items resolve; in the Admin Center reading needs inventory.stock.view
+(Offer.stock and Variant.stock check it for staff; customers see stock only through Offer.availability).
 """
 type StockItem @areas(in: [SELLER, ADMIN]) {
   id: UUID!
@@ -144,12 +145,12 @@ extend type Offer {
   availability: Availability! @source(module: "inventory", fn: "getOfferAvailability")
 
   "The stock item holding this offer's quantities (seller: own offers only)"
-  stock: StockItem @areas(in: [SELLER, ADMIN]) @source(module: "inventory", fn: "getStockForOffers")
+  stock: StockItem @areas(in: [SELLER, ADMIN]) @auth(requires: SELLER) @source(module: "inventory", fn: "getStockForOffers")
 }
 
 extend type Variant {
   "Stock items for this variant. Seller Center: the caller's own items; Admin Center: company and seller items, never summed"
-  stock: [StockItem!]! @areas(in: [SELLER, ADMIN]) @source(module: "inventory", fn: "listStockForVariants")
+  stock: [StockItem!]! @areas(in: [SELLER, ADMIN]) @auth(requires: SELLER) @source(module: "inventory", fn: "listStockForVariants")
 }
 
 extend type Query {

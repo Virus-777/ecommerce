@@ -76,6 +76,11 @@ export class WarehouseService implements WarehousePublicApi {
     return this.fulfillments.onItemCancelled(event);
   }
 
+  /** orders.item.split: split the fulfillment line so newItemId gets its own line (idempotent per newItemId) */
+  onItemSplitFromOrders(event: EventPayload<'orders.item.split'>): Promise<void> {
+    return this.fulfillments.onItemSplit(event);
+  }
+
   /** inventory.discrepancy.resolved: Resume a held fulfillment when the shortage or damage was reallocated */
   onDiscrepancyResolvedFromInventory(event: EventPayload<'inventory.discrepancy.resolved'>): Promise<void> {
     return this.fulfillments.onDiscrepancyResolved(event);

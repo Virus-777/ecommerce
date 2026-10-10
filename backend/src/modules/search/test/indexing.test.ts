@@ -49,7 +49,7 @@ describe('catalog events', () => {
     const { p, find } = product();
     const o = k.world.offer(p.id, { price: 4500, sellerId: null });
     await k.emit('offers', 'offers.offer.price_changed', { ...offerBase(o), from: { amount: 5000, currency: 'USD' }, to: { amount: 4500, currency: 'USD' }, termsVersion: 2 });
-    await k.emit('inventory', 'inventory.stock.changed', { stockItemId: newId(), offerId: o.id, ownerType: 'official', sellerId: null, variantId: o.variantId, available: 3, reserved: 0, previousAvailable: 0, state: 'in_stock', cause: 'receipt' });
+    await k.emit('inventory', 'inventory.stock.changed', { stockItemId: newId(), offerId: o.id, ownerType: 'official', sellerId: null, productId: p.id, variantId: o.variantId, available: 3, reserved: 0, previousAvailable: 0, state: 'in_stock', archived: false, cause: 'receipt' });
     expect(ids(await find())).toEqual([]);
     await k.index(p.id);
     expect((await find()).items[0].product).toMatchObject({ productId: p.id, price: { amount: 4500 }, official: true });
@@ -67,11 +67,11 @@ describe('catalog events', () => {
     await k.emit('catalog', 'catalog.product.publication_changed', { productId: p.id, from: 'hidden', to: 'active', reason: 'Fixed' });
     expect(ids(await find())).toEqual([p.id]);
     k.world.products.get(p.id)!.title = `Pellar enamel dutch oven ${word}`;
-    await k.emit('catalog', 'catalog.product.updated', { productId: p.id, version: 3 });
+    await k.emit('catalog', 'catalog.product.updated', { productId: p.id, version: 3, title: k.world.products.get(p.id)!.title });
     expect(ids((await k.call('GET', `${STORE}/products?q=dutch+oven+${word}`)).body)).toEqual([p.id]);
     // a product that is no longer purchasable is removed on rebuild
     k.world.products.get(p.id)!.purchasable = false;
-    await k.emit('catalog', 'catalog.product.updated', { productId: p.id, version: 4 });
+    await k.emit('catalog', 'catalog.product.updated', { productId: p.id, version: 4, title: k.world.products.get(p.id)!.title });
     expect(ids(await find())).toEqual([]);
   });
 
@@ -125,10 +125,10 @@ describe('offers, stock, reviews and promotions events', () => {
     await k.index(p.id);
     expect((await find()).items[0].product.offerCount).toBe(2);
     k.world.offers.get(a.id)!.status = 'paused';
-    await k.emit('offers', 'offers.offer.status_changed', { ...offerBase(a), from: 'active', to: 'paused' });
+    await k.emit('offers', 'offers.offer.status_changed', { ...offerBase(a), from: 'active', to: 'paused', stockItemId: newId() });
     expect((await find()).items[0].product).toMatchObject({ offerCount: 1, price: { amount: 2500 } });
     k.world.offers.get(b.id)!.status = 'removed';
-    await k.emit('offers', 'offers.offer.status_changed', { ...offerBase(b), from: 'active', to: 'removed' });
+    await k.emit('offers', 'offers.offer.status_changed', { ...offerBase(b), from: 'active', to: 'removed', stockItemId: newId() });
     expect(ids(await find('&availability=include_out_of_stock'))).toEqual([]);
   });
 
@@ -139,7 +139,7 @@ describe('offers, stock, reviews and promotions events', () => {
     k.world.down.add('offers');
     try {
       await k.emit('offers', 'offers.offer.price_changed', { ...offerBase(o), from: { amount: 3000, currency: 'USD' }, to: { amount: 2700, currency: 'USD' }, termsVersion: 2 });
-      await k.emit('catalog', 'catalog.product.updated', { productId: p.id, version: 2 });
+      await k.emit('catalog', 'catalog.product.updated', { productId: p.id, version: 2, title: k.world.products.get(p.id)!.title });
       await k.job('search.process-dirty');
       expect((await find()).items[0].product).toMatchObject({ price: { amount: 2700 }, offerCount: 1 });
     } finally {
@@ -152,7 +152,7 @@ describe('offers, stock, reviews and promotions events', () => {
     const o = k.world.offer(p.id, { price: 1200, sellerId: seller.id });
     k.world.featured.set(p.id, o.id);
     await k.index(p.id);
-    const stock = (state: string) => k.emit('inventory', 'inventory.stock.changed', { stockItemId: newId(), offerId: o.id, ownerType: 'seller', sellerId: seller.id, variantId: o.variantId, available: state === 'out_of_stock' ? 0 : 2, reserved: 0, previousAvailable: 5, state, cause: 'sale' });
+    const stock = (state: string) => k.emit('inventory', 'inventory.stock.changed', { stockItemId: newId(), offerId: o.id, ownerType: 'seller', sellerId: seller.id, productId: p.id, variantId: o.variantId, available: state === 'out_of_stock' ? 0 : 2, reserved: 0, previousAvailable: 5, state, archived: false, cause: 'sale' });
     await stock('low_stock');
     expect((await find()).items[0].product.availability).toBe('low_stock');
     await stock('out_of_stock');
@@ -246,7 +246,7 @@ describe('jobs', () => {
     const placed = async (productId: string, quantity: number) => {
       const orderId = newId();
       k.world.orders.set(orderId, [{ productId, quantity }]);
-      const event = { orderId, ref: 'MK-261009-00001', checkoutSessionId: newId(), customerId: null, guestEmail: 'g@example.com', paymentIntentId: newId(), paymentState: 'accepted', total: { amount: 1000, currency: 'USD' }, couponCodes: [], groups: [], placedAt: new Date().toISOString() };
+      const event = { orderId, ref: 'MK-261009-00001', checkoutSessionId: newId(), customerId: null, guestEmail: 'g@example.com', paymentIntentId: newId(), paymentState: 'accepted', total: { amount: 1000, currency: 'USD' }, couponCodes: [], groups: [], placedAt: new Date().toISOString(), attemptNo: 1, contactName: 'Guest Shopper' };
       await k.emit('orders', 'orders.order.placed', event);
       return event;
     };

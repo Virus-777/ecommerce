@@ -12,6 +12,7 @@ export type EntryRow = WalletDb['ledger'];
 export type HoldRow = WalletDb['holds'];
 export type GrantRow = WalletDb['goodwill_grants'];
 export type GiftCardRow = WalletDb['gift_cards'];
+export type GiftCardBatchRow = WalletDb['gift_card_batches'];
 
 /** Which lots an entry took credit from (or gave it to), stored on the ledger entry */
 export interface LotAllocation {
@@ -114,10 +115,22 @@ export interface WalletRepository {
   /** Active cards at or past their expiry */
   dueGiftCards(now: Date, limit: number): Promise<GiftCardRow[]>;
 
+  /* gift card batches */
+  /** Inserts the batch unless one with its id exists; the stored row either way */
+  insertBatch(row: GiftCardBatchRow): Promise<GiftCardBatchRow>;
+  getBatch(id: string, o?: { forUpdate?: boolean }): Promise<GiftCardBatchRow | undefined>;
+  updateBatch(id: string, patch: Partial<Pick<GiftCardBatchRow, 'status' | 'approval_request_id' | 'codes_ciphertext' | 'codes_file_id' | 'codes_delivered_at' | 'codes_expire_at'>>): Promise<GiftCardBatchRow>;
+  /** Deletes undelivered encrypted codes whose download window ended; how many batches were cleared */
+  clearExpiredBatchCodes(now: Date): Promise<number>;
+
   /* loyalty (phase 4 experiment) */
   loyaltyPoints(customerId: string): Promise<number>;
 
   /* checks */
   /** Accounts ordered by customer id after a cursor, each with its ledger, lot and hold sums */
   balanceSnapshots(afterCustomerId: string | null, limit: number): Promise<BalanceSnapshot[]>;
+  /** Credit outstanding over all accounts now (from the account balances) */
+  liabilityNow(): Promise<{ available: number; held: number; accounts: number }>;
+  /** Credit outstanding at a past time, rebuilt from the ledger (total) and the hold entries (held) */
+  liabilityAt(asOf: Date): Promise<{ total: number; held: number; accounts: number }>;
 }

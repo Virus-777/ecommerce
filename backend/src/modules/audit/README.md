@@ -93,7 +93,7 @@ The tamper-evident action history: who did what, in which role, to which record,
 | action | `string` Key, e.g. finance.hold.released |
 | actionLabel | `string` Released payout hold |
 | module | `string` |
-| category | `enum(financial|seller_enforcement|catalog|orders|returns|customers|settings|access|security|content|advertising|other)` |
+| category | `enum(financial|seller_enforcement|catalog|orders|returns|customers|settings|access|security|content|advertising|support|trust|inventory|shipping|other)` |
 | target | `AuditTarget` |
 | relatedTargets | `AuditTarget[]` |
 | reason | `text?` |
@@ -115,7 +115,7 @@ The tamper-evident action history: who did what, in which role, to which record,
 | action | `string` |
 | actionLabel | `string` |
 | module | `string` |
-| category | `enum(financial|seller_enforcement|catalog|orders|returns|customers|settings|access|security|content|advertising|other)` |
+| category | `enum(financial|seller_enforcement|catalog|orders|returns|customers|settings|access|security|content|advertising|support|trust|inventory|shipping|other)` |
 | target | `AuditTarget` |
 | relatedTargets | `AuditTarget[]?` |
 | reason | `text?` |
@@ -139,7 +139,7 @@ The tamper-evident action history: who did what, in which role, to which record,
 | actorId | `string?` |
 | roleKey | `string?` |
 | module | `string?` |
-| category | `enum(financial|seller_enforcement|catalog|orders|returns|customers|settings|access|security|content|advertising|other)?` |
+| category | `enum(financial|seller_enforcement|catalog|orders|returns|customers|settings|access|security|content|advertising|support|trust|inventory|shipping|other)?` |
 | targetType | `string?` |
 | targetId | `string?` |
 | sellerId | `uuid?` |
@@ -199,6 +199,9 @@ The tamper-evident action history: who did what, in which role, to which record,
 | lastVerifiedAt | `datetime?` |
 | lastVerifiedSeq | `int?` |
 | brokenAtSeq | `int?` |
+| lastCheckpointSeq | `int?` Newest signed checkpoint |
+| lastCheckpointAt | `datetime?` |
+| checkpointSignatureOk | `bool?` False when a checkpoint's HMAC does not verify (someone rewrote the chain and its hashes) |
 | message | `string?` |
 
 ### SellerAuditEntry
@@ -310,6 +313,20 @@ Indexes: `(state)`
 | last_purge_removed | bigint? |
 | last_purge_through | timestamptz? |
 
+**checkpoints**: Signed chain checkpoints: written after each successful verification and before a purge, so verification continues across purged ranges and a rewritten chain is detected even if every hash was recomputed
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| seq | bigint unique |
+| hash | bytea |
+| mac | text (hex HMAC-SHA256 of seq || hash) |
+| key_id | text (secret derivation label, e.g. audit.checkpoint.v1) |
+| kind | text (verified|purge) |
+| created_at | timestamptz |
+
+Indexes: `(created_at desc)`
+
 **integrity_checks**
 
 | Column | Type |
@@ -356,7 +373,7 @@ Indexes: `(started_at desc)`
 |---|---|---|
 | `audit.entries.view` | staff | Read the action history (Platform Administrator, Business Owner, Finance Manager, Reports Analyst) |
 | `audit.entries.export` | staff | Export action history (sensitive; every export is recorded) |
-| `audit.retention.manage` | staff | Change the retention period (shortening still needs Business Owner approval) |
+| `audit.retention.manage` | staff | Change the retention period (shortening still needs Business Owner approval). Seeded to the Business Owner and Platform Administrator roles |
 | `audit.own-history.view` | seller | See changes made on the seller's own account (owner by default) |
 
 ## Approval actions
@@ -371,14 +388,14 @@ Checked through the access module (limits per role, second reviewer).
 
 | Code | Status | Meaning |
 |---|---|---|
-| `EXPORT_TOO_LARGE` | 400 | The filters match more than reports.maxExportRows; narrow the date range. details.matched. |
+| `EXPORT_TOO_LARGE` | 422 | The filters match more than reports.maxExportRows; narrow the date range. details.matched, details.max. |
 | `BELOW_LEGAL_MINIMUM` | 400 | Retention cannot be shorter than details.minimumYears. |
 
 ## Background jobs
 
 | Job | Schedule | Does |
 |---|---|---|
-| `audit.verify-chain` | daily 03:00 market time | Recompute hashes from the last verified seq; on mismatch publish audit.integrity.failed (Platform Administrator and Business Owner are notified) |
+| `audit.verify-chain` | daily 03:00 market time | Verify the newest checkpoint's HMAC, recompute hashes from it; on success write a new signed checkpoint at the last seq; on a hash or signature mismatch publish audit.integrity.failed (Platform Administrator and Business Owner are notified) |
 | `audit.purge-expired` | monthly | Drop month partitions entirely older than retainYears (never below minimumRetentionYears), keep a signed checkpoint hash so the chain still verifies, record the purge as an entry |
 
 ## Settings
@@ -393,7 +410,8 @@ Checked through the access module (limits per role, second reviewer).
 - Material actions: every endpoint marked audited in any module calls audit.record (the kernel provides a helper that fills actor, roles, requestId and IP from the request). Modules pass before/after as structured JSON plus short human text ('Held $1,240.00' → 'Available $1,240.00') for the list.
 - audit has no hard dependencies so every module can use it. It is optional for others (ctx.tryUse('audit')); if disabled, modules still work and the kernel logs a warning that material actions are not being recorded. It should stay enabled in every real deployment.
 - Entries are never updated. The approval column comes from approval_states, which follows access events (requested → partially approved → approved), so an entry created with 'Pending · waiting for Morgan Hale' later shows 'Approved'.
-- Tamper evidence: entries form a hash chain by seq; the app's database role has INSERT and SELECT only on entries. Purges keep a checkpoint so verification continues across purged ranges.
+- Tamper evidence: entries form a hash chain by seq; the app's database role has INSERT and SELECT only on entries. Checkpoints (table checkpoints) carry an HMAC-SHA256 over seq and hash keyed with secretFor(config, 'audit.checkpoint'), a key the database never holds, so rewriting entries and recomputing every hash is still detected. Purges write a checkpoint first so verification continues across purged ranges. Month partitions are a later infrastructure step; until then purge deletes by at.
+- Categories: support (cases, remedies, goodwill decisions), trust (reports, recommendations, enforcements, appeals), inventory (adjustments, transfers, counts, discrepancies), shipping (labels, claims, carrier services, holidays, exceptions) join the earlier ones; modules that recorded these as other switch to their own category (old entries keep theirs).
 - Secrets are never stored: redactKeys are masked at record time; payout account numbers appear only as last 4 digits.
 - Retention 7 years is the prototype's example; the legal requirement is a business decision to confirm.
 - Exports: audit registers dataset audit.admin.entries with reports.registerDataset and serves the rows through exportRows; the job, file, link expiry and link logging are reports' (requestExport, getExport, listExports). reports is an optional dependency checked at call time; while it is disabled the audit Export button is hidden (DATASET_UNAVAILABLE).
@@ -492,6 +510,10 @@ enum AuditCategory @areas(in: [ADMIN]) {
   SECURITY
   CONTENT
   ADVERTISING
+  SUPPORT
+  TRUST
+  INVENTORY
+  SHIPPING
   OTHER
 }
 

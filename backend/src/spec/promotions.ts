@@ -243,7 +243,7 @@ export interface CampaignInput {
   discount: DiscountRule;
   /** Shared code, e.g. FALLHOME20. Omit for automatic discounts. */
   code?: string | null;
-  /** Also applied automatically from the campaign page or when clipped */
+  /** Authoritative (decision P1): true = applied automatically to every eligible cart, with or without the code; false = applied only through its code or, for signed-in customers, a clip. A campaign with no code and autoApply false is clip-only. Default false. */
   autoApply?: boolean | null;
   startsAt: string;
   endsAt: string;
@@ -267,7 +267,7 @@ export const CampaignInput: z.ZodType<CampaignInput> = z.object({
     return DiscountRule;
   },
   code: z.string().describe("Shared code, e.g. FALLHOME20. Omit for automatic discounts.").nullish(),
-  autoApply: z.boolean().describe("Also applied automatically from the campaign page or when clipped").nullish(),
+  autoApply: z.boolean().describe("Authoritative (decision P1): true = applied automatically to every eligible cart, with or without the code; false = applied only through its code or, for signed-in customers, a clip. A campaign with no code and autoApply false is clip-only. Default false.").nullish(),
   startsAt: z.iso.datetime({ offset: true }),
   endsAt: z.iso.datetime({ offset: true }),
   timeZone: z.string(),
@@ -1185,7 +1185,8 @@ export interface PromotionsDashboard {
   couponRedemptions: number;
   redemptionShareOfOrders: number;
   returnsOnPromotedPct: number;
-  storeReturnsPct: number;
+  /** Store-wide return rate for the same range, from reports when enabled; null when not available (never 0 as a stand-in) */
+  storeReturnsPct?: number | null;
   tabs: TabCount[];
   dailyCost: DailyPoint[];
   results: CampaignResult[];
@@ -1214,7 +1215,7 @@ export const PromotionsDashboard: z.ZodType<PromotionsDashboard> = z.object({
   couponRedemptions: z.number().int(),
   redemptionShareOfOrders: z.number(),
   returnsOnPromotedPct: z.number(),
-  storeReturnsPct: z.number(),
+  storeReturnsPct: z.number().describe("Store-wide return rate for the same range, from reports when enabled; null when not available (never 0 as a stand-in)").nullish(),
   get tabs() {
     return z.array(TabCount);
   },
@@ -1250,6 +1251,9 @@ export interface OfferPromotion {
   flash?: FlashCountdown | null;
   /** e.g. 10% off orders over $100 from Northwind Audio, applied automatically */
   sellerPromos: PromoBanner[];
+  /** Per-unit discount the customer gets without doing anything (autoApply campaigns with no minimum spend, e.g. an automatic 10% off), on top of price. Offers subtracts it in comparable totals for the featured-offer rule (Total price = item + shipping − automatic discounts). Null when none */
+  automaticDiscount?: common.Money | null;
+  automaticDiscountLabel?: string | null;
 }
 
 export const OfferPromotion: z.ZodType<OfferPromotion> = z.object({
@@ -1275,6 +1279,10 @@ export const OfferPromotion: z.ZodType<OfferPromotion> = z.object({
   get sellerPromos() {
     return z.array(PromoBanner);
   },
+  get automaticDiscount() {
+    return common.Money.nullish();
+  },
+  automaticDiscountLabel: z.string().nullish(),
 }).register(common.apiTypes, { id: "promotions.OfferPromotion" });
 
 export interface FlashCountdown {
@@ -1545,9 +1553,11 @@ export interface CartLineInput {
   offerId: string;
   productId: string;
   variantId: string;
+  /** The seller id, or OFFICIAL_STORE_ID for Official Store lines. Defensive: evaluateCart maps '' or null to OFFICIAL_STORE_ID when officialStore is true (VALIDATION_FAILED otherwise), so redemption_lines.seller_id is always a uuid */
   sellerId: string;
   officialStore: boolean;
-  categoryId: string;
+  /** Null when the caller does not know it (catalog off); category-scoped campaigns then do not match the line */
+  categoryId?: string | null;
   brandId?: string | null;
   quantity: number;
   /** Offer price before promotions */
@@ -1560,9 +1570,9 @@ export const CartLineInput: z.ZodType<CartLineInput> = z.object({
   offerId: z.uuid(),
   productId: z.uuid(),
   variantId: z.uuid(),
-  sellerId: z.uuid(),
+  sellerId: z.uuid().describe("The seller id, or OFFICIAL_STORE_ID for Official Store lines. Defensive: evaluateCart maps '' or null to OFFICIAL_STORE_ID when officialStore is true (VALIDATION_FAILED otherwise), so redemption_lines.seller_id is always a uuid"),
   officialStore: z.boolean(),
-  categoryId: z.uuid(),
+  categoryId: z.uuid().describe("Null when the caller does not know it (catalog off); category-scoped campaigns then do not match the line").nullish(),
   brandId: z.uuid().nullish(),
   quantity: z.number().int(),
   get unitPrice() {
@@ -1575,6 +1585,8 @@ export interface CartEvaluationInput {
   customerId?: string | null;
   guestSessionId?: string | null;
   region?: string | null;
+  /** Guest checkout contact email. Per-customer limits and new-customer eligibility for guests key on its normalised hash (usage_counters.customer_key), so one person cannot reuse a one-per-customer coupon by checking out as a new guest. Ignored when customerId is set */
+  contactEmail?: string | null;
   lines: CartLineInput[];
   /** Codes entered by the customer; clipped coupons of a signed-in customer are added automatically */
   codes: string[];
@@ -1587,6 +1599,7 @@ export const CartEvaluationInput: z.ZodType<CartEvaluationInput> = z.object({
   customerId: z.uuid().nullish(),
   guestSessionId: z.string().nullish(),
   region: z.string().nullish(),
+  contactEmail: z.email().describe("Guest checkout contact email. Per-customer limits and new-customer eligibility for guests key on its normalised hash (usage_counters.customer_key), so one person cannot reuse a one-per-customer coupon by checking out as a new guest. Ignored when customerId is set").nullish(),
   get lines() {
     return z.array(CartLineInput);
   },
@@ -1629,6 +1642,8 @@ export interface LineDiscount {
   lineDiscount: common.Money;
   purchaseLimit?: number | null;
   limitExceeded: boolean;
+  /** Units that get the deal price (decision P2). Quantity above the remaining per-customer or deal limit is split: discountedQuantity units at unitPrice, the rest at regularUnitPrice, limitExceeded true. Equals the line quantity when nothing is over the limit */
+  discountedQuantity: number;
 }
 
 export const LineDiscount: z.ZodType<LineDiscount> = z.object({
@@ -1647,6 +1662,7 @@ export const LineDiscount: z.ZodType<LineDiscount> = z.object({
   },
   purchaseLimit: z.number().int().nullish(),
   limitExceeded: z.boolean(),
+  discountedQuantity: z.number().int().describe("Units that get the deal price (decision P2). Quantity above the remaining per-customer or deal limit is split: discountedQuantity units at unitPrice, the rest at regularUnitPrice, limitExceeded true. Equals the line quantity when nothing is over the limit"),
 }).register(common.apiTypes, { id: "promotions.LineDiscount" });
 
 export interface PackageDiscount {
@@ -1691,9 +1707,24 @@ export const AppliedPromotion: z.ZodType<AppliedPromotion> = z.object({
   source: z.enum(["automatic", "code", "clipped"]),
 }).register(common.apiTypes, { id: "promotions.AppliedPromotion" });
 
+export interface SkippedPromotion {
+  campaignId: string;
+  label: string;
+  reason: "budget_insufficient" | "budget_exhausted" | "usage_limit" | "deal_sold_out" | "purchase_limit";
+  message: string;
+}
+
+export const SkippedPromotion: z.ZodType<SkippedPromotion> = z.object({
+  campaignId: z.uuid(),
+  label: z.string(),
+  reason: z.enum(["budget_insufficient", "budget_exhausted", "usage_limit", "deal_sold_out", "purchase_limit"]),
+  message: z.string(),
+}).register(common.apiTypes, { id: "promotions.SkippedPromotion" });
+
 export interface RejectedCode {
   code: string;
-  reason: "not_found" | "not_started" | "expired" | "no_eligible_items" | "min_spend_not_met" | "customer_not_eligible" | "sign_in_required" | "region" | "usage_limit" | "budget_exhausted" | "not_combinable" | "per_order_limit";
+  /** budget_insufficient: the remaining budget does not cover the whole discount for this cart; nothing is applied (decision P3, never a partial discount) */
+  reason: "not_found" | "not_started" | "expired" | "no_eligible_items" | "min_spend_not_met" | "customer_not_eligible" | "sign_in_required" | "region" | "usage_limit" | "budget_exhausted" | "budget_insufficient" | "not_combinable" | "per_order_limit";
   /** e.g. Applies only to Home & Kitchen items from the Official Store. None in your cart qualify. */
   message: string;
   details: string[];
@@ -1701,7 +1732,7 @@ export interface RejectedCode {
 
 export const RejectedCode: z.ZodType<RejectedCode> = z.object({
   code: z.string(),
-  reason: z.enum(["not_found", "not_started", "expired", "no_eligible_items", "min_spend_not_met", "customer_not_eligible", "sign_in_required", "region", "usage_limit", "budget_exhausted", "not_combinable", "per_order_limit"]),
+  reason: z.enum(["not_found", "not_started", "expired", "no_eligible_items", "min_spend_not_met", "customer_not_eligible", "sign_in_required", "region", "usage_limit", "budget_exhausted", "budget_insufficient", "not_combinable", "per_order_limit"]).describe("budget_insufficient: the remaining budget does not cover the whole discount for this cart; nothing is applied (decision P3, never a partial discount)"),
   message: z.string().describe("e.g. Applies only to Home & Kitchen items from the Official Store. None in your cart qualify."),
   details: z.array(z.string()),
 }).register(common.apiTypes, { id: "promotions.RejectedCode" });
@@ -1713,6 +1744,8 @@ export interface CartEvaluation {
   packages: PackageDiscount[];
   applied: AppliedPromotion[];
   rejected: RejectedCode[];
+  /** Automatic or clipped campaigns that matched but were not applied, with a reason the customer can read */
+  skipped: SkippedPromotion[];
   totals: FundingBreakdown;
   /** Differences from the previous evaluation, e.g. HOMEWEEK10 ended at 12:00 PM PT */
   changes: string[];
@@ -1732,6 +1765,9 @@ export const CartEvaluation: z.ZodType<CartEvaluation> = z.object({
   },
   get rejected() {
     return z.array(RejectedCode);
+  },
+  get skipped() {
+    return z.array(SkippedPromotion);
   },
   get totals() {
     return FundingBreakdown;
@@ -2038,8 +2074,8 @@ export interface PromotionsPublicApi {
   getPublicCampaign(campaignId: string): Promise<PublicCampaign | null>;
   /** False when ended, paused, out of budget or sold out. Advertising stops linked ads; content hides teasers. Used by: advertising, content. */
   isCampaignActive(campaignId: string): Promise<{ active: boolean, reason?: string }>;
-  /** Flash deals for the homepage Deals section. Used by: content, graphql. */
-  liveDeals(opts: { limit: number }): Promise<FlashSaleBlock[]>;
+  /** Flash deals for the homepage Deals section. campaignId limits the result to one campaign (content SourceRule.campaignId: a section or collection fed by one promotion). Used by: content, graphql. */
+  liveDeals(opts: { limit: number, campaignId?: string }): Promise<FlashSaleBlock[]>;
   /** Honest 'was' price: delegates to offers.lowestPrice(offerId, referencePriceDays, campaignStart or now) and returns null when offers has no history for the window. No price history is kept in promotions. Used by: offers, wishlist. */
   referencePrice(offerId: string): Promise<common.Money | null>;
   /** Deals page data in one call: tab counts, live flash sales, clippable coupons (clipped state for the customer), the first clearance batch, upcoming events with reminder state, the combination rules and serverTime for countdowns. Same data as GET /api/store/promotions/deals. Used by: graphql. */
@@ -3692,7 +3728,8 @@ export const spec = defineModuleSpec({
     consumes: {
       "orders.order.placed": "Commit reservations referenced by the order (fallback when commitRedemption was not called)",
       "orders.item.cancelled": "Reverse the item's allocations; restore usage and deal stock when cancelled before dispatch",
-      "returns.refund.approved": "Partially reverse the item's allocations by the refunded quantity; count the return in campaign results",
+      "returns.refund.approved": "Partially reverse each item's allocations by its refunded quantity from the payload items ({ orderItemId, quantity }[]; a refund without items reverses nothing and is logged); count the return in campaign results",
+      "orders.item.split": "Split the item's redemption_lines between the original and the new order item in proportion to the quantities, so later cancellations, refundShare and fundingSplitFor on either id find their share",
       "payments.payment.failed": "Release reservations of the failed quote",
       "offers.offer.price_changed": "Flag participations whose seller raised the price during the campaign (the was price itself is read from offers.lowestPrice)",
       "offers.offer.status_changed": "Rebuild eligible offers; remove deactivated offers from flash sales",

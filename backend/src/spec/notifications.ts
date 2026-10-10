@@ -13,8 +13,10 @@ import * as identity from './identity.js';
 export interface Recipient {
   /** external_email: a contact outside Marketly (supplier, rights owner, scheduled-report address); email only, essential topics only */
   kind: "customer" | "guest_email" | "seller" | "seller_member" | "staff_role" | "staff_member" | "external_email";
-  /** Identity account (customer, seller member, staff member) */
+  /** Identity account (seller member, staff member; a customer only when no customerId is known) */
   accountId?: string | null;
+  /** customer: the customers-module id (preferred over accountId; never an account id). notifications resolves the identity account and email through customers.getCustomer, so modules that only know an order's customerId (shipping, returns, payments) address the customer directly instead of the order email */
+  customerId?: string | null;
   /** Guests (checkout email) and external_email recipients */
   email?: string | null;
   /** seller: all members who should get this topic; seller_member: one member */
@@ -26,7 +28,8 @@ export interface Recipient {
 
 export const Recipient: z.ZodType<Recipient> = z.object({
   kind: z.enum(["customer", "guest_email", "seller", "seller_member", "staff_role", "staff_member", "external_email"]).describe("external_email: a contact outside Marketly (supplier, rights owner, scheduled-report address); email only, essential topics only"),
-  accountId: z.uuid().describe("Identity account (customer, seller member, staff member)").nullish(),
+  accountId: z.uuid().describe("Identity account (seller member, staff member; a customer only when no customerId is known)").nullish(),
+  customerId: z.uuid().describe("customer: the customers-module id (preferred over accountId; never an account id). notifications resolves the identity account and email through customers.getCustomer, so modules that only know an order's customerId (shipping, returns, payments) address the customer directly instead of the order email").nullish(),
   email: z.email().describe("Guests (checkout email) and external_email recipients").nullish(),
   sellerId: z.uuid().describe("seller: all members who should get this topic; seller_member: one member").nullish(),
   memberId: z.uuid().nullish(),
@@ -133,6 +136,9 @@ export interface Notice {
   deadline?: common.Deadline | null;
   /** The work was done (shows 'Resolved Oct 7') */
   resolvedAt?: string | null;
+  /** Action notices only (null for information notices): open; resolved = the work was done; expired = no longer needed (the record closed another way or the notice aged out), shown as 'No longer needed', never as Resolved */
+  state?: "open" | "resolved" | "expired" | null;
+  expiredAt?: string | null;
   /** Staff notices only */
   routedTo?: RoutingInfo | null;
 }
@@ -156,6 +162,8 @@ export const Notice: z.ZodType<Notice> = z.object({
     return common.Deadline.nullish();
   },
   resolvedAt: z.iso.datetime({ offset: true }).describe("The work was done (shows 'Resolved Oct 7')").nullish(),
+  state: z.enum(["open", "resolved", "expired"]).describe("Action notices only (null for information notices): open; resolved = the work was done; expired = no longer needed (the record closed another way or the notice aged out), shown as 'No longer needed', never as Resolved").nullish(),
+  expiredAt: z.iso.datetime({ offset: true }).nullish(),
   get routedTo() {
     return RoutingInfo.nullish();
   },
@@ -333,6 +341,8 @@ export interface TopicMatrix {
   seller: Topic[];
   staff: Topic[];
   promotional: Topic[];
+  /** Email-only topics for contacts outside Marketly (suppliers, rights owners) */
+  external: Topic[];
   stats: DeliveryStats;
 }
 
@@ -347,6 +357,9 @@ export const TopicMatrix: z.ZodType<TopicMatrix> = z.object({
     return z.array(Topic);
   },
   get promotional() {
+    return z.array(Topic);
+  },
+  get external() {
     return z.array(Topic);
   },
   get stats() {
@@ -475,7 +488,8 @@ export const TemplateVersion: z.ZodType<TemplateVersion> = z.object({
 export interface Template {
   id: string;
   topicKey: string;
-  audience: "customer" | "seller" | "staff";
+  /** external: email templates for suppliers and rights owners */
+  audience: "customer" | "seller" | "staff" | "external";
   channel: "email" | "in_app" | "sms" | "push";
   /** en-US (only locale at launch) */
   language: string;
@@ -487,7 +501,7 @@ export interface Template {
 export const Template: z.ZodType<Template> = z.object({
   id: z.uuid(),
   topicKey: z.string(),
-  audience: z.enum(["customer", "seller", "staff"]),
+  audience: z.enum(["customer", "seller", "staff", "external"]).describe("external: email templates for suppliers and rights owners"),
   channel: z.enum(["email", "in_app", "sms", "push"]),
   language: z.string().describe("en-US (only locale at launch)"),
   get live() {
@@ -564,7 +578,7 @@ export interface Delivery {
   noticeId?: string | null;
   topicKey: string;
   channel: "email" | "sms" | "push";
-  recipientKind: "customer" | "guest_email" | "seller_member" | "staff_member";
+  recipientKind: "customer" | "guest_email" | "seller_member" | "staff_member" | "external_email";
   accountId?: string | null;
   addressMasked: string;
   status: "queued" | "sending" | "sent" | "delivered" | "retrying" | "failed" | "bounced" | "complained" | "suppressed" | "skipped";
@@ -586,7 +600,7 @@ export const Delivery: z.ZodType<Delivery> = z.object({
   noticeId: z.uuid().nullish(),
   topicKey: z.string(),
   channel: z.enum(["email", "sms", "push"]),
-  recipientKind: z.enum(["customer", "guest_email", "seller_member", "staff_member"]),
+  recipientKind: z.enum(["customer", "guest_email", "seller_member", "staff_member", "external_email"]),
   accountId: z.uuid().nullish(),
   addressMasked: z.string(),
   status: z.enum(["queued", "sending", "sent", "delivered", "retrying", "failed", "bounced", "complained", "suppressed", "skipped"]),
@@ -1195,6 +1209,8 @@ export interface NotificationsDb {
     dedupe_key: string | null;
     resolved_at: Date | null;
     resolve_note: string | null;
+    /** action notices that ended without being resolved */
+    expired_at: Date | null;
     created_at: Date;
     expires_at: Date;
   };
@@ -1704,7 +1720,7 @@ export const endpoints = defineEndpoints({
     query: () =>
       z.object({
         topicKey: z.string().optional(),
-        audience: z.enum(["customer", "seller", "staff"]).optional(),
+        audience: z.enum(["customer", "seller", "staff", "external"]).optional(),
         channel: z.enum(["email", "in_app", "sms", "push"]).optional(),
         hasDraft: z.stringbool().optional(),
         q: z.string().optional(),
@@ -2119,7 +2135,7 @@ export const endpoints = defineEndpoints({
     auth: "provider",
     scope: "public",
     summary: "Replies to case and message emails",
-    desc: "The reply-to address carries a signed token naming the module and record (case, conversation) and the recipient. Valid replies are published for support or messaging; attachments are stored through media. Unknown or expired tokens get an automatic 'please reply in your account' email.",
+    desc: "The reply-to address carries a signed token naming the module and record (case, conversation) and the recipient. Valid replies are published for support or messaging; attachments are stored through media.storeInboundFile (purpose message_attachment for conversations, case_evidence for cases; owner = the replying customer, seller or guest) and listed in attachmentAssetIds, refused files are named in the auto-reply. Unknown or expired tokens get an automatic 'please reply in your account' email.",
     body: () => InboundEmail,
     response: null,
     status: 204,
@@ -2313,7 +2329,7 @@ export const spec = defineModuleSpec({
       ]
     },
     "Action notice": {
-      "field": "Notice.resolvedAt",
+      "field": "Notice.state",
       "initial": "open",
       "transitions": [
         [
@@ -2354,10 +2370,10 @@ export const spec = defineModuleSpec({
       "customers.account.closed": "Stop all promotional sends, remove push devices, keep essential notices for open obligations only",
       "customers.data_export.ready": "Email the customer the export download link",
       "orders.order.accepted": "Customer: order accepted (confirmation only after acceptance). Seller: new order per seller group (orders group, members with order permission)",
-      "orders.item.cancelled": "Customer: cancellation update for the item; seller: item cancelled",
+      "orders.item.cancelled": "Customer: cancellation update for the item, skipped when the payload's notifyCustomer is false (staff cancelled without telling the customer); seller: item cancelled (always)",
       "orders.item.delayed": "Customer: delay notice with the new estimate and options (wait, cancel, contact support)",
       "orders.cancellation.decided": "Customer: result of a cancellation request",
-      "payments.payment.captured": "Customer: payment accepted (combined with order accepted when simultaneous)",
+      "payments.payment.captured": "Customer: payment accepted (combined with order accepted when simultaneous); for orders paid fully with store credit (amount 0, creditAmount set) the notice says paid with store credit",
       "payments.payment.failed": "Customer: payment failed, retry link",
       "payments.payment.pending_check": "Customer: payment result is being checked; link to order status",
       "payments.refund.sent": "Customer: refund sent, with destination and expected timing",
@@ -2381,9 +2397,9 @@ export const spec = defineModuleSpec({
       "support.case.message_added": "Customer or seller: case reply (email carries a reply-to token)",
       "support.case.escalated": "Staff: escalated case to Customer Support Manager (or Returns Manager by category)",
       "support.case.overdue": "Staff: case past its response target to the queue lead and backup",
-      "support.case.decided": "Customer and seller: decision and remedy, with the appeal deadline",
+      "support.case.decided": "Customer and seller: decision and remedy, with the appeal deadline. Nothing is sent when the payload's notified is false (staff decided without notifying the parties)",
       "support.case.resolved": "Customer: case resolved",
-      "messaging.message.sent": "Recipient (customer or seller members with customer permission): new message, reply-to token in email",
+      "messaging.message.sent": "Recipient (customer or seller members with customer permission): new message, reply-to token in email. When the recipient seller is the Official Store (OFFICIAL_STORE_ID) the notice goes to staff instead (topic staff.official_store.message_received, Official Store Manager role through access, action required until the conversation is answered)",
       "sellers.invitation.sent": "Email the invited business its invitation code and how to apply (code never stored in the delivery log)",
       "sellers.application.submitted": "Staff: new application to Seller Manager",
       "sellers.application.information_requested": "Applicant: information required, with deadline",
@@ -2429,21 +2445,29 @@ export const spec = defineModuleSpec({
       "settings.change.scheduled": "Sellers (seller-visible changes): upcoming platform change with its effective date",
       "audit.integrity.failed": "Staff: urgent notice to Platform Administrator and Business Owner",
       "reports.export.ready": "Export ready to the requester (staff or seller member), including audit, orders and module list exports",
-      "reports.scheduled_report.ready": "Phase 2: each recipient address (external_email, topic staff.report.scheduled, email only): the scheduled report with its download link and expiry",
-      "purchasing.purchase_order.sent": "Supplier (external_email, topic supplier.purchase_order.sent, email only) when emailSupplier is true and supplierEmail is set: the purchase order with its lines, delivery location and the buyer's message; in-app copy to the Purchasing Manager role",
+      "reports.scheduled_report.ready": "Phase 2: each staff recipient (staff_member, topic staff.report.scheduled, in-app and email): the scheduled report with a link to its export in the Admin Center (scheduled reports go to staff only; no outside addresses)",
+      "purchasing.purchase_order.sent": "Supplier (external_email, topic supplier.purchase_order.sent, email only) when emailSupplier is true and supplierEmail is set: the purchase order with its lines, the delivery address from the payload's shipTo (location name and address) and the buyer's message; in-app copy to the Purchasing Manager role",
       "wallet.credit.expiring": "Customer (account group, topic customer.credit.expiring): unused store credit amount and expiry date, with a link to shop",
-      "workqueues.day_end.prepared": "Staff (topic staff.day_end.summary, to roleKeys): today's day-end review is ready with open and overdue counts and the due time; action required",
+      "workqueues.day_end.prepared": "Staff (topic staff.day_end.summary, to roleKeys): reminder that today's day-end review is open, with open and overdue counts and the due time; action required (resolved when the review is completed). workqueues does not publish it once the review is completed",
       "advertising.campaign.ending_soon": "Seller (members with advertising permission, topic seller.campaign.ending_soon) for seller campaigns; staff (ownerStaffId, else the Advertising Manager role; topic staff.campaign.ending_soon) for own and brand campaigns: ends on endsAt, renew or let it finish",
       "content.article.review_due": "Staff (ownerStaffId, else the Content Manager role; topic staff.article.review_due): help article due for review, action required",
       "reviews.moderation.decided": "Reporters (topic customer.review_report.decided, seller variant for sellers): reporterOutcome; author (topic customer.review.moderated, seller.content.moderated for responses and answers): kept, edited or removed with the reason and appealUntil",
       "trust.report.resolved": "Each reporter (customers and sellers in-app and email, rights owners by external_email; topic trust.report.resolved): the reporterOutcome text, never the reported party's details",
-      "trust.rights_report.received": "Rights owner (external_email, topic rights_owner.report.received): confirmation with the TR reference and what happens next"
+      "trust.rights_report.received": "Rights owner (external_email, topic rights_owner.report.received): confirmation with the TR reference and what happens next",
+      "trust.evidence.requested": "The asked party: customer (topic customer.trust.evidence_requested, cases group) or seller owner (topic seller.trust.evidence_requested): Trust and Risk needs proof, what to send and by when; action required until trust records the answer (resolve by the request's dedupe key)",
+      "trust.appeal.decided": "The appellant: customer (topic customer.trust.appeal_decided) or seller owner (topic seller.trust.appeal_decided): the appeal outcome and what changes (restriction lifted or kept)",
+      "payments.refund.destination_requested": "Customer (by the payload's customerId, else the order email; topic customer.refund.destination_needed, returns_refunds group): the refund could not go back to the original payment method; choose where to receive it, with the deadline; action required",
+      "customers.closure.delayed": "Customer (topic customer.account.closure_delayed, account group): the account closure is waiting because new obligations appeared (blockers listed), and when it is checked again",
+      "offers.offer.missing_items_stale": "Ask the seller to review the offer's missing-items list after the product's box contents changed (topic seller.offer.missing_items_review, members with offers.offers.manage); Official Store offers go to staff (topic staff.offer.missing_items_review, Catalog Manager role)",
+      "inventory.stock.low_digest": "Daily digest of items at or below their reorder point: Official Store items to staff (topic staff.inventory.low_stock_digest, Inventory Manager role); each seller's own items to that seller (topic seller.stock.low_digest, members with the stock permission). Replaces one notice per item for non-urgent low stock",
+      "sellers.application.information_reminder": "Applicant (topic seller.application.information_reminder, owner only): reminder that requested information is still missing, with the deadline; same action notice as the original request",
+      "workqueues.day_end.completed": "Staff (topic staff.day_end.completed, to the payload's roleKeys): the day-end summary (who completed it, open and overdue counts, items with notes); resolves the staff.day_end.summary action notices"
     },
   },
   jobs: {
     "notifications.dispatch": {
-      "schedule": "queue worker",
-      "does": "Render and send queued deliveries per channel with provider rate limits; mark sent"
+      "schedule": "every minute",
+      "does": "Also started at once after notices are queued. Render and send queued deliveries per channel with provider rate limits; mark sent"
     },
     "notifications.retry": {
       "schedule": "every minute",
@@ -2458,12 +2482,12 @@ export const spec = defineModuleSpec({
       "does": "Start scheduled broadcasts, resolve consenting recipients, respect quiet hours for SMS and push, publish notifications.broadcast.sent"
     },
     "notifications.staff-digest": {
-      "schedule": "daily at the start of business hours",
-      "does": "Email the daily digest to staff who chose it"
+      "schedule": "daily 08:00 market time",
+      "does": "Email the daily digest to staff who chose it (08:00 is the start of business hours; on closed days it waits for the next open day)"
     },
     "notifications.purge": {
       "schedule": "daily",
-      "does": "Delete notices older than noticeRetentionMonths and delivery rows older than deliveryLogRetentionDays; expire unresolved action notices whose records closed"
+      "does": "Delete notices older than noticeRetentionMonths and delivery rows older than deliveryLogRetentionDays; mark unresolved action notices whose records closed as expired (expired_at, not resolved_at)"
     }
   },
   settings: {
@@ -2801,6 +2825,10 @@ export const spec = defineModuleSpec({
       },
       "resolve_note": {
         "type": "text",
+        "nullable": true
+      },
+      "expired_at": {
+        "type": "timestamptz",
         "nullable": true
       },
       "created_at": {

@@ -200,7 +200,7 @@ describe('packing station', () => {
     await h.call('PATCH', `/packages/${pkg.id}`, { boxTypeId: mailer.id, weight: { value: 0.1, unit: 'lb' } });
     await h.call('POST', `/packages/${pkg.id}/label`, {}, { headers: idem() });
     const zero = { amount: 0, currency: 'USD' };
-    await h.publish('orders', 'orders.item.cancelled', { orderId: o.orderId, ref: o.ref, groupId: o.groupId, ownerType: 'official', sellerId: null, itemId: o.itemIds[0], offerId: newId(), stockItemId: a.id, quantity: 1, cancellationId: newId(), initiatedBy: 'staff', reasonCode: 'out_of_stock', beforeDispatch: true, countsAgainstSeller: false, refund: { itemAmount: zero, discountShare: zero, shippingRefund: zero, taxRefund: zero, total: zero }, paymentIntentId: newId() });
+    await h.publish('orders', 'orders.item.cancelled', { orderId: o.orderId, ref: o.ref, groupId: o.groupId, ownerType: 'official', sellerId: null, itemId: o.itemIds[0], offerId: newId(), stockItemId: a.id, quantity: 1, cancellationId: newId(), initiatedBy: 'staff', reasonCode: 'out_of_stock', beforeDispatch: true, countsAgainstSeller: false, refund: { itemAmount: zero, discountShare: zero, shippingRefund: zero, taxRefund: zero, total: zero }, paymentIntentId: newId(), notifyCustomer: true });
     const f = (await h.call('GET', `/fulfillments/${o.fulfillment.id}`)).body;
     expect(f.status).toBe('packing');
     expect(f.lines[0].state).toBe('cancelled');

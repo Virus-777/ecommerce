@@ -3,7 +3,7 @@
 Return policies (platform baseline, seller terms, category exceptions, who pays return shipping), per-item eligibility, return requests and decisions, return shipments, receipt and inspection, remedies (refund, replacement, exchange) and the refund request that Finance approves before payments sends the money.
 
 - **Group:** After-sales and money · **Launch phase:** 1 · **Plan chapters:** 13, 9, 2
-- **Depends on:** [orders](orders.md), [shipping](shipping.md), [payments](payments.md), [inventory](inventory.md) · **Optional:** [media](media.md), [finance](finance.md), [support](support.md), [messaging](messaging.md), [access](access.md), [wallet](wallet.md), [workqueues](workqueues.md), [audit](audit.md), [content](content.md), [identity](identity.md), [notifications](notifications.md), [promotions](promotions.md), [purchasing](purchasing.md), [reports](reports.md), [sellers](sellers.md), [settings](settings.md), [customers](customers.md)
+- **Depends on:** [orders](orders.md), [shipping](shipping.md), [payments](payments.md), [inventory](inventory.md) · **Optional:** [media](media.md), [finance](finance.md), [support](support.md), [messaging](messaging.md), [access](access.md), [wallet](wallet.md), [workqueues](workqueues.md), [audit](audit.md), [content](content.md), [identity](identity.md), [notifications](notifications.md), [promotions](promotions.md), [purchasing](purchasing.md), [reports](reports.md), [sellers](sellers.md), [settings](settings.md), [customers](customers.md), [catalog](catalog.md), [offers](offers.md)
 
 ## Owns
 - Platform return baseline with versions and effective dates, category exceptions and the who-pays-return-shipping matrix
@@ -64,6 +64,7 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | PUT | `/api/seller/returns/requests/{id}/inspection-draft` | Save an unsent inspection and refund decision | seller<br>`returns.refunds.issue` | `{ inspection: json, remedy: json? }` → `InspectionDraft` |
 | POST | `/api/seller/returns/requests/{id}/evidence` | Attach evidence to a return before any case exists _(audited)_ | seller<br>`returns.requests.respond` | `{ kind: enum(photo|video|document|tracking|invoice|other), mediaIds: uuid[], note: text? }` → `ReturnEvidence` |
 | POST | `/api/seller/returns/requests/{id}/remedy` | Confirm the refund (full or partial) or ship a replacement or exchange _(idempotent)_ | seller<br>`returns.refunds.issue` | `RemedyInput` → `ReturnCase` |
+| POST | `/api/seller/returns/replacements/{id}/cancel` | Cancel a replacement or exchange not shipped yet (e.g. no stock) with a reason _(audited)_ | seller<br>`returns.refunds.issue` | `{ reason: text }` → `Replacement` |
 | GET | `/api/seller/returns/terms` | Own return terms, return address and the platform baseline | seller | `SellerReturnTerms` |
 | PUT | `/api/seller/returns/terms` | Change return terms or return address _(audited)_ | seller<br>`returns.terms.manage` | `SellerReturnTermsInput` → `SellerReturnTerms` |
 
@@ -88,6 +89,7 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | PUT | `/api/admin/returns/requests/{id}/inspection-draft` | Save an unsent inspection (checks ticked so far, notes, photos) | staff<br>`returns.inspections.record` | `{ inspection: json }` → `InspectionDraft` |
 | POST | `/api/admin/returns/requests/{id}/inspection` | Record inspection: photos, condition grade, checks, missing parts and proposed stock outcome _(audited)_ | staff<br>`returns.inspections.record` | `InspectionInput` → `ReturnCase` |
 | POST | `/api/admin/returns/requests/{id}/remedy` | Decide the remedy for an Official Store or platform-handled return _(idempotent, audited)_ | staff<br>`returns.requests.manage` | `RemedyInput` → `ReturnCase` |
+| POST | `/api/admin/returns/replacements/{id}/cancel` | Cancel a replacement or exchange not shipped yet with a reason _(audited)_ | staff<br>`returns.requests.manage` | `{ reason: text }` → `Replacement` |
 | POST | `/api/admin/returns/refunds` | Issue a refund from the order page (exception refund request) _(idempotent, audited)_ | staff<br>`returns.exceptions.propose` | `ExceptionRefundInput` → `RefundRequest` |
 | GET | `/api/admin/returns/refunds` | Refund approval queue for Finance | staff<br>`returns.requests.view` | Page<RefundRequest> |
 | GET | `/api/admin/returns/refunds/{id}` | One refund request with breakdown, funding and earnings impact | staff<br>`returns.requests.view` | `RefundRequest` |
@@ -250,7 +252,7 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 
 | Field | Type |
 |---|---|
-| sellerId | `uuid` |
+| sellerId | `uuid` The seller, or OFFICIAL_STORE_ID for the Official Store |
 | categoryId | `uuid?` |
 | windowDays | `int` |
 | changeOfMindAllowed | `bool` |
@@ -260,6 +262,7 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | responseTargetBusinessDays | `int` |
 | summary | `string` One line for product page and checkout, e.g. 30-day returns, free for defects |
 | policyVersion | `string` |
+| policyVersionId | `uuid?` Baseline policy version record the terms were built from; null only for the settings fallback when no version exists |
 | sellerTermsVersion | `int?` |
 | source | `enum(baseline|seller_terms|category_exception)` |
 
@@ -362,6 +365,7 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | shippingRefund | `Money` |
 | returnShippingDeduction | `Money` |
 | deductions | `RefundDeduction[]` |
+| taxRefund | `Money?` Sales tax on the refunded items and shipping, included in total; null when no tax was charged |
 | total | `Money` |
 | maxRefundable | `Money` Remaining refundable amount for these items (from payments) |
 | destination | `string` e.g. Visa •••• 4417, or Marketly store credit |
@@ -501,6 +505,10 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | Field | Type |
 |---|---|
 | id | `uuid` |
+| returnId | `uuid?` The return it replaces items for; null for a replacement decided on a support case without a return |
+| caseId | `uuid?` Support case that asked for it (requestReplacement) |
+| orderId | `uuid` |
+| orderItemId | `uuid` The original order item being replaced |
 | kind | `enum(replacement|exchange)` |
 | status | `enum(pending|reserved|shipped|delivered|cancelled)` |
 | variantId | `uuid` |
@@ -981,7 +989,7 @@ stateDiagram-v2
   reserved --> cancelled: cancel
 ```
 
-Replacement stock is reserved through inventory; returns.replacement.created asks orders/warehouse (Official Store) or the seller to fulfil it as a zero-charge shipment. If stock is gone, cancel with a reason and offer a refund instead. A replacement gets a new 30-day return window.
+reserve allocates the unit through inventory.allocateForOrder (an allocation tied to the order and the replacement, with no expiry), never a timed hold, so a slow seller or warehouse never loses the unit; returns.replacement.created asks orders/warehouse (Official Store) or the seller to fulfil it as a zero-charge shipment. cancel (POST /replacements/{id}/cancel, or automatically when stock is gone) needs a reason, releases the allocation (inventory.releaseHold), publishes returns.replacement.cancelled and offers a refund instead. A replacement gets a new 30-day return window. Replacements without a return (requestReplacement from a support case) use the same machine.
 
 ### Policy version (`PolicyVersion.status`)
 
@@ -1156,6 +1164,8 @@ Indexes: `(order_item_id)`
 | cost | bigint? |
 | paid_by | text |
 | shipping_shipment_id | uuid? |
+| label_id | uuid? (shipping label, for void and the label file) |
+| carrier_service_id | uuid? (Label.carrierServiceId; drop-off points are looked up with it) |
 | created_at | timestamptz |
 | delivered_at | timestamptz? |
 
@@ -1247,26 +1257,29 @@ Indexes: `(return_id)`
 
 Indexes: `(status, created_at)`, `(order_id)`, `(return_id)`, `(case_id)`
 
-**replacements**: Replacement or exchange units with their own shipment; the original order is not changed
+**replacements**: Replacement or exchange units with their own shipment; the original order is not changed. return_id is null for replacements decided on a support case without a return (case_id set)
 
 | Column | Type |
 |---|---|
 | id | uuid pk |
-| return_id | uuid → returns |
+| return_id | uuid? → returns |
+| case_id | uuid? |
+| order_id | uuid |
 | kind | text |
 | status | text |
 | order_item_id | uuid |
 | variant_id | uuid |
 | offer_id | uuid |
 | quantity | int |
-| reservation_id | uuid? |
+| reservation_id | uuid? (inventory allocation from allocateForOrder; no expiry) |
 | shipping_shipment_id | uuid? |
 | cancel_reason | text? |
+| idempotency_key | text? unique |
 | created_at | timestamptz |
 | shipped_at | timestamptz? |
 | delivered_at | timestamptz? |
 
-Indexes: `(return_id)`, `(status)`
+Indexes: `(return_id)`, `(case_id)`, `(order_id)`, `(status)`
 
 **return_events**: Timeline and action history per return (who, what, reason)
 
@@ -1288,23 +1301,25 @@ Indexes: `(return_id, at)`
 
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
-| `returns.return.requested` | A customer submits a return (one event per seller return) | `{ returnId: uuid, ref: string, orderId: uuid, ownerType: enum(official|seller), sellerId: uuid?, orderItemIds: uuid[], reason: string, responseDueAt: datetime }` | notifications, orders, reports, sellers |
-| `returns.return.info_requested` | Seller or staff asks the customer a question | `{ returnId: uuid, customerId: uuid?, contactEmail: email?, replyDueAt: datetime }` | notifications |
-| `returns.return.approved` | Seller, Official Store or platform approves (with or without return) | `{ returnId: uuid, ref: string, orderId: uuid, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, items: ReturnItemQuantity[], withoutReturn: bool, platformDecision: bool, dropOffBy: datetime?, trackingNumber: string? }` | notifications, warehouse |
-| `returns.return.rejected` | A return is rejected with an explanation | `{ returnId: uuid, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, reasonCode: string, platformDecision: bool }` | notifications, orders |
-| `returns.return.escalated` | Customer asks Marketly to step in, a seller misses a deadline, or staff take over | `{ returnId: uuid, ownerType: enum(official|seller), sellerId: uuid?, orderId: uuid, reason: string, by: Actor }` | notifications, support, workqueues |
-| `returns.return.shipped` | Return parcel dropped off (first carrier scan or customer tracking) | `{ returnId: uuid, trackingNumber: string? }` | - |
-| `returns.return.received` | Return received at the warehouse or seller address | `{ returnId: uuid, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, items: ReturnedItem[], receivedAt: datetime }` | fulfillment-service, inventory, notifications, orders |
-| `returns.return.inspected` | Inspection recorded | `{ returnId: uuid, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, conditionOutcome: string, proposedStockOutcome: string, orderItemId: uuid, variantId: uuid, stockItemId: uuid?, quantity: int }` | inventory, notifications, reports |
-| `returns.return.completed` | The remedy finished (refund sent, replacement shipped, credit issued) | `{ returnId: uuid, outcome: enum(refunded|partly_refunded|replaced|exchanged|credited) }` | - |
-| `returns.return.cancelled` | Customer withdraws, information or drop-off deadline expires | `{ returnId: uuid, by: Actor, reason: string? }` | orders |
-| `returns.label.created` | A prepaid return label is issued; finance charges the payer | `{ returnId: uuid, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, labelId: uuid, orderId: uuid, cost: Money, paidBy: enum(seller|customer|platform) }` | finance, notifications |
+| `returns.return.requested` | A customer submits a return (one event per seller return) | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, ownerType: enum(official|seller), sellerId: uuid?, orderItemIds: uuid[], reason: string, responseDueAt: datetime }` | notifications, orders, reports, sellers |
+| `returns.return.info_requested` | Seller or staff asks the customer a question | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, customerId: uuid?, contactEmail: email?, replyDueAt: datetime }` | notifications |
+| `returns.return.approved` | Seller, Official Store or platform approves (with or without return) | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, items: ReturnItemQuantity[], withoutReturn: bool, platformDecision: bool, dropOffBy: datetime?, trackingNumber: string? }` | notifications, warehouse |
+| `returns.return.rejected` | A return is rejected with an explanation | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, reasonCode: string, platformDecision: bool }` | notifications, orders |
+| `returns.return.escalated` | Customer asks Marketly to step in, a seller misses a deadline, or staff take over | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, ownerType: enum(official|seller), sellerId: uuid?, reason: string, by: Actor }` | notifications, support, workqueues |
+| `returns.return.shipped` | Return parcel dropped off (first carrier scan or customer tracking) | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, trackingNumber: string? }` | - |
+| `returns.return.received` | Return received at the warehouse or seller address | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, items: ReturnedItem[], receivedAt: datetime }` | fulfillment-service, inventory, notifications, orders |
+| `returns.return.inspected` | Inspection recorded | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, conditionOutcome: string, proposedStockOutcome: string, orderItemId: uuid, variantId: uuid, stockItemId: uuid?, quantity: int }` | inventory, notifications, reports |
+| `returns.return.completed` | The remedy finished (refund sent, replacement shipped, credit issued) | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, outcome: enum(refunded|partly_refunded|replaced|exchanged|credited) }` | - |
+| `returns.return.cancelled` | Customer withdraws, information or drop-off deadline expires | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, by: Actor, reason: string? }` | orders |
+| `returns.label.created` | A prepaid return label is issued; finance charges the payer | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, labelId: uuid, cost: Money, paidBy: enum(seller|customer|platform) }` | finance, notifications |
 | `returns.refund.requested` | A refund request enters Finance review | `{ refundRequestId: uuid, orderId: uuid, total: Money, source: string }` | - |
-| `returns.refund.approved` | A refund is approved and handed to payments (not yet sent) | `{ refundRequestId: uuid, returnId: uuid?, caseId: uuid?, orderId: uuid, customerId: uuid?, contactEmail: email?, orderItemIds: uuid[], ownerType: enum(official|seller), sellerId: uuid?, source: enum(return|case|exception|seller), trustReportId: uuid?, total: Money, breakdown: RefundBreakdown, fundedBy: string, sellerShare: Money?, platformShare: Money?, approvedBy: Actor }` | finance, notifications, orders, promotions, support, trust, workqueues |
-| `returns.refund.declined` | Finance sends a refund request back | `{ refundRequestId: uuid, reason: text }` | - |
+| `returns.refund.approved` | A refund is approved and handed to payments (not yet sent) | `{ refundRequestId: uuid, returnId: uuid?, caseId: uuid?, orderId: uuid, customerId: uuid?, contactEmail: email?, orderItemIds: uuid[], items: ReturnItemQuantity[], ownerType: enum(official|seller), sellerId: uuid?, source: enum(return|case|exception|seller), trustReportId: uuid?, total: Money, breakdown: RefundBreakdown, fundedBy: string, sellerShare: Money?, platformShare: Money?, approvedBy: Actor }` | finance, notifications, orders, promotions, support, trust, workqueues |
+| `returns.refund.declined` | Finance sends a refund request back | `{ refundRequestId: uuid, reason: text }` | support |
+| `returns.refund.cancelled` | A refund request is cancelled before money moved (e.g. cancelRefundsForCase after an appeal overturns a case decision) | `{ refundRequestId: uuid, ref: string, orderId: uuid, caseId: uuid?, returnId: uuid?, total: Money, reason: text, by: Actor }` | - |
 | `returns.exception.proposed` | Refund-without-return proposed by staff | `{ returnId: uuid, reasonCode: string }` | - |
 | `returns.exception.approved` | Refund-without-return approved (seller or Finance) | `{ returnId: uuid, reasonCode: string, approvedBy: Actor }` | - |
-| `returns.replacement.created` | A replacement or exchange is created and stock reserved | `{ replacementId: uuid, returnId: uuid, orderId: uuid, customerId: uuid?, contactEmail: email?, orderItemId: uuid, ownerType: enum(official|seller), sellerId: uuid?, variantId: uuid, offerId: uuid, quantity: int, kind: string }` | notifications, orders, shipping, support |
+| `returns.replacement.created` | A replacement or exchange is created and its stock allocated (from a return, or from a support case without a return) | `{ replacementId: uuid, returnId: uuid?, caseId: uuid?, orderId: uuid, customerId: uuid?, contactEmail: email?, orderItemId: uuid, ownerType: enum(official|seller), sellerId: uuid?, variantId: uuid, offerId: uuid, quantity: int, kind: string }` | notifications, orders, shipping, support |
+| `returns.replacement.cancelled` | A replacement or exchange not shipped yet is cancelled (no stock, or by the seller or staff); its stock allocation is released | `{ replacementId: uuid, returnId: uuid?, caseId: uuid?, orderId: uuid, orderItemId: uuid, ownerType: enum(official|seller), sellerId: uuid?, reason: text, by: Actor }` | - |
 | `returns.seller_terms.changed` | A seller changes return terms or return address | `{ sellerId: uuid, version: int }` | - |
 | `returns.policy.proposed` | Baseline or category exception change proposed | `{ policyVersionId: uuid?, categoryExceptionId: uuid?, effectiveFrom: datetime }` | - |
 | `returns.policy.changed` | A baseline or category exception becomes active | `{ policyVersionId: uuid?, categoryId: uuid?, effectiveFrom: datetime }` | - |
@@ -1328,9 +1343,11 @@ Indexes: `(return_id, at)`
 
 | Function | Signature | Used by |
 |---|---|---|
-| resolveTerms | `(sellerId: uuid | null, categoryId: uuid | null, condition: string | null) => EffectiveTerms`<br>sellerId null = Official Store (ownerType official). Effective return terms for an offer: baseline, category exception and seller terms combined. Shown before purchase and frozen on the order item. | offers, checkout, orders |
+| resolveTerms | `(sellerId: uuid | null, categoryId: uuid | null, condition: string | null) => EffectiveTerms`<br>sellerId null or OFFICIAL_STORE_ID = Official Store (ownerType official): both resolve the Official Store terms (baseline and category exceptions), never a seller_terms lookup. Effective return terms for an offer: baseline, category exception and seller terms combined. Shown before purchase and frozen on the order item. | offers, checkout, orders |
 | returnStateForItems | `(orderItemIds: uuid[]) => { orderItemId: uuid, returnId: uuid | null, ref: string | null, status: string | null, refundStatus: string | null }[]`<br>After-sales column of the order detail (return and refund progress per item) | orders, support |
-| requestRefund | `(input: { source: 'case' | 'exception', caseId?: uuid, orderId: uuid, orderItemIds: uuid[], breakdown: RefundBreakdown, fundedBy: string, reason: string, proposedBy: Actor }) => RefundRequest`<br>Creates a refund request in the Finance approval queue for remedies decided outside a return (dispute decisions). Approved does not mean sent. | support |
+| requestRefund | `(input: { source: 'case' | 'exception', caseId?: uuid, orderId: uuid, orderItemIds: uuid[], items?: { orderItemId: uuid, quantity: int }[], breakdown: RefundBreakdown, fundedBy: string, reasonCode?: string, reason: string, proposedBy: Actor }) => RefundRequest`<br>Creates a refund request in the Finance approval queue for remedies decided outside a return (dispute decisions). Approved does not mean sent. The items must belong to one seller group of the order (a request spanning groups is refused with VALIDATION_FAILED, details.groups; the caller makes one request per group). items gives refunded quantities (default: each item's full quantity) and is carried on returns.refund.approved. Not for goodwill: reasonCode customer_goodwill is refused with REMEDY_NOT_AVAILABLE (goodwill is store credit through wallet; when wallet is off support refuses the remedy, decision D-RT3). | support |
+| requestReplacement | `(input: { caseId: uuid, orderId: uuid, orderItemId: uuid, quantity: int, variantId?: uuid, reason: string, requestedBy: Actor }, idempotencyKey: string) => Replacement`<br>A replacement decided on a support case without a return (e.g. lost or damaged parcel): same variant by default (variantId only for a same-product, same-price exchange), stock allocated through inventory.allocateForOrder, then returns.replacement.created with returnId null and caseId set. Refused with REMEDY_NOT_AVAILABLE when no stock or the item was not delivered or reported lost. Same key returns the same replacement. | support |
+| defaultWindowDays | `() => { windowDays: int, policyVersion: string | null }`<br>Baseline return window in force now (active policy version, else the baselineWindowDays fallback), e.g. for the content service strip to warn when its text disagrees | content |
 | recordWarehouseReceipt | `(returnId: uuid, receivedAt: datetime, receivedBy: Actor, trackingNumber: string | null) => ReturnDetail`<br>Called by warehouse when an Official Store return is scanned at the dock | warehouse |
 | sellerReturnStats | `(sellerId: uuid, range: DateRange) => { requests: int, returnRatePct: number, respondedOnTimePct: number, unresolved: int }`<br>Inputs to seller performance and reports | sellers, reports |
 | listOpenForCustomer | `(customerId: uuid, limit: int) => { items: ReturnSummary[], total: int }`<br>Open returns of a customer, newest first (open = not closed or cancelled), for the account overview tile and list. | customers, graphql |
@@ -1351,7 +1368,7 @@ Indexes: `(return_id, at)`
 | sellerReturnTermsFor | `(sellerIds: uuid[]) => map<EffectiveTerms>`<br>Storefront returns section: the seller's standard terms for new items (resolveTerms with no category or condition). Category exceptions and per-offer terms show on the product page and are frozen on the order item. | sellers, graphql |
 | exportRows | `(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }`<br>Export rows for reports datasets returns.admin.requests, returns.admin.inspections and returns.seller.requests (seller rows scoped to the principal's seller) | reports |
 | getReturn | `(returnId: uuid) => ReturnCase | null`<br>Any return by id, staff view (same as getReturnAdmin by ref) | warehouse |
-| cancelRefundsForCase | `(caseId: uuid, reason: string) => { cancelled: RefundRequest[], notCancellable: RefundRequest[] }`<br>When an appeal overturns a case decision: cancel the case's refund requests still requested, under review or declined. Approved, processing or sent ones are returned in notCancellable (money already moving). | support |
+| cancelRefundsForCase | `(caseId: uuid, reason: string, actor: Actor) => { cancelled: RefundRequest[], notCancellable: RefundRequest[] }`<br>When an appeal overturns a case decision: cancel the case's refund requests still requested, under review or declined. Approved, processing or sent ones are returned in notCancellable (money already moving). Each cancellation is recorded in the request history and the audit log as the actor (the staff member deciding the appeal) and publishes returns.refund.cancelled. | support |
 | countOpenReturnsForProducts | `(productIds: uuid[]) => map<int>`<br>Open return requests per product (not closed, refunded or rejected). Catalog publication-impact preview. | catalog |
 
 ## Permissions
@@ -1388,7 +1405,8 @@ Checked through the access module (limits per role, second reviewer).
 | `QUANTITY_EXCEEDS_RETURNABLE` | 422 | More units than were delivered and not yet returned. |
 | `REMEDY_NOT_AVAILABLE` | 422 | The chosen remedy is not offered (e.g. no stock for a replacement, store credit off). |
 | `REFUND_EXCEEDS_REFUNDABLE` | 422 | Amount is above the remaining refundable amount. details.maxRefundable. |
-| `DUPLICATE_REFUND` | 409 | An active refund already covers these items. details.refundRequestId. |
+| `DUPLICATE_REFUND` | 409 | A refund request still in progress (requested, under review, approved or processing) already covers these items. Sent, failed, declined and cancelled requests do not block a second refund; the remaining refundable amount from payments caps it. details.refundRequestId. |
+| `EXCHANGE_NOT_ALLOWED` | 422 | The exchange variant is not another variant of the same product, is not sold by the same seller, or is not at the same price as the original unit (different-price exchanges are phase 4). details.reason. |
 | `SHIPPING_PAYER_NOT_ALLOWED` | 422 | Platform rules do not allow the customer to pay return shipping for this reason. |
 | `RESPONSE_DEADLINE_PASSED` | 409 | The respond-by time passed and Marketly is handling the return. |
 | `ESCALATION_NOT_AVAILABLE` | 409 | Escalation is not open yet (seller still within the deadline). details.availableFrom. |
@@ -1408,7 +1426,8 @@ Checked through the access module (limits per role, second reviewer).
 
 | Key | Default | Rules | Meaning |
 |---|---|---|---|
-| baselineWindowDays | `30` | duration, days, 1–…, approval: business owner, seller-visible, 14 d notice | Fallback when no policy version is active (example) |
+| officialReturnAddress | `{"name":"Marketly Returns","line1":"1250 Logistics Way","line2":"Dock 4","city":"Reno","region":"NV","postalCode":"89502","country":"US","phone":null}` | json, approval: business owner | Where Official Store returns are sent (Address): return labels, drop-off instructions and the return address card (decision D-RT1; example address) |
+| baselineWindowDays | `30` | duration, days, 1–…, approval: business owner, seller-visible, 14 d notice | Fallback when no policy version is active (example). A migration seeds baseline version 1.0, so this is only read if that row is missing |
 | changeOfMindReturnFee | `{"amount":799,"currency":"USD"}` | money, 0–…, approval: business owner, seller-visible, 14 d notice | Deducted when the customer pays return shipping (example) |
 | sellerResponseBusinessDays | `2` | duration, business days, 1–…, approval: second reviewer, seller-visible | Respond-by target for sellers (example) |
 | platformInterventionGraceHours | `0` | duration, hours, 0–…, seller-visible | Hours after a missed seller deadline before Marketly takes over |
@@ -1429,16 +1448,23 @@ Checked through the access module (limits per role, second reviewer).
 - A return is per seller: items from different sellers in one request become separate returns, each with its own RT- reference, label and decision.
 - Return terms are read from the order item's purchase snapshot (resolveTerms is called at checkout and stored by orders); later policy changes never apply to existing orders.
 - Return status and refund status are separate fields everywhere so Received or Approved is never read as money arrived.
-- Refund amounts are always itemised (item, discount share, shipping, return shipping deduction, other deductions with reasons) and capped by the remaining refundable amount from payments. DUPLICATE_REFUND guards against two active refunds for the same items.
+- Refund amounts are always itemised (item, discount share, shipping, return shipping deduction, other deductions with reasons) and capped by the remaining refundable amount from payments. DUPLICATE_REFUND guards against two refunds in progress for the same items.
 - Who approves money: the seller for its own returns (its earnings fund it); Finance (returns.refunds.approve, limits via access) for Official Store, platform-decided, case and exception refunds. Granting staff access to returns does not grant refund authority.
 - Earnings impact shown to sellers and staff comes from finance.previewRefundImpact when finance is enabled; finance books the real entries when payments.refund.sent arrives.
 - Stock outcomes (restock, different_condition, repair, return_to_supplier, write_off; same values as inventory) are proposed here and recorded by inventory (recordReturnOutcome), which owns the Returned stock group. Official Store parcels are scanned in by warehouse, which calls recordWarehouseReceipt.
 - Return labels: returns asks shipping.createLabel with kind = return and labelMethod prepaid_qr or prepaid_label (from the seller's return address or the Official Store warehouse); shipping creates the return parcel shipment, its QR code and drop-off deadline, and publishes tracking events with kind = return and returnId. Drop-off points come from shipping.findDropOffPoints. Label cost is booked by finance from returns.label.created, which knows the payer (seller, customer or platform); finance ignores kind = return in shipping.label.purchased to avoid double charging.
-- Official Store returns use ownerType official with sellerId null in every type, table and event (same convention as offers, orders and shipping).
+- Official Store returns use ownerType official with sellerId null in every type, table and event (same convention as offers, orders and shipping). Callers may pass OFFICIAL_STORE_ID where a seller id is asked for (resolveTerms, sellerReturnTermsFor and the Official Store offers' terms); returns maps it to the Official Store before any lookup, so it never resolves as a seller without terms. EffectiveTerms.sellerId carries OFFICIAL_STORE_ID for the Official Store. The Official Store return address is the officialReturnAddress setting (Business Owner approval).
+- Baseline seed (decision D-RT2): a returns migration inserts baseline policy version 1.0 (active, effective at install) with the example values (30-day window, 2 business days seller response, 7 days to reply to an information request, 7 days to drop off, inspection and refund targets, shipping responsibilities per reason group), so resolveTerms, eligibility and terms snapshots always have a policy version and a policyVersionId.
+- Duplicate refunds: DUPLICATE_REFUND blocks only refund requests still in progress (requested, under review, approved, processing) for the same items. A second refund on an item whose first refund was sent (e.g. a partial refund, then the rest after inspection) is allowed up to the remaining refundable amount from payments; a failed request blocks nothing in returns while payments keeps counting it until it is cancelled.
+- Eligibility reads each order item with orders.getOrderItem (state, delivered at, quantity, terms snapshot) and subtracts quantities on open and completed returns; an item with no return record is judged by its own state, never marked ineligible for lacking one.
+- Exchanges (same price only at launch): the new variant must belong to the same product and be offered by the same seller (offers.listOwnOffersForProduct; offers is an optional dependency, without it exchanges are refused with REMEDY_NOT_AVAILABLE) at the original unit price. Replacements and exchanges allocate stock with inventory.allocateForOrder (no expiry) and release it with inventory.releaseHold on cancel.
+- Replacement without a return: support calls requestReplacement for a case remedy (lost or damaged parcel). The replacement has caseId and no returnId; shipping matches its parcel by the replacement's order items; nothing completes on a return when it ships.
+- Categories: with catalog enabled, returns reads category names and ancestor paths with catalog.getCategoryPaths(categoryIds) to show category names and to match a category exception set on a parent category to items in its subcategories (nearest exception wins). Without catalog, exceptions match the exact category id only and show the id.
+- Goodwill (decision D-RT3): goodwill is store credit (wallet). requestRefund refuses reasonCode customer_goodwill, so a support case cannot turn goodwill into a card refund while wallet is off; support refuses the goodwill remedy instead.
 - Store credit refunds on returns (remedy store_credit, or a return refund request with destination store_credit) call wallet.creditRefund (phase 3) instead of payments.startRefund, idempotent per refund request id; the refund request then goes approved → sent without a card step. wallet is an optional dependency resolved at call time; while it is off store_credit is refused with REMEDY_NOT_AVAILABLE. Refunds to the original method go to payments, which returns any store-credit part of a mixed tender through wallet.creditRefund itself.
 - Store credit as a remedy is offered only when the wallet module (phase 3) is enabled; exchange for a different price is phase 4 (advanced returns). Same-price exchanges are phase 1.
 - Guests reach store endpoints with a guest session that has order access (auth/guest-orders); signed-in customers see their own returns only.
-- Dependency note: media and finance are optional (photos and earnings previews degrade gracefully); access is optional because approvals fall back to 'needs approval' without it.
+- Dependency note: media and finance are optional (photos and earnings previews degrade gracefully); access is optional because approvals fall back to 'needs approval' without it; catalog (category names and paths) and offers (exchange price check) are optional.
 
 ## GraphQL (read layer)
 

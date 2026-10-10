@@ -30,7 +30,8 @@ export interface FindOptions<R> {
 
 /**
  * The identity of a conversation: one per customer + seller + subject and kind. Columns left undefined are not
- * compared (a guest's conversation is keyed by the order, not the guest session, which changes).
+ * compared (a guest's conversation is keyed by the order, not the guest session, which changes). case_id is part of
+ * the key only for support conversations; for order and staff conversations it is a link.
  */
 export interface ConversationKey {
   kind: string;
@@ -45,7 +46,8 @@ export interface ConversationKey {
 
 /** Who owns a list of conversations (inbox scope) */
 export type InboxOwner =
-  | { kind: 'customer'; customerId: string | null; guestSessionId: string | null }
+  /** orderIds: guest orders the session reaches (their conversations are keyed by the order) */
+  | { kind: 'customer'; customerId: string | null; guestSessionId: string | null; orderIds?: string[] }
   | { kind: 'seller'; sellerId: string }
   | { kind: 'staff'; staffId: string };
 
@@ -65,7 +67,8 @@ export interface AdminFilter {
   customerId?: string;
   sellerId?: string;
   caseId?: string;
-  filter?: 'overdue' | 'reported' | 'locked';
+  /** official_awaiting: Official Store conversations waiting for a staff reply, oldest due first */
+  filter?: 'overdue' | 'reported' | 'locked' | 'official_awaiting';
 }
 
 /** One message line used for previews, reply labels and statistics */
@@ -85,6 +88,10 @@ export interface MessageLine {
 export interface MessagingRepository {
   /** Runs fn in one transaction with a repository bound to it (nested calls reuse it) */
   transaction<T>(fn: (tx: MessagingRepository) => Promise<T>): Promise<T>;
+  /** Inbox (ctx.inbox): true the first time this key is claimed; commits with the transaction it runs in */
+  claim(key: string): Promise<boolean>;
+  /** The kept conversation an old (merged) id now points to */
+  aliasOf(id: string): Promise<string | undefined>;
 
   /* generic */
   get<T extends IdTable>(table: T, id: string, o?: { forUpdate?: boolean }): Promise<Db[T] | undefined>;

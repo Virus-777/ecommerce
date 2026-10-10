@@ -140,6 +140,7 @@ describe('return parcels', () => {
     returnId,
     ref,
     orderId: o.orderId ?? newId(),
+    orderRef: 'MK-261005-10001',
     customerId: newId(),
     ownerType: o.ownerType ?? 'official',
     sellerId: o.ownerType === 'seller' ? newId() : null,
@@ -211,7 +212,7 @@ describe('return parcels', () => {
     try {
       await h.app.kernel.jobs.runNow('warehouse.overdue-return-parcels');
       raised = h.raised.at(-1)!;
-      expect(raised).toMatchObject({ queueKey: 'warehouse.return_parcels', kind: 'return_parcel_overdue', subject: { type: 'other', label: 'Return parcel' }, relatedSubjects: [{ type: 'return', id: returnId }] });
+      expect(raised).toMatchObject({ sourceModule: 'warehouse', queueKey: 'warehouse.return_parcels', kind: 'return_parcel_overdue', subject: { type: 'return_parcel', label: 'Return parcel' }, relatedSubjects: [{ type: 'return', id: returnId }] });
     } finally {
       h.clock.advance(-30 * 86_400_000);
     }

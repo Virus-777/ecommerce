@@ -5,7 +5,7 @@
 import type * as catalog from '../../../spec/catalog.js';
 import type * as common from '../../../spec/common.js';
 import type { DocRow, DocWrite, OfferRow } from '../ports.js';
-import { OFFICIAL_STORE_NAME } from './ranking.js';
+import { OFFICIAL_BADGE, OFFICIAL_STORE_NAME } from './ranking.js';
 import { attrKey, normalizeGtin, titleNorm } from './text.js';
 import type { ConditionGroup } from './types.js';
 
@@ -105,7 +105,7 @@ export function buildDocument(src: SourceProduct, now: Date): { doc: DocWrite; o
   const sameDayCutoff = !sameDay.length || cutoffs.some((c) => c === null) ? null : cutoffs.sort().at(-1)!;
   const attributes = attributesOf(p);
   const badges: string[] = [];
-  if (featured?.official) badges.push(OFFICIAL_STORE_NAME);
+  if (featured?.official) badges.push(OFFICIAL_BADGE);
   if (onSale) badges.push('Deal');
   const categoryNames = src.categoryPath.map((c) => c.name);
   const listedAt = p.listedAt ? new Date(p.listedAt) : null;

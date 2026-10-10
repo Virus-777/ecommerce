@@ -106,6 +106,7 @@ export class HoldsPart extends Part {
       released_at: null,
       release_reason: null,
       approval_request_id: approvalId,
+      trust_report_id: input.trustReportId ?? null,
     };
     const out = new Outbox();
     const inserted = await this.repo.transaction(async (tx) => {
@@ -116,7 +117,7 @@ export class HoldsPart extends Part {
     this.core.flush(out, by);
     if (inserted && !approvalId) this.core.publish('finance.hold.placed', { holdId: id, sellerId: row.seller_id, amount: input.amount, reasonCode: row.reason_code, reason: row.reason, reviewDate: row.review_date, trustReportId: input.trustReportId ?? null }, by);
     if (inserted) await this.core.audit({ action: 'finance.hold.place', actionLabel: approvalId ? 'Requested approval for a hold' : 'Placed a hold on seller earnings', category: 'financial', target: { type: 'hold', id, label: row.reason, sellerId: row.seller_id, screen: 'admin/payouts' }, after: { amount: row.amount, reasonCode: row.reason_code, reviewDate: row.review_date }, reason: row.reason, approvalRequestId: approvalId, visibleToSeller: true }, by);
-    if (approvalId) throw this.core.approvalRequired({ id: approvalId }, { holdId: id }, 'Above your hold limit: the hold waits for approval');
+    // above the limit the hold is saved waiting for approval and answered with `approval` (FORMAT.md, Approval responses)
     return this.holdView(id);
   }
 
@@ -150,7 +151,7 @@ export class HoldsPart extends Part {
         });
         await this.repo.update('holds', id, { approval_request_id: req.id });
         await this.core.audit({ action: `finance.hold.${op}_requested`, actionLabel: `Requested approval to ${op} a hold`, category: 'financial', target: { type: 'hold', id, label: hold.reason, sellerId: hold.seller_id }, reason: body.reason, approvalRequestId: req.id }, by);
-        throw this.core.approvalRequired(req, { holdId: id });
+        return this.holdView(id); // saved pending: the hold answers with `approval` (FORMAT.md, Approval responses)
       }
     }
     await this.apply(id, op, amount, body.reason, by);
@@ -287,7 +288,7 @@ export class HoldsPart extends Part {
     this.core.flush(out, by);
     if (!approvalId) this.core.publish('finance.adjustment.recorded', { adjustmentId: id, sellerId: row.seller_id, direction: row.direction, amount: input.amount, reasonCode: row.reason_code }, by);
     await this.core.audit({ action: 'finance.adjustment.record', actionLabel: approvalId ? 'Proposed a seller adjustment for approval' : 'Recorded a seller adjustment', category: 'financial', target: { type: 'adjustment', id, ref, label: row.reason, sellerId: row.seller_id, screen: 'admin/seller' }, after: { direction: row.direction, amount: row.amount, reasonCode: row.reason_code, status: row.status }, reason: row.reason, approvalRequestId: approvalId, visibleToSeller: true }, by);
-    if (approvalId) throw this.core.approvalRequired({ id: approvalId }, { adjustmentId: id, adjustmentRef: ref }, 'Above your limit: a second Finance reviewer approves this adjustment');
+    // above the limit the adjustment is saved pending_approval and answered with `approval` (FORMAT.md, Approval responses)
     return (await this.adjustmentViews([row]))[0]!;
   }
 
@@ -427,7 +428,7 @@ export class HoldsPart extends Part {
         await this.core.post(tx, h.seller_id, this.holdEntries(h), out);
       });
       this.core.flush(out, by);
-      this.core.publish('finance.hold.placed', { holdId: h.id, sellerId: h.seller_id, amount: { amount: h.amount, currency: h.currency }, reasonCode: h.reason_code, reason: h.reason, reviewDate: h.review_date, trustReportId: null }, by);
+      this.core.publish('finance.hold.placed', { holdId: h.id, sellerId: h.seller_id, amount: { amount: h.amount, currency: h.currency }, reasonCode: h.reason_code, reason: h.reason, reviewDate: h.review_date, trustReportId: h.trust_report_id }, by);
       await this.core.audit({ action: 'finance.hold.place', actionLabel: 'Hold approved and placed', category: 'financial', target: { type: 'hold', id: h.id, label: h.reason, sellerId: h.seller_id }, approvalRequestId: e.requestId, visibleToSeller: true }, by);
       return;
     }
@@ -552,6 +553,7 @@ export class HoldsPart extends Part {
       released_at: null,
       release_reason: null,
       approval_request_id: null,
+      trust_report_id: null,
     });
   }
 
@@ -577,6 +579,7 @@ export class HoldsPart extends Part {
       }
       await this.core.optional('workqueues', (w) =>
         w.raise({
+          sourceModule: 'finance',
           queueKey: 'finance.daily_checks',
           kind: 'hold_review',
           title: `Review hold of ${fmt(h.amount - h.released_amount, h.currency)} on ${names.get(h.seller_id)?.name ?? 'a seller'}`,

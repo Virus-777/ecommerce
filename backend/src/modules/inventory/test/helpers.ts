@@ -9,7 +9,7 @@
  *   reports.registerDataset / requestExport / getExport → recorded calls and ExportJobs.
  *   workqueues.raise → recorded in h.raised.
  *   finance.recordCompanyCost → recorded in h.costs.
- *   catalog.getProduct → products registered in h.products.
+ *   catalog.getProduct → products registered in h.products; catalog.getVariants → their variants (gtin when registered).
  */
 import type { FastifyInstance } from 'fastify';
 import { sql } from 'kysely';
@@ -25,6 +25,7 @@ import { auth, buildTestApp, token } from '../../../testing/app.js';
 export const INVENTORY_EVENTS = [
   'inventory.stock.changed',
   'inventory.stock.low',
+  'inventory.stock.low_digest',
   'inventory.reservation.allocated',
   'inventory.reservation.released',
   'inventory.adjustment.recorded',
@@ -47,7 +48,7 @@ export interface Harness {
   raised: unknown[];
   costs: unknown[];
   /** catalog.getProduct answers from here */
-  products: Map<string, { id: string; title: string; categoryId?: string | null; variants: { id: string; options: Record<string, string>; images: [] }[] }>;
+  products: Map<string, { id: string; title: string; categoryId?: string | null; variants: { id: string; options: Record<string, string>; images: []; gtin?: string | null }[] }>;
 }
 
 export async function harness(opts: { launchPhase?: number } = {}): Promise<Harness> {
@@ -88,6 +89,7 @@ export async function harness(opts: { launchPhase?: number } = {}): Promise<Harn
           approvalsNeeded: h.access.decision === 'approval_required' ? 1 : 0,
           eligibleApproverRoles: [],
           eligibleApprovers: [],
+          stepUpRequired: false,
         }),
         requestApproval: async (input) => {
           h.access.requests.push(input);
@@ -124,6 +126,8 @@ export async function harness(opts: { launchPhase?: number } = {}): Promise<Harn
       },
       catalog: {
         getProduct: async (id) => (h.products.get(id) as never) ?? null,
+        getVariants: async (ids) =>
+          [...h.products.values()].flatMap((p) => p.variants.filter((v) => ids.includes(v.id)).map((v) => ({ id: v.id, productId: p.id, productTitle: p.title, options: v.options, gtin: v.gtin ?? null }))),
       },
       finance: {
         recordCompanyCost: async (input) => {

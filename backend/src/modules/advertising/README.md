@@ -63,8 +63,8 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 | POST | `/api/admin/advertising/campaigns/{id}/check` | Run checks: blocked pages, overlaps, labels, claims vs promotion, availability, links, reach estimate | staff<br>`advertising.campaigns.view` | `CampaignCheckResult` |
 | GET | `/api/admin/advertising/campaigns/{id}/preview` | Desktop and phone preview exactly as visitors see it, with label and close control | staff<br>`advertising.campaigns.view` | `AdPreview` |
 | POST | `/api/admin/advertising/campaigns/{id}/submit` | Submit for approval _(audited)_ | staff<br>`advertising.campaigns.manage` | `{ noteToReviewers: text? }` → `AdCampaign` |
-| POST | `/api/admin/advertising/campaigns/{id}/approve` | Approve one review step (the campaign is approved when all steps are) _(audited)_ | staff<br>`advertising.campaigns.review` | `{ role: enum(advertising|content|marketing), note: text? }` → `AdCampaign` |
-| POST | `/api/admin/advertising/campaigns/{id}/request-changes` | Send back to the owner with a reason _(audited)_ | staff<br>`advertising.campaigns.review` | `{ role: enum(advertising|content|marketing), reason: text }` → `AdCampaign` |
+| POST | `/api/admin/advertising/campaigns/{id}/approve` | Approve one review step (the campaign is approved when all steps are) _(audited)_ | staff<br>`advertising.campaigns.review` | `{ role: enum(advertising|content|marketing)?, note: text? }` → `AdCampaign` |
+| POST | `/api/admin/advertising/campaigns/{id}/request-changes` | Send back to the owner with a reason _(audited)_ | staff<br>`advertising.campaigns.review` | `{ role: enum(advertising|content|marketing)?, reason: text }` → `AdCampaign` |
 | POST | `/api/admin/advertising/campaigns/{id}/reject` | Reject a request (e.g. promoted offer suspended) _(audited)_ | staff<br>`advertising.campaigns.review` | `{ reason: text }` → `AdCampaign` |
 | POST | `/api/admin/advertising/campaigns/{id}/schedule` | Schedule an approved campaign for its start time _(audited)_ | staff<br>`advertising.campaigns.publish` | `AdCampaign` |
 | POST | `/api/admin/advertising/campaigns/{id}/activate` | Activate an approved campaign now _(audited)_ | staff<br>`advertising.campaigns.publish` | `AdCampaign` |
@@ -84,7 +84,7 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 | POST | `/api/admin/advertising/creatives` | Add a creative (image or video uploaded through media first, or ad text) | staff<br>`advertising.campaigns.manage` | `CreativeInput` → `Creative` |
 | GET | `/api/admin/advertising/creatives/{id}` | Creative with checks, reviews and where it is used | staff<br>`advertising.campaigns.view` | `Creative` |
 | PATCH | `/api/admin/advertising/creatives/{id}` | Edit ad text or link (approved creatives return to draft) _(audited)_ | staff<br>`advertising.campaigns.manage` | `{ headline: string?, body: string?, buttonText: string?, link: string?, mediaId: uuid? }` → `Creative` |
-| POST | `/api/admin/advertising/creatives/{id}/review` | Approve, request changes or reject a creative with a reason _(audited)_ | staff<br>`advertising.campaigns.review` | `{ role: enum(advertising|content|marketing), decision: enum(approved|changes_requested|rejected|note), reasonCode: enum(no_changes|unsupported_claim|broken_link|product_unavailable|label_missing|image_quality|policy)?, comment: text? }` → `Creative` |
+| POST | `/api/admin/advertising/creatives/{id}/review` | Approve, request changes or reject a creative with a reason _(audited)_ | staff<br>`advertising.campaigns.review` | `{ role: enum(advertising|content|marketing)?, decision: enum(approved|changes_requested|rejected|note), reasonCode: enum(no_changes|unsupported_claim|broken_link|product_unavailable|label_missing|image_quality|policy)?, comment: text? }` → `Creative` |
 | POST | `/api/admin/advertising/creatives/{id}/check` | Re-run the link, availability and label checks | staff<br>`advertising.campaigns.view` | `Creative` |
 | GET | `/api/admin/advertising/charges` | Seller ad charges (separate from commission) _(phase 3)_ | staff<br>`advertising.billing.manage` | Page<AdCharge> |
 | POST | `/api/admin/advertising/charges/{id}/void` | Void an accrued charge or credit a posted one (invalid traffic, cancelled delivery) _(idempotent, audited, phase 3)_ | staff<br>`advertising.billing.manage` | `{ reason: text }` → `AdCharge` |
@@ -173,6 +173,7 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 | positions | `int[]?` Fixed positions in results lists, e.g. [3, 8] |
 | label | `enum(Ad|Sponsored)` |
 | liveCampaigns | `int` |
+| version | `int` Increments on every change; PATCH must send the version it read (PlacementPatch.version), otherwise CONFLICT |
 | updatedAt | `datetime` |
 | updatedBy | `Actor?` |
 
@@ -809,6 +810,7 @@ stateDiagram-v2
   paused --> finished: finish
   finished --> archived: archive
   rejected --> archived: archive
+  rejected --> draft: reopen
 ```
 
 Plan ch. 16 lifecycle (Draft → In review/Submitted → Approved → Scheduled → Live/Active ⇄ Paused → Finished → Archived); Rejected is added for requests that fail review. approve completes only when every required ApprovalStep is approved (own promotions: Advertising plus Content or Marketing; seller and brand ads: Advertising, Content for claims). activate is allowed only if startsAt has passed and no linked promotion starts later. The final approve applies the campaign's afterApproval choice automatically (schedule, or activate when still allowed; if activation became impossible meanwhile it falls back to schedule and says so in the timeline). start/finish run from jobs at startsAt/endsAt; finish also fires on budget or delivery cap reached, linked promotion ended (stopWithPromotion), promoted offer unavailable, seller suspended. Staff pause takes the ad off the site within 1 minute (decision ttl). Renew creates a new draft copy; it is not a transition. Editing a seller request in review sends it back to draft (start of review).
@@ -825,9 +827,10 @@ stateDiagram-v2
   in_review --> rejected: reject
   approved --> draft: edit
   approved --> rejected: revoke
+  rejected --> in_review: reinstate
 ```
 
-Creatives are submitted with their campaign. approve needs every required reviewer role. revoke is used when a promoted offer is suspended or a trust enforcement names it (reason recorded; seller can appeal through trust).
+Creatives are submitted with their campaign. approve needs every required reviewer role. revoke is used when a promoted offer is suspended or a trust enforcement names it (reason recorded; seller can appeal through trust). reinstate only follows trust.enforcement.reversed for a creative that enforcement revoked: it goes back to review, never straight to approved.
 
 ### Ad charge (`AdCharge.state`)
 
@@ -1122,18 +1125,19 @@ Indexes: `unique (campaign_id, day)`, `(seller_id, state)`
 | `catalog.product.publication_changed` | catalog | Pause ads promoting hidden or suspended products |
 | `sellers.seller.restricted` | sellers | Pause the seller's ads when the restriction covers new sales or advertising |
 | `sellers.seller.suspended` | sellers | Finish the seller's ads (seller_restricted); charges only for delivery so far |
-| `trust.enforcement.recorded` | trust | Revoke creatives and reject requests that promote the enforced offer or product |
-| `orders.order.placed` | orders | Attribute the order to the visitor's last ad click within the attribution period |
+| `trust.enforcement.recorded` | trust | Revoke creatives and reject requests that promote the enforced offer or product; the enforcementId is stored with the revoke or reject reason so a reversal can find them |
+| `trust.enforcement.reversed` | trust | Inbox-claimed per event. Creatives revoked by that enforcementId go back to in_review (reinstate) and seller requests it rejected reopen as drafts (reopen) the seller may resubmit; ads finished because of it are not restarted. The seller (or staff owner) is told; the campaign log records the reversal |
+| `orders.order.placed` | orders | Attribute the order to the last ad click within attributionDays: by customerId for signed-in shoppers, and for guests by the payload visitorId (present only when the shopper allowed personalization; hashed like ad_events.visitor_key). Orders with neither are not attributed. unique (order_id, campaign_id) keeps redelivery idempotent |
 | `orders.item.cancelled` | orders | Reduce attributed sales for cancelled items |
 | `content.page.published` | content | Re-run link checks for creatives pointing at the page |
-| `access.approval.decided` | access | Apply an approved global rules change at its effective time |
+| `access.approval.decided` | access | Apply an approved global rules change at its effective time (and finish non-draft fee schedule approvals). Inbox-claimed per event (ctx.inbox) before acting, so a redelivered decision applies once and writes one audit entry |
 | `catalog.product.merged` | catalog | Repoint ads, ad requests and creatives that promote the duplicate product (or its variants, mapped through newVariantId / intoVariantId) to the kept product; delivery, spend and attribution history stay on the ad |
 
 ## In-process API (for other modules)
 
 | Function | Signature | Used by |
 |---|---|---|
-| sponsoredForResults | `(ctx: { page: PageType, query?: string, categoryId?: uuid, productId?: uuid, visitorId: string, sessionId: string, device: string, organicOfferIds: uuid[] }) => SponsoredProductSlot[]`<br>Sponsored product cards and their positions for a results list (max per page from the placement; relevance first, then priority). Only eligible, in-stock offers are returned. | search, catalog |
+| sponsoredForResults | `(ctx: { page: PageType, query?: string, categoryId?: uuid, productId?: uuid, visitorId: string, sessionId: string, device: string, organicOfferIds: uuid[], personalizationAllowed: bool, customerId?: uuid }) => SponsoredProductSlot[]`<br>Sponsored product cards and their positions for a results list (max per page from the placement; relevance first, then priority). Only eligible, in-stock offers are returned. personalizationAllowed false: only page context (query, category, product) is used, frequency state is kept per session only and clicks are not kept for attribution by visitor; customerId (signed-in shopper) lets frequency caps and attribution follow the customer across devices when personalization is allowed. | search, catalog |
 | adPositionsFor | `(page: PageType) => { placementKey: string, name: string, enabled: bool }[]`<br>Ad positions on a page, so content can show them as locked markers in homepage sections. | content |
 | campaignsForPromotion | `(promotionId: uuid) => AdCampaignSummary[]`<br>Ads linked to a promotion (shown on the promotion detail). | promotions, graphql |
 | isAdBlockedPage | `(page: PageType) => bool`<br>True for checkout, payment results, order tracking and returns; used by front-end shells to skip the serve call. | content |
@@ -1214,6 +1218,8 @@ Checked through the access module (limits per role, second reviewer).
 - Paid seller ads, sponsored store/brand, floating, interstitial and video are later (plan ch. 20 phase 3); their seller endpoints are phase 3 and the placements ship disabled. Sponsored product runs as a pilot for selected sellers when paidSellerAdsEnabled is on.
 - Dependencies follow the architecture doc (media, access). promotions, offers, inventory, catalog, sellers, orders and content are optional: without them the related checks are skipped and the matching auto-pause rules do nothing.
 - Global rules changes are versioned with an effective date and always need Business Owner approval (admin/ad-placements); the four blocked page types can never be unblocked.
+- Reviewer roles: approve, request-changes and creative review take the reviewing step from the caller's access roles (access.rolesOf), so a Content Manager can never act on the Advertising step by sending role advertising.
+- Attribution privacy (decision: guest attribution only with personalizationAllowed): orders carry visitorId only when the shopper allowed personalization; clicks recorded without personalization keep no visitor key usable for attribution.
 
 ## GraphQL (read layer)
 

@@ -4,6 +4,7 @@
  */
 import { allocate, money } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
+import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type {
   AdminItemAfterSales,
   AdminOrderDetail,
@@ -69,7 +70,7 @@ import {
 import type { CancellationRec, GroupRec, ItemRec, NoteRec, ShipmentRec, TimelineRec } from '../ports.js';
 import type { Agg, Cfg, Core } from './core.js';
 
-const OFFICIAL_NAME = 'Marketly Official Store';
+const OFFICIAL_NAME = OFFICIAL_STORE_NAME;
 const ADDRESS_NOTE = "To change where a package goes, contact the seller before it ships. Address book changes don't affect this order.";
 const TIMING_NOTE = 'Refunds are sent within 1 business day of confirmation; banks usually show them 3–5 business days after they are sent.';
 const STATUS_NOTE = 'Requested means no money has moved yet.';
@@ -230,6 +231,7 @@ export class Views {
       returnWindowEndsAt: iso(i.return_window_ends_at),
       splitFromItemId: i.split_from_item_id,
       replacementOfItemId: i.replacement_of_item_id,
+      checkoutLineId: i.replacement_of_item_id ? null : i.checkout_line_id,
       afterSales: this.afterSales(agg, i),
       actions: viewer === 'store' ? this.itemActions(agg, i, g) : [],
     };

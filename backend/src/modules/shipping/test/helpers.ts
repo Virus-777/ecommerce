@@ -16,6 +16,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { newId } from '../../../kernel/lib/ids.js';
+import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type * as access from '../../../spec/access.js';
 import type * as audit from '../../../spec/audit.js';
 import type * as catalog from '../../../spec/catalog.js';
@@ -36,6 +37,8 @@ export interface Harness {
   audits: audit.RecordInput[];
   notices: notifications.NotifyInput[];
   offers: Map<string, offers.Offer>;
+  /** offers.countActiveOffersByProfile answers per profile id (else counted from offers) */
+  offerCounts: Map<string, number>;
   snapshots: Map<string, offers.OfferSnapshot>;
   products: Map<string, catalog.ProductSnapshot>;
   guestGrants: Set<string>;
@@ -82,6 +85,7 @@ export async function harness(): Promise<Harness> {
     audits: [] as audit.RecordInput[],
     notices: [] as notifications.NotifyInput[],
     offers: new Map<string, offers.Offer>(),
+    offerCounts: new Map<string, number>(),
     snapshots: new Map<string, offers.OfferSnapshot>(),
     products: new Map<string, catalog.ProductSnapshot>(),
     guestGrants: new Set<string>(),
@@ -108,6 +112,8 @@ export async function harness(): Promise<Harness> {
           const items = [...h.offers.values()].filter((o) => (filter.official ? o.ownerType === 'official' : o.sellerId === filter.sellerId) && (!filter.status?.length || filter.status.includes(o.status)));
           return { items, nextCursor: null };
         },
+        // exact count of active offers per profile (h.offerCounts overrides it, e.g. more offers than any page holds)
+        countActiveOffersByProfile: async (profileId) => h.offerCounts.get(profileId) ?? [...h.offers.values()].filter((o) => o.shippingProfileId === profileId && o.status === 'active').length,
       },
       catalog: {
         snapshotForOrder: async (variantId) => ({ ...structuredClone(h.products.get(variantId)!), takenAt: clock.now().toISOString() }),
@@ -135,7 +141,7 @@ export async function harness(): Promise<Harness> {
           ids.map((id) => ({ id, ref: 'SL-1', slug: 'seller', storeName: h.sellerNames.get(id) ?? 'Casa Verde Home', status: 'approved', verified: true, canSellNew: true, activeRestrictionIds: [], launchReady: true })),
       },
       access: {
-        check: async (_p, action) => ({ decision: h.access.decision, action, reason: h.access.decision === 'denied' ? 'Your role has no authority' : 'Above your limit: Finance Manager approval', requiresSecondReviewer: false, approvalsNeeded: h.access.decision === 'approval_required' ? 1 : 0, eligibleApproverRoles: [], eligibleApprovers: [] }),
+        check: async (_p, action) => ({ decision: h.access.decision, action, reason: h.access.decision === 'denied' ? 'Your role has no authority' : 'Above your limit: Finance Manager approval', requiresSecondReviewer: false, approvalsNeeded: h.access.decision === 'approval_required' ? 1 : 0, eligibleApproverRoles: [], eligibleApprovers: [], stepUpRequired: false }),
         requestApproval: async (input) => {
           const id = newId();
           h.access.requested.push(input);
@@ -200,7 +206,9 @@ export function product(h: Harness, o: { title: string; price: number; ownerType
     termsVersion: 1,
     ownerType,
     sellerId: ownerType === 'seller' ? (o.sellerId ?? null) : null,
-    sellerName: ownerType === 'official' ? 'Marketly Official Store' : 'Casa Verde Home',
+    sellerName: ownerType === 'official' ? OFFICIAL_STORE_NAME : 'Casa Verde Home',
+    sellerSku: 'SKU-1',
+    title: o.title,
     condition: 'new',
     conditionNotes: null,
     missingItems: [],

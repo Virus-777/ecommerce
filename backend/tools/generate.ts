@@ -19,7 +19,7 @@ import { parseArgs } from 'node:util';
 import { parse, print, valueFromASTUntyped } from 'graphql';
 import { emitCommon, emitModule, GENERATED } from './lib/emit.js';
 import { scaffoldFiles } from './lib/scaffold.js';
-import { apiDir, backendDir, camel, gqlDir, loadCommon, loadFragment, loadModules, type ModuleSpec } from './lib/spec.js';
+import { apiDir, backendDir, camel, gqlDir, loadCommon, loadFragment, loadModules, readText, type ModuleSpec } from './lib/spec.js';
 import { TypeContext } from './lib/types.js';
 
 const { values: opts } = parseArgs({ options: { check: { type: 'boolean' }, all: { type: 'boolean' }, only: { type: 'string' } } });
@@ -70,14 +70,14 @@ export const moduleNames = Object.keys(specs) as ModuleName[];
 
 /* ---------------------------------------------------------------- GraphQL base + persisted queries */
 {
-  const base = readFileSync(join(gqlDir, 'base.graphql'), 'utf8');
+  const base = readText(join(gqlDir, 'base.graphql'));
   const ops: Record<string, Record<string, { name: string; screens: string[]; query: string }>> = {};
   for (const area of ['store', 'seller', 'admin']) {
     ops[area] = {};
     const dir = join(gqlDir, 'operations', area);
     if (!existsSync(dir)) continue;
     for (const f of readdirSync(dir).filter((x) => x.endsWith('.graphql')).sort()) {
-      const src = readFileSync(join(dir, f), 'utf8');
+      const src = readText(join(dir, f));
       const doc = parse(src);
       const normalized = print(doc); // same id as docs/api/tools/graphql.mjs → manifest.json
       const id = createHash('sha256').update(normalized).digest('hex');
@@ -130,7 +130,7 @@ for (const m of modules) {
   if (!exists && !scaffoldNow) continue;
   const readmeSrc = join(apiDir, 'modules', `${m.name}.md`);
   if (existsSync(readmeSrc)) {
-    const md = readFileSync(readmeSrc, 'utf8').replace(/\]\(([a-z0-9-]+)\.md(#[^)]*)?\)/g, (_, x: string, h = '') => `](../${x}/README.md${h})`);
+    const md = readText(readmeSrc).replace(/\]\(([a-z0-9-]+)\.md(#[^)]*)?\)/g, (_, x: string, h = '') => `](../${x}/README.md${h})`);
     generated.set(join(dir, 'README.md'), `<!-- ${GENERATED(`docs/api/modules/${m.name}.md`).trim().replace(/^\/\/ /, '')} -->\n\n${md}`);
   }
   if (fragment) {
@@ -176,7 +176,7 @@ ${present.map((n) => `  ${JSON.stringify(n)}: () => import('./${n}/module.js'),`
 /* ---------------------------------------------------------------- write or check */
 const stale: string[] = [];
 for (const [p, content] of generated) {
-  const cur = existsSync(p) ? readFileSync(p, 'utf8') : null;
+  const cur = existsSync(p) ? readText(p) : null;
   if (cur === content) continue;
   if (CHECK) stale.push(relative(backendDir, p));
   else {

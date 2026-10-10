@@ -28,6 +28,7 @@ export async function customerOf(service: TrustService, i: Input): Promise<Repor
     name: profile?.displayName ?? null,
     mediaOwner: { kind: 'customer', id: accountId || null },
     customerId,
+    accountId: accountId || null,
     actor: i.actor,
   };
 }
@@ -41,6 +42,7 @@ export async function sellerOf(service: TrustService, i: Input & { sellerId: str
     name: seller?.storeName ?? null,
     mediaOwner: { kind: 'seller', id: i.sellerId },
     sellerId: i.sellerId,
+    accountId: i.principal?.accountId ?? null,
     actor: i.actor,
   };
 }

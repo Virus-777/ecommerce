@@ -15,12 +15,11 @@ import { Routines } from './app/routines.js';
 import { Sweep } from './app/sweep.js';
 import { AREAS, type Priority } from './domain/catalog.js';
 import { addDays, ageLabel } from './domain/rules.js';
-import type { ArchiveStore, WorkqueuesRepository } from './ports.js';
+import type { WorkqueuesRepository } from './ports.js';
 
 export interface WorkqueuesServiceDeps {
   repo: WorkqueuesRepository;
   ctx: ModuleContext<'workqueues'>;
-  archive: ArchiveStore;
 }
 
 const DISPATCH_KINDS = ['overdue_dispatch', 'missing_tracking', 'seller_cannot_fulfill'];
@@ -98,7 +97,8 @@ export class WorkqueuesService implements WorkqueuesPublicApi {
 
   /** Create or refresh a work item. Idempotent on dedupeKey: a second call updates title, deadline and amount instead of creating a duplicate. For checks that are not events (e.g. finance's daily reconciliation, returns' deadline job). */
   async raise(input: RaiseInput): Promise<WorkItem> {
-    const module = input.queueKey?.split('.')[0] || 'unknown';
+    // the calling module names itself (stored as items.source_module); validated as required by items.raise
+    const module = typeof input.sourceModule === 'string' ? input.sourceModule.trim() : '';
     const { row } = await this.items.raise({
       queueKey: input.queueKey,
       kind: input.kind,
@@ -115,7 +115,7 @@ export class WorkqueuesService implements WorkqueuesPublicApi {
       dedupeKey: input.dedupeKey,
       links: input.links,
       visibleToSeller: input.visibleToSeller,
-      source: { module, event: null, by: { kind: 'system', name: module } },
+      source: { module, event: null, by: { kind: 'system', name: module || 'unknown' } },
     });
     return this.core.workItem(row);
   }
@@ -362,7 +362,7 @@ export class WorkqueuesService implements WorkqueuesPublicApi {
     await this.intake.handle('payments.chargeback.opened', event);
   }
 
-  /** catalog.product.submitted: Open a product_review item */
+  /** catalog.product.submitted: Open a product_review item due at the payload's reviewDueAt (the catalog review target in business hours; queue default when absent) */
   async onProductSubmittedFromCatalog(event: EventPayload<'catalog.product.submitted'>): Promise<void> {
     await this.intake.handle('catalog.product.submitted', event);
   }
@@ -382,7 +382,7 @@ export class WorkqueuesService implements WorkqueuesPublicApi {
     await this.intake.handle('catalog.product.rejected', event);
   }
 
-  /** sellers.application.submitted: Open an application_waiting item with the decision target as deadline */
+  /** sellers.application.submitted: Open an application_waiting item due at the payload's decisionTargetAt (queue default when absent) */
   async onApplicationSubmittedFromSellers(event: EventPayload<'sellers.application.submitted'>): Promise<void> {
     await this.intake.handle('sellers.application.submitted', event);
   }
@@ -457,7 +457,7 @@ export class WorkqueuesService implements WorkqueuesPublicApi {
     await this.intake.handle('trust.recommendation.decided', event);
   }
 
-  /** messaging.reply.overdue: Open a seller-visible seller_reply_overdue task */
+  /** messaging.reply.overdue: Open a seller-visible seller_reply_overdue task. Skipped when officialStore is true: messaging keeps its own official_store_reply item for the Official Store (staff owe the reply) */
   async onReplyOverdueFromMessaging(event: EventPayload<'messaging.reply.overdue'>): Promise<void> {
     await this.intake.handle('messaging.reply.overdue', event);
   }
@@ -507,6 +507,11 @@ export class WorkqueuesService implements WorkqueuesPublicApi {
     await this.intake.handle('warehouse.return_parcel.received', event);
   }
 
+  /** reviews.moderation.decided: Resolve the review_moderation_overdue item for that moderation item (dedupeKey review_moderation_overdue:<moderationItemId>) */
+  async onModerationDecidedFromReviews(event: EventPayload<'reviews.moderation.decided'>, eventId?: string): Promise<void> {
+    await this.intake.handle('reviews.moderation.decided', event, eventId);
+  }
+
   /* ---------------- jobs */
 
   /** Job workqueues.deadline-sweep (every 1 min): Move items to due_soon and overdue; publish workqueues.item.overdue once; escalate along each queue's route; route to the backup when the lead is away (access absences) */
@@ -524,7 +529,7 @@ export class WorkqueuesService implements WorkqueuesPublicApi {
     await this.routines.late();
   }
 
-  /** Job workqueues.day-end-prepare (daily 15:00 market time): Build today's day-end review and publish workqueues.day_end.prepared (once per date) */
+  /** Job workqueues.day-end-prepare (daily 15:00 market time): Build or refresh today's day-end review; publish workqueues.day_end.prepared (the reminder) once per date, only while the review is open */
   async dayEndPrepare(): Promise<void> {
     await this.dayEnd.prepareAndAnnounce();
   }
@@ -534,7 +539,7 @@ export class WorkqueuesService implements WorkqueuesPublicApi {
     await this.dayEnd.close();
   }
 
-  /** Job workqueues.archive (monthly): Move resolved items older than itemRetentionDays to cold storage */
+  /** Job workqueues.archive (monthly): Mark resolved items older than itemRetentionDays archived (rows stay; nothing is deleted) */
   async archive(): Promise<void> {
     await this.sweep.archive();
   }
