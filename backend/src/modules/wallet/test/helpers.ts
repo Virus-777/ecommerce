@@ -16,6 +16,7 @@ import type { FastifyInstance } from 'fastify';
 import { newId } from '../../../kernel/lib/ids.js';
 import type * as access from '../../../spec/access.js';
 import type * as audit from '../../../spec/audit.js';
+import type * as finance from '../../../spec/finance.js';
 import type * as notifications from '../../../spec/notifications.js';
 import type { OrderDetail } from '../../../spec/orders.js';
 import { auth, buildTestApp, callers, movingClock, tokenClock } from '../../../testing/app.js';
@@ -40,6 +41,10 @@ export interface Harness {
   finance: { value: boolean };
   settings: Record<string, unknown>;
   approvals: (access.RequestApprovalInput & { id: string })[];
+  /** finance.recordExternalDifference calls (finance booted with harness({ modules: ['finance'] })) */
+  financeDiffs: Parameters<finance.FinancePublicApi['recordExternalDifference']>[0][];
+  /** media.storeGeneratedFile calls with the file text (media booted with harness({ modules: ['media'] })) */
+  mediaFiles: { purpose: string; fileName: string; ttlHours?: number; text: string; id: string }[];
   call(method: string, url: string, token: string, body?: unknown, headers?: Record<string, string>): Promise<{ status: number; body: any }>;
   publish(source: string, name: string, payload: unknown): Promise<void>;
   named(name: string): any[];
@@ -49,10 +54,10 @@ export interface Harness {
   give(customerId: string, amount: number, o?: { orderId?: string }): Promise<void>;
   /** Approves (or rejects) a recorded approval request as access would */
   decide(requestId: string, outcome: 'approved' | 'rejected'): Promise<void>;
-  staff(permissions?: string[]): string;
+  staff(permissions?: string[], accountId?: string): string;
 }
 
-export async function harness(): Promise<Harness> {
+export async function harness(opts: { modules?: string[] } = {}): Promise<Harness> {
   const clock = movingClock();
   tokenClock.now = () => clock.now();
   tokenClock.ttlSeconds = 400 * 86_400;
@@ -67,10 +72,12 @@ export async function harness(): Promise<Harness> {
     finance: { value: false },
     settings: {} as Record<string, unknown>,
     approvals: [] as Harness['approvals'],
+    financeDiffs: [] as Harness['financeDiffs'],
+    mediaFiles: [] as Harness['mediaFiles'],
   };
   const snapshot = (id: string) => ({ id, userId: id, ref: 'CU-000001', displayName: 'Ana Lopez', email: 'ana@example.com', accountStatus: 'active' as const, canOrder: true, canMessage: true });
   const app = await buildTestApp({
-    only: ['wallet', 'settings', 'audit', 'notifications'],
+    only: ['wallet', 'settings', 'audit', 'notifications', ...(opts.modules ?? [])],
     clock,
     config: { rateLimits: false, launchPhase: 4 },
     apiStubs: {
@@ -90,6 +97,20 @@ export async function harness(): Promise<Harness> {
           return newId();
         },
       },
+      finance: {
+        recordExternalDifference: async (input) => {
+          h.financeDiffs.push(input);
+          return { id: newId() } as finance.ReconItem;
+        },
+      },
+      media: {
+        storeGeneratedFile: async (input) => {
+          const id = newId();
+          const text = await new Response(input.body).text();
+          h.mediaFiles.push({ purpose: input.purpose, fileName: input.fileName, ttlHours: input.ttlHours, text, id });
+          return { id } as never;
+        },
+      },
       notifications: {
         notify: async (input) => {
           h.notices.push(input);
@@ -99,7 +120,7 @@ export async function harness(): Promise<Harness> {
       access: {
         check: async (_p, action) => {
           const decision = h.authority[action] ?? 'allowed';
-          return { decision, action, reason: decision === 'allowed' ? 'Within your $50.00 limit' : decision === 'denied' ? 'Your role has no authority' : 'Above your limit: Finance Manager approval', requiresSecondReviewer: false, approvalsNeeded: decision === 'allowed' ? 0 : 1, eligibleApproverRoles: [], eligibleApprovers: [] };
+          return { decision, action, reason: decision === 'allowed' ? 'Within your $50.00 limit' : decision === 'denied' ? 'Your role has no authority' : 'Above your limit: Finance Manager approval', requiresSecondReviewer: false, approvalsNeeded: decision === 'allowed' ? 0 : 1, eligibleApproverRoles: [], eligibleApprovers: [], stepUpRequired: false };
         },
         hasPermission: async () => h.finance.value,
         requestApproval: async (input) => {
@@ -159,7 +180,7 @@ export async function harness(): Promise<Harness> {
         requestedById: a.requestedBy.accountId ?? newId(),
       });
     },
-    staff: (permissions) => callers.staff(permissions),
+    staff: (permissions, accountId) => callers.staff(permissions, accountId ? { sub: accountId } : {}),
   };
   // one object: tests change h.authority, h.settings… and the stubs above read them
   return Object.assign(h, rest);

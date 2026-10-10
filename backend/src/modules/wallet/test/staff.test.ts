@@ -54,13 +54,13 @@ describe('goodwill credit', () => {
     expect(entries.body.items[0]).toMatchObject({ kind: 'price_adjustment', amount: USD(700), label: 'Price adjustment', actor: { kind: 'staff' }, reason: 'Price dropped two days after purchase' });
   });
 
-  it('above the staff limit waits for approval (APPROVAL_REQUIRED), then access decides', async () => {
+  it('above the staff limit is saved pending approval (201 with approval in the body), then access decides', async () => {
     const c = h.customer();
     h.authority['wallet.goodwill.grant'] = 'approval_required';
     const res = await h.call('POST', `${ADMIN}/goodwill`, agent(), goodwill(c.id, 8000), idem());
-    expect(res.status, JSON.stringify(res.body)).toBe(409);
-    expect(res.body.error).toMatchObject({ code: 'APPROVAL_REQUIRED', details: { approvalRequestId: expect.any(String), grantId: expect.any(String) } });
-    const { approvalRequestId, grantId } = res.body.error.details;
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ state: 'pending_approval', amount: USD(8000), approval: { required: true, approvalRequestId: expect.any(String) } });
+    const { id: grantId, approval: { approvalRequestId } } = res.body;
     expect(h.approvals.find((a) => a.id === approvalRequestId)).toMatchObject({ action: 'wallet.goodwill.grant', target: { type: 'goodwill_grant', id: grantId }, amount: USD(8000) });
     expect((await h.service.getBalance(c.id)).available).toEqual(USD(0));
 
@@ -135,7 +135,11 @@ describe('reversing goodwill', () => {
     expect(reversed.status, JSON.stringify(reversed.body)).toBe(200);
     expect(reversed.body.state).toBe('reversed');
     expect((await h.service.getBalance(c.id)).available).toEqual(USD(0));
-    expect(h.named('wallet.credit.reversed')).toContainEqual({ customerId: c.id, grantId: g.id, amount: USD(1200), reason: 'Granted to the wrong customer' });
+    const reversal = (await h.call('GET', `${ADMIN}/customers/${c.id}/entries?kind=reversal`, finance())).body.items[0];
+    expect(reversal).toMatchObject({ kind: 'reversal', amount: USD(-1200) });
+    expect(h.named('wallet.credit.reversed').filter((e) => e.grantId === g.id)).toEqual([
+      { customerId: c.id, entryId: reversal.id, grantId: g.id, grantEntryId: g.ledgerEntryId, amount: USD(1200), chargedTo: 'platform', sellerId: null, caseId: null, orderId: null, reason: 'Granted to the wrong customer' },
+    ]);
     expect(h.audits.find((a) => a.action === 'wallet.goodwill.reverse' && a.target.id === g.id)).toBeTruthy();
     const twice = await h.call('POST', `${ADMIN}/goodwill/${g.id}/reverse`, finance(), { reason: 'Again' }, idem());
     expect(twice.body.error.code).toBe('ILLEGAL_TRANSITION');
@@ -147,10 +151,28 @@ describe('reversing goodwill', () => {
     expect(refused.body.error).toMatchObject({ code: 'CREDIT_ALREADY_USED', details: { used: USD(300) } });
 
     h.authority['wallet.goodwill.grant'] = 'approval_required';
-    const pending = (await h.call('POST', `${ADMIN}/goodwill`, agent(), goodwill(c.id, 500), idem())).body.error.details.grantId;
+    const pending = (await h.call('POST', `${ADMIN}/goodwill`, agent(), goodwill(c.id, 500), idem())).body.id;
     expect((await h.call('POST', `${ADMIN}/goodwill/${pending}/reverse`, finance(), { reason: 'x' }, idem())).body.error.code).toBe('ILLEGAL_TRANSITION');
     expect((await h.call('POST', `${ADMIN}/goodwill/${newId()}/reverse`, finance(), { reason: 'x' }, idem())).status).toBe(404);
     expect((await h.call('POST', `${ADMIN}/goodwill/${used.id}/reverse`, agent(), { reason: 'x' }, idem())).status).toBe(403);
+  });
+
+  it('a seller-charged grant reversed tells finance which seller to credit back (sellerId, grantEntryId, case and order)', async () => {
+    const c = h.customer();
+    const sellerId = newId();
+    const caseId = newId();
+    const orderId = newId();
+    const g = (await h.call('POST', `${ADMIN}/goodwill`, agent(), goodwill(c.id, 1750, { chargedTo: 'seller', sellerId, caseId, orderId }), idem())).body;
+    expect(g).toMatchObject({ state: 'granted', ledgerEntryId: expect.any(String) });
+    const granted = h.named('wallet.credit.granted').find((e) => e.customerId === c.id)!;
+    expect(granted.entryId).toBe(g.ledgerEntryId);
+    const res = await h.call('POST', `${ADMIN}/goodwill/${g.id}/reverse`, finance(), { reason: 'Seller was not at fault' }, idem());
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const reversal = (await h.call('GET', `${ADMIN}/customers/${c.id}/entries?kind=reversal`, finance())).body.items[0];
+    expect(h.named('wallet.credit.reversed').filter((e) => e.customerId === c.id)).toEqual([
+      { customerId: c.id, entryId: reversal.id, grantId: g.id, grantEntryId: granted.entryId, amount: USD(1750), chargedTo: 'seller', sellerId, caseId, orderId, reason: 'Seller was not at fault' },
+    ]);
+    expect((await h.service.getBalance(c.id)).available).toEqual(USD(0));
   });
 });
 

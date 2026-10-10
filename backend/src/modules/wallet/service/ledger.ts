@@ -17,7 +17,8 @@ import type { CreditBalance, CreditHold, CreditLot, LedgerEntry, WalletCreditGra
 import { creditHoldMachine } from '../domain/state-machines.js';
 import { allocate, daysLeft, dueReminder, HOW_TO_USE, m, reminderDays, RESERVATION_KINDS, SYSTEM, USABLE_ON, type EntryKind, type LotSource } from '../domain/rules.js';
 import { allocationsOf, toEntry, toHold, toLot, type EntryFacts } from '../mappers.js';
-import type { AccountRow, EntryRow, HoldRow, LotAllocation, LotRow, WalletRepository } from '../ports.js';
+import { dateInZone } from '../../../kernel/lib/clock.js';
+import type { AccountRow, BalanceSnapshot, EntryRow, HoldRow, LotAllocation, LotRow, WalletRepository } from '../ports.js';
 import { conflict, invalid, notFound, Outbox, type By, type WalletCore } from './core.js';
 
 const DAY = 86_400_000;
@@ -109,8 +110,8 @@ export class Ledger {
     for (const lot of await tx.dueLots(acct.customer_id, now, { forUpdate: true })) {
       if (lot.remaining > 0) {
         a = await tx.updateAccount(a.customer_id, { available: a.available - lot.remaining, held: a.held, updated_at: now });
-        await tx.insertEntry(this.entryRow(a, { kind: 'expiry', amount: -lot.remaining, allocations: [{ lotId: lot.id, amount: lot.remaining }], key: null, actor: SYSTEM, reason: 'Credit reached its expiry date' }));
-        out.push('wallet.credit.expired', { customerId: a.customer_id, lotId: lot.id, amount: m(lot.remaining, a.currency) });
+        const entry = await tx.insertEntry(this.entryRow(a, { kind: 'expiry', amount: -lot.remaining, allocations: [{ lotId: lot.id, amount: lot.remaining }], key: null, actor: SYSTEM, reason: 'Credit reached its expiry date' }));
+        out.push('wallet.credit.expired', { customerId: a.customer_id, entryId: entry.id, lotId: lot.id, source: lot.source as LotSource, amount: m(lot.remaining, a.currency) });
       }
       await tx.updateLot(lot.id, { remaining: 0, state: 'expired' });
     }
@@ -281,6 +282,46 @@ export class Ledger {
     return { released };
   }
 
+  /**
+   * held → held (extend): keeps a hold alive while its payment is pending check, so the capture after a slow
+   * bank answer does not fail with INSUFFICIENT_CREDIT. Never shortens a hold; capped at pendingHoldMaxHours
+   * after the hold was made (its `hold` ledger entry); a captured or released hold is returned unchanged.
+   */
+  async extendHold(holdId: string, until: string): Promise<CreditHold> {
+    const wanted = until ? new Date(until) : new Date(Number.NaN);
+    if (Number.isNaN(wanted.getTime())) throw invalid([{ path: 'until', message: 'Give a date and time' }]);
+    const h0 = await this.repo.getHold(holdId);
+    if (!h0) throw notFound('Credit hold');
+    const maxHours = Number(await this.core.ctx.settings.get('pendingHoldMaxHours')) || 48;
+    const { hold, currency } = await this.repo.transaction(async (tx) => {
+      const acct = await tx.lockAccount(h0.customer_id);
+      const h = (await tx.getHold(holdId, { forUpdate: true }))!;
+      const currency = acct?.currency ?? this.core.currency;
+      if (h.state !== 'held') return { hold: h, currency };
+      const made = (await tx.entryOfHold(h.id, 'hold'))?.at ?? h.expires_at;
+      const target = Math.min(wanted.getTime(), made.getTime() + maxHours * 3_600_000);
+      if (target <= h.expires_at.getTime()) return { hold: h, currency };
+      const state = creditHoldMachine.next('held', 'extend');
+      return { hold: await tx.updateHold(h.id, { state, expires_at: new Date(target) }), currency };
+    });
+    return toHold(hold, currency);
+  }
+
+  /** Credit outstanding over all accounts (now, or rebuilt from the ledger at asOf), for finance's store_credit check */
+  async liabilityTotal(asOf?: string): Promise<{ available: common.Money; held: common.Money; accounts: number }> {
+    const currency = this.core.currency;
+    if (asOf) {
+      const at = new Date(asOf);
+      if (Number.isNaN(at.getTime())) throw invalid([{ path: 'asOf', message: 'Give a date and time' }]);
+      if (at.getTime() < this.core.now().getTime()) {
+        const r = await this.repo.liabilityAt(at);
+        return { available: m(r.total - r.held, currency), held: m(r.held, currency), accounts: r.accounts };
+      }
+    }
+    const r = await this.repo.liabilityNow();
+    return { available: m(r.available, currency), held: m(r.held, currency), accounts: r.accounts };
+  }
+
   /* ================================================================ refunds to credit */
 
   async creditRefund(input: { customerId: string; refundId: string; orderId: string; amount: common.Money; reason: string }, idempotencyKey: string, by: By = { actor: SYSTEM }): Promise<LedgerEntry> {
@@ -426,7 +467,7 @@ export class Ledger {
 
   /* ================================================================ balance check */
 
-  /** Job wallet.balance-check: every account against its ledger, lots and holds; differences go to Finance through the audit log */
+  /** Job wallet.balance-check: every account against its ledger, lots and holds; differences are logged, audited and (ledger vs balance) reported to finance */
   async balanceCheck(): Promise<{ checked: number; differences: number }> {
     let after: string | null = null;
     let checked = 0;
@@ -446,6 +487,7 @@ export class Ledger {
     }
     if (differences.length) {
       this.core.ctx.log.error({ differences }, 'wallet: store credit balances differ from the ledger');
+      await this.reportToFinance(differences as unknown as BalanceSnapshot[]);
       for (const d of differences) {
         await this.core.audit(
           {
@@ -461,6 +503,33 @@ export class Ledger {
       }
     }
     return { checked, differences: differences.length };
+  }
+
+  /**
+   * Each account whose balance differs from its ledger sum goes to Finance's daily check
+   * (finance.recordExternalDifference, check store_credit, key customer id + market date; expected = ledger sum,
+   * actual = balance). Without finance the log and audit entries above are the record.
+   */
+  private async reportToFinance(rows: readonly BalanceSnapshot[]) {
+    const finance = this.core.ctx.tryUse('finance');
+    if (!finance) return;
+    const date = dateInZone(this.core.now(), this.core.ctx.config.market.timeZone);
+    for (const r of rows) {
+      const balance = r.available + r.held;
+      if (r.ledgerSum === balance) continue;
+      try {
+        await finance.recordExternalDifference({
+          check: 'store_credit',
+          subject: `Store credit account ${r.customerId}`,
+          description: `Store credit balance ${this.core.fmt(balance)} differs from its ledger sum ${this.core.fmt(r.ledgerSum)}`,
+          expected: m(r.ledgerSum, this.core.currency),
+          actual: m(balance, this.core.currency),
+          key: `${r.customerId}:${date}`,
+        });
+      } catch (err) {
+        this.core.ctx.log.error({ err, customerId: r.customerId }, 'wallet: balance difference not reported to finance');
+      }
+    }
   }
 
   /* ================================================================ reads */

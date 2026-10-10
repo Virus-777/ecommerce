@@ -5,6 +5,7 @@
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { isAppError } from '../../../kernel/errors/index.js';
+import { dateInZone } from '../../../kernel/lib/clock.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { callers } from '../../../testing/app.js';
 import { DAY, harness, USD, type Harness } from './helpers.js';
@@ -222,7 +223,7 @@ describe('events from orders and payments', () => {
     const sessionId = newId();
     const hold = await h.service.holdCredit(c.id, sessionId, USD(400), newId());
     const orderId = newId();
-    const placed = { orderId, ref: 'MK-261009-30003', checkoutSessionId: sessionId, customerId: c.id, guestEmail: null, paymentIntentId: newId(), paymentState: 'accepted', total: USD(9900), couponCodes: [], groups: [], placedAt: h.clock.now().toISOString() };
+    const placed = { orderId, ref: 'MK-261009-30003', checkoutSessionId: sessionId, attemptNo: 1, customerId: c.id, guestEmail: null, contactName: 'Ana Lopez', paymentIntentId: newId(), paymentState: 'accepted', total: USD(9900), couponCodes: [], groups: [], placedAt: h.clock.now().toISOString() };
     await h.publish('orders', 'orders.order.placed', placed);
     await h.publish('orders', 'orders.order.placed', placed); // twice: still one use
     const row: any = await db().selectFrom('wallet.holds' as never).selectAll().where('id' as never, '=', hold.id as never).executeTakeFirst();
@@ -236,7 +237,7 @@ describe('events from orders and payments', () => {
     const sessionId = newId();
     const hold = await h.service.holdCredit(c.id, sessionId, USD(400), newId());
     const orderId = newId();
-    await h.publish('orders', 'orders.order.placed', { orderId, ref: 'MK-261009-30004', checkoutSessionId: sessionId, customerId: c.id, guestEmail: null, paymentIntentId: newId(), paymentState: 'pending_check', total: USD(9900), couponCodes: [], groups: [], placedAt: h.clock.now().toISOString() });
+    await h.publish('orders', 'orders.order.placed', { orderId, ref: 'MK-261009-30004', checkoutSessionId: sessionId, attemptNo: 1, customerId: c.id, guestEmail: null, contactName: 'Ana Lopez', paymentIntentId: newId(), paymentState: 'pending_check', total: USD(9900), couponCodes: [], groups: [], placedAt: h.clock.now().toISOString() });
     let row: any = await db().selectFrom('wallet.holds' as never).selectAll().where('id' as never, '=', hold.id as never).executeTakeFirst();
     expect(row).toMatchObject({ state: 'held', order_id: orderId });
     expect(new Date(row.expires_at).getTime()).toBeGreaterThan(h.clock.now().getTime() + 20 * 3_600_000);
@@ -310,5 +311,127 @@ describe('expiry and checks', () => {
     expect(flagged).toHaveLength(1);
     expect(flagged[0]).toMatchObject({ category: 'financial', target: { type: 'wallet_account', id: c.id } });
     await sql`update wallet.accounts set available = available - 1 where customer_id = ${c.id}`.execute(db());
+  });
+});
+
+describe('pass 3: holds kept alive, liability total, expiry payload', () => {
+  const holdMadeAt = async (holdId: string) => {
+    const r = await sql<{ at: Date }>`select at from wallet.ledger where hold_id = ${holdId} and kind = 'hold'`.execute(db());
+    return r.rows[0]!.at.getTime();
+  };
+
+  it('extendHold keeps a hold past holdTtlMinutes so the capture after a slow payment check succeeds (no INSUFFICIENT_CREDIT)', async () => {
+    const c = h.customer();
+    await h.give(c.id, 5000);
+    const hold = await h.service.holdCredit(c.id, newId(), USD(3000), newId());
+    const made = await holdMadeAt(hold.id);
+    expect(Math.abs(new Date(hold.expiresAt).getTime() - (made + 30 * 60_000))).toBeLessThan(1_000); // holdTtlMinutes default
+
+    const until = new Date(made + 6 * 3_600_000).toISOString();
+    const extended = await h.service.extendHold(hold.id, until);
+    expect(extended).toMatchObject({ id: hold.id, state: 'held', amount: USD(3000), expiresAt: until });
+
+    h.clock.advance(60 * 60_000); // past the original 30 minutes
+    await h.app.kernel.jobs.runNow('wallet.release-stale-holds');
+    expect(await h.service.getBalance(c.id)).toMatchObject({ available: USD(2000), held: USD(3000) });
+
+    const orderId = newId();
+    const captured = await h.service.captureHold(hold.id, orderId);
+    expect(captured).toMatchObject({ state: 'captured', amount: USD(3000) });
+    expect(await h.service.getBalance(c.id)).toMatchObject({ available: USD(2000), held: USD(0) });
+    await h.app.kernel.events.drain();
+    expect(h.named('wallet.credit.used').filter((e) => e.customerId === c.id)).toEqual([{ customerId: c.id, orderId, amount: USD(3000) }]);
+    await invariant(c.id);
+  });
+
+  it('extendHold never shortens, is capped at pendingHoldMaxHours after the hold was made, and leaves captured or released holds unchanged', async () => {
+    const c = h.customer();
+    await h.give(c.id, 4000);
+    const hold = await h.service.holdCredit(c.id, newId(), USD(1000), newId());
+    const made = await holdMadeAt(hold.id);
+    const capped = await h.service.extendHold(hold.id, new Date(made + 100 * 3_600_000).toISOString());
+    expect(new Date(capped.expiresAt).getTime()).toBe(made + 48 * 3_600_000);
+    const notShorter = await h.service.extendHold(hold.id, new Date(made + 3_600_000).toISOString());
+    expect(notShorter.expiresAt).toBe(capped.expiresAt);
+
+    h.settings['wallet.pendingHoldMaxHours'] = 2;
+    try {
+      const other = await h.service.holdCredit(c.id, newId(), USD(500), newId());
+      const otherMade = await holdMadeAt(other.id);
+      expect(new Date((await h.service.extendHold(other.id, new Date(otherMade + 5 * 3_600_000).toISOString())).expiresAt).getTime()).toBe(otherMade + 2 * 3_600_000);
+    } finally {
+      delete h.settings['wallet.pendingHoldMaxHours'];
+    }
+
+    const released = await h.service.releaseHold(hold.id);
+    const again = await h.service.extendHold(hold.id, new Date(made + 10 * 3_600_000).toISOString());
+    expect(again).toEqual(released);
+    await expect(h.service.extendHold(newId(), new Date().toISOString())).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(h.service.extendHold(hold.id, 'soon')).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    await invariant(c.id);
+  });
+
+  it('getLiabilityTotal sums available and held credit over all accounts, now and as of a past time', async () => {
+    const before = await h.service.getLiabilityTotal();
+    const a = h.customer();
+    const b = h.customer();
+    await h.give(a.id, 1000);
+    await h.give(b.id, 2500);
+    await h.service.holdCredit(b.id, newId(), USD(700), newId());
+    const at = await h.service.getLiabilityTotal();
+    expect(at.available.amount - before.available.amount).toBe(1000 + 2500 - 700);
+    expect(at.held.amount - before.held.amount).toBe(700);
+    expect(at.accounts - before.accounts).toBe(2);
+    expect(at.available.currency).toBe('USD');
+
+    const t1 = h.clock.now().toISOString();
+    h.clock.advance(1_000);
+    // later activity: a captured hold and a new account do not change the total as of t1
+    const hold = await h.service.holdCredit(a.id, newId(), USD(400), newId());
+    await h.service.captureHold(hold.id, newId());
+    await h.give(h.customer().id, 900);
+    expect(await h.service.getLiabilityTotal(t1)).toEqual(at);
+    const now = await h.service.getLiabilityTotal();
+    expect(now.available.amount - at.available.amount).toBe(-400 + 900);
+    expect(now.held.amount).toBe(at.held.amount);
+    expect(now.accounts - at.accounts).toBe(1);
+  });
+
+  it('wallet.credit.expired carries the expiry ledger entry and the lot source (finance books breakage on it)', async () => {
+    const c = h.customer();
+    await h.service.grantGoodwill({ customerId: c.id, amount: USD(1300), reason: 'Late parcel', reasonCode: 'late_delivery', chargedTo: 'platform', expiresInDays: 2 }, { kind: 'staff', id: newId() }, newId());
+    const lot = (await h.service.ledger.lots(c.id))[0]!;
+    h.clock.advance(3 * DAY);
+    await h.app.kernel.jobs.runNow('wallet.expire-lots');
+    await h.app.kernel.events.drain();
+    const entry = (await h.call('GET', `/api/admin/wallet/customers/${c.id}/entries?kind=expiry`, callers.staff())).body.items[0];
+    expect(entry).toMatchObject({ kind: 'expiry', amount: USD(-1300) });
+    expect(h.named('wallet.credit.expired').filter((e) => e.customerId === c.id)).toEqual([{ customerId: c.id, entryId: entry.id, lotId: lot.id, source: 'goodwill', amount: USD(1300) }]);
+  });
+});
+
+describe('balance check reports differences to finance', () => {
+  let hf: Harness;
+  beforeAll(async () => {
+    hf = await harness({ modules: ['finance'] });
+  });
+  afterAll(async () => {
+    await hf?.app.close();
+  });
+
+  it('calls finance.recordExternalDifference with expected = ledger sum, actual = balance, key = customer id + market date', async () => {
+    const c = hf.customer();
+    await hf.give(c.id, 800);
+    await hf.app.kernel.jobs.runNow('wallet.balance-check');
+    expect(hf.financeDiffs).toEqual([]);
+    const fdb = hf.app.kernel.database.kysely;
+    await sql`update wallet.accounts set available = available + 25 where customer_id = ${c.id}`.execute(fdb);
+    await hf.app.kernel.jobs.runNow('wallet.balance-check');
+    const date = dateInZone(hf.clock.now(), hf.app.kernel.config.market.timeZone);
+    expect(hf.financeDiffs).toEqual([
+      { check: 'store_credit', subject: `Store credit account ${c.id}`, description: 'Store credit balance $8.25 differs from its ledger sum $8.00', expected: USD(800), actual: USD(825), key: `${c.id}:${date}` },
+    ]);
+    expect(hf.audits.filter((a) => a.action === 'wallet.balance_check.difference')).toHaveLength(1);
+    await sql`update wallet.accounts set available = available - 25 where customer_id = ${c.id}`.execute(fdb);
   });
 });

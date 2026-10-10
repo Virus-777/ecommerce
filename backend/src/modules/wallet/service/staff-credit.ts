@@ -47,8 +47,8 @@ export class StaffCredit {
    * Within the requester's goodwill limit (access) the grant is made now (pending_approval → granted in the same
    * call); above it an approval request is raised and the grant waits. The per-customer 30-day limit
    * (goodwillMaxPerCustomer30Days) counts granted and pending goodwill; above it only Finance (wallet.credit.correct)
-   * may grant, still within their own limit. `http`: answer a pending grant with APPROVAL_REQUIRED (REST) instead
-   * of returning it (in-process callers such as support keep the pending grant).
+   * may grant, still within their own limit. A pending grant is returned like any grant (REST answers 201 with
+   * state pending_approval and `approval`; FORMAT.md, Approval responses).
    */
   async grant(input: GoodwillInput, by: By, key: string, o: { http?: boolean } = {}): Promise<GoodwillGrant> {
     const issues: Issue[] = [...this.core.checkMoney(input.amount, 'amount')];
@@ -160,10 +160,8 @@ export class StaffCredit {
     return tx.updateGrant(g.id, { state, ledger_entry_id: r.entry.id, decided_by: actorText(decidedBy) });
   }
 
-  private async answer(g: GrantRow, o: { http?: boolean }): Promise<GoodwillGrant> {
-    if (o.http && g.state === 'pending_approval') {
-      throw this.core.approvalRequired({ id: g.approval_request_id! }, { grantId: g.id }, 'Above your goodwill limit: the credit is waiting for approval');
-    }
+  /** A grant waiting for approval is saved, so it is answered like any grant (state pending_approval, `approval` in the body; FORMAT.md, Approval responses) */
+  private async answer(g: GrantRow, _o: { http?: boolean }): Promise<GoodwillGrant> {
     return (await this.grantViews([g]))[0]!;
   }
 
@@ -191,7 +189,7 @@ export class StaffCredit {
       }
       await tx.updateLot(lot.id, { remaining: 0, state: 'depleted' });
       const a = await tx.updateAccount(acct.customer_id, { available: acct.available - lot.remaining, held: acct.held, updated_at: this.core.now() });
-      await tx.insertEntry({
+      const rev = await tx.insertEntry({
         id: newId(),
         customer_id: a.customer_id,
         kind: 'reversal',
@@ -208,7 +206,19 @@ export class StaffCredit {
         reason: reason.trim(),
         at: this.core.now(),
       });
-      out.push('wallet.credit.reversed', { customerId: g.customer_id, grantId: g.id, amount: m(g.amount, g.currency), reason: reason.trim() });
+      // finance reverses what it booked for the grant (keyed by grantEntryId) and credits a funding seller back
+      out.push('wallet.credit.reversed', {
+        customerId: g.customer_id,
+        entryId: rev.id,
+        grantId: g.id,
+        grantEntryId: g.ledger_entry_id!,
+        amount: m(-rev.amount, g.currency),
+        chargedTo: g.charged_to as 'platform' | 'seller',
+        sellerId: g.charged_to === 'seller' ? g.seller_id : null,
+        caseId: g.case_id,
+        orderId: g.order_id,
+        reason: reason.trim(),
+      });
       return tx.updateGrant(g.id, { state });
     });
     this.core.flush(out, by);
