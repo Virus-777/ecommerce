@@ -67,6 +67,20 @@ const TO_CUSTOMER = new Set<string>(['shipping.shipment.dispatched', 'shipping.s
 export const OFFICIAL_NAME = OFFICIAL_STORE_NAME;
 export const DEFAULT_CUTOFF = '14:00';
 
+/** Who physically ships a group (orders' FulfilledBy) */
+export type FulfilledBy = 'official_warehouse' | 'seller' | 'marketly_service';
+export const FULFILLED_BY: readonly FulfilledBy[] = ['official_warehouse', 'seller', 'marketly_service'];
+
+/** The value when a caller or an older event gives none: Official Store groups are warehouse-shipped, seller groups seller-shipped */
+export const fulfilledByOf = (ownerType: string, given?: string | null): FulfilledBy =>
+  given && (FULFILLED_BY as readonly string[]).includes(given) ? (given as FulfilledBy) : ownerType === 'official' ? 'official_warehouse' : 'seller';
+
+/** Marketly's warehouse ships it (Fulfilled by Marketly): a seller's package, but the seller has no part in dispatch */
+export const byMarketly = (fulfilledBy: string | null | undefined) => fulfilledBy === 'marketly_service';
+
+/** 409 FULFILLED_BY_MARKETLY for seller actions on a Marketly-shipped package */
+export const MARKETLY_SHIPS = "Marketly ships this package; you can't record shipments, buy labels, correct tracking or answer exceptions for it.";
+
 export const invalid = (issues: { path: string; message: string }[], message = 'Some details need fixing') => new AppError('VALIDATION_FAILED', message, { issues });
 export const notFound = (what: string) => new AppError('NOT_FOUND', `${what} not found`);
 export const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
@@ -95,6 +109,16 @@ export class Core {
   }
   today = (at: Date = this.now()) => dateInZone(at, this.tz);
   error = (code: string, message?: string, details?: unknown) => this.ctx.error(code, message, details);
+
+  /** Seller endpoints on a Fulfilled by Marketly package: 409 FULFILLED_BY_MARKETLY */
+  refuseIfMarketly(fulfilledBy: string | null | undefined) {
+    if (byMarketly(fulfilledBy)) throw this.error('FULFILLED_BY_MARKETLY', MARKETLY_SHIPS);
+  }
+
+  /** The Fulfilled by Marketly service location (fulfillment-service); null when the module is off or has none */
+  async serviceLocation(): Promise<{ locationId: string; address: common.Address; shipsFrom: string } | null> {
+    return (await this.soft('fulfillment-service', 'getServiceLocation', (f) => f.getServiceLocation())) ?? null;
+  }
 
   async cfg(): Promise<Cfg> {
     const s = this.ctx.settings;

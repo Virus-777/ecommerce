@@ -531,8 +531,9 @@ export class Placement {
         key,
         ownerType: pl[0]!.owner_type as 'official' | 'seller',
         sellerId: pl[0]!.owner_type === 'official' ? null : pl[0]!.seller_id,
+        // the package's effective ships-from and fulfilment (Offer.shipping when quoted), never hard-coded
         shipsFrom: pkg?.ships_from || info.dispatch.shipsFrom,
-        fulfilledBy: pl[0]!.owner_type === 'official' ? 'official_warehouse' : 'seller',
+        fulfilledBy: pkg?.fulfilled_by ?? pl[0]!.fulfilled_by,
         delivery: {
           methodName: opt?.methodName ?? 'Standard',
           carrier: opt?.carrierService ?? null,

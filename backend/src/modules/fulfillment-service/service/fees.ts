@@ -62,7 +62,24 @@ export class FeesPart extends Part {
     if (check.decision === 'denied') throw new AppError('FORBIDDEN', check.reason || 'You cannot propose fee schedules');
     const id = newId();
     const row = await this.repo.insert('fee_schedules', { id, version, effective_at: effectiveAt, rates: body.rates, state: 'draft', approval_request_id: null });
-    if (check.decision === 'allowed') return this.parts.views.schedule(await this.publishSchedule(id, by));
+    const audit = (approvalRequestId: string | null) =>
+      this.core.audit(
+        {
+          action: 'fulfillment-service.fee_schedule.create',
+          actionLabel: approvalRequestId ? 'Proposed a fulfillment fee schedule' : 'Published a fulfillment fee schedule',
+          category: 'financial',
+          target: { type: 'fulfillment_fee_schedule', id, ref: version, label: `Fulfillment fee schedule ${version}`, screen: 'admin/settings' },
+          after: { version, effectiveAt: effectiveAt.toISOString(), rates: body.rates },
+          reason: body.reason.trim(),
+          approvalRequestId,
+        },
+        by,
+      );
+    if (check.decision === 'allowed') {
+      const published = await this.publishSchedule(id, by);
+      await audit(null);
+      return this.parts.views.schedule(published);
+    }
     const req = await access.requestApproval({
       action: FEES_ACTION,
       target: { type: SCHEDULE_TARGET, id, ref: version, label: `Fulfillment fee schedule ${version}`, screen: 'admin/settings' },
@@ -71,7 +88,9 @@ export class FeesPart extends Part {
       reason: body.reason.trim(),
       requestedBy: principal,
     });
-    return this.parts.views.schedule(await this.repo.update('fee_schedules', row.id, { approval_request_id: req.id }));
+    const pending = await this.repo.update('fee_schedules', row.id, { approval_request_id: req.id });
+    await audit(req.id);
+    return this.parts.views.schedule(pending);
   }
 
   /** Approved: scheduled for its date, and every enrolled seller is told */
@@ -92,13 +111,7 @@ export class FeesPart extends Part {
     const sellers = await this.repo.find('enrollments', { state: ['approved', 'active', 'suspended', 'offboarding'] }, { limit: 50_000 });
     const effective = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: this.core.tz }).format(row.effective_at);
     for (const e of sellers) {
-      await this.core.notifySeller(
-        e.seller_id,
-        'seller.platform.change_scheduled',
-        { change: { summary: `New fulfillment service fee schedule ${row.version}`, effective } },
-        { kind: 'setting_change', id: row.id, ref: row.version, label: 'View fees', screen: 'seller/finance' },
-        `fulfillment-service:schedule:${row.id}`,
-      );
+      await this.core.notifySeller(e.seller_id, 'seller.fulfillment.fee_schedule_changed', { version: row.version, effective }, { kind: 'setting_change', id: row.id, ref: row.version, label: 'View fees', screen: 'seller/finance' }, `fs:schedule:${row.id}`);
     }
     void by;
     return (await this.repo.get('fee_schedules', id))!;
@@ -165,10 +178,30 @@ export class FeesPart extends Part {
           reason: text,
           requestedBy: principal,
         });
+        await this.auditReversal(row, row, text, by, req.id);
         throw new AppError('APPROVAL_REQUIRED', `${check.reason || 'Above your adjustment limit'}; sent for approval.`, { approvalRequestId: req.id, approval: { required: true, approvalRequestId: req.id, approvers: (check.eligibleApproverRoles ?? []).map((r) => r.name) } });
       }
     }
-    return this.parts.views.charge((await this.applyReversal(row.id, text, by))!);
+    const after = (await this.applyReversal(row.id, text, by))!;
+    await this.auditReversal(row, after, text, by, null);
+    return this.parts.views.charge(after);
+  }
+
+  private async auditReversal(before: ChargeRec, after: ChargeRec, reason: string, by: By, approvalRequestId: string | null) {
+    await this.core.audit(
+      {
+        action: 'fulfillment-service.fee.reverse',
+        actionLabel: approvalRequestId ? 'Asked to reverse a fulfillment fee' : 'Reversed a fulfillment fee',
+        category: 'financial',
+        target: { type: 'fulfillment_fee_charge', id: before.id, ref: before.reference, label: `${CHARGE_LABEL[before.type] ?? before.type} fee ${before.reference ?? before.period ?? ''}`.trim(), sellerId: before.seller_id, screen: 'admin/finance' },
+        before: { state: before.state, amount: this.core.money(before.amount, before.currency) },
+        after: { state: after.state },
+        reason,
+        approvalRequestId,
+        visibleToSeller: true,
+      },
+      by,
+    );
   }
 
   /**
@@ -185,8 +218,16 @@ export class FeesPart extends Part {
    * accrued → reversed (never reached the ledger), or posted → reversed after crediting the seller ledger for the
    * whole fee (idempotent per charge). `claim`: inbox key of the event being handled; null when already handled.
    */
-  private async applyReversal(id: string, reason: string, by: By, claim?: string): Promise<ChargeRec | null> {
+  private async applyReversal(id: string, reason: string, by: By, claim?: string, o: { creditSettled?: boolean } = {}): Promise<ChargeRec | null> {
     const pre = (await this.repo.get('fee_charges', id))!;
+    if (pre.state === 'accrued' && pre.amount < 0 && !o.creditSettled) {
+      // an accrued reimbursement may already wait in finance as a seller credit: withdraw it (a posted one is paid)
+      const finance = this.ctx.use('finance');
+      const idempotencyKey = `fulfillment-service:reimbursement:${id}`;
+      const credit = await finance.getSellerCredit({ idempotencyKey });
+      if (credit?.status === 'posted') throw new AppError('ILLEGAL_TRANSITION', 'This reimbursement is already paid to the seller; take it back with a finance adjustment.', { from: pre.state, event: 'reverse', chargeId: id });
+      if (credit?.status === 'pending_approval') await finance.withdrawSellerCredit({ idempotencyKey, reason });
+    }
     if (pre.state === 'posted') {
       await this.ctx.use('finance').creditSellerCharge({
         sellerId: pre.seller_id,
@@ -207,7 +248,7 @@ export class FeesPart extends Part {
     });
     if (!res) return null;
     const { after, changed } = res;
-    if (changed) this.core.publish('fulfillment-service.fee.reversed', { chargeId: id, sellerId: after.seller_id, amount: this.core.money(after.amount, after.currency), reason }, by);
+    if (changed) this.core.publish('fulfillment-service.fee.reversed', { chargeId: id, sellerId: after.seller_id, amount: this.core.money(after.amount, after.currency), reason, period: after.period }, by);
     return after;
   }
 
@@ -237,9 +278,9 @@ export class FeesPart extends Part {
    * per charge. The entry is kept on the charge (ledger_entry_id) and fee.charged is published.
    *
    * A reimbursement above finance's creditSecondReviewerThreshold comes back pending_approval: the charge stays
-   * accrued and the next run asks again with the same idempotency key, which returns the same credit with its
-   * current status (the spec gives this module no finance.seller_credit.decided consumer). Posted → the charge is
-   * posted; rejected by Finance → the charge is reversed with Finance's decision as the reason.
+   * accrued and the next run reads the credit back with finance.getSellerCredit({ idempotencyKey }) instead of
+   * asking again (the spec gives this module no finance.seller_credit.decided consumer). Posted → the charge is
+   * posted; rejected by Finance (or withdrawn) → the charge is reversed with Finance's decision as the reason.
    */
   async postAll(): Promise<{ posted: number }> {
     const finance = this.ctx.use('finance');
@@ -259,15 +300,18 @@ export class FeesPart extends Part {
           });
           entryId = entry.id;
         } else {
-          const credit = await finance.creditSeller({
-            sellerId: c.seller_id,
-            amount: this.core.money(-c.amount, c.currency),
-            reason: c.reason ?? `Reimbursement${c.reference ? ` for ${c.reference}` : ''}`,
-            reference: { kind: 'fulfillment_service', id: c.id, ref: c.reference ?? null },
-            idempotencyKey: `fulfillment-service:reimbursement:${c.id}`,
-          });
-          if (credit.status === 'rejected') {
-            await this.applyReversal(c.id, 'Finance did not approve the reimbursement', { actor: SYSTEM });
+          const idempotencyKey = `fulfillment-service:reimbursement:${c.id}`;
+          const credit =
+            (await finance.getSellerCredit({ idempotencyKey })) ??
+            (await finance.creditSeller({
+              sellerId: c.seller_id,
+              amount: this.core.money(-c.amount, c.currency),
+              reason: c.reason ?? `Reimbursement${c.reference ? ` for ${c.reference}` : ''}`,
+              reference: { kind: 'fulfillment_service', id: c.id, ref: c.reference ?? null },
+              idempotencyKey,
+            }));
+          if (credit.status === 'rejected' || credit.status === 'withdrawn') {
+            await this.applyReversal(c.id, credit.status === 'rejected' ? 'Finance did not approve the reimbursement' : 'The reimbursement was withdrawn', { actor: SYSTEM }, undefined, { creditSettled: true });
             continue;
           }
           if (credit.status !== 'posted' || !credit.ledgerEntry) {
@@ -283,7 +327,7 @@ export class FeesPart extends Part {
         });
         if (done) {
           posted += 1;
-          this.core.publish('fulfillment-service.fee.charged', { chargeId: c.id, sellerId: c.seller_id, type: c.type, amount: this.core.money(c.amount, c.currency), reference: c.reference });
+          this.core.publish('fulfillment-service.fee.charged', { chargeId: c.id, sellerId: c.seller_id, type: c.type, amount: this.core.money(c.amount, c.currency), reference: c.reference, period: c.period });
         }
       } catch (err) {
         if (err instanceof AppError && err.code === 'NOT_IMPLEMENTED') return { posted };

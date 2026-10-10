@@ -66,7 +66,7 @@ export class ReturnsService implements ReturnsPublicApi {
     return this.policies.defaultWindowDays();
   }
 
-  /** Warehouse scanned an Official Store return at the dock (a second scan changes nothing) */
+  /** Warehouse scanned an Official Store or Fulfilled by Marketly return at the dock (a second scan changes nothing) */
   async recordWarehouseReceipt(returnId: string, receivedAt: string, receivedBy: common.Actor, trackingNumber: string | null): Promise<ReturnDetail> {
     const agg = await this.core.visible(returnId, { area: 'admin' });
     await this.handling.receive(returnId, { receivedAt, trackingNumber, rescanOk: true }, { actor: receivedBy }, agg);

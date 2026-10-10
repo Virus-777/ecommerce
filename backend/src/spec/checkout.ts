@@ -217,8 +217,10 @@ export interface CheckoutPackage {
   /** 'Package 2 of 3' */
   label: string;
   seller: cart.SellerLabel;
-  /** 'Sold and shipped by Northwind Audio' */
+  /** 'Sold and shipped by Northwind Audio'; for marketly_service packages 'Sold by Northwind Audio · Shipped by Marketly' */
   soldAndShippedBy: string;
+  /** Becomes the order group's fulfilledBy */
+  fulfilledBy: "official_warehouse" | "seller" | "marketly_service";
   shipsFrom: string;
   lines: CheckoutLine[];
   options: shipping.DeliveryOption[];
@@ -235,7 +237,8 @@ export const CheckoutPackage: z.ZodType<CheckoutPackage> = z.object({
   get seller() {
     return cart.SellerLabel;
   },
-  soldAndShippedBy: z.string().describe("'Sold and shipped by Northwind Audio'"),
+  soldAndShippedBy: z.string().describe("'Sold and shipped by Northwind Audio'; for marketly_service packages 'Sold by Northwind Audio · Shipped by Marketly'"),
+  fulfilledBy: z.enum(["official_warehouse", "seller", "marketly_service"]).describe("Becomes the order group's fulfilledBy"),
   shipsFrom: z.string(),
   get lines() {
     return z.array(CheckoutLine);
@@ -1192,7 +1195,9 @@ export interface CheckoutDb {
     product_id: string;
     variant_id: string;
     stock_item_id: string;
+    /** Offer.shipping.profileId */
     profile_id: string;
+    fulfilled_by: 'official_warehouse' | 'seller' | 'marketly_service';
     package_key: string;
     quantity: number;
     unit_price: number;
@@ -1206,6 +1211,7 @@ export interface CheckoutDb {
     package_key: string;
     owner_type: string;
     seller_id: string | null;
+    fulfilled_by: 'official_warehouse' | 'seller' | 'marketly_service';
     ships_from: string;
     options: Json;
     selected_option_id: string | null;
@@ -2154,6 +2160,10 @@ export const spec = defineModuleSpec({
         "type": "uuid",
         "nullable": false
       },
+      "fulfilled_by": {
+        "type": "text",
+        "nullable": false
+      },
       "package_key": {
         "type": "text",
         "nullable": false
@@ -2199,6 +2209,10 @@ export const spec = defineModuleSpec({
       "seller_id": {
         "type": "uuid",
         "nullable": true
+      },
+      "fulfilled_by": {
+        "type": "text",
+        "nullable": false
       },
       "ships_from": {
         "type": "text",

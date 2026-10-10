@@ -66,7 +66,7 @@ export class WarehouseService implements WarehousePublicApi {
 
   /* ---------------- events consumed */
 
-  /** orders.order.accepted: Create a fulfillment for the order's Official Store seller group (lines carry stock item ids from the purchase snapshot and ship-by from shipping) */
+  /** orders.order.accepted: Create a fulfillment for each Official Store group and each Fulfilled by Marketly group (at the service location, seller stored); lines carry stock item ids from the purchase snapshot and ship-by from shipping */
   onOrderAcceptedFromOrders(event: EventPayload<'orders.order.accepted'>): Promise<void> {
     return this.fulfillments.onOrderAccepted(event);
   }
@@ -91,7 +91,12 @@ export class WarehouseService implements WarehousePublicApi {
     return this.putaway.onReceiptRecorded(event);
   }
 
-  /** returns.return.approved: Expect a return parcel when the return goes to an Official Store warehouse */
+  /** fulfillment-service.inbound.received: Put-away tasks for a Fulfilled by Marketly receiving record (sellable units to the suggested bin, damaged to quarantine); idempotent per receiptId */
+  onInboundReceivedFromFulfillmentService(event: EventPayload<'fulfillment-service.inbound.received'>): Promise<void> {
+    return this.putaway.onInboundReceived(event);
+  }
+
+  /** returns.return.approved: Expect a return parcel when the return goes to a Marketly warehouse (Official Store and Fulfilled by Marketly returns) */
   onReturnApprovedFromReturns(event: EventPayload<'returns.return.approved'>): Promise<void> {
     return this.parcels.onReturnApproved(event);
   }

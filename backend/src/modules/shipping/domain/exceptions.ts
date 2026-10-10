@@ -29,6 +29,20 @@ export const DEFAULT_NEXT_STEP: Record<ExceptionKind, string> = {
   failed_delivery: 'Wait for the customer to choose redelivery, pickup or return',
 };
 
+/**
+ * Fulfilled by Marketly packages: Marketly's warehouse ships them, so the Shipping Manager owns the exception and the
+ * seller is never asked to act (no seller notice, no seller response). Kinds not listed keep DEFAULT_NEXT_STEP.
+ */
+export const MARKETLY_NEXT_STEP: Partial<Record<ExceptionKind, string>> = {
+  late_dispatch: 'Fulfilled by Marketly (warehouse): ship the package; offer the customer to wait or cancel',
+  missing_tracking: 'Fulfilled by Marketly (warehouse): check the label and carrier hand-over',
+};
+
+export const MARKETLY_REQUIRED_RESPONSE: Partial<Record<ExceptionKind, string>> = {
+  late_dispatch: 'Overdue task for the Marketly warehouse: dispatch it and offer the customer support escalation',
+  missing_tracking: 'The Marketly warehouse confirms valid tracking; never imply delivery',
+};
+
 /** What the customer may do, for the shipping.shipment.exception event (null: nothing asked of them) */
 export const CUSTOMER_ACTION: Record<ExceptionKind, string | null> = {
   seller_cannot_fulfill: null,

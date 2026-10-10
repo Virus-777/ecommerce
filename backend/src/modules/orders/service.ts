@@ -151,7 +151,7 @@ export class OrdersService implements OrdersPublicApi {
 
   listOrdersForSeller(
     sellerId: string,
-    filter: { tab?: string; tabs?: string[]; q?: string; placedFrom?: string; placedTo?: string; overdueOnly?: boolean; sort?: string },
+    filter: { tab?: string; tabs?: string[]; q?: string; placedFrom?: string; placedTo?: string; overdueOnly?: boolean; sort?: string; fulfilledBy?: string },
     page: common.PageInput,
   ): Promise<common.Page<{ order: OrderDetail; groups: SellerOrderDetail[] }>> {
     return this.reads.listOrdersForSeller(sellerId, filter, page);
@@ -168,7 +168,7 @@ export class OrdersService implements OrdersPublicApi {
   }
 
   listOrdersAdmin(
-    filter: { q?: string; sellerType?: string; sellerId?: string; customerId?: string; fulfillmentStatus?: string; paymentState?: string; placedFrom?: string; placedTo?: string; flag?: string; savedFilterId?: string },
+    filter: { q?: string; sellerType?: string; sellerId?: string; customerId?: string; fulfillmentStatus?: string; paymentState?: string; placedFrom?: string; placedTo?: string; flag?: string; savedFilterId?: string; fulfilledBy?: string },
     page: common.PageInput,
   ): Promise<common.Page<AdminOrderDetail>> {
     return this.reads.listOrdersAdmin(filter as never, page);

@@ -962,6 +962,8 @@ export const PackageQuoteItem: z.ZodType<PackageQuoteItem> = z.object({
 export interface PackageQuoteInput {
   ownerType: "official" | "seller";
   sellerId?: string | null;
+  /** marketly_service (a seller package Marketly ships): Official dispatch settings, closures and cutoffs, the profile-owner check as for official (items carry the service profile, an Official profile), its free-shipping threshold, and origin the service location (fulfillment-service.getServiceLocation). Omitted = official_warehouse for official, seller for seller */
+  fulfilledBy?: "official_warehouse" | "seller" | "marketly_service" | null;
   shipsFrom: string;
   items: PackageQuoteItem[];
   destination: QuoteDestination;
@@ -971,6 +973,7 @@ export interface PackageQuoteInput {
 export const PackageQuoteInput: z.ZodType<PackageQuoteInput> = z.object({
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
+  fulfilledBy: z.enum(["official_warehouse", "seller", "marketly_service"]).describe("marketly_service (a seller package Marketly ships): Official dispatch settings, closures and cutoffs, the profile-owner check as for official (items carry the service profile, an Official profile), its free-shipping threshold, and origin the service location (fulfillment-service.getServiceLocation). Omitted = official_warehouse for official, seller for seller").nullish(),
   shipsFrom: z.string(),
   get items() {
     return z.array(PackageQuoteItem);
@@ -1854,6 +1857,7 @@ export interface ShippingShipmentCreatedEvent {
   groupId: string;
   returnId?: string | null;
   sellerId?: string | null;
+  fulfilledBy: "official_warehouse" | "seller" | "marketly_service";
   packageLabel: string;
   carrierCode?: string | null;
   carrierName?: string | null;
@@ -1871,6 +1875,7 @@ export const ShippingShipmentCreatedEvent: z.ZodType<ShippingShipmentCreatedEven
   groupId: z.uuid(),
   returnId: z.uuid().nullish(),
   sellerId: z.uuid().nullish(),
+  fulfilledBy: z.enum(["official_warehouse", "seller", "marketly_service"]),
   packageLabel: z.string(),
   carrierCode: z.string().nullish(),
   carrierName: z.string().nullish(),
@@ -1896,6 +1901,8 @@ export interface ShippingShipmentDispatchedEvent {
   returnId?: string | null;
   ownerType: "official" | "seller";
   sellerId?: string | null;
+  /** marketly_service: a seller's package Marketly dispatched; it never counts toward the seller's dispatch performance */
+  fulfilledBy: "official_warehouse" | "seller" | "marketly_service";
   lines: ShipmentLine[];
   shippedAt: string;
   dispatchDueAt?: string | null;
@@ -1914,6 +1921,7 @@ export const ShippingShipmentDispatchedEvent: z.ZodType<ShippingShipmentDispatch
   returnId: z.uuid().nullish(),
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
+  fulfilledBy: z.enum(["official_warehouse", "seller", "marketly_service"]).describe("marketly_service: a seller's package Marketly dispatched; it never counts toward the seller's dispatch performance"),
   get lines() {
     return z.array(ShipmentLine);
   },
@@ -1967,6 +1975,8 @@ export interface ShippingShipmentDeliveredEvent {
   groupId: string;
   returnId?: string | null;
   sellerId?: string | null;
+  /** Who shipped the package (the shipment's fulfilledBy): a marketly_service delivery is not a seller dispatch fact */
+  fulfilledBy: "official_warehouse" | "seller" | "marketly_service";
   lines: ShipmentLine[];
   deliveredAt: string;
 }
@@ -1980,6 +1990,7 @@ export const ShippingShipmentDeliveredEvent: z.ZodType<ShippingShipmentDelivered
   groupId: z.uuid(),
   returnId: z.uuid().nullish(),
   sellerId: z.uuid().nullish(),
+  fulfilledBy: z.enum(["official_warehouse", "seller", "marketly_service"]).describe("Who shipped the package (the shipment's fulfilledBy): a marketly_service delivery is not a seller dispatch fact"),
   get lines() {
     return z.array(ShipmentLine);
   },
@@ -1998,6 +2009,8 @@ export interface ShippingShipmentExceptionEvent {
   groupId: string;
   shipmentId?: string | null;
   sellerId?: string | null;
+  /** marketly_service exceptions are owned by the Shipping Manager: no seller notice, no seller response */
+  fulfilledBy: "official_warehouse" | "seller" | "marketly_service";
   orderItemIds: string[];
   dueAt: string;
   /** e.g. choose redelivery by a date */
@@ -2017,6 +2030,7 @@ export const ShippingShipmentExceptionEvent: z.ZodType<ShippingShipmentException
   groupId: z.uuid(),
   shipmentId: z.uuid().nullish(),
   sellerId: z.uuid().nullish(),
+  fulfilledBy: z.enum(["official_warehouse", "seller", "marketly_service"]).describe("marketly_service exceptions are owned by the Shipping Manager: no seller notice, no seller response"),
   orderItemIds: z.array(z.uuid()),
   dueAt: z.iso.datetime({ offset: true }),
   customerAction: z.string().describe("e.g. choose redelivery by a date").nullish(),
@@ -2063,6 +2077,8 @@ export interface ShippingDispatchOverdueEvent {
   groupId: string;
   ownerType: "official" | "seller";
   sellerId?: string | null;
+  /** marketly_service: the Marketly warehouse is late, not the seller (no seller notice, no seller performance fact) */
+  fulfilledBy: "official_warehouse" | "seller" | "marketly_service";
   orderItemIds: string[];
   dueAt: string;
   exceptionId: string;
@@ -2074,6 +2090,7 @@ export const ShippingDispatchOverdueEvent: z.ZodType<ShippingDispatchOverdueEven
   groupId: z.uuid(),
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
+  fulfilledBy: z.enum(["official_warehouse", "seller", "marketly_service"]).describe("marketly_service: the Marketly warehouse is late, not the seller (no seller notice, no seller performance fact)"),
   orderItemIds: z.array(z.uuid()),
   dueAt: z.iso.datetime({ offset: true }),
   exceptionId: z.uuid(),
@@ -2257,7 +2274,7 @@ export interface ShippingPublicApi {
   handOver(shipmentId: string, at: string, actor: common.Actor): Promise<Shipment>;
   /** Shipments of an order with status and contents Used by: support. */
   getShipmentsForOrder(orderId: string): Promise<ShipmentSummary[]>;
-  /** On-time dispatch, valid tracking and late counts. reviews shows the seller dispatch facts on seller ratings; sellers and reports compute their own figures. Used by: reviews. */
+  /** On-time dispatch, valid tracking and late counts. reviews shows the seller dispatch facts on seller ratings; sellers and reports compute their own figures. A seller's figures leave out Fulfilled by Marketly shipments (fulfilled_by marketly_service): Marketly dispatched them. Used by: reviews. */
   dispatchMetrics(sellerId: string | null, range: common.DateRange): Promise<DispatchMetrics>;
   /** Customer-arranged return: create a kind = return shipment for a tracking number the customer entered (format-checked) so carrier events for it are tracked and published like a prepaid return label. Used by: returns. */
   registerReturnTracking(input: { returnId: string, orderId: string, groupId: string, carrierCode: string, trackingNumber: string, to: common.Address }): Promise<Shipment>;
@@ -2267,7 +2284,7 @@ export interface ShippingPublicApi {
   listShipmentsForGroups(groupIds: string[], kinds?: ('outbound'|'replacement'|'return')[]): Promise<Map<string, Shipment[]>>;
   /** One package with tracking view fields (headline, steps, estimate note, notices). Store: the customer's or guest's own order; seller: own shipments; staff: any (shipping.shipments.view). Otherwise null. Used by: graphql, warehouse. */
   getShipment(viewer: { customerId?: string, guestSessionId?: string, sellerId?: string, staff?: boolean }, shipmentId: string): Promise<Shipment | null>;
-  /** Default delivery option per offer at a location (resolves offer → profile and dispatch through offers). Without a postal code uses the shopper's saved or cart location, else the market default; batched per request. Used by: graphql. */
+  /** Default delivery option per offer at a location (resolves offer → profile and dispatch through offers' effective Offer.shipping, so Marketly-fulfilled offers are quoted with the service profile and dispatch). Without a postal code uses the shopper's saved or cart location, else the market default; batched per request. Used by: graphql. */
   estimateOffers(offerIds: string[], postalCode?: string, viewer?: { customerId?: string, guestSessionId?: string }): Promise<OfferEstimate[]>;
   /** Delivery exceptions on an order; with sellerId only that seller's groups Used by: graphql. */
   listExceptionsForOrder(orderId: string, sellerId?: string): Promise<DeliveryException[]>;
@@ -2283,6 +2300,8 @@ export interface ShippingPublicApi {
   getProfileOwners(profileIds: string[]): Promise<Record<string, { ownerType: 'official' | 'seller', sellerId: string | null, status: string } | null>>;
   /** The Official Store's standing free-shipping threshold in force now (default profile threshold or an active official_store free-shipping rule), e.g. for the content service strip to warn when its text disagrees. For content's service strip check; content does not call it yet (integration item). Used by: content. */
   getOfficialFreeShipping(): Promise<{ threshold: common.Money | null, methodCode: string | null, active: boolean, label: string | null }>;
+  /** The Official Store's default active shipping profile with its handling days and same-day cutoff (Official dispatch settings); null when none exists. fulfillment-service quotes Marketly-fulfilled offers with it unless its serviceShippingProfileId setting names another Official profile (decision D1) Used by: fulfillment-service. */
+  getOfficialDefaultProfile(): Promise<{ profileId: string, handlingDays: number, sameDayCutoff: string | null } | null>;
   /** Carriers and services the seller can use, whether labels can be bought and the default package, for the record-shipment form Used by: graphql. */
   getSellerShippingSetup(sellerId: string): Promise<SellerShippingSetup>;
   /** Export rows for reports dataset shipping.admin.exceptions (delivery exceptions) Used by: reports. */
@@ -2433,6 +2452,7 @@ export interface ShippingDb {
     return_id: string | null;
     owner_type: string;
     seller_id: string | null;
+    fulfilled_by: 'official_warehouse' | 'seller' | 'marketly_service';
     package_no: number;
     carrier_code: string | null;
     service_name: string | null;
@@ -2518,6 +2538,7 @@ export interface ShippingDb {
     order_id: string;
     owner_type: string;
     seller_id: string | null;
+    fulfilled_by: 'official_warehouse' | 'seller' | 'marketly_service';
     due_at: Date;
     open_item_ids: Json;
     overdue_since: Date | null;
@@ -2531,6 +2552,7 @@ export interface ShippingDb {
     shipment_id: string | null;
     owner_type: string;
     seller_id: string | null;
+    fulfilled_by: 'official_warehouse' | 'seller' | 'marketly_service';
     items_summary: string;
     /** the order items the exception is about, as on shipping.shipment.exception */
     order_item_ids: string[];
@@ -2882,7 +2904,7 @@ export const endpoints = defineEndpoints({
     body: () => RecordShipmentInput,
     response: () => Shipment,
     status: 201,
-    errors: ["ITEMS_NOT_SHIPPABLE","TRACKING_FORMAT_INVALID","TRACKING_ALREADY_USED"],
+    errors: ["ITEMS_NOT_SHIPPABLE","TRACKING_FORMAT_INVALID","TRACKING_ALREADY_USED","FULFILLED_BY_MARKETLY"],
     events: ["shipping.shipment.created","shipping.shipment.dispatched"],
     screens: ["seller/order"],
     phase: 1,
@@ -2944,7 +2966,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => Shipment,
     status: 200,
-    errors: ["TRACKING_FORMAT_INVALID","ILLEGAL_TRANSITION"],
+    errors: ["TRACKING_FORMAT_INVALID","ILLEGAL_TRANSITION","FULFILLED_BY_MARKETLY"],
     events: ["shipping.tracking.corrected"],
     screens: ["seller/order"],
     phase: 1,
@@ -2968,7 +2990,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => z.array(LabelQuote),
     status: 200,
-    errors: ["LABELS_NOT_SUPPORTED","ITEMS_NOT_SHIPPABLE"],
+    errors: ["LABELS_NOT_SUPPORTED","ITEMS_NOT_SHIPPABLE","FULFILLED_BY_MARKETLY"],
     screens: ["seller/order"],
     phase: 1,
   },
@@ -2989,7 +3011,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => LabelResult,
     status: 201,
-    errors: ["QUOTE_EXPIRED","LABEL_FAILED","ITEMS_NOT_SHIPPABLE"],
+    errors: ["QUOTE_EXPIRED","LABEL_FAILED","ITEMS_NOT_SHIPPABLE","FULFILLED_BY_MARKETLY"],
     idempotent: true,
     events: ["shipping.label.purchased","shipping.shipment.created"],
     screens: ["seller/order"],
@@ -3012,7 +3034,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => Shipment,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION"],
+    errors: ["ILLEGAL_TRANSITION","FULFILLED_BY_MARKETLY"],
     events: ["shipping.shipment.dispatched"],
     screens: ["seller/order"],
     phase: 1,
@@ -3034,7 +3056,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => Label,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION"],
+    errors: ["ILLEGAL_TRANSITION","FULFILLED_BY_MARKETLY"],
     idempotent: true,
     events: ["shipping.label.voided"],
     screens: ["seller/order"],
@@ -3079,7 +3101,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => DeliveryException,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","VALIDATION_FAILED"],
+    errors: ["ILLEGAL_TRANSITION","VALIDATION_FAILED","FULFILLED_BY_MARKETLY"],
     events: ["shipping.exception.updated"],
     screens: ["seller/order"],
     phase: 1,
@@ -3981,7 +4003,7 @@ export const spec = defineModuleSpec({
   summary: "How things get delivered: carriers and services, destinations and excluded areas, shipping profiles with rates (Official Store and sellers), free-shipping rules, dispatch targets and cutoffs, the holiday and service-interruption calendar, delivery estimates for a location, shipments with contents and tracking, labels where supported, partial shipments, and delivery exceptions with their required responses and carrier claims.",
   dependsOn: ["orders"],
   optionalDeps: ["offers","sellers","media","support","access","settings","audit","finance","fulfillment-service","identity","notifications","returns","reports"],
-  publicApi: ["quote","quoteOptions","checkCoverage","hasCoverage","dispatchDeadline","activeNotices","quoteLabelOptions","createLabel","voidLabel","handOver","getShipmentsForOrder","dispatchMetrics","registerReturnTracking","findDropOffPoints","listShipmentsForGroups","getShipment","estimateOffers","listExceptionsForOrder","listExceptions","countOpenExceptions","getSellerShippingSummaries","shipmentsForReplacements","getProfileOwners","getOfficialFreeShipping","getSellerShippingSetup","exportRows"],
+  publicApi: ["quote","quoteOptions","checkCoverage","hasCoverage","dispatchDeadline","activeNotices","quoteLabelOptions","createLabel","voidLabel","handOver","getShipmentsForOrder","dispatchMetrics","registerReturnTracking","findDropOffPoints","listShipmentsForGroups","getShipment","estimateOffers","listExceptionsForOrder","listExceptions","countOpenExceptions","getSellerShippingSummaries","shipmentsForReplacements","getProfileOwners","getOfficialFreeShipping","getOfficialDefaultProfile","getSellerShippingSetup","exportRows"],
   permissions: [
     {
       "key": "shipping.settings.view",
@@ -4361,10 +4383,10 @@ export const spec = defineModuleSpec({
       "shipping.coverage.changed": { when: "Served zones or excluded areas change", payload: () => ShippingCoverageChangedEvent },
     },
     consumes: {
-      "orders.order.accepted": "Add each group to the dispatch watch; if acceptance came later than placement, recalculate the deadline and call orders.setDispatchDeadline",
+      "orders.order.accepted": "Add each group to the dispatch watch with its fulfilledBy; if acceptance came later than placement, recalculate the deadline (the Official schedule for official_warehouse and marketly_service groups) and call orders.setDispatchDeadline",
       "orders.dispatch_deadline.changed": "Move the watched deadline (the original stays on record for performance)",
       "orders.item.cancelled": "Remove items from the watch; open (or update) a seller_cannot_fulfill exception when the seller cancelled; close dispatch exceptions when nothing is left to ship; void unused labels",
-      "warehouse.package.packed": "Official Store package handed to the carrier pickup (handOver)",
+      "warehouse.package.packed": "Warehouse package (Official Store or Fulfilled by Marketly) handed to the carrier pickup (handOver); the shipment is recorded with the payload's owner (ownerType, sellerId) and fulfilledBy, never a hard-coded official owner",
       "sellers.seller.restricted": "Mark open exceptions of the seller for escalation to the Seller Manager",
       "support.case.opened": "Open a lost_or_damaged exception for missing or damaged package reports when none is open for that group and package (source customer_report, caseRef set, shipmentId from the report when given)",
       "returns.replacement.created": "Watch the replacement's dispatch like an original shipment (with or without a return: returnId may be null for a replacement decided on a case)",
@@ -4531,6 +4553,10 @@ export const spec = defineModuleSpec({
     "WEBHOOK_SIGNATURE_INVALID": {
       "status": 401,
       "meaning": "The carrier signature did not verify."
+    },
+    "FULFILLED_BY_MARKETLY": {
+      "status": 409,
+      "meaning": "Marketly ships this package; you can't record shipments, buy labels, correct tracking or answer exceptions for it."
     }
   },
   tables: {
@@ -5007,6 +5033,10 @@ export const spec = defineModuleSpec({
         "type": "uuid",
         "nullable": true
       },
+      "fulfilled_by": {
+        "type": "text",
+        "nullable": false
+      },
       "package_no": {
         "type": "int",
         "nullable": false
@@ -5295,6 +5325,10 @@ export const spec = defineModuleSpec({
         "type": "uuid",
         "nullable": true
       },
+      "fulfilled_by": {
+        "type": "text",
+        "nullable": false
+      },
       "due_at": {
         "type": "timestamptz",
         "nullable": false
@@ -5340,6 +5374,10 @@ export const spec = defineModuleSpec({
       "seller_id": {
         "type": "uuid",
         "nullable": true
+      },
+      "fulfilled_by": {
+        "type": "text",
+        "nullable": false
       },
       "items_summary": {
         "type": "text",

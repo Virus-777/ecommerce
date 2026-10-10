@@ -12,7 +12,7 @@ import { addDays, arrivalRange, arrivesLabel, isTime, MON_FRI, planDispatch, shi
 import { addressKindOf, CONTIGUOUS_48_DC, destinationOf, TERRITORIES, zoneMatches, type AddressKind, type Destination } from '../domain/geo.js';
 import { fitsWeight, freeOutcome, methodPrice, ruleStatus } from '../domain/rates.js';
 import type { CarrierRec, ClosureRec, MethodRec, NoticeRec, ProfileRec, RuleRec, ServiceRec, SettingsRec, TargetsRec, ZoneRec } from '../ports.js';
-import { DEFAULT_CUTOFF, notFound, SYSTEM, type Cfg, type Core } from './core.js';
+import { byMarketly, DEFAULT_CUTOFF, fulfilledByOf, notFound, SYSTEM, type Cfg, type Core, type FulfilledBy } from './core.js';
 
 export const DEFAULT_WEIGHT_GRAMS = 1000;
 const QUOTABLE = ['active', 'scheduled', 'superseded'];
@@ -37,6 +37,12 @@ export interface Owner {
   ownerType: 'official' | 'seller';
   sellerId: string | null;
 }
+
+/**
+ * Whose dispatch schedule a group follows: a Fulfilled by Marketly package (a seller's package Marketly's warehouse
+ * ships) follows the Official Store's settings, closures, market closures and cutoff; every other group its owner's.
+ */
+export const scheduleOwner = (owner: Owner, fulfilledBy?: string | null): Owner => (byMarketly(fulfilledBy) ? { ownerType: 'official', sellerId: null } : owner);
 
 export interface CoverageResult {
   shippable: boolean;
@@ -224,6 +230,8 @@ export class Estimates {
       settings: SettingsRec;
       closures: ClosureRec[];
       extraNotices?: NoticeRec[];
+      /** marketly_service: o.owner is the schedule owner (the Official Store); free shipping follows the seller's package */
+      fulfilledBy?: FulfilledBy;
     },
   ): Promise<DeliveryOption[]> {
     const currency = o.profiles[0]?.currency ?? this.core.currency;
@@ -233,8 +241,11 @@ export class Estimates {
     const zoneIds = o.zone ? [o.zone.id] : [];
     const ownerNotices = notices.filter((n) => this.noticeApplies(n, { dest: o.dest, zoneIds, ownerType: o.owner.ownerType }));
     const dayRules = this.dispatchRules(w, o.owner, o.settings, o.closures, ownerNotices);
-    const official = o.owner.ownerType === 'official';
-    const defaultCutoff = official ? w.targets.official.cutoff || w.cfg.officialCutoff : o.settings.same_day_cutoff || DEFAULT_CUTOFF;
+    // a Fulfilled by Marketly package is the seller's sale: free shipping is the seller's (the label is billed to the
+    // seller, decision D1) and seller-offer free-shipping rules apply, with the service profile's own threshold
+    const freeOwner: Owner['ownerType'] = byMarketly(o.fulfilledBy) ? 'seller' : o.owner.ownerType;
+    const official = freeOwner === 'official';
+    const defaultCutoff = o.owner.ownerType === 'official' ? w.targets.official.cutoff || w.cfg.officialCutoff : o.settings.same_day_cutoff || DEFAULT_CUTOFF;
     // the package leaves when its slowest item can
     const plans = (o.dispatch.length ? o.dispatch : [{ businessDays: o.settings.handling_days, sameDayCutoff: null, shipsFrom: '' }]).map((d) =>
       planDispatch(w.at, {
@@ -272,7 +283,7 @@ export class Estimates {
       const price = prices.reduce((a, b) => (b!.amount > a!.amount ? b : a))!;
       const outcomes = o.profiles.map((p, i) =>
         freeOutcome({
-          ownerType: o.owner.ownerType,
+          ownerType: freeOwner,
           methodCode: code,
           pm: pms[i]!,
           threshold: p.free_threshold != null ? money(p.free_threshold, p.currency) : null,
@@ -339,7 +350,11 @@ export class Estimates {
   async quoteOptions(input: PackageQuoteInput): Promise<PackageQuote> {
     const at = input.at ? new Date(input.at) : this.core.now();
     const w = await this.world(Number.isNaN(at.getTime()) ? this.core.now() : at);
-    const owner: Owner = { ownerType: input.ownerType, sellerId: input.ownerType === 'official' ? null : (input.sellerId ?? null) };
+    const fulfilledBy = fulfilledByOf(input.ownerType, input.fulfilledBy);
+    // Fulfilled by Marketly: the Official schedule, closures, cutoff and profile-owner check (items carry the service
+    // profile, an Official one), shipped from the service location
+    const owner = scheduleOwner({ ownerType: input.ownerType, sellerId: input.ownerType === 'official' ? null : (input.sellerId ?? null) }, fulfilledBy);
+    const origin = byMarketly(fulfilledBy) ? ((await this.core.serviceLocation())?.shipsFrom ?? null) : null;
     const settings = await this.settingsFor(owner, w.at, w.cfg);
     const dest = destinationOf({ postalCode: input.destination.postalCode, region: input.destination.region ?? null, country: input.destination.country, address: input.destination.address ?? null });
     const versions = new Map<string, ProfileRec | undefined>();
@@ -372,9 +387,10 @@ export class Estimates {
       zone,
       weightGrams: weight,
       subtotal,
-      dispatch: ok.map((i) => ({ businessDays: i.dispatch.businessDays, sameDayCutoff: i.dispatch.sameDayCutoff ?? null, shipsFrom: i.dispatch.shipsFrom || input.shipsFrom })),
+      dispatch: ok.map((i) => ({ businessDays: i.dispatch.businessDays, sameDayCutoff: i.dispatch.sameDayCutoff ?? null, shipsFrom: origin ?? (i.dispatch.shipsFrom || input.shipsFrom) })),
       settings,
       closures: await this.closuresFor(owner),
+      fulfilledBy,
     });
     if (!options.length) {
       return { shipsToLocation: false, notShippableLineIds: input.items.map((i) => i.lineId), reason: 'These items have no delivery method in common. Order them separately.', options: [], default: null };

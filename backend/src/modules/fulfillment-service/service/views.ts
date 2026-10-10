@@ -4,10 +4,10 @@
  * requests, service returns, removal orders, fee schedules and fee charges.
  */
 import type * as common from '../../../spec/common.js';
-import type { Enrollment, FeeCharge, FeeSchedule, FulfillmentRequest, InboundLine, InboundShipment, OwnedStock, RemovalOrder, ServiceReturn, SkuEnrollment } from '../../../spec/fulfillment-service.js';
+import type { Enrollment, FeeCharge, FeeSchedule, FulfillmentRequest, InboundLine, InboundShipment, OwnedStock, RemovalOrder, ServiceReceipt, ServiceReturn, SkuEnrollment, StockDifference } from '../../../spec/fulfillment-service.js';
 import { renderPdf, type PdfLine } from '../domain/pdf.js';
 import { actorOf, ageBuckets, CHARGE_LABEL, cubicFeet, EXAMPLE_SCHEDULE, onHandBlocks, physicalUnits, plural, qty, rateFor, round4 } from '../domain/rules.js';
-import type { Balances, ChargeRec, EnrollmentRec, InboundLineRec, InboundRec, LedgerRec, RemovalRec, RequestRec, ScheduleRec, ServiceReturnRec, SkuRec } from '../ports.js';
+import type { Balances, ChargeRec, EnrollmentRec, InboundLineRec, InboundRec, LedgerRec, ReceiptRec, RemovalRec, RequestRec, ScheduleRec, ServiceReturnRec, SkuRec, StockDifferenceRec } from '../ports.js';
 import { iso, num, Part } from './core.js';
 
 const OPEN_SKU_STATES = ['pending', 'approved', 'active'];
@@ -76,6 +76,10 @@ export class Views extends Part {
       acceptedAt: iso(r.accepted_at),
       acceptedBy: actorOf(r.accepted_by),
       capacity: { maxCubicFeet: num(r.max_cubic_feet), usedCubicFeet: usage.get(r.seller_id)?.cubicFeet ?? 0, maxSkus: r.max_skus, usedSkus: usage.get(r.seller_id)?.skus ?? 0 },
+      expectedSkus: r.expected_skus,
+      expectedMonthlyUnits: r.expected_monthly_units,
+      categories: Array.isArray(r.categories) ? r.categories : [],
+      contactNote: r.contact_note,
       reason: r.reason,
       reviewer: actorOf(r.reviewer_id),
       createdAt: r.created_at.toISOString(),
@@ -107,6 +111,8 @@ export class Views extends Part {
         labelRequired: r.label_required,
         restricted: r.restricted,
         restrictionReason: r.restriction_reason,
+        hazmat: r.hazmat,
+        notes: r.notes,
         state: r.state as SkuEnrollment['state'],
         stock: stock.get(r.id) ?? null,
       };
@@ -147,8 +153,9 @@ export class Views extends Part {
     if (!rows.length) return [];
     const ids = rows.map((r) => r.id);
     const refs = rows.map((r) => r.ref);
-    const [lines, discrepancies, charges, ledger] = await Promise.all([
+    const [lines, receipts, discrepancies, charges, ledger] = await Promise.all([
       this.repo.find('inbound_lines', { inbound_id: ids }),
+      this.repo.find('inbound_receipts', { inbound_id: ids }, { orderBy: [['seq', 'asc']] }),
       this.repo.find('discrepancies', { inbound_id: ids }),
       this.repo.find('fee_charges', { reference: refs }, { orderBy: [['id', 'asc']] }),
       this.repo.find('ownership_ledger', { reference: refs, seller_id: [...new Set(rows.map((r) => r.seller_id))] }, { orderBy: [['at', 'asc']] }),
@@ -161,6 +168,7 @@ export class Views extends Part {
       const own = lines.filter((l) => l.inbound_id === r.id);
       const disc = discrepancies.find((d) => d.inbound_id === r.id);
       const moves = ledger.filter((m) => m.reference === r.ref && m.seller_id === r.seller_id);
+      const ownReceipts = receipts.filter((x) => x.inbound_id === r.id);
       out.push({
         id: r.id,
         ref: r.ref,
@@ -175,6 +183,7 @@ export class Views extends Part {
         arrivedAt: iso(r.arrived_at),
         receivedAt: iso(r.received_at),
         lines: own.map((l) => this.lineOf(l, info.get(l.sku_enrollment_id), complete)),
+        receipts: ownReceipts.map((x) => this.receipt(x)),
         discrepancy: disc
           ? {
               summary: disc.summary,
@@ -187,18 +196,37 @@ export class Views extends Part {
           : null,
         labels: o.labels ? await this.labels(r, own, info) : [],
         fees: charges.filter((c) => c.reference === r.ref && c.seller_id === r.seller_id).map((c) => this.charge(c)),
-        timeline: this.inboundTimeline(r, moves, disc),
+        timeline: this.inboundTimeline(r, moves, disc, ownReceipts),
       });
     }
     return out;
+  }
+
+  receipt(x: ReceiptRec): ServiceReceipt {
+    return {
+      id: x.id,
+      seq: x.seq,
+      state: x.state,
+      received: x.lines.reduce((n, l) => n + l.received, 0),
+      damaged: x.lines.reduce((n, l) => n + l.damaged, 0),
+      countedBy: actorOf(x.counted_by) ?? { kind: 'staff', id: null, name: null },
+      countedAt: x.counted_at.toISOString(),
+      confirmedBy: actorOf(x.confirmed_by),
+      confirmedAt: iso(x.confirmed_at),
+    };
   }
 
   async inbound(row: InboundRec, o: { labels?: boolean } = {}): Promise<InboundShipment> {
     return (await this.inbounds([row], o))[0]!;
   }
 
-  inboundTimeline(r: InboundRec, moves: readonly LedgerRec[], disc: { decision: string | null; decided_at: Date | null; decided_by: string | null } | undefined): common.TimelineEvent[] {
+  inboundTimeline(r: InboundRec, moves: readonly LedgerRec[], disc: { decision: string | null; decided_at: Date | null; decided_by: string | null } | undefined, receipts: readonly ReceiptRec[] = []): common.TimelineEvent[] {
     const events: common.TimelineEvent[] = [{ at: r.created_at.toISOString(), label: 'Inbound shipment planned' }];
+    for (const x of receipts) {
+      const received = x.lines.reduce((n, l) => n + l.received, 0);
+      const damaged = x.lines.reduce((n, l) => n + l.damaged, 0);
+      events.push({ at: x.counted_at.toISOString(), label: 'Units counted', detail: `${plural(received, 'unit')}${damaged ? ` (${damaged} damaged)` : ''}, waiting for stock confirmation`, actor: actorOf(x.counted_by) });
+    }
     const actorFor = (m: LedgerRec): common.Actor => ({ kind: m.actor_kind as common.Actor['kind'], id: m.actor_id, name: null });
     const byTime = new Map<string, LedgerRec[]>();
     for (const m of moves) {
@@ -215,6 +243,7 @@ export class Views extends Part {
       else if (m.movement === 'received') events.push({ at, label: 'Units received', detail: `${plural(units, 'unit')} available to sell`, actor: actorFor(m) });
       else if (m.movement === 'received_damaged') events.push({ at, label: 'Damaged units received', detail: `${plural(units, 'unit')} held as unsellable`, actor: actorFor(m) });
       else if (m.movement === 'missing') events.push({ at, label: 'Units missing', detail: `${plural(units, 'unit')} not in the shipment`, actor: actorFor(m) });
+      else if (m.movement === 'not_accepted') events.push({ at, label: 'Units not accepted', detail: `${plural(units, 'unit')} not accepted when the stock was confirmed`, actor: actorFor(m) });
       else if (m.movement === 'adjusted') events.push({ at, label: 'Stock adjusted', detail: m.reason, actor: actorFor(m) });
     }
     if (r.arrived_at && !moves.some((m) => m.movement === 'arrived')) events.push({ at: r.arrived_at.toISOString(), label: 'Arrived at the warehouse' });
@@ -281,31 +310,31 @@ export class Views extends Part {
     return {
       id: r.id,
       orderId: r.order_id,
-      orderRef: r.items[0]?.orderRef ?? '',
+      orderRef: r.order_ref || r.items[0]?.orderRef || '',
       sellerGroupId: r.seller_group_id,
       sellerId: r.seller_id,
       state: r.state as FulfillmentRequest['state'],
-      items: r.items.map((i) => ({ orderItemId: i.orderItemId, offerId: i.offerId, skuEnrollmentId: i.skuEnrollmentId, sku: i.sku, title: i.title, quantity: i.quantity - i.cancelled, cancelled: i.cancelled, picked: i.picked })),
+      items: r.items.map((i) => ({ orderItemId: i.orderItemId, offerId: i.offerId, skuEnrollmentId: i.skuEnrollmentId, sku: i.sku, title: i.title, quantity: i.quantity - i.cancelled, cancelled: i.cancelled, picked: i.picked, shipped: i.shipped ?? 0 })),
       warehouseTaskId: r.warehouse_task_id,
       shipmentId: r.shipment_id,
       dispatchBy: { dueAt: r.dispatch_by.toISOString(), state },
+      shortReportedAt: iso(r.short_reported_at),
       createdAt: r.created_at.toISOString(),
     };
   }
 
   async returns(rows: readonly ServiceReturnRec[]): Promise<ServiceReturn[]> {
-    // the 'returned' movement that brought the units in carries the service return's id and the return ref
-    const receipts = rows.length ? await this.repo.find('ownership_ledger', { id: rows.map((r) => r.id) }) : [];
-    const refs = new Map(receipts.map((m) => [m.id, m.reference ?? '']));
     const photos = await this.photos(rows.flatMap((r) => r.evidence_media_ids));
     return rows.map((r) => ({
       id: r.id,
       returnId: r.return_id,
-      returnRef: refs.get(r.id) ?? '',
+      returnRef: r.return_ref,
       sellerId: r.seller_id,
       skuEnrollmentId: r.sku_enrollment_id,
+      orderItemId: r.order_item_id,
       quantity: r.quantity,
       outcome: r.outcome as ServiceReturn['outcome'],
+      proposedOutcome: r.proposed_outcome,
       inspectionNote: r.inspection_note,
       evidence: r.evidence_media_ids.map((id) => photos.get(id)).filter((m): m is common.MediaRef => Boolean(m)),
       inspectedAt: iso(r.inspected_at),
@@ -320,7 +349,8 @@ export class Views extends Part {
       const done = r.state === 'completed';
       const fees = charged.filter((c) => c.reference === r.ref && c.seller_id === r.seller_id && c.state !== 'reversed');
       let fee: common.Money | null = null;
-      if (fees.length) fee = this.core.money(fees.reduce((n, c) => n + c.amount, 0), fees[0]!.currency);
+      if (r.fee_amount !== null && r.fee_amount !== undefined && !fees.length) fee = this.core.money(Number(r.fee_amount));
+      else if (fees.length) fee =this.core.money(fees.reduce((n, c) => n + c.amount, 0), fees[0]!.currency);
       else if (r.state !== 'cancelled') {
         // estimate from the schedule in force
         let amount = 0;
@@ -353,9 +383,33 @@ export class Views extends Part {
         shipTo: r.ship_to,
         tracking: r.tracking,
         fee,
+        reason: r.reason,
         createdAt: r.created_at.toISOString(),
+        approvedAt: iso(r.approved_at),
+        completedAt: iso(r.completed_at),
       };
     });
+  }
+
+  /** Stock differences with the SKU and, for a reimbursement waiting for approval, the approval */
+  async differences(rows: readonly StockDifferenceRec[], approvals: Map<string, common.ApprovalInfo> = new Map()): Promise<StockDifference[]> {
+    const skus = new Map((rows.length ? await this.repo.find('sku_enrollments', { id: [...new Set(rows.map((r) => r.sku_enrollment_id))] }) : []).map((s) => [s.id, s]));
+    return rows.map((r) => ({
+      id: r.id,
+      skuEnrollmentId: r.sku_enrollment_id,
+      sku: skus.get(r.sku_enrollment_id)?.sku ?? '',
+      sellerId: r.seller_id,
+      day: r.day,
+      ledger: r.ledger,
+      inventory: r.inventory,
+      state: r.state,
+      decision: (r.decision as StockDifference['decision']) ?? null,
+      reason: r.reason,
+      amount: r.amount === null || r.amount === undefined ? null : this.core.money(Number(r.amount)),
+      decidedBy: actorOf(r.decided_by),
+      decidedAt: iso(r.decided_at),
+      approval: approvals.get(r.id) ?? (r.approval_request_id ? { required: true, approvalRequestId: r.approval_request_id, approvers: [] } : null),
+    }));
   }
 
   /* ---------------------------------------------------------------- fees */

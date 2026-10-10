@@ -252,14 +252,15 @@ export class CartChecker {
         shippingApi.quoteOptions({
           ownerType: first.item.owner_type,
           sellerId: first.item.seller_id,
+          fulfilledBy: first.fulfilledBy,
           shipsFrom: first.shipsFrom,
           items: quotable.map((l) => ({
             lineId: l.item.id,
-            profileId: l.offer!.shippingProfileId,
+            profileId: l.shipping!.profileId,
             parcel: { weightGrams: DEFAULT_UNIT_WEIGHT_GRAMS },
             quantity: l.item.quantity,
             value: money(l.unitPrice.amount * l.item.quantity, l.unitPrice.currency),
-            dispatch: { businessDays: l.offer!.dispatch.businessDays, sameDayCutoff: l.offer!.dispatch.sameDayCutoff ?? null, shipsFrom: l.shipsFrom },
+            dispatch: { businessDays: l.shipping!.dispatch.businessDays, sameDayCutoff: l.shipping!.dispatch.sameDayCutoff ?? null, shipsFrom: l.shipsFrom },
           })),
           destination: { postalCode: dest.postalCode, country: dest.country, region: dest.region ?? null },
           at: iso(this.now()),
@@ -353,7 +354,8 @@ export class CartChecker {
           if (e.offer) patch.accepted_terms_version = e.offer.termsVersion;
         }
         if (e.offer) {
-          if (e.offer.dispatch.shipsFrom !== e.item.ships_from) patch.ships_from = e.offer.dispatch.shipsFrom;
+          if (e.shipsFrom !== e.item.ships_from) patch.ships_from = e.shipsFrom;
+          if (e.fulfilledBy !== e.item.fulfilled_by) patch.fulfilled_by = e.fulfilledBy;
           if (e.offer.condition !== e.item.condition) patch.condition = e.offer.condition;
           if (e.offer.stockItemId !== e.item.stock_item_id) patch.stock_item_id = e.offer.stockItemId;
         }
@@ -609,6 +611,7 @@ export class CartChecker {
         key,
         label: `Package ${idx + 1} of ${keys.length}`,
         seller: first.item.seller,
+        fulfilledBy: first.eval.fulfilledBy,
         shipsFrom: first.eval.shipsFrom,
         items: pkgLines.map((l) => l.item),
         delivery,

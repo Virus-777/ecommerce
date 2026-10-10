@@ -912,7 +912,8 @@ Indexes: `(status, scheduled_at)`
 | `customers.marketing_preferences.changed` | customers | Refresh the consent cache used for promotional sends and broadcasts |
 | `customers.account.closed` | customers | Stop all promotional sends, remove push devices, keep essential notices for open obligations only |
 | `customers.data_export.ready` | customers | Email the customer the export download link |
-| `orders.order.accepted` | orders | Customer: order accepted (confirmation only after acceptance). Seller: new order per seller group (orders group, members with order permission) |
+| `orders.order.accepted` | orders | Customer: order accepted (confirmation only after acceptance). Seller: new order per seller group with fulfilledBy seller (orders group, members with order permission), with the dispatch reminder effect; Fulfilled by Marketly groups get no new-order notice or dispatch reminder (fulfillment-service sends seller.fulfillment.order_received) |
+| `orders.cancellation.requested` | orders | Seller (fulfilledBy seller; orders group, action required until respondBy): a customer asks to cancel items. Official Store and Fulfilled by Marketly groups: staff (order_manager role) decide it instead; no seller notice |
 | `orders.item.cancelled` | orders | Customer: cancellation update for the item, skipped when the payload's notifyCustomer is false (staff cancelled without telling the customer); seller: item cancelled (always) |
 | `orders.item.delayed` | orders | Customer: delay notice with the new estimate and options (wait, cancel, contact support) |
 | `orders.cancellation.decided` | orders | Customer: result of a cancellation request |
@@ -924,8 +925,8 @@ Indexes: `(status, scheduled_at)`
 | `payments.chargeback.opened` | payments | Staff: unusual financial activity notice to Finance Manager; seller: dispute opened on an order |
 | `shipping.shipment.dispatched` | shipping | Customer: package dispatched with contents, carrier and tracking; cancels the seller dispatch reminder |
 | `shipping.shipment.delivered` | shipping | Customer: package delivered |
-| `shipping.shipment.exception` | shipping | Customer: delivery problem with next steps; staff: Shipping Manager |
-| `shipping.dispatch.overdue` | shipping | Seller: dispatch overdue (action required); staff: overdue shipping to Shipping Manager (lead or backup) |
+| `shipping.shipment.exception` | shipping | Customer: delivery problem with next steps; staff: Shipping Manager. No seller notice for Fulfilled by Marketly groups (fulfilledBy marketly_service) |
+| `shipping.dispatch.overdue` | shipping | Seller (fulfilledBy seller only): dispatch overdue (action required); staff: overdue shipping to Shipping Manager (lead or backup). Fulfilled by Marketly groups: no seller notice; the staff notice names the Marketly warehouse and goes to warehouse_manager |
 | `returns.return.requested` | returns | Seller: new return request with response deadline |
 | `returns.return.info_requested` | returns | Customer: more information needed for the return |
 | `returns.return.approved` | returns | Customer: return approved with label or drop-off instructions |
@@ -961,7 +962,7 @@ Indexes: `(status, scheduled_at)`
 | `catalog.product.changes_requested` | catalog | Seller: requested corrections with field comments and resubmit deadline |
 | `catalog.product.approved` | catalog | Seller: product approved |
 | `catalog.product.rejected` | catalog | Seller: product rejected with reason |
-| `inventory.stock.low` | inventory | Seller: low stock (own offers); staff: stock shortage to Inventory Manager for the Official Store |
+| `inventory.stock.low` | inventory | Seller: low stock (own offers), skipped when serviceManaged (fulfillment-service sends seller.fulfillment.stock_low); staff: stock shortage to Inventory Manager for the Official Store |
 | `finance.payout.paid` | finance | Seller owner: payout paid (after bank confirmation) |
 | `finance.payout.failed` | finance | Seller owner: payout failed and what to fix; staff: failed payout to Finance Manager |
 | `finance.hold.placed` | finance | Seller owner: hold with amount, reason and review date |
@@ -1011,7 +1012,7 @@ Indexes: `(status, scheduled_at)`
 
 | Function | Signature | Used by |
 |---|---|---|
-| notify | `(input: NotifyInput) => { noticeIds: uuid[], deliveryIds: uuid[] }`<br>Send a topic to recipients now (for cases not covered by the event routing rules, e.g. mentions, test notices, guest order links). Essential topics ignore promotional consent; promotional topics check it. | customers, support, messaging, sellers, finance, returns, workqueues, access, reports, audit |
+| notify | `(input: NotifyInput) => { noticeIds: uuid[], deliveryIds: uuid[] }`<br>Send a topic to recipients now (for cases not covered by the event routing rules, e.g. mentions, test notices, guest order links). Essential topics ignore promotional consent; promotional topics check it. | customers, support, messaging, sellers, finance, returns, workqueues, access, reports, audit, fulfillment-service |
 | schedule | `(input: NotifyInput, sendAt: datetime) => uuid`<br>Send later (deadline reminders). Requires a dedupeKey so it can be cancelled. | shipping, orders, returns, sellers, support, access |
 | cancelScheduled | `(dedupeKey: string) => int`<br>Cancel scheduled notices (e.g. order dispatched before the reminder) | shipping, orders, returns, sellers, support, access |
 | resolve | `(dedupeKey: string, note?: string) => int`<br>Mark action-required notices as done for every recipient (the queue item was handled), so inboxes stop showing them as needing action | workqueues, support, access, finance, sellers, shipping, returns |
@@ -1092,6 +1093,8 @@ Indexes: `(status, scheduled_at)`
 - Default templates: install seeds version 1 of every topic and channel from the built-in defaults. A template nobody edited (every version written by the system) follows the defaults: when a default changes (e.g. the purchase order email gained the Deliver to line), the boot seed publishes a new system version (note Default template updated) and supersedes the old one. A template with any staff version is never touched.
 - Sensitive events (codes, reset links, invitation links) are rendered and sent without storing the secret: the delivery row keeps the template version and a redacted subject; such deliveries are not retryable from the log.
 - Android: push arrives in phase 3; until then the app polls GET /inbox/summary on resume. Push payloads carry only the title, a short body and the NoticeLink, never personal details beyond the order reference.
+- Fulfilled by Marketly topics (fulfillment-service sends them all through notify; notifications declares the topics and default templates). Seller topics in the new preference group fulfillment_service (label 'Fulfilled by Marketly', permission fulfillment-service.inbound.manage, not owner-only, essential for the owner, default on): seller.fulfillment.enrollment_decided (context enrollment.state, reason), seller.fulfillment.sku_reviewed (sku, approved, reason), seller.fulfillment.inbound_received (inbound.ref, received, damaged, discrepancy), seller.fulfillment.stock_available (inbound.ref, units), seller.fulfillment.discrepancy_decided (inbound.ref, decision), seller.fulfillment.order_received (order.ref, items), seller.fulfillment.return_inspected (return.ref, outcome), seller.fulfillment.removal_completed (removal.ref, units), seller.fulfillment.stock_low (stock.label, available), seller.fulfillment.stock_aged (units, effective), seller.fulfillment.disposal_scheduled (units, days, removal.ref), seller.fulfillment.fee_schedule_changed (version, effective), seller.fulfillment.offboarding (removal.refs). Staff topics: staff.fulfillment.enrollment_submitted (role seller_manager), staff.fulfillment.inbound_submitted (role warehouse_manager), staff.fulfillment.discrepancy_claimed (role warehouse_manager). The dedupe keys are listed in the fulfillment-service spec notes.
+- Fulfilled by Marketly routing: event routing never sends a seller a shipping or dispatch notice for a group with fulfilledBy marketly_service (new order, dispatch reminder, dispatch overdue, cancellation request, delivery exceptions), and skips the generic seller low-stock notice when inventory.stock.low is serviceManaged.
 
 ## GraphQL (read layer)
 

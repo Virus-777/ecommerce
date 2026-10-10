@@ -160,6 +160,9 @@ export interface LabelFacts {
   outcome?: string | null;
   platformHandling: boolean;
   inspecting: boolean;
+  /** Fulfilled by Marketly: platform handled from the request, so not "Escalated" unless someone escalated it */
+  service?: boolean;
+  escalated?: boolean;
 }
 
 const OUTCOME_LABEL: Record<string, string> = { refunded: 'Refunded', partly_refunded: 'Partly refunded', replaced: 'Replaced', exchanged: 'Exchanged', credited: 'Refunded as store credit' };
@@ -188,7 +191,7 @@ export function customerStatusLabel(f: LabelFacts): string {
 }
 
 export function sellerStatusLabel(f: LabelFacts): string {
-  if (f.platformHandling && is(ACTIVE_STATUSES, f.status)) return 'Escalated';
+  if (f.platformHandling && (!f.service || f.escalated) && is(ACTIVE_STATUSES, f.status)) return 'Escalated';
   switch (f.status) {
     case 'requested':
       return 'Return requested';

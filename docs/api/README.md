@@ -1,6 +1,6 @@
 # Marketly API design
 
-Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 33 modules, 1292 endpoints.
+Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 33 modules, 1294 endpoints.
 
 - **GraphQL read layer:** [graphql/README.md](graphql/README.md), composed schemas `graphql/schema.{store,seller,admin}.graphql`, screen queries in `graphql/operations/`
 - **OpenAPI 3.1:** [openapi.json](openapi.json) (open in Swagger UI, Redoc or Postman)
@@ -81,7 +81,7 @@ Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 33 modules, 
 
 | Module | Phase | Owns | Depends on | Endpoints |
 |---|---|---|---|---|
-| [fulfillment-service](modules/fulfillment-service.md) | 4 | Platform storage and shipping for sellers: seller enrollment under service terms, SKU enrollment, inbound shipments to our warehouse, receiving into seller-owned stock, picking and shipping by us while the seller stays the seller of record, returns handling, removal of stock, and storage and handling fees with full seller visibility. | inventory, warehouse, finance | 39 |
+| [fulfillment-service](modules/fulfillment-service.md) | 4 | Platform storage and shipping for sellers: seller enrollment under service terms, SKU enrollment, inbound shipments to our warehouse, receiving into seller-owned stock, picking and shipping by us while the seller stays the seller of record, returns handling, removal of stock, and storage and handling fees with full seller visibility. | inventory, warehouse, finance | 41 |
 | [wallet](modules/wallet.md) | 3 | Customer store credit with an auditable ledger (refunds to credit, goodwill credit within approval limits, price adjustments, use at checkout, expiry), gift cards, and a placeholder for loyalty rewards. Checkout and payments use the balance through the in-process public API. | customers, payments | 15 |
 | [wishlist](modules/wishlist.md) | 3 | Saved shopping for customers: saved items in one or more lists, price-drop and back-in-stock alerts, and shareable lists. Alerts are delivered through notifications under the customer's promotional preferences. | catalog, offers, customers | 19 |
 

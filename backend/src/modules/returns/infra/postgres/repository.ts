@@ -66,12 +66,14 @@ function returnQuery(d: any, f: ReturnFilter): any {
   if (f.ids) q = f.ids.length ? q.where('id', 'in', f.ids) : q.where(sql<boolean>`false`);
   if (f.sellerId) q = q.where('seller_id', '=', f.sellerId);
   if (f.ownerType) q = q.where('owner_type', '=', f.ownerType);
+  if (f.marketlyDock) q = q.where(sql<boolean>`(owner_type = 'official' or fulfilled_by = 'marketly_service')`);
   if (f.orderId) q = q.where('order_id', '=', f.orderId);
   if (f.statuses) q = f.statuses.length ? q.where('status', 'in', f.statuses) : q.where(sql<boolean>`false`);
   if (f.notStatuses?.length) q = q.where('status', 'not in', f.notStatuses);
   if (f.platformHandling !== undefined) q = q.where('platform_handling', '=', f.platformHandling);
   if (f.disputed !== undefined) {
-    const cond = sql<boolean>`(platform_handling or escalation is not null or case_id is not null)`;
+    // Fulfilled by Marketly returns are platform handled from the request: a dispute only when escalated or on a case
+    const cond = sql<boolean>`((platform_handling and fulfilled_by <> 'marketly_service') or escalation is not null or case_id is not null)`;
     q = q.where(f.disputed ? cond : sql<boolean>`not ${cond}`);
   }
   if (f.hasException !== undefined) q = q.where('exception', f.hasException ? 'is not' : 'is', null);

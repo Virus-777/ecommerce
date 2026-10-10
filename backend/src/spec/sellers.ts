@@ -2824,6 +2824,16 @@ export interface SellersDb {
     ref: string | null;
     at: Date;
   };
+  /** Permissions added to a member role template after members were invited with it (migration 0004: the two Fulfilled by Marketly keys of products_inventory). Applied once, on the first start where the permission's module runs, to the open members of that template who lack it */
+  template_grants: {
+    id: string;
+    template: 'products_inventory' | 'shipping' | 'customer_service';
+    permission: string;
+    created_at: Date;
+    /** null while the permission's module is off */
+    applied_at: Date | null;
+    members_updated: number | null;
+  };
   /** Invitations to apply (invite-only launch) */
   seller_invitations: {
     id: string;
@@ -5388,9 +5398,9 @@ export const spec = defineModuleSpec({
       "content.policy.effective": "When a seller agreement, product rules, fee schedule or service standards version becomes effective, mark it pending for every owner",
       "orders.order.accepted": "Performance: count accepted orders and units per seller group",
       "orders.item.cancelled": "Performance: count seller-caused cancellations",
-      "shipping.shipment.dispatched": "Performance: on-time vs late dispatch and whether tracking is valid",
-      "shipping.dispatch.overdue": "Performance: overdue dispatch counts towards dispatch reliability",
-      "shipping.shipment.delivered": "Performance: confirm carrier-scanned tracking",
+      "shipping.shipment.dispatched": "Performance: on-time vs late dispatch and whether tracking is valid; skipped for fulfilledBy marketly_service (Marketly dispatched it)",
+      "shipping.dispatch.overdue": "Performance: overdue dispatch counts towards dispatch reliability; skipped for fulfilledBy marketly_service",
+      "shipping.shipment.delivered": "Performance: confirm carrier-scanned tracking of packages the seller shipped (fulfilledBy seller; Fulfilled by Marketly deliveries are left out)",
       "returns.return.requested": "Performance: return rate",
       "support.case.opened": "Performance: open cases per seller",
       "support.case.resolved": "Performance: unresolved cases past deadline",
@@ -6909,6 +6919,32 @@ export const spec = defineModuleSpec({
       "at": {
         "type": "timestamptz",
         "nullable": false
+      }
+    },
+    "template_grants": {
+      "id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "template": {
+        "type": "text",
+        "nullable": false
+      },
+      "permission": {
+        "type": "text",
+        "nullable": false
+      },
+      "created_at": {
+        "type": "timestamptz",
+        "nullable": false
+      },
+      "applied_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
+      "members_updated": {
+        "type": "int",
+        "nullable": true
       }
     },
     "seller_invitations": {

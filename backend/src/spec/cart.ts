@@ -242,11 +242,13 @@ export const PackageDelivery: z.ZodType<PackageDelivery> = z.object({
 }).register(common.apiTypes, { id: "cart.PackageDelivery" });
 
 export interface CartPackage {
-  /** Stable grouping key: owner type + seller id + ship-from (offers DispatchTerms.shipsFrom) */
+  /** Stable grouping key: owner type + seller id + fulfilledBy + ship-from (offers Offer.shipping: fulfilledBy and dispatch.shipsFrom), so a seller's Marketly-fulfilled and self-shipped items are separate packages */
   key: string;
   /** 'Package 2 of 3' */
   label: string;
   seller: SellerLabel;
+  /** marketly_service packages read 'Ships from Marketly' and are quoted with the service profile */
+  fulfilledBy: "official_warehouse" | "seller" | "marketly_service";
   /** e.g. 'Reno, NV warehouse' */
   shipsFrom: string;
   items: CartItem[];
@@ -261,11 +263,12 @@ export interface CartPackage {
 }
 
 export const CartPackage: z.ZodType<CartPackage> = z.object({
-  key: z.string().describe("Stable grouping key: owner type + seller id + ship-from (offers DispatchTerms.shipsFrom)"),
+  key: z.string().describe("Stable grouping key: owner type + seller id + fulfilledBy + ship-from (offers Offer.shipping: fulfilledBy and dispatch.shipsFrom), so a seller's Marketly-fulfilled and self-shipped items are separate packages"),
   label: z.string().describe("'Package 2 of 3'"),
   get seller() {
     return SellerLabel;
   },
+  fulfilledBy: z.enum(["official_warehouse", "seller", "marketly_service"]).describe("marketly_service packages read 'Ships from Marketly' and are quoted with the service profile"),
   shipsFrom: z.string().describe("e.g. 'Reno, NV warehouse'"),
   get items() {
     return z.array(CartItem);
@@ -618,6 +621,7 @@ export interface CheckoutCartLine {
   productId: string;
   variantId: string;
   packageKey: string;
+  fulfilledBy: "official_warehouse" | "seller" | "marketly_service";
   quantity: number;
   acceptedUnitPrice: common.Money;
   currentUnitPrice: common.Money;
@@ -633,6 +637,7 @@ export const CheckoutCartLine: z.ZodType<CheckoutCartLine> = z.object({
   productId: z.uuid(),
   variantId: z.uuid(),
   packageKey: z.string(),
+  fulfilledBy: z.enum(["official_warehouse", "seller", "marketly_service"]),
   quantity: z.number().int(),
   get acceptedUnitPrice() {
     return common.Money;
@@ -826,6 +831,8 @@ export interface CartDb {
     variant_id: string;
     stock_item_id: string;
     ships_from: string;
+    /** Offer.shipping.fulfilledBy at the last check; null only for lines added before it was kept, until their next check */
+    fulfilled_by: 'official_warehouse' | 'seller' | 'marketly_service' | null;
     /** offer condition at add; null only for lines added before it was kept, until their next check */
     condition: 'new' | 'used_like_new' | 'used_good' | 'used_acceptable' | 'refurbished' | null;
     quantity: number;
@@ -1475,6 +1482,10 @@ export const spec = defineModuleSpec({
       "ships_from": {
         "type": "text",
         "nullable": false
+      },
+      "fulfilled_by": {
+        "type": "text",
+        "nullable": true
       },
       "condition": {
         "type": "text",

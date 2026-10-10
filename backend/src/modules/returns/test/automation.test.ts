@@ -102,6 +102,7 @@ describe('events from other modules', () => {
       groupId: m.order.groups[0]!.id,
       ownerType: 'seller',
       sellerId: m.sellerId,
+      fulfilledBy: 'seller',
       itemId: m.items[0]![0]!,
       offerId: newId(),
       stockItemId: newId(),
@@ -136,10 +137,10 @@ describe('events from other modules', () => {
     await h.publish('shipping', 'shipping.shipment.status_changed', { shipmentId, kind: 'return', orderId: m.order.id, groupId, returnId: m.ret.id, from: 'label_created', to: 'in_transit', statusLabel: 'In transit', estimatedArrival: { from: '2026-10-12', to: '2026-10-13' }, at: now() });
     let d = await detail(m.ret.id, m.sellerId);
     expect(d.detail).toMatchObject({ status: 'in_transit', shipment: { status: 'in_transit' } });
-    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'lost_or_damaged', orderId: m.order.id, groupId, shipmentId, sellerId: m.sellerId, orderItemIds: [], dueAt: now(), customerAction: null, source: 'carrier', caseRef: null });
+    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'lost_or_damaged', orderId: m.order.id, groupId, shipmentId, sellerId: m.sellerId, fulfilledBy: 'seller', orderItemIds: [], dueAt: now(), customerAction: null, source: 'carrier', caseRef: null });
     d = await detail(m.ret.id, m.sellerId);
     expect(d.detail.shipment.status).toBe('exception');
-    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId, kind: 'return', orderId: m.order.id, groupId, returnId: m.ret.id, sellerId: m.sellerId, lines: [], deliveredAt: now() });
+    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId, kind: 'return', orderId: m.order.id, groupId, returnId: m.ret.id, sellerId: m.sellerId, fulfilledBy: 'seller', lines: [], deliveredAt: now() });
     d = await detail(m.ret.id, m.sellerId);
     expect(d.detail.shipment.status).toBe('delivered');
     expect(d.detail.shipment.events.map((e: any) => e.label)).toEqual(expect.arrayContaining(['In transit']));

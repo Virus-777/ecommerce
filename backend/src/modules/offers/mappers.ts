@@ -3,6 +3,8 @@
  */
 import type * as common from '../../spec/common.js';
 import { OFFICIAL_STORE_NAME } from '../../spec/common.js';
+import type { ServiceTerms } from '../../spec/fulfillment-service.js';
+import type * as shipping from '../../spec/shipping.js';
 import type {
   BulkRowError,
   BulkUpdateJob,
@@ -14,6 +16,7 @@ import type {
   FeaturedRule,
   IneligibilityReason,
   Offer,
+  OfferShipping,
   OfferStatusEntry,
   PricePoint,
   ReturnTerms,
@@ -55,6 +58,72 @@ export const hhmm = (t: string | null | undefined) => (t ? t.slice(0, 5) : null)
 export function dispatchOf(r: OfferRec): DispatchTerms {
   return { businessDays: r.dispatch_business_days, sameDayCutoff: hhmm(r.same_day_cutoff), shipsFrom: r.ships_from, label: dispatchLabel(r.dispatch_business_days) };
 }
+
+/* ---------------------------------------------------------------- effective fulfilment (Fulfilled by Marketly) */
+
+/** Customer-facing fulfilment of an offer (Offer.shipping) and whether the fulfilment lets it sell */
+export interface Fulfilment {
+  shipping: OfferShipping;
+  /** False for a Marketly-fulfilled offer the service does not let sell: enrollment suspended or offboarding, service unavailable or off (decision D5) */
+  sellable: boolean;
+  /** Why it does not sell (status reason text), null when it sells */
+  holdText: string | null;
+  /** The SKU's parcel for marketly_service quotes; null: the default parcel */
+  parcel: shipping.Parcel | null;
+}
+
+/** Status reason text of an offer Fulfilled by Marketly does not let sell (it never switches to seller shipping) */
+export const SERVICE_HOLD: Record<NonNullable<ServiceTerms['notSellableReason']>, string> = {
+  enrollment_suspended: 'The Fulfilled by Marketly enrollment is suspended, so this offer is not on sale until it is reinstated',
+  enrollment_offboarding: 'The seller is leaving Fulfilled by Marketly, so this offer is not on sale while the stock is removed',
+  service_unavailable: 'Fulfilled by Marketly is not available right now, so this offer is not on sale',
+};
+
+/** Seller and Official Store offers: their own profile and dispatch terms */
+export function ownFulfilment(r: OfferRec): Fulfilment {
+  return { shipping: { fulfilledBy: r.fulfilled_by, profileId: r.shipping_profile_id, dispatch: dispatchOf(r) }, sellable: true, holdText: null, parcel: null };
+}
+
+/**
+ * Marketly-fulfilled offers: Marketly's profile, dispatch and ships-from (fulfillment-service.getServiceTerms). Without
+ * terms (the service is off or no longer fulfils it) the offer does not sell and is never treated as seller-shipped; its
+ * saved profile and dispatch only fill the shape.
+ */
+export function serviceFulfilment(r: OfferRec, t: ServiceTerms | null | undefined): Fulfilment {
+  if (!t) return { shipping: { fulfilledBy: 'marketly_service', profileId: r.shipping_profile_id, dispatch: dispatchOf(r) }, sellable: false, holdText: SERVICE_HOLD.service_unavailable, parcel: null };
+  const days = t.dispatch.businessDays;
+  const d = t.parcel?.dimensionsCm;
+  return {
+    shipping: { fulfilledBy: 'marketly_service', profileId: t.shippingProfileId, dispatch: { businessDays: days, sameDayCutoff: t.dispatch.sameDayCutoff ?? null, shipsFrom: t.shipsFrom, label: dispatchLabel(days) } },
+    sellable: t.sellable,
+    holdText: t.sellable ? null : SERVICE_HOLD[t.notSellableReason ?? 'service_unavailable'],
+    parcel: t.parcel ? { weightGrams: t.parcel.weightGrams, ...(d ? { lengthCm: d.length, widthCm: d.width, heightCm: d.height } : {}) } : null,
+  };
+}
+
+/** Statuses a service hold shows as Ineligible (a paused offer stays paused) */
+const HOLDABLE = ['active', 'out_of_stock'];
+
+/** True when the offer is held by its fulfilment: shown Ineligible although its stored status sells */
+export const serviceHeld = (r: OfferRec, f: Fulfilment | undefined) => Boolean(f && !f.sellable && HOLDABLE.includes(r.status));
+
+/** The status customers and other modules see */
+export const shownStatus = (r: OfferRec, f: Fulfilment | undefined): Offer['status'] => (serviceHeld(r, f) ? 'ineligible' : (r.status as Offer['status']));
+
+export function serviceHoldReason(f: Fulfilment, at: Date | string): StatusReason {
+  return { code: 'fulfillment_service_suspended', text: f.holdText ?? SERVICE_HOLD.service_unavailable, affectedActivity: 'Sales of this offer', appealRoute: null, reviewDate: null, actor: { kind: 'system', id: null }, at: isoReq(at) };
+}
+
+/** Featured-offer reason of an offer Fulfilled by Marketly is not selling (IneligibilityReason has no service code) */
+export const SERVICE_INELIGIBLE: IneligibilityReason = {
+  code: 'offer_not_active',
+  message: 'Not eligible for featured offer: Fulfilled by Marketly is not selling this offer right now',
+  howToFix: 'The offer sells again when your Fulfilled by Marketly enrollment is reinstated or the SKU leaves the service.',
+};
+
+export const FULFILLED_BY_MARKETLY_LABEL = 'Ships from Marketly';
+
+export const FULFILLMENT_NOTE = "Fulfilled by Marketly: customers see Marketly's delivery terms. Your dispatch time and shipping profile are saved but apply only if you leave the service.";
 
 export function returnTermsOf(r: OfferRec): ReturnTerms {
   return {
@@ -107,8 +176,11 @@ export function offerTitle(productTitle: string, options: Record<string, string>
   return Object.keys(options ?? {}).length ? `${productTitle} – ${variantLabel(options)}` : productTitle;
 }
 
-export function toOffer(r: OfferRec, x: { sellerName: string; eligibility?: EligibilityRec; lookbackDays: number }): Offer {
+export function toOffer(r: OfferRec, x: { sellerName: string; eligibility?: EligibilityRec; lookbackDays: number; fulfilment?: Fulfilment; now?: Date }): Offer {
   const missing = strings(r.missing_items);
+  const f = x.fulfilment ?? ownFulfilment(r);
+  const held = serviceHeld(r, f);
+  const eligibility = eligibilityOf(r, x.eligibility);
   return {
     id: r.id,
     ownerType: r.owner_type,
@@ -131,11 +203,13 @@ export function toOffer(r: OfferRec, x: { sellerName: string; eligibility?: Elig
     purchaseLimit: r.purchase_limit,
     dispatch: dispatchOf(r),
     shippingProfileId: r.shipping_profile_id,
+    fulfilledBy: r.fulfilled_by,
+    shipping: f.shipping,
     returnTerms: returnTermsOf(r),
     warranty: warrantyOf(r),
-    status: r.status as Offer['status'],
-    statusReason: statusReasonOf(r),
-    featuredEligibility: eligibilityOf(r, x.eligibility),
+    status: shownStatus(r, f),
+    statusReason: held ? serviceHoldReason(f, x.now ?? r.updated_at) : statusReasonOf(r),
+    featuredEligibility: held ? { ...eligibility, eligible: false, reasons: [SERVICE_INELIGIBLE, ...eligibility.reasons.filter((e) => e.message !== SERVICE_INELIGIBLE.message)] } : eligibility,
     publishOnApproval: r.publish_on_approval,
     termsVersion: r.terms_version,
     publishedAt: iso(r.published_at),

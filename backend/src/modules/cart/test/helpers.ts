@@ -50,8 +50,15 @@ export interface Kit {
   publish(source: string, name: string, payload: unknown): Promise<void>;
   /** A product with one variant (or more) in the catalog stub */
   product(o?: { title?: string; variants?: number }): Promise<{ productId: string; variantIds: string[] }>;
-  /** An active offer with stock (inventory availability stub) */
-  offer(o: { productId: string; variantId: string; price: number; stock?: number; sellerName?: string; official?: boolean; sellerId?: string; purchaseLimit?: number | null; shipsFrom?: string; condition?: offers.Offer['condition'] }): Promise<offers.Offer>;
+  /**
+   * An active offer with stock (inventory availability stub). o.service: Fulfilled by Marketly (Offer.shipping from
+   * the service terms: Marketly's profile, dispatch and ships-from)
+   */
+  offer(o: { productId: string; variantId: string; price: number; stock?: number; sellerName?: string; official?: boolean; sellerId?: string; purchaseLimit?: number | null; shipsFrom?: string; condition?: offers.Offer['condition']; service?: boolean }): Promise<offers.Offer>;
+  /** Marketly's service terms in the world: profile, dispatch and ships-from of Fulfilled by Marketly offers */
+  serviceTerms: offers.OfferShipping;
+  /** The effective shipping of an offer when Marketly fulfils it (or stops fulfilling it) */
+  shipping(offer: offers.Offer, service: boolean): Pick<offers.Offer, 'fulfilledBy' | 'shipping'>;
   /** Change an offer in the world (price, status, purchase limit …); bumps termsVersion */
   change(offerId: string, patch: Partial<offers.Offer>): void;
   /** Set available stock (publishes inventory.stock.changed as inventory would) */
@@ -79,9 +86,11 @@ const viewOf = (o: offers.Offer, world: World): offers.OfferView => ({
     shippingCost: money(599),
     free: false,
     freeOver: money(3500),
-    shipsFrom: o.dispatch.shipsFrom,
-    dispatchLabel: o.dispatch.label,
+    shipsFrom: (o.shipping ?? o).dispatch.shipsFrom,
+    dispatchLabel: (o.shipping ?? o).dispatch.label,
+    fulfilledByLabel: o.fulfilledBy === 'marketly_service' ? 'Ships from Marketly' : null,
   },
+  fulfilledBy: o.fulfilledBy,
   total: o.price,
   availability: { state: 'in_stock', maxPerOrder: 10, label: 'In stock' },
   returns: o.returnTerms,
@@ -149,8 +158,19 @@ export async function boot(opts: BuildOptions & { only?: string[] } = {}): Promi
   for (const name of Object.keys(spec.events.publishes)) bus.subscribe('test', name, (e) => void events.push(e));
 
 
+  const service: offers.OfferShipping = {
+    fulfilledBy: 'marketly_service',
+    profileId: newId(),
+    dispatch: { businessDays: 0, sameDayCutoff: '14:00', shipsFrom: 'Reno, NV (Marketly warehouse)', label: 'Ships today' },
+  };
+  const shippingFor = (o: Pick<offers.Offer, 'ownerType' | 'shippingProfileId' | 'dispatch'>, onService: boolean): Pick<offers.Offer, 'fulfilledBy' | 'shipping'> =>
+    onService
+      ? { fulfilledBy: 'marketly_service', shipping: structuredClone(service) }
+      : { fulfilledBy: o.ownerType === 'official' ? 'official_warehouse' : 'seller', shipping: { fulfilledBy: o.ownerType === 'official' ? 'official_warehouse' : 'seller', profileId: o.shippingProfileId, dispatch: o.dispatch } };
   const kit: Kit = {
     app,
+    serviceTerms: service,
+    shipping: shippingFor,
     clock,
     world,
     service: app.kernel.boot.apis.get('cart') as CartService,
@@ -228,7 +248,8 @@ export async function boot(opts: BuildOptions & { only?: string[] } = {}): Promi
         termsVersion: 1,
         createdAt: now,
         updatedAt: now,
-      };
+      } as Omit<offers.Offer, 'fulfilledBy' | 'shipping'> as offers.Offer;
+      Object.assign(offer, shippingFor(offer, o.service ?? false));
       world.offers.set(id, offer);
       return offer;
     },

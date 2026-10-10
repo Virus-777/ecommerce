@@ -12,7 +12,7 @@ import type { ModuleContext, PublicApiMap } from '../../../kernel/module-system/
 import type * as audit from '../../../spec/audit.js';
 import type * as common from '../../../spec/common.js';
 import { orderItemMachine, orderLifecycleMachine } from '../domain/state-machines.js';
-import { displayStatus, groupStatus, is, OPEN_GROUP, paidOf, splitMoney, MINUTE, type ItemState, type Lifecycle } from '../domain/rules.js';
+import { displayStatus, groupStatus, is, OPEN_GROUP, paidOf, splitMoney, MINUTE, WAREHOUSE_STAGE_ENTRY, type ItemState, type Lifecycle } from '../domain/rules.js';
 import type { CancellationRec, DocumentRec, FactRec, FlagData, GroupRec, ItemRec, OrderRec, OrdersRepository, ShipmentRec, TimelineRec } from '../ports.js';
 
 export interface OrdersServiceDeps {
@@ -111,6 +111,13 @@ export class Core {
   today = (at: Date = this.now()) => dateInZone(at, this.tz);
   error = (code: string, message?: string, details?: unknown) => this.ctx.error(code, message, details);
 
+  /** Seller actions on a Fulfilled by Marketly group: 409 FULFILLED_BY_MARKETLY (decision D6) */
+  refuseMarketly(g: { fulfilled_by: string }, action: string) {
+    if (g.fulfilled_by === 'marketly_service') {
+      throw this.error('FULFILLED_BY_MARKETLY', `Marketly ships this package; you can't ${action}. The Order Manager handles its cancellations.`);
+    }
+  }
+
   async cfg(): Promise<Cfg> {
     const s = this.ctx.settings;
     const [dueSoonMinutes, sellerAddressVisibleDays, sellerCancellationResponse, officialCancelUntil, orderRefPrefix] = await Promise.all([
@@ -203,6 +210,15 @@ export class Core {
 
   async timelineOf(orderId: string, visibility?: string[]): Promise<TimelineRec[]> {
     return this.repo.find('timeline', { order_id: orderId, ...(visibility ? { visibility: visibility as TimelineRec['visibility'][] } : {}) }, { orderBy: [['at', 'asc'], ['id', 'asc']] });
+  }
+
+  /** The latest Marketly warehouse stage label per Fulfilled by Marketly group of the orders (seller timeline entries) */
+  async warehouseStages(orderIds: readonly string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    if (!orderIds.length) return out;
+    const rows = await this.repo.find('timeline', { order_id: [...new Set(orderIds)], visibility: 'seller', label: WAREHOUSE_STAGE_ENTRY }, { orderBy: [['at', 'asc'], ['id', 'asc']] });
+    for (const r of rows) if (r.group_id && r.detail) out.set(r.group_id, r.detail);
+    return out;
   }
 
   /* ---------------------------------------------------------------- writes (inside a transaction) */

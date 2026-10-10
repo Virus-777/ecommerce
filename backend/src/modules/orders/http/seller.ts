@@ -41,12 +41,12 @@ export const sellerRoutes = (service: OrdersService) =>
     /** POST /orders/{id}/cancellation-requests/{requestId}/accept: Accept the buyer's cancellation and refund */
     acceptCancellationRequest: async ({ params, sellerId, actor, requestId, principal }) => {
       const { agg } = await service.reads.sellerGroup(sellerId, params.id);
-      return service.cancellations.accept(agg.order.id, params.requestId, { actor, requestId, principal }, { outcome: 'accepted', groupId: params.id });
+      return service.cancellations.accept(agg.order.id, params.requestId, { actor, requestId, principal }, { outcome: 'accepted', groupId: params.id, bySeller: true });
     },
     /** POST /orders/{id}/cancellation-requests/{requestId}/decline: Decline because the items already shipped */
     declineCancellationRequest: async ({ params, body, sellerId, actor, requestId, principal }) => {
       const { agg } = await service.reads.sellerGroup(sellerId, params.id);
-      return service.cancellations.decline(agg.order.id, params.requestId, { actor, requestId, principal }, { reason: body.reason, note: body.note, groupId: params.id });
+      return service.cancellations.decline(agg.order.id, params.requestId, { actor, requestId, principal }, { reason: body.reason, note: body.note, groupId: params.id, bySeller: true });
     },
     /** GET /orders/{id}/packing-slip: Packing slip for this task (only this seller's items) */
     getPackingSlip: async ({ params, query, sellerId, principal }) => service.admin.packingSlip(sellerId, params.id, query.hidePrices, p(principal)),

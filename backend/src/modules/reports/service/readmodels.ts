@@ -35,8 +35,11 @@ const REBUILDS: Record<string, string | null> = {
   refunds: null,
   returns: null,
   service: null,
+  marketly_fulfillment: null,
 };
-const EVENT_ONLY_NOTE = 'Kept from events only: there is no event log to replay yet, so it cannot be rebuilt';
+/** A seller's group Marketly's warehouse fulfils (Fulfilled by Marketly): its dispatch facts are Marketly's, not the seller's */
+const isMarketly = (p: { fulfilledBy?: string | null; sellerId?: string | null }) => p.fulfilledBy === 'marketly_service' && !isOfficialSeller(p.sellerId);
+const EVENT_ONLY_NOTE ='Kept from events only: there is no event log to replay yet, so it cannot be rebuilt';
 const DAY = 86_400_000;
 
 export class ReadModels {
@@ -138,6 +141,7 @@ export class ReadModels {
           placed_at: new Date(order.placedAt),
           accepted_at: order.acceptedAt ? new Date(order.acceptedAt) : null,
           group_id: g.id,
+          fulfilled_by: g.fulfilledBy ?? null,
           paid_at: null,
           shipped_at: null,
           delivered_at: i.deliveredAt ? new Date(i.deliveredAt) : null,
@@ -156,12 +160,21 @@ export class ReadModels {
 
   async onOrderPlaced(p: EventPayload<'orders.order.placed'>, env: Env) {
     if (p.paymentState === 'accepted') await this.ensureOrder(p.orderId, { customerId: p.customerId, email: p.guestEmail, accepted: true });
+    await this.keepFulfilledBy(p.orderId, p.groups);
     await this.touch(['order_items', 'customers'], env);
   }
 
   async onOrderAccepted(p: EventPayload<'orders.order.accepted'>, env: Env) {
     await this.ensureOrder(p.orderId, { customerId: p.customerId, email: p.contactEmail, accepted: true });
+    await this.keepFulfilledBy(p.orderId, p.groups);
     await this.touch(['order_items', 'customers', 'discovery'], env);
+  }
+
+  /** fact_order_items.fulfilled_by from the event's groups (PlacedGroup.fulfilledBy), for rows that do not hold it yet */
+  private async keepFulfilledBy(orderId: string, groups: readonly orders.PlacedGroup[]) {
+    for (const g of groups) {
+      if (g.fulfilledBy) await this.repo.updateOrderItems({ orderId, groupId: g.groupId, nullColumn: 'fulfilled_by' }, { fulfilled_by: g.fulfilledBy });
+    }
   }
 
   async onPaymentCaptured(p: EventPayload<'payments.payment.captured'>, env: Env) {
@@ -179,34 +192,49 @@ export class ReadModels {
     await this.touch(['order_items'], env);
   }
 
+  /**
+   * Shipment date basis and on-time dispatch. A dispatch Marketly's warehouse made for a Fulfilled by Marketly group
+   * (fulfilledBy marketly_service) counts in fact_marketly_fulfillment_daily for the seller of record, never in the
+   * seller's fact_service_daily row (seller dispatch figures only count what the seller shipped).
+   */
   async onShipmentDispatched(p: EventPayload<'shipping.shipment.dispatched'>, env: Env) {
     if (p.kind === 'return') return this.touch(['service'], env);
     await this.ensureOrder(p.orderId, { accepted: true });
     await this.repo.updateOrderItems({ itemIds: p.lines.map((l) => l.orderItemId), nullColumn: 'shipped_at' }, { shipped_at: new Date(p.shippedAt) });
+    const marketly = isMarketly(p);
     if (p.kind === 'outbound') {
       const day = await this.day(p.shippedAt);
+      const onTime = p.onTime === false ? 0 : 1;
       await this.repo.transaction(async (tx) => {
         if (!(await tx.claim(`service:dispatched:${p.shipmentId}`))) return;
-        await tx.bumpService(p.sellerId ?? OFFICIAL_KEY, day, { dispatched: 1, dispatched_on_time: p.onTime === false ? 0 : 1, valid_tracking: p.trackingValid ? 1 : 0 });
+        if (marketly) await tx.bumpDaily('fact_marketly_fulfillment_daily', { seller_id: p.sellerId!, day }, { dispatched: 1, dispatched_on_time: onTime });
+        else await tx.bumpService(p.sellerId ?? OFFICIAL_KEY, day, { dispatched: 1, dispatched_on_time: onTime, valid_tracking: p.trackingValid ? 1 : 0 });
       });
     }
-    await this.touch(['order_items', 'service'], env);
+    await this.touch(['order_items', marketly ? 'marketly_fulfillment' : 'service'], env);
   }
 
   async onDispatchOverdue(p: EventPayload<'shipping.dispatch.overdue'>, env: Env) {
     const day = await this.day(env.at);
+    const marketly = isMarketly(p);
     await this.repo.transaction(async (tx) => {
-      if (await tx.claim(`service:overdue:${p.exceptionId}`)) await tx.bumpService(p.sellerId ?? OFFICIAL_KEY, day, { overdue: 1 });
+      if (!(await tx.claim(`service:overdue:${p.exceptionId}`))) return;
+      if (marketly) await tx.bumpDaily('fact_marketly_fulfillment_daily', { seller_id: p.sellerId!, day }, { overdue: 1 });
+      else await tx.bumpService(p.sellerId ?? OFFICIAL_KEY, day, { overdue: 1 });
     });
-    await this.touch(['service'], env);
+    await this.touch([marketly ? 'marketly_fulfillment' : 'service'], env);
   }
 
+  /** Delivery issues: a Fulfilled by Marketly package's go to the Marketly fulfillment row of its seller of record, never the seller's own */
   async onShipmentException(p: EventPayload<'shipping.shipment.exception'>, env: Env) {
     const day = await this.day(env.at);
+    const marketly = isMarketly(p);
     await this.repo.transaction(async (tx) => {
-      if (await tx.claim(`service:exception:${p.exceptionId}`)) await tx.bumpService(p.sellerId ?? OFFICIAL_KEY, day, { delivery_exceptions: 1 });
+      if (!(await tx.claim(`service:exception:${p.exceptionId}`))) return;
+      if (marketly) await tx.bumpDaily('fact_marketly_fulfillment_daily', { seller_id: p.sellerId!, day }, { delivery_exceptions: 1 });
+      else await tx.bumpService(p.sellerId ?? OFFICIAL_KEY, day, { delivery_exceptions: 1 });
     });
-    await this.touch(['service'], env);
+    await this.touch([marketly ? 'marketly_fulfillment' : 'service'], env);
   }
 
   async onItemDelivered(p: EventPayload<'orders.item.delivered'>, env: Env) {
@@ -526,6 +554,18 @@ export class ReadModels {
     await this.touch(['campaigns', 'marketplace_finance'], env);
   }
 
+  /** Fulfilled by Marketly fees per seller and day, claimed per chargeId (the event carries no time: the day it was posted) */
+  async onServiceFeeCharged(p: EventPayload<'fulfillment-service.fee.charged'>, env: Env) {
+    await this.financeBump(`service_fee:charged:${p.chargeId}`, p.sellerId, await this.day(env.at), { service_fees_minor: p.amount.amount });
+    await this.touch(['marketplace_finance'], env);
+  }
+
+  /** A reversed Fulfilled by Marketly fee comes off service_fees_minor on the reversal day */
+  async onServiceFeeReversed(p: EventPayload<'fulfillment-service.fee.reversed'>, env: Env) {
+    await this.financeBump(`service_fee:reversed:${p.chargeId}`, p.sellerId, await this.day(env.at), { service_fees_minor: -Math.abs(p.amount.amount) });
+    await this.touch(['marketplace_finance'], env);
+  }
+
   /* ---------------------------------------------------------------- daily pull (02:30 market time) */
 
   /** Figures without events: fee income, seller sales and discount funding, unavailable searches, ad performance, buying costs, reply times */
@@ -732,7 +772,10 @@ export class ReadModels {
     for (const f of fresh) {
       const e = existing.find((x) => x.order_item_id === f.order_item_id);
       if (!e) continue;
-      await this.repo.updateOrderItems({ itemIds: [f.order_item_id] }, { category_id: f.category_id ?? e.category_id, delivered_at: e.delivered_at ?? f.delivered_at, buying_cost_minor: e.buying_cost_minor ?? f.buying_cost_minor });
+      await this.repo.updateOrderItems(
+        { itemIds: [f.order_item_id] },
+        { category_id: f.category_id ?? e.category_id, delivered_at: e.delivered_at ?? f.delivered_at, buying_cost_minor: e.buying_cost_minor ?? f.buying_cost_minor, fulfilled_by: e.fulfilled_by ?? f.fulfilled_by },
+      );
     }
   }
 }

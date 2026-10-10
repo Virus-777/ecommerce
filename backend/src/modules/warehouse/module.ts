@@ -8,14 +8,14 @@ import { createPostgresWarehouseRepository } from './infra/postgres/repository.j
 import { WarehouseService } from './service.js';
 
 /**
- * Warehouse: Physical work for Official Store stock: bins, put-away of received goods, pick waves and pick lists by order with bin locations and scanning, packing stations (item checklist, box and weight, carrier label through shipping, packing slip), shortage and damage reports, and receipt of return parcels handed over to returns inspection.
+ * Warehouse: Physical work for Official Store stock and Fulfilled by Marketly (seller-owned stock at the service location): bins, put-away of received goods, pick waves and pick lists by order with bin locations and scanning, packing stations (item checklist, box and weight, carrier label through shipping, packing slip), shortage and damage reports, and receipt of return parcels handed over to returns inspection.
  *
  * Name, launch phase, dependencies, permissions, events, jobs, settings and endpoints come from
  * docs/api/spec/modules/warehouse.json through `spec`; the server refuses to start if they drift.
  */
 export default defineModule({
   spec,
-  version: '1.2.0',
+  version: '1.3.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
@@ -30,6 +30,7 @@ export default defineModule({
     ctx.events.on("orders.item.split", (e) => service.onItemSplitFromOrders(e.payload));
     ctx.events.on("inventory.discrepancy.resolved", (e) => service.onDiscrepancyResolvedFromInventory(e.payload));
     ctx.events.on("purchasing.receipt.recorded", (e) => service.onReceiptRecordedFromPurchasing(e.payload));
+    ctx.events.on("fulfillment-service.inbound.received", (e) => service.onInboundReceivedFromFulfillmentService(e.payload));
     ctx.events.on("returns.return.approved", (e) => service.onReturnApprovedFromReturns(e.payload));
     ctx.events.on("shipping.shipment.dispatched", (e) => service.onShipmentDispatchedFromShipping(e.payload));
     ctx.events.on("shipping.dispatch.overdue", (e) => service.onDispatchOverdueFromShipping(e.payload));

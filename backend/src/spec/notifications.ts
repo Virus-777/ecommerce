@@ -1123,7 +1123,7 @@ export const NotificationsEmailReplyReceivedEvent: z.ZodType<NotificationsEmailR
 
 /** What other modules may call in-process: `ctx.use('notifications')` (or `ctx.tryUse` for an optional dependency). */
 export interface NotificationsPublicApi {
-  /** Send a topic to recipients now (for cases not covered by the event routing rules, e.g. mentions, test notices, guest order links). Essential topics ignore promotional consent; promotional topics check it. Used by: customers, support, messaging, sellers, finance, returns, workqueues, access, reports, audit. */
+  /** Send a topic to recipients now (for cases not covered by the event routing rules, e.g. mentions, test notices, guest order links). Essential topics ignore promotional consent; promotional topics check it. Used by: customers, support, messaging, sellers, finance, returns, workqueues, access, reports, audit, fulfillment-service. */
   notify(input: NotifyInput): Promise<{ noticeIds: string[], deliveryIds: string[] }>;
   /** Send later (deadline reminders). Requires a dedupeKey so it can be cancelled. Used by: shipping, orders, returns, sellers, support, access. */
   schedule(input: NotifyInput, sendAt: string): Promise<string>;
@@ -2369,7 +2369,8 @@ export const spec = defineModuleSpec({
       "customers.marketing_preferences.changed": "Refresh the consent cache used for promotional sends and broadcasts",
       "customers.account.closed": "Stop all promotional sends, remove push devices, keep essential notices for open obligations only",
       "customers.data_export.ready": "Email the customer the export download link",
-      "orders.order.accepted": "Customer: order accepted (confirmation only after acceptance). Seller: new order per seller group (orders group, members with order permission)",
+      "orders.order.accepted": "Customer: order accepted (confirmation only after acceptance). Seller: new order per seller group with fulfilledBy seller (orders group, members with order permission), with the dispatch reminder effect; Fulfilled by Marketly groups get no new-order notice or dispatch reminder (fulfillment-service sends seller.fulfillment.order_received)",
+      "orders.cancellation.requested": "Seller (fulfilledBy seller; orders group, action required until respondBy): a customer asks to cancel items. Official Store and Fulfilled by Marketly groups: staff (order_manager role) decide it instead; no seller notice",
       "orders.item.cancelled": "Customer: cancellation update for the item, skipped when the payload's notifyCustomer is false (staff cancelled without telling the customer); seller: item cancelled (always)",
       "orders.item.delayed": "Customer: delay notice with the new estimate and options (wait, cancel, contact support)",
       "orders.cancellation.decided": "Customer: result of a cancellation request",
@@ -2381,8 +2382,8 @@ export const spec = defineModuleSpec({
       "payments.chargeback.opened": "Staff: unusual financial activity notice to Finance Manager; seller: dispute opened on an order",
       "shipping.shipment.dispatched": "Customer: package dispatched with contents, carrier and tracking; cancels the seller dispatch reminder",
       "shipping.shipment.delivered": "Customer: package delivered",
-      "shipping.shipment.exception": "Customer: delivery problem with next steps; staff: Shipping Manager",
-      "shipping.dispatch.overdue": "Seller: dispatch overdue (action required); staff: overdue shipping to Shipping Manager (lead or backup)",
+      "shipping.shipment.exception": "Customer: delivery problem with next steps; staff: Shipping Manager. No seller notice for Fulfilled by Marketly groups (fulfilledBy marketly_service)",
+      "shipping.dispatch.overdue": "Seller (fulfilledBy seller only): dispatch overdue (action required); staff: overdue shipping to Shipping Manager (lead or backup). Fulfilled by Marketly groups: no seller notice; the staff notice names the Marketly warehouse and goes to warehouse_manager",
       "returns.return.requested": "Seller: new return request with response deadline",
       "returns.return.info_requested": "Customer: more information needed for the return",
       "returns.return.approved": "Customer: return approved with label or drop-off instructions",
@@ -2418,7 +2419,7 @@ export const spec = defineModuleSpec({
       "catalog.product.changes_requested": "Seller: requested corrections with field comments and resubmit deadline",
       "catalog.product.approved": "Seller: product approved",
       "catalog.product.rejected": "Seller: product rejected with reason",
-      "inventory.stock.low": "Seller: low stock (own offers); staff: stock shortage to Inventory Manager for the Official Store",
+      "inventory.stock.low": "Seller: low stock (own offers), skipped when serviceManaged (fulfillment-service sends seller.fulfillment.stock_low); staff: stock shortage to Inventory Manager for the Official Store",
       "finance.payout.paid": "Seller owner: payout paid (after bank confirmation)",
       "finance.payout.failed": "Seller owner: payout failed and what to fix; staff: failed payout to Finance Manager",
       "finance.hold.placed": "Seller owner: hold with amount, reason and review date",

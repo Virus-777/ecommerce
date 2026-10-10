@@ -218,7 +218,7 @@ describe('events from other modules', () => {
   it('seller cancellations open seller_cannot_fulfill; the refund closes it; nothing left closes late dispatch', async () => {
     const o = await sellerOrder(h);
     const refund = { itemAmount: { amount: 3000, currency: 'USD' }, discountShare: { amount: 0, currency: 'USD' }, shippingRefund: { amount: 0, currency: 'USD' }, taxRefund: { amount: 0, currency: 'USD' }, total: { amount: 3000, currency: 'USD' } };
-    await h.publish('orders', 'orders.item.cancelled', { orderId: o.order.id, ref: o.order.ref, groupId: o.groupId, ownerType: 'seller', sellerId: o.sellerId, itemId: o.lamp.id, offerId: newId(), stockItemId: newId(), quantity: 1, cancellationId: newId(), initiatedBy: 'seller', reasonCode: 'out_of_stock', beforeDispatch: true, countsAgainstSeller: true, refund, paymentIntentId: newId(), notifyCustomer: true });
+    await h.publish('orders', 'orders.item.cancelled', { orderId: o.order.id, ref: o.order.ref, groupId: o.groupId, ownerType: 'seller', sellerId: o.sellerId, fulfilledBy: 'seller', itemId: o.lamp.id, offerId: newId(), stockItemId: newId(), quantity: 1, cancellationId: newId(), initiatedBy: 'seller', reasonCode: 'out_of_stock', beforeDispatch: true, countsAgainstSeller: true, refund, paymentIntentId: newId(), notifyCustomer: true });
     const ex = h.named('shipping.shipment.exception').at(-1);
     expect(ex).toMatchObject({ kind: 'seller_cannot_fulfill', groupId: o.groupId, orderItemIds: [o.lamp.id] });
     const view = (await h.call('GET', `${ADMIN}/exceptions/${ex.exceptionId}`, tokens.staff())).body;

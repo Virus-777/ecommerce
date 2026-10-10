@@ -60,7 +60,7 @@ describe('order facts from events (idempotent, order-tolerant)', () => {
     const groupId = o.groups[0]!.id;
     const now = h.clock.now().toISOString();
     // dispatched before reports saw the placement
-    const shipment = { shipmentId: newId(), kind: 'outbound', orderId: o.id, groupId, ownerType: 'seller', sellerId, lines: [{ orderItemId: item.id, title: 'Lamp', variantLabel: 'Silver', quantity: 1 }], shippedAt: now, dispatchDueAt: now, onTime: true, trackingValid: true };
+    const shipment = { shipmentId: newId(), kind: 'outbound', orderId: o.id, groupId, ownerType: 'seller', sellerId, fulfilledBy: 'seller', lines: [{ orderItemId: item.id, title: 'Lamp', variantLabel: 'Silver', quantity: 1 }], shippedAt: now, dispatchDueAt: now, onTime: true, trackingValid: true };
     h.publish('shipping', 'shipping.shipment.dispatched', shipment);
     h.publish('shipping', 'shipping.shipment.dispatched', shipment);
     await h.drain();
@@ -88,7 +88,7 @@ describe('order facts from events (idempotent, order-tolerant)', () => {
     const groupId = o.groups[0]!.id;
     h.placed(o);
     await h.drain();
-    const cancel = { orderId: o.id, ref: o.ref, groupId, ownerType: 'seller', sellerId, itemId: b!.id, offerId: b!.offer.offerId, stockItemId: newId(), quantity: 1, cancellationId: newId(), initiatedBy: 'seller', reasonCode: 'out_of_stock', beforeDispatch: true, countsAgainstSeller: true, refund: { itemAmount: usd(4000), discountShare: usd(0), shippingRefund: usd(500), taxRefund: usd(400), total: usd(4900) }, paymentIntentId: newId(), notifyCustomer: true };
+    const cancel = { orderId: o.id, ref: o.ref, groupId, ownerType: 'seller', sellerId, fulfilledBy: 'seller', itemId: b!.id, offerId: b!.offer.offerId, stockItemId: newId(), quantity: 1, cancellationId: newId(), initiatedBy: 'seller', reasonCode: 'out_of_stock', beforeDispatch: true, countsAgainstSeller: true, refund: { itemAmount: usd(4000), discountShare: usd(0), shippingRefund: usd(500), taxRefund: usd(400), total: usd(4900) }, paymentIntentId: newId(), notifyCustomer: true };
     h.publish('orders', 'orders.item.cancelled', cancel);
     h.publish('orders', 'orders.item.cancelled', cancel);
     const refund = { refundId: newId(), ref: 'RF-1', orderId: o.id, origin: 'return', originId: null, amount: usd(3000), items: [{ orderItemId: a!.id, title: 'Lamp', groupId, sellerId, amount: usd(3000) }], destination: 'card', sentAt: h.clock.now().toISOString() };
@@ -117,9 +117,9 @@ describe('order facts from events (idempotent, order-tolerant)', () => {
     h.placed(o);
     await h.drain();
     const returnId = newId();
-    h.publish('returns', 'returns.return.requested', { returnId, ref: 'RT-1', orderId: o.id, orderRef: o.ref, ownerType: 'seller', sellerId, orderItemIds: [o.groups[0]!.items[0]!.id], reason: 'damaged', responseDueAt: h.clock.now().toISOString() });
+    h.publish('returns', 'returns.return.requested', { returnId, ref: 'RT-1', orderId: o.id, orderRef: o.ref, ownerType: 'seller', sellerId, fulfilledBy: 'seller', orderItemIds: [o.groups[0]!.items[0]!.id], reason: 'damaged', responseDueAt: h.clock.now().toISOString() });
     await h.drain();
-    h.publish('returns', 'returns.return.inspected', { returnId, ref: 'RT-1', orderId: o.id, orderRef: o.ref, ownerType: 'seller', sellerId, conditionOutcome: 'damaged_in_transit', proposedStockOutcome: 'damaged', orderItemId: o.groups[0]!.items[0]!.id, variantId: newId(), stockItemId: null, quantity: 1 });
+    h.publish('returns', 'returns.return.inspected', { returnId, ref: 'RT-1', orderId: o.id, orderRef: o.ref, ownerType: 'seller', sellerId, fulfilledBy: 'seller', conditionOutcome: 'damaged_in_transit', proposedStockOutcome: 'damaged', orderItemId: o.groups[0]!.items[0]!.id, variantId: newId(), stockItemId: null, quantity: 1 });
     await h.drain();
     const mine = await sellerReport(sellerId, 'seller.returns_by_reason', { preset: 'today' });
     expect(kpi(mine.body, 'service.return_requests').value).toBe(1);
@@ -153,8 +153,8 @@ describe('seller reports', () => {
 describe('admin reports from the other read models', () => {
   it('service: dispatch, overdue, delivery issues, messages and the case backlog', async () => {
     const sellerId = newId();
-    h.publish('shipping', 'shipping.dispatch.overdue', { orderId: newId(), orderRef: 'MK-1', groupId: newId(), ownerType: 'seller', sellerId, orderItemIds: [newId()], dueAt: h.clock.now().toISOString(), exceptionId: newId() });
-    const ex = { exceptionId: newId(), kind: 'lost_or_damaged', orderId: newId(), groupId: newId(), sellerId, orderItemIds: [newId()], dueAt: h.clock.now().toISOString(), source: 'carrier' };
+    h.publish('shipping', 'shipping.dispatch.overdue', { orderId: newId(), orderRef: 'MK-1', groupId: newId(), ownerType: 'seller', sellerId, fulfilledBy: 'seller', orderItemIds: [newId()], dueAt: h.clock.now().toISOString(), exceptionId: newId() });
+    const ex = { exceptionId: newId(), kind: 'lost_or_damaged', orderId: newId(), groupId: newId(), sellerId, fulfilledBy: 'seller', orderItemIds: [newId()], dueAt: h.clock.now().toISOString(), source: 'carrier' };
     h.publish('shipping', 'shipping.shipment.exception', ex);
     h.publish('shipping', 'shipping.shipment.exception', ex);
     h.publish('messaging', 'messaging.message.sent', { messageId: newId(), conversationId: newId(), conversationKind: 'order', authorKind: 'customer', recipientKinds: ['seller'], sellerId, officialStore: false, staffIds: [] });
@@ -207,7 +207,7 @@ describe('admin reports from the other read models', () => {
     expect(kpi(r.body, 'marketplace.ad_income').value).toBe(1000);
     expect(r.body.callouts[0].title).toBe('Marketplace sales are not marketplace fee income');
     expect(r.body.callouts[1].body).toContain(yesterday);
-    expect(r.body.unavailable).toEqual([]);
+    expect(r.body.unavailable).toEqual(['marketplace.service_fees']); // fulfillment-service is off and charged no fees
 
     const campaigns = await h.call('POST', '/api/admin/reports/reports/marketing.campaigns/query', h.tokens.staff(), { preset: 'today' });
     expect(campaigns.body.table.rows).toContainEqual(expect.objectContaining({ kind: 'ad', campaignId, spend: usd(1000) }));
@@ -322,7 +322,7 @@ describe('dashboards', () => {
 
   it('seller: work tiles, sales by order date, payouts and performance; only the caller’s own figures', async () => {
     const sellerId = newId();
-    h.sellerCounts.set(sellerId, { new: 3, preparing: 1, shipped: 0, completed: 0, cancellationRequests: 0, overdue: 1, dueToday: 2 });
+    h.sellerCounts.set(sellerId, { new: 3, preparing: 1, shipped: 0, completed: 0, cancellationRequests: 0, overdue: 1, dueToday: 2, fulfilledByMarketly: 0 });
     h.placed(h.order({ sellerId, items: [{ unit: 4500, quantity: 2 }] }));
     await h.drain();
     const r = await h.call('GET', '/api/seller/reports/dashboard', h.tokens.seller(sellerId));
@@ -351,7 +351,7 @@ describe('read model health', () => {
   it('lists every read model with rows and state; rebuilds run in the check-lag job; one rebuild at a time', async () => {
     const list = await h.call('GET', '/api/admin/reports/read-models', h.tokens.staff());
     expect(list.status).toBe(200);
-    expect(list.body.map((m: any) => m.key)).toEqual(['order_items', 'refunds', 'returns', 'marketplace_finance', 'service', 'discovery', 'search_misses', 'customers', 'campaigns']);
+    expect(list.body.map((m: any) => m.key)).toEqual(['order_items', 'refunds', 'returns', 'marketplace_finance', 'service', 'marketly_fulfillment', 'discovery', 'search_misses', 'customers', 'campaigns']);
     const items = list.body.find((m: any) => m.key === 'order_items');
     expect(items.rows).toBeGreaterThan(0);
     expect(items.state).toBe('live');

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { AppError, isAppError, isNotImplemented } from '../../kernel/errors/index.js';
 import { inventoryError } from './errors.js';
 import type { EventEnvelope, EventPayload, PublishMeta } from '../../kernel/events/index.js';
@@ -67,9 +68,11 @@ import {
   openQty,
   reasonLabel,
   reservationStateOf,
+  SERVICE_REASONS,
   splitLabel,
   stockState,
   weightedAverage,
+  zeroQty,
   type Group,
   type GroupOrOutside,
   type ReservationState,
@@ -79,6 +82,7 @@ import {
   actorText,
   effectiveThreshold,
   incomingCue,
+  isServiceItem,
   iso,
   photoIdsOf,
   sellableAvailable,
@@ -90,6 +94,7 @@ import {
   toLocation,
   toMovement,
   toReservation,
+  receiptSourceOf,
   toReservationLine,
   toReturnOutcome,
   toStockItem,
@@ -137,6 +142,18 @@ const invalid = (path: string, message: string) => new AppError('VALIDATION_FAIL
 const notFound = (what = 'Stock item') => new AppError('NOT_FOUND', `${what} not found`);
 const RESERVATION_EVENT: Record<ReservationState, 'allocate' | 'fulfill' | 'release' | 'expire' | null> = { held: null, allocated: 'allocate', fulfilled: 'fulfill', released: 'release', expired: 'expire' };
 const RETURN_OUTCOMES = ['restock', 'different_condition', 'damaged_stock', 'repair', 'return_to_supplier', 'write_off'] as const;
+
+/** moveServiceStock: the ledger row id derived from the caller's idempotency key (a name-based UUID, version 8) */
+function serviceMovementId(key: string): string {
+  const b = createHash('sha256').update(`inventory.moveServiceStock:${key}`).digest().subarray(0, 16);
+  b[6] = 0x80 | (b[6]! & 0x0f);
+  b[8] = 0x80 | (b[8]! & 0x3f);
+  const h = b.toString('hex');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+/** The quantities at the movement's location right after it */
+const afterOf = (m: Row<'stock_movements'>): StockQuantities => (typeof m.after === 'string' ? JSON.parse(m.after) : m.after) as unknown as StockQuantities;
 type ReturnOutcomeKind = (typeof RETURN_OUTCOMES)[number];
 
 /**
@@ -351,7 +368,10 @@ export class InventoryService implements InventoryPublicApi {
       const ownItems = new Set(own.map((l) => l.stock_item_id));
       return toInbound(
         r,
-        own.map((l) => toInboundLine(l, items.get(l.stock_item_id), sellableAvailable(levels.filter((x) => x.stock_item_id === l.stock_item_id), locations) === 0, this.currency)),
+        own.map((l) => {
+          const item = items.get(l.stock_item_id);
+          return toInboundLine(l, item, !item || sellableAvailable(item, levels, locations) === 0, this.currency);
+        }),
         shortages.filter((d) => ownItems.has(d.stock_item_id)).length,
       );
     });
@@ -491,7 +511,7 @@ export class InventoryService implements InventoryPublicApi {
     const locations = new Map((await this.repo.locations({ ids: [...new Set(levels.map((l) => l.location_id))] })).map((l) => [l.id, l]));
     const out: Record<string, { available: number; state: string; lowStockThreshold: number | null; nextIncoming: IncomingCue | null }> = {};
     rows.forEach((row, i) => {
-      const available = row.archived ? 0 : sellableAvailable(levels.filter((l) => l.stock_item_id === row.id), locations);
+      const available = row.archived ? 0 : sellableAvailable(row, levels, locations);
       out[row.id] = { available, state: api[i]!.state, lowStockThreshold: api[i]!.lowStockThreshold ?? null, nextIncoming: api[i]!.nextIncoming ?? null };
     });
     return out;
@@ -952,34 +972,55 @@ export class InventoryService implements InventoryPublicApi {
     const items = await this.repo.items({ ids: lines.map((l) => l.stockItemId), includeArchived: true });
     for (const [i, l] of lines.entries()) if (!items.find((it) => it.id === l.stockItemId && it.owner_type === 'official')) throw invalid(`lines[${i}].stockItemId`, 'Unknown company stock item');
     const ref: MovementRef = { kind: 'purchase_order', id: purchaseOrderId, label: `Purchase order ${purchaseOrderRef}` };
-    await this.#stock('incoming', async (st) => {
-      const existing = await st.tx.expectations({ sourceKind: 'purchase_order', sourceId: purchaseOrderId }, { forUpdate: true });
-      await st.lock([...lines.map((l) => l.stockItemId), ...existing.map((e) => e.stock_item_id)]);
-      const wanted = new Map<string, { quantity: number; expectedDate: string }>();
-      for (const l of lines) wanted.set(l.stockItemId, { quantity: (wanted.get(l.stockItemId)?.quantity ?? 0) + l.quantity, expectedDate: l.expectedDate });
-      // lines no longer on the order, or moved to another location: their open units leave Incoming
-      for (const e of existing) {
-        const w = wanted.get(e.stock_item_id);
-        if (w && e.location_id === locationId) continue;
-        const n = Math.min(e.quantity_open, st.qty(e.stock_item_id, e.location_id).incoming);
-        if (n > 0) await st.move(e.stock_item_id, e.location_id, 'incoming', 'outside', n, { reason: 'purchase_order_changed', ref, actor: SYSTEM_ACTOR });
-        await st.tx.update('incoming_expectations', e.id, { quantity_open: 0 });
-        e.quantity_open = 0;
+    await this.#stock('incoming', (st) =>
+      this.#replaceIncoming(st, { sourceKind: 'purchase_order', sourceId: purchaseOrderId, sourceRef: purchaseOrderRef, locationId, lines, ref, sent: 'purchase_order_sent', changed: 'purchase_order_changed' }),
+    );
+  }
+
+  /**
+   * The open Incoming of one source (a purchase order or a Fulfilled by Marketly inbound shipment) becomes `lines`:
+   * lines no longer on it (or moved to another location) leave Incoming, the others are raised or lowered to their
+   * quantity. Inside the caller's stock transaction.
+   */
+  async #replaceIncoming(
+    st: StockTx,
+    o: {
+      sourceKind: 'purchase_order' | 'service_inbound';
+      sourceId: string;
+      sourceRef: string;
+      locationId: string;
+      lines: { stockItemId: string; quantity: number; expectedDate?: string | null }[];
+      ref: MovementRef;
+      sent: string;
+      changed: string;
+    },
+  ): Promise<void> {
+    const { locationId, ref } = o;
+    const existing = await st.tx.expectations({ sourceKind: o.sourceKind, sourceId: o.sourceId }, { forUpdate: true });
+    await st.lock([...o.lines.map((l) => l.stockItemId), ...existing.map((e) => e.stock_item_id)]);
+    const wanted = new Map<string, { quantity: number; expectedDate: string | null }>();
+    for (const l of o.lines) wanted.set(l.stockItemId, { quantity: (wanted.get(l.stockItemId)?.quantity ?? 0) + l.quantity, expectedDate: l.expectedDate ?? null });
+    // lines no longer on the source, or moved to another location: their open units leave Incoming
+    for (const e of existing) {
+      const w = wanted.get(e.stock_item_id);
+      if (w && e.location_id === locationId) continue;
+      const n = Math.min(e.quantity_open, st.qty(e.stock_item_id, e.location_id).incoming);
+      if (n > 0) await st.move(e.stock_item_id, e.location_id, 'incoming', 'outside', n, { reason: o.changed, ref, actor: SYSTEM_ACTOR });
+      await st.tx.update('incoming_expectations', e.id, { quantity_open: 0 });
+      e.quantity_open = 0;
+    }
+    for (const [itemId, w] of wanted) {
+      const e = existing.find((x) => x.stock_item_id === itemId && x.location_id === locationId);
+      const before = e?.quantity_open ?? 0;
+      const delta = w.quantity - before;
+      if (delta > 0) await st.move(itemId, locationId, 'outside', 'incoming', delta, { reason: e ? o.changed : o.sent, ref, actor: SYSTEM_ACTOR });
+      if (delta < 0) {
+        const n = Math.min(-delta, st.qty(itemId, locationId).incoming);
+        if (n > 0) await st.move(itemId, locationId, 'incoming', 'outside', n, { reason: o.changed, ref, actor: SYSTEM_ACTOR });
       }
-      for (const [itemId, w] of wanted) {
-        const e = existing.find((x) => x.stock_item_id === itemId && x.location_id === locationId);
-        const before = e?.quantity_open ?? 0;
-        const delta = w.quantity - before;
-        if (delta > 0) await st.move(itemId, locationId, 'outside', 'incoming', delta, { reason: e ? 'purchase_order_changed' : 'purchase_order_sent', ref, actor: SYSTEM_ACTOR });
-        if (delta < 0) {
-          const n = Math.min(-delta, st.qty(itemId, locationId).incoming);
-          if (n > 0) await st.move(itemId, locationId, 'incoming', 'outside', n, { reason: 'purchase_order_changed', ref, actor: SYSTEM_ACTOR });
-        }
-        if (e) await st.tx.update('incoming_expectations', e.id, { quantity_open: w.quantity, expected_date: w.expectedDate, source_ref: purchaseOrderRef });
-        else
-          await st.tx.insert('incoming_expectations', { id: newId(), stock_item_id: itemId, location_id: locationId, source_kind: 'purchase_order', source_id: purchaseOrderId, source_ref: purchaseOrderRef, quantity_open: w.quantity, expected_date: w.expectedDate });
-      }
-    });
+      if (e) await st.tx.update('incoming_expectations', e.id, { quantity_open: w.quantity, expected_date: w.expectedDate, source_ref: o.sourceRef });
+      else await st.tx.insert('incoming_expectations', { id: newId(), stock_item_id: itemId, location_id: locationId, source_kind: o.sourceKind, source_id: o.sourceId, source_ref: o.sourceRef, quantity_open: w.quantity, expected_date: w.expectedDate });
+    }
   }
 
   /** Cancelled or short-closed purchase orders */
@@ -1024,6 +1065,11 @@ export class InventoryService implements InventoryPublicApi {
           id,
           receipt_id: receipt.receiptId,
           receipt_ref: receipt.receiptRef,
+          source_kind: 'purchase_order',
+          source_id: receipt.purchaseOrderId,
+          source_ref: receipt.purchaseOrderRef,
+          owner_type: 'official',
+          seller_id: null,
           purchase_order_id: receipt.purchaseOrderId,
           purchase_order_ref: receipt.purchaseOrderRef,
           supplier_name: receipt.supplierName,
@@ -1069,7 +1115,9 @@ export class InventoryService implements InventoryPublicApi {
     // photos are attached (inspection_photo) so the media orphan sweep never deletes them
     const photoIds = [...new Set(input.photoIds ?? [])];
     const detach = await this.#attachPhotos(photoIds, { refId: id, refLabel: `${input.kind === 'pick_shortage' ? 'Pick shortage' : 'Damage found'} · ${item.sku}` });
+    let moved: Row<'stock_movements'>[] = [];
     const changed = await this.#stock('discrepancy', async (st) => {
+      moved = st.movements;
       await st.tx.insert('discrepancies', {
         id,
         kind: input.kind,
@@ -1113,6 +1161,8 @@ export class InventoryService implements InventoryPublicApi {
     });
     void changed;
     this.ctx.events.publish('inventory.discrepancy.reported', { discrepancyId: id, kind: input.kind, stockItemId: item.id, orderId: input.orderId ?? null, quantity: input.quantity }, { actor: input.reportedBy });
+    // damaged units moved at once: the fulfillment service's ledger follows them for seller stock in our warehouse
+    await this.#publishMovementsRecorded(moved, input.reportedBy, { actor: input.reportedBy });
     return (await this.#discrepanciesApi([(await this.repo.get('discrepancies', id))!]))[0]!;
   }
 
@@ -1158,8 +1208,9 @@ export class InventoryService implements InventoryPublicApi {
 
   /**
    * Stock items by id with SKU, label, owner and main location (unknown ids are left out, input order kept).
-   * Main location: the seller's virtual location; for company stock the location holding most of the item's
-   * units (sellable first), or the default company location when it has none.
+   * Main location: the seller's virtual location (a seller item Fulfilled by Marketly: its service location); for
+   * company stock the location holding most of the item's units (sellable first), or the default company location
+   * when it has none.
    */
   async getStockItems(stockItemIds: string[]): Promise<StockItemRef[]> {
     const ids = [...new Set((stockItemIds ?? []).filter((id) => isUuid(id)))];
@@ -1168,7 +1219,8 @@ export class InventoryService implements InventoryPublicApi {
     if (!rows.length) return [];
     const levels = await this.repo.levels(rows.map((r) => r.id));
     const sellerIds = [...new Set(rows.map((r) => (r.owner_type === 'seller' ? r.seller_id : null)).filter((x): x is string => Boolean(x)))];
-    const locations = new Map((await this.repo.locations({ ids: [...new Set(levels.map((l) => l.location_id))] })).map((l) => [l.id, l]));
+    const serviceIds = rows.flatMap((r) => (isServiceItem(r) ? [r.service_location_id!] : []));
+    const locations = new Map((await this.repo.locations({ ids: [...new Set([...levels.map((l) => l.location_id), ...serviceIds])] })).map((l) => [l.id, l]));
     const sellerLocation = new Map<string, Row<'locations'>>();
     for (const sellerId of sellerIds) {
       const own = (await this.repo.locations({ ownerType: 'seller', sellerId }))[0];
@@ -1188,6 +1240,7 @@ export class InventoryService implements InventoryPublicApi {
     const units = (l: Row<'stock_levels'>) => l.available + l.reserved + l.incoming + l.damaged_held + l.returned;
     const mainOf = (r: Row<'stock_items'>): Row<'locations'> | undefined => {
       if (r.owner_type === 'seller') {
+        if (isServiceItem(r) && locations.has(r.service_location_id!)) return locations.get(r.service_location_id!);
         const held = levels.filter((l) => l.stock_item_id === r.id).map((l) => locations.get(l.location_id)).find((l) => l?.kind === 'seller_virtual');
         return (r.seller_id ? sellerLocation.get(r.seller_id) : undefined) ?? held;
       }
@@ -1399,6 +1452,227 @@ export class InventoryService implements InventoryPublicApi {
     return this.#datasetsRegistered;
   }
 
+  /* ================================================================ Fulfilled by Marketly (public API for fulfillment-service) */
+
+  /** An active company warehouse: a service location or the destination of an inbound shipment */
+  async #companyWarehouse(locationId: string | null | undefined, path = 'locationId'): Promise<Row<'locations'>> {
+    const loc = isUuid(locationId) ? await this.repo.get('locations', locationId) : undefined;
+    if (!loc || loc.owner_type !== 'official' || loc.kind !== 'warehouse' || !loc.active) throw invalid(path, 'Choose an active company warehouse');
+    return loc;
+  }
+
+  /** Seller stock items by id; every one must exist and belong to one seller (`sellerId` when given) */
+  async #sellerItems(ids: string[], path: (i: number) => string, sellerId?: string): Promise<Map<string, Row<'stock_items'>>> {
+    const rows = new Map((await this.repo.items({ ids: [...new Set(ids.filter((id) => isUuid(id)))], includeArchived: true })).map((r) => [r.id, r]));
+    let owner = sellerId ?? null;
+    for (const [i, id] of ids.entries()) {
+      const item = rows.get(id);
+      if (!item || item.owner_type !== 'seller') throw invalid(path(i), 'Unknown seller stock item');
+      owner ??= item.seller_id;
+      if (item.seller_id !== owner) throw invalid(path(i), sellerId ? "This stock item is not the seller's" : 'All stock items must belong to one seller');
+    }
+    return rows;
+  }
+
+  /**
+   * Designates the company location a seller item sells from (null returns it to the seller's own location). While
+   * set, the item sells only there and the seller's own-location units are kept but not on sale (decision D4).
+   * Publishes inventory.stock.changed (cause service_location); the same value again is a no-op.
+   */
+  async setServiceLocation(stockItemId: string, locationId: string | null, actor: common.Actor): Promise<StockItem> {
+    if (!actor?.kind) throw invalid('actor', 'Say who changes where the item sells from');
+    const item = isUuid(stockItemId) ? await this.repo.get('stock_items', stockItemId) : undefined;
+    if (!item) throw notFound();
+    if (item.owner_type !== 'seller') throw invalid('stockItemId', 'Only seller stock can be Fulfilled by Marketly');
+    const target = locationId ?? null;
+    if (target !== null) await this.#companyWarehouse(target);
+    if ((item.service_location_id ?? null) === target) return this.#itemApi(item);
+    await this.#stock(
+      'service_location',
+      async (st) => {
+        await st.lock([item.id]);
+        if ((st.item(item.id).service_location_id ?? null) === target) return;
+        st.touch(item.id, await st.tx.update('stock_items', item.id, { service_location_id: target, updated_at: st.now }));
+      },
+      { actor },
+    );
+    return this.#itemApi(await this.#item(item.id));
+  }
+
+  /**
+   * One atomic movement of a seller item at its service location (null = outside stock). Idempotent per key through
+   * the inbox: the ledger row's id is derived from the key, so the same key answers with the first movement.
+   * Publishes inventory.stock.changed (and stock.low), never inventory.adjustment.recorded.
+   */
+  async moveServiceStock(input: Parameters<InventoryPublicApi['moveServiceStock']>[0]): Promise<{ movementId: string; levels: StockQuantities }> {
+    const key = input?.key?.trim();
+    if (!key) throw invalid('key', 'A service stock movement needs its idempotency key');
+    const movementId = serviceMovementId(key);
+    const first = await this.repo.get('stock_movements', movementId);
+    if (first) return { movementId, levels: afterOf(first) };
+    const from: GroupOrOutside = input.from ?? 'outside';
+    const to: GroupOrOutside = input.to ?? 'outside';
+    for (const [path, g] of [['from', from], ['to', to]] as const) if (g !== 'outside' && !(GROUPS as readonly string[]).includes(g)) throw invalid(path, 'Not a stock group');
+    if (from === to) throw invalid('to', 'Choose two different stock groups');
+    if (from === 'reserved' || to === 'reserved') throw inventoryError('RESERVED_NOT_ADJUSTABLE', 'Reserved units belong to orders; they move through reservations');
+    if (!Number.isInteger(input.quantity) || input.quantity <= 0) throw invalid('quantity', 'Quantity must be at least 1');
+    if (!(SERVICE_REASONS as readonly string[]).includes(input.reasonCode)) throw invalid('reasonCode', 'Not a Fulfilled by Marketly reason');
+    if (!input.ref?.kind || !input.ref.id || !input.ref.label) throw invalid('ref', 'Say what the movement is for');
+    if (!input.actor?.kind) throw invalid('actor', 'Say who moves the stock');
+    const item = isUuid(input.stockItemId) ? await this.repo.get('stock_items', input.stockItemId) : undefined;
+    if (!item) throw notFound();
+    const notHere = () => invalid('locationId', 'This item is not Fulfilled by Marketly from that location');
+    if (item.owner_type !== 'seller' || !item.service_location_id || item.service_location_id !== input.locationId) throw notHere();
+    const label = input.ref.label;
+    const moved = await this.#stock(
+      'service_stock',
+      async (st) => {
+        if (!(await st.tx.claimEvent(`service-move:${key}`))) return null;
+        await st.lock([item.id]);
+        if (st.item(item.id).service_location_id !== input.locationId) throw notHere();
+        return st.move(item.id, input.locationId, from, to, input.quantity, {
+          movementId,
+          reason: input.reasonCode,
+          ref: input.ref,
+          actor: input.actor,
+          ...(to === 'damaged_held' ? { hold: { reasonCode: input.reasonCode, reviewDate: addDays(this.today(), DEFAULT_HOLD_REVIEW_DAYS), reason: label, sourceRef: label } } : {}),
+          insufficient: (have) =>
+            inventoryError('INSUFFICIENT_STOCK', `Only ${have} unit${have === 1 ? '' : 's'} in ${from.replace('_', ' ')} for ${item.sku}`, { group: from, lines: [{ stockItemId: item.id, requested: input.quantity, available: have }] }),
+        });
+      },
+      { actor: input.actor },
+    );
+    const m = moved ?? (await this.repo.get('stock_movements', movementId));
+    if (!m) throw new AppError('CONFLICT', 'The same movement is being applied at the same time; try again');
+    return { movementId: m.id, levels: afterOf(m) };
+  }
+
+  /** Incoming at the service location for a submitted inbound shipment; repeated calls replace the open quantities */
+  async expectServiceInbound(input: { inboundId: string; ref: string; locationId: string; lines: { stockItemId: string; quantity: number; expectedDate?: string }[] }): Promise<void> {
+    if (!isUuid(input?.inboundId)) throw invalid('inboundId', 'Not an inbound shipment id');
+    if (!input.ref?.trim()) throw invalid('ref', 'The inbound shipment needs its reference');
+    const location = await this.#companyWarehouse(input.locationId);
+    const lines = input.lines ?? [];
+    for (const [i, l] of lines.entries()) {
+      if (!Number.isInteger(l.quantity) || l.quantity < 0) throw invalid(`lines[${i}].quantity`, 'Quantity must be 0 or more');
+      if (l.expectedDate != null && !/^\d{4}-\d{2}-\d{2}$/.test(l.expectedDate)) throw invalid(`lines[${i}].expectedDate`, 'Not a date (YYYY-MM-DD)');
+    }
+    await this.#sellerItems(
+      lines.map((l) => l.stockItemId),
+      (i) => `lines[${i}].stockItemId`,
+    );
+    const ref = input.ref.trim();
+    await this.#stock('incoming', (st) =>
+      this.#replaceIncoming(st, {
+        sourceKind: 'service_inbound',
+        sourceId: input.inboundId,
+        sourceRef: ref,
+        locationId: location.id,
+        lines,
+        ref: { kind: 'service_inbound', id: input.inboundId, label: `Inbound ${ref}` },
+        sent: 'service_inbound_expected',
+        changed: 'service_inbound_changed',
+      }),
+    );
+  }
+
+  /**
+   * Removes the open Incoming of a cancelled or completed inbound shipment. Units already counted on a receipt that
+   * waits for confirmation stay in Incoming (confirmInbound takes them); no-op when nothing is open.
+   */
+  async cancelServiceInbound(inboundId: string): Promise<void> {
+    if (!isUuid(inboundId)) throw invalid('inboundId', 'Not an inbound shipment id');
+    await this.#stock('incoming', async (st) => {
+      const open = await st.tx.expectations({ sourceKind: 'service_inbound', sourceId: inboundId, openOnly: true }, { forUpdate: true });
+      if (!open.length) return;
+      const waiting = await st.tx.inboundWhere({ sourceKind: 'service_inbound', sourceId: inboundId, state: 'awaiting_confirmation' });
+      const counted = new Map<string, number>();
+      for (const l of await st.tx.inboundLines(waiting.map((r) => r.id))) {
+        const r = waiting.find((x) => x.id === l.inbound_id)!;
+        counted.set(`${l.stock_item_id}:${r.location_id}`, (counted.get(`${l.stock_item_id}:${r.location_id}`) ?? 0) + l.received);
+      }
+      await st.lock(open.map((e) => e.stock_item_id));
+      for (const e of open) {
+        const keep = Math.min(e.quantity_open, counted.get(`${e.stock_item_id}:${e.location_id}`) ?? 0);
+        const n = Math.min(e.quantity_open - keep, st.qty(e.stock_item_id, e.location_id).incoming);
+        if (n > 0) await st.move(e.stock_item_id, e.location_id, 'incoming', 'outside', n, { reason: 'service_inbound_closed', ref: { kind: 'service_inbound', id: inboundId, label: `Inbound ${e.source_ref}` }, actor: SYSTEM_ACTOR });
+        if (keep !== e.quantity_open) await st.tx.update('incoming_expectations', e.id, { quantity_open: keep });
+      }
+    });
+  }
+
+  /**
+   * A counted Fulfilled by Marketly receiving record waiting for the Inventory Manager (decision D3): like
+   * submitInbound without cost. The units stay in Incoming until confirmInbound; same receiptId returns the first receipt.
+   */
+  async submitServiceReceipt(receipt: Parameters<InventoryPublicApi['submitServiceReceipt']>[0]): Promise<InboundReceipt> {
+    if (!isUuid(receipt?.receiptId)) throw invalid('receiptId', 'Not a receipt id');
+    const existing = await this.repo.inboundByReceipt(receipt.receiptId);
+    if (existing) return (await this.#inboundsApi([existing]))[0]!;
+    if (!isUuid(receipt.inboundId)) throw invalid('inboundId', 'Not an inbound shipment id');
+    if (!isUuid(receipt.sellerId)) throw invalid('sellerId', 'Not a seller id');
+    for (const f of ['receiptRef', 'inboundRef', 'sellerName'] as const) if (!receipt[f]?.trim()) throw invalid(f, 'Required');
+    if (!receipt.receivedBy?.kind) throw invalid('receivedBy', 'Say who counted the units');
+    const receivedAt = new Date(receipt.receivedAt);
+    if (Number.isNaN(receivedAt.getTime())) throw invalid('receivedAt', 'Not a valid time');
+    if (!receipt.lines?.length) throw invalid('lines', 'A receipt needs at least one line');
+    const location = await this.#companyWarehouse(receipt.locationId);
+    await this.#sellerItems(
+      receipt.lines.map((l) => l.stockItemId),
+      (i) => `lines[${i}].stockItemId`,
+      receipt.sellerId,
+    );
+    const seen = new Set<string>();
+    for (const [i, l] of receipt.lines.entries()) {
+      if (seen.has(l.stockItemId)) throw invalid(`lines[${i}].stockItemId`, 'Each stock item appears once per receipt');
+      seen.add(l.stockItemId);
+      if (![l.expected, l.received, l.damaged].every((n) => Number.isInteger(n) && n >= 0)) throw invalid(`lines[${i}]`, 'Quantities must be whole numbers, 0 or more');
+      if (l.damaged > l.received) throw invalid(`lines[${i}].damaged`, 'Damaged units cannot exceed received units');
+    }
+    const id = newId();
+    const inserted = await this.repo.transaction(async (tx) => {
+      const row = await tx.insert(
+        'inbound_receipts',
+        {
+          id,
+          receipt_id: receipt.receiptId,
+          receipt_ref: receipt.receiptRef.trim(),
+          source_kind: 'service_inbound',
+          source_id: receipt.inboundId,
+          source_ref: receipt.inboundRef.trim(),
+          owner_type: 'seller',
+          seller_id: receipt.sellerId,
+          purchase_order_id: null,
+          purchase_order_ref: null,
+          supplier_name: receipt.sellerName.trim(),
+          location_id: location.id,
+          received_by: actorText(receipt.receivedBy),
+          received_at: receivedAt,
+          state: 'awaiting_confirmation',
+          confirmed_by: null,
+          confirmed_at: null,
+          note: null,
+        },
+        { ignoreConflict: true },
+      );
+      if (!row) return false;
+      // the counted units stay in Incoming (against the inbound shipment) until the Inventory Manager confirms them
+      await tx.insertInboundLines(receipt.lines.map((l) => ({ inbound_id: id, stock_item_id: l.stockItemId, expected: l.expected, received: l.received, damaged: l.damaged, bin_code: l.binCode ?? null, unit_cost_amount: null, sellable: null, reason: null })));
+      return true;
+    });
+    const row = inserted ? await this.repo.get('inbound_receipts', id) : await this.repo.inboundByReceipt(receipt.receiptId);
+    return (await this.#inboundsApi([row!]))[0]!;
+  }
+
+  /** Quantities of the items at one location, keyed by stock item id (zeros where an item has no level row there) */
+  async getLevels(stockItemIds: string[], locationId: string): Promise<Record<string, StockQuantities>> {
+    const ids = [...new Set((stockItemIds ?? []).filter((id) => isUuid(id)))];
+    const out: Record<string, StockQuantities> = Object.fromEntries(ids.map((id) => [id, zeroQty()]));
+    if (!ids.length || !isUuid(locationId)) return out;
+    for (const l of await this.repo.levels(ids)) if (l.location_id === locationId) out[l.stock_item_id] = levelQty(l);
+    return out;
+  }
+
   /* ================================================================ seller area */
 
   async #sellerListFilter(sellerId: string, q: { q?: string; state?: ItemListFilter['state']; categoryId?: string }): Promise<ItemListFilter> {
@@ -1458,6 +1732,9 @@ export class InventoryService implements InventoryPublicApi {
           lowStockThreshold: i.lowStockThreshold ?? null,
           state: i.state,
           lastChange: last.get(i.id) ?? null,
+          // Fulfilled by Marketly: available and reserved are 'At Marketly'; the row is read-only (SERVICE_MANAGED)
+          fulfilledByMarketly: !!i.serviceLocationId,
+          ownLocationAvailable: i.serviceLocationId ? (i.ownLocationQuantities?.available ?? 0) : null,
           updatedAt: i.updatedAt,
         };
       }),
@@ -1544,12 +1821,15 @@ export class InventoryService implements InventoryPublicApi {
   ): Promise<Row<'stock_movements'> | null> {
     if (!Number.isInteger(newAvailable) || newAvailable < 0) throw invalid('newAvailable', 'Available must be a whole number, 0 or more');
     const item = await this.#ownItem(sellerId, itemId);
+    if (isServiceItem(item)) throw inventoryError('SERVICE_MANAGED', undefined, { stockItemId: item.id });
     if (item.archived) throw inventoryError('STOCK_ITEM_ARCHIVED', 'This stock item is archived because its offer was removed');
     const result = await this.#stock(
       'adjustment',
       async (st) => {
         await st.lock([item.id]);
-        const location = st.levels(item.id)[0]?.location_id ?? (await this.#sellerLocation(st.tx, sellerId)).id;
+        if (isServiceItem(st.item(item.id))) throw inventoryError('SERVICE_MANAGED', undefined, { stockItemId: item.id });
+        // always the seller's own location (units the item may still have in a Marketly warehouse are not the seller's to edit)
+        const location = (await this.#sellerLocation(st.tx, sellerId)).id;
         const current = st.qty(item.id, location).available;
         const delta = newAvailable - current;
         if (delta === 0) {
@@ -1563,7 +1843,7 @@ export class InventoryService implements InventoryPublicApi {
     if (result) {
       this.ctx.events.publish(
         'inventory.adjustment.recorded',
-        { adjustmentId: null, movementId: result.id, stockItemId: item.id, ownerType: item.owner_type, sellerId: item.seller_id, fromGroup: result.from_group, toGroup: result.to_group, quantity: result.quantity, reasonCode: result.reason_code, actor: o.by.actor },
+        { adjustmentId: null, movementId: result.id, stockItemId: item.id, locationId: result.location_id, ownerType: item.owner_type, sellerId: item.seller_id, serviceManaged: false, fromGroup: result.from_group, toGroup: result.to_group, quantity: result.quantity, reasonCode: result.reason_code, actor: o.by.actor },
         this.#meta(o.by),
       );
     }
@@ -1696,9 +1976,21 @@ export class InventoryService implements InventoryPublicApi {
 
   /* ---------------------------------------------------------------- adjustments (company stock) */
 
+  /**
+   * Company stock, and seller items at their service location (Fulfilled by Marketly: units found, lost or damaged
+   * in our warehouse); the latter publish inventory.adjustment.recorded with serviceManaged true.
+   */
   async createAdjustment(body: AdjustmentRequest, by: StaffBy): Promise<Adjustment> {
-    const item = await this.#officialItem(body.stockItemId);
+    const item = await this.#item(body.stockItemId);
+    if (item.owner_type !== 'official' && !isServiceItem(item)) await this.#officialItem(item.id); // the seller's own stock: refused
     return this.#requestAdjustment(item, { ...body, locationId: body.locationId ?? null }, by);
+  }
+
+  /** A seller item's units at a company location are in Marketly's custody: the fulfillment service's ledger follows them */
+  async #serviceManaged(item: Row<'stock_items'>, locationId: string): Promise<boolean> {
+    if (item.owner_type !== 'seller') return false;
+    if (item.service_location_id === locationId) return true;
+    return (await this.repo.get('locations', locationId))?.owner_type === 'official';
   }
 
   async #requestAdjustment(
@@ -1712,9 +2004,12 @@ export class InventoryService implements InventoryPublicApi {
     if (!Number.isInteger(body.quantity) || body.quantity <= 0) throw invalid('quantity', 'Quantity must be at least 1');
     if (body.toGroup === 'damaged_held' && !body.reviewDate) throw inventoryError('REVIEW_DATE_REQUIRED', 'Moving units into Damaged or held needs a review date');
     const levels = await this.repo.levels([item.id]);
-    const locationId = body.locationId ?? levels[0]?.location_id ?? (await this.#officialDefault())?.id;
+    const service = isServiceItem(item);
+    const locationId = body.locationId ?? (service ? item.service_location_id : null) ?? levels[0]?.location_id ?? (await this.#officialDefault())?.id;
     const location = locationId ? await this.repo.get('locations', locationId) : undefined;
     if (!location || location.owner_type !== 'official') throw invalid('locationId', 'Choose a company stock location');
+    // seller stock Fulfilled by Marketly is adjusted only where Marketly holds it
+    if (item.owner_type === 'seller' && location.id !== item.service_location_id) throw invalid('locationId', 'Seller stock can be adjusted only at its Fulfilled by Marketly location');
     const current = levelQty(levels.find((l) => l.location_id === location.id));
     if (body.fromGroup !== 'outside' && current[FIELD[body.fromGroup]] < body.quantity) {
       const have = current[FIELD[body.fromGroup]];
@@ -1785,18 +2080,59 @@ export class InventoryService implements InventoryPublicApi {
       this.#meta(by),
     );
     const api = (await this.#adjustmentsApi([applied!]))[0]!;
-    this.#publishAdjustmentRecorded(applied!, item, by.actor, by);
+    await this.#publishAdjustmentRecorded(applied!, item, by.actor, by);
     await this.#reportWriteOff(item, body.toGroup, body.quantity, { kind: 'adjustment', id }, by);
     await this.#audit({ action: 'inventory.adjustment.apply', actionLabel: 'Adjusted company stock', category: 'inventory', target: { ...target, screen: 'ops/inventory' }, before: api.before, after: api.after, reason: body.note ?? reasonLabel(body.reasonCode), approvalNote: check?.reason ?? null }, by);
     return api;
   }
 
-  #publishAdjustmentRecorded(a: Row<'adjustments'>, item: Row<'stock_items'>, actor: common.Actor, by: By) {
+  async #publishAdjustmentRecorded(a: Row<'adjustments'>, item: Row<'stock_items'>, actor: common.Actor, by: By) {
     this.ctx.events.publish(
       'inventory.adjustment.recorded',
-      { adjustmentId: a.id, movementId: a.movement_id!, stockItemId: item.id, ownerType: item.owner_type, sellerId: item.seller_id, fromGroup: a.from_group, toGroup: a.to_group, quantity: a.quantity, reasonCode: a.reason_code, actor },
+      {
+        adjustmentId: a.id,
+        movementId: a.movement_id!,
+        stockItemId: item.id,
+        locationId: a.location_id,
+        ownerType: item.owner_type,
+        sellerId: item.seller_id,
+        serviceManaged: await this.#serviceManaged(item, a.location_id),
+        fromGroup: a.from_group,
+        toGroup: a.to_group,
+        quantity: a.quantity,
+        reasonCode: a.reason_code,
+        actor,
+      },
       this.#meta(by),
     );
+  }
+
+  /** inventory.adjustment.recorded for movements outside an adjustment (discrepancies reported or resolved) */
+  async #publishMovementsRecorded(movements: Row<'stock_movements'>[], actor: common.Actor, by: By) {
+    if (!movements.length) return;
+    const items = await this.#skus(movements.map((m) => m.stock_item_id));
+    for (const m of movements) {
+      const item = items.get(m.stock_item_id);
+      if (!item) continue;
+      this.ctx.events.publish(
+        'inventory.adjustment.recorded',
+        {
+          adjustmentId: null,
+          movementId: m.id,
+          stockItemId: item.id,
+          locationId: m.location_id,
+          ownerType: item.owner_type,
+          sellerId: item.seller_id,
+          serviceManaged: await this.#serviceManaged(item, m.location_id),
+          fromGroup: m.from_group,
+          toGroup: m.to_group,
+          quantity: m.quantity,
+          reasonCode: m.reason_code,
+          actor,
+        },
+        this.#meta(by),
+      );
+    }
   }
 
   /** Units of company stock leaving stock (written off) are reported to finance at cost */
@@ -1879,8 +2215,8 @@ export class InventoryService implements InventoryPublicApi {
 
   /* ---------------------------------------------------------------- inbound receipts */
 
-  async listInbound(query: { state?: string }, page: PageRequest): Promise<common.Page<InboundReceipt>> {
-    const p = await this.repo.pageInbound(query, page);
+  async listInbound(query: { state?: string; source?: 'purchase_order' | 'service_inbound' }, page: PageRequest): Promise<common.Page<InboundReceipt>> {
+    const p = await this.repo.pageInbound({ ...(query.state ? { state: query.state } : {}), ...(query.source ? { source: query.source } : {}) }, page);
     return { ...p, items: await this.#inboundsApi(p.items) };
   }
 
@@ -1905,7 +2241,9 @@ export class InventoryService implements InventoryPublicApi {
       if (l.sellable !== line.received - l.damaged && !l.reason?.trim()) throw invalid(`lines[${i}].reason`, 'Say why the sellable quantity differs from received minus damaged');
       decided.set(l.stockItemId, { sellable: l.sellable, damaged: l.damaged, reason: l.reason?.trim() || null });
     }
-    const ref: MovementRef = { kind: 'receipt', id: receipt.receipt_id, label: `Received ${receipt.purchase_order_ref}` };
+    const source = receiptSourceOf(receipt);
+    const service = source.kind === 'service_inbound';
+    const ref: MovementRef = { kind: 'receipt', id: receipt.receipt_id, label: `Received ${source.ref}` };
     const reviewDate = addDays(this.today(), DEFAULT_HOLD_REVIEW_DAYS);
     await this.#stock(
       'receipt_confirmed',
@@ -1913,6 +2251,11 @@ export class InventoryService implements InventoryPublicApi {
         const locked = (await st.tx.get('inbound_receipts', id, { forUpdate: true }))!;
         const state = inboundConfirmationMachine.next(locked.state as 'awaiting_confirmation', 'confirm');
         await st.lock(lines.map((l) => l.stock_item_id));
+        if (service) {
+          await this.#confirmServiceLines(st, locked, lines, decided, { ref, reviewDate, actor: by.actor });
+          await st.tx.update('inbound_receipts', id, { state, confirmed_by: actorText(by.actor), confirmed_at: st.now, note: body.note ?? null });
+          return;
+        }
         for (const line of lines) {
           const d = decided.get(line.stock_item_id) ?? { sellable: Math.max(0, line.received - line.damaged), damaged: line.damaged, reason: null };
           const item = st.item(line.stock_item_id);
@@ -1936,9 +2279,64 @@ export class InventoryService implements InventoryPublicApi {
       this.#meta(by),
     );
     const api = await this.getInbound(id);
-    this.ctx.events.publish('inventory.receipt.confirmed', { inboundId: id, receiptId: receipt.receipt_id, purchaseOrderId: receipt.purchase_order_id, lines: api.lines, confirmedBy: by.actor }, this.#meta(by));
-    await this.#audit({ action: 'inventory.inbound.confirm', actionLabel: 'Confirmed received stock', category: 'inventory', target: { type: 'receipt', id: receipt.receipt_id, ref: receipt.receipt_ref, label: `${receipt.supplier_name} · ${receipt.purchase_order_ref}`, screen: 'ops/receiving' }, after: api.totals, reason: body.note ?? null }, by);
+    this.ctx.events.publish(
+      'inventory.receipt.confirmed',
+      { inboundId: id, receiptId: receipt.receipt_id, source, ownerType: receipt.owner_type, sellerId: receipt.seller_id, purchaseOrderId: receipt.purchase_order_id, locationId: receipt.location_id, lines: api.lines, confirmedBy: by.actor },
+      this.#meta(by),
+    );
+    await this.#audit(
+      {
+        action: 'inventory.inbound.confirm',
+        actionLabel: service ? 'Confirmed received Fulfilled by Marketly stock' : 'Confirmed received stock',
+        category: 'inventory',
+        target: { type: 'receipt', id: receipt.receipt_id, ref: receipt.receipt_ref, label: `${receipt.supplier_name} · ${source.ref}`, screen: 'ops/receiving', ...(receipt.seller_id ? { sellerId: receipt.seller_id } : {}) },
+        after: api.totals,
+        reason: body.note ?? null,
+      },
+      by,
+    );
     return api;
+  }
+
+  /**
+   * Confirmation of a Fulfilled by Marketly receipt (seller stock at the service location): no unit cost and no
+   * valuation. Each line's units come out of the inbound shipment's open Incoming (as far as it goes) into Available
+   * (sellable) and Damaged or held (damaged), units not accepted leave Incoming, and units beyond the open Incoming
+   * are added from outside.
+   */
+  async #confirmServiceLines(
+    st: StockTx,
+    receipt: Row<'inbound_receipts'>,
+    lines: Row<'inbound_lines'>[],
+    decided: Map<string, { sellable: number; damaged: number; reason: string | null }>,
+    o: { ref: MovementRef; reviewDate: string; actor: common.Actor },
+  ) {
+    const loc = receipt.location_id;
+    const expectations = receipt.source_id ? await st.tx.expectations({ sourceKind: 'service_inbound', sourceId: receipt.source_id }, { forUpdate: true }) : [];
+    for (const line of lines) {
+      const d = decided.get(line.stock_item_id) ?? { sellable: Math.max(0, line.received - line.damaged), damaged: line.damaged, reason: null };
+      const item = st.item(line.stock_item_id);
+      const e = expectations.find((x) => x.stock_item_id === item.id && x.location_id === loc);
+      let pool = Math.min(line.received, e?.quantity_open ?? 0, st.qty(item.id, loc).incoming);
+      if (e && pool > 0) await st.tx.update('incoming_expectations', e.id, { quantity_open: e.quantity_open - pool });
+      const base = { ref: o.ref, actor: o.actor };
+      const hold = { reasonCode: 'receipt_damaged', reviewDate: o.reviewDate, reason: 'Damaged on arrival (Fulfilled by Marketly)', sourceRef: receipt.receipt_ref };
+      const put = async (n: number, to: 'available' | 'damaged_held') => {
+        if (n <= 0) return;
+        const fromIncoming = Math.min(n, pool);
+        pool -= fromIncoming;
+        const reason = to === 'available' ? 'receipt_confirmed' : 'receipt_damaged';
+        const extra = to === 'damaged_held' ? { hold } : {};
+        if (fromIncoming > 0) await st.move(item.id, loc, 'incoming', to, fromIncoming, { ...base, ...extra, reason, note: d.reason });
+        if (n - fromIncoming > 0) await st.move(item.id, loc, 'outside', to, n - fromIncoming, { ...base, ...extra, reason: 'received_over_expected', note: d.reason });
+      };
+      await put(d.sellable, 'available');
+      await put(d.damaged, 'damaged_held');
+      // the rest of the units counted against the inbound were not accepted: they leave Incoming
+      if (pool > 0) await st.move(item.id, loc, 'incoming', 'outside', pool, { ...base, reason: 'receipt_not_accepted', note: d.reason });
+      if (line.bin_code && !item.primary_bin_code) st.items.set(item.id, await st.tx.update('stock_items', item.id, { primary_bin_code: line.bin_code }));
+      await st.tx.updateInboundLine(receipt.id, item.id, { sellable: d.sellable, damaged: d.damaged, reason: d.reason });
+    }
   }
 
   /* ---------------------------------------------------------------- return outcomes */
@@ -2027,7 +2425,7 @@ export class InventoryService implements InventoryPublicApi {
     if (body.resolution === 'adjusted' && (!Number.isInteger(n) || n <= 0)) throw invalid('adjustQuantity', 'Quantity must be at least 1');
     const source = body.sourceGroup ?? 'available';
     const ref: MovementRef = { kind: 'discrepancy', id, label: d.order_ref ? `${d.kind === 'pick_shortage' ? 'Shortage' : 'Damage'}, order ${d.order_ref}` : d.kind === 'pick_shortage' ? 'Pick shortage' : 'Damage found' };
-    await this.#stock(
+    const moved = await this.#stock(
       'discrepancy',
       async (st) => {
         const locked = (await st.tx.get('discrepancies', id, { forUpdate: true }))!;
@@ -2075,10 +2473,12 @@ export class InventoryService implements InventoryPublicApi {
           }
         }
         await st.tx.update('discrepancies', id, { state, resolution: body.resolution, resolution_note: body.note, resolved_by: actorText(by.actor), resolved_at: st.now });
+        return st.movements;
       },
       this.#meta(by),
     );
     this.ctx.events.publish('inventory.discrepancy.resolved', { discrepancyId: id, resolution: body.resolution, orderId: d.order_id }, this.#meta(by));
+    await this.#publishMovementsRecorded(moved, by.actor, by);
     const api = (await this.#discrepanciesApi([(await this.repo.get('discrepancies', id))!]))[0]!;
     await this.#audit({ action: 'inventory.discrepancy.resolve', actionLabel: 'Resolved warehouse discrepancy', category: 'inventory', target: { type: 'discrepancy', id, ref: d.order_ref, label: `${api.sku} · ${d.kind.replace('_', ' ')}`, screen: 'ops/inventory' }, after: { resolution: body.resolution, adjustQuantity: body.adjustQuantity ?? null, sourceGroup: body.sourceGroup ?? null }, reason: body.note }, by);
     return api;
@@ -2164,7 +2564,8 @@ export class InventoryService implements InventoryPublicApi {
     const active = patch.active ?? before.active;
     if (sellable && active && !(before.sellable && before.active)) await this.#checkSecondSellable(id);
     if (before.active && active === false) {
-      const totals = await this.repo.levelTotals({ ownerType: 'official', locationId: id });
+      // company stock and seller stock Fulfilled by Marketly held here
+      const totals = [...(await this.repo.levelTotals({ ownerType: 'official', locationId: id })), ...(await this.repo.levelTotals({ ownerType: 'seller', locationId: id }))];
       const units = totals.reduce((n, l) => n + l.available + l.reserved + l.incoming + l.damaged_held + l.returned, 0);
       if (units > 0) throw invalid('active', `${units} unit${units === 1 ? ' is' : 's are'} still at this location; move them first`);
     }
@@ -2301,8 +2702,9 @@ export class InventoryService implements InventoryPublicApi {
     if (!location || location.owner_type !== 'official') throw invalid('locationId', 'Choose a company stock location');
     const scope = body.scope?.trim();
     if (!scope) throw invalid('scope', 'Enter a zone, bin prefix or SKU list');
-    const levels = await this.repo.levelTotals({ ownerType: 'official', locationId: location.id });
-    const items = await this.repo.items({ ids: levels.map((l) => l.stock_item_id) });
+    // company stock and seller items Fulfilled by Marketly from this location (counted by the same staff)
+    const levels = [...(await this.repo.levelTotals({ ownerType: 'official', locationId: location.id })), ...(await this.repo.levelTotals({ ownerType: 'seller', locationId: location.id }))];
+    const items = (await this.repo.items({ ids: levels.map((l) => l.stock_item_id) })).filter((i) => i.owner_type === 'official' || i.service_location_id === location.id);
     const skus = scope.split(/[\s,;]+/).filter(Boolean);
     const bySku = items.filter((i) => skus.includes(i.sku));
     const chosen = bySku.length ? bySku : items.filter((i) => (i.primary_bin_code ?? '').toUpperCase().startsWith(scope.toUpperCase()));
@@ -2852,7 +3254,7 @@ export class InventoryService implements InventoryPublicApi {
         this.#meta(by),
       );
       if (!applied) return;
-      this.#publishAdjustmentRecorded(applied, item, requester, by);
+      await this.#publishAdjustmentRecorded(applied, item, requester, by);
       await this.#reportWriteOff(item, applied.to_group as GroupOrOutside, applied.quantity, { kind: 'adjustment', id: applied.id }, by);
       await this.#audit({ action: 'inventory.adjustment.apply', actionLabel: 'Applied stock adjustment after second review', category: 'inventory', target: { type: 'stock_adjustment', id: a.id, ref: item.sku, label: item.label, screen: 'ops/inventory' }, after: { state: 'applied', quantity: a.quantity, fromGroup: a.from_group, toGroup: a.to_group }, reason: event.reason ?? null, approvalRequestId: event.requestId }, by);
     } catch (err) {

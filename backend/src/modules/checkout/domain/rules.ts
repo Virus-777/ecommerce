@@ -6,10 +6,11 @@ import { format as formatMoney } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
 import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type * as cart from '../../../spec/cart.js';
+import type * as offers from '../../../spec/offers.js';
 import type * as orders from '../../../spec/orders.js';
 import type * as payments from '../../../spec/payments.js';
 import type * as promotions from '../../../spec/promotions.js';
-import type { Change, CheckoutLine, CouponResult, DiscountLine, QuoteTotals, StepState } from '../../../spec/checkout.js';
+import type { Change, CheckoutLine, CheckoutPackage, CouponResult, DiscountLine, QuoteTotals, StepState } from '../../../spec/checkout.js';
 
 /* ================================================================ stored shapes (jsonb columns) */
 
@@ -111,6 +112,11 @@ export interface StoredChange {
     couponCode?: string;
     /** terms_changed: the offer's current termsVersion, set on the line when the customer accepts */
     termsVersion?: number;
+    /**
+     * terms_changed: who ships the offer now (Offer.shipping.fulfilledBy) when it differs from the line; accepting
+     * moves the line to the offer's current fulfilment, profile, dispatch and package
+     */
+    fulfilledBy?: FulfilledBy;
   };
 }
 
@@ -131,7 +137,31 @@ export const CONDITION_LABEL: Record<string, string> = {
 
 export const plural = (n: number, word: string, many = `${word}s`) => `${n} ${n === 1 ? word : many}`;
 
-export const packageKey = (ownerType: string, sellerId: string | null | undefined, shipsFrom: string) => `${ownerType}:${sellerId ?? 'official'}:${shipsFrom}`;
+export type FulfilledBy = CheckoutPackage['fulfilledBy'];
+
+/** Who ships a line when nothing else says so: the Official Store's warehouse, or the seller */
+export const defaultFulfilledBy = (ownerType: string): FulfilledBy => (ownerType === 'official' ? 'official_warehouse' : 'seller');
+
+/**
+ * The offer's effective customer-facing fulfilment (Offer.shipping: who ships it, the profile it is quoted with, its
+ * dispatch and ships-from). Checkout never reads shippingProfileId and dispatch directly; the fallback only covers an
+ * offer read without shipping resolved (offers always resolves it).
+ */
+export function shippingOf(offer: offers.Offer): offers.OfferShipping {
+  return offer.shipping ?? { fulfilledBy: offer.fulfilledBy ?? defaultFulfilledBy(offer.ownerType), profileId: offer.shippingProfileId, dispatch: offer.dispatch };
+}
+
+/** Owner + seller + fulfilledBy + ship-from, the same key as the cart: a seller's Marketly-fulfilled and self-shipped items are two packages */
+export const packageKey = (ownerType: string, sellerId: string | null | undefined, fulfilledBy: string, shipsFrom: string) => `${ownerType}:${sellerId ?? 'official'}:${fulfilledBy}:${shipsFrom}`;
+
+/** 'Sold and shipped by Northwind Audio', or 'Sold by Northwind Audio · Shipped by Marketly' when Marketly fulfils the package */
+export const soldAndShippedBy = (sellerName: string, fulfilledBy: string) => (fulfilledBy === 'marketly_service' ? `Sold by ${sellerName} · Shipped by Marketly` : `Sold and shipped by ${sellerName}`);
+
+export const FULFILMENT_LABEL: Record<FulfilledBy, string> = {
+  official_warehouse: 'Shipped by Marketly',
+  seller: 'Shipped by the seller',
+  marketly_service: 'Shipped by Marketly',
+};
 
 export const OFFICIAL_SELLER: cart.SellerLabel = { ownerType: 'official', id: null, name: OFFICIAL_STORE_NAME, slug: 'official-store', official: true, verified: true, logo: null };
 

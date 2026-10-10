@@ -65,6 +65,7 @@ const cancelledEvent = (orderId: string, itemId: string, stockItemId: string, qu
   reasonCode: 'changed_mind',
   beforeDispatch: true,
   countsAgainstSeller: false,
+  fulfilledBy: 'official_warehouse' as const,
   refund: { itemAmount: usd(0), discountShare: usd(0), shippingRefund: usd(0), taxRefund: usd(0), total: usd(0) },
   paymentIntentId: newId(),
 });
@@ -79,6 +80,7 @@ const dispatchedEvent = (shipmentId: string, orderId: string, orderItemId: strin
   lines: [{ orderItemId, quantity, title: 'Aurora', variantLabel: 'Black' }],
   shippedAt: new Date().toISOString(),
   trackingValid: true,
+  fulfilledBy: 'official_warehouse' as const,
 });
 
 describe('reservations.source', () => {

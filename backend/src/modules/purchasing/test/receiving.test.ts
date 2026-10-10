@@ -171,11 +171,17 @@ describe('receiving', () => {
     expect((await call('GET', `/receipts?withIssues=true&purchaseOrderId=${po.id}`)).json().items).toHaveLength(1);
 
     // the Inventory Manager confirms in inventory
-    const confirm = () =>
-      app.kernel.events.publish('inventory', 'inventory.receipt.confirmed', {
-        inboundId: newId(), receiptId: r.id, purchaseOrderId: po.id, confirmedBy: { kind: 'staff', id: newId(), name: 'Ana Silva' },
-        lines: [{ stockItemId: headphones, sku: 'HAL-AUR-BLK', label: 'Headphones', expected: 100, received: 100, damaged: 2, shortage: 0, unitCost: usd(9624), sellable: 98, outOfStockNow: false }],
-      });
+    const confirmation = (source: { kind: 'purchase_order' | 'service_inbound'; id: string; ref: string }) => ({
+      inboundId: newId(), receiptId: r.id, source, ownerType: source.kind === 'purchase_order' ? ('official' as const) : ('seller' as const),
+      sellerId: source.kind === 'purchase_order' ? null : newId(), purchaseOrderId: source.kind === 'purchase_order' ? po.id : null, locationId: LOCATION,
+      confirmedBy: { kind: 'staff' as const, id: newId(), name: 'Ana Silva' },
+      lines: [{ stockItemId: headphones, sku: 'HAL-AUR-BLK', label: 'Headphones', expected: 100, received: 100, damaged: 2, shortage: 0, unitCost: usd(9624), sellable: 98, outOfStockNow: false }],
+    });
+    const confirm = () => app.kernel.events.publish('inventory', 'inventory.receipt.confirmed', confirmation({ kind: 'purchase_order', id: po.id, ref: po.ref }));
+    // a Fulfilled by Marketly receipt (source service_inbound) is fulfillment-service's: ignored, even with a matching id
+    app.kernel.events.publish('inventory', 'inventory.receipt.confirmed', confirmation({ kind: 'service_inbound', id: newId(), ref: 'IB-261009-0001' }));
+    await app.kernel.events.drain();
+    expect((await call('GET', `/receipts/${r.id}`)).json()).toMatchObject({ status: 'awaiting_confirmation' });
     confirm();
     confirm();
     await app.kernel.events.drain();
@@ -277,8 +283,8 @@ describe('reorder suggestions and public API', () => {
 
     // inventory.stock.low adds company items to the candidates; seller items are ignored
     const loose = stubs.addStock({ sku: 'LOOSE', label: 'Loose item', available: 0, threshold: 3 });
-    app.kernel.events.publish('inventory', 'inventory.stock.low', { stockItemId: loose, ownerType: 'official', productId: newId(), variantId: newId(), sku: 'LOOSE', label: 'Loose item', available: 0, threshold: 3 });
-    app.kernel.events.publish('inventory', 'inventory.stock.low', { stockItemId: newId(), ownerType: 'seller', sellerId: newId(), productId: newId(), variantId: newId(), sku: 'S', label: 'S', available: 0, threshold: 3 });
+    app.kernel.events.publish('inventory', 'inventory.stock.low', { stockItemId: loose, ownerType: 'official', productId: newId(), variantId: newId(), sku: 'LOOSE', label: 'Loose item', available: 0, threshold: 3, serviceManaged: false });
+    app.kernel.events.publish('inventory', 'inventory.stock.low', { stockItemId: newId(), ownerType: 'seller', sellerId: newId(), productId: newId(), variantId: newId(), sku: 'S', label: 'S', available: 0, threshold: 3, serviceManaged: true });
     await app.kernel.events.drain();
     const all = (await call('GET', '/reorder-suggestions?limit=100')).json().items;
     expect(all.find((x: { stockItemId: string }) => x.stockItemId === loose)).toMatchObject({ supplier: null, suggestedQuantity: 6 });

@@ -1,19 +1,20 @@
 /**
- * Inbound shipments from a seller to our warehouse: plan (lines, boxes, ship-from), submit (labels; the units
- * become Inbound), ship, cancel, arrival at the dock (Inbound → Receiving), receiving counts (sellable units
- * become Available seller-owned stock in inventory, damaged units Unsellable; receiving and labelling fees),
- * discrepancies the seller accepts or claims, staff decisions (adjust stock, reimburse within limits, reject)
- * and the daily overdue sweep.
+ * Inbound shipments from a seller to our warehouse: plan (lines, boxes, ship-from; the destination is the service
+ * location's address, decision D12), submit (labels; inventory expects the units as Incoming), ship, cancel,
+ * arrival at the dock (Inbound → Receiving), receiving records (each one a service receipt in inventory; the units
+ * stay in Receiving until the Inventory Manager confirms it, decision D3), the confirmation (Available and
+ * Unsellable seller-owned stock; the SKU and the enrollment activate), discrepancies the seller accepts or claims,
+ * staff decisions (adjust stock, reimburse within limits, reject) and the daily overdue sweep.
  */
 import { AppError } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
-import type { InboundInput, InboundShipment, ReceivingInput } from '../../../spec/fulfillment-service.js';
+import type { InboundInput, InboundShipment, ReceivedEventLine, ReceivingInput } from '../../../spec/fulfillment-service.js';
 import { inboundShipmentMachine } from '../domain/state-machines.js';
-import { actorText, addDays, cubicFeet, physicalUnits, plural, qty, REIMBURSEMENT, round4, SYSTEM } from '../domain/rules.js';
-import type { EnrollmentRec, InboundLineRec, InboundRec, SkuRec } from '../ports.js';
+import { actorText, addDays, cubicFeet, physicalUnits, plural, qty, round4, SYSTEM } from '../domain/rules.js';
+import type { EnrollmentRec, InboundLineRec, InboundRec, ReceiptLine, SkuRec } from '../ports.js';
 import { invalid, notFound, Part, type By } from './core.js';
 
 type State = InboundShipment['state'];
@@ -22,6 +23,8 @@ export const REIMBURSE_ACTION = 'fulfillment-service.reimbursements.approve';
 export const DISCREPANCY_TARGET = 'inbound_discrepancy';
 const LINE_STATES = ['approved', 'active', 'inactive'];
 const OPEN = ['draft', 'submitted', 'in_transit', 'arrived', 'receiving', 'received'];
+
+const fmt = (m: common.Money) => `${(m.amount / 100).toFixed(2)} ${m.currency}`;
 
 export class InboundPart extends Part {
   /* ---------------------------------------------------------------- reads */
@@ -105,7 +108,9 @@ export class InboundPart extends Part {
     const enrollment = await this.parts.enrollment.requireOpen(sellerId, 'plan inbound shipments');
     const skus = await this.checkLines(sellerId, input);
     await this.checkCapacity(enrollment, input, skus);
-    const [ref, destination] = await Promise.all([this.ctx.refs.next('IB', { digits: 4 }), this.core.destination()]);
+    // the destination is the service location's address (decision D12)
+    const location = await this.core.requireLocation();
+    const ref = await this.ctx.refs.next('IB', { digits: 4 });
     const id = newId();
     const row = await this.repo.transaction(async (tx) => {
       const r = await tx.insert('inbound_shipments', {
@@ -114,14 +119,13 @@ export class InboundPart extends Part {
         seller_id: sellerId,
         state: inboundShipmentMachine.initial,
         ship_from: input.shipFrom,
-        destination,
+        destination: location.address,
         boxes: input.boxes,
         carrier: input.carrier?.trim() || null,
         tracking: input.tracking?.trim() || null,
         expected_arrival: input.expectedArrival ?? null,
         arrived_at: null,
         received_at: null,
-        warehouse_receipt_id: null,
         created_at: this.now(),
       });
       await tx.insertMany(
@@ -165,8 +169,35 @@ export class InboundPart extends Part {
       );
       return tx.update('inbound_shipments', id, { ...common, ship_from: input.shipFrom, boxes: input.boxes });
     });
+    if (row.state !== 'draft' && row.expected_arrival !== before.expected_arrival) await this.expect(row, { strict: false });
     void by;
     return this.parts.views.inbound(row, { labels: true });
+  }
+
+  /** inventory.expectServiceInbound: the shipment's units are Incoming at the service location (repeat = replace) */
+  private async expect(row: InboundRec, o: { strict: boolean }) {
+    try {
+      const location = await this.core.requireLocation();
+      const lines = await this.repo.find('inbound_lines', { inbound_id: row.id });
+      const skus = new Map((await this.repo.find('sku_enrollments', { id: lines.map((l) => l.sku_enrollment_id) })).map((s) => [s.id, s]));
+      await this.ctx.use('inventory').expectServiceInbound({
+        inboundId: row.id,
+        ref: row.ref,
+        locationId: location.locationId,
+        lines: lines.filter((l) => skus.get(l.sku_enrollment_id)?.inventory_item_id).map((l) => ({ stockItemId: skus.get(l.sku_enrollment_id)!.inventory_item_id!, quantity: l.expected, ...(row.expected_arrival ? { expectedDate: row.expected_arrival } : {}) })),
+      });
+    } catch (err) {
+      if (o.strict) throw err;
+      this.ctx.log.warn({ err, inboundId: row.id }, 'fulfillment-service: inventory did not take the expected inbound units');
+    }
+  }
+
+  /** inventory.cancelServiceInbound: the open Incoming of a cancelled or completed shipment goes */
+  private async unexpect(inboundId: string) {
+    await this.ctx
+      .use('inventory')
+      .cancelServiceInbound(inboundId)
+      .catch((err) => this.ctx.log.warn({ err, inboundId }, 'fulfillment-service: inventory kept the open inbound units'));
   }
 
   async submit(sellerId: string, id: string, by: By): Promise<InboundShipment> {
@@ -177,6 +208,8 @@ export class InboundPart extends Part {
     const input: InboundInput = { shipFrom: before.ship_from, boxes: before.boxes, lines: lines.map((l) => ({ skuEnrollmentId: l.sku_enrollment_id, quantity: l.expected })), expectedArrival: null };
     const skus = await this.checkLines(sellerId, input);
     await this.checkCapacity(enrollment, input, skus, id);
+    // inventory first: Incoming at the service location (replaces any earlier expectation of this shipment)
+    await this.expect(before, { strict: true });
     const row = await this.repo.transaction(async (tx) => {
       const locked = (await tx.get('inbound_shipments', id, { forUpdate: true }))!;
       const state = inboundShipmentMachine.next(locked.state as State, 'submit');
@@ -185,6 +218,8 @@ export class InboundPart extends Part {
     });
     const units = lines.reduce((n, l) => n + l.expected, 0);
     this.core.publish('fulfillment-service.inbound.submitted', { inboundId: id, sellerId, units, expectedArrival: row.expected_arrival }, by);
+    const names = await this.core.sellerNames([sellerId]);
+    await this.core.notifyStaff('warehouse_manager', 'staff.fulfillment.inbound_submitted', { inbound: { ref: row.ref, units, expectedArrival: row.expected_arrival ?? '' }, seller: { name: names.get(sellerId) ?? 'A seller' } }, { kind: 'queue', id, ref: row.ref, label: 'Open receiving', screen: 'ops/receiving' }, `fs:inbound:${id}:submitted`);
     return this.parts.views.inbound(row, { labels: true });
   }
 
@@ -193,34 +228,36 @@ export class InboundPart extends Part {
     if (!body.carrier?.trim()) issues.push({ path: 'carrier', message: 'Enter the carrier' });
     if (!body.tracking?.trim()) issues.push({ path: 'tracking', message: 'Enter the tracking number' });
     if (issues.length) throw invalid(issues);
-    await this.ownInbound(sellerId, id);
+    const before = await this.ownInbound(sellerId, id);
     const row = await this.repo.transaction(async (tx) => {
       const locked = (await tx.get('inbound_shipments', id, { forUpdate: true }))!;
       const state = inboundShipmentMachine.next(locked.state as State, 'ship');
       return tx.update('inbound_shipments', id, { state, carrier: body.carrier.trim(), tracking: body.tracking.trim(), ...(body.expectedArrival ? { expected_arrival: body.expectedArrival } : {}) });
     });
+    if (row.expected_arrival !== before.expected_arrival) await this.expect(row, { strict: false });
     void by;
     return this.parts.views.inbound(row);
   }
 
   async cancel(sellerId: string, id: string, body: { reason?: string | null }, by: By): Promise<InboundShipment> {
     await this.ownInbound(sellerId, id);
-    const row = await this.repo.transaction(async (tx) => {
+    const { row, wasSubmitted } = await this.repo.transaction(async (tx) => {
       const locked = (await tx.get('inbound_shipments', id, { forUpdate: true }))!;
       const state = inboundShipmentMachine.next(locked.state as State, 'cancel');
       if (locked.state === 'submitted') {
         const lines = await tx.find('inbound_lines', { inbound_id: id });
         for (const l of lines) await this.core.move(tx, { sellerId, skuEnrollmentId: l.sku_enrollment_id, movement: 'inbound_cancelled', quantity: l.expected, from: 'inbound', to: null, reference: locked.ref, reason: body.reason?.trim() || 'Cancelled by the seller', actor: by.actor });
       }
-      return tx.update('inbound_shipments', id, { state });
+      return { row: await tx.update('inbound_shipments', id, { state }), wasSubmitted: locked.state === 'submitted' };
     });
+    if (wasSubmitted) await this.unexpect(id);
     return this.parts.views.inbound(row);
   }
 
   async respondDiscrepancy(sellerId: string, id: string, body: { response: 'accepted' | 'claimed'; note?: string | null; evidenceIds?: string[] | null }, by: By): Promise<InboundShipment> {
-    const before = await this.ownInbound(sellerId, id);
+    await this.ownInbound(sellerId, id);
     if (body.response === 'claimed' && !body.note?.trim() && !body.evidenceIds?.length) throw invalid([{ path: 'note', message: 'Explain the claim or add evidence' }]);
-    const row = await this.repo.transaction(async (tx) => {
+    const { row, summary } = await this.repo.transaction(async (tx) => {
       const locked = (await tx.get('inbound_shipments', id, { forUpdate: true }))!;
       const disc = await tx.findOne('discrepancies', { inbound_id: id }, { forUpdate: true });
       if (locked.state !== 'received' || !disc || disc.seller_response !== 'pending') {
@@ -228,12 +265,24 @@ export class InboundPart extends Part {
       }
       if (body.response === 'accepted') {
         await tx.update('discrepancies', disc.id, { seller_response: 'accepted', claim_note: body.note?.trim() || null, decision: 'Accepted by the seller', decided_by: actorText(by.actor), decided_at: this.now() });
-        return tx.update('inbound_shipments', id, { state: inboundShipmentMachine.next('received', 'close') });
+        return { row: await tx.update('inbound_shipments', id, { state: inboundShipmentMachine.next('received', 'close') }), summary: disc.summary };
       }
       await tx.update('discrepancies', disc.id, { seller_response: 'claimed', claim_note: body.note?.trim() || null, evidence_media_ids: [...disc.evidence_media_ids, ...(body.evidenceIds ?? [])] });
-      return locked;
+      return { row: locked, summary: disc.summary };
     });
-    void before;
+    if (body.response === 'claimed') {
+      const names = await this.core.sellerNames([sellerId]);
+      await this.core.notifyStaff('warehouse_manager', 'staff.fulfillment.discrepancy_claimed', { inbound: { ref: row.ref }, seller: { name: names.get(sellerId) ?? 'A seller' }, discrepancy: summary, note: body.note?.trim() ?? '' }, { kind: 'queue', id, ref: row.ref, label: 'Decide the claim', screen: 'ops/receiving' }, `fs:inbound:${id}:claimed`);
+      await this.core.raise({
+        queueKey: 'fulfillment.receiving',
+        kind: 'receiving',
+        title: `Receiving claim on ${row.ref}`,
+        summary: `${names.get(sellerId) ?? 'Seller'} claims: ${summary}${body.note?.trim() ? ` · ${body.note.trim()}` : ''}`,
+        subject: { type: 'other', id, ref: row.ref, label: 'Inbound shipment' },
+        sellerId,
+        dedupeKey: `fs_discrepancy:${id}`,
+      });
+    }
     return this.parts.views.inbound(row);
   }
 
@@ -251,20 +300,23 @@ export class InboundPart extends Part {
       for (const l of lines) await this.core.move(tx, { sellerId: locked.seller_id, skuEnrollmentId: l.sku_enrollment_id, movement: 'arrived', quantity: l.expected, from: 'inbound', to: 'receiving', reference: locked.ref, reason, actor: by.actor });
       return tx.update('inbound_shipments', id, { state, arrived_at: this.now() });
     });
-    void before;
+    await this.core.resolveWork(`fs_inbound_overdue:${id}`, 'Arrived at the warehouse', by.actor);
+    await this.core.audit({ action: 'fulfillment-service.inbound.arrive', actionLabel: 'Recorded an inbound shipment arrival', category: 'inventory', target: { type: 'inbound_shipment', id, ref: row.ref, label: `Inbound ${row.ref}`, sellerId: row.seller_id, screen: 'ops/receiving' }, before: { state: before.state }, after: { state: row.state, boxesArrived: body.boxesArrived, boxes: row.boxes }, reason: body.note?.trim() || null }, by);
     return this.parts.views.inbound(row);
   }
 
   /**
-   * Received and damaged units (added to what was counted before). Sellable units become Available seller-owned
-   * stock (in inventory too), damaged units Unsellable; completing with differences opens a discrepancy.
+   * One receiving record: the counts (added to earlier ones), receiving and labelling fees, an inventory service
+   * receipt the Inventory Manager confirms (the units stay in Receiving until then) and fulfillment-service.inbound.received
+   * for warehouse put-away. Completing writes the missing units, cancels the open Incoming and opens a discrepancy
+   * when the counts differ.
    */
   async receive(id: string, body: ReceivingInput, by: By): Promise<InboundShipment> {
     const before = await this.ownInbound(null, id);
     const lines = await this.repo.find('inbound_lines', { inbound_id: id });
     const issues: { path: string; message: string }[] = [];
     const seen = new Set<string>();
-    body.lines.forEach((l, i) => {
+    (body.lines ?? []).forEach((l, i) => {
       if (!lines.some((x) => x.sku_enrollment_id === l.skuEnrollmentId)) issues.push({ path: `lines[${i}].skuEnrollmentId`, message: 'This SKU is not on the shipment' });
       if (seen.has(l.skuEnrollmentId)) issues.push({ path: `lines[${i}].skuEnrollmentId`, message: 'Each SKU appears once' });
       seen.add(l.skuEnrollmentId);
@@ -272,77 +324,183 @@ export class InboundPart extends Part {
       else if (l.damaged > l.received) issues.push({ path: `lines[${i}].damaged`, message: 'Damaged units are part of the received units' });
     });
     if (issues.length) throw invalid(issues);
+    // the transition is checked before inventory hears anything
+    if (before.state !== 'receiving') inboundShipmentMachine.next(before.state as State, 'startReceiving');
+    if (body.complete) inboundShipmentMachine.next('receiving', 'finishReceiving');
     const skus = new Map((await this.repo.find('sku_enrollments', { id: lines.map((l) => l.sku_enrollment_id) })).map((s) => [s.id, s]));
+    const info = await this.parts.views.skuInfo(lines.map((l) => l.sku_enrollment_id));
+    const counted = (body.lines ?? []).filter((l) => l.received > 0);
     const schedule = await this.core.currentSchedule();
-    const key = by.idempotencyKey ?? by.requestId ?? newId();
-    const sellable = new Map<string, number>();
-    let totalReceived = 0;
-    let totalDamaged = 0;
+    const location = await this.core.requireLocation();
+    const receiptId = newId();
+    const seq = (await this.repo.count('inbound_receipts', { inbound_id: id })) + 1;
+    const receiptLines: ReceiptLine[] = counted.map((l) => ({ skuEnrollmentId: l.skuEnrollmentId, stockItemId: skus.get(l.skuEnrollmentId)?.inventory_item_id ?? null, received: l.received, damaged: l.damaged }));
+    const countedAt = this.now();
 
-    const result = await this.repo.transaction(async (tx) => {
+    // inventory first: the receiving record waits in the Inventory Manager's confirmation queue (decision D3)
+    let inventoryReceiptId: string | null = null;
+    if (counted.length) {
+      const names = await this.core.sellerNames([before.seller_id]);
+      const receipt = await this.ctx.use('inventory').submitServiceReceipt({
+        receiptId,
+        receiptRef: `${before.ref}-R${seq}`,
+        inboundId: id,
+        inboundRef: before.ref,
+        sellerId: before.seller_id,
+        sellerName: names.get(before.seller_id) ?? 'Seller',
+        locationId: location.locationId,
+        receivedBy: by.actor,
+        receivedAt: countedAt.toISOString(),
+        lines: receiptLines
+          .filter((l) => l.stockItemId)
+          .map((l) => {
+            const line = lines.find((x) => x.sku_enrollment_id === l.skuEnrollmentId)!;
+            return { stockItemId: l.stockItemId!, expected: Math.max(0, line.expected - line.received), received: l.received, damaged: l.damaged };
+          }),
+      });
+      inventoryReceiptId = receipt.id;
+    }
+
+    const updated = await this.repo.transaction(async (tx) => {
       const locked = (await tx.get('inbound_shipments', id, { forUpdate: true }))!;
       let state = locked.state as State;
-      if (state === 'arrived') state = inboundShipmentMachine.next(state, 'startReceiving');
-      else if (state !== 'receiving') inboundShipmentMachine.next(state, 'startReceiving');
-      await tx.lockSkus(lines.map((l) => l.sku_enrollment_id));
-      const balances = await tx.balances(lines.map((l) => l.sku_enrollment_id));
+      if (state !== 'receiving') state = inboundShipmentMachine.next(state, 'startReceiving');
+      const current = await tx.find('inbound_lines', { inbound_id: id });
       const ref = locked.ref;
-      const mv = { sellerId: locked.seller_id, reference: ref, actor: by.actor };
-      for (const l of body.lines) {
-        if (!l.received) continue;
-        const line = lines.find((x) => x.sku_enrollment_id === l.skuEnrollmentId)!;
+      for (const l of counted) {
+        const line = current.find((x) => x.sku_enrollment_id === l.skuEnrollmentId)!;
         const sku = skus.get(l.skuEnrollmentId)!;
-        const fromReceiving = Math.min(l.received, qty(balances, sku.id, 'receiving'));
-        const damagedFromReceiving = Math.min(l.damaged, fromReceiving);
-        const goodFromReceiving = fromReceiving - damagedFromReceiving;
-        const damagedExtra = l.damaged - damagedFromReceiving;
-        const goodExtra = l.received - fromReceiving - damagedExtra;
-        await this.core.move(tx, { ...mv, skuEnrollmentId: sku.id, movement: 'received', quantity: goodFromReceiving, from: 'receiving', to: 'available' });
-        await this.core.move(tx, { ...mv, skuEnrollmentId: sku.id, movement: 'received', quantity: goodExtra, from: null, to: 'available', reason: 'More units than expected' });
-        await this.core.move(tx, { ...mv, skuEnrollmentId: sku.id, movement: 'received_damaged', quantity: damagedFromReceiving, from: 'receiving', to: 'unsellable', reason: body.note ?? 'Damaged on arrival' });
-        await this.core.move(tx, { ...mv, skuEnrollmentId: sku.id, movement: 'received_damaged', quantity: damagedExtra, from: null, to: 'unsellable', reason: body.note ?? 'Damaged on arrival' });
-        const bal = balances.get(sku.id) ?? {};
-        bal.receiving = (bal.receiving ?? 0) - fromReceiving;
-        balances.set(sku.id, bal);
-        await tx.updateWhere('inbound_lines', { inbound_id: id, sku_enrollment_id: sku.id }, { received: line.received + l.received, damaged: line.damaged + l.damaged });
         line.received += l.received;
         line.damaged += l.damaged;
-        sellable.set(sku.id, (sellable.get(sku.id) ?? 0) + l.received - l.damaged);
-        totalReceived += l.received;
-        totalDamaged += l.damaged;
+        await tx.updateWhere('inbound_lines', { inbound_id: id, sku_enrollment_id: sku.id }, { received: line.received, damaged: line.damaged });
         const fee = { sellerId: locked.seller_id, sizeTier: sku.size_tier, units: l.received, reference: ref };
-        await this.core.accrue(tx, { ...fee, rateType: 'receiving_per_unit', key: `receiving:${id}:${sku.id}:${key}` }, schedule.rates);
-        if (sku.label_required) await this.core.accrue(tx, { ...fee, rateType: 'label_per_unit', key: `labelling:${id}:${sku.id}:${key}` }, schedule.rates);
+        await this.core.accrue(tx, { ...fee, rateType: 'receiving_per_unit', key: `receiving:${id}:${sku.id}:${receiptId}` }, schedule.rates);
+        if (sku.label_required) await this.core.accrue(tx, { ...fee, rateType: 'label_per_unit', key: `labelling:${id}:${sku.id}:${receiptId}` }, schedule.rates);
+      }
+      if (counted.length) {
+        await tx.insert('inbound_receipts', { id: receiptId, inbound_id: id, seq, inventory_receipt_id: inventoryReceiptId, lines: receiptLines, state: 'submitted', counted_by: actorText(by.actor)!, counted_at: countedAt, confirmed_by: null, confirmed_at: null });
       }
       const patch: Partial<InboundRec> = { state };
       if (body.complete) {
         patch.state = state = inboundShipmentMachine.next(state, 'finishReceiving');
         patch.received_at = this.now();
-        // units still expected but not counted are missing
-        for (const l of lines) await this.core.move(tx, { ...mv, skuEnrollmentId: l.sku_enrollment_id, movement: 'missing', quantity: qty(balances, l.sku_enrollment_id, 'receiving'), from: 'receiving', to: null, reason: 'Not in the shipment' });
-        const summary = discrepancySummary(lines, skus);
+        // units expected but never counted are missing; counted units wait in Receiving for the confirmation
+        await tx.lockSkus(current.map((l) => l.sku_enrollment_id));
+        const balances = await tx.balances(current.map((l) => l.sku_enrollment_id));
+        for (const l of current) {
+          const missing = Math.min(Math.max(0, l.expected - l.received), qty(balances, l.sku_enrollment_id, 'receiving'));
+          await this.core.move(tx, { sellerId: locked.seller_id, skuEnrollmentId: l.sku_enrollment_id, movement: 'missing', quantity: missing, from: 'receiving', to: null, reference: ref, reason: 'Not in the shipment', actor: by.actor });
+        }
+        const summary = discrepancySummary(current, skus);
         if (summary) {
           await tx.insertIfNew('discrepancies', { id: newId(), inbound_id: id, summary, evidence_media_ids: body.evidenceIds ?? [], seller_response: 'pending', claim_note: null, decision: null, decided_by: null, decided_at: null });
         } else {
           patch.state = state = inboundShipmentMachine.next(state, 'close');
         }
       }
-      const updated = await tx.update('inbound_shipments', id, patch);
-      const received = [...sellable].filter(([, n]) => n > 0).map(([skuId]) => skuId);
-      await this.parts.skus.activateWithStock(tx, received);
-      const activated = received.length ? await this.parts.enrollment.activateIfApproved(tx, locked.seller_id) : null;
-      return { updated, activated };
+      return tx.update('inbound_shipments', id, patch);
     });
 
-    // inventory: the sellable units join the seller's stock item (after the commit)
-    for (const [skuId, n] of sellable) {
-      if (n <= 0) continue;
-      const sku = skus.get(skuId)!;
-      await this.core.adjustInventory(before.seller_id, sku.inventory_item_id, n, id, by.actor).catch((err) => this.ctx.log.warn({ err, inboundId: id, skuId }, 'fulfillment-service: received units not added to inventory'));
+    const received = counted.reduce((n, l) => n + l.received, 0);
+    const damaged = counted.reduce((n, l) => n + l.damaged, 0);
+    if (counted.length) {
+      const eventLines: ReceivedEventLine[] = receiptLines
+        .filter((l) => l.stockItemId)
+        .map((l) => ({ skuEnrollmentId: l.skuEnrollmentId, stockItemId: l.stockItemId!, sku: skus.get(l.skuEnrollmentId)!.sku, label: info.get(l.skuEnrollmentId)?.title ?? skus.get(l.skuEnrollmentId)!.sku, received: l.received, damaged: l.damaged }));
+      this.core.publish('fulfillment-service.inbound.received', { inboundId: id, ref: before.ref, receiptId, sellerId: before.seller_id, locationId: location.locationId, received, damaged, complete: body.complete, lines: eventLines }, by);
     }
-    if (result.activated) this.parts.enrollment.activated(result.activated, by);
-    this.core.publish('fulfillment-service.inbound.received', { inboundId: id, sellerId: before.seller_id, received: totalReceived, damaged: totalDamaged, complete: body.complete }, by);
-    return this.parts.views.inbound(result.updated, { labels: true });
+    if (body.complete) {
+      await this.unexpect(id);
+      const all = await this.repo.find('inbound_lines', { inbound_id: id });
+      const disc = await this.repo.findOne('discrepancies', { inbound_id: id });
+      await this.core.notifySeller(
+        before.seller_id,
+        'seller.fulfillment.inbound_received',
+        { inbound: { ref: before.ref }, received: all.reduce((n, l) => n + l.received, 0), damaged: all.reduce((n, l) => n + l.damaged, 0), discrepancy: disc?.summary ?? 'none' },
+        { kind: 'queue', id, ref: before.ref, label: disc ? 'Review the discrepancy' : 'View shipment', screen: 'seller/inventory' },
+        `fs:inbound:${id}:received`,
+      );
+    }
+    await this.core.audit(
+      {
+        action: 'fulfillment-service.inbound.receive',
+        actionLabel: body.complete ? 'Completed receiving an inbound shipment' : 'Recorded received units',
+        category: 'inventory',
+        target: { type: 'inbound_shipment', id, ref: before.ref, label: `Inbound ${before.ref}`, sellerId: before.seller_id, screen: 'ops/receiving' },
+        before: { state: before.state },
+        after: { state: updated.state, receiptId: counted.length ? receiptId : null, received, damaged, complete: body.complete },
+        reason: body.note?.trim() || null,
+        evidence: body.evidenceIds ?? null,
+      },
+      by,
+    );
+    return this.parts.views.inbound(updated, { labels: true });
+  }
+
+  /**
+   * inventory.receipt.confirmed (service_inbound): per confirmed line the ledger moves Receiving → Available
+   * (sellable) and → Unsellable (damaged), extra units from outside, units the Inventory Manager did not accept out;
+   * the receipt is confirmed; the SKU (first time: setServiceLocation, then offer.service_changed) and the enrollment
+   * activate; the seller hears the stock is on sale. Claimed once per receipt.
+   */
+  async onReceiptConfirmed(e: EventPayload<'inventory.receipt.confirmed'>): Promise<void> {
+    if (e.source?.kind !== 'service_inbound') return;
+    const receipt = (isUuid(e.receiptId) ? await this.repo.get('inbound_receipts', e.receiptId) : undefined) ?? (isUuid(e.inboundId) ? await this.repo.findOne('inbound_receipts', { inventory_receipt_id: e.inboundId }) : undefined);
+    if (!receipt) {
+      this.ctx.log.warn({ receiptId: e.receiptId, inboundId: e.source.id }, 'fulfillment-service: confirmed service receipt is unknown');
+      return;
+    }
+    if (receipt.state === 'confirmed') return;
+    const inbound = await this.repo.get('inbound_shipments', receipt.inbound_id);
+    if (!inbound) return;
+    const confirmed = new Map(e.lines.map((l) => [l.stockItemId, l]));
+    const by = { actor: e.confirmedBy ?? SYSTEM };
+    const result = await this.repo.transaction(async (tx) => {
+      if (!(await tx.claim(`receipt-confirmed:${receipt.id}`))) return null;
+      const locked = (await tx.get('inbound_receipts', receipt.id, { forUpdate: true }))!;
+      if (locked.state === 'confirmed') return null;
+      const skuIds = locked.lines.map((l) => l.skuEnrollmentId);
+      await tx.lockSkus(skuIds);
+      const balances = await tx.balances(skuIds);
+      const mv = { sellerId: inbound.seller_id, reference: inbound.ref, actor: by.actor };
+      const sellableSkus: string[] = [];
+      let units = 0;
+      for (const l of locked.lines) {
+        const c = l.stockItemId ? confirmed.get(l.stockItemId) : undefined;
+        const received = c?.received ?? l.received;
+        const damaged = c ? c.damaged : l.damaged;
+        const sellable = c ? c.sellable : Math.max(0, l.received - l.damaged);
+        const rejected = Math.max(0, received - sellable - damaged);
+        let pool = Math.min(received, qty(balances, l.skuEnrollmentId, 'receiving'));
+        const take = (n: number) => {
+          const t = Math.min(n, pool);
+          pool -= t;
+          return t;
+        };
+        const goodIn = take(sellable);
+        const damagedIn = take(damaged);
+        const rejectedIn = take(rejected);
+        const used = goodIn + damagedIn + rejectedIn;
+        await this.core.move(tx, { ...mv, skuEnrollmentId: l.skuEnrollmentId, movement: 'received', quantity: goodIn, from: 'receiving', to: 'available' });
+        await this.core.move(tx, { ...mv, skuEnrollmentId: l.skuEnrollmentId, movement: 'received', quantity: sellable - goodIn, from: null, to: 'available', reason: 'More units than expected' });
+        await this.core.move(tx, { ...mv, skuEnrollmentId: l.skuEnrollmentId, movement: 'received_damaged', quantity: damagedIn, from: 'receiving', to: 'unsellable', reason: 'Damaged on arrival' });
+        await this.core.move(tx, { ...mv, skuEnrollmentId: l.skuEnrollmentId, movement: 'received_damaged', quantity: damaged - damagedIn, from: null, to: 'unsellable', reason: 'Damaged on arrival' });
+        await this.core.move(tx, { ...mv, skuEnrollmentId: l.skuEnrollmentId, movement: 'not_accepted', quantity: rejectedIn, from: 'receiving', to: null, reason: 'Not accepted when the receipt was confirmed' });
+        const bal = balances.get(l.skuEnrollmentId) ?? {};
+        bal.receiving = (bal.receiving ?? 0) - used;
+        balances.set(l.skuEnrollmentId, bal);
+        if (sellable > 0) sellableSkus.push(l.skuEnrollmentId);
+        units += sellable;
+      }
+      await tx.update('inbound_receipts', locked.id, { state: 'confirmed', confirmed_by: actorText(by.actor), confirmed_at: this.now(), inventory_receipt_id: locked.inventory_receipt_id ?? (isUuid(e.inboundId) ? e.inboundId : null) });
+      const activated = await this.parts.skus.activateWithStock(tx, sellableSkus);
+      const enrollment = sellableSkus.length ? await this.parts.enrollment.activateIfApproved(tx, inbound.seller_id) : null;
+      return { activated, enrollment, units };
+    });
+    if (!result) return;
+    await this.parts.skus.activated(result.activated, by);
+    if (result.enrollment) await this.parts.enrollment.activated(result.enrollment, by);
+    await this.core.notifySeller(inbound.seller_id, 'seller.fulfillment.stock_available', { inbound: { ref: inbound.ref }, units: result.units }, { kind: 'queue', id: inbound.id, ref: inbound.ref, label: 'View stock', screen: 'seller/inventory' }, `fs:receipt:${receipt.id}:confirmed`);
   }
 
   /* ---------------------------------------------------------------- staff: discrepancy decisions */
@@ -373,7 +531,7 @@ export class InboundPart extends Part {
             action: REIMBURSE_ACTION,
             target: { type: DISCREPANCY_TARGET, id, ref: row.ref, label: `Inbound ${row.ref} discrepancy`, sellerId: row.seller_id, screen: 'ops/receiving' },
             amount: body.amount,
-            summary: `Reimburse the seller ${(body.amount.amount / 100).toFixed(2)} ${body.amount.currency} for inbound ${row.ref}`,
+            summary: `Reimburse the seller ${fmt(body.amount)} for inbound ${row.ref}`,
             details: { inboundId: id, ref: row.ref, missing, discrepancy: disc.summary },
             reason,
             requestedBy: principal,
@@ -382,62 +540,79 @@ export class InboundPart extends Part {
         }
       }
     }
-    return this.parts.views.inbound(await this.applyDecision(id, body.decision, { units: body.units ?? null, amount: body.amount ?? null, reason }, by));
+    // found units: inventory first (the item sells from the service location, then the units are added there)
+    const found = new Map<string, number>();
+    if (body.decision === 'adjust_stock') {
+      let left = body.units!;
+      for (const l of lines) {
+        const n = Math.min(left, Math.max(0, l.expected - l.received));
+        if (n > 0) found.set(l.sku_enrollment_id, n);
+        left -= n;
+        if (left <= 0) break;
+      }
+      const skus = new Map((await this.repo.find('sku_enrollments', { id: [...found.keys()] })).map((s) => [s.id, s]));
+      const location = await this.core.requireLocation();
+      for (const [skuId, n] of found) {
+        const sku = skus.get(skuId)!;
+        if (sku.state !== 'active') await this.core.setServiceLocation(sku, location.locationId, by.actor, { strict: true });
+        await this.core.moveStock({ key: `fs:found:${id}:${skuId}`, sku, from: null, to: 'available', quantity: n, reasonCode: 'service_found', ref: { kind: 'service_inbound', id, label: `Found units ${row.ref}` }, actor: by.actor }, { strict: true, location });
+      }
+    }
+    const after = await this.applyDecision(id, body.decision, { found, amount: body.amount ?? null, reason }, by);
+    await this.core.audit(
+      {
+        action: 'fulfillment-service.inbound.discrepancy_decide',
+        actionLabel: 'Decided an inbound discrepancy claim',
+        category: body.decision === 'reimburse' ? 'financial' : 'inventory',
+        target: { type: 'inbound_shipment', id, ref: row.ref, label: `Inbound ${row.ref} discrepancy`, sellerId: row.seller_id, screen: 'ops/receiving' },
+        before: { discrepancy: disc.summary, claim: disc.claim_note },
+        after: { decision: body.decision, units: body.units ?? null, amount: body.amount ?? null },
+        reason,
+      },
+      by,
+    );
+    return this.parts.views.inbound(after);
   }
 
-  private async applyDecision(id: string, decision: 'adjust_stock' | 'reimburse' | 'reject', o: { units: number | null; amount: common.Money | null; reason: string; claim?: string }, by: By): Promise<InboundRec> {
-    const found = new Map<string, number>();
+  private async applyDecision(id: string, decision: 'adjust_stock' | 'reimburse' | 'reject', o: { found?: Map<string, number>; amount: common.Money | null; reason: string; claim?: string }, by: By): Promise<InboundRec> {
     const result = await this.repo.transaction(async (tx) => {
       if (o.claim && !(await tx.claim(o.claim))) return null; // the decision was already applied
       const locked = (await tx.get('inbound_shipments', id, { forUpdate: true }))!;
       const disc = await tx.findOne('discrepancies', { inbound_id: id }, { forUpdate: true });
       if (locked.state !== 'received' || !disc || disc.decision) return null;
       let text = '';
+      let activated: SkuRec[] = [];
+      let enrollment: EnrollmentRec | null = null;
       if (decision === 'adjust_stock') {
-        let left = o.units ?? 0;
         const lines = await tx.find('inbound_lines', { inbound_id: id });
-        for (const l of lines) {
-          if (left <= 0) break;
-          const n = Math.min(left, Math.max(0, l.expected - l.received));
-          if (!n) continue;
-          await this.core.move(tx, { sellerId: locked.seller_id, skuEnrollmentId: l.sku_enrollment_id, movement: 'adjusted', quantity: n, from: null, to: 'available', reference: locked.ref, reason: `Found units: ${o.reason}`, actor: by.actor });
-          await tx.updateWhere('inbound_lines', { inbound_id: id, sku_enrollment_id: l.sku_enrollment_id }, { received: l.received + n });
-          found.set(l.sku_enrollment_id, n);
-          left -= n;
+        let units = 0;
+        for (const [skuId, n] of o.found ?? []) {
+          const l = lines.find((x) => x.sku_enrollment_id === skuId);
+          if (!l) continue;
+          await this.core.move(tx, { sellerId: locked.seller_id, skuEnrollmentId: skuId, movement: 'adjusted', quantity: n, from: null, to: 'available', reference: locked.ref, reason: `Found units: ${o.reason}`, actor: by.actor });
+          await tx.updateWhere('inbound_lines', { inbound_id: id, sku_enrollment_id: skuId }, { received: l.received + n });
+          units += n;
         }
-        await this.parts.skus.activateWithStock(tx, [...found.keys()]);
-        text = `Stock adjusted: ${plural(o.units ?? 0, 'unit')} added. ${o.reason}`;
+        activated = await this.parts.skus.activateWithStock(tx, [...(o.found?.keys() ?? [])]);
+        if (units) enrollment = await this.parts.enrollment.activateIfApproved(tx, locked.seller_id);
+        text = `Stock adjusted: ${plural(units, 'unit')} added. ${o.reason}`;
       } else if (decision === 'reimburse') {
         const amount = o.amount!;
-        await tx.insertIfNew('fee_charges', {
-          id: newId(),
-          seller_id: locked.seller_id,
-          type: REIMBURSEMENT,
-          period: this.core.month(),
-          reference: locked.ref,
-          units: '1',
-          rate: -amount.amount,
-          amount: -amount.amount,
-          currency: amount.currency,
-          state: 'accrued',
-          posted_at: null,
-          ledger_entry_id: null,
-          reason: o.reason,
-          idempotency_key: `reimbursement:${id}`,
-        });
-        text = `Reimbursed ${(amount.amount / 100).toFixed(2)} ${amount.currency}. ${o.reason}`;
+        await this.core.accrueReimbursement(tx, { sellerId: locked.seller_id, amount, reference: locked.ref, reason: o.reason, key: `reimbursement:${id}` });
+        text = `Reimbursed ${fmt(amount)}. ${o.reason}`;
       } else {
         text = `Claim rejected. ${o.reason}`;
       }
       await tx.update('discrepancies', disc.id, { decision: text, decided_by: actorText(by.actor), decided_at: this.now() });
-      return tx.update('inbound_shipments', id, { state: inboundShipmentMachine.next('received', 'close') });
+      const row = await tx.update('inbound_shipments', id, { state: inboundShipmentMachine.next('received', 'close') });
+      return { row, text, activated, enrollment };
     });
-    const row = result ?? (await this.repo.get('inbound_shipments', id))!;
-    if (result) {
-      const skus = new Map((await this.repo.find('sku_enrollments', { id: [...found.keys()] })).map((s) => [s.id, s]));
-      for (const [skuId, n] of found) await this.core.adjustInventory(row.seller_id, skus.get(skuId)?.inventory_item_id ?? null, n, id, by.actor).catch((err) => this.ctx.log.warn({ err, inboundId: id }, 'fulfillment-service: found units not added to inventory'));
-    }
-    return row;
+    if (!result) return (await this.repo.get('inbound_shipments', id))!;
+    await this.parts.skus.activated(result.activated, by);
+    if (result.enrollment) await this.parts.enrollment.activated(result.enrollment, by);
+    await this.core.resolveWork(`fs_discrepancy:${id}`, result.text, by.actor);
+    await this.core.notifySeller(result.row.seller_id, 'seller.fulfillment.discrepancy_decided', { inbound: { ref: result.row.ref }, decision: result.text }, { kind: 'queue', id, ref: result.row.ref, label: 'View shipment', screen: 'seller/inventory' }, `fs:discrepancy:${id}`);
+    return result.row;
   }
 
   /** access.approval.decided for fulfillment-service.reimbursements.approve (claimed once per request; posted by the post-fees job) */
@@ -451,16 +626,29 @@ export class InboundPart extends Part {
     } catch {
       /* keep the decision note */
     }
-    await this.applyDecision(row.id, 'reimburse', { units: null, amount: e.amount, reason: reason || 'Approved reimbursement', claim: `approval-decided:${e.requestId}` }, { actor: e.decidedBy ?? SYSTEM });
+    await this.applyDecision(row.id, 'reimburse', { amount: e.amount, reason: reason || 'Approved reimbursement', claim: `approval-decided:${e.requestId}` }, { actor: e.decidedBy ?? SYSTEM });
   }
 
   /* ---------------------------------------------------------------- job */
 
-  /** Shipments past their expected arrival (logged for the receiving queue); unanswered discrepancies close */
+  /** Shipments past their expected arrival (fulfillment.receiving work items); unanswered discrepancies close */
   async overdue(): Promise<{ overdue: number; closed: number }> {
     const today = this.core.today();
     const late = await this.repo.find('inbound_shipments', { state: ['submitted', 'in_transit'], expected_arrival: { op: '<', value: today } }, { limit: 1000 });
-    if (late.length) this.ctx.log.info({ count: late.length, refs: late.slice(0, 20).map((r) => r.ref) }, 'fulfillment-service: inbound shipments past their expected arrival');
+    if (late.length) {
+      const names = await this.core.sellerNames(late.map((r) => r.seller_id));
+      for (const r of late) {
+        await this.core.raise({
+          queueKey: 'fulfillment.receiving',
+          kind: 'receiving',
+          title: `Inbound ${r.ref} is past its expected arrival`,
+          summary: `${names.get(r.seller_id) ?? 'Seller'} · expected ${r.expected_arrival}${r.carrier ? ` · ${r.carrier} ${r.tracking ?? ''}`.trimEnd() : ''}`,
+          subject: { type: 'other', id: r.id, ref: r.ref, label: 'Inbound shipment' },
+          sellerId: r.seller_id,
+          dedupeKey: `fs_inbound_overdue:${r.id}`,
+        });
+      }
+    }
     const days = await this.core.setting('discrepancyResponseDays', 14);
     const cutoff = this.core.dayStart(addDays(today, -days));
     const waiting = await this.repo.find('inbound_shipments', { state: 'received', received_at: { op: '<', value: cutoff } }, { limit: 500 });
@@ -480,7 +668,7 @@ export class InboundPart extends Part {
   }
 }
 
-/** '2 units short, 1 damaged, 3 extra' over the lines, or null when everything matched */
+/** '2 short, 1 damaged, 3 extra' over the lines, or null when everything matched */
 function discrepancySummary(lines: readonly InboundLineRec[], skus: Map<string, SkuRec>): string | null {
   const parts: string[] = [];
   for (const l of lines) {

@@ -8,7 +8,7 @@ import { newId } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { Fulfillment, FulfillmentRow, PickConfirm, ShortageReport, DamageReport, Wave } from '../../../spec/warehouse.js';
-import { actorText, damageHold, deliveryChoiceLabel, itemMatches, NIL_UUID, parseActor, shortageHold, WAVE_DONE_STATUSES } from '../domain/rules.js';
+import { actorText, damageHold, deliveryChoiceLabel, itemMatches, NIL_UUID, parseActor, shortageHold, warehouseGroup, WAVE_DONE_STATUSES } from '../domain/rules.js';
 import { waveMachine, warehouseFulfillmentMachine } from '../domain/state-machines.js';
 import type { DiscrepancyNote, FulfillmentRec, LineRec, WarehouseRepository, WaveRec, Where } from '../ports.js';
 import type { Bins } from './bins.js';
@@ -57,8 +57,9 @@ export class Fulfillments {
     return this.views.fulfillment(f, parts, { otherSellers });
   }
 
-  async list(q: { status?: Status; waveId?: string; shipByBefore?: string; q?: string }, page: PageRequest): Promise<common.Page<FulfillmentRow>> {
+  async list(q: { status?: Status; fulfilledBy?: Fulfillment['fulfilledBy']; waveId?: string; shipByBefore?: string; q?: string }, page: PageRequest): Promise<common.Page<FulfillmentRow>> {
     const where: Where<FulfillmentRec> = { status: q.status ? q.status : DEFAULT_LIST };
+    if (q.fulfilledBy) where.fulfilled_by = q.fulfilledBy;
     if (q.waveId) where.wave_id = q.waveId;
     if (q.shipByBefore) where.ship_by = { op: '<=', value: new Date(q.shipByBefore) };
     const result = await this.repo.page('fulfillments', where, page, { order: { column: 'ship_by', direction: 'asc' }, ...(q.q?.trim() ? { search: { columns: ['order_ref'], term: q.q } } : {}) });
@@ -86,7 +87,7 @@ export class Fulfillments {
   async move(tx: WarehouseRepository, f: FulfillmentRec, event: FulfillmentEvent, batch: Batch, o: { reason?: string | null; patch?: Partial<FulfillmentRec> } = {}): Promise<FulfillmentRec> {
     const to = warehouseFulfillmentMachine.next(f.status as never, event);
     const after = await tx.update('fulfillments', f.id, { ...o.patch, status: to, updated_at: this.core.now() });
-    batch.push('warehouse.fulfillment.status_changed', { fulfillmentId: f.id, orderId: f.order_id, sellerGroupId: f.seller_group_id, from: f.status, to, reason: o.reason ?? null });
+    batch.push('warehouse.fulfillment.status_changed', { fulfillmentId: f.id, orderId: f.order_id, sellerGroupId: f.seller_group_id, fulfilledBy: f.fulfilled_by, sellerId: f.seller_id, from: f.status, to, reason: o.reason ?? null });
     return after;
   }
 
@@ -114,11 +115,15 @@ export class Fulfillments {
 
   /* ---------------------------------------------------------------- creation */
 
-  /** orders.order.accepted: one fulfillment per Official Store seller group, lines with stock items and primary bins */
+  /**
+   * orders.order.accepted: one fulfillment per Official Store seller group and per Fulfilled by Marketly group
+   * (seller-owned stock at the service location, seller of record kept), lines with stock items and primary bins
+   */
   async onOrderAccepted(e: EventPayload<'orders.order.accepted'>): Promise<void> {
     const orders = this.core.ctx.use('orders');
     for (const g of e.groups) {
-      if (g.fulfilledBy !== 'official_warehouse' || g.ownerType !== 'official') continue;
+      const fulfilledBy = warehouseGroup(g);
+      if (!fulfilledBy) continue;
       if ((await this.repo.count('fulfillments', { seller_group_id: g.groupId })) > 0) continue;
       let task;
       try {
@@ -133,7 +138,10 @@ export class Fulfillments {
       const info = await this.core.stockInfo(stockIds);
       const primaries = await this.repo.find('bin_assignments', { stock_item_id: stockIds, primary_bin: true });
       const bins = primaries.length ? await this.repo.find('bins', { id: primaries.map((a) => a.bin_id), active: true }) : [];
-      const locationId = bins[0]?.location_id ?? (await this.core.defaultLocation()) ?? NIL_UUID;
+      const service = fulfilledBy === 'marketly_service';
+      // Fulfilled by Marketly: the service location (fulfillment-service), else the default company location
+      const locationId = (service ? await this.core.serviceLocationId() : bins[0]?.location_id) ?? (await this.core.defaultLocation()) ?? NIL_UUID;
+      const sellerId = service ? (g.sellerId ?? task.seller.id ?? null) : null;
       const binOf = (stockItemId: string) => {
         const a = primaries.find((x) => x.stock_item_id === stockItemId);
         return (a && bins.find((b) => b.id === a.bin_id && b.location_id === locationId)?.code) ?? null;
@@ -147,6 +155,9 @@ export class Fulfillments {
           order_id: task.orderId,
           order_ref: task.orderRef,
           seller_group_id: g.groupId,
+          fulfilled_by: fulfilledBy,
+          seller_id: sellerId,
+          seller_name: service ? task.seller.name : null,
           location_id: locationId,
           status: warehouseFulfillmentMachine.initial,
           ship_by: shipBy,
@@ -181,7 +192,7 @@ export class Fulfillments {
         );
         return true;
       });
-      if (created) this.core.publish('warehouse.fulfillment.created', { fulfillmentId: id, orderId: task.orderId, sellerGroupId: g.groupId, shipBy: shipBy.toISOString() });
+      if (created) this.core.publish('warehouse.fulfillment.created', { fulfillmentId: id, orderId: task.orderId, sellerGroupId: g.groupId, fulfilledBy, sellerId, shipBy: shipBy.toISOString() });
     }
   }
 
@@ -474,7 +485,7 @@ export class Fulfillments {
 
   /** orders.item.cancelled: the line goes (picked units back to the bin); packed or labelled boxes are flagged to reopen */
   async onItemCancelled(e: EventPayload<'orders.item.cancelled'>): Promise<void> {
-    if (e.ownerType !== 'official') return;
+    // Official Store and Fulfilled by Marketly groups have a fulfillment; other groups have none (the missing row is the filter)
     const f = (await this.repo.find('fulfillments', { seller_group_id: e.groupId }))[0];
     if (!f) return;
     const actor: common.Actor = { kind: 'system', id: null, name: 'Orders' };
@@ -528,7 +539,7 @@ export class Fulfillments {
    * Idempotent per newItemId.
    */
   async onItemSplit(e: EventPayload<'orders.item.split'>): Promise<void> {
-    // only Official Store groups have a fulfillment
+    // only Official Store and Fulfilled by Marketly groups have a fulfillment
     const f = (await this.repo.find('fulfillments', { seller_group_id: e.groupId }))[0];
     if (!f) return;
     await this.repo.transaction(async (tx) => {
@@ -585,7 +596,7 @@ export class Fulfillments {
 
   /** shipping.dispatch.overdue: the order goes to the top of the pick list (ship-by is the passed deadline) */
   async onDispatchOverdue(e: EventPayload<'shipping.dispatch.overdue'>): Promise<void> {
-    if (e.ownerType !== 'official') return;
+    // found by seller group: groups sellers ship themselves have no fulfillment
     const f = (await this.repo.find('fulfillments', { seller_group_id: e.groupId }))[0];
     if (!f || ['dispatched', 'cancelled'].includes(f.status)) return;
     const due = new Date(e.dueAt);

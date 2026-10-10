@@ -85,7 +85,7 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | POST | `/api/admin/returns/requests/{id}/assign` | Set the owner of a return _(audited)_ | staff<br>`returns.requests.manage` | `{ ownerId: uuid, note: text? }` → `ReturnCase` |
 | POST | `/api/admin/returns/requests/{id}/approve-without-return` | Propose refund-without-return (controlled exception) _(idempotent, audited)_ | staff<br>`returns.exceptions.propose` | `ExceptionInput` → `ReturnCase` |
 | POST | `/api/admin/returns/requests/{id}/receive` | Record receipt at a seller's address for a platform-handled return _(audited)_ | staff<br>`returns.inspections.record` | `{ receivedAt: datetime?, trackingNumber: string?, note: text? }` → `ReturnCase` |
-| GET | `/api/admin/returns/inspections` | Official Store returns received, arriving and decided | staff<br>`returns.inspections.record` | Page<InspectionQueueRow> |
+| GET | `/api/admin/returns/inspections` | Official Store and Fulfilled by Marketly returns received, arriving and decided | staff<br>`returns.inspections.record` | Page<InspectionQueueRow> |
 | GET | `/api/admin/returns/inspections/stats` | Inspection queue KPIs | staff<br>`returns.inspections.record` | `InspectionQueueStats` |
 | POST | `/api/admin/returns/requests/{id}/start-inspection` | Start (or continue) inspecting a received return: sets the inspector and status Inspecting _(audited)_ | staff<br>`returns.inspections.record` | `{ inspectorId: uuid? }` → `InspectionQueueRow` |
 | PUT | `/api/admin/returns/requests/{id}/inspection-draft` | Save an unsent inspection (checks ticked so far, notes, photos) | staff<br>`returns.inspections.record` | `{ inspection: json }` → `InspectionDraft` |
@@ -796,6 +796,7 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | customer | `{"displayName":"string","city":"string?","ordersWithSeller":"int"}` |
 | payment | `{"itemPaid":"Money","shippingPaid":"Money","discountShare":"Money","maxRefundable":"Money","refundedSoFar":"Money","methodLabel":"string"}` |
 | policyApplied | `EffectiveTerms` |
+| fulfilledBy | `enum(official_warehouse|seller|marketly_service)` From the order group. marketly_service: Marketly handles the return (platform handling, Marketly returns dock); the seller sees it read-only and funds the refund |
 | shippingPaidBy | `enum(seller|customer|platform)` |
 | deadlines | `{"respondBy":"Deadline?","inspectBy":"Deadline?","refundBy":"Deadline?","dropOffBy":"Deadline?"}` |
 | inspection | `Inspection?` |
@@ -1103,6 +1104,7 @@ Indexes: `(seller_id, effective_from desc)`
 | guest_session_id | text? |
 | owner_type | text (official|seller) |
 | seller_id | uuid? |
+| fulfilled_by | text (official_warehouse|seller|marketly_service) (the order group's, copied at request) |
 | status | text |
 | reason | text |
 | details | text |
@@ -1343,14 +1345,14 @@ Indexes: `(return_id, at)`
 
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
-| `returns.return.requested` | A customer submits a return (one event per seller return) | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, ownerType: enum(official|seller), sellerId: uuid?, orderItemIds: uuid[], reason: string, responseDueAt: datetime }` | notifications, orders, reports, sellers |
+| `returns.return.requested` | A customer submits a return (one event per seller return) | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, ownerType: enum(official|seller), sellerId: uuid?, fulfilledBy: enum(official_warehouse|seller|marketly_service), orderItemIds: uuid[], reason: string, responseDueAt: datetime }` | notifications, orders, reports, sellers |
 | `returns.return.info_requested` | Seller or staff asks the customer a question | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, customerId: uuid?, contactEmail: email?, replyDueAt: datetime }` | notifications |
-| `returns.return.approved` | Seller, Official Store or platform approves (with or without return) | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, items: ReturnItemQuantity[], withoutReturn: bool, platformDecision: bool, dropOffBy: datetime?, trackingNumber: string? }` | notifications, warehouse |
+| `returns.return.approved` | Seller, Official Store or platform approves (with or without return) | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, fulfilledBy: enum(official_warehouse|seller|marketly_service), items: ReturnItemQuantity[], withoutReturn: bool, platformDecision: bool, dropOffBy: datetime?, trackingNumber: string? }` | notifications, warehouse |
 | `returns.return.rejected` | A return is rejected with an explanation | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, reasonCode: string, platformDecision: bool }` | notifications, orders |
 | `returns.return.escalated` | Customer asks Marketly to step in, a seller misses a deadline, or staff take over | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, ownerType: enum(official|seller), sellerId: uuid?, reason: string, by: Actor }` | notifications, support, workqueues |
 | `returns.return.shipped` | Return parcel dropped off (first carrier scan or customer tracking) | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, trackingNumber: string? }` | - |
-| `returns.return.received` | Return received at the warehouse or seller address | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, items: ReturnedItem[], receivedAt: datetime }` | fulfillment-service, inventory, notifications, orders |
-| `returns.return.inspected` | Inspection recorded | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, conditionOutcome: string, proposedStockOutcome: string, orderItemId: uuid, variantId: uuid, stockItemId: uuid?, quantity: int }` | inventory, notifications, reports |
+| `returns.return.received` | Return received at the warehouse or seller address | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, fulfilledBy: enum(official_warehouse|seller|marketly_service), items: ReturnedItem[], receivedAt: datetime }` | fulfillment-service, inventory, notifications, orders |
+| `returns.return.inspected` | Inspection recorded | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, fulfilledBy: enum(official_warehouse|seller|marketly_service), conditionOutcome: string, proposedStockOutcome: string, orderItemId: uuid, variantId: uuid, stockItemId: uuid?, quantity: int }` | fulfillment-service, inventory, notifications, reports |
 | `returns.return.completed` | The remedy finished (refund sent, replacement shipped, credit issued) | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, outcome: enum(refunded|partly_refunded|replaced|exchanged|credited) }` | - |
 | `returns.return.cancelled` | Customer withdraws, information or drop-off deadline expires | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, by: Actor, reason: string? }` | orders |
 | `returns.label.created` | A prepaid return label is issued; finance charges the payer | `{ returnId: uuid, ref: string, orderId: uuid, orderRef: string, customerId: uuid?, contactEmail: email?, ownerType: enum(official|seller), sellerId: uuid?, labelId: uuid, cost: Money, paidBy: enum(seller|customer|platform) }` | finance, notifications |
@@ -1475,6 +1477,7 @@ Checked through the access module (limits per role, second reviewer).
 | sellerResponseBusinessDays | `2` | duration, business days, 1–…, approval: second reviewer, seller-visible | Respond-by target for sellers (example) |
 | platformInterventionGraceHours | `0` | duration, hours, 0–…, seller-visible | Hours after a missed seller deadline before Marketly takes over |
 | autoApproveOfficialWithinWindow | `true` | bool, approval: second reviewer | Official Store returns inside the window are approved automatically |
+| autoApproveServiceWithinWindow | `true` | bool, approval: second reviewer, seller-visible | Fulfilled by Marketly returns inside the seller's return window are approved automatically by Marketly (decision D7) |
 | maxPhotosPerReturn | `6` | int, 1–20 | Photos or short videos per return request |
 | maxMediaMb | `10` | int, MB, 1–… | Upload size per file |
 | inspectionChecksByCategory | `{}` | json | Category id → functional and hygiene checks added to the inspection checklist (e.g. Headphones: powers on and pairs, ear cushions clean) |
@@ -1508,6 +1511,7 @@ Checked through the access module (limits per role, second reviewer).
 - Store credit as a remedy is offered only when the wallet module (phase 3) is enabled; exchange for a different price is phase 4 (advanced returns). Same-price exchanges are phase 1.
 - Guests reach store endpoints with a guest session that has order access (auth/guest-orders); signed-in customers see their own returns only.
 - Dependency note: media and finance are optional (photos and earnings previews degrade gracefully); access is optional because approvals fall back to 'needs approval' without it; catalog (category names and paths) and offers (exchange price check) are optional.
+- Fulfilled by Marketly returns (decision D7; order group fulfilledBy marketly_service, copied to returns.fulfilled_by at request): platform handled from the request (platform_handling true), the seller's return terms and window, auto-approved within that window when autoApproveServiceWithinWindow is on (as Official Store returns are), destination marketly_warehouse with officialReturnAddress, return label from the customer to the Marketly dock, received by warehouse and inspected by Marketly staff. The refund is approved under policy (Finance limits like other platform-decided refunds) and funded by the seller as seller of record (refund_requests.funded_by seller). The seller sees the return read-only: seller decide endpoints already refuse while platform_handling, with a message that Marketly handles it. returns.return.requested, approved, received and inspected and ReturnCase carry fulfilledBy; fulfillment-service records the stock outcome of the unit (recordReturnOutcome there; inventory stays out, decision D8).
 
 ## GraphQL (read layer)
 

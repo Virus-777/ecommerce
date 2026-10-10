@@ -133,6 +133,11 @@ export const QUEUE_SEEDS: Record<string, QueueSeed> = Object.fromEntries(
     seed({ key: 'reviews.moderation', name: 'Review moderation', area: 'trust', ownerRole: 'trust_and_risk_manager', defaultDeadlineMinutes: D, businessHoursOnly: true, screen: 'admin/reviews', screenFilter: 'moderation', escalationRoute: [role(OWNER, D)] }),
     seed({ key: 'access.approvals', name: 'Approvals waiting', area: 'platform', ownerRole: OWNER, defaultDeadlineMinutes: D, screen: 'admin/staff', screenFilter: 'approvals', escalationRoute: [role(OWNER, 0)] }),
     seed({ key: 'customers.data_requests', name: 'Customer data requests', area: 'support', ownerRole: 'customer_support_manager', defaultDeadlineMinutes: 30 * D, screen: 'admin/customers', screenFilter: 'data_requests', escalationRoute: [role('platform_administrator', 0), role(OWNER, 2 * D)] }),
+    // Fulfilled by Marketly (raised and resolved by fulfillment-service; never seller-visible)
+    seed({ key: 'fulfillment.receiving', name: 'Fulfilled by Marketly receiving', area: 'inventory_warehouse', ownerRole: 'warehouse_manager', defaultDeadlineMinutes: D, businessHoursOnly: true, screen: 'ops/receiving', screenFilter: 'fulfillment_service', escalationRoute: [role('inventory_manager', D), role(OWNER, 2 * D)] }),
+    seed({ key: 'fulfillment.reconciliation', name: 'Fulfilled by Marketly stock differences', area: 'inventory_warehouse', ownerRole: 'inventory_manager', defaultDeadlineMinutes: 2 * D, businessHoursOnly: true, screen: 'ops/inventory', screenFilter: 'service_differences', escalationRoute: [role('warehouse_manager', 0), role(OWNER, 2 * D)] }),
+    seed({ key: 'fulfillment.requests', name: 'Fulfilled by Marketly orders', area: 'inventory_warehouse', ownerRole: 'warehouse_manager', defaultDeadlineMinutes: 4 * H, screen: 'ops/pick-pack', screenFilter: 'fulfillment_service', escalationRoute: [role('order_manager', 0), role(OWNER, D)] }),
+    seed({ key: 'fulfillment.enrollments', name: 'Fulfilled by Marketly enrollments', area: 'sellers', ownerRole: 'seller_manager', defaultDeadlineMinutes: 2 * D, businessHoursOnly: true, screen: 'admin/sellers', screenFilter: 'fulfillment_service', escalationRoute: [role(OWNER, 2 * D)] }),
   ].map((q) => [q.key, q]),
 );
 
@@ -165,7 +170,16 @@ export const KIND_QUEUES: Partial<Record<Kind, string>> = {
  * Items routed by their dedupe key prefix, for raisers that use the generic manual_task kind (spec notes,
  * "Queues per kind"): same rule as KIND_QUEUES, applied when the kind has no home queue.
  */
-export const DEDUPE_PREFIX_QUEUES: readonly (readonly [prefix: string, queueKey: string])[] = [['inventory.merge_candidate:', 'inventory.merge_candidates']];
+export const DEDUPE_PREFIX_QUEUES: readonly (readonly [prefix: string, queueKey: string])[] = [
+  ['inventory.merge_candidate:', 'inventory.merge_candidates'],
+  // Fulfilled by Marketly: fulfillment-service raises generic kinds (receiving, manual_task, pick_pack, application_waiting)
+  ['fs_inbound_overdue:', 'fulfillment.receiving'],
+  ['fs_discrepancy:', 'fulfillment.receiving'],
+  ['fs_stock_difference:', 'fulfillment.reconciliation'],
+  ['fs_request_short:', 'fulfillment.requests'],
+  ['fs_enrollment:', 'fulfillment.enrollments'],
+  ['fs_sku:', 'fulfillment.enrollments'],
+];
 
 /** Every work item kind (spec WorkItem.kind) */
 export const KINDS: readonly Kind[] = ['overdue_dispatch', 'missing_tracking', 'delivery_exception', 'seller_cannot_fulfill', 'low_stock', 'receiving', 'pick_pack', 'return_inspection', 'return_decision', 'approval_waiting', 'case_past_target', 'case_escalated', 'payout_failed', 'payment_check', 'payment_mismatch', 'chargeback', 'hold_review', 'product_review', 'application_waiting', 'launch_review', 'appeal_due', 'restriction_review', 'restriction_evidence', 'seller_performance', 'seller_owner_missing', 'storefront_review', 'trust_report', 'trust_recommendation', 'enforcement_reversal', 'review_moderation_overdue', 'official_store_reply', 'data_request', 'seller_reply_overdue', 'unexpected_return_parcel', 'return_parcel_overdue', 'manual_task'];

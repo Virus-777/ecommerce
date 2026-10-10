@@ -132,7 +132,11 @@ export class ShippingService implements ShippingPublicApi {
     return this.shipments.getForViewer(viewer, shipmentId);
   }
 
-  /** Default option per offer (resolved through offers); without a postal code the market default location */
+  /**
+   * Default option per offer, resolved through offers' effective Offer.shipping (a Fulfilled by Marketly offer is quoted
+   * with the service profile and dispatch, and that Official profile brings the Official schedule); without a postal
+   * code the market default location
+   */
   async estimateOffers(offerIds: string[], postalCode?: string, _viewer?: { customerId?: string; guestSessionId?: string }): Promise<OfferEstimate[]> {
     const ids = [...new Set(offerIds)].filter(isUuid).slice(0, 50);
     if (!ids.length) return [];
@@ -145,8 +149,12 @@ export class ShippingService implements ShippingPublicApi {
         out.push({ offerId, shipsToLocation: false, reason: 'This offer is not available', option: null, otherOptions: 0 });
         continue;
       }
+      // offers that predate Offer.shipping carry only their own profile and dispatch
+      const shipping = (offer as Partial<typeof offer>).shipping;
+      const profileId = shipping?.profileId ?? offer.shippingProfileId;
+      const dispatch = shipping?.dispatch ?? offer.dispatch;
       try {
-        const q = await this.estimates.quote(offer.shippingProfileId, zip, { weightGrams: 1000 }, { businessDays: offer.dispatch.businessDays, sameDayCutoff: offer.dispatch.sameDayCutoff ?? null, shipsFrom: offer.dispatch.shipsFrom }, w);
+        const q = await this.estimates.quote(profileId, zip, { weightGrams: 1000 }, { businessDays: dispatch.businessDays, sameDayCutoff: dispatch.sameDayCutoff ?? null, shipsFrom: dispatch.shipsFrom }, w);
         out.push({ offerId, shipsToLocation: q.shipsToLocation, reason: q.reason ?? null, option: q.default ?? null, otherOptions: Math.max(0, q.options.length - 1) });
       } catch {
         out.push({ offerId, shipsToLocation: false, reason: 'Delivery options are not available for this offer', option: null, otherOptions: 0 });
@@ -203,6 +211,11 @@ export class ShippingService implements ShippingPublicApi {
   /** The Official Store's free-shipping threshold in force now (content's service strip warns when its text disagrees) */
   getOfficialFreeShipping(): Promise<{ threshold: common.Money | null; methodCode: string | null; active: boolean; label: string | null }> {
     return this.profiles.officialFreeShipping();
+  }
+
+  /** The Official Store's default active profile with the Official handling days and cutoff (fulfillment-service quotes service offers with it) */
+  getOfficialDefaultProfile(): Promise<{ profileId: string; handlingDays: number; sameDayCutoff: string | null } | null> {
+    return this.profiles.officialDefaultProfile();
   }
 
   getSellerShippingSetup(sellerId: string): Promise<SellerShippingSetup> {

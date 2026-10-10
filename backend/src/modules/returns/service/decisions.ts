@@ -25,12 +25,14 @@ export class Decisions {
     private readonly handling: Handling,
   ) {}
 
+  /** Marketly decides a seller's return: staff, or the automatic approval of a Fulfilled by Marketly return (D7) */
   private platformDecision(agg: Agg, mode: Mode) {
-    return mode === 'admin' && agg.ret.owner_type === 'seller';
+    return agg.ret.owner_type === 'seller' && (mode === 'admin' || (mode === 'auto' && this.core.isService(agg.ret)));
   }
 
-  /** Sellers cannot act once Marketly handles the return */
+  /** Sellers cannot act on Fulfilled by Marketly returns, nor once Marketly handles the return */
   private sellerMayRespond(agg: Agg, mode: Mode) {
+    if (mode === 'seller') this.core.sellerMayAct(agg.ret);
     if (mode === 'seller' && agg.ret.platform_handling) throw this.core.error('RESPONSE_DEADLINE_PASSED', 'Marketly is handling this return now', { respondBy: agg.ret.response_due_at?.toISOString() ?? null });
   }
 
@@ -279,6 +281,7 @@ export class Decisions {
   async approveWithoutReturn(id: string, input: ExceptionInput, by: By, mode: 'seller' | 'admin', agg: Agg): Promise<void> {
     const r = agg.ret;
     if (!input.details?.trim()) throw invalidField('details', 'Record why the item does not come back');
+    if (mode === 'seller') this.core.sellerMayAct(r);
     if (mode === 'seller' && r.platform_handling) throw illegal('Marketly is handling this return now', { from: r.status });
     // retry after a hand-over that did not go through (idempotent endpoint)
     if (r.status === 'awaiting_remedy' && r.exception) {

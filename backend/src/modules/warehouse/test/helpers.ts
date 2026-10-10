@@ -43,10 +43,14 @@ export interface Harness {
   receipts: { returnId: string; trackingNumber: string | null }[];
   returns: Map<string, returns.ReturnDetail>;
   files: { fileName: string; contentType: string; text: string }[];
+  /** quoteLabelOptions inputs */
+  quotes: shipping.LabelRequest[];
   labels: { input: shipping.LabelRequest; key: string; id: string; shipmentId: string; tracking: string; voided: boolean }[];
   /** media.attach calls: [assetId, usage, owner] */
   attached: unknown[][];
   knobs: { labelFails: boolean; slowServicesOnly: boolean };
+  /** fulfillment-service.getServiceLocation (harness({ fulfillmentService: true })) */
+  serviceLocation: { locationId: string; address: common.Address; shipsFrom: string } | null;
   events: { name: string; payload: any }[];
   named(name: string): any[];
   call(method: string, path: string, body?: unknown, o?: { token?: string; headers?: Record<string, string> }): Promise<{ status: number; body: any }>;
@@ -56,17 +60,29 @@ export interface Harness {
   /** Bins at the harness location; returns them by code */
   bins(codes: string[], kind?: string): Promise<Record<string, any>>;
   /** An accepted order with an Official Store group (and optionally a seller group): returns its fulfillment */
-  order(lines: { item: StockRec; quantity: number }[], o?: { sellerGroup?: boolean; dispatchInHours?: number }): Promise<{ orderId: string; ref: string; groupId: string; itemIds: string[]; fulfillment: any }>;
+  order(lines: { item: StockRec; quantity: number }[], o?: { sellerGroup?: boolean; dispatchInHours?: number; service?: ServiceSeller }): Promise<{ orderId: string; ref: string; groupId: string; itemIds: string[]; fulfillment: any }>;
   /** Order → wave → picking: the fulfillment ready to pick */
-  picking(lines: { item: StockRec; quantity: number }[], o?: { sellerGroup?: boolean }): Promise<{ orderId: string; ref: string; groupId: string; itemIds: string[]; fulfillment: any; waveId: string }>;
+  picking(lines: { item: StockRec; quantity: number }[], o?: { sellerGroup?: boolean; service?: ServiceSeller }): Promise<{ orderId: string; ref: string; groupId: string; itemIds: string[]; fulfillment: any; waveId: string }>;
   /** Picks every line with the right scans */
   pickAll(fulfillmentId: string): Promise<any>;
 }
 
 let refNo = 10000;
 
-export async function harness(): Promise<Harness> {
+/** A seller whose group Marketly fulfils (fulfilledBy marketly_service) */
+export interface ServiceSeller {
+  sellerId: string;
+  name: string;
+}
+
+export const RENO: common.Address = { name: 'Marketly Fulfillment', line1: '400 Logistics Way', city: 'Reno', region: 'NV', postalCode: '89502', country: 'US' };
+
+/** fulfillmentService: warehouse sees fulfillment-service, whose getServiceLocation answers h.serviceLocation */
+export async function harness(opts: { fulfillmentService?: boolean } = {}): Promise<Harness> {
   const clock = movingClock();
+  const locationId = newId();
+  // the default company location (inventory): the harness site, with the Reno address
+  const site = { id: locationId, code: 'RNO1', name: 'Reno, NV warehouse', kind: 'warehouse' as const, ownerType: 'official' as const, sellerId: null, address: RENO, timeZone: 'America/Los_Angeles', sellable: true, active: true, isDefault: true };
   const h = {
     stock: new Map<string, StockRec>(),
     tasks: new Map<string, orders.FulfillmentTask>(),
@@ -78,9 +94,11 @@ export async function harness(): Promise<Harness> {
     receipts: [] as { returnId: string; trackingNumber: string | null }[],
     returns: new Map<string, returns.ReturnDetail>(),
     files: [] as { fileName: string; contentType: string; text: string }[],
+    quotes: [] as shipping.LabelRequest[],
     labels: [] as Harness['labels'],
     attached: [] as unknown[][],
     knobs: { labelFails: false, slowServicesOnly: false },
+    serviceLocation: null as Harness['serviceLocation'],
     events: [] as { name: string; payload: any }[],
   };
   const day = (n: number) => new Date(clock.now().getTime() + n * DAY).toISOString().slice(0, 10);
@@ -106,6 +124,8 @@ export async function harness(): Promise<Harness> {
   });
   const svcOf = (l: Harness['labels'][number]) => SERVICES.find((s) => s.id === l.input.carrierServiceId) ?? SERVICES[0]!;
   const shipmentOf = (l: Harness['labels'][number]) => ({ id: l.shipmentId, groupId: l.input.groupId, label: labelOf(l, svcOf(l)), estimatedArrival: { from: day(svcOf(l).days - 1), to: day(svcOf(l).days) } }) as unknown as shipping.Shipment;
+  // ReturnCase.fulfilledBy: a test detail may carry it (Fulfilled by Marketly returns), else from the owner
+  const fulfilledByOf = (d: returns.ReturnDetail) => (d as { fulfilledBy?: string }).fulfilledBy ?? (d.seller.ownerType === 'official' ? 'official_warehouse' : 'seller');
   const readStream = async (s: ReadableStream) => Buffer.from(await new Response(s).arrayBuffer()).toString('latin1');
 
   const app = await buildTestApp({
@@ -113,6 +133,8 @@ export async function harness(): Promise<Harness> {
     clock,
     config: { rateLimits: false },
     apiStubs: {
+      // fulfillment-service is not booted: its stub answers warehouse's optional lookup
+      ...(opts.fulfillmentService ? { 'fulfillment-service': { getServiceLocation: async () => structuredClone(self.serviceLocation) } } : {}),
       orders: {
         getFulfillmentTask: async (groupId) => {
           const t = h.tasks.get(groupId);
@@ -134,6 +156,8 @@ export async function harness(): Promise<Harness> {
           }),
         findBySku: async (_owner, skus) =>
           [...h.stock.values()].filter((s) => skus.some((k) => k.trim().toUpperCase() === s.sku.toUpperCase())).map((s) => ({ id: s.id, ownerType: 'official', sku: s.sku, productId: newId(), variantId: newId(), condition: 'new', label: s.label, image: null, quantities: {}, state: 'in_stock', archived: false, updatedAt: clock.now().toISOString() }) as never),
+        getDefaultLocation: async () => structuredClone(site),
+        getLocations: async () => [structuredClone(site)],
         reportDiscrepancy: async (input) => {
           const d = { id: newId(), ...input, state: 'open' };
           h.discrepancies.push(d);
@@ -141,8 +165,9 @@ export async function harness(): Promise<Harness> {
         },
       },
       shipping: {
-        quoteLabelOptions: async (input) =>
-          SERVICES.filter((s) => !h.knobs.slowServicesOnly || s.days > 6).map((s) => ({
+        quoteLabelOptions: async (input) => {
+          h.quotes.push(input);
+          return SERVICES.filter((s) => !h.knobs.slowServicesOnly || s.days > 6).map((s) => ({
             id: newId(),
             carrierServiceId: s.id,
             carrierName: s.carrier,
@@ -151,7 +176,8 @@ export async function harness(): Promise<Harness> {
             estimatedArrival: { from: day(s.days - 1), to: day(s.days) },
             keepsPromise: s.days <= 6,
             expiresAt: new Date(clock.now().getTime() + 3_600_000).toISOString(),
-          })),
+          }));
+        },
         createLabel: async (input, key) => {
           const existing = h.labels.find((l) => l.key === key);
           if (existing) return { label: labelOf(existing, svcOf(existing)), shipment: shipmentOf(existing) };
@@ -174,11 +200,11 @@ export async function harness(): Promise<Harness> {
       returns: {
         getReturn: async (returnId) => {
           const d = h.returns.get(returnId);
-          return d ? ({ detail: d } as unknown as returns.ReturnCase) : null;
+          return d ? ({ detail: d, fulfilledBy: fulfilledByOf(d) } as unknown as returns.ReturnCase) : null;
         },
         getReturnAdmin: async (ref) => {
           const d = [...h.returns.values()].find((r) => r.ref === ref);
-          return d ? ({ detail: d } as unknown as returns.ReturnCase) : null;
+          return d ? ({ detail: d, fulfilledBy: fulfilledByOf(d) } as unknown as returns.ReturnCase) : null;
         },
         recordWarehouseReceipt: async (returnId, _at, _by, trackingNumber) => {
           h.receipts.push({ returnId, trackingNumber });
@@ -220,7 +246,6 @@ export async function harness(): Promise<Harness> {
   const service = app.kernel.boot.apis.get('warehouse') as WarehouseService;
   const staffId = newId();
   const staff = callers.staff(undefined, { sub: staffId });
-  const locationId = newId();
 
   const call: Harness['call'] = async (method, path, body, o = {}) => {
     const res = await app.inject({ method: method as never, url: path.startsWith('/api') ? path : `${ADMIN}${path}`, headers: { ...auth(o.token ?? staff), ...(o.headers ?? {}) }, ...(body !== undefined ? { payload: body as never } : {}) });
@@ -262,8 +287,8 @@ export async function harness(): Promise<Harness> {
         groupId,
         orderId,
         orderRef: ref,
-        seller: { ownerType: 'official', id: null, name: 'Marketly Official Store', slug: 'official', verified: true },
-        fulfilledBy: 'official_warehouse',
+        seller: o.service ? { ownerType: 'seller', id: o.service.sellerId, name: o.service.name, slug: 'seller', verified: true } : { ownerType: 'official', id: null, name: 'Marketly Official Store', slug: 'official', verified: true },
+        fulfilledBy: o.service ? 'marketly_service' : 'official_warehouse',
         shipTo: PORTLAND,
         delivery: { methodName: 'Standard', carrier: 'UPS', service: 'Ground', price: USD(599), free: false, fundedBy: 'customer', arrival: { from: day(3), to: day(6) }, dispatchBy: new Date(now.getTime() + (o.dispatchInHours ?? 24) * 3_600_000).toISOString() },
         dispatchDeadline: { dueAt: new Date(now.getTime() + (o.dispatchInHours ?? 24) * 3_600_000).toISOString(), state: 'on_time' },
@@ -271,8 +296,8 @@ export async function harness(): Promise<Harness> {
         hidePricesOnSlip: false,
         openLines: lines.map((l, i) => ({ orderItemId: itemIds[i]!, stockItemId: l.item.id, offerId: newId(), title: l.item.label.split(', ')[0]!, variantLabel: l.item.label.split(', ')[1] ?? '', sellerSku: l.item.sku, quantityToShip: l.quantity })),
       });
-      const groups: orders.PlacedGroup[] = [{ groupId, ownerType: 'official', sellerId: null, fulfilledBy: 'official_warehouse', dispatchBy: new Date(now.getTime() + DAY).toISOString(), itemIds, total: USD(4600) }];
-      const orderGroups = [{ id: groupId, name: 'Marketly Official Store', itemIds }];
+      const groups: orders.PlacedGroup[] = [{ groupId, ownerType: o.service ? 'seller' : 'official', sellerId: o.service?.sellerId ?? null, fulfilledBy: o.service ? 'marketly_service' : 'official_warehouse', dispatchBy: new Date(now.getTime() + DAY).toISOString(), itemIds, total: USD(4600) }];
+      const orderGroups = [{ id: groupId, name: o.service?.name ?? 'Marketly Official Store', itemIds }];
       if (o.sellerGroup) {
         const sg = newId();
         groups.push({ groupId: sg, ownerType: 'seller', sellerId: newId(), fulfilledBy: 'seller', dispatchBy: new Date(now.getTime() + DAY).toISOString(), itemIds: [newId()], total: USD(1000) });

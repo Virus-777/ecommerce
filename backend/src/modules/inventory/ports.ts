@@ -142,7 +142,9 @@ export interface InventoryRepository {
   inboundLines(inboundIds: string[]): Promise<Row<'inbound_lines'>[]>;
   insertInboundLines(rows: NewRow<'inbound_lines'>[]): Promise<void>;
   updateInboundLine(inboundId: string, itemId: string, patch: Patch<'inbound_lines'>): Promise<void>;
-  pageInbound(filter: { state?: string }, page: PageRequest): Promise<Page<Row<'inbound_receipts'>>>;
+  pageInbound(filter: { state?: string; source?: Row<'inbound_receipts'>['source_kind'] }, page: PageRequest): Promise<Page<Row<'inbound_receipts'>>>;
+  /** Receipts of one source (a purchase order or a Fulfilled by Marketly inbound shipment), oldest first */
+  inboundWhere(filter: { sourceKind: Row<'inbound_receipts'>['source_kind']; sourceId: string; state?: string }): Promise<Row<'inbound_receipts'>[]>;
 
   /* ---------------------------------------------------------------- return outcomes */
   returnOutcomesWhere(filter: { returnId?: string; ids?: string[] }): Promise<Row<'return_outcomes'>[]>;

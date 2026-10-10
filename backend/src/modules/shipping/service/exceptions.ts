@@ -14,11 +14,11 @@ import type { CarrierClaim, ClaimInput, DeliveryException, ExceptionCounts, Open
 /** What opened an exception (shipping.shipment.exception source) */
 type ExceptionSource = ShippingShipmentExceptionEvent['source'];
 import { DAY_MS, HOUR_MS, instantLabel } from '../domain/calendar.js';
-import { CUSTOMER_ACTION, DEFAULT_NEXT_STEP, FIRST_DEADLINE_HOURS, KIND_LABEL, OPEN_STATUSES, type ExceptionKind } from '../domain/exceptions.js';
+import { CUSTOMER_ACTION, DEFAULT_NEXT_STEP, FIRST_DEADLINE_HOURS, KIND_LABEL, MARKETLY_NEXT_STEP, OPEN_STATUSES, type ExceptionKind } from '../domain/exceptions.js';
 import { carrierClaimMachine, deliveryExceptionMachine } from '../domain/state-machines.js';
 import type { ExceptionRec, ShipmentRec, WatchRec } from '../ports.js';
-import { invalid, notFound, SYSTEM, type By, type Core } from './core.js';
-import type { Estimates } from './estimates.js';
+import { byMarketly, fulfilledByOf, invalid, notFound, SYSTEM, type By, type Core, type FulfilledBy } from './core.js';
+import { scheduleOwner, type Estimates } from './estimates.js';
 import type { Shipments } from './shipments.js';
 import type { Views } from './views.js';
 
@@ -28,6 +28,8 @@ interface GroupFacts {
   groupId: string;
   ownerType: 'official' | 'seller';
   sellerId: string | null;
+  /** marketly_service: owned by the Shipping Manager, no seller notice, no seller response */
+  fulfilledBy: FulfilledBy;
 }
 
 const CASE_KINDS = /(missing|not[_\s-]?received|never[_\s-]?arrived|lost|damage|broken|not[_\s-]?delivered|wrong[_\s-]?address|package)/i;
@@ -79,6 +81,8 @@ export class Exceptions {
   }): Promise<{ row: ExceptionRec; created: boolean }> {
     const now = this.core.now();
     const id = newId();
+    // Fulfilled by Marketly: the Shipping Manager's exception; the seller is never notified or asked to respond
+    const marketly = byMarketly(o.group.fulfilledBy);
     const created = await this.repo.transaction(async (tx) => {
       const ok = await tx.insertIfNew('exceptions', {
         id,
@@ -89,17 +93,18 @@ export class Exceptions {
         shipment_id: o.shipmentId ?? null,
         owner_type: o.group.ownerType,
         seller_id: o.group.sellerId,
+        fulfilled_by: o.group.fulfilledBy,
         items_summary: o.itemsSummary,
         order_item_ids: o.itemIds,
         situation: o.situation,
-        next_step: o.nextStep ?? DEFAULT_NEXT_STEP[o.kind],
+        next_step: o.nextStep ?? (marketly ? MARKETLY_NEXT_STEP[o.kind] : undefined) ?? DEFAULT_NEXT_STEP[o.kind],
         status: o.owner ? 'in_progress' : 'open',
         owner_staff_id: o.owner?.staffId ?? null,
         owner_name: o.owner?.name ?? null,
         owner_role: o.owner?.role ?? null,
         due_at: o.dueAt,
         customer_notified_at: null,
-        seller_notified_at: o.sellerNotified ? now : null,
+        seller_notified_at: o.sellerNotified && !marketly ? now : null,
         escalated_to: null,
         seller_response: null,
         resolution: null,
@@ -122,7 +127,7 @@ export class Exceptions {
     if (o.publish !== false) {
       this.core.publish(
         'shipping.shipment.exception',
-        { exceptionId: id, kind: o.kind, orderId: row.order_id, ...(await this.core.recipientOf(row.order_id)), groupId: row.group_id, shipmentId: row.shipment_id, sellerId: row.seller_id, orderItemIds: o.itemIds, dueAt: row.due_at.toISOString(), customerAction: CUSTOMER_ACTION[o.kind], source: o.source, caseRef: row.case_ref },
+        { exceptionId: id, kind: o.kind, orderId: row.order_id, ...(await this.core.recipientOf(row.order_id)), groupId: row.group_id, shipmentId: row.shipment_id, sellerId: row.seller_id, fulfilledBy: fulfilledByOf(row.owner_type, row.fulfilled_by), orderItemIds: o.itemIds, dueAt: row.due_at.toISOString(), customerAction: CUSTOMER_ACTION[o.kind], source: o.source, caseRef: row.case_ref },
         o.by,
       );
     }
@@ -160,7 +165,7 @@ export class Exceptions {
   }
 
   private factsOf(s: ShipmentRec): GroupFacts {
-    return { orderId: s.order_id, orderRef: s.order_ref, groupId: s.group_id, ownerType: s.owner_type as 'seller', sellerId: s.seller_id };
+    return { orderId: s.order_id, orderRef: s.order_ref, groupId: s.group_id, ownerType: s.owner_type as 'seller', sellerId: s.seller_id, fulfilledBy: fulfilledByOf(s.owner_type, s.fulfilled_by) };
   }
 
   private async linesOf(shipmentId: string) {
@@ -192,7 +197,7 @@ export class Exceptions {
 
   async defaultApplied(s: ShipmentRec) {
     for (const e of await this.repo.find('exceptions', { shipment_id: s.id, kind: 'failed_delivery', status: OPEN_STATUSES })) {
-      await this.repo.update('exceptions', e.id, { next_step: 'No choice in time: returning to the seller', customer_notified_at: this.core.now(), seller_notified_at: this.core.now() });
+      await this.repo.update('exceptions', e.id, { next_step: 'No choice in time: returning to the seller', customer_notified_at: this.core.now(), ...(byMarketly(e.fulfilled_by) ? {} : { seller_notified_at: this.core.now() }) });
       await this.log(e.id, 'customer_notified', 'No choice in time; the package returns to the seller', SYSTEM);
     }
     await this.notifyCustomerOf(s.order_id, s.id, 'failed_delivery', 'The package is returning to the seller; your refund follows when it arrives', this.core.now());
@@ -209,7 +214,8 @@ export class Exceptions {
         ...(f.sellerType === 'official' ? { owner_type: 'official' } : f.sellerType === 'marketplace' ? { owner_type: 'seller' } : {}),
         ...(f.ownerStaffId ? { owner_staff_id: f.ownerStaffId } : {}),
         ...(f.customerNotNotified ? { customer_notified_at: null, status: f.status ?? OPEN_STATUSES } : {}),
-        ...(f.sellerId ? { owner_type: 'seller', seller_id: f.sellerId } : {}),
+        // the seller's list holds what needs the seller's response: never a Fulfilled by Marketly package's
+        ...(f.sellerId ? { owner_type: 'seller', seller_id: f.sellerId, fulfilled_by: 'seller' } : {}),
       },
       page,
       { order: { column: 'due_at', direction: 'asc' }, ...(f.q ? { search: { columns: ['order_ref', 'items_summary', 'situation', 'case_ref'], term: f.q } } : {}) },
@@ -279,7 +285,7 @@ export class Exceptions {
     if (existing) throw this.core.error('EXCEPTION_ALREADY_OPEN', `An open ${KIND_LABEL[kind].toLowerCase()} exception exists for this package`, { exceptionId: existing.id });
     const { row, created } = await this.open({
       kind,
-      group: { orderId: g.task.orderId, orderRef: g.task.orderRef, groupId: g.task.groupId, ownerType: g.owner.ownerType, sellerId: g.owner.sellerId },
+      group: { orderId: g.task.orderId, orderRef: g.task.orderRef, groupId: g.task.groupId, ownerType: g.owner.ownerType, sellerId: g.owner.sellerId, fulfilledBy: g.fulfilledBy },
       shipmentId,
       itemIds: lines.map((l) => l.id),
       itemsSummary: itemsSummary(lines),
@@ -321,6 +327,7 @@ export class Exceptions {
     const e = await this.get(id);
     this.requireOpen(e, 'notify_seller');
     if (e.owner_type !== 'seller' || !e.seller_id) throw invalid([{ path: 'id', message: 'Official Store packages have no seller to remind' }]);
+    if (byMarketly(e.fulfilled_by)) throw invalid([{ path: 'id', message: 'Marketly ships this package; the seller has nothing to do' }]);
     const now = this.core.now();
     if (e.seller_notified_at && now.getTime() - e.seller_notified_at.getTime() < REMIND_EVERY_MS) {
       throw new AppError('RATE_LIMITED', 'The seller was reminded less than an hour ago', { retryAfterSeconds: Math.ceil((REMIND_EVERY_MS - (now.getTime() - e.seller_notified_at.getTime())) / 1000) });
@@ -376,7 +383,8 @@ export class Exceptions {
     this.requireOpen(e, 'request_tracking');
     const due = new Date(dueAt);
     if (Number.isNaN(due.getTime()) || due.getTime() <= this.core.now().getTime()) throw invalid([{ path: 'dueAt', message: 'Give the seller a deadline in the future' }]);
-    if (e.seller_id) {
+    const marketly = byMarketly(e.fulfilled_by);
+    if (e.seller_id && !marketly) {
       await this.core.soft('notifications', 'request tracking', (n) =>
         n.notify({
           topic: 'seller.dispatch.reminder',
@@ -390,7 +398,10 @@ export class Exceptions {
         }),
       );
     }
-    await this.repo.update('exceptions', id, { due_at: due, seller_notified_at: this.core.now(), next_step: `Seller to provide valid tracking by ${instantLabel(due, this.core.tz)}` });
+    await this.repo.update('exceptions', id, {
+      due_at: due,
+      ...(marketly ? { next_step: `Marketly warehouse to confirm valid tracking by ${instantLabel(due, this.core.tz)}` } : { seller_notified_at: this.core.now(), next_step: `Seller to provide valid tracking by ${instantLabel(due, this.core.tz)}` }),
+    });
     await this.log(id, 'tracking_requested', `Due ${instantLabel(due, this.core.tz)}`, by.actor);
     this.updated(e, 'tracking_requested', by);
     return this.view(id);
@@ -445,6 +456,7 @@ export class Exceptions {
 
   async respond(sellerId: string, id: string, body: { action: 'tracking_provided' | 'will_ship_by' | 'cannot_fulfill' | 'replacement_sent' | 'other'; trackingNumber?: string | null; shipBy?: string | null; note?: string | null }, by: By): Promise<DeliveryException> {
     const e = await this.get(id, sellerId);
+    this.core.refuseIfMarketly(e.fulfilled_by);
     this.requireOpen(e, 'seller_response');
     const issues: { path: string; message: string }[] = [];
     let shipBy: Date | null = null;
@@ -482,7 +494,7 @@ export class Exceptions {
     if (body.action === 'cannot_fulfill' && e.kind !== 'seller_cannot_fulfill') {
       await this.open({
         kind: 'seller_cannot_fulfill',
-        group: { orderId: e.order_id, orderRef: e.order_ref, groupId: e.group_id, ownerType: e.owner_type as 'seller', sellerId: e.seller_id },
+        group: { orderId: e.order_id, orderRef: e.order_ref, groupId: e.group_id, ownerType: e.owner_type as 'seller', sellerId: e.seller_id, fulfilledBy: fulfilledByOf(e.owner_type, e.fulfilled_by) },
         shipmentId: e.shipment_id,
         itemIds: [],
         itemsSummary: e.items_summary,
@@ -497,19 +509,22 @@ export class Exceptions {
 
   /* ---------------------------------------------------------------- dispatch watch and late dispatch (scenario 5) */
 
-  /** orders.order.accepted: watch each group's deadline; a late acceptance moves the deadline */
+  /** orders.order.accepted: watch each group's deadline (with its fulfilledBy); a late acceptance moves the deadline */
   async onOrderAccepted(e: EventPayload<'orders.order.accepted'>) {
     const acceptedAt = new Date(e.acceptedAt);
     let placedAt: Date | null = null;
     for (const g of e.groups) {
       let due = new Date(g.dispatchBy);
-      const inserted = await this.repo.insertIfNew('dispatch_watch', { group_id: g.groupId, order_id: e.orderId, owner_type: g.ownerType, seller_id: g.ownerType === 'official' ? null : (g.sellerId ?? null), due_at: due, open_item_ids: g.itemIds, overdue_since: null });
+      const fulfilledBy = fulfilledByOf(g.ownerType, g.fulfilledBy);
+      const sellerId = g.ownerType === 'official' ? null : (g.sellerId ?? null);
+      const inserted = await this.repo.insertIfNew('dispatch_watch', { group_id: g.groupId, order_id: e.orderId, owner_type: g.ownerType, seller_id: sellerId, fulfilled_by: fulfilledBy, due_at: due, open_item_ids: g.itemIds, overdue_since: null });
       if (!inserted) continue;
       placedAt ??= await this.orders.getOrder(e.orderId).then((o) => (o ? new Date(o.placedAt) : null), () => null);
       if (!placedAt || this.core.today(acceptedAt) <= this.core.today(placedAt)) continue;
-      // payment accepted on a later day: the deadline counts from acceptance with the same handling days
+      // payment accepted on a later day: the deadline counts from acceptance with the same handling days, on the
+      // Official schedule for warehouse-shipped groups (Official Store and Fulfilled by Marketly)
       const w = await this.estimates.world(placedAt);
-      const owner = { ownerType: g.ownerType, sellerId: g.ownerType === 'official' ? null : (g.sellerId ?? null) };
+      const owner = scheduleOwner({ ownerType: g.ownerType, sellerId }, fulfilledBy);
       let handling: number | null = null;
       for (let h = 0; h <= 10; h++) {
         if (this.core.today((await this.estimates.plan(w, owner, { businessDays: h })).dueAt) === this.core.today(due)) {
@@ -565,30 +580,33 @@ export class Exceptions {
     const by: By = { actor: SYSTEM };
     const respondBy = new Date(now.getTime() + FIRST_DEADLINE_HOURS.late_dispatch * HOUR_MS);
     const existing = (await this.repo.find('exceptions', { group_id: w.group_id, kind: 'late_dispatch', status: OPEN_STATUSES }))[0];
+    const fulfilledBy = fulfilledByOf(w.owner_type, w.fulfilled_by);
+    // only a seller who ships its own package is late; Marketly's warehouse is late for Fulfilled by Marketly groups
+    const sellerShips = w.owner_type === 'seller' && fulfilledBy === 'seller';
     let exceptionId: string;
     if (existing) {
       // a seller who misses a second deadline goes to the Seller Manager
       exceptionId = existing.id;
-      await this.repo.update('exceptions', existing.id, { due_at: respondBy, seller_notified_at: now, situation: `Missed the new dispatch deadline of ${instantLabel(w.due_at, this.core.tz)}` });
+      await this.repo.update('exceptions', existing.id, { due_at: respondBy, ...(sellerShips ? { seller_notified_at: now } : {}), situation: `Missed the new dispatch deadline of ${instantLabel(w.due_at, this.core.tz)}` });
       await this.log(existing.id, 'missed_deadline', `Deadline ${instantLabel(w.due_at, this.core.tz)} passed with ${open.length} item${open.length === 1 ? '' : 's'} unshipped`, SYSTEM);
-      if (existing.status !== 'escalated' && w.owner_type === 'seller') await this.escalate(existing.id, 'seller_manager', 'The seller missed a second dispatch deadline', by, { audit: false });
+      if (existing.status !== 'escalated' && sellerShips) await this.escalate(existing.id, 'seller_manager', 'The seller missed a second dispatch deadline', by, { audit: false });
     } else {
       const { row } = await this.open({
         kind: 'late_dispatch',
-        group: { orderId: task.orderId, orderRef: task.orderRef, groupId: w.group_id, ownerType: w.owner_type as 'seller', sellerId: w.seller_id },
+        group: { orderId: task.orderId, orderRef: task.orderRef, groupId: w.group_id, ownerType: w.owner_type as 'seller', sellerId: w.seller_id, fulfilledBy },
         itemIds: open.map((l) => l.orderItemId),
         itemsSummary: itemsSummary(open.map((l) => ({ title: l.title, variantLabel: l.variantLabel, quantity: l.quantityToShip }))),
         situation: `Not dispatched by ${instantLabel(w.due_at, this.core.tz)}`,
         dueAt: respondBy,
         by,
-        sellerNotified: w.owner_type === 'seller',
+        sellerNotified: sellerShips,
         // shipping.dispatch.overdue carries the exception to orders, notifications, sellers and workqueues
         publish: false,
         source: 'system',
       });
       exceptionId = row.id;
     }
-    this.core.publish('shipping.dispatch.overdue', { orderId: task.orderId, orderRef: task.orderRef, groupId: w.group_id, ownerType: w.owner_type as 'seller', sellerId: w.seller_id, orderItemIds: open.map((l) => l.orderItemId), dueAt: w.due_at.toISOString(), exceptionId }, by);
+    this.core.publish('shipping.dispatch.overdue', { orderId: task.orderId, orderRef: task.orderRef, groupId: w.group_id, ownerType: w.owner_type as 'seller', sellerId: w.seller_id, fulfilledBy, orderItemIds: open.map((l) => l.orderItemId), dueAt: w.due_at.toISOString(), exceptionId }, by);
   }
 
   /** Job: no tracking, an invalid number, or a label or dispatch without a carrier scan after the grace period */
@@ -657,7 +675,7 @@ export class Exceptions {
       const summary = lines ? itemsSummary([{ title: lines.title, variantLabel: lines.variantLabel, quantity: e.quantity }]) : `${e.quantity} item${e.quantity === 1 ? '' : 's'}`;
       const { row, created } = await this.open({
         kind: 'seller_cannot_fulfill',
-        group: { orderId: e.orderId, orderRef: e.ref, groupId: e.groupId, ownerType: e.ownerType, sellerId: e.sellerId ?? null },
+        group: { orderId: e.orderId, orderRef: e.ref, groupId: e.groupId, ownerType: e.ownerType, sellerId: e.sellerId ?? null, fulfilledBy: fulfilledByOf(e.ownerType, e.fulfilledBy ?? w?.fulfilled_by) },
         itemIds: [e.itemId],
         itemsSummary: summary,
         situation,
@@ -692,7 +710,8 @@ export class Exceptions {
 
   /** sellers.seller.restricted: the seller's open exceptions are marked for escalation to the Seller Manager */
   async onSellerRestricted(e: EventPayload<'sellers.seller.restricted'>) {
-    const rows = await this.repo.find('exceptions', { owner_type: 'seller', seller_id: e.sellerId, status: ['open', 'in_progress'] });
+    // Fulfilled by Marketly exceptions stay with the Shipping Manager: the seller has no part in them
+    const rows = await this.repo.find('exceptions', { owner_type: 'seller', seller_id: e.sellerId, fulfilled_by: 'seller', status: ['open', 'in_progress'] });
     for (const x of rows) {
       await this.repo.update('exceptions', x.id, { status: deliveryExceptionMachine.next(x.status as never, 'escalate'), escalated_to: 'seller_manager' });
       await this.log(x.id, 'marked_for_escalation', `Seller restricted: ${e.reason}`, SYSTEM);
@@ -714,7 +733,7 @@ export class Exceptions {
       const shipment = (await this.repo.find('shipments', { group_id: groupId, kind: ['outbound', 'replacement'], status: { op: '<>', value: 'cancelled' } }, { orderBy: [['created_at', 'desc']] })).find((s) => own.some((i) => i.shipmentId === s.id)) ?? null;
       const { row, created } = await this.open({
         kind: 'lost_or_damaged',
-        group: { orderId: order.id, orderRef: order.ref, groupId, ownerType: g.seller.ownerType, sellerId: g.seller.ownerType === 'official' ? null : (g.seller.id ?? null) },
+        group: { orderId: order.id, orderRef: order.ref, groupId, ownerType: g.seller.ownerType, sellerId: g.seller.ownerType === 'official' ? null : (g.seller.id ?? null), fulfilledBy: fulfilledByOf(g.seller.ownerType, g.fulfilledBy) },
         shipmentId: shipment?.id ?? null,
         itemIds: own.map((i) => i.id),
         itemsSummary: itemsSummary(own.map((i) => ({ title: i.title, variantLabel: i.variantLabel, quantity: i.quantity }))),
@@ -735,10 +754,11 @@ export class Exceptions {
     const group = order?.groups.find((g) => g.items.some((i) => i.id === e.orderItemId || i.replacementOfItemId === e.orderItemId));
     if (!order || !group) return;
     const owner = { ownerType: e.ownerType, sellerId: e.ownerType === 'official' ? null : (e.sellerId ?? null) };
-    const plan = await this.estimates.plan(await this.estimates.world(), owner, { businessDays: null });
+    const fulfilledBy = fulfilledByOf(e.ownerType, group.fulfilledBy);
+    const plan = await this.estimates.plan(await this.estimates.world(), scheduleOwner(owner, fulfilledBy), { businessDays: null });
     const existing = await this.repo.get('dispatch_watch', group.id);
     if (!existing) {
-      await this.repo.insertIfNew('dispatch_watch', { group_id: group.id, order_id: e.orderId, owner_type: e.ownerType, seller_id: owner.sellerId, due_at: plan.dueAt, open_item_ids: [`replacement:${e.replacementId}`], overdue_since: null });
+      await this.repo.insertIfNew('dispatch_watch', { group_id: group.id, order_id: e.orderId, owner_type: e.ownerType, seller_id: owner.sellerId, fulfilled_by: fulfilledBy, due_at: plan.dueAt, open_item_ids: [`replacement:${e.replacementId}`], overdue_since: null });
     } else if (!existing.open_item_ids.includes(`replacement:${e.replacementId}`)) {
       await this.repo.update('dispatch_watch', group.id, { open_item_ids: [...existing.open_item_ids, `replacement:${e.replacementId}`], ...(existing.overdue_since ? { due_at: plan.dueAt, overdue_since: null } : {}) });
     }

@@ -37,6 +37,7 @@ function cancelled(o: { orderId?: string; customerId?: string | null; contactEma
     groupId: newId(),
     ownerType: o.ownerType ?? 'official',
     sellerId: o.sellerId ?? null,
+    fulfilledBy: o.ownerType === 'seller' ? 'seller' : 'official_warehouse',
     itemId: newId(),
     offerId: newId(),
     stockItemId: newId(),
@@ -82,6 +83,7 @@ describe('customers named by the event', () => {
       groupId: newId(),
       returnId: null,
       sellerId: null,
+      fulfilledBy: 'official_warehouse',
       lines: [{ orderItemId: newId(), title: 'Aurora Desk Lamp', variantLabel: "Black", quantity: 1 }],
       deliveredAt: new Date().toISOString(),
     });
@@ -101,13 +103,14 @@ describe('customers named by the event', () => {
       contactEmail: null,
       ownerType: 'official',
       sellerId: null,
+      fulfilledBy: 'official_warehouse',
       items: [{ orderItemId: newId(), quantity: 1 }],
       withoutReturn: false,
       platformDecision: false,
       dropOffBy: new Date(Date.now() + 7 * 86_400_000).toISOString(),
       trackingNumber: null,
     });
-    await publish(app, 'returns.return.received', { returnId, ref: 'RT-261010-0042', orderId, orderRef: 'MK-261010-40042', customerId: c.customerId, contactEmail: null, ownerType: 'official', sellerId: null, items: [], receivedAt: new Date().toISOString() });
+    await publish(app, 'returns.return.received', { returnId, ref: 'RT-261010-0042', orderId, orderRef: 'MK-261010-40042', customerId: c.customerId, contactEmail: null, ownerType: 'official', sellerId: null, fulfilledBy: 'official_warehouse', items: [], receivedAt: new Date().toISOString() });
     const mine = await inbox(as.customer(c), 'store', '?group=returns_refunds');
     expect(mine.map((n) => n.topicKey)).toEqual(['customer.return.received', 'customer.return.approved']);
     expect(mine[1]).toMatchObject({ link: { kind: 'return', id: returnId, ref: 'RT-261010-0042' } });

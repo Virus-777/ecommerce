@@ -322,4 +322,37 @@ export class MembersPart extends Part {
     const rows = await this.repo.find('members', { seller_id: _sellerId, status: 'invited' });
     for (const m of rows) await this.repo.update('members', m.id, { status: 'revoked' });
   }
+
+  /**
+   * Template permissions added after members were invited with the template (template_grants, migration 0004): each
+   * grant whose key is in this process's catalogue (its module runs) is applied once to the open, non-owner members
+   * of the template who lack it, and marked applied. Grants of modules that are off wait for a start where they run.
+   * Runs after boot; safe when several instances start together (the grant row is locked).
+   */
+  async applyTemplateGrants(): Promise<number> {
+    const known = new Set(this.allSellerKeys());
+    const pending = (await this.repo.find('template_grants', { applied_at: null })).filter((g) => known.has(g.permission));
+    let updated = 0;
+    for (const g of pending) {
+      const changed = await this.repo.transaction(async (tx) => {
+        const grant = await tx.get('template_grants', g.id, { forUpdate: true });
+        if (!grant || grant.applied_at) return [];
+        const members = await tx.find('members', { role: g.template, status: OPEN, is_owner: false });
+        const out: { sellerId: string; memberId: string; permissions: string[] }[] = [];
+        for (const m of members) {
+          const permissions = map.strings(m.permissions);
+          if (permissions.includes(g.permission)) continue;
+          permissions.push(g.permission);
+          await tx.update('members', m.id, { permissions: permissions as never });
+          out.push({ sellerId: m.seller_id, memberId: m.id, permissions });
+        }
+        await tx.update('template_grants', g.id, { applied_at: this.now(), members_updated: out.length });
+        return out;
+      });
+      for (const c of changed) this.core.publish('sellers.member.permissions_changed', c, { actor: SYSTEM });
+      if (changed.length) this.ctx.log.info({ template: g.template, permission: g.permission, members: changed.length }, 'template permission granted to existing members');
+      updated += changed.length;
+    }
+    return updated;
+  }
 }

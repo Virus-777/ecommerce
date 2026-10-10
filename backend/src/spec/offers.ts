@@ -42,9 +42,14 @@ export interface Offer {
   saleEndsAt?: string | null;
   /** Maximum units per customer */
   purchaseLimit?: number | null;
+  /** The seller's own dispatch terms as saved. For a Marketly-fulfilled offer they are kept but have no customer effect; read shipping for what customers get */
   dispatch: DispatchTerms;
-  /** shipping module profile (rates, services, coverage) */
+  /** shipping module profile (rates, services, coverage) as saved by the seller; see shipping for the effective one */
   shippingProfileId: string;
+  /** Who ships it: official_warehouse for Official Store offers, marketly_service while fulfillment-service fulfils the offer (fulfillment-service.offer.service_changed), else seller */
+  fulfilledBy: "official_warehouse" | "seller" | "marketly_service";
+  /** Effective customer-facing fulfilment: seller offers = their own shippingProfileId and dispatch; Official Store as today; marketly_service = fulfillment-service.getServiceTerms (Marketly's profile, dispatch and ships-from). Cart, checkout, delivery estimates and the featured rule read this, never shippingProfileId and dispatch directly */
+  shipping: OfferShipping;
   returnTerms: ReturnTerms;
   warranty: WarrantyTerms;
   status: "draft" | "active" | "paused" | "out_of_stock" | "ineligible" | "removed";
@@ -86,7 +91,11 @@ export const Offer: z.ZodType<Offer> = z.object({
   get dispatch() {
     return DispatchTerms;
   },
-  shippingProfileId: z.uuid().describe("shipping module profile (rates, services, coverage)"),
+  shippingProfileId: z.uuid().describe("shipping module profile (rates, services, coverage) as saved by the seller; see shipping for the effective one"),
+  fulfilledBy: z.enum(["official_warehouse", "seller", "marketly_service"]).describe("Who ships it: official_warehouse for Official Store offers, marketly_service while fulfillment-service fulfils the offer (fulfillment-service.offer.service_changed), else seller"),
+  get shipping() {
+    return OfferShipping;
+  },
   get returnTerms() {
     return ReturnTerms;
   },
@@ -143,6 +152,22 @@ export const DispatchTerms: z.ZodType<DispatchTerms> = z.object({
   shipsFrom: z.string().describe("City and region, e.g. 'Reno, NV'. Official Store offers: the inventory default location (inventory.getDefaultLocation), set at save and refreshed by the hourly offers.reevaluate-eligibility job when that location changes (inventory publishes no location event; the refresh does not bump termsVersion); seller offers: the seller's ships-from address from shipping seller settings. Never empty: falls back to the market default location label (kernel config)."),
   label: z.string().describe("e.g. 'Ships today', 'Ships in 1 business day'"),
 }).register(common.apiTypes, { id: "offers.DispatchTerms" });
+
+export interface OfferShipping {
+  fulfilledBy: "official_warehouse" | "seller" | "marketly_service";
+  /** Shipping profile customers are quoted with: the offer's own, or the service profile (fulfillment-service ServiceTerms.shippingProfileId) for marketly_service */
+  profileId: string;
+  /** Dispatch promise and ships-from customers see; for marketly_service the service dispatch and shipsFrom from fulfillment-service ServiceTerms */
+  dispatch: DispatchTerms;
+}
+
+export const OfferShipping: z.ZodType<OfferShipping> = z.object({
+  fulfilledBy: z.enum(["official_warehouse", "seller", "marketly_service"]),
+  profileId: z.uuid().describe("Shipping profile customers are quoted with: the offer's own, or the service profile (fulfillment-service ServiceTerms.shippingProfileId) for marketly_service"),
+  get dispatch() {
+    return DispatchTerms;
+  },
+}).register(common.apiTypes, { id: "offers.OfferShipping" });
 
 export interface ReturnTerms {
   /** extended = more generous than the platform baseline for the category */
@@ -210,7 +235,8 @@ export const IneligibilityReason: z.ZodType<IneligibilityReason> = z.object({
 }).register(common.apiTypes, { id: "offers.IneligibilityReason" });
 
 export interface StatusReason {
-  code: "awaiting_launch_review" | "seller_restricted" | "seller_suspended" | "seller_closed" | "product_hidden" | "product_suspended" | "product_merged" | "staff_hold" | "removed_by_staff" | "ended_by_seller" | "enforcement";
+  /** fulfillment_service_suspended: the seller's Fulfilled by Marketly enrollment is suspended or offboarding, so the offer stops selling (it never switches to seller shipping); restored when the enrollment is reinstated or the SKU leaves the service */
+  code: "awaiting_launch_review" | "seller_restricted" | "seller_suspended" | "seller_closed" | "product_hidden" | "product_suspended" | "product_merged" | "staff_hold" | "removed_by_staff" | "ended_by_seller" | "enforcement" | "fulfillment_service_suspended";
   text: string;
   /** For restrictions: what is stopped, e.g. 'Refurbished offers and new listings' */
   affectedActivity?: string | null;
@@ -223,7 +249,7 @@ export interface StatusReason {
 }
 
 export const StatusReason: z.ZodType<StatusReason> = z.object({
-  code: z.enum(["awaiting_launch_review", "seller_restricted", "seller_suspended", "seller_closed", "product_hidden", "product_suspended", "product_merged", "staff_hold", "removed_by_staff", "ended_by_seller", "enforcement"]),
+  code: z.enum(["awaiting_launch_review", "seller_restricted", "seller_suspended", "seller_closed", "product_hidden", "product_suspended", "product_merged", "staff_hold", "removed_by_staff", "ended_by_seller", "enforcement", "fulfillment_service_suspended"]).describe("fulfillment_service_suspended: the seller's Fulfilled by Marketly enrollment is suspended or offboarding, so the offer stops selling (it never switches to seller shipping); restored when the enrollment is reinstated or the SKU leaves the service"),
   text: z.string(),
   affectedActivity: z.string().describe("For restrictions: what is stopped, e.g. 'Refurbished offers and new listings'").nullish(),
   appealRoute: z.string().describe("For restrictions and removals: how to appeal").nullish(),
@@ -452,7 +478,10 @@ export interface DeliveryEstimate {
   freeOver?: common.Money | null;
   carrier?: string | null;
   service?: string | null;
+  /** Effective ships-from (Offer.shipping.dispatch.shipsFrom): for marketly_service the Marketly warehouse, e.g. 'Reno, NV (Marketly warehouse)' */
   shipsFrom: string;
+  /** 'Ships from Marketly' for marketly_service offers (the seller stays named in seller); null otherwise */
+  fulfilledByLabel?: string | null;
   dispatchLabel: string;
   /** Countdown to the cutoff that keeps this date */
   orderWithinMinutes?: number | null;
@@ -474,7 +503,8 @@ export const DeliveryEstimate: z.ZodType<DeliveryEstimate> = z.object({
   },
   carrier: z.string().nullish(),
   service: z.string().nullish(),
-  shipsFrom: z.string(),
+  shipsFrom: z.string().describe("Effective ships-from (Offer.shipping.dispatch.shipsFrom): for marketly_service the Marketly warehouse, e.g. 'Reno, NV (Marketly warehouse)'"),
+  fulfilledByLabel: z.string().describe("'Ships from Marketly' for marketly_service offers (the seller stays named in seller); null otherwise").nullish(),
   dispatchLabel: z.string(),
   orderWithinMinutes: z.number().int().describe("Countdown to the cutoff that keeps this date").nullish(),
   serviceNotice: z.string().describe("Holiday or known interruption (from shipping)").nullish(),
@@ -529,6 +559,7 @@ export interface OfferView {
   /** Shown under ineligible offers on the all-offers page */
   ineligibleNote?: string | null;
   status: "draft" | "active" | "paused" | "out_of_stock" | "ineligible" | "removed";
+  fulfilledBy: "official_warehouse" | "seller" | "marketly_service";
   termsVersion: number;
 }
 
@@ -578,6 +609,7 @@ export const OfferView: z.ZodType<OfferView> = z.object({
   featuredEligible: z.boolean(),
   ineligibleNote: z.string().describe("Shown under ineligible offers on the all-offers page").nullish(),
   status: z.enum(["draft", "active", "paused", "out_of_stock", "ineligible", "removed"]),
+  fulfilledBy: z.enum(["official_warehouse", "seller", "marketly_service"]),
   termsVersion: z.number().int(),
 }).register(common.apiTypes, { id: "offers.OfferView" });
 
@@ -912,6 +944,8 @@ export interface SellerOfferDetail {
   otherOfferCount: number;
   lowestNewPrice?: common.Money | null;
   officialStorePrice?: common.Money | null;
+  /** For marketly_service offers: 'Fulfilled by Marketly: customers see Marketly's delivery terms. Your dispatch time and shipping profile are saved but apply only if you leave the service.' */
+  fulfillmentNote?: string | null;
 }
 
 export const SellerOfferDetail: z.ZodType<SellerOfferDetail> = z.object({
@@ -943,6 +977,7 @@ export const SellerOfferDetail: z.ZodType<SellerOfferDetail> = z.object({
   get officialStorePrice() {
     return common.Money.nullish();
   },
+  fulfillmentNote: z.string().describe("For marketly_service offers: 'Fulfilled by Marketly: customers see Marketly's delivery terms. Your dispatch time and shipping profile are saved but apply only if you leave the service.'").nullish(),
 }).register(common.apiTypes, { id: "offers.SellerOfferDetail" });
 
 export interface PricePoint {
@@ -1517,7 +1552,10 @@ export interface OfferSnapshot {
   /** Offer (regular) price at purchase. Campaign markdowns, flash prices, coupons and automatic discounts are not in it: the price the customer paid per unit comes from checkout (promotions evaluation) on the order item. */
   price: common.Money;
   compareAt?: common.Money | null;
+  /** Effective dispatch terms at purchase (Offer.shipping.dispatch): Marketly's for marketly_service offers */
   dispatch: DispatchTerms;
+  /** Offer.fulfilledBy at purchase; offers always sets it (optional only so snapshots built elsewhere, e.g. test fixtures, stay valid) */
+  fulfilledBy?: "official_warehouse" | "seller" | "marketly_service" | null;
   returnTerms: ReturnTerms;
   warranty: WarrantyTerms;
   stockItemId: string;
@@ -1544,6 +1582,7 @@ export const OfferSnapshot: z.ZodType<OfferSnapshot> = z.object({
   get dispatch() {
     return DispatchTerms;
   },
+  fulfilledBy: z.enum(["official_warehouse", "seller", "marketly_service"]).describe("Offer.fulfilledBy at purchase; offers always sets it (optional only so snapshots built elsewhere, e.g. test fixtures, stay valid)").nullish(),
   get returnTerms() {
     return ReturnTerms;
   },
@@ -1858,6 +1897,7 @@ export interface OffersDb {
     same_day_cutoff: string | null;
     ships_from: string;
     shipping_profile_id: string;
+    fulfilled_by: 'official_warehouse' | 'seller' | 'marketly_service';
     return_kind: string;
     return_window_days: number;
     free_return_shipping: boolean;
@@ -1870,7 +1910,7 @@ export interface OffersDb {
     warranty_handled_by: string | null;
     status: string;
     status_before_ineligible: string | null;
-    /** { kind: restriction|suspension|product|staff, id } */
+    /** { kind: restriction|suspension|product|staff|fulfillment_service, id } */
     ineligible_source: Json | null;
     status_reason: Json | null;
     publish_on_approval: boolean;
@@ -3273,7 +3313,8 @@ export const spec = defineModuleSpec({
       "trust.enforcement.recorded": "Remove or hold offers named in an enforcement (counterfeit, abuse); status_reason keeps the enforcementId so a reversal can find them",
       "trust.enforcement.reversed": "Undo what trust.enforcement.recorded did for that enforcementId (inbox-claimed per event): offers it removed go back to Paused (same path as reinstateOffer, stock item unarchived by inventory, seller told and asked to resume); offers it held are released to their previous status; offers since changed by someone else (seller ended, staff removed for another reason) are left alone (noted in offer_status_log; trust's owner work item covers the rest). Publishes offers.offer.status_changed with trustEnforcementId",
       "promotions.campaign.started": "Mark featured decisions dirty for offers whose automatic discount changes the comparable total",
-      "promotions.campaign.ended": "Same as started"
+      "promotions.campaign.ended": "Same as started",
+      "fulfillment-service.offer.service_changed": "Inbox-claimed per event: set fulfilled_by (marketly_service or seller), bump terms_version and mark featured decisions dirty. With sellable false make the offer Ineligible (statusReason fulfillment_service_suspended, ineligible_source { kind: fulfillment_service, id: skuEnrollmentId }); with sellable true (or fulfilledBy seller) restoreEligibility on offers whose ineligible_source is fulfillment_service"
     },
   },
   jobs: {
@@ -3521,6 +3562,10 @@ export const spec = defineModuleSpec({
       },
       "shipping_profile_id": {
         "type": "uuid",
+        "nullable": false
+      },
+      "fulfilled_by": {
+        "type": "text",
         "nullable": false
       },
       "return_kind": {

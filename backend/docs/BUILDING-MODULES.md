@@ -154,7 +154,7 @@ Granting a permission never grants financial authority: `check` is the only sour
 
 ## 9b. Modules already built
 
-Built and merged: tranche 1 **identity, access, settings, audit, media, notifications**; tranche 2 **customers, catalog, inventory, sellers, purchasing, workqueues**; tranche 3 **offers, cart, orders, search, promotions, content**; tranche 4 **checkout, payments, shipping, finance, returns, messaging, reviews**; tranche 5 **support, trust, advertising, reports, warehouse** (all 30 launch modules). The phase 3–4 modules (wishlist, wallet, fulfillment-service) are off in `modules.config.ts`; tests enable them with `only: [...]`. `flows.liveListing()` sets up a seller with a live offer; `src/integration/order-lifecycle.test.ts` shows a whole order (checkout, payment, shipment, delivery, return, refund) with real modules. Real end-to-end flows for tests (staff with roles, customers, seller sign-in) are in `src/testing/flows.ts`; see `src/integration/*.test.ts`. Call their
+Built and merged: tranche 1 **identity, access, settings, audit, media, notifications**; tranche 2 **customers, catalog, inventory, sellers, purchasing, workqueues**; tranche 3 **offers, cart, orders, search, promotions, content**; tranche 4 **checkout, payments, shipping, finance, returns, messaging, reviews**; tranche 5 **support, trust, advertising, reports, warehouse** (all 30 launch modules). The phase 3–4 modules (wishlist, wallet, fulfillment-service) are built and off in `modules.config.ts`; tests enable them with `only: [...]`, and `MODULES=…,fulfillment-service` boots Fulfilled by Marketly like any other module (no guard: set its `serviceLocationId` / `serviceShippingProfileId` settings or rely on the defaults first). `src/integration/fulfilled-by-marketly.test.ts` shows the whole service (enrollment, inbound, Marketly-fulfilled order, warehouse shipping, fees, return, reconciliation, suspension) with real modules. `flows.liveListing()` sets up a seller with a live offer; `src/integration/order-lifecycle.test.ts` shows a whole order (checkout, payment, shipment, delivery, return, refund) with real modules. Real end-to-end flows for tests (staff with roles, customers, seller sign-in) are in `src/testing/flows.ts`; see `src/integration/*.test.ts`. Call their
 public APIs for real; in tests boot them (`only: [...]` pulls dependencies) rather than stubbing, unless
 you need to control an answer. Notifications already consumes the events your spec publishes and turns
 them into notices, so publish exactly the spec's events and payloads. Stub only modules that are not
@@ -175,6 +175,11 @@ beforeAll(async () => {
     apiStubs: { identity: { getAccounts: async (ids) => ids.map((id) => ({ id, name: 'Ana', … })) } },
   });
 });
+// apiStubs replace functions for callers through the public API; the module's own methods stay bound to it
+// (private fields keep working) and its routes, consumers and this.fn() calls run its own code, so stub every
+// function your code path reaches. A stubbed optional dependency that is off answers `ctx.tryUse` with its
+// stub, so { 'fulfillment-service': { isServiceOffer } } isolates a test without booting it. Never patch
+// `ctx.tryUse` or Object.assign onto services.
 const res = await app.inject({ method: 'POST', url: '/api/admin/mymodule/things', headers: auth(callers.staff()), payload: {…} });
 await app.kernel.events.drain();   // wait for event consumers
 ```

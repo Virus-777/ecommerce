@@ -15,6 +15,11 @@
  *   day-end:<reviewId>                    day-end review reminders (resolved by workqueues.day_end.completed)
  *   refund:<refundId>:destination         refund destination requests (resolved when the refund is sent)
  *   offer-missing-items:<offerId>         missing-items review notices (resolved by offers.offer.missing_items_reviewed)
+ *   cancellation:<cancellationId>:request cancellation requests to the seller or the Order Manager (resolved by orders.cancellation.decided)
+ *
+ * Fulfilled by Marketly groups (fulfilledBy marketly_service) never give the seller a shipping or dispatch
+ * notice: no new order, dispatch reminder, overdue dispatch or cancellation request (fulfillment-service tells
+ * the seller with its seller.fulfillment.* topics through notify).
  */
 import type { EventName, EventPayload } from '../../../kernel/events/index.js';
 import { OFFICIAL_STORE_ID, OFFICIAL_STORE_NAME, type Money } from '../../../spec/common.js';
@@ -195,6 +200,12 @@ export function queueArea(queueKey: string): string {
 
 const REVIEW_STATES = new Set(['pending_review', 'submitted', 'in_review', 'pending_approval']);
 
+/**
+ * A group the seller ships itself: seller-owned and not Fulfilled by Marketly. Only these give the seller
+ * shipping and dispatch notices (new order, dispatch reminder, overdue dispatch, cancellation requests).
+ */
+export const sellerShips = (g: { ownerType?: string | null; fulfilledBy?: string | null }) => g.ownerType === 'seller' && g.fulfilledBy !== 'marketly_service' && g.fulfilledBy !== 'official_warehouse';
+
 /* ------------------------------------------------------------------ the table */
 
 export const ROUTES: Routes = {
@@ -335,8 +346,9 @@ export const ROUTES: Routes = {
         dedupe: `order:${p.orderId}:accepted`,
         ...(p.customerId ? {} : { guestOrderLink: { orderId: p.orderId, email: p.contactEmail } }),
       },
+      // Fulfilled by Marketly groups: Marketly ships them (fulfillment-service sends seller.fulfillment.order_received)
       ...p.groups
-        .filter((g) => g.ownerType === 'seller' && g.sellerId)
+        .filter((g) => sellerShips(g) && g.sellerId)
         .map((g) => ({
           topic: 'seller.order.new',
           to: [seller(g.sellerId)],
@@ -365,7 +377,8 @@ export const ROUTES: Routes = {
           topic: 'seller.order.item_cancelled',
           to: [seller(p.sellerId)],
           link: sellerOrderLink(p.groupId, p.ref),
-          context: { order: { ref: p.ref }, item: { count: p.quantity } },
+          // Fulfilled by Marketly: Marketly's warehouse holds the units; the seller has nothing to stop
+          context: { order: { ref: p.ref }, item: { count: p.quantity }, cancel: { note: p.fulfilledBy === 'marketly_service' ? "Marketly's warehouse will not ship them." : 'Do not ship them.' } },
           subjects: { orderId: p.orderId, groupId: p.groupId },
           sellerId: p.sellerId,
           dedupe: `cancellation:${p.cancellationId}:${p.itemId}`,
@@ -385,7 +398,38 @@ export const ROUTES: Routes = {
       },
     ],
   },
+  'orders.cancellation.requested': {
+    sends: (p, f) => {
+      const count = p.itemIds.length;
+      const subjects = { orderId: p.orderId, groupId: p.groupId };
+      return [
+        // the seller answers only for the groups it ships itself
+        p.fulfilledBy === 'seller' &&
+          p.sellerId && {
+            topic: 'seller.order.cancellation_requested',
+            to: [seller(p.sellerId)],
+            link: sellerOrderLink(p.groupId, null, 'Respond'),
+            context: { item: { count }, due: { date: f.dateTime(p.respondBy) } },
+            subjects,
+            sellerId: p.sellerId,
+            deadline: p.respondBy,
+            dedupe: `cancellation:${p.cancellationId}:request`,
+          },
+        // Official Store and Fulfilled by Marketly groups already being picked: the Order Manager decides
+        p.fulfilledBy !== 'seller' && {
+          topic: 'staff.orders.cancellation_requested',
+          to: [role('order_manager')],
+          link: L('order', p.orderId, 'admin/order', 'Decide cancellation'),
+          context: { item: { count }, shipper: { name: p.fulfilledBy === 'marketly_service' ? 'Fulfilled by Marketly' : OFFICIAL_STORE_NAME }, due: { date: f.dateTime(p.respondBy) } },
+          subjects,
+          deadline: p.respondBy,
+          dedupe: `cancellation:${p.cancellationId}:request`,
+        },
+      ];
+    },
+  },
   'orders.cancellation.decided': {
+    resolve: (p) => [`cancellation:${p.cancellationId}:request`],
     sends: (p) => [
       {
         topic: 'customer.order.cancellation_decided',
@@ -567,7 +611,8 @@ export const ROUTES: Routes = {
   },
   'shipping.dispatch.overdue': {
     sends: (p, f) => [
-      p.ownerType === 'seller' &&
+      // Fulfilled by Marketly: the Marketly warehouse is late, not the seller (no seller notice; Warehouse Manager)
+      sellerShips(p) &&
         p.sellerId && {
           topic: 'seller.dispatch.overdue',
           to: [seller(p.sellerId)],
@@ -580,9 +625,9 @@ export const ROUTES: Routes = {
         },
       {
         topic: 'staff.shipping.dispatch_overdue',
-        to: [role('shipping_manager')],
-        link: L('order', p.orderId, 'ops/dispatch', 'Open dispatch queue', p.orderRef),
-        context: { order: { ref: p.orderRef }, seller: { name: p.ownerType === 'official' ? OFFICIAL_STORE_NAME : 'The seller' }, due: { date: f.dateTime(p.dueAt) } },
+        to: [role(p.fulfilledBy === 'marketly_service' ? 'warehouse_manager' : 'shipping_manager')],
+        link: p.fulfilledBy === 'marketly_service' ? L('order', p.orderId, 'ops/pick-pack', 'Open pick and pack', p.orderRef) : L('order', p.orderId, 'ops/dispatch', 'Open dispatch queue', p.orderRef),
+        context: { order: { ref: p.orderRef }, seller: { name: p.fulfilledBy === 'marketly_service' ? 'The Marketly warehouse (Fulfilled by Marketly)' : p.ownerType === 'official' ? OFFICIAL_STORE_NAME : 'The seller' }, due: { date: f.dateTime(p.dueAt) } },
         subjects: { orderId: p.orderId, groupId: p.groupId },
         deadline: p.dueAt,
         dedupe: `dispatch:${p.groupId}`,
@@ -977,7 +1022,9 @@ export const ROUTES: Routes = {
   },
   'inventory.stock.low': {
     sends: (p) => [
+      // Fulfilled by Marketly stock: fulfillment-service sends seller.fulfillment.stock_low instead
       p.ownerType !== 'official' &&
+        !p.serviceManaged &&
         p.sellerId && { topic: 'seller.stock.low', to: [seller(p.sellerId)], link: L('stock', p.stockItemId, 'seller/inventory', 'Update stock', p.sku), context: { stock: { label: p.label, available: p.available } }, sellerId: p.sellerId, dedupe: `stock:${p.stockItemId}` },
       p.ownerType === 'official' && { topic: 'staff.inventory.stock_shortage', to: [role('inventory_manager')], link: L('stock', p.stockItemId, 'ops/inventory', 'Open stock', p.sku), context: { stock: { label: p.label, available: p.available } }, dedupe: `stock:${p.stockItemId}` },
     ],

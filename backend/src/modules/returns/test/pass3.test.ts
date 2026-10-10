@@ -189,10 +189,10 @@ describe('replacements: allocated, cancelled with a release', () => {
 
     // shipping matches the parcel by the replacement's order items (no return id)
     const shipmentId = newId();
-    await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId, kind: 'replacement', orderId: m.order.id, groupId: m.order.groups[0]!.id, returnId: null, ownerType: 'seller', sellerId, lines: [{ orderItemId: itemId, title: 'Bowl', variantLabel: '', quantity: 1 }], shippedAt: now(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
+    await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId, kind: 'replacement', orderId: m.order.id, groupId: m.order.groups[0]!.id, returnId: null, ownerType: 'seller', fulfilledBy: 'seller', sellerId, lines: [{ orderItemId: itemId, title: 'Bowl', variantLabel: '', quantity: 1 }], shippedAt: now(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
     let row = (await h.service.core.repo.get('replacements', rep.id))!;
     expect(row).toMatchObject({ status: 'shipped', shipping_shipment_id: shipmentId });
-    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId, kind: 'replacement', orderId: m.order.id, groupId: m.order.groups[0]!.id, returnId: null, sellerId, lines: [{ orderItemId: itemId, title: 'Bowl', variantLabel: '', quantity: 1 }], deliveredAt: now() });
+    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId, kind: 'replacement', orderId: m.order.id, groupId: m.order.groups[0]!.id, returnId: null, sellerId, fulfilledBy: sellerId ? 'seller' : 'official_warehouse', lines: [{ orderItemId: itemId, title: 'Bowl', variantLabel: '', quantity: 1 }], deliveredAt: now() });
     row = (await h.service.core.repo.get('replacements', rep.id))!;
     expect(row.status).toBe('delivered');
     expect((await h.call('POST', `/api/admin/returns/replacements/${rep.id}/cancel`, staff(), { reason: 'late' })).status).toBe(409);
@@ -219,7 +219,7 @@ describe('case replacements on a case with a return', () => {
     expect(h.named('returns.replacement.created').find((e) => e.replacementId === rep.id)).toMatchObject({ returnId: id, caseId });
     // the return cannot get a second remedy
     expect((await h.call('POST', `/api/admin/returns/requests/${id}/remedy`, staff(), { kind: 'full_refund' }, idem())).status).toBe(409);
-    await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId: newId(), kind: 'replacement', orderId: m.order.id, groupId: m.order.groups[0]!.id, returnId: id, ownerType: 'official', sellerId: null, lines: [], shippedAt: now(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
+    await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId: newId(), kind: 'replacement', orderId: m.order.id, groupId: m.order.groups[0]!.id, returnId: id, ownerType: 'official', fulfilledBy: 'official_warehouse', sellerId: null, lines: [], shippedAt: now(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
     expect((await h.call('GET', `/api/admin/returns/requests/${id}`, staff())).body.detail).toMatchObject({ status: 'completed', replacement: { id: rep.id, status: 'shipped' } });
   });
 });

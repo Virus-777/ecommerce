@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { withStubs } from './app.js';
 import { enabledModules } from './modules.config.js';
 import { persistedQueries } from './spec/graphql.js';
 import { auth, buildTestApp, callers } from './testing/app.js';
@@ -80,5 +81,61 @@ describe('the launch configuration', () => {
 describe('module configuration', () => {
   it('refuses to start when an enabled module needs one that is off', async () => {
     await expect(buildTestApp({ modules: ['wishlist', 'customers', 'identity'] })).rejects.toThrow(/"wishlist" needs "catalog"/);
+  });
+
+  it('boots the phase 4 fulfillment service from MODULES like any other module', async () => {
+    const app = await buildTestApp({ env: { NODE_ENV: 'test', MODULES: [...enabledModules, 'fulfillment-service'].join(',') }, config: { launchPhase: 4 } });
+    try {
+      expect(app.kernel.modules).toContain('fulfillment-service');
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('apiStubs (tests)', () => {
+  /** A public API whose methods use private fields, like the module services */
+  class Counter {
+    #n = 0;
+    bump() {
+      return ++this.#n;
+    }
+    twice() {
+      this.bump();
+      return this.bump();
+    }
+  }
+
+  it("keeps the module's own methods (with #private fields) working next to a stubbed one", () => {
+    class Doubler extends Counter {
+      #step = 2;
+      double() {
+        return this.bump() * this.#step;
+      }
+    }
+    const service = new Doubler();
+    const api = withStubs(service, { bump: () => 100 }) as Doubler;
+    expect(api.bump()).toBe(100); // callers through the API get the stub
+    expect(api.double()).toBe(2); // the module's own method runs on the module: its private fields and its own bump
+    expect(api.twice()).toBe(3);
+    expect(api.twice).toBe(api.twice); // bound once
+    // a function assigned through the API later replaces the stub, on the module object too
+    (api as { bump: () => number }).bump = () => 7;
+    expect(api.bump()).toBe(7);
+    expect(service.bump()).toBe(7);
+    // a module that is off: only the stubs
+    expect('bump' in (withStubs(undefined, { bump: () => 1 }) as object)).toBe(true);
+  });
+
+  it('answers an optional lookup (tryUse) of a module that is off with its stub', async () => {
+    const app = await buildTestApp({ only: ['orders'], apiStubs: { 'fulfillment-service': { isServiceOffer: async () => true } } });
+    try {
+      expect(app.kernel.modules).not.toContain('fulfillment-service');
+      const ctx = (app.kernel.boot.apis.get('orders') as { core: { ctx: { tryUse(m: string): { isServiceOffer(id: string): Promise<boolean> } | undefined } } }).core.ctx;
+      expect(await ctx.tryUse('fulfillment-service')!.isServiceOffer('any')).toBe(true);
+      expect(ctx.tryUse('fulfillment-service')).toBeDefined();
+    } finally {
+      await app.close();
+    }
   });
 });

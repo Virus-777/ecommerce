@@ -8,7 +8,7 @@ import { money } from '../../../kernel/lib/money.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { AdminOrderDetail, AdminOrderRow, DelayedItemAlert, ItemPaidAmount, OrderDetail, OrderSummary, SellerOrderCounts, SellerOrderDetail, SellerOrderRow } from '../../../spec/orders.js';
-import { DAY, dayStart, endOfMarketDay, rangeStart } from '../domain/rules.js';
+import { DAY, dayStart, endOfMarketDay, isMarketlyService, rangeStart } from '../domain/rules.js';
 import type { AdminOrderFilter, GroupRec, OrderRec, SellerGroupFilter } from '../ports.js';
 import { notFound, type Agg, type Cfg, type Core } from './core.js';
 import type { Fees, Views } from './views.js';
@@ -19,7 +19,7 @@ export interface StoreViewer {
 }
 
 export type AdminListQuery = Omit<AdminOrderFilter, 'placedFrom' | 'placedTo'> & { placedFrom?: string; placedTo?: string; savedFilterId?: string };
-export type SellerListQuery = { tab?: string; tabs?: string | string[]; q?: string; placedFrom?: string; placedTo?: string; overdueOnly?: boolean; sort?: string };
+export type SellerListQuery = { tab?: string; tabs?: string | string[]; q?: string; placedFrom?: string; placedTo?: string; overdueOnly?: boolean; sort?: string; fulfilledBy?: string };
 
 const toPageRequest = (p: common.PageInput | undefined): PageRequest => {
   const limit = Math.min(Math.max(p?.limit ?? 24, 1), 100);
@@ -201,14 +201,15 @@ export class Reads {
       placedTo: q.placedTo ? dayStart(q.placedTo, tz, true) : null,
       overdueOnly: q.overdueOnly,
       sort: (['dispatch_deadline', 'newest', 'oldest'].includes(String(q.sort)) ? q.sort : 'dispatch_deadline') as SellerGroupFilter['sort'],
+      fulfilledBy: q.fulfilledBy === 'seller' || q.fulfilledBy === 'marketly_service' ? q.fulfilledBy : undefined,
     };
   }
 
   async sellerRows(sellerId: string, q: SellerListQuery, page: PageRequest): Promise<common.Page<SellerOrderRow>> {
     const rows = await this.core.repo.sellerGroups(sellerId, this.sellerFilter(q), page, this.core.now());
     const aggs = await this.core.loadMany(rows.items.map((g) => g.order_id));
-    const cfg = await this.core.cfg();
-    return { ...rows, items: rows.items.map((g) => this.views.sellerRow(aggs.get(g.order_id)!, aggs.get(g.order_id)!.groups.find((x) => x.id === g.id)!, cfg)) };
+    const [cfg, stages] = await Promise.all([this.core.cfg(), this.core.warehouseStages(rows.items.filter(isMarketlyService).map((g) => g.order_id))]);
+    return { ...rows, items: rows.items.map((g) => this.views.sellerRow(aggs.get(g.order_id)!, aggs.get(g.order_id)!.groups.find((x) => x.id === g.id)!, cfg, stages)) };
   }
 
   async sellerOrder(agg: Agg, sellerId: string, cfg: Cfg) {
@@ -273,6 +274,7 @@ export class Reads {
       fulfillmentStatus: m.fulfillmentStatus,
       paymentState: m.paymentState,
       flag: m.flag,
+      fulfilledBy: ['official_warehouse', 'seller', 'marketly_service'].includes(String(m.fulfilledBy)) ? (m.fulfilledBy as AdminOrderFilter['fulfilledBy']) : undefined,
       placedFrom: m.placedFrom ? dayStart(String(m.placedFrom).slice(0, 10), tz) : null,
       placedTo: m.placedTo ? dayStart(String(m.placedTo).slice(0, 10), tz, true) : null,
     };

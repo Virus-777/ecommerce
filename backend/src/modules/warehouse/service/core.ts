@@ -180,6 +180,38 @@ export class Core {
     return last[0]?.location_id ?? null;
   }
 
+  /** Fulfilled by Marketly: where service stock lives (fulfillment-service.getServiceLocation), else inventory's default company location */
+  async serviceLocationId(): Promise<string | null> {
+    const svc = await this.soft('fulfillment-service', 'service location', (fs) => fs.getServiceLocation());
+    if (svc?.locationId) return svc.locationId;
+    const inv = await this.ctx
+      .use('inventory')
+      .getDefaultLocation()
+      .catch((err) => {
+        if (!isAppError(err)) throw err;
+        return null;
+      });
+    return inv?.id ?? null;
+  }
+
+  /**
+   * The ship-from address of a fulfillment's labels: a Fulfilled by Marketly package leaves from the service
+   * location's address (decision D1); null for Official Store packages (shipping uses its own origin).
+   */
+  async labelOrigin(f: { fulfilled_by: string; location_id: string }): Promise<common.Address | null> {
+    if (f.fulfilled_by !== 'marketly_service') return null;
+    const svc = await this.soft('fulfillment-service', 'service location', (fs) => fs.getServiceLocation());
+    if (svc && svc.locationId === f.location_id && svc.address) return svc.address;
+    const locations = await this.ctx
+      .use('inventory')
+      .getLocations({ ownerType: 'official' })
+      .catch((err) => {
+        if (!isAppError(err)) throw err;
+        return [];
+      });
+    return locations.find((l) => l.id === f.location_id)?.address ?? svc?.address ?? null;
+  }
+
   /** A generated file (packing slip, put-away labels) stored privately and signed for the caller */
   async fileLink(o: { fileName: string; contentType: string; bytes: Uint8Array; principal?: Principal | null; reason: string }): Promise<FileLink> {
     const media = this.ctx.tryUse('media');

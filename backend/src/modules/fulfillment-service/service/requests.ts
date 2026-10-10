@@ -1,20 +1,26 @@
 /**
- * Fulfillment requests: orders of service offers routed to our warehouse while the seller stays the seller of
- * record. Created from orders.order.placed (or by orders directly), they reserve seller-owned units; item
- * cancellations release them; the dispatch ships them and accrues pick-and-pack and order handling fees.
- * Warehouse progress comes from the warehouse's task for the seller group when there is one.
+ * Fulfillment requests: orders of service offers our warehouse ships while the seller stays the seller of record.
+ * Created from orders.order.accepted for groups with fulfilledBy marketly_service (warehouse creates the pick work
+ * from the same event), they reserve seller-owned units in the ownership ledger; cancellations, split items and the
+ * warehouse's progress follow; each dispatched package ships its lines and accrues pick-and-pack, and the request
+ * accrues order handling once.
  */
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type { FulfillmentRequest } from '../../../spec/fulfillment-service.js';
-import type { FulfillmentTask } from '../../../spec/orders.js';
-import { SYSTEM } from '../domain/rules.js';
+import { plural, SYSTEM } from '../domain/rules.js';
 import type { RequestItem, RequestRec, SkuRec } from '../ports.js';
 import { invalid, Part } from './core.js';
 
-/** Warehouse task status → request state (shipping is recorded from shipping.shipment.dispatched) */
-const WAREHOUSE_STATE: Record<string, FulfillmentRequest['state']> = { picking: 'picking', picked: 'picking', packing: 'picking', packed: 'packed' };
+/** Warehouse fulfilment status → request state (dispatch comes from shipping.shipment.dispatched) */
+const WAREHOUSE_STATE: Record<string, FulfillmentRequest['state']> = { awaiting_pick: 'open', picking: 'picking', picked: 'picking', packing: 'picking', packed: 'packed', on_hold: 'short' };
+const RANK: Record<string, number> = { open: 0, short: 0, picking: 1, packed: 2 };
+const DONE = ['shipped', 'cancelled'];
+
+/** Units of an item still to ship */
+const openOf = (i: RequestItem) => Math.max(0, i.quantity - i.cancelled - (i.shipped ?? 0));
+const shortOf = (items: readonly RequestItem[]) => items.some((i) => openOf(i) > i.reserved);
 
 export class RequestsPart extends Part {
   async list(q: { state?: string; sellerId?: string; overdue?: boolean }, page: PageRequest) {
@@ -26,41 +32,18 @@ export class RequestsPart extends Part {
       if (!q.state) where.state = ['open', 'picking', 'packed', 'short'];
     }
     const res = await this.repo.page('fulfillment_requests', where, page, { order: { column: 'created_at', direction: 'desc' } });
-    const rows = await this.withWarehouseProgress(res.items);
-    return { ...res, items: rows.map((r) => this.parts.views.request(r)) };
-  }
-
-  /** The warehouse's task for each seller group, when it works one (state and task id) */
-  private async withWarehouseProgress(rows: readonly RequestRec[]): Promise<RequestRec[]> {
-    const open = rows.filter((r) => r.state !== 'shipped' && r.state !== 'cancelled');
-    if (!open.length) return [...rows];
-    let tasks: Record<string, { id: string; status: string } | null> = {};
-    try {
-      tasks = (await this.ctx.use('warehouse').getTasksForOrderGroups(open.map((r) => r.seller_group_id))) as never;
-    } catch (err) {
-      this.ctx.log.warn({ err }, 'fulfillment-service: warehouse progress unavailable');
-    }
-    const out: RequestRec[] = [];
-    for (const r of rows) {
-      const t = tasks[r.seller_group_id];
-      if (!t || r.state === 'shipped' || r.state === 'cancelled') {
-        out.push(r);
-        continue;
-      }
-      const state = WAREHOUSE_STATE[t.status] ?? r.state;
-      if (t.id !== r.warehouse_task_id || (state !== r.state && r.state !== 'short')) {
-        out.push(await this.repo.update('fulfillment_requests', r.id, { warehouse_task_id: t.id, ...(r.state !== 'short' ? { state } : {}) }));
-      } else out.push(r);
-    }
-    return out;
+    return { ...res, items: res.items.map((r) => this.parts.views.request(r)) };
   }
 
   /* ---------------------------------------------------------------- creation */
 
-  /** Called when a seller group contains service offers (orders), or from orders.order.placed */
-  async create(orderId: string, sellerGroupId: string, items: { orderItemId: string; offerId: string; quantity: number }[], task?: FulfillmentTask | null): Promise<FulfillmentRequest> {
+  /**
+   * One request per seller group: seller-owned units reserved out of Available (short when there are not enough).
+   * Same group again → the existing request.
+   */
+  async create(orderId: string, sellerGroupId: string, items: { orderItemId: string; offerId: string; quantity: number }[], meta?: { orderRef: string; dispatchBy: Date }): Promise<{ request: FulfillmentRequest; created: boolean }> {
     const existing = await this.repo.findOne('fulfillment_requests', { seller_group_id: sellerGroupId });
-    if (existing) return this.parts.views.request(existing);
+    if (existing) return { request: this.parts.views.request(existing), created: false };
     if (!isUuid(orderId) || !isUuid(sellerGroupId)) throw invalid([{ path: 'orderId', message: 'Order and seller group ids are required' }]);
     const issues: { path: string; message: string }[] = [];
     items.forEach((i, n) => {
@@ -74,131 +57,242 @@ export class RequestsPart extends Part {
     const sellerIds = new Set(service.map((i) => skus.get(i.offerId)!.seller_id));
     if (sellerIds.size > 1) throw invalid([{ path: 'items', message: 'A seller group belongs to one seller' }]);
     const sellerId = [...sellerIds][0]!;
-    const t = task === undefined ? await this.core.soft('orders', 'fulfillment task', (o) => o.getFulfillmentTask(sellerGroupId)) : task;
-    const orderRef = t?.orderRef ?? '';
-    const dispatchBy = t?.dispatchDeadline?.dueAt ? new Date(t.dispatchDeadline.dueAt) : new Date(this.now().getTime() + 48 * 3_600_000);
+    let orderRef = meta?.orderRef ?? '';
+    let dispatchBy = meta?.dispatchBy;
+    if (!meta) {
+      const t = await this.core.soft('orders', 'fulfillment task', (o) => o.getFulfillmentTask(sellerGroupId));
+      orderRef = t?.orderRef ?? '';
+      dispatchBy = t?.dispatchDeadline?.dueAt ? new Date(t.dispatchDeadline.dueAt) : undefined;
+    }
+    const due = dispatchBy && !Number.isNaN(dispatchBy.getTime()) ? dispatchBy : new Date(this.now().getTime() + 48 * 3_600_000);
     const info = await this.core.stockItems(service.map((i) => i.offerId));
     const id = newId();
-    const row = await this.repo.transaction(async (tx) => {
+    const result = await this.repo.transaction(async (tx) => {
       await tx.lockSkus([...new Set(service.map((i) => skus.get(i.offerId)!.id))]);
       const again = await tx.findOne('fulfillment_requests', { seller_group_id: sellerGroupId });
-      if (again) return again;
+      if (again) return { row: again, created: false };
       const balances = await tx.balances([...skus.values()].map((s) => s.id));
-      let short = false;
       const lines: RequestItem[] = [];
       for (const i of service) {
         const s = skus.get(i.offerId)!;
         const bal = balances.get(s.id) ?? {};
         const take = Math.min(i.quantity, Math.max(0, bal.available ?? 0));
-        if (take < i.quantity) short = true;
         bal.available = (bal.available ?? 0) - take;
         balances.set(s.id, bal);
         await this.core.move(tx, { sellerId, skuEnrollmentId: s.id, movement: 'reserved', quantity: take, from: 'available', to: 'reserved', reference: orderRef || orderId, actor: SYSTEM });
         lines.push(itemOf(i, s, info.get(i.offerId)?.label ?? s.sku, take, orderRef));
       }
-      return tx.insert('fulfillment_requests', {
+      const row = await tx.insert('fulfillment_requests', {
         id,
         order_id: orderId,
+        order_ref: orderRef,
         seller_group_id: sellerGroupId,
         seller_id: sellerId,
-        state: short ? 'short' : 'open',
+        state: shortOf(lines) ? 'short' : 'open',
         items: lines,
         warehouse_task_id: null,
         shipment_id: null,
-        dispatch_by: dispatchBy,
+        dispatch_by: due,
+        short_reported_at: null,
         created_at: this.now(),
       });
+      return { row, created: true };
     });
-    if (row.state === 'short') this.ctx.log.warn({ requestId: row.id, orderRef }, 'fulfillment-service: not enough seller-owned stock for a fulfillment request');
-    return this.parts.views.request(row);
+    if (result.created && result.row.state === 'short') await this.raiseShort(result.row, 'Not enough seller-owned stock at our warehouse for this order');
+    return { request: this.parts.views.request(result.row), created: result.created };
   }
 
-  /** orders.order.placed: a fulfillment request for each seller group with service offers */
-  async onOrderPlaced(e: EventPayload<'orders.order.placed'>): Promise<void> {
+  /** orders.order.accepted: a request for each group Marketly fulfils; the seller hears about it */
+  async onOrderAccepted(e: EventPayload<'orders.order.accepted'>): Promise<void> {
     for (const g of e.groups) {
-      if (g.ownerType !== 'seller' || !g.sellerId) continue;
-      // cheap check first: does this seller use the service at all
-      if (!(await this.repo.count('sku_enrollments', { seller_id: g.sellerId, state: ['active', 'inactive'] }))) continue;
-      if (await this.repo.count('fulfillment_requests', { seller_group_id: g.groupId })) continue;
-      const task = await this.core.soft('orders', 'fulfillment task', (o) => o.getFulfillmentTask(g.groupId));
-      if (!task) continue;
-      const lines = task.openLines.map((l) => ({ orderItemId: l.orderItemId, offerId: l.offerId, quantity: l.quantityToShip }));
-      const service = await this.repo.find('sku_enrollments', { offer_id: [...new Set(lines.map((l) => l.offerId))], state: ['active', 'inactive'] });
-      if (!service.length) continue;
+      if (g.fulfilledBy !== 'marketly_service') continue;
+      const ids = new Set(g.itemIds);
+      const items = e.items.filter((i) => ids.has(i.orderItemId)).map((i) => ({ orderItemId: i.orderItemId, offerId: i.offerId, quantity: i.quantity }));
+      if (!items.length) continue;
       try {
-        await this.create(e.orderId, g.groupId, lines, task);
+        const { request, created } = await this.create(e.orderId, g.groupId, items, { orderRef: e.ref, dispatchBy: new Date(g.dispatchBy) });
+        if (!created) continue;
+        const units = items.reduce((n, i) => n + i.quantity, 0);
+        await this.core.notifySeller(request.sellerId, 'seller.fulfillment.order_received', { order: { ref: e.ref }, items: plural(units, 'unit') }, { kind: 'seller_order', id: g.groupId, ref: e.ref, label: 'View order', screen: 'seller/order' }, `fs:order:${g.groupId}`);
       } catch (err) {
         this.ctx.log.warn({ err, orderId: e.orderId, groupId: g.groupId }, 'fulfillment-service: fulfillment request not created');
       }
     }
   }
 
-  /** orders.item.cancelled: shorten or cancel the request and release its seller-owned reservation */
+  /** orders.order.cancelled (safety net): open requests of the order are cancelled and their reservations released */
+  async onOrderCancelled(e: EventPayload<'orders.order.cancelled'>): Promise<void> {
+    if (!isUuid(e.orderId)) return;
+    const rows = await this.repo.find('fulfillment_requests', { order_id: e.orderId, state: { op: 'not in', value: DONE } });
+    for (const r of rows) {
+      await this.repo.transaction(async (tx) => {
+        if (!(await tx.claim(`order-cancelled:${r.id}`))) return;
+        const locked = (await tx.get('fulfillment_requests', r.id, { forUpdate: true }))!;
+        if (DONE.includes(locked.state)) return;
+        const items = locked.items.map((i) => ({ ...i, shipped: i.shipped ?? 0 }));
+        for (const i of items) {
+          await this.core.move(tx, { sellerId: locked.seller_id, skuEnrollmentId: i.skuEnrollmentId, movement: 'released', quantity: i.reserved, from: 'reserved', to: 'available', reference: locked.order_ref || e.ref, reason: `Order cancelled (${e.reason === 'payment_declined' ? 'payment declined' : 'all items cancelled'})`, actor: SYSTEM });
+          i.cancelled += openOf(i);
+          i.reserved = 0;
+        }
+        const anyShipped = items.some((i) => i.shipped > 0);
+        await tx.update('fulfillment_requests', r.id, { items, state: anyShipped ? 'shipped' : 'cancelled' });
+      });
+      await this.core.resolveWork(`fs_request_short:${r.id}`, 'Order cancelled');
+    }
+  }
+
+  /** orders.item.cancelled: shorten or cancel the request and release its seller-owned reservation (once per cancellation) */
   async onItemCancelled(e: EventPayload<'orders.item.cancelled'>): Promise<void> {
     const r = await this.repo.findOne('fulfillment_requests', { seller_group_id: e.groupId });
-    if (!r || r.state === 'shipped' || r.state === 'cancelled') return;
+    if (!r || DONE.includes(r.state)) return;
     if (!r.items.some((i) => i.orderItemId === e.itemId)) return;
-    await this.repo.transaction(async (tx) => {
+    const after = await this.repo.transaction(async (tx) => {
+      if (!(await tx.claim(`item-cancelled:${e.cancellationId}:${e.itemId}`))) return null;
       const locked = (await tx.get('fulfillment_requests', r.id, { forUpdate: true }))!;
-      if (locked.state === 'shipped' || locked.state === 'cancelled') return;
-      const items = locked.items.map((i) => ({ ...i }));
+      if (DONE.includes(locked.state)) return null;
+      const items = locked.items.map((i) => ({ ...i, shipped: i.shipped ?? 0 }));
       const item = items.find((i) => i.orderItemId === e.itemId)!;
-      const open = item.quantity - item.cancelled;
-      const n = Math.min(open, Math.max(0, e.quantity));
-      if (!n) return;
-      // the cancellation id makes a redelivered event a no-op
-      const marker = `cancel:${e.cancellationId}`;
-      if (await tx.findOne('ownership_ledger', { sku_enrollment_id: item.skuEnrollmentId, reference: marker })) return;
-      const release = Math.min(n, item.reserved);
+      const n = Math.min(openOf(item), Math.max(0, e.quantity));
+      if (!n) return null;
+      // a short item keeps its reservation for the units still to ship
+      const release = Math.max(0, Math.min(item.reserved, item.reserved - (openOf(item) - n)));
       item.cancelled += n;
       item.reserved -= release;
-      await this.core.move(tx, { sellerId: locked.seller_id, skuEnrollmentId: item.skuEnrollmentId, movement: 'released', quantity: release, from: 'reserved', to: 'available', reference: marker, reason: `Order item cancelled (${item.orderRef || e.ref})`, actor: SYSTEM });
-      const allCancelled = items.every((i) => i.cancelled >= i.quantity);
-      const short = items.some((i) => i.quantity - i.cancelled > i.reserved);
-      await tx.update('fulfillment_requests', r.id, { items, state: allCancelled ? 'cancelled' : locked.state === 'short' && !short ? 'open' : locked.state });
+      await this.core.move(tx, { sellerId: locked.seller_id, skuEnrollmentId: item.skuEnrollmentId, movement: 'released', quantity: release, from: 'reserved', to: 'available', reference: `cancel:${e.cancellationId}`, reason: `Order item cancelled (${item.orderRef || e.ref})`, actor: SYSTEM });
+      return tx.update('fulfillment_requests', r.id, { items, state: this.stateAfter(locked.state, items) });
+    });
+    if (after && after.state !== 'short') await this.core.resolveWork(`fs_request_short:${r.id}`, after.state === 'cancelled' ? 'Order items cancelled' : 'No longer short');
+  }
+
+  /** orders.item.split: the request item is split so later events naming newItemId match it */
+  async onItemSplit(e: EventPayload<'orders.item.split'>): Promise<void> {
+    const r = await this.repo.findOne('fulfillment_requests', { seller_group_id: e.groupId });
+    if (!r || !r.items.some((i) => i.orderItemId === e.itemId) || r.items.some((i) => i.orderItemId === e.newItemId)) return;
+    await this.repo.transaction(async (tx) => {
+      if (!(await tx.claim(`item-split:${e.newItemId}`))) return;
+      const locked = (await tx.get('fulfillment_requests', r.id, { forUpdate: true }))!;
+      const items = locked.items.map((i) => ({ ...i, shipped: i.shipped ?? 0 }));
+      const idx = items.findIndex((i) => i.orderItemId === e.itemId);
+      if (idx < 0 || items.some((i) => i.orderItemId === e.newItemId)) return;
+      const orig = items[idx]!;
+      const moving = Math.min(Math.max(0, e.quantity), orig.quantity);
+      if (!moving) return;
+      // the split-off units: shipped ones first for a return, otherwise units still to ship first
+      const parts = { open: openOf(orig), shipped: orig.shipped, cancelled: orig.cancelled };
+      const order: (keyof typeof parts)[] = e.reason === 'return' ? ['shipped', 'open', 'cancelled'] : e.reason === 'cancellation' ? ['open', 'cancelled', 'shipped'] : ['open', 'shipped', 'cancelled'];
+      const taken = { open: 0, shipped: 0, cancelled: 0 };
+      let left = moving;
+      for (const k of order) {
+        const t = Math.min(left, parts[k]);
+        taken[k] = t;
+        left -= t;
+      }
+      const origOpen = parts.open - taken.open;
+      const keepReserved = Math.min(orig.reserved, origOpen);
+      const next: RequestItem = { ...orig, orderItemId: e.newItemId, quantity: moving, cancelled: taken.cancelled, shipped: taken.shipped, picked: Math.min(orig.picked, taken.shipped), reserved: Math.min(orig.reserved - keepReserved, taken.open) };
+      orig.quantity -= moving;
+      orig.cancelled -= taken.cancelled;
+      orig.shipped -= taken.shipped;
+      orig.picked = Math.max(0, orig.picked - next.picked);
+      orig.reserved = orig.reserved - next.reserved;
+      items.splice(idx + 1, 0, next);
+      await tx.update('fulfillment_requests', r.id, { items });
     });
   }
 
-  /** shipping.shipment.dispatched: shipped, reserved units leave, pick-and-pack and order handling fees */
+  /**
+   * shipping.shipment.dispatched for a Marketly-fulfilled group: this package's lines leave Reserved (claimed per
+   * shipment); pick-and-pack per package and size tier, order handling once per request; the request is shipped when
+   * every uncancelled unit has shipped.
+   */
   async onShipmentDispatched(e: EventPayload<'shipping.shipment.dispatched'>): Promise<void> {
-    if (e.kind === 'return') return;
+    if (e.kind === 'return' || (e.fulfilledBy && e.fulfilledBy !== 'marketly_service')) return;
     const r = await this.repo.findOne('fulfillment_requests', { seller_group_id: e.groupId });
-    if (!r || r.state === 'shipped' || r.state === 'cancelled') return;
+    if (!r || DONE.includes(r.state)) return;
     const skus = new Map((await this.repo.find('sku_enrollments', { id: [...new Set(r.items.map((i) => i.skuEnrollmentId))] })).map((s) => [s.id, s]));
     const schedule = await this.core.currentSchedule();
-    await this.repo.transaction(async (tx) => {
+    const shipmentKey = isUuid(e.shipmentId) ? e.shipmentId : `${e.groupId}:${e.shippedAt}`;
+    const after = await this.repo.transaction(async (tx) => {
+      if (!(await tx.claim(`shipment-dispatched:${shipmentKey}`))) return null;
       const locked = (await tx.get('fulfillment_requests', r.id, { forUpdate: true }))!;
-      if (locked.state === 'shipped' || locked.state === 'cancelled') return;
-      const items = locked.items.map((i) => ({ ...i }));
-      const shippedQty = new Map(e.lines.map((l) => [l.orderItemId, l.quantity]));
+      if (DONE.includes(locked.state)) return null;
+      const items = locked.items.map((i) => ({ ...i, shipped: i.shipped ?? 0 }));
+      const shippedQty = new Map<string, number>();
+      for (const l of e.lines ?? []) shippedQty.set(l.orderItemId, (shippedQty.get(l.orderItemId) ?? 0) + l.quantity);
       const byTier = new Map<string, number>();
+      const ref = locked.order_ref || items[0]?.orderRef || e.orderId;
       for (const i of items) {
-        const open = i.quantity - i.cancelled;
-        const n = shippedQty.size ? Math.min(open, shippedQty.get(i.orderItemId) ?? 0) : open;
+        const n = shippedQty.size ? Math.min(openOf(i), shippedQty.get(i.orderItemId) ?? 0) : openOf(i);
         if (!n) continue;
         const fromReserved = Math.min(n, i.reserved);
-        await this.core.move(tx, { sellerId: locked.seller_id, skuEnrollmentId: i.skuEnrollmentId, movement: 'shipped', quantity: fromReserved, from: 'reserved', to: null, reference: i.orderRef || e.orderId, actor: SYSTEM });
+        await this.core.move(tx, { sellerId: locked.seller_id, skuEnrollmentId: i.skuEnrollmentId, movement: 'shipped', quantity: fromReserved, from: 'reserved', to: null, reference: ref, actor: SYSTEM });
+        // picked although the ledger had not reserved them (a short request the warehouse could fill)
+        await this.core.move(tx, { sellerId: locked.seller_id, skuEnrollmentId: i.skuEnrollmentId, movement: 'shipped', quantity: n - fromReserved, from: 'available', to: null, reference: ref, reason: 'Shipped beyond the reservation', actor: SYSTEM });
         i.reserved -= fromReserved;
-        i.picked = n;
+        i.shipped += n;
+        i.picked = Math.max(i.picked, i.shipped);
         const tier = skus.get(i.skuEnrollmentId)?.size_tier ?? 'standard';
         byTier.set(tier, (byTier.get(tier) ?? 0) + n);
       }
-      const ref = items[0]?.orderRef || null;
+      if (!byTier.size) return null;
       for (const [tier, units] of byTier) {
-        await this.core.accrue(tx, { sellerId: locked.seller_id, rateType: 'pick_pack_per_unit', sizeTier: tier, units, reference: ref, key: `pick_pack:${locked.id}:${tier}` }, schedule.rates);
+        await this.core.accrue(tx, { sellerId: locked.seller_id, rateType: 'pick_pack_per_unit', sizeTier: tier, units, reference: ref, key: `pick_pack:${locked.id}:${shipmentKey}:${tier}` }, schedule.rates);
       }
-      if (byTier.size) await this.core.accrue(tx, { sellerId: locked.seller_id, rateType: 'order_handling', sizeTier: 'any', units: 1, reference: ref, key: `order_handling:${locked.id}` }, schedule.rates);
-      await tx.update('fulfillment_requests', locked.id, { state: 'shipped', shipment_id: isUuid(e.shipmentId) ? e.shipmentId : null, items });
+      await this.core.accrue(tx, { sellerId: locked.seller_id, rateType: 'order_handling', sizeTier: 'any', units: 1, reference: ref, key: `order_handling:${locked.id}` }, schedule.rates);
+      const allShipped = items.every((i) => openOf(i) === 0);
+      return tx.update('fulfillment_requests', locked.id, { state: allShipped ? 'shipped' : locked.state === 'short' && !shortOf(items) ? 'packed' : locked.state, shipment_id: isUuid(e.shipmentId) ? e.shipmentId : locked.shipment_id, items });
     });
+    if (after?.state === 'shipped') await this.core.resolveWork(`fs_request_short:${r.id}`, 'Shipped');
   }
 
-  /** Shipped request items of a seller (returns matching) */
-  async shippedItems(sellerId: string, limit = 2000): Promise<{ request: RequestRec; item: RequestItem }[]> {
-    const rows = await this.repo.find('fulfillment_requests', { seller_id: sellerId, state: 'shipped' }, { orderBy: [['created_at', 'desc']], limit });
-    return rows.flatMap((request) => request.items.map((item) => ({ request, item })));
+  /** warehouse.fulfillment.status_changed: the request follows the warehouse task (never backwards, never after dispatch) */
+  async onWarehouseStatus(e: EventPayload<'warehouse.fulfillment.status_changed'>): Promise<void> {
+    if (e.fulfilledBy !== 'marketly_service') return;
+    const target = WAREHOUSE_STATE[e.to];
+    if (!target) return;
+    const r = await this.repo.findOne('fulfillment_requests', { seller_group_id: e.sellerGroupId });
+    if (!r || DONE.includes(r.state)) return;
+    const after = await this.repo.transaction(async (tx) => {
+      const locked = (await tx.get('fulfillment_requests', r.id, { forUpdate: true }))!;
+      if (DONE.includes(locked.state)) return null;
+      const patch: Partial<RequestRec> = { warehouse_task_id: isUuid(e.fulfillmentId) ? e.fulfillmentId : locked.warehouse_task_id };
+      if (target === 'short') {
+        if (locked.state !== 'short') patch.state = 'short';
+        patch.short_reported_at = this.now();
+      } else if (locked.state === 'short' ? target !== 'open' : (RANK[target] ?? 0) > (RANK[locked.state] ?? 0)) {
+        patch.state = target;
+      }
+      return tx.update('fulfillment_requests', locked.id, patch);
+    });
+    if (!after) return;
+    if (target === 'short') await this.raiseShort(after, e.reason ? `The warehouse could not pick everything: ${e.reason}` : 'The warehouse could not pick everything');
+    else if (after.state !== 'short') await this.core.resolveWork(`fs_request_short:${after.id}`, `Warehouse: ${e.to}`);
+  }
+
+  private stateAfter(state: string, items: readonly RequestItem[]): string {
+    if (items.every((i) => i.cancelled >= i.quantity)) return 'cancelled';
+    if (items.every((i) => openOf(i) === 0)) return 'shipped';
+    if (state === 'short' && !shortOf(items)) return 'open';
+    return state;
+  }
+
+  private async raiseShort(r: RequestRec, summary: string) {
+    const names = await this.core.sellerNames([r.seller_id]);
+    await this.core.raise({
+      queueKey: 'fulfillment.requests',
+      kind: 'pick_pack',
+      title: `Fulfilled by Marketly order ${r.order_ref || r.order_id} is short`,
+      summary: `${names.get(r.seller_id) ?? 'Seller'} · ${summary}`,
+      subject: { type: 'order', id: r.order_id, ref: r.order_ref || null, label: 'Fulfilled by Marketly order' },
+      sellerId: r.seller_id,
+      dueAt: r.dispatch_by.toISOString(),
+      priority: 'high',
+      dedupeKey: `fs_request_short:${r.id}`,
+    });
   }
 }
 
 function itemOf(i: { orderItemId: string; offerId: string; quantity: number }, s: SkuRec, title: string, reserved: number, orderRef: string): RequestItem {
-  return { orderItemId: i.orderItemId, offerId: i.offerId, skuEnrollmentId: s.id, stockItemId: s.inventory_item_id, sku: s.sku, title, sizeTier: s.size_tier, quantity: i.quantity, cancelled: 0, picked: 0, reserved, orderRef };
+  return { orderItemId: i.orderItemId, offerId: i.offerId, skuEnrollmentId: s.id, stockItemId: s.inventory_item_id, sku: s.sku, title, sizeTier: s.size_tier, quantity: i.quantity, cancelled: 0, picked: 0, shipped: 0, reserved, orderRef };
 }

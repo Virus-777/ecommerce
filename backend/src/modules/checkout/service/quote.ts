@@ -17,6 +17,7 @@ import {
   OFFICIAL_SELLER,
   m,
   packageKey,
+  shippingOf,
   stableHash,
   type LineInfo,
   type Shippability,
@@ -127,6 +128,7 @@ export class Quoter {
                 logo: null,
               };
         const variant = cmp?.variant;
+        const shipping = shippingOf(offer);
         const info: LineInfo = {
           title: cmp?.product.title ?? 'Item',
           variantLabel: Object.values(variant?.options ?? {}).join(' · '),
@@ -143,7 +145,8 @@ export class Quoter {
             policyVersionId: null,
           },
           responseTargetDays: terms?.responseTargetBusinessDays ?? null,
-          dispatch: { businessDays: offer.dispatch.businessDays, sameDayCutoff: offer.dispatch.sameDayCutoff ?? null, shipsFrom: offer.dispatch.shipsFrom },
+          // the effective terms (Offer.shipping): Marketly's dispatch and ships-from for a Marketly-fulfilled offer
+          dispatch: { businessDays: shipping.dispatch.businessDays, sameDayCutoff: shipping.dispatch.sameDayCutoff ?? null, shipsFrom: shipping.dispatch.shipsFrom },
         };
         out.set(id, { offer, info, variantOffers: (cmp?.offers ?? []).filter((v) => v.status === 'active') });
       }),
@@ -151,20 +154,23 @@ export class Quoter {
     return out;
   }
 
-  /** A new session line for an offer at its current price */
-  lineFrom(sessionId: string, offer: offers.Offer, quantity: number, cartItemId: string | null, pkgKey?: string): LineRow {
+  /** A new session line for an offer at its current price, with its effective fulfilment (Offer.shipping) */
+  lineFrom(sessionId: string, offer: offers.Offer, quantity: number, cartItemId: string | null): LineRow {
+    const shipping = shippingOf(offer);
+    const sellerId = offer.ownerType === 'official' ? null : (offer.sellerId ?? null);
     return {
       id: newId(),
       session_id: sessionId,
       cart_item_id: cartItemId,
       offer_id: offer.id,
       owner_type: offer.ownerType,
-      seller_id: offer.ownerType === 'official' ? null : (offer.sellerId ?? null),
+      seller_id: sellerId,
       product_id: offer.productId,
       variant_id: offer.variantId,
       stock_item_id: offer.stockItemId,
-      profile_id: offer.shippingProfileId,
-      package_key: pkgKey ?? packageKey(offer.ownerType, offer.ownerType === 'official' ? null : offer.sellerId, offer.dispatch.shipsFrom),
+      profile_id: shipping.profileId,
+      fulfilled_by: shipping.fulfilledBy,
+      package_key: packageKey(offer.ownerType, sellerId, shipping.fulfilledBy, shipping.dispatch.shipsFrom),
       quantity,
       unit_price: offer.price.amount,
       terms_version: offer.termsVersion,
@@ -200,13 +206,14 @@ export class Quoter {
     for (const [key, lines] of groups) {
       const first = lines[0]!;
       const info = d.quote.lineInfo[first.id];
-      const shipsFrom = info?.dispatch.shipsFrom ?? key.split(':').slice(2).join(':');
       const prev = d.packages.get(key);
+      const shipsFrom = info?.dispatch.shipsFrom ?? prev?.ships_from ?? key.split(':').slice(3).join(':');
       const row: PackageRow = {
         session_id: d.session.id,
         package_key: key,
         owner_type: first.owner_type,
         seller_id: first.seller_id,
+        fulfilled_by: first.fulfilled_by,
         ships_from: shipsFrom,
         options: [],
         selected_option_id: null,
@@ -217,6 +224,8 @@ export class Quoter {
         const q: shipping.PackageQuote = await api.quoteOptions({
           ownerType: first.owner_type as 'official' | 'seller',
           sellerId: first.seller_id,
+          // marketly_service: Official settings, closures and cutoffs; origin the service location
+          fulfilledBy: first.fulfilled_by,
           shipsFrom,
           items: lines.map((l) => {
             const i = d.quote.lineInfo[l.id];

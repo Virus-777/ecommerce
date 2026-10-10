@@ -609,6 +609,7 @@ How things get delivered: carriers and services, destinations and excluded areas
 |---|---|
 | ownerType | `enum(official|seller)` |
 | sellerId | `uuid?` |
+| fulfilledBy | `enum(official_warehouse|seller|marketly_service)?` marketly_service (a seller package Marketly ships): Official dispatch settings, closures and cutoffs, the profile-owner check as for official (items carry the service profile, an Official profile), its free-shipping threshold, and origin the service location (fulfillment-service.getServiceLocation). Omitted = official_warehouse for official, seller for seller |
 | shipsFrom | `string` |
 | items | `PackageQuoteItem[]` |
 | destination | `QuoteDestination` |
@@ -1326,6 +1327,7 @@ Indexes: `(status, from_date)`
 | return_id | uuid? |
 | owner_type | text |
 | seller_id | uuid? |
+| fulfilled_by | text (official_warehouse|seller|marketly_service) |
 | package_no | int |
 | carrier_code | text? |
 | service_name | text? |
@@ -1431,6 +1433,7 @@ Indexes: `(shipment_id, at)`, `unique (shipment_id, carrier_event_id)`
 | order_id | uuid |
 | owner_type | text |
 | seller_id | uuid? |
+| fulfilled_by | text (official_warehouse|seller|marketly_service) |
 | due_at | timestamptz |
 | open_item_ids | jsonb |
 | overdue_since | timestamptz? |
@@ -1449,6 +1452,7 @@ Indexes: `(due_at) where overdue_since is null`
 | shipment_id | uuid? |
 | owner_type | text |
 | seller_id | uuid? |
+| fulfilled_by | text (official_warehouse|seller|marketly_service) |
 | items_summary | text |
 | order_item_ids | uuid[] (the order items the exception is about, as on shipping.shipment.exception) |
 | situation | text |
@@ -1524,14 +1528,14 @@ Indexes: `unique (carrier_code, external_id)`
 
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
-| `shipping.shipment.created` | A shipment is recorded or a label is bought | `{ shipmentId: uuid, kind: enum(outbound|replacement|return), orderId: uuid, groupId: uuid, returnId: uuid?, sellerId: uuid?, packageLabel: string, carrierCode: string?, carrierName: string?, serviceName: string?, trackingNumber: string?, trackingUrl: url?, lines: ShipmentLine[], status: string }` | orders |
-| `shipping.shipment.dispatched` | A package is handed to the carrier (seller record, warehouse hand-over or first scan) | `{ shipmentId: uuid, kind: enum(outbound|replacement|return), orderId: uuid, customerId: uuid?, contactEmail: email?, groupId: uuid, returnId: uuid?, ownerType: enum(official|seller), sellerId: uuid?, lines: ShipmentLine[], shippedAt: datetime, dispatchDueAt: datetime?, onTime: bool?, trackingValid: bool, estimatedArrival: DateRange? }` | fulfillment-service, inventory, notifications, orders, payments, reports, returns, sellers, support, warehouse, workqueues |
+| `shipping.shipment.created` | A shipment is recorded or a label is bought | `{ shipmentId: uuid, kind: enum(outbound|replacement|return), orderId: uuid, groupId: uuid, returnId: uuid?, sellerId: uuid?, fulfilledBy: enum(official_warehouse|seller|marketly_service), packageLabel: string, carrierCode: string?, carrierName: string?, serviceName: string?, trackingNumber: string?, trackingUrl: url?, lines: ShipmentLine[], status: string }` | orders |
+| `shipping.shipment.dispatched` | A package is handed to the carrier (seller record, warehouse hand-over or first scan) | `{ shipmentId: uuid, kind: enum(outbound|replacement|return), orderId: uuid, customerId: uuid?, contactEmail: email?, groupId: uuid, returnId: uuid?, ownerType: enum(official|seller), sellerId: uuid?, fulfilledBy: enum(official_warehouse|seller|marketly_service), lines: ShipmentLine[], shippedAt: datetime, dispatchDueAt: datetime?, onTime: bool?, trackingValid: bool, estimatedArrival: DateRange? }` | fulfillment-service, inventory, notifications, orders, payments, reports, returns, sellers, support, warehouse, workqueues |
 | `shipping.shipment.status_changed` | Any shipment status change | `{ shipmentId: uuid, kind: enum(outbound|replacement|return), orderId: uuid, groupId: uuid, returnId: uuid?, from: string, to: string, statusLabel: string, estimatedArrival: DateRange?, at: datetime }` | orders, returns |
-| `shipping.shipment.delivered` | The carrier confirms delivery (or pickup) | `{ shipmentId: uuid, kind: enum(outbound|replacement|return), orderId: uuid, customerId: uuid?, contactEmail: email?, groupId: uuid, returnId: uuid?, sellerId: uuid?, lines: ShipmentLine[], deliveredAt: datetime }` | notifications, orders, returns, sellers, support, workqueues |
-| `shipping.shipment.exception` | A delivery exception is opened | `{ exceptionId: uuid, kind: enum(seller_cannot_fulfill|late_dispatch|missing_tracking|lost_or_damaged|failed_delivery), orderId: uuid, customerId: uuid?, contactEmail: email?, groupId: uuid, shipmentId: uuid?, sellerId: uuid?, orderItemIds: uuid[], dueAt: datetime, customerAction: string?, source: enum(carrier|system|staff|seller|customer_report), caseRef: string? }` | notifications, orders, reports, returns, support, workqueues |
+| `shipping.shipment.delivered` | The carrier confirms delivery (or pickup) | `{ shipmentId: uuid, kind: enum(outbound|replacement|return), orderId: uuid, customerId: uuid?, contactEmail: email?, groupId: uuid, returnId: uuid?, sellerId: uuid?, fulfilledBy: enum(official_warehouse|seller|marketly_service), lines: ShipmentLine[], deliveredAt: datetime }` | notifications, orders, returns, sellers, support, workqueues |
+| `shipping.shipment.exception` | A delivery exception is opened | `{ exceptionId: uuid, kind: enum(seller_cannot_fulfill|late_dispatch|missing_tracking|lost_or_damaged|failed_delivery), orderId: uuid, customerId: uuid?, contactEmail: email?, groupId: uuid, shipmentId: uuid?, sellerId: uuid?, fulfilledBy: enum(official_warehouse|seller|marketly_service), orderItemIds: uuid[], dueAt: datetime, customerAction: string?, source: enum(carrier|system|staff|seller|customer_report), caseRef: string? }` | notifications, orders, reports, returns, support, workqueues |
 | `shipping.exception.updated` | An exception is assigned, escalated, notified or answered by the seller | `{ exceptionId: uuid, action: string, by: Actor }` | - |
 | `shipping.exception.resolved` | An exception is resolved or its condition clears | `{ exceptionId: uuid, kind: string, orderId: uuid, groupId: uuid, resolution: string }` | - |
-| `shipping.dispatch.overdue` | A seller group passes its dispatch deadline with unshipped items | `{ orderId: uuid, orderRef: string, groupId: uuid, ownerType: enum(official|seller), sellerId: uuid?, orderItemIds: uuid[], dueAt: datetime, exceptionId: uuid }` | notifications, orders, reports, sellers, support, warehouse, workqueues |
+| `shipping.dispatch.overdue` | A seller group passes its dispatch deadline with unshipped items | `{ orderId: uuid, orderRef: string, groupId: uuid, ownerType: enum(official|seller), sellerId: uuid?, fulfilledBy: enum(official_warehouse|seller|marketly_service), orderItemIds: uuid[], dueAt: datetime, exceptionId: uuid }` | notifications, orders, reports, sellers, support, warehouse, workqueues |
 | `shipping.tracking.corrected` | Carrier or tracking number is corrected | `{ shipmentId: uuid, orderId: uuid, from: string, to: string, reason: text, by: Actor }` | orders |
 | `shipping.label.purchased` | A label is bought (cost charged to the seller, company or platform) | `{ labelId: uuid, shipmentId: uuid?, orderId: uuid, groupId: uuid, sellerId: uuid?, billedTo: enum(seller|company|platform|customer), cost: Money, kind: enum(outbound|replacement|return), returnId: uuid? }` | finance |
 | `shipping.label.voided` | An unused label is voided | `{ labelId: uuid, shipmentId: uuid?, orderId: uuid, kind: enum(outbound|replacement|return), returnId: uuid?, sellerId: uuid?, billedTo: string, cost: Money }` | finance |
@@ -1543,10 +1547,10 @@ Indexes: `unique (carrier_code, external_id)`
 
 | Consumes | From | Does |
 |---|---|---|
-| `orders.order.accepted` | orders | Add each group to the dispatch watch; if acceptance came later than placement, recalculate the deadline and call orders.setDispatchDeadline |
+| `orders.order.accepted` | orders | Add each group to the dispatch watch with its fulfilledBy; if acceptance came later than placement, recalculate the deadline (the Official schedule for official_warehouse and marketly_service groups) and call orders.setDispatchDeadline |
 | `orders.dispatch_deadline.changed` | orders | Move the watched deadline (the original stays on record for performance) |
 | `orders.item.cancelled` | orders | Remove items from the watch; open (or update) a seller_cannot_fulfill exception when the seller cancelled; close dispatch exceptions when nothing is left to ship; void unused labels |
-| `warehouse.package.packed` | warehouse | Official Store package handed to the carrier pickup (handOver) |
+| `warehouse.package.packed` | warehouse | Warehouse package (Official Store or Fulfilled by Marketly) handed to the carrier pickup (handOver); the shipment is recorded with the payload's owner (ownerType, sellerId) and fulfilledBy, never a hard-coded official owner |
 | `sellers.seller.restricted` | sellers | Mark open exceptions of the seller for escalation to the Seller Manager |
 | `support.case.opened` | support | Open a lost_or_damaged exception for missing or damaged package reports when none is open for that group and package (source customer_report, caseRef set, shipmentId from the report when given) |
 | `returns.replacement.created` | returns | Watch the replacement's dispatch like an original shipment (with or without a return: returnId may be null for a replacement decided on a case) |
@@ -1567,12 +1571,12 @@ Indexes: `unique (carrier_code, external_id)`
 | voidLabel | `(labelId: uuid, reason: string) => Label`<br>Void an unused label (before the first carrier scan) | warehouse, returns |
 | handOver | `(shipmentId: uuid, at: datetime, actor: Actor) => Shipment`<br>Package handed to the carrier (label_created → shipped). Publishes shipping.shipment.dispatched. No module calls it at launch (warehouse records hand-over on its own parcels); kept for fulfillment-service (phase 4). |  |
 | getShipmentsForOrder | `(orderId: uuid) => ShipmentSummary[]`<br>Shipments of an order with status and contents | support |
-| dispatchMetrics | `(sellerId: uuid | null, range: DateRange) => DispatchMetrics`<br>On-time dispatch, valid tracking and late counts. reviews shows the seller dispatch facts on seller ratings; sellers and reports compute their own figures. | reviews |
+| dispatchMetrics | `(sellerId: uuid | null, range: DateRange) => DispatchMetrics`<br>On-time dispatch, valid tracking and late counts. reviews shows the seller dispatch facts on seller ratings; sellers and reports compute their own figures. A seller's figures leave out Fulfilled by Marketly shipments (fulfilled_by marketly_service): Marketly dispatched them. | reviews |
 | registerReturnTracking | `(input: { returnId: uuid, orderId: uuid, groupId: uuid, carrierCode: string, trackingNumber: string, to: Address }) => Shipment`<br>Customer-arranged return: create a kind = return shipment for a tracking number the customer entered (format-checked) so carrier events for it are tracked and published like a prepaid return label. | returns |
 | findDropOffPoints | `(carrierServiceId: uuid, postalCode: string, limit?: int) => { name: string, address: Address, hours: string, distanceMiles: number, acceptsQr: bool }[]`<br>Carrier drop-off locations near a ZIP code for return labels. | returns |
 | listShipmentsForGroups | `(groupIds: uuid[], kinds?: ('outbound'|'replacement'|'return')[]) => Map<uuid, Shipment[]>`<br>Shipments per seller group with contents, tracking events and failed-delivery options (batched per request). Default kinds: outbound and replacement. | graphql, warehouse |
 | getShipment | `(viewer: { customerId?: uuid, guestSessionId?: uuid, sellerId?: uuid, staff?: bool }, shipmentId: uuid) => Shipment | null`<br>One package with tracking view fields (headline, steps, estimate note, notices). Store: the customer's or guest's own order; seller: own shipments; staff: any (shipping.shipments.view). Otherwise null. | graphql, warehouse |
-| estimateOffers | `(offerIds: uuid[], postalCode?: string, viewer?: { customerId?: uuid, guestSessionId?: uuid }) => OfferEstimate[]`<br>Default delivery option per offer at a location (resolves offer → profile and dispatch through offers). Without a postal code uses the shopper's saved or cart location, else the market default; batched per request. | graphql |
+| estimateOffers | `(offerIds: uuid[], postalCode?: string, viewer?: { customerId?: uuid, guestSessionId?: uuid }) => OfferEstimate[]`<br>Default delivery option per offer at a location (resolves offer → profile and dispatch through offers' effective Offer.shipping, so Marketly-fulfilled offers are quoted with the service profile and dispatch). Without a postal code uses the shopper's saved or cart location, else the market default; batched per request. | graphql |
 | listExceptionsForOrder | `(orderId: uuid, sellerId?: uuid) => DeliveryException[]`<br>Delivery exceptions on an order; with sellerId only that seller's groups | graphql |
 | listExceptions | `(filter: { kind?: string, status?: string, sellerType?: string, ownerStaffId?: uuid, customerNotNotified?: bool, q?: string }, page: PageInput) => Page<DeliveryException>`<br>Dispatch and delivery exceptions for staff (same filters as admin GET /exceptions) | graphql |
 | countOpenExceptions | `() => ExceptionCounts`<br>Open exceptions per kind and not-yet-notified customers (queue tiles) | graphql, workqueues |
@@ -1580,6 +1584,7 @@ Indexes: `unique (carrier_code, external_id)`
 | shipmentsForReplacements | `(replacements: { replacementId: uuid, returnId: uuid | null, orderItemIds?: uuid[] }[]) => map<Shipment | null>`<br>The REPLACEMENT shipment sent for a replacement or exchange (shipments.kind = replacement), matched by return id, or by the replacement's order item ids when it has no return (replacement decided on a case). returns reads replacement shipments through the GraphQL field. | graphql |
 | getProfileOwners | `(profileIds: uuid[]) => map<{ ownerType: 'official' | 'seller', sellerId: uuid | null, status: string } | null>`<br>Owner of each shipping profile (by lineage id or version id); null when unknown. offers checks that a seller only uses its own profiles (and the Official Store only official ones) | offers |
 | getOfficialFreeShipping | `() => { threshold: Money | null, methodCode: string | null, active: bool, label: string | null }`<br>The Official Store's standing free-shipping threshold in force now (default profile threshold or an active official_store free-shipping rule), e.g. for the content service strip to warn when its text disagrees. For content's service strip check; content does not call it yet (integration item). | content |
+| getOfficialDefaultProfile | `() => { profileId: uuid, handlingDays: int, sameDayCutoff: string | null } | null`<br>The Official Store's default active shipping profile with its handling days and same-day cutoff (Official dispatch settings); null when none exists. fulfillment-service quotes Marketly-fulfilled offers with it unless its serviceShippingProfileId setting names another Official profile (decision D1) | fulfillment-service |
 | getSellerShippingSetup | `(sellerId: uuid) => SellerShippingSetup`<br>Carriers and services the seller can use, whether labels can be bought and the default package, for the record-shipment form | graphql |
 | exportRows | `(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }`<br>Export rows for reports dataset shipping.admin.exceptions (delivery exceptions) | reports |
 
@@ -1623,6 +1628,7 @@ Checked through the access module (limits per role, second reviewer).
 | `CHOICE_WINDOW_CLOSED` | 409 | The time to choose a next step has passed; the default was applied. |
 | `EXCEPTION_ALREADY_OPEN` | 409 | An open exception of this kind exists for the group and package (or for the group when no package is named). details.exceptionId. |
 | `WEBHOOK_SIGNATURE_INVALID` | 401 | The carrier signature did not verify. |
+| `FULFILLED_BY_MARKETLY` | 409 | Marketly ships this package; you can't record shipments, buy labels, correct tracking or answer exceptions for it. |
 
 ## Background jobs
 
@@ -1674,6 +1680,7 @@ Checked through the access module (limits per role, second reviewer).
 - Profile checks: archiving refuses while offers use the profile; the count comes from offers.countActiveOffersByProfile (exact count, no paging cap). offers checks profile ownership with getProfileOwners.
 - Direct customer notices (notifyCustomer, tracking corrections, failed-delivery default, exception updates) are addressed with Recipient.customerId when the order has a customer (customers-module id from the order), and to the order contact email only for guests; customer ids are never used as identity account ids.
 - Dependencies: architecture lists orders. Optional: offers (resolve offer → profile and dispatch for GET /estimates; countActiveOffersByProfile for PROFILE_IN_USE), notifications (direct customer notices), sellers (names, restriction state), media (claim evidence, label files), support (link lost/damaged cases), access (claim approvals), settings (market time zone and default location).
+- Fulfilled by Marketly (fulfillment-service, phase 4): groups with fulfilledBy marketly_service are a seller's packages that Marketly's warehouse ships. Quotes (quoteOptions with fulfilledBy marketly_service) use Official dispatch settings, closures and cutoffs and the Official profile-owner check, from the service location (fulfillment-service.getServiceLocation). The dispatch watch, shipments and exceptions keep fulfilled_by; the deadline follows the Official schedule. warehouse.package.packed records the shipment with the seller as owner (ownerType seller, sellerId) and the warehouse's label is billed to the seller (decision D1; finance books it like other seller labels). shipment.created, shipment.dispatched, dispatch.overdue and shipment.exception carry fulfilledBy. Exceptions on those groups are owned by the Shipping Manager with no seller notice and no seller response; dispatchMetrics for a seller leaves them out. Seller endpoints (recordShipment, quoteLabels, buyLabel, markLabelHandedOver, correctTrackingSeller, respondToException) answer 409 FULFILLED_BY_MARKETLY for them; label quotes for such a group start from the service location.
 
 ## GraphQL (read layer)
 

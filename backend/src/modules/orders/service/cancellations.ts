@@ -5,11 +5,12 @@
  * publishes orders.item.cancelled per item with the refund breakdown (payments sends it).
  */
 import { AppError } from '../../../kernel/errors/index.js';
+import type { EventPayload } from '../../../kernel/events/index.js';
 import { money } from '../../../kernel/lib/money.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type { CancellableItem, CancellationLineInput, CancellationOptions, CancellationRequest, RefundPreview } from '../../../spec/orders.js';
 import { cancellationRequestMachine } from '../domain/state-machines.js';
-import { CANCELLABLE, fmt, is, refundLines, respondBy, shortDate, SHIPPED_OR_LATER, sumMoney, type ItemState } from '../domain/rules.js';
+import { CANCELLABLE, fmt, is, marketlyFulfils, refundLines, respondBy, shortDate, SHIPPED_OR_LATER, sumMoney, type ItemState } from '../domain/rules.js';
 import type { CancellationRec, GroupRec, ItemRec, OrdersRepository, StoredCancellationLine } from '../ports.js';
 import { Batch, invalid, notFound, SYSTEM, type Agg, type By, type Core } from './core.js';
 import { Views } from './views.js';
@@ -168,7 +169,9 @@ export class Cancellations {
         const created: string[] = [];
         for (const [groupId, ls] of this.byGroup(lines)) {
           const group = agg.groups.find((g) => g.id === groupId)!;
-          const instant = group.owner_type === 'official' && (cfg.officialCancelUntil !== 'picking_started' || ls.every((l) => l.item.state !== 'preparing'));
+          // Official Store and Fulfilled by Marketly groups: instant until warehouse picking starts, then the Order
+          // Manager decides (decision D6); seller groups wait for the seller
+          const instant = marketlyFulfils(group) && (cfg.officialCancelUntil !== 'picking_started' || ls.every((l) => l.item.state !== 'preparing'));
           const id = await this.createDirect(tx, batch, agg, group, ls, {
             initiatedBy: 'customer',
             reasonCode: input.reasonCode,
@@ -241,11 +244,30 @@ export class Cancellations {
     const titles = stored.map((s) => `${s.title}${s.quantity > 1 ? ` × ${s.quantity}` : ''}`).join(', ');
     if (o.pending) {
       for (const item of acted) await this.core.move(tx, batch, item, 'request_cancellation', { reason: o.reasonCode, patch: { state_before_request: item.state } });
+      const byMarketly = marketlyFulfils(group);
       await this.core.timeline(tx, agg.order.id, [
-        { group_id: group.id, visibility: 'customer', label: 'Cancellation requested', detail: `${titles}. ${group.seller_name} has until ${shortDate(o.pending, this.core.tz)} to confirm.`, actor: batch.by.actor },
-        { group_id: group.id, visibility: 'seller', label: 'Buyer asked to cancel', detail: `${titles}. Respond by ${o.pending.toISOString()} or it is accepted automatically if nothing has shipped.`, actor: batch.by.actor },
+        {
+          group_id: group.id,
+          visibility: 'customer',
+          label: 'Cancellation requested',
+          detail: byMarketly
+            ? `${titles}. Our warehouse has started on this package; Marketly will confirm by ${shortDate(o.pending, this.core.tz)}.`
+            : `${titles}. ${group.seller_name} has until ${shortDate(o.pending, this.core.tz)} to confirm.`,
+          actor: batch.by.actor,
+        },
+        byMarketly
+          ? { group_id: group.id, visibility: 'seller', label: 'Buyer asked to cancel', detail: `${titles}. Marketly's Order Manager decides, as the warehouse has started on this package.`, actor: batch.by.actor }
+          : { group_id: group.id, visibility: 'seller', label: 'Buyer asked to cancel', detail: `${titles}. Respond by ${o.pending.toISOString()} or it is accepted automatically if nothing has shipped.`, actor: batch.by.actor },
       ]);
-      batch.push('orders.cancellation.requested', { cancellationId: id, orderId: agg.order.id, groupId: group.id, sellerId: group.seller_id, itemIds: stored.map((s) => s.itemId), respondBy: o.pending.toISOString() });
+      batch.push('orders.cancellation.requested', {
+        cancellationId: id,
+        orderId: agg.order.id,
+        groupId: group.id,
+        sellerId: group.seller_id,
+        fulfilledBy: group.fulfilled_by as EventPayload<'orders.cancellation.requested'>['fulfilledBy'],
+        itemIds: stored.map((s) => s.itemId),
+        respondBy: o.pending.toISOString(),
+      });
       return id;
     }
     for (const item of acted) await this.core.move(tx, batch, item, 'cancel', { reason: o.reasonCode, patch: { refund_status: refund.total.amount > 0 ? 'requested' : item.refund_status } });
@@ -285,6 +307,7 @@ export class Cancellations {
         groupId: group.id,
         ownerType: group.owner_type as 'official' | 'seller',
         sellerId: group.seller_id,
+        fulfilledBy: group.fulfilled_by as EventPayload<'orders.item.cancelled'>['fulfilledBy'],
         itemId: item.id,
         offerId: item.offer_id,
         stockItemId: item.stock_item_id,
@@ -315,10 +338,11 @@ export class Cancellations {
   }
 
   /** requested → accepted (seller, staff or auto) or declined → accepted (staff override) */
-  async accept(orderId: string, cancellationId: string, by: By, o: { outcome: 'accepted' | 'auto_accepted'; reason?: string | null; groupId?: string }): Promise<CancellationRequest> {
+  async accept(orderId: string, cancellationId: string, by: By, o: { outcome: 'accepted' | 'auto_accepted'; reason?: string | null; groupId?: string; bySeller?: boolean }): Promise<CancellationRequest> {
     await this.core.write(orderId, by, async (tx, agg, batch) => {
       const c = agg.cancellations.find((x) => x.id === cancellationId && (!o.groupId || x.group_id === o.groupId));
       if (!c) throw notFound('Cancellation');
+      if (o.bySeller) this.core.refuseMarketly(agg.groups.find((g) => g.id === c.group_id)!, 'answer its cancellation requests');
       if (c.status === 'accepted') return; // already accepted: idempotent
       const event = c.status === 'declined' ? 'staff_override' : o.outcome === 'auto_accepted' ? 'auto_accept' : 'accept';
       const status = cancellationRequestMachine.next(c.status as 'requested', event as 'accept');
@@ -350,10 +374,11 @@ export class Cancellations {
   }
 
   /** requested → declined: items go back to the state they had (a decline because of shipment needs a tracked shipment) */
-  async decline(orderId: string, cancellationId: string, by: By, o: { reason: string; note?: string | null; groupId?: string; byStaff?: boolean }): Promise<CancellationRequest> {
+  async decline(orderId: string, cancellationId: string, by: By, o: { reason: string; note?: string | null; groupId?: string; byStaff?: boolean; bySeller?: boolean }): Promise<CancellationRequest> {
     await this.core.write(orderId, by, async (tx, agg, batch) => {
       const c = agg.cancellations.find((x) => x.id === cancellationId && (!o.groupId || x.group_id === o.groupId));
       if (!c) throw notFound('Cancellation');
+      if (o.bySeller) this.core.refuseMarketly(agg.groups.find((g) => g.id === c.group_id)!, 'answer its cancellation requests');
       const status = cancellationRequestMachine.next(c.status as 'requested', 'decline');
       if (o.reason === 'already_shipped') {
         const itemIds = new Set(c.items.map((l) => l.itemId));
@@ -415,6 +440,7 @@ export class Cancellations {
     }
     const id = await this.core.write(orderId, by, async (tx, agg, batch) => {
       const group = agg.groups.find((g) => g.id === groupId)!;
+      this.core.refuseMarketly(group, 'cancel its items');
       const lines = this.resolve(agg, input.items, { groupId });
       return this.createDirect(tx, batch, agg, group, lines, { initiatedBy: 'seller', reasonCode: input.reasonCode, reason: input.note ?? null, idempotencyKey: key, pending: null, countsAgainstSeller: true });
     });

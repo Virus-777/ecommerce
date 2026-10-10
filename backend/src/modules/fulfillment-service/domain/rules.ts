@@ -4,7 +4,7 @@
  */
 import type * as common from '../../../spec/common.js';
 import type { Dimensions, FeeRate, OwnedStock, SkuEnrollment } from '../../../spec/fulfillment-service.js';
-import type { Balances, LedgerRec, StockGroup } from '../ports.js';
+import type { Balances, LedgerRec, Levels, StockGroup } from '../ports.js';
 
 export const SYSTEM: common.Actor = { kind: 'system', id: null, name: 'Marketly' };
 
@@ -237,13 +237,53 @@ export function actorOf(text: string | null | undefined): common.Actor | null {
   return { kind: 'staff', id: text, name: null };
 }
 
-/** The warehouse address setting: an Address object, or text such as 'Reno, NV warehouse' */
-export function warehouseAddress(setting: unknown): common.Address {
-  if (setting && typeof setting === 'object' && 'line1' in setting) return setting as common.Address;
-  const text = typeof setting === 'string' && setting.trim() ? setting.trim() : 'Marketly fulfillment center';
-  const [city, rest] = text.split(',').map((s) => s.trim());
-  const region = /^([A-Z]{2})\b/.exec(rest ?? '')?.[1] ?? '';
-  return { name: 'Marketly Fulfillment', line1: text, city: rest !== undefined ? (city ?? '') : '', region, postalCode: '', country: 'US' };
+/** 'City, Region' of the service location (its name when the address has neither) */
+export function shipsFromOf(address: common.Address, name: string): string {
+  const text = [address.city, address.region].filter((s) => s?.trim()).join(', ');
+  return text || name;
+}
+
+/* ---------------------------------------------------------------- the ledger against inventory */
+
+/**
+ * Ledger groups mapped to inventory's groups at the service location: inbound + receiving ↔ incoming,
+ * available ↔ available, reserved ↔ reserved, unsellable + removal_pending ↔ damagedHeld, returned ↔ returned.
+ */
+export function ledgerLevels(b: Balances, skuId: string): Levels {
+  return {
+    incoming: qty(b, skuId, 'inbound') + qty(b, skuId, 'receiving'),
+    available: qty(b, skuId, 'available'),
+    reserved: qty(b, skuId, 'reserved'),
+    damagedHeld: qty(b, skuId, 'unsellable') + qty(b, skuId, 'removal_pending'),
+    returned: qty(b, skuId, 'returned'),
+  };
+}
+
+export const LEVEL_KEYS = ['incoming', 'available', 'reserved', 'damagedHeld', 'returned'] as const;
+
+export const levelsDiffer = (a: Levels, b: Levels) => LEVEL_KEYS.some((k) => a[k] !== b[k]);
+
+/** The ledger group an inventory group moves (the first group when two ledger groups map to one) */
+export const LEDGER_GROUP: Record<(typeof LEVEL_KEYS)[number], StockGroup> = { incoming: 'receiving', available: 'available', reserved: 'reserved', damagedHeld: 'unsellable', returned: 'returned' };
+
+/** Inventory's group names (adjustment.recorded fromGroup / toGroup) → ledger group; outside → null */
+export function ledgerGroupOf(inventoryGroup: string): StockGroup | null | undefined {
+  switch (inventoryGroup) {
+    case 'available':
+      return 'available';
+    case 'reserved':
+      return 'reserved';
+    case 'incoming':
+      return 'receiving';
+    case 'damaged_held':
+      return 'unsellable';
+    case 'returned':
+      return 'returned';
+    case 'outside':
+      return null;
+    default:
+      return undefined;
+  }
 }
 
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;

@@ -48,10 +48,8 @@ export const sellerRoutes = (service: ShippingService) => {
     /** POST /labels: Buy a carrier label (cost is deducted from earnings) */
     buyLabel: async ({ sellerId, body, idempotencyKey, actor, requestId, principal }) => service.shipments.buyLabel(sellerId, body, idempotencyKey, { actor, requestId, principal }),
     /** POST /shipments/{id}/hand-over: Mark a labelled package as handed to the carrier */
-    markLabelHandedOver: async ({ sellerId, params, body, actor, requestId, principal }) => {
-      await service.shipments.own(params.id, sellerId);
-      return service.shipments.handOver(params.id, body?.at ?? service.core.now().toISOString(), actor, { actor, requestId, principal });
-    },
+    markLabelHandedOver: async ({ sellerId, params, body, actor, requestId, principal }) =>
+      service.shipments.handOverSeller(sellerId, params.id, body?.at ?? service.core.now().toISOString(), { actor, requestId, principal }),
     /** POST /labels/{id}/void: Void an unused label (refunded to earnings) */
     voidLabelSeller: async ({ sellerId, params, body, actor, requestId, principal }) => service.shipments.voidLabel(params.id, body.reason, { actor, requestId, principal }, sellerId),
     /** GET /exceptions: Delivery exceptions on the seller's orders that need the seller's response */

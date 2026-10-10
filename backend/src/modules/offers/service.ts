@@ -217,6 +217,10 @@ export class OffersService implements OffersPublicApi {
     return this.enforcement.onCampaignEnded(event);
   }
 
+  onServiceChangedFromFulfillmentService(event: EventPayload<'fulfillment-service.offer.service_changed'>, envelope?: Pick<EventEnvelope, 'actor' | 'id'>) {
+    return this.enforcement.onServiceChanged(event, envelope?.id, envelope?.actor);
+  }
+
   /* ---------------- jobs */
 
   applyPriceSchedule() {

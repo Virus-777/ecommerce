@@ -24,9 +24,28 @@ export interface RequestItem {
   /** Units cancelled before dispatch */
   cancelled: number;
   picked: number;
-  /** Units reserved out of available seller-owned stock when the request was created */
+  /** Units dispatched so far (across packages) */
+  shipped: number;
+  /** Units reserved out of available seller-owned stock when the request was created (and not yet shipped or released) */
   reserved: number;
   orderRef: string;
+}
+
+/** One line of a receiving record (inbound_receipts.lines) */
+export interface ReceiptLine {
+  skuEnrollmentId: string;
+  stockItemId: string | null;
+  received: number;
+  damaged: number;
+}
+
+/** Quantities compared by the reconciliation, in inventory's groups */
+export interface Levels {
+  incoming: number;
+  available: number;
+  reserved: number;
+  damagedHeld: number;
+  returned: number;
 }
 
 /** One line of a removal order (removal_orders.lines) */
@@ -36,7 +55,16 @@ export interface RemovalLineRec {
   fromGroup: 'available' | 'unsellable';
 }
 
-export type EnrollmentRec = Db['enrollments'];
+export interface EnrollmentRec extends Omit<Db['enrollments'], 'categories'> {
+  categories: string[];
+}
+export interface ReceiptRec extends Omit<Db['inbound_receipts'], 'lines'> {
+  lines: ReceiptLine[];
+}
+export interface StockDifferenceRec extends Omit<Db['stock_differences'], 'ledger' | 'inventory'> {
+  ledger: Levels;
+  inventory: Levels;
+}
 export interface SkuRec extends Omit<Db['sku_enrollments'], 'dimensions'> {
   dimensions: Dimensions;
 }
@@ -72,11 +100,13 @@ export interface Recs {
   sku_enrollments: SkuRec;
   inbound_shipments: InboundRec;
   inbound_lines: InboundLineRec;
+  inbound_receipts: ReceiptRec;
   discrepancies: DiscrepancyRec;
   ownership_ledger: LedgerRec;
   fulfillment_requests: RequestRec;
   service_returns: ServiceReturnRec;
   removal_orders: RemovalRec;
+  stock_differences: StockDifferenceRec;
   fee_schedules: ScheduleRec;
   fee_charges: ChargeRec;
   storage_snapshots: SnapshotRec;
@@ -104,7 +134,7 @@ export interface PageOptions<R> {
 /** Balance of each stock group per SKU enrollment */
 export type Balances = Map<string, Partial<Record<StockGroup, number>>>;
 
-/** Persistence for this module's own tables: fulfillment_service.enrollments, fulfillment_service.sku_enrollments, fulfillment_service.inbound_shipments, fulfillment_service.inbound_lines, fulfillment_service.discrepancies, fulfillment_service.ownership_ledger, fulfillment_service.fulfillment_requests, fulfillment_service.service_returns, fulfillment_service.removal_orders, fulfillment_service.fee_schedules, fulfillment_service.fee_charges, fulfillment_service.storage_snapshots. */
+/** Persistence for this module's own tables: fulfillment_service.enrollments, fulfillment_service.sku_enrollments, fulfillment_service.inbound_shipments, fulfillment_service.inbound_lines, fulfillment_service.inbound_receipts, fulfillment_service.discrepancies, fulfillment_service.ownership_ledger, fulfillment_service.fulfillment_requests, fulfillment_service.service_returns, fulfillment_service.removal_orders, fulfillment_service.stock_differences, fulfillment_service.fee_schedules, fulfillment_service.fee_charges, fulfillment_service.storage_snapshots. */
 export interface FulfillmentServiceRepository {
   /** Runs fn in one transaction (nested calls join the outer one) */
   transaction<T>(fn: (tx: FulfillmentServiceRepository) => Promise<T>): Promise<T>;

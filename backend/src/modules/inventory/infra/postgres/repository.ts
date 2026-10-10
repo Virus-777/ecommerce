@@ -25,12 +25,15 @@ export function createPostgresInventoryRepository(db: Kysely<InventoryDb>, inbox
 
   /** Stock items with their aggregated quantities, for lists filtered by state and groups */
   const itemListQuery = (f: ItemListFilter) => {
+    // sellable rule (domain/rules sellsFrom): a seller item sells from its service location when set, else from its own
+    // location; company stock from company locations
     const agg = db
       .selectFrom('stock_levels as l')
       .innerJoin('locations as loc', 'loc.id', 'l.location_id')
+      .innerJoin('stock_items as si', 'si.id', 'l.stock_item_id')
       .select([
         'l.stock_item_id',
-        sql<number>`coalesce(sum(l.available) filter (where loc.sellable and loc.active), 0)::int`.as('sell_avail'),
+        sql<number>`coalesce(sum(l.available) filter (where loc.sellable and loc.active and (case when si.owner_type = 'seller' then (case when si.service_location_id is null then loc.owner_type = 'seller' else loc.id = si.service_location_id end) else loc.owner_type = 'official' end)), 0)::int`.as('sell_avail'),
         sql<number>`sum(l.damaged_held)::int`.as('damaged'),
         sql<number>`sum(l.returned)::int`.as('ret'),
         sql<number>`sum(l.incoming)::int`.as('inc'),
@@ -235,7 +238,7 @@ export function createPostgresInventoryRepository(db: Kysely<InventoryDb>, inbox
     /* ---------------------------------------------------------------- incoming */
     async expectations(f, lock) {
       let q = db.selectFrom('incoming_expectations').selectAll();
-      if (f.sourceKind) q = q.where('source_kind', '=', f.sourceKind as 'purchase_order' | 'transfer');
+      if (f.sourceKind) q = q.where('source_kind', '=', f.sourceKind as Row<'incoming_expectations'>['source_kind']);
       if (f.sourceId) q = q.where('source_id', '=', f.sourceId);
       if (f.itemIds) q = q.where('stock_item_id', 'in', f.itemIds.length ? f.itemIds : ['00000000-0000-0000-0000-000000000000']);
       if (f.openOnly) q = q.where('quantity_open', '>', 0);
@@ -312,8 +315,10 @@ export function createPostgresInventoryRepository(db: Kysely<InventoryDb>, inbox
     pageInbound(f, page) {
       let q = db.selectFrom('inbound_receipts').selectAll();
       if (f.state) q = q.where('state', '=', f.state);
+      if (f.source) q = q.where('source_kind', '=', f.source);
       return paginate(q, page, { column: 'received_at', direction: 'desc' }) as never;
     },
+    inboundWhere: (f) => db.selectFrom('inbound_receipts').selectAll().where('source_kind', '=', f.sourceKind).where('source_id', '=', f.sourceId).$if(!!f.state, (q) => q.where('state', '=', f.state!)).orderBy('received_at').orderBy('id').execute(),
 
     /* ---------------------------------------------------------------- return outcomes */
     async returnOutcomesWhere(f) {

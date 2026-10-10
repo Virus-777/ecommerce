@@ -103,7 +103,7 @@ describe('orders.item.split', () => {
     expect(f.lines.find((l: any) => l.orderItemId === newItemId)).toMatchObject({ quantity: 2, picked: 0, state: 'pending', sku: 'P3-SPLIT' });
 
     const zero = { amount: 0, currency: 'USD' };
-    await h.publish('orders', 'orders.item.cancelled', { orderId: o.orderId, ref: o.ref, groupId: o.groupId, ownerType: 'official', sellerId: null, itemId: newItemId, offerId: newId(), stockItemId: a.id, quantity: 2, cancellationId: newId(), initiatedBy: 'customer', reasonCode: 'changed_mind', beforeDispatch: true, countsAgainstSeller: false, refund: { itemAmount: zero, discountShare: zero, shippingRefund: zero, taxRefund: zero, total: zero }, paymentIntentId: newId(), notifyCustomer: true });
+    await h.publish('orders', 'orders.item.cancelled', { orderId: o.orderId, ref: o.ref, groupId: o.groupId, ownerType: 'official', sellerId: null, fulfilledBy: 'official_warehouse', itemId: newItemId, offerId: newId(), stockItemId: a.id, quantity: 2, cancellationId: newId(), initiatedBy: 'customer', reasonCode: 'changed_mind', beforeDispatch: true, countsAgainstSeller: false, refund: { itemAmount: zero, discountShare: zero, shippingRefund: zero, taxRefund: zero, total: zero }, paymentIntentId: newId(), notifyCustomer: true });
     const after = (await h.call('GET', `/fulfillments/${o.fulfillment.id}`)).body;
     expect(after.lines.find((l: any) => l.orderItemId === newItemId)).toMatchObject({ state: 'cancelled' });
     expect(after.lines.find((l: any) => l.orderItemId === o.itemIds[0])).toMatchObject({ quantity: 1, state: 'picked' });

@@ -152,7 +152,7 @@ describe('seller stock (own items only)', () => {
     expect((await seller(h, avery, 'PATCH', `/stock-items/${item.id}`, { lowStockThreshold: -1 })).statusCode).toBe(400);
     h.events.length = 0;
     await seller(h, avery, 'POST', `/stock-items/${item.id}/adjustments`, { newAvailable: 5, reasonCode: 'count_correction' });
-    expect(eventsNamed(h, 'inventory.stock.low')).toEqual([{ stockItemId: item.id, offerId: item.offerId, ownerType: 'seller', sellerId: avery, productId: item.productId, variantId: item.variantId, sku: item.sku, label: item.label, available: 5, threshold: 6 }]);
+    expect(eventsNamed(h, 'inventory.stock.low')).toEqual([{ stockItemId: item.id, offerId: item.offerId, ownerType: 'seller', sellerId: avery, productId: item.productId, variantId: item.variantId, sku: item.sku, label: item.label, available: 5, threshold: 6, serviceManaged: false }]);
     await seller(h, avery, 'POST', `/stock-items/${item.id}/adjustments`, { newAvailable: 4, reasonCode: 'count_correction' });
     expect(eventsNamed(h, 'inventory.stock.low')).toHaveLength(1); // within the cooldown
     h.clock.advance(25 * 3_600_000);

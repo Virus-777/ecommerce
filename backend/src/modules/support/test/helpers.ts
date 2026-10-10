@@ -327,9 +327,9 @@ export async function placeOrder(h: Harness, groups: OrderGroupInput[], o: { cus
       const lines = g.items.map((i) => ({ orderItemId: i.id, quantity: i.quantity, title: 'x', variantLabel: '' }));
       const sellerId = g.seller.id ?? null;
       const at = h.clock.now().toISOString();
-      await h.publish('shipping', 'shipping.shipment.created', { shipmentId, kind: 'outbound', orderId: order.id, groupId: g.id, sellerId, packageLabel: 'Package', carrierCode: 'ups', carrierName: 'UPS', serviceName: null, trackingNumber: '1Z1', trackingUrl: null, lines, status: 'label_created' });
-      await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId, kind: 'outbound', orderId: order.id, groupId: g.id, ownerType: g.seller.ownerType, sellerId, lines, shippedAt: at, dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
-      await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId, kind: 'outbound', orderId: order.id, groupId: g.id, sellerId, lines, deliveredAt: at });
+      await h.publish('shipping', 'shipping.shipment.created', { shipmentId, kind: 'outbound', orderId: order.id, groupId: g.id, sellerId, fulfilledBy: g.fulfilledBy, packageLabel: 'Package', carrierCode: 'ups', carrierName: 'UPS', serviceName: null, trackingNumber: '1Z1', trackingUrl: null, lines, status: 'label_created' });
+      await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId, kind: 'outbound', orderId: order.id, groupId: g.id, ownerType: g.seller.ownerType, sellerId, fulfilledBy: g.fulfilledBy, lines, shippedAt: at, dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
+      await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId, kind: 'outbound', orderId: order.id, groupId: g.id, sellerId, fulfilledBy: g.fulfilledBy, lines, deliveredAt: at });
     }
   }
   const fresh = (await h.orders.getOrder(order.id))!;

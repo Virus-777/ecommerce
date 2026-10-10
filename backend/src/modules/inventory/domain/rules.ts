@@ -51,6 +51,21 @@ export function applyMove(q: StockQuantities, from: GroupOrOutside, to: GroupOrO
   return out;
 }
 
+/**
+ * Sellable rule (Fulfilled by Marketly, decision D4): whether an item's Available units at a location can be sold.
+ * The location must be sellable and active; a seller item sells from its service location when one is set
+ * (stock_items.service_location_id) and otherwise only from its own (seller) location; company locations never sell
+ * a seller item that is not designated there, and company stock sells from company locations only.
+ */
+export function sellsFrom(
+  item: { owner_type: string; service_location_id: string | null },
+  loc: { id: string; owner_type: string; sellable: boolean; active: boolean } | undefined,
+): boolean {
+  if (!loc || !loc.sellable || !loc.active) return false;
+  if (item.owner_type === 'seller') return item.service_location_id ? loc.id === item.service_location_id : loc.owner_type === 'seller';
+  return loc.owner_type === 'official';
+}
+
 /** Units physically held (valued at cost): everything except Incoming */
 export const onHand = (q: StockQuantities) => q.available + q.reserved + q.damagedHeld + q.returned;
 
@@ -125,7 +140,31 @@ const REASON_LABELS: Record<string, string> = {
   hold_unmatched: 'Held units not on the accepted order',
   merged_out: 'Merged into another SKU',
   merged_in: 'Merged from another SKU',
+  // Fulfilled by Marketly (seller stock in a Marketly warehouse)
+  service_inbound_expected: 'Inbound shipment to Marketly',
+  service_inbound_changed: 'Inbound shipment to Marketly changed',
+  service_inbound_closed: 'Inbound shipment to Marketly closed',
+  service_return_received: 'Return received at Marketly',
+  service_return_restocked: 'Return restocked at Marketly',
+  service_return_unsellable: 'Return kept as unsellable at Marketly',
+  service_return_disposed: 'Return disposed of at Marketly',
+  service_removal_reserved: 'Set aside for a removal order',
+  service_removal_completed: 'Removal order completed',
+  service_found: 'Found at Marketly',
+  service_reconcile: 'Reconciled with the fulfillment service',
 };
+
+/** moveServiceStock reason codes (contract K7) */
+export const SERVICE_REASONS = [
+  'service_return_received',
+  'service_return_restocked',
+  'service_return_unsellable',
+  'service_return_disposed',
+  'service_removal_reserved',
+  'service_removal_completed',
+  'service_found',
+  'service_reconcile',
+] as const;
 
 export const reasonLabel = (code: string) => REASON_LABELS[code] ?? code.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 

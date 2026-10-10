@@ -11,7 +11,7 @@ import type { EventName, EventPayload } from '../../../kernel/events/index.js';
 import { format } from '../../../kernel/lib/money.js';
 import type { NotifyInput, Recipient } from '../../../spec/notifications.js';
 import { TOPICS } from '../domain/catalog.js';
-import { ROUTES, type EventRoute, type Fmt, type RouteSend, type RouteTarget, type Routes, type SubjectKey, type Target } from '../domain/routing.js';
+import { ROUTES, sellerShips, type EventRoute, type Fmt, type RouteSend, type RouteTarget, type Routes, type SubjectKey, type Target } from '../domain/routing.js';
 import { formatDate, hashAddress } from '../domain/rules.js';
 import { Core } from './core.js';
 import type { Sender } from './sender.js';
@@ -293,7 +293,8 @@ export class Consumers {
         const p = payload as EventPayload<'orders.order.accepted'>;
         const hours = Number(await core.setting('sellerDispatchReminderHours'));
         for (const g of p.groups) {
-          if (g.ownerType !== 'seller' || !g.sellerId) continue;
+          // Fulfilled by Marketly groups: Marketly dispatches them, the seller gets no reminder
+          if (!sellerShips(g) || !g.sellerId) continue;
           const key = `seller.dispatch.reminder:${g.groupId}`;
           const sendAt = new Date(new Date(g.dispatchBy).getTime() - hours * 3_600_000);
           if (sendAt.getTime() <= now.getTime() || (await repo.hasPendingScheduled(key))) continue;

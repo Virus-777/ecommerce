@@ -153,7 +153,7 @@ describe('remedies that would stay pending', () => {
     const onTime = await dispute(h, {});
     const due = new Date(h.clock.now().getTime() + 2 * 86_400_000).toISOString();
     for (const d of [late, onTime]) expect((await decide(h, d.caseId, [{ kind: 'ship_by_deadline', dueAt: due }])).status).toBe(200);
-    const dispatched = (d: typeof late, at: Date) => h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId: newId(), kind: 'outbound', orderId: d.order.id, groupId: d.order.groups[0]!.id, ownerType: 'seller', sellerId: d.sellerId, lines: [{ orderItemId: d.itemId, title: 'x', variantLabel: '', quantity: 1 }], shippedAt: at.toISOString(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
+    const dispatched = (d: typeof late, at: Date) => h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId: newId(), kind: 'outbound', orderId: d.order.id, groupId: d.order.groups[0]!.id, ownerType: 'seller', sellerId: d.sellerId, fulfilledBy: 'seller', lines: [{ orderItemId: d.itemId, title: 'x', variantLabel: '', quantity: 1 }], shippedAt: at.toISOString(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
     await dispatched(onTime, new Date(h.clock.now().getTime() + 86_400_000));
     await dispatched(late, new Date(h.clock.now().getTime() + 3 * 86_400_000));
     expect((await h.service.core.load(onTime.caseId))!.remedies[0]!.status).toBe('completed');

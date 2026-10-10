@@ -26,8 +26,8 @@ async function twoSellerOrder() {
 async function ship(orderId: string, groupId: string, sellerId: string, lines: { orderItemId: string; quantity: number }[], trackingNumber = '1Z1') {
   const shipmentId = newId();
   const l = lines.map((x) => ({ ...x, title: 'x', variantLabel: '' }));
-  await h.publish('shipping', 'shipping.shipment.created', { shipmentId, kind: 'outbound', orderId, groupId, sellerId, packageLabel: 'Package', carrierCode: 'ups', carrierName: 'UPS', serviceName: null, trackingNumber, trackingUrl: null, lines: l, status: 'label_created' });
-  await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId, kind: 'outbound', orderId, groupId, ownerType: 'seller', sellerId, lines: l, shippedAt: now(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: { from: '2026-10-12', to: '2026-10-14' } });
+  await h.publish('shipping', 'shipping.shipment.created', { shipmentId, kind: 'outbound', orderId, groupId, sellerId, fulfilledBy: sellerId ? 'seller' : 'official_warehouse', packageLabel: 'Package', carrierCode: 'ups', carrierName: 'UPS', serviceName: null, trackingNumber, trackingUrl: null, lines: l, status: 'label_created' });
+  await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId, kind: 'outbound', orderId, groupId, ownerType: 'seller', fulfilledBy: 'seller', sellerId, lines: l, shippedAt: now(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: { from: '2026-10-12', to: '2026-10-14' } });
   return shipmentId;
 }
 
@@ -52,7 +52,7 @@ describe('shipping and delivery', () => {
     expect(task.openLines[0]!.quantityToShip).toBe(1);
 
     await h.publish('shipping', 'shipping.shipment.status_changed', { shipmentId: s1, kind: 'outbound', orderId: m.order.id, groupId: m.gA.id, from: 'shipped', to: 'in_transit', statusLabel: 'In transit', estimatedArrival: null, at: now() });
-    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId: s1, kind: 'outbound', orderId: m.order.id, groupId: m.gA.id, sellerId: m.sellerA, lines: [{ orderItemId: item.id, title: 'x', variantLabel: '', quantity: 1 }], deliveredAt: now() });
+    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId: s1, kind: 'outbound', orderId: m.order.id, groupId: m.gA.id, sellerId: m.sellerA, fulfilledBy: 'seller', lines: [{ orderItemId: item.id, title: 'x', variantLabel: '', quantity: 1 }], deliveredAt: now() });
     const delivered = h.named('orders.item.delivered').find((e) => e.itemId === item.id);
     expect(delivered).toMatchObject({ orderId: m.order.id, ownerType: 'seller', sellerId: m.sellerA, quantity: 1, customerId: m.customerId, contactEmail: 'sam@example.com' });
     expect(new Date(delivered.returnWindowEndsAt).getTime() - new Date(delivered.deliveredAt).getTime()).toBe(30 * 86_400_000);
@@ -64,7 +64,7 @@ describe('shipping and delivery', () => {
 
   it('turns unshipped items Delayed on an overdue dispatch, and staff set a final dispatch date', async () => {
     const m = await twoSellerOrder();
-    await h.publish('shipping', 'shipping.dispatch.overdue', { orderId: m.order.id, orderRef: m.order.ref, groupId: m.gB.id, ownerType: 'seller', sellerId: m.sellerB, orderItemIds: [m.gB.items[0]!.id], dueAt: now(), exceptionId: newId() });
+    await h.publish('shipping', 'shipping.dispatch.overdue', { orderId: m.order.id, orderRef: m.order.ref, groupId: m.gB.id, ownerType: 'seller', fulfilledBy: 'seller', sellerId: m.sellerB, orderItemIds: [m.gB.items[0]!.id], dueAt: now(), exceptionId: newId() });
     expect(h.named('orders.item.delayed').find((e) => e.groupId === m.gB.id)).toMatchObject({ source: 'overdue', expectedDispatchBy: null });
     expect((await h.service.getOrder(m.order.id))!.groups[1]!.status).toBe('delayed');
     const staff = tokens.staff();
@@ -80,7 +80,7 @@ describe('shipping and delivery', () => {
   it('flags delivery exceptions and corrects tracking', async () => {
     const m = await twoSellerOrder();
     const s = await ship(m.order.id, m.gB.id, m.sellerB, [{ orderItemId: m.gB.items[0]!.id, quantity: 1 }], '1ZBAD');
-    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'failed_delivery', orderId: m.order.id, groupId: m.gB.id, shipmentId: s, sellerId: m.sellerB, orderItemIds: [m.gB.items[0]!.id], dueAt: now(), customerAction: null, source: 'carrier' });
+    await h.publish('shipping', 'shipping.shipment.exception', { exceptionId: newId(), kind: 'failed_delivery', orderId: m.order.id, groupId: m.gB.id, shipmentId: s, sellerId: m.sellerB, fulfilledBy: 'seller', orderItemIds: [m.gB.items[0]!.id], dueAt: now(), customerAction: null, source: 'carrier' });
     await h.publish('shipping', 'shipping.tracking.corrected', { shipmentId: s, orderId: m.order.id, from: '1ZBAD', to: '1ZGOOD12345', reason: 'Typo', by: { kind: 'seller', id: m.sellerB } });
     const o = (await h.service.getOrder(m.order.id))!;
     expect(o.status.flags).toContain('delivery_issue');
@@ -95,7 +95,7 @@ describe('shipping and delivery', () => {
     const customerId = newId();
     const p = product(h, { title: 'Pan', price: 2500, ownerType: 'official' });
     const order = await h.service.createOrder(checkout([group(h, [line(p, 1)], { ownerType: 'official' })], { customerId }));
-    await h.publish('warehouse', 'warehouse.fulfillment.status_changed', { fulfillmentId: newId(), orderId: order.id, sellerGroupId: order.groups[0]!.id, from: 'awaiting_pick', to: 'picking', reason: null });
+    await h.publish('warehouse', 'warehouse.fulfillment.status_changed', { fulfillmentId: newId(), orderId: order.id, sellerGroupId: order.groups[0]!.id, fulfilledBy: 'official_warehouse', from: 'awaiting_pick', to: 'picking', reason: null });
     const item = (await h.service.getOrder(order.id))!.groups[0]!.items[0]!;
     expect(item.state).toBe('preparing');
     const res = await h.call('POST', `/api/store/orders/orders/${order.id}/cancellations`, tokens.customer(customerId), { items: [{ itemId: item.id, quantity: 1 }], reasonCode: 'changed_mind' }, { 'idempotency-key': newId() });
@@ -108,15 +108,15 @@ describe('returns, refunds, cases and completion', () => {
     const m = await twoSellerOrder();
     const itemB = m.gB.items[0]!;
     const s = await ship(m.order.id, m.gB.id, m.sellerB, [{ orderItemId: itemB.id, quantity: 1 }]);
-    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId: s, kind: 'outbound', orderId: m.order.id, groupId: m.gB.id, sellerId: m.sellerB, lines: [{ orderItemId: itemB.id, title: 'x', variantLabel: '', quantity: 1 }], deliveredAt: now() });
+    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId: s, kind: 'outbound', orderId: m.order.id, groupId: m.gB.id, sellerId: m.sellerB, fulfilledBy: 'seller', lines: [{ orderItemId: itemB.id, title: 'x', variantLabel: '', quantity: 1 }], deliveredAt: now() });
     const returnId = newId();
-    await h.publish('returns', 'returns.return.requested', { returnId, ref: 'RT-261009-0001', orderId: m.order.id, orderRef: m.order.ref, ownerType: 'seller', sellerId: m.sellerB, orderItemIds: [itemB.id], reason: 'damaged', responseDueAt: now() });
+    await h.publish('returns', 'returns.return.requested', { returnId, ref: 'RT-261009-0001', orderId: m.order.id, orderRef: m.order.ref, ownerType: 'seller', fulfilledBy: 'seller', sellerId: m.sellerB, orderItemIds: [itemB.id], reason: 'damaged', responseDueAt: now() });
     let o = (await h.service.getOrder(m.order.id))!;
     expect(o.groups[1]!.items[0]).toMatchObject({ state: 'return_requested', afterSales: { returnId, returnRef: 'RT-261009-0001' } });
     expect(o.progress.returns).toMatchObject({ state: 'requested', openReturns: 1 });
     expect(o.status.flags).toContain('return_open');
 
-    await h.publish('returns', 'returns.return.received', { returnId, ref: 'RT-261009-0001', orderId: m.order.id, orderRef: m.order.ref, customerId: m.customerId, contactEmail: 'sam@example.com', ownerType: 'seller', sellerId: m.sellerB, items: [{ orderItemId: itemB.id, quantity: 1, variantId: itemB.product.variantId, stockItemId: itemB.stockItemId }], receivedAt: now() });
+    await h.publish('returns', 'returns.return.received', { returnId, ref: 'RT-261009-0001', orderId: m.order.id, orderRef: m.order.ref, customerId: m.customerId, contactEmail: 'sam@example.com', ownerType: 'seller', fulfilledBy: 'seller', sellerId: m.sellerB, items: [{ orderItemId: itemB.id, quantity: 1, variantId: itemB.product.variantId, stockItemId: itemB.stockItemId }], receivedAt: now() });
     const breakdown = { itemAmount: { amount: 3000, currency: 'USD' }, discountShare: { amount: 0, currency: 'USD' }, shippingRefund: { amount: 0, currency: 'USD' }, returnShippingDeduction: { amount: 0, currency: 'USD' }, deductions: [], total: { amount: 3200, currency: 'USD' }, maxRefundable: { amount: 3200, currency: 'USD' }, destination: 'Visa •••• 4417', isEstimate: false };
     const refundRequestId = newId();
     await h.publish('returns', 'returns.refund.approved', { refundRequestId, returnId, caseId: null, orderId: m.order.id, orderItemIds: [itemB.id], items: [{ orderItemId: itemB.id, quantity: 1 }], ownerType: 'seller', sellerId: m.sellerB, source: 'return', trustReportId: null, total: { amount: 3200, currency: 'USD' }, breakdown, fundedBy: 'seller', sellerShare: null, platformShare: null, approvedBy: { kind: 'staff', id: newId() } });
@@ -143,9 +143,9 @@ describe('returns, refunds, cases and completion', () => {
     const m = await twoSellerOrder();
     const itemB = m.gB.items[0]!;
     const s = await ship(m.order.id, m.gB.id, m.sellerB, [{ orderItemId: itemB.id, quantity: 1 }]);
-    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId: s, kind: 'outbound', orderId: m.order.id, groupId: m.gB.id, sellerId: m.sellerB, lines: [], deliveredAt: now() });
+    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId: s, kind: 'outbound', orderId: m.order.id, groupId: m.gB.id, sellerId: m.sellerB, fulfilledBy: 'seller', lines: [], deliveredAt: now() });
     const returnId = newId();
-    await h.publish('returns', 'returns.return.requested', { returnId, ref: 'RT-2', orderId: m.order.id, orderRef: m.order.ref, ownerType: 'seller', sellerId: m.sellerB, orderItemIds: [itemB.id], reason: 'x', responseDueAt: now() });
+    await h.publish('returns', 'returns.return.requested', { returnId, ref: 'RT-2', orderId: m.order.id, orderRef: m.order.ref, ownerType: 'seller', fulfilledBy: 'seller', sellerId: m.sellerB, orderItemIds: [itemB.id], reason: 'x', responseDueAt: now() });
     await h.publish('returns', 'returns.return.rejected', { returnId, ref: 'RT-2', orderId: m.order.id, orderRef: m.order.ref, ownerType: 'seller', sellerId: m.sellerB, reasonCode: 'used', platformDecision: false });
     expect((await h.service.getOrder(m.order.id))!.groups[1]!.items[0]!.state).toBe('delivered');
     const replacement = { replacementId: newId(), returnId, orderId: m.order.id, orderItemId: itemB.id, ownerType: 'seller' as const, sellerId: m.sellerB, variantId: h.products.get([...h.products.keys()].find((k) => h.products.get(k)!.title === 'Lamp')!)!.variantId, offerId: m.gB.items[0]!.offer.offerId, quantity: 1, kind: 'replacement' };
@@ -194,7 +194,7 @@ describe('returns, refunds, cases and completion', () => {
     const order = await h.service.createOrder(checkout([group(h, [line(p, 1)], { sellerId })], { customerId }));
     const item = order.groups[0]!.items[0]!;
     const s = await ship(order.id, order.groups[0]!.id, sellerId, [{ orderItemId: item.id, quantity: 1 }]);
-    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId: s, kind: 'outbound', orderId: order.id, groupId: order.groups[0]!.id, sellerId, lines: [], deliveredAt: now() });
+    await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId: s, kind: 'outbound', orderId: order.id, groupId: order.groups[0]!.id, sellerId, fulfilledBy: order.groups[0]!.fulfilledBy, lines: [], deliveredAt: now() });
     await h.app.kernel.jobs.runNow('orders.complete-orders');
     expect((await h.service.getOrder(order.id))!.lifecycle).toBe('open');
     h.clock.advance(31 * 86_400_000);

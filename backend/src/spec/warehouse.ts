@@ -131,6 +131,13 @@ export interface Fulfillment {
   orderId: string;
   orderRef: string;
   sellerGroupId: string;
+  /** official_warehouse: an Official Store group; marketly_service: a seller's group Marketly fulfils from seller-owned stock */
+  fulfilledBy: "official_warehouse" | "marketly_service";
+  /** The seller of record of a marketly_service fulfilment; null for the Official Store */
+  sellerId?: string | null;
+  /** Shown on the packing slip: 'Sold by <seller> · Fulfilled by Marketly' */
+  sellerName?: string | null;
+  /** The service location (fulfillment-service.getServiceLocation) for marketly_service, else the default location */
   locationId: string;
   status: "awaiting_pick" | "picking" | "picked" | "packing" | "packed" | "dispatched" | "on_hold" | "cancelled";
   shipBy: string;
@@ -156,7 +163,10 @@ export const Fulfillment: z.ZodType<Fulfillment> = z.object({
   orderId: z.uuid(),
   orderRef: z.string(),
   sellerGroupId: z.uuid(),
-  locationId: z.uuid(),
+  fulfilledBy: z.enum(["official_warehouse", "marketly_service"]).describe("official_warehouse: an Official Store group; marketly_service: a seller's group Marketly fulfils from seller-owned stock"),
+  sellerId: z.uuid().describe("The seller of record of a marketly_service fulfilment; null for the Official Store").nullish(),
+  sellerName: z.string().describe("Shown on the packing slip: 'Sold by <seller> · Fulfilled by Marketly'").nullish(),
+  locationId: z.uuid().describe("The service location (fulfillment-service.getServiceLocation) for marketly_service, else the default location"),
   status: z.enum(["awaiting_pick", "picking", "picked", "packing", "packed", "dispatched", "on_hold", "cancelled"]),
   shipBy: z.iso.datetime({ offset: true }),
   get deadline() {
@@ -183,6 +193,8 @@ export const Fulfillment: z.ZodType<Fulfillment> = z.object({
 export interface FulfillmentRow {
   id: string;
   orderRef: string;
+  fulfilledBy: "official_warehouse" | "marketly_service";
+  sellerName?: string | null;
   status: "awaiting_pick" | "picking" | "picked" | "packing" | "packed" | "dispatched" | "on_hold" | "cancelled";
   deadline: common.Deadline;
   shipBy: string;
@@ -195,6 +207,8 @@ export interface FulfillmentRow {
 export const FulfillmentRow: z.ZodType<FulfillmentRow> = z.object({
   id: z.uuid(),
   orderRef: z.string(),
+  fulfilledBy: z.enum(["official_warehouse", "marketly_service"]),
+  sellerName: z.string().nullish(),
   status: z.enum(["awaiting_pick", "picking", "picked", "packing", "packed", "dispatched", "on_hold", "cancelled"]),
   get deadline() {
     return common.Deadline;
@@ -662,11 +676,14 @@ export const WarehouseSummary: z.ZodType<WarehouseSummary> = z.object({
 
 /* ------------------------------------------------------------------ events */
 
-/** warehouse.fulfillment.created: An accepted order's Official Store group reaches the warehouse */
+/** warehouse.fulfillment.created: An accepted order's Official Store or Fulfilled by Marketly group reaches the warehouse */
 export interface WarehouseFulfillmentCreatedEvent {
   fulfillmentId: string;
   orderId: string;
   sellerGroupId: string;
+  fulfilledBy: "official_warehouse" | "marketly_service";
+  /** Seller of record of a marketly_service group */
+  sellerId?: string | null;
   shipBy: string;
 }
 
@@ -674,6 +691,8 @@ export const WarehouseFulfillmentCreatedEvent: z.ZodType<WarehouseFulfillmentCre
   fulfillmentId: z.uuid(),
   orderId: z.uuid(),
   sellerGroupId: z.uuid(),
+  fulfilledBy: z.enum(["official_warehouse", "marketly_service"]),
+  sellerId: z.uuid().describe("Seller of record of a marketly_service group").nullish(),
   shipBy: z.iso.datetime({ offset: true }),
 });
 
@@ -682,6 +701,8 @@ export interface WarehouseFulfillmentStatusChangedEvent {
   fulfillmentId: string;
   orderId: string;
   sellerGroupId: string;
+  fulfilledBy: "official_warehouse" | "marketly_service";
+  sellerId?: string | null;
   from: string;
   to: string;
   reason?: string | null;
@@ -691,6 +712,8 @@ export const WarehouseFulfillmentStatusChangedEvent: z.ZodType<WarehouseFulfillm
   fulfillmentId: z.uuid(),
   orderId: z.uuid(),
   sellerGroupId: z.uuid(),
+  fulfilledBy: z.enum(["official_warehouse", "marketly_service"]),
+  sellerId: z.uuid().nullish(),
   from: z.string(),
   to: z.string(),
   reason: z.string().nullish(),
@@ -753,6 +776,10 @@ export interface WarehousePackagePackedEvent {
   fulfillmentId: string;
   orderId: string;
   sellerGroupId: string;
+  /** seller for marketly_service packages: shipping records the shipment with the seller as owner */
+  ownerType: "official" | "seller";
+  sellerId?: string | null;
+  fulfilledBy: "official_warehouse" | "marketly_service";
   items: PackageItem[];
   carrier: string;
   service: string;
@@ -766,6 +793,9 @@ export const WarehousePackagePackedEvent: z.ZodType<WarehousePackagePackedEvent>
   fulfillmentId: z.uuid(),
   orderId: z.uuid(),
   sellerGroupId: z.uuid(),
+  ownerType: z.enum(["official", "seller"]).describe("seller for marketly_service packages: shipping records the shipment with the seller as owner"),
+  sellerId: z.uuid().nullish(),
+  fulfilledBy: z.enum(["official_warehouse", "marketly_service"]),
   get items() {
     return z.array(PackageItem);
   },
@@ -861,12 +891,16 @@ export interface WarehouseDb {
     primary_bin: boolean;
     assigned_at: Date;
   };
-  /** One per Official Store seller group of an accepted order */
+  /** One per Official Store or Fulfilled by Marketly seller group of an accepted order */
   fulfillments: {
     id: string;
     order_id: string;
     order_ref: string;
     seller_group_id: string;
+    fulfilled_by: 'official_warehouse' | 'marketly_service';
+    /** seller of record of a marketly_service group */
+    seller_id: string | null;
+    seller_name: string | null;
     location_id: string;
     status: string;
     ship_by: Date;
@@ -1123,10 +1157,11 @@ export const endpoints = defineEndpoints({
     auth: "staff",
     permission: "warehouse.view",
     scope: "staff",
-    summary: "Official Store orders to pick and pack, most urgent first",
+    summary: "Official Store and Fulfilled by Marketly orders to pick and pack, most urgent first",
     query: () =>
       z.object({
         status: z.enum(["awaiting_pick", "picking", "picked", "packing", "packed", "dispatched", "on_hold", "cancelled"]).optional(),
+        fulfilledBy: z.enum(["official_warehouse", "marketly_service"]).describe("Official Store only or Fulfilled by Marketly only; both by default").optional(),
         waveId: z.uuid().optional(),
         shipByBefore: z.iso.datetime({ offset: true }).optional(),
         q: z.string().describe("Order reference").optional(),
@@ -1863,7 +1898,7 @@ export const spec = defineModuleSpec({
   },
   events: {
     publishes: {
-      "warehouse.fulfillment.created": { when: "An accepted order's Official Store group reaches the warehouse", payload: () => WarehouseFulfillmentCreatedEvent },
+      "warehouse.fulfillment.created": { when: "An accepted order's Official Store or Fulfilled by Marketly group reaches the warehouse", payload: () => WarehouseFulfillmentCreatedEvent },
       "warehouse.fulfillment.status_changed": { when: "Any fulfillment status transition", payload: () => WarehouseFulfillmentStatusChangedEvent },
       "warehouse.fulfillment.at_risk": { when: "Not packed within the at-risk window before ship-by", payload: () => WarehouseFulfillmentAtRiskEvent },
       "warehouse.shortage.reported": { when: "A picker finds fewer units than expected", payload: () => WarehouseShortageReportedEvent },
@@ -1874,12 +1909,13 @@ export const spec = defineModuleSpec({
       "warehouse.return_parcel.handed_over": { when: "A parcel is handed to returns inspection", payload: () => WarehouseReturnParcelHandedOverEvent },
     },
     consumes: {
-      "orders.order.accepted": "Create a fulfillment for the order's Official Store seller group (lines carry stock item ids from the purchase snapshot and ship-by from shipping)",
+      "orders.order.accepted": "Create a fulfillment for each Official Store group and each Fulfilled by Marketly group (fulfilledBy marketly_service; at fulfillment-service.getServiceLocation, else the default location; seller stored). Lines carry stock item ids from the purchase snapshot and ship-by from shipping",
       "orders.item.split": "A line was split (partial cancel, shipment or return; decision S-D1): split the fulfillment line of itemId so newItemId gets its own line with quantity units (picked units stay on the original line first), so later cancel and dispatch events that name either item find their line. Idempotent per newItemId",
       "orders.item.cancelled": "Cancel the line; if already picked, return units to the bin; if packed, flag the package to be reopened",
       "inventory.discrepancy.resolved": "Resume a held fulfillment when the shortage or damage was reallocated",
       "purchasing.receipt.recorded": "Create put-away tasks for received units (damaged units to a quarantine bin)",
-      "returns.return.approved": "Expect a return parcel when the return goes to an Official Store warehouse",
+      "fulfillment-service.inbound.received": "Create put-away tasks for a Fulfilled by Marketly receiving record like a purchase receipt: sellable units (received − damaged) to the suggested bin, damaged units to quarantine; receipt_id = receiptId, receipt_ref = the IB- ref, location = locationId. Idempotent per receiptId",
+      "returns.return.approved": "Expect a return parcel when the return goes to a Marketly warehouse (Official Store returns and Fulfilled by Marketly returns, fulfilledBy marketly_service)",
       "shipping.shipment.dispatched": "Mark packages and the fulfillment dispatched",
       "shipping.dispatch.overdue": "Raise the fulfillment to the top of the pick list and flag it"
     },
@@ -2052,6 +2088,18 @@ export const spec = defineModuleSpec({
       "seller_group_id": {
         "type": "uuid",
         "nullable": false
+      },
+      "fulfilled_by": {
+        "type": "text",
+        "nullable": false
+      },
+      "seller_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "seller_name": {
+        "type": "text",
+        "nullable": true
       },
       "location_id": {
         "type": "uuid",
@@ -2475,7 +2523,11 @@ export const spec = defineModuleSpec({
       }
     }
   },
-  tenantTables: {},
+  tenantTables: {
+    "fulfillments": {
+      "seller": "seller_id"
+    }
+  },
   endpoints,
 });
 

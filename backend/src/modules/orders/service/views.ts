@@ -55,12 +55,15 @@ import {
   fmt,
   human,
   is,
+  isMarketlyService,
   maskEmail,
   maskPhone,
   monthDay,
   plural,
   shortDate,
   variantLabelOf,
+  WAREHOUSE_STAGE_ENTRY,
+  WAREHOUSE_STAGE_LABEL,
   type DisplayFlag,
   type GroupStatus,
   type ItemState,
@@ -152,7 +155,7 @@ export class Views {
   }
 
   stateNote(agg: Agg, i: ItemRec, g: GroupRec): string | null {
-    const seller = this.sellerLabel(g).name;
+    const seller = this.shipper(g);
     switch (i.state as ItemState) {
       case 'pending_payment':
         return 'Your payment is still being checked. Nothing ships until it is accepted.';
@@ -162,6 +165,7 @@ export class Views {
         return `Not shipped yet. You can cancel it until ${seller} ships it.`;
       case 'cancellation_requested': {
         const c = agg.cancellations.find((x) => x.status === 'requested' && x.items.some((l) => l.itemId === i.id));
+        if (c?.respond_by && isMarketlyService(g)) return `Cancellation requested. Marketly will confirm by ${shortDate(c.respond_by, this.tz)}.`;
         return c?.respond_by ? `Cancellation requested. ${seller} has until ${shortDate(c.respond_by, this.tz)} to confirm.` : 'Cancellation requested.';
       }
       case 'shipped':
@@ -273,7 +277,20 @@ export class Views {
   }
 
   handlingNote(g: GroupRec) {
-    return g.owner_type === 'official' ? 'Official Store item. Marketly handles returns.' : `${g.seller_name} handles this package. Marketly support can step in.`;
+    if (g.owner_type === 'official') return 'Official Store item. Marketly handles returns.';
+    if (isMarketlyService(g)) return 'Marketly ships this package and handles its returns';
+    return `${g.seller_name} handles this package. Marketly support can step in.`;
+  }
+
+  /** 'Sold by Casa Verde Home', or 'Sold by Casa Verde Home · Shipped by Marketly' for Fulfilled by Marketly */
+  soldBy(g: GroupRec) {
+    const name = this.sellerLabel(g).name;
+    return isMarketlyService(g) ? `Sold by ${name} · Shipped by Marketly` : `Sold by ${name}`;
+  }
+
+  /** Who ships the package, as the customer reads it */
+  private shipper(g: GroupRec) {
+    return isMarketlyService(g) ? 'Marketly' : this.sellerLabel(g).name;
   }
 
   latestEstimate(g: GroupRec) {
@@ -303,7 +320,9 @@ export class Views {
         caseRef,
       };
     }
-    if (this.core.now().getTime() > g.dispatch_by.getTime()) return { tone: 'warning', title: 'Running late', message: 'This package has not shipped by its dispatch date. We are following up with the seller.', caseRef };
+    if (this.core.now().getTime() > g.dispatch_by.getTime()) {
+      return { tone: 'warning', title: 'Running late', message: `This package has not shipped by its dispatch date. We are following up with ${isMarketlyService(g) ? 'our warehouse' : 'the seller'}.`, caseRef };
+    }
     return caseRef ? { tone: 'info', title: 'Support case open', message: 'We are looking into this package.', caseRef } : null;
   }
 
@@ -603,7 +622,20 @@ export class Views {
     }
   }
 
+  /**
+   * The seller's status label: for Fulfilled by Marketly groups 'Fulfilled by Marketly · <warehouse stage>' while
+   * the warehouse works on it (the latest stage from `stages`), then the shipping status.
+   */
+  sellerStatusLabel(agg: Agg, g: GroupRec, status: SellerRowStatus, stages?: ReadonlyMap<string, string>): string {
+    if (!isMarketlyService(g)) return SELLER_STATUS_LABEL[status];
+    let stage: string = SELLER_STATUS_LABEL[status];
+    if (agg.order.lifecycle === 'payment_pending') stage = 'Payment being checked';
+    else if (status === 'new' || status === 'preparing' || status === 'delayed') stage = stages?.get(g.id) ?? (status === 'new' ? WAREHOUSE_STAGE_LABEL.awaiting_pick! : SELLER_STATUS_LABEL[status]);
+    return `Fulfilled by Marketly · ${stage}`;
+  }
+
   nextAction(agg: Agg, g: GroupRec): SellerOrderRow['nextAction'] {
+    if (isMarketlyService(g)) return 'marketly_fulfils';
     const s = this.sellerStatus(agg, g);
     if (s === 'cancellation_requested') return 'respond_cancellation';
     if (agg.order.lifecycle === 'payment_pending') return 'view';
@@ -632,11 +664,13 @@ export class Views {
     return cancelled && live.length ? `${plural(cancelled, 'item')} cancelled` : null;
   }
 
-  sellerRow(agg: Agg, g: GroupRec, cfg: Pick<Cfg, 'dueSoonMinutes'>): SellerOrderRow {
+  /** `stages`: the latest Marketly warehouse stage per Fulfilled by Marketly group (Core.warehouseStages) */
+  sellerRow(agg: Agg, g: GroupRec, cfg: Pick<Cfg, 'dueSoonMinutes'>, stages?: ReadonlyMap<string, string>): SellerOrderRow {
     const items = agg.items.filter((i) => i.group_id === g.id);
     const status = this.sellerStatus(agg, g);
     return {
       id: g.id,
+      fulfilledBy: g.fulfilled_by as SellerOrderRow['fulfilledBy'],
       orderId: agg.order.id,
       ref: agg.order.ref,
       placedAt: isoReq(agg.order.placed_at),
@@ -645,7 +679,7 @@ export class Views {
       units: items.filter((i) => i.state !== 'cancelled').reduce((s, i) => s + i.quantity, 0),
       total: this.m(g.total, agg),
       status,
-      statusLabel: SELLER_STATUS_LABEL[status],
+      statusLabel: this.sellerStatusLabel(agg, g, status, stages),
       dispatchDeadline: this.dispatchDeadline(agg, g, cfg),
       deadlineLabel: deadlineLabel(g.dispatch_by, this.core.now(), g.shipped_at, this.groupOpen(agg, g), this.tz),
       nextAction: this.nextAction(agg, g),
@@ -689,9 +723,15 @@ export class Views {
     return { platform, seller };
   }
 
+  /** City and region only (decision D10: the seller of a Fulfilled by Marketly group does not ship it) */
+  cityAndRegion(a: common.Address): common.Address {
+    return { name: buyerName(a.name), line1: 'Marketly ships this package', line2: null, city: a.city, region: a.region, postalCode: '', country: a.country, phone: null };
+  }
+
   /** Full ship-to only while the task is open plus the return window (sellerAddressVisibleDays after delivery) */
   shipTo(agg: Agg, g: GroupRec, cfg: Pick<Cfg, 'sellerAddressVisibleDays'>): common.Address {
     const a = agg.order.delivery_address;
+    if (isMarketlyService(g)) return this.cityAndRegion(a);
     const until = g.delivered_at ? g.delivered_at.getTime() + cfg.sellerAddressVisibleDays * DAY : null;
     const visible = g.status !== 'cancelled' && (until === null || this.core.now().getTime() <= until);
     if (visible) return a;
@@ -699,6 +739,7 @@ export class Views {
   }
 
   sellerActions(agg: Agg, g: GroupRec): SellerOrderDetail['allowedActions'] {
+    if (isMarketlyService(g)) return []; // Marketly picks, packs and ships; the seller only views (decision D6)
     const items = agg.items.filter((i) => i.group_id === g.id);
     const paid = agg.order.lifecycle === 'open';
     const out: SellerOrderDetail['allowedActions'] = [];
@@ -715,6 +756,8 @@ export class Views {
     const open = this.groupOpen(agg, g);
     const fee = fees?.get(g.id) ?? null;
     const d = this.promise(g);
+    const stages = new Map<string, string>();
+    for (const t of timeline) if (t.group_id === g.id && t.visibility === 'seller' && t.label === WAREHOUSE_STAGE_ENTRY && t.detail) stages.set(g.id, t.detail);
     return {
       id: g.id,
       orderId: agg.order.id,
@@ -723,7 +766,8 @@ export class Views {
       buyerName: buyerName(agg.order.contact_name),
       paymentAccepted: agg.order.lifecycle !== 'payment_pending' && agg.order.payment_state !== 'failed',
       status,
-      statusLabel: SELLER_STATUS_LABEL[status],
+      statusLabel: this.sellerStatusLabel(agg, g, status, stages),
+      fulfilledBy: g.fulfilled_by as SellerOrderDetail['fulfilledBy'],
       dispatchDeadline: this.dispatchDeadline(agg, g, cfg),
       timeLeftMinutes: open ? Math.round((g.dispatch_by.getTime() - this.core.now().getTime()) / 60_000) : null,
       dispatchResult: dispatchResult(g.dispatch_by, g.shipped_at),
@@ -771,6 +815,8 @@ export class Views {
     scoped.order = { ...scoped.order, items_total: totals.items, discount_total: totals.discounts, shipping_total: totals.shipping, tax_total: totals.tax, total: totals.total, captured_total: 0, refunded_total: 0, contact_email: '', contact_phone: null, customer_id: null, contact_name: buyerName(agg.order.contact_name), coupon_codes: [] };
     const detail = this.detail(scoped, timeline.filter((t) => t.group_id && ownIds.has(t.group_id) && t.visibility !== 'staff'), 'seller', cfg);
     detail.contact = { kind: agg.order.customer_id ? 'customer' : 'guest', customerId: null, name: buyerName(agg.order.contact_name), email: 'hidden@marketly.invalid', phone: null };
+    // decision D10: a seller whose groups Marketly all ships sees the city and region only
+    if (own.every(isMarketlyService)) detail.deliveryAddress = this.cityAndRegion(agg.order.delivery_address);
     detail.documents = [];
     detail.cases = [];
     detail.paymentIntentId = null;
@@ -954,7 +1000,7 @@ export class Views {
       fulfillmentStatus: DISPLAY_LABEL[status.value],
       fulfillmentNote: live.length ? `${delivered} of ${plural(live.length, 'package')} delivered` : 'All items cancelled',
       lateBy: overdue ? `Overdue ${human(now - overdue.dispatch_by.getTime())}` : null,
-      owner: overdue ? (overdue.owner_type === 'official' ? 'Official Store warehouse' : overdue.seller_name) : null,
+      owner: overdue ? (overdue.owner_type === 'official' ? 'Official Store warehouse' : isMarketlyService(overdue) ? `Marketly warehouse (Fulfilled by Marketly for ${overdue.seller_name})` : overdue.seller_name) : null,
       flags: this.flags(agg),
     };
   }

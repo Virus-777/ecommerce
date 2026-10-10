@@ -19,9 +19,9 @@ const now = () => new Date().toISOString();
 async function deliver(orderId: string, groupId: string, sellerId: string | null, items: { id: string; quantity: number }[]) {
   const shipmentId = newId();
   const lines = items.map((i) => ({ orderItemId: i.id, quantity: i.quantity, title: 'x', variantLabel: '' }));
-  await h.publish('shipping', 'shipping.shipment.created', { shipmentId, kind: 'outbound', orderId, groupId, sellerId, packageLabel: 'Package', carrierCode: 'ups', carrierName: 'UPS', serviceName: null, trackingNumber: '1Z9', trackingUrl: null, lines, status: 'label_created' });
-  await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId, kind: 'outbound', orderId, groupId, ownerType: sellerId ? 'seller' : 'official', sellerId, lines, shippedAt: now(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
-  await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId, kind: 'outbound', orderId, groupId, sellerId, lines, deliveredAt: now() });
+  await h.publish('shipping', 'shipping.shipment.created', { shipmentId, kind: 'outbound', orderId, groupId, sellerId, fulfilledBy: sellerId ? 'seller' : 'official_warehouse', packageLabel: 'Package', carrierCode: 'ups', carrierName: 'UPS', serviceName: null, trackingNumber: '1Z9', trackingUrl: null, lines, status: 'label_created' });
+  await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId, kind: 'outbound', orderId, groupId, ownerType: sellerId ? 'seller' : 'official', fulfilledBy: sellerId ? 'seller' : 'official_warehouse', sellerId, lines, shippedAt: now(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
+  await h.publish('shipping', 'shipping.shipment.delivered', { shipmentId, kind: 'outbound', orderId, groupId, sellerId, fulfilledBy: sellerId ? 'seller' : 'official_warehouse', lines, deliveredAt: now() });
 }
 
 describe('category at purchase', () => {
@@ -128,7 +128,7 @@ describe('customer on customer-facing events', () => {
     expect(h.named('orders.item.cancelled').find((e) => e.itemId === vase.id)).toMatchObject({ customerId: accountId, contactEmail: 'sam@example.com' });
     expect(h.named('orders.cancellation.decided').find((e) => e.orderId === order.id)).toMatchObject({ customerId: accountId, contactEmail: 'sam@example.com', outcome: 'accepted' });
 
-    await h.publish('shipping', 'shipping.dispatch.overdue', { orderId: order.id, orderRef: order.ref, groupId: order.groups[0]!.id, ownerType: 'seller', sellerId, orderItemIds: [order.groups[0]!.items[0]!.id], dueAt: now(), exceptionId: newId() });
+    await h.publish('shipping', 'shipping.dispatch.overdue', { orderId: order.id, orderRef: order.ref, groupId: order.groups[0]!.id, ownerType: 'seller', fulfilledBy: 'seller', sellerId, orderItemIds: [order.groups[0]!.items[0]!.id], dueAt: now(), exceptionId: newId() });
     expect(h.named('orders.item.delayed').find((e) => e.orderId === order.id)).toMatchObject({ customerId: accountId, contactEmail: 'sam@example.com', source: 'overdue' });
   });
 
@@ -136,7 +136,7 @@ describe('customer on customer-facing events', () => {
     const sellerId = newId();
     const p = product(h, { title: 'Shelf', price: 5000, sellerId });
     const order = await h.service.createOrder(checkout([group(h, [line(p, 1)], { sellerId })], { email: 'guest-shelf@example.com' }));
-    await h.publish('shipping', 'shipping.dispatch.overdue', { orderId: order.id, orderRef: order.ref, groupId: order.groups[0]!.id, ownerType: 'seller', sellerId, orderItemIds: [order.groups[0]!.items[0]!.id], dueAt: now(), exceptionId: newId() });
+    await h.publish('shipping', 'shipping.dispatch.overdue', { orderId: order.id, orderRef: order.ref, groupId: order.groups[0]!.id, ownerType: 'seller', fulfilledBy: 'seller', sellerId, orderItemIds: [order.groups[0]!.items[0]!.id], dueAt: now(), exceptionId: newId() });
     expect(h.named('orders.item.delayed').find((e) => e.orderId === order.id)).toMatchObject({ customerId: null, contactEmail: 'guest-shelf@example.com' });
   });
 });

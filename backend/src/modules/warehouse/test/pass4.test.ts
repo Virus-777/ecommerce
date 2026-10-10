@@ -31,7 +31,7 @@ async function stocked(sku: string, label: string): Promise<StockRec> {
 }
 
 const overdue = (o: { orderId: string; ref: string; groupId: string; itemIds: string[] }, exceptionId: string, dueAt: string) =>
-  h.publish('shipping', 'shipping.dispatch.overdue', { orderId: o.orderId, orderRef: o.ref, groupId: o.groupId, ownerType: 'official', sellerId: null, orderItemIds: o.itemIds, dueAt, exceptionId });
+  h.publish('shipping', 'shipping.dispatch.overdue', { orderId: o.orderId, orderRef: o.ref, groupId: o.groupId, ownerType: 'official', sellerId: null, fulfilledBy: 'official_warehouse', orderItemIds: o.itemIds, dueAt, exceptionId });
 
 describe('fulfillments.dispatch_overdue_at', () => {
   it('is set once by shipping.dispatch.overdue (inbox: a redelivery changes nothing)', async () => {

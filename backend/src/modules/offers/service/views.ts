@@ -22,7 +22,7 @@ import type {
 } from '../../../spec/offers.js';
 import type * as reports from '../../../spec/reports.js';
 import { CONDITIONS, dispatchLabel, reason } from '../domain/rules.js';
-import { compareAtOf, money, OFFICIAL_NAME, pricePoint, statusEntry, variantLabel } from '../mappers.js';
+import { compareAtOf, FULFILLMENT_NOTE, money, OFFICIAL_NAME, pricePoint, statusEntry, variantLabel } from '../mappers.js';
 import type { OfferListFilter, OfferRec } from '../ports.js';
 import { invalidField, notFound, Part, type By, type ProductCache } from './core.js';
 
@@ -240,6 +240,8 @@ export class ViewsPart extends Part {
       otherOfferCount: context.otherOfferCount,
       lowestNewPrice: context.lowestNewPrice,
       officialStorePrice: context.officialStorePrice,
+      // dispatch and shipping profile edits are saved but have no customer effect while Marketly fulfils the offer
+      fulfillmentNote: row.fulfilled_by === 'marketly_service' ? FULFILLMENT_NOTE : null,
     };
   }
 

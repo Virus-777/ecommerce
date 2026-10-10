@@ -6,7 +6,7 @@ import { AppError } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import type * as common from '../../../spec/common.js';
 import type { BulkResult, FulfillmentTask } from '../../../spec/orders.js';
-import { CANCELLABLE, DAY, is, shortDate, UNSHIPPED } from '../domain/rules.js';
+import { CANCELLABLE, DAY, is, isMarketlyService, marketlyFulfils, shortDate, UNSHIPPED, WAREHOUSE_STAGE_ENTRY, WAREHOUSE_STAGE_LABEL } from '../domain/rules.js';
 import type { DispatchChange, GroupRec, ItemRec, ShipmentRec } from '../ports.js';
 import { invalid, notFound, SYSTEM, type Agg, type By, type Core } from './core.js';
 import type { Views } from './views.js';
@@ -47,6 +47,7 @@ export class Fulfillment {
   async startPreparing(groupId: string, by: By): Promise<void> {
     const g = await this.core.repo.get('seller_groups', groupId);
     if (!g) throw notFound();
+    this.core.refuseMarketly(g, 'prepare it');
     await this.core.write(g.order_id, by, async (tx, agg, batch) => {
       const items = agg.items.filter((i) => i.group_id === groupId);
       const movable = items.filter((i) => i.state === 'confirmed' || i.state === 'delayed');
@@ -93,6 +94,7 @@ export class Fulfillment {
   async reportDelay(groupId: string, body: { itemIds?: string[] | null; reason: string; expectedDispatchBy: string; note?: string | null }, by: By): Promise<void> {
     const g = await this.core.repo.get('seller_groups', groupId);
     if (!g) throw notFound();
+    this.core.refuseMarketly(g, 'report a delay for it');
     const expected = new Date(body.expectedDispatchBy);
     if (expected.getTime() <= this.core.now().getTime()) throw invalid([{ path: 'expectedDispatchBy', message: 'Choose a date in the future' }]);
     await this.core.write(g.order_id, by, async (tx, agg, batch) => {
@@ -342,10 +344,19 @@ export class Fulfillment {
       if (!items.length) return;
       for (const i of items) await this.core.move(tx, batch, i, 'mark_delayed', { reason: 'Dispatch deadline passed' });
       const g = agg.groups.find((x) => x.id === e.groupId)!;
-      await this.core.timeline(tx, agg.order.id, [
-        { group_id: e.groupId, visibility: 'customer', label: 'Package delayed', detail: `Package ${g.position} has not shipped on time. We have asked ${g.seller_name} to ship it; you can cancel the items or contact support.` },
-        { group_id: e.groupId, visibility: 'seller', label: 'Dispatch overdue', detail: 'Ship now or cancel what you cannot fulfill.' },
-      ]);
+      await this.core.timeline(
+        tx,
+        agg.order.id,
+        marketlyFulfils(g)
+          ? [
+              { group_id: e.groupId, visibility: 'customer', label: 'Package delayed', detail: `Package ${g.position} has not shipped on time. Our warehouse is on it; you can cancel the items or contact support.` },
+              { group_id: e.groupId, visibility: 'seller', label: 'Dispatch overdue', detail: "Marketly's warehouse is late with this package. Nothing to do on your side." },
+            ]
+          : [
+              { group_id: e.groupId, visibility: 'customer', label: 'Package delayed', detail: `Package ${g.position} has not shipped on time. We have asked ${g.seller_name} to ship it; you can cancel the items or contact support.` },
+              { group_id: e.groupId, visibility: 'seller', label: 'Dispatch overdue', detail: 'Ship now or cancel what you cannot fulfill.' },
+            ],
+      );
       batch.push('orders.item.delayed', { orderId: e.orderId, ...this.core.recipient(agg.order), groupId: e.groupId, itemIds: items.map((i) => i.id), source: 'overdue', expectedDispatchBy: null, reason: 'Dispatch deadline passed' });
     });
   }
@@ -363,10 +374,22 @@ export class Fulfillment {
     });
   }
 
-  /** Official Store items become Preparing when picking starts (closing instant cancellation) */
+  /**
+   * Official Store and Fulfilled by Marketly items become Preparing when picking starts (closing instant
+   * cancellation). For Fulfilled by Marketly groups every warehouse stage is also written to the seller's timeline:
+   * the latest one is the stage in the seller's status label.
+   */
   async onWarehouseStatusChanged(e: EventPayload<'warehouse.fulfillment.status_changed'>) {
-    if (!PREPARING_WAREHOUSE.includes(e.to) || !(await this.known(e.orderId, e.sellerGroupId))) return;
+    const stage = WAREHOUSE_STAGE_LABEL[e.to];
+    if (!PREPARING_WAREHOUSE.includes(e.to) && !stage) return;
+    const g = await this.known(e.orderId, e.sellerGroupId);
+    if (!g || (!PREPARING_WAREHOUSE.includes(e.to) && !isMarketlyService(g))) return;
+    const latest = isMarketlyService(g) && stage ? await this.core.warehouseStages([e.orderId]) : null;
     await this.core.write(e.orderId, { actor: SYSTEM }, async (tx, agg, batch) => {
+      if (stage && latest && latest.get(e.sellerGroupId) !== stage) {
+        await this.core.timeline(tx, agg.order.id, [{ group_id: e.sellerGroupId, visibility: 'seller', label: WAREHOUSE_STAGE_ENTRY, detail: stage }]);
+      }
+      if (!PREPARING_WAREHOUSE.includes(e.to)) return;
       const items = agg.items.filter((i) => i.group_id === e.sellerGroupId && (i.state === 'confirmed' || i.state === 'delayed'));
       for (const i of items) await this.core.move(tx, batch, i, 'start_preparing', { reason: `Warehouse ${e.to}` });
       if (items.length) await this.core.timeline(tx, agg.order.id, [{ group_id: e.sellerGroupId, visibility: 'customer', label: 'Preparing your package', detail: 'Our warehouse is picking your items.' }]);

@@ -30,7 +30,7 @@ import { addDays, arrivalRange, HOUR_MS, DAY_MS, MON_FRI, onOrAfter, type DayRul
 import { labelMachine, shipmentMachine } from '../domain/state-machines.js';
 import { EVENT_LABELS, formatOk, MOVING, normalizeCode, normalizeTracking, pathFor, STEPS, stepOf, statusLabel, trackingUrlOf, type ShipmentStatus, type TrackingCode } from '../domain/tracking.js';
 import { CarrierRefused, type CarrierRec, type CarrierScan, type LabelRec, type LineRec, type ServiceRec, type ShipmentRec } from '../ports.js';
-import { Batch, invalid, iso, notFound, SYSTEM, type By, type Core } from './core.js';
+import { Batch, byMarketly, fulfilledByOf, invalid, iso, notFound, SYSTEM, type By, type Core, type FulfilledBy } from './core.js';
 import type { Estimates, Owner } from './estimates.js';
 import type { Exceptions } from './exceptions.js';
 import type { Profiles } from './profiles.js';
@@ -41,6 +41,8 @@ export interface GroupCtx {
   order: orders.OrderDetail | null;
   group: orders.SellerGroup | null;
   owner: Owner;
+  /** marketly_service: a seller's package Marketly's warehouse ships (the seller owns it but has no part in dispatch) */
+  fulfilledBy: FulfilledBy;
 }
 
 export interface ShopperViewer {
@@ -84,7 +86,7 @@ export class Shipments {
     const sellerId = ownerType === 'official' ? null : (task.seller.id ?? null);
     if (owner && (owner.ownerType !== ownerType || (owner.ownerType === 'seller' && owner.sellerId !== sellerId))) throw notFound('Order');
     const order = await this.orders.getOrder(task.orderId).catch(() => null);
-    return { task, order, group: order?.groups.find((g) => g.id === groupId) ?? null, owner: { ownerType, sellerId } };
+    return { task, order, group: order?.groups.find((g) => g.id === groupId) ?? null, owner: { ownerType, sellerId }, fulfilledBy: fulfilledByOf(ownerType, task.fulfilledBy) };
   }
 
   async load(id: string): Promise<ShipmentRec> {
@@ -322,6 +324,7 @@ export class Shipments {
       returnId: s.return_id,
       ownerType: s.owner_type as 'seller',
       sellerId: s.seller_id,
+      fulfilledBy: fulfilledByOf(s.owner_type, s.fulfilled_by),
       lines: this.views.contents(lines),
       shippedAt: (s.shipped_at ?? this.core.now()).toISOString(),
       dispatchDueAt: iso(s.dispatch_due_at),
@@ -339,6 +342,7 @@ export class Shipments {
       groupId: s.group_id,
       returnId: s.return_id,
       sellerId: s.seller_id,
+      fulfilledBy: fulfilledByOf(s.owner_type, s.fulfilled_by),
       packageLabel,
       carrierCode: s.carrier_code,
       carrierName: carrierNameOf(s.carrier_code),
@@ -398,6 +402,8 @@ export class Shipments {
 
   async record(owner: Owner, input: RecordShipmentInput, by: By, source: 'seller' | 'warehouse' = 'seller'): Promise<Shipment> {
     const g = await this.groupContext(input.groupId, owner);
+    // the warehouse records Marketly's packages; the seller never does
+    if (source === 'seller') this.core.refuseIfMarketly(g.fulfilledBy);
     if (input.labelId) return this.recordWithLabel(g, input, by);
     await this.checkItems(g, input.items);
     const carrier = await this.carrierByCode(input.carrierCode);
@@ -435,6 +441,7 @@ export class Shipments {
         return_id: returnId,
         owner_type: g.owner.ownerType,
         seller_id: g.owner.sellerId,
+        fulfilled_by: g.fulfilledBy,
         package_no: packageNo,
         carrier_code: carrier.code,
         service_name: service?.name ?? input.serviceName?.trim() ?? null,
@@ -515,6 +522,13 @@ export class Shipments {
     return this.view(s, by.principal);
   }
 
+  /** Seller Center: the seller's own labelled package; Marketly's warehouse hands its packages over itself */
+  async handOverSeller(sellerId: string, shipmentId: string, at: string, by: By): Promise<Shipment> {
+    const s = await this.own(shipmentId, sellerId);
+    this.core.refuseIfMarketly(s.fulfilled_by);
+    return this.handOver(shipmentId, at, by.actor, by);
+  }
+
   private async serviceOfShipment(s: ShipmentRec): Promise<ServiceRec | null> {
     const label = (await this.repo.find('labels', { shipment_id: s.id }, { limit: 1 }))[0];
     if (label) return (await this.repo.get('carrier_services', label.carrier_service_id)) ?? null;
@@ -540,17 +554,18 @@ export class Shipments {
   }
 
   /** Quotes per label-capable service: cost, arrival and whether it keeps the promised range */
-  private async quotesFor(g: GroupCtx, parcel: Parcel, o: { kind: string; to?: Partial<common.Address> | null }): Promise<LabelQuote[]> {
+  private async quotesFor(g: GroupCtx, parcel: Parcel, o: { kind: string; to?: Partial<common.Address> | null; from?: Partial<common.Address> | null }): Promise<LabelQuote[]> {
     const options = await this.labelServices();
     if (!options.length) throw this.core.error('LABELS_NOT_SUPPORTED', 'No carrier service can sell a label for this package. Enter tracking manually.');
     const now = this.core.now();
     const promise = g.task.delivery.arrival;
     const toZip = (o.to?.postalCode ?? g.task.shipTo.postalCode ?? '').toString();
+    const fromZip = o.from?.postalCode ? String(o.from.postalCode) : null;
     const out: LabelQuote[] = [];
     for (const { service, carrier } of options) {
       let cost: common.Money;
       try {
-        cost = await this.core.carriers.rate({ carrierCode: carrier.code, serviceCode: service.code, speed: this.speedOf(service), parcel, fromPostalCode: null, toPostalCode: toZip, currency: this.core.currency });
+        cost = await this.core.carriers.rate({ carrierCode: carrier.code, serviceCode: service.code, speed: this.speedOf(service), parcel, fromPostalCode: fromZip, toPostalCode: toZip, currency: this.core.currency });
       } catch (err) {
         if (err instanceof CarrierRefused) continue;
         throw err;
@@ -564,8 +579,14 @@ export class Shipments {
     return out.sort((a, b) => Number(b.keepsPromise) - Number(a.keepsPromise) || a.cost.amount - b.cost.amount);
   }
 
+  /** Where an outbound package of the group starts: the service location for Fulfilled by Marketly groups, else not known here */
+  private async originOf(g: GroupCtx): Promise<common.Address | null> {
+    return byMarketly(g.fulfilledBy) ? ((await this.core.serviceLocation())?.address ?? null) : null;
+  }
+
   async quoteLabels(sellerId: string, body: { groupId: string; items: ShipmentLineInput[]; parcel: Parcel }): Promise<LabelQuote[]> {
     const g = await this.groupContext(body.groupId, { ownerType: 'seller', sellerId });
+    this.core.refuseIfMarketly(g.fulfilledBy);
     if (!(body.parcel.weightGrams > 0)) throw invalid([{ path: 'parcel.weightGrams', message: 'Enter the package weight' }]);
     await this.checkItems(g, body.items);
     return this.quotesFor(g, body.parcel, { kind: 'outbound' });
@@ -574,7 +595,8 @@ export class Shipments {
   async quoteLabelOptions(input: LabelRequest): Promise<LabelQuote[]> {
     const g = await this.groupContext(input.groupId);
     if (input.kind !== 'return' && input.items.length) await this.checkItems(g, input.items);
-    const quotes = await this.quotesFor(g, input.parcel, { kind: input.kind, to: input.to ?? null });
+    const from = input.from ?? (input.kind === 'return' ? null : await this.originOf(g));
+    const quotes = await this.quotesFor(g, input.parcel, { kind: input.kind, to: input.to ?? null, from });
     return input.keepPromise ? quotes.filter((q) => q.keepsPromise) : quotes;
   }
 
@@ -586,6 +608,7 @@ export class Shipments {
     const quote = await this.repo.get('label_quotes', body.quoteId);
     if (!quote) throw notFound('Label quote');
     const g = await this.groupContext(quote.group_id, { ownerType: 'seller', sellerId });
+    this.core.refuseIfMarketly(g.fulfilledBy);
     if (quote.expires_at.getTime() < this.core.now().getTime()) throw this.core.error('QUOTE_EXPIRED', 'This label price has expired. Get a new quote.');
     const result = await this.purchase(g, {
       kind: 'outbound',
@@ -619,7 +642,9 @@ export class Shipments {
     const options = await this.labelServices();
     let pick = input.carrierServiceId ? options.find((o) => o.service.id === input.carrierServiceId) : input.serviceCode ? options.find((o) => o.service.code === input.serviceCode || `${o.carrier.code}:${o.service.code}` === input.serviceCode) : undefined;
     if ((input.carrierServiceId || input.serviceCode) && !pick) throw this.core.error('LABELS_NOT_SUPPORTED', 'This carrier service cannot sell labels. Enter tracking manually.');
-    const quotes = await this.quotesFor(g, input.parcel, { kind: input.kind, to: input.to ?? null });
+    // a Fulfilled by Marketly package leaves from the service location (the label is billed to the seller, decision D1)
+    const from = input.from ?? (input.kind === 'return' ? null : await this.originOf(g));
+    const quotes = await this.quotesFor(g, input.parcel, { kind: input.kind, to: input.to ?? null, from });
     if (!pick) {
       const best = (input.keepPromise ? quotes.filter((q) => q.keepsPromise) : quotes)[0];
       if (!best) throw invalid([{ path: 'keepPromise', message: 'No carrier service arrives within the promised dates' }]);
@@ -637,7 +662,7 @@ export class Shipments {
       cost: q.cost,
       billedTo,
       key,
-      from: input.from ?? null,
+      from,
       to: input.kind === 'return' ? input.to! : (input.to ?? g.task.shipTo),
       returnId: input.kind === 'return' ? (input.returnId ?? null) : null,
       qr: input.kind === 'return' && input.labelMethod === 'prepaid_qr',
@@ -698,6 +723,7 @@ export class Shipments {
         return_id: kindInfo.returnId,
         owner_type: g.owner.ownerType,
         seller_id: g.owner.sellerId,
+        fulfilled_by: g.fulfilledBy,
         package_no: packageNo,
         carrier_code: carrier.code,
         service_name: service.name,
@@ -759,6 +785,8 @@ export class Shipments {
     if (!l) throw notFound('Label');
     const s = l.shipment_id ? await this.repo.get('shipments', l.shipment_id) : undefined;
     if (sellerId && (!s || s.owner_type !== 'seller' || s.seller_id !== sellerId)) throw notFound('Label');
+    // the warehouse's label for a Fulfilled by Marketly package is not the seller's to void
+    if (sellerId) this.core.refuseIfMarketly(s?.fulfilled_by);
     if (l.status === 'voided') return this.views.label(l, by.principal);
     labelMachine.next(l.status as never, 'void');
     if (s && s.status !== 'label_created') throw new AppError('ILLEGAL_TRANSITION', 'The carrier already has this package; the label cannot be voided', { machine: 'Label', from: l.status, event: 'void', allowed: [] });
@@ -786,6 +814,7 @@ export class Shipments {
 
   async correct(id: string, body: { carrierCode?: string | null; trackingNumber: string; reason: string; notifyCustomer?: boolean }, by: By, o: { sellerId?: string; staff?: boolean }): Promise<Shipment> {
     const s = o.sellerId ? await this.own(id, o.sellerId) : await this.load(id);
+    if (o.sellerId) this.core.refuseIfMarketly(s.fulfilled_by);
     if (!body.reason?.trim()) throw invalid([{ path: 'reason', message: 'Say why the tracking changes' }]);
     if (!o.staff && ['delivered', 'returned_to_sender', 'cancelled'].includes(s.status)) {
       throw new AppError('ILLEGAL_TRANSITION', 'Tracking of a delivered, returned or cancelled package cannot be changed', { machine: 'Shipment', from: s.status, event: 'correct_tracking', allowed: [] });
@@ -863,7 +892,7 @@ export class Shipments {
         current = await tx.update('shipments', s.id, step);
         this.statusChanged(batch, current, status, next, e.at);
         if (ev === 'hand_over') this.dispatched(batch, current, lines);
-        if (next === 'delivered') batch.push('shipping.shipment.delivered', { shipmentId: s.id, kind: s.kind as 'outbound', orderId: s.order_id, groupId: s.group_id, returnId: s.return_id, sellerId: s.seller_id, lines: this.views.contents(lines), deliveredAt: e.at.toISOString() });
+        if (next === 'delivered') batch.push('shipping.shipment.delivered', { shipmentId: s.id, kind: s.kind as 'outbound', orderId: s.order_id, groupId: s.group_id, returnId: s.return_id, sellerId: s.seller_id, fulfilledBy: fulfilledByOf(s.owner_type, s.fulfilled_by), lines: this.views.contents(lines), deliveredAt: e.at.toISOString() });
         status = next;
       }
       if (!path?.events.length && Object.keys(patch).length) current = await tx.update('shipments', s.id, patch);
@@ -1037,6 +1066,7 @@ export class Shipments {
         return_id: input.returnId,
         owner_type: g.owner.ownerType,
         seller_id: g.owner.sellerId,
+        fulfilled_by: g.fulfilledBy,
         package_no: 0,
         carrier_code: carrier.code,
         service_name: null,
@@ -1077,8 +1107,23 @@ export class Shipments {
 
   /* ---------------------------------------------------------------- warehouse */
 
-  /** warehouse.package.packed: hand over the Official Store package (recorded from the event when no label is known) */
-  async onPackagePacked(e: { packageId: string; orderId: string; sellerGroupId: string; items: { orderItemId: string; quantity: number }[]; carrier: string; service: string; trackingNumber: string; weight: { value: number; unit: string } }) {
+  /**
+   * warehouse.package.packed: hand over the warehouse's package, an Official Store one or a seller's Fulfilled by
+   * Marketly one (recorded from the event when no label is known, with the payload's owner, never a hard-coded one)
+   */
+  async onPackagePacked(e: {
+    packageId: string;
+    orderId: string;
+    sellerGroupId: string;
+    ownerType?: 'official' | 'seller' | null;
+    sellerId?: string | null;
+    fulfilledBy?: string | null;
+    items: { orderItemId: string; quantity: number }[];
+    carrier: string;
+    service: string;
+    trackingNumber: string;
+    weight: { value: number; unit: string };
+  }) {
     const tracking = normalizeTracking(e.trackingNumber);
     const existing = (await this.repo.find('shipments', { group_id: e.sellerGroupId, tracking_number: tracking })).find((s) => s.status !== 'cancelled');
     if (existing) {
@@ -1091,8 +1136,11 @@ export class Shipments {
       this.core.ctx.log.warn({ packageId: e.packageId, carrier: e.carrier }, 'shipping: packed package with an unknown carrier or no tracking');
       return;
     }
+    // older payloads carry no owner: the warehouse shipped Official Store packages only
+    const ownerType = e.ownerType ?? (byMarketly(e.fulfilledBy) ? 'seller' : 'official');
+    const owner: Owner = { ownerType, sellerId: ownerType === 'official' ? null : (e.sellerId ?? null) };
     try {
-      await this.record({ ownerType: 'official', sellerId: null }, { groupId: e.sellerGroupId, carrierCode: carrier.code, serviceName: e.service, trackingNumber: tracking, shippedAt: this.core.now().toISOString(), items: e.items.map((i) => ({ orderItemId: i.orderItemId, quantity: i.quantity })), acknowledgeFormatWarning: true }, { actor: { kind: 'system', id: null, name: 'Warehouse' } }, 'warehouse');
+      await this.record(owner, { groupId: e.sellerGroupId, carrierCode: carrier.code, serviceName: e.service, trackingNumber: tracking, shippedAt: this.core.now().toISOString(), items: e.items.map((i) => ({ orderItemId: i.orderItemId, quantity: i.quantity })), acknowledgeFormatWarning: true }, { actor: { kind: 'system', id: null, name: 'Warehouse' } }, 'warehouse');
     } catch (err) {
       if (!isAppError(err)) throw err;
       this.core.ctx.log.info({ err, packageId: e.packageId }, 'shipping: packed package not recorded');
@@ -1127,9 +1175,10 @@ export class Shipments {
   async dispatchMetrics(sellerId: string | null, range: common.DateRange): Promise<DispatchMetrics> {
     const from = new Date(`${range.from}T00:00:00Z`);
     const to = new Date(new Date(`${range.to}T00:00:00Z`).getTime() + DAY_MS);
+    // a seller's figures leave out Fulfilled by Marketly packages: Marketly dispatched them
     const rows = await this.repo.find('shipments', {
       owner_type: sellerId ? 'seller' : 'official',
-      ...(sellerId ? { seller_id: sellerId } : {}),
+      ...(sellerId ? { seller_id: sellerId, fulfilled_by: 'seller' } : {}),
       kind: ['outbound', 'replacement'],
       shipped_at: { op: '>=', value: from },
     });
@@ -1137,7 +1186,7 @@ export class Shipments {
     const known = inRange.filter((s) => s.dispatched_on_time !== null);
     const onTime = known.filter((s) => s.dispatched_on_time).length;
     const validTracking = inRange.filter((s) => s.tracking_state === 'valid' || s.tracking_state === 'pending').length;
-    const overdueOpen = await this.repo.count('dispatch_watch', { owner_type: sellerId ? 'seller' : 'official', ...(sellerId ? { seller_id: sellerId } : { seller_id: null }), due_at: { op: '<', value: this.core.now() } });
+    const overdueOpen = await this.repo.count('dispatch_watch', { owner_type: sellerId ? 'seller' : 'official', ...(sellerId ? { seller_id: sellerId, fulfilled_by: 'seller' } : { seller_id: null }), due_at: { op: '<', value: this.core.now() } });
     const pct = (n: number, d: number) => (d ? Math.round((n / d) * 1000) / 10 : 100);
     return { dispatched: inRange.length, onTimePct: pct(onTime, known.length), validTrackingPct: pct(validTracking, inRange.length), late: known.length - onTime, overdueOpen };
   }

@@ -37,6 +37,20 @@ export class Putaway {
 
   /** purchasing.receipt.recorded: a task per received line for sellable units, and one to quarantine for damaged units */
   async onReceiptRecorded(e: EventPayload<'purchasing.receipt.recorded'>): Promise<void> {
+    await this.createTasks(e);
+  }
+
+  /**
+   * fulfillment-service.inbound.received: a Fulfilled by Marketly receiving record is put away like a purchase
+   * receipt (sellable units to the suggested bin, damaged units to quarantine); receipt_id = the receiving record,
+   * receipt_ref = the IB- reference, at the service location. Idempotent per receiptId.
+   */
+  async onInboundReceived(e: EventPayload<'fulfillment-service.inbound.received'>): Promise<void> {
+    await this.createTasks({ receiptId: e.receiptId, ref: e.ref, locationId: e.locationId, lines: e.lines.map((l) => ({ stockItemId: l.stockItemId, received: l.received, damaged: l.damaged })) });
+  }
+
+  /** Tasks of one receipt (once per receiptId): received − damaged to the suggested bin, damaged to a quarantine bin */
+  private async createTasks(e: { receiptId: string; ref: string; locationId: string; lines: { stockItemId: string; received: number; damaged: number; binCode?: string | null }[] }): Promise<void> {
     if ((await this.repo.count('putaway_tasks', { receipt_id: e.receiptId })) > 0) return;
     const quarantines = await this.repo.find('bins', { location_id: e.locationId, kind: 'quarantine', active: true }, { orderBy: [['code', 'asc']], limit: 100 });
     const rows: PutawayRec[] = [];

@@ -1,11 +1,13 @@
 /**
  * Seller-owned stock held by Marketly: the ownership ledger per SKU, totals and the seller overview (stock,
  * open inbound, fees this and last month, alerts), daily storage snapshots with age buckets, the weekly
- * aged-stock notice and the daily reconciliation of the ledger with inventory.
+ * aged-stock notice and the low-stock notice for Marketly-held items.
  */
+import type { EventPayload } from '../../../kernel/events/index.js';
+import { isUuid } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type { SellerServiceOverview } from '../../../spec/fulfillment-service.js';
-import { ageBuckets, cubicFeet, onHandBlocks, physicalUnits, plural, previousMonth, qty, round4, sumStock, unitsOlderThan } from '../domain/rules.js';
+import { ageBuckets, cubicFeet, onHandBlocks, physicalUnits, plural, previousMonth, round4, sumStock, unitsOlderThan } from '../domain/rules.js';
 import type { SkuRec } from '../ports.js';
 import { notFound, Part } from './core.js';
 
@@ -130,39 +132,17 @@ export class StockPart extends Part {
       if (!soon.units) continue;
       sellers += 1;
       const when = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: this.core.tz }).format(soon.firstAt!);
-      await this.core.notifySeller(
-        sellerId,
-        'seller.platform.change_scheduled',
-        { change: { summary: `${plural(soon.units, 'unit')} at Marketly's warehouse will reach ${longTermDays} days and incur long-term storage fees; sell them or request their removal`, effective: when } },
-        { kind: 'queue', id: sellerId, label: 'View stock', screen: 'seller/inventory' },
-        `fulfillment-service:aged:${sellerId}:${week}`,
-      );
+      await this.core.notifySeller(sellerId, 'seller.fulfillment.stock_aged', { units: soon.units, effective: when, days: longTermDays }, { kind: 'queue', id: sellerId, label: 'View stock', screen: 'seller/inventory' }, `fs:aged:${sellerId}:${week}`);
     }
     const disposals = await this.parts.removals.disposeAbandoned();
     return { sellers, disposals };
   }
 
-  /**
-   * Job fulfillment-service.reconcile: the ledger's sellable units (Available + Reserved) against the seller's
-   * stock item in inventory, per SKU. Differences are logged for the Inventory Manager (workqueues is not a
-   * dependency of this module, so no work item can be opened).
-   */
-  async reconcile(): Promise<{ checked: number; differences: { skuEnrollmentId: string; sellerId: string; ledger: number; inventory: number }[] }> {
-    const skus = await this.repo.find('sku_enrollments', { state: ['approved', 'active', 'inactive'] }, { limit: 50_000 });
-    const differences: { skuEnrollmentId: string; sellerId: string; ledger: number; inventory: number }[] = [];
-    for (let i = 0; i < skus.length; i += 200) {
-      const batch = skus.slice(i, i + 200);
-      const balances = await this.repo.balances(batch.map((s) => s.id));
-      const items = await this.core.stockItems(batch.map((s) => s.offer_id));
-      for (const s of batch) {
-        const item = items.get(s.offer_id);
-        if (!item) continue;
-        const ledger = qty(balances, s.id, 'available') + qty(balances, s.id, 'reserved');
-        const inventory = item.quantities.available + item.quantities.reserved;
-        if (ledger !== inventory) differences.push({ skuEnrollmentId: s.id, sellerId: s.seller_id, ledger, inventory });
-      }
-    }
-    if (differences.length) this.ctx.log.warn({ count: differences.length, differences: differences.slice(0, 50) }, 'fulfillment-service: ownership ledger and inventory differ');
-    return { checked: skus.length, differences };
+  /** inventory.stock.low for a Marketly-held item (serviceManaged): the seller is asked to send more */
+  async onStockLow(e: EventPayload<'inventory.stock.low'>): Promise<void> {
+    if (!e.serviceManaged || e.ownerType !== 'seller' || !e.sellerId || !isUuid(e.stockItemId)) return;
+    const sku = await this.repo.findOne('sku_enrollments', { inventory_item_id: e.stockItemId, state: 'active' });
+    if (!sku || sku.seller_id !== e.sellerId) return;
+    await this.core.notifySeller(sku.seller_id, 'seller.fulfillment.stock_low', { stock: { label: e.label, sku: sku.sku }, available: e.available }, { kind: 'queue', id: sku.id, ref: sku.sku, label: 'Plan an inbound shipment', screen: 'seller/inventory' }, `fs:low:${sku.id}:${this.core.today()}`);
   }
 }

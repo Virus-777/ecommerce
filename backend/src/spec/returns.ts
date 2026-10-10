@@ -1453,6 +1453,8 @@ export interface ReturnCase {
     methodLabel: string;
   };
   policyApplied: EffectiveTerms;
+  /** From the order group. marketly_service: Marketly handles the return (platform handling, Marketly returns dock); the seller sees it read-only and funds the refund */
+  fulfilledBy: "official_warehouse" | "seller" | "marketly_service";
   shippingPaidBy: "seller" | "customer" | "platform";
   deadlines: {
     respondBy?: common.Deadline | null;
@@ -1510,6 +1512,7 @@ export const ReturnCase: z.ZodType<ReturnCase> = z.object({
   get policyApplied() {
     return EffectiveTerms;
   },
+  fulfilledBy: z.enum(["official_warehouse", "seller", "marketly_service"]).describe("From the order group. marketly_service: Marketly handles the return (platform handling, Marketly returns dock); the seller sees it read-only and funds the refund"),
   shippingPaidBy: z.enum(["seller", "customer", "platform"]),
   deadlines: z.object({
     get respondBy() {
@@ -1826,6 +1829,8 @@ export interface ReturnsReturnRequestedEvent {
   orderRef: string;
   ownerType: "official" | "seller";
   sellerId?: string | null;
+  /** marketly_service returns are platform handled from the request; the seller is not asked to respond */
+  fulfilledBy: "official_warehouse" | "seller" | "marketly_service";
   orderItemIds: string[];
   reason: string;
   responseDueAt: string;
@@ -1838,6 +1843,7 @@ export const ReturnsReturnRequestedEvent: z.ZodType<ReturnsReturnRequestedEvent>
   orderRef: z.string().describe("MK- reference of the order"),
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
+  fulfilledBy: z.enum(["official_warehouse", "seller", "marketly_service"]).describe("marketly_service returns are platform handled from the request; the seller is not asked to respond"),
   orderItemIds: z.array(z.uuid()),
   reason: z.string(),
   responseDueAt: z.iso.datetime({ offset: true }),
@@ -1881,6 +1887,8 @@ export interface ReturnsReturnApprovedEvent {
   contactEmail?: string | null;
   ownerType: "official" | "seller";
   sellerId?: string | null;
+  /** official_warehouse and marketly_service returns come to a Marketly warehouse (warehouse expects the parcel) */
+  fulfilledBy: "official_warehouse" | "seller" | "marketly_service";
   items: ReturnItemQuantity[];
   withoutReturn: boolean;
   platformDecision: boolean;
@@ -1898,6 +1906,7 @@ export const ReturnsReturnApprovedEvent: z.ZodType<ReturnsReturnApprovedEvent> =
   contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
+  fulfilledBy: z.enum(["official_warehouse", "seller", "marketly_service"]).describe("official_warehouse and marketly_service returns come to a Marketly warehouse (warehouse expects the parcel)"),
   get items() {
     return z.array(ReturnItemQuantity);
   },
@@ -1998,6 +2007,8 @@ export interface ReturnsReturnReceivedEvent {
   contactEmail?: string | null;
   ownerType: "official" | "seller";
   sellerId?: string | null;
+  /** marketly_service: fulfillment-service creates a service return for the units */
+  fulfilledBy: "official_warehouse" | "seller" | "marketly_service";
   items: ReturnedItem[];
   receivedAt: string;
 }
@@ -2011,6 +2022,7 @@ export const ReturnsReturnReceivedEvent: z.ZodType<ReturnsReturnReceivedEvent> =
   contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
+  fulfilledBy: z.enum(["official_warehouse", "seller", "marketly_service"]).describe("marketly_service: fulfillment-service creates a service return for the units"),
   get items() {
     return z.array(ReturnedItem);
   },
@@ -2031,6 +2043,8 @@ export interface ReturnsReturnInspectedEvent {
   contactEmail?: string | null;
   ownerType: "official" | "seller";
   sellerId?: string | null;
+  /** marketly_service: fulfillment-service stores proposedStockOutcome on its service return; inventory ignores it like other seller returns */
+  fulfilledBy: "official_warehouse" | "seller" | "marketly_service";
   conditionOutcome: string;
   proposedStockOutcome: string;
   orderItemId: string;
@@ -2048,6 +2062,7 @@ export const ReturnsReturnInspectedEvent: z.ZodType<ReturnsReturnInspectedEvent>
   contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
+  fulfilledBy: z.enum(["official_warehouse", "seller", "marketly_service"]).describe("marketly_service: fulfillment-service stores proposedStockOutcome on its service return; inventory ignores it like other seller returns"),
   conditionOutcome: z.string(),
   proposedStockOutcome: z.string(),
   orderItemId: z.uuid(),
@@ -2501,6 +2516,8 @@ export interface ReturnsDb {
     guest_session_id: string | null;
     owner_type: 'official' | 'seller';
     seller_id: string | null;
+    /** the order group's, copied at request */
+    fulfilled_by: 'official_warehouse' | 'seller' | 'marketly_service';
     status: string;
     reason: string;
     details: string;
@@ -3578,7 +3595,7 @@ export const endpoints = defineEndpoints({
     auth: "staff",
     permission: "returns.inspections.record",
     scope: "staff",
-    summary: "Official Store returns received, arriving and decided",
+    summary: "Official Store and Fulfilled by Marketly returns received, arriving and decided",
     query: () =>
       z.object({
         tab: z.enum(["received", "arriving", "decided"]).optional(),
@@ -4481,6 +4498,13 @@ export const spec = defineModuleSpec({
       "approval": "second_reviewer",
       "sellerVisible": false
     },
+    "autoApproveServiceWithinWindow": {
+      "default": true,
+      "desc": "Fulfilled by Marketly returns inside the seller's return window are approved automatically by Marketly (decision D7)",
+      "type": "bool",
+      "approval": "second_reviewer",
+      "sellerVisible": true
+    },
     "maxPhotosPerReturn": {
       "default": 6,
       "desc": "Photos or short videos per return request",
@@ -4776,6 +4800,10 @@ export const spec = defineModuleSpec({
       "seller_id": {
         "type": "uuid",
         "nullable": true
+      },
+      "fulfilled_by": {
+        "type": "text",
+        "nullable": false
       },
       "status": {
         "type": "text",

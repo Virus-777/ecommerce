@@ -262,7 +262,7 @@ describe('cancellations from orders', () => {
     orderId: placed.order.id,
     ref: placed.order.ref,
     groupId: placed.order.groups.find((g) => g.items.some((i) => i.id === itemId))!.id,
-    ownerType: 'official',
+    ownerType: 'official', fulfilledBy: 'official_warehouse',
     sellerId: null,
     itemId,
     offerId: newId(),
@@ -312,7 +312,7 @@ describe('cancellations from orders', () => {
     expect(i).toMatchObject({ status: 'authorized', authorized_amount: 12000, captured_amount: 0 });
     expect((await h.calls(placed.intentId, 'partial_void')).map((c) => c.outcome)).toEqual(['ok', 'ok']);
     // the group is charged what is left when it ships
-    await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId: newId(), kind: 'outbound', orderId: placed.order.id, groupId: placed.order.groups[0]!.id, ownerType: 'seller', sellerId: null, lines: [], shippedAt: h.clock.now().toISOString(), trackingValid: true });
+    await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId: newId(), kind: 'outbound', orderId: placed.order.id, groupId: placed.order.groups[0]!.id, ownerType: 'seller', sellerId: null, fulfilledBy: 'seller', lines: [], shippedAt: h.clock.now().toISOString(), trackingValid: true });
     expect(await h.service.core.repo.get('intents', placed.intentId)).toMatchObject({ status: 'captured', authorized_amount: 12000, captured_amount: 12000 });
   });
 

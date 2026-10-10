@@ -10,14 +10,21 @@
  *   payments.listOptions: one saved Visa for customers, wallets available.
  *   shipping.quoteOptions: Standard ($5.99, free from $50 per package) and Express ($14.99) with arrival dates;
  *     destinations in Alaska are not served. shipping.checkCoverage: Alaska → outside_seller_coverage.
- *     `ship.shiftDays` moves arrival dates, `ship.standardPrice` changes the Standard price.
+ *     `ship.shiftDays` moves arrival dates, `ship.standardPrice` changes the Standard price; `ship.knobs.quotes` keeps every input.
+ *
+ * Fulfilled by Marketly (world({ fulfillment: true })): fulfillment-service is not booted; an apiStubs entry answers the
+ * optional lookups of offers (getServiceTerms: Marketly's service profile, dispatch and ships-from) and orders
+ * (isServiceOffer). `await w.marketly.enroll(offerId)` publishes fulfillment-service.offer.service_changed the way the
+ * service does when a SKU activates, so offers moves the offer to marketly_service (termsVersion bumped); `leave` undoes it.
  */
 import type { FastifyInstance } from 'fastify';
 import { expect } from 'vitest';
 import { AppError } from '../../../kernel/errors/index.js';
 import type { EventEnvelope } from '../../../kernel/events/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
+import type { PublicApiMap } from '../../../kernel/module-system/index.js';
 import { withDependencies } from '../../../kernel/module-system/loader.js';
+import type * as offers from '../../../spec/offers.js';
 import type * as payments from '../../../spec/payments.js';
 import type * as shipping from '../../../spec/shipping.js';
 import { auth, buildTestApp, callers, movingClock } from '../../../testing/app.js';
@@ -135,7 +142,7 @@ export function fakePayments(clock: { now(): Date }) {
 /* ================================================================ shipping stub */
 
 export function fakeShipping(clock: { now(): Date }) {
-  const knobs = { shiftDays: 0, standardPrice: 599, calls: { quoteOptions: 0, checkCoverage: 0 } };
+  const knobs = { shiftDays: 0, standardPrice: 599, calls: { quoteOptions: 0, checkCoverage: 0 }, quotes: [] as shipping.PackageQuoteInput[] };
   /** Profiles the kit created, by owner: offers checks a profile belongs to the offer's owner (shipping.getProfileOwners) */
   const owners = new Map<string, { ownerType: 'official' | 'seller'; sellerId: string | null; status: string }>();
   const profileFor = (owner: { ownerType: 'official' | 'seller'; sellerId: string | null }) => {
@@ -156,6 +163,7 @@ export function fakeShipping(clock: { now(): Date }) {
     },
     quoteOptions: async (input) => {
       knobs.calls.quoteOptions++;
+      knobs.quotes.push(input);
       if (input.destination.region === 'AK') return { shipsToLocation: false, notShippableLineIds: input.items.map((i) => i.lineId), reason: "The seller doesn't ship to Alaska.", options: [], default: null };
       const value = input.items.reduce((s, i) => s + i.value.amount, 0);
       const free = value >= 5000;
@@ -200,6 +208,8 @@ export interface World {
   offers: { black: string; white: string; officialWhite: string };
   stock: { black: string; white: string; officialWhite: string };
   service: CheckoutService;
+  /** Fulfilled by Marketly (world({ fulfillment: true })): Marketly's service terms, and offers moved onto (or off) the service */
+  marketly: { terms: offers.OfferShipping; enroll(offerId: string): Promise<void>; leave(offerId: string): Promise<void> };
   call(method: string, url: string, token?: string, body?: unknown, headers?: Record<string, string>): Promise<{ status: number; body: any }>;
   named(name: string): any[];
   api<T = any>(module: string): T;
@@ -208,17 +218,23 @@ export interface World {
   sid(token: string): string;
 }
 
-/** o.wallet: also run the real wallet (phase 3, off at launch) with the launch phase that opens the credit step */
-export async function world(o: { wallet?: boolean } = {}): Promise<World> {
+/**
+ * o.wallet: also run the real wallet (phase 3, off at launch) with the launch phase that opens the credit step.
+ * o.fulfillment: fulfillment-service is on for offers and orders (stubbed, launch phase 4): getServiceTerms and
+ * isServiceOffer answer for the offers enrolled with w.marketly.enroll.
+ */
+export async function world(o: { wallet?: boolean; fulfillment?: boolean } = {}): Promise<World> {
   const clock = movingClock();
   const pay = fakePayments(clock);
   const ship = fakeShipping(clock);
+  const marketly = fakeFulfillmentService(clock, ship.profileFor({ ownerType: 'official', sellerId: null }));
   const app = await buildTestApp({
     only: withDependencies(['identity', 'access', 'audit', 'media', 'notifications', 'settings', 'customers', 'sellers', 'catalog', 'inventory', 'offers', 'cart', 'orders', 'promotions', 'content', 'checkout', ...(o.wallet ? ['wallet'] : [])]),
     clock,
-    config: { rateLimits: false, ...(o.wallet ? { launchPhase: 3 } : {}) },
-    apiStubs: { payments: pay.api, shipping: ship.api },
+    config: { rateLimits: false, ...(o.wallet ? { launchPhase: 3 } : {}), ...(o.fulfillment ? { launchPhase: 4 } : {}) },
+    apiStubs: { payments: pay.api, shipping: ship.api, ...(o.fulfillment ? { 'fulfillment-service': marketly.api } : {}) },
   });
+  marketly.app = app;
   if (o.wallet) pay.hooks.releaseCredit = (holdId) => (app.kernel.boot.apis.get('wallet') as { releaseHold(id: string): Promise<unknown> }).releaseHold(holdId);
   const f = flows(app, clock);
   const events: EventEnvelope[] = [];
@@ -271,6 +287,7 @@ export async function world(o: { wallet?: boolean } = {}): Promise<World> {
   };
   const ob = await offerFor(black!.id, 18900, 'NW-AU-100-BK');
   const ow = await offerFor(white!.id, 2500, 'NW-AU-100-WH');
+  for (const x of [ob, ow]) marketly.offers.set(x.id, { sellerId: seller.sellerId, stockItemId: x.stockItemId });
   const approved = await f.call('POST', `/api/admin/catalog/products/${productId}/approve`, { token: catalogToken, body: {} });
   expect(approved.status, JSON.stringify(approved.body)).toBe(200);
   await app.kernel.events.drain();
@@ -303,6 +320,7 @@ export async function world(o: { wallet?: boolean } = {}): Promise<World> {
     offers: { black: ob.id, white: ow.id, officialWhite: official.body.offer.id },
     stock: { black: ob.stockItemId, white: ow.stockItemId, officialWhite: officialStock.id },
     service: app.kernel.boot.apis.get('checkout') as CheckoutService,
+    marketly: { terms: marketly.terms, enroll: (id) => marketly.flip(id, true), leave: (id) => marketly.flip(id, false) },
     async call(method, url, token, body, headers) {
       const res = await app.inject({ method: method as never, url, headers: { ...(token ? auth(token) : {}), ...headers }, ...(body !== undefined ? { payload: body as never } : {}) });
       await app.kernel.events.drain();
@@ -318,6 +336,49 @@ export async function world(o: { wallet?: boolean } = {}): Promise<World> {
     sid: (token) => JSON.parse(Buffer.from(token.split('.')[1]!, 'base64url').toString('utf8')).sid,
   };
   return w;
+}
+
+/**
+ * fulfillment-service as offers and orders see it: getServiceTerms / isServiceOffer for the enrolled offers, and
+ * flip() publishing offer.service_changed (SKU activated / deactivated) the way the service does.
+ */
+function fakeFulfillmentService(clock: { now(): Date }, serviceProfileId: string) {
+  const SHIPS_FROM = 'Reno, NV (Marketly warehouse)';
+  const terms: offers.OfferShipping = { fulfilledBy: 'marketly_service', profileId: serviceProfileId, dispatch: { businessDays: 0, sameDayCutoff: '14:00', shipsFrom: SHIPS_FROM, label: 'Ships today' } };
+  const enrolled = new Set<string>();
+  const offerRefs = new Map<string, { sellerId: string; stockItemId: string; skuEnrollmentId?: string }>();
+  const locationId = newId();
+  const ref = (offerId: string) => {
+    const r = offerRefs.get(offerId);
+    if (!r) throw new Error(`world: no seller offer ${offerId}`);
+    r.skuEnrollmentId ??= newId();
+    return r as Required<typeof r>;
+  };
+  const api: Partial<PublicApiMap['fulfillment-service']> = {
+    isServiceOffer: async (offerId) => enrolled.has(offerId),
+    getServiceTerms: async (offerIds) =>
+      Object.fromEntries(
+        offerIds.map((offerId) => {
+          if (!enrolled.has(offerId)) return [offerId, null];
+          const r = ref(offerId);
+          return [offerId, { offerId, sellerId: r.sellerId, skuEnrollmentId: r.skuEnrollmentId, stockItemId: r.stockItemId, sellable: true, locationId, shipsFrom: SHIPS_FROM, dispatch: { businessDays: 0, sameDayCutoff: '14:00' }, shippingProfileId: serviceProfileId, parcel: { weightGrams: 600, dimensionsCm: { length: 25, width: 20, height: 10 } } }];
+        }),
+      ),
+  };
+  const fake = {
+    api,
+    terms,
+    offers: offerRefs,
+    app: undefined as FastifyInstance | undefined,
+    async flip(offerId: string, on: boolean) {
+      if (on) enrolled.add(offerId);
+      else enrolled.delete(offerId);
+      const r = ref(offerId);
+      fake.app!.kernel.events.publish('fulfillment-service', 'fulfillment-service.offer.service_changed', { offerId, sellerId: r.sellerId, skuEnrollmentId: r.skuEnrollmentId, stockItemId: r.stockItemId, fulfilledBy: on ? 'marketly_service' : 'seller', sellable: true, reason: on ? 'sku_activated' : 'sku_deactivated', at: clock.now().toISOString() });
+      await fake.app!.kernel.events.drain();
+    },
+  };
+  return fake;
 }
 
 /** Adds offers to the shopper's cart */

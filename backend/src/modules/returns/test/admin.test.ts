@@ -153,7 +153,7 @@ describe('Official Store returns', () => {
     expect(created).toMatchObject({ orderId: m.order.id, ownerType: 'official', variantId: m.p.variantId, offerId: m.p.offerId, quantity: 1, kind: 'replacement' });
     // orders adds the zero-charge replacement line
     expect((await h.orders.getOrder(m.order.id))!.groups[0]!.items.some((i) => i.replacementOfItemId === m.items[0]![0]!)).toBe(true);
-    await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId: newId(), kind: 'replacement', orderId: m.order.id, groupId: m.order.groups[0]!.id, returnId: m.ret.id, ownerType: 'official', sellerId: null, lines: [], shippedAt: now(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
+    await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId: newId(), kind: 'replacement', orderId: m.order.id, groupId: m.order.groups[0]!.id, returnId: m.ret.id, ownerType: 'official', fulfilledBy: 'official_warehouse', sellerId: null, lines: [], shippedAt: now(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
     const done = await h.call('GET', `/api/store/returns/requests/${m.ret.id}`, m.token);
     expect(done.body).toMatchObject({ status: 'completed', statusLabel: 'Replaced', replacement: { status: 'shipped' } });
     expect(h.named('returns.return.completed').find((e) => e.returnId === m.ret.id)).toMatchObject({ outcome: 'replaced' });

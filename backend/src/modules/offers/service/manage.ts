@@ -403,6 +403,8 @@ export class ManagePart extends Part {
           same_day_cutoff: o.origin.sameDayCutoff,
           ships_from: o.origin.shipsFrom,
           shipping_profile_id: i.shippingProfileId,
+          // a new offer ships from its owner; fulfillment-service.offer.service_changed moves it to marketly_service
+          fulfilled_by: o.ownerType === 'official' ? 'official_warehouse' : 'seller',
           return_kind: o.returns.kind,
           return_window_days: o.returns.windowDays,
           free_return_shipping: o.returns.freeReturnShipping,
@@ -705,6 +707,8 @@ export class ManagePart extends Part {
       }
     }
 
+    // while Marketly fulfils the offer, the seller's dispatch and shipping profile are saved but customers see Marketly's
+    if (row.fulfilled_by === 'marketly_service') fields.splice(0, fields.length, ...fields.filter((f) => f !== 'dispatch' && f !== 'shippingProfileId'));
     let after = row;
     if (Object.keys(patch).length) {
       const visible = fields.length > 0 && Boolean(row.published_at);

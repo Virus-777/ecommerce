@@ -164,7 +164,8 @@ export class Reads {
     const base: ReturnFilter = { sellerId, ownerType: 'seller' };
     const awaiting = await repo.find('returns', { seller_id: sellerId, status: 'requested', platform_handling: false }, { orderBy: [['response_due_at', 'asc']] });
     const overdue = awaiting.filter((r) => r.response_due_at && r.response_due_at.getTime() < now.getTime());
-    const received = await repo.find('returns', { seller_id: sellerId, status: 'received' });
+    // Fulfilled by Marketly returns are inspected by Marketly, not the seller
+    const received = await repo.find('returns', { seller_id: sellerId, status: 'received', fulfilled_by: { op: '<>', value: 'marketly_service' } });
     const receivedAggs = await this.core.loadMany(received.map((r) => r.id));
     const receivedTimes = [...receivedAggs.values()].map((a) => this.core.receivedAt(a)).filter((d): d is Date => !!d);
     const disputes = await repo.listReturns({ ...base, disputed: true, statuses: OPEN_STATUSES }, { mode: 'cursor', cursor: null, limit: 100 });
@@ -300,8 +301,9 @@ export class Reads {
 
   /* ---------------------------------------------------------------- inspection queue (Official Store) */
 
+  /** Returns that come to the Marketly returns dock: Official Store and Fulfilled by Marketly returns (D7) */
   inspectionFilter(tab: 'received' | 'arriving' | 'decided' | undefined): ReturnFilter {
-    const f: ReturnFilter = { ownerType: 'official' };
+    const f: ReturnFilter = { marketlyDock: true };
     if (tab === 'arriving') f.statuses = ['approved', 'in_transit'];
     else if (tab === 'decided') f.statuses = ['awaiting_remedy', 'completed'];
     else f.statuses = ['received'];
@@ -315,14 +317,22 @@ export class Reads {
   async inspectionStats(): Promise<InspectionQueueStats> {
     const repo = this.core.repo;
     const now = this.core.now();
-    const received = await repo.find('returns', { owner_type: 'official', status: 'received' }, { orderBy: [['requested_at', 'asc']], limit: 500 });
+    // oldest first (the list pages newest first)
+    const received = (await repo.listReturns(this.inspectionFilter('received'), { mode: 'cursor', cursor: null, limit: 500 })).items.sort((a, b) => a.requested_at.getTime() - b.requested_at.getTime());
     const aggs = await this.core.loadMany(received.map((r) => r.id));
     const overdue = [...aggs.values()].filter((a) => (this.views.inspectBy(a)?.getTime() ?? Infinity) < now.getTime());
-    const arriving = await repo.countReturns({ ownerType: 'official', statuses: ['approved', 'in_transit'] });
+    const arriving = await repo.countReturns(this.inspectionFilter('arriving'));
     const weekAgo = new Date(now.getTime() - 7 * DAY);
     const decided = (await repo.find('inspections', { inspected_at: { op: '>=', value: weekAgo } })).map((i) => i.return_id);
-    const decidedOfficial = decided.length ? await repo.count('returns', { id: [...new Set(decided)], owner_type: 'official' }) : 0;
-    const withFinance = await repo.find('refund_requests', { owner_type: 'official', status: ['requested', 'under_review'] });
+    const decidedOfficial = decided.length ? await repo.countReturns({ marketlyDock: true, ids: [...new Set(decided)] }) : 0;
+    // refunds of dock returns with Finance: the Official Store's, and the seller-funded ones of Fulfilled by Marketly returns
+    const pendingRefunds = await repo.find('refund_requests', { status: ['requested', 'under_review'] }, { limit: 5000 });
+    const serviceReturns = new Set(
+      pendingRefunds.some((r) => r.owner_type === 'seller' && r.return_id)
+        ? (await repo.find('returns', { id: [...new Set(pendingRefunds.filter((r) => r.owner_type === 'seller' && r.return_id).map((r) => r.return_id!))], fulfilled_by: 'marketly_service' })).map((r) => r.id)
+        : [],
+    );
+    const withFinance = pendingRefunds.filter((r) => r.owner_type === 'official' || (r.return_id && serviceReturns.has(r.return_id)));
     return {
       waiting: received.length,
       overdue: overdue.length,
@@ -461,6 +471,7 @@ export class Reads {
       customer: { displayName: agg.ret.terms_snapshot.meta.customerName, city: null, ordersWithSeller: 0 },
       payment: { itemPaid: zero, shippingPaid: zero, discountShare: zero, maxRefundable: zero, refundedSoFar: zero, methodLabel: '' },
       policyApplied: agg.ret.terms_snapshot.terms,
+      fulfilledBy: agg.ret.fulfilled_by,
       shippingPaidBy: agg.ret.shipping_paid_by as ReturnCase['shippingPaidBy'],
       deadlines: {},
       inspection: null,

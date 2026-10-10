@@ -817,6 +817,7 @@
     "RECON_DAY_INCOMPLETE": { "status": 409, "meaning": "Open mismatches remain; explain or correct them first. details.openItems." }
   },
   "notes": [
+    "Fulfilled by Marketly money (decision D1, no finance change): the seller stays the seller of record, so the sale and the shipping charge stay in the seller's proceeds as for any seller group; the outbound label the warehouse buys for a marketly_service group is billedTo seller and booked from shipping.label.purchased like a seller-bought label; Fulfilled by Marketly fees arrive through recordServiceFee (service_fee, fulfillment section of the statement) and reimbursements through creditSeller / creditSellerCharge; refunds of Fulfilled by Marketly returns are seller-funded like other seller returns.",
     "Seller ledger exports run through reports like every other export: POST /api/seller/finance/ledger/exports creates a finance.seller.ledger job (date range; columns: date, entry type, order or payout reference, description, amount, balance after) and GET /ledger/exports/{id} returns its status and link.",
     "The ledger is append-only and the source of truth; seller_accounts is a projection. Every entry references the record that caused it (order, return, refund, case, chargeback, payout, adjustment, ad campaign).",
     "Seller money and company money never mix: Official Store sales go to trading_entries and company trading reports, never to a seller payout. Marketplace seller sales are not company revenue; only the fee portion is marketplace income.",

@@ -77,21 +77,36 @@ declare module 'fastify' {
   }
 }
 
-/** A module's API with some functions replaced (the module's own methods keep their `this`). */
-function withStubs(api: object | undefined, stub: object): object {
+/**
+ * A module's API as other modules see it, with some functions replaced. Callers through the API get the stubs; the
+ * module's own methods stay bound to the module object, so a service class with #private fields keeps working when
+ * one of its methods runs next to a stubbed one (a Proxy as `this` would make its private fields throw "Receiver must
+ * be an instance"). The module itself is untouched: its routes, consumers and `this.fn()` calls run its own code.
+ * Assigning a function through the API (a test replacing it later) sets it on the module object, and over a stub of
+ * the same name.
+ */
+export function withStubs(api: object | undefined, stub: object): object {
+  const stubs = stub as Record<PropertyKey, unknown>;
+  const bound = new Map<PropertyKey, unknown>();
   return new Proxy(api ?? {}, {
-    get: (target, key) => (key in stub ? (stub as Record<PropertyKey, unknown>)[key] : Reflect.get(target, key, target)),
-    has: (target, key) => key in stub || key in target,
+    get: (target, key) => {
+      if (key in stubs) return stubs[key];
+      const value: unknown = Reflect.get(target, key, target);
+      if (typeof value !== 'function') return value;
+      if (!bound.has(key)) bound.set(key, (value as (...args: unknown[]) => unknown).bind(target));
+      return bound.get(key);
+    },
+    has: (target, key) => key in stubs || key in target,
+    set: (target, key, value) => {
+      bound.delete(key);
+      if (key in stubs) stubs[key] = value;
+      return Reflect.set(target, key, value);
+    },
   });
 }
 
 export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance> {
   const config = loadConfig(opts.env ?? process.env, opts.config);
-  // Phase 4 guard: checkout, offers and orders don't route Marketly-fulfilled items yet (isServiceOffer is unused), so
-  // with fulfillment-service on, sellers would be told to ship orders Marketly fulfils. Tests boot it by name (opts.modules).
-  if (!opts.modules && (config.modules ?? enabledModules).includes('fulfillment-service')) {
-    throw new Error('fulfillment-service cannot be enabled yet: checkout, offers and orders must call fulfillment-service.isServiceOffer first (phase 4)');
-  }
   const app = createServer(config);
 
   // independent startup work runs in parallel: the database and the module imports
@@ -148,7 +163,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
   // modules get permission checks before the auth chain exists (it needs their APIs): bind it late
   let authChain: AuthChain | undefined;
   const can = async (principal: Principal | null | undefined, permission: string) => (authChain ? authChain.canPrincipal(principal, permission) : false);
-  const boot = await bootModules(defs, { config, log: app.log, database, clock, events, jobs, refs, rateLimits, can });
+  const boot = await bootModules(defs, { config, log: app.log, database, clock, events, jobs, refs, rateLimits, can, stubbed: Object.keys(opts.apiStubs ?? {}) });
   for (const w of boot.warnings) app.log.debug(w);
   for (const [m, v] of Object.entries(opts.webhookVerifiers ?? {})) if (!boot.webhookVerifiers.has(m)) boot.webhookVerifiers.set(m, v);
   for (const [m, stub] of Object.entries(opts.apiStubs ?? {})) boot.apis.set(m, withStubs(boot.apis.get(m), stub as object));

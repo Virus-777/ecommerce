@@ -18,7 +18,7 @@ import { OffersService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.2.0',
+  version: '1.3.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
@@ -46,6 +46,7 @@ export default defineModule({
     ctx.events.on("trust.enforcement.reversed", (e) => service.onEnforcementReversedFromTrust(e.payload, e));
     ctx.events.on("promotions.campaign.started", (e) => service.onCampaignStartedFromPromotions(e.payload));
     ctx.events.on("promotions.campaign.ended", (e) => service.onCampaignEndedFromPromotions(e.payload));
+    ctx.events.on("fulfillment-service.offer.service_changed", (e) => service.onServiceChangedFromFulfillmentService(e.payload, e));
 
     // Background jobs (spec jobs)
     ctx.jobs.handle("offers.apply-price-schedule", () => service.applyPriceSchedule());

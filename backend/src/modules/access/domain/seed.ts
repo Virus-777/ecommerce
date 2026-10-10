@@ -32,6 +32,11 @@ const RECOMMEND = { authority: 'recommend_only' as const };
 const QUEUES = ['workqueues.items.view', 'workqueues.items.work'];
 /** Owner teams accept or decline Trust and Risk's recommendations for the actions they own (trust spec: trust.recommendations.decide); Trust recommends, the owner acts */
 const OWNER_DECIDES = 'trust.recommendations.decide';
+/** Fulfilled by Marketly staff keys (fulfillment-service, phase 4; access spec notes). Installs seeded before them get them from migration 0004. */
+const FS_REVIEW = 'fulfillment-service.enrollment.review';
+const FS_RECEIVE = 'fulfillment-service.inbound.receive';
+const FS_OPERATIONS = 'fulfillment-service.operations.view';
+const FS_FEES = 'fulfillment-service.fees.manage';
 
 export const SYSTEM_ROLES: SeedRole[] = [
   {
@@ -104,7 +109,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Inventory and warehouse',
     description: 'Stock groups, adjustments, transfers and counts.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['inventory.*', ...QUEUES],
+    permissions: ['inventory.*', FS_OPERATIONS, ...QUEUES],
     limits: { 'inventory.adjustments.apply': { authority: 'permitted', limitNumber: 50 } },
   },
   {
@@ -114,7 +119,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Inventory and warehouse',
     description: 'Warehouse bins, waves, picking, packing and put-away.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['warehouse.*', 'inventory.stock.view', 'inventory.discrepancies.resolve', ...QUEUES],
+    permissions: ['warehouse.*', 'inventory.stock.view', 'inventory.discrepancies.resolve', FS_RECEIVE, FS_OPERATIONS, ...QUEUES],
     limits: { 'fulfillment-service.reimbursements.approve': upTo(500) },
   },
   {
@@ -124,7 +129,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Orders and shipping',
     description: 'Orders, cancellations and order exceptions.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['orders.orders.*', 'orders.cancellations.decide', 'cart.carts.view', 'checkout.sessions.view', OWNER_DECIDES, ...QUEUES],
+    permissions: ['orders.orders.*', 'orders.cancellations.decide', 'cart.carts.view', 'checkout.sessions.view', FS_OPERATIONS, OWNER_DECIDES, ...QUEUES],
     limits: {},
   },
   {
@@ -144,7 +149,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Returns and cases',
     description: 'Return requests, inspections and return policies. Refund approval belongs to Finance.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['returns.requests.*', 'returns.inspections.record', 'returns.exceptions.propose', 'returns.policies.manage', 'inventory.returns.record', OWNER_DECIDES, ...QUEUES],
+    permissions: ['returns.requests.*', 'returns.inspections.record', 'returns.exceptions.propose', 'returns.policies.manage', 'inventory.returns.record', FS_RECEIVE, OWNER_DECIDES, ...QUEUES],
     limits: { 'returns.baseline.change': RECOMMEND, 'returns.policies.shorten-window': RECOMMEND },
   },
   {
@@ -165,7 +170,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Sellers',
     description: 'Seller applications, accounts, performance and restrictions.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['sellers.*', 'offers.offers.view', 'offers.offers.remove', OWNER_DECIDES, ...QUEUES],
+    permissions: ['sellers.*', 'offers.offers.view', 'offers.offers.remove', FS_REVIEW, OWNER_DECIDES, ...QUEUES],
     limits: {
       'sellers.sellers.restrict': PERMITTED,
       'sellers.sellers.suspend': PERMITTED,
@@ -194,7 +199,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Finance',
     description: 'Ledger, payouts, holds, adjustments, payments and refunds.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['finance.*', 'payments.*', 'returns.refunds.approve', 'reports.marketplace-finance.view', 'reports.trading.view', 'wallet.*', OWNER_DECIDES, ...QUEUES],
+    permissions: ['finance.*', 'payments.*', 'returns.refunds.approve', 'reports.marketplace-finance.view', 'reports.trading.view', 'wallet.*', FS_FEES, OWNER_DECIDES, ...QUEUES],
     limits: {
       'finance.payouts.release': upTo(250_000, { secondReviewerAboveMoney: usd(50_000), secondReviewerRoleKeys: ['finance_manager', BUSINESS_OWNER] }),
       'finance.holds.place': upTo(50_000),
@@ -276,7 +281,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Inventory and warehouse',
     description: 'Picking, packing, put-away and receiving returns.',
     escalationRoleKey: 'warehouse_manager',
-    permissions: ['warehouse.view', 'warehouse.picking.perform', 'warehouse.packing.perform', 'warehouse.putaway.perform', 'warehouse.returns.receive', ...QUEUES],
+    permissions: ['warehouse.view', 'warehouse.picking.perform', 'warehouse.packing.perform', 'warehouse.putaway.perform', 'warehouse.returns.receive', FS_RECEIVE, ...QUEUES],
     limits: {},
   },
   {

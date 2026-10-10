@@ -1044,7 +1044,9 @@ export interface SellerOrderRow {
   dispatchDeadline: common.Deadline;
   /** 'Due today 5:00 PM', 'Overdue 3 h', 'Shipped Oct 6 · 1 day late' */
   deadlineLabel: string;
-  nextAction: "prepare" | "record_shipment" | "ship_remaining" | "view_tracking" | "respond_cancellation" | "view";
+  fulfilledBy: "official_warehouse" | "seller" | "marketly_service";
+  /** marketly_fulfils for Fulfilled by Marketly groups: Marketly picks, packs and ships; the seller only views */
+  nextAction: "prepare" | "record_shipment" | "ship_remaining" | "view_tracking" | "respond_cancellation" | "view" | "marketly_fulfils";
   /** e.g. '1 of 2 items shipped' */
   note?: string | null;
 }
@@ -1066,7 +1068,8 @@ export const SellerOrderRow: z.ZodType<SellerOrderRow> = z.object({
     return common.Deadline;
   },
   deadlineLabel: z.string().describe("'Due today 5:00 PM', 'Overdue 3 h', 'Shipped Oct 6 · 1 day late'"),
-  nextAction: z.enum(["prepare", "record_shipment", "ship_remaining", "view_tracking", "respond_cancellation", "view"]),
+  fulfilledBy: z.enum(["official_warehouse", "seller", "marketly_service"]),
+  nextAction: z.enum(["prepare", "record_shipment", "ship_remaining", "view_tracking", "respond_cancellation", "view", "marketly_fulfils"]).describe("marketly_fulfils for Fulfilled by Marketly groups: Marketly picks, packs and ships; the seller only views"),
   note: z.string().describe("e.g. '1 of 2 items shipped'").nullish(),
 }).register(common.apiTypes, { id: "orders.SellerOrderRow" });
 
@@ -1078,6 +1081,8 @@ export interface SellerOrderCounts {
   cancellationRequests: number;
   overdue: number;
   dueToday: number;
+  /** Open Fulfilled by Marketly groups; they are left out of new, preparing, cancellationRequests, overdue and dueToday */
+  fulfilledByMarketly: number;
 }
 
 export const SellerOrderCounts: z.ZodType<SellerOrderCounts> = z.object({
@@ -1088,6 +1093,7 @@ export const SellerOrderCounts: z.ZodType<SellerOrderCounts> = z.object({
   cancellationRequests: z.number().int(),
   overdue: z.number().int(),
   dueToday: z.number().int(),
+  fulfilledByMarketly: z.number().int().describe("Open Fulfilled by Marketly groups; they are left out of new, preparing, cancellationRequests, overdue and dueToday"),
 }).register(common.apiTypes, { id: "orders.SellerOrderCounts" });
 
 export interface SellerOrderItem {
@@ -1166,7 +1172,9 @@ export interface SellerOrderDetail {
   buyerName: string;
   paymentAccepted: boolean;
   status: string;
+  /** For Fulfilled by Marketly groups 'Fulfilled by Marketly · <warehouse stage>', e.g. 'Fulfilled by Marketly · Picking' */
   statusLabel: string;
+  fulfilledBy: "official_warehouse" | "seller" | "marketly_service";
   dispatchDeadline: common.Deadline;
   timeLeftMinutes?: number | null;
   /** 'Shipped on time' after shipment */
@@ -1175,7 +1183,7 @@ export interface SellerOrderDetail {
   /** 'The customer's order also has items from other sellers. You only see and handle your own items.' */
   mixedOrderNote?: string | null;
   money: SellerOrderMoney;
-  /** Full address and phone for the carrier, only while the task is open plus the return window */
+  /** Full address and phone for the carrier, only while the task is open plus the return window. Fulfilled by Marketly groups: city and region only (decision D10) */
   shipTo: common.Address;
   delivery: DeliveryPromise;
   giftNote?: string | null;
@@ -1183,6 +1191,7 @@ export interface SellerOrderDetail {
   shipments: ShipmentRef[];
   cancellationRequests: CancellationRequest[];
   timeline: common.TimelineEvent[];
+  /** Empty for Fulfilled by Marketly groups */
   allowedActions: ("start_preparing" | "report_delay" | "record_shipment" | "cancel_items" | "respond_cancellation" | "print_packing_slip")[];
 }
 
@@ -1194,7 +1203,8 @@ export const SellerOrderDetail: z.ZodType<SellerOrderDetail> = z.object({
   buyerName: z.string(),
   paymentAccepted: z.boolean(),
   status: z.string(),
-  statusLabel: z.string(),
+  statusLabel: z.string().describe("For Fulfilled by Marketly groups 'Fulfilled by Marketly · <warehouse stage>', e.g. 'Fulfilled by Marketly · Picking'"),
+  fulfilledBy: z.enum(["official_warehouse", "seller", "marketly_service"]),
   get dispatchDeadline() {
     return common.Deadline;
   },
@@ -1224,7 +1234,7 @@ export const SellerOrderDetail: z.ZodType<SellerOrderDetail> = z.object({
   get timeline() {
     return z.array(common.TimelineEvent);
   },
-  allowedActions: z.array(z.enum(["start_preparing", "report_delay", "record_shipment", "cancel_items", "respond_cancellation", "print_packing_slip"])),
+  allowedActions: z.array(z.enum(["start_preparing", "report_delay", "record_shipment", "cancel_items", "respond_cancellation", "print_packing_slip"])).describe("Empty for Fulfilled by Marketly groups"),
 }).register(common.apiTypes, { id: "orders.SellerOrderDetail" });
 
 export interface BulkResult {
@@ -1880,6 +1890,7 @@ export interface OrdersItemCancelledEvent {
   groupId: string;
   ownerType: "official" | "seller";
   sellerId?: string | null;
+  fulfilledBy: "official_warehouse" | "seller" | "marketly_service";
   itemId: string;
   offerId: string;
   stockItemId: string;
@@ -1904,6 +1915,7 @@ export const OrdersItemCancelledEvent: z.ZodType<OrdersItemCancelledEvent> = z.o
   groupId: z.uuid(),
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
+  fulfilledBy: z.enum(["official_warehouse", "seller", "marketly_service"]),
   itemId: z.uuid(),
   offerId: z.uuid(),
   stockItemId: z.uuid(),
@@ -2008,12 +2020,14 @@ export const OrdersItemDeliveredEvent: z.ZodType<OrdersItemDeliveredEvent> = z.o
   contactEmail: z.email().describe("Order contact email, for guests").nullish(),
 });
 
-/** orders.cancellation.requested: A customer asks to cancel items that need the seller's confirmation */
+/** orders.cancellation.requested: A customer asks to cancel items that need the seller's confirmation (or, for Official Store and Fulfilled by Marketly groups already being picked, the Order Manager's decision) */
 export interface OrdersCancellationRequestedEvent {
   cancellationId: string;
   orderId: string;
   groupId: string;
   sellerId?: string | null;
+  /** Only seller groups are answered by the seller; the others go to staff (order_manager) */
+  fulfilledBy: "official_warehouse" | "seller" | "marketly_service";
   itemIds: string[];
   respondBy: string;
 }
@@ -2023,6 +2037,7 @@ export const OrdersCancellationRequestedEvent: z.ZodType<OrdersCancellationReque
   orderId: z.uuid(),
   groupId: z.uuid(),
   sellerId: z.uuid().nullish(),
+  fulfilledBy: z.enum(["official_warehouse", "seller", "marketly_service"]).describe("Only seller groups are answered by the seller; the others go to staff (order_manager)"),
   itemIds: z.array(z.uuid()),
   respondBy: z.iso.datetime({ offset: true }),
 });
@@ -2086,7 +2101,7 @@ export const OrdersConfirmationRequestedEvent: z.ZodType<OrdersConfirmationReque
 
 /** What other modules may call in-process: `ctx.use('orders')` (or `ctx.tryUse` for an optional dependency). */
 export interface OrdersPublicApi {
-  /** Create the order from an authorized or pending payment. Freezes catalog.snapshotForOrder and offers.snapshotForOrder per item. Status open when paymentState=accepted (publishes orders.order.placed and orders.order.accepted in one transaction), payment_pending otherwise (publishes orders.order.placed only). Idempotent per (checkoutSessionId, attemptNo): a second call with the same pair returns the existing order; a retry after a finally declined pending payment passes the next attemptNo and gets a new order (the declined one stays cancelled). paymentState is the real authorize result: accepted creates the order open in one step; only pending_check creates it payment_pending. Attaches each item's snapshot image to the order (media.attach, usage kind order_evidence, ref the order id) so the image outlives catalog changes. Used by: checkout. */
+  /** Create the order from an authorized or pending payment. Freezes catalog.snapshotForOrder and offers.snapshotForOrder per item. Fulfilled by Marketly check: with fulfillment-service on, a marketly_service group must hold only offers where fulfillment-service.isServiceOffer is true and a seller group none (VALIDATION_FAILED); with it off a marketly_service group is refused. Status open when paymentState=accepted (publishes orders.order.placed and orders.order.accepted in one transaction), payment_pending otherwise (publishes orders.order.placed only). Idempotent per (checkoutSessionId, attemptNo): a second call with the same pair returns the existing order; a retry after a finally declined pending payment passes the next attemptNo and gets a new order (the declined one stays cancelled). paymentState is the real authorize result: accepted creates the order open in one step; only pending_check creates it payment_pending. Attaches each item's snapshot image to the order (media.attach, usage kind order_evidence, ref the order id) so the image outlives catalog changes. Used by: checkout. */
   createOrder(input: OrderCreateInput): Promise<OrderDetail>;
   /** payment_pending → open when the payment result arrives (also done on payments.payment.authorized). Idempotent. Used by: checkout. */
   acceptOrder(orderId: string, paymentIntentId: string): Promise<OrderDetail>;
@@ -2094,7 +2109,7 @@ export interface OrdersPublicApi {
   cancelForDeclinedPayment(orderId: string): Promise<void>;
   /** Full order for other modules (no access check) Used by: payments, shipping, returns, support, finance, messaging, warehouse, reviews. */
   getOrder(orderId: string): Promise<OrderDetail | null>;
-  /** Seller group with ship-to address, delivery promise, dispatch deadline and items still to ship Used by: shipping, warehouse, fulfillment-service. */
+  /** Seller group with ship-to address, delivery promise, dispatch deadline and items still to ship Used by: shipping, warehouse. */
   getFulfillmentTask(groupId: string): Promise<FulfillmentTask>;
   /** Items belong to the group, are not cancelled or already shipped, and quantities fit Used by: shipping, warehouse. */
   canShipItems(groupId: string, lines: { orderItemId: string, quantity: number }[]): Promise<{ ok: boolean, problems: string[] }>;
@@ -2127,13 +2142,13 @@ export interface OrdersPublicApi {
   /** One order as a seller sees it: only the seller's own groups (items, money, ship-to while needed, cancellations, timeline) and seller-safe order fields. Null (NOT_FOUND) when the order has no group of this seller. Used by: graphql. */
   getOrderForSeller(sellerId: string, ref: string): Promise<{ order: OrderDetail, groups: SellerOrderDetail[] } | null>;
   /** The seller's orders by stage with dispatch deadlines (same filters as seller GET /orders); own groups only Used by: graphql, search. */
-  listOrdersForSeller(sellerId: string, filter: { tab?: string, tabs?: string[], q?: string, placedFrom?: string, placedTo?: string, overdueOnly?: boolean, sort?: string }, page: common.PageInput): Promise<common.Page<{ order: OrderDetail, groups: SellerOrderDetail[] }>>;
+  listOrdersForSeller(sellerId: string, filter: { tab?: string, tabs?: string[], q?: string, placedFrom?: string, placedTo?: string, overdueOnly?: boolean, sort?: string, fulfilledBy?: string }, page: common.PageInput): Promise<common.Page<{ order: OrderDetail, groups: SellerOrderDetail[] }>>;
   /** Seller tab counts plus overdue and due today Used by: graphql. */
   countSellerOrders(sellerId: string): Promise<SellerOrderCounts>;
   /** Order 360 across sellers for staff: groups, items, money by seller, after-sales, flags, notes and staff history. Contact details masked unless the principal holds orders.customers.view-contact (masked when no principal is given). Used by: graphql. */
   getOrderAdmin(ref: string, principal?: identity.Principal): Promise<AdminOrderDetail | null>;
   /** Staff order list (same filters as admin GET /orders plus customerId) for the customer and seller 360 views Used by: graphql, search. */
-  listOrdersAdmin(filter: { q?: string, sellerType?: string, sellerId?: string, customerId?: string, fulfillmentStatus?: string, paymentState?: string, placedFrom?: string, placedTo?: string, flag?: string, savedFilterId?: string }, page: common.PageInput): Promise<common.Page<AdminOrderDetail>>;
+  listOrdersAdmin(filter: { q?: string, sellerType?: string, sellerId?: string, customerId?: string, fulfillmentStatus?: string, paymentState?: string, placedFrom?: string, placedTo?: string, flag?: string, savedFilterId?: string, fulfilledBy?: string }, page: common.PageInput): Promise<common.Page<AdminOrderDetail>>;
   /** Batched order lookup for order fields on other modules' records (Case.order, Return.order, RefundRequest.order). Same visibility as order / sellerOrder / orderAdmin: store → only orders of the signed-in customer or a guest session with access; seller → only the caller's own groups and seller-safe fields (null when the order has no group of this seller); admin → order 360 (contact masked unless orders.customers.view-contact). Not visible → null (never an error that reveals the order exists). Used by: graphql. */
   getOrdersByIds(viewer: { area: 'store'|'seller'|'admin', customerId?: string, guestSessionId?: string, sellerId?: string }, orderIds: string[]): Promise<Record<string, OrderDetail | { order: OrderDetail, groups: SellerOrderDetail[] } | AdminOrderDetail | null>>;
   /** Seller 360 order tiles (staff): open orders (a group of the seller not yet delivered or cancelled), groups past their dispatch deadline, due today, pending customer cancellation requests and cancellations in the last 30 days. Recent orders use listOrdersAdmin with filter.sellerId. Used by: graphql. */
@@ -2488,7 +2503,7 @@ export const endpoints = defineEndpoints({
     auth: "shopper",
     scope: "own-customer",
     summary: "Request cancellation of selected items",
-    desc: "One request per seller group is created (items from several sellers produce several requests). Official Store items not yet picked are accepted at once; seller items wait for the seller until respondBy, then are auto-accepted if unshipped. Other items continue as normal.",
+    desc: "One request per seller group is created (items from several sellers produce several requests). Official Store and Fulfilled by Marketly items not yet picked are accepted at once; seller items wait for the seller until respondBy, then are auto-accepted if unshipped. Other items continue as normal.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -2592,10 +2607,11 @@ export const endpoints = defineEndpoints({
     permission: "orders.fulfillment.view",
     scope: "own-seller",
     summary: "The seller's fulfillment tasks by stage, with dispatch deadlines and next action",
-    desc: "Only this seller's groups and items; buyers appear as first name and last initial. Default sort: dispatch deadline, soonest first.",
+    desc: "Only this seller's groups and items; buyers appear as first name and last initial. Default sort: dispatch deadline, soonest first. Fulfilled by Marketly groups show nextAction marketly_fulfils and are left out of the new, preparing and cancellation_requests tabs and of overdueOnly.",
     query: () =>
       z.object({
         tab: z.enum(["new", "preparing", "shipped", "completed", "cancellation_requests"]).optional(),
+        fulfilledBy: z.enum(["seller", "marketly_service"]).describe("Only self-shipped or only Fulfilled by Marketly groups").optional(),
         q: z.string().describe("Order reference, buyer name or seller SKU").optional(),
         placedFrom: z.iso.date().optional(),
         placedTo: z.iso.date().optional(),
@@ -2654,7 +2670,7 @@ export const endpoints = defineEndpoints({
       }),
     response: () => SellerOrderDetail,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION"],
+    errors: ["ILLEGAL_TRANSITION","FULFILLED_BY_MARKETLY"],
     events: ["orders.item.state_changed"],
     screens: ["seller/order","seller/orders"],
     phase: 1,
@@ -2667,6 +2683,7 @@ export const endpoints = defineEndpoints({
     permission: "orders.fulfillment.manage",
     scope: "own-seller",
     summary: "Mark several new tasks as preparing",
+    desc: "Fulfilled by Marketly groups are listed in failed with code FULFILLED_BY_MARKETLY; the others are updated.",
     body: () => z.object({
       orderIds: z.array(z.uuid()),
     }),
@@ -2697,7 +2714,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => SellerOrderDetail,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION"],
+    errors: ["ILLEGAL_TRANSITION","FULFILLED_BY_MARKETLY"],
     events: ["orders.item.delayed"],
     screens: ["seller/order"],
     phase: 1,
@@ -2724,7 +2741,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => CancellationRequest,
     status: 201,
-    errors: ["CANCELLATION_NOT_ALLOWED","QUANTITY_EXCEEDS_REMAINING"],
+    errors: ["CANCELLATION_NOT_ALLOWED","QUANTITY_EXCEEDS_REMAINING","FULFILLED_BY_MARKETLY"],
     idempotent: true,
     events: ["orders.item.cancelled"],
     screens: ["seller/order"],
@@ -2746,7 +2763,7 @@ export const endpoints = defineEndpoints({
       }),
     response: () => CancellationRequest,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION"],
+    errors: ["ILLEGAL_TRANSITION","FULFILLED_BY_MARKETLY"],
     idempotent: true,
     events: ["orders.cancellation.decided","orders.item.cancelled"],
     screens: ["seller/orders","seller/order"],
@@ -2772,7 +2789,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => CancellationRequest,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","SHIPMENT_REQUIRED"],
+    errors: ["ILLEGAL_TRANSITION","SHIPMENT_REQUIRED","FULFILLED_BY_MARKETLY"],
     events: ["orders.cancellation.decided"],
     screens: ["seller/orders","seller/order"],
     phase: 1,
@@ -2795,6 +2812,7 @@ export const endpoints = defineEndpoints({
       }),
     response: () => DocumentLink,
     status: 200,
+    errors: ["FULFILLED_BY_MARKETLY"],
     screens: ["seller/order"],
     phase: 1,
   },
@@ -2806,12 +2824,14 @@ export const endpoints = defineEndpoints({
     permission: "orders.fulfillment.view",
     scope: "own-seller",
     summary: "One PDF with packing slips for several tasks",
+    desc: "Refused with FULFILLED_BY_MARKETLY when any task is Fulfilled by Marketly (the warehouse prints those slips).",
     body: () => z.object({
       orderIds: z.array(z.uuid()),
       hidePrices: z.boolean().nullish(),
     }),
     response: () => DocumentLink,
     status: 200,
+    errors: ["FULFILLED_BY_MARKETLY"],
     screens: ["seller/orders"],
     phase: 1,
   },
@@ -2867,6 +2887,7 @@ export const endpoints = defineEndpoints({
       z.object({
         q: z.string().optional(),
         sellerType: z.enum(["all", "official", "marketplace"]).optional(),
+        fulfilledBy: z.enum(["official_warehouse", "seller", "marketly_service"]).describe("Orders with at least one group fulfilled this way").optional(),
         sellerId: z.uuid().optional(),
         fulfillmentStatus: z.enum(["new", "preparing", "overdue", "shipped", "partly_delivered", "delivered", "cancellation_requested", "cancelled"]).optional(),
         paymentState: z.enum(["pending_check", "captured", "failed", "partly_refunded", "refunded"]).optional(),
@@ -3424,7 +3445,7 @@ export const spec = defineModuleSpec({
       "orders.item.split": { when: "A partial cancellation, shipment or return splits an item line: the original line keeps its id with the remaining quantity and a new line takes the split-off quantity (splitFromItemId = original)", payload: () => OrdersItemSplitEvent },
       "orders.item.delayed": { when: "Items become Delayed (seller report or overdue dispatch)", payload: () => OrdersItemDelayedEvent },
       "orders.item.delivered": { when: "Items in a delivered shipment become Delivered", payload: () => OrdersItemDeliveredEvent },
-      "orders.cancellation.requested": { when: "A customer asks to cancel items that need the seller's confirmation", payload: () => OrdersCancellationRequestedEvent },
+      "orders.cancellation.requested": { when: "A customer asks to cancel items that need the seller's confirmation (or, for Official Store and Fulfilled by Marketly groups already being picked, the Order Manager's decision)", payload: () => OrdersCancellationRequestedEvent },
       "orders.cancellation.decided": { when: "A request is accepted, auto-accepted, declined or withdrawn", payload: () => OrdersCancellationDecidedEvent },
       "orders.dispatch_deadline.changed": { when: "A group's dispatch deadline is recalculated or extended by staff", payload: () => OrdersDispatchDeadlineChangedEvent },
       "orders.confirmation.requested": { when: "Staff resend the order confirmation", payload: () => OrdersConfirmationRequestedEvent },
@@ -3530,6 +3551,10 @@ export const spec = defineModuleSpec({
     "EXPORT_TOO_LARGE": {
       "status": 422,
       "meaning": "More than reports.maxExportRows rows; narrow the filters. details.max."
+    },
+    "FULFILLED_BY_MARKETLY": {
+      "status": 409,
+      "meaning": "Marketly ships this package; you can't prepare, delay, cancel, answer cancellations or print packing slips for it. The Order Manager handles its cancellations."
     }
   },
   tables: {

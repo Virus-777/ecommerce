@@ -102,7 +102,8 @@ export class Sender {
     const dedupeKey = input.dedupeKey ?? null;
     const deadline = input.deadline ? new Date(input.deadline) : null;
     const linkUrl = core.linkUrl(t.audience, input.link);
-    const baseCtx: Record<string, unknown> = { ...(input.context ?? {}), link: { url: linkUrl, ref: input.link.ref ?? '', label: input.link.label ?? '' } };
+    const given = input.context ?? {};
+    const baseCtx: Record<string, unknown> = { ...given, ...(t.derive?.(given) ?? {}), link: { url: linkUrl, ref: input.link.ref ?? '', label: input.link.label ?? '' } };
 
     const addressees = mergeAddressees((await Promise.all(input.targets.map((target) => this.#resolve(t, target)))).flat());
     if (input.only) for (const a of addressees) a.deliveries = a.deliveries.filter((d) => input.only!.includes(d.channel));

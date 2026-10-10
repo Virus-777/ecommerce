@@ -94,6 +94,9 @@ export const ROLE_TEMPLATES: Record<Exclude<SellerRoleTemplate['key'], 'owner' |
     'inventory.stock.export',
     'media.assets.upload',
     'promotions.discounts.manage',
+    // Fulfilled by Marketly (phase 4): SKUs, inbound shipments, removals and service fees; given only while fulfillment-service runs
+    'fulfillment-service.inbound.manage',
+    'fulfillment-service.fees.view',
   ],
   shipping: [
     'orders.fulfillment.view',

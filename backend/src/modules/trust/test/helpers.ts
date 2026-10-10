@@ -87,6 +87,11 @@ export async function boot(): Promise<Kit> {
           requested.set(id, input);
           return { id, ref: 'AP-1', status: 'pending', target: input.target } as any;
         },
+        // the approval as access shows it: pending requests made through requestApproval above
+        approvalInfo: async (id: string) =>
+          requested.has(id) && (approvalStatus.get(id) ?? 'pending') === 'pending'
+            ? { required: true, reason: 'Above your limit: Business Owner approval', approvalRequestId: id, approvers: ['Business Owner'] }
+            : { required: false, reason: 'Approval request not found', approvalRequestId: id, approvers: [] },
         getApproval: async (id: string) => {
           const input = requested.get(id);
           return { id, status: approvalStatus.get(id) ?? 'pending', reason: input?.reason ?? '', details: input?.details ?? null, requestedBy: { kind: 'staff', id: input?.requestedBy.accountId ?? null } } as any;

@@ -10,7 +10,7 @@ import type * as offers from '../../../spec/offers.js';
 import type * as shipping from '../../../spec/shipping.js';
 import type { AlternativeOffer, Change, ChangeDecision, ChangeSet, CheckoutView, RevalidationResult } from '../../../spec/checkout.js';
 import { checkoutSessionMachine } from '../domain/state-machines.js';
-import { HEADLINES, OFFICIAL_SELLER, choicesFor, fmt, isoDay, plural, type StoredChange, type StoredChangeSet, type StoredQuote } from '../domain/rules.js';
+import { FULFILMENT_LABEL, HEADLINES, OFFICIAL_SELLER, choicesFor, fmt, isoDay, packageKey, plural, shippingOf, type StoredChange, type StoredChangeSet, type StoredQuote } from '../domain/rules.js';
 import type { ChangeSetRow, LineRow, Owner, SessionRow } from '../ports.js';
 import type { By, Core } from './core.js';
 import { included, type Draft, type OfferFacts, type Quoter } from './quote.js';
@@ -179,7 +179,19 @@ export class Revalidator {
           quoted!.returnTerms.returnShippingPaidBy !== now!.returnTerms.returnShippingPaidBy ||
           quoted!.dispatch.businessDays !== now!.dispatch.businessDays ||
           quoted!.dispatch.shipsFrom !== now!.dispatch.shipsFrom);
-      if (versionMoved && (termsDiffer || offer.price.amount === l.unit_price)) {
+      // who ships it (Fulfilled by Marketly started or stopped): always a terms change, the package and delivery move
+      const fulfilledBy = shippingOf(offer).fulfilledBy;
+      if (fulfilledBy !== l.fulfilled_by) {
+        const sellerName = f?.info?.seller.name ?? 'The seller';
+        add('terms_changed', l, {
+          previous: FULFILMENT_LABEL[l.fulfilled_by],
+          current: FULFILMENT_LABEL[fulfilledBy],
+          detail:
+            fulfilledBy === 'marketly_service'
+              ? `Marketly now ships this item for ${sellerName}, with Marketly's delivery and dispatch terms.`
+              : `${sellerName} now ships this item instead of Marketly, with the seller's delivery and dispatch terms.`,
+        }, { termsVersion: Math.max(offer.termsVersion, l.terms_version), fulfilledBy }, { alternatives: alts() });
+      } else if (versionMoved && (termsDiffer || offer.price.amount === l.unit_price)) {
         add('terms_changed', l, {
           previous: termsChange?.before ?? `Terms version ${l.terms_version}`,
           current: termsChange?.after ?? `Terms version ${offer.termsVersion}`,
@@ -231,9 +243,10 @@ export class Revalidator {
     this.discountChanges(stored.quote, freshQuote, cur, add);
     fresh.quote = freshQuote;
 
-    // the total with the default choices
+    // the total with the default choices (a line that changes who ships it moves package: its delivery is quoted again)
     const withDefaults = cloneDraft(fresh);
     await this.apply(withDefaults, items, new Map(), facts);
+    if (withDefaults.address && items.some((i) => i.apply.fulfilledBy)) await this.quoter.shipping(withDefaults);
     const defaultQuote = await this.quoter.price(withDefaults);
     const prev = stored.quote.totals;
     const next = defaultQuote.totals;
@@ -310,6 +323,7 @@ export class Revalidator {
             if (offer) line.terms_version = offer.termsVersion;
           }
           if (line && apply.termsVersion !== undefined) line.terms_version = Math.max(line.terms_version, apply.termsVersion);
+          if (line && apply.fulfilledBy) this.refulfil(d, line, facts.get(line.offer_id));
           if (pkg && apply.optionId) pkg.selected_option_id = apply.optionId;
           break;
         case 'remove':
@@ -369,6 +383,19 @@ export class Revalidator {
       }
     }
     return { removed, switched };
+  }
+
+  /**
+   * The customer accepted a change of who ships the line: it takes the offer's current fulfilment, profile, dispatch
+   * and ships-from (Offer.shipping) and moves to that package; the delivery options are quoted again on save.
+   */
+  private refulfil(d: Draft, line: LineRow, f: OfferFacts | undefined) {
+    if (!f?.offer) return;
+    const shipping = shippingOf(f.offer);
+    line.fulfilled_by = shipping.fulfilledBy;
+    line.profile_id = shipping.profileId;
+    line.package_key = packageKey(line.owner_type, line.seller_id, shipping.fulfilledBy, shipping.dispatch.shipsFrom);
+    if (f.info) d.quote.lineInfo[line.id] = f.info;
   }
 
   /* ================================================================ endpoints */

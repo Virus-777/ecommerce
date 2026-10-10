@@ -10,7 +10,7 @@ import type { ReportsService } from '../service.js';
 export const sellerRoutes = (service: ReportsService) =>
   routes(endpoints, 'seller', {
     /** GET /dashboard: Today at this seller: work tiles, dispatch deadlines, sales, payouts, performance, announcements */
-    getSellerDashboard: async (i) => service.getSellerDashboard(i.sellerId, 'last_14_days', { canViewFinance: await i.can('finance.balances.view') }),
+    getSellerDashboard: async (i) => service.getSellerDashboard(i.sellerId, 'last_14_days', { canViewFinance: await i.can('finance.balances.view'), canViewServiceFees: await i.can('fulfillment-service.fees.view') }),
     /** GET /catalogue: Reports available to sellers */
     getSellerCatalogue: async () => service.defs.sellerCatalogue(),
     /** POST /reports/{key}/query: Run a seller report (product sales, order trend, returns by reason, service performance) */

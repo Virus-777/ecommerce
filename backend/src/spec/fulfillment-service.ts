@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Json } from '../kernel/db/types.js';
 import { defineEndpoints, defineModuleSpec } from '../kernel/spec/define.js';
 import * as common from './common.js';
+import * as identity from './identity.js';
 
 /** Fulfillment service: Platform storage and shipping for sellers: seller enrollment under service terms, SKU enrollment, inbound shipments to our warehouse, receiving into seller-owned stock, picking and shipping by us while the seller stays the seller of record, returns handling, removal of stock, and storage and handling fees with full seller visibility. */
 
@@ -19,6 +20,13 @@ export interface Enrollment {
   acceptedAt?: string | null;
   acceptedBy?: common.Actor | null;
   capacity: Capacity;
+  /** From the application; the approved allowance is capacity.maxSkus */
+  expectedSkus: number;
+  expectedMonthlyUnits: number;
+  /** Catalog categories the seller expects to store */
+  categories: string[];
+  /** The applicant's note; reason holds only staff decision reasons */
+  contactNote?: string | null;
   reason?: string | null;
   reviewer?: common.Actor | null;
   createdAt: string;
@@ -39,6 +47,10 @@ export const Enrollment: z.ZodType<Enrollment> = z.object({
   get capacity() {
     return Capacity;
   },
+  expectedSkus: z.number().int().describe("From the application; the approved allowance is capacity.maxSkus"),
+  expectedMonthlyUnits: z.number().int(),
+  categories: z.array(z.uuid()).describe("Catalog categories the seller expects to store"),
+  contactNote: z.string().describe("The applicant's note; reason holds only staff decision reasons").nullish(),
   reason: z.string().nullish(),
   get reviewer() {
     return common.Actor.nullish();
@@ -95,6 +107,9 @@ export interface SkuEnrollment {
   labelRequired: boolean;
   restricted: boolean;
   restrictionReason?: string | null;
+  /** Declared by the seller at enrollment */
+  hazmat: boolean;
+  notes?: string | null;
   state: "pending" | "approved" | "rejected" | "active" | "inactive";
   stock?: OwnedStock | null;
 }
@@ -117,11 +132,132 @@ export const SkuEnrollment: z.ZodType<SkuEnrollment> = z.object({
   labelRequired: z.boolean(),
   restricted: z.boolean(),
   restrictionReason: z.string().nullish(),
+  hazmat: z.boolean().describe("Declared by the seller at enrollment"),
+  notes: z.string().nullish(),
   state: z.enum(["pending", "approved", "rejected", "active", "inactive"]),
   get stock() {
     return OwnedStock.nullish();
   },
 }).register(common.apiTypes, { id: "fulfillment-service.SkuEnrollment" });
+
+export interface ServiceTerms {
+  offerId: string;
+  sellerId: string;
+  skuEnrollmentId: string;
+  stockItemId: string;
+  /** True while the enrollment is active and a shipping profile exists; false while it is suspended or offboarding (the offer is Ineligible, never seller-shipped, decision D5) */
+  sellable: boolean;
+  notSellableReason?: "enrollment_suspended" | "enrollment_offboarding" | "service_unavailable" | null;
+  /** The service location (getServiceLocation) */
+  locationId: string;
+  /** e.g. 'Reno, NV (Marketly warehouse)' */
+  shipsFrom: string;
+  dispatch: {
+    businessDays: number;
+    sameDayCutoff?: string | null;
+  };
+  /** Setting serviceShippingProfileId, else shipping.getOfficialDefaultProfile */
+  shippingProfileId: string;
+  parcel: {
+    weightGrams: number;
+    dimensionsCm: Dimensions;
+  };
+}
+
+export const ServiceTerms: z.ZodType<ServiceTerms> = z.object({
+  offerId: z.uuid(),
+  sellerId: z.uuid(),
+  skuEnrollmentId: z.uuid(),
+  stockItemId: z.uuid(),
+  sellable: z.boolean().describe("True while the enrollment is active and a shipping profile exists; false while it is suspended or offboarding (the offer is Ineligible, never seller-shipped, decision D5)"),
+  notSellableReason: z.enum(["enrollment_suspended", "enrollment_offboarding", "service_unavailable"]).nullish(),
+  locationId: z.uuid().describe("The service location (getServiceLocation)"),
+  shipsFrom: z.string().describe("e.g. 'Reno, NV (Marketly warehouse)'"),
+  dispatch: z.object({
+    businessDays: z.number().int(),
+    sameDayCutoff: z.string().nullish(),
+  }),
+  shippingProfileId: z.uuid().describe("Setting serviceShippingProfileId, else shipping.getOfficialDefaultProfile"),
+  parcel: z.object({
+    weightGrams: z.number().int(),
+    get dimensionsCm() {
+      return Dimensions;
+    },
+  }),
+}).register(common.apiTypes, { id: "fulfillment-service.ServiceTerms" });
+
+export interface StockDifference {
+  id: string;
+  skuEnrollmentId: string;
+  sku: string;
+  sellerId: string;
+  day: string;
+  /** Ownership ledger groups mapped to inventory groups: { incoming, available, reserved, damagedHeld, returned } */
+  ledger?: unknown;
+  /** inventory.getLevels at the service location: { incoming, available, reserved, damagedHeld, returned } */
+  inventory?: unknown;
+  state: "open" | "resolved";
+  decision?: "adjust_ledger" | "reimburse" | "no_change" | null;
+  reason?: string | null;
+  amount?: common.Money | null;
+  decidedBy?: common.Actor | null;
+  decidedAt?: string | null;
+  approval?: common.ApprovalInfo | null;
+}
+
+export const StockDifference: z.ZodType<StockDifference> = z.object({
+  id: z.uuid(),
+  skuEnrollmentId: z.uuid(),
+  sku: z.string(),
+  sellerId: z.uuid(),
+  day: z.iso.date(),
+  ledger: z.unknown().describe("Ownership ledger groups mapped to inventory groups: { incoming, available, reserved, damagedHeld, returned }"),
+  inventory: z.unknown().describe("inventory.getLevels at the service location: { incoming, available, reserved, damagedHeld, returned }"),
+  state: z.enum(["open", "resolved"]),
+  decision: z.enum(["adjust_ledger", "reimburse", "no_change"]).nullish(),
+  reason: z.string().nullish(),
+  get amount() {
+    return common.Money.nullish();
+  },
+  get decidedBy() {
+    return common.Actor.nullish();
+  },
+  decidedAt: z.iso.datetime({ offset: true }).nullish(),
+  get approval() {
+    return common.ApprovalInfo.nullish();
+  },
+}).register(common.apiTypes, { id: "fulfillment-service.StockDifference" });
+
+export interface ServiceReceipt {
+  /** Also the receiptId given to inventory.submitServiceReceipt */
+  id: string;
+  /** 1, 2, … per inbound shipment (one per receiving record) */
+  seq: number;
+  /** submitted: counted, waiting for the Inventory Manager (inventory confirmInbound); confirmed: units are sellable seller-owned stock */
+  state: "submitted" | "confirmed";
+  received: number;
+  damaged: number;
+  countedBy: common.Actor;
+  countedAt: string;
+  confirmedBy?: common.Actor | null;
+  confirmedAt?: string | null;
+}
+
+export const ServiceReceipt: z.ZodType<ServiceReceipt> = z.object({
+  id: z.uuid().describe("Also the receiptId given to inventory.submitServiceReceipt"),
+  seq: z.number().int().describe("1, 2, … per inbound shipment (one per receiving record)"),
+  state: z.enum(["submitted", "confirmed"]).describe("submitted: counted, waiting for the Inventory Manager (inventory confirmInbound); confirmed: units are sellable seller-owned stock"),
+  received: z.number().int(),
+  damaged: z.number().int(),
+  get countedBy() {
+    return common.Actor;
+  },
+  countedAt: z.iso.datetime({ offset: true }),
+  get confirmedBy() {
+    return common.Actor.nullish();
+  },
+  confirmedAt: z.iso.datetime({ offset: true }).nullish(),
+}).register(common.apiTypes, { id: "fulfillment-service.ServiceReceipt" });
 
 export interface Dimensions {
   length: number;
@@ -249,6 +385,8 @@ export interface InboundShipment {
   arrivedAt?: string | null;
   receivedAt?: string | null;
   lines: InboundLine[];
+  /** Receiving records; units become available only when inventory confirms each one */
+  receipts: ServiceReceipt[];
   discrepancy?: Discrepancy | null;
   /** Box and unit labels to print */
   labels: common.MediaRef[];
@@ -275,6 +413,9 @@ export const InboundShipment: z.ZodType<InboundShipment> = z.object({
   receivedAt: z.iso.datetime({ offset: true }).nullish(),
   get lines() {
     return z.array(InboundLine);
+  },
+  get receipts() {
+    return z.array(ServiceReceipt);
   },
   get discrepancy() {
     return Discrepancy.nullish();
@@ -340,6 +481,25 @@ export const ReceivedLine: z.ZodType<ReceivedLine> = z.object({
   damaged: z.number().int(),
 }).register(common.apiTypes, { id: "fulfillment-service.ReceivedLine" });
 
+export interface ReceivedEventLine {
+  skuEnrollmentId: string;
+  stockItemId: string;
+  sku: string;
+  label: string;
+  /** Units counted in this receiving record, damaged included */
+  received: number;
+  damaged: number;
+}
+
+export const ReceivedEventLine: z.ZodType<ReceivedEventLine> = z.object({
+  skuEnrollmentId: z.uuid(),
+  stockItemId: z.uuid(),
+  sku: z.string(),
+  label: z.string(),
+  received: z.number().int().describe("Units counted in this receiving record, damaged included"),
+  damaged: z.number().int(),
+}).register(common.apiTypes, { id: "fulfillment-service.ReceivedEventLine" });
+
 export interface FulfillmentRequest {
   id: string;
   orderId: string;
@@ -347,11 +507,13 @@ export interface FulfillmentRequest {
   sellerGroupId: string;
   sellerId: string;
   state: "open" | "picking" | "packed" | "shipped" | "cancelled" | "short";
-  /** orderItemId, offerId, sku, quantity, picked */
+  /** orderItemId, offerId, sku, quantity, cancelled, picked, shipped (units dispatched so far; a request is shipped when every uncancelled unit has shipped, across several packages) */
   items: unknown[];
   warehouseTaskId?: string | null;
+  /** Latest shipment of the request */
   shipmentId?: string | null;
   dispatchBy: common.Deadline;
+  shortReportedAt?: string | null;
   createdAt: string;
 }
 
@@ -362,12 +524,13 @@ export const FulfillmentRequest: z.ZodType<FulfillmentRequest> = z.object({
   sellerGroupId: z.uuid(),
   sellerId: z.uuid(),
   state: z.enum(["open", "picking", "packed", "shipped", "cancelled", "short"]),
-  items: z.array(z.unknown()).describe("orderItemId, offerId, sku, quantity, picked"),
+  items: z.array(z.unknown()).describe("orderItemId, offerId, sku, quantity, cancelled, picked, shipped (units dispatched so far; a request is shipped when every uncancelled unit has shipped, across several packages)"),
   warehouseTaskId: z.uuid().nullish(),
-  shipmentId: z.uuid().nullish(),
+  shipmentId: z.uuid().describe("Latest shipment of the request").nullish(),
   get dispatchBy() {
     return common.Deadline;
   },
+  shortReportedAt: z.iso.datetime({ offset: true }).nullish(),
   createdAt: z.iso.datetime({ offset: true }),
 }).register(common.apiTypes, { id: "fulfillment-service.FulfillmentRequest" });
 
@@ -377,8 +540,11 @@ export interface ServiceReturn {
   returnRef: string;
   sellerId: string;
   skuEnrollmentId: string;
+  orderItemId: string;
   quantity: number;
   outcome: "pending" | "restocked" | "unsellable" | "removal" | "disposed";
+  /** returns' proposedStockOutcome from returns.return.inspected; staff confirm the outcome with recordReturnOutcome (decision D8) */
+  proposedOutcome?: string | null;
   inspectionNote?: string | null;
   evidence: common.MediaRef[];
   inspectedAt?: string | null;
@@ -390,8 +556,10 @@ export const ServiceReturn: z.ZodType<ServiceReturn> = z.object({
   returnRef: z.string(),
   sellerId: z.uuid(),
   skuEnrollmentId: z.uuid(),
+  orderItemId: z.uuid(),
   quantity: z.number().int(),
   outcome: z.enum(["pending", "restocked", "unsellable", "removal", "disposed"]),
+  proposedOutcome: z.string().describe("returns' proposedStockOutcome from returns.return.inspected; staff confirm the outcome with recordReturnOutcome (decision D8)").nullish(),
   inspectionNote: z.string().nullish(),
   get evidence() {
     return z.array(common.MediaRef);
@@ -429,7 +597,10 @@ export interface RemovalOrder {
   shipTo?: common.Address | null;
   tracking?: string | null;
   fee?: common.Money | null;
+  reason?: string | null;
   createdAt: string;
+  approvedAt?: string | null;
+  completedAt?: string | null;
 }
 
 export const RemovalOrder: z.ZodType<RemovalOrder> = z.object({
@@ -448,7 +619,10 @@ export const RemovalOrder: z.ZodType<RemovalOrder> = z.object({
   get fee() {
     return common.Money.nullish();
   },
+  reason: z.string().nullish(),
   createdAt: z.iso.datetime({ offset: true }),
+  approvedAt: z.iso.datetime({ offset: true }).nullish(),
+  completedAt: z.iso.datetime({ offset: true }).nullish(),
 }).register(common.apiTypes, { id: "fulfillment-service.RemovalOrder" });
 
 export interface FeeRate {
@@ -592,21 +766,58 @@ export const FulfillmentServiceInboundSubmittedEvent: z.ZodType<FulfillmentServi
   expectedArrival: z.iso.date().nullish(),
 });
 
-/** fulfillment-service.inbound.received: Receiving is recorded */
+/** fulfillment-service.inbound.received: A receiving record is counted and submitted to inventory (warehouse creates put-away tasks from it). Counts are for this receiving record only, not cumulative */
 export interface FulfillmentServiceInboundReceivedEvent {
   inboundId: string;
+  /** IB- reference */
+  ref: string;
+  /** The receiving record (ServiceReceipt.id, also the inventory receiptId) */
+  receiptId: string;
   sellerId: string;
+  /** The service location */
+  locationId: string;
   received: number;
   damaged: number;
   complete: boolean;
+  lines: ReceivedEventLine[];
 }
 
 export const FulfillmentServiceInboundReceivedEvent: z.ZodType<FulfillmentServiceInboundReceivedEvent> = z.object({
   inboundId: z.uuid(),
+  ref: z.string().describe("IB- reference"),
+  receiptId: z.uuid().describe("The receiving record (ServiceReceipt.id, also the inventory receiptId)"),
   sellerId: z.uuid(),
+  locationId: z.uuid().describe("The service location"),
   received: z.number().int(),
   damaged: z.number().int(),
   complete: z.boolean(),
+  get lines() {
+    return z.array(ReceivedEventLine);
+  },
+});
+
+/** fulfillment-service.offer.service_changed: An offer starts or stops being fulfilled by Marketly, or its service sellability changes: SKU activated or deactivated, enrollment suspended, reinstated, offboarded or closed. Published after inventory.setServiceLocation has been applied */
+export interface FulfillmentServiceOfferServiceChangedEvent {
+  offerId: string;
+  sellerId: string;
+  skuEnrollmentId: string;
+  stockItemId: string;
+  fulfilledBy: "marketly_service" | "seller";
+  /** With marketly_service: false while the enrollment is suspended or offboarding (offers makes the offer Ineligible, reason fulfillment_service_suspended). With seller: always true (offers lifts its fulfillment_service ineligibility) */
+  sellable: boolean;
+  reason: "sku_activated" | "sku_deactivated" | "enrollment_suspended" | "enrollment_reinstated" | "enrollment_offboarding" | "enrollment_closed";
+  at: string;
+}
+
+export const FulfillmentServiceOfferServiceChangedEvent: z.ZodType<FulfillmentServiceOfferServiceChangedEvent> = z.object({
+  offerId: z.uuid(),
+  sellerId: z.uuid(),
+  skuEnrollmentId: z.uuid(),
+  stockItemId: z.uuid(),
+  fulfilledBy: z.enum(["marketly_service", "seller"]),
+  sellable: z.boolean().describe("With marketly_service: false while the enrollment is suspended or offboarding (offers makes the offer Ineligible, reason fulfillment_service_suspended). With seller: always true (offers lifts its fulfillment_service ineligibility)"),
+  reason: z.enum(["sku_activated", "sku_deactivated", "enrollment_suspended", "enrollment_reinstated", "enrollment_offboarding", "enrollment_closed"]),
+  at: z.iso.datetime({ offset: true }),
 });
 
 /** fulfillment-service.return.inspected: A returned service unit gets an outcome */
@@ -644,6 +855,8 @@ export interface FulfillmentServiceFeeChargedEvent {
   type: string;
   amount: common.Money;
   reference?: string | null;
+  /** Billing period of storage fees, e.g. 2026-10 */
+  period?: string | null;
 }
 
 export const FulfillmentServiceFeeChargedEvent: z.ZodType<FulfillmentServiceFeeChargedEvent> = z.object({
@@ -654,6 +867,7 @@ export const FulfillmentServiceFeeChargedEvent: z.ZodType<FulfillmentServiceFeeC
     return common.Money;
   },
   reference: z.string().nullish(),
+  period: z.string().describe("Billing period of storage fees, e.g. 2026-10").nullish(),
 });
 
 /** fulfillment-service.fee.reversed: A fee charge is reversed */
@@ -662,6 +876,7 @@ export interface FulfillmentServiceFeeReversedEvent {
   sellerId: string;
   amount: common.Money;
   reason: string;
+  period?: string | null;
 }
 
 export const FulfillmentServiceFeeReversedEvent: z.ZodType<FulfillmentServiceFeeReversedEvent> = z.object({
@@ -671,18 +886,25 @@ export const FulfillmentServiceFeeReversedEvent: z.ZodType<FulfillmentServiceFee
     return common.Money;
   },
   reason: z.string(),
+  period: z.string().nullish(),
 });
 
 /* ------------------------------------------------------------------ public API (in-process) */
 
 /** What other modules may call in-process: `ctx.use('fulfillment-service')` (or `ctx.tryUse` for an optional dependency). */
 export interface FulfillmentServicePublicApi {
-  /** True when the offer is fulfilled by Marketly. Offers shows 'Ships from Marketly' while the seller stays named; orders route the seller group's fulfillment to our warehouse. Used by: offers, orders, shipping, checkout. */
+  /** True when Marketly fulfils the offer, sellable or not: its SKU enrollment is active and the seller's enrollment is active, suspended or offboarding, and a service location exists (the same rule as getServiceTerms). Orders uses it to validate that a marketly_service group holds only service offers and a seller group none. Used by: orders. */
   isServiceOffer(offerId: string): Promise<boolean>;
+  /** Customer-facing fulfilment terms of Marketly-fulfilled offers, keyed by offer id; null when the offer is not Marketly-fulfilled (see isServiceOffer). Reads settings once per call; the profile comes from serviceShippingProfileId or shipping.getOfficialDefaultProfile, the location from serviceLocationId or inventory.getDefaultLocation, the parcel from the SKU's dimensions and weight. Offers resolves Offer.shipping for marketly_service offers with one batched call. Used by: offers. */
+  getServiceTerms(offerIds: string[]): Promise<Record<string, ServiceTerms | null>>;
+  /** The company warehouse that holds and ships seller stock (setting serviceLocationId, else inventory.getDefaultLocation); shipsFrom is its 'City, Region'. Null when no company location exists (then nothing is Marketly-fulfilled). Warehouse creates service fulfilments there and labels from its address; shipping quotes service packages from it. Used by: warehouse, shipping. */
+  getServiceLocation(): Promise<{ locationId: string, address: common.Address, shipsFrom: string } | null>;
   /** Owner of stock in our warehouse; reports and inventory use it to keep seller stock separate from company stock (plan ch. 9). Used by: inventory, warehouse, reports. */
   stockOwner(stockItemId: string): Promise<{ kind: 'company' | 'seller', sellerId?: string }>;
-  /** Called when a seller group contains service offers; creates the warehouse pick task. Also triggered by orders.order.placed. Used by: orders. */
+  /** Kept for staff tooling and tests. Requests are created from orders.order.accepted (groups with fulfilledBy marketly_service); warehouse creates the pick work from the same event, so no module calls this. */
   createFulfillmentRequest(orderId: string, sellerGroupId: string, items: { orderItemId: string, offerId: string, quantity: number }[]): Promise<FulfillmentRequest>;
+  /** Rows of the datasets this module registers with reports.registerDataset at boot: fulfillment-service.seller.fees and fulfillment-service.seller.stock (seller audience, own rows only), fulfillment-service.admin.stock_by_owner (fulfillment-service.operations.view) and fulfillment-service.admin.fees (fulfillment-service.fees.manage). Used by: reports. */
+  exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[], nextCursor?: string }>;
 }
 
 /* ------------------------------------------------------------------ tables (Kysely row types) */
@@ -698,8 +920,16 @@ export interface FulfillmentServiceDb {
     accepted_at: Date | null;
     accepted_by: string | null;
     max_cubic_feet: string;
+    /** approved SKU allowance; never the applicant's expectedSkus */
     max_skus: number;
+    expected_skus: number;
+    expected_monthly_units: number;
+    categories: Json;
+    contact_note: string | null;
+    /** staff decision reasons only */
     reason: string | null;
+    /** sellers suspension that suspended this enrollment; sellers.seller.reinstated with the same endedSuspensionId reinstates it */
+    seller_suspension_id: string | null;
     reviewer_id: string | null;
     created_at: Date;
     decided_at: Date | null;
@@ -717,6 +947,8 @@ export interface FulfillmentServiceDb {
     label_required: boolean;
     restricted: boolean;
     restriction_reason: string | null;
+    hazmat: boolean;
+    notes: string | null;
     state: string;
     inventory_item_id: string | null;
   };
@@ -733,7 +965,6 @@ export interface FulfillmentServiceDb {
     expected_arrival: string | null;
     arrived_at: Date | null;
     received_at: Date | null;
-    warehouse_receipt_id: string | null;
     created_at: Date;
   };
   inbound_lines: {
@@ -742,6 +973,22 @@ export interface FulfillmentServiceDb {
     expected: number;
     received: number;
     damaged: number;
+  };
+  /** One row per receiving record of an inbound shipment, submitted to inventory as a service receipt and confirmed by the Inventory Manager */
+  inbound_receipts: {
+    /** = inventory receiptId */
+    id: string;
+    inbound_id: string;
+    seq: number;
+    /** inventory InboundReceipt.id */
+    inventory_receipt_id: string | null;
+    /** { skuEnrollmentId, stockItemId, received, damaged }[] */
+    lines: Json;
+    state: 'submitted' | 'confirmed';
+    counted_by: string;
+    counted_at: Date;
+    confirmed_by: string | null;
+    confirmed_at: Date | null;
   };
   discrepancies: {
     id: string;
@@ -772,22 +1019,28 @@ export interface FulfillmentServiceDb {
   fulfillment_requests: {
     id: string;
     order_id: string;
+    order_ref: string;
     seller_group_id: string;
     seller_id: string;
     state: string;
+    /** RequestItem[] with cancelled, picked and shipped per item */
     items: Json;
     warehouse_task_id: string | null;
     shipment_id: string | null;
     dispatch_by: Date;
+    short_reported_at: Date | null;
     created_at: Date;
   };
   service_returns: {
     id: string;
     return_id: string;
+    return_ref: string;
+    order_item_id: string;
     seller_id: string;
     sku_enrollment_id: string;
     quantity: number;
     outcome: string;
+    proposed_outcome: string | null;
     inspection_note: string | null;
     evidence_media_ids: Json;
     inspected_at: Date | null;
@@ -801,7 +1054,27 @@ export interface FulfillmentServiceDb {
     lines: Json;
     ship_to: Json | null;
     tracking: string | null;
+    reason: string | null;
+    fee_amount: number | null;
     created_at: Date;
+    approved_at: Date | null;
+    completed_at: Date | null;
+  };
+  /** Daily reconciliation differences between the ownership ledger and inventory at the service location, per SKU */
+  stock_differences: {
+    id: string;
+    seller_id: string;
+    sku_enrollment_id: string;
+    day: string;
+    ledger: Json;
+    inventory: Json;
+    state: 'open' | 'resolved';
+    decision: string | null;
+    reason: string | null;
+    amount: number | null;
+    approval_request_id: string | null;
+    decided_by: string | null;
+    decided_at: Date | null;
   };
   fee_schedules: {
     id: string;
@@ -969,6 +1242,7 @@ export const endpoints = defineEndpoints({
     response: () => SkuEnrollment,
     status: 200,
     errors: ["ILLEGAL_TRANSITION","STOCK_REMAINING"],
+    events: ["fulfillment-service.offer.service_changed"],
     screens: ["seller/inventory"],
     phase: 4,
   },
@@ -1303,7 +1577,7 @@ export const endpoints = defineEndpoints({
     status: 200,
     errors: ["ILLEGAL_TRANSITION","STOCK_REMAINING"],
     audited: true,
-    events: ["fulfillment-service.enrollment.decided"],
+    events: ["fulfillment-service.enrollment.decided","fulfillment-service.offer.service_changed"],
     screens: ["admin/seller"],
     phase: 4,
   },
@@ -1383,7 +1657,7 @@ export const endpoints = defineEndpoints({
     permission: "fulfillment-service.inbound.receive",
     scope: "staff",
     summary: "Record received and damaged units (partial or complete)",
-    desc: "Counts go to inventory as seller-owned stock (incoming → available after inspection, damaged → held). Completing with differences opens a discrepancy for the seller.",
+    desc: "Each call is one receiving record: counts accrue receiving and label fees, are submitted to inventory as a service receipt (inventory.submitServiceReceipt; the Inventory Manager confirms it on inventory confirmInbound) and stay in the receiving group until then. Confirmation makes sellable units available and damaged units held (decision D3). Completing with differences opens a discrepancy for the seller.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1455,6 +1729,7 @@ export const endpoints = defineEndpoints({
     permission: "fulfillment-service.inbound.receive",
     scope: "staff",
     summary: "Record the inspection outcome of a returned service unit",
+    desc: "The single stock decision for a returned service unit (decision D8), prefilled from returns' proposed outcome: restocked → inventory returned → available, unsellable or removal → damaged_held, disposed → out of stock (inventory.moveServiceStock with reasons service_return_restocked, service_return_unsellable, service_return_disposed). The seller is notified (seller.fulfillment.return_inspected).",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1532,6 +1807,55 @@ export const endpoints = defineEndpoints({
     response: () => SkuEnrollment,
     status: 200,
     screens: ["admin/seller","ops/inventory"],
+    phase: 4,
+  },
+  listStockDifferences: {
+    area: "admin",
+    method: "GET",
+    path: "/stock-differences",
+    auth: "staff",
+    permission: "fulfillment-service.operations.view",
+    scope: "staff",
+    summary: "Differences between the ownership ledger and inventory found by the daily reconciliation",
+    query: () =>
+      z.object({
+        state: z.enum(["open", "resolved"]).optional(),
+        sellerId: z.uuid().optional(),
+        day: z.iso.date().optional(),
+      }),
+    paging: true,
+    response: () => StockDifference,
+    status: 200,
+    screens: ["ops/inventory"],
+    phase: 4,
+  },
+  resolveStockDifference: {
+    area: "admin",
+    method: "POST",
+    path: "/stock-differences/{id}/resolve",
+    auth: "staff",
+    permission: "fulfillment-service.inbound.receive",
+    scope: "staff",
+    summary: "Resolve a stock difference: adjust the ledger, reimburse the seller or leave it",
+    desc: "adjust_ledger writes an adjusted ledger movement so the ledger matches inventory; reimburse accrues a reimbursement for units lost or damaged in Marketly's custody (amount required; decision D11) through the approval action fulfillment-service.reimbursements.approve; no_change records the reason. Resolves the fulfillment.reconciliation work item.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      decision: z.enum(["adjust_ledger", "reimburse", "no_change"]),
+      get amount() {
+        return common.Money.nullish();
+      },
+      reason: z.string(),
+    }),
+    response: () => StockDifference,
+    status: 200,
+    errors: ["ILLEGAL_TRANSITION","APPROVAL_REQUIRED","VALIDATION_FAILED"],
+    idempotent: true,
+    audited: true,
+    approval: "Approval action fulfillment-service.reimbursements.approve. Reimbursements above the caller's limit need Finance approval; the difference stays open with approval until access.approval.decided",
+    screens: ["ops/inventory"],
     phase: 4,
   },
   listFeeSchedules: {
@@ -1630,8 +1954,8 @@ export const spec = defineModuleSpec({
   chapters: [1,12,9,14],
   summary: "Platform storage and shipping for sellers: seller enrollment under service terms, SKU enrollment, inbound shipments to our warehouse, receiving into seller-owned stock, picking and shipping by us while the seller stays the seller of record, returns handling, removal of stock, and storage and handling fees with full seller visibility.",
   dependsOn: ["inventory","warehouse","finance"],
-  optionalDeps: ["sellers","offers","orders","shipping","returns","media","access","notifications","reports"],
-  publicApi: ["isServiceOffer","stockOwner","createFulfillmentRequest"],
+  optionalDeps: ["sellers","offers","orders","shipping","returns","media","access","notifications","reports","audit","workqueues"],
+  publicApi: ["isServiceOffer","getServiceTerms","getServiceLocation","stockOwner","createFulfillmentRequest","exportRows"],
   permissions: [
     {
       "key": "fulfillment-service.enrollment.review",
@@ -1867,6 +2191,17 @@ export const spec = defineModuleSpec({
         ]
       ]
     },
+    "Stock difference": {
+      "field": "StockDifference.state",
+      "initial": "open",
+      "transitions": [
+        [
+          "open",
+          "resolve",
+          "resolved"
+        ]
+      ]
+    },
     "Service fee charge": {
       "field": "FeeCharge.state",
       "initial": "accrued",
@@ -1894,21 +2229,29 @@ export const spec = defineModuleSpec({
       "fulfillment-service.enrollment.submitted": { when: "A seller applies", payload: () => FulfillmentServiceEnrollmentSubmittedEvent },
       "fulfillment-service.enrollment.decided": { when: "Approve, reject, request info, suspend, reinstate, offboard or close", payload: () => FulfillmentServiceEnrollmentDecidedEvent },
       "fulfillment-service.inbound.submitted": { when: "An inbound shipment is submitted (warehouse expects it)", payload: () => FulfillmentServiceInboundSubmittedEvent },
-      "fulfillment-service.inbound.received": { when: "Receiving is recorded", payload: () => FulfillmentServiceInboundReceivedEvent },
+      "fulfillment-service.inbound.received": { when: "A receiving record is counted and submitted to inventory (warehouse creates put-away tasks from it). Counts are for this receiving record only, not cumulative", payload: () => FulfillmentServiceInboundReceivedEvent },
+      "fulfillment-service.offer.service_changed": { when: "An offer starts or stops being fulfilled by Marketly, or its service sellability changes: SKU activated or deactivated, enrollment suspended, reinstated, offboarded or closed. Published after inventory.setServiceLocation has been applied", payload: () => FulfillmentServiceOfferServiceChangedEvent },
       "fulfillment-service.return.inspected": { when: "A returned service unit gets an outcome", payload: () => FulfillmentServiceReturnInspectedEvent },
       "fulfillment-service.removal.completed": { when: "A removal or disposal is completed", payload: () => FulfillmentServiceRemovalCompletedEvent },
       "fulfillment-service.fee.charged": { when: "Fee charges are posted for seller statements", payload: () => FulfillmentServiceFeeChargedEvent },
       "fulfillment-service.fee.reversed": { when: "A fee charge is reversed", payload: () => FulfillmentServiceFeeReversedEvent },
     },
     consumes: {
-      "orders.order.placed": "Create fulfillment requests for seller groups with service offers",
+      "orders.order.accepted": "Create a fulfillment request for each group with fulfilledBy marketly_service (items = payload items filtered by the group's itemIds; ref and dispatchBy from the payload; no orders.getFulfillmentTask call) and reserve the units in the ownership ledger; notify the seller (seller.fulfillment.order_received). Declined payments never reach here, so no reservation leaks",
+      "orders.order.cancelled": "Safety net: cancel any open request of the order and release its ledger reservations",
       "orders.item.cancelled": "Cancel or shorten open fulfillment requests and release seller-owned reservations",
-      "shipping.shipment.dispatched": "Mark requests shipped; accrue pick-and-pack and order handling fees",
-      "returns.return.received": "Create a service return for units returned to our warehouse; accrue the returns processing fee",
-      "inventory.stock.low": "Notify the seller to send more stock for service SKUs",
-      "sellers.seller.suspended": "Suspend the enrollment for new inbound; keep fulfilling accepted orders",
+      "orders.item.split": "Split the request item so later cancel, dispatch and return events naming newItemId match it (as warehouse and inventory do)",
+      "shipping.shipment.dispatched": "For a request's group (fulfilledBy marketly_service): move that shipment's lines reserved → shipped in the ledger (claimed per shipmentId); the request is shipped when every uncancelled unit has shipped. Accrue pick-and-pack per shipment (key pick_pack:<requestId>:<shipmentId>:<tier>) and order handling once per request",
+      "warehouse.fulfillment.status_changed": "Follow the warehouse task: request state picking, packed or short (with shortReportedAt and a fulfillment.requests work item); replaces reading warehouse progress on every list call",
+      "returns.return.received": "For returned items of a shipped request (payload items: orderItemId, stockItemId, quantity): create a service return (return_ref, order_item_id), move the units into inventory returned at the service location (inventory.moveServiceStock out → returned, reason service_return_received) and the ledger, and accrue the returns processing fee",
+      "returns.return.inspected": "Store returns' proposedStockOutcome on the service return as proposed_outcome; staff still record the outcome with recordReturnOutcome (decision D8)",
+      "inventory.receipt.confirmed": "For source.kind service_inbound: per confirmed line move the ledger receiving → available (sellable) and receiving → unsellable (damaged), adding extra units from outside; mark the receipt confirmed; activate the SKU (first time: inventory.setServiceLocation, then fulfillment-service.offer.service_changed) and the enrollment if approved; notify the seller (seller.fulfillment.stock_available). Purchase-order receipts are ignored",
+      "inventory.adjustment.recorded": "For serviceManaged movements (staff adjustments, counts and discrepancy resolutions at the service location): the ownership ledger follows with an adjusted movement carrying the inventory reason and movementId (claimed per movementId)",
+      "inventory.stock.low": "For serviceManaged items: notify the seller to send more stock (seller.fulfillment.stock_low)",
+      "sellers.seller.suspended": "Suspend the enrollment (remember the suspensionId) for new inbound and new service-offer sales; keep fulfilling accepted orders and returns",
+      "sellers.seller.reinstated": "Reinstate an enrollment suspended by that suspension (endedSuspensionId = enrollments.seller_suspension_id); enrollments suspended by staff stay suspended",
       "sellers.seller.closed": "Start offboarding; ask the seller to remove stock",
-      "access.approval.decided": "Apply approved fee schedules, reimbursements and fee reversals"
+      "access.approval.decided": "Apply approved fee schedules, reimbursements (discrepancies and stock differences) and fee reversals"
     },
   },
   jobs: {
@@ -1926,15 +2269,15 @@ export const spec = defineModuleSpec({
     },
     "fulfillment-service.inbound-overdue": {
       "schedule": "daily",
-      "does": "Flag inbound shipments past expected arrival; close discrepancies without a seller response after discrepancyResponseDays"
+      "does": "Flag inbound shipments past expected arrival (work item kind receiving in fulfillment.receiving, dedupeKey fs_inbound_overdue:<inboundId>); close discrepancies without a seller response after discrepancyResponseDays"
     },
     "fulfillment-service.aged-stock-notice": {
       "schedule": "weekly",
-      "does": "Warn sellers about units approaching long-term storage"
+      "does": "Warn sellers about units approaching long-term storage (seller.fulfillment.stock_aged)"
     },
     "fulfillment-service.reconcile": {
       "schedule": "daily",
-      "does": "Compare the ownership ledger with inventory quantities per seller SKU; open a work item for differences"
+      "does": "Compare the ownership ledger with inventory.getLevels at the service location per seller SKU (inbound + receiving ↔ incoming, available ↔ available, reserved ↔ reserved, unsellable + removal_pending ↔ damagedHeld, returned ↔ returned); write a stock_differences row and raise a fulfillment.reconciliation work item (kind manual_task, dedupeKey fs_stock_difference:<skuEnrollmentId>) per SKU that differs"
     }
   },
   settings: {
@@ -1965,11 +2308,37 @@ export const spec = defineModuleSpec({
       "approval": "business_owner",
       "sellerVisible": true
     },
-    "warehouseAddress": {
-      "default": "Reno, NV warehouse (placeholder)",
-      "desc": "Inbound destination",
+    "serviceLocationId": {
+      "default": null,
+      "desc": "inventory location id of the company warehouse that holds and ships seller stock; null = inventory's default location (decision D2). Its address is the inbound destination (decision D12)",
       "type": "string",
-      "sellerVisible": true
+      "approval": "business_owner",
+      "sellerVisible": true,
+      "minLeadDays": 30
+    },
+    "serviceShippingProfileId": {
+      "default": null,
+      "desc": "Official Store shipping profile customers are quoted for Marketly-fulfilled packages; null = shipping.getOfficialDefaultProfile (decision D1)",
+      "type": "string",
+      "approval": "second_reviewer",
+      "sellerVisible": false
+    },
+    "serviceDispatchBusinessDays": {
+      "default": null,
+      "desc": "Dispatch promise of Marketly-fulfilled packages in business days; null = the service profile's handling days",
+      "type": "int",
+      "min": 0,
+      "max": 10,
+      "unit": "business days",
+      "approval": "second_reviewer",
+      "sellerVisible": false
+    },
+    "serviceSameDayCutoff": {
+      "default": null,
+      "desc": "Same-day dispatch cutoff of Marketly-fulfilled packages; null = the service profile's cutoff",
+      "type": "time",
+      "approval": "second_reviewer",
+      "sellerVisible": false
     },
     "unsellableDisposalDays": {
       "default": 60,
@@ -2041,8 +2410,28 @@ export const spec = defineModuleSpec({
         "type": "int",
         "nullable": false
       },
+      "expected_skus": {
+        "type": "int",
+        "nullable": false
+      },
+      "expected_monthly_units": {
+        "type": "int",
+        "nullable": false
+      },
+      "categories": {
+        "type": "jsonb",
+        "nullable": false
+      },
+      "contact_note": {
+        "type": "text",
+        "nullable": true
+      },
       "reason": {
         "type": "text",
+        "nullable": true
+      },
+      "seller_suspension_id": {
+        "type": "uuid",
         "nullable": true
       },
       "reviewer_id": {
@@ -2107,6 +2496,14 @@ export const spec = defineModuleSpec({
         "type": "text",
         "nullable": true
       },
+      "hazmat": {
+        "type": "bool",
+        "nullable": false
+      },
+      "notes": {
+        "type": "text",
+        "nullable": true
+      },
       "state": {
         "type": "text",
         "nullable": false
@@ -2165,10 +2562,6 @@ export const spec = defineModuleSpec({
         "type": "timestamptz",
         "nullable": true
       },
-      "warehouse_receipt_id": {
-        "type": "uuid",
-        "nullable": true
-      },
       "created_at": {
         "type": "timestamptz",
         "nullable": false
@@ -2194,6 +2587,48 @@ export const spec = defineModuleSpec({
       "damaged": {
         "type": "int",
         "nullable": false
+      }
+    },
+    "inbound_receipts": {
+      "id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "inbound_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "seq": {
+        "type": "int",
+        "nullable": false
+      },
+      "inventory_receipt_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "lines": {
+        "type": "jsonb",
+        "nullable": false
+      },
+      "state": {
+        "type": "text",
+        "nullable": false
+      },
+      "counted_by": {
+        "type": "text",
+        "nullable": false
+      },
+      "counted_at": {
+        "type": "timestamptz",
+        "nullable": false
+      },
+      "confirmed_by": {
+        "type": "text",
+        "nullable": true
+      },
+      "confirmed_at": {
+        "type": "timestamptz",
+        "nullable": true
       }
     },
     "discrepancies": {
@@ -2293,6 +2728,10 @@ export const spec = defineModuleSpec({
         "type": "uuid",
         "nullable": false
       },
+      "order_ref": {
+        "type": "text",
+        "nullable": false
+      },
       "seller_group_id": {
         "type": "uuid",
         "nullable": false
@@ -2321,6 +2760,10 @@ export const spec = defineModuleSpec({
         "type": "timestamptz",
         "nullable": false
       },
+      "short_reported_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
       "created_at": {
         "type": "timestamptz",
         "nullable": false
@@ -2332,6 +2775,14 @@ export const spec = defineModuleSpec({
         "nullable": false
       },
       "return_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "return_ref": {
+        "type": "text",
+        "nullable": false
+      },
+      "order_item_id": {
         "type": "uuid",
         "nullable": false
       },
@@ -2350,6 +2801,10 @@ export const spec = defineModuleSpec({
       "outcome": {
         "type": "text",
         "nullable": false
+      },
+      "proposed_outcome": {
+        "type": "text",
+        "nullable": true
       },
       "inspection_note": {
         "type": "text",
@@ -2397,9 +2852,79 @@ export const spec = defineModuleSpec({
         "type": "text",
         "nullable": true
       },
+      "reason": {
+        "type": "text",
+        "nullable": true
+      },
+      "fee_amount": {
+        "type": "bigint",
+        "nullable": true
+      },
       "created_at": {
         "type": "timestamptz",
         "nullable": false
+      },
+      "approved_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
+      "completed_at": {
+        "type": "timestamptz",
+        "nullable": true
+      }
+    },
+    "stock_differences": {
+      "id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "seller_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "sku_enrollment_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "day": {
+        "type": "date",
+        "nullable": false
+      },
+      "ledger": {
+        "type": "jsonb",
+        "nullable": false
+      },
+      "inventory": {
+        "type": "jsonb",
+        "nullable": false
+      },
+      "state": {
+        "type": "text",
+        "nullable": false
+      },
+      "decision": {
+        "type": "text",
+        "nullable": true
+      },
+      "reason": {
+        "type": "text",
+        "nullable": true
+      },
+      "amount": {
+        "type": "bigint",
+        "nullable": true
+      },
+      "approval_request_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "decided_by": {
+        "type": "text",
+        "nullable": true
+      },
+      "decided_at": {
+        "type": "timestamptz",
+        "nullable": true
       }
     },
     "fee_schedules": {
@@ -2535,6 +3060,9 @@ export const spec = defineModuleSpec({
     "removal_orders": {
       "seller": "seller_id"
     },
+    "stock_differences": {
+      "seller": "seller_id"
+    },
     "fee_charges": {
       "seller": "seller_id"
     },
@@ -2551,6 +3079,7 @@ declare module '../kernel/events/event-map.js' {
     "fulfillment-service.enrollment.decided": FulfillmentServiceEnrollmentDecidedEvent;
     "fulfillment-service.inbound.submitted": FulfillmentServiceInboundSubmittedEvent;
     "fulfillment-service.inbound.received": FulfillmentServiceInboundReceivedEvent;
+    "fulfillment-service.offer.service_changed": FulfillmentServiceOfferServiceChangedEvent;
     "fulfillment-service.return.inspected": FulfillmentServiceReturnInspectedEvent;
     "fulfillment-service.removal.completed": FulfillmentServiceRemovalCompletedEvent;
     "fulfillment-service.fee.charged": FulfillmentServiceFeeChargedEvent;

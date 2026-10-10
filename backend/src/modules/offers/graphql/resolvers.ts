@@ -133,6 +133,9 @@ export const resolvers = (service: OffersService): ModuleResolvers => {
       conditionLabel: conditionLabel(o.condition),
       price: money(o.price),
       compareAt: o.compareAt ? { ...o.compareAt, amount: money(o.compareAt.amount), basis: up(o.compareAt.basis) } : null,
+      // what customers get: Marketly's dispatch and ships-from for Fulfilled by Marketly offers (Offer.shipping)
+      dispatch: o.shipping.dispatch,
+      fulfilledBy: up(o.fulfilledBy),
       returnTerms: { ...o.returnTerms, kind: up(o.returnTerms.kind) },
       warranty: { ...o.warranty, kind: up(o.warranty.kind), handledBy: up(o.warranty.handledBy ?? null) },
       status: up(o.status),

@@ -35,6 +35,8 @@ export interface KernelServices {
   rateLimits: RateLimitStore;
   /** Permission check for an in-process principal (set by the app once the auth chain exists) */
   can(principal: Principal | null | undefined, permission: string): Promise<boolean>;
+  /** Tests (apiStubs): stubbed modules; an optional dependency that is not enabled answers tryUse with its stub */
+  stubbed?: readonly string[];
 }
 
 export interface BootResult {
@@ -96,6 +98,7 @@ function checkRoutes(spec: ModuleSpecDef, sets: readonly RouteSet[]) {
 
 export async function bootModules(defs: ModuleDefinition[], k: KernelServices): Promise<BootResult> {
   const enabled = new Set(defs.map((d) => d.spec.name));
+  const stubbed = new Set(k.stubbed ?? []);
   const result: BootResult = { endpoints: [], resolvers: new Map(), webhookVerifiers: new Map(), fileRoutes: [], apis: new Map(), warnings: [], runAfterBoot: async () => {} };
   const { apis, resolvers, webhookVerifiers, warnings } = result;
   const proxies = new Map<string, object>();
@@ -175,7 +178,7 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
       },
       tryUse(dep: string) {
         if (!spec.optionalDeps.includes(dep)) throw new Error(`${name} uses ${dep}, which is not in its spec optionalDeps`);
-        return enabled.has(dep) ? (proxyFor(dep, name) as never) : undefined;
+        return enabled.has(dep) || stubbed.has(dep) ? (proxyFor(dep, name) as never) : undefined;
       },
       afterBoot: (fn: () => unknown) => afterBoot.push({ module: name, fn }),
       http: {

@@ -30,6 +30,7 @@ import {
   packagesNote,
   plural,
   sellerSupportLine,
+  soldAndShippedBy,
   stepsOf,
   type LineInfo,
   type StepFacts,
@@ -174,7 +175,8 @@ export class Views {
         key,
         label: `Package ${i + 1} of ${keys.length}`,
         seller: info.seller,
-        soldAndShippedBy: `Sold and shipped by ${info.seller.name}`,
+        soldAndShippedBy: soldAndShippedBy(info.seller.name, row2?.fulfilled_by ?? pl[0]!.fulfilled_by),
+        fulfilledBy: row2?.fulfilled_by ?? pl[0]!.fulfilled_by,
         shipsFrom: row2?.ships_from || info.dispatch.shipsFrom,
         lines: pl.map((l) => this.line(l, q, cur)),
         options: (Array.isArray(row2?.options) ? row2!.options : []) as unknown as shipping.DeliveryOption[],
@@ -288,12 +290,14 @@ export class Views {
         const info = this.info(q, pl[0]!.id);
         const opt = pkgRows.get(key)?.selected_option as shipping.DeliveryOption | null | undefined;
         const ship = q.totals.shippingByPackage.find((s) => s.packageKey === key);
+        const fulfilledBy = pkgRows.get(key)?.fulfilled_by ?? pl[0]!.fulfilled_by;
         return {
           label: `Package ${i + 1} of ${keys.length}`,
           seller: info.seller,
           shipsFrom: pkgRows.get(key)?.ships_from || info.dispatch.shipsFrom,
           arrivalLabel: opt?.arrivalLabel ?? 'Arrival date to be confirmed',
-          shippingLabel: `${opt?.methodName ?? 'Standard'} · ${ship && ship.amount.amount > 0 ? new Intl.NumberFormat('en-US', { style: 'currency', currency: cur }).format(ship.amount.amount / 100) : 'Free'}`,
+          // ConfirmationPackage has no soldAndShippedBy: a Marketly-fulfilled package says it on its shipping line
+          shippingLabel: `${opt?.methodName ?? 'Standard'} · ${ship && ship.amount.amount > 0 ? new Intl.NumberFormat('en-US', { style: 'currency', currency: cur }).format(ship.amount.amount / 100) : 'Free'}${fulfilledBy === 'marketly_service' ? ` · ${soldAndShippedBy(info.seller.name, fulfilledBy)}` : ''}`,
           items: pl.map((l) => {
             const li = this.info(q, l.id);
             return { title: li.title, variantLabel: li.variantLabel, condition: li.condition, quantity: l.quantity, price: m(l.unit_price, cur), image: li.image, status: 'Confirmed' };

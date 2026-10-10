@@ -90,6 +90,7 @@ export default defineModule({
 | **Update** | Change the module; add a new migration file; bump its `version`. Contract changes are visible to dependents through TypeScript |
 | **Disable** | Remove it from `modules.config.ts`. `npm run modules` lists modules that depend on it and blocks the start if a required dependent is still on |
 | **Remove** | Disable, then delete the folder. Its tables stay until you drop the schema (`DROP SCHEMA <name> CASCADE`), so nothing is lost by accident |
+| **Enable a later-phase module** | Uncomment it in `modules.config.ts` (or add it to `MODULES`) and `npm run migrate`. Nothing else blocks the start: e.g. Fulfilled by Marketly (`fulfillment-service`, phase 4) is routed end to end by offers, checkout, orders, warehouse, shipping and returns. Set its settings `serviceLocationId` / `serviceShippingProfileId` first, or rely on the defaults (inventory's default company location, shipping's Official Store default profile); without them no offer sells as Fulfilled by Marketly |
 
 ## 4. Module catalog
 
