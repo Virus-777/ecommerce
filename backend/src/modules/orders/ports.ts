@@ -30,7 +30,7 @@ export interface FlagData {
 /** orders.product_snapshot: catalog.ProductSnapshot plus the category at purchase */
 export type StoredProduct = catalog.ProductSnapshot & { categoryId?: string | null };
 /** orders.offer_snapshot: offers.OfferSnapshot plus the seller SKU at purchase */
-export type StoredOffer = Partial<offers.OfferSnapshot> & { offerId: string; termsVersion: number; condition: string; sellerSku?: string | null; conditionLabel?: string };
+export type StoredOffer = Omit<Partial<offers.OfferSnapshot>, 'sellerSku'> & { offerId: string; termsVersion: number; condition: string; sellerSku?: string | null; conditionLabel?: string };
 /** seller_groups.delivery: the promise accepted at checkout plus the seller label shown at purchase */
 export type StoredDelivery = DeliveryPromise & { seller?: SellerLabel };
 export interface DispatchChange {
@@ -172,7 +172,9 @@ export interface OrdersRepository {
   update<T extends Table>(table: T, id: string, patch: Partial<Recs[T]>): Promise<Recs[T]>;
   remove<T extends Table>(table: T, id: string): Promise<void>;
 
-  /** Inserts the order unless its checkout session already has one (then null) */
+  /** Inbox claim (ctx.inbox): true the first time this key is claimed; commits with the transaction it runs in */
+  claim(key: string): Promise<boolean>;
+  /** Inserts the order unless the (checkout session, attempt) pair already has one (then null) */
   insertOrderIfNew(row: OrderRec): Promise<OrderRec | null>;
   upsertShipment(row: ShipmentRec): Promise<ShipmentRec>;
 
@@ -187,6 +189,8 @@ export interface OrdersRepository {
   adminOrders(f: AdminOrderFilter, page: PageRequest, now: Date): Promise<common.Page<OrderRec>>;
   adminCount(f: AdminOrderFilter, now: Date): Promise<number>;
   guestOrdersByEmail(email: string): Promise<OrderRec[]>;
+  /** Whether the customer (or, without one, the contact email) has an order whose payment was accepted */
+  hasAcceptedOrder(who: { customerId?: string | null; email?: string | null }): Promise<boolean>;
   /** Orders in a lifecycle, by id, in bounded batches (jobs) */
   ordersInLifecycle(lifecycles: string[], afterId: string | null, limit: number): Promise<OrderRec[]>;
   ordersWithOpenGroupsOfSeller(sellerId: string): Promise<GroupRec[]>;

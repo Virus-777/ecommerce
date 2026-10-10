@@ -36,6 +36,8 @@ export interface Harness {
   /** catalog.getProduct category by product id (overrides the snapshot's, for snapshots without one) */
   productCategories: Map<string, string>;
   exports: { requested: any[]; registered: string[] };
+  /** media.attach calls (snapshot images kept for the order) */
+  attached: { assetId: string; usage: any }[];
   call(method: string, url: string, token: string, body?: unknown, headers?: Record<string, string>): Promise<{ status: number; body: any }>;
   publish(source: string, name: string, payload: unknown): Promise<void>;
   named(name: string): any[];
@@ -54,6 +56,7 @@ export async function harness(): Promise<Harness> {
     guestGrants: new Set<string>(),
     productCategories: new Map<string, string>(),
     exports: { requested: [] as any[], registered: [] as string[] },
+    attached: [] as { assetId: string; usage: any }[],
   };
   const job = (over: Partial<reports.ExportJob> = {}): reports.ExportJob => ({
     id: newId(),
@@ -97,6 +100,11 @@ export async function harness(): Promise<Harness> {
       identity: {
         hasGuestOrderAccess: async (sessionId, orderId) => h.guestGrants.has(`${sessionId}:${orderId}`),
       },
+      media: {
+        attach: async (assetId, usage) => {
+          h.attached.push({ assetId, usage });
+        },
+      },
       audit: {
         record: async (entry) => {
           h.audits.push(entry);
@@ -130,6 +138,7 @@ export async function harness(): Promise<Harness> {
     'orders.order.completed',
     'orders.item.state_changed',
     'orders.item.cancelled',
+    'orders.item.split',
     'orders.item.delayed',
     'orders.item.delivered',
     'orders.cancellation.requested',
@@ -160,7 +169,7 @@ export async function harness(): Promise<Harness> {
 }
 
 /** An offer and its product snapshot registered in the stubs */
-export function product(h: Harness, o: { title: string; price: number; ownerType?: 'official' | 'seller'; sellerId?: string | null; sellerName?: string; options?: Record<string, string>; categoryId?: string | null; condition?: string }) {
+export function product(h: Harness, o: { title: string; price: number; ownerType?: 'official' | 'seller'; sellerId?: string | null; sellerName?: string; options?: Record<string, string>; categoryId?: string | null; condition?: string; imageId?: string | null }) {
   const offerId = newId();
   const productId = newId();
   const variantId = newId();
@@ -175,6 +184,7 @@ export function product(h: Harness, o: { title: string; price: number; ownerType
     options: o.options ?? { Color: 'Teal' },
     modelNumber: 'H-100',
     imageUrl: 'https://cdn.example/p.jpg',
+    imageId: o.imageId ?? null,
     takenAt: new Date().toISOString(),
     categoryId: o.categoryId === undefined ? CATEGORY.child : o.categoryId,
   });
@@ -194,6 +204,8 @@ export function product(h: Harness, o: { title: string; price: number; ownerType
     warranty: { kind: 'manufacturer', months: 24, handledBy: 'manufacturer', summary: '2-year manufacturer warranty' },
     stockItemId,
     takenAt: new Date().toISOString(),
+    sellerSku: `SKU-${offerId.slice(0, 6)}`,
+    title: o.title,
   });
   return { offerId, productId, variantId, stockItemId, price: o.price };
 }
@@ -245,10 +257,13 @@ export function group(h: Harness, items: OrderItemInput[], o: { ownerType?: 'off
   };
 }
 
-export function checkout(groups: OrderGroupInput[], o: { customerId?: string | null; email?: string; paymentState?: 'accepted' | 'pending_check'; checkoutSessionId?: string } = {}): OrderCreateInput {
+export function checkout(groups: OrderGroupInput[], o: { customerId?: string | null; email?: string; paymentState?: 'accepted' | 'pending_check'; checkoutSessionId?: string; attemptNo?: number; deliveryAddressId?: string | null; visitorId?: string | null } = {}): OrderCreateInput {
   const sum = (k: 'items' | 'discounts' | 'shipping' | 'tax' | 'total') => USD(groups.reduce((s, g) => s + g.totals[k].amount, 0));
   return {
     checkoutSessionId: o.checkoutSessionId ?? newId(),
+    ...(o.attemptNo !== undefined ? { attemptNo: o.attemptNo } : {}),
+    ...(o.deliveryAddressId !== undefined ? { deliveryAddressId: o.deliveryAddressId } : {}),
+    ...(o.visitorId !== undefined ? { visitorId: o.visitorId } : {}),
     contact: o.customerId ? { kind: 'customer', customerId: o.customerId, name: 'Sam Rivera', email: o.email ?? 'sam@example.com', phone: '+15035550142' } : { kind: 'guest', name: 'Gia Guest', email: o.email ?? 'gia@example.com', phone: null },
     channel: 'web',
     currency: 'USD',

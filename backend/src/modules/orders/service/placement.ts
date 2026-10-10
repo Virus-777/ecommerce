@@ -5,6 +5,7 @@
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
+import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type * as offers from '../../../spec/offers.js';
 import type { AcceptedItem, OrderCreateInput, OrderDetail, PlacedGroup, SellerLabel } from '../../../spec/orders.js';
 import { orderItemMachine, orderLifecycleMachine } from '../domain/state-machines.js';
@@ -62,9 +63,11 @@ export class Placement {
     if (issues.length) throw invalid(issues, 'The order is incomplete');
   }
 
-  /** Create the order from an authorized or pending payment (idempotent per checkoutSessionId) */
+  /** Create the order from an authorized or pending payment (idempotent per checkoutSessionId and attemptNo) */
   async createOrder(input: OrderCreateInput): Promise<OrderDetail> {
-    const existing = (await this.core.repo.find('orders', { checkout_session_id: input.checkoutSessionId }))[0];
+    const attemptNo = input.attemptNo ?? 1;
+    if (!(Number.isInteger(attemptNo) && attemptNo >= 1)) throw invalid([{ path: 'attemptNo', message: 'Attempt numbers start at 1' }]);
+    const existing = (await this.core.repo.find('orders', { checkout_session_id: input.checkoutSessionId, attempt_no: attemptNo }))[0];
     if (existing) return this.detailOf(existing.id);
     this.validate(input);
     const ctx = this.core.ctx;
@@ -113,7 +116,7 @@ export class Placement {
       const s = g.sellerId ? sellers.get(g.sellerId) : undefined;
       const label: SellerLabel =
         g.ownerType === 'official'
-          ? { ownerType: 'official', id: null, name: first.sellerName || 'Marketly Official Store', slug: 'official-store', verified: true, logo: null }
+          ? { ownerType: 'official', id: null, name: first.sellerName || OFFICIAL_STORE_NAME, slug: 'official-store', verified: true, logo: null }
           : { ownerType: 'seller', id: g.sellerId, name: s?.storeName ?? first.sellerName, slug: s?.slug ?? '', verified: s?.verified ?? false, logo: null };
       groups.push({
         id: groupId,
@@ -151,7 +154,7 @@ export class Placement {
           stock_item_id: i.stockItemId,
           category_id: p.categoryId ?? null,
           product_snapshot: p,
-          offer_snapshot: { ...o, conditionLabel: CONDITION_LABEL[o.condition] ?? o.condition, sellerSku: skus?.[i.offerId]?.sku ?? null },
+          offer_snapshot: { ...o, conditionLabel: CONDITION_LABEL[o.condition] ?? o.condition, sellerSku: o.sellerSku || skus?.[i.offerId]?.sku || null },
           return_terms: i.returnTerms,
           ...line,
           paid_amount: line.quantity * line.unit_price - discountSum(line.discounts) + line.shipping_share + line.tax_share,
@@ -175,7 +178,9 @@ export class Placement {
       id: orderId,
       ref,
       checkout_session_id: input.checkoutSessionId,
+      attempt_no: attemptNo,
       reservation_id: input.reservationId ?? null,
+      delivery_address_id: input.deliveryAddressId ?? null,
       customer_id:input.contact.kind === 'customer' ? (input.contact.customerId ?? null) : null,
       contact_email: input.contact.email,
       contact_phone: input.contact.phone ?? null,
@@ -203,7 +208,6 @@ export class Placement {
       placed_at: now,
       accepted_at: accepted ? now : null,
       completed_at: null,
-      search: null,
     };
 
     const actor = input.contact.kind === 'customer' ? { kind: 'customer' as const, id: input.contact.customerId ?? null, name: input.contact.name } : { kind: 'visitor' as const, id: null, name: input.contact.name };
@@ -234,7 +238,7 @@ export class Placement {
       return true;
     });
     if (!created) {
-      const winner = (await this.core.repo.find('orders', { checkout_session_id: input.checkoutSessionId }))[0];
+      const winner = (await this.core.repo.find('orders', { checkout_session_id: input.checkoutSessionId, attempt_no: attemptNo }))[0];
       if (!winner) throw new AppError('CONFLICT', 'The order could not be placed; try again');
       return this.detailOf(winner.id);
     }
@@ -253,13 +257,39 @@ export class Placement {
       couponCodes: order.coupon_codes,
       groups: placed,
       placedAt: now.toISOString(),
+      attemptNo,
+      deliveryAddressId: order.delivery_address_id,
+      contactName: order.contact_name,
+      visitorId: input.visitorId ?? null,
     });
     if (accepted) {
       for (const i of items) batch.push('orders.item.state_changed', { orderId, groupId: i.group_id, itemId: i.id, from: 'pending_payment', to: itemState, actor: SYSTEM, at: now.toISOString() });
       batch.push('orders.order.accepted', { orderId, ref, customerId: order.customer_id, contactEmail: order.contact_email, total: this.views.m(order.total, agg), groups: placed, items: this.acceptedItems(agg), reservationId: order.reservation_id, acceptedAt: now.toISOString() });
     }
     this.core.flush(batch);
+    await this.attachSnapshotImages(orderId, ref, items);
     return this.views.detail(agg, await this.core.timelineOf(orderId, ['customer']), 'internal', cfg);
+  }
+
+  /**
+   * Keeps each item's snapshot image alive for the order (media usage kind order_evidence, ref the order id), so the
+   * picture on the order outlives catalog changes. Best effort: media off or an asset gone never fails the order.
+   */
+  private async attachSnapshotImages(orderId: string, ref: string, items: ItemRec[]) {
+    const media = this.core.ctx.tryUse('media');
+    if (!media) return;
+    const assetIds = new Set<string>();
+    for (const i of items) {
+      const id = i.product_snapshot.imageId ?? i.product_snapshot.image?.id ?? null;
+      if (id) assetIds.add(id);
+    }
+    for (const assetId of assetIds) {
+      try {
+        await media.attach(assetId, { module: 'orders', kind: 'order_evidence', refId: orderId, refLabel: ref }, { kind: 'platform', id: null, label: 'Orders' });
+      } catch (err) {
+        this.core.ctx.log.warn({ err, orderId, assetId }, 'orders: could not keep the snapshot image');
+      }
+    }
   }
 
   /** payment_pending → open when the payment result arrives. Idempotent. */
@@ -323,7 +353,8 @@ export class Placement {
       const o = await this.core.repo.get('orders', orderId);
       if (o) return o;
     }
-    return (await this.core.repo.find('orders', { checkout_session_id: checkoutSessionId }))[0];
+    // the latest attempt of the checkout (earlier ones were cancelled for a declined payment)
+    return (await this.core.repo.find('orders', { checkout_session_id: checkoutSessionId }, { orderBy: [['attempt_no', 'desc']], limit: 1 }))[0];
   }
 
   async onPaymentAuthorized(e: EventPayload<'payments.payment.authorized'>) {

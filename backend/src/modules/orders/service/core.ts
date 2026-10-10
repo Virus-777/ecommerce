@@ -196,13 +196,46 @@ export class Core {
   /**
    * Splits `part` units off a line: the part acted on keeps the line id (other modules refer to it), the rest
    * becomes a new line with splitFromItemId. Shares are re-allocated by largest remainder in cents.
+   * Publishes orders.item.split (in the batch, before the events of the action that split the line) so inventory
+   * and promotions split their per-item rows: itemId keeps `part` units (remainingQuantity), newItemId takes the rest.
    */
-  async split(tx: OrdersRepository, item: ItemRec, part: number, currency: string): Promise<{ part: ItemRec; rest: ItemRec | null }> {
+  async split(
+    tx: OrdersRepository,
+    batch: Batch,
+    item: ItemRec,
+    part: number,
+    currency: string,
+    reason: 'cancellation' | 'shipment' | 'return' | 'replacement',
+  ): Promise<{ part: ItemRec; rest: ItemRec | null }> {
     if (part >= item.quantity) return { part: item, rest: null };
     const [a, b] = splitMoney(item, part, currency);
     const updated = await tx.update('order_items', item.id, { ...a, paid_amount: paidOf({ ...a, unit_price: item.unit_price }) });
     const rest = await tx.insert('order_items', { ...item, ...b, id: newId(), paid_amount: paidOf({ ...b, unit_price: item.unit_price }), split_from_item_id: item.id });
+    batch.push('orders.item.split', {
+      orderId: item.order_id,
+      groupId: item.group_id,
+      itemId: item.id,
+      newItemId: rest.id,
+      rootItemId: await this.rootOf(tx, item),
+      offerId: item.offer_id,
+      stockItemId: item.stock_item_id,
+      quantity: rest.quantity,
+      remainingQuantity: updated.quantity,
+      reason,
+      at: this.now().toISOString(),
+    });
     return { part: updated, rest };
+  }
+
+  /** First line of a split chain (the line itself unless it was split off another) */
+  private async rootOf(tx: OrdersRepository, item: ItemRec): Promise<string> {
+    let current = item;
+    for (let depth = 0; current.split_from_item_id && depth < 100; depth++) {
+      const parent = await tx.get('order_items', current.split_from_item_id);
+      if (!parent) break;
+      current = parent;
+    }
+    return current.id;
   }
 
   async timeline(
