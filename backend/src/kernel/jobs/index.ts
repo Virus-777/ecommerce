@@ -3,9 +3,10 @@
  * module's spec with a schedule; the module supplies the handler with ctx.jobs.handle().
  *
  * This in-process scheduler understands the spec's schedule phrases ("every 10 min", "hourly",
- * "daily 02:00 market time", "nightly 03:00 PT", "on boot"). Phrases it can't time
- * ("per payoutSchedule at cutoff", "queue worker", "on demand") run only through runNow().
- * A Postgres-backed queue (pg-boss) can replace it behind the same interface.
+ * "daily 02:00 market time", "nightly 03:00 PT", "on boot"). Any other phrase fails boot: a job
+ * the scheduler can't time would silently never run (FORMAT.md lists the phrases).
+ * Every instance runs every job, so run one instance until a Postgres-backed queue (pg-boss)
+ * replaces this behind the same interface.
  */
 import type { FastifyBaseLogger } from 'fastify';
 import { isNotImplemented } from '../errors/index.js';
@@ -16,8 +17,7 @@ export type Schedule =
   | { kind: 'daily'; time: string }
   | { kind: 'weekly'; time: string }
   | { kind: 'monthly'; time: string }
-  | { kind: 'boot' }
-  | { kind: 'manual'; note: string };
+  | { kind: 'boot' };
 
 export function parseSchedule(text: string): Schedule {
   const s = text.toLowerCase();
@@ -34,7 +34,7 @@ export function parseSchedule(text: string): Schedule {
   if (/^(daily|nightly)/.test(s) && !s.includes('start of business')) return { kind: 'daily', time: at ?? '00:00' };
   if (/^weekly/.test(s)) return { kind: 'weekly', time: at ?? '00:00' };
   if (/^monthly/.test(s)) return { kind: 'monthly', time: at ?? '00:00' };
-  return { kind: 'manual', note: text };
+  throw new Error(`Job schedule "${text}" is not one the scheduler can time (see "jobs" in docs/api/spec/FORMAT.md)`);
 }
 
 export interface JobDefinition {
