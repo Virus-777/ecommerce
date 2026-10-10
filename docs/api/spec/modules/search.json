@@ -26,7 +26,7 @@
     "Personalized recommendations and visual search: later projects (plan ch. 4)"
   ],
   "dependsOn": ["catalog", "offers"],
-  "optionalDeps": ["inventory", "reviews", "sellers", "advertising", "promotions", "customers", "media", "reports", "wishlist", "orders", "returns"],
+  "optionalDeps": ["inventory", "reviews", "sellers", "advertising", "promotions", "customers", "media", "reports", "wishlist", "orders", "returns", "audit"],
   "publicApi": [
     { "name": "searchProducts", "signature": "(query: SearchQuery) => { items: ProductCard[], total: int, nextCursor: string|null }", "desc": "Same engine as the store endpoint, without sponsored slots. Used for collections (new arrivals, best sellers, category picks).", "usedBy": ["content", "promotions"] },
     { "name": "getProductCards", "signature": "(productIds: uuid[], opts?: { postalCode?: string, sellerId?: uuid }) => ProductCard[]", "desc": "Cards for any product list (home sections, recently viewed, related products), same shape everywhere", "usedBy": ["content", "wishlist", "reviews", "advertising"] },
@@ -284,6 +284,7 @@
     { "name": "recent_searches", "columns": { "id": "uuid pk", "owner_kind": "text (customer|guest)", "owner_id": "text", "query": "text", "filters": "jsonb", "searched_at": "timestamptz" }, "indexes": ["(owner_kind, owner_id, searched_at desc)"] },
     { "name": "query_log", "desc": "Every search (partitioned by month); feeds zero-result reports, suggestions and ranking", "columns": { "id": "uuid pk", "search_id": "text", "raw": "text?", "normalized": "text?", "filters": "jsonb", "sort": "text", "results": "int", "corrected_to": "text?", "session_key": "text?", "at": "timestamptz" }, "indexes": ["(normalized, at)", "(results, at) where results = 0"] },
     { "name": "click_log", "columns": { "search_id": "text", "product_id": "uuid", "position": "int", "sponsored": "bool", "at": "timestamptz" }, "indexes": ["(search_id)", "(product_id, at)"] },
+    { "name": "product_sales_daily", "desc": "Units and orders per product per market day (decision S-D3), fed idempotently by orders events through the inbox; the nightly job sums the last 30 days into search_documents.sales_30d. Rebuildable from orders", "tenant": false, "columns": { "product_id": "uuid", "day": "date (market time zone)", "units": "int", "orders": "int", "updated_at": "timestamptz" }, "indexes": ["pk (product_id, day)", "(day)"] },
     { "name": "dirty_documents", "desc": "Products waiting to be reindexed", "columns": { "product_id": "uuid pk", "reason": "text", "queued_at": "timestamptz" } },
     { "name": "reindex_jobs", "columns": { "id": "uuid pk", "scope": "text", "ids": "uuid[]", "state": "text", "total": "int", "processed": "int", "requested_by": "text", "reason": "text", "started_at": "timestamptz?", "finished_at": "timestamptz?", "error": "text?" } },
     { "name": "ranking_policies", "columns": { "version": "int pk", "text": "text", "factors": "jsonb", "effective_from": "timestamptz", "reason": "text", "published_by": "text", "published_at": "timestamptz" } }
@@ -344,6 +345,7 @@
         "arrivesBy": "date?",
         "attrs": "string?",
         "listedWithinDays": "int?",
+        "onSale": { "type": "bool?", "desc": "Same as GET /products: only products with a deal price now, so facet counts match the deals list" },
         "sort": "enum(recommended|price_asc|price_desc|newest|rating|best_selling)?",
         "postalCode": "string?"
       },
@@ -398,7 +400,8 @@
       { "name": "sellers.seller.closed", "does": "Remove the store from suggestions" },
       { "name": "promotions.campaign.started", "does": "Update deal badges, was prices and deal end times on cards" },
       { "name": "promotions.campaign.ended", "does": "Remove deal badges" },
-      { "name": "orders.order.placed", "does": "Count units for best-selling sort and popularity (phase 2 sort)" },
+      { "name": "orders.order.placed", "does": "Add the order's units per product to product_sales_daily for the placed day (items read with orders.getOrder; inbox-claimed per event so redelivery never counts twice). Feeds best-selling sort and popularity (phase 2 sort)" },
+      { "name": "orders.order.cancelled", "does": "Subtract the cancelled order's units from product_sales_daily for the day it was placed (inbox-claimed), so declined-payment orders do not count as sales" },
       { "name": "identity.guest_session.claimed", "does": "Merge the guest session's recent searches into the account (identity calls nothing in search)" },
       { "name": "catalog.brand.changed", "does": "Reindex the brand name, slug and status on the brand's product documents and brand suggestions; only active brands are suggested or offered as a facet" },
       { "name": "customers.marketing_preferences.changed", "does": "recentSearches false: delete the customer's saved recent searches and stop saving new ones; true: start saving again (nothing is restored)" }
@@ -412,10 +415,10 @@
   ],
   "jobs": [
     { "name": "search.process-dirty", "schedule": "every 30 s", "does": "Rebuild documents in dirty_documents from catalog, offers, inventory, reviews and promotions public APIs" },
-    { "name": "search.refresh-delivery-flags", "schedule": "every 15 min", "does": "Recompute 'Ships today' and arrives-by flags as dispatch cutoffs pass" },
+    { "name": "search.refresh-delivery-flags", "schedule": "every 15 min", "does": "Recompute 'Ships today' and arrives-by flags as dispatch cutoffs pass (arrival = dispatch days + transitBusinessDays)" },
     { "name": "search.refresh-suggestions", "schedule": "hourly", "does": "Rebuild suggestion_terms from popular queries (with results), categories, brands, stores and product names" },
     { "name": "search.full-reindex", "schedule": "nightly 03:00 market time", "does": "Full rebuild (catches category tree changes, which catalog does not publish as events)" },
-    { "name": "search.sales-counts", "schedule": "nightly 03:30 market time", "does": "30-day units sold per product for best-selling sort and popularity; enables best_selling once bestSellingMinOrders is reached; ranks the top 100 products per leaf category (best_seller_rank, shown as #3 in Headphones)" },
+    { "name": "search.sales-counts", "schedule": "nightly 03:30 market time", "does": "Sum product_sales_daily over the last 30 days into sales_30d per product (and delete rows older than 90 days) for best-selling sort and popularity; enables best_selling once bestSellingMinOrders is reached; ranks the top 100 products per leaf category (best_seller_rank, shown as #3 in Headphones)" },
     { "name": "search.prune-logs", "schedule": "daily 04:00 market time", "does": "Delete recent searches older than the retention period and query/click logs older than 13 months" }
   ],
   "settings": [
@@ -426,6 +429,7 @@
     { "key": "recentSearchRetentionDays", "type": "duration", "default": 90, "desc": "Recent searches older than this are deleted", "unit": "days", "min": 1 },
     { "key": "newArrivalsWindowDays", "type": "duration", "default": 30, "desc": "'New arrivals' = first listed within this window", "unit": "days", "min": 1 },
     { "key": "bestSellingMinOrders", "type": "int", "default": 500, "desc": "Platform orders in 30 days before best-selling sort is offered", "min": 0 },
+    { "key": "transitBusinessDays", "type": "duration", "default": 3, "desc": "Carrier transit business days assumed for every destination in the market (decision S-D4): search results' arrives-by filter and delivery cues use dispatch days + this. The purchase box and checkout show shipping's real estimate", "unit": "business days", "min": 0, "max": 15 },
     { "key": "excludeOutOfStockByDefault", "type": "bool", "default": true, "desc": "Out-of-stock products appear only with 'Include out of stock'" },
     { "key": "searchEngine", "type": "enum", "default": "postgres", "desc": "postgres | external (adapter added later)", "choices": ["postgres", "external"], "approval": "second_reviewer" }
   ],
@@ -451,6 +455,6 @@
     "Returning to previous results: the query string is the state; searchId plus page/cursor restores the same page after viewing a product.",
     "Recent searches are stored per customer or guest session and merged on sign-in when search consumes identity.guest_session.claimed. For a customer they are saved to the account only while customers.MarketingPreferences.recentSearches is on (customers.getMarketingConsent at save time). Turning it off deletes the saved history: customers publishes customers.marketing_preferences.changed and search deletes the rows. With customers disabled, nothing is saved to accounts.",
     "Reports read unavailable searches through zeroResultStats; query logs are not exported directly.",
-    "Optional dependencies: inventory (stock flags), reviews (ratings), sellers (store suggestions), advertising (sponsored slots), promotions (deal badges), customers (recent-search preference). With any of them off, the related fields are simply empty."
+    "Optional dependencies: inventory (stock flags), reviews (ratings), sellers (store suggestions), advertising (sponsored slots), promotions (deal badges), customers (recent-search preference), orders (sales counts), audit (synonym, reindex and ranking policy changes are written to the action history when audit is enabled). With any of them off, the related fields are simply empty."
   ]
 }

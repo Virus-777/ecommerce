@@ -41,7 +41,7 @@
     { "name": "refundShare", "signature": "(orderItemId: uuid, quantity: int) => RefundShare", "desc": "Coupon share to deduct when refunding part of an order (coupons are split across items by value). Used to cap refunds at the remaining refundable amount.", "usedBy": ["returns", "payments", "support"] },
     { "name": "getPublicCampaign", "signature": "(campaignId: uuid) => PublicCampaign | null", "desc": "Name, period, terms and status for campaign pages, banners and ads.", "usedBy": ["content", "advertising", "graphql"] },
     { "name": "isCampaignActive", "signature": "(campaignId: uuid) => { active: bool, reason?: string }", "desc": "False when ended, paused, out of budget or sold out. Advertising stops linked ads; content hides teasers.", "usedBy": ["advertising", "content"] },
-    { "name": "liveDeals", "signature": "(opts: { limit: int }) => FlashSaleBlock[]", "desc": "Flash deals for the homepage Deals section.", "usedBy": ["content", "graphql"] },
+    { "name": "liveDeals", "signature": "(opts: { limit: int, campaignId?: uuid }) => FlashSaleBlock[]", "desc": "Flash deals for the homepage Deals section. campaignId limits the result to one campaign (content SourceRule.campaignId: a section or collection fed by one promotion).", "usedBy": ["content", "graphql"] },
     { "name": "referencePrice", "signature": "(offerId: uuid) => Money | null", "desc": "Honest 'was' price: delegates to offers.lowestPrice(offerId, referencePriceDays, campaignStart or now) and returns null when offers has no history for the window. No price history is kept in promotions.", "usedBy": ["offers", "wishlist"] },
     { "name": "getDealsPage", "signature": "(ctx: { customerId?: uuid, at?: datetime }) => DealsPage", "desc": "Deals page data in one call: tab counts, live flash sales, clippable coupons (clipped state for the customer), the first clearance batch, upcoming events with reminder state, the combination rules and serverTime for countdowns. Same data as GET /api/store/promotions/deals.", "usedBy": ["graphql"] },
     { "name": "listClearance", "signature": "(paging: PageInput) => Paged<DealProduct>", "desc": "Clearance products page by page (GET /deals/clearance).", "usedBy": ["graphql"] },
@@ -114,7 +114,7 @@
       "internalNote": "string?",
       "discount": "DiscountRule",
       "code": { "type": "string?", "desc": "Shared code, e.g. FALLHOME20. Omit for automatic discounts." },
-      "autoApply": { "type": "bool?", "desc": "Also applied automatically from the campaign page or when clipped" },
+      "autoApply": { "type": "bool?", "desc": "Authoritative (decision P1): true = applied automatically to every eligible cart, with or without the code; false = applied only through its code or, for signed-in customers, a clip. A campaign with no code and autoApply false is clip-only. Default false." },
       "startsAt": "datetime", "endsAt": "datetime", "timeZone": "string",
       "scope": "Scope", "eligibility": "Eligibility", "limits": "Limits", "funding": "Funding", "stacking": "StackingRules",
       "participation": "ParticipationSettings?",
@@ -261,7 +261,7 @@
       "discountCost": "FundingBreakdown", "sharedCost": "Money",
       "officialMargin": { "before": "number?", "after": "number?", "changePts": "number?" },
       "couponRedemptions": "int", "redemptionShareOfOrders": "number",
-      "returnsOnPromotedPct": "number", "storeReturnsPct": "number",
+      "returnsOnPromotedPct": "number", "storeReturnsPct": { "type": "number?", "desc": "Store-wide return rate for the same range, from reports when enabled; null when not available (never 0 as a stand-in)" },
       "tabs": "TabCount[]",
       "dailyCost": "DailyPoint[]",
       "results": "CampaignResult[]"
@@ -274,7 +274,9 @@
       "badges": "PromoBadge[]", "campaignId": "uuid?",
       "purchaseLimit": "int?",
       "flash": { "type": "FlashCountdown?" },
-      "sellerPromos": { "type": "PromoBanner[]", "desc": "e.g. 10% off orders over $100 from Northwind Audio, applied automatically" }
+      "sellerPromos": { "type": "PromoBanner[]", "desc": "e.g. 10% off orders over $100 from Northwind Audio, applied automatically" },
+      "automaticDiscount": { "type": "Money?", "desc": "Per-unit discount the customer gets without doing anything (autoApply campaigns with no minimum spend, e.g. an automatic 10% off), on top of price. Offers subtracts it in comparable totals for the featured-offer rule (Total price = item + shipping − automatic discounts). Null when none" },
+      "automaticDiscountLabel": "string?"
     },
     "FlashCountdown": { "campaignId": "uuid", "startsAt": "datetime", "endsAt": "datetime", "claimedPct": "int", "dealStockLeft": "int", "state": "enum(upcoming|active|sold_out|ended)" },
     "PromoBanner": { "campaignId": "uuid", "title": "string", "detail": "string", "period": "SchedulePeriod", "autoApply": "bool", "code": "string?" },
@@ -310,11 +312,12 @@
     "CodeCheck": { "code": "string", "valid": "bool", "coupon": "CouponCard?", "reason": "string?" },
     "PublicCampaign": { "id": "uuid", "name": "string", "description": "string?", "period": "SchedulePeriod", "terms": "text?", "status": "string", "code": "string?" },
     "CartLineInput": {
-      "lineId": "string", "offerId": "uuid", "productId": "uuid", "variantId": "uuid", "sellerId": "uuid", "officialStore": "bool",
-      "categoryId": "uuid", "brandId": "uuid?", "quantity": "int", "unitPrice": { "type": "Money", "desc": "Offer price before promotions" }, "packageId": "string"
+      "lineId": "string", "offerId": "uuid", "productId": "uuid", "variantId": "uuid", "sellerId": { "type": "uuid", "desc": "The seller id, or OFFICIAL_STORE_ID for Official Store lines. Defensive: evaluateCart maps '' or null to OFFICIAL_STORE_ID when officialStore is true (VALIDATION_FAILED otherwise), so redemption_lines.seller_id is always a uuid" }, "officialStore": "bool",
+      "categoryId": { "type": "uuid?", "desc": "Null when the caller does not know it (catalog off); category-scoped campaigns then do not match the line" }, "brandId": "uuid?", "quantity": "int", "unitPrice": { "type": "Money", "desc": "Offer price before promotions" }, "packageId": "string"
     },
     "CartEvaluationInput": {
       "customerId": "uuid?", "guestSessionId": "string?", "region": "string?",
+      "contactEmail": { "type": "email?", "desc": "Guest checkout contact email. Per-customer limits and new-customer eligibility for guests key on its normalised hash (usage_counters.customer_key), so one person cannot reuse a one-per-customer coupon by checking out as a new guest. Ignored when customerId is set" },
       "lines": "CartLineInput[]",
       "codes": { "type": "string[]", "desc": "Codes entered by the customer; clipped coupons of a signed-in customer are added automatically" },
       "shipping": { "type": "map<Money>?", "desc": "packageId → shipping charge, for free-shipping evaluation" },
@@ -324,13 +327,15 @@
     "LineDiscount": {
       "lineId": "string", "regularUnitPrice": "Money", "unitPrice": "Money",
       "allocations": "DiscountAllocation[]", "lineDiscount": "Money",
-      "purchaseLimit": "int?", "limitExceeded": "bool"
+      "purchaseLimit": "int?", "limitExceeded": "bool",
+      "discountedQuantity": { "type": "int", "desc": "Units that get the deal price (decision P2). Quantity above the remaining per-customer or deal limit is split: discountedQuantity units at unitPrice, the rest at regularUnitPrice, limitExceeded true. Equals the line quantity when nothing is over the limit" }
     },
     "PackageDiscount": { "packageId": "string", "sellerId": "uuid", "shippingDiscount": "Money", "freeShipping": "bool", "campaignId": "uuid?", "allocation": "DiscountAllocation?" },
     "AppliedPromotion": { "campaignId": "uuid", "code": "string?", "label": "string", "amount": "Money", "coversLineIds": "string[]", "source": "enum(automatic|code|clipped)" },
+    "SkippedPromotion": { "campaignId": "uuid", "label": "string", "reason": "enum(budget_insufficient|budget_exhausted|usage_limit|deal_sold_out|purchase_limit)", "message": "text" },
     "RejectedCode": {
       "code": "string",
-      "reason": "enum(not_found|not_started|expired|no_eligible_items|min_spend_not_met|customer_not_eligible|sign_in_required|region|usage_limit|budget_exhausted|not_combinable|per_order_limit)",
+      "reason": { "type": "enum(not_found|not_started|expired|no_eligible_items|min_spend_not_met|customer_not_eligible|sign_in_required|region|usage_limit|budget_exhausted|budget_insufficient|not_combinable|per_order_limit)", "desc": "budget_insufficient: the remaining budget does not cover the whole discount for this cart; nothing is applied (decision P3, never a partial discount)" },
       "message": { "type": "text", "desc": "e.g. Applies only to Home & Kitchen items from the Official Store. None in your cart qualify." },
       "details": "string[]"
     },
@@ -338,6 +343,7 @@
       "evaluationId": "uuid", "validUntil": "datetime",
       "lines": "LineDiscount[]", "packages": "PackageDiscount[]",
       "applied": "AppliedPromotion[]", "rejected": "RejectedCode[]",
+      "skipped": { "type": "SkippedPromotion[]", "desc": "Automatic or clipped campaigns that matched but were not applied, with a reason the customer can read" },
       "totals": "FundingBreakdown",
       "changes": { "type": "string[]", "desc": "Differences from the previous evaluation, e.g. HOMEWEEK10 ended at 12:00 PM PT" }
     },
@@ -504,7 +510,8 @@
     "consumes": [
       { "name": "orders.order.placed", "does": "Commit reservations referenced by the order (fallback when commitRedemption was not called)" },
       { "name": "orders.item.cancelled", "does": "Reverse the item's allocations; restore usage and deal stock when cancelled before dispatch" },
-      { "name": "returns.refund.approved", "does": "Partially reverse the item's allocations by the refunded quantity; count the return in campaign results" },
+      { "name": "returns.refund.approved", "does": "Partially reverse each item's allocations by its refunded quantity from the payload items ({ orderItemId, quantity }[]; a refund without items reverses nothing and is logged); count the return in campaign results" },
+      { "name": "orders.item.split", "does": "Split the item's redemption_lines between the original and the new order item in proportion to the quantities, so later cancellations, refundShare and fundingSplitFor on either id find their share" },
       { "name": "payments.payment.failed", "does": "Release reservations of the failed quote" },
       { "name": "offers.offer.price_changed", "does": "Flag participations whose seller raised the price during the campaign (the was price itself is read from offers.lowestPrice)" },
       { "name": "offers.offer.status_changed", "does": "Rebuild eligible offers; remove deactivated offers from flash sales" },
@@ -572,6 +579,11 @@
     "Was prices are the offer's lowest price in the look-back window (referencePriceDays) before the campaign starts. referencePrice and priceOffers read it from offers.lowestPrice (offers owns offer_price_history, the single source); promotions stores no daily prices. Campaign terms state the rule.",
     "Seller views are scoped to the caller's seller account; sellers never see other sellers' consent or earnings.",
     "Bundles and quantity deals (DiscountRule.bundle / quantityTiers) are phase 3: the kinds are accepted only when the phase-3 feature flag is on, otherwise VALIDATION_FAILED. Flash sales are phase 2 (plan 'growth promotions'); their endpoints are marked phase 2.",
+    "Automatic vs code vs clip (decision P1): autoApply decides. Evaluation applies autoApply campaigns without input, code campaigns only when the code is entered, and clip-only campaigns when a signed-in customer clipped them.",
+    "Deal limits (decision P2): quantity over a per-customer unit limit or the remaining deal stock is not refused; the line is split into discounted and regular-price units (LineDiscount.discountedQuantity) and the cart shows why.",
+    "Budgets (decision P3): a discount is applied in full or not at all. When the remaining budget (minus live reservations) is below the discount for this cart, a code is rejected with budget_insufficient and an automatic campaign is listed in skipped; reserveRedemption re-checks and fails BUDGET_EXHAUSTED if the budget moved in between.",
+    "New customers: audience new_customers means orders.hasPlacedOrder({ customerId }) is false, or for guests hasPlacedOrder({ email: contactEmail }); a guest without a contact email is not eligible (customer_not_eligible).",
+    "Offer reads: evaluation, eligibility rebuilds and participation checks read offers in one batch with offers.getOffers(ids) (any status, with sellerId) instead of per-offer getOffer calls.",
     "access is an optional dependency here: funding confirmation checks the approval action promotions.budgets.approve through access.check / access.requestApproval when access is enabled.",
     "Campaign pages, banners and the Deals homepage section are content; promotional ads are advertising. Both read campaign status through getPublicCampaign / isCampaignActive and react to promotions.campaign.ended."
   ]
