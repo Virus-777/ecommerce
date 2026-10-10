@@ -181,19 +181,23 @@ export function createPostgresOrdersRepository(db: Kysely<OrdersDb>, inbox?: Inb
     async sellerGroups(sellerId, f, page, now) {
       let q = d.selectFrom('seller_groups as g').innerJoin('orders as o', 'o.id', 'g.order_id').selectAll('g').select('o.placed_at as placed_at').where('g.seller_id', '=', sellerId);
       if (f.tabs?.length) {
-        const statuses = [...new Set(f.tabs.flatMap((t) => (t === 'cancellation_requests' ? [] : (TABS[t] ?? []))))];
+        // Fulfilled by Marketly groups are left out of the new, preparing and cancellation_requests tabs (the seller has nothing to do)
+        const sellerTabs = [...new Set(f.tabs.flatMap((t) => (SELLER_ACTION_TABS.includes(t) ? (TABS[t] ?? []) : [])))];
+        const anyTabs = [...new Set(f.tabs.flatMap((t) => (t === 'cancellation_requests' || SELLER_ACTION_TABS.includes(t) ? [] : (TABS[t] ?? []))))];
         const pending = f.tabs.includes('cancellation_requests');
         q = q.where((eb: any) =>
           eb.or([
-            ...(statuses.length ? [eb('g.status', 'in', statuses)] : []),
-            ...(pending ? [sql<boolean>`exists (select 1 from orders.cancellations c where c.group_id = g.id and c.status = 'requested')`] : []),
-            ...(!statuses.length && !pending ? [sql<boolean>`false`] : []),
+            ...(sellerTabs.length ? [eb.and([eb('g.status', 'in', sellerTabs), eb('g.fulfilled_by', '<>', MARKETLY)])] : []),
+            ...(anyTabs.length ? [eb('g.status', 'in', anyTabs)] : []),
+            ...(pending ? [sql<boolean>`(g.fulfilled_by <> ${MARKETLY} and exists (select 1 from orders.cancellations c where c.group_id = g.id and c.status = 'requested'))`] : []),
+            ...(!sellerTabs.length && !anyTabs.length && !pending ? [sql<boolean>`false`] : []),
           ]),
         );
       }
+      if (f.fulfilledBy) q = q.where('g.fulfilled_by', '=', f.fulfilledBy);
       if (f.placedFrom) q = q.where('o.placed_at', '>=', f.placedFrom);
       if (f.placedTo) q = q.where('o.placed_at', '<', f.placedTo);
-      if (f.overdueOnly) q = q.where('g.status', 'in', OPEN).where('g.dispatch_by', '<', now);
+      if (f.overdueOnly) q = q.where('g.status', 'in', OPEN).where('g.dispatch_by', '<', now).where('g.fulfilled_by', '<>', MARKETLY);
       if (f.q?.trim()) {
         const term = like(f.q);
         q = q.where(
@@ -212,13 +216,15 @@ export function createPostgresOrdersRepository(db: Kysely<OrdersDb>, inbox?: Inb
       const r = await d
         .selectFrom('seller_groups as g')
         .select([
-          sql<number>`count(*) filter (where g.status = 'new')::int`.as('new'),
-          sql<number>`count(*) filter (where g.status in ('preparing', 'delayed', 'partly_shipped'))::int`.as('preparing'),
+          // Fulfilled by Marketly groups: left out of what the seller acts on, counted in fulfilledByMarketly while open
+          sql<number>`count(*) filter (where g.status = 'new' and g.fulfilled_by <> ${MARKETLY})::int`.as('new'),
+          sql<number>`count(*) filter (where g.status in ('preparing', 'delayed', 'partly_shipped') and g.fulfilled_by <> ${MARKETLY})::int`.as('preparing'),
           sql<number>`count(*) filter (where g.status in ('shipped', 'partly_delivered'))::int`.as('shipped'),
           sql<number>`count(*) filter (where g.status in ('delivered', 'partly_cancelled', 'cancelled'))::int`.as('completed'),
-          sql<number>`count(*) filter (where exists (select 1 from orders.cancellations c where c.group_id = g.id and c.status = 'requested'))::int`.as('cancellationRequests'),
-          sql<number>`count(*) filter (where g.status in (${list(OPEN)}) and g.dispatch_by < ${now})::int`.as('overdue'),
-          sql<number>`count(*) filter (where g.status in (${list(OPEN)}) and g.dispatch_by >= ${now} and g.dispatch_by < ${endOfDay})::int`.as('dueToday'),
+          sql<number>`count(*) filter (where g.fulfilled_by <> ${MARKETLY} and exists (select 1 from orders.cancellations c where c.group_id = g.id and c.status = 'requested'))::int`.as('cancellationRequests'),
+          sql<number>`count(*) filter (where g.status in (${list(OPEN)}) and g.dispatch_by < ${now} and g.fulfilled_by <> ${MARKETLY})::int`.as('overdue'),
+          sql<number>`count(*) filter (where g.status in (${list(OPEN)}) and g.dispatch_by >= ${now} and g.dispatch_by < ${endOfDay} and g.fulfilled_by <> ${MARKETLY})::int`.as('dueToday'),
+          sql<number>`count(*) filter (where g.fulfilled_by = ${MARKETLY} and g.status not in ('delivered', 'partly_cancelled', 'cancelled'))::int`.as('fulfilledByMarketly'),
         ])
         .where('g.seller_id', '=', sellerId)
         .executeTakeFirstOrThrow();
@@ -232,9 +238,10 @@ export function createPostgresOrdersRepository(db: Kysely<OrdersDb>, inbox?: Inb
         .select([
           'g.seller_id as seller_id',
           sql<number>`count(distinct g.order_id) filter (where g.status not in ('delivered', 'cancelled', 'partly_cancelled'))::int`.as('open'),
-          sql<number>`count(*) filter (where g.status in (${list(OPEN)}) and g.dispatch_by < ${now})::int`.as('overdueDispatch'),
-          sql<number>`count(*) filter (where g.status in (${list(OPEN)}) and g.dispatch_by >= ${now} and g.dispatch_by < ${endOfDay})::int`.as('dueToday'),
-          sql<number>`coalesce(sum((select count(*) from orders.cancellations c where c.group_id = g.id and c.status = 'requested' and c.initiated_by = 'customer')), 0)::int`.as('cancellationRequests'),
+          // the seller's own dispatch work: Fulfilled by Marketly groups are Marketly's
+          sql<number>`count(*) filter (where g.status in (${list(OPEN)}) and g.dispatch_by < ${now} and g.fulfilled_by <> ${MARKETLY})::int`.as('overdueDispatch'),
+          sql<number>`count(*) filter (where g.status in (${list(OPEN)}) and g.dispatch_by >= ${now} and g.dispatch_by < ${endOfDay} and g.fulfilled_by <> ${MARKETLY})::int`.as('dueToday'),
+          sql<number>`coalesce(sum((select count(*) from orders.cancellations c where c.group_id = g.id and c.status = 'requested' and c.initiated_by = 'customer' and g.fulfilled_by <> ${MARKETLY})), 0)::int`.as('cancellationRequests'),
           sql<number>`coalesce(sum((select count(*) from orders.item_state_log l join orders.order_items i on i.id = l.item_id where i.group_id = g.id and l.to_state = 'cancelled' and l.at >= ${since30d})), 0)::int`.as('cancellations30d'),
         ])
         .where('g.seller_id', 'in', sellerIds)
@@ -365,6 +372,10 @@ export function createPostgresOrdersRepository(db: Kysely<OrdersDb>, inbox?: Inb
   return repo;
 }
 
+const MARKETLY = 'marketly_service';
+/** Tabs of seller work: Fulfilled by Marketly groups are left out */
+const SELLER_ACTION_TABS = ['new', 'preparing'];
+
 const TABS: Record<string, string[]> = {
   new: ['new'],
   preparing: ['preparing', 'delayed', 'partly_shipped'],
@@ -410,6 +421,7 @@ function adminQuery(d: any, f: AdminOrderFilter, now: Date): any {
   if (f.sellerType === 'official') q = q.where(sql<boolean>`exists (select 1 from orders.seller_groups g where g.order_id = orders.id and g.owner_type = 'official')`);
   if (f.sellerType === 'marketplace') q = q.where(sql<boolean>`exists (select 1 from orders.seller_groups g where g.order_id = orders.id and g.owner_type = 'seller')`);
   if (f.sellerId) q = q.where(sql<boolean>`exists (select 1 from orders.seller_groups g where g.order_id = orders.id and g.seller_id = ${f.sellerId})`);
+  if (f.fulfilledBy) q = q.where(sql<boolean>`exists (select 1 from orders.seller_groups g where g.order_id = orders.id and g.fulfilled_by = ${f.fulfilledBy})`);
   if (f.customerId) q = q.where('customer_id', '=', f.customerId);
   if (f.placedFrom) q = q.where('placed_at', '>=', f.placedFrom);
   if (f.placedTo) q = q.where('placed_at', '<', f.placedTo);

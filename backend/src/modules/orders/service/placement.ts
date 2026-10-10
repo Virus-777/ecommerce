@@ -9,7 +9,7 @@ import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type * as offers from '../../../spec/offers.js';
 import type { AcceptedItem, OrderCreateInput, OrderDetail, PlacedGroup, SellerLabel } from '../../../spec/orders.js';
 import { orderItemMachine, orderLifecycleMachine } from '../domain/state-machines.js';
-import { CONDITION_LABEL, discountSum, plural } from '../domain/rules.js';
+import { CONDITION_LABEL, discountSum, MARKETLY_SERVICE, plural } from '../domain/rules.js';
 import type { GroupRec, ItemRec, OrderRec, StoredProduct } from '../ports.js';
 import { Batch, invalid, notFound, SYSTEM, type Agg, type By, type Core } from './core.js';
 import type { Views } from './views.js';
@@ -63,6 +63,37 @@ export class Placement {
     if (issues.length) throw invalid(issues, 'The order is incomplete');
   }
 
+  /**
+   * Fulfilled by Marketly check: with fulfillment-service on, a marketly_service group holds only offers Marketly
+   * fulfils (isServiceOffer) and a seller group none; with it off a marketly_service group is refused.
+   */
+  private async checkFulfilledBy(input: OrderCreateInput) {
+    const fs = this.core.ctx.tryUse('fulfillment-service');
+    const issues: { path: string; message: string }[] = [];
+    const service = new Map<string, boolean>();
+    if (fs) {
+      const offerIds = new Set(input.groups.filter((g) => g.ownerType === 'seller' && (g.fulfilledBy === 'seller' || g.fulfilledBy === MARKETLY_SERVICE)).flatMap((g) => g.items.map((i) => i.offerId)));
+      // a failing fulfillment-service is not swallowed: the order can't be checked, so it is not placed
+      for (const offerId of offerIds) service.set(offerId, await fs.isServiceOffer(offerId));
+    }
+    input.groups.forEach((g, gi) => {
+      if (g.fulfilledBy !== MARKETLY_SERVICE) {
+        if (g.fulfilledBy === 'seller' && fs) {
+          g.items.forEach((i, ii) => {
+            if (service.get(i.offerId)) issues.push({ path: `groups[${gi}].items[${ii}].offerId`, message: 'Marketly fulfils this offer; it belongs in a Fulfilled by Marketly package' });
+          });
+        }
+        return;
+      }
+      if (!fs) return void issues.push({ path: `groups[${gi}].fulfilledBy`, message: 'Fulfilled by Marketly is not available' });
+      if (g.ownerType !== 'seller') return void issues.push({ path: `groups[${gi}].fulfilledBy`, message: 'Only seller packages can be Fulfilled by Marketly' });
+      g.items.forEach((i, ii) => {
+        if (!service.get(i.offerId)) issues.push({ path: `groups[${gi}].items[${ii}].offerId`, message: 'Marketly does not fulfil this offer' });
+      });
+    });
+    if (issues.length) throw invalid(issues, 'The packages do not match how their offers are fulfilled');
+  }
+
   /** Create the order from an authorized or pending payment (idempotent per checkoutSessionId and attemptNo) */
   async createOrder(input: OrderCreateInput): Promise<OrderDetail> {
     const attemptNo = input.attemptNo ?? 1;
@@ -100,6 +131,7 @@ export class Placement {
       }),
     );
     if (issues.length) throw invalid(issues, 'The order does not match its offers');
+    await this.checkFulfilledBy(input);
 
     const cfg = await this.core.cfg();
     const ref = await ctx.refs.next(cfg.orderRefPrefix);
@@ -233,7 +265,12 @@ export class Placement {
         accepted
           ? { visibility: 'customer', label: 'Payment accepted', detail: `${input.paymentMethodLabel}. Your order is confirmed.` }
           : { visibility: 'customer', label: 'Payment being checked', detail: "Your bank is confirming the payment. You won't be charged twice." },
-        ...groups.map((g) => ({ group_id: g.id, visibility: 'seller' as const, label: accepted ? 'New order' : 'New order, payment being checked', detail: `Dispatch by ${g.dispatch_by.toISOString()}` })),
+        ...groups.map((g) => ({
+          group_id: g.id,
+          visibility: 'seller' as const,
+          label: accepted ? 'New order' : 'New order, payment being checked',
+          detail: g.fulfilled_by === MARKETLY_SERVICE ? 'Fulfilled by Marketly: our warehouse picks, packs and ships it.' : `Dispatch by ${g.dispatch_by.toISOString()}`,
+        })),
       ]);
       return true;
     });
@@ -315,7 +352,7 @@ export class Placement {
       });
       await this.core.timeline(tx, orderId, [
         { visibility: 'customer', label: 'Payment accepted', detail: 'Your order is confirmed.' },
-        ...agg.groups.map((g) => ({ group_id: g.id, visibility: 'seller' as const, label: 'Payment accepted', detail: 'You can prepare and ship this order.' })),
+        ...agg.groups.map((g) => ({ group_id: g.id, visibility: 'seller' as const, label: 'Payment accepted', detail: g.fulfilled_by === MARKETLY_SERVICE ? 'Marketly will pick, pack and ship this order.' : 'You can prepare and ship this order.' })),
       ]);
       const fresh = (await this.core.load(orderId, tx))!;
       batch.push('orders.order.accepted', {

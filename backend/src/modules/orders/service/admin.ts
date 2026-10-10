@@ -229,10 +229,11 @@ export class Admin {
       const rows = await this.core.repo.sellerGroups(sellerId, this.reads.sellerFilter(f as SellerListQuery), page, this.core.now());
       const aggs = await this.core.loadMany(rows.items.map((g) => g.order_id));
       const cfg = await this.core.cfg();
+      const stages = await this.core.warehouseStages(rows.items.filter((g) => g.fulfilled_by === 'marketly_service').map((g) => g.order_id));
       return {
         rows: rows.items.map((g) => {
           const agg = aggs.get(g.order_id)!;
-          const row = this.views.sellerRow(agg, agg.groups.find((x) => x.id === g.id)!, cfg);
+          const row = this.views.sellerRow(agg, agg.groups.find((x) => x.id === g.id)!, cfg, stages);
           return { ref: row.ref, placedAt: row.placedAt, buyerName: row.buyerName, items: row.itemsSummary, units: row.units, total: fmt(row.total.amount, row.total.currency), status: row.statusLabel, dispatchBy: row.dispatchDeadline.dueAt, deadline: row.deadlineLabel };
         }),
         ...(rows.nextCursor ? { nextCursor: rows.nextCursor } : {}),
@@ -267,7 +268,7 @@ export class Admin {
     const groups = d.group_id ? agg.groups.filter((g) => g.id === d.group_id) : agg.groups;
     const body: PdfPage['lines'] = [];
     for (const g of groups) {
-      body.push({ text: `Sold by ${this.views.sellerLabel(g).name}`, bold: true, gap: 8 });
+      body.push({ text: this.views.soldBy(g), bold: true, gap: 8 });
       body.push(...this.lineRows(agg, g, true));
       body.push({ text: `Items ${fmt(g.items_total, c)} · Discounts -${fmt(g.discount_total, c)} · Shipping ${fmt(g.shipping_total, c)} · Tax ${fmt(g.tax_total, c)} · Total ${fmt(g.total, c)}` });
     }
@@ -323,6 +324,7 @@ export class Admin {
 
   async packingSlip(sellerId: string, groupId: string, hidePrices: boolean | undefined, principal: identity.Principal): Promise<DocumentLink> {
     const { agg, group } = await this.reads.sellerGroup(sellerId, groupId);
+    this.core.refuseMarketly(group, 'print its packing slip (the warehouse prints it)');
     return this.link({ kind: 'seller', id: sellerId }, `packing-slip-${agg.order.ref}-${group.position}.pdf`, renderPdf([this.slip(agg, group, hidePrices ?? agg.order.hide_prices)]), principal);
   }
 
@@ -330,6 +332,7 @@ export class Admin {
     if (!ids.length) throw invalid([{ path: 'orderIds', message: 'Choose at least one order' }]);
     const groups = ids.flatMap((id) => tasks.get(id) ?? []);
     if (!groups.length) throw notFound();
+    for (const g of groups) this.core.refuseMarketly(g, 'print packing slips for Fulfilled by Marketly orders (the warehouse prints them)');
     const aggs = await this.core.loadMany(groups.map((g) => g.order_id));
     const pages = groups.map((g) => {
       const agg = aggs.get(g.order_id)!;

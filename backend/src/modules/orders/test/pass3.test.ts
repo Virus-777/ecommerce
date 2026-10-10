@@ -115,7 +115,7 @@ describe('orders.item.split', () => {
     const rest = (await h.service.getOrder(order.id))!.groups[0]!.items.find((i) => i.id !== item.id)!;
     const shipmentId = newId();
     const lines = [{ orderItemId: rest.id, quantity: 1, title: 'Plate', variantLabel: '' }];
-    await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId, kind: 'outbound', orderId: order.id, groupId: g.id, ownerType: 'seller', sellerId, lines, shippedAt: now(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
+    await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId, kind: 'outbound', orderId: order.id, groupId: g.id, ownerType: 'seller', fulfilledBy: 'seller', sellerId, lines, shippedAt: now(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
     const ship = h.named('orders.item.split').find((e) => e.orderId === order.id && e.reason === 'shipment');
     expect(ship).toMatchObject({ itemId: rest.id, rootItemId: item.id, quantity: 2, remainingQuantity: 1 });
   });

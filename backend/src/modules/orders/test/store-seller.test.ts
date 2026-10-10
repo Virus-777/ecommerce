@@ -165,8 +165,8 @@ describe('cancellations', () => {
     expect(early.status).toBe(409);
     expect(early.body.error.code).toBe('SHIPMENT_REQUIRED');
     const shipmentId = newId();
-    await h.publish('shipping', 'shipping.shipment.created', { shipmentId, kind: 'outbound', orderId: m.order.id, groupId: m.groupB.id, sellerId: m.sellerB, packageLabel: 'Package 2 of 3', carrierCode: 'ups', carrierName: 'UPS', serviceName: 'Ground', trackingNumber: '1Z999', trackingUrl: 'https://ups.example/1Z999', lines: [{ orderItemId: itemB.id, title: 'Duvet', variantLabel: 'Teal', quantity: 1 }], status: 'label_created' });
-    await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId, kind: 'outbound', orderId: m.order.id, groupId: m.groupB.id, ownerType: 'seller', sellerId: m.sellerB, lines: [{ orderItemId: itemB.id, title: 'Duvet', variantLabel: 'Teal', quantity: 1 }], shippedAt: new Date().toISOString(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
+    await h.publish('shipping', 'shipping.shipment.created', { shipmentId, kind: 'outbound', orderId: m.order.id, groupId: m.groupB.id, sellerId: m.sellerB, fulfilledBy: 'seller', packageLabel: 'Package 2 of 3', carrierCode: 'ups', carrierName: 'UPS', serviceName: 'Ground', trackingNumber: '1Z999', trackingUrl: 'https://ups.example/1Z999', lines: [{ orderItemId: itemB.id, title: 'Duvet', variantLabel: 'Teal', quantity: 1 }], status: 'label_created' });
+    await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId, kind: 'outbound', orderId: m.order.id, groupId: m.groupB.id, ownerType: 'seller', fulfilledBy: 'seller', sellerId: m.sellerB, lines: [{ orderItemId: itemB.id, title: 'Duvet', variantLabel: 'Teal', quantity: 1 }], shippedAt: new Date().toISOString(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
     const ok = await h.call('POST', `/api/seller/orders/orders/${m.groupB.id}/cancellation-requests/${req.id}/decline`, seller, { reason: 'already_shipped', note: 'Left this morning' });
     expect(ok.status).toBe(200);
     expect(ok.body).toMatchObject({ status: 'declined', items: [{ shipped: true }] });

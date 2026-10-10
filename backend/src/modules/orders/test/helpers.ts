@@ -19,6 +19,7 @@ import type * as catalog from '../../../spec/catalog.js';
 import type * as offers from '../../../spec/offers.js';
 import type { OrderCreateInput, OrderGroupInput, OrderItemInput } from '../../../spec/orders.js';
 import type * as reports from '../../../spec/reports.js';
+import type { PublicApiMap } from '../../../kernel/module-system/index.js';
 import { auth, buildTestApp, callers, movingClock } from '../../../testing/app.js';
 import type { OrdersService } from '../service.js';
 
@@ -38,6 +39,8 @@ export interface Harness {
   exports: { requested: any[]; registered: string[] };
   /** media.attach calls (snapshot images kept for the order) */
   attached: { assetId: string; usage: any }[];
+  /** fulfillment-service.isServiceOffer answers (harness({ fulfillmentService: true })): offers Marketly fulfils */
+  serviceOffers: Set<string>;
   call(method: string, url: string, token: string, body?: unknown, headers?: Record<string, string>): Promise<{ status: number; body: any }>;
   publish(source: string, name: string, payload: unknown): Promise<void>;
   named(name: string): any[];
@@ -45,7 +48,12 @@ export interface Harness {
 
 export const CATEGORY = { root: newId(), child: newId() };
 
-export async function harness(): Promise<Harness> {
+/**
+ * fulfillmentService: orders sees fulfillment-service as on, with isServiceOffer answered from h.serviceOffers.
+ * fulfillment-service itself is not booted (its phase 4 rebuild lands in another batch and it can't boot on this
+ * base), so orders' tryUse('fulfillment-service') is answered by the stub instead of an apiStubs entry.
+ */
+export async function harness(o: { fulfillmentService?: boolean } = {}): Promise<Harness> {
   const clock = movingClock();
   const h = {
     clock,
@@ -57,6 +65,7 @@ export async function harness(): Promise<Harness> {
     productCategories: new Map<string, string>(),
     exports: { requested: [] as any[], registered: [] as string[] },
     attached: [] as { assetId: string; usage: any }[],
+    serviceOffers: new Set<string>(),
   };
   const job = (over: Partial<reports.ExportJob> = {}): reports.ExportJob => ({
     id: newId(),
@@ -130,6 +139,12 @@ export async function harness(): Promise<Harness> {
     },
   });
   const service = app.kernel.boot.apis.get('orders') as OrdersService | undefined;
+  if (o.fulfillmentService && service) {
+    const ctx = service.core.ctx as { tryUse: (m: string) => unknown };
+    const real = ctx.tryUse.bind(ctx);
+    const fs: Partial<PublicApiMap['fulfillment-service']> = { isServiceOffer: async (offerId) => h.serviceOffers.has(offerId) };
+    ctx.tryUse = (m) => (m === 'fulfillment-service' ? fs : real(m));
+  }
   const events: Harness['events'] = h.events;
   for (const name of [
     'orders.order.placed',
@@ -227,7 +242,11 @@ export function line(p: P, quantity: number, o: { discount?: number; shipping?: 
   };
 }
 
-export function group(h: Harness, items: OrderItemInput[], o: { ownerType?: 'official' | 'seller'; sellerId?: string | null; dispatchInHours?: number; shipping?: number } = {}): OrderGroupInput {
+export function group(
+  h: Harness,
+  items: OrderItemInput[],
+  o: { ownerType?: 'official' | 'seller'; sellerId?: string | null; dispatchInHours?: number; shipping?: number; fulfilledBy?: OrderGroupInput['fulfilledBy'] } = {},
+): OrderGroupInput {
   const ownerType = o.ownerType ?? 'seller';
   const itemsTotal = items.reduce((s, i) => s + i.unitPrice.amount * i.quantity, 0);
   const discounts = items.reduce((s, i) => s + i.discounts.reduce((a, d) => a + d.amount.amount, 0), 0);
@@ -240,7 +259,7 @@ export function group(h: Harness, items: OrderItemInput[], o: { ownerType?: 'off
     ownerType,
     sellerId: ownerType === 'seller' ? (o.sellerId ?? null) : null,
     shipsFrom: 'Reno, NV',
-    fulfilledBy: ownerType === 'official' ? 'official_warehouse' : 'seller',
+    fulfilledBy: o.fulfilledBy ?? (ownerType === 'official' ? 'official_warehouse' : 'seller'),
     delivery: {
       methodName: 'Standard',
       carrier: 'UPS',

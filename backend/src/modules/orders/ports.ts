@@ -112,6 +112,8 @@ export interface SellerGroupFilter {
   placedTo?: Date | null;
   overdueOnly?: boolean;
   sort?: 'dispatch_deadline' | 'newest' | 'oldest';
+  /** Only self-shipped (seller) or only Fulfilled by Marketly (marketly_service) groups */
+  fulfilledBy?: 'seller' | 'marketly_service';
 }
 
 export interface AdminOrderFilter {
@@ -124,6 +126,8 @@ export interface AdminOrderFilter {
   placedFrom?: Date | null;
   placedTo?: Date | null;
   flag?: string;
+  /** Orders with at least one group fulfilled this way */
+  fulfilledBy?: 'official_warehouse' | 'seller' | 'marketly_service';
 }
 
 export interface SellerCounts {
@@ -134,6 +138,8 @@ export interface SellerCounts {
   cancellationRequests: number;
   overdue: number;
   dueToday: number;
+  /** Open Fulfilled by Marketly groups (left out of new, preparing, cancellationRequests, overdue and dueToday) */
+  fulfilledByMarketly: number;
 }
 
 /** An item with its order, group owner and customer (OrderItemInfo) */

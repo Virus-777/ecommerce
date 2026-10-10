@@ -36,6 +36,27 @@ export const DELIVERED_LIKE: readonly ItemState[] = ['delivered', 'return_reques
 /** Final for completion: nothing more happens to the line */
 export const FINAL: readonly ItemState[] = ['delivered', 'cancelled', 'returned', 'refunded'];
 
+/**
+ * Fulfilled by Marketly (fulfillment-service, phase 4): the seller sells, Marketly's warehouse picks, packs and ships
+ * (decisions D6, D10). Official Store groups are `official_warehouse`; both are handled by Marketly, not the seller.
+ */
+export const MARKETLY_SERVICE = 'marketly_service';
+export const isMarketlyService = (g: { fulfilled_by: string }) => g.fulfilled_by === MARKETLY_SERVICE;
+/** Marketly (not the seller) handles the physical fulfilment: Official Store and Fulfilled by Marketly groups */
+export const marketlyFulfils = (g: { fulfilled_by: string }) => g.fulfilled_by !== 'seller';
+
+/** Warehouse fulfillment stages shown to the seller of a Fulfilled by Marketly group */
+export const WAREHOUSE_STAGE_LABEL: Record<string, string> = {
+  awaiting_pick: 'Awaiting picking',
+  picking: 'Picking',
+  picked: 'Picked',
+  packing: 'Packing',
+  packed: 'Packed',
+  on_hold: 'On hold',
+};
+/** Timeline label of the seller-visible warehouse stage entries (the latest one is the group's stage) */
+export const WAREHOUSE_STAGE_ENTRY = 'Marketly warehouse';
+
 export const ITEM_STATE_LABEL: Record<ItemState, string> = {
   pending_payment: 'Payment being checked',
   confirmed: 'Confirmed',
